@@ -1071,19 +1071,53 @@ class VisualIdentityRepository:
             )
             pack_version_id = int(version_cursor.lastrowid)
 
-            draft_assets = [
-                dict(row)
-                for row in conn.execute(
-                    """
-                    SELECT * FROM visual_identity_assets
-                    WHERE draft_id = ?
-                      AND owner_user_id = ?
-                      AND deleted = 0
-                    ORDER BY expression_key ASC, id ASC
-                    """,
-                    (draft_id, owner_user_id),
-                ).fetchall()
-            ]
+            slot_selections = _draft_slot_asset_selections(draft)
+            if slot_selections is None:
+                draft_assets = [
+                    dict(row)
+                    for row in conn.execute(
+                        """
+                        SELECT * FROM visual_identity_assets
+                        WHERE draft_id = ?
+                          AND owner_user_id = ?
+                          AND deleted = 0
+                        ORDER BY expression_key ASC, id ASC
+                        """,
+                        (draft_id, owner_user_id),
+                    ).fetchall()
+                ]
+            else:
+                if not slot_selections:
+                    raise ValueError("visual_identity_draft_has_no_selected_assets")
+                selected_ids = [selection["asset_id"] for selection in slot_selections]
+                selected_rows = [
+                    dict(row)
+                    for row in conn.execute(
+                        """
+                        SELECT * FROM visual_identity_assets
+                        WHERE draft_id = ?
+                          AND owner_user_id = ?
+                          AND deleted = 0
+                        """,
+                        (draft_id, owner_user_id),
+                    ).fetchall()
+                    if int(row["id"]) in selected_ids
+                ]
+                assets_by_id = {int(asset["id"]): asset for asset in selected_rows}
+                missing_ids = sorted(set(selected_ids) - set(assets_by_id))
+                if missing_ids:
+                    raise ValueError("visual_identity_draft_slot_asset_not_found")
+                draft_assets = [
+                    {
+                        **assets_by_id[int(selection["asset_id"])],
+                        "expression_key": selection["expression_key"],
+                        "display_label": selection["display_label"],
+                    }
+                    for selection in sorted(
+                        slot_selections,
+                        key=lambda item: (str(item["expression_key"]), int(item["asset_id"])),
+                    )
+                ]
             copied_assets: list[dict[str, Any]] = []
             for asset in draft_assets:
                 asset_cursor = conn.execute(
@@ -1681,6 +1715,47 @@ def _update_values(
 
 def _json_dump(value: Any) -> str:
     return json.dumps(value)
+
+
+def _draft_slot_asset_selections(
+    draft: Mapping[str, Any],
+) -> list[dict[str, Any]] | None:
+    """Return selected draft assets from slot_map_json, or None for legacy copy-all drafts."""
+    try:
+        slot_map = json.loads(str(draft.get("slot_map_json") or "{}"))
+    except json.JSONDecodeError as exc:
+        raise ValueError("visual_identity_draft_slot_map_invalid") from exc
+    if not isinstance(slot_map, dict) or not slot_map:
+        return None
+
+    selections: list[dict[str, Any]] = []
+    seen: set[tuple[int, str]] = set()
+    for slot_key, raw_entry in slot_map.items():
+        if not isinstance(raw_entry, Mapping):
+            continue
+        asset_id = raw_entry.get("asset_id")
+        if asset_id is None:
+            continue
+        try:
+            normalized_asset_id = int(asset_id)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("visual_identity_draft_slot_asset_invalid") from exc
+        if normalized_asset_id <= 0:
+            raise ValueError("visual_identity_draft_slot_asset_invalid")
+        expression_key = str(raw_entry.get("expression_key") or slot_key)
+        display_label = str(raw_entry.get("display_label") or expression_key)
+        selection_key = (normalized_asset_id, expression_key)
+        if selection_key in seen:
+            continue
+        seen.add(selection_key)
+        selections.append(
+            {
+                "asset_id": normalized_asset_id,
+                "expression_key": expression_key,
+                "display_label": display_label,
+            }
+        )
+    return selections
 
 
 def _build_activation_manifest(

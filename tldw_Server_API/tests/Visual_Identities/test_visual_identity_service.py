@@ -175,6 +175,98 @@ def test_activation_copies_draft_assets_into_version_instead_of_mutating_them(
     assert all(asset["pack_version_id"] == activation.pack_version_id for asset in version_assets)
 
 
+def test_activation_uses_slot_map_replacement_asset(
+    repo: VisualIdentityRepository,
+    service: VisualIdentityService,
+) -> None:
+    draft = repo.create_draft(
+        owner_user_id=OWNER_USER_ID,
+        title="Replacement Draft",
+        source_kind="zip",
+        source_filename="replacement.zip",
+        status="ready_for_review",
+        default_expression_key="happy",
+    )
+    old_asset = _create_draft_asset(
+        repo,
+        draft_id=draft["id"],
+        expression_key="happy",
+        storage_relpath="visual_identities/happy-old.png",
+        sha256="sha256-happy-old",
+    )
+    new_asset = _create_draft_asset(
+        repo,
+        draft_id=draft["id"],
+        expression_key="happy",
+        storage_relpath="visual_identities/happy-new.png",
+        sha256="sha256-happy-new",
+    )
+    repo.update_draft_slot_map(
+        draft_id=draft["id"],
+        owner_user_id=OWNER_USER_ID,
+        slot_map={"happy": {"asset_id": new_asset["id"], "expression_key": "happy"}},
+    )
+
+    activation = service.activate_draft(draft_id=draft["id"])
+    version_assets = repo.list_assets_for_version(
+        activation.pack_version_id,
+        owner_user_id=OWNER_USER_ID,
+    )
+
+    assert [asset["storage_relpath"] for asset in version_assets] == [
+        "visual_identities/happy-new.png"
+    ]
+    assert version_assets[0]["sha256"] == "sha256-happy-new"
+    assert version_assets[0]["id"] != old_asset["id"]
+
+
+def test_activation_excludes_cleared_slot_map_asset(
+    repo: VisualIdentityRepository,
+    service: VisualIdentityService,
+) -> None:
+    draft = repo.create_draft(
+        owner_user_id=OWNER_USER_ID,
+        title="Cleared Slot Draft",
+        source_kind="zip",
+        source_filename="cleared.zip",
+        status="ready_for_review",
+        default_expression_key="neutral",
+    )
+    neutral_asset = _create_draft_asset(
+        repo,
+        draft_id=draft["id"],
+        expression_key="neutral",
+        storage_relpath="visual_identities/neutral.png",
+        sha256="sha256-neutral",
+    )
+    _create_draft_asset(
+        repo,
+        draft_id=draft["id"],
+        expression_key="happy",
+        storage_relpath="visual_identities/happy-cleared.png",
+        sha256="sha256-happy-cleared",
+    )
+    repo.update_draft_slot_map(
+        draft_id=draft["id"],
+        owner_user_id=OWNER_USER_ID,
+        slot_map={
+            "neutral": {"asset_id": neutral_asset["id"], "expression_key": "neutral"},
+            "happy": {"asset_id": None, "expression_key": "happy"},
+        },
+    )
+
+    activation = service.activate_draft(draft_id=draft["id"])
+    version_assets = repo.list_assets_for_version(
+        activation.pack_version_id,
+        owner_user_id=OWNER_USER_ID,
+    )
+
+    assert [asset["expression_key"] for asset in version_assets] == ["neutral"]
+    assert [asset["storage_relpath"] for asset in version_assets] == [
+        "visual_identities/neutral.png"
+    ]
+
+
 def test_activation_preserves_existing_pack_metadata_when_draft_targets_pack(
     repo: VisualIdentityRepository,
     service: VisualIdentityService,
@@ -410,5 +502,29 @@ def _create_ready_draft(
             sha256=f"sha256-{expression_key}",
             width=64,
             height=64,
-        )
+    )
     return draft
+
+
+def _create_draft_asset(
+    repo: VisualIdentityRepository,
+    *,
+    draft_id: int,
+    expression_key: str,
+    storage_relpath: str,
+    sha256: str,
+) -> dict[str, Any]:
+    return repo.create_asset(
+        owner_user_id=OWNER_USER_ID,
+        draft_id=draft_id,
+        expression_key=expression_key,
+        original_expression_key=expression_key,
+        display_label=expression_key.title(),
+        source_filename=f"{expression_key}.png",
+        storage_relpath=storage_relpath,
+        content_type="image/png",
+        bytes=123,
+        sha256=sha256,
+        width=64,
+        height=64,
+    )

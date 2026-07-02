@@ -803,36 +803,36 @@ bunx vitest run \
 
 **Files:**
 
-- [ ] Add `apps/packages/ui/src/components/Common/VisualIdentity/VisualIdentityPackPanel.tsx`
-- [ ] Add `apps/packages/ui/src/components/Common/VisualIdentity/VisualIdentityDraftReview.tsx`
-- [ ] Add `apps/packages/ui/src/components/Common/VisualIdentity/ExpressionSlotGrid.tsx`
-- [ ] Add `apps/packages/ui/src/components/Common/VisualIdentity/ExpressionAssetUploader.tsx`
-- [ ] Add `apps/packages/ui/src/components/Common/VisualIdentity/__tests__/VisualIdentityDraftReview.test.tsx`
-- [ ] Add `apps/packages/ui/src/components/Common/VisualIdentity/__tests__/ExpressionSlotGrid.test.tsx`
-- [ ] Modify `apps/packages/ui/src/components/Option/Characters/CharacterEditorForm.tsx`.
-- [ ] Modify `apps/packages/ui/src/components/PersonaGarden/VisualPackEditor.tsx`.
+- [x] Add `apps/packages/ui/src/components/Common/VisualIdentity/VisualIdentityPackPanel.tsx`
+- [x] Add `apps/packages/ui/src/components/Common/VisualIdentity/VisualIdentityDraftReview.tsx`
+- [x] Add `apps/packages/ui/src/components/Common/VisualIdentity/ExpressionSlotGrid.tsx`
+- [x] Add `apps/packages/ui/src/components/Common/VisualIdentity/ExpressionAssetUploader.tsx`
+- [x] Add `apps/packages/ui/src/components/Common/VisualIdentity/__tests__/VisualIdentityDraftReview.test.tsx`
+- [x] Add `apps/packages/ui/src/components/Common/VisualIdentity/__tests__/ExpressionSlotGrid.test.tsx`
+- [x] Modify `apps/packages/ui/src/components/Option/Characters/CharacterEditorForm.tsx`.
+- [x] Modify `apps/packages/ui/src/components/PersonaGarden/VisualPackEditor.tsx`.
 
 **Implementation Steps:**
 
-- [ ] Add a reusable panel that accepts `actorKind: "character" | "persona"` and `actorId: number`.
-- [ ] Load current active binding by calling `resolveVisualIdentityBinding` for `neutral`.
-- [ ] Show active pack, active version, default expression, supported formats, and fallback status.
-- [ ] Add ZIP import button that calls `startVisualIdentityZipImport`.
-- [ ] Poll the returned job through existing job polling helpers until draft is ready, failed, cancelled, or quarantined.
-- [ ] Show draft slot grid with canonical slots first and custom slots after.
-- [ ] Allow per-slot image upload with immediate validation errors from the API.
-- [ ] Allow default expression selection only from slots with valid assets.
-- [ ] Activate draft with actor binding by default, matching the user's requirement that the pack applies to the selected character/persona it is associated with.
-- [ ] Replace the current `CharacterEditorForm.tsx` "Mood images (coming soon)" dashed block with `VisualIdentityPackPanel` and a collapsed section titled "Legacy mood images". Do not remove stored legacy data.
-- [ ] Add `VisualIdentityPackPanel` to `VisualPackEditor.tsx` in a separate section titled "Expression packs" so Persona Visual Pack management remains visible and unchanged.
+- [x] Add a reusable panel that accepts `actorKind: "character" | "persona"` and `actorId: number | string`.
+- [x] Load current active binding by calling `resolveVisualIdentityBinding` for `neutral`.
+- [x] Show active pack, active version, default expression, supported formats, and fallback status.
+- [x] Add ZIP import button that calls `startVisualIdentityZipImport`.
+- [x] Poll the returned draft through terminal status-aware polling until ready, failed, cancelled, quarantined, activated, or timeout. No generic Visual Identity job status endpoint/helper exists in the current V1 surface.
+- [x] Show draft slot grid with canonical slots first and custom slots after.
+- [x] Allow per-slot image upload with immediate validation errors from the API.
+- [ ] Allow default expression selection only from slots with valid assets. Deferred: this requires a backend draft default-expression update or activation-time override API.
+- [x] Activate draft with actor binding by default, matching the user's requirement that the pack applies to the selected character/persona it is associated with.
+- [x] Replace the current `CharacterEditorForm.tsx` "Mood images (coming soon)" dashed block with `VisualIdentityPackPanel` and a collapsed section titled "Legacy mood images". Do not remove stored legacy data.
+- [x] Add `VisualIdentityPackPanel` to `VisualPackEditor.tsx` in a separate section titled "Expression packs" so Persona Visual Pack management remains visible and unchanged.
 
 **UX Constraints:**
 
-- [ ] Use compact grids and toolbars rather than a marketing-style page.
-- [ ] Use image thumbnails for expressions.
-- [ ] Use icons for upload, replace, delete, activate, and refresh actions where existing icon libraries provide them.
-- [ ] Show animated assets as images, but do not create layout shifts when animations load.
-- [ ] Respect reduced-motion by pausing preview animation when the user has reduced motion enabled.
+- [x] Use compact grids and toolbars rather than a marketing-style page.
+- [x] Use image thumbnails for expressions when asset content URLs are available; packless draft assets show a stable unavailable-preview state.
+- [x] Use icons for upload, replace, delete, activate, and refresh actions where existing icon libraries provide them.
+- [x] Show animated assets as images, but do not create layout shifts when animations load.
+- [x] Respect reduced-motion by pausing preview animation when the user has reduced motion enabled.
 
 **Tests To Write First:**
 
