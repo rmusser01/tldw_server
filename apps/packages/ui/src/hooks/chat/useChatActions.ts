@@ -35,6 +35,7 @@ import {
 import { generateBranchFromMessageIds } from "@/db/dexie/branch"
 import { type UploadedFile } from "@/db/dexie/types"
 import { buildAssistantErrorContent } from "@/utils/chat-error-message"
+import { buildCharacterChatAssistantErrorContent } from "./useCharacterChatMode"
 import { detectCharacterMood } from "@/utils/character-mood"
 import { WEBUI_CHARACTER_CHAT_SOURCE } from "@/utils/character-chat-session"
 import {
@@ -1338,6 +1339,7 @@ export const useChatActions = ({
     let pendingStreamingText = ""
     let pendingReasoningTime = 0
     let lastStreamingUpdateAt = 0
+    let inactivityTimer: ReturnType<typeof setTimeout> | null = null
 
     const flushStreamingUpdate = () => {
       if (pendingStreamingText.length === 0) return
@@ -1732,6 +1734,23 @@ export const useChatActions = ({
         normalizedModel.length > 0 ? normalizedModel : resolvedModel
 
       const shouldPersistToServer = !temporaryChat
+      // Stream-inactivity watchdog: if no chunk arrives within the timeout, abort
+      // the underlying stream so a stalled character response cannot hang forever.
+      const STREAM_INACTIVITY_TIMEOUT_MS = 60_000
+      let inactivityAborted = false
+      const turnController =
+        activeAbortControllerRef.current &&
+        activeAbortControllerRef.current.signal === signal
+          ? activeAbortControllerRef.current
+          : null
+      const resetInactivityTimer = () => {
+        if (inactivityTimer) clearTimeout(inactivityTimer)
+        inactivityTimer = setTimeout(() => {
+          inactivityAborted = true
+          turnController?.abort()
+        }, STREAM_INACTIVITY_TIMEOUT_MS)
+      }
+      resetInactivityTimer()
       for await (const chunk of tldwClient.streamCharacterChatCompletion(
         chatId,
         {
@@ -1749,6 +1768,7 @@ export const useChatActions = ({
         },
         { signal }
       )) {
+        resetInactivityTimer()
         const interruptionEvent =
           chunk && typeof chunk === "object" && !Array.isArray(chunk)
             ? (chunk as Record<string, unknown>)
@@ -1802,6 +1822,15 @@ export const useChatActions = ({
       }
       cancelStreamingUpdate()
       flushStreamingUpdate()
+      if (inactivityTimer) clearTimeout(inactivityTimer)
+
+      if (inactivityAborted) {
+        const timeoutError = new Error(
+          "Stream timed out: no data received for 60 seconds"
+        )
+        ;(timeoutError as any).name = "StreamInactivityTimeout"
+        throw timeoutError
+      }
 
       if (signal?.aborted) {
         const abortError = new Error("AbortError")
@@ -2136,7 +2165,11 @@ export const useChatActions = ({
           return true
         }
       })
-      const assistantContent = buildAssistantErrorContent(fullText, e)
+      const assistantContent = buildCharacterChatAssistantErrorContent(
+        fullText,
+        e,
+        t
+      )
       const interruptionReason =
         e instanceof Error ? e.message : t("somethingWentWrong")
       if (generateMessageId) {
@@ -2173,8 +2206,12 @@ export const useChatActions = ({
       })
 
       if (!errorSave) {
+        const isInactivityTimeout =
+          e instanceof Error && (e as any).name === "StreamInactivityTimeout"
         notification.error({
-          message: t("error"),
+          message: isInactivityTimeout
+            ? t("playground:streamTimeout", { defaultValue: "Stream timed out" })
+            : t("error"),
           description: e instanceof Error ? e.message : t("somethingWentWrong")
         })
       }
@@ -2184,6 +2221,7 @@ export const useChatActions = ({
     } finally {
       discardCurrentTurnOnAbortRef.current = false
       cancelStreamingUpdate()
+      if (inactivityTimer) clearTimeout(inactivityTimer)
       // Only null the shared controller if this turn still owns it, so a newer
       // in-flight turn's controller is not clobbered (and stays cancellable).
       if (releaseAbortControllerIfOwned(signal)) {

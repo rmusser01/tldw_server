@@ -42,6 +42,13 @@ type VoiceChatOptions = VoiceChatCallbacks & {
   active: boolean
 }
 
+// Drop mic frames once the socket's outbound buffer backs up past this many
+// bytes so a slow uplink can't grow the buffer until the browser force-closes.
+const MAX_WS_BUFFERED_BYTES = 512 * 1024
+// Abort the handshake if `onopen` never fires so the UI can recover instead of
+// wedging in "connecting". Mirrors the extension STT worker connect timer.
+const VOICE_WS_CONNECT_TIMEOUT_MS = 10000
+
 const formatToMime = (format: string): string => {
   const normalized = String(format || "").trim().toLowerCase()
   switch (normalized) {
@@ -144,10 +151,12 @@ export const useVoiceChatStream = ({
   const connectingRef = React.useRef(false)
   const closingRef = React.useRef(false)
   const triggeredRef = React.useRef(false)
+  const bargeInSentRef = React.useRef(false)
   const pendingResumeRef = React.useRef(false)
   const resolvedTtsFormatRef = React.useRef<string | null>(null)
   const errorRef = React.useRef<string | null>(null)
   const startAttemptRef = React.useRef(0)
+  const connectTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
   const didRunActiveEffectRef = React.useRef(false)
   const manualSessionRef = React.useRef(false)
 
@@ -219,7 +228,21 @@ export const useVoiceChatStream = ({
       if (!ws || ws.readyState !== WebSocket.OPEN) return
       try {
         if (voiceChatBargeIn && stateRef.current === "speaking") {
-          ws.send(JSON.stringify({ type: "interrupt", reason: "barge_in" }))
+          // Send the barge-in interrupt once per speaking turn instead of on
+          // every mic frame (~4/sec). The guard is cleared on tts_start and
+          // when the server acks the interruption.
+          if (!bargeInSentRef.current) {
+            bargeInSentRef.current = true
+            ws.send(JSON.stringify({ type: "interrupt", reason: "barge_in" }))
+          }
+        }
+        // Backpressure: drop this mic frame when the outbound buffer is backed
+        // up rather than growing it unbounded on a slow uplink.
+        if (
+          typeof ws.bufferedAmount === "number" &&
+          ws.bufferedAmount > MAX_WS_BUFFERED_BYTES
+        ) {
+          return
         }
         const base64 = arrayBufferToBase64(chunk)
         ws.send(JSON.stringify({ type: "audio", data: base64 }))
@@ -267,6 +290,10 @@ export const useVoiceChatStream = ({
   const cleanupSession = React.useCallback(() => {
     manualSessionRef.current = false
     startAttemptRef.current += 1
+    if (connectTimeoutRef.current) {
+      clearTimeout(connectTimeoutRef.current)
+      connectTimeoutRef.current = null
+    }
     try {
       micStop()
     } catch {}
@@ -276,6 +303,7 @@ export const useVoiceChatStream = ({
     wsRef.current = null
     connectingRef.current = false
     triggeredRef.current = false
+    bargeInSentRef.current = false
     pendingResumeRef.current = false
     resolvedTtsFormatRef.current = null
     setConnected(false)
@@ -290,6 +318,14 @@ export const useVoiceChatStream = ({
       try {
         ws.send(JSON.stringify({ type: "stop" }))
       } catch {}
+    }
+    // Detach handlers before closing so a late onclose/onerror can't fire state
+    // updates after the session (or the component) has gone away.
+    if (ws) {
+      ws.onopen = null
+      ws.onmessage = null
+      ws.onerror = null
+      ws.onclose = null
     }
     try {
       ws?.close()
@@ -381,6 +417,8 @@ export const useVoiceChatStream = ({
 
       if (msgType === "tts_start") {
         const format = String(data.format || resolvedTtsFormatRef.current || "mp3")
+        // New speaking turn: allow one barge-in interrupt for this turn.
+        bargeInSentRef.current = false
         audioStart(format, voiceChatTtsMode === "stream")
         updateState("speaking")
         if (!voiceChatBargeIn) {
@@ -399,6 +437,12 @@ export const useVoiceChatStream = ({
 
       if (msgType === "interrupted") {
         pendingResumeRef.current = false
+        bargeInSentRef.current = false
+        // Barge-in: stop the already-buffered assistant audio immediately so it
+        // does not keep playing over the user.
+        try {
+          audioStop()
+        } catch {}
         updateState(activeRef.current ? "listening" : "idle")
         return
       }
@@ -418,6 +462,7 @@ export const useVoiceChatStream = ({
     [
       audioFinish,
       audioStart,
+      audioStop,
       handleError,
       micStop,
       normalizedTriggers,
@@ -477,6 +522,18 @@ export const useVoiceChatStream = ({
       ws.binaryType = "arraybuffer"
       wsRef.current = ws
 
+      // Handshake timeout: if onopen never fires the UI would otherwise wedge in
+      // "connecting" forever. Fail fast so the restart guard is released.
+      if (connectTimeoutRef.current) {
+        clearTimeout(connectTimeoutRef.current)
+      }
+      connectTimeoutRef.current = setTimeout(() => {
+        connectTimeoutRef.current = null
+        if (!isStartAttemptCurrent(attemptId)) return
+        if (ws.readyState === WebSocket.OPEN) return
+        handleError("Voice chat connection timed out")
+      }, VOICE_WS_CONNECT_TIMEOUT_MS)
+
       ws.onmessage = (event) => {
         if (typeof event.data === "string") {
           try {
@@ -506,10 +563,17 @@ export const useVoiceChatStream = ({
           updateState("error")
           return
         }
-        updateState("idle")
+        // Don't clobber a surfaced error state by resetting to idle on close.
+        if (!errorRef.current) {
+          updateState("idle")
+        }
       }
 
       ws.onopen = () => {
+        if (connectTimeoutRef.current) {
+          clearTimeout(connectTimeoutRef.current)
+          connectTimeoutRef.current = null
+        }
         void (async () => {
           try {
             if (!isStartAttemptCurrent(attemptId)) {
@@ -517,6 +581,14 @@ export const useVoiceChatStream = ({
                 ws.close()
               } catch {}
               return
+            }
+            // TASK-12106: authenticate before any config/audio so the server
+            // authorizes the connection first. The audio WS endpoint reads an
+            // {type:"auth", token} first frame via receive_text()
+            // (streaming_service.py:641-647 multi-user / 720-723 single-user).
+            // `token` is the JWT (multi-user) or API key (single-user).
+            if (token) {
+              ws.send(JSON.stringify({ type: "auth", token }))
             }
             const sttConfig: Record<string, any> = {
               enable_vad: true,

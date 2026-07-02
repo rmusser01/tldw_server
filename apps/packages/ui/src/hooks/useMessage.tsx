@@ -20,6 +20,7 @@ import { useTranslation } from "react-i18next";
 import { usePageAssist } from "@/context";
 import { formatDocs } from "@/utils/format-docs";
 import { buildAssistantErrorContent } from "@/utils/chat-error-message";
+import { buildCharacterChatAssistantErrorContent } from "@/hooks/chat/useCharacterChatMode";
 import { detectCharacterMood } from "@/utils/character-mood";
 import { useStorage } from "@plasmohq/storage/hook";
 import { useStoreChatModelSettings } from "@/store/model";
@@ -1230,6 +1231,7 @@ export const useMessage = () => {
     characterOverride?: Character | null,
     regenerateFromMessage?: Message,
     serverChatIdOverride?: string | null,
+    controller?: AbortController,
   ) => {
     setStreaming(true);
     const activeCharacter = characterOverride ?? selectedCharacter;
@@ -1288,6 +1290,7 @@ export const useMessage = () => {
         : history;
     let fullText = "";
     let contentToSave = "";
+    let inactivityTimer: ReturnType<typeof setTimeout> | null = null;
     const resolvedAssistantMessageId = generateID();
     const resolvedUserMessageId = !isRegenerate ? generateID() : undefined;
     let persistedUserServerMessageId: string | undefined;
@@ -1602,6 +1605,18 @@ export const useMessage = () => {
         normalizedModel.length > 0 ? normalizedModel : model;
 
       const shouldPersistToServer = !temporaryChat;
+      // Stream-inactivity watchdog: if no chunk arrives within the timeout, abort
+      // the underlying stream so a stalled character response cannot hang forever.
+      const STREAM_INACTIVITY_TIMEOUT_MS = 60_000;
+      let inactivityAborted = false;
+      const resetInactivityTimer = () => {
+        if (inactivityTimer) clearTimeout(inactivityTimer);
+        inactivityTimer = setTimeout(() => {
+          inactivityAborted = true;
+          controller?.abort();
+        }, STREAM_INACTIVITY_TIMEOUT_MS);
+      };
+      resetInactivityTimer();
       for await (const chunk of tldwClient.streamCharacterChatCompletion(
         chatId,
         {
@@ -1612,6 +1627,7 @@ export const useMessage = () => {
         },
         { signal },
       )) {
+        resetInactivityTimer();
         const loopEvent = extractChatLoopEvent(chunk);
         if (loopEvent) {
           dispatchChatLoopEvent(loopEvent);
@@ -1656,6 +1672,16 @@ export const useMessage = () => {
         count++;
         if (signal?.aborted) break;
       }
+      if (inactivityTimer) clearTimeout(inactivityTimer);
+
+      if (inactivityAborted) {
+        const timeoutError = new Error(
+          "Stream timed out: no data received for 60 seconds",
+        );
+        (timeoutError as any).name = "StreamInactivityTimeout";
+        throw timeoutError;
+      }
+
       if (signal?.aborted) {
         const abortError = new Error("AbortError");
         (abortError as any).name = "AbortError";
@@ -1904,7 +1930,11 @@ export const useMessage = () => {
         return;
       }
 
-      const assistantContent = buildAssistantErrorContent(fullText, e);
+      const assistantContent = buildCharacterChatAssistantErrorContent(
+        fullText,
+        e,
+        t,
+      );
       if (generateMessageId) {
         setMessages((prev) =>
           prev.map((msg) =>
@@ -1933,8 +1963,14 @@ export const useMessage = () => {
       });
 
       if (!errorSave) {
+        const isInactivityTimeout =
+          e instanceof Error && (e as any).name === "StreamInactivityTimeout";
         notification.error({
-          message: t("error"),
+          message: isInactivityTimeout
+            ? t("playground:streamTimeout", {
+                defaultValue: "Stream timed out",
+              })
+            : t("error"),
           description: e?.message || t("somethingWentWrong"),
         });
       }
@@ -1942,6 +1978,7 @@ export const useMessage = () => {
       setStreaming(false);
     } finally {
       discardCurrentTurnOnAbortRef.current = false;
+      if (inactivityTimer) clearTimeout(inactivityTimer);
       setAbortController(null);
     }
   };
@@ -2370,11 +2407,14 @@ export const useMessage = () => {
         : resolvedSelectedModel
       ).trim() || "image-generation";
     let signal: AbortSignal;
+    let activeController: AbortController;
     if (!controller) {
       const newController = new AbortController();
+      activeController = newController;
       signal = newController.signal;
       setAbortController(newController);
     } else {
+      activeController = controller;
       setAbortController(controller);
       signal = controller.signal;
     }
@@ -2553,6 +2593,7 @@ export const useMessage = () => {
               trackedCharacterForSend,
               regenerateFromMessage,
               serverChatIdOverride,
+              activeController,
             );
           } else if (sendMode === "tracked_persona" && isPersonaAssistantSelection(effectiveSelectedAssistant)) {
             const personaServerChat = await ensurePersonaServerChat({

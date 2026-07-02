@@ -1,7 +1,7 @@
 ---
 id: TASK-12108
 title: Consolidate triplicated characterChatMode and add stream-inactivity watchdog to the live path
-status: To Do
+status: In Progress
 labels:
 - tech-debt
 - medium

@@ -237,11 +237,142 @@ function calculateCRC32(data: Uint8Array): number {
 
 let crc32Table: Uint32Array | null = null
 
+/** Maximum bytes to accept when fetching a remote avatar for PNG embedding. */
+const MAX_AVATAR_FETCH_BYTES = 5 * 1024 * 1024
+/** Timeout for the (allowlisted) remote avatar fetch. */
+const AVATAR_FETCH_TIMEOUT_MS = 10_000
+
+/**
+ * Decode a base64 (optionally `data:`-prefixed) string into an ArrayBuffer.
+ */
+function base64ToArrayBuffer(value: string): ArrayBuffer {
+  const base64 = value.replace(/^data:image\/\w+;base64,/, "")
+  const binaryString = atob(base64)
+  const bytes = new Uint8Array(binaryString.length)
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i)
+  }
+  return bytes.buffer
+}
+
+/**
+ * Decide whether an avatar URL is safe to fetch for PNG export.
+ *
+ * A character card's `avatar_url` is attacker-controllable (via shared/imported
+ * cards), so blindly fetching it would let a card fire an outbound request from
+ * the victim's browser (tracking beacon / internal-network probe). We therefore
+ * only permit same-origin URLs plus any explicitly-allowed origin (e.g. the
+ * configured tldw server). `data:` URLs are handled separately by the caller
+ * (decoded locally, no network request).
+ */
+export function isSafeAvatarFetchUrl(
+  rawUrl: string,
+  allowedOrigins?: string[]
+): boolean {
+  if (typeof rawUrl !== "string" || rawUrl.trim().length === 0) return false
+
+  let parsed: URL
+  try {
+    const base =
+      typeof window !== "undefined" && window.location
+        ? window.location.href
+        : undefined
+    parsed = new URL(rawUrl, base)
+  } catch {
+    return false
+  }
+
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false
+
+  const allowed = new Set<string>()
+  if (typeof window !== "undefined" && window.location?.origin) {
+    allowed.add(window.location.origin)
+  }
+  for (const origin of allowedOrigins ?? []) {
+    if (typeof origin !== "string" || !origin.trim()) continue
+    try {
+      allowed.add(new URL(origin).origin)
+    } catch {
+      // ignore malformed allowlist entries
+    }
+  }
+
+  return allowed.has(parsed.origin)
+}
+
+/**
+ * Load avatar image bytes for PNG embedding, defending against SSRF / beacon
+ * abuse. Returns null (never throws) when the avatar cannot be loaded safely;
+ * callers should fall back to a locally-generated placeholder.
+ */
+async function loadAvatarImageData(
+  avatarUrl: string,
+  allowedOrigins?: string[]
+): Promise<ArrayBuffer | null> {
+  // Inline data: URLs never hit the network.
+  if (avatarUrl.startsWith("data:")) {
+    try {
+      return base64ToArrayBuffer(avatarUrl)
+    } catch {
+      console.warn("Character export: failed to decode inline avatar data URL")
+      return null
+    }
+  }
+
+  if (!isSafeAvatarFetchUrl(avatarUrl, allowedOrigins)) {
+    console.warn(
+      "Character export: skipping avatar fetch for a non-allowlisted URL; exporting without the embedded avatar"
+    )
+    return null
+  }
+
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), AVATAR_FETCH_TIMEOUT_MS)
+  try {
+    const response = await fetch(avatarUrl, {
+      signal: controller.signal,
+      // Do not attach the user's cookies/credentials to the avatar request.
+      credentials: "omit"
+    })
+    if (!response.ok) {
+      console.warn(
+        `Character export: avatar fetch failed (${response.status}); exporting without the embedded avatar`
+      )
+      return null
+    }
+    const declaredLength = Number(response.headers.get("content-length"))
+    if (
+      Number.isFinite(declaredLength) &&
+      declaredLength > MAX_AVATAR_FETCH_BYTES
+    ) {
+      console.warn(
+        "Character export: avatar exceeds the size cap; exporting without the embedded avatar"
+      )
+      return null
+    }
+    const buffer = await response.arrayBuffer()
+    if (buffer.byteLength > MAX_AVATAR_FETCH_BYTES) {
+      console.warn(
+        "Character export: avatar exceeds the size cap; exporting without the embedded avatar"
+      )
+      return null
+    }
+    return buffer
+  } catch (error) {
+    console.warn("Character export: avatar fetch aborted or failed", error)
+    return null
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
 /**
  * Export character to PNG with embedded metadata
  *
- * If the character has an avatar image, embeds the metadata into it.
- * Otherwise, creates a simple placeholder image with the metadata.
+ * If the character has an already-local avatar (base64), it is embedded directly.
+ * A remote `avatarUrl` is only fetched when it is same-origin or from an allowed
+ * origin (see `isSafeAvatarFetchUrl`), with a timeout and response-size cap.
+ * Otherwise a locally-generated placeholder image is used.
  */
 export async function exportCharacterToPNG(
   character: CharacterV3,
@@ -249,32 +380,35 @@ export async function exportCharacterToPNG(
     avatarUrl?: string
     avatarBase64?: string
     filename?: string
+    /**
+     * Extra origins (besides the WebUI origin) whose avatars may be fetched,
+     * e.g. the configured tldw server origin.
+     */
+    allowedAvatarOrigins?: string[]
   }
 ): Promise<void> {
   const name = character.name || "character"
   const filename = options?.filename || `${sanitizeFilename(name)}_character.png`
 
-  let imageData: ArrayBuffer
+  let imageData: ArrayBuffer | null = null
 
-  // Try to get image data from avatar URL or base64
+  // Prefer already-local base64 (no network request).
   if (options?.avatarBase64) {
-    // Convert base64 to ArrayBuffer
-    const base64 = options.avatarBase64.replace(/^data:image\/\w+;base64,/, "")
-    const binaryString = atob(base64)
-    const bytes = new Uint8Array(binaryString.length)
-    for (let i = 0; i < binaryString.length; i++) {
-      bytes[i] = binaryString.charCodeAt(i)
+    try {
+      imageData = base64ToArrayBuffer(options.avatarBase64)
+    } catch {
+      console.warn("Character export: failed to decode provided avatar base64")
+      imageData = null
     }
-    imageData = bytes.buffer
   } else if (options?.avatarUrl) {
-    // Fetch image from URL
-    const response = await fetch(options.avatarUrl)
-    if (!response.ok) {
-      throw new Error(`Failed to fetch avatar image: ${response.statusText}`)
-    }
-    imageData = await response.arrayBuffer()
-  } else {
-    // Create a placeholder PNG image
+    imageData = await loadAvatarImageData(
+      options.avatarUrl,
+      options.allowedAvatarOrigins
+    )
+  }
+
+  if (!imageData) {
+    // Fall back to a locally-generated placeholder image.
     imageData = await createPlaceholderPNG(name)
   }
 

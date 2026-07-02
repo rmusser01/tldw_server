@@ -11,6 +11,13 @@ import {
 } from "@/utils/image-utils"
 import { tldwClient, type ImageBackend } from "@/services/tldw/TldwApiClient"
 
+/**
+ * Maximum size for an uploaded avatar image. Mirrors `MAX_PERSONA_IMAGE_BYTES`
+ * in CharacterSelect. Oversized images are rejected up front so their base64 is
+ * never autosaved to localStorage (which would trigger `QuotaExceededError`).
+ */
+export const MAX_AVATAR_IMAGE_BYTES = 5 * 1024 * 1024
+
 export type AvatarMode = "url" | "upload" | "generate"
 
 export interface AvatarFieldValue {
@@ -120,6 +127,16 @@ export function AvatarField({
       message.error(
         t("settings:manageCharacters.avatar.selectImageError", {
           defaultValue: "Please select an image file"
+        })
+      )
+      return false
+    }
+
+    if (file.size > MAX_AVATAR_IMAGE_BYTES) {
+      message.error(
+        t("settings:manageCharacters.avatar.tooLargeError", {
+          defaultValue:
+            "Image is too large. Please choose an image around 5 MB or less."
         })
       )
       return false

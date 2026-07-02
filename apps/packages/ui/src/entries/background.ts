@@ -3329,7 +3329,11 @@ export default defineBackground({
                   "Not authenticated. Configure tldw credentials in Settings > tldw.",
                 );
               }
-              const url = `${base}/api/v1/audio/stream/transcribe?token=${encodeURIComponent(token)}`;
+              // TASK-12106: keep the auth token OUT of the URL (URLs leak into
+              // access/proxy logs and history). The transcribe WS authenticates
+              // from an {type:"auth", token} first frame sent below on open
+              // (streaming_service.py:641-647 multi-user / 720-723 single-user).
+              const url = `${base}/api/v1/audio/stream/transcribe`;
               ws = new WebSocket(url);
               ws.binaryType = "arraybuffer";
               connectTimer = setTimeout(() => {
@@ -3351,6 +3355,13 @@ export default defineBackground({
                 if (connectTimer) {
                   clearTimeout(connectTimer);
                   connectTimer = null;
+                }
+                // Send auth as the first frame, before the content script starts
+                // streaming audio (it only sends audio after the "open" event).
+                try {
+                  ws?.send(JSON.stringify({ type: "auth", token }));
+                } catch (error) {
+                  logBackgroundError("stt websocket send auth", error);
                 }
                 safePost({ event: "open" });
               };

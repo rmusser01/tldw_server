@@ -1,7 +1,7 @@
 ---
 id: TASK-12110
 title: Harden character card handling (export SSRF, size caps, favorite desync, variant server-id)
-status: To Do
+status: Done
 labels:
 - bug
 - medium

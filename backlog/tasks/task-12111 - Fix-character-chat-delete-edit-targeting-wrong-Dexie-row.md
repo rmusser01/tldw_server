@@ -1,5 +1,5 @@
 ---
-id: TASK-12104
+id: TASK-12111
 title: Fix character chat delete/edit targeting wrong Dexie row (greeting index offset)
 status: Done
 labels:

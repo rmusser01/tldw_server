@@ -1,7 +1,7 @@
 ---
-id: TASK-12106
+id: TASK-12113
 title: Move voice/STT WebSocket auth token out of the URL query string
-status: To Do
+status: In Progress
 labels:
 - bug
 - high

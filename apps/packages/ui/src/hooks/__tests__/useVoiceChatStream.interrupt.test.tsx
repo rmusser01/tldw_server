@@ -110,15 +110,18 @@ class MockWebSocket {
 
   readyState = 0
   binaryType = "blob"
+  bufferedAmount = 0
   sent: string[] = []
   onopen: (() => void) | null = null
   onmessage: ((event: { data: string | ArrayBuffer }) => void) | null = null
   onerror: (() => void) | null = null
   onclose: (() => void) | null = null
   url: string
+  protocols?: string | string[]
 
-  constructor(url: string) {
+  constructor(url: string, protocols?: string | string[]) {
     this.url = url
+    this.protocols = protocols
     MockWebSocket.instances.push(this)
   }
 
@@ -230,8 +233,11 @@ describe("useVoiceChatStream interrupt handling", () => {
     })
 
     expect(MockWebSocket.instances[0]?.url).toBe(
-      "ws://127.0.0.1:8080/api/v1/audio/chat/stream?token=test-key"
+      "ws://127.0.0.1:8080/api/v1/audio/chat/stream"
     )
+    // TASK-12106: token must not appear in the connection URL.
+    expect(MockWebSocket.instances[0]?.url).not.toContain("token")
+    expect(MockWebSocket.instances[0]?.url).not.toContain("test-key")
   })
 
   it("does not open a websocket when auth is missing", async () => {
@@ -282,10 +288,14 @@ describe("useVoiceChatStream interrupt handling", () => {
     })
 
     await waitFor(() => {
-      expect(ws.sent[0]).toBeDefined()
+      expect(ws.sent.length).toBeGreaterThan(1)
     })
 
-    const configFrame = JSON.parse(ws.sent[0]!)
+    const frames = ws.sent.map((raw) => JSON.parse(raw))
+    // Auth is the first frame; config follows.
+    expect(frames[0]).toEqual({ type: "auth", token: "test-key" })
+    const configFrame = frames.find((frame) => frame.type === "config")
+    expect(configFrame).toBeDefined()
     expect(configFrame.llm.model).toBeUndefined()
     expect(configFrame.llm.provider).toBeUndefined()
   })
@@ -599,5 +609,202 @@ describe("useVoiceChatStream interrupt handling", () => {
     })
 
     expect(onError).toHaveBeenCalledWith("Voice chat disconnected")
+  })
+
+  it("sends the auth frame before the config frame on open", async () => {
+    renderHook(() =>
+      useVoiceChatStream({
+        active: true
+      })
+    )
+
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    const ws = MockWebSocket.instances[0]
+    expect(ws).toBeDefined()
+
+    await act(async () => {
+      ws.triggerOpen()
+      await Promise.resolve()
+    })
+
+    await waitFor(() => {
+      expect(ws.sent.length).toBeGreaterThan(1)
+    })
+
+    const frames = ws.sent.map((raw) => JSON.parse(raw))
+    expect(frames[0]).toEqual({ type: "auth", token: "test-key" })
+    expect(frames[1]?.type).toBe("config")
+  })
+
+  it("sends the barge-in interrupt only once per speaking turn", async () => {
+    renderHook(() =>
+      useVoiceChatStream({
+        active: true
+      })
+    )
+
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    const ws = MockWebSocket.instances[0]
+    expect(ws).toBeDefined()
+
+    await act(async () => {
+      ws.triggerOpen()
+      await Promise.resolve()
+    })
+
+    await act(async () => {
+      ws.triggerJson({ type: "tts_start", format: "mp3" })
+      await Promise.resolve()
+    })
+
+    const priorSendCount = ws.sent.length
+    await act(async () => {
+      micState.callback?.(new ArrayBuffer(8))
+      micState.callback?.(new ArrayBuffer(8))
+      micState.callback?.(new ArrayBuffer(8))
+      await Promise.resolve()
+    })
+
+    const newFrames = ws.sent.slice(priorSendCount).map((raw) => JSON.parse(raw))
+    const interruptFrames = newFrames.filter((frame) => frame.type === "interrupt")
+    expect(interruptFrames).toHaveLength(1)
+
+    // A new speaking turn re-arms the guard.
+    await act(async () => {
+      ws.triggerJson({ type: "interrupted", phase: "both" })
+      ws.triggerJson({ type: "tts_start", format: "mp3" })
+      await Promise.resolve()
+    })
+    const secondTurnStart = ws.sent.length
+    await act(async () => {
+      micState.callback?.(new ArrayBuffer(8))
+      micState.callback?.(new ArrayBuffer(8))
+      await Promise.resolve()
+    })
+    const secondTurnFrames = ws.sent
+      .slice(secondTurnStart)
+      .map((raw) => JSON.parse(raw))
+    expect(
+      secondTurnFrames.filter((frame) => frame.type === "interrupt")
+    ).toHaveLength(1)
+  })
+
+  it("stops buffered TTS audio when the server interrupts", async () => {
+    renderHook(() =>
+      useVoiceChatStream({
+        active: true
+      })
+    )
+
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    const ws = MockWebSocket.instances[0]
+    expect(ws).toBeDefined()
+
+    await act(async () => {
+      ws.triggerOpen()
+      await Promise.resolve()
+    })
+
+    await act(async () => {
+      ws.triggerJson({ type: "tts_start", format: "mp3" })
+      await Promise.resolve()
+    })
+
+    audioPlayerState.stop.mockClear()
+
+    await act(async () => {
+      ws.triggerJson({ type: "interrupted", phase: "both" })
+      await Promise.resolve()
+    })
+
+    expect(audioPlayerState.stop).toHaveBeenCalled()
+  })
+
+  it("drops mic frames when the socket buffer is backed up", async () => {
+    renderHook(() =>
+      useVoiceChatStream({
+        active: true
+      })
+    )
+
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    const ws = MockWebSocket.instances[0]
+    expect(ws).toBeDefined()
+
+    await act(async () => {
+      ws.triggerOpen()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    // Simulate a slow uplink whose outbound buffer has backed up.
+    ws.bufferedAmount = 2 * 1024 * 1024
+    const priorSendCount = ws.sent.length
+
+    await act(async () => {
+      micState.callback?.(new ArrayBuffer(8))
+      await Promise.resolve()
+    })
+
+    const newFrames = ws.sent.slice(priorSendCount).map((raw) => JSON.parse(raw))
+    expect(newFrames.some((frame) => frame.type === "audio")).toBe(false)
+
+    // Once the buffer drains, frames flow again.
+    ws.bufferedAmount = 0
+    await act(async () => {
+      micState.callback?.(new ArrayBuffer(8))
+      await Promise.resolve()
+    })
+    const drainedFrames = ws.sent
+      .slice(priorSendCount)
+      .map((raw) => JSON.parse(raw))
+    expect(drainedFrames.some((frame) => frame.type === "audio")).toBe(true)
+  })
+
+  it("times out the handshake and surfaces an error when onopen never fires", async () => {
+    const onError = vi.fn()
+    vi.useFakeTimers()
+    try {
+      const { result } = renderHook(() =>
+        useVoiceChatStream({
+          active: false,
+          onError
+        })
+      )
+
+      await act(async () => {
+        await result.current.start()
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+
+      const ws = MockWebSocket.instances[0]
+      expect(ws).toBeDefined()
+
+      // Never fire onopen; advance past the handshake timeout.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10000)
+      })
+
+      expect(onError).toHaveBeenCalledWith("Voice chat connection timed out")
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

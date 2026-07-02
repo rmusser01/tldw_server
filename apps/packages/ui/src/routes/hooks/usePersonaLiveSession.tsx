@@ -258,6 +258,12 @@ export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
   const [pendingRecoveryReconnectToken, setPendingRecoveryReconnectToken] =
     React.useState(0)
 
+  // Guards for the multi-await connect(): a superseding connect or an unmount
+  // during the awaits must prevent the pending attempt from creating a socket
+  // that nothing will ever close (mirrors useVoiceChatStream's attempt guard).
+  const connectAttemptRef = React.useRef(0)
+  const mountedRef = React.useRef(true)
+
   // ── Companion mode side-effects ──
   React.useEffect(() => {
     if (!isCompanionMode) return
@@ -414,6 +420,8 @@ export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
     if (!confirmDiscardUnsavedStateDrafts("connect")) return
     setConnecting(true)
     setError(null)
+    const attemptId = connectAttemptRef.current + 1
+    connectAttemptRef.current = attemptId
 
     try {
       disconnect({ force: true })
@@ -587,7 +595,15 @@ export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
         ])
       }
 
-      const ws = new WebSocket(buildPersonaWebSocketUrl(config))
+      // If this attempt was superseded by a newer connect() or the hook
+      // unmounted during the awaits above, don't open a socket that nothing
+      // will ever close.
+      if (!mountedRef.current || connectAttemptRef.current !== attemptId) {
+        return
+      }
+
+      const { url, protocols } = buildPersonaWebSocketUrl(config)
+      const ws = new WebSocket(url, protocols)
       ws.binaryType = "arraybuffer"
       wsRef.current = ws
       manuallyClosingRef.current = false
@@ -621,6 +637,13 @@ export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
 
       ws.onerror = () => {
         setError("Persona stream error")
+        // Close the half-broken socket so we don't leave it in a "connected"
+        // limbo; onclose then runs the normal teardown.
+        try {
+          ws.close()
+        } catch {
+          // ignore close errors
+        }
       }
 
       ws.onclose = () => {
@@ -701,10 +724,20 @@ export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
   // ── Cleanup on unmount ──
   React.useEffect(() => {
     return () => {
+      // Supersede any in-flight connect() so it can't create a socket after we
+      // unmount.
+      mountedRef.current = false
+      connectAttemptRef.current += 1
       const ws = wsRef.current
       flushLiveVoiceSessionAnalytics({ finalize: true })
       if (!ws) return
       manuallyClosingRef.current = true
+      // Detach handlers so a late onclose/onerror can't fire state updates after
+      // unmount.
+      ws.onopen = null
+      ws.onmessage = null
+      ws.onerror = null
+      ws.onclose = null
       try {
         ws.close()
       } catch {

@@ -58,6 +58,51 @@ describe("message variant metadata", () => {
     expect(next.metadataExtra).toBeUndefined()
   })
 
+  it("does not inherit the prior variant's serverMessageId for an unpersisted variant", () => {
+    const message = createMessage({
+      serverMessageId: "server-1",
+      serverMessageVersion: 3
+    })
+
+    const next = applyVariantToMessage(
+      message,
+      {
+        // A freshly-regenerated variant that has not been persisted yet.
+        id: "variant-2",
+        message: "regenerated answer",
+        sources: [],
+        images: []
+      },
+      1
+    )
+
+    expect(next.serverMessageId).toBeUndefined()
+    expect(next.serverMessageVersion).toBeUndefined()
+  })
+
+  it("adopts a persisted variant's own server identity when swiping", () => {
+    const message = createMessage({
+      serverMessageId: "server-1",
+      serverMessageVersion: 3
+    })
+
+    const next = applyVariantToMessage(
+      message,
+      {
+        id: "variant-2",
+        message: "persisted answer",
+        serverMessageId: "server-2",
+        serverMessageVersion: 5,
+        sources: [],
+        images: []
+      },
+      1
+    )
+
+    expect(next.serverMessageId).toBe("server-2")
+    expect(next.serverMessageVersion).toBe(5)
+  })
+
   it("stores metadata updates on the active variant", () => {
     const message = createMessage({
       activeVariantIndex: 0,

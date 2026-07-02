@@ -1,7 +1,7 @@
 ---
 id: TASK-12109
 title: Harden real-time voice (barge-in, backpressure, handshake timeout, WS unmount leaks)
-status: To Do
+status: Done
 labels:
 - bug
 - medium

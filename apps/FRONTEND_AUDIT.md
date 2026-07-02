@@ -267,11 +267,17 @@ Lower-severity items (empty-completion bubbles, greeting double-render, undo ver
 No XSS in character/card rendering; character card image decode validates magic bytes + MIME allow-list; download filenames are traversal-safe; no ReDoS from lorebook regex; **no duplicate assistant persistence** (the server skips persistence while streaming and the client persists once, idempotently); cross-character session switching resets state correctly; TTS streaming chunk ordering is correct; `useMicStream.ts` teardown is complete on every path; no zero-delay reconnect loops.
 
 ## R2 remediation status
-Backlog tasks `task-12104`…`task-12110`.
+Backlog tasks `task-12107`…`task-12113` (renumbered off `task-12104`–`12106`, which teammates used for PR-2573 work).
 
-**Fixed in this pass (with tests, 68 passing):**
-- **R1 (task-12104)** — character delete/edit now address the Dexie row by **stable message id**, not array position, so a greeting at UI index 0 no longer corrupts the store. *Deferred (AC#3):* the greeting is still not persisted to Dexie, so a Dexie-sourced rehydrate shows one fewer message than a server-sourced one — cosmetic, not corruption.
-- **R2 (task-12105)** — the three mic-capture sites now match `useMicStream` (synchronous re-entry guard, stream held in a `catch`-reachable ref, `MediaRecorder` `onerror` that stops tracks + releases the capture lock).
-- **R6/R7 (task-12107)** — TTS blob-URL/MediaSource leaks freed on every path (revoke-before-overwrite; `cancel()` settles the in-flight promise + revokes directly); overlapping playback fixed (stop the prior clip first); audiobook cancel aborts the in-flight chapter.
+**Fixed (with tests):**
+- **R1 (task-12111)** — character delete/edit now address the Dexie row by **stable message id**, not array position, so a greeting at UI index 0 no longer corrupts the store. *Deferred (AC#3):* the greeting is still not persisted to Dexie, so a Dexie-sourced rehydrate shows one fewer message than a server-sourced one — cosmetic, not corruption.
+- **R2 (task-12112)** — the three mic-capture sites now match `useMicStream` (synchronous re-entry guard, stream held in a `catch`-reachable ref, `MediaRecorder` `onerror` that stops tracks + releases the capture lock).
+- **R6/R7 (task-12107)** — TTS blob-URL/MediaSource leaks freed on every path; overlapping playback fixed; audiobook cancel aborts the in-flight chapter.
+- **R8 (task-12109)** — real-time voice hardening: barge-in stops TTS + single interrupt, `bufferedAmount` backpressure, handshake timeout, unmount-mid-connect WS-leak guards.
+- **R9/R10 (task-12110)** — card handling: export SSRF guard (same-origin/allowlisted + timeout + 5 MB cap), avatar/import size caps, favorite reconciled to the server flag with the correct cache key, and a swiped-but-unpersisted variant no longer inherits a stale `serverMessageId`.
 
-**Ticketed for follow-up:** **R3 (task-12106)** WS token-in-URL — needs a client auth-method switch validated against a live server (backend already supports subprotocol / first-message auth); **R5 (task-12108)** characterChatMode consolidation + inactivity watchdog; **R8 (task-12109)** real-time voice hardening; **R9/R10 (task-12110)** card handling + variant server-id.
+**Partially done / gated:**
+- **R3 (task-12113)** — WS token **moved out of the URL** (persona subprotocol `["bearer",cred]`; audio/STT `{type:"auth"}` first message), with a charset fallback so a non-token-safe custom key can't crash `new WebSocket`. ⚠️ **Needs a live-server smoke before merge** (subprotocol handshake, single-user key charset, auth-before-config ordering, extension STT).
+- **R5 (task-12108)** — the high-value **stream-inactivity watchdog** (60s) is now on both live character paths + recovery classification; the full 3-copy consolidation is intentionally deferred (a large refactor while dev is actively churning chat).
+
+**Not done (deliberately deferred, see the running commentary):** TS-strict enablement (blocked on ~66 pre-existing type errors — a real migration, not a flag flip); dropping CSP `'unsafe-eval'` (needs WASM/OCR browser verification); deleting the `extension/routes` mirror (kept in sync by ~22 parity tests; negative-value churn during dev's route refactor).
