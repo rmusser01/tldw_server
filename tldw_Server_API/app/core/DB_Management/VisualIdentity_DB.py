@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS visual_identity_packs (
     title TEXT NOT NULL,
     description TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'archived', 'deleted')),
-    active_version_id INTEGER,
+    active_version_id INTEGER REFERENCES visual_identity_pack_versions(id),
     default_expression_key TEXT NOT NULL DEFAULT 'neutral',
     source_kind TEXT NOT NULL DEFAULT 'manual',
     source_context_json TEXT NOT NULL DEFAULT '{}',
@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS visual_identity_packs (
 CREATE TABLE IF NOT EXISTS visual_identity_pack_drafts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     owner_user_id INTEGER NOT NULL,
-    pack_id INTEGER,
+    pack_id INTEGER REFERENCES visual_identity_packs(id),
     title TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'importing'
         CHECK(status IN ('importing', 'ready_for_review', 'failed', 'abandoned', 'activated')),
@@ -47,7 +47,7 @@ CREATE TABLE IF NOT EXISTS visual_identity_pack_drafts (
 
 CREATE TABLE IF NOT EXISTS visual_identity_pack_versions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    pack_id INTEGER NOT NULL,
+    pack_id INTEGER NOT NULL REFERENCES visual_identity_packs(id),
     owner_user_id INTEGER NOT NULL,
     version_number INTEGER NOT NULL,
     default_expression_key TEXT NOT NULL DEFAULT 'neutral',
@@ -59,26 +59,27 @@ CREATE TABLE IF NOT EXISTS visual_identity_pack_versions (
 CREATE TABLE IF NOT EXISTS visual_identity_assets (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     owner_user_id INTEGER NOT NULL,
-    pack_id INTEGER,
-    draft_id INTEGER,
-    pack_version_id INTEGER,
+    pack_id INTEGER REFERENCES visual_identity_packs(id),
+    draft_id INTEGER REFERENCES visual_identity_pack_drafts(id),
+    pack_version_id INTEGER REFERENCES visual_identity_pack_versions(id),
     expression_key TEXT NOT NULL,
     original_expression_key TEXT NOT NULL DEFAULT '',
     display_label TEXT NOT NULL DEFAULT '',
     source_filename TEXT NOT NULL,
     storage_relpath TEXT NOT NULL,
     content_type TEXT NOT NULL,
-    bytes INTEGER NOT NULL,
+    bytes INTEGER NOT NULL CHECK(bytes > 0),
     sha256 TEXT NOT NULL,
-    width INTEGER NOT NULL,
-    height INTEGER NOT NULL,
-    is_animated INTEGER NOT NULL DEFAULT 0,
+    width INTEGER NOT NULL CHECK(width > 0),
+    height INTEGER NOT NULL CHECK(height > 0),
+    is_animated INTEGER NOT NULL DEFAULT 0 CHECK(is_animated IN (0, 1)),
     frame_count INTEGER,
     duration_ms INTEGER,
     preview_relpath TEXT,
-    deleted INTEGER NOT NULL DEFAULT 0,
+    deleted INTEGER NOT NULL DEFAULT 0 CHECK(deleted IN (0, 1)),
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CHECK(draft_id IS NOT NULL OR pack_version_id IS NOT NULL)
 );
 
 CREATE TABLE IF NOT EXISTS visual_identity_bindings (
@@ -86,8 +87,8 @@ CREATE TABLE IF NOT EXISTS visual_identity_bindings (
     owner_user_id INTEGER NOT NULL,
     actor_kind TEXT NOT NULL CHECK(actor_kind IN ('character', 'persona')),
     actor_id INTEGER NOT NULL,
-    pack_id INTEGER NOT NULL,
-    active_version_id INTEGER NOT NULL,
+    pack_id INTEGER NOT NULL REFERENCES visual_identity_packs(id),
+    active_version_id INTEGER NOT NULL REFERENCES visual_identity_pack_versions(id),
     status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'deleted')),
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -131,6 +132,9 @@ VISUAL_IDENTITY_SCHEMA_STATEMENTS = tuple(
 def ensure_visual_identity_tables(db: CharactersRAGDB) -> None:
     """Create visual identity tables in a SQLite ChaChaNotes database."""
     _require_sqlite_chacha_db(db)
+    conn = db.get_connection()
+    if not conn.in_transaction:
+        conn.execute("PRAGMA foreign_keys = ON")
     with db.transaction() as conn:
         for statement in VISUAL_IDENTITY_SCHEMA_STATEMENTS:
             conn.execute(statement)
@@ -167,6 +171,8 @@ class VisualIdentityRepository:
         source_context: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         self._ensure_schema_initialized()
+        if active_version_id is not None:
+            raise ValueError("visual_identity_pack_version_not_found")
         with self.db.transaction() as conn:
             cursor = conn.execute(
                 """
@@ -310,6 +316,8 @@ class VisualIdentityRepository:
         error: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         self._ensure_schema_initialized()
+        if pack_id is not None and self.get_pack(pack_id, owner_user_id=owner_user_id) is None:
+            raise ValueError("visual_identity_pack_not_found")
         with self.db.transaction() as conn:
             cursor = conn.execute(
                 """
@@ -434,6 +442,8 @@ class VisualIdentityRepository:
         default_expression_key: str = "neutral",
     ) -> dict[str, Any]:
         self._ensure_schema_initialized()
+        if self.get_pack(pack_id, owner_user_id=owner_user_id) is None:
+            raise ValueError("visual_identity_pack_not_found")
         with self.db.transaction() as conn:
             cursor = conn.execute(
                 """
@@ -536,6 +546,15 @@ class VisualIdentityRepository:
         preview_relpath: str | None = None,
     ) -> dict[str, Any]:
         self._ensure_schema_initialized()
+        pack_id = self._normalize_asset_attachment(
+            owner_user_id=owner_user_id,
+            pack_id=pack_id,
+            draft_id=draft_id,
+            pack_version_id=pack_version_id,
+            bytes=bytes,
+            width=width,
+            height=height,
+        )
         with self.db.transaction() as conn:
             cursor = conn.execute(
                 """
@@ -673,6 +692,11 @@ class VisualIdentityRepository:
         active_version_id: int,
     ) -> dict[str, Any]:
         self._ensure_schema_initialized()
+        self._require_owned_pack_version(
+            owner_user_id=owner_user_id,
+            pack_id=pack_id,
+            pack_version_id=active_version_id,
+        )
         with self.db.transaction() as conn:
             existing = conn.execute(
                 """
@@ -794,9 +818,10 @@ class VisualIdentityRepository:
             JOIN visual_identity_packs p
               ON p.id = b.pack_id
              AND p.owner_user_id = b.owner_user_id
-            LEFT JOIN visual_identity_pack_versions v
+            JOIN visual_identity_pack_versions v
               ON v.id = b.active_version_id
              AND v.owner_user_id = b.owner_user_id
+             AND v.pack_id = b.pack_id
             WHERE b.owner_user_id = ?
               AND b.actor_kind = ?
               AND b.actor_id = ?
@@ -889,11 +914,22 @@ class VisualIdentityRepository:
     ) -> dict[str, Any]:
         self._ensure_schema_initialized()
         with self.db.transaction() as conn:
+            existing = conn.execute(
+                """
+                SELECT * FROM visual_identity_idempotency
+                WHERE owner_user_id = ?
+                  AND scope = ?
+                  AND resource_id = ?
+                  AND idempotency_key = ?
+                """,
+                (owner_user_id, scope, resource_id, idempotency_key),
+            ).fetchone()
+            if existing is not None and str(existing["payload_hash"]) != payload_hash:
+                raise ValueError("idempotency_key_conflict")
             cursor = conn.execute(
                 """
                 UPDATE visual_identity_idempotency
                 SET status = 'completed',
-                    payload_hash = ?,
                     response_json = ?,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE owner_user_id = ?
@@ -902,7 +938,6 @@ class VisualIdentityRepository:
                   AND idempotency_key = ?
                 """,
                 (
-                    payload_hash,
                     _json_dump(dict(response)),
                     owner_user_id,
                     scope,
@@ -1025,6 +1060,67 @@ class VisualIdentityRepository:
             return
         self.initialize_schema()
 
+    def _require_owned_pack_version(
+        self,
+        *,
+        owner_user_id: int,
+        pack_id: int,
+        pack_version_id: int,
+    ) -> dict[str, Any]:
+        version = self.get_pack_version(pack_version_id, owner_user_id=owner_user_id)
+        if version is None or int(version["pack_id"]) != int(pack_id):
+            raise ValueError("visual_identity_pack_version_not_found")
+        if self.get_pack(pack_id, owner_user_id=owner_user_id) is None:
+            raise ValueError("visual_identity_pack_not_found")
+        return version
+
+    def _normalize_asset_attachment(
+        self,
+        *,
+        owner_user_id: int,
+        pack_id: int | None,
+        draft_id: int | None,
+        pack_version_id: int | None,
+        bytes: int,
+        width: int,
+        height: int,
+    ) -> int | None:
+        if bytes <= 0 or width <= 0 or height <= 0:
+            raise ValueError("visual_identity_asset_dimensions_invalid")
+        if draft_id is None and pack_version_id is None:
+            raise ValueError("visual_identity_asset_attachment_required")
+
+        normalized_pack_id = pack_id
+        if normalized_pack_id is not None and self.get_pack(
+            normalized_pack_id,
+            owner_user_id=owner_user_id,
+        ) is None:
+            raise ValueError("visual_identity_pack_not_found")
+
+        if draft_id is not None:
+            draft = self.get_draft(draft_id, owner_user_id=owner_user_id)
+            if draft is None:
+                raise ValueError("visual_identity_draft_not_found")
+            draft_pack_id = draft.get("pack_id")
+            if draft_pack_id is not None:
+                draft_pack_id = int(draft_pack_id)
+                if normalized_pack_id is None:
+                    normalized_pack_id = draft_pack_id
+                elif int(normalized_pack_id) != draft_pack_id:
+                    raise ValueError("visual_identity_draft_not_found")
+
+        if pack_version_id is not None:
+            version = self.get_pack_version(pack_version_id, owner_user_id=owner_user_id)
+            if version is None:
+                raise ValueError("visual_identity_pack_version_not_found")
+            version_pack_id = int(version["pack_id"])
+            if normalized_pack_id is None:
+                normalized_pack_id = version_pack_id
+            elif int(normalized_pack_id) != version_pack_id:
+                raise ValueError("visual_identity_pack_version_not_found")
+
+        return normalized_pack_id
+
 
 def _update_values(
     fields: Mapping[str, Any],
@@ -1035,7 +1131,7 @@ def _update_values(
     for field_name, raw_value in fields.items():
         statement = statements.get(field_name)
         if statement is None:
-            continue
+            raise ValueError(f"unsupported_pack_update_field:{field_name}")
         value = _json_dump(dict(raw_value or {})) if field_name in json_fields else raw_value
         values.append((statement, value))
     return values
@@ -1064,10 +1160,6 @@ _PACK_UPDATE_STATEMENTS = {
     "status": (
         "UPDATE visual_identity_packs "
         "SET status = ? WHERE id = ? AND owner_user_id = ? AND status != 'deleted'"
-    ),
-    "active_version_id": (
-        "UPDATE visual_identity_packs "
-        "SET active_version_id = ? WHERE id = ? AND owner_user_id = ? AND status != 'deleted'"
     ),
     "default_expression_key": (
         "UPDATE visual_identity_packs "

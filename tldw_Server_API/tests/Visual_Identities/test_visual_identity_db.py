@@ -139,6 +139,38 @@ def test_idempotency_claim_replays_completed_response_and_rejects_payload_confli
         )
 
 
+def test_complete_idempotency_record_rejects_payload_hash_conflict(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VisualIdentityRepository.initialized(chacha_db)
+    repo.claim_idempotency_record(
+        owner_user_id=42,
+        scope="visual_identity_import",
+        resource_id="pack:1",
+        idempotency_key="import-1",
+        payload_hash="hash-a",
+    )
+
+    with pytest.raises(ValueError, match="idempotency_key_conflict"):
+        repo.complete_idempotency_record(
+            owner_user_id=42,
+            scope="visual_identity_import",
+            resource_id="pack:1",
+            idempotency_key="import-1",
+            payload_hash="hash-b",
+            response={"draft_id": 10},
+        )
+
+    record = repo.get_idempotency_record(
+        owner_user_id=42,
+        scope="visual_identity_import",
+        resource_id="pack:1",
+        idempotency_key="import-1",
+    )
+    assert record["status"] == "in_progress"
+    assert record["payload_hash"] == "hash-a"
+
+
 def test_create_idempotency_record_is_conflict_tolerant_for_same_payload(
     chacha_db: CharactersRAGDB,
 ) -> None:
@@ -205,6 +237,30 @@ def test_pack_creation_list_update_archive_and_delete(chacha_db: CharactersRAGDB
     assert repo.get_pack(pack["id"], owner_user_id=1) is None
 
 
+def test_update_pack_rejects_unsupported_fields_and_active_version_updates(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VisualIdentityRepository.initialized(chacha_db)
+    pack = repo.create_pack(owner_user_id=1, title="Protected Pack")
+    version = repo.create_pack_version(
+        pack_id=pack["id"],
+        owner_user_id=1,
+        version_number=1,
+        manifest={"renderer": "sprite_frames"},
+    )
+
+    with pytest.raises(ValueError, match="unsupported_pack_update_field:active_version_id"):
+        repo.update_pack(
+            pack_id=pack["id"],
+            owner_user_id=1,
+            fields={"active_version_id": version["id"]},
+        )
+    with pytest.raises(ValueError, match="unsupported_pack_update_field:unknown"):
+        repo.update_pack(pack_id=pack["id"], owner_user_id=1, fields={"unknown": "value"})
+
+    assert repo.get_pack(pack["id"], owner_user_id=1)["active_version_id"] is None
+
+
 def test_draft_creation_status_slot_map_and_assets(chacha_db: CharactersRAGDB) -> None:
     repo = VisualIdentityRepository.initialized(chacha_db)
     draft = repo.create_draft(
@@ -267,6 +323,26 @@ def test_version_creation_and_set_active_version(chacha_db: CharactersRAGDB) -> 
     assert active_pack["active_version_id"] == version["id"]
 
 
+def test_pack_version_requires_existing_owner_pack(chacha_db: CharactersRAGDB) -> None:
+    repo = VisualIdentityRepository.initialized(chacha_db)
+    pack = repo.create_pack(owner_user_id=1, title="Owner Pack")
+
+    with pytest.raises(ValueError, match="visual_identity_pack_not_found"):
+        repo.create_pack_version(
+            pack_id=pack["id"],
+            owner_user_id=2,
+            version_number=1,
+            manifest={"renderer": "sprite_frames"},
+        )
+    with pytest.raises(ValueError, match="visual_identity_pack_not_found"):
+        repo.create_pack_version(
+            pack_id=9999,
+            owner_user_id=1,
+            version_number=1,
+            manifest={"renderer": "sprite_frames"},
+        )
+
+
 def test_asset_lists_for_version_and_soft_delete(chacha_db: CharactersRAGDB) -> None:
     repo = VisualIdentityRepository.initialized(chacha_db)
     pack = repo.create_pack(owner_user_id=1, title="Asset Expressions")
@@ -305,28 +381,171 @@ def test_asset_lists_for_version_and_soft_delete(chacha_db: CharactersRAGDB) -> 
     assert repo.list_assets_for_version(version["id"], owner_user_id=1) == []
 
 
+def test_asset_creation_rejects_orphan_and_mismatched_references(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VisualIdentityRepository.initialized(chacha_db)
+    pack = repo.create_pack(owner_user_id=1, title="Asset Pack")
+    version = repo.create_pack_version(
+        pack_id=pack["id"],
+        owner_user_id=1,
+        version_number=1,
+        manifest={"renderer": "sprite_frames"},
+    )
+    foreign_draft = repo.create_draft(owner_user_id=2, title="Foreign Draft", source_kind="zip")
+
+    with pytest.raises(ValueError, match="visual_identity_asset_attachment_required"):
+        repo.create_asset(
+            owner_user_id=1,
+            expression_key="happy",
+            source_filename="happy.png",
+            storage_relpath="visual_identities/happy.png",
+            content_type="image/png",
+            bytes=123,
+            sha256="abc123",
+            width=64,
+            height=64,
+        )
+    with pytest.raises(ValueError, match="visual_identity_pack_version_not_found"):
+        repo.create_asset(
+            owner_user_id=1,
+            pack_id=pack["id"],
+            pack_version_id=9999,
+            expression_key="happy",
+            source_filename="happy.png",
+            storage_relpath="visual_identities/happy.png",
+            content_type="image/png",
+            bytes=123,
+            sha256="abc123",
+            width=64,
+            height=64,
+        )
+    with pytest.raises(ValueError, match="visual_identity_draft_not_found"):
+        repo.create_asset(
+            owner_user_id=1,
+            draft_id=foreign_draft["id"],
+            expression_key="happy",
+            source_filename="happy.png",
+            storage_relpath="visual_identities/happy.png",
+            content_type="image/png",
+            bytes=123,
+            sha256="abc123",
+            width=64,
+            height=64,
+        )
+    with pytest.raises(ValueError, match="visual_identity_asset_dimensions_invalid"):
+        repo.create_asset(
+            owner_user_id=1,
+            pack_id=pack["id"],
+            pack_version_id=version["id"],
+            expression_key="happy",
+            source_filename="happy.png",
+            storage_relpath="visual_identities/happy.png",
+            content_type="image/png",
+            bytes=0,
+            sha256="abc123",
+            width=64,
+            height=64,
+        )
+
+
 def test_binding_upsert_keeps_one_active_binding_per_actor(chacha_db: CharactersRAGDB) -> None:
     repo = VisualIdentityRepository.initialized(chacha_db)
+    first_pack = repo.create_pack(owner_user_id=1, title="First Bound Pack")
+    first_version = repo.create_pack_version(
+        pack_id=first_pack["id"],
+        owner_user_id=1,
+        version_number=1,
+        manifest={"pack": "first"},
+    )
+    second_pack = repo.create_pack(owner_user_id=1, title="Second Bound Pack")
+    second_version = repo.create_pack_version(
+        pack_id=second_pack["id"],
+        owner_user_id=1,
+        version_number=1,
+        manifest={"pack": "second"},
+    )
 
     first = repo.upsert_binding(
         owner_user_id=1,
         actor_kind="character",
         actor_id=7,
-        pack_id=10,
-        active_version_id=1,
+        pack_id=first_pack["id"],
+        active_version_id=first_version["id"],
     )
     second = repo.upsert_binding(
         owner_user_id=1,
         actor_kind="character",
         actor_id=7,
-        pack_id=11,
-        active_version_id=2,
+        pack_id=second_pack["id"],
+        active_version_id=second_version["id"],
     )
 
     assert second["id"] == first["id"]
     binding = repo.get_binding_for_actor(owner_user_id=1, actor_kind="character", actor_id=7)
-    assert binding["pack_id"] == 11
-    assert binding["active_version_id"] == 2
+    assert binding["pack_id"] == second_pack["id"]
+    assert binding["active_version_id"] == second_version["id"]
+
+
+def test_binding_upsert_rejects_version_from_other_pack_and_resolve_cannot_mix_manifest(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VisualIdentityRepository.initialized(chacha_db)
+    pack_a = repo.create_pack(owner_user_id=1, title="Pack A")
+    version_a = repo.create_pack_version(
+        pack_id=pack_a["id"],
+        owner_user_id=1,
+        version_number=1,
+        manifest={"pack": "a"},
+    )
+    pack_b = repo.create_pack(owner_user_id=1, title="Pack B")
+    version_b = repo.create_pack_version(
+        pack_id=pack_b["id"],
+        owner_user_id=1,
+        version_number=1,
+        manifest={"pack": "b"},
+    )
+
+    with pytest.raises(ValueError, match="visual_identity_pack_version_not_found"):
+        repo.upsert_binding(
+            owner_user_id=1,
+            actor_kind="character",
+            actor_id=7,
+            pack_id=pack_a["id"],
+            active_version_id=version_b["id"],
+        )
+
+    with chacha_db.transaction() as conn:
+        conn.execute(
+            """
+            INSERT INTO visual_identity_bindings (
+                owner_user_id,
+                actor_kind,
+                actor_id,
+                pack_id,
+                active_version_id,
+                status
+            )
+            VALUES (?, ?, ?, ?, ?, 'active')
+            """,
+            (1, "character", 7, pack_a["id"], version_b["id"]),
+        )
+
+    assert repo.resolve_active_binding(owner_user_id=1, actor_kind="character", actor_id=7) is None
+    repo.delete_binding(
+        repo.get_binding_for_actor(owner_user_id=1, actor_kind="character", actor_id=7)["id"],
+        owner_user_id=1,
+    )
+    binding = repo.upsert_binding(
+        owner_user_id=1,
+        actor_kind="character",
+        actor_id=7,
+        pack_id=pack_a["id"],
+        active_version_id=version_a["id"],
+    )
+    resolved = repo.resolve_active_binding(owner_user_id=1, actor_kind="character", actor_id=7)
+    assert resolved["id"] == binding["id"]
+    assert json.loads(resolved["active_manifest_json"]) == {"pack": "a"}
 
 
 def test_binding_delete_and_resolve_active_binding(chacha_db: CharactersRAGDB) -> None:
