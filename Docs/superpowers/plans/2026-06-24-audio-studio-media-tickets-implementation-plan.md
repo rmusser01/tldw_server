@@ -799,6 +799,21 @@ def test_ticket_redemption_revalidates_size_mismatch(client_audio_studio_tickets
     assert response.json()["detail"] == "audio_studio_artifact_size_mismatch"  # nosec B101
 
 
+def test_ticket_redemption_revalidates_content_hash_mismatch(client_audio_studio_tickets) -> None:
+    client, _tmp_path = client_audio_studio_tickets
+    project = _create_project(client)
+    path = _write_user_output("clip.wav")
+    artifact = _create_artifact(project, size_bytes=len(MEDIA_BYTES))
+    mint = client.post(_mint_url(project["project_id"], artifact["artifact_id"]), json={"purpose": "download"})
+    assert mint.status_code == 200  # nosec B101
+    path.write_bytes(b"x" * len(MEDIA_BYTES))
+
+    response = client.get(mint.json()["ticket_path"])
+
+    assert response.status_code == 409  # nosec B101
+    assert response.json()["detail"] == "audio_studio_artifact_hash_mismatch"  # nosec B101
+
+
 def test_ticket_redemption_rejects_symlink_escape_after_mint(client_audio_studio_tickets) -> None:
     client, tmp_path = client_audio_studio_tickets
     project = _create_project(client)
@@ -996,6 +1011,19 @@ def _normalize_download_mime(mime_type: str | None, path: FileSystemPath) -> str
             detail="unsupported_audio_studio_artifact_download_type",
         )
     return normalized
+
+
+def _validate_artifact_content_hash(artifact: AudioStudioArtifactRow, media_path: FileSystemPath) -> None:
+    if not _is_sha256_hex(artifact.content_hash):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="audio_studio_artifact_hash_unavailable",
+        )
+    if _sha256_file(media_path) != artifact.content_hash.lower():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="audio_studio_artifact_hash_mismatch",
+        )
 ```
 
 Update the existing authenticated media endpoint to call `_resolve_audio_studio_artifact_path(..., user_id=current_user.id, ...)`. Keep `_normalize_audio_mime`, byte range parsing, and the current small authenticated media route behavior intact.
@@ -1158,6 +1186,7 @@ async def redeem_audio_studio_media_ticket(
     actual_size = media_path.stat().st_size
     if artifact.size_bytes is not None and artifact.size_bytes != actual_size:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="audio_studio_artifact_size_mismatch")
+    _validate_artifact_content_hash(artifact, media_path)
 
     if ticket.purpose == "playback":
         mime_type = _normalize_audio_mime(artifact.mime_type, media_path)
@@ -1190,8 +1219,8 @@ async def redeem_audio_studio_media_ticket(
         return FileResponse(str(media_path), media_type=mime_type, headers=headers)
 
     mime_type = _normalize_download_mime(artifact.mime_type, media_path)
-    return FileResponse(
-        str(media_path),
+    return StreamingResponse(
+        _iter_file_range(media_path, start=0, length=actual_size),
         media_type=mime_type,
         headers={
             "Cache-Control": "private, no-store",
@@ -1201,11 +1230,14 @@ async def redeem_audio_studio_media_ticket(
                 mime_type=mime_type,
                 download=True,
             ),
+            "Content-Length": str(actual_size),
             "Referrer-Policy": "no-referrer",
             "X-Content-Type-Options": "nosniff",
         },
     )
 ```
+
+Download ticket redemption intentionally uses `StreamingResponse` over the full file instead of `FileResponse`, so the endpoint ignores browser `Range` requests and does not advertise `Accept-Ranges` for single-use download tickets. The content-hash revalidation must run after path/size checks so a same-size backing-file replacement is rejected before any bytes are streamed.
 
 - [ ] **Step 8: Run backend ticket API tests**
 
@@ -1230,6 +1262,7 @@ git commit -m "feat(audio-studio): add artifact media tickets API"
 
 **Files:**
 - Modify: `tldw_Server_API/app/core/Logging/access_log_middleware.py`
+- Modify: `tldw_Server_API/app/main.py`
 - Test: `tldw_Server_API/tests/Logging/test_access_log_redaction.py`
 
 - [ ] **Step 1: Write failing redaction tests**
@@ -1241,7 +1274,7 @@ Create `tldw_Server_API/tests/Logging/test_access_log_redaction.py`:
 
 from __future__ import annotations
 
-from tldw_Server_API.app.core.Logging.access_log_middleware import redact_access_log_path
+from tldw_Server_API.app.core.Logging.access_log_middleware import redact_access_log_message, redact_access_log_path
 
 
 def test_redacts_audio_studio_media_ticket_token() -> None:
@@ -1253,8 +1286,21 @@ def test_redacts_audio_studio_media_ticket_token() -> None:
 def test_redacts_ticket_token_without_changing_other_paths() -> None:
     assert redact_access_log_path("/api/v1/audio-studio/projects/p1") == "/api/v1/audio-studio/projects/p1"
     assert redact_access_log_path("/api/v1/audio-studio/media-tickets/token?download=1") == (
-        "/api/v1/audio-studio/media-tickets/[REDACTED]"
+        "/api/v1/audio-studio/media-tickets/[REDACTED]?download=1"
     )
+
+
+def test_redacts_ticket_token_in_uvicorn_access_message() -> None:
+    message = (
+        '127.0.0.1:54000 - "GET '
+        '/api/v1/audio-studio/media-tickets/raw-secret-token-123?download=1 '
+        'HTTP/1.1" 206'
+    )
+
+    redacted = redact_access_log_message(message)
+
+    assert "raw-secret-token-123" not in redacted
+    assert "/api/v1/audio-studio/media-tickets/[REDACTED]?download=1" in redacted
 ```
 
 - [ ] **Step 2: Run redaction tests and verify they fail**
@@ -1281,6 +1327,10 @@ _AUDIO_STUDIO_MEDIA_TICKET_PATH = re.compile(
 
 def redact_access_log_path(path: str) -> str:
     return _AUDIO_STUDIO_MEDIA_TICKET_PATH.sub(r"\1[REDACTED]", path)
+
+
+def redact_access_log_message(message: str) -> str:
+    return redact_access_log_path(message)
 ```
 
 Then change the `dispatch` method:
@@ -1290,6 +1340,23 @@ path = redact_access_log_path(request.url.path)
 ```
 
 The logger binding and formatted message must both use the redacted `path`.
+
+Query strings are preserved when present; only the bearer token path segment is redacted.
+
+Modify `tldw_Server_API/app/main.py` so the stdlib/uvicorn intercept handler also redacts ticket tokens before forwarding messages into Loguru:
+
+```python
+message = record.getMessage()
+try:
+    from tldw_Server_API.app.core.Logging.access_log_middleware import (
+        redact_access_log_message as _redact_access_log_message,
+    )
+
+    message = _redact_access_log_message(message)
+except _LOGGING_SETUP_EXCEPTIONS:
+    pass
+logger.opt(depth=depth, exception=record.exc_info).log(level, message)
+```
 
 - [ ] **Step 4: Run redaction tests**
 
@@ -1306,7 +1373,7 @@ Expected: all redaction tests pass.
 Run:
 
 ```bash
-git add tldw_Server_API/app/core/Logging/access_log_middleware.py tldw_Server_API/tests/Logging/test_access_log_redaction.py
+git add tldw_Server_API/app/core/Logging/access_log_middleware.py tldw_Server_API/app/main.py tldw_Server_API/tests/Logging/test_access_log_redaction.py
 git commit -m "fix(logging): redact audio studio media ticket tokens"
 ```
 
@@ -1479,6 +1546,8 @@ git commit -m "feat(audio-studio): add media ticket client helper"
 **Files:**
 - Modify: `apps/packages/ui/src/components/Option/AudioStudio/TimelineEditor.tsx`
 - Modify: `apps/packages/ui/src/components/Option/AudioStudio/__tests__/AudioStudioPage.test.tsx`
+
+This task is workflow-agnostic. The `TimelineEditor` receives project artifacts and selected clips independent of workflow, so the ticket playback/download path must continue to work for Narration, Podcast, and Briefings instead of adding workflow-specific branches.
 
 - [ ] **Step 1: Write failing UI tests for ticket playback and downloads**
 
@@ -2029,7 +2098,7 @@ Expected: selected frontend tests pass.
 Run:
 
 ```bash
-source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/Audio_Studio/media_tickets.py tldw_Server_API/app/api/v1/endpoints/audio/audio_studio.py tldw_Server_API/app/core/Logging/access_log_middleware.py -f json -o /tmp/bandit_audio_studio_media_tickets.json
+source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/Audio_Studio/media_tickets.py tldw_Server_API/app/api/v1/endpoints/audio/audio_studio.py tldw_Server_API/app/core/Logging/access_log_middleware.py tldw_Server_API/app/main.py -f json -o /tmp/bandit_audio_studio_media_tickets.json
 ```
 
 Expected: command exits `0` with no new high or medium severity findings in touched code. If Bandit reports findings, fix the changed code and rerun the command.
@@ -2094,7 +2163,7 @@ cd apps/packages/ui && bunx vitest run src/services/__tests__/audio-studio.test.
 ```
 
 ```bash
-source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/Audio_Studio/media_tickets.py tldw_Server_API/app/api/v1/endpoints/audio/audio_studio.py tldw_Server_API/app/core/Logging/access_log_middleware.py -f json -o /tmp/bandit_audio_studio_media_tickets.json
+source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/Audio_Studio/media_tickets.py tldw_Server_API/app/api/v1/endpoints/audio/audio_studio.py tldw_Server_API/app/core/Logging/access_log_middleware.py tldw_Server_API/app/main.py -f json -o /tmp/bandit_audio_studio_media_tickets.json
 ```
 
 ```bash
