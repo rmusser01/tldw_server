@@ -262,6 +262,52 @@ def test_duplicate_hash_target_with_corrupt_existing_file_fails(tmp_path: Path) 
         )
 
 
+def test_safe_write_fails_closed_when_hardlink_publish_is_unavailable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage = _storage_module()
+    image_path = tmp_path / "avatar.png"
+    _write_png(image_path, color="green")
+
+    def fail_link(_source: Path, _target: Path) -> None:
+        raise OSError("hardlink unavailable")
+
+    monkeypatch.setattr(storage.os, "link", fail_link)
+
+    with pytest.raises(ValueError, match="stored_asset_publish_unavailable"):
+        storage.validate_and_store_visual_identity_asset(
+            source_path=image_path,
+            owner_user_id=1,
+            expression_key="neutral",
+            storage_root=tmp_path / "store",
+        )
+
+
+def test_duplicate_hash_preview_with_corrupt_existing_file_fails(tmp_path: Path) -> None:
+    storage = _storage_module()
+    image_path = tmp_path / "avatar.png"
+    _write_png(image_path, color="green")
+
+    stored = storage.validate_and_store_visual_identity_asset(
+        source_path=image_path,
+        owner_user_id=1,
+        expression_key="neutral",
+        storage_root=tmp_path / "store",
+    )
+    assert stored.preview_relpath is not None
+    preview_path = tmp_path / "store" / stored.preview_relpath
+    preview_path.write_bytes(b"corrupt")
+
+    with pytest.raises(ValueError, match="stored_asset_hash_mismatch"):
+        storage.validate_and_store_visual_identity_asset(
+            source_path=image_path,
+            owner_user_id=1,
+            expression_key="neutral",
+            storage_root=tmp_path / "store",
+        )
+
+
 def test_rejects_animated_frame_count_over_limit(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -349,6 +395,39 @@ def test_copy_generated_file_record_to_expression_asset_uses_validated_storage(
     assert (tmp_path / "store" / stored.relpath).is_file()
 
 
+@pytest.mark.parametrize("source_feature", [None, "", "   "])
+def test_copy_generated_file_record_requires_expected_source_feature(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    source_feature: str | None,
+) -> None:
+    storage = _storage_module()
+    outputs_dir = tmp_path / "outputs"
+    outputs_dir.mkdir()
+    _patch_user_outputs_dir(monkeypatch, outputs_dir)
+    source_path = outputs_dir / "generated.png"
+    _write_png(source_path)
+    generated_file = {
+        "id": 99,
+        "user_id": 1,
+        "file_category": "image",
+        "source_feature": "vn_assets",
+        "storage_path": "generated.png",
+        "mime_type": "image/png",
+        "is_deleted": False,
+    }
+
+    with pytest.raises(ValueError, match="generated_file_not_found"):
+        storage.copy_generated_file_record_to_expression_asset(
+            owner_user_id=1,
+            pack_id=5,
+            expression_key="happy",
+            generated_file_record=generated_file,
+            source_feature=source_feature,
+            storage_root=tmp_path / "store",
+        )
+
+
 def test_copy_generated_file_record_rejects_public_source_path_override(
     tmp_path: Path,
 ) -> None:
@@ -384,6 +463,8 @@ def test_copy_generated_file_record_rejects_public_source_path_override(
         ({"is_deleted": True}, "vn_assets", "generated_file_not_found"),
         ({"file_category": "tts_audio"}, "vn_assets", "generated_file_not_image"),
         ({}, "vn_assets", "generated_file_not_found"),
+        ({"source_feature": ""}, "vn_assets", "generated_file_not_found"),
+        ({"source_feature": "   "}, "vn_assets", "generated_file_not_found"),
         ({"source_feature": "image_gen"}, "vn_assets", "generated_file_not_found"),
     ],
 )
@@ -417,5 +498,43 @@ def test_copy_generated_file_record_rejects_invalid_record_metadata(
             expression_key="happy",
             generated_file_record=generated_file,
             source_feature=source_feature,
+            storage_root=tmp_path / "store",
+        )
+
+
+@pytest.mark.parametrize(
+    "storage_path",
+    [
+        "../generated.png",
+        "/tmp/generated.png",
+        r"nested\generated.png",
+    ],
+)
+def test_copy_generated_file_record_rejects_unsafe_storage_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    storage_path: str,
+) -> None:
+    storage = _storage_module()
+    outputs_dir = tmp_path / "outputs"
+    outputs_dir.mkdir()
+    _patch_user_outputs_dir(monkeypatch, outputs_dir)
+    generated_file = {
+        "id": 99,
+        "user_id": 1,
+        "file_category": "image",
+        "source_feature": "vn_assets",
+        "storage_path": storage_path,
+        "mime_type": "image/png",
+        "is_deleted": False,
+    }
+
+    with pytest.raises(ValueError, match="generated_file_not_found"):
+        storage.copy_generated_file_record_to_expression_asset(
+            owner_user_id=1,
+            pack_id=5,
+            expression_key="happy",
+            generated_file_record=generated_file,
+            source_feature="vn_assets",
             storage_root=tmp_path / "store",
         )

@@ -31,6 +31,7 @@ VISUAL_IDENTITY_EXTENSION_MISMATCH = "extension_mismatch"
 VISUAL_IDENTITY_GENERATED_FILE_NOT_FOUND = "generated_file_not_found"
 VISUAL_IDENTITY_GENERATED_FILE_NOT_IMAGE = "generated_file_not_image"
 VISUAL_IDENTITY_STORED_ASSET_HASH_MISMATCH = "stored_asset_hash_mismatch"
+VISUAL_IDENTITY_STORED_ASSET_PUBLISH_UNAVAILABLE = "stored_asset_publish_unavailable"
 
 _IMAGE_VALIDATION_ERRORS = (OSError, ValueError, UnidentifiedImageError)
 _SAFE_COMPONENT_RE = re.compile(r"[^A-Za-z0-9_.-]+")
@@ -389,7 +390,7 @@ def _write_once(target_path: Path, content: bytes, *, expected_sha256: str) -> N
                 expected_size=expected_size,
                 expected_sha256=expected_sha256,
             )
-        except OSError:
+        except OSError as exc:
             if target_path.exists():
                 _verify_existing_hash_target(
                     target_path,
@@ -397,12 +398,7 @@ def _write_once(target_path: Path, content: bytes, *, expected_sha256: str) -> N
                     expected_sha256=expected_sha256,
                 )
             else:
-                temp_path.replace(target_path)
-                _verify_existing_hash_target(
-                    target_path,
-                    expected_size=expected_size,
-                    expected_sha256=expected_sha256,
-                )
+                raise ValueError(VISUAL_IDENTITY_STORED_ASSET_PUBLISH_UNAVAILABLE) from exc
     finally:
         temp_path.unlink(missing_ok=True)
 
@@ -466,20 +462,27 @@ def _create_first_frame_preview(
         pack_id=pack_id,
     )
     try:
-        preview_path = resolve_visual_identity_asset_path(
-            owner_user_id=owner_user_id,
-            relpath=relpath,
-            storage_root=storage_root,
-        )
         with Image.open(io.BytesIO(content)) as image:
             image.seek(0)
             frame = image.convert("RGBA")
-            preview_path.parent.mkdir(parents=True, exist_ok=True)
-            if not preview_path.exists():
-                frame.save(preview_path, format="PNG")
+            preview_buffer = io.BytesIO()
+            frame.save(preview_buffer, format="PNG")
     except _IMAGE_VALIDATION_ERRORS as exc:
         logger.debug("Skipping visual identity preview extraction: {}", exc)
         return None
+
+    preview_content = preview_buffer.getvalue()
+    preview_path = resolve_visual_identity_asset_path(
+        owner_user_id=owner_user_id,
+        relpath=relpath,
+        storage_root=storage_root,
+    )
+    preview_path.parent.mkdir(parents=True, exist_ok=True)
+    _write_once(
+        preview_path,
+        preview_content,
+        expected_sha256=hashlib.sha256(preview_content).hexdigest(),
+    )
     return relpath
 
 
@@ -501,10 +504,11 @@ def _validate_generated_file_record(
         raise ValueError(VISUAL_IDENTITY_GENERATED_FILE_NOT_IMAGE)
 
     expected_source_feature = str(source_feature or "").strip().lower()
-    if expected_source_feature:
-        record_source_feature = str(generated_file_record.get("source_feature") or "").strip().lower()
-        if record_source_feature != expected_source_feature:
-            raise ValueError(VISUAL_IDENTITY_GENERATED_FILE_NOT_FOUND)
+    if not expected_source_feature:
+        raise ValueError(VISUAL_IDENTITY_GENERATED_FILE_NOT_FOUND)
+    record_source_feature = str(generated_file_record.get("source_feature") or "").strip().lower()
+    if record_source_feature != expected_source_feature:
+        raise ValueError(VISUAL_IDENTITY_GENERATED_FILE_NOT_FOUND)
 
 
 def _resolve_generated_file_record_path(
