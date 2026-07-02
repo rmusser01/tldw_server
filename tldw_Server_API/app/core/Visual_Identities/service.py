@@ -1,0 +1,267 @@
+"""Service layer for visual identity expression pack activation and resolution."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any
+
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.VisualIdentity_DB import VisualIdentityRepository
+from tldw_Server_API.app.core.Visual_Identities.expression_slots import normalize_expression_key
+
+
+ActorId = int | str
+
+
+@dataclass(frozen=True)
+class VisualIdentityActivationResult:
+    """Result returned after a draft has been activated into a pack version."""
+
+    draft_id: int
+    pack_id: int
+    pack_version_id: int
+    asset_ids: tuple[int, ...]
+    binding_id: int | None = None
+
+
+@dataclass(frozen=True)
+class VisualIdentityResolvedAsset:
+    """Resolved visual identity asset metadata for a message expression."""
+
+    actor_kind: str
+    actor_id: ActorId
+    pack_id: int | None
+    pack_version_id: int | None
+    expression_key: str | None
+    requested_expression_key: str | None
+    asset_id: int | None
+    storage_relpath: str | None
+    fallback_reason: str
+    is_animated: bool = False
+    content_type: str | None = None
+    asset_url: str | None = None
+
+
+class VisualIdentityService:
+    """Coordinate visual identity pack activation and expression resolution."""
+
+    def __init__(
+        self,
+        db: CharactersRAGDB,
+        owner_user_id: int,
+        jobs_manager: Any | None = None,
+    ) -> None:
+        self.db = db
+        self.owner_user_id = int(owner_user_id)
+        self.jobs_manager = jobs_manager
+        self.repository = VisualIdentityRepository.initialized(db)
+
+    def create_pack(
+        self,
+        *,
+        title: str,
+        description: str = "",
+        default_expression_key: str = "neutral",
+        source_kind: str = "manual",
+        source_context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Create an active pack shell without activating a version."""
+        normalized_default = normalize_expression_key(default_expression_key) or "neutral"
+        return self.repository.create_pack(
+            owner_user_id=self.owner_user_id,
+            title=title,
+            description=description,
+            status="active",
+            active_version_id=None,
+            default_expression_key=normalized_default,
+            source_kind=source_kind,
+            source_context=source_context,
+        )
+
+    def activate_draft(
+        self,
+        *,
+        draft_id: int,
+        actor_kind: str | None = None,
+        actor_id: ActorId | None = None,
+    ) -> VisualIdentityActivationResult:
+        """Activate a ready draft and optionally bind it to an owned actor."""
+        if (actor_kind is None) != (actor_id is None):
+            raise ValueError("visual_identity_binding_actor_required")
+        normalized_actor_id = (
+            self._validate_actor_for_binding(actor_kind, actor_id)
+            if actor_kind is not None and actor_id is not None
+            else None
+        )
+        activation = self.repository.activate_draft_as_version(
+            owner_user_id=self.owner_user_id,
+            draft_id=draft_id,
+            actor_kind=actor_kind,
+            actor_id=normalized_actor_id,
+        )
+        binding = activation.get("binding")
+        return VisualIdentityActivationResult(
+            draft_id=int(draft_id),
+            pack_id=int(activation["pack"]["id"]),
+            pack_version_id=int(activation["pack_version"]["id"]),
+            asset_ids=tuple(int(asset["id"]) for asset in activation["assets"]),
+            binding_id=int(binding["id"]) if binding is not None else None,
+        )
+
+    def resolve_expression_asset(
+        self,
+        actor_kind: str,
+        actor_id: ActorId,
+        requested_expression_key: str,
+        manual_override_expression_key: str | None = None,
+        mood_expression_key: str | None = None,
+    ) -> VisualIdentityResolvedAsset:
+        """Resolve the best asset for a requested actor expression."""
+        if actor_kind not in {"character", "persona"}:
+            raise ValueError("visual_identity_actor_kind_invalid")
+
+        normalized_requested = normalize_expression_key(requested_expression_key)
+        binding = self.repository.resolve_active_binding(
+            owner_user_id=self.owner_user_id,
+            actor_kind=actor_kind,
+            actor_id=actor_id,
+        )
+        if binding is None:
+            return self._placeholder(
+                actor_kind=actor_kind,
+                actor_id=actor_id,
+                requested_expression_key=normalized_requested,
+            )
+
+        pack_version_id = int(binding["active_version_id"])
+        assets: dict[str, dict[str, Any]] = {}
+        for asset in self.repository.list_assets_for_version(
+            pack_version_id,
+            owner_user_id=self.owner_user_id,
+        ):
+            assets.setdefault(str(asset["expression_key"]), asset)
+        candidates = [
+            ("manual_override", normalize_expression_key(manual_override_expression_key or "")),
+            ("requested", normalized_requested),
+            ("mood", normalize_expression_key(mood_expression_key or "")),
+            (
+                "pack_default",
+                normalize_expression_key(str(binding.get("pack_default_expression_key") or "")),
+            ),
+        ]
+        for fallback_reason, expression_key in candidates:
+            if not expression_key:
+                continue
+            asset = assets.get(expression_key)
+            if asset is not None:
+                return self._resolved_asset(
+                    actor_kind=actor_kind,
+                    actor_id=actor_id,
+                    requested_expression_key=normalized_requested,
+                    binding=binding,
+                    asset=asset,
+                    expression_key=expression_key,
+                    fallback_reason=fallback_reason,
+                )
+
+        for alias in ("neutral", "default", "normal"):
+            expression_key = normalize_expression_key(alias)
+            if not expression_key:
+                continue
+            asset = assets.get(expression_key)
+            if asset is not None:
+                return self._resolved_asset(
+                    actor_kind=actor_kind,
+                    actor_id=actor_id,
+                    requested_expression_key=normalized_requested,
+                    binding=binding,
+                    asset=asset,
+                    expression_key=expression_key,
+                    fallback_reason="neutral_alias",
+                )
+
+        return self._placeholder(
+            actor_kind=actor_kind,
+            actor_id=actor_id,
+            requested_expression_key=normalized_requested,
+        )
+
+    def _validate_actor_for_binding(
+        self,
+        actor_kind: str,
+        actor_id: ActorId,
+    ) -> ActorId:
+        """Validate that an actor exists and is owned by the current user."""
+        if actor_kind == "character":
+            try:
+                character_id = int(actor_id)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("visual_identity_character_not_found") from exc
+            if self.db.get_character_card_by_id(character_id) is None:
+                raise ValueError("visual_identity_character_not_found")
+            return character_id
+
+        if actor_kind == "persona":
+            persona_id = str(actor_id).strip()
+            if not persona_id:
+                raise ValueError("visual_identity_persona_not_found")
+            persona = self.db.get_persona_profile(
+                persona_id,
+                user_id=str(self.owner_user_id),
+                include_deleted=False,
+            )
+            if persona is None:
+                raise ValueError("visual_identity_persona_not_found")
+            return persona_id
+
+        raise ValueError("visual_identity_actor_kind_invalid")
+
+    def _resolved_asset(
+        self,
+        *,
+        actor_kind: str,
+        actor_id: ActorId,
+        requested_expression_key: str | None,
+        binding: dict[str, Any],
+        asset: dict[str, Any],
+        expression_key: str,
+        fallback_reason: str,
+    ) -> VisualIdentityResolvedAsset:
+        """Build a resolved asset result from a selected version asset row."""
+        return VisualIdentityResolvedAsset(
+            actor_kind=actor_kind,
+            actor_id=actor_id,
+            pack_id=int(binding["pack_id"]),
+            pack_version_id=int(binding["active_version_id"]),
+            expression_key=expression_key,
+            requested_expression_key=requested_expression_key,
+            asset_id=int(asset["id"]),
+            storage_relpath=str(asset["storage_relpath"]),
+            fallback_reason=fallback_reason,
+            is_animated=bool(asset.get("is_animated")),
+            content_type=str(asset["content_type"]),
+            asset_url=None,
+        )
+
+    def _placeholder(
+        self,
+        *,
+        actor_kind: str,
+        actor_id: ActorId,
+        requested_expression_key: str | None,
+    ) -> VisualIdentityResolvedAsset:
+        """Build an explicit placeholder result for unresolved visual identities."""
+        return VisualIdentityResolvedAsset(
+            actor_kind=actor_kind,
+            actor_id=actor_id,
+            pack_id=None,
+            pack_version_id=None,
+            expression_key=None,
+            requested_expression_key=requested_expression_key,
+            asset_id=None,
+            storage_relpath=None,
+            fallback_reason="placeholder",
+            is_animated=False,
+            content_type=None,
+            asset_url=None,
+        )

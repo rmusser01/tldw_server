@@ -86,7 +86,7 @@ CREATE TABLE IF NOT EXISTS visual_identity_bindings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     owner_user_id INTEGER NOT NULL,
     actor_kind TEXT NOT NULL CHECK(actor_kind IN ('character', 'persona')),
-    actor_id INTEGER NOT NULL,
+    actor_id TEXT NOT NULL,
     pack_id INTEGER NOT NULL REFERENCES visual_identity_packs(id),
     active_version_id INTEGER NOT NULL REFERENCES visual_identity_pack_versions(id),
     status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'deleted')),
@@ -729,7 +729,7 @@ class VisualIdentityRepository:
         *,
         owner_user_id: int,
         actor_kind: str,
-        actor_id: int,
+        actor_id: int | str,
         pack_id: int,
         active_version_id: int,
     ) -> dict[str, Any]:
@@ -739,6 +739,7 @@ class VisualIdentityRepository:
             pack_id=pack_id,
             pack_version_id=active_version_id,
         )
+        normalized_actor_id = _normalize_actor_id(actor_id)
         with self.db.transaction() as conn:
             existing = conn.execute(
                 """
@@ -748,7 +749,7 @@ class VisualIdentityRepository:
                   AND actor_id = ?
                   AND status = 'active'
                 """,
-                (owner_user_id, actor_kind, actor_id),
+                (owner_user_id, actor_kind, normalized_actor_id),
             ).fetchone()
             if existing is None:
                 cursor = conn.execute(
@@ -763,7 +764,7 @@ class VisualIdentityRepository:
                     )
                     VALUES (?, ?, ?, ?, ?, 'active')
                     """,
-                    (owner_user_id, actor_kind, actor_id, pack_id, active_version_id),
+                    (owner_user_id, actor_kind, normalized_actor_id, pack_id, active_version_id),
                 )
                 binding_id = int(cursor.lastrowid)
             else:
@@ -824,9 +825,10 @@ class VisualIdentityRepository:
         *,
         owner_user_id: int,
         actor_kind: str,
-        actor_id: int,
+        actor_id: int | str,
     ) -> dict[str, Any] | None:
         self._ensure_schema_initialized()
+        normalized_actor_id = _normalize_actor_id(actor_id)
         cursor = self.db.execute_query(
             """
             SELECT * FROM visual_identity_bindings
@@ -835,7 +837,7 @@ class VisualIdentityRepository:
               AND actor_id = ?
               AND status = 'active'
             """,
-            (owner_user_id, actor_kind, actor_id),
+            (owner_user_id, actor_kind, normalized_actor_id),
         )
         row = cursor.fetchone()
         return dict(row) if row is not None else None
@@ -845,9 +847,10 @@ class VisualIdentityRepository:
         *,
         owner_user_id: int,
         actor_kind: str,
-        actor_id: int,
+        actor_id: int | str,
     ) -> dict[str, Any] | None:
         self._ensure_schema_initialized()
+        normalized_actor_id = _normalize_actor_id(actor_id)
         cursor = self.db.execute_query(
             """
             SELECT
@@ -870,10 +873,342 @@ class VisualIdentityRepository:
               AND b.status = 'active'
               AND p.status = 'active'
             """,
-            (owner_user_id, actor_kind, actor_id),
+            (owner_user_id, actor_kind, normalized_actor_id),
         )
         row = cursor.fetchone()
         return dict(row) if row is not None else None
+
+    def activate_draft_as_version(
+        self,
+        *,
+        owner_user_id: int,
+        draft_id: int,
+        actor_kind: str | None = None,
+        actor_id: int | str | None = None,
+        title: str | None = None,
+        description: str = "",
+        source_context: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Atomically activate a draft as a new immutable pack version."""
+        self._ensure_schema_initialized()
+        if (actor_kind is None) != (actor_id is None):
+            raise ValueError("visual_identity_binding_actor_required")
+        if actor_kind is not None and actor_kind not in {"character", "persona"}:
+            raise ValueError("visual_identity_actor_kind_invalid")
+        normalized_actor_id = _normalize_actor_id(actor_id) if actor_id is not None else None
+
+        with self.db.transaction() as conn:
+            draft_row = conn.execute(
+                """
+                SELECT * FROM visual_identity_pack_drafts
+                WHERE id = ? AND owner_user_id = ?
+                """,
+                (draft_id, owner_user_id),
+            ).fetchone()
+            if draft_row is None:
+                raise ValueError("visual_identity_draft_not_found")
+            draft = dict(draft_row)
+            if draft["status"] != "ready_for_review":
+                raise ValueError("visual_identity_draft_not_ready")
+
+            pack_id = draft.get("pack_id")
+            default_expression_key = str(draft.get("default_expression_key") or "neutral")
+            resolved_title = title or str(draft["title"])
+            resolved_source_context = {
+                "draft_id": int(draft["id"]),
+                "source_filename": draft.get("source_filename") or "",
+                **dict(source_context or {}),
+            }
+
+            if pack_id is None:
+                pack_cursor = conn.execute(
+                    """
+                    INSERT INTO visual_identity_packs (
+                        owner_user_id,
+                        title,
+                        description,
+                        status,
+                        active_version_id,
+                        default_expression_key,
+                        source_kind,
+                        source_context_json
+                    )
+                    VALUES (?, ?, ?, 'active', NULL, ?, ?, ?)
+                    """,
+                    (
+                        owner_user_id,
+                        resolved_title,
+                        description,
+                        default_expression_key,
+                        draft["source_kind"],
+                        _json_dump(resolved_source_context),
+                    ),
+                )
+                pack_id = int(pack_cursor.lastrowid)
+            else:
+                pack_id = int(pack_id)
+                update_cursor = conn.execute(
+                    """
+                    UPDATE visual_identity_packs
+                    SET title = ?,
+                        description = ?,
+                        status = 'active',
+                        default_expression_key = ?,
+                        source_kind = ?,
+                        source_context_json = ?,
+                        updated_at = CURRENT_TIMESTAMP,
+                        version = version + 1
+                    WHERE id = ?
+                      AND owner_user_id = ?
+                      AND status != 'deleted'
+                    """,
+                    (
+                        resolved_title,
+                        description,
+                        default_expression_key,
+                        draft["source_kind"],
+                        _json_dump(resolved_source_context),
+                        pack_id,
+                        owner_user_id,
+                    ),
+                )
+                if update_cursor.rowcount == 0:
+                    raise ValueError("visual_identity_pack_not_found")
+
+            version_number = int(
+                conn.execute(
+                    """
+                    SELECT COALESCE(MAX(version_number), 0)
+                    FROM visual_identity_pack_versions
+                    WHERE pack_id = ? AND owner_user_id = ?
+                    """,
+                    (pack_id, owner_user_id),
+                ).fetchone()[0]
+            ) + 1
+            version_cursor = conn.execute(
+                """
+                INSERT INTO visual_identity_pack_versions (
+                    pack_id,
+                    owner_user_id,
+                    version_number,
+                    default_expression_key,
+                    manifest_json
+                )
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (pack_id, owner_user_id, version_number, default_expression_key, "{}"),
+            )
+            pack_version_id = int(version_cursor.lastrowid)
+
+            draft_assets = [
+                dict(row)
+                for row in conn.execute(
+                    """
+                    SELECT * FROM visual_identity_assets
+                    WHERE draft_id = ?
+                      AND owner_user_id = ?
+                      AND deleted = 0
+                    ORDER BY expression_key ASC, id ASC
+                    """,
+                    (draft_id, owner_user_id),
+                ).fetchall()
+            ]
+            copied_assets: list[dict[str, Any]] = []
+            for asset in draft_assets:
+                asset_cursor = conn.execute(
+                    """
+                    INSERT INTO visual_identity_assets (
+                        owner_user_id,
+                        pack_id,
+                        draft_id,
+                        pack_version_id,
+                        expression_key,
+                        original_expression_key,
+                        display_label,
+                        source_filename,
+                        storage_relpath,
+                        content_type,
+                        bytes,
+                        sha256,
+                        width,
+                        height,
+                        is_animated,
+                        frame_count,
+                        duration_ms,
+                        preview_relpath,
+                        deleted
+                    )
+                    VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+                    """,
+                    (
+                        owner_user_id,
+                        pack_id,
+                        pack_version_id,
+                        asset["expression_key"],
+                        asset["original_expression_key"],
+                        asset["display_label"],
+                        asset["source_filename"],
+                        asset["storage_relpath"],
+                        asset["content_type"],
+                        asset["bytes"],
+                        asset["sha256"],
+                        asset["width"],
+                        asset["height"],
+                        asset["is_animated"],
+                        asset["frame_count"],
+                        asset["duration_ms"],
+                        asset["preview_relpath"],
+                    ),
+                )
+                copied_assets.append(
+                    {
+                        **asset,
+                        "id": int(asset_cursor.lastrowid),
+                        "pack_id": pack_id,
+                        "draft_id": None,
+                        "pack_version_id": pack_version_id,
+                        "deleted": 0,
+                    }
+                )
+            copied_assets = [
+                dict(row)
+                for row in conn.execute(
+                    """
+                    SELECT * FROM visual_identity_assets
+                    WHERE pack_version_id = ?
+                      AND owner_user_id = ?
+                      AND deleted = 0
+                    ORDER BY expression_key ASC, id ASC
+                    """,
+                    (pack_version_id, owner_user_id),
+                ).fetchall()
+            ]
+
+            manifest = _build_activation_manifest(
+                draft=draft,
+                version_number=version_number,
+                assets=copied_assets,
+                default_expression_key=default_expression_key,
+            )
+            conn.execute(
+                """
+                UPDATE visual_identity_pack_versions
+                SET manifest_json = ?
+                WHERE id = ? AND owner_user_id = ?
+                """,
+                (_json_dump(manifest), pack_version_id, owner_user_id),
+            )
+            conn.execute(
+                """
+                UPDATE visual_identity_packs
+                SET active_version_id = ?,
+                    default_expression_key = ?,
+                    updated_at = CURRENT_TIMESTAMP,
+                    version = version + 1
+                WHERE id = ?
+                  AND owner_user_id = ?
+                  AND status != 'deleted'
+                """,
+                (pack_version_id, default_expression_key, pack_id, owner_user_id),
+            )
+            conn.execute(
+                """
+                UPDATE visual_identity_pack_drafts
+                SET pack_id = ?,
+                    status = 'activated',
+                    updated_at = CURRENT_TIMESTAMP,
+                    version = version + 1
+                WHERE id = ? AND owner_user_id = ?
+                """,
+                (pack_id, draft_id, owner_user_id),
+            )
+
+            binding_id: int | None = None
+            if actor_kind is not None and normalized_actor_id is not None:
+                existing = conn.execute(
+                    """
+                    SELECT * FROM visual_identity_bindings
+                    WHERE owner_user_id = ?
+                      AND actor_kind = ?
+                      AND actor_id = ?
+                      AND status = 'active'
+                    """,
+                    (owner_user_id, actor_kind, normalized_actor_id),
+                ).fetchone()
+                if existing is None:
+                    binding_cursor = conn.execute(
+                        """
+                        INSERT INTO visual_identity_bindings (
+                            owner_user_id,
+                            actor_kind,
+                            actor_id,
+                            pack_id,
+                            active_version_id,
+                            status
+                        )
+                        VALUES (?, ?, ?, ?, ?, 'active')
+                        """,
+                        (
+                            owner_user_id,
+                            actor_kind,
+                            normalized_actor_id,
+                            pack_id,
+                            pack_version_id,
+                        ),
+                    )
+                    binding_id = int(binding_cursor.lastrowid)
+                else:
+                    binding_id = int(existing["id"])
+                    conn.execute(
+                        """
+                        UPDATE visual_identity_bindings
+                        SET pack_id = ?,
+                            active_version_id = ?,
+                            updated_at = CURRENT_TIMESTAMP,
+                            version = version + 1
+                        WHERE id = ? AND owner_user_id = ?
+                        """,
+                        (pack_id, pack_version_id, binding_id, owner_user_id),
+                    )
+
+            pack = dict(
+                conn.execute(
+                    """
+                    SELECT * FROM visual_identity_packs
+                    WHERE id = ? AND owner_user_id = ?
+                    """,
+                    (pack_id, owner_user_id),
+                ).fetchone()
+            )
+            pack_version = dict(
+                conn.execute(
+                    """
+                    SELECT * FROM visual_identity_pack_versions
+                    WHERE id = ? AND owner_user_id = ?
+                    """,
+                    (pack_version_id, owner_user_id),
+                ).fetchone()
+            )
+            binding = (
+                dict(
+                    conn.execute(
+                        """
+                        SELECT * FROM visual_identity_bindings
+                        WHERE id = ? AND owner_user_id = ?
+                        """,
+                        (binding_id, owner_user_id),
+                    ).fetchone()
+                )
+                if binding_id is not None
+                else None
+            )
+
+        return {
+            "pack": pack,
+            "pack_version": pack_version,
+            "assets": copied_assets,
+            "binding": binding,
+        }
 
     def get_idempotency_record(
         self,
@@ -1181,6 +1516,45 @@ def _update_values(
 
 def _json_dump(value: Any) -> str:
     return json.dumps(value)
+
+
+def _build_activation_manifest(
+    *,
+    draft: Mapping[str, Any],
+    version_number: int,
+    assets: list[dict[str, Any]],
+    default_expression_key: str,
+) -> dict[str, Any]:
+    """Build a deterministic manifest for an activated draft version."""
+    return {
+        "manifest_version": 1,
+        "renderer": "expression_pack",
+        "source": {
+            "kind": draft.get("source_kind") or "",
+            "draft_id": int(draft["id"]),
+            "source_filename": draft.get("source_filename") or "",
+        },
+        "version_number": int(version_number),
+        "default_expression_key": default_expression_key,
+        "assets": [
+            {
+                "asset_id": int(asset["id"]),
+                "expression_key": str(asset["expression_key"]),
+            }
+            for asset in sorted(
+                assets,
+                key=lambda item: (str(item["expression_key"]), int(item["id"])),
+            )
+        ],
+    }
+
+
+def _normalize_actor_id(actor_id: int | str | None) -> str:
+    """Normalize integer character IDs and string persona IDs for binding storage."""
+    normalized = "" if actor_id is None else str(actor_id).strip()
+    if not normalized:
+        raise ValueError("visual_identity_actor_id_required")
+    return normalized
 
 
 def _require_sqlite_chacha_db(db: CharactersRAGDB) -> None:

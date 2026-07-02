@@ -641,3 +641,59 @@ def test_binding_delete_and_resolve_active_binding(chacha_db: CharactersRAGDB) -
     repo.delete_binding(binding["id"], owner_user_id=1)
     assert repo.get_binding_for_actor(owner_user_id=1, actor_kind="persona", actor_id=3) is None
     assert repo.resolve_active_binding(owner_user_id=1, actor_kind="persona", actor_id=3) is None
+
+
+def test_activate_draft_as_version_copies_assets_and_supports_string_actor_id(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VisualIdentityRepository.initialized(chacha_db)
+    persona_id = "550e8400-e29b-41d4-a716-446655440000"
+    draft = repo.create_draft(
+        owner_user_id=1,
+        title="Atomic Draft",
+        source_kind="zip",
+        source_filename="atomic.zip",
+        status="ready_for_review",
+        default_expression_key="neutral",
+    )
+    draft_asset = repo.create_asset(
+        owner_user_id=1,
+        draft_id=draft["id"],
+        expression_key="neutral",
+        source_filename="neutral.png",
+        storage_relpath="visual_identities/neutral.png",
+        content_type="image/png",
+        bytes=123,
+        sha256="abc123",
+        width=64,
+        height=64,
+    )
+
+    activation = repo.activate_draft_as_version(
+        owner_user_id=1,
+        draft_id=draft["id"],
+        actor_kind="persona",
+        actor_id=persona_id,
+    )
+
+    pack = activation["pack"]
+    version = activation["pack_version"]
+    version_assets = repo.list_assets_for_version(version["id"], owner_user_id=1)
+    draft_assets = repo.list_draft_assets(draft["id"], owner_user_id=1)
+    binding = repo.get_binding_for_actor(
+        owner_user_id=1,
+        actor_kind="persona",
+        actor_id=persona_id,
+    )
+
+    assert pack["active_version_id"] == version["id"]
+    assert repo.get_draft(draft["id"], owner_user_id=1)["status"] == "activated"
+    assert [asset["id"] for asset in draft_assets] == [draft_asset["id"]]
+    assert version_assets[0]["id"] != draft_asset["id"]
+    assert version_assets[0]["draft_id"] is None
+    assert version_assets[0]["pack_version_id"] == version["id"]
+    assert json.loads(version["manifest_json"])["assets"] == [
+        {"asset_id": version_assets[0]["id"], "expression_key": "neutral"}
+    ]
+    assert binding is not None
+    assert str(binding["actor_id"]) == persona_id
