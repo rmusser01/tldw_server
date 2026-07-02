@@ -103,7 +103,7 @@ class DatabaseMigrator:
         re.IGNORECASE,
     )
     _TRANSACTION_CONTROL_RE = re.compile(
-        r"^\s*(?:BEGIN\s+(?:TRANSACTION|IMMEDIATE|EXCLUSIVE)|COMMIT|ROLLBACK)\b",
+        r"^\s*(?:BEGIN|COMMIT|END|ROLLBACK|SAVEPOINT|RELEASE)\b",
         re.IGNORECASE,
     )
 
@@ -116,13 +116,13 @@ class DatabaseMigrator:
 
         package_db_management_dir = Path(__file__).resolve().parent
         package_migrations_dir = resolve_path(package_db_management_dir / "migrations")
-        package_media_schema_migrations_dir = resolve_path(
-            package_db_management_dir / "media_db" / "schema" / "migrations"
+        package_media_sqlite_migrations_dir = resolve_path(
+            package_db_management_dir / "media_db" / "schema" / "migrations" / "sqlite"
         )
         self._migration_roots = (
             self._db_dir,
             package_migrations_dir,
-            package_media_schema_migrations_dir,
+            package_media_sqlite_migrations_dir,
         )
         if migrations_dir is not None:
             chosen_dir = self._validate_migrations_dir(Path(migrations_dir))
@@ -326,16 +326,44 @@ class DatabaseMigrator:
             lines.append(line)
         return "\n".join(lines).strip()
 
+    @staticmethod
+    def _strip_leading_sql_comments(sql: str) -> str:
+        index = 0
+        length = len(sql)
+
+        while index < length:
+            while index < length and sql[index].isspace():
+                index += 1
+
+            if sql.startswith("--", index):
+                newline_index = sql.find("\n", index + 2)
+                if newline_index == -1:
+                    return ""
+                index = newline_index + 1
+                continue
+
+            if sql.startswith("/*", index):
+                comment_end_index = sql.find("*/", index + 2)
+                if comment_end_index == -1:
+                    return sql[index:]
+                index = comment_end_index + 2
+                continue
+
+            break
+
+        return sql[index:]
+
     @classmethod
     def _reject_transaction_control(cls, sql: str, migration_name: str) -> None:
-        for line in sql.splitlines():
-            stripped = line.strip()
-            if not stripped or stripped.startswith("--"):
+        for statement in cls._split_sql_statements(sql):
+            stripped = cls._strip_leading_sql_comments(statement).strip()
+            if not stripped:
                 continue
             if cls._TRANSACTION_CONTROL_RE.match(stripped):
+                statement_preview = stripped.splitlines()[0].strip()
                 raise MigrationError(
                     "Migration SQL must not include transaction control statements; "
-                    f"remove `{stripped}` from migration {migration_name}."
+                    f"remove `{statement_preview}` from migration {migration_name}."
                 )
 
     @classmethod
@@ -343,15 +371,15 @@ class DatabaseMigrator:
         statements: list[str] = []
         current: list[str] = []
 
-        for line in sql.splitlines():
-            current.append(line)
-            candidate = "\n".join(current).strip()
+        for char in sql:
+            current.append(char)
+            candidate = "".join(current).strip()
             if candidate and sqlite3.complete_statement(candidate):
                 if cls._strip_sql_comments(candidate):
                     statements.append(candidate)
                 current = []
 
-        remainder = "\n".join(current).strip()
+        remainder = "".join(current).strip()
         if remainder and cls._strip_sql_comments(remainder):
             statements.append(remainder)
 
