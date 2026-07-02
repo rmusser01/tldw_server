@@ -7,7 +7,6 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { CHAT_RAIL_EDGE_TRIGGER_CLASS } from '@/components/Layouts/chat-rail-positioning';
 import OptionLayout from '../../../components/layout/WebLayout';
 
 const testModulePath = import.meta.url.startsWith('file:')
@@ -477,7 +476,7 @@ describe('WebLayout /chat scroll contract', () => {
     expect(source).toContain("if (typeof window === 'undefined' || !showChatSidebar) return;");
   });
 
-  it('anchors the collapsed chat rail in an upper edge band instead of centering it', () => {
+  it('does not render a chat-specific collapsed rail edge button', () => {
     featureFlagState.showChatSidebar = true;
     mediaQueryState.isDesktop = true;
 
@@ -487,10 +486,7 @@ describe('WebLayout /chat scroll contract', () => {
       </OptionLayout>
     );
 
-    const edgeButton = screen.getByTestId('chat-sidebar-edge-expand');
-    expect(edgeButton).toHaveAttribute('aria-label', 'Expand chat rail');
-    expect(edgeButton).toHaveClass(...CHAT_RAIL_EDGE_TRIGGER_CLASS.split(' '));
-    expect(edgeButton).not.toHaveClass('top-[calc(50%_-_8rem)]');
+    expect(screen.queryByTestId('chat-sidebar-edge-expand')).toBeNull();
   });
 
   it('ignores chat sidebar open events when the shared ChatSidebar feature is disabled', async () => {

@@ -1,7 +1,7 @@
 import React, { lazy, Suspense, useState, useContext, useEffect, useCallback } from 'react';
 
 import { Drawer, Tooltip } from 'antd';
-import { EraserIcon, PanelLeftOpen, XIcon } from 'lucide-react';
+import { EraserIcon, XIcon } from 'lucide-react';
 import { IconButton } from '@/components/Common/IconButton';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -28,13 +28,12 @@ import { BuddyShellHost, BuddyShellRenderContextProvider } from '@/components/Co
 import { CurrentChatModelSettings } from '@/components/Common/Settings/CurrentChatModelSettings';
 import { Sidebar } from '@/components/Option/Sidebar';
 import { Header } from '@/components/Layouts/Header';
-import { CHAT_RAIL_EDGE_TRIGGER_CLASS } from '@/components/Layouts/chat-rail-positioning';
 import { QuickIngestModalHost } from '@/components/Layouts/QuickIngestButton';
 import { useMigration } from '@/hooks/useMigration';
 import { useStorageMigrations } from '@/hooks/useStorageMigrations';
 import { useLayoutEffectsOwner } from '@/hooks/useLayoutEffectsOwner';
 import { useChatSidebar } from '@/hooks/useFeatureFlags';
-import { useDesktop, useMobile } from '@/hooks/useMediaQuery';
+import { useMobile } from '@/hooks/useMediaQuery';
 import { useSetting } from '@/hooks/useSetting';
 import { useServerOnline } from '@/hooks/useServerOnline';
 import { ChatSidebar } from '@/components/Common/ChatSidebar';
@@ -108,7 +107,6 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
   }, []);
   const chatSidebarCollapsed = useLayoutUiStore((state) => state.chatSidebarCollapsed);
   const setChatSidebarCollapsed = useLayoutUiStore((state) => state.setChatSidebarCollapsed);
-  const leftEdgeExpandRef = React.useRef<HTMLButtonElement>(null);
   const { t } = useTranslation(['option', 'common', 'settings']);
   const navigate = useNavigate();
   const [openModelSettings, setOpenModelSettings] = useState(false);
@@ -116,7 +114,6 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
   const { demoEnabled } = useDemoMode();
   const [showChatSidebar] = useChatSidebar();
   const isMobileViewport = useMobile();
-  const isDesktopViewport = useDesktop();
   useServerOnline();
 
   // Notification unread count for header bell
@@ -160,14 +157,11 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
   const [chatBackgroundImage] = useSetting(CHAT_BACKGROUND_IMAGE_SETTING);
   const [stickyChatInput] = useStorage('stickyChatInput', false);
   const isChatScreen = location.pathname === '/chat';
-  const useChatEdgeCollapse =
-    isChatScreen && isDesktopViewport && showChatSidebar && !hideHeader && !hideSidebar;
   const shouldRenderChatSidebar =
     showChatSidebar &&
     !hideHeader &&
     !hideSidebar &&
-    !isMobileViewport &&
-    (!useChatEdgeCollapse || !chatSidebarCollapsed);
+    !isMobileViewport;
   const stickyChatLayoutActive = isChatScreen && stickyChatInput;
   const isViewportConstrainedRoute =
     stickyChatLayoutActive ||
@@ -407,43 +401,10 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
             openResetKey={chatSidebarOpenResetKey}
             onToggleCollapse={() => {
               if (chatSidebarCollapsed) signalChatSidebarOpen();
-              const collapsingFromDesktopChat = useChatEdgeCollapse && !chatSidebarCollapsed;
               setChatSidebarCollapsed((prev) => !prev);
-              if (collapsingFromDesktopChat) {
-                window.requestAnimationFrame(() => {
-                  leftEdgeExpandRef.current?.focus();
-                });
-              }
             }}
             className="sticky top-0 shrink-0 border-r border-border"
           />
-        )}
-        {useChatEdgeCollapse && chatSidebarCollapsed && (
-          <button
-            ref={leftEdgeExpandRef}
-            type="button"
-            data-testid="chat-sidebar-edge-expand"
-            aria-label={t('common:chatSidebar.expandRail', 'Expand chat rail') as string}
-            title={t('common:chatSidebar.expandRail', 'Expand chat rail') as string}
-            onClick={() => {
-              signalChatSidebarOpen();
-              setChatSidebarCollapsed(false);
-              window.requestAnimationFrame(() => {
-                document
-                  .querySelector<HTMLButtonElement>('[data-testid="chat-sidebar-toggle"]')
-                  ?.focus();
-              });
-            }}
-            className={CHAT_RAIL_EDGE_TRIGGER_CLASS}
-          >
-            <PanelLeftOpen className="h-4 w-4" aria-hidden="true" />
-            <span
-              aria-hidden="true"
-              className="rotate-180 text-[10px] font-semibold uppercase tracking-[0.16em] [writing-mode:vertical-rl]"
-            >
-              {t('common:chatSidebar.title', 'Chats') as string}
-            </span>
-          </button>
         )}
         <main
           className={classNames(

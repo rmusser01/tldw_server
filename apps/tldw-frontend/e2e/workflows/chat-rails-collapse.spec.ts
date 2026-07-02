@@ -121,13 +121,6 @@ const expectStableBottomPosition = (
   expect(Math.abs(actualBottom - expectedBottom)).toBeLessThanOrEqual(2)
 }
 
-const expectLeftEdgeHandle = async (button: Locator) => {
-  const box = await button.boundingBox()
-  expect(box).not.toBeNull()
-  expect(box!.x).toBeLessThanOrEqual(1)
-  expect(box!.height).toBeGreaterThan(box!.width * 2)
-}
-
 const expectRightEdgeHandle = async (page: Page, button: Locator) => {
   const box = await button.boundingBox()
   const viewport = page.viewportSize()
@@ -138,7 +131,7 @@ const expectRightEdgeHandle = async (page: Page, button: Locator) => {
 }
 
 test.describe("/chat siderail collapse", () => {
-  test("desktop cockpit restore stays clickable above the collapsed chat rail edge", async ({
+  test("desktop cockpit restore stays clickable without a separate chat rail edge", async ({
     page
   }) => {
     await page.setViewportSize({ width: 1440, height: 960 })
@@ -146,8 +139,7 @@ test.describe("/chat siderail collapse", () => {
     await page.goto("/chat", { waitUntil: "domcontentloaded" })
     await waitForAppShell(page)
 
-    const chatRailEdge = page.getByTestId("chat-sidebar-edge-expand")
-    await expect(chatRailEdge).toBeVisible()
+    await expect(page.getByTestId("chat-sidebar-edge-expand")).toHaveCount(0)
 
     const cockpitLeftRail = page.getByTestId("playground-cockpit-left-rail")
     await expect(cockpitLeftRail).toBeVisible()
@@ -155,14 +147,14 @@ test.describe("/chat siderail collapse", () => {
 
     const cockpitRestore = page.getByTestId("playground-cockpit-left-rail-restore")
     await expect(cockpitRestore).toBeVisible()
-    await expect(chatRailEdge).toBeVisible()
+    await expect(page.getByTestId("chat-sidebar-edge-expand")).toHaveCount(0)
 
     await cockpitRestore.click()
     await expect(cockpitLeftRail).toBeVisible()
-    await expect(chatRailEdge).toBeVisible()
+    await expect(page.getByTestId("chat-sidebar-edge-expand")).toHaveCount(0)
   })
 
-  test("desktop default composer keeps collapsed rails recoverable from the same edge", async ({
+  test("desktop default composer does not show the redundant chat rail edge", async ({
     page
   }) => {
     await page.setViewportSize({ width: 1440, height: 960 })
@@ -178,17 +170,13 @@ test.describe("/chat siderail collapse", () => {
     await expect(composerInput).toBeVisible()
     await expect(page.getByTestId("playground-chat-composer-dock")).toHaveCount(0)
 
-    const leftEdge = page.getByTestId("chat-sidebar-edge-expand")
-    await expect(leftEdge).toBeVisible()
-    await expectLeftEdgeHandle(leftEdge)
+    await expect(page.getByTestId("chat-sidebar-edge-expand")).toHaveCount(0)
 
-    await leftEdge.click()
-    await expect(page.getByTestId("chat-sidebar")).toBeVisible()
     await openArtifactPanel(page)
     const artifactPanel = visibleArtifactPanel(page)
     await expect(artifactPanel).toHaveCount(1)
     await expect(artifactPanel).toBeVisible()
-    await expect(leftEdge).toHaveCount(0)
+    await expect(page.getByTestId("chat-sidebar-edge-expand")).toHaveCount(0)
     await expect(page.getByTestId("playground-artifacts-edge-expand")).toHaveCount(0)
 
     const bothOpenBox = await chatShell.boundingBox()
@@ -196,39 +184,19 @@ test.describe("/chat siderail collapse", () => {
     expect(bothOpenBox).not.toBeNull()
     expect(bothOpenComposerBox).not.toBeNull()
 
-    await page.getByTestId("chat-sidebar-toggle").click()
-    await expect(leftEdge).toBeVisible()
-    await expectLeftEdgeHandle(leftEdge)
-    await expect(page.getByTestId("playground-artifacts-edge-expand")).toHaveCount(0)
-    await expect(artifactPanel).toHaveCount(1)
-    await expect(artifactPanel).toBeVisible()
-    const leftCollapsedBox = await chatShell.boundingBox()
-    const leftCollapsedComposerBox = await composerRegion.boundingBox()
-    expect(leftCollapsedBox).not.toBeNull()
-    expect(leftCollapsedBox!.width).toBeGreaterThan(bothOpenBox!.width)
-    expectStableVerticalPosition(leftCollapsedBox, bothOpenBox!)
-    expectStableBottomPosition(leftCollapsedComposerBox, bothOpenComposerBox!)
-
-    await leftEdge.click()
-    await expect(page.getByTestId("chat-sidebar")).toBeVisible()
-    const rightOpenBox = await chatShell.boundingBox()
-    const rightOpenComposerBox = await composerRegion.boundingBox()
-    expect(rightOpenBox).not.toBeNull()
-    expect(rightOpenComposerBox).not.toBeNull()
     await closeVisibleArtifactPanel(page)
 
     const rightEdge = page.getByTestId("playground-artifacts-edge-expand")
     await expect(rightEdge).toBeVisible()
     await expectRightEdgeHandle(page, rightEdge)
-    await expect(page.getByTestId("chat-sidebar")).toBeVisible()
-    await expect(leftEdge).toHaveCount(0)
+    await expect(page.getByTestId("chat-sidebar-edge-expand")).toHaveCount(0)
     await expect(artifactPanel).toHaveCount(0)
     const rightClosedBox = await chatShell.boundingBox()
     const rightClosedComposerBox = await composerRegion.boundingBox()
     expect(rightClosedBox).not.toBeNull()
-    expect(rightClosedBox!.width).toBeGreaterThan(rightOpenBox!.width)
-    expectStableVerticalPosition(rightClosedBox, rightOpenBox!)
-    expectStableBottomPosition(rightClosedComposerBox, rightOpenComposerBox!)
+    expect(rightClosedBox!.width).toBeGreaterThan(bothOpenBox!.width)
+    expectStableVerticalPosition(rightClosedBox, bothOpenBox!)
+    expectStableBottomPosition(rightClosedComposerBox, bothOpenComposerBox!)
   })
 
   test("medium and mobile viewports do not expose desktop edge buttons", async ({ page }) => {
