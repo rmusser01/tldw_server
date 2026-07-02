@@ -193,6 +193,7 @@ from tldw_Server_API.app.core.LLM_Calls.sse import ensure_sse_line, normalize_pr
 # Completion schemas centralized in schemas/chat_session_schemas.py
 from tldw_Server_API.app.core.Streaming.streams import SSEStream
 from tldw_Server_API.app.core.Utils.common import parse_boolean
+from tldw_Server_API.app.core.Visual_Identities.service import VisualIdentityService
 from tldw_Server_API.app.core.config import load_and_log_configs
 
 from .llm_providers import get_configured_providers
@@ -775,6 +776,145 @@ def _build_persist_validation_degraded_detail(assistant_message_id: str) -> dict
     }
 
 
+def _optional_int_metadata(value: Any) -> int | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _optional_text_metadata(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    return normalized or None
+
+
+def _read_visual_identity_value(source: Any, *field_names: str) -> Any:
+    if source is None:
+        return None
+    if isinstance(source, Mapping):
+        for field_name in field_names:
+            if field_name in source:
+                return source[field_name]
+        return None
+    for field_name in field_names:
+        if hasattr(source, field_name):
+            return getattr(source, field_name)
+    return None
+
+
+def _visual_identity_metadata_extra(visual_identity: Any | None) -> dict[str, Any]:
+    """Normalize resolved visual identity data into persisted scalar metadata fields."""
+    if visual_identity is None:
+        return {}
+
+    metadata: dict[str, Any] = {}
+    actor_kind = _optional_text_metadata(
+        _read_visual_identity_value(visual_identity, "visual_actor_kind", "actor_kind")
+    )
+    if actor_kind:
+        metadata["visual_actor_kind"] = actor_kind
+
+    actor_id = _read_visual_identity_value(visual_identity, "visual_actor_id", "actor_id")
+    if isinstance(actor_id, bool):
+        actor_id = None
+    if isinstance(actor_id, int):
+        metadata["visual_actor_id"] = actor_id
+    elif isinstance(actor_id, str) and actor_id.strip():
+        metadata["visual_actor_id"] = actor_id.strip()
+
+    for output_key, source_key in (
+        ("visual_pack_id", "pack_id"),
+        ("visual_pack_version_id", "pack_version_id"),
+        ("visual_asset_id", "asset_id"),
+    ):
+        value = _optional_int_metadata(
+            _read_visual_identity_value(visual_identity, output_key, source_key)
+        )
+        if value is not None:
+            metadata[output_key] = value
+
+    for output_key, source_key in (
+        ("visual_expression_key", "expression_key"),
+        ("visual_fallback_reason", "fallback_reason"),
+    ):
+        value = _optional_text_metadata(
+            _read_visual_identity_value(visual_identity, output_key, source_key)
+        )
+        if value is not None:
+            metadata[output_key] = value
+
+    return metadata
+
+
+def _current_user_id_int_or_none(current_user: User) -> int | None:
+    user_id = getattr(current_user, "id_int", None)
+    if user_id is not None:
+        return int(user_id)
+    with contextlib.suppress(TypeError, ValueError):
+        return int(getattr(current_user, "id", ""))
+    return None
+
+
+def resolve_character_visual_identity(
+    *,
+    db: CharactersRAGDB,
+    owner_user_id: int,
+    actor_id: int | None,
+    mood_label: str | None,
+) -> dict[str, Any] | None:
+    """Resolve visual identity metadata for a character chat assistant turn."""
+    if actor_id is None:
+        return None
+    service = VisualIdentityService(db, owner_user_id=owner_user_id)
+    resolved = service.resolve_expression_asset(
+        actor_kind="character",
+        actor_id=actor_id,
+        requested_expression_key="",
+        mood_expression_key=mood_label,
+    )
+    if (
+        resolved.fallback_reason == "placeholder"
+        or (
+            resolved.pack_id is None
+            and resolved.asset_id is None
+            and resolved.expression_key is None
+        )
+    ):
+        return None
+    metadata = _visual_identity_metadata_extra(resolved)
+    return metadata or None
+
+
+def _safe_resolve_character_visual_identity(
+    *,
+    db: CharactersRAGDB,
+    current_user: User,
+    actor_id: int | None,
+    mood_label: str | None,
+) -> dict[str, Any] | None:
+    owner_user_id = _current_user_id_int_or_none(current_user)
+    if owner_user_id is None or actor_id is None:
+        return None
+    try:
+        return resolve_character_visual_identity(
+            db=db,
+            owner_user_id=owner_user_id,
+            actor_id=actor_id,
+            mood_label=mood_label,
+        )
+    except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS as exc:
+        logger.debug(
+            "Non-fatal: failed to resolve character visual identity for actor_id={}: {}",
+            actor_id,
+            exc,
+        )
+        return None
+
+
 def _build_stream_persist_metadata_extra(
     *,
     speaker_character_id: int | None,
@@ -786,6 +926,7 @@ def _build_stream_persist_metadata_extra(
     mood_confidence: float | None,
     mood_topic: str | None,
     usage: dict[str, Any] | None,
+    visual_identity: Any | None = None,
 ) -> dict[str, Any]:
     metadata_extra: dict[str, Any] = {
         "speaker_character_id": speaker_character_id,
@@ -807,6 +948,7 @@ def _build_stream_persist_metadata_extra(
             metadata_extra["mood_topic"] = trimmed_topic
     if usage is not None:
         metadata_extra["usage"] = usage
+    metadata_extra.update(_visual_identity_metadata_extra(visual_identity))
     return metadata_extra
 
 
@@ -5971,6 +6113,12 @@ async def character_chat_completion(
         saved = False
         assistant_msg_id: Optional[str] = None
         if will_persist:
+            visual_identity_metadata = _safe_resolve_character_visual_identity(
+                db=db,
+                current_user=current_user,
+                actor_id=active_character_id,
+                mood_label=resolved_mood_label,
+            )
             # Persist appended user message first, if any
             if body.append_user_message:
                 appended_user_id = post_message_to_conversation(
@@ -6019,6 +6167,8 @@ async def character_chat_completion(
                 metadata_extra["lorebook_cost_diagnostics"] = turn_lorebook_cost_diagnostics
             if turn_prompt_guardrail_diagnostics:
                 metadata_extra["prompt_guardrails"] = turn_prompt_guardrail_diagnostics
+            if visual_identity_metadata:
+                metadata_extra.update(visual_identity_metadata)
             validated_tool_calls = (
                 _validate_and_truncate_tool_calls(assistant_tool_calls)
                 if assistant_tool_calls
@@ -7114,6 +7264,12 @@ async def persist_streamed_assistant_message(
             if isinstance(body.assistant_message_id, str)
             else ""
         ) or None
+        visual_identity_metadata = _safe_resolve_character_visual_identity(
+            db=db,
+            current_user=current_user,
+            actor_id=resolved_speaker_id,
+            mood_label=_optional_text_metadata(body.mood_label),
+        )
         persist_fingerprint = None
         if not requested_assistant_message_id and getattr(body, "user_message_id", None):
             persist_fingerprint = _build_stream_persist_fingerprint(
@@ -7167,6 +7323,7 @@ async def persist_streamed_assistant_message(
                     mood_confidence=body.mood_confidence,
                     mood_topic=body.mood_topic,
                     usage=_validate_stream_persist_usage(getattr(body, "usage", None)),
+                    visual_identity=visual_identity_metadata,
                 ),
                 chat_rating=getattr(body, "chat_rating", None),
             )
@@ -7203,6 +7360,7 @@ async def persist_streamed_assistant_message(
             mood_confidence=body.mood_confidence,
             mood_topic=body.mood_topic,
             usage=_validate_stream_persist_usage(getattr(body, "usage", None)),
+            visual_identity=visual_identity_metadata,
         )
 
         # Persist assistant response via Character_Chat guardrails
