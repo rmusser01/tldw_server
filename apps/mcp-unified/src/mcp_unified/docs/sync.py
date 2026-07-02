@@ -355,12 +355,17 @@ class DocsSourceSyncService:
         chunks, content_hash = self._parsed_url_sync_item(parsed)
         links = self.store.source_document_links(scope=scope, source_id=source_id)
         link = _url_page_link(links=links, source_url=source_url, parsed_uri=parsed.canonical_uri)
-        item_status = self._local_item_status(
-            scope=scope,
-            parsed=parsed,
-            link=link,
-            content_hash=content_hash,
-            force=request.force,
+        stale_active_links = _stale_url_page_links(links=links, parsed_uri=parsed.canonical_uri)
+        item_status = (
+            "updated"
+            if stale_active_links
+            else self._local_item_status(
+                scope=scope,
+                parsed=parsed,
+                link=link,
+                content_hash=content_hash,
+                force=request.force,
+            )
         )
         counts = dict(_ZERO_COUNTS)
         counts[item_status] = 1
@@ -393,6 +398,12 @@ class DocsSourceSyncService:
                     last_hash=content_hash,
                     metadata={"importer": "url"},
                 )
+                for stale_link in stale_active_links:
+                    self.store.tombstone_source_item(
+                        scope=scope,
+                        source_id=source_id,
+                        source_item_uri=str(stale_link["source_item_uri"]),
+                    )
             elif link is not None and link.get("last_hash") != content_hash:
                 self.store.link_source_document(
                     scope=scope,
@@ -672,6 +683,14 @@ def _url_page_link(
     if len(active_links) == 1:
         return active_links[0]
     return None
+
+
+def _stale_url_page_links(*, links: list[dict[str, Any]], parsed_uri: str) -> list[dict[str, Any]]:
+    return [
+        link
+        for link in links
+        if link.get("status") == "active" and str(link.get("source_item_uri") or "") != parsed_uri
+    ]
 
 
 def _local_sync_metadata(parsed: ParsedDocument) -> dict[str, Any]:

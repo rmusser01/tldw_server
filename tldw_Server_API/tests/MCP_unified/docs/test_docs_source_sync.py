@@ -208,6 +208,83 @@ def test_url_page_sync_private_address_denial_preserves_old_content_without_run(
     assert status["counts"]["sync_runs"] == 0  # nosec B101
 
 
+def test_url_page_sync_retires_previous_redirect_target_when_canonical_changes_with_new_body(
+    tmp_path: Path,
+) -> None:
+    store = DocsCatalogStore(tmp_path / "docs.db")
+    store.migrate()
+    settings = DocsSettings.from_mapping(
+        {
+            "db_path": str(tmp_path / "docs.db"),
+            "enable_web_acquisition": True,
+            "web_source_profile": "online_capable",
+            "allow_arbitrary_public_domains": True,
+        }
+    )
+    resolver = FakeResolver({"example.com": ["93.184.216.34"]})
+    transport = FakeTransport(
+        [
+            FetchResponse(status_code=302, headers={"location": "https://example.com/b"}),
+            FetchResponse(status_code=200, headers={"content-type": "text/plain"}, body_chunks=[b"oldbmarker body"]),
+            FetchResponse(status_code=302, headers={"location": "https://example.com/c"}),
+            FetchResponse(status_code=200, headers={"content-type": "text/plain"}, body_chunks=[b"newcmarker body"]),
+        ]
+    )
+    acquisition = DocsAcquisitionService(settings=settings, store=store, resolver=resolver, transport=transport)
+    scope = AccessScope()
+    ingested = acquisition.ingest_url(scope=scope, url="https://example.com/a")
+    source_id = ingested["source"]["id"]
+    service = DocsSourceSyncService(settings=settings, store=store, resolver=resolver, transport=transport)
+
+    result = service.sync_source(scope=scope, request=SyncSourceRequest(source_id=source_id, mode="apply"))
+    links = store.source_document_links(scope=scope, source_id=source_id)
+    active_links = [link for link in links if link["status"] == "active"]
+    old_search = store.search_chunks(scope=scope, query="oldbmarker", limit=10)
+    new_search = store.search_chunks(scope=scope, query="newcmarker", limit=10)
+
+    assert result["counts"]["updated"] == 1  # nosec B101
+    assert [link["source_item_uri"] for link in active_links] == ["https://example.com/c"]  # nosec B101
+    assert old_search == []  # nosec B101
+    assert new_search  # nosec B101
+
+
+def test_url_page_sync_relinks_same_body_when_canonical_changes(
+    tmp_path: Path,
+) -> None:
+    store = DocsCatalogStore(tmp_path / "docs.db")
+    store.migrate()
+    settings = DocsSettings.from_mapping(
+        {
+            "db_path": str(tmp_path / "docs.db"),
+            "enable_web_acquisition": True,
+            "web_source_profile": "online_capable",
+            "allow_arbitrary_public_domains": True,
+        }
+    )
+    resolver = FakeResolver({"example.com": ["93.184.216.34"]})
+    transport = FakeTransport(
+        [
+            FetchResponse(status_code=302, headers={"location": "https://example.com/b"}),
+            FetchResponse(status_code=200, headers={"content-type": "text/plain"}, body_chunks=[b"samebodymarker"]),
+            FetchResponse(status_code=302, headers={"location": "https://example.com/c"}),
+            FetchResponse(status_code=200, headers={"content-type": "text/plain"}, body_chunks=[b"samebodymarker"]),
+        ]
+    )
+    acquisition = DocsAcquisitionService(settings=settings, store=store, resolver=resolver, transport=transport)
+    scope = AccessScope()
+    ingested = acquisition.ingest_url(scope=scope, url="https://example.com/a")
+    source_id = ingested["source"]["id"]
+    service = DocsSourceSyncService(settings=settings, store=store, resolver=resolver, transport=transport)
+
+    result = service.sync_source(scope=scope, request=SyncSourceRequest(source_id=source_id, mode="apply"))
+    links = store.source_document_links(scope=scope, source_id=source_id)
+    active_links = [link for link in links if link["status"] == "active"]
+
+    assert result["counts"]["updated"] == 1  # nosec B101
+    assert result["counts"]["unchanged"] == 0  # nosec B101
+    assert [link["source_item_uri"] for link in active_links] == ["https://example.com/c"]  # nosec B101
+
+
 def test_provider_advertises_sync_source_when_enabled(tmp_path: Path) -> None:
     provider = DocsMCPToolProvider(settings=DocsSettings(db_path=tmp_path / "docs.db", trusted_roots=(tmp_path,)))
 
