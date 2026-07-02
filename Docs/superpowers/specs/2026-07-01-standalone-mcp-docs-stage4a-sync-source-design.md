@@ -109,15 +109,23 @@ Canonical URI rules:
   source is not created until policy allows a fetch and the fetch produces a
   canonical, fetch-capable URL.
 - Sitemaps use the normalized sitemap URL.
-- `source_url` stores the fetch target for URL-backed sources and may include
-  query parameters needed to refresh the source.
+- `source_url` stores the fetch target for URL-backed sources.
 - `redacted_source_url` stores the display/logging form. Tool results, source
   lists, errors, warnings, and sync-run metadata must use redacted URL forms
   unless the caller explicitly requests full source metadata through a future
   privileged diagnostic path. Stage 4A does not add that diagnostic path.
-- Query strings may be part of `canonical_uri` and `source_url` for fetch
-  identity, but logs, errors, audit summaries, and source list display must use
-  redacted forms.
+- Query strings are sensitive persistence. By default, a URL with a query string
+  may be ingested as a document, but Stage 4A must not create a refreshable
+  `url_page` source or persist a fetch-capable query-bearing `source_url` unless
+  `settings.persist_url_query_strings=true`.
+- When query persistence is disabled and an otherwise allowed URL contains a
+  query string, the response should include `url_query_not_persisted` and source
+  listing/sync should not expose a refreshable URL source for that document.
+- When query persistence is enabled, query strings may be part of
+  `canonical_uri` and `source_url` for fetch identity, but logs, errors, audit
+  summaries, source list display, and sync-run metadata must use redacted forms.
+- URL credentials in userinfo remain denied by Stage 2 policy and must never be
+  persisted.
 
 ### `docs_source_documents`
 
@@ -129,7 +137,8 @@ Recommended fields:
 - `source_id`
 - `document_id`
 - `source_item_uri`
-- `status`: `active`, `missing`, `tombstoned`, or `failed`
+- `status`: `active`, `tombstoned`, or `failed`. Missing source items are run
+  results, not a persisted source-link status in Stage 4A report mode.
 - `last_seen_at`
 - `last_hash`
 - `last_error_code`
@@ -263,6 +272,10 @@ Sync must not erase user organization.
 - Sync must not call `DocsCatalogStore.upsert_document()` with empty keyword or
   collection arguments for an existing document unless the source explicitly has
   an empty replacement policy. Stage 4A does not add replacement policy.
+- The implementation should add a sync-aware store helper, such as
+  `upsert_document_for_sync()`, that performs document/chunk replacement and
+  collection/keyword merging inside one write transaction. The existing
+  `upsert_document()` can remain replacement-oriented for direct imports.
 - User-applied keywords and collection memberships survive unchanged content,
   updated content, missing-source report mode, and tombstone mode.
 - If a future source wants authoritative replacement semantics, it needs a new
@@ -327,6 +340,13 @@ must still pass policy.
 Sitemap support is allowed in Stage 4A only for explicit `url_sitemap` sources.
 It is still not a crawler.
 
+Stage 4A.1 may defer sitemap source creation and sitemap sync entirely. If the
+optional sitemap slice is implemented, it must first add a narrow source
+registration path, such as `docs.sources.register`, limited to `url_sitemap`
+sources and protected by the same URL policy checks. Until that registration
+path exists, sitemap sync must remain disabled or unreachable because no user can
+create a valid sitemap source.
+
 Rules:
 
 - A sitemap source must already exist and must have a canonical sitemap URL.
@@ -354,7 +374,8 @@ sync must fail closed with `robots_unavailable` before fetching page content.
 Default stale behavior is report-only.
 
 - `stale_policy="report"`: missing items are returned in the response and run
-  record, but existing documents remain searchable.
+  record, source-link status is not changed, and existing documents remain
+  searchable.
 - `stale_policy="tombstone"`: apply mode marks the source item as
   `tombstoned`.
 - Add `lifecycle_status` to `docs_documents` with default `active`.
@@ -362,7 +383,7 @@ Default stale behavior is report-only.
   Stage 4A does not expose a public tool to set it; the field exists so future
   manual-preservation flows have a defined search rule.
 - A document is hidden from default search only when all source links for that
-  document are tombstoned or missing and `preserve_on_source_tombstone=false`.
+  document are tombstoned and `preserve_on_source_tombstone=false`.
 - Legacy rows without source links remain `active` after migration.
 - Hard delete is out of scope.
 
@@ -376,6 +397,9 @@ Extend `DocsSettings` with source-sync limits:
 - `max_sync_run_items`: default 500.
 - `default_stale_policy`: `report`.
 - `sitemap_sync_enabled`: default false unless explicitly enabled.
+- `persist_url_query_strings`: default false. Enables storing fetch-capable URL
+  sources whose canonical URL contains query parameters. Redacted display forms
+  are still mandatory.
 
 Profile behavior:
 
@@ -403,6 +427,7 @@ Stable reason codes should include:
 - `path_scope_denied`
 - `import_path_not_found`
 - `unsupported_import_format`
+- `url_query_not_persisted`
 - `web_acquisition_disabled`
 - `approval_required`
 - `source_policy_denied`
@@ -455,6 +480,8 @@ Unit tests:
 - source creation from URL ingest;
 - URL source identity stores a fetch-capable `source_url` while source lists
   and run metadata expose only redacted URL forms;
+- query-bearing URL ingest does not create a refreshable source unless
+  `persist_url_query_strings=true`;
 - source listing with owner/profile scope enforcement;
 - sync selector validation;
 - dry-run does not mutate documents, source links, source timestamps,
@@ -463,11 +490,12 @@ Unit tests:
   source defaults;
 - local file sync created/updated/unchanged behavior;
 - local directory sync deterministic enumeration and max-document limit;
-- missing local file report mode;
+- missing local file report mode does not persist a missing source-link status;
 - tombstone mode marks source item only in apply mode;
 - URL sync no-fetch-before-approval;
 - URL sync denial for source policy and private redirect cases;
 - sitemap disabled failure;
+- sitemap source registration, if the optional sitemap slice is implemented;
 - sitemap parsing with safe XML settings;
 - sitemap `DOCTYPE` and `ENTITY` declaration rejection;
 - sitemap `max_pages` enforcement before page fetches;
@@ -479,7 +507,8 @@ Integration tests:
 - import local directory, list source, dry-run sync, apply sync, search updated
   content;
 - ingest approved URL, list source, sync source with fake transport;
-- sitemap source sync with fake sitemap and fake page transport;
+- optional sitemap source registration and sync with fake sitemap and fake page
+  transport;
 - `DocsModule` exposes `docs.sync_source` through the host shim without Media
   DB/RAG imports.
 
@@ -514,7 +543,7 @@ Recommended Stage 4A implementation sequence:
 3. `docs.list(kind="sources")` and `docs.status` source-sync capability.
 4. Local file/directory `docs.sync_source`.
 5. URL page `docs.sync_source`.
-6. Optional explicit sitemap source sync.
+6. Optional explicit sitemap source registration and sync.
 7. Host shim registration and boundary tests.
 
 If the work needs to be split into multiple PRs, stop after slice 4. Local
@@ -526,8 +555,9 @@ more URL risk.
 - The first Stage 4A implementation plan should include slices 1 through 5:
   source registry, source population, source list/status, local sync, and URL
   page sync.
-- Explicit sitemap source sync should be planned as the final task in the same
-  plan and can be deferred to Stage 4A.2 if the first PR needs to stay smaller.
+- Explicit sitemap source registration and sync should be planned as the final
+  task in the same plan and can be deferred to Stage 4A.2 if the first PR needs
+  to stay smaller.
 - Store run item details in `docs_sync_runs.metadata_json` in Stage 4A, bounded
   by `max_sync_run_items`; do not add `docs_sync_run_items` until result sizes
   justify another table.
