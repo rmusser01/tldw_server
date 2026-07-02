@@ -47,6 +47,18 @@ def _web_policy_status(settings: DocsSettings) -> dict[str, Any]:
     }
 
 
+def _source_sync_status(settings: DocsSettings) -> dict[str, Any]:
+    return {
+        "enabled": settings.enable_source_sync,
+        "max_sync_documents": settings.max_sync_documents,
+        "max_sync_pages": settings.max_sync_pages,
+        "max_sync_run_items": settings.max_sync_run_items,
+        "default_stale_policy": settings.default_stale_policy,
+        "sitemap_sync_enabled": settings.sitemap_sync_enabled,
+        "persist_url_query_strings": settings.persist_url_query_strings,
+    }
+
+
 class DocsMCPToolProvider:
     def __init__(self, *, settings: DocsSettings, store: DocsCatalogStore | None = None) -> None:
         self.settings = settings
@@ -192,6 +204,7 @@ class DocsMCPToolProvider:
             status["web_extractors"] = available_extractors() if self.acquisition is not None else []
             status["web_source_profile"] = self.settings.web_source_profile
             status["web_policy"] = _web_policy_status(self.settings)
+            status["source_sync"] = _source_sync_status(self.settings)
             status["web_acquisition_unavailable_reason"] = (
                 None if self.acquisition is not None else "web_acquisition_disabled"
             )

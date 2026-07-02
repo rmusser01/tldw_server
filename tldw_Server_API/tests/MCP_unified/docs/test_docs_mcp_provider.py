@@ -247,6 +247,10 @@ def test_provider_status_reports_web_acquisition_disabled(tmp_path: Path) -> Non
     assert status["web_policy"]["allow_arbitrary_public_domains"] is False  # nosec B101
     assert status["web_policy"]["preapproved_domains"] == []  # nosec B101
     assert status["web_policy"]["allowed_url_prefixes"] == []  # nosec B101
+    assert status["source_sync"]["enabled"] is True  # nosec B101
+    assert status["source_sync"]["default_stale_policy"] == "report"  # nosec B101
+    assert status["source_sync"]["max_sync_documents"] == 500  # nosec B101
+    assert status["source_sync"]["sitemap_sync_enabled"] is False  # nosec B101
 
 
 def test_provider_status_reports_custom_web_policy(tmp_path: Path) -> None:
