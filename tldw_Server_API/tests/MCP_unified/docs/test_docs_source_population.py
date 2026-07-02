@@ -4,12 +4,15 @@ from pathlib import Path
 
 import pytest
 
+from mcp_unified.docs.acquisition.models import FetchResponse
+from mcp_unified.docs.acquisition.service import DocsAcquisitionService
 from mcp_unified.docs.errors import DocsError
 from mcp_unified.docs.importers.local import DocsImportService
 from mcp_unified.docs.models import AccessScope
 from mcp_unified.docs.settings import DocsSettings
 from mcp_unified.docs.source_utils import redacted_url_for_display, url_has_query
 from mcp_unified.docs.store.sqlite import DocsCatalogStore
+from tldw_Server_API.tests.MCP_unified.docs.helpers import FakeResolver, FakeTransport
 
 pytestmark = pytest.mark.unit
 
@@ -71,6 +74,91 @@ def test_import_directory_creates_one_directory_source_with_file_items(tmp_path:
     assert sources[0]["source_type"] == "local_directory"  # nosec B101
     assert sources[0]["canonical_uri"].endswith("/")  # nosec B101
     assert sorted(link["source_item_uri"].rsplit("/", 1)[-1] for link in links) == ["a.md", "b.md"]  # nosec B101
+
+
+def test_ingest_url_creates_url_page_source_for_queryless_url(tmp_path: Path) -> None:
+    store = DocsCatalogStore(tmp_path / "docs.db")
+    store.migrate()
+    settings = DocsSettings.from_mapping(
+        {
+            "db_path": str(tmp_path / "docs.db"),
+            "enable_web_acquisition": True,
+            "web_source_profile": "online_capable",
+            "allow_arbitrary_public_domains": True,
+        }
+    )
+    service = DocsAcquisitionService(
+        settings=settings,
+        store=store,
+        resolver=FakeResolver({"example.com": ["93.184.216.34"]}),
+        transport=FakeTransport(
+            [FetchResponse(status_code=200, headers={"content-type": "text/plain"}, body_chunks=[b"sync body"])]
+        ),
+    )
+
+    result = service.ingest_url(scope=AccessScope(), url="https://example.com/page")
+
+    sources = store.list_sources(scope=AccessScope())
+    assert result["source"]["source_type"] == "url_page"  # nosec B101
+    assert sources[0]["source_url"] == "https://example.com/page"  # nosec B101
+    assert sources[0]["redacted_source_url"] == "https://example.com/page"  # nosec B101
+
+
+def test_ingest_query_url_does_not_create_refreshable_source_by_default(tmp_path: Path) -> None:
+    store = DocsCatalogStore(tmp_path / "docs.db")
+    store.migrate()
+    settings = DocsSettings.from_mapping(
+        {
+            "db_path": str(tmp_path / "docs.db"),
+            "enable_web_acquisition": True,
+            "web_source_profile": "online_capable",
+            "allow_arbitrary_public_domains": True,
+        }
+    )
+    service = DocsAcquisitionService(
+        settings=settings,
+        store=store,
+        resolver=FakeResolver({"example.com": ["93.184.216.34"]}),
+        transport=FakeTransport(
+            [FetchResponse(status_code=200, headers={"content-type": "text/plain"}, body_chunks=[b"query body"])]
+        ),
+    )
+
+    result = service.ingest_url(scope=AccessScope(), url="https://example.com/page?token=secret")
+
+    assert result["status"] == "created"  # nosec B101
+    assert result["reason_code"] == "ok"  # nosec B101
+    assert result["source"] is None  # nosec B101
+    assert "url_query_not_persisted" in result["warnings"]  # nosec B101
+    assert store.list_sources(scope=AccessScope()) == []  # nosec B101
+
+
+def test_ingest_query_url_creates_source_when_query_persistence_enabled(tmp_path: Path) -> None:
+    store = DocsCatalogStore(tmp_path / "docs.db")
+    store.migrate()
+    settings = DocsSettings.from_mapping(
+        {
+            "db_path": str(tmp_path / "docs.db"),
+            "enable_web_acquisition": True,
+            "web_source_profile": "online_capable",
+            "allow_arbitrary_public_domains": True,
+            "persist_url_query_strings": True,
+        }
+    )
+    service = DocsAcquisitionService(
+        settings=settings,
+        store=store,
+        resolver=FakeResolver({"example.com": ["93.184.216.34"]}),
+        transport=FakeTransport(
+            [FetchResponse(status_code=200, headers={"content-type": "text/plain"}, body_chunks=[b"query body"])]
+        ),
+    )
+
+    result = service.ingest_url(scope=AccessScope(), url="https://example.com/page?token=secret")
+
+    sources = store.list_sources(scope=AccessScope())
+    assert result["source"]["source_url"] == "https://example.com/page?token=secret"  # nosec B101
+    assert sources[0]["redacted_source_url"] == "https://example.com/page"  # nosec B101
 
 
 def test_redacted_url_for_display_removes_credentials_query_and_fragment() -> None:

@@ -11,6 +11,7 @@ from ..errors import DocsError
 from ..importers.base import chunks_from_text
 from ..models import AccessScope
 from ..settings import DocsSettings
+from ..source_utils import redacted_url_for_display, source_defaults_metadata, url_has_query
 from ..store.sqlite import DocsCatalogStore
 from .extract import extract_fetched_document
 from .fetcher import URLFetcher
@@ -81,6 +82,8 @@ class DocsAcquisitionService:
 
         previous_hash = _existing_content_hash(self.store, scope, parsed.canonical_uri)
         new_hash = sha256(parsed.text.encode("utf-8")).hexdigest()
+        keyword_tuple = tuple(keywords)
+        collection_tuple = tuple(collection_names)
         chunks = [
             {"text": chunk, "citation": f"{parsed.source_url or parsed.canonical_uri}#{index + 1}"}
             for index, chunk in enumerate(chunks_from_text(parsed.text))
@@ -95,8 +98,8 @@ class DocsAcquisitionService:
             text=parsed.text,
             sections=[asdict(section) for section in parsed.sections],
             chunks=chunks,
-            keywords=keywords,
-            collection_names=collection_names,
+            keywords=keyword_tuple,
+            collection_names=collection_tuple,
             metadata={
                 "importer": "url",
                 "extraction_method": parsed.extraction_method,
@@ -105,6 +108,38 @@ class DocsAcquisitionService:
                 "warnings": list(parsed.warnings),
             },
         )
+        warnings = list(parsed.warnings)
+        source: dict[str, Any] | None = None
+        can_persist_query_source = self.settings.persist_url_query_strings or not url_has_query(parsed.canonical_uri)
+        if can_persist_query_source:
+            redacted_source_url = redacted_url_for_display(parsed.canonical_uri)
+            source_id = self.store.upsert_source(
+                scope=scope,
+                source_type="url_page",
+                canonical_uri=parsed.canonical_uri,
+                display_name=parsed.title,
+                source_path=None,
+                source_url=parsed.canonical_uri,
+                redacted_source_url=redacted_source_url,
+                policy_profile=self.settings.web_source_profile,
+                sync_enabled=True,
+                metadata=source_defaults_metadata(
+                    keywords=keyword_tuple,
+                    collection_names=collection_tuple,
+                ),
+            )
+            self.store.link_source_document(
+                scope=scope,
+                source_id=source_id,
+                document_id=document_id,
+                source_item_uri=parsed.canonical_uri,
+                status="active",
+                last_hash=new_hash,
+                metadata={"importer": "url"},
+            )
+            source = self.store.get_source(scope=scope, source_id=source_id)
+        else:
+            warnings.append("url_query_not_persisted")
         status = "created" if previous_hash is None else "unchanged" if previous_hash == new_hash else "updated"
         return {
             "status": status,
@@ -124,6 +159,8 @@ class DocsAcquisitionService:
                 "content_type": content_type,
                 "bytes": len(fetched.body),
             },
+            "source": source,
+            "warnings": warnings,
         }
 
 
