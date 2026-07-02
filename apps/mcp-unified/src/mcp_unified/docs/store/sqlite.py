@@ -29,6 +29,8 @@ _COUNT_SQL = {
 }
 _SCOPE_TABLE_INFO_SQL = {
     "docs_documents": "PRAGMA table_info(docs_documents)",
+    "docs_sources": "PRAGMA table_info(docs_sources)",
+    "docs_sync_runs": "PRAGMA table_info(docs_sync_runs)",
     "docs_collections": "PRAGMA table_info(docs_collections)",
     "docs_keywords": "PRAGMA table_info(docs_keywords)",
     "docs_aliases": "PRAGMA table_info(docs_aliases)",
@@ -41,6 +43,14 @@ _SCOPE_BACKFILL_SQL = {
     "docs_documents": (
         "UPDATE docs_documents SET owner_scope = ? WHERE owner_scope IS NULL",
         "UPDATE docs_documents SET profile_scope = ? WHERE profile_scope IS NULL",
+    ),
+    "docs_sources": (
+        "UPDATE docs_sources SET owner_scope = ? WHERE owner_scope IS NULL",
+        "UPDATE docs_sources SET profile_scope = ? WHERE profile_scope IS NULL",
+    ),
+    "docs_sync_runs": (
+        "UPDATE docs_sync_runs SET owner_scope = ? WHERE owner_scope IS NULL",
+        "UPDATE docs_sync_runs SET profile_scope = ? WHERE profile_scope IS NULL",
     ),
     "docs_collections": (
         "UPDATE docs_collections SET owner_scope = ? WHERE owner_scope IS NULL",
@@ -79,6 +89,8 @@ class DocsCatalogStore:
         schema = resources.files(_STORE_PACKAGE).joinpath(_SCHEMA_RESOURCE).read_text(encoding="utf-8")
         with closing(self.connect()) as conn:
             conn.executescript(schema)
+            self._ensure_document_lifecycle_columns(conn)
+            self._ensure_source_tables(conn)
             self._backfill_scope_sentinels(conn)
             self._ensure_documents_scope_uri_unique_index(conn)
             self._ensure_collection_description_column(conn)
@@ -123,52 +135,21 @@ class DocsCatalogStore:
 
         with closing(self.connect()) as conn:
             with conn:
-                cursor = conn.execute(
-                    """
-                    INSERT INTO docs_documents (
-                        owner_scope,
-                        profile_scope,
-                        title,
-                        document_type,
-                        canonical_uri,
-                        source_path,
-                        source_url,
-                        content_hash,
-                        text,
-                        metadata_json,
-                        package_name,
-                        package_version
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(owner_scope, profile_scope, canonical_uri)
-                    DO UPDATE SET title = excluded.title,
-                        document_type = excluded.document_type,
-                        source_path = excluded.source_path,
-                        source_url = excluded.source_url,
-                        content_hash = excluded.content_hash,
-                        text = excluded.text,
-                        metadata_json = excluded.metadata_json,
-                        package_name = excluded.package_name,
-                        package_version = excluded.package_version,
-                        updated_at = CURRENT_TIMESTAMP
-                    RETURNING id
-                    """,
-                    (
-                        owner_scope,
-                        profile_scope,
-                        title,
-                        document_type,
-                        canonical_uri,
-                        source_path,
-                        source_url,
-                        content_hash,
-                        text,
-                        metadata_json,
-                        package_name,
-                        package_version,
-                    ),
+                document_id = self._upsert_document_record(
+                    conn,
+                    owner_scope,
+                    profile_scope,
+                    title,
+                    document_type,
+                    canonical_uri,
+                    source_path,
+                    source_url,
+                    content_hash,
+                    text,
+                    metadata_json,
+                    package_name,
+                    package_version,
                 )
-                document_id = int(cursor.fetchone()["id"])
 
                 self._replace_document_rows(conn, document_id, title, sections, chunks)
                 self._replace_document_keywords(conn, owner_scope, profile_scope, document_id, keywords)
@@ -180,6 +161,353 @@ class DocsCatalogStore:
                     profile_scope,
                     document_id,
                     collection_names,
+                )
+                return document_id
+
+    def upsert_source(
+        self,
+        *,
+        scope: AccessScope,
+        source_type: str,
+        canonical_uri: str,
+        display_name: str,
+        source_path: str | None,
+        source_url: str | None,
+        redacted_source_url: str | None,
+        policy_profile: str | None,
+        sync_enabled: bool,
+        metadata: Mapping[str, Any],
+    ) -> int:
+        owner_scope, profile_scope = _scope_values(scope)
+        metadata_json = _json_dump(dict(metadata or {}))
+        with closing(self.connect()) as conn:
+            with conn:
+                cursor = conn.execute(
+                    """
+                    INSERT INTO docs_sources (
+                        owner_scope,
+                        profile_scope,
+                        source_type,
+                        canonical_uri,
+                        display_name,
+                        source_path,
+                        source_url,
+                        redacted_source_url,
+                        policy_profile,
+                        sync_enabled,
+                        metadata_json
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(owner_scope, profile_scope, canonical_uri)
+                    DO UPDATE SET source_type = excluded.source_type,
+                        display_name = excluded.display_name,
+                        source_path = excluded.source_path,
+                        source_url = excluded.source_url,
+                        redacted_source_url = excluded.redacted_source_url,
+                        policy_profile = excluded.policy_profile,
+                        sync_enabled = excluded.sync_enabled,
+                        metadata_json = excluded.metadata_json,
+                        updated_at = CURRENT_TIMESTAMP
+                    RETURNING id
+                    """,
+                    (
+                        owner_scope,
+                        profile_scope,
+                        source_type,
+                        canonical_uri,
+                        display_name,
+                        source_path,
+                        source_url,
+                        redacted_source_url,
+                        policy_profile,
+                        1 if sync_enabled else 0,
+                        metadata_json,
+                    ),
+                )
+                return int(cursor.fetchone()["id"])
+
+    def get_source(
+        self,
+        *,
+        scope: AccessScope,
+        source_id: int | None = None,
+        canonical_uri: str | None = None,
+    ) -> dict[str, Any] | None:
+        if (source_id is None) == (canonical_uri is None):
+            raise ValueError("Pass exactly one source selector.")
+
+        owner_scope, profile_scope = _scope_values(scope)
+        if source_id is not None:
+            sql = """
+                SELECT s.*, COUNT(DISTINCT sd.document_id) AS document_count
+                FROM docs_sources s
+                LEFT JOIN docs_source_documents sd ON sd.source_id = s.id
+                WHERE s.owner_scope = ?
+                  AND s.profile_scope = ?
+                  AND s.id = ?
+                GROUP BY s.id
+                """
+            selector_param: object = source_id
+        else:
+            sql = """
+                SELECT s.*, COUNT(DISTINCT sd.document_id) AS document_count
+                FROM docs_sources s
+                LEFT JOIN docs_source_documents sd ON sd.source_id = s.id
+                WHERE s.owner_scope = ?
+                  AND s.profile_scope = ?
+                  AND s.canonical_uri = ?
+                GROUP BY s.id
+                """
+            selector_param = canonical_uri
+
+        with closing(self.connect()) as conn:
+            row = conn.execute(sql, (owner_scope, profile_scope, selector_param)).fetchone()
+        return _source_from_row(row) if row is not None else None
+
+    def list_sources(self, *, scope: AccessScope, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
+        owner_scope, profile_scope = _scope_values(scope)
+        with closing(self.connect()) as conn:
+            rows = conn.execute(
+                """
+                SELECT s.*, COUNT(DISTINCT sd.document_id) AS document_count
+                FROM docs_sources s
+                LEFT JOIN docs_source_documents sd ON sd.source_id = s.id
+                WHERE s.owner_scope = ? AND s.profile_scope = ?
+                GROUP BY s.id
+                ORDER BY s.display_name COLLATE NOCASE ASC, s.id ASC
+                LIMIT ? OFFSET ?
+                """,
+                (
+                    owner_scope,
+                    profile_scope,
+                    _bounded_non_negative(limit, default=50),
+                    _bounded_non_negative(offset, default=0),
+                ),
+            ).fetchall()
+        return [_source_from_row(row) for row in rows]
+
+    def link_source_document(
+        self,
+        *,
+        scope: AccessScope,
+        source_id: int,
+        document_id: int,
+        source_item_uri: str,
+        status: str,
+        last_hash: str | None,
+        metadata: Mapping[str, Any],
+    ) -> None:
+        owner_scope, profile_scope = _scope_values(scope)
+        normalized_item_uri = _required_name(source_item_uri, "source item URI")
+        normalized_status = _required_name(status, "source link status")
+        metadata_json = _json_dump(dict(metadata or {}))
+        with closing(self.connect()) as conn:
+            with conn:
+                self._assert_source_in_scope(conn, owner_scope, profile_scope, source_id)
+                self._assert_document_in_scope(conn, owner_scope, profile_scope, document_id)
+                conn.execute(
+                    """
+                    INSERT INTO docs_source_documents (
+                        source_id,
+                        document_id,
+                        source_item_uri,
+                        status,
+                        last_seen_at,
+                        last_hash,
+                        last_error_code,
+                        metadata_json
+                    )
+                    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, ?, NULL, ?)
+                    ON CONFLICT(source_id, source_item_uri)
+                    DO UPDATE SET document_id = excluded.document_id,
+                        status = excluded.status,
+                        last_seen_at = CURRENT_TIMESTAMP,
+                        last_hash = excluded.last_hash,
+                        last_error_code = NULL,
+                        metadata_json = excluded.metadata_json
+                    """,
+                    (
+                        source_id,
+                        document_id,
+                        normalized_item_uri,
+                        normalized_status,
+                        _optional_text(last_hash),
+                        metadata_json,
+                    ),
+                )
+
+    def source_document_links(self, *, scope: AccessScope, source_id: int) -> list[dict[str, Any]]:
+        owner_scope, profile_scope = _scope_values(scope)
+        with closing(self.connect()) as conn:
+            self._assert_source_in_scope(conn, owner_scope, profile_scope, source_id)
+            rows = conn.execute(
+                """
+                SELECT sd.*, d.title, d.canonical_uri
+                FROM docs_source_documents sd
+                JOIN docs_documents d ON d.id = sd.document_id
+                WHERE sd.source_id = ?
+                  AND d.owner_scope = ?
+                  AND d.profile_scope = ?
+                ORDER BY sd.source_item_uri COLLATE NOCASE ASC
+                """,
+                (source_id, owner_scope, profile_scope),
+            ).fetchall()
+        return [_source_document_link_from_row(row) for row in rows]
+
+    def record_sync_run(
+        self,
+        *,
+        scope: AccessScope,
+        source_id: int,
+        mode: str,
+        status: str,
+        requested_limits: Mapping[str, Any],
+        counts: Mapping[str, int],
+        warnings: list[str],
+        error_code: str | None,
+        metadata: Mapping[str, Any],
+    ) -> int:
+        owner_scope, profile_scope = _scope_values(scope)
+        requested_limits_json = _json_dump(dict(requested_limits or {}))
+        counts_json = _json_dump(dict(counts or {}))
+        warnings_json = json.dumps(warnings or [], sort_keys=True, separators=(",", ":"), default=str)
+        metadata_json = _json_dump(dict(metadata or {}))
+        with closing(self.connect()) as conn:
+            with conn:
+                self._assert_source_in_scope(conn, owner_scope, profile_scope, source_id)
+                cursor = conn.execute(
+                    """
+                    INSERT INTO docs_sync_runs (
+                        owner_scope,
+                        profile_scope,
+                        source_id,
+                        mode,
+                        status,
+                        completed_at,
+                        requested_limits_json,
+                        counts_json,
+                        warnings_json,
+                        error_code,
+                        metadata_json
+                    )
+                    VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        owner_scope,
+                        profile_scope,
+                        source_id,
+                        mode,
+                        status,
+                        requested_limits_json,
+                        counts_json,
+                        warnings_json,
+                        error_code,
+                        metadata_json,
+                    ),
+                )
+                sync_run_id = int(cursor.lastrowid)
+                run_row = conn.execute(
+                    """
+                    SELECT started_at, completed_at
+                    FROM docs_sync_runs
+                    WHERE id = ?
+                    """,
+                    (sync_run_id,),
+                ).fetchone()
+                conn.execute(
+                    """
+                    UPDATE docs_sources
+                    SET last_sync_status = ?,
+                        last_sync_started_at = ?,
+                        last_sync_completed_at = ?,
+                        last_error_code = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                      AND owner_scope = ?
+                      AND profile_scope = ?
+                    """,
+                    (
+                        status,
+                        run_row["started_at"],
+                        run_row["completed_at"],
+                        error_code,
+                        source_id,
+                        owner_scope,
+                        profile_scope,
+                    ),
+                )
+                return sync_run_id
+
+    def upsert_document_for_sync(
+        self,
+        *,
+        scope: AccessScope,
+        title: str,
+        document_type: str,
+        canonical_uri: str,
+        source_path: str | None,
+        source_url: str | None,
+        text: str,
+        sections: Sequence[Mapping[str, Any]],
+        chunks: Sequence[Mapping[str, Any]],
+        source_default_keywords: Iterable[str],
+        source_default_collections: Iterable[str],
+        metadata: Mapping[str, Any],
+    ) -> int:
+        owner_scope, profile_scope = _scope_values(scope)
+        metadata_map = dict(metadata or {})
+        metadata_json = _json_dump(metadata_map)
+        content_hash = sha256(text.encode("utf-8")).hexdigest()
+        package_name = _optional_text(metadata_map.get("package_name") or metadata_map.get("package"))
+        package_version = _optional_text(metadata_map.get("version") or metadata_map.get("package_version"))
+
+        with closing(self.connect()) as conn:
+            with conn:
+                existing_row = conn.execute(
+                    """
+                    SELECT id
+                    FROM docs_documents
+                    WHERE owner_scope = ? AND profile_scope = ? AND canonical_uri = ?
+                    """,
+                    (owner_scope, profile_scope, canonical_uri),
+                ).fetchone()
+                existing_document_id = int(existing_row["id"]) if existing_row is not None else None
+                existing_keywords = (
+                    self._keywords_for_document(conn, owner_scope, profile_scope, existing_document_id)
+                    if existing_document_id is not None
+                    else ()
+                )
+                existing_collections = (
+                    self._collections_for_document(conn, owner_scope, profile_scope, existing_document_id)
+                    if existing_document_id is not None
+                    else ()
+                )
+                merged_keywords = _normalized_names((*existing_keywords, *source_default_keywords))
+                merged_collections = _normalized_names((*existing_collections, *source_default_collections))
+
+                document_id = self._upsert_document_record(
+                    conn,
+                    owner_scope,
+                    profile_scope,
+                    title,
+                    document_type,
+                    canonical_uri,
+                    source_path,
+                    source_url,
+                    content_hash,
+                    text,
+                    metadata_json,
+                    package_name,
+                    package_version,
+                )
+                self._replace_document_rows(conn, document_id, title, sections, chunks)
+                self._replace_document_keywords(conn, owner_scope, profile_scope, document_id, merged_keywords)
+                self._replace_collection_memberships(
+                    conn,
+                    owner_scope,
+                    profile_scope,
+                    document_id,
+                    merged_collections,
                 )
                 return document_id
 
@@ -625,6 +953,71 @@ class DocsCatalogStore:
             return int(row["id"]) if row is not None else None
 
     @staticmethod
+    def _upsert_document_record(
+        conn: sqlite3.Connection,
+        owner_scope: str,
+        profile_scope: str,
+        title: str,
+        document_type: str,
+        canonical_uri: str,
+        source_path: str | None,
+        source_url: str | None,
+        content_hash: str,
+        text: str,
+        metadata_json: str,
+        package_name: str | None,
+        package_version: str | None,
+    ) -> int:
+        cursor = conn.execute(
+            """
+            INSERT INTO docs_documents (
+                owner_scope,
+                profile_scope,
+                title,
+                document_type,
+                canonical_uri,
+                source_path,
+                source_url,
+                content_hash,
+                text,
+                lifecycle_status,
+                metadata_json,
+                package_name,
+                package_version
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
+            ON CONFLICT(owner_scope, profile_scope, canonical_uri)
+            DO UPDATE SET title = excluded.title,
+                document_type = excluded.document_type,
+                source_path = excluded.source_path,
+                source_url = excluded.source_url,
+                content_hash = excluded.content_hash,
+                text = excluded.text,
+                lifecycle_status = 'active',
+                metadata_json = excluded.metadata_json,
+                package_name = excluded.package_name,
+                package_version = excluded.package_version,
+                updated_at = CURRENT_TIMESTAMP
+            RETURNING id
+            """,
+            (
+                owner_scope,
+                profile_scope,
+                title,
+                document_type,
+                canonical_uri,
+                source_path,
+                source_url,
+                content_hash,
+                text,
+                metadata_json,
+                package_name,
+                package_version,
+            ),
+        )
+        return int(cursor.fetchone()["id"])
+
+    @staticmethod
     def _ensure_collection(
         conn: sqlite3.Connection,
         owner_scope: str,
@@ -669,6 +1062,95 @@ class DocsCatalogStore:
                 message="Document not found in active scope.",
                 details={"document_id": document_id},
             )
+
+    @staticmethod
+    def _assert_source_in_scope(
+        conn: sqlite3.Connection,
+        owner_scope: str,
+        profile_scope: str,
+        source_id: int,
+    ) -> None:
+        row = conn.execute(
+            """
+            SELECT id
+            FROM docs_sources
+            WHERE owner_scope = ? AND profile_scope = ? AND id = ?
+            """,
+            (owner_scope, profile_scope, source_id),
+        ).fetchone()
+        if row is None:
+            raise DocsError(
+                code="source_not_found",
+                message="Source not found in active scope.",
+                details={"source_id": source_id},
+            )
+
+    @staticmethod
+    def _ensure_document_lifecycle_columns(conn: sqlite3.Connection) -> None:
+        rows = conn.execute("PRAGMA table_info(docs_documents)").fetchall()
+        columns = {row["name"] for row in rows}
+        if "lifecycle_status" not in columns:
+            conn.execute("ALTER TABLE docs_documents ADD COLUMN lifecycle_status TEXT NOT NULL DEFAULT 'active'")
+        if "preserve_on_source_tombstone" not in columns:
+            conn.execute(
+                "ALTER TABLE docs_documents ADD COLUMN preserve_on_source_tombstone INTEGER NOT NULL DEFAULT 0"
+            )
+
+    @staticmethod
+    def _ensure_source_tables(conn: sqlite3.Connection) -> None:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS docs_sources (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                owner_scope TEXT NOT NULL DEFAULT '',
+                profile_scope TEXT NOT NULL DEFAULT '',
+                source_type TEXT NOT NULL,
+                canonical_uri TEXT NOT NULL,
+                display_name TEXT NOT NULL,
+                source_path TEXT,
+                source_url TEXT,
+                redacted_source_url TEXT,
+                policy_profile TEXT,
+                sync_enabled INTEGER NOT NULL DEFAULT 1,
+                last_sync_status TEXT,
+                last_sync_started_at TEXT,
+                last_sync_completed_at TEXT,
+                last_error_code TEXT,
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (owner_scope, profile_scope, canonical_uri)
+            );
+
+            CREATE TABLE IF NOT EXISTS docs_source_documents (
+                source_id INTEGER NOT NULL REFERENCES docs_sources(id) ON DELETE CASCADE,
+                document_id INTEGER NOT NULL REFERENCES docs_documents(id) ON DELETE CASCADE,
+                source_item_uri TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'active',
+                last_seen_at TEXT,
+                last_hash TEXT,
+                last_error_code TEXT,
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                PRIMARY KEY (source_id, source_item_uri)
+            );
+
+            CREATE TABLE IF NOT EXISTS docs_sync_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                owner_scope TEXT NOT NULL DEFAULT '',
+                profile_scope TEXT NOT NULL DEFAULT '',
+                source_id INTEGER NOT NULL REFERENCES docs_sources(id) ON DELETE CASCADE,
+                mode TEXT NOT NULL,
+                status TEXT NOT NULL,
+                started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                completed_at TEXT,
+                requested_limits_json TEXT NOT NULL DEFAULT '{}',
+                counts_json TEXT NOT NULL DEFAULT '{}',
+                warnings_json TEXT NOT NULL DEFAULT '[]',
+                error_code TEXT,
+                metadata_json TEXT NOT NULL DEFAULT '{}'
+            );
+            """
+        )
 
     @staticmethod
     def _backfill_scope_sentinels(conn: sqlite3.Connection) -> None:
@@ -977,6 +1459,48 @@ class DocsCatalogStore:
         ]
 
     @staticmethod
+    def _keywords_for_document(
+        conn: sqlite3.Connection,
+        owner_scope: str,
+        profile_scope: str,
+        document_id: int,
+    ) -> tuple[str, ...]:
+        rows = conn.execute(
+            """
+            SELECT kw.name
+            FROM docs_document_keywords dk
+            JOIN docs_keywords kw ON kw.id = dk.keyword_id
+            WHERE dk.document_id = ?
+              AND kw.owner_scope = ?
+              AND kw.profile_scope = ?
+            ORDER BY kw.name COLLATE NOCASE ASC
+            """,
+            (document_id, owner_scope, profile_scope),
+        ).fetchall()
+        return tuple(row["name"] for row in rows)
+
+    @staticmethod
+    def _collections_for_document(
+        conn: sqlite3.Connection,
+        owner_scope: str,
+        profile_scope: str,
+        document_id: int,
+    ) -> tuple[str, ...]:
+        rows = conn.execute(
+            """
+            SELECT col.name
+            FROM docs_collection_members cm
+            JOIN docs_collections col ON col.id = cm.collection_id
+            WHERE cm.document_id = ?
+              AND col.owner_scope = ?
+              AND col.profile_scope = ?
+            ORDER BY col.name COLLATE NOCASE ASC
+            """,
+            (document_id, owner_scope, profile_scope),
+        ).fetchall()
+        return tuple(row["name"] for row in rows)
+
+    @staticmethod
     def _chunks_for_document(conn: sqlite3.Connection, document_id: int) -> list[dict[str, Any]]:
         rows = conn.execute(
             """
@@ -1155,4 +1679,43 @@ def _document_from_row(row: sqlite3.Row) -> dict[str, Any]:
         "version": row["package_version"],
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
+    }
+
+
+def _source_from_row(row: sqlite3.Row) -> dict[str, Any]:
+    keys = set(row.keys())
+    return {
+        "id": int(row["id"]),
+        "source_type": row["source_type"],
+        "canonical_uri": row["canonical_uri"],
+        "display_name": row["display_name"],
+        "source_path": row["source_path"],
+        "source_url": row["source_url"],
+        "redacted_source_url": row["redacted_source_url"],
+        "policy_profile": row["policy_profile"],
+        "sync_enabled": bool(row["sync_enabled"]),
+        "last_sync_status": row["last_sync_status"],
+        "last_sync_started_at": row["last_sync_started_at"],
+        "last_sync_completed_at": row["last_sync_completed_at"],
+        "last_error_code": row["last_error_code"],
+        "document_count": int(row["document_count"] or 0) if "document_count" in keys else 0,
+        "metadata": _json_load(row["metadata_json"]),
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+
+
+def _source_document_link_from_row(row: sqlite3.Row) -> dict[str, Any]:
+    keys = set(row.keys())
+    return {
+        "source_id": int(row["source_id"]),
+        "document_id": int(row["document_id"]),
+        "source_item_uri": row["source_item_uri"],
+        "status": row["status"],
+        "last_seen_at": row["last_seen_at"],
+        "last_hash": row["last_hash"],
+        "last_error_code": row["last_error_code"],
+        "metadata": _json_load(row["metadata_json"]),
+        "title": row["title"] if "title" in keys else None,
+        "canonical_uri": row["canonical_uri"] if "canonical_uri" in keys else None,
     }

@@ -18,6 +18,8 @@ CREATE TABLE IF NOT EXISTS docs_documents (
     source_url TEXT,
     content_hash TEXT NOT NULL,
     text TEXT NOT NULL,
+    lifecycle_status TEXT NOT NULL DEFAULT 'active',
+    preserve_on_source_tombstone INTEGER NOT NULL DEFAULT 0,
     metadata_json TEXT NOT NULL DEFAULT '{}',
     package_name TEXT,
     package_version TEXT,
@@ -34,6 +36,56 @@ CREATE INDEX IF NOT EXISTS docs_documents_scope_type_idx
 
 CREATE INDEX IF NOT EXISTS docs_documents_scope_package_idx
     ON docs_documents (owner_scope, profile_scope, package_name, package_version);
+
+CREATE TABLE IF NOT EXISTS docs_sources (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_scope TEXT NOT NULL DEFAULT '',
+    profile_scope TEXT NOT NULL DEFAULT '',
+    source_type TEXT NOT NULL,
+    canonical_uri TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    source_path TEXT,
+    source_url TEXT,
+    redacted_source_url TEXT,
+    policy_profile TEXT,
+    sync_enabled INTEGER NOT NULL DEFAULT 1,
+    last_sync_status TEXT,
+    last_sync_started_at TEXT,
+    last_sync_completed_at TEXT,
+    last_error_code TEXT,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (owner_scope, profile_scope, canonical_uri)
+);
+
+CREATE TABLE IF NOT EXISTS docs_source_documents (
+    source_id INTEGER NOT NULL REFERENCES docs_sources(id) ON DELETE CASCADE,
+    document_id INTEGER NOT NULL REFERENCES docs_documents(id) ON DELETE CASCADE,
+    source_item_uri TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    last_seen_at TEXT,
+    last_hash TEXT,
+    last_error_code TEXT,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    PRIMARY KEY (source_id, source_item_uri)
+);
+
+CREATE TABLE IF NOT EXISTS docs_sync_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_scope TEXT NOT NULL DEFAULT '',
+    profile_scope TEXT NOT NULL DEFAULT '',
+    source_id INTEGER NOT NULL REFERENCES docs_sources(id) ON DELETE CASCADE,
+    mode TEXT NOT NULL,
+    status TEXT NOT NULL,
+    started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    completed_at TEXT,
+    requested_limits_json TEXT NOT NULL DEFAULT '{}',
+    counts_json TEXT NOT NULL DEFAULT '{}',
+    warnings_json TEXT NOT NULL DEFAULT '[]',
+    error_code TEXT,
+    metadata_json TEXT NOT NULL DEFAULT '{}'
+);
 
 CREATE TABLE IF NOT EXISTS docs_collections (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
