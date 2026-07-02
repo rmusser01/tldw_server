@@ -28,6 +28,12 @@ const messageOptionState = vi.hoisted(() => ({
     setSelectedQuickPrompt: vi.fn(),
     setSelectedModel: vi.fn(),
     setServerChatId: vi.fn(),
+    serverChatCharacterId: null as string | number | null,
+    setServerChatCharacterId: vi.fn(),
+    serverChatAssistantKind: null as "character" | "persona" | null,
+    setServerChatAssistantKind: vi.fn(),
+    serverChatAssistantId: null as string | null,
+    setServerChatAssistantId: vi.fn(),
     contextFiles: [] as Array<{ id: string; name: string }>,
     setContextFiles: vi.fn(),
     createChatBranch: vi.fn(),
@@ -39,8 +45,12 @@ const messageOptionState = vi.hoisted(() => ({
       kind: "character" | "persona";
       id: string;
       name: string;
+      metadata?: Record<string, unknown>;
     } | null,
     serverChatPersonaMemoryMode: null as "read_only" | "read_write" | null,
+    serverChatMetaLoaded: false,
+    setServerChatPersonaMemoryMode: vi.fn(),
+    setServerChatMetaLoaded: vi.fn(),
     setSelectedAssistant: vi.fn(),
     compareMode: false,
     compareFeatureEnabled: false,
@@ -54,6 +64,7 @@ const messageOptionState = vi.hoisted(() => ({
 const sessionPersistenceState = vi.hoisted(() => ({
   value: {
     restoreSession: vi.fn(async () => false),
+    clearPersistedSession: vi.fn(async () => undefined),
     sessionScopeReady: true,
     hasPersistedSession: false,
     persistedHistoryId: null as string | null,
@@ -323,6 +334,10 @@ describe("Playground cockpit shell", () => {
     messageOptionState.value.history = [];
     messageOptionState.value.historyId = null;
     messageOptionState.value.serverChatId = null;
+    messageOptionState.value.serverChatCharacterId = null;
+    messageOptionState.value.serverChatAssistantKind = null;
+    messageOptionState.value.serverChatAssistantId = null;
+    messageOptionState.value.serverChatMetaLoaded = false;
     messageOptionState.value.streaming = false;
     messageOptionState.value.selectedModel = "openai:gpt-4.1-mini";
     messageOptionState.value.selectedSystemPrompt = "";
@@ -330,9 +345,16 @@ describe("Playground cockpit shell", () => {
     messageOptionState.value.selectedAssistant = null;
     messageOptionState.value.selectedCharacter = null;
     messageOptionState.value.setSelectedCharacter = vi.fn();
+    messageOptionState.value.setServerChatId = vi.fn();
+    messageOptionState.value.setServerChatCharacterId = vi.fn();
+    messageOptionState.value.setServerChatAssistantKind = vi.fn();
+    messageOptionState.value.setServerChatAssistantId = vi.fn();
+    messageOptionState.value.setServerChatPersonaMemoryMode = vi.fn();
+    messageOptionState.value.setServerChatMetaLoaded = vi.fn();
     messageOptionState.value.contextFiles = [];
     messageOptionState.value.regenerateLastMessage = vi.fn();
     sessionPersistenceState.value.sessionScopeReady = true;
+    sessionPersistenceState.value.clearPersistedSession.mockClear();
     chatSettingsState.syncChatSettingsForServerChat.mockClear();
     cockpitChatRenderState.starterDeckSignals = [];
     tldwServerState.fetchChatModels.mockResolvedValue([
@@ -403,6 +425,94 @@ describe("Playground cockpit shell", () => {
       activeCharacterName: "Ariadne",
       activeServerChatId: "server-chat-1",
     });
+  });
+
+  it("clears the loaded character chat when the selected tracked character changes", async () => {
+    storageState.values.set("playgroundChatWorkflowMode", "character");
+    messageOptionState.value.serverChatId = "chat-character-a";
+    messageOptionState.value.serverChatCharacterId = "character-a";
+    messageOptionState.value.serverChatAssistantKind = "character";
+    messageOptionState.value.serverChatAssistantId = "character-a";
+    messageOptionState.value.serverChatMetaLoaded = true;
+    messageOptionState.value.historyId = "local-chat-a";
+    messageOptionState.value.messages = [
+      {
+        role: "assistant",
+        isBot: true,
+        message: "Prior character reply",
+      },
+    ];
+    messageOptionState.value.history = [
+      {
+        role: "assistant",
+        content: "Prior character reply",
+      },
+    ];
+    messageOptionState.value.selectedAssistant = {
+      kind: "character",
+      id: "character-a",
+      name: "Character A",
+      metadata: { selectionMode: "tracked" },
+    };
+    messageOptionState.value.selectedCharacter = {
+      id: "character-a",
+      name: "Character A",
+    };
+
+    const { rerender } = render(<Playground />);
+
+    await screen.findByTestId("playground-cockpit-shell");
+    await waitFor(() => {
+      expect(characterSessionsPanelState.props.at(-1)).toMatchObject({
+        activeServerChatId: "chat-character-a",
+      });
+    });
+    vi.mocked(messageOptionState.value.setServerChatId).mockClear();
+    vi.mocked(messageOptionState.value.setHistoryId).mockClear();
+    vi.mocked(messageOptionState.value.setHistory).mockClear();
+    vi.mocked(messageOptionState.value.setMessages).mockClear();
+    vi.mocked(messageOptionState.value.setServerChatCharacterId).mockClear();
+    vi.mocked(messageOptionState.value.setServerChatAssistantKind).mockClear();
+    vi.mocked(messageOptionState.value.setServerChatAssistantId).mockClear();
+    vi.mocked(messageOptionState.value.setServerChatPersonaMemoryMode).mockClear();
+    vi.mocked(messageOptionState.value.setServerChatMetaLoaded).mockClear();
+
+    messageOptionState.value.selectedAssistant = {
+      kind: "character",
+      id: "character-b",
+      name: "Character B",
+      metadata: { selectionMode: "tracked" },
+    };
+    messageOptionState.value.selectedCharacter = {
+      id: "character-b",
+      name: "Character B",
+    };
+
+    rerender(<Playground />);
+
+    await waitFor(() => {
+      expect(messageOptionState.value.setServerChatId).toHaveBeenCalledWith(null);
+    });
+    expect(messageOptionState.value.setHistoryId).toHaveBeenCalledWith(null, {
+      preserveServerChatId: false,
+    });
+    expect(messageOptionState.value.setHistory).toHaveBeenCalledWith([]);
+    expect(messageOptionState.value.setMessages).toHaveBeenCalledWith([]);
+    expect(messageOptionState.value.setServerChatCharacterId).toHaveBeenCalledWith(
+      null,
+    );
+    expect(messageOptionState.value.setServerChatAssistantKind).toHaveBeenCalledWith(
+      null,
+    );
+    expect(messageOptionState.value.setServerChatAssistantId).toHaveBeenCalledWith(
+      null,
+    );
+    expect(
+      messageOptionState.value.setServerChatPersonaMemoryMode,
+    ).toHaveBeenCalledWith(null);
+    expect(messageOptionState.value.setServerChatMetaLoaded).toHaveBeenCalledWith(
+      false,
+    );
   });
 
   it("shows the starter deck for a true blank chat state", async () => {

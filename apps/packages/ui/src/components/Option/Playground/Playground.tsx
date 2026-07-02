@@ -368,6 +368,8 @@ export const Playground = () => {
     serverChatState,
     serverChatTopic,
     serverChatSource,
+    serverChatCharacterId,
+    serverChatMetaLoaded,
     isLoading,
     selectedModel,
     setHistoryId,
@@ -593,6 +595,60 @@ export const Playground = () => {
       : selectedAssistant
         ? null
         : (selectedCharacter?.name ?? null);
+  const selectedTrackedCharacterId = React.useMemo(() => {
+    if (
+      selectedAssistant?.kind === "character" &&
+      selectedAssistantMode !== "overlay"
+    ) {
+      return String(selectedAssistant.id);
+    }
+    if (!selectedAssistant && selectedCharacter?.id != null) {
+      return String(selectedCharacter.id);
+    }
+    return null;
+  }, [
+    selectedAssistant,
+    selectedAssistantMode,
+    selectedCharacter?.id,
+  ]);
+
+  React.useEffect(() => {
+    if (
+      !serverChatId ||
+      !serverChatMetaLoaded ||
+      serverChatCharacterId == null ||
+      !selectedTrackedCharacterId ||
+      String(serverChatCharacterId) === selectedTrackedCharacterId
+    ) {
+      return;
+    }
+
+    setHistoryId(null, { preserveServerChatId: false });
+    setHistory([]);
+    setMessages([]);
+    setServerChatCharacterId(null);
+    setServerChatAssistantKind(null);
+    setServerChatAssistantId(null);
+    setServerChatPersonaMemoryMode(null);
+    setServerChatMetaLoaded(false);
+    setServerChatId(null);
+    void clearPersistedSession().catch(() => undefined);
+  }, [
+    clearPersistedSession,
+    selectedTrackedCharacterId,
+    serverChatCharacterId,
+    serverChatId,
+    serverChatMetaLoaded,
+    setHistory,
+    setHistoryId,
+    setMessages,
+    setServerChatAssistantId,
+    setServerChatAssistantKind,
+    setServerChatCharacterId,
+    setServerChatId,
+    setServerChatMetaLoaded,
+    setServerChatPersonaMemoryMode,
+  ]);
   const setRouteContext = useChatSurfaceCoordinatorStore(
     (state) => state.setRouteContext,
   );
