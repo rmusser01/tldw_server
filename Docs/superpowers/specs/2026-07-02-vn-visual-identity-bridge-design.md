@@ -21,7 +21,7 @@ Source reference: [TavernSprite SillyTavern expression guide](https://tavernspri
 - Let VN-generated image files become Visual Identity expression assets through a VN-aware bridge.
 - Keep the existing generic generated-file import endpoint as the backend API surface.
 - Add asset-level provenance so the system can trace which VN asset workflow produced a Visual Identity asset.
-- Preserve support for animated raster expression assets, including GIF, WebP, and capability-gated AVIF.
+- Preserve Visual Identity support for animated raster expression assets, including GIF, WebP, and capability-gated AVIF, when a valid generated-file source already provides those formats.
 - Provide a reusable frontend import action/hook for future VN asset surfaces without creating route-level VN UI in this stage.
 - Support partial success when asset import succeeds but draft slot assignment fails.
 - Add a stateless resolver for future VN role/casting flows with strict ownership and override validation.
@@ -78,12 +78,14 @@ Extend its request/response schema and service path to support optional asset pr
     "vn_asset_type": "sprite",
     "vn_slot_key": "happy",
     "vn_slot_label": "Happy",
-    "source_ref": "vn_assets/generated-files/42"
+    "source_ref": "vn_asset_item:29"
   }
 }
 ```
 
 The lower-level endpoint remains flexible enough for other generated-file sources. The VN bridge service defaults `source_feature` to `vn_assets` and rejects non-VN source features unless the caller explicitly opts into the generic path outside the bridge.
+
+The VN bridge must treat client-provided provenance as a request hint, not as trusted authority. Where possible, it derives `source_feature`, filename, MIME metadata, and generated-file source references from the generated-file record and VN asset item data. If `vn_item_id` is present, the generated-file record must match the VN asset item source reference, such as `vn_asset_item:{vn_item_id}`. A mismatch fails before asset creation.
 
 Use this backend module:
 
@@ -106,8 +108,9 @@ Migration requirements:
 - The migration is idempotent and checks whether the column exists before adding it.
 - Existing rows receive `{}` and remain valid.
 - Draft assets and activated version assets both carry `source_context_json`.
-- Activation copies `source_context_json` from draft assets into version assets.
-- API responses include `source_context` when returning generated-file import results and asset records that the frontend needs to verify or display.
+- Activation copies `source_context_json` from draft assets into version assets in both the SQL insert and the returned activation asset list.
+- Version manifests preserve asset `source_context` where they serialize asset metadata.
+- `VisualIdentityAssetResponse` includes `source_context`, including generated-file import responses and draft asset lists that the frontend needs to verify or display.
 
 `source_context` is bounded metadata, not a hidden payload channel:
 
@@ -123,9 +126,11 @@ The minimum useful provenance fields are `source_feature`, `generated_file_id`, 
 
 ### Idempotency
 
-The generated-file import idempotency payload hash must include `source_context`.
+The generated-file import idempotency payload hash must include the validated, canonicalized `source_context` after server-derived fields are merged and rejected fields are removed.
 
 If the same owner, scope, resource, and idempotency key are reused with a different `source_context`, the request conflicts rather than returning a stale response. This prevents two VN generation records from being accidentally collapsed into one Visual Identity asset assignment.
+
+Canonicalization uses deterministic JSON key ordering and normalized scalar values so semantically equivalent metadata does not conflict only because object keys arrived in a different order.
 
 ### Frontend Reusable Import Action
 
@@ -160,6 +165,8 @@ type GeneratedFileImportActionResult =
 ```
 
 If asset import succeeds and slot update fails, the action returns `imported_unassigned`. It does not auto-delete the created asset. The host can show a retry affordance or let the user manually assign the imported asset.
+
+Stage 11A does not expand the current VN Asset upload/generation format matrix. VN Assets currently produce or accept only the formats supported by their own module. Visual Identity can still preserve GIF/WebP/AVIF animation when the generated-file record is already a valid image source accepted by the Visual Identity generated-file import path.
 
 ## Stage 11B: VN Role/Casting Resolver
 
@@ -245,6 +252,7 @@ Stage 11A import errors:
 - non-image generated file: no asset row is created
 - unsupported MIME or failed image validation: no asset row is created
 - invalid `source_context`: no asset row is created
+- VN source-ref mismatch: no asset row is created
 - idempotency conflict: no new asset row is created
 - slot update failure after successful import: asset remains and frontend returns `imported_unassigned`
 
@@ -275,7 +283,9 @@ Resolver responses must expose fallback reasons. Silent fallback to unrelated pa
 - `source_context` validation rejects invalid root type, excessive size, excessive depth, excessive key count, long keys, long scalar strings, binary/base64 payloads, data URIs, and long prompt text.
 - VN bridge defaults `source_feature` to `vn_assets`.
 - VN bridge rejects non-VN generated-file sources unless the generic import path is explicitly used.
-- API response includes `source_context` where the frontend needs to verify or display provenance.
+- VN bridge rejects a generated-file record whose `source_ref` does not match the provided `vn_item_id`.
+- Idempotency uses validated/canonicalized `source_context`; reordered equivalent objects replay, while materially different context conflicts.
+- API response includes asset-level `source_context` on `VisualIdentityAssetResponse`, generated-file import responses, draft asset lists, and version/manifest asset metadata where exposed.
 
 ### Frontend Stage 11A
 
