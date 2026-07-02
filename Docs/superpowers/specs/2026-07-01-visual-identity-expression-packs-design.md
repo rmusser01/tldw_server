@@ -75,12 +75,28 @@ Important metadata:
 - pack id
 - owner user id
 - title and description
-- source type: imported, uploaded, generated, mixed
+- source type: imported, uploaded, mixed, or reserved future generated
 - renderer type: `sprite_frames` in V1
 - current active version id
-- status: draft, active, archived, failed
+- container status: active, archived, deleted
 - compatibility metadata for SillyTavern imports
 - created and updated timestamps
+
+`generated` is a reserved source type for V1. It can appear only when an existing compatible generator explicitly emits a Visual Identity draft; this spec does not add a new generation workflow.
+
+### Pack Draft
+
+A draft is the mutable workspace for imports and edits.
+
+Draft statuses:
+
+- importing
+- ready_for_review
+- failed
+- abandoned
+- activated
+
+Drafts can contain invalid, skipped, or warning-bearing entries. Only validated draft contents can be activated into an immutable version.
 
 ### Pack Version
 
@@ -140,9 +156,11 @@ Reserved future target:
 
 - VN role
 
-One binding can be marked as default for the target. Chat/VN explicit overrides outrank defaults. Default resolution is:
+One binding can be marked as default for the target. Chat/VN explicit overrides outrank defaults. Default resolution is actor-scoped:
 
 `chat or VN explicit override -> selected character/persona default pack -> legacy mood image/static avatar -> neutral placeholder`
+
+When both a character and persona are selected, the renderer resolves the pack for the actor being displayed. Character chat portrait and V1 stage view display the assistant/character actor by default, so the selected character's binding wins there. A persona binding is used when the persona itself is rendered or later cast into a VN/user role. The resolver must take an explicit `actor_kind` and `actor_id` rather than guessing from global chat state.
 
 ### Expression State
 
@@ -251,14 +269,13 @@ Runtime resolution should be deterministic and side-effect-light.
 
 Priority order:
 
-1. Session-level manual expression override.
-2. Client-side `/emote <expression>` override.
-3. Trusted structured message metadata for future model-directed expression output.
-4. Future server classifier output.
-5. Existing client-side mood detection when confidence meets threshold.
-6. Pack default expression.
-7. Legacy mood image or static avatar.
-8. Neutral placeholder.
+1. Session-level manual expression override, set by the picker or `/emote <expression>`.
+2. Trusted structured message metadata for future model-directed expression output.
+3. Future server classifier output.
+4. Existing client-side mood detection when confidence meets threshold.
+5. Pack default expression.
+6. Legacy mood image or static avatar.
+7. Neutral placeholder.
 
 Manual picker and `/emote` overrides are sticky for the current session until cleared or changed. Per-message metadata records what displayed at the time, but session overrides control future messages.
 
@@ -342,6 +359,8 @@ Bindings may use "latest active" for new sessions, but message history must pers
 
 This lets old chat history replay predictably after pack edits.
 
+Assets referenced by active pack versions or persisted message history are retained. Delete operations should create tombstones or mark assets unavailable before physical cleanup. Physical cleanup is allowed only for unreferenced draft, skipped, rejected, or abandoned assets, or after a retention policy can prove no active version or message replay path references the file. When a historical asset is unavailable, replay must expose an explicit fallback reason.
+
 Visual pack asset URLs are user-owned content. They should go through authenticated API access or short-lived signed URLs, consistent with existing project storage conventions.
 
 ## Compatibility
@@ -424,6 +443,21 @@ Integration tests:
 - existing Persona Visual Pack behavior unchanged
 
 Security validation should include Bandit for touched backend code during implementation. This design doc alone does not require Bandit execution.
+
+## Appendix: V1 Expression Baseline
+
+The implementation plan should pin the exact alias table after checking existing local mood labels and SillyTavern compatibility expectations. The V1 canonical baseline should include at least the existing local mood labels:
+
+- neutral
+- happy
+- excited
+- sad
+- angry
+- thinking
+- confused
+- surprised
+
+The importer should map common compatibility aliases into canonical keys, including `default` and `normal` to `neutral`. SillyTavern-style names that do not map to a canonical V1 key become custom expression slots with their original source name preserved as an alias.
 
 ## Rollout
 

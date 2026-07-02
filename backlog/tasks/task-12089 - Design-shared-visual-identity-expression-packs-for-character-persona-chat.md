@@ -25,7 +25,7 @@ Write a design spec for shared Visual Identity Packs that support SillyTavern-st
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Draft design spec written for shared Visual Identity Packs covering V1 scope, import/manual edit behavior, animated raster validation, chat portrait and stage runtime behavior, immutable pack versions, compatibility constraints, VN bridge metadata, and testing/rollout strategy. Verification: self-review scan found no unresolved placeholder markers; design-only change so Bandit is not applicable.
+Design spec written and revised after review for shared Visual Identity Packs. Latest revision clarifies actor-scoped default resolution when both character and persona packs exist, separates pack containers from mutable drafts and immutable versions, reserves generated source type for future workflows, collapses manual picker and /emote into one session override priority, adds retention/tombstone rules for replayed assets, and adds a V1 expression baseline appendix. Verification: self-review scan found no unresolved placeholder markers; design-only change so Bandit is not applicable.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
