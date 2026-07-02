@@ -54,7 +54,7 @@ apply a bounded refresh, and receive stable item-level results.
 
 ## Current Baseline
 
-The merged Stage 1-3 docs package already has:
+The current Stage 1-3 stacked branch already has:
 
 - `DocsSettings` with trusted roots and web acquisition policy settings.
 - `DocsImportService.import_path()` for trusted local file/tree import.
@@ -88,6 +88,7 @@ Recommended fields:
 - `display_name`
 - `source_path`
 - `source_url`
+- `redacted_source_url`
 - `policy_profile`
 - `sync_enabled`
 - `last_sync_status`
@@ -104,11 +105,19 @@ Canonical URI rules:
 
 - Local files and directories use normalized `file://` URIs derived from the
   resolved trusted-root path.
-- URL pages use the Stage 2 normalized canonical URL after redirects when a
-  fetch succeeds, otherwise the normalized redacted requested URL.
+- URL pages use the Stage 2 normalized canonical URL after redirects. A URL
+  source is not created until policy allows a fetch and the fetch produces a
+  canonical, fetch-capable URL.
 - Sitemaps use the normalized sitemap URL.
-- Query strings may be part of the canonical URL for fetch identity, but logs,
-  errors, audit summaries, and source list display must use redacted forms.
+- `source_url` stores the fetch target for URL-backed sources and may include
+  query parameters needed to refresh the source.
+- `redacted_source_url` stores the display/logging form. Tool results, source
+  lists, errors, warnings, and sync-run metadata must use redacted URL forms
+  unless the caller explicitly requests full source metadata through a future
+  privileged diagnostic path. Stage 4A does not add that diagnostic path.
+- Query strings may be part of `canonical_uri` and `source_url` for fetch
+  identity, but logs, errors, audit summaries, and source list display must use
+  redacted forms.
 
 ### `docs_source_documents`
 
@@ -237,8 +246,27 @@ Response shape:
 ```
 
 For `dry_run`, no documents, chunks, collection memberships, keywords, source
-links, or source status fields are mutated. A sync run record may be stored for
-auditability if the implementation marks it clearly as dry-run.
+links, source status fields, source timestamps, or sync run records are
+mutated. Dry-run audit persistence is deferred to a host wrapper or later
+diagnostic feature so the Stage 4A standalone dry-run path is strictly
+read-only.
+
+## Metadata Preservation
+
+Sync must not erase user organization.
+
+- `docs.import_path` and `docs.ingest_url` should record their initial
+  collection and keyword arguments as source defaults in `docs_sources`
+  metadata.
+- In apply mode, sync merges source-default collections and keywords with the
+  document's existing collections and keywords.
+- Sync must not call `DocsCatalogStore.upsert_document()` with empty keyword or
+  collection arguments for an existing document unless the source explicitly has
+  an empty replacement policy. Stage 4A does not add replacement policy.
+- User-applied keywords and collection memberships survive unchanged content,
+  updated content, missing-source report mode, and tombstone mode.
+- If a future source wants authoritative replacement semantics, it needs a new
+  explicit source metadata policy and separate tests.
 
 ## Local Source Sync
 
@@ -252,7 +280,9 @@ Local file sync:
 4. If the suffix is unsupported, return `failed` with
    `unsupported_import_format`.
 5. Parse, chunk, hash, and compare with the linked document.
-6. In apply mode, upsert the document only when content or metadata changed,
+6. In apply mode, merge existing user collections/keywords with source-default
+   collections/keywords.
+7. In apply mode, upsert the document only when content or metadata changed,
    unless `force=true`.
 
 Local directory sync:
@@ -261,10 +291,12 @@ Local directory sync:
 2. Enforce trusted-root path scope.
 3. Enumerate supported files deterministically.
 4. Enforce `max_documents` before parsing all candidates.
-5. Upsert active files through the same parser/chunker path as import.
-6. Compare enumerated item URIs with previously linked source items.
-7. Report previously linked items that are no longer present as `missing`.
-8. Only set source-item status to `tombstoned` when
+5. Merge existing user collections/keywords with source-default
+   collections/keywords for each active document.
+6. Upsert active files through the same parser/chunker path as import.
+7. Compare enumerated item URIs with previously linked source items.
+8. Report previously linked items that are no longer present as `missing`.
+9. Only set source-item status to `tombstoned` when
    `stale_policy="tombstone"` and `mode="apply"`.
 
 Directory sync should not recurse outside the source root even if symlinks
@@ -301,11 +333,16 @@ Rules:
 - Fetch the sitemap URL through the same Stage 2 URL fetcher and policy checks.
 - Parse XML with stdlib XML tooling configured to avoid external entity
   expansion.
+- Reject sitemap bodies containing `DOCTYPE` or `ENTITY` declarations before
+  XML parsing.
 - Accept only `<url><loc>...</loc></url>` entries in Stage 4A.
 - Ignore sitemap index recursion unless a later task explicitly adds it.
 - Every discovered URL must pass the source policy and must be same-origin or
   under an explicitly allowed URL prefix for the source.
-- Enforce `max_pages` before page fetches.
+- Enforce `max_pages` while collecting `<loc>` entries and before page fetches;
+  entries beyond the limit are counted as skipped without being fetched.
+- Cap stored run item details at `max_sync_run_items`; additional item summaries
+  are counted but not persisted into run metadata.
 - Fetch each accepted page with Stage 2 guards.
 - No JavaScript rendering, no cookies, no browser extraction.
 
@@ -321,9 +358,11 @@ Default stale behavior is report-only.
 - `stale_policy="tombstone"`: apply mode marks the source item as
   `tombstoned`.
 - Add `lifecycle_status` to `docs_documents` with default `active`.
+- Add `preserve_on_source_tombstone` to `docs_documents` with default false.
+  Stage 4A does not expose a public tool to set it; the field exists so future
+  manual-preservation flows have a defined search rule.
 - A document is hidden from default search only when all source links for that
-  document are tombstoned or missing and the document is not manually
-  preserved.
+  document are tombstoned or missing and `preserve_on_source_tombstone=false`.
 - Legacy rows without source links remain `active` after migration.
 - Hard delete is out of scope.
 
@@ -373,6 +412,8 @@ Stable reason codes should include:
 - `sitemap_fetch_failed`
 - `sitemap_parse_failed`
 - `sitemap_url_out_of_scope`
+- `sitemap_xml_forbidden_doctype`
+- `sitemap_xml_forbidden_entity`
 - `robots_unavailable`
 - `stale_reported`
 - `tombstoned`
@@ -412,9 +453,14 @@ Unit tests:
 - source schema migration and legacy row compatibility;
 - source creation from local import;
 - source creation from URL ingest;
+- URL source identity stores a fetch-capable `source_url` while source lists
+  and run metadata expose only redacted URL forms;
 - source listing with owner/profile scope enforcement;
 - sync selector validation;
-- dry-run does not mutate documents, source links, or statuses;
+- dry-run does not mutate documents, source links, source timestamps,
+  statuses, or sync-run rows;
+- sync preserves existing user-applied collections and keywords while merging
+  source defaults;
 - local file sync created/updated/unchanged behavior;
 - local directory sync deterministic enumeration and max-document limit;
 - missing local file report mode;
@@ -423,6 +469,8 @@ Unit tests:
 - URL sync denial for source policy and private redirect cases;
 - sitemap disabled failure;
 - sitemap parsing with safe XML settings;
+- sitemap `DOCTYPE` and `ENTITY` declaration rejection;
+- sitemap `max_pages` enforcement before page fetches;
 - sitemap out-of-scope URL rejection;
 - source sync status reporting in `docs.status`.
 
@@ -453,6 +501,8 @@ Security tests:
 - oversized response denial;
 - unsupported content type denial;
 - sitemap XML external entity is not resolved;
+- sitemap XML `DOCTYPE` or `ENTITY` declarations are rejected before parser
+  construction;
 - no fetch before approval-required result.
 
 ## Implementation Slices
