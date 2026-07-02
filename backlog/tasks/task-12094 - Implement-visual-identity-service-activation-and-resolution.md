@@ -30,7 +30,7 @@ priority: high
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-<!-- SECTION:DESCRIPTION:BEGIN -->
+Stage 4 service activation and resolution for visual identity expression packs: pack shell creation, atomic draft activation into immutable versions, optional character/persona binding, actor ownership validation, deterministic expression resolution, legacy mood fallback, and service/repository regression coverage.
 <!-- SECTION:DESCRIPTION:END -->
 
 <!-- SECTION:DESCRIPTION:END -->
