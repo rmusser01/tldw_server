@@ -12,6 +12,7 @@ labels:
 dependencies: []
 references:
 - TASK-12088
+- https://github.com/rmusser01/tldw_server/pull/2572
 - https://github.com/huggingface/speech-to-speech
 - https://developers.openai.com/api/docs/guides/realtime
 - https://developers.openai.com/api/docs/guides/realtime-conversations#handling-audio-with-websockets
@@ -110,4 +111,6 @@ Stage 4 complete. Added DefaultRealtimePipeline with injected STT/chat/TTS depen
 Stage 5 complete. Documented the OpenAI-compatible realtime speech routes, handshake auth behavior, audio contract, supported client/server events, explicit Stage 1 unsupported features, and tldw quota semantics. Updated the latency PRD to record the Stage 1 route support and deferred latency/interruption benchmarks, accepted the design spec, completed TASK-12088, and added an opt-in provider-backed live smoke marker that is skipped unless `TLDW_REALTIME_LIVE_SMOKE=1` plus explicit STT/LLM/TTS provider env vars are set. Verification: live smoke marker collection reported 1 skipped; focused realtime suite passed (96 passed, 3 warnings); route/config regression suite passed (11 passed, 4 warnings); Bandit on touched implementation paths plus TTS realtime session wrote `/tmp/bandit_audio_realtime.json` with errors=[] and results=0; git diff --check passed.
 
 Pre-PR review follow-up complete. Rebased the feature branch onto current `origin/dev` so the PR diff is limited to realtime/task/doc files. Fixed review blockers by making response generation cancellable through the WebSocket receive loop, adding an active-generation cancellation integration test, rejecting unimplemented `response.create` and `session.modalities` overrides instead of silently accepting them, adding explicit beta `input_audio_format` rejection, validating session scalar field types, exposing persistence/deferred feature metadata in capabilities, serializing capabilities with `asdict`, splitting oversized TTS audio chunks before protocol serialization, splitting chat and TTS provider hints, and correcting the opt-in live smoke session shape. Verification: focused realtime suite passed (110 passed, 3 warnings); route/config regression suite passed (11 passed, 4 warnings); Bandit wrote `/tmp/bandit_audio_realtime_reviewfix_final.json` with errors=[] and results=0; git diff --check passed.
+
+PR opened against `dev`: https://github.com/rmusser01/tldw_server/pull/2572. PR body records the human-authored Change summary merge-gate requirement for this AI-authored change.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
