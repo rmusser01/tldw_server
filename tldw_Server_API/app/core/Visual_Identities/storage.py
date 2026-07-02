@@ -70,6 +70,20 @@ class VisualIdentityStoredAsset:
     preview_relpath: str | None
 
 
+@dataclass(frozen=True)
+class _ValidatedVisualIdentitySource:
+    content: bytes
+    byte_count: int
+    sha256: str
+    content_type: str
+    width: int
+    height: int
+    is_animated: bool
+    frame_count: int
+    duration_ms: int | None
+    extension: str
+
+
 def validate_and_store_visual_identity_asset(
     *,
     source_path: str | Path,
@@ -81,33 +95,11 @@ def validate_and_store_visual_identity_asset(
 ) -> VisualIdentityStoredAsset:
     """Validate a raster expression asset and store its original bytes safely."""
     source = Path(source_path)
-    if not source.is_file():
-        raise ValueError(VISUAL_IDENTITY_INVALID_IMAGE)
-
-    byte_count = source.stat().st_size
-    if byte_count <= 0:
-        raise ValueError(VISUAL_IDENTITY_INVALID_IMAGE)
-    if byte_count > constraints.MAX_EXPRESSION_ASSET_BYTES:
-        raise ValueError(VISUAL_IDENTITY_FILE_TOO_LARGE)
-
-    content = source.read_bytes()
-    byte_count = len(content)
-    if byte_count <= 0:
-        raise ValueError(VISUAL_IDENTITY_INVALID_IMAGE)
-    if byte_count > constraints.MAX_EXPRESSION_ASSET_BYTES:
-        raise ValueError(VISUAL_IDENTITY_FILE_TOO_LARGE)
-
-    sha256 = hashlib.sha256(content).hexdigest()
-    sniffed_mime = _sniff_mime_type(content)
-    _ensure_supported_mime_type(sniffed_mime)
-    _validate_declared_mime_type(content_type, sniffed_mime)
-
-    image_metadata = _validate_image_content(content, expected_mime_type=sniffed_mime)
-    extension = _validated_storage_extension(source, sniffed_mime)
+    validated = _validate_visual_identity_source(source, content_type=content_type)
     root = _visual_identity_storage_root(owner_user_id, storage_root=storage_root)
     asset_relpath = _asset_relpath(
-        sha256=sha256,
-        extension=extension,
+        sha256=validated.sha256,
+        extension=validated.extension,
         expression_key=expression_key,
         pack_id=pack_id,
     )
@@ -117,27 +109,27 @@ def validate_and_store_visual_identity_asset(
         storage_root=root,
     )
     target_path.parent.mkdir(parents=True, exist_ok=True)
-    _write_once(target_path, content, expected_sha256=sha256)
+    _write_once(target_path, validated.content, expected_sha256=validated.sha256)
 
     preview_relpath = _create_first_frame_preview(
-        content,
+        validated.content,
         owner_user_id=owner_user_id,
         storage_root=root,
-        sha256=sha256,
+        sha256=validated.sha256,
         expression_key=expression_key,
         pack_id=pack_id,
     )
 
     return VisualIdentityStoredAsset(
         relpath=asset_relpath,
-        content_type=sniffed_mime,
-        bytes=byte_count,
-        sha256=sha256,
-        width=image_metadata["width"],
-        height=image_metadata["height"],
-        is_animated=image_metadata["is_animated"],
-        frame_count=image_metadata["frame_count"],
-        duration_ms=image_metadata["duration_ms"],
+        content_type=validated.content_type,
+        bytes=validated.byte_count,
+        sha256=validated.sha256,
+        width=validated.width,
+        height=validated.height,
+        is_animated=validated.is_animated,
+        frame_count=validated.frame_count,
+        duration_ms=validated.duration_ms,
         preview_relpath=preview_relpath,
     )
 
@@ -195,6 +187,25 @@ def copy_generated_file_record_to_expression_asset(
         content_type=declared_content_type,
         pack_id=pack_id,
     )
+
+
+def validate_generated_file_record_for_expression_asset(
+    *,
+    owner_user_id: int,
+    generated_file_record: Mapping[str, Any],
+    source_feature: str | None = None,
+) -> None:
+    """Validate generated-file ownership and source path before draft side effects."""
+    _validate_generated_file_record(
+        generated_file_record,
+        owner_user_id=owner_user_id,
+        source_feature=source_feature,
+    )
+    source_path = _resolve_generated_file_record_path(owner_user_id, generated_file_record)
+    if not source_path.is_file():
+        raise ValueError(VISUAL_IDENTITY_GENERATED_FILE_NOT_FOUND)
+    declared_content_type = str(generated_file_record.get("mime_type") or "").strip() or None
+    _validate_visual_identity_source(source_path, content_type=declared_content_type)
 
 
 def _visual_identity_storage_root(
@@ -260,6 +271,48 @@ def _safe_storage_component(value: str, *, prefix: str) -> str:
         digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
         return f"{prefix}_{digest}"
     return cleaned[:120]
+
+
+def _validate_visual_identity_source(
+    source: Path,
+    *,
+    content_type: str | None,
+) -> _ValidatedVisualIdentitySource:
+    if not source.is_file():
+        raise ValueError(VISUAL_IDENTITY_INVALID_IMAGE)
+
+    byte_count = source.stat().st_size
+    if byte_count <= 0:
+        raise ValueError(VISUAL_IDENTITY_INVALID_IMAGE)
+    if byte_count > constraints.MAX_EXPRESSION_ASSET_BYTES:
+        raise ValueError(VISUAL_IDENTITY_FILE_TOO_LARGE)
+
+    content = source.read_bytes()
+    byte_count = len(content)
+    if byte_count <= 0:
+        raise ValueError(VISUAL_IDENTITY_INVALID_IMAGE)
+    if byte_count > constraints.MAX_EXPRESSION_ASSET_BYTES:
+        raise ValueError(VISUAL_IDENTITY_FILE_TOO_LARGE)
+
+    sha256 = hashlib.sha256(content).hexdigest()
+    sniffed_mime = _sniff_mime_type(content)
+    _ensure_supported_mime_type(sniffed_mime)
+    _validate_declared_mime_type(content_type, sniffed_mime)
+
+    image_metadata = _validate_image_content(content, expected_mime_type=sniffed_mime)
+    extension = _validated_storage_extension(source, sniffed_mime)
+    return _ValidatedVisualIdentitySource(
+        content=content,
+        byte_count=byte_count,
+        sha256=sha256,
+        content_type=sniffed_mime,
+        width=image_metadata["width"],
+        height=image_metadata["height"],
+        is_animated=image_metadata["is_animated"],
+        frame_count=image_metadata["frame_count"],
+        duration_ms=image_metadata["duration_ms"],
+        extension=extension,
+    )
 
 
 def _sniff_mime_type(content: bytes) -> str:
@@ -534,5 +587,6 @@ __all__ = [
     "VisualIdentityStoredAsset",
     "copy_generated_file_record_to_expression_asset",
     "resolve_visual_identity_asset_path",
+    "validate_generated_file_record_for_expression_asset",
     "validate_and_store_visual_identity_asset",
 ]

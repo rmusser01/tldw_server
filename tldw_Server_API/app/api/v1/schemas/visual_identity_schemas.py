@@ -185,7 +185,7 @@ class VisualIdentityResolveResponse(BaseModel):
     requested_expression_key: str | None = None
     asset_id: int | None = None
     storage_relpath: str | None = None
-    fallback_reason: str
+    fallback_reason: str | None = None
     is_animated: bool = False
     content_type: str | None = None
     asset_url: str | None = None
@@ -210,3 +210,4 @@ class VisualIdentityGeneratedFileAssetRequest(BaseModel):
     expression_key: str = Field(..., min_length=1, max_length=100)
     draft_id: int | None = Field(default=None, ge=1)
     source_feature: str = Field(default="image_gen", min_length=1, max_length=100)
+    idempotency_key: str = Field(..., min_length=1, max_length=160)

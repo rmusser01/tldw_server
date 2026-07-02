@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 from collections.abc import Generator
+from io import BytesIO
 from pathlib import Path
+from typing import Any
+import zipfile
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from PIL import Image
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_db_pool
 from tldw_Server_API.app.api.v1.endpoints import visual_identities
@@ -43,6 +47,51 @@ def storage_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return root
 
 
+@pytest.fixture
+def outputs_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    root = tmp_path / "outputs"
+    root.mkdir()
+    monkeypatch.setattr(
+        DatabasePaths,
+        "get_user_outputs_dir",
+        staticmethod(lambda owner_user_id: root / str(owner_user_id)),
+    )
+    return root
+
+
+class FakeJobManager:
+    def __init__(self) -> None:
+        self.created_jobs: list[dict[str, Any]] = []
+        self.jobs_by_idempotency_key: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+
+    def create_job(self, **kwargs: Any) -> dict[str, Any]:
+        idempotency_key = str(kwargs.get("idempotency_key") or "")
+        key = (
+            str(kwargs.get("domain") or ""),
+            str(kwargs.get("queue") or ""),
+            str(kwargs.get("job_type") or ""),
+            idempotency_key,
+        )
+        if idempotency_key and key in self.jobs_by_idempotency_key:
+            return self.jobs_by_idempotency_key[key]
+        self.created_jobs.append(kwargs)
+        job_id = f"zip-job-{len(self.created_jobs)}"
+        job = {"id": job_id, "job_id": job_id}
+        if idempotency_key:
+            self.jobs_by_idempotency_key[key] = job
+        return job
+
+
+class FakeGeneratedFilesRepo:
+    def __init__(self, records: dict[int, dict[str, Any]]) -> None:
+        self.records = records
+        self.accessed_ids: list[int] = []
+
+    async def get_file_by_id(self, file_id: int) -> dict[str, Any] | None:
+        self.accessed_ids.append(file_id)
+        return self.records.get(file_id)
+
+
 def _user(user_id: int) -> User:
     return User(
         id=user_id,
@@ -53,7 +102,13 @@ def _user(user_id: int) -> User:
     )
 
 
-def _client(chacha_db: CharactersRAGDB, *, user_id: int = 1) -> TestClient:
+def _client(
+    chacha_db: CharactersRAGDB,
+    *,
+    user_id: int = 1,
+    job_manager: FakeJobManager | None = None,
+    files_repo: FakeGeneratedFilesRepo | None = None,
+) -> TestClient:
     app = FastAPI()
     app.include_router(
         visual_identities.router,
@@ -63,6 +118,10 @@ def _client(chacha_db: CharactersRAGDB, *, user_id: int = 1) -> TestClient:
     app.dependency_overrides[visual_identities.get_request_user] = lambda: _user(user_id)
     app.dependency_overrides[visual_identities.get_chacha_db_for_user] = lambda: chacha_db
     app.dependency_overrides[get_db_pool] = lambda: object()
+    if job_manager is not None:
+        app.dependency_overrides[visual_identities._job_manager] = lambda: job_manager
+    if files_repo is not None:
+        app.dependency_overrides[visual_identities._generated_files_repo] = lambda: files_repo
     return TestClient(app)
 
 
@@ -97,6 +156,19 @@ def _seed_ready_draft(repo: VisualIdentityRepository, *, owner_user_id: int) -> 
         height=64,
     )
     return draft
+
+
+def _png_bytes(*, color: str = "purple") -> bytes:
+    buffer = BytesIO()
+    Image.new("RGBA", (8, 8), color).save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def _zip_bytes_with_png() -> bytes:
+    buffer = BytesIO()
+    with zipfile.ZipFile(buffer, mode="w") as archive:
+        archive.writestr("neutral.png", _png_bytes())
+    return buffer.getvalue()
 
 
 def test_capabilities_endpoint_reports_supported_formats(chacha_db: CharactersRAGDB) -> None:
@@ -157,6 +229,209 @@ def test_activate_draft_with_character_binds_by_default(
     assert binding is not None
     assert binding["pack_id"] == payload["pack_id"]
     assert binding["active_version_id"] == payload["pack_version_id"]
+
+
+def test_resolve_bound_asset_returns_content_url_and_null_direct_fallback(
+    chacha_db: CharactersRAGDB,
+    repo: VisualIdentityRepository,
+) -> None:
+    character_id = _seed_character(chacha_db)
+    draft = _seed_ready_draft(repo, owner_user_id=1)
+    client = _client(chacha_db)
+    activation = client.post(
+        f"/api/v1/visual-identities/drafts/{draft['id']}/activate",
+        json={"actor_kind": "character", "actor_id": character_id},
+    ).json()
+
+    response = client.get(
+        "/api/v1/visual-identities/bindings/resolve",
+        params={
+            "actor_kind": "character",
+            "actor_id": character_id,
+            "expression_key": "neutral",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["asset_id"] in activation["asset_ids"]
+    assert payload["asset_url"] == (
+        f"/api/v1/visual-identities/packs/{activation['pack_id']}"
+        f"/assets/{payload['asset_id']}/content"
+    )
+    assert payload["fallback_reason"] is None
+
+
+def test_zip_import_replays_idempotency_and_persists_job_id(
+    chacha_db: CharactersRAGDB,
+    storage_root: Path,
+) -> None:
+    job_manager = FakeJobManager()
+    client = _client(chacha_db, job_manager=job_manager)
+    archive_bytes = _zip_bytes_with_png()
+
+    first = client.post(
+        "/api/v1/visual-identities/imports/zip",
+        data={"title": "Zip Expressions", "idempotency_key": "zip-import-1"},
+        files={"archive": ("expressions.zip", archive_bytes, "application/zip")},
+    )
+    second = client.post(
+        "/api/v1/visual-identities/imports/zip",
+        data={"title": "Zip Expressions", "idempotency_key": "zip-import-1"},
+        files={"archive": ("expressions.zip", archive_bytes, "application/zip")},
+    )
+
+    assert first.status_code == 202
+    assert second.status_code == 202
+    assert second.json() == first.json()
+    assert len(job_manager.created_jobs) == 1
+    draft_response = client.get(
+        f"/api/v1/visual-identities/drafts/{first.json()['draft_id']}"
+    )
+    assert draft_response.status_code == 200
+    assert draft_response.json()["import_job_id"] == first.json()["import_job_id"]
+    assert (storage_root / "1" / "imports" / str(first.json()["draft_id"]) / "expressions.zip").is_file()
+
+
+def test_zip_import_same_client_key_is_user_scoped_for_jobs(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    job_manager = FakeJobManager()
+    archive_bytes = _zip_bytes_with_png()
+    first = _client(chacha_db, user_id=1, job_manager=job_manager).post(
+        "/api/v1/visual-identities/imports/zip",
+        data={"title": "Zip Expressions", "idempotency_key": "shared-key"},
+        files={"archive": ("expressions.zip", archive_bytes, "application/zip")},
+    )
+    second = _client(chacha_db, user_id=2, job_manager=job_manager).post(
+        "/api/v1/visual-identities/imports/zip",
+        data={"title": "Zip Expressions", "idempotency_key": "shared-key"},
+        files={"archive": ("expressions.zip", archive_bytes, "application/zip")},
+    )
+
+    assert first.status_code == 202
+    assert second.status_code == 202
+    assert first.json()["import_job_id"] != second.json()["import_job_id"]
+    assert len(job_manager.created_jobs) == 2
+
+
+def test_generated_file_asset_import_replays_idempotency(
+    chacha_db: CharactersRAGDB,
+    repo: VisualIdentityRepository,
+    storage_root: Path,
+    outputs_root: Path,
+) -> None:
+    pack = repo.create_pack(owner_user_id=1, title="Generated Expressions")
+    source_path = outputs_root / "1" / "image_gen" / "neutral.png"
+    source_path.parent.mkdir(parents=True)
+    source_path.write_bytes(_png_bytes(color="blue"))
+    files_repo = FakeGeneratedFilesRepo(
+        {
+            77: {
+                "id": 77,
+                "user_id": 1,
+                "is_deleted": False,
+                "file_category": "image",
+                "source_feature": "image_gen",
+                "storage_path": "image_gen/neutral.png",
+                "mime_type": "image/png",
+                "original_filename": "neutral.png",
+            }
+        }
+    )
+    client = _client(chacha_db, files_repo=files_repo)
+    request = {
+        "generated_file_id": 77,
+        "expression_key": "happy",
+        "idempotency_key": "generated-asset-1",
+    }
+
+    first = client.post(
+        f"/api/v1/visual-identities/packs/{pack['id']}/assets/from-generated-file",
+        json=request,
+    )
+    second = client.post(
+        f"/api/v1/visual-identities/packs/{pack['id']}/assets/from-generated-file",
+        json=request,
+    )
+    conflict = client.post(
+        f"/api/v1/visual-identities/packs/{pack['id']}/assets/from-generated-file",
+        json={**request, "expression_key": "sad"},
+    )
+    file_conflict = client.post(
+        f"/api/v1/visual-identities/packs/{pack['id']}/assets/from-generated-file",
+        json={**request, "generated_file_id": 78},
+    )
+
+    assert first.status_code == 201
+    assert second.status_code == 201
+    assert second.json() == first.json()
+    assert conflict.status_code == 409
+    assert file_conflict.status_code == 409
+    assert files_repo.accessed_ids == [77]
+    assert len(repo.list_draft_assets(first.json()["draft_id"], owner_user_id=1)) == 1
+    assert any((storage_root / "1").glob("packs/draft-*/happy/*.png"))
+
+
+def test_generated_file_asset_import_rejects_invalid_file_without_creating_draft(
+    chacha_db: CharactersRAGDB,
+    repo: VisualIdentityRepository,
+    outputs_root: Path,
+) -> None:
+    pack = repo.create_pack(owner_user_id=1, title="Generated Expressions")
+    corrupt_path = outputs_root / "1" / "image_gen" / "corrupt.png"
+    corrupt_path.parent.mkdir(parents=True)
+    corrupt_path.write_bytes(b"not-a-real-png")
+    files_repo = FakeGeneratedFilesRepo(
+        {
+            77: {
+                "id": 77,
+                "user_id": 2,
+                "is_deleted": False,
+                "file_category": "image",
+                "source_feature": "image_gen",
+                "storage_path": "image_gen/neutral.png",
+                "mime_type": "image/png",
+                "original_filename": "neutral.png",
+            },
+            78: {
+                "id": 78,
+                "user_id": 1,
+                "is_deleted": False,
+                "file_category": "image",
+                "source_feature": "image_gen",
+                "storage_path": "image_gen/corrupt.png",
+                "mime_type": "image/png",
+                "original_filename": "corrupt.png",
+            }
+        }
+    )
+    client = _client(chacha_db, files_repo=files_repo)
+
+    foreign_response = client.post(
+        f"/api/v1/visual-identities/packs/{pack['id']}/assets/from-generated-file",
+        json={
+            "generated_file_id": 77,
+            "expression_key": "happy",
+            "idempotency_key": "generated-invalid-1",
+        },
+    )
+    corrupt_response = client.post(
+        f"/api/v1/visual-identities/packs/{pack['id']}/assets/from-generated-file",
+        json={
+            "generated_file_id": 78,
+            "expression_key": "happy",
+            "idempotency_key": "generated-invalid-2",
+        },
+    )
+    draft_count = chacha_db.execute_query(
+        "SELECT COUNT(*) FROM visual_identity_pack_drafts WHERE owner_user_id = ?",
+        (1,),
+    ).fetchone()[0]
+
+    assert foreign_response.status_code == 404
+    assert corrupt_response.status_code == 422
+    assert draft_count == 0
 
 
 def test_asset_content_requires_owner(

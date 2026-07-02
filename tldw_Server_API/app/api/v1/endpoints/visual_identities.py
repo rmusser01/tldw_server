@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import tempfile
 from pathlib import Path
@@ -9,6 +10,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user, rbac_rate_limit
@@ -51,6 +53,7 @@ from tldw_Server_API.app.core.Visual_Identities.service import VisualIdentitySer
 from tldw_Server_API.app.core.Visual_Identities.storage import (
     copy_generated_file_record_to_expression_asset,
     resolve_visual_identity_asset_path,
+    validate_generated_file_record_for_expression_asset,
     validate_and_store_visual_identity_asset,
 )
 from tldw_Server_API.app.services.storage_quota_service import get_storage_service
@@ -59,6 +62,7 @@ router = APIRouter()
 
 _IMMUTABLE_ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable"
 _UPLOAD_CHUNK_SIZE_BYTES = 1024 * 1024
+_API_PREFIX = "/api/v1/visual-identities"
 _READ_LIMIT = Depends(rbac_rate_limit("visual-identities.read"))
 _WRITE_LIMIT = Depends(rbac_rate_limit("visual-identities.write"))
 _DELETE_LIMIT = Depends(rbac_rate_limit("visual-identities.delete"))
@@ -219,6 +223,120 @@ def _handle_value_error(exc: ValueError) -> HTTPException:
     if "conflict" in detail or detail in {"visual_identity_draft_not_ready"}:
         return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
     return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=detail)
+
+
+def _idempotency_conflict(*, scope: str, resource_id: str) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "code": "idempotency_key_conflict",
+            "scope": scope,
+            "resource_id": resource_id,
+        },
+    )
+
+
+def _require_idempotency_key(idempotency_key: str | None) -> str:
+    normalized = str(idempotency_key or "").strip()
+    if normalized:
+        return normalized
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        detail="idempotency_key_required",
+    )
+
+
+def _canonical_payload_hash(payload: dict[str, Any]) -> str:
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as file_obj:
+        for chunk in iter(lambda: file_obj.read(_UPLOAD_CHUNK_SIZE_BYTES), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _claim_or_replay_idempotency(
+    service: VisualIdentityService,
+    *,
+    scope: str,
+    resource_id: str,
+    idempotency_key: str,
+    payload_hash: str,
+    response_model: type[BaseModel],
+) -> tuple[BaseModel | None, str | None]:
+    try:
+        record, claimed = _repo(service).claim_idempotency_record(
+            owner_user_id=service.owner_user_id,
+            scope=scope,
+            resource_id=resource_id,
+            idempotency_key=idempotency_key,
+            payload_hash=payload_hash,
+        )
+    except ValueError as exc:
+        if str(exc) == "idempotency_key_conflict":
+            raise _idempotency_conflict(scope=scope, resource_id=resource_id) from exc
+        raise
+    if claimed:
+        return None, str(record["claim_token"])
+    if str(record.get("status") or "") != "completed":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="idempotency_key_in_progress",
+        )
+    return response_model.model_validate(json.loads(str(record["response_json"]))), None
+
+
+def _record_idempotency_response(
+    service: VisualIdentityService,
+    *,
+    scope: str,
+    resource_id: str,
+    idempotency_key: str,
+    payload_hash: str,
+    response: BaseModel,
+    claim_token: str,
+) -> None:
+    _repo(service).complete_idempotency_record(
+        owner_user_id=service.owner_user_id,
+        scope=scope,
+        resource_id=resource_id,
+        idempotency_key=idempotency_key,
+        payload_hash=payload_hash,
+        response=response.model_dump(mode="json"),
+        claim_token=claim_token,
+    )
+
+
+def _release_idempotency_claim(
+    service: VisualIdentityService,
+    *,
+    scope: str,
+    resource_id: str,
+    idempotency_key: str,
+    claim_token: str,
+) -> None:
+    _repo(service).release_idempotency_claim(
+        owner_user_id=service.owner_user_id,
+        scope=scope,
+        resource_id=resource_id,
+        idempotency_key=idempotency_key,
+        claim_token=claim_token,
+    )
+
+
+def _asset_content_url(*, pack_id: int, asset_id: int) -> str:
+    return f"{_API_PREFIX}/packs/{pack_id}/assets/{asset_id}/content"
+
+
+def _api_fallback_reason(selection_reason: str | None) -> str | None:
+    if selection_reason == "requested":
+        return None
+    return selection_reason
 
 
 def _require_pack(service: VisualIdentityService, pack_id: int) -> dict[str, Any]:
@@ -532,14 +650,42 @@ async def create_visual_identity_asset_from_generated_file(
 ) -> VisualIdentityAssetResponse:
     pack = _require_pack(service, pack_id)
     normalized_expression = _normalize_expression_or_422(request.expression_key)
-    draft = _draft_for_asset_upload(service, pack, draft_id=request.draft_id)
-    generated_file = await files_repo.get_file_by_id(request.generated_file_id)
-    if not generated_file:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="generated_file_not_found",
-        )
+    scope = "visual_identity_generated_file_asset"
+    resource_id = f"pack:{pack_id}:generated-file-asset"
+    payload_hash = _canonical_payload_hash(
+        {
+            "pack_id": pack_id,
+            "generated_file_id": request.generated_file_id,
+            "expression_key": normalized_expression,
+            "draft_id": request.draft_id,
+            "source_feature": request.source_feature,
+        }
+    )
+    replay, claim_token = _claim_or_replay_idempotency(
+        service,
+        scope=scope,
+        resource_id=resource_id,
+        idempotency_key=request.idempotency_key,
+        payload_hash=payload_hash,
+        response_model=VisualIdentityAssetResponse,
+    )
+    if replay is not None:
+        return replay  # type: ignore[return-value]
+    if claim_token is None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="idempotency_claim_missing")
     try:
+        generated_file = await files_repo.get_file_by_id(request.generated_file_id)
+        if not generated_file:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="generated_file_not_found",
+            )
+        validate_generated_file_record_for_expression_asset(
+            owner_user_id=service.owner_user_id,
+            generated_file_record=generated_file,
+            source_feature=request.source_feature,
+        )
+        draft = _draft_for_asset_upload(service, pack, draft_id=request.draft_id)
         stored = copy_generated_file_record_to_expression_asset(
             owner_user_id=service.owner_user_id,
             pack_id=f"draft-{draft['id']}",
@@ -547,16 +693,42 @@ async def create_visual_identity_asset_from_generated_file(
             generated_file_record=generated_file,
             source_feature=request.source_feature,
         )
+        response = _create_asset_from_stored_metadata(
+            service,
+            pack_id=int(pack["id"]),
+            draft_id=int(draft["id"]),
+            expression_key=normalized_expression,
+            source_filename=str(generated_file.get("original_filename") or generated_file.get("filename") or ""),
+            stored=stored,
+        )
     except ValueError as exc:
+        _release_idempotency_claim(
+            service,
+            scope=scope,
+            resource_id=resource_id,
+            idempotency_key=request.idempotency_key,
+            claim_token=claim_token,
+        )
         raise _handle_value_error(exc) from exc
-    return _create_asset_from_stored_metadata(
+    except Exception:
+        _release_idempotency_claim(
+            service,
+            scope=scope,
+            resource_id=resource_id,
+            idempotency_key=request.idempotency_key,
+            claim_token=claim_token,
+        )
+        raise
+    _record_idempotency_response(
         service,
-        pack_id=int(pack["id"]),
-        draft_id=int(draft["id"]),
-        expression_key=normalized_expression,
-        source_filename=str(generated_file.get("original_filename") or generated_file.get("filename") or ""),
-        stored=stored,
+        scope=scope,
+        resource_id=resource_id,
+        idempotency_key=request.idempotency_key,
+        payload_hash=payload_hash,
+        response=response,
+        claim_token=claim_token,
     )
+    return response
 
 
 @router.get(
@@ -606,7 +778,7 @@ async def start_visual_identity_zip_import(
     archive: UploadFile = File(...),
     title: str = Form(default="Imported Expression Pack"),
     pack_id: int | None = Form(default=None),
-    idempotency_key: str | None = Form(default=None),
+    idempotency_key: str = Form(..., min_length=1, max_length=160),
     service: VisualIdentityService = Depends(_service),
     jobs_manager: JobManager = Depends(_job_manager),
 ) -> VisualIdentityImportZipStartResponse:
@@ -617,38 +789,108 @@ async def start_visual_identity_zip_import(
         )
     if pack_id is not None:
         _require_pack(service, pack_id)
-    draft = _repo(service).create_draft(
-        owner_user_id=service.owner_user_id,
-        pack_id=pack_id,
-        title=title,
-        source_kind="zip",
-        source_filename=_safe_upload_filename(archive, fallback="expressions.zip"),
-        status="importing",
+    operation_idempotency_key = _require_idempotency_key(idempotency_key)
+    source_filename = _safe_upload_filename(archive, fallback="expressions.zip")
+    temp_path, byte_count = await _upload_to_temp_file(archive, max_bytes=MAX_EXPRESSION_ZIP_BYTES)
+    file_sha256 = _sha256_file(temp_path)
+    scope = "visual_identity_zip_import"
+    resource_id = f"pack:{pack_id}" if pack_id is not None else "pack:new"
+    payload_hash = _canonical_payload_hash(
+        {
+            "pack_id": pack_id,
+            "title": title,
+            "source_filename": source_filename,
+            "file_sha256": file_sha256,
+            "file_size": byte_count,
+        }
     )
-    temp_path, _ = await _upload_to_temp_file(archive, max_bytes=MAX_EXPRESSION_ZIP_BYTES)
-    upload_dir = DatabasePaths.get_user_visual_identities_dir(service.owner_user_id) / "imports" / str(draft["id"])
-    upload_dir.mkdir(parents=True, exist_ok=True)
-    upload_path = upload_dir / _safe_upload_filename(archive, fallback="expressions.zip")
-    temp_path.replace(upload_path)
     try:
+        replay, claim_token = _claim_or_replay_idempotency(
+            service,
+            scope=scope,
+            resource_id=resource_id,
+            idempotency_key=operation_idempotency_key,
+            payload_hash=payload_hash,
+            response_model=VisualIdentityImportZipStartResponse,
+        )
+        if replay is not None:
+            temp_path.unlink(missing_ok=True)
+            return replay  # type: ignore[return-value]
+        if claim_token is None:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="idempotency_claim_missing")
+    except Exception:
+        temp_path.unlink(missing_ok=True)
+        raise
+
+    upload_path: Path | None = None
+    try:
+        draft = _repo(service).create_draft(
+            owner_user_id=service.owner_user_id,
+            pack_id=pack_id,
+            title=title,
+            source_kind="zip",
+            source_filename=source_filename,
+            status="importing",
+        )
+        upload_dir = DatabasePaths.get_user_visual_identities_dir(service.owner_user_id) / "imports" / str(draft["id"])
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        upload_path = upload_dir / source_filename
+        temp_path.replace(upload_path)
         job = create_visual_identity_import_zip_job(
             jobs_manager,
             owner_user_id=service.owner_user_id,
             draft_id=int(draft["id"]),
             upload_path=str(upload_path),
             source_filename=str(draft["source_filename"]),
-            idempotency_key=idempotency_key,
+        )
+        job_id = job.get("job_id") or job.get("id")
+        if job_id is not None:
+            draft = _repo(service).set_draft_import_job_id(
+                draft_id=int(draft["id"]),
+                owner_user_id=service.owner_user_id,
+                import_job_id=str(job_id),
+            )
+        response = VisualIdentityImportZipStartResponse(
+            draft_id=int(draft["id"]),
+            job_id=job_id,
+            status="queued",
+            source_filename=str(draft["source_filename"]),
+            import_job_id=str(job_id) if job_id is not None else None,
         )
     except ValueError as exc:
+        _release_idempotency_claim(
+            service,
+            scope=scope,
+            resource_id=resource_id,
+            idempotency_key=operation_idempotency_key,
+            claim_token=claim_token,
+        )
+        temp_path.unlink(missing_ok=True)
+        if upload_path is not None:
+            upload_path.unlink(missing_ok=True)
         raise _handle_value_error(exc) from exc
-    job_id = job.get("job_id") or job.get("id")
-    return VisualIdentityImportZipStartResponse(
-        draft_id=int(draft["id"]),
-        job_id=job_id,
-        status="queued",
-        source_filename=str(draft["source_filename"]),
-        import_job_id=str(job_id) if job_id is not None else None,
+    except Exception:
+        _release_idempotency_claim(
+            service,
+            scope=scope,
+            resource_id=resource_id,
+            idempotency_key=operation_idempotency_key,
+            claim_token=claim_token,
+        )
+        temp_path.unlink(missing_ok=True)
+        if upload_path is not None:
+            upload_path.unlink(missing_ok=True)
+        raise
+    _record_idempotency_response(
+        service,
+        scope=scope,
+        resource_id=resource_id,
+        idempotency_key=operation_idempotency_key,
+        payload_hash=payload_hash,
+        response=response,
+        claim_token=claim_token,
     )
+    return response
 
 
 @router.get(
@@ -811,6 +1053,9 @@ async def resolve_visual_identity_binding(
         )
     except ValueError as exc:
         raise _handle_value_error(exc) from exc
+    asset_url = resolved.asset_url
+    if asset_url is None and resolved.pack_id is not None and resolved.asset_id is not None:
+        asset_url = _asset_content_url(pack_id=resolved.pack_id, asset_id=resolved.asset_id)
     return VisualIdentityResolveResponse(
         actor_kind=resolved.actor_kind,  # type: ignore[arg-type]
         actor_id=resolved.actor_id,
@@ -820,8 +1065,8 @@ async def resolve_visual_identity_binding(
         requested_expression_key=resolved.requested_expression_key,
         asset_id=resolved.asset_id,
         storage_relpath=resolved.storage_relpath,
-        fallback_reason=resolved.fallback_reason,
+        fallback_reason=_api_fallback_reason(resolved.fallback_reason),
         is_animated=resolved.is_animated,
         content_type=resolved.content_type,
-        asset_url=resolved.asset_url,
+        asset_url=asset_url,
     )

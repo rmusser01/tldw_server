@@ -171,6 +171,85 @@ def test_complete_idempotency_record_rejects_payload_hash_conflict(
     assert record["payload_hash"] == "hash-a"
 
 
+def test_stale_in_progress_idempotency_claim_can_be_reclaimed(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VisualIdentityRepository.initialized(chacha_db)
+    first_record, first_claimed = repo.claim_idempotency_record(
+        owner_user_id=42,
+        scope="visual_identity_import",
+        resource_id="pack:1",
+        idempotency_key="import-1",
+        payload_hash="hash-a",
+    )
+    assert first_claimed is True
+    first_claim_token = str(first_record["claim_token"])
+
+    with chacha_db.transaction() as conn:
+        conn.execute(
+            """
+            UPDATE visual_identity_idempotency
+            SET updated_at = datetime('now', '-16 minutes')
+            WHERE id = ?
+            """,
+            (first_record["id"],),
+        )
+
+    reclaimed_record, reclaimed = repo.claim_idempotency_record(
+        owner_user_id=42,
+        scope="visual_identity_import",
+        resource_id="pack:1",
+        idempotency_key="import-1",
+        payload_hash="hash-a",
+    )
+
+    assert reclaimed is True
+    assert reclaimed_record["status"] == "in_progress"
+    assert reclaimed_record["id"] == first_record["id"]
+    reclaimed_claim_token = str(reclaimed_record["claim_token"])
+    assert reclaimed_claim_token != first_claim_token
+
+    repo.release_idempotency_claim(
+        owner_user_id=42,
+        scope="visual_identity_import",
+        resource_id="pack:1",
+        idempotency_key="import-1",
+        claim_token=first_claim_token,
+    )
+    still_claimed = repo.get_idempotency_record(
+        owner_user_id=42,
+        scope="visual_identity_import",
+        resource_id="pack:1",
+        idempotency_key="import-1",
+    )
+    assert still_claimed is not None
+    assert still_claimed["claim_token"] == reclaimed_claim_token
+
+    old_completion = repo.complete_idempotency_record(
+        owner_user_id=42,
+        scope="visual_identity_import",
+        resource_id="pack:1",
+        idempotency_key="import-1",
+        payload_hash="hash-a",
+        response={"draft_id": 1},
+        claim_token=first_claim_token,
+    )
+    assert old_completion["status"] == "in_progress"
+    assert old_completion["claim_token"] == reclaimed_claim_token
+
+    completed = repo.complete_idempotency_record(
+        owner_user_id=42,
+        scope="visual_identity_import",
+        resource_id="pack:1",
+        idempotency_key="import-1",
+        payload_hash="hash-a",
+        response={"draft_id": 2},
+        claim_token=reclaimed_claim_token,
+    )
+    assert completed["status"] == "completed"
+    assert json.loads(completed["response_json"]) == {"draft_id": 2}
+
+
 def test_create_idempotency_record_is_conflict_tolerant_for_same_payload(
     chacha_db: CharactersRAGDB,
 ) -> None:

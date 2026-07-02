@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+import secrets
 import sqlite3
 from collections.abc import Mapping
 from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+
+IDEMPOTENCY_IN_PROGRESS_STALE_AFTER_SECONDS = 15 * 60
 
 VISUAL_IDENTITY_SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS visual_identity_packs (
@@ -102,6 +105,7 @@ CREATE TABLE IF NOT EXISTS visual_identity_idempotency (
     resource_id TEXT NOT NULL,
     idempotency_key TEXT NOT NULL,
     payload_hash TEXT NOT NULL,
+    claim_token TEXT,
     status TEXT NOT NULL,
     response_json TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -138,6 +142,16 @@ def ensure_visual_identity_tables(db: CharactersRAGDB) -> None:
     with db.transaction() as conn:
         for statement in VISUAL_IDENTITY_SCHEMA_STATEMENTS:
             conn.execute(statement)
+        _ensure_visual_identity_idempotency_columns(conn)
+
+
+def _ensure_visual_identity_idempotency_columns(conn: sqlite3.Connection) -> None:
+    columns = {
+        str(row[1])
+        for row in conn.execute("PRAGMA table_info(visual_identity_idempotency)").fetchall()
+    }
+    if "claim_token" not in columns:
+        conn.execute("ALTER TABLE visual_identity_idempotency ADD COLUMN claim_token TEXT")
 
 
 class VisualIdentityRepository:
@@ -392,6 +406,30 @@ class VisualIdentityRepository:
                 WHERE id = ? AND owner_user_id = ?
                 """,
                 (_json_dump(dict(slot_map)), draft_id, owner_user_id),
+            )
+        draft = self.get_draft(draft_id, owner_user_id=owner_user_id)
+        if draft is None:
+            raise ValueError("visual_identity_draft_not_found")
+        return draft
+
+    def set_draft_import_job_id(
+        self,
+        *,
+        draft_id: int,
+        owner_user_id: int,
+        import_job_id: str,
+    ) -> dict[str, Any]:
+        self._ensure_schema_initialized()
+        with self.db.transaction() as conn:
+            conn.execute(
+                """
+                UPDATE visual_identity_pack_drafts
+                SET import_job_id = ?,
+                    updated_at = CURRENT_TIMESTAMP,
+                    version = version + 1
+                WHERE id = ? AND owner_user_id = ?
+                """,
+                (import_job_id, draft_id, owner_user_id),
             )
         draft = self.get_draft(draft_id, owner_user_id=owner_user_id)
         if draft is None:
@@ -1273,8 +1311,10 @@ class VisualIdentityRepository:
         resource_id: str,
         idempotency_key: str,
         payload_hash: str,
+        stale_after_seconds: int | None = IDEMPOTENCY_IN_PROGRESS_STALE_AFTER_SECONDS,
     ) -> tuple[dict[str, Any], bool]:
         self._ensure_schema_initialized()
+        claim_token = secrets.token_urlsafe(24)
         with self.db.transaction() as conn:
             try:
                 conn.execute(
@@ -1285,12 +1325,20 @@ class VisualIdentityRepository:
                         resource_id,
                         idempotency_key,
                         payload_hash,
+                        claim_token,
                         status,
                         response_json
                     )
-                    VALUES (?, ?, ?, ?, ?, 'in_progress', '{}')
+                    VALUES (?, ?, ?, ?, ?, ?, 'in_progress', '{}')
                     """,
-                    (owner_user_id, scope, resource_id, idempotency_key, payload_hash),
+                    (
+                        owner_user_id,
+                        scope,
+                        resource_id,
+                        idempotency_key,
+                        payload_hash,
+                        claim_token,
+                    ),
                 )
                 claimed = True
             except sqlite3.IntegrityError:
@@ -1310,6 +1358,50 @@ class VisualIdentityRepository:
             record = dict(row)
             if str(record["payload_hash"]) != payload_hash:
                 raise ValueError("idempotency_key_conflict")
+            if (
+                not claimed
+                and stale_after_seconds is not None
+                and str(record.get("status") or "") == "in_progress"
+                and int(stale_after_seconds) >= 0
+            ):
+                cursor = conn.execute(
+                    """
+                    UPDATE visual_identity_idempotency
+                    SET updated_at = CURRENT_TIMESTAMP,
+                        claim_token = ?,
+                        response_json = '{}'
+                    WHERE owner_user_id = ?
+                      AND scope = ?
+                      AND resource_id = ?
+                      AND idempotency_key = ?
+                      AND payload_hash = ?
+                      AND status = 'in_progress'
+                      AND datetime(updated_at) <= datetime('now', ?)
+                    """,
+                    (
+                        claim_token,
+                        owner_user_id,
+                        scope,
+                        resource_id,
+                        idempotency_key,
+                        payload_hash,
+                        f"-{int(stale_after_seconds)} seconds",
+                    ),
+                )
+                if cursor.rowcount:
+                    row = conn.execute(
+                        """
+                        SELECT * FROM visual_identity_idempotency
+                        WHERE owner_user_id = ?
+                          AND scope = ?
+                          AND resource_id = ?
+                          AND idempotency_key = ?
+                        """,
+                        (owner_user_id, scope, resource_id, idempotency_key),
+                    ).fetchone()
+                    if row is None:
+                        raise RuntimeError("visual_identity_idempotency_record_not_found")
+                    return dict(row), True
             return record, claimed
 
     def complete_idempotency_record(
@@ -1321,6 +1413,7 @@ class VisualIdentityRepository:
         idempotency_key: str,
         payload_hash: str,
         response: Mapping[str, Any],
+        claim_token: str | None = None,
     ) -> dict[str, Any]:
         self._ensure_schema_initialized()
         with self.db.transaction() as conn:
@@ -1346,6 +1439,7 @@ class VisualIdentityRepository:
                   AND scope = ?
                   AND resource_id = ?
                   AND idempotency_key = ?
+                  AND (? IS NULL OR claim_token = ?)
                 """,
                 (
                     _json_dump(dict(response)),
@@ -1353,9 +1447,13 @@ class VisualIdentityRepository:
                     scope,
                     resource_id,
                     idempotency_key,
+                    claim_token,
+                    claim_token,
                 ),
             )
             if cursor.rowcount == 0:
+                if claim_token is not None and existing is not None:
+                    return dict(existing)
                 conn.execute(
                     """
                     INSERT INTO visual_identity_idempotency (
@@ -1364,10 +1462,11 @@ class VisualIdentityRepository:
                         resource_id,
                         idempotency_key,
                         payload_hash,
+                        claim_token,
                         status,
                         response_json
                     )
-                    VALUES (?, ?, ?, ?, ?, 'completed', ?)
+                    VALUES (?, ?, ?, ?, ?, ?, 'completed', ?)
                     """,
                     (
                         owner_user_id,
@@ -1375,6 +1474,7 @@ class VisualIdentityRepository:
                         resource_id,
                         idempotency_key,
                         payload_hash,
+                        claim_token,
                         _json_dump(dict(response)),
                     ),
                 )
@@ -1387,6 +1487,38 @@ class VisualIdentityRepository:
         if record is None:
             raise RuntimeError("completed_visual_identity_idempotency_record_not_found")
         return record
+
+    def release_idempotency_claim(
+        self,
+        *,
+        owner_user_id: int,
+        scope: str,
+        resource_id: str,
+        idempotency_key: str,
+        claim_token: str | None = None,
+    ) -> None:
+        """Remove an in-progress idempotency claim after a failed side effect."""
+        self._ensure_schema_initialized()
+        with self.db.transaction() as conn:
+            conn.execute(
+                """
+                DELETE FROM visual_identity_idempotency
+                WHERE owner_user_id = ?
+                  AND scope = ?
+                  AND resource_id = ?
+                  AND idempotency_key = ?
+                  AND status = 'in_progress'
+                  AND (? IS NULL OR claim_token = ?)
+                """,
+                (
+                    owner_user_id,
+                    scope,
+                    resource_id,
+                    idempotency_key,
+                    claim_token,
+                    claim_token,
+                ),
+            )
 
     def create_idempotency_record(
         self,
