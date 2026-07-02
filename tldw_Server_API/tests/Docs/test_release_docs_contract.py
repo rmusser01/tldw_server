@@ -112,6 +112,17 @@ def test_repository_release_metadata_matches_pyproject() -> None:
     assert f"v{current_version}" in mkdocs_text
 
 
+def test_release_helper_updates_repository_readme_release_references() -> None:
+    readme_text = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    target_version = "9.9.9"
+
+    updated_text = update_readme_release_references(readme_text, target_version)
+
+    assert f"`{target_version}` Beta status. Expect rough edges and please report issues." in updated_text
+    assert f"beyond `{target_version}`" in updated_text
+    assert f"post-`{target_version}` branch work" in updated_text
+
+
 def test_mkdocs_version_metadata_raises_for_missing_anchor() -> None:
     with pytest.raises(ValueError, match="(?i)mkdocs|anchor|version"):
         update_mkdocs_version_metadata("extra:\n  generator: false\n", "0.1.30")
