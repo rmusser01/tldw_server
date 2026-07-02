@@ -186,7 +186,7 @@ function writeBrowserConfig(config: AppConfig): void {
     // codeql[js/clear-text-storage-of-sensitive-data]: local self-hosted credential persistence is explicit user config.
     window.localStorage.setItem('apiKey', apiKey);
     window.localStorage.removeItem('accessToken');
-  } else if (!apiKey && normalizeTextValue(nextConfig.authMode) === 'single-user') {
+  } else {
     delete nextConfig.apiKey;
     window.localStorage.removeItem('apiKey');
   }
@@ -198,12 +198,12 @@ function writeBrowserConfig(config: AppConfig): void {
     // codeql[js/clear-text-storage-of-sensitive-data]: local self-hosted credential persistence is explicit user config.
     window.localStorage.setItem('accessToken', apiBearer);
     window.localStorage.removeItem('apiKey');
-  } else if (!apiBearer && normalizeTextValue(nextConfig.authMode) === 'multi-user') {
+  } else {
     delete nextConfig.accessToken;
     window.localStorage.removeItem('accessToken');
   }
 
-  // codeql[js/clear-text-storage-of-sensitive-data]: this persists the user's chosen local/self-hosted auth mode.
+  // codeql[js/clear-text-storage-of-sensitive-data]: this intentionally persists local/self-hosted auth mode and user-supplied credentials for reloads.
   window.localStorage.setItem('tldwConfig', JSON.stringify(nextConfig));
 }
 

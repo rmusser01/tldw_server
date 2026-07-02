@@ -8,6 +8,10 @@ const authStorageMocks = vi.hoisted(() => ({
 
 vi.mock('@web/lib/authStorage', () => authStorageMocks);
 
+function readStoredTldwConfig(): Record<string, unknown> {
+  return JSON.parse(localStorage.getItem('tldwConfig') ?? '{}') as Record<string, unknown>;
+}
+
 describe('useConfig networking', () => {
   beforeEach(() => {
     vi.resetModules();
@@ -169,7 +173,11 @@ describe('useConfig networking', () => {
     });
     expect(localStorage.getItem('apiKey')).toBe('saved-api-key');
     expect(localStorage.getItem('apiBearer')).toBeNull();
-    expect(localStorage.getItem('tldwConfig')).toContain('saved-api-key');
+    expect(readStoredTldwConfig()).toMatchObject({
+      authMode: 'single-user',
+      apiKey: 'saved-api-key',
+    });
+    expect(readStoredTldwConfig()).not.toHaveProperty('accessToken');
     expect(localStorage.getItem('refreshToken')).toBeNull();
   });
 
@@ -191,7 +199,11 @@ describe('useConfig networking', () => {
     });
     expect(localStorage.getItem('accessToken')).toBe('saved-bearer-token');
     expect(localStorage.getItem('apiKey')).toBeNull();
-    expect(localStorage.getItem('tldwConfig')).toContain('saved-bearer-token');
+    expect(readStoredTldwConfig()).toMatchObject({
+      authMode: 'multi-user',
+      accessToken: 'saved-bearer-token',
+    });
+    expect(readStoredTldwConfig()).not.toHaveProperty('apiKey');
   });
 
   it('refreshes live config after settings writes canonical tldw config', async () => {
@@ -220,7 +232,11 @@ describe('useConfig networking', () => {
       expect(authStorageMocks.setRuntimeApiKey).toHaveBeenLastCalledWith('event-api-key');
     });
     expect(localStorage.getItem('apiKey')).toBe('event-api-key');
-    expect(localStorage.getItem('tldwConfig')).toContain('event-api-key');
+    expect(readStoredTldwConfig()).toMatchObject({
+      authMode: 'single-user',
+      apiKey: 'event-api-key',
+    });
+    expect(readStoredTldwConfig()).not.toHaveProperty('accessToken');
   });
 
   it('keeps environment api keys ahead of stale browser config', async () => {
@@ -245,5 +261,8 @@ describe('useConfig networking', () => {
     await waitFor(() => {
       expect(authStorageMocks.setRuntimeApiKey).toHaveBeenLastCalledWith('env-api-key');
     });
+    expect(localStorage.getItem('apiKey')).toBeNull();
+    expect(readStoredTldwConfig()).not.toHaveProperty('apiKey');
+    expect(readStoredTldwConfig()).not.toHaveProperty('accessToken');
   });
 });

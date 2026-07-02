@@ -2061,11 +2061,11 @@ def test_search_brave():
     result_filter = None
     result = search_web_brave(search_term, country, search_lang, ui_lang, result_count, safesearch, date_range,
                              result_filter)
-    logging.debug("Brave search smoke raw results: {}", _redact_websearch_log_value(result))
+    logging.debug(f"Brave search smoke raw results: {_redact_websearch_log_value(result)}")
 
     output_dict = {"results": []}
     parse_brave_results(result, output_dict)
-    logging.debug("Parsed Brave search smoke results: {}", json.dumps(output_dict, indent=2))
+    logging.debug(f"Parsed Brave search smoke results: {json.dumps(output_dict, indent=2)}")
 
 
 def parse_brave_results(raw_results: dict, output_dict: dict) -> None:
@@ -2234,21 +2234,21 @@ def test_search_duckduckgo():
             timelimit="w",
             max_results=10
         )
-        logging.info("DuckDuckGo search smoke result count: {}", len(results))
+        logging.info(f"DuckDuckGo search smoke result count: {len(results)}")
         for result in results:
-            logging.debug("DuckDuckGo title: {}", result["title"])
-            logging.debug("DuckDuckGo URL: {}", result["href"])
-            logging.debug("DuckDuckGo snippet: {}", result["body"])
+            logging.debug(f"DuckDuckGo title: {result['title']}")
+            logging.debug(f"DuckDuckGo URL: {result['href']}")
+            logging.debug(f"DuckDuckGo snippet: {result['body']}")
 
         # Parse the results
         output_dict = {"results": []}
         parse_duckduckgo_results({"results": results}, output_dict)
-        logging.debug("Parsed DuckDuckGo results: {}", json.dumps(output_dict, indent=2))
+        logging.debug(f"Parsed DuckDuckGo results: {json.dumps(output_dict, indent=2)}")
 
     except ValueError as e:
-        logging.warning("Invalid DuckDuckGo smoke input: {}", str(e))
+        logging.warning(f"Invalid DuckDuckGo smoke input: {str(e)}")
     except (NetworkError, RetryExhaustedError) as e:
-        logging.warning("DuckDuckGo smoke request error: {}", str(e))
+        logging.warning(f"DuckDuckGo smoke request error: {str(e)}")
 
 
 def parse_duckduckgo_results(raw_results: dict, output_dict: dict) -> None:
@@ -2524,7 +2524,7 @@ def test_search_google():
         site_blacklist=site_blacklist,
         sort_results_by=sort_results_by,
     )
-    logging.debug("Google search smoke raw results: {}", _redact_websearch_log_value(result))
+    logging.debug(f"Google search smoke raw results: {_redact_websearch_log_value(result)}")
     return result
 
 
@@ -2536,9 +2536,13 @@ def parse_google_results(raw_results: dict, output_dict: dict) -> None:
         raw_results (Dict): Raw Google API response.
         output_dict (Dict): Dictionary to store processed results.
     """
-    # Lower verbosity: only log raw payload at debug level
-    redacted_results = json.dumps(_redact_websearch_log_value(raw_results), indent=2)
-    logging.debug(f"Raw results received: {redacted_results}")
+    # Lower verbosity: only log raw payload at debug level.
+    log_opt = getattr(logging, "opt", None)
+    if callable(log_opt):
+        log_opt(lazy=True).debug(
+            "Raw results received: {}",
+            lambda: json.dumps(_redact_websearch_log_value(raw_results), indent=2),
+        )
     try:
         # Initialize results list if not present
         if "results" not in output_dict:
@@ -2631,7 +2635,7 @@ def test_parse_google_results():
     raw_results = {}
     raw_results = test_search_google()
     parse_google_results(raw_results, parsed_results)
-    logging.debug("Parsed Google search smoke results: {}", parsed_results)
+    logging.debug(f"Parsed Google search smoke results: {parsed_results}")
     pass
 
 
@@ -2669,7 +2673,7 @@ def test_search_kagi():
     search_term = "How can I bake a cherry cake"
     result_count = 10
     result = search_web_kagi(search_term, result_count)
-    logging.debug("Kagi search smoke raw results: {}", _redact_websearch_log_value(result))
+    logging.debug(f"Kagi search smoke raw results: {_redact_websearch_log_value(result)}")
 
 
 def parse_kagi_results(raw_results: dict, output_dict: dict) -> None:
@@ -2843,7 +2847,7 @@ def test_search_searx():
     # Use a different Searx instance to avoid rate limiting
     searx_url = "https://searx.be"  # Example of a different Searx instance
     result = search_web_searx("What goes into making a cherry cake?", searx_url=searx_url)
-    logging.debug("Searx search smoke raw results: {}", _redact_websearch_log_value(result))
+    logging.debug(f"Searx search smoke raw results: {_redact_websearch_log_value(result)}")
 
 def parse_searx_results(searx_search_results, web_search_results_dict):
     try:
@@ -3104,7 +3108,7 @@ def search_web_tavily(search_query, result_count=10, site_whitelist=None, site_b
 
 def test_search_tavily():
     result = search_web_tavily("How can I bake a cherry cake?")
-    logging.debug("Tavily search smoke raw results: {}", _redact_websearch_log_value(result))
+    logging.debug(f"Tavily search smoke raw results: {_redact_websearch_log_value(result)}")
 
 
 def parse_tavily_results(tavily_search_results, web_search_results_dict):

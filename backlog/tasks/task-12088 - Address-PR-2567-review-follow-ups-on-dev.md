@@ -33,10 +33,10 @@ Create a follow-up PR against dev that addresses all actionable Qodo review issu
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 All eight Qodo review threads from PR 2567 are addressed or technically dispositioned.
-- [ ] #2 Targeted backend and frontend tests covering changed behavior pass.
-- [ ] #3 Bandit runs against touched backend Python scope without new findings.
-- [ ] #4 A PR is opened against dev with a human-readable change summary and verification evidence.
+- [x] #1 All eight Qodo review threads from PR 2567 are addressed or technically dispositioned.
+- [x] #2 Targeted backend and frontend tests covering changed behavior pass.
+- [x] #3 Bandit runs against touched backend Python scope without new findings.
+- [x] #4 A PR is opened against dev with a human-readable change summary and verification evidence.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -54,15 +54,15 @@ Create a follow-up PR against dev that addresses all actionable Qodo review issu
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Draft PR opened against dev: https://github.com/rmusser01/tldw_server/pull/2568. Addressed all eight Qodo review threads from PR 2567. Verification passed: git diff --check; targeted Python pytest suite with 101 passing tests; targeted Vitest useConfig suite with 10 passing tests; Bandit touched Python scope reported only the same three low-severity WebSearch_APIs.py baseline findings present on origin/dev (B311, B101, B311), so no new Bandit findings were introduced. PR remains draft pending the required human-authored Change summary before merge.
+PR opened against dev: https://github.com/rmusser01/tldw_server/pull/2568. Addressed all eight Qodo review threads from PR 2567. Verification passed: git diff --check; targeted Python pytest suite with 101 passing tests; targeted Vitest useConfig suite with 10 passing tests; Bandit touched Python scope reported only the same three low-severity WebSearch_APIs.py baseline findings present on origin/dev (B311, B101, B311), so no new Bandit findings were introduced.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

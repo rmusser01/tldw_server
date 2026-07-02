@@ -219,7 +219,7 @@ def _setup_secure_temp_directory(user_id: str) -> Path:
 
 def _resolve_chatbook_temp_file(temp_dir: Path, safe_filename: str, *, prefix: str) -> Path:
     """Resolve a sanitized upload filename under the checked chatbooks temp directory."""
-    # codeql[py/path-injection]: temp_dir is normalized by _resolve_chatbooks_temp_dir.
+    # codeql[py/path-injection]: temp_dir is normalized by _setup_secure_temp_directory.
     temp_dir_resolved = temp_dir.resolve(strict=True)
     joined = safe_join(
         str(temp_dir_resolved),

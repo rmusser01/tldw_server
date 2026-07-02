@@ -49,6 +49,7 @@ modified_files:
 - tldw_Server_API/app/core/VN_Assets/storage.py
 - tldw_Server_API/app/services/mcp_hub_path_enforcement_service.py
 - tldw_Server_API/tests/CI/test_required_workflow_contracts.py
+- tldw_Server_API/tests/Metrics/test_sensitive_label_hashing.py
 - tldw_Server_API/tests/TTS_NEW/unit/test_omnivoice_sidecar_server.py
 - tldw_Server_API/tests/Utils/test_image_validation.py
 ---
@@ -77,10 +78,10 @@ Investigated current open CodeQL alerts on refs/heads/main via GitHub code scann
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
