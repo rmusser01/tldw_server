@@ -201,16 +201,28 @@ export function createImageDataUrl(base64: string): string | null {
 
   const trimmed = base64.trim()
   if (!trimmed) return null
-  if (trimmed.toLowerCase().startsWith("data:image/")) return trimmed
-  if (!isValidBase64ImagePayload(trimmed)) return null
+  const dataUrlMatch = /^data:([^;,]+);base64,([A-Za-z0-9+/_=-]+)$/i.exec(trimmed)
+  const payload = dataUrlMatch ? dataUrlMatch[2] : trimmed
+  const declaredMime = dataUrlMatch?.[1]?.trim().toLowerCase()
 
-  const headerBytes = decodeBase64Header(trimmed)
+  if (trimmed.toLowerCase().startsWith("data:image/")) {
+    if (!dataUrlMatch || !declaredMime || !ALLOWED_IMAGE_MIME_TYPES.has(declaredMime)) {
+      return null
+    }
+  } else if (trimmed.toLowerCase().startsWith("data:")) {
+    return null
+  }
+
+  if (!isValidBase64ImagePayload(payload)) return null
+
+  const headerBytes = decodeBase64Header(payload)
   if (!headerBytes) return null
 
   const mime = detectImageMime(headerBytes)
   if (!mime || !ALLOWED_IMAGE_MIME_TYPES.has(mime)) return null
+  if (declaredMime && declaredMime !== mime) return null
 
-  return `data:${mime};base64,${trimmed}`
+  return `data:${mime};base64,${payload}`
 }
 
 /**

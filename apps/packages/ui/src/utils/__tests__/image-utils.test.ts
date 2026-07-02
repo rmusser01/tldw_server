@@ -35,6 +35,14 @@ describe("image utils", () => {
     expect(createImageDataUrl(malformed)).toBeNull()
   })
 
+  it("validates prebuilt data image URLs before returning them", () => {
+    expect(createImageDataUrl(`data:image/png;base64,${ONE_PIXEL_PNG_BASE64}`)).toBe(
+      `data:image/png;base64,${ONE_PIXEL_PNG_BASE64}`
+    )
+    expect(createImageDataUrl("data:image/svg+xml;base64,PHN2Zy8+")).toBeNull()
+    expect(createImageDataUrl("data:image/png,not-base64")).toBeNull()
+  })
+
   it("returns an empty string when value is already a data URL", () => {
     expect(validateAndCreateImageDataUrl(`data:image/png;base64,${ONE_PIXEL_PNG_BASE64}`)).toBe(
       ""

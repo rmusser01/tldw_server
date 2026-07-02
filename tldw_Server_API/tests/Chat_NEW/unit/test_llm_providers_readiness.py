@@ -213,6 +213,38 @@ def test_custom_openai_catalog_uses_env_endpoint_and_model(
 
 
 @pytest.mark.unit
+def test_custom_openai_catalog_uses_env_endpoint_and_model_without_api_section(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Env-only custom OpenAI catalog config is usable without an [API] section."""
+    monkeypatch.setenv("CUSTOM_OPENAI_API_URL", "http://127.0.0.1:9099/v1")
+    monkeypatch.setenv("CUSTOM_OPENAI_API_MODEL", "local-gemma.gguf")
+    monkeypatch.setenv("WORKFLOWS_EGRESS_ALLOWED_PORTS", "*")
+    monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "false")
+    monkeypatch.setenv("WORKFLOWS_EGRESS_ALLOWLIST", "127.0.0.1,localhost")
+    parser = _config({})
+
+    with _client_for_config(monkeypatch, parser) as client:
+        providers_response = client.get("/api/v1/llm/providers")
+        models_response = client.get("/api/v1/llm/models/metadata")
+
+    assert providers_response.status_code == 200, providers_response.text
+    provider = _provider(providers_response.json(), "custom_openai_api")
+    assert provider["endpoint"] == "http://127.0.0.1:9099/v1"
+    assert provider["models"] == ["local-gemma.gguf"]
+    assert provider["is_configured"] is True
+    assert provider["provider_enabled"] is True
+    assert provider["availability"] == "enabled"
+    assert provider["requires_api_key"] is False
+
+    assert models_response.status_code == 200, models_response.text
+    model = _model(models_response.json(), "custom_openai_api", "local-gemma.gguf")
+    assert model["is_configured"] is True
+    assert model["provider_enabled"] is True
+    assert model["availability"] == "enabled"
+
+
+@pytest.mark.unit
 def test_llm_provider_readiness_marks_unsupported_catalog_alias_unavailable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

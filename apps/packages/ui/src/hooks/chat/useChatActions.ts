@@ -2765,8 +2765,8 @@ export const useChatActions = ({
               : null
           const resolvedSelectedCharacter =
             resolvedSendMode === "tracked_character"
-              ? currentChatTrackedCharacter ||
-                draftTrackedCharacter ||
+              ? draftTrackedCharacter ||
+                currentChatTrackedCharacter ||
                 assistantSelectionToCharacter<Character & Record<string, unknown>>(
                   effectiveSelectedAssistant
                 )

@@ -273,7 +273,7 @@ describe("useChatActions character integration", () => {
     expect(options.setServerChatId).not.toHaveBeenCalledWith(null)
   })
 
-  it("does not let a stale selected assistant speaker override the active character chat", async () => {
+  it("does not let stale overlay assistant state override the active character chat", async () => {
     const options = {
       ...createHookOptions(),
       serverChatId: "other-character-chat",
@@ -290,7 +290,7 @@ describe("useChatActions character integration", () => {
         id: "99",
         name: "Miku",
         system_prompt: "Stale Miku prompt",
-        metadata: { selectionMode: "tracked" }
+        metadata: { selectionMode: "overlay" }
       }
     }
     const { result } = renderHook(() => useChatActions(options as any))
@@ -318,13 +318,73 @@ describe("useChatActions character integration", () => {
         speaker_character_id: 42
       })
     )
-    expect(
-      (persistCharacterCompletionMock.mock.calls.at(-1)?.[1] as Record<
-        string,
-        unknown
-      >)?.speaker_character_name
-    ).toBeUndefined()
+    const lastPersistCall = persistCharacterCompletionMock.mock.calls.at(-1) as
+      | unknown[]
+      | undefined
+    const lastPersistRequest = lastPersistCall?.[1] as
+      | Record<string, unknown>
+      | undefined
+    expect(lastPersistRequest?.speaker_character_name).toBeUndefined()
     expect(options.setServerChatId).not.toHaveBeenCalledWith(null)
     expect(options.setServerChatCharacterId).not.toHaveBeenCalledWith(null)
+  })
+
+  it("honors an explicit tracked character switch over the current chat metadata", async () => {
+    createChatMock.mockResolvedValueOnce({
+      id: "new-miku-chat",
+      character_id: 99,
+      title: "Miku chat"
+    })
+    const options = {
+      ...createHookOptions(),
+      serverChatId: "other-character-chat",
+      serverChatTitle: "Other character chat",
+      serverChatCharacterId: 42,
+      serverChatAssistantId: "42",
+      selectedCharacter: {
+        id: 42,
+        name: "Other Character",
+        system_prompt: "Other character prompt"
+      },
+      selectedAssistant: {
+        kind: "character",
+        id: "99",
+        name: "Miku",
+        system_prompt: "Miku prompt",
+        metadata: { selectionMode: "tracked" }
+      }
+    }
+    const { result } = renderHook(() => useChatActions(options as any))
+
+    await act(async () => {
+      await result.current.onSubmit({
+        message: "Start talking with Miku",
+        image: ""
+      })
+    })
+
+    expect(options.setServerChatId).toHaveBeenCalledWith(null)
+    expect(options.setServerChatCharacterId).toHaveBeenCalledWith(null)
+    expect(createChatMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        character_id: "99"
+      })
+    )
+    expect(streamCharacterChatCompletionMock).toHaveBeenCalledWith(
+      "new-miku-chat",
+      expect.objectContaining({
+        include_character_context: true,
+        model: "deepseek-chat"
+      }),
+      expect.any(Object)
+    )
+    expect(persistCharacterCompletionMock).toHaveBeenCalledWith(
+      "new-miku-chat",
+      expect.objectContaining({
+        assistant_content: "Tracked reply",
+        speaker_character_id: 99,
+        speaker_character_name: "Miku"
+      })
+    )
   })
 })

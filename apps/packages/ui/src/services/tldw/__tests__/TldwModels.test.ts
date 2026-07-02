@@ -82,6 +82,29 @@ describe("TldwModelsService caching", () => {
     )
   })
 
+  it.each(["CHANGE_ME_TO_SECURE_API_KEY", "   "])(
+    "does not treat invalid runtime single-user auth %s as model-ready",
+    async (runtimeKey) => {
+      mocks.getConfig.mockResolvedValue({
+        serverUrl: "http://127.0.0.1:8000",
+        authMode: "single-user"
+      })
+      mocks.getRuntimeSingleUserApiKeyOverride.mockReturnValue(runtimeKey)
+      mocks.getModels.mockResolvedValue([
+        { id: "local-model", name: "Local Model", provider: "llama", type: "chat" }
+      ])
+
+      const { TldwModelsService } = await importService()
+      const service = new TldwModelsService()
+
+      const models = await service.getModels()
+
+      expect(models).toEqual([])
+      expect(mocks.getModels).not.toHaveBeenCalled()
+      expect(mocks.storageSet).not.toHaveBeenCalled()
+    }
+  )
+
   it("dedupes concurrent in-flight model fetches", async () => {
     vi.useFakeTimers()
     try {

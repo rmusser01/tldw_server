@@ -167,8 +167,8 @@ export class TldwModelsService {
       return Boolean(String(config.accessToken || "").trim())
     }
 
-    const runtimeApiKey = getRuntimeSingleUserApiKeyOverride()
-    if (runtimeApiKey) return true
+    const runtimeApiKey = String(getRuntimeSingleUserApiKeyOverride() || "").trim()
+    if (runtimeApiKey && !isPlaceholderApiKey(runtimeApiKey)) return true
 
     const key = String(config.apiKey || "").trim()
     if (!key) return false
@@ -181,9 +181,11 @@ export class TldwModelsService {
     const serverUrl = String(config.serverUrl || "").trim().toLowerCase()
     const authMode = String(config.authMode || "single-user")
     const hasAccessToken = Boolean(String(config.accessToken || "").trim())
+    const apiKey = String(config.apiKey || "").trim()
+    const runtimeApiKey = String(getRuntimeSingleUserApiKeyOverride() || "").trim()
     const hasApiKey = Boolean(
-      String(config.apiKey || "").trim()
-      || getRuntimeSingleUserApiKeyOverride()
+      (apiKey && !isPlaceholderApiKey(apiKey)) ||
+        (runtimeApiKey && !isPlaceholderApiKey(runtimeApiKey))
     )
     const orgId = config.orgId != null ? String(config.orgId) : "none"
     return `${serverUrl}|${authMode}|${hasAccessToken ? "token" : hasApiKey ? "key" : "none"}|${orgId}`

@@ -108,6 +108,7 @@ describe("Playground responsive parity guard", () => {
     const contextItemsSource = fs.readFileSync(contextItemsSourcePath, "utf8")
 
     expect(playgroundSource).not.toContain("PlaygroundStatusStrip")
+    expect(cockpitShellSource).not.toContain("PlaygroundStatusStrip")
     expect(playgroundSource).not.toContain("cockpitStatusStrip")
     expect(playgroundSource).not.toContain("statusStrip={")
     expect(cockpitShellSource).not.toContain("statusStrip")

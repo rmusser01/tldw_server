@@ -248,7 +248,7 @@ export const PlaygroundCockpitShell = ({
         {modeSummary}
       </p>
 
-      {!focusMode && (leftRailVisible || rightRailVisible) && (
+      {!focusMode && (
         <div
           data-testid="playground-cockpit-mobile-rails"
           data-mobile-panel={visibleMobilePanel ?? "none"}
@@ -259,40 +259,52 @@ export const PlaygroundCockpitShell = ({
             aria-label={t("cockpit.mobilePanelTabs", "Mobile cockpit panels")}
             className="grid grid-cols-2 gap-1 rounded-md border border-border bg-surface p-1"
           >
-            {leftRailVisible ? (
-              <button
-                id={mobileContextTabId}
-                type="button"
-                role="tab"
-                aria-selected={visibleMobilePanel === "context"}
-                aria-controls={mobileContextPanelId}
-                onClick={() => setMobilePanel("context")}
-                className={`min-h-[44px] rounded px-3 py-2 text-xs font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-focus ${
-                  visibleMobilePanel === "context"
-                    ? "bg-bg text-text shadow-sm"
-                    : "text-text-muted hover:bg-bg"
-                }`}
-              >
-                {t("cockpit.context", "Context")}
-              </button>
-            ) : null}
-            {rightRailVisible ? (
-              <button
-                id={mobileRuntimeTabId}
-                type="button"
-                role="tab"
-                aria-selected={visibleMobilePanel === "runtime"}
-                aria-controls={mobileRuntimePanelId}
-                onClick={() => setMobilePanel("runtime")}
-                className={`min-h-[44px] rounded px-3 py-2 text-xs font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-focus ${
-                  visibleMobilePanel === "runtime"
-                    ? "bg-bg text-text shadow-sm"
-                    : "text-text-muted hover:bg-bg"
-                }`}
-              >
-                {t("cockpit.runtime", "Runtime")}
-              </button>
-            ) : null}
+            <button
+              id={mobileContextTabId}
+              type="button"
+              role="tab"
+              aria-selected={leftRailVisible && visibleMobilePanel === "context"}
+              aria-controls={leftRailVisible ? mobileContextPanelId : undefined}
+              aria-expanded={leftRailVisible}
+              onClick={() => {
+                if (!leftRailVisible) {
+                  onLeftRailVisibleChange?.(true);
+                }
+                setMobilePanel("context");
+              }}
+              className={`min-h-[44px] rounded px-3 py-2 text-xs font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-focus ${
+                leftRailVisible && visibleMobilePanel === "context"
+                  ? "bg-bg text-text shadow-sm"
+                  : "text-text-muted hover:bg-bg"
+              }`}
+            >
+              {leftRailVisible
+                ? t("cockpit.context", "Context")
+                : restoreContextSidechannelLabel}
+            </button>
+            <button
+              id={mobileRuntimeTabId}
+              type="button"
+              role="tab"
+              aria-selected={rightRailVisible && visibleMobilePanel === "runtime"}
+              aria-controls={rightRailVisible ? mobileRuntimePanelId : undefined}
+              aria-expanded={rightRailVisible}
+              onClick={() => {
+                if (!rightRailVisible) {
+                  onRightRailVisibleChange?.(true);
+                }
+                setMobilePanel("runtime");
+              }}
+              className={`min-h-[44px] rounded px-3 py-2 text-xs font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-focus ${
+                rightRailVisible && visibleMobilePanel === "runtime"
+                  ? "bg-bg text-text shadow-sm"
+                  : "text-text-muted hover:bg-bg"
+              }`}
+            >
+              {rightRailVisible
+                ? t("cockpit.runtime", "Runtime")
+                : restoreRuntimeSidechannelLabel}
+            </button>
           </div>
           <p
             id={mobilePanelSummaryId}

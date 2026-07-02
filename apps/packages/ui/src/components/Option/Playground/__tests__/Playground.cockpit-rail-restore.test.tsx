@@ -146,4 +146,27 @@ describe("Playground cockpit rail restore tabs", () => {
     expect(onLeftRailVisibleChange).toHaveBeenCalledWith(true);
     expect(onRightRailVisibleChange).toHaveBeenCalledWith(true);
   });
+
+  it("keeps mobile restore tabs available when cockpit rails are hidden", () => {
+    const { onLeftRailVisibleChange, onRightRailVisibleChange } = renderShell({
+      leftRailVisible: false,
+      rightRailVisible: false,
+    });
+
+    const mobileRails = screen.getByTestId("playground-cockpit-mobile-rails");
+    expect(mobileRails).toHaveAttribute("data-mobile-panel", "none");
+
+    const contextTab = screen.getByRole("tab", {
+      name: /restore context sidechannel/i,
+    });
+    const runtimeTab = screen.getByRole("tab", {
+      name: /restore runtime sidechannel/i,
+    });
+
+    fireEvent.click(contextTab);
+    fireEvent.click(runtimeTab);
+
+    expect(onLeftRailVisibleChange).toHaveBeenCalledWith(true);
+    expect(onRightRailVisibleChange).toHaveBeenCalledWith(true);
+  });
 });

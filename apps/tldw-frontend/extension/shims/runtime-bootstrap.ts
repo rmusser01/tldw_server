@@ -1,5 +1,8 @@
 import { browser } from "./wxt-browser"
-import { setRuntimeApiKey } from "@web/lib/authStorage"
+import {
+  setEnvApiKeySuppressedForSession,
+  setRuntimeApiKey
+} from "@web/lib/authStorage"
 import { createSafeStorage } from "@/utils/safe-storage"
 import type { TldwConfig } from "@/services/tldw/TldwApiClient"
 import { FEATURE_FLAGS } from "@/hooks/useFeatureFlags"
@@ -205,6 +208,7 @@ const DEFAULT_TLDW_SERVER_URL = "http://127.0.0.1:8000"
 const RUNTIME_CONFIG_ENDPOINT = "/api/_tldw-webui/runtime-config"
 const RUNTIME_AUTH_METADATA_KEY = "tldwRuntimeAuthMetadata"
 const RUNTIME_AUTH_METADATA_VERSION = 1
+const RUNTIME_ENV_AUTH_OPT_OUT_KEY = "tldwRuntimeEnvAuthOptOut"
 const PLACEHOLDER_API_KEYS = new Set([
   "change-me",
   "changeme",
@@ -478,7 +482,19 @@ const seedTldwConfigFromEnv = async (): Promise<void> => {
   const apiKey = (process.env.NEXT_PUBLIC_X_API_KEY || "").trim() || null
   const apiBearer = (process.env.NEXT_PUBLIC_API_BEARER || "").trim() || null
 
-  if (apiKey && !getRuntimeSingleUserApiKeyOverride()) {
+  const envAuthOptedOut = (() => {
+    try {
+      return window.localStorage.getItem(RUNTIME_ENV_AUTH_OPT_OUT_KEY) === "true"
+    } catch {
+      return false
+    }
+  })()
+  setEnvApiKeySuppressedForSession(envAuthOptedOut)
+
+  if (envAuthOptedOut) {
+    setRuntimeApiKey(null)
+    setRuntimeSingleUserApiKeyOverride(null)
+  } else if (apiKey && !getRuntimeSingleUserApiKeyOverride()) {
     setRuntimeApiKey(apiKey)
     setRuntimeSingleUserApiKeyOverride(apiKey)
   }

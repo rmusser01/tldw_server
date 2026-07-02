@@ -988,7 +988,7 @@ async function* bgStreamDirect<
   }
 
   if (!shouldSkipAuth && !hostedMode && cfg?.authMode === "single-user") {
-    const runtimeApiKey = getRuntimeSingleUserApiKeyOverride()
+    const runtimeApiKey = String(getRuntimeSingleUserApiKeyOverride() || "").trim()
     const key = runtimeApiKey || String(cfg?.apiKey || "").trim()
     if (!key) {
       throw new Error(

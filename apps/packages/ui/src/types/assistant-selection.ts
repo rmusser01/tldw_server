@@ -98,7 +98,7 @@ const resolveAvatarUrl = (
 
   const embeddedImageUrl =
     typeof candidate.image_base64 === "string"
-      ? createImageDataUrl(candidate.image_base64)
+      ? createImageDataUrl(candidate.image_base64.trim())
       : null
   return embeddedImageUrl ?? avatarUrl
 }

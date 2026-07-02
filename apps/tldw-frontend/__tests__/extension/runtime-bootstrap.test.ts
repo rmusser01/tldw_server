@@ -665,6 +665,32 @@ describe("runtime-bootstrap chrome shim", () => {
     expect(readStoredValue("tldwRuntimeAuthMetadata")).toBeNull()
   })
 
+  it("does not reapply env single-user auth after an explicit browser opt-out", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "advanced"
+    process.env.NEXT_PUBLIC_API_URL = "http://127.0.0.1:8000"
+    process.env.NEXT_PUBLIC_X_API_KEY = "env-key"
+    localStorage.setItem("tldwRuntimeEnvAuthOptOut", "true")
+    localStorage.setItem(
+      "tldwConfig",
+      JSON.stringify({
+        authMode: "single-user",
+        serverUrl: "http://127.0.0.1:8000"
+      })
+    )
+
+    await importAndAwaitBootstrap()
+
+    const { getApiKey, hasEnvApiAuth } = await import("@web/lib/authStorage")
+    const { getRuntimeSingleUserApiKeyOverride } = await import(
+      "@/services/tldw/runtime-auth-override"
+    )
+
+    expect(getApiKey()).toBeNull()
+    expect(hasEnvApiAuth()).toBe(false)
+    expect(getRuntimeSingleUserApiKeyOverride()).toBeNull()
+    expect(localStorage.getItem("tldwConfig")).not.toContain("env-key")
+  })
+
   it("does not fetch runtime config for extension protocols", async () => {
     process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
     setWindowLocation("chrome-extension://extension-id/options.html")
