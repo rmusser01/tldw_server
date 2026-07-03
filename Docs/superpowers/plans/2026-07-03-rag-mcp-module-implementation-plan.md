@@ -33,9 +33,12 @@ Modify:
 - `tldw_Server_API/tests/RAG_NEW/integration/test_rag_source_health_endpoint.py` - update helper monkeypatch targets after source-health extraction.
 - `tldw_Server_API/Config_Files/mcp_modules.yaml` - add default-enabled `rag` module only after control parity is implemented.
 - `tldw_Server_API/Config_Files/mcp_tool_categories.yaml` - add `rag.search: search` and `rag.answer: rag_generation`.
-- `tldw_Server_API/Config_Files/resource_governor_policies.yaml` - add `mcp.rag_generation` policy mapping.
+- `tldw_Server_API/Config_Files/resource_governor_policies.yaml` - add `mcp.search` and `mcp.rag_generation` policy mappings.
 - `tldw_Server_API/app/core/MCP_unified/module_surface.py` - classify `rag` as read-only data access.
 - `tldw_Server_API/app/core/MCP_unified/tests/test_protocol_catalog_filter.py` - catalog discovery regression coverage for curated `rag.*` workflow catalogs.
+- `tldw_Server_API/tests/MCP_unified/test_mcp_http_auth_paths.py` - HTTP `/tools/execute` wrapper compatibility coverage for `rag.*`.
+- `tldw_Server_API/tests/MCP_unified/test_mcp_knowledge_rbac.py` - executable regression proving `knowledge.search` remains FTS/source-module fan-out.
+- `tldw_Server_API/app/core/MCP_unified/tests/test_knowledge_search_defaults.py` - source fan-out defaults coverage if needed for `knowledge.search` regression.
 - `Docs/MCP/mcp_tool_catalogs.md` - document a curated RAG/library workflow catalog using the existing DB-backed catalog service.
 - `Docs/MCP/Unified/User_Guide.md` - document `rag.*` tools and catalog/security boundaries.
 - `Docs/MCP/Unified/Client_Snippets.md` - add JSON-RPC snippets for `rag.search` and `rag.answer`.
@@ -184,6 +187,12 @@ def test_sql_source_is_rejected_in_stage_one():
         _build_mcp_rag_request("rag.search", {"query": "q", "sources": ["sql"]})
 
 
+def test_unknown_and_internal_sources_are_rejected():
+    for source in ("unknown", "claims"):
+        with pytest.raises(ValueError, match=source):
+            _build_mcp_rag_request("rag.search", {"query": "q", "sources": [source]})
+
+
 def test_compact_response_truncates_documents_and_preserves_citations():
     response = UnifiedRAGResponse(
         query="q",
@@ -203,6 +212,11 @@ def test_compact_response_truncates_documents_and_preserves_citations():
     assert payload["documents"][0]["content_truncated"] is True
     assert payload["chunk_citations"] == [{"id": "chunk-1"}]
     assert payload["metadata"]["hard_citation_coverage"] == 0.5
+    assert payload["metadata"]["sources_used"] == ["media_db"]
+    assert payload["metadata"]["sources_unavailable"] == []
+    assert payload["metadata"]["documents_truncated"] is False
+    assert payload["metadata"]["max_documents"] == 1
+    assert payload["metadata"]["max_content_chars"] == 3
 ```
 
 - [ ] **Step 2: Run tests to verify failures**
@@ -342,7 +356,9 @@ Also add tests for:
 - `tools/call` enforces `tools.execute:rag.capabilities`, `tools.execute:rag.source_health`, `tools.execute:rag.search`, and `tools.execute:rag.answer` independently.
 - `rag.source_health`, `rag.search`, and `rag.answer` call a transport-neutral `rbac_rate_limit("rag.search")`-equivalent posture check before source access; `rag.capabilities` does not.
 - `rag.source_health`, `rag.search`, and `rag.answer` enforce TokenScopeGuard/API-key-scope-equivalent read access using existing MCP scope normalization; a context with incompatible API-key/tool scopes fails closed before source access or pipeline execution.
+- supported source scopes from `context.metadata` are applied before retrieval: `media_id`/`media_ids` into `include_media_ids`, `note_id`/`note_ids` into `include_note_ids`, and workspace/session metadata into `workspace_id`/safe request metadata where the RAG pipeline supports it. Tests must prove scoped contexts cannot run unscoped retrieval for `media_db` or `notes`.
 - `rag.search` and `rag.answer` call the RAG query quota checker before pipeline execution and the best-effort usage logger after successful execution.
+- `rag.capabilities` does not consume RAG query quota.
 - `rag.answer` propagates only LLM-provider-safe request metadata into generation/pipeline kwargs and strips authorization, API keys, raw config paths, raw prompts, and debug payloads.
 - explicit unavailable source returns `ok:false` unless `allow_partial=true`.
 - `sources=["sql"]` returns a Stage 1 rejection rather than entering the pipeline.
@@ -403,6 +419,7 @@ Execution rules:
   - `dictionaries`: backing module/source entitlement available and enabled; explicit requests fail closed otherwise, implicit defaults filter with a warning.
 - `_authorize_sources()` returns the filtered canonical source list plus `sources_unavailable` and warnings. Explicitly denied or unavailable sources fail closed unless `allow_partial=true`; implicit/default sources are filtered with warnings.
 - `_unsupported_scope_warnings_or_error()` must inspect `context.metadata`/persona scope for `conversation_id`, `character_id`, and `prompt_id`. When these scopes are supplied with explicit affected sources, return `ok:false` with `unsupported_scope` or `source_unavailable`; when sources are implicit/default, filter affected sources and add warnings.
+- `_apply_supported_source_scopes()` must apply supported item/workspace scopes after argument validation and before `build_standard_request_bundle()`/pipeline execution. Normalize `context.metadata["media_id"]`, `context.metadata["media_ids"]`, `context.metadata["note_id"]`, and `context.metadata["note_ids"]` into `UnifiedRAGRequest.include_media_ids` and `UnifiedRAGRequest.include_note_ids`, intersecting with any explicit include lists rather than widening them. Normalize `context.metadata["workspace_id"]` and `context.session_id`/`context.metadata["session_id"]` into `workspace_id` and safe request metadata only where the current RAG schema/pipeline enforces them. Invalid scoped ids fail closed for explicit affected sources and filter/warn for implicit defaults.
 - `_mcp_safe_search_agent_overrides()` must be merged into pipeline kwargs after `build_standard_request_bundle()` so profile/config defaults cannot enable out-of-scope external behavior. Force these keys false/disabled in Stage 1: `enable_research_loop`, `search_url_scraping`, `enable_image_search`, `enable_video_search`, `enable_discussion_search` when it would call external providers, web fallback flags, and any equivalent research/web provider toggles present in the payload.
 - `_safe_generation_metadata(context, request_info)` must provide the only request metadata passed to generation/provider-facing kwargs for `rag.answer`. Keep bounded scalar identifiers such as request/session/correlation ids and canonical source ids; redact or omit authorization headers, API keys, raw config paths, raw prompts, full context metadata, and debug/provider payloads.
 - `rag.search` and `rag.answer` call an injectable `_check_rag_query_quota(context, units=1)` before pipeline execution. The default implementation should use existing Billing enforcement (`LimitCategory.RAG_QUERIES_DAY`) when org context is available, and preserve single-user/orgless behavior where Billing is disabled or explicitly orgless.
@@ -456,13 +473,19 @@ def test_rag_tool_category_config_separates_generation():
     assert mapping["rag.answer"] == "rag_generation"
 
 
+def test_rag_search_and_answer_have_concrete_mcp_policies():
+    policies = yaml.safe_load(Path("tldw_Server_API/Config_Files/resource_governor_policies.yaml").read_text())
+    assert "mcp.search" in policies["policies"]
+    assert "mcp.rag_generation" in policies["policies"]
+
+
 def test_module_surface_classifies_rag_as_read_only():
     assert MODULE_RISK_TIERS["rag"][0] == "read_only"
 ```
 
-Add a policy test that `resource_governor_policies.yaml` contains `mcp.rag_generation` or the equivalent operation mapping used by MCP rate limiting.
+Add a policy test that `resource_governor_policies.yaml` contains concrete `mcp.search` and `mcp.rag_generation` policies, or the equivalent operation mapping used by MCP rate limiting. Do not leave `rag.search` mapped to `search` without a concrete `mcp.search` policy or deliberate tested alias to an existing category.
 
-Add a protocol-level category test with a fake rate limiter proving `tools/call` for `rag.answer` receives category `rag_generation` via `MCP_TOOL_CATEGORY_MAP`/`mcp_tool_categories.yaml`, because the runtime only trusts a small built-in set of metadata categories before consulting the config map.
+Add protocol-level category tests with a fake rate limiter proving `tools/call` for `rag.search` receives category `search` and `tools/call` for `rag.answer` receives category `rag_generation` via `MCP_TOOL_CATEGORY_MAP`/`mcp_tool_categories.yaml`, because the runtime only trusts a small built-in set of metadata categories before consulting the config map.
 
 In `test_protocol_catalog_filter.py`, add a catalog regression using the existing `tool_catalog_provider` injection:
 
@@ -536,14 +559,18 @@ rag.answer: rag_generation
 Add a resource-governor policy in `resource_governor_policies.yaml`:
 
 ```yaml
+  mcp.search:
+    <<: *mcp_base
+    requests: { rpm: 60, burst: 1.0 }
+
   mcp.rag_generation:
     requests: { rpm: 30, burst: 1.0 }
     scopes: [user, api_key]
 ```
 
-If the policy file has an MCP category map, map `mcp.rag_generation` there rather than creating a dead policy.
+If the policy file has an MCP category map, map `mcp.search` and `mcp.rag_generation` there rather than creating dead policies.
 
-Do not rely on `metadata={"category": "rag_generation"}` alone for MCP rate limiting. Keep the metadata for governance/observability, but make the runtime category deterministic through `mcp_tool_categories.yaml`.
+Do not rely on tool metadata alone for MCP rate limiting. Keep metadata for governance/observability, but make runtime categories deterministic through `mcp_tool_categories.yaml`.
 
 Add to `module_surface.py`:
 
@@ -579,6 +606,9 @@ git commit -m "config: register rag mcp module"
 - Modify: `Docs/MCP/mcp_tool_catalogs.md`
 - Modify: `Docs/MCP/Unified/User_Guide.md`
 - Modify: `Docs/MCP/Unified/Client_Snippets.md`
+- Modify: `tldw_Server_API/tests/MCP_unified/test_mcp_http_auth_paths.py`
+- Modify: `tldw_Server_API/tests/MCP_unified/test_mcp_knowledge_rbac.py`
+- Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_knowledge_search_defaults.py` if the `knowledge.search` regression fits better there.
 - Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_profile_presets.py` only if adding `rag.*` to built-in profile metadata exposes a missing-prefix test.
 - Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_protocol_allowed_tools.py` only if discovery/canExecute fixtures need `rag.*` coverage.
 
@@ -588,11 +618,18 @@ If built-in profile metadata is updated to include `rag.search` or `rag.answer`,
 
 Add a lightweight docs regression, or extend an existing docs/catalog test, that confirms `Docs/MCP/mcp_tool_catalogs.md` includes a curated `library-rag` or updated `research-kit` catalog example containing `rag.search` and `rag.answer`. Do not add a new static catalog seed file unless the repository already has a first-class static seed mechanism for tool catalogs; the current catalog system is DB-backed through the existing catalog management APIs.
 
+Add `/api/v1/mcp/tools/execute` compatibility coverage in `test_mcp_http_auth_paths.py` using the existing dummy-server pattern. The test should call `rag.search` and prove the HTTP facade preserves the current `ToolExecutionResponse` wrapper shape for JSON results instead of silently moving the inner `rag.*` payload to a different top-level contract.
+
+Add an executable `knowledge.search` regression in `test_mcp_knowledge_rbac.py` or `test_knowledge_search_defaults.py` proving `KnowledgeModule.execute_tool("knowledge.search", ...)` still fans out to source search tools such as `notes.search`/`media.search`, preserves FTS-style result metadata like `score_type="fts"` when the source module returns it, and never invokes `rag.search`, `RagModule`, or `unified_rag_pipeline`.
+
 Run:
 
 ```bash
 source .venv/bin/activate && python -m pytest \
   tldw_Server_API/app/core/MCP_unified/tests/test_protocol_catalog_filter.py \
+  tldw_Server_API/tests/MCP_unified/test_mcp_http_auth_paths.py \
+  tldw_Server_API/tests/MCP_unified/test_mcp_knowledge_rbac.py \
+  tldw_Server_API/app/core/MCP_unified/tests/test_knowledge_search_defaults.py \
   tldw_Server_API/app/core/MCP_unified/tests/test_profile_presets.py \
   tldw_Server_API/app/core/MCP_unified/tests/test_protocol_allowed_tools.py \
   -q
@@ -649,6 +686,10 @@ Run:
 source .venv/bin/activate && python -m pytest \
   tldw_Server_API/app/core/MCP_unified/tests/test_rag_module.py \
   tldw_Server_API/app/core/MCP_unified/tests/test_rag_module_registration.py \
+  tldw_Server_API/app/core/MCP_unified/tests/test_protocol_catalog_filter.py \
+  tldw_Server_API/tests/MCP_unified/test_mcp_http_auth_paths.py \
+  tldw_Server_API/tests/MCP_unified/test_mcp_knowledge_rbac.py \
+  tldw_Server_API/app/core/MCP_unified/tests/test_knowledge_search_defaults.py \
   tldw_Server_API/tests/RAG_NEW/unit/test_rag_transport_helpers.py \
   tldw_Server_API/tests/RAG_NEW/unit/test_rag_unified_search_agent_defaults.py \
   tldw_Server_API/tests/RAG_NEW/integration/test_rag_source_health_endpoint.py \
@@ -673,6 +714,8 @@ Expected:
 - `rag.search` has no `answer`
 - `rag.answer["answer"]["status"]` is one of `answered`, `partial`, `abstained`
 
+Also add or run an automated HTTP facade smoke through `POST /api/v1/mcp/tools/execute` for `rag.search` with a stub server, asserting the existing wrapper contract remains intact.
+
 - [ ] **Step 5: Run Bandit on touched code scopes**
 
 Run:
@@ -694,6 +737,9 @@ git add \
   Docs/MCP/mcp_tool_catalogs.md \
   Docs/MCP/Unified/User_Guide.md \
   Docs/MCP/Unified/Client_Snippets.md \
+  tldw_Server_API/tests/MCP_unified/test_mcp_http_auth_paths.py \
+  tldw_Server_API/tests/MCP_unified/test_mcp_knowledge_rbac.py \
+  tldw_Server_API/app/core/MCP_unified/tests/test_knowledge_search_defaults.py \
   tldw_Server_API/app/core/MCP_unified/tests/test_profile_presets.py \
   tldw_Server_API/app/core/MCP_unified/tests/test_protocol_allowed_tools.py
 git commit -m "docs: document rag mcp tools"
@@ -706,10 +752,12 @@ git commit -m "docs: document rag mcp tools"
 - [ ] `rag.capabilities`, `rag.source_health`, `rag.search`, and `rag.answer` are discoverable.
 - [ ] `rag.search` returns bounded evidence and omits `answer`.
 - [ ] `rag.answer` returns bounded evidence plus `answer.status`.
-- [ ] Source aliases normalize to canonical ids and preserve `sources_explicit`.
+- [ ] Source aliases normalize to canonical ids, reject unknown/internal sources such as `claims`, and preserve `sources_explicit`.
+- [ ] Response metadata includes `sources_requested`, `sources_used`, `sources_unavailable`, and truncation fields.
 - [ ] `sql` is rejected/deferred in Stage 1 and is not advertised by `rag.source_health`.
 - [ ] `rag.source_health`, `rag.search`, and `rag.answer` enforce `rbac_rate_limit("rag.search")`-equivalent posture; `rag.capabilities` does not.
 - [ ] `rag.source_health`, `rag.search`, and `rag.answer` enforce TokenScopeGuard/API-key-scope-equivalent read access before source access.
+- [ ] Supported `media_id`, `note_id`, workspace, and session scopes are applied before retrieval where current RAG paths can enforce them.
 - [ ] Per-source authorization/module enablement is enforced independently; `media.read` only authorizes `media_db`.
 - [ ] Explicit unavailable sources fail closed unless `allow_partial=true`.
 - [ ] Unsupported `conversation_id`, `character_id`, and `prompt_id` scopes fail closed for explicit source requests and filter with warnings for implicit/default source selection.
@@ -719,6 +767,8 @@ git commit -m "docs: document rag mcp tools"
 - [ ] Curated `library-rag`/catalog documentation exists and catalog filtering does not grant execute permission.
 - [ ] `rag.source_health` and `rag.capabilities` do not consume `RAG_QUERIES_DAY`.
 - [ ] `rag.search` and `rag.answer` enforce RAG query quota and usage accounting.
-- [ ] `knowledge.search` remains FTS discovery.
+- [ ] `mcp.search` and `mcp.rag_generation` have concrete category/rate policies.
+- [ ] `knowledge.search` remains FTS/source-module discovery, not a RAG wrapper.
+- [ ] JSON-RPC `tools/call` and HTTP `/tools/execute` wrapper contracts are preserved.
 - [ ] Targeted pytest suite passes.
 - [ ] Bandit touched-scope scan is clean or any findings are fixed.
