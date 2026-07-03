@@ -9,7 +9,6 @@ from tldw_Server_API.app.core.Character_Chat import character_rate_limiter as cr
 
 @pytest.fixture
 def limiter(monkeypatch):
-    monkeypatch.setenv("CHARACTER_RATE_LIMIT_ENABLED", "true")
     monkeypatch.setattr(crl, "_rg_character_enabled", lambda: True)
     monkeypatch.setattr(crl, "_rg_character_enforce_requests", lambda: True)
     lim = crl.CharacterRateLimiter()
@@ -61,8 +60,7 @@ async def test_unavailable_governor_fails_open(limiter, monkeypatch):
 
 
 @pytest.mark.unit
-async def test_disabled_limiter_short_circuits(monkeypatch):
-    monkeypatch.setenv("CHARACTER_RATE_LIMIT_ENABLED", "false")
+async def test_disabled_limiter_short_circuits():
     lim = crl.CharacterRateLimiter()
     lim.enabled = False
     allowed, _ = await lim.check_rate_limit(user_id=1)

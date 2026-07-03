@@ -6,12 +6,12 @@ pytestmark = pytest.mark.integration
 
 # (method, path, minimal-but-malformed JSON body or None for GET)
 PROTECTED_ROUTES = [
-    ("POST", "/api/v1/chat/completions", {"model": 123}),          # model must be str
-    ("POST", "/api/v1/embeddings", {"input": None}),               # input required
-    ("POST", "/api/v1/rag/search", {"query": None}),               # query required
+    ("POST", "/api/v1/chat/completions", {"model": 123}),          # ChatCompletionRequest.model is Optional[str]; an int fails type validation
+    ("POST", "/api/v1/embeddings", {"input": None}),               # CreateEmbeddingRequest.input is required (Field(...)); None fails presence/type validation (model is also omitted)
+    ("POST", "/api/v1/rag/search", {"query": None}),               # UnifiedRAGRequest.query is required str with min_length=1; None fails type validation before length is even checked
     ("POST", "/api/v1/media/search", None),                        # GET is 405; endpoint is POST-only
-    ("POST", "/api/v1/media/add", {}),                              # media_type required; always registered (content.py, unconditional)
-    ("POST", "/api/v1/chatbooks/export", {"content_selections": "not-a-dict"}),  # content_selections must be a dict; always registered (content.py, unconditional)
+    ("POST", "/api/v1/media/add", {}),                              # AddMediaForm.media_type is required (Field(...)); an empty body has no fields at all, so the required-field check fails; always registered (content.py, unconditional)
+    ("POST", "/api/v1/chatbooks/export", {"content_selections": "not-a-dict"}),  # content_selections must be a dict of content-type -> ids (dict[ContentType, list[str]]); a plain string fails the dict-type validation; always registered (content.py, unconditional)
     ("GET", "/api/v1/notes/", None),
     ("GET", "/api/v1/prompts/", None),
     ("GET", "/api/v1/characters/", None),

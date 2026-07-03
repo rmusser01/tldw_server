@@ -24,7 +24,7 @@ The project has an unusually large and well-organized test estate — the proble
 | **Enforced coverage floor** | **5%** | `.github/workflows/coverage-required.yml:79` |
 | Whole-suite coverage | **Unable to verify** — never measured | see F1 |
 
-**Overall grade: B−.** World-class breadth (security suite, a11y gates, tiered E2E, per-test Postgres isolation) undermined by a near-meaningless coverage gate, five untested endpoint files (two of them OAuth admin surfaces), and three test directories silently excluded from collection.
+**Overall grade: B−.** World-class breadth (security suite, a11y gates, tiered E2E, per-test Postgres isolation) undermined by a near-meaningless coverage gate, five untested endpoint files (two of them OAuth admin surfaces), and three test directories silently excluded from default collection (CI shards ran curated subsets; see §3.2(a) correction).
 
 **Top 3 actions:**
 1. Expand coverage measurement beyond `tests/unit` + `tests/sanity_tests` and ratchet the floor (F1).

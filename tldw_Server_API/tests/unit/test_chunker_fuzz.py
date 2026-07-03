@@ -63,6 +63,7 @@ def test_empty_input_yields_no_chunks(max_size):
 @given(text=st.text(min_size=1, max_size=5_000).filter(lambda s: s.strip()))
 def test_nonempty_input_content_is_preserved_in_chunks(text):
     chunker = Chunker()
+    # assumes _sanitize_input is a pure function of text (same call chunk_text makes internally)
     sanitized = chunker._sanitize_input(text)
     if not sanitized.strip():
         # Sanitization (e.g. bidi-override removal) can reduce an input that
