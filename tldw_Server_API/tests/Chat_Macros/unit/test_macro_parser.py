@@ -39,7 +39,7 @@ def test_builtin_wrapup_loads_and_validates():
     ]
 
 
-def test_non_empty_tool_or_skill_permissions_rejected():
+def test_non_empty_tool_permissions_rejected():
     raw = (
         "schema_version: 1\n"
         "name: bad\n"
@@ -49,6 +49,19 @@ def test_non_empty_tool_or_skill_permissions_rejected():
         "steps: []\n"
     )
     with pytest.raises(MacroValidationError, match="tool"):
+        load_macro_definition(raw)
+
+
+def test_non_empty_skill_permissions_rejected():
+    raw = (
+        "schema_version: 1\n"
+        "name: bad\n"
+        "command: bad\n"
+        "permissions:\n"
+        "  skills: [python]\n"
+        "steps: []\n"
+    )
+    with pytest.raises(MacroValidationError, match="skills"):
         load_macro_definition(raw)
 
 
