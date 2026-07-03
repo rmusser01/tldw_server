@@ -50,6 +50,7 @@ from tldw_Server_API.app.core.Visual_Identities.expression_slots import (
 )
 from tldw_Server_API.app.core.Visual_Identities.jobs import create_visual_identity_import_zip_job
 from tldw_Server_API.app.core.Visual_Identities.service import VisualIdentityService
+from tldw_Server_API.app.core.Visual_Identities.source_context import canonicalize_source_context
 from tldw_Server_API.app.core.Visual_Identities.storage import (
     copy_generated_file_record_to_expression_asset,
     resolve_visual_identity_asset_path,
@@ -154,6 +155,7 @@ def _asset_response(row: dict[str, Any]) -> VisualIdentityAssetResponse:
         frame_count=int(row["frame_count"]) if row.get("frame_count") is not None else None,
         duration_ms=int(row["duration_ms"]) if row.get("duration_ms") is not None else None,
         preview_relpath=str(row["preview_relpath"]) if row.get("preview_relpath") else None,
+        source_context=_json_mapping(row, "source_context_json"),
         created_at=str(row["created_at"]) if row.get("created_at") is not None else None,
         updated_at=str(row["updated_at"]) if row.get("updated_at") is not None else None,
     )
@@ -445,6 +447,7 @@ def _create_asset_from_stored_metadata(
     expression_key: str,
     source_filename: str,
     stored: Any,
+    source_context: dict[str, Any] | None = None,
 ) -> VisualIdentityAssetResponse:
     asset = _repo(service).create_asset(
         owner_user_id=service.owner_user_id,
@@ -464,6 +467,7 @@ def _create_asset_from_stored_metadata(
         frame_count=stored.frame_count,
         duration_ms=stored.duration_ms,
         preview_relpath=stored.preview_relpath,
+        source_context=source_context or {},
     )
     return _asset_response(asset)
 
@@ -650,6 +654,10 @@ async def create_visual_identity_asset_from_generated_file(
 ) -> VisualIdentityAssetResponse:
     pack = _require_pack(service, pack_id)
     normalized_expression = _normalize_expression_or_422(request.expression_key)
+    try:
+        canonical_context = canonicalize_source_context(request.source_context)
+    except ValueError as exc:
+        raise _handle_value_error(exc) from exc
     scope = "visual_identity_generated_file_asset"
     resource_id = f"pack:{pack_id}:generated-file-asset"
     payload_hash = _canonical_payload_hash(
@@ -659,6 +667,7 @@ async def create_visual_identity_asset_from_generated_file(
             "expression_key": normalized_expression,
             "draft_id": request.draft_id,
             "source_feature": request.source_feature,
+            "source_context": canonical_context,
         }
     )
     replay, claim_token = _claim_or_replay_idempotency(
@@ -700,6 +709,7 @@ async def create_visual_identity_asset_from_generated_file(
             expression_key=normalized_expression,
             source_filename=str(generated_file.get("original_filename") or generated_file.get("filename") or ""),
             stored=stored,
+            source_context=canonical_context,
         )
     except ValueError as exc:
         _release_idempotency_claim(

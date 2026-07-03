@@ -96,6 +96,7 @@ class VisualIdentityAssetResponse(BaseModel):
     frame_count: int | None = None
     duration_ms: int | None = None
     preview_relpath: str | None = None
+    source_context: dict[str, Any] = Field(default_factory=dict)
     created_at: str | None = None
     updated_at: str | None = None
 
@@ -210,4 +211,5 @@ class VisualIdentityGeneratedFileAssetRequest(BaseModel):
     expression_key: str = Field(..., min_length=1, max_length=100)
     draft_id: int | None = Field(default=None, ge=1)
     source_feature: str = Field(default="image_gen", min_length=1, max_length=100)
+    source_context: dict[str, Any] = Field(default_factory=dict)
     idempotency_key: str = Field(..., min_length=1, max_length=160)

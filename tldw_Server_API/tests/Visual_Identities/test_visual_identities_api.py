@@ -373,6 +373,120 @@ def test_generated_file_asset_import_replays_idempotency(
     assert any((storage_root / "1").glob("packs/draft-*/happy/*.png"))
 
 
+def test_generated_file_asset_import_returns_source_context(
+    chacha_db: CharactersRAGDB,
+    repo: VisualIdentityRepository,
+    storage_root: Path,
+    outputs_root: Path,
+) -> None:
+    pack = repo.create_pack(owner_user_id=1, title="Generated Expressions")
+    source_path = outputs_root / "1" / "image_gen" / "happy.png"
+    source_path.parent.mkdir(parents=True)
+    source_path.write_bytes(_png_bytes(color="blue"))
+    files_repo = FakeGeneratedFilesRepo(
+        {
+            77: {
+                "id": 77,
+                "user_id": 1,
+                "is_deleted": False,
+                "file_category": "image",
+                "source_feature": "image_gen",
+                "storage_path": "image_gen/happy.png",
+                "mime_type": "image/png",
+                "original_filename": "happy.png",
+            }
+        }
+    )
+
+    response = _client(chacha_db, files_repo=files_repo).post(
+        f"/api/v1/visual-identities/packs/{pack['id']}/assets/from-generated-file",
+        json={
+            "generated_file_id": 77,
+            "expression_key": "happy",
+            "source_context": {"source_feature": "image_gen", "generated_file_id": 77},
+            "idempotency_key": "generated-context-1",
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["source_context"] == {
+        "generated_file_id": 77,
+        "source_feature": "image_gen",
+    }
+
+
+def test_generated_file_asset_import_idempotency_uses_canonical_source_context(
+    chacha_db: CharactersRAGDB,
+    repo: VisualIdentityRepository,
+    storage_root: Path,
+    outputs_root: Path,
+) -> None:
+    pack = repo.create_pack(owner_user_id=1, title="Generated Expressions")
+    source_path = outputs_root / "1" / "image_gen" / "neutral.png"
+    source_path.parent.mkdir(parents=True)
+    source_path.write_bytes(_png_bytes(color="blue"))
+    files_repo = FakeGeneratedFilesRepo(
+        {
+            77: {
+                "id": 77,
+                "user_id": 1,
+                "is_deleted": False,
+                "file_category": "image",
+                "source_feature": "image_gen",
+                "storage_path": "image_gen/neutral.png",
+                "mime_type": "image/png",
+                "original_filename": "neutral.png",
+            }
+        }
+    )
+    client = _client(chacha_db, files_repo=files_repo)
+    request = {
+        "generated_file_id": 77,
+        "expression_key": "happy",
+        "idempotency_key": "generated-context-canonical-1",
+        "source_context": {
+            "source_feature": "image_gen",
+            "generated_file_id": 77,
+            "metadata": {"rank": 1, "stage": "final"},
+        },
+    }
+
+    first = client.post(
+        f"/api/v1/visual-identities/packs/{pack['id']}/assets/from-generated-file",
+        json=request,
+    )
+    replay = client.post(
+        f"/api/v1/visual-identities/packs/{pack['id']}/assets/from-generated-file",
+        json={
+            **request,
+            "source_context": {
+                "metadata": {"stage": "final", "rank": 1},
+                "generated_file_id": 77,
+                "source_feature": "image_gen",
+            },
+        },
+    )
+    conflict = client.post(
+        f"/api/v1/visual-identities/packs/{pack['id']}/assets/from-generated-file",
+        json={
+            **request,
+            "source_context": {
+                "source_feature": "image_gen",
+                "generated_file_id": 77,
+                "metadata": {"rank": 2, "stage": "final"},
+            },
+        },
+    )
+
+    assert first.status_code == 201
+    assert replay.status_code == 201
+    assert replay.json() == first.json()
+    assert conflict.status_code == 409
+    assert files_repo.accessed_ids == [77]
+    assert len(repo.list_draft_assets(first.json()["draft_id"], owner_user_id=1)) == 1
+    assert any((storage_root / "1").glob("packs/draft-*/happy/*.png"))
+
+
 def test_generated_file_asset_import_rejects_invalid_file_without_creating_draft(
     chacha_db: CharactersRAGDB,
     repo: VisualIdentityRepository,
