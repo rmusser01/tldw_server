@@ -125,6 +125,33 @@ def test_vn_bridge_accepts_digit_string_structural_ids(
 
 
 @pytest.mark.parametrize(
+    "source_feature",
+    [
+        None,
+        "",
+        "   ",
+    ],
+)
+def test_vn_bridge_rejects_missing_or_blank_source_feature(
+    source_feature: str | None,
+    vn_repository: FakeVNAssetPacksRepository,
+) -> None:
+    generated_file_record = {
+        "id": 42,
+        "source_ref": "vn_asset_item:29",
+    }
+    if source_feature is not None:
+        generated_file_record["source_feature"] = source_feature
+
+    with pytest.raises(ValueError, match="vn_generated_file_context_mismatch"):
+        build_vn_visual_identity_source_context(
+            user_id=OWNER_USER_ID,
+            vn_repository=vn_repository,
+            generated_file_record=generated_file_record,
+        )
+
+
+@pytest.mark.parametrize(
     "source_ref",
     [
         None,

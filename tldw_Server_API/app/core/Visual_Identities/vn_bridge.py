@@ -54,7 +54,7 @@ def build_vn_visual_identity_source_context(
 ) -> dict[str, Any]:
     """Resolve trusted Visual Identity source context for a VN generated file."""
     requested = canonicalize_source_context(requested_context or {})
-    source_feature = str(generated_file_record.get("source_feature") or VN_SOURCE_FEATURE).strip()
+    source_feature = str(generated_file_record.get("source_feature") or "").strip()
     if source_feature.lower() != VN_SOURCE_FEATURE:
         _raise_context_mismatch()
 
