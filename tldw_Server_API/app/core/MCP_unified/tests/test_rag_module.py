@@ -14,6 +14,7 @@ from tldw_Server_API.app.core.MCP_unified.modules.implementations.rag_module imp
 )
 from tldw_Server_API.app.core.MCP_unified.modules.registry import ModuleRegistry
 from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol, MCPRequest, RequestContext
+from tldw_Server_API.app.core.MCP_unified import server as mcp_server_module
 
 
 class _RecordingControls:
@@ -70,6 +71,18 @@ class _AllowAllRBAC:
     async def check_permission(self, *args, **kwargs):  # noqa: ANN001
         del args, kwargs
         return True
+
+
+class _DenyNotesSearchRBAC:
+    async def check_permission(self, _user_id, resource, _action, resource_id=None):  # noqa: ANN001
+        if getattr(resource, "value", resource) == "tool" and resource_id == "notes.search":
+            return False
+        return True
+
+
+class _NoopRateLimiter:
+    async def check_rate_limit(self, *args, **kwargs):  # noqa: ANN001
+        del args, kwargs
 
 
 def test_mcp_sources_accept_aliases_but_return_canonical_ids() -> None:
@@ -135,6 +148,60 @@ def test_compact_response_truncates_documents_and_preserves_citations() -> None:
     assert payload["metadata"]["documents_truncated"] is False  # nosec B101
     assert payload["metadata"]["max_documents"] == 1  # nosec B101
     assert payload["metadata"]["max_content_chars"] == 3  # nosec B101
+
+
+def test_compact_response_redacts_raw_document_and_response_metadata() -> None:
+    response = UnifiedRAGResponse(
+        query="q",
+        documents=[
+            {
+                "id": "d1",
+                "content": "Evidence",
+                "score": 0.9,
+                "source": "media_db",
+                "metadata": {
+                    "source": "media_db",
+                    "source_id": "42",
+                    "title": "Allowed title",
+                    "path": "SECRET_PATH",
+                    "db_path": "SECRET_DB",
+                    "provider": "SECRET_PROVIDER",
+                    "prompt": "SECRET_PROMPT",
+                    "debug": {"raw": "SECRET_DEBUG"},
+                },
+                "provider_payload": {"token": "SECRET_TOKEN"},
+            }
+        ],
+        citations=[],
+        chunk_citations=[],
+        metadata={
+            "hard_citations": {"coverage": 0.5},
+            "knowledge_trust": {"state": "grounded"},
+            "provider_debug": "SECRET_PROVIDER",
+            "prompt": "SECRET_PROMPT",
+            "db_path": "SECRET_DB",
+        },
+    )
+
+    payload = _compact_rag_response(
+        response,
+        mode="search",
+        request_metadata={"sources_requested": ["media_db"], "sources_explicit": True},
+        max_documents=1,
+        max_content_chars=2000,
+    )
+
+    document = payload["documents"][0]
+    assert document["metadata"] == {  # nosec B101
+        "source": "media_db",
+        "source_id": "42",
+        "title": "Allowed title",
+    }
+    assert "provider_payload" not in document  # nosec B101
+    rendered_payload = repr(payload)
+    assert "SECRET_" not in rendered_payload  # nosec B101
+    assert "knowledge_trust" not in payload["metadata"]  # nosec B101
+    assert payload["metadata"]["knowledge_trust_state"] == "grounded"  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -284,6 +351,9 @@ async def test_rag_search_applies_supported_scopes_and_disables_external_researc
     assert calls["search_url_scraping"] is False  # nosec B101
     assert calls["enable_image_search"] is False  # nosec B101
     assert calls["enable_video_search"] is False  # nosec B101
+    assert calls["enable_web_fallback"] is False  # nosec B101
+    assert calls["enable_query_classification"] is False  # nosec B101
+    assert calls["search_depth_mode"] is None  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -304,12 +374,45 @@ async def test_rag_source_health_uses_read_controls_without_query_quota() -> Non
 
     out = await module.execute_tool("rag.source_health", {}, context=RequestContext(request_id="r6", user_id="1"))
 
-    assert hasattr(out, "sources")  # nosec B101
+    assert out["ok"] is True  # nosec B101
+    assert isinstance(out["sources"], list)  # nosec B101
     assert ("protocol_rate", "rag.source_health", "search") in controls.calls  # nosec B101
     assert ("rbac_rate", "rag.search") in controls.calls  # nosec B101
     assert ("read_scope", "rag.source_health") in controls.calls  # nosec B101
     assert not any(call[0] == "quota" for call in controls.calls)  # nosec B101
     assert not any(call[0] == "usage" for call in controls.calls)  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_rag_source_health_reports_unavailable_sources_with_ok_contract() -> None:
+    module = RagModule(ModuleConfig(name="rag"), controls=_UnavailableNotesControls())
+
+    out = await module.execute_tool(
+        "rag.source_health",
+        {"sources": ["media", "notes"], "allow_partial": True},
+        context=RequestContext(request_id="source-health-partial", user_id="1"),
+    )
+
+    assert out["ok"] is True  # nosec B101
+    assert out["sources_unavailable"] == ["notes"]  # nosec B101
+    assert out["warnings"] == ["notes unavailable"]  # nosec B101
+    assert all(source["source_id"] != "notes" for source in out["sources"])  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_rag_source_health_fails_closed_when_explicit_source_is_unavailable() -> None:
+    module = RagModule(ModuleConfig(name="rag"), controls=_UnavailableNotesControls())
+
+    out = await module.execute_tool(
+        "rag.source_health",
+        {"sources": ["notes"]},
+        context=RequestContext(request_id="source-health-denied", user_id="1"),
+    )
+
+    assert out["ok"] is False  # nosec B101
+    assert out["reason_code"] == "source_unavailable"  # nosec B101
+    assert out["sources_unavailable"] == ["notes"]  # nosec B101
+    assert out["warnings"] == ["notes unavailable"]  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -386,6 +489,68 @@ async def test_explicit_unavailable_source_fails_closed() -> None:
     assert out["ok"] is False  # nosec B101
     assert out["reason_code"] == "source_unavailable"  # nosec B101
     assert out["sources_unavailable"] == ["notes"]  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_default_controls_enforce_source_tool_permission(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = RagModule(ModuleConfig(name="rag"))
+    protocol = MCPProtocol()
+    protocol.rbac_policy = _DenyNotesSearchRBAC()
+    protocol.rate_limiter = _NoopRateLimiter()
+    monkeypatch.setattr(mcp_server_module, "_server", SimpleNamespace(protocol=protocol))
+
+    async def fail_if_pipeline_runs(**kwargs):  # noqa: ANN001
+        del kwargs
+        raise AssertionError("pipeline must not run when source authorization fails")
+
+    monkeypatch.setattr(rag_module_impl, "unified_rag_pipeline", fail_if_pipeline_runs)
+
+    out = await module.execute_tool(
+        "rag.search",
+        {"query": "q", "sources": ["notes"]},
+        context=RequestContext(request_id="source-auth", user_id="1", client_id="unit"),
+    )
+
+    assert out["ok"] is False  # nosec B101
+    assert out["reason_code"] == "source_unavailable"  # nosec B101
+    assert out["sources_unavailable"] == ["notes"]  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_default_controls_authorize_character_backed_rag_sources(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = RagModule(ModuleConfig(name="rag"))
+    protocol = MCPProtocol()
+    protocol.rbac_policy = _AllowAllRBAC()
+    protocol.rate_limiter = _NoopRateLimiter()
+    monkeypatch.setattr(mcp_server_module, "_server", SimpleNamespace(protocol=protocol))
+    calls: dict[str, object] = {}
+
+    async def fake_pipeline(**kwargs):
+        calls.update(kwargs)
+        return SimpleNamespace(
+            documents=[],
+            query="q",
+            metadata={},
+            timings={},
+            citations=[],
+            chunk_citations=[],
+            generated_answer=None,
+            errors=[],
+            total_time=0.1,
+            cache_hit=False,
+            expanded_queries=[],
+        )
+
+    monkeypatch.setattr(rag_module_impl, "unified_rag_pipeline", fake_pipeline)
+
+    out = await module.execute_tool(
+        "rag.search",
+        {"query": "q", "sources": ["world_books", "dictionaries"]},
+        context=RequestContext(request_id="character-backed-sources", user_id="1", client_id="unit"),
+    )
+
+    assert out["ok"] is True  # nosec B101
+    assert calls["sources"] == ["world_books", "dictionaries"]  # nosec B101
 
 
 @pytest.mark.asyncio

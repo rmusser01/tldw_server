@@ -40,6 +40,8 @@ _SEARCH_MODES = ("hybrid", "vector", "fts")
 _PROFILES = ("fast", "balanced", "accuracy")
 
 _EXTERNAL_RESEARCH_DISABLED_OVERRIDES: dict[str, Any] = {
+    "search_depth_mode": None,
+    "enable_query_classification": False,
     "enable_research_loop": False,
     "search_url_scraping": False,
     "enable_image_search": False,
@@ -57,6 +59,58 @@ _UNSUPPORTED_SOURCE_SCOPES: dict[str, tuple[str, ...]] = {
     "prompt_id": ("prompts",),
     "prompt_ids": ("prompts",),
 }
+_SOURCE_PERMISSION_TOOLS: dict[str, str] = {
+    "media_db": "media.search",
+    "notes": "notes.search",
+    "chats": "chats.search",
+    "characters": "characters.search",
+    "kanban": "kanban.cards.search",
+    "prompts": "prompts.search",
+    "world_books": "characters.search",
+    "dictionaries": "characters.search",
+}
+_SAFE_DOCUMENT_KEYS = frozenset(
+    {
+        "id",
+        "source",
+        "source_type",
+        "source_id",
+        "title",
+        "uri",
+        "url",
+        "score",
+        "score_type",
+        "rank",
+        "chunk_id",
+        "document_id",
+        "media_id",
+        "note_id",
+        "created_at",
+        "updated_at",
+    }
+)
+_SAFE_DOCUMENT_METADATA_KEYS = frozenset(
+    {
+        "source",
+        "source_type",
+        "source_id",
+        "title",
+        "uri",
+        "url",
+        "score_type",
+        "chunk_id",
+        "document_id",
+        "media_id",
+        "note_id",
+        "page",
+        "page_number",
+        "start_time",
+        "end_time",
+        "timestamp",
+        "created_at",
+        "updated_at",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,18 +126,36 @@ class _McpRagControls:
     """Injectable MCP control hooks used by the RAG module.
 
     The protocol layer performs the primary module/tool execution checks before
-    calling modules. These hooks keep RAG-specific tests and host integrations
-    explicit without importing FastAPI dependencies into the module.
+    calling modules. These hooks reuse that server-owned protocol state for
+    direct module invocation and per-source RAG authorization.
     """
 
     async def enforce_protocol_rate(self, context: Any | None, tool_name: str, category: str) -> None:
-        del context, tool_name, category
+        metadata = getattr(context, "metadata", None)
+        if isinstance(metadata, dict) and metadata.get("rg_ingress_enforced"):
+            return
+        limiter = getattr(self._protocol(), "rate_limiter", None)
+        if limiter is None:
+            from ...auth.rate_limiter import get_rate_limiter
+
+            limiter = get_rate_limiter()
+        key = self._rate_limit_key(context, tool_name)
+        if key is None:
+            return
+        try:
+            await limiter.check_rate_limit(key, category=category)
+        except Exception as exc:  # noqa: BLE001 - normalizes host limiter exceptions for MCP payloads.
+            from ...auth.rate_limiter import RateLimitExceeded
+
+            if isinstance(exc, RateLimitExceeded):
+                raise PermissionError(f"MCP rate limit exceeded; retry after {exc.retry_after}s") from exc
+            raise
 
     async def enforce_rag_rbac_rate_limit(self, context: Any | None, resource: str) -> None:
-        del context, resource
+        await self._ensure_tool_allowed(context, resource)
 
     async def require_mcp_rag_read_scope(self, context: Any | None, tool_name: str) -> None:
-        del context, tool_name
+        await self._ensure_tool_allowed(context, tool_name)
 
     async def authorize_sources(
         self,
@@ -93,14 +165,61 @@ class _McpRagControls:
         sources_explicit: bool,
         allow_partial: bool,
     ) -> _SourceAuthorization:
-        del context, sources_explicit, allow_partial
-        return _SourceAuthorization(sources=list(sources), sources_unavailable=[], warnings=[])
+        del sources_explicit, allow_partial
+        allowed_sources: list[str] = []
+        unavailable_sources: list[str] = []
+        warnings: list[str] = []
+        for source in sources:
+            permission_tool = _SOURCE_PERMISSION_TOOLS.get(source)
+            if permission_tool is None:
+                unavailable_sources.append(source)
+                warnings.append(f"{source} unavailable: no MCP source permission tool is registered")
+                continue
+            if await self._tool_allowed(context, permission_tool):
+                allowed_sources.append(source)
+                continue
+            unavailable_sources.append(source)
+            warnings.append(f"{source} unavailable: MCP tool permission denied for {permission_tool}")
+        return _SourceAuthorization(
+            sources=allowed_sources,
+            sources_unavailable=unavailable_sources,
+            warnings=warnings,
+        )
 
     async def check_rag_query_quota(self, context: Any | None, units: int = 1) -> None:
-        del context, units
+        if units <= 0:
+            return
+        await self.enforce_protocol_rate(context, "rag.query", "rag_generation")
 
     async def log_rag_query_usage(self, context: Any | None, units: int = 1) -> None:
         await rag_transport.log_rag_queries_for_org_context(request_like=context, current_user=None, units=units)
+
+    def _protocol(self) -> Any:
+        from ...server import get_mcp_server
+
+        return get_mcp_server().protocol
+
+    @staticmethod
+    def _rate_limit_key(context: Any | None, tool_name: str) -> str | None:
+        user_id = getattr(context, "user_id", None)
+        if user_id:
+            return f"user:{user_id}:tool:{tool_name}"
+        client_id = getattr(context, "client_id", None)
+        if client_id:
+            return f"client:{client_id}:tool:{tool_name}"
+        return None
+
+    async def _tool_allowed(self, context: Any | None, tool_name: str) -> bool:
+        if context is None or not getattr(context, "user_id", None):
+            return False
+        has_tool_permission = getattr(self._protocol(), "_has_tool_permission", None)
+        if not callable(has_tool_permission):
+            return False
+        return bool(await has_tool_permission(context, tool_name, is_write=False))
+
+    async def _ensure_tool_allowed(self, context: Any | None, tool_name: str) -> None:
+        if not await self._tool_allowed(context, tool_name):
+            raise PermissionError(f"MCP tool permission denied: {tool_name}")
 
 _SEARCH_PROPERTIES: dict[str, Any] = {
     "query": {"type": "string", "minLength": 1, "maxLength": 20000},
@@ -249,9 +368,55 @@ def _source_from_document(document: dict[str, Any]) -> str | None:
     return None
 
 
+def _safe_json_value(value: Any) -> Any | None:
+    """Return bounded scalar/list metadata values suitable for MCP responses."""
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if isinstance(value, str):
+        return value[:1000]
+    if isinstance(value, (list, tuple)):
+        safe_items = [_safe_json_value(item) for item in value[:20]]
+        return [item for item in safe_items if item is not None]
+    return None
+
+
+def _safe_metadata(metadata: Any, allowed_keys: frozenset[str]) -> dict[str, Any]:
+    """Allowlist metadata keys and scalar values before returning to MCP clients."""
+    if not isinstance(metadata, dict):
+        return {}
+    safe: dict[str, Any] = {}
+    for key in sorted(allowed_keys):
+        if key not in metadata:
+            continue
+        value = _safe_json_value(metadata.get(key))
+        if value is not None:
+            safe[key] = value
+    return safe
+
+
+def _model_to_plain_dict(value: Any) -> dict[str, Any]:
+    """Convert Pydantic v1/v2 models to plain JSON-safe dictionaries."""
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        return model_dump(mode="json", exclude_none=True)
+    dict_method = getattr(value, "dict", None)
+    if callable(dict_method):
+        return dict_method(exclude_none=True)
+    return dict(value) if isinstance(value, dict) else {}
+
+
 def _compact_document(document: dict[str, Any], *, max_content_chars: int) -> dict[str, Any]:
-    compacted = dict(document)
-    content = compacted.get("content")
+    compacted: dict[str, Any] = {}
+    for key in sorted(_SAFE_DOCUMENT_KEYS):
+        if key not in document:
+            continue
+        value = _safe_json_value(document.get(key))
+        if value is not None:
+            compacted[key] = value
+    safe_metadata = _safe_metadata(document.get("metadata"), _SAFE_DOCUMENT_METADATA_KEYS)
+    if safe_metadata:
+        compacted["metadata"] = safe_metadata
+    content = document.get("content")
     if not isinstance(content, str):
         content = "" if content is None else str(content)
     truncated = max_content_chars >= 0 and len(content) > max_content_chars
@@ -294,18 +459,21 @@ def _compact_rag_response(
     if not sources_used:
         sources_used = list(request_metadata.get("sources_requested") or [])
 
-    metadata = dict(response.metadata or {})
-    metadata.update(
-        {
-            "sources_requested": list(request_metadata.get("sources_requested") or []),
-            "sources_used": sources_used,
-            "sources_unavailable": list(request_metadata.get("sources_unavailable") or []),
-            "documents_truncated": len(documents) > len(selected_documents),
-            "max_documents": max_documents,
-            "max_content_chars": max_content_chars,
-            "hard_citation_coverage": _hard_citation_coverage(response.metadata or {}),
-        }
-    )
+    response_metadata = response.metadata or {}
+    trust = response_metadata.get("knowledge_trust")
+    trust_state = str(trust.get("state", "")).strip().lower() if isinstance(trust, dict) else None
+    metadata = {
+        "sources_requested": list(request_metadata.get("sources_requested") or []),
+        "sources_used": sources_used,
+        "sources_unavailable": list(request_metadata.get("sources_unavailable") or []),
+        "warnings": list(request_metadata.get("warnings") or []),
+        "documents_truncated": len(documents) > len(selected_documents),
+        "max_documents": max_documents,
+        "max_content_chars": max_content_chars,
+        "hard_citation_coverage": _hard_citation_coverage(response_metadata),
+    }
+    if trust_state:
+        metadata["knowledge_trust_state"] = trust_state
 
     payload: dict[str, Any] = {
         "ok": not bool(response.errors),
@@ -579,6 +747,8 @@ class RagModule(BaseModule):
             await self._controls.enforce_protocol_rate(context, tool_name, "search")
             await self._controls.enforce_rag_rbac_rate_limit(context, "rag.search")
             await self._controls.require_mcp_rag_read_scope(context, tool_name)
+            sources_explicit = _sources_were_explicit(args)
+            allow_partial = bool(args.get("allow_partial", False))
             requested_sources = (
                 _normalize_mcp_sources(args.get("sources"))
                 if args.get("sources") is not None
@@ -587,17 +757,35 @@ class RagModule(BaseModule):
             authorization = await self._controls.authorize_sources(
                 context,
                 requested_sources,
-                sources_explicit=_sources_were_explicit(args),
-                allow_partial=bool(args.get("allow_partial", False)),
+                sources_explicit=sources_explicit,
+                allow_partial=allow_partial,
             )
+            if authorization.sources_unavailable and sources_explicit and not allow_partial:
+                return {
+                    "ok": False,
+                    "reason_code": "source_unavailable",
+                    "sources_requested": requested_sources,
+                    "sources_unavailable": authorization.sources_unavailable,
+                    "warnings": authorization.warnings,
+                }
             current_user = _current_user_from_context(context)
             payload = rag_transport.build_source_health_payload(current_user=current_user)
-            payload.sources = [
+            visible_sources = [
                 entry
                 for entry in payload.sources
                 if entry.source_id in set(authorization.sources)
             ]
-            return payload
+            return {
+                "ok": True,
+                "sources": [_model_to_plain_dict(entry) for entry in visible_sources],
+                "sources_requested": requested_sources,
+                "sources_unavailable": list(authorization.sources_unavailable),
+                "warnings": list(authorization.warnings),
+                "metadata": {
+                    "sources_explicit": sources_explicit,
+                    "allow_partial": allow_partial,
+                },
+            }
         if tool_name in {_TOOL_SEARCH, _TOOL_ANSWER}:
             return await self._execute_rag_query(tool_name, args, context)
         return {"ok": False, "reason_code": "unknown_tool", "message": f"Unknown tool: {tool_name}"}
