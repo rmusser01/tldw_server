@@ -33,9 +33,12 @@ running server. If it's wrong, these features fail to connect.
 - [ ] Auth arrives **before** config/audio (server 5s auth timeout is met).
 
 Files if a revert/patch is needed: `apps/packages/ui/src/services/persona-stream.ts`,
-`services/tldw/voice-conversation.ts`, `hooks/useVoiceChatStream.tsx`,
-`routes/hooks/usePersonaLiveSession.tsx`, `hooks/usePersonaLiveControl.tsx`,
-`entries/background.ts` (STT section).
+`apps/packages/ui/src/services/tldw/voice-conversation.ts`,
+`apps/packages/ui/src/hooks/useVoiceChatStream.tsx`,
+`apps/packages/ui/src/routes/hooks/usePersonaLiveSession.tsx`,
+`apps/packages/ui/src/hooks/usePersonaLiveControl.tsx`,
+`apps/packages/ui/src/entries/background.ts` (STT implementation; extension
+entrypoint re-exported through `apps/extension/entrypoints/background.ts`).
 
 ### V2 — CSP dropped `'unsafe-inline'` (H1 / `task-12093`)
 `script-src` no longer allows `'unsafe-inline'`; the one trusted inline script
