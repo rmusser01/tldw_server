@@ -329,7 +329,9 @@ def _resample_audio_without_librosa(audio: np.ndarray, sample_rate: int, target_
         divisor = math.gcd(int(sample_rate), int(target_sr))
         up = int(target_sr) // divisor
         down = int(sample_rate) // divisor
-        return signal.resample_poly(audio, up, down).astype(np.float32, copy=False)
+        if up <= 1000 and down <= 1000:
+            return signal.resample_poly(audio, up, down).astype(np.float32, copy=False)
+        logging.debug(f"Polyphase Parakeet resampling factors too large (up={up}, down={down}); using linear fallback.")
     except ImportError as exc:
         logging.debug(f"SciPy unavailable for Parakeet resampling; using linear fallback: {exc}")
     except _AUDIO_TRANSCRIPTION_NONCRITICAL_EXCEPTIONS as exc:
@@ -337,8 +339,8 @@ def _resample_audio_without_librosa(audio: np.ndarray, sample_rate: int, target_
 
     ratio = float(target_sr) / float(sample_rate)
     new_len = max(1, int(round(len(audio) * ratio)))
-    x_old = np.linspace(0.0, 1.0, num=len(audio), endpoint=False)
-    x_new = np.linspace(0.0, 1.0, num=new_len, endpoint=False)
+    x_old = np.linspace(0.0, 1.0, num=len(audio), endpoint=False, dtype=np.float32)
+    x_new = np.linspace(0.0, 1.0, num=new_len, endpoint=False, dtype=np.float32)
     return np.interp(x_new, x_old, audio).astype(np.float32, copy=False)
 
 
@@ -351,7 +353,7 @@ def _load_audio_for_parakeet_nemo(audio_file_path: str, target_sr: int = 16000) 
 
     try:
         audio_data, sample_rate = sf.read(audio_file_path, dtype="float32", always_2d=False)
-    except _AUDIO_TRANSCRIPTION_NONCRITICAL_EXCEPTIONS as exc:
+    except Exception as exc:
         logging.debug(f"Soundfile could not load Parakeet audio: {type(exc).__name__}")
         raise STTTranscriptionError(
             "Parakeet audio loading failed; convert the input to a WAV-compatible format before transcription."

@@ -4,6 +4,8 @@ import importlib.machinery
 import sys
 import types
 import wave
+from pathlib import Path
+from unittest.mock import Mock
 
 import numpy as np
 import pytest
@@ -50,7 +52,14 @@ if "transformers" not in sys.modules:
 import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as atlib
 
 
-def _write_test_wav(audio_file, *, sample_rate=16000, duration_seconds=0.25, channels=1):
+def _write_test_wav(
+    audio_file: Path,
+    *,
+    sample_rate: int = 16000,
+    duration_seconds: float = 0.25,
+    channels: int = 1,
+) -> None:
+    """Write a small sine-wave PCM WAV fixture for audio-loader tests."""
     frame_count = int(sample_rate * duration_seconds)
     mono = 0.1 * np.sin(2.0 * np.pi * 440.0 * np.arange(frame_count) / sample_rate)
     if channels == 1:
@@ -79,8 +88,10 @@ def test_speech_to_text_parakeet_onnx_failure_fails_fast(monkeypatch, tmp_path):
     monkeypatch.setattr(
         atlib,
         "get_whisper_model",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("Whisper fallback should not run for Parakeet ONNX")
+        Mock(
+            side_effect=AssertionError(
+                "Whisper fallback should not run for Parakeet ONNX"
+            )
         ),
     )
 
@@ -127,11 +138,15 @@ def test_speech_to_text_parakeet_onnx_loads_audio_without_librosa(monkeypatch, t
     _write_test_wav(audio_file, sample_rate=8000, channels=2)
 
     fake_librosa = types.SimpleNamespace(
-        get_duration=lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("librosa.get_duration should not be used for Parakeet ONNX")
+        get_duration=Mock(
+            side_effect=AssertionError(
+                "librosa.get_duration should not be used for Parakeet ONNX"
+            )
         ),
-        load=lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("librosa.load should not be used for Parakeet ONNX")
+        load=Mock(
+            side_effect=AssertionError(
+                "librosa.load should not be used for Parakeet ONNX"
+            )
         ),
     )
     monkeypatch.setitem(sys.modules, "librosa", fake_librosa)
@@ -210,3 +225,44 @@ def test_speech_to_text_parakeet_onnx_passes_configured_chunking(monkeypatch, tm
         "overlap_duration": 0.25,
     }
     assert segments[0]["Text"] == "chunked parakeet onnx transcript"
+
+
+@pytest.mark.unit
+def test_parakeet_onnx_resample_uses_linear_fallback_for_large_polyphase(
+    monkeypatch,
+) -> None:
+    """Pathological sample-rate ratios should not call SciPy polyphase resampling."""
+
+    class FakeSignal:
+        """Signal module stand-in that fails if polyphase resampling is used."""
+
+        @staticmethod
+        def resample_poly(*_args, **_kwargs):
+            raise AssertionError("resample_poly should not be called")
+
+    monkeypatch.setitem(sys.modules, "scipy", types.SimpleNamespace(signal=FakeSignal))
+    audio = np.linspace(-0.25, 0.25, num=44101, endpoint=False, dtype=np.float32)
+
+    result = atlib._resample_audio_without_librosa(audio, sample_rate=44101, target_sr=16000)
+
+    assert result.dtype == np.float32
+    assert result.shape == (16000,)
+
+
+@pytest.mark.unit
+def test_load_audio_for_parakeet_nemo_wraps_unexpected_soundfile_errors(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Unexpected soundfile failures should be converted to STTTranscriptionError."""
+
+    class CustomAudioLoadError(Exception):
+        """Non-standard soundfile failure used to exercise broad wrapping."""
+
+    fake_soundfile = types.SimpleNamespace(
+        read=Mock(side_effect=CustomAudioLoadError("decoder exploded")),
+    )
+    monkeypatch.setitem(sys.modules, "soundfile", fake_soundfile)
+
+    with pytest.raises(atlib.STTTranscriptionError, match="audio loading failed"):
+        atlib._load_audio_for_parakeet_nemo(str(tmp_path / "input.wav"))
