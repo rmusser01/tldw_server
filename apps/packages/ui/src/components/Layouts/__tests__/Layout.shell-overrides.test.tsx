@@ -139,4 +139,53 @@ describe("OptionLayout shell overrides", () => {
 
     expect(setOverrides).toHaveBeenLastCalledWith(null)
   })
+
+  it("clears the same shell setter that accepted route content overrides", async () => {
+    const originalSetOverrides = vi.fn()
+    const replacementSetOverrides = vi.fn()
+    const externalShell: {
+      mounted: boolean
+      ownerId: string
+      setOverrides?: (overrides: unknown) => void
+    } = {
+      mounted: true,
+      ownerId: "root-shell",
+      setOverrides: originalSetOverrides
+    }
+    ;(
+      globalThis as typeof globalThis & {
+        __tldwOptionShell?: typeof externalShell
+      }
+    ).__tldwOptionShell = externalShell
+
+    function FocusRouteContent() {
+      useOptionLayoutShellOverrides({
+        hideHeader: true,
+        hideSidebar: true
+      })
+
+      return <div>Focus route</div>
+    }
+
+    const { unmount } = render(
+      <MemoryRouter initialEntries={["/chat"]}>
+        <FocusRouteContent />
+      </MemoryRouter>
+    )
+
+    await waitFor(() => {
+      expect(originalSetOverrides).toHaveBeenCalledWith({
+        hideHeader: true,
+        hideSidebar: true,
+        sourcePath: "/chat"
+      })
+    })
+
+    externalShell.setOverrides = replacementSetOverrides
+
+    unmount()
+
+    expect(originalSetOverrides).toHaveBeenLastCalledWith(null)
+    expect(replacementSetOverrides).not.toHaveBeenCalled()
+  })
 })

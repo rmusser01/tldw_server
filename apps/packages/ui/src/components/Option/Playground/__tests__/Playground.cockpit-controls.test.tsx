@@ -1237,6 +1237,11 @@ describe("Playground cockpit controls", () => {
       expect(storageState.values.get("playgroundChatLayoutMode")).toBe(
         "cockpit",
       );
+      expect(
+        layoutShellOverrideState.overrides[
+          layoutShellOverrideState.overrides.length - 1
+        ],
+      ).toBeNull();
     });
   });
 

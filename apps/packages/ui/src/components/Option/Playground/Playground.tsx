@@ -3642,7 +3642,7 @@ export const Playground = () => {
                     type="button"
                     data-testid="playground-chat-layout-mode-trigger"
                     aria-label={chatLayoutToggleLabel}
-                    aria-pressed={false}
+                    aria-pressed={focusModeActive}
                     onClick={() => handleChatLayoutModeChange(nextChatLayoutMode)}
                     title={chatLayoutToggleLabel}
                     className="inline-flex min-h-[26px] min-w-[26px] items-center justify-center gap-1 rounded-full border border-border bg-surface2 px-1.5 py-0.5 text-text hover:bg-surface sm:px-2"

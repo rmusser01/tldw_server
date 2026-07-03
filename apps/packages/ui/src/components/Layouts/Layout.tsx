@@ -680,28 +680,29 @@ export function useOptionLayoutShellOverrides(
   const shell = useContext(LayoutShellContext)
   const globalShell = getGlobalShell()
   const location = useLocation()
+  const { hideHeader, hideSidebar } = request ?? {}
   const requestedOverrides = React.useMemo(() => {
-    if (!request) return null
-
     const overrides: LayoutShellOverrides = {}
-    if (request.hideHeader) overrides.hideHeader = true
-    if (request.hideSidebar) overrides.hideSidebar = true
+    if (hideHeader) overrides.hideHeader = true
+    if (hideSidebar) overrides.hideSidebar = true
     if (Object.keys(overrides).length === 0) return null
 
     overrides.sourcePath = location.pathname
     return overrides
-  }, [location.pathname, request?.hideHeader, request?.hideSidebar])
+  }, [hideHeader, hideSidebar, location.pathname])
 
   React.useEffect(() => {
     if (!requestedOverrides) return
 
     let timeoutId: ReturnType<typeof setTimeout> | null = null
-    let appliedOverrides = false
+    let appliedSetOverrides:
+      | ((overrides: LayoutShellOverrides | null) => void)
+      | null = null
     const applyOverrides = () => {
       const setOverrides = shell.setOverrides || globalShell?.setOverrides
       if (!setOverrides) return false
       setOverrides(requestedOverrides)
-      appliedOverrides = true
+      appliedSetOverrides = setOverrides
       return true
     }
 
@@ -713,9 +714,7 @@ export function useOptionLayoutShellOverrides(
 
     return () => {
       if (timeoutId) clearTimeout(timeoutId)
-      if (!appliedOverrides) return
-      const setOverrides = shell.setOverrides || globalShell?.setOverrides
-      setOverrides?.(null)
+      appliedSetOverrides?.(null)
     }
   }, [globalShell?.setOverrides, requestedOverrides, shell.setOverrides])
 }

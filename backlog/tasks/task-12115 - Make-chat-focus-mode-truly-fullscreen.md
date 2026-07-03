@@ -4,7 +4,7 @@ title: Make chat focus mode truly fullscreen
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-07-03 01:43'
+updated_date: '2026-07-03 02:07'
 labels:
   - webui
   - chat
@@ -29,33 +29,27 @@ Update chat focus mode so it hides the app shell/header/sidebar and cockpit rail
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 Plan: Docs/superpowers/plans/2026-07-03-chat-focus-fullscreen.md
 
-Verification: targeted Vitest passed: bun run test:run ../packages/ui/src/components/Layouts/__tests__/Layout.shell-overrides.test.tsx ../packages/ui/src/components/Option/Playground/__tests__/Playground.cockpit-controls.test.tsx (22 tests passed).
+Verification: targeted Vitest passed: bun run test:run ../packages/ui/src/components/Layouts/__tests__/Layout.shell-overrides.test.tsx ../packages/ui/src/components/Option/Playground/__tests__/Playground.cockpit-controls.test.tsx (23 tests passed after adding the shell cleanup regression).
 
 Verification: browser check on http://127.0.0.1:18001/chat confirmed focus mode hides header/sidebar, chat sidebar, context/runtime rails, and top focus/shortcut controls while preserving transcript, composer, and Exit focus. Desktop screenshot: /tmp/tldw-chat-focus-fullscreen.png. Mobile screenshot: /tmp/tldw-chat-focus-fullscreen-mobile.png.
 
-Known skip/failure: bun run typecheck still fails on existing unrelated files (AudioStudio TimelineEditor referrerPolicy, ScheduledTasks response typing, Skills Checkbox props, scheduled-tasks service params, mcp-hub path typing, voice-cloning ArrayBuffer, knowledge QA fixture assertions, flashcards E2E never callable). The touched Playground type error found during the first typecheck was fixed and absent in the rerun.
+Verification: git diff --check passed.
+
+Typecheck baseline: bun run typecheck was rerun and remains blocked by existing unrelated latest-dev errors outside this PR scope (AudioStudio TimelineEditor referrerPolicy, ScheduledTasks response typing, Skills Checkbox props, scheduled-tasks service params, mcp-hub path typing, voice-cloning ArrayBuffer, knowledge QA fixture assertions, flashcards E2E never callable). No touched files are present in the current typecheck error output.
 
 Bandit: skipped because this change only touches frontend TypeScript/TSX tests and Markdown; no Python touched.
 
-Branch verification: after switching to codex/chat-focus-fullscreen from origin/dev, targeted Vitest was rerun and passed (22 tests). Broad typecheck still fails only on the same unrelated baseline files listed above.
-
 PR: https://github.com/rmusser01/tldw_server/pull/2578
+
+Review follow-up: rebased on latest dev and addressed PR review comments for shell cleanup, focus accessibility/test coverage, and task marker structure. The Qodo broad-typecheck comment was evaluated against latest dev; the remaining typecheck failures are pre-existing, unrelated baseline errors and are not changed by this PR.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Added a shared OptionLayout shell override hook and wired chat focus mode to hide app shell chrome, cockpit rails, top shortcut/status chrome, artifacts rails, and comparison breadcrumbs. Focus mode now leaves the chat transcript/composer plus a fixed Exit focus control, and the control returns the user to cockpit mode. Added regression coverage for the shared shell override hook and focus-mode UX.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
-<!-- SECTION:FINAL_SUMMARY:END -->
-
+Added a shared OptionLayout shell override hook and wired chat focus mode to hide app shell chrome, cockpit rails, top shortcut/status chrome, artifacts rails, and comparison breadcrumbs. Focus mode now leaves the chat transcript/composer plus a fixed Exit focus control, and the control returns the user to cockpit mode. Added regression coverage for the shared shell override hook and focus-mode UX. Review follow-up captures the exact shell setter used for cleanup, keeps focus accessibility state dynamic, verifies focus exit clears shell overrides, and fixes the Backlog final-summary marker structure.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
