@@ -11,13 +11,119 @@ on:
           - testpypi
           - pypi
         default: testpypi
+  push:
+    branches:
+      - main
+    paths:
+      - pyproject.toml
 
 permissions:
   contents: read
 
+concurrency:
+  group: publish-pypi-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
+  detect-version:
+    name: Detect PyPI Version
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.detect.outputs.version }}
+      published: ${{ steps.detect.outputs.published }}
+      should_publish: ${{ steps.detect.outputs.should_publish }}
+      reason: ${{ steps.detect.outputs.reason }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.12"
+
+      - name: Detect package version on PyPI
+        id: detect
+        env:
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import sys
+          import tomllib
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+          from pathlib import Path
+
+          project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))["project"]
+          name = project["name"]
+          version = project["version"]
+          event_name = os.environ["GITHUB_EVENT_NAME"]
+          url = f"https://pypi.org/pypi/{urllib.parse.quote(name)}/json"
+
+          published = False
+          reason = "manual_dispatch"
+
+          if event_name == "push":
+              request = urllib.request.Request(
+                  url,
+                  headers={
+                      "Accept": "application/json",
+                      "User-Agent": "tldw-server-publish-workflow",
+                  },
+              )
+              try:
+                  with urllib.request.urlopen(request, timeout=15) as response:
+                      payload = json.load(response)
+              except urllib.error.HTTPError as exc:
+                  if exc.code == 404:
+                      payload = {"releases": {}}
+                  else:
+                      print(f"PyPI lookup failed for {name} {version}: HTTP {exc.code}", file=sys.stderr)
+                      raise
+              except urllib.error.URLError as exc:
+                  print(f"PyPI lookup failed for {name} {version}: {exc}", file=sys.stderr)
+                  raise
+
+              published = version in payload.get("releases", {})
+              reason = "already_published" if published else "missing_from_pypi"
+
+          should_publish = event_name == "push" and not published
+
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
+              print(f"version={version}", file=output)
+              print(f"published={str(published).lower()}", file=output)
+              print(f"should_publish={str(should_publish).lower()}", file=output)
+              print(f"reason={reason}", file=output)
+
+          summary = Path(os.environ["GITHUB_STEP_SUMMARY"])
+          summary.write_text(
+              "\n".join(
+                  [
+                      "## PyPI publish decision",
+                      "",
+                      f"- Package: `{name}`",
+                      f"- Version: `{version}`",
+                      f"- Event: `{event_name}`",
+                      f"- Already on PyPI: `{str(published).lower()}`",
+                      f"- Auto publish: `{str(should_publish).lower()}`",
+                      f"- Reason: `{reason}`",
+                  ]
+              )
+              + "\n",
+              encoding="utf-8",
+          )
+          PY
+
   build:
     name: Build Distributions
+    needs: detect-version
+    if: ${{ github.event_name == 'workflow_dispatch' || needs.detect-version.outputs.should_publish == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -48,7 +154,9 @@ jobs:
 
   publish-testpypi:
     name: Publish to TestPyPI
-    needs: build
+    needs:
+      - detect-version
+      - build
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.target == 'testpypi' }}
     runs-on: ubuntu-latest
     permissions:
@@ -70,8 +178,10 @@ jobs:
 
   publish-pypi:
     name: Publish to PyPI
-    needs: build
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.target == 'pypi' }}
+    needs:
+      - detect-version
+      - build
+    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.target == 'pypi') || (github.event_name == 'push' && needs.detect-version.outputs.should_publish == 'true') }}
     runs-on: ubuntu-latest
     permissions:
       id-token: write
