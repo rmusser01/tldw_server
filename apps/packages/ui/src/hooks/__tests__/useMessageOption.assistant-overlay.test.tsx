@@ -350,6 +350,7 @@ describe("useMessageOption assistant overlay changes", () => {
     chatBaseState.setHistory.mockReset()
     chatBaseState.setHistoryId.mockReset()
     storeState.setServerChatId.mockReset()
+    lastUseChatActionsArgs.value = null
   })
 
   it("does not clear the loaded conversation when the overlay selection changes", () => {
@@ -376,5 +377,75 @@ describe("useMessageOption assistant overlay changes", () => {
     expect(chatBaseState.setMessages).not.toHaveBeenCalledWith([])
     expect(chatBaseState.setHistory).not.toHaveBeenCalledWith([])
     expect(chatBaseState.setHistoryId).not.toHaveBeenCalledWith(null)
+  })
+
+  it("preserves workspace assistant provenance after server chat metadata arrives", () => {
+    selectedAssistantState.current = null
+    chatSettingsState.current = null
+    storeState.serverChatId = null
+    storeState.serverChatAssistantKind = null
+    storeState.serverChatAssistantId = null
+    storeState.serverChatPersonaMemoryMode = null
+    chatBaseState.messages = []
+    chatBaseState.history = []
+    chatBaseState.historyId = null
+    const inheritedAssistant = {
+      kind: "persona" as const,
+      id: "workspace-helper",
+      name: "Workspace Helper",
+      metadata: {
+        selectionMode: "tracked",
+        source: "workspace",
+        personaMemoryMode: "read_write"
+      }
+    }
+
+    const { result, rerender } = renderHook(() =>
+      useMessageOption({
+        inheritedAssistant,
+        inheritedPersonaMemoryMode: "read_write"
+      })
+    )
+
+    expect(result.current).toEqual(
+      expect.objectContaining({
+        selectedAssistant: expect.objectContaining({
+          id: "workspace-helper",
+          name: "Workspace Helper"
+        }),
+        selectedAssistantSource: "workspace"
+      })
+    )
+
+    storeState.serverChatId = "workspace-chat-1"
+    storeState.serverChatAssistantKind = "persona"
+    storeState.serverChatAssistantId = "workspace-helper"
+    storeState.serverChatPersonaMemoryMode = "read_write"
+    chatBaseState.messages = [
+      {
+        id: "msg-1",
+        role: "user",
+        message: "Use workspace persona",
+        isBot: false,
+        sources: []
+      }
+    ]
+    chatBaseState.history = [
+      {
+        role: "user",
+        content: "Use workspace persona"
+      }
+    ]
+    rerender()
+
+    expect(result.current).toEqual(
+      expect.objectContaining({
+        selectedAssistant: expect.objectContaining({
+          id: "workspace-helper",
+          name: "Workspace Helper"
+        }),
+        selectedAssistantSource: "workspace"
+      })
+    )
   })
 })

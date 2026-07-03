@@ -51,6 +51,7 @@ import {
   reviveSavedWorkspace,
   reviveWorkspaceCollections,
   reviveWorkspaceSnapshot,
+  coerceWorkspaceAssistantDefaultsForRehydrate,
   coerceWorkspaceBannerForRehydrate,
   createFallbackWorkspaceSnapshot,
   duplicateWorkspaceSnapshot,
@@ -1150,6 +1151,10 @@ export const createWorkspaceListSlice: WorkspaceSlice<WorkspaceListSliceActions>
       workspaceName: clonedSnapshot.workspaceName,
       workspaceTag: clonedSnapshot.workspaceTag,
       studyMaterialsPolicy: clonedSnapshot.studyMaterialsPolicy ?? null,
+      assistantDefaults: coerceWorkspaceAssistantDefaultsForRehydrate(
+        clonedSnapshot.assistantDefaults
+      ),
+      effectiveAssistantDefault: clonedSnapshot.effectiveAssistantDefault ?? null,
       workspaceCreatedAt: reviveDateOrNull(clonedSnapshot.workspaceCreatedAt),
       workspaceChatReferenceId:
         clonedSnapshot.workspaceChatReferenceId ||

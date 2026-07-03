@@ -8,7 +8,7 @@ const setRouteContext = vi.fn()
 const chatPanelRuntimeState = vi.hoisted(() => ({
   backendAvailable: true
 }))
-const workspaceState = vi.hoisted(() => ({
+const workspaceState = vi.hoisted((): { value: any } => ({
   value: {
     workspaceId: "workspace-1",
     workspaceName: "Default workspace",
@@ -21,7 +21,16 @@ const workspaceState = vi.hoisted(() => ({
         status: "ready",
         addedAt: new Date("2026-05-03T00:00:00Z")
       }
-    ]
+    ],
+    effectiveAssistantDefault: {
+      status: "available",
+      source: "workspace",
+      assistantKind: "persona",
+      assistantId: "workspace-persona",
+      label: "Workspace Analyst",
+      personaMemoryMode: "read_only",
+      degradedReason: null
+    }
   }
 }))
 const connectionState = vi.hoisted(() => ({
@@ -55,12 +64,14 @@ vi.mock("../WorkspaceChatPanel", () => ({
     workspaceId,
     onClearStagedSources,
     backendAvailable,
+    effectiveAssistantDefault,
     onRuntimeStateChange
   }: {
     stagedSources: unknown[]
     workspaceId?: string | null
     onClearStagedSources: () => void
     backendAvailable: boolean
+    effectiveAssistantDefault?: { assistantId?: string | null } | null
     onRuntimeStateChange?: (state: unknown) => void
   }) => {
     const [mountedWorkspaceId] = React.useState(workspaceId)
@@ -74,7 +85,8 @@ vi.mock("../WorkspaceChatPanel", () => ({
         backendAvailable: chatPanelRuntimeState.backendAvailable,
         streaming: true,
         selectedModelLabel: "gpt-test",
-        selectedPersonaLabel: "Analyst"
+        selectedPersonaLabel: "Analyst",
+        assistantSource: "explicit"
       })
     }, [onRuntimeStateChange])
 
@@ -83,6 +95,7 @@ vi.mock("../WorkspaceChatPanel", () => ({
         data-testid="workspace-chat-panel"
         data-workspace-id={workspaceId ?? "null"}
         data-backend-available={String(backendAvailable)}
+        data-effective-assistant-id={effectiveAssistantDefault?.assistantId ?? "null"}
       >
         staged:{stagedSources.length}; workspace:{workspaceId}; mounted:
         {mountedWorkspaceId}; backend:{String(backendAvailable)}
@@ -107,7 +120,16 @@ describe("ChatWorkspacePage", () => {
           status: "ready",
           addedAt: new Date("2026-05-03T00:00:00Z")
         }
-      ]
+      ],
+      effectiveAssistantDefault: {
+        status: "available",
+        source: "workspace",
+        assistantKind: "persona",
+        assistantId: "workspace-persona",
+        label: "Workspace Analyst",
+        personaMemoryMode: "read_only",
+        degradedReason: null
+      }
     }
     connectionState.value = {
       phase: "connected",
@@ -150,6 +172,10 @@ describe("ChatWorkspacePage", () => {
 
     expect(screen.getByTestId("workspace-chat-panel")).toHaveTextContent(
       "workspace:workspace-1"
+    )
+    expect(screen.getByTestId("workspace-chat-panel")).toHaveAttribute(
+      "data-effective-assistant-id",
+      "workspace-persona"
     )
     expect(await screen.findByText("gpt-test")).toBeInTheDocument()
     expect(screen.getByText("Analyst")).toBeInTheDocument()

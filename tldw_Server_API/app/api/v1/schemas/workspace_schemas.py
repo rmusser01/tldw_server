@@ -226,7 +226,7 @@ class WorkspaceResponse(BaseModel):
     audio_voice: str | None = None
     audio_speed: float | None = None
     assistant_defaults: WorkspaceAssistantDefaults | None = None
-    effective_assistant_default: WorkspaceEffectiveAssistantDefault | None = None
+    effective_assistant_default: WorkspaceEffectiveAssistantDefault
     created_at: str
     last_modified: str
     version: int

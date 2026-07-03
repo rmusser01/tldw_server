@@ -8,7 +8,12 @@ import {
 } from "@/hooks/chat/chat-action-utils"
 import type { Message } from "@/store/option"
 import { useMessageOption } from "@/hooks/useMessageOption"
+import type { AssistantSelection } from "@/types/assistant-selection"
 import type { ChatScope } from "@/types/chat-scope"
+import type {
+  EffectiveWorkspaceAssistantDefault,
+  WorkspacePersonaMemoryMode
+} from "@/types/workspace"
 
 import { ContextStagingCard } from "./ContextStagingCard"
 import {
@@ -16,6 +21,7 @@ import {
   getReadyStagedMediaIds
 } from "./staging"
 import type {
+  ChatWorkspaceAssistantSource,
   ChatWorkspaceRuntimeState,
   StagedWorkspaceSource
 } from "./types"
@@ -27,6 +33,7 @@ export type WorkspaceChatPanelProps = {
   stagedSources: StagedWorkspaceSource[]
   onClearStagedSources: () => void
   backendAvailable: boolean
+  effectiveAssistantDefault?: EffectiveWorkspaceAssistantDefault | null
   onRuntimeStateChange?: (state: ChatWorkspaceRuntimeState) => void
 }
 
@@ -51,12 +58,51 @@ const getMessageRole = (message: WorkspacePanelMessage): "user" | "assistant" | 
   return "assistant"
 }
 
+type InheritedWorkspacePersonaAssistant = AssistantSelection & { kind: "persona" }
+
+const normalizePersonaMemoryMode = (
+  value: WorkspacePersonaMemoryMode | null | undefined
+): WorkspacePersonaMemoryMode => {
+  return value === "read_write" ? "read_write" : "read_only"
+}
+
+const buildInheritedWorkspaceAssistant = (
+  effectiveAssistantDefault: EffectiveWorkspaceAssistantDefault | null | undefined,
+  workspaceReady: boolean
+): InheritedWorkspacePersonaAssistant | null => {
+  if (!workspaceReady || effectiveAssistantDefault?.status !== "available") {
+    return null
+  }
+  if (
+    effectiveAssistantDefault.assistantKind !== "persona" ||
+    !effectiveAssistantDefault.assistantId
+  ) {
+    return null
+  }
+
+  const personaMemoryMode = normalizePersonaMemoryMode(
+    effectiveAssistantDefault.personaMemoryMode
+  )
+
+  return {
+    kind: "persona",
+    id: effectiveAssistantDefault.assistantId,
+    name: effectiveAssistantDefault.label ?? "Workspace Persona",
+    metadata: {
+      selectionMode: "tracked",
+      source: "workspace",
+      personaMemoryMode
+    }
+  }
+}
+
 export const WorkspaceChatPanel = ({
   workspaceId,
   workspaceName,
   stagedSources,
   onClearStagedSources,
   backendAvailable,
+  effectiveAssistantDefault,
   onRuntimeStateChange
 }: WorkspaceChatPanelProps) => {
   const [draft, setDraft] = React.useState("")
@@ -75,6 +121,26 @@ export const WorkspaceChatPanel = ({
         : { type: "global" },
     [normalizedWorkspaceId]
   )
+  const inheritedAssistant = React.useMemo(
+    () => buildInheritedWorkspaceAssistant(effectiveAssistantDefault, workspaceReady),
+    [effectiveAssistantDefault, workspaceReady]
+  )
+  const inheritedPersonaMemoryMode = inheritedAssistant
+    ? normalizePersonaMemoryMode(
+        effectiveAssistantDefault?.personaMemoryMode ?? null
+      )
+    : null
+  const messageOptionArgs = React.useMemo(
+    () =>
+      inheritedAssistant
+        ? {
+            scope,
+            inheritedAssistant,
+            inheritedPersonaMemoryMode
+          }
+        : { scope },
+    [inheritedAssistant, inheritedPersonaMemoryMode, scope]
+  )
 
   const {
     messages,
@@ -84,8 +150,44 @@ export const WorkspaceChatPanel = ({
     isProcessing,
     stopStreamingRequest,
     selectedModel,
-    selectedAssistant
-  } = useMessageOption({ scope })
+    selectedAssistant,
+    selectedAssistantSource,
+    serverChatId,
+    serverChatAssistantKind,
+    serverChatAssistantId
+  } = useMessageOption(messageOptionArgs)
+
+  const selectedMatchesWorkspaceAssistant =
+    selectedAssistantSource === "workspace" &&
+    selectedAssistant?.kind === "persona" &&
+    inheritedAssistant?.kind === "persona" &&
+    selectedAssistant.id === inheritedAssistant.id
+  const restoredWorkspaceAssistant =
+    !selectedAssistant &&
+    inheritedAssistant?.kind === "persona" &&
+    serverChatAssistantKind === "persona" &&
+    serverChatAssistantId === inheritedAssistant.id
+  const usingWorkspaceAssistant =
+    Boolean(inheritedAssistant) &&
+    (selectedMatchesWorkspaceAssistant ||
+      restoredWorkspaceAssistant ||
+      (selectedAssistantSource === "workspace" &&
+        !selectedAssistant &&
+        messages.length === 0))
+  const assistantSource: ChatWorkspaceAssistantSource = usingWorkspaceAssistant
+    ? "workspace"
+    : selectedAssistant || serverChatAssistantKind || serverChatAssistantId
+      ? "explicit"
+      : effectiveAssistantDefault?.status === "unavailable"
+        ? "unavailable"
+        : "none"
+  const runtimeSelectedPersonaLabel =
+    assistantSource === "workspace"
+      ? inheritedAssistant?.name ?? selectedAssistant?.name ?? null
+      : selectedAssistant?.name ??
+        (assistantSource === "explicit" && serverChatAssistantKind === "persona"
+          ? "Persona"
+          : null)
 
   React.useEffect(() => {
     setDraft("")
@@ -97,12 +199,19 @@ export const WorkspaceChatPanel = ({
       backendAvailable: chatBackendAvailable,
       streaming,
       selectedModelLabel: selectedModel || "No model selected",
-      selectedPersonaLabel: selectedAssistant?.name ?? null
+      selectedPersonaLabel: runtimeSelectedPersonaLabel,
+      assistantSource,
+      workspaceAssistantDegradedReason:
+        assistantSource === "unavailable"
+          ? effectiveAssistantDefault?.degradedReason ?? null
+          : null
     })
   }, [
+    assistantSource,
     chatBackendAvailable,
+    effectiveAssistantDefault?.degradedReason,
     onRuntimeStateChange,
-    selectedAssistant?.name,
+    runtimeSelectedPersonaLabel,
     selectedModel,
     streaming
   ])
@@ -159,7 +268,14 @@ export const WorkspaceChatPanel = ({
           requestOverrides: {
             ragMediaIds: readyMediaIds,
             fileRetrievalEnabled: hasReadyMedia,
-            chatMode: hasReadyMedia ? "rag" : "normal"
+            chatMode: hasReadyMedia ? "rag" : "normal",
+            ...(usingWorkspaceAssistant && inheritedAssistant
+              ? {
+                  assistant_kind: "persona",
+                  assistant_id: inheritedAssistant.id,
+                  persona_memory_mode: inheritedPersonaMemoryMode ?? "read_only"
+                }
+              : {})
           }
         })) as ChatSubmitResult | undefined
       )
@@ -182,12 +298,15 @@ export const WorkspaceChatPanel = ({
     chatBackendAvailable,
     hasReadyMedia,
     hasUncarriedStagedContext,
+    inheritedAssistant,
+    inheritedPersonaMemoryMode,
     onClearStagedSources,
     onSubmit,
     readyMediaIds,
     sendDisabled,
     stagedSources,
-    trimmedDraft
+    trimmedDraft,
+    usingWorkspaceAssistant
   ])
 
   const handleSubmit = React.useCallback(

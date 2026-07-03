@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { useMessageOption as useMessageOptionHook } from "@/hooks/useMessageOption"
 import { WorkspaceChatPanel } from "../WorkspaceChatPanel"
 import type { StagedWorkspaceSource } from "../types"
+import type { EffectiveWorkspaceAssistantDefault } from "@/types/workspace"
 
 type UseMessageOptionHook = typeof useMessageOptionHook
 type UseMessageOptionState = ReturnType<UseMessageOptionHook>
@@ -21,7 +22,12 @@ const chatHookState = vi.hoisted(() => {
     isProcessing: false,
     stopStreamingRequest,
     selectedModel: "gpt-test",
-    selectedAssistant: { kind: "persona", id: "p1", name: "Analyst" }
+    selectedAssistant: { kind: "persona", id: "p1", name: "Analyst" },
+    selectedAssistantSource: "explicit",
+    serverChatId: null,
+    serverChatAssistantKind: null,
+    serverChatAssistantId: null,
+    serverChatMetaLoaded: false
   } as unknown as UseMessageOptionState
   const useMessageOption = vi.fn<UseMessageOptionHook>(() => value)
 
@@ -86,6 +92,26 @@ const getSubmitPayload = (): SubmitPayload => {
   return payload
 }
 
+const availableWorkspaceDefault: EffectiveWorkspaceAssistantDefault = {
+  status: "available",
+  source: "workspace",
+  assistantKind: "persona",
+  assistantId: "workspace-persona",
+  label: "Workspace Analyst",
+  personaMemoryMode: "read_write",
+  degradedReason: null
+}
+
+const unavailableWorkspaceDefault: EffectiveWorkspaceAssistantDefault = {
+  status: "unavailable",
+  source: "workspace",
+  assistantKind: "persona",
+  assistantId: "workspace-persona",
+  label: "Workspace Analyst",
+  personaMemoryMode: "read_write",
+  degradedReason: "persona_deleted"
+}
+
 describe("WorkspaceChatPanel", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -93,6 +119,16 @@ describe("WorkspaceChatPanel", () => {
     chatHookState.value.streaming = false
     chatHookState.value.isLoading = false
     chatHookState.value.isProcessing = false
+    chatHookState.value.selectedAssistant = {
+      kind: "persona",
+      id: "p1",
+      name: "Analyst"
+    }
+    chatHookState.value.selectedAssistantSource = "explicit"
+    chatHookState.value.serverChatId = null
+    chatHookState.value.serverChatAssistantKind = null
+    chatHookState.value.serverChatAssistantId = null
+    chatHookState.value.serverChatMetaLoaded = false
     chatHookState.onSubmit.mockResolvedValue({ status: "submitted" })
   })
 
@@ -501,15 +537,228 @@ describe("WorkspaceChatPanel", () => {
       />
     )
 
-    expect(chatHookState.useMessageOption).toHaveBeenCalledWith({
-      scope: { type: "workspace", workspaceId: "workspace-1" }
-    })
+    expect(chatHookState.useMessageOption).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scope: { type: "workspace", workspaceId: "workspace-1" }
+      })
+    )
     expect(onRuntimeStateChange).toHaveBeenCalledWith(
       expect.objectContaining({
         streaming: false,
         selectedModelLabel: "gpt-test",
-        selectedPersonaLabel: "Analyst"
+        selectedPersonaLabel: "Analyst",
+        assistantSource: "explicit"
       })
     )
+  })
+
+  it("inherits the available workspace persona default on first submit", async () => {
+    chatHookState.value.selectedAssistant = {
+      kind: "persona",
+      id: "workspace-persona",
+      name: "Workspace Analyst"
+    }
+    chatHookState.value.selectedAssistantSource = "workspace"
+    const onRuntimeStateChange = vi.fn()
+
+    render(
+      <WorkspaceChatPanel
+        stagedSources={[]}
+        onClearStagedSources={vi.fn()}
+        backendAvailable
+        workspaceId="workspace-1"
+        effectiveAssistantDefault={availableWorkspaceDefault}
+        onRuntimeStateChange={onRuntimeStateChange}
+      />
+    )
+
+    expect(chatHookState.useMessageOption).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scope: { type: "workspace", workspaceId: "workspace-1" },
+        inheritedAssistant: expect.objectContaining({
+          kind: "persona",
+          id: "workspace-persona",
+          name: "Workspace Analyst",
+          metadata: expect.objectContaining({
+            selectionMode: "tracked",
+            source: "workspace",
+            personaMemoryMode: "read_write"
+          })
+        })
+      })
+    )
+    expect(onRuntimeStateChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        selectedPersonaLabel: "Workspace Analyst",
+        assistantSource: "workspace"
+      })
+    )
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Chat workspace message" }), {
+      target: { value: "Use the default persona" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }))
+
+    await waitFor(() => expect(chatHookState.onSubmit).toHaveBeenCalledTimes(1))
+    expect(getSubmitPayload()).toMatchObject({
+      requestOverrides: expect.objectContaining({
+        assistant_kind: "persona",
+        assistant_id: "workspace-persona",
+        persona_memory_mode: "read_write"
+      })
+    })
+  })
+
+  it("keeps workspace provenance after the inherited persona chat is created", () => {
+    chatHookState.value.selectedAssistant = {
+      kind: "persona",
+      id: "workspace-persona",
+      name: "Workspace Analyst"
+    }
+    chatHookState.value.selectedAssistantSource = "workspace"
+    chatHookState.value.serverChatId = "workspace-persona-chat"
+    chatHookState.value.serverChatAssistantKind = "persona"
+    chatHookState.value.serverChatAssistantId = "workspace-persona"
+    const onRuntimeStateChange = vi.fn()
+
+    render(
+      <WorkspaceChatPanel
+        stagedSources={[]}
+        onClearStagedSources={vi.fn()}
+        backendAvailable
+        workspaceId="workspace-1"
+        effectiveAssistantDefault={availableWorkspaceDefault}
+        onRuntimeStateChange={onRuntimeStateChange}
+      />
+    )
+
+    expect(onRuntimeStateChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        selectedPersonaLabel: "Workspace Analyst",
+        assistantSource: "workspace"
+      })
+    )
+  })
+
+  it("keeps workspace provenance when reopening an inherited persona chat", () => {
+    chatHookState.value.selectedAssistant = null
+    chatHookState.value.selectedAssistantSource = "none"
+    chatHookState.value.serverChatId = "workspace-persona-chat"
+    chatHookState.value.serverChatAssistantKind = "persona"
+    chatHookState.value.serverChatAssistantId = "workspace-persona"
+    const onRuntimeStateChange = vi.fn()
+
+    render(
+      <WorkspaceChatPanel
+        stagedSources={[]}
+        onClearStagedSources={vi.fn()}
+        backendAvailable
+        workspaceId="workspace-1"
+        effectiveAssistantDefault={availableWorkspaceDefault}
+        onRuntimeStateChange={onRuntimeStateChange}
+      />
+    )
+
+    expect(onRuntimeStateChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        selectedPersonaLabel: "Workspace Analyst",
+        assistantSource: "workspace"
+      })
+    )
+  })
+
+  it("keeps an explicit selected persona ahead of the workspace default", async () => {
+    chatHookState.value.selectedAssistant = {
+      kind: "persona",
+      id: "explicit-persona",
+      name: "Explicit Analyst",
+      metadata: {
+        selectionMode: "tracked"
+      }
+    }
+
+    render(
+      <WorkspaceChatPanel
+        stagedSources={[]}
+        onClearStagedSources={vi.fn()}
+        backendAvailable
+        workspaceId="workspace-1"
+        effectiveAssistantDefault={availableWorkspaceDefault}
+      />
+    )
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Chat workspace message" }), {
+      target: { value: "Use explicit persona" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }))
+
+    await waitFor(() => expect(chatHookState.onSubmit).toHaveBeenCalledTimes(1))
+    expect(getSubmitPayload().requestOverrides).not.toMatchObject({
+      assistant_id: "workspace-persona"
+    })
+  })
+
+  it("does not inherit an unavailable workspace default", async () => {
+    chatHookState.value.selectedAssistant = null
+    chatHookState.value.selectedAssistantSource = "none"
+    const onRuntimeStateChange = vi.fn()
+
+    render(
+      <WorkspaceChatPanel
+        stagedSources={[]}
+        onClearStagedSources={vi.fn()}
+        backendAvailable
+        workspaceId="workspace-1"
+        effectiveAssistantDefault={unavailableWorkspaceDefault}
+        onRuntimeStateChange={onRuntimeStateChange}
+      />
+    )
+
+    expect(onRuntimeStateChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        selectedPersonaLabel: null,
+        assistantSource: "unavailable",
+        workspaceAssistantDegradedReason: "persona_deleted"
+      })
+    )
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Chat workspace message" }), {
+      target: { value: "No default persona" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }))
+
+    await waitFor(() => expect(chatHookState.onSubmit).toHaveBeenCalledTimes(1))
+    expect(getSubmitPayload().requestOverrides).not.toMatchObject({
+      assistant_kind: "persona",
+      assistant_id: "workspace-persona"
+    })
+  })
+
+  it("does not mutate existing chat assistant metadata when the workspace default changes", async () => {
+    chatHookState.value.selectedAssistant = null
+    chatHookState.value.selectedAssistantSource = "none"
+    chatHookState.value.serverChatAssistantKind = "persona"
+    chatHookState.value.serverChatAssistantId = "session-persona"
+    chatHookState.value.serverChatMetaLoaded = true
+
+    render(
+      <WorkspaceChatPanel
+        stagedSources={[]}
+        onClearStagedSources={vi.fn()}
+        backendAvailable
+        workspaceId="workspace-1"
+        effectiveAssistantDefault={availableWorkspaceDefault}
+      />
+    )
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Chat workspace message" }), {
+      target: { value: "Continue existing chat" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }))
+
+    await waitFor(() => expect(chatHookState.onSubmit).toHaveBeenCalledTimes(1))
+    expect(getSubmitPayload().requestOverrides).not.toMatchObject({
+      assistant_id: "workspace-persona"
+    })
   })
 })

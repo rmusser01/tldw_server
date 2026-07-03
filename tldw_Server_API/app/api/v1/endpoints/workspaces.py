@@ -31,7 +31,9 @@ from tldw_Server_API.app.api.v1.schemas.workspace_schemas import (
     WorkspaceArtifactExportResponse,
     WorkspaceArtifactResponse,
     WorkspaceArtifactUpdateRequest,
+    WorkspaceAssistantDefaults,
     WorkspaceContextResponse,
+    WorkspaceEffectiveAssistantDefault,
     WorkspaceFileInventoryEntryKind,
     WorkspaceFileInventoryItemsResponse,
     WorkspaceFileInventoryScanRequest,
@@ -140,8 +142,177 @@ def get_workspace_sandbox_volume_service() -> SandboxWorkspaceVolumeService:
     return SandboxWorkspaceVolumeService(store=get_sandbox_store())
 
 
-def _ws_to_response(ws: dict) -> WorkspaceResponse:
+def _user_id_for_workspace_scope(current_user: User) -> str:
+    """Return the canonical string user id used by Workspace-scoped Persona APIs."""
+    return str(current_user.id)
+
+
+def _parse_workspace_assistant_defaults(
+    raw: Any,
+    *,
+    workspace_id: str | None = None,
+) -> tuple[WorkspaceAssistantDefaults | None, bool]:
+    """Parse stored Workspace Assistant Defaults without leaking invalid storage drift."""
+    if raw is None:
+        return None, False
+    try:
+        return WorkspaceAssistantDefaults.model_validate(raw), False
+    except ValueError as exc:
+        payload_keys = sorted(raw.keys()) if isinstance(raw, dict) else None
+        logger.warning(
+            "Ignoring invalid stored workspace assistant defaults "
+            "for workspace_id={workspace_id}: error={error}; "
+            "payload_type={payload_type}; payload_keys={payload_keys}",
+            workspace_id=workspace_id or "<unknown>",
+            error=str(exc),
+            payload_type=type(raw).__name__,
+            payload_keys=payload_keys,
+        )
+        return None, True
+
+
+WorkspacePersonaProfileCache = dict[tuple[str, str, bool], dict[str, Any] | None]
+
+
+def _get_workspace_persona_profile(
+    *,
+    db: CharactersRAGDB,
+    assistant_id: str,
+    user_id: str,
+    include_deleted: bool,
+    cache: WorkspacePersonaProfileCache | None = None,
+) -> dict[str, Any] | None:
+    """Return a persona profile with optional request-scoped lookup caching."""
+    cache_key = (user_id, assistant_id, include_deleted)
+    if cache is not None and cache_key in cache:
+        return cache[cache_key]
+
+    try:
+        profile = db.get_persona_profile(
+            assistant_id,
+            user_id=user_id,
+            include_deleted=include_deleted,
+        )
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(
+            exc,
+            default_detail="Failed to resolve workspace assistant default",
+        ) from exc
+    if cache is not None:
+        cache[cache_key] = profile
+    return profile
+
+
+def _effective_workspace_assistant_default(
+    *,
+    db: CharactersRAGDB,
+    stored: WorkspaceAssistantDefaults | None,
+    user_id: str,
+    invalid_stored_default: bool = False,
+    persona_profile_cache: WorkspacePersonaProfileCache | None = None,
+) -> WorkspaceEffectiveAssistantDefault:
+    """Resolve a Workspace assistant default into a permission-safe client projection."""
+    if invalid_stored_default:
+        return WorkspaceEffectiveAssistantDefault(
+            status="unavailable",
+            source="workspace",
+            degraded_reason="invalid_default",
+        )
+    if stored is None:
+        return WorkspaceEffectiveAssistantDefault(status="none", source="none")
+
+    if stored.assistant_kind != "persona":
+        return WorkspaceEffectiveAssistantDefault(
+            status="unavailable",
+            source="workspace",
+            degraded_reason="unsupported_assistant_kind",
+        )
+
+    profile = _get_workspace_persona_profile(
+        db=db,
+        assistant_id=stored.assistant_id,
+        user_id=user_id,
+        include_deleted=False,
+        cache=persona_profile_cache,
+    )
+    if profile is not None:
+        if not bool(profile.get("is_active", True)):
+            return WorkspaceEffectiveAssistantDefault(
+                status="unavailable",
+                source="workspace",
+                assistant_kind="persona",
+                assistant_id=stored.assistant_id,
+                persona_memory_mode=stored.persona_memory_mode,
+                degraded_reason="persona_unavailable",
+            )
+        return WorkspaceEffectiveAssistantDefault(
+            status="available",
+            source="workspace",
+            assistant_kind="persona",
+            assistant_id=stored.assistant_id,
+            label=str(profile.get("name") or stored.assistant_id),
+            persona_memory_mode=stored.persona_memory_mode,
+        )
+
+    deleted_profile = _get_workspace_persona_profile(
+        db=db,
+        assistant_id=stored.assistant_id,
+        user_id=user_id,
+        include_deleted=True,
+        cache=persona_profile_cache,
+    )
+    degraded_reason = (
+        "persona_deleted"
+        if deleted_profile is not None
+        else "permission_denied"
+    )
+    return WorkspaceEffectiveAssistantDefault(
+        status="unavailable",
+        source="workspace",
+        assistant_kind="persona",
+        assistant_id=stored.assistant_id,
+        persona_memory_mode=stored.persona_memory_mode,
+        degraded_reason=degraded_reason,
+    )
+
+
+def _validate_workspace_assistant_default_reference(
+    *,
+    db: CharactersRAGDB,
+    stored: WorkspaceAssistantDefaults,
+    user_id: str,
+) -> None:
+    """Reject writes that would store an unusable Persona default reference."""
+    if stored.assistant_kind != "persona":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="assistant_defaults.assistant_kind is not supported",
+        )
+    profile = _get_workspace_persona_profile(
+        db=db,
+        assistant_id=stored.assistant_id,
+        user_id=user_id,
+        include_deleted=False,
+    )
+    if profile is None or not bool(profile.get("is_active", True)):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="assistant_defaults.assistant_id must reference an active Persona available to the current user",
+        )
+
+
+def _ws_to_response(
+    ws: dict,
+    *,
+    db: CharactersRAGDB,
+    current_user: User,
+    persona_profile_cache: WorkspacePersonaProfileCache | None = None,
+) -> WorkspaceResponse:
     """Convert a workspace DB row dict to a WorkspaceResponse schema."""
+    assistant_defaults, invalid_stored_default = _parse_workspace_assistant_defaults(
+        ws.get("assistant_defaults_json"),
+        workspace_id=str(ws.get("id") or ""),
+    )
     return WorkspaceResponse(
         id=ws["id"],
         name=ws.get("name"),
@@ -156,7 +327,14 @@ def _ws_to_response(ws: dict) -> WorkspaceResponse:
         audio_model=ws.get("audio_model"),
         audio_voice=ws.get("audio_voice"),
         audio_speed=ws.get("audio_speed"),
-        assistant_defaults=ws.get("assistant_defaults_json"),
+        assistant_defaults=assistant_defaults,
+        effective_assistant_default=_effective_workspace_assistant_default(
+            db=db,
+            stored=assistant_defaults,
+            user_id=_user_id_for_workspace_scope(current_user),
+            invalid_stored_default=invalid_stored_default,
+            persona_profile_cache=persona_profile_cache,
+        ),
         created_at=str(ws.get("created_at", "")),
         last_modified=str(ws.get("last_modified", "")),
         version=ws.get("version", 1),
@@ -1088,8 +1266,17 @@ async def list_workspaces(
         items = db.list_workspaces()
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to fetch workspaces") from exc
+    persona_profile_cache: WorkspacePersonaProfileCache = {}
     return WorkspaceListResponse(
-        items=[_ws_to_response(w) for w in items],
+        items=[
+            _ws_to_response(
+                w,
+                db=db,
+                current_user=current_user,
+                persona_profile_cache=persona_profile_cache,
+            )
+            for w in items
+        ],
         total=len(items),
     )
 
@@ -1110,7 +1297,7 @@ async def get_workspace(
         ws = _require_workspace(db, workspace_id)
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to fetch workspace") from exc
-    return _ws_to_response(ws)
+    return _ws_to_response(ws, db=db, current_user=current_user)
 
 
 @router.put(
@@ -1140,7 +1327,7 @@ async def upsert_workspace(
         )
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to create or update workspace") from exc
-    return _ws_to_response(ws)
+    return _ws_to_response(ws, db=db, current_user=current_user)
 
 
 @router.patch(
@@ -1158,6 +1345,12 @@ async def patch_workspace(
     """Update workspace fields with optimistic locking."""
     updates = body.model_dump(exclude_unset=True, exclude={"version"})
     if "assistant_defaults" in updates:
+        if body.assistant_defaults is not None:
+            _validate_workspace_assistant_default_reference(
+                db=db,
+                stored=body.assistant_defaults,
+                user_id=_user_id_for_workspace_scope(current_user),
+            )
         updates["assistant_defaults_json"] = updates.pop("assistant_defaults")
     updates.pop("confirm_read_write_assistant_default", None)
     if not updates:
@@ -1169,7 +1362,7 @@ async def patch_workspace(
         ws = db.update_workspace(workspace_id, updates, body.version)
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to update workspace") from exc
-    return _ws_to_response(ws)
+    return _ws_to_response(ws, db=db, current_user=current_user)
 
 
 @router.delete(
@@ -1747,7 +1940,7 @@ async def get_workspace_context(
         workspace_kind=str(capability_payload.get("workspace_kind") or "research_workspace"),
         schema_version=2,
         generated_at=_utc_now_iso(),
-        workspace=_ws_to_response(workspace),
+        workspace=_ws_to_response(workspace, db=db, current_user=current_user),
         attention_state=str(core_context_payload.get("attention_state") or "needs_attention"),
         resolution=capability_payload.get("resolution") or {},
         project_root=capability_payload.get("project_root") or {},

@@ -1804,9 +1804,6 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
       const cleanupRemoteIfSkipped = options?.cleanupRemoteIfSkipped ?? false
       try {
         const characterId = await resolveDefaultCharacterId()
-        if (!characterId) {
-          throw new Error("Default character unavailable")
-        }
 
         const resolvedTitle = title?.trim()
           ? title.trim()
@@ -1814,7 +1811,7 @@ export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
 
         // Create a new conversation via API
         const response = await tldwClient.createChat({
-          character_id: characterId,
+          ...(characterId != null ? { character_id: characterId } : {}),
           title: resolvedTitle,
           state: "in-progress",
           source: "knowledge_qa",

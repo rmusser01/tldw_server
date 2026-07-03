@@ -115,6 +115,75 @@ describe("TldwApiClient connection storage sync", () => {
     })
   })
 
+  it("uses the in-memory WebUI config for chat creation", async () => {
+    const client = new TldwApiClient()
+    await client.updateConfig({
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "single-user",
+      apiKey: "test-api-key"
+    })
+    mocks.tldwRequest.mockResolvedValue({
+      ok: true,
+      status: 201,
+      data: { id: "thread-1", title: "Knowledge thread" }
+    })
+
+    await expect(
+      client.createChat({ title: "Knowledge thread", source: "knowledge_qa" })
+    ).resolves.toMatchObject({ id: "thread-1", title: "Knowledge thread" })
+
+    expect(mocks.bgRequest).not.toHaveBeenCalled()
+    expect(mocks.tldwRequest).toHaveBeenCalledTimes(1)
+    const [request, runtime] = mocks.tldwRequest.mock.calls[0]
+    expect(request).toMatchObject({
+      path: "/api/v1/chats/",
+      method: "POST",
+      body: { title: "Knowledge thread", source: "knowledge_qa" }
+    })
+    await expect(runtime.getConfig()).resolves.toMatchObject({
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "single-user",
+      apiKey: "test-api-key"
+    })
+  })
+
+  it("uses the in-memory WebUI config for RAG search", async () => {
+    const client = new TldwApiClient()
+    await client.updateConfig({
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "single-user",
+      apiKey: "test-api-key"
+    })
+    mocks.tldwRequest.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: {
+        results: [],
+        generated_answer: "No relevant sources found."
+      }
+    })
+
+    await expect(
+      client.ragSearch("What changed?", { sources: ["media_db"] })
+    ).resolves.toMatchObject({
+      generated_answer: "No relevant sources found."
+    })
+
+    expect(mocks.bgRequest).not.toHaveBeenCalled()
+    expect(mocks.tldwRequest).toHaveBeenCalledTimes(1)
+    const [request, runtime] = mocks.tldwRequest.mock.calls[0]
+    expect(request).toMatchObject({
+      path: "/api/v1/rag/search",
+      method: "POST",
+      body: { query: "What changed?", sources: ["media_db"] }
+    })
+    await expect(runtime.getConfig()).resolves.toMatchObject({
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "single-user",
+      apiKey: "test-api-key"
+    })
+  })
+
   it("uses the in-memory WebUI config for OpenAPI discovery", async () => {
     const client = new TldwApiClient()
     await client.updateConfig({

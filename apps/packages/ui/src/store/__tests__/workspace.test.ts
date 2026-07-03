@@ -78,6 +78,8 @@ const resetWorkspaceStore = () => {
     workspaceTag: "",
     workspaceCreatedAt: null,
     workspaceChatReferenceId: "",
+    assistantDefaults: null,
+    effectiveAssistantDefault: null,
     sources: [],
     selectedSourceIds: [],
     sourceFolders: [],
@@ -321,6 +323,50 @@ describe("workspace store snapshot persistence", () => {
         workspaceTag: "workspace:renamed-research"
       })
     )
+  })
+
+  it("persists workspace assistant defaults without resolved effective labels", async () => {
+    useWorkspaceStore.getState().initializeWorkspace("Assistant Workspace")
+    const workspaceId = useWorkspaceStore.getState().workspaceId
+
+    useWorkspaceStore.setState({
+      assistantDefaults: {
+        assistantKind: "persona",
+        assistantId: "persona-1",
+        personaMemoryMode: "read_only",
+        voice: null,
+        style: null,
+        toolPolicyProfileId: null
+      },
+      effectiveAssistantDefault: {
+        status: "available",
+        source: "workspace",
+        assistantKind: "persona",
+        assistantId: "persona-1",
+        label: "Resolved Persona Label",
+        personaMemoryMode: "read_only",
+        degradedReason: null
+      }
+    })
+    useWorkspaceStore.getState().saveCurrentWorkspace()
+
+    await Promise.resolve()
+
+    const persistedRaw = localStorage.getItem(STORAGE_KEY)
+    expect(persistedRaw).toBeTruthy()
+    const persisted = persistedRaw ? JSON.parse(persistedRaw) : null
+    const snapshot = persisted?.state?.workspaceSnapshots?.[workspaceId]
+
+    expect(snapshot?.assistantDefaults).toEqual({
+      assistantKind: "persona",
+      assistantId: "persona-1",
+      personaMemoryMode: "read_only",
+      voice: null,
+      style: null,
+      toolPolicyProfileId: null
+    })
+    expect(snapshot?.effectiveAssistantDefault).toBeUndefined()
+    expect(JSON.stringify(snapshot)).not.toContain("Resolved Persona Label")
   })
 
   it("creates isolated snapshots for new workspaces", () => {

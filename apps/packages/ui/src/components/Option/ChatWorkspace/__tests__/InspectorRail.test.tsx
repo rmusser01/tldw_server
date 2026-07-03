@@ -34,6 +34,7 @@ describe("InspectorRail", () => {
         ]}
         selectedModelLabel="gpt-test"
         selectedPersonaLabel="Analyst"
+        assistantSource="explicit"
         backendAvailable
         streaming={false}
       />
@@ -43,6 +44,7 @@ describe("InspectorRail", () => {
     expect(screen.getByText("Operator Notes")).toBeInTheDocument()
     expect(screen.getByText("gpt-test")).toBeInTheDocument()
     expect(screen.getByText("Analyst")).toBeInTheDocument()
+    expect(screen.getByText("Explicit persona")).toBeInTheDocument()
     expect(screen.getByText("Ready via registry")).toBeInTheDocument()
   })
 
@@ -54,6 +56,7 @@ describe("InspectorRail", () => {
         stagedSources={[]}
         selectedModelLabel="No model selected"
         selectedPersonaLabel={null}
+        assistantSource="none"
         backendAvailable={false}
         streaming={false}
       />
@@ -75,6 +78,7 @@ describe("InspectorRail", () => {
         ]}
         selectedModelLabel="gpt-test"
         selectedPersonaLabel={null}
+        assistantSource="none"
         backendAvailable
         streaming={false}
       />
@@ -87,5 +91,43 @@ describe("InspectorRail", () => {
     const source = readFileSync(resolve(__dirname, "../InspectorRail.tsx"), "utf8")
 
     expect(source).not.toContain("stagedSourceTitles")
+  })
+
+  it("labels an inherited workspace persona separately from explicit selection", () => {
+    render(
+      <InspectorRail
+        scopeLabel="Default workspace"
+        stagedSourceCount={0}
+        stagedSources={[]}
+        selectedModelLabel="gpt-test"
+        selectedPersonaLabel="Workspace Analyst"
+        assistantSource="workspace"
+        backendAvailable
+        streaming={false}
+      />
+    )
+
+    expect(screen.getByText("Workspace Analyst")).toBeInTheDocument()
+    expect(screen.getByText("Inherited from workspace")).toBeInTheDocument()
+  })
+
+  it("shows unavailable workspace defaults without duplicating persona content", () => {
+    render(
+      <InspectorRail
+        scopeLabel="Default workspace"
+        stagedSourceCount={0}
+        stagedSources={[]}
+        selectedModelLabel="gpt-test"
+        selectedPersonaLabel={null}
+        assistantSource="unavailable"
+        workspaceAssistantDegradedReason="persona_deleted"
+        backendAvailable
+        streaming={false}
+      />
+    )
+
+    expect(screen.getByText("Workspace default unavailable")).toBeInTheDocument()
+    expect(screen.getByText("Persona deleted")).toBeInTheDocument()
+    expect(screen.queryByText("No persona selected")).not.toBeInTheDocument()
   })
 })

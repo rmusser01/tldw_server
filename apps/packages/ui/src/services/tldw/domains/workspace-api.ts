@@ -11,6 +11,19 @@ import type {
   SkillsListParams,
   SkillsListResponse
 } from "@/types/skill"
+import type {
+  EffectiveWorkspaceAssistantDefault,
+  EffectiveWorkspaceAssistantDefaultSource,
+  EffectiveWorkspaceAssistantDefaultStatus,
+  WorkspaceAssistantDefaultDegradedReason,
+  WorkspaceAssistantDefaults,
+  WorkspaceAssistantKind,
+  WorkspacePersonaMemoryMode
+} from "@/types/workspace"
+import {
+  normalizeEffectiveWorkspaceAssistantDefault,
+  normalizeWorkspaceAssistantDefaults
+} from "@/types/workspace-assistant-defaults"
 
 /**
  * Minimal interface for the TldwApiClient methods referenced via `this`.
@@ -64,6 +77,25 @@ export type WorkspaceProjectRootState =
 
 export type WorkspaceResolutionStatus = "complete" | "partial" | "failed"
 
+export interface WorkspaceAssistantDefaultsApiPayload {
+  assistant_kind: WorkspaceAssistantKind
+  assistant_id: string
+  persona_memory_mode?: WorkspacePersonaMemoryMode
+  voice?: null
+  style?: null
+  tool_policy_profile_id?: null
+}
+
+export interface WorkspaceEffectiveAssistantDefaultApiPayload {
+  status: EffectiveWorkspaceAssistantDefaultStatus
+  source: EffectiveWorkspaceAssistantDefaultSource
+  assistant_kind?: WorkspaceAssistantKind | null
+  assistant_id?: string | null
+  label?: string | null
+  persona_memory_mode?: WorkspacePersonaMemoryMode | null
+  degraded_reason?: WorkspaceAssistantDefaultDegradedReason | null
+}
+
 export interface WorkspaceApiResponse {
   id: string
   name: string | null
@@ -81,6 +113,10 @@ export interface WorkspaceApiResponse {
   created_at: string
   last_modified: string
   version: number
+  assistant_defaults?: WorkspaceAssistantDefaultsApiPayload | null
+  effective_assistant_default?: WorkspaceEffectiveAssistantDefaultApiPayload | null
+  assistantDefaults?: WorkspaceAssistantDefaults | null
+  effectiveAssistantDefault?: EffectiveWorkspaceAssistantDefault
 }
 
 export interface WorkspaceListApiResponse {
@@ -460,6 +496,10 @@ export interface WorkspacePatchRequest {
   audio_model?: string | null
   audio_voice?: string | null
   audio_speed?: number | null
+  assistant_defaults?: WorkspaceAssistantDefaultsApiPayload | null
+  assistantDefaults?: WorkspaceAssistantDefaults | null
+  confirm_read_write_assistant_default?: boolean | null
+  confirmReadWriteAssistantDefault?: boolean | null
   version: number
 }
 
@@ -797,6 +837,76 @@ const resolveSkillExportFilename = (
     : fallbackFilename
 }
 
+const describeWorkspaceAssistantDefaultsPayload = (value: unknown): string => {
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return Object.prototype.toString.call(value)
+  }
+}
+
+export const serializeWorkspaceAssistantDefaults = (
+  value: WorkspaceAssistantDefaults | WorkspaceAssistantDefaultsApiPayload | null
+): WorkspaceAssistantDefaultsApiPayload | null => {
+  if (value === null) return null
+  const normalized = normalizeWorkspaceAssistantDefaults(value)
+  if (!normalized) {
+    throw new Error(
+      `Invalid assistant_defaults payload: expected persona assistant_kind and non-empty assistant_id; received ${describeWorkspaceAssistantDefaultsPayload(
+        value
+      )}.`
+    )
+  }
+  return {
+    assistant_kind: normalized.assistantKind,
+    assistant_id: normalized.assistantId,
+    persona_memory_mode: normalized.personaMemoryMode,
+    voice: null,
+    style: null,
+    tool_policy_profile_id: null
+  }
+}
+
+export const normalizeWorkspaceApiResponse = (
+  workspace: WorkspaceApiResponse
+): WorkspaceApiResponse => ({
+  ...workspace,
+  assistantDefaults: normalizeWorkspaceAssistantDefaults(
+    workspace.assistant_defaults ?? workspace.assistantDefaults ?? null
+  ),
+  effectiveAssistantDefault: normalizeEffectiveWorkspaceAssistantDefault(
+    workspace.effective_assistant_default ??
+      workspace.effectiveAssistantDefault ??
+      null
+  )
+})
+
+const serializeWorkspacePatchRequest = (
+  data: WorkspacePatchRequest
+): WorkspacePatchRequest => {
+  const body: WorkspacePatchRequest = { ...data }
+
+  if ("assistantDefaults" in body) {
+    body.assistant_defaults =
+      body.assistantDefaults === undefined
+        ? undefined
+        : serializeWorkspaceAssistantDefaults(body.assistantDefaults)
+    delete body.assistantDefaults
+  } else if ("assistant_defaults" in body && body.assistant_defaults !== undefined) {
+    body.assistant_defaults = serializeWorkspaceAssistantDefaults(
+      body.assistant_defaults
+    )
+  }
+
+  if ("confirmReadWriteAssistantDefault" in body) {
+    body.confirm_read_write_assistant_default =
+      body.confirmReadWriteAssistantDefault ?? null
+    delete body.confirmReadWriteAssistantDefault
+  }
+
+  return body
+}
+
 export const workspaceApiMethods = {
   // ── Skills API ──
 
@@ -1095,41 +1205,48 @@ export const workspaceApiMethods = {
   // ── Workspace sub-resource methods ──
 
   async listWorkspaces(): Promise<WorkspaceListApiResponse> {
-    return await bgRequest<WorkspaceListApiResponse>({
+    const response = await bgRequest<WorkspaceListApiResponse>({
       path: "/api/v1/workspaces",
       method: "GET"
     })
+    return {
+      ...response,
+      items: response.items.map(normalizeWorkspaceApiResponse)
+    }
   },
 
   async upsertWorkspace(
     workspaceId: string,
     data: WorkspaceUpsertRequest
   ): Promise<WorkspaceApiResponse> {
-    return await bgRequest<WorkspaceApiResponse>({
+    const response = await bgRequest<WorkspaceApiResponse>({
       path: workspacePath(workspaceId),
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: data
     })
+    return normalizeWorkspaceApiResponse(response)
   },
 
   async getWorkspace(workspaceId: string): Promise<WorkspaceApiResponse> {
-    return await bgRequest<WorkspaceApiResponse>({
+    const response = await bgRequest<WorkspaceApiResponse>({
       path: workspacePath(workspaceId),
       method: "GET"
     })
+    return normalizeWorkspaceApiResponse(response)
   },
 
   async patchWorkspace(
     workspaceId: string,
     data: WorkspacePatchRequest
   ): Promise<WorkspaceApiResponse> {
-    return await bgRequest<WorkspaceApiResponse>({
+    const response = await bgRequest<WorkspaceApiResponse>({
       path: workspacePath(workspaceId),
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: data
+      body: serializeWorkspacePatchRequest(data)
     })
+    return normalizeWorkspaceApiResponse(response)
   },
 
   async deleteWorkspace(workspaceId: string): Promise<void> {

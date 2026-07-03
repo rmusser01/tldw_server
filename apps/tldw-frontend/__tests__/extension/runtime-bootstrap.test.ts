@@ -288,6 +288,33 @@ describe("runtime-bootstrap chrome shim", () => {
     })
   })
 
+  it("uses an existing stored single-user key as a runtime override before scrubbing it", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "advanced"
+    process.env.NEXT_PUBLIC_API_URL = "http://127.0.0.1:8000"
+    delete process.env.NEXT_PUBLIC_X_API_KEY
+    localStorage.setItem(
+      "tldwConfig",
+      JSON.stringify({
+        authMode: "single-user",
+        apiKey: "manual-user-key",
+        serverUrl: "http://127.0.0.1:8000"
+      })
+    )
+
+    await importAndAwaitBootstrap()
+    const { getRuntimeSingleUserApiKeyOverride } = await import(
+      "@/services/tldw/runtime-auth-override"
+    )
+
+    expect(getRuntimeSingleUserApiKeyOverride()).toBe("manual-user-key")
+    await vi.waitFor(() => {
+      const nextConfig = readStoredValue("tldwConfig") as Record<string, unknown>
+      expect(nextConfig.serverUrl).toBe("http://127.0.0.1:8000")
+      expect(nextConfig.apiKey).toBeUndefined()
+      expect(localStorage.getItem("tldwConfig")).not.toContain("manual-user-key")
+    })
+  })
+
   it("repairs a stale env LAN host to the current browser host during bootstrap", async () => {
     process.env.NEXT_PUBLIC_API_URL = "http://192.168.5.184:8000"
 

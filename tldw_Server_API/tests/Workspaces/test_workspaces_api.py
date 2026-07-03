@@ -67,6 +67,43 @@ def workspace_fastapi_app() -> FastAPI:
     return app
 
 
+def _create_workspace_test_persona(
+    db: CharactersRAGDB,
+    *,
+    persona_id: str = "persona-1",
+    user_id: str = "1",
+    name: str = "Workspace Persona",
+) -> str:
+    """Create a test Persona profile for workspace endpoint tests.
+
+    Args:
+        db: CharactersRAGDB test database that already contains "Test Char".
+        persona_id: Stable Persona id to write into the profile row.
+        user_id: Owner user id for permission-scoped Persona lookups.
+        name: Display name to store on the Persona profile.
+
+    Returns:
+        The Persona id returned by ``db.create_persona_profile``.
+
+    Side Effects:
+        Asserts that the "Test Char" character card exists, then creates a
+        session-scoped Persona profile linked to that character.
+    """
+    character = db.get_character_card_by_name("Test Char")
+    assert character is not None  # nosec B101
+    return db.create_persona_profile(
+        {
+            "id": persona_id,
+            "user_id": user_id,
+            "name": name,
+            "character_card_id": int(character["id"]),
+            "mode": "session_scoped",
+            "system_prompt": "You support workspace tests.",
+            "is_active": True,
+        }
+    )
+
+
 def _get_workspace_roots_response(
     workspace_fastapi_app: FastAPI,
     db_like: Any,
@@ -463,6 +500,7 @@ def test_workspace_api_patches_assistant_defaults(workspace_fastapi_app, db):
         )
 
     workspace = db.upsert_workspace("ws-assistant", "Assistant Defaults")
+    _create_workspace_test_persona(db)
     workspace_fastapi_app.dependency_overrides[get_request_user] = _user
     workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: db
     workspace_fastapi_app.dependency_overrides[WORKSPACES_WRITE_RATE_LIMIT] = _allow_rate_limit
@@ -518,6 +556,7 @@ def test_workspace_api_requires_confirmation_for_read_write_assistant_default(wo
         )
 
     workspace = db.upsert_workspace("ws-assistant", "Assistant Defaults")
+    _create_workspace_test_persona(db)
     workspace_fastapi_app.dependency_overrides[get_request_user] = _user
     workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: db
     workspace_fastapi_app.dependency_overrides[WORKSPACES_WRITE_RATE_LIMIT] = _allow_rate_limit

@@ -1,10 +1,14 @@
-import type { WorkspaceSource } from "@/types/workspace"
+import type {
+  EffectiveWorkspaceAssistantDefault,
+  WorkspaceSource
+} from "@/types/workspace"
 
 import { InspectorRail } from "./InspectorRail"
 import { WorkspaceChatPanel } from "./WorkspaceChatPanel"
 import { WorkspaceRail } from "./WorkspaceRail"
 import { WorkspaceStatusStrip } from "./WorkspaceStatusStrip"
 import type {
+  ChatWorkspaceAssistantSource,
   ChatWorkspaceRuntimeState,
   StagedWorkspaceSource
 } from "./types"
@@ -18,6 +22,11 @@ export type ChatWorkspaceConsoleProps = {
   stagedSources: StagedWorkspaceSource[]
   selectedModelLabel: string
   selectedPersonaLabel: string | null
+  assistantSource: ChatWorkspaceAssistantSource
+  workspaceAssistantDegradedReason?: ChatWorkspaceRuntimeState[
+    "workspaceAssistantDegradedReason"
+  ]
+  effectiveAssistantDefault?: EffectiveWorkspaceAssistantDefault | null
   backendAvailable: boolean
   chatBackendAvailable: boolean
   streaming: boolean
@@ -35,6 +44,9 @@ export const ChatWorkspaceConsole = ({
   stagedSources,
   selectedModelLabel,
   selectedPersonaLabel,
+  assistantSource,
+  workspaceAssistantDegradedReason,
+  effectiveAssistantDefault,
   backendAvailable,
   chatBackendAvailable,
   streaming,
@@ -76,6 +88,7 @@ export const ChatWorkspaceConsole = ({
               stagedSources={stagedSources}
               onClearStagedSources={onClearStagedSources}
               backendAvailable={chatBackendAvailable}
+              effectiveAssistantDefault={effectiveAssistantDefault}
               onRuntimeStateChange={onRuntimeStateChange}
             />
           </div>
@@ -93,6 +106,8 @@ export const ChatWorkspaceConsole = ({
             stagedSources={inspectorSources}
             selectedModelLabel={selectedModelLabel}
             selectedPersonaLabel={selectedPersonaLabel}
+            assistantSource={assistantSource}
+            workspaceAssistantDegradedReason={workspaceAssistantDegradedReason}
             backendAvailable={backendAvailable}
             streaming={streaming}
           />
