@@ -33,9 +33,11 @@ from tldw_Server_API.app.api.v1.schemas.visual_identity_schemas import (
 )
 from tldw_Server_API.app.core.AuthNZ.repos.generated_files_repo import AuthnzGeneratedFilesRepo
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.VNAssetPacks_DB import VNAssetPacksRepository
 from tldw_Server_API.app.core.DB_Management.VisualIdentity_DB import VisualIdentityRepository
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.VN_Assets.storage import SOURCE_FEATURE_VN_ASSETS
 from tldw_Server_API.app.core.Visual_Identities.archive_import import MAX_EXPRESSION_ZIP_BYTES
 from tldw_Server_API.app.core.Visual_Identities.constraints import (
     MAX_EXPRESSION_ASSET_BYTES,
@@ -56,6 +58,9 @@ from tldw_Server_API.app.core.Visual_Identities.storage import (
     resolve_visual_identity_asset_path,
     validate_generated_file_record_for_expression_asset,
     validate_and_store_visual_identity_asset,
+)
+from tldw_Server_API.app.core.Visual_Identities.vn_bridge import (
+    build_vn_visual_identity_source_context,
 )
 from tldw_Server_API.app.services.storage_quota_service import get_storage_service
 
@@ -654,10 +659,36 @@ async def create_visual_identity_asset_from_generated_file(
 ) -> VisualIdentityAssetResponse:
     pack = _require_pack(service, pack_id)
     normalized_expression = _normalize_expression_or_422(request.expression_key)
-    try:
-        canonical_context = canonicalize_source_context(request.source_context)
-    except ValueError as exc:
-        raise _handle_value_error(exc) from exc
+    normalized_source_feature = str(request.source_feature or "").strip().lower()
+    is_vn_source = normalized_source_feature == SOURCE_FEATURE_VN_ASSETS
+    generated_file: dict[str, Any] | None = None
+    source_feature = SOURCE_FEATURE_VN_ASSETS if is_vn_source else request.source_feature
+    if is_vn_source:
+        generated_file = await files_repo.get_file_by_id(request.generated_file_id)
+        if not generated_file:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="generated_file_not_found",
+            )
+        try:
+            validate_generated_file_record_for_expression_asset(
+                owner_user_id=service.owner_user_id,
+                generated_file_record=generated_file,
+                source_feature=source_feature,
+            )
+            canonical_context = build_vn_visual_identity_source_context(
+                user_id=service.owner_user_id,
+                vn_repository=VNAssetPacksRepository.initialized(service.db),
+                generated_file_record=generated_file,
+                requested_context=request.source_context,
+            )
+        except ValueError as exc:
+            raise _handle_value_error(exc) from exc
+    else:
+        try:
+            canonical_context = canonicalize_source_context(request.source_context)
+        except ValueError as exc:
+            raise _handle_value_error(exc) from exc
     scope = "visual_identity_generated_file_asset"
     resource_id = f"pack:{pack_id}:generated-file-asset"
     payload_hash = _canonical_payload_hash(
@@ -666,7 +697,7 @@ async def create_visual_identity_asset_from_generated_file(
             "generated_file_id": request.generated_file_id,
             "expression_key": normalized_expression,
             "draft_id": request.draft_id,
-            "source_feature": request.source_feature,
+            "source_feature": source_feature,
             "source_context": canonical_context,
         }
     )
@@ -683,24 +714,25 @@ async def create_visual_identity_asset_from_generated_file(
     if claim_token is None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="idempotency_claim_missing")
     try:
-        generated_file = await files_repo.get_file_by_id(request.generated_file_id)
-        if not generated_file:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="generated_file_not_found",
+        if generated_file is None:
+            generated_file = await files_repo.get_file_by_id(request.generated_file_id)
+            if not generated_file:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="generated_file_not_found",
+                )
+            validate_generated_file_record_for_expression_asset(
+                owner_user_id=service.owner_user_id,
+                generated_file_record=generated_file,
+                source_feature=source_feature,
             )
-        validate_generated_file_record_for_expression_asset(
-            owner_user_id=service.owner_user_id,
-            generated_file_record=generated_file,
-            source_feature=request.source_feature,
-        )
         draft = _draft_for_asset_upload(service, pack, draft_id=request.draft_id)
         stored = copy_generated_file_record_to_expression_asset(
             owner_user_id=service.owner_user_id,
             pack_id=f"draft-{draft['id']}",
             expression_key=normalized_expression,
             generated_file_record=generated_file,
-            source_feature=request.source_feature,
+            source_feature=source_feature,
         )
         response = _create_asset_from_stored_metadata(
             service,

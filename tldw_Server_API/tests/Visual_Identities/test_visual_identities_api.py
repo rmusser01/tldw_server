@@ -16,8 +16,13 @@ from tldw_Server_API.app.api.v1.endpoints import visual_identities
 from tldw_Server_API.app.api.v1.router_groups.core import iter_core_router_specs
 from tldw_Server_API.app.api.v1.router_registry import register_router_specs
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.VNAssetPacks_DB import VNAssetPacksRepository
 from tldw_Server_API.app.core.DB_Management.VisualIdentity_DB import VisualIdentityRepository
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.VN_Assets.storage import (
+    SOURCE_FEATURE_VN_ASSETS,
+    vn_asset_source_ref,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -487,6 +492,132 @@ def test_generated_file_asset_import_idempotency_uses_canonical_source_context(
     assert any((storage_root / "1").glob("packs/draft-*/happy/*.png"))
 
 
+def test_generated_file_asset_import_records_vn_context_and_rejects_item_mismatch(
+    chacha_db: CharactersRAGDB,
+    repo: VisualIdentityRepository,
+    storage_root: Path,
+    outputs_root: Path,
+) -> None:
+    pack = repo.create_pack(owner_user_id=1, title="VN Generated Expressions")
+    source_path = outputs_root / "1" / SOURCE_FEATURE_VN_ASSETS / "maya_happy.png"
+    source_path.parent.mkdir(parents=True)
+    source_bytes = _png_bytes(color="blue")
+    source_path.write_bytes(source_bytes)
+
+    character_id = _seed_character(chacha_db, name="Maya")
+    vn_repo = VNAssetPacksRepository.initialized(chacha_db)
+    vn_pack = vn_repo.create_pack(
+        owner_user_id=1,
+        primary_character_id=character_id,
+        title="Maya Sprite Pack",
+    )
+    vn_slot = vn_repo.create_slot(
+        pack_id=int(vn_pack["id"]),
+        asset_type="sprite",
+        slot_key="happy",
+        labels={"expression": "happy"},
+    )
+    vn_item = vn_repo.create_item(
+        pack_id=int(vn_pack["id"]),
+        slot_id=int(vn_slot["id"]),
+        generated_file_id=77,
+        storage_ref=f"{SOURCE_FEATURE_VN_ASSETS}/maya_happy.png",
+        mime_type="image/png",
+        width=8,
+        height=8,
+        bytes=len(source_bytes),
+    )
+    item_id = int(vn_item["id"])
+    slot_id = int(vn_slot["id"])
+    vn_pack_id = int(vn_pack["id"])
+    files_repo = FakeGeneratedFilesRepo(
+        {
+            77: {
+                "id": 77,
+                "user_id": 1,
+                "is_deleted": False,
+                "file_category": "image",
+                "source_feature": SOURCE_FEATURE_VN_ASSETS,
+                "source_ref": vn_asset_source_ref(item_id),
+                "storage_path": f"{SOURCE_FEATURE_VN_ASSETS}/maya_happy.png",
+                "mime_type": "image/png",
+                "original_filename": "maya_happy.png",
+            }
+        }
+    )
+    client = _client(chacha_db, files_repo=files_repo)
+
+    response = client.post(
+        f"/api/v1/visual-identities/packs/{pack['id']}/assets/from-generated-file",
+        json={
+            "generated_file_id": 77,
+            "expression_key": "happy",
+            "source_feature": SOURCE_FEATURE_VN_ASSETS,
+            "source_context": {
+                "vn_item_id": item_id,
+                "vn_pack_id": vn_pack_id,
+                "vn_slot_id": slot_id,
+                "vn_slot_key": "happy",
+                "vn_slot_label": "Happy",
+                "vn_asset_type": "sprite",
+            },
+            "idempotency_key": "vn-generated-context-ok",
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["source_context"] == {
+        "filename": "maya_happy.png",
+        "generated_file_id": 77,
+        "mime_type": "image/png",
+        "source_feature": SOURCE_FEATURE_VN_ASSETS,
+        "source_ref": vn_asset_source_ref(item_id),
+        "vn_asset_type": "sprite",
+        "vn_item_id": item_id,
+        "vn_pack_id": vn_pack_id,
+        "vn_slot_id": slot_id,
+        "vn_slot_key": "happy",
+        "vn_slot_label": "Happy",
+    }
+    assert _visual_identity_asset_count(chacha_db, owner_user_id=1) == 1
+
+    item_mismatch = client.post(
+        f"/api/v1/visual-identities/packs/{pack['id']}/assets/from-generated-file",
+        json={
+            "generated_file_id": 77,
+            "expression_key": "sad",
+            "source_feature": SOURCE_FEATURE_VN_ASSETS,
+            "source_context": {"vn_item_id": item_id + 1},
+            "idempotency_key": "vn-generated-context-item-mismatch",
+        },
+    )
+
+    assert item_mismatch.status_code in {422, 404}
+    assert _visual_identity_asset_count(chacha_db, owner_user_id=1) == 1
+
+    mismatched_contexts = [
+        {"vn_item_id": item_id, "vn_pack_id": vn_pack_id + 1},
+        {"vn_item_id": item_id, "vn_slot_id": slot_id + 1},
+        {"vn_item_id": item_id, "vn_slot_key": "sad"},
+        {"vn_item_id": item_id, "vn_asset_type": "background"},
+    ]
+    for index, source_context in enumerate(mismatched_contexts, start=1):
+        mismatch = client.post(
+            f"/api/v1/visual-identities/packs/{pack['id']}/assets/from-generated-file",
+            json={
+                "generated_file_id": 77,
+                "expression_key": "sad",
+                "source_feature": SOURCE_FEATURE_VN_ASSETS,
+                "source_context": source_context,
+                "idempotency_key": f"vn-generated-context-structural-mismatch-{index}",
+            },
+        )
+
+        assert mismatch.status_code in {422, 404}
+        assert _visual_identity_asset_count(chacha_db, owner_user_id=1) == 1
+    assert any((storage_root / "1").glob("packs/draft-*/happy/*.png"))
+
+
 def test_generated_file_asset_import_rejects_invalid_file_without_creating_draft(
     chacha_db: CharactersRAGDB,
     repo: VisualIdentityRepository,
@@ -546,6 +677,14 @@ def test_generated_file_asset_import_rejects_invalid_file_without_creating_draft
     assert foreign_response.status_code == 404
     assert corrupt_response.status_code == 422
     assert draft_count == 0
+
+
+def _visual_identity_asset_count(db: CharactersRAGDB, *, owner_user_id: int) -> int:
+    row = db.execute_query(
+        "SELECT COUNT(*) FROM visual_identity_assets WHERE owner_user_id = ?",
+        (owner_user_id,),
+    ).fetchone()
+    return int(row[0])
 
 
 def test_asset_content_requires_owner(
