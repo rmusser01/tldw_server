@@ -85,7 +85,7 @@ Extend its request/response schema and service path to support optional asset pr
 
 The lower-level endpoint remains flexible enough for other generated-file sources. The VN bridge service defaults `source_feature` to `vn_assets` and rejects non-VN source features unless the caller explicitly opts into the generic path outside the bridge.
 
-The VN bridge must treat client-provided provenance as a request hint, not as trusted authority. Where possible, it derives `source_feature`, filename, MIME metadata, and generated-file source references from the generated-file record and VN asset item data. If `vn_item_id` is present, the generated-file record must match the VN asset item source reference, such as `vn_asset_item:{vn_item_id}`. A mismatch fails before asset creation.
+The VN bridge must treat client-provided provenance as a request hint, not as trusted authority. It always derives `source_feature`, `generated_file_id`, filename, MIME metadata, and generated-file source references from the generated-file record. If `vn_item_id` is present, the generated-file record must match the VN asset item source reference, such as `vn_asset_item:{vn_item_id}`. A mismatch fails before asset creation. VN pack, slot, and item ids are stored only after they are verified against VN data. Client-provided labels, such as `vn_slot_label`, are stored as display labels only and are not used as ownership or source-of-truth checks.
 
 Use this backend module:
 
@@ -120,7 +120,10 @@ Migration requirements:
 - maximum total keys is 50
 - keys are strings of 1 to 64 characters
 - scalar strings are at most 512 characters
-- binary data, base64 blobs, data URIs, and long prompt text are rejected
+- strings beginning with `data:` are rejected
+- known prompt text keys are rejected: `prompt`, `negative_prompt`, `system_prompt`, `user_prompt`, and `prompt_text`
+- short prompt references are allowed only under reference keys such as `prompt_id`, `prompt_ref`, or `prompt_label`
+- binary data, base64-like payload strings, and full prompt text are rejected
 
 The minimum useful provenance fields are `source_feature`, `generated_file_id`, and filename. VN-specific fields are optional because different generation paths may know different amounts of VN context.
 
@@ -173,6 +176,14 @@ Stage 11A does not expand the current VN Asset upload/generation format matrix. 
 ### Resolver Shape
 
 Add a stateless resolver for VN-like surfaces. It takes actor identity, optional role metadata, requested expression, and optional strict pack/version override. It does not persist cast assignments.
+
+Stage 11B extends the existing resolver API instead of adding a separate VN-only route:
+
+```text
+GET /api/v1/visual-identities/bindings/resolve
+```
+
+The endpoint keeps the current actor/expression/manual/mood query parameters and adds optional query parameters for `role_id`, `role_label`, `override_pack_id`, `override_pack_version_id`, and `allow_override_fallback`. The response model extends `VisualIdentityResolveResponse` with `role_id`, `role_label`, and `resolution_source`.
 
 Resolver input fields:
 
@@ -281,6 +292,7 @@ Resolver responses must expose fallback reasons. Silent fallback to unrelated pa
 - Same idempotency key with different `source_context` returns a conflict.
 - Missing, wrong-owner, non-image, and invalid generated files create no asset rows.
 - `source_context` validation rejects invalid root type, excessive size, excessive depth, excessive key count, long keys, long scalar strings, binary/base64 payloads, data URIs, and long prompt text.
+- `source_context` validation rejects known prompt text keys, while allowing short prompt reference keys.
 - VN bridge defaults `source_feature` to `vn_assets`.
 - VN bridge rejects non-VN generated-file sources unless the generic import path is explicitly used.
 - VN bridge rejects a generated-file record whose `source_ref` does not match the provided `vn_item_id`.
@@ -300,6 +312,7 @@ Resolver responses must expose fallback reasons. Silent fallback to unrelated pa
 ### Backend Stage 11B
 
 - Actor default binding resolves without role override.
+- Existing `/bindings/resolve` query parameters keep working when no Stage 11B override fields are supplied.
 - Explicit override resolves the requested expression.
 - Valid override missing the requested/default expression returns `override_expression_missing` by default.
 - `allow_override_fallback=true` permits fallback and records `fallback_reason`.
