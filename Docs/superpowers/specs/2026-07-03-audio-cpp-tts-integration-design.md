@@ -62,6 +62,24 @@ Core units:
 
 Do not add generic Audio Studio `/v1/tasks/run` abstractions in the first implementation. The TTS provider should leave room for those by reusing `AudioCppClient` and the sidecar supervisor.
 
+## Provider Registration And Routing
+
+The implementation should register `audio_cpp` explicitly in the existing TTS provider registry:
+
+- Add `TTSProvider.AUDIO_CPP = "audio_cpp"`.
+- Add default adapter mapping for `AudioCppTTSAdapter`.
+- Add provider aliases for `audio_cpp`, `audio-cpp`, and `audiocpp`.
+- Add `audio_cpp` to provider priority only as disabled-by-default documentation/config; it should not affect default selection unless enabled.
+- Add `audio_cpp` to format preferences after the adapter's conversion behavior is verified.
+
+Model routing should avoid stealing existing aliases. Today, generic `pocket-tts` routes to the existing PocketTTS provider. The first `audio_cpp` implementation should prefer explicit provider selection or namespaced model aliases such as:
+
+- `audio_cpp:pocket-tts`
+- `audio-cpp/pocket-tts`
+- `audiocpp/pocket-tts`
+
+Do not remap bare `pocket-tts` to `audio_cpp` unless a later migration intentionally changes the existing PocketTTS behavior and covers that compatibility break in tests and release notes.
+
 ## Configuration
 
 Add `audio_cpp` to `tldw_Server_API/Config_Files/tts_providers_config.yaml`, disabled by default.
@@ -70,39 +88,63 @@ Add `audio_cpp` to `tldw_Server_API/Config_Files/tts_providers_config.yaml`, dis
 providers:
   audio_cpp:
     enabled: false
-    managed: false
-    base_url: "http://127.0.0.1:8080"
-    server_binary_path: null
-    server_config_path: "models/audio_cpp/server.json"
-    models_root: "models/audio_cpp"
-    shared_scratch_dir: "models/audio_cpp/runtime/scratch"
     backend: "cuda"  # setup/build hint; not necessarily emitted into server.json
-    device: 0
-    threads: 1
-    lazy_load: true
-    model: "pocket-tts"
-    family: "pocket_tts"
+    base_url: "http://127.0.0.1:8080"
+    model: "audio-cpp/pocket-tts"
     model_path: "models/audio_cpp/pocket-tts"
-    task: "tts"
-    mode: "offline"
-    load_options:
-      language: "english"
-    session_options:
-      language: "english"
+    binary_path: null
+    device: "cuda"
     timeout: 300
     sample_rate: 24000
-    retain_request_artifacts: false
-    request_option_allowlist:
-      - max_tokens
-      - seed
-    voices:
-      alba:
-        voice_id: "alba"
+    max_concurrent_generations: 1
+    auto_download: false
+    extra_params:
+      managed: false
+      allow_remote_base_url: false
+      server:
+        host: "127.0.0.1"
+        port: 8080
+        autoselect_port: true
+        port_probe_max: 10
+        startup_timeout_seconds: 30
+        healthcheck_interval_seconds: 0.25
+        startup_backoff_seconds: 5
+        idle_shutdown_seconds: 900
+        terminate_timeout_seconds: 10
+        server_config_path: "models/audio_cpp/server.json"
+        models_root: "models/audio_cpp"
+        shared_scratch_dir: "models/audio_cpp/runtime/scratch"
+        lazy_load: true
+        device: 0
+        threads: 1
+        model:
+          id: "pocket-tts"
+          family: "pocket_tts"
+          path: "models/audio_cpp/pocket-tts"
+          task: "tts"
+          mode: "offline"
+          load_options:
+            language: "english"
+          session_options:
+            language: "english"
+      retain_request_artifacts: false
+      external_voice_reference_mode: "disabled"  # disabled | shared_path
+      request_option_allowlist:
+        - max_tokens
+        - seed
+      voices:
+        alba:
+          upstream_value: "alba"
+          request_field: null  # set only after upstream server support is verified
 ```
+
+The current `ProviderConfig` schema preserves known provider fields plus `extra_params`. The first implementation should either extend that schema deliberately or keep audio.cpp-specific runtime fields under `extra_params` as shown above. Do not place new top-level provider keys in YAML unless the config schema is updated in the same change, because otherwise those fields may be dropped during Pydantic parsing or config serialization.
 
 For managed mode, tldw renders an upstream-compatible server config with explicit model entries. Provider settings such as `backend` are setup/build hints unless upstream server config documents a matching field. The first implementation should support one configured TTS model entry and leave multi-model config expansion for a later pass unless it is trivial inside the config renderer.
 
 For external server mode, `shared_scratch_dir` is required only for requests that need server-local files, such as reference audio. If the external server cannot read the configured scratch directory, `voice_reference` requests must fail with a clear provider validation error. Basic text-to-speech can work with only `base_url`.
+
+External reference-audio support must be opt-in. Because upstream currently documents request-time audio paths as server-local and does not document a cheap file-read probe endpoint, tldw cannot fully verify external server readability during normal initialization. The default `external_voice_reference_mode` should be `disabled`; `shared_path` should be treated as an admin assertion that the external server can read the configured path.
 
 ## Setup And Installer Scope
 
@@ -123,6 +165,15 @@ Installer behavior:
 - Keep network operations explicit and user/admin initiated.
 - Do not put secrets or tokens in generated config files.
 - Keep platform support truthful: CUDA server build is the first managed target; CPU/Vulkan/Metal server support is future verification unless upstream server docs change.
+
+Managed sidecar behavior:
+
+- Bind managed sidecars to loopback hosts only.
+- Autoselect a free port by default and derive `base_url` from the selected host and port.
+- Wait for `/health` with configurable timeout and polling interval.
+- Back off after startup failure to avoid tight restart loops.
+- Support idle shutdown because upstream keeps loaded models and sessions resident until process exit.
+- Keep stdout/stderr handling sanitized and avoid surfacing arbitrary process output in user-facing errors.
 
 ## TTS Request Behavior
 
@@ -146,6 +197,8 @@ Reference-audio handling:
 - Temp names must be generated by tldw, not derived from user filenames.
 - Files are deleted after the request unless `retain_request_artifacts` is enabled for diagnostics.
 
+Configured voice mappings need a verified upstream request field before they are sent. The current server README documents `voice_ref` for `/v1/audio/speech`, but it does not document a built-in voice field for that route. Until implementation verifies the server source or a real runtime for fields such as `voice`, `voice_id`, or another request key, configured voices should be exposed as catalog metadata only or fail with a clear validation error when requested without a reference audio path.
+
 Streaming semantics:
 
 - Upstream warns that framework-wide streaming inference is not generally supported and models should be treated as offline-only.
@@ -164,6 +217,7 @@ Output conversion:
 
 - If tldw request format differs from upstream WAV, convert using existing `AudioConverter` behavior in `TTSServiceV2` or adapter-local conversion consistent with existing providers.
 - The adapter response should include provider metadata: `provider=audio_cpp`, upstream `model`, `base_url` redacted to origin only when useful, `managed`, `incremental_streaming=false`, `voice_reference_mode`, and ignored/unsupported request options.
+- Advertise only formats the adapter can actually return or convert. The first pass should not advertise `ogg`, `webm`, or `ulaw` just because the public request schema accepts them, unless conversion for those formats is verified and tested.
 
 Voice catalog:
 
@@ -198,6 +252,7 @@ Controls:
 - Keep managed config, scratch, and logs under tldw-controlled roots.
 - Validate paths with resolved absolute path checks before writing or passing them to the sidecar.
 - In external mode, require explicit shared-scratch configuration for file-backed requests.
+- Restrict `base_url` to loopback origins by default. Allow non-loopback origins only through an admin-controlled `allow_remote_base_url` setting.
 - Use an allowlist for request options.
 - Do not accept arbitrary server command args, environment variables, config JSON, or file paths from normal speech requests.
 - Do not auto-download models during inference.
@@ -215,6 +270,10 @@ Required tests:
 - Server config renderer tests for model entries, lazy load, CUDA backend fields, and path validation.
 - Installer helper tests for runtime layout and `tts_providers_config.yaml` patching.
 - Endpoint-level test that `audio_cpp` can be selected through model/provider routing without bypassing TTSServiceV2, using mocks.
+- Registry tests for `TTSProvider.AUDIO_CPP`, provider aliases, default adapter mapping, and namespaced model aliases that do not change existing `pocket-tts` routing.
+- Config tests proving audio.cpp-specific fields survive load/serialize either through explicit `ProviderConfig` fields or through `extra_params`.
+- Security tests for loopback-only default `base_url`, remote opt-in, path containment, and disabled external reference-audio mode.
+- Format tests proving unsupported public schema formats are rejected unless conversion is implemented.
 
 Optional real-runtime checks:
 
@@ -250,4 +309,4 @@ The key boundary is that TTS must prove the runtime management, path safety, err
 - Which initial model package should the installer present first: `pocket_tts`, `qwen3_tts_0_6b_base`, or a small non-gated model if upstream supports one well enough?
 - Should managed mode support multiple configured TTS models in the first implementation, or one model entry plus later expansion?
 - Should the health/status endpoint expose resident-model memory warnings for `audio_cpp` specifically, or rely on provider metadata first?
-- Should `audio_cpp` model aliases be added to `TTSAdapterFactory.MODEL_PROVIDER_MAP`, or should the provider be selected only through explicit provider hints and configured default provider?
+- Which upstream server request field, if any, should configured built-in voices use for `/v1/audio/speech`?
