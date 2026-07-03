@@ -283,6 +283,116 @@ def build_source_health_payload(
     )
 
 
+def _first_positive_int(*values: Any) -> int | None:
+    """Return the first positive integer value from a sequence of loose inputs."""
+    for value in values:
+        if value is None or isinstance(value, bool):
+            continue
+        if isinstance(value, (list, tuple)) and value:
+            nested = _first_positive_int(*value)
+            if nested is not None:
+                return nested
+            continue
+        try:
+            candidate = int(value)
+        except (TypeError, ValueError):
+            continue
+        if candidate > 0:
+            return candidate
+    return None
+
+
+def _allow_orgless_rag_billing_access() -> bool:
+    """Return whether RAG billing checks may pass without org context."""
+    try:
+        from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+        from tldw_Server_API.app.core.testing import is_explicit_pytest_runtime, is_test_mode
+
+        auth_mode = str(getattr(get_settings(), "AUTH_MODE", "") or "").strip().lower()
+        if auth_mode == "single_user":
+            return True
+        return bool(is_test_mode() or is_explicit_pytest_runtime())
+    except Exception:  # noqa: BLE001 - fail closed if the auth mode cannot be resolved.
+        return False
+
+
+async def resolve_org_id_for_rag_context(
+    *,
+    request_like: Any = None,
+    current_user: Optional[Any] = None,
+) -> int | None:
+    """Resolve a billing organization from HTTP request state or MCP context metadata."""
+    state = getattr(request_like, "state", None)
+    if state is not None:
+        org_id = _first_positive_int(
+            getattr(state, "org_id", None),
+            getattr(state, "org_ids", None),
+        )
+        if org_id is not None:
+            return org_id
+
+    metadata = getattr(request_like, "metadata", None)
+    if isinstance(metadata, dict):
+        org_id = _first_positive_int(metadata.get("org_id"), metadata.get("org_ids"))
+        if org_id is not None:
+            return org_id
+
+    direct_org_id = _first_positive_int(getattr(request_like, "org_id", None))
+    if direct_org_id is not None:
+        return direct_org_id
+
+    if current_user and getattr(current_user, "id_int", None) is not None:
+        try:
+            from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+            from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
+
+            pool = await get_db_pool()
+            repo = AuthnzOrgsTeamsRepo(db_pool=pool)
+            memberships = await repo.list_org_memberships_for_user(current_user.id_int)
+            for membership in memberships:
+                org_id = _first_positive_int(membership.get("org_id"))
+                if org_id is not None:
+                    return org_id
+        except Exception:  # noqa: BLE001 - callers decide whether missing org context is fatal.
+            return None
+
+    return None
+
+
+async def enforce_rag_query_limit_for_org_context(
+    *,
+    request_like: Any = None,
+    current_user: Optional[Any] = None,
+    units: int = 1,
+) -> None:
+    """Enforce the shared RAG daily-query billing limit outside FastAPI DI."""
+    if units <= 0:
+        return
+
+    from tldw_Server_API.app.core.Billing.enforcement import (
+        LimitCategory,
+        enforcement_enabled,
+        get_billing_enforcer,
+    )
+
+    if not enforcement_enabled():
+        return
+
+    org_id = await resolve_org_id_for_rag_context(request_like=request_like, current_user=current_user)
+    if org_id is None:
+        if _allow_orgless_rag_billing_access():
+            return
+        raise PermissionError("An active organization context is required for billing enforcement")
+
+    result = await get_billing_enforcer().check_limit(
+        org_id,
+        LimitCategory.RAG_QUERIES_DAY,
+        requested_units=units,
+    )
+    if result.should_block:
+        raise PermissionError(result.message or f"Limit exceeded for {LimitCategory.RAG_QUERIES_DAY.value}")
+
+
 async def log_rag_queries_for_org_context(
     *,
     request_like: Any = None,
@@ -293,31 +403,7 @@ async def log_rag_queries_for_org_context(
     if units <= 0:
         return
     try:
-        org_id: Optional[int] = None
-        try:
-            state = getattr(request_like, "state", None)
-            if state is not None:
-                org_ids = getattr(state, "org_ids", None)
-                if isinstance(org_ids, (list, tuple)) and org_ids:
-                    org_id = int(org_ids[0])
-        except (AttributeError, TypeError, ValueError):
-            org_id = None
-
-        if org_id is None and current_user and getattr(current_user, "id_int", None) is not None:
-            try:
-                from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
-                from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
-
-                pool = await get_db_pool()
-                repo = AuthnzOrgsTeamsRepo(db_pool=pool)
-                memberships = await repo.list_org_memberships_for_user(current_user.id_int)
-                if memberships:
-                    candidate = memberships[0].get("org_id")
-                    if candidate is not None:
-                        org_id = int(candidate)
-            except Exception:  # noqa: BLE001 - usage logging is best-effort.
-                org_id = None
-
+        org_id = await resolve_org_id_for_rag_context(request_like=request_like, current_user=current_user)
         if org_id is None:
             return
 

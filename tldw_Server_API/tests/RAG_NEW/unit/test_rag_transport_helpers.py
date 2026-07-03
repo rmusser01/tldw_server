@@ -2,10 +2,15 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from tldw_Server_API.app.api.v1.schemas.rag_schemas_unified import UnifiedRAGRequest
+from tldw_Server_API.app.core.Billing import enforcement as billing_enforcement
 from tldw_Server_API.app.core.RAG.rag_service.transport import (
     build_source_health_payload,
     build_unified_pipeline_kwargs,
+    enforce_rag_query_limit_for_org_context,
+    resolve_org_id_for_rag_context,
 )
 
 
@@ -41,3 +46,61 @@ def test_build_source_health_payload_uses_existing_paths_without_leaking_paths()
 
     assert [entry.source_id for entry in payload.sources][:2] == ["media_db", "notes"]  # nosec B101
     assert "/secret" not in str(payload)  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_resolve_org_id_for_rag_context_uses_request_metadata_and_state() -> None:
+    metadata_context = SimpleNamespace(metadata={"org_id": "42"})
+    state_context = SimpleNamespace(state=SimpleNamespace(org_ids=[7]))
+
+    assert await resolve_org_id_for_rag_context(request_like=metadata_context) == 42  # nosec B101
+    assert await resolve_org_id_for_rag_context(request_like=state_context) == 7  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_enforce_rag_query_limit_for_org_context_uses_rag_daily_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeEnforcer:
+        async def check_limit(self, org_id, category, *, requested_units):  # noqa: ANN001
+            captured.update(
+                {
+                    "org_id": org_id,
+                    "category": category,
+                    "requested_units": requested_units,
+                }
+            )
+            return SimpleNamespace(should_block=False, message=None)
+
+    monkeypatch.setattr(billing_enforcement, "enforcement_enabled", lambda: True)
+    monkeypatch.setattr(billing_enforcement, "get_billing_enforcer", lambda: FakeEnforcer())
+
+    await enforce_rag_query_limit_for_org_context(
+        request_like=SimpleNamespace(metadata={"org_id": 55}),
+        units=3,
+    )
+
+    assert captured == {  # nosec B101
+        "org_id": 55,
+        "category": billing_enforcement.LimitCategory.RAG_QUERIES_DAY,
+        "requested_units": 3,
+    }
+
+
+@pytest.mark.asyncio
+async def test_enforce_rag_query_limit_for_org_context_raises_when_blocked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class BlockingEnforcer:
+        async def check_limit(self, org_id, category, *, requested_units):  # noqa: ANN001
+            del org_id, category, requested_units
+            return SimpleNamespace(should_block=True, message="RAG query daily limit exceeded")
+
+    monkeypatch.setattr(billing_enforcement, "enforcement_enabled", lambda: True)
+    monkeypatch.setattr(billing_enforcement, "get_billing_enforcer", lambda: BlockingEnforcer())
+
+    with pytest.raises(PermissionError, match="daily limit"):
+        await enforce_rag_query_limit_for_org_context(
+            request_like=SimpleNamespace(metadata={"org_id": 55}),
+            units=1,
+        )

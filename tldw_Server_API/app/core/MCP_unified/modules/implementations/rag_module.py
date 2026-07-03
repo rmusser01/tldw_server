@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any
@@ -38,6 +39,8 @@ _CANONICAL_PUBLIC_SOURCES = (
 _DEFERRED_STAGE_ONE_SOURCES = frozenset({"sql"})
 _SEARCH_MODES = ("hybrid", "vector", "fts")
 _PROFILES = ("fast", "balanced", "accuracy")
+_MCP_TOP_K_MAX = 50
+_MAX_CITATIONS = 20
 
 _EXTERNAL_RESEARCH_DISABLED_OVERRIDES: dict[str, Any] = {
     "search_depth_mode": None,
@@ -111,6 +114,30 @@ _SAFE_DOCUMENT_METADATA_KEYS = frozenset(
         "updated_at",
     }
 )
+_SAFE_CITATION_KEYS = frozenset(
+    {
+        "id",
+        "source",
+        "source_type",
+        "source_id",
+        "document_id",
+        "chunk_id",
+        "media_id",
+        "note_id",
+        "title",
+        "uri",
+        "url",
+        "text",
+        "quote",
+        "snippet",
+        "page",
+        "page_number",
+        "start_time",
+        "end_time",
+        "timestamp",
+        "score",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -175,6 +202,10 @@ class _McpRagControls:
                 unavailable_sources.append(source)
                 warnings.append(f"{source} unavailable: no MCP source permission tool is registered")
                 continue
+            if not await self._source_tool_registered(permission_tool):
+                unavailable_sources.append(source)
+                warnings.append(f"{source} unavailable: MCP source module for {permission_tool} is not active")
+                continue
             if await self._tool_allowed(context, permission_tool):
                 allowed_sources.append(source)
                 continue
@@ -190,9 +221,18 @@ class _McpRagControls:
         if units <= 0:
             return
         await self.enforce_protocol_rate(context, "rag.query", "rag_generation")
+        await rag_transport.enforce_rag_query_limit_for_org_context(
+            request_like=context,
+            current_user=_current_user_from_context(context),
+            units=units,
+        )
 
     async def log_rag_query_usage(self, context: Any | None, units: int = 1) -> None:
-        await rag_transport.log_rag_queries_for_org_context(request_like=context, current_user=None, units=units)
+        await rag_transport.log_rag_queries_for_org_context(
+            request_like=context,
+            current_user=_current_user_from_context(context),
+            units=units,
+        )
 
     def _protocol(self) -> Any:
         from ...server import get_mcp_server
@@ -217,6 +257,16 @@ class _McpRagControls:
             return False
         return bool(await has_tool_permission(context, tool_name, is_write=False))
 
+    async def _source_tool_registered(self, tool_name: str) -> bool:
+        module_registry = getattr(self._protocol(), "module_registry", None)
+        find_module_for_tool = getattr(module_registry, "find_module_for_tool", None)
+        if not callable(find_module_for_tool):
+            return False
+        result = find_module_for_tool(tool_name)
+        if inspect.isawaitable(result):
+            result = await result
+        return result is not None
+
     async def _ensure_tool_allowed(self, context: Any | None, tool_name: str) -> None:
         if not await self._tool_allowed(context, tool_name):
             raise PermissionError(f"MCP tool permission denied: {tool_name}")
@@ -229,7 +279,7 @@ _SEARCH_PROPERTIES: dict[str, Any] = {
         "description": "Canonical or accepted alias source ids.",
     },
     "search_mode": {"type": "string", "enum": list(_SEARCH_MODES), "default": "hybrid"},
-    "top_k": {"type": "integer", "minimum": 1, "maximum": 50, "default": 10},
+    "top_k": {"type": "integer", "minimum": 1, "maximum": _MCP_TOP_K_MAX, "default": 10},
     "min_score": {"type": "number", "minimum": 0.0, "maximum": 1.0, "default": 0.0},
     "rag_profile": {"type": "string", "enum": list(_PROFILES)},
     "include_documents": {"type": "boolean", "default": True},
@@ -334,7 +384,7 @@ def _build_mcp_rag_request(
         "query": _required_string(arguments, "query", max_length=20000),
         "sources": sources,
         "search_mode": _enum(arguments.get("search_mode", "hybrid"), _SEARCH_MODES),
-        "top_k": _bounded_int(arguments.get("top_k", 10), minimum=1, maximum=50),
+        "top_k": _bounded_int(arguments.get("top_k", 10), minimum=1, maximum=_MCP_TOP_K_MAX),
         "min_score": _bounded_float(arguments.get("min_score", 0.0), minimum=0.0, maximum=1.0),
         "rag_profile": _optional_enum(arguments.get("rag_profile"), _PROFILES),
         "enable_generation": tool_name == _TOOL_ANSWER,
@@ -392,6 +442,19 @@ def _safe_metadata(metadata: Any, allowed_keys: frozenset[str]) -> dict[str, Any
         if value is not None:
             safe[key] = value
     return safe
+
+
+def _compact_citations(citations: Any) -> tuple[list[dict[str, Any]], bool]:
+    """Return bounded citation dictionaries without backend/debug payloads."""
+    if not isinstance(citations, list):
+        return [], False
+    selected = citations[:_MAX_CITATIONS]
+    compacted = [
+        _safe_metadata(citation, _SAFE_CITATION_KEYS)
+        for citation in selected
+        if isinstance(citation, dict)
+    ]
+    return compacted, len(citations) > len(selected)
 
 
 def _model_to_plain_dict(value: Any) -> dict[str, Any]:
@@ -456,10 +519,10 @@ def _compact_rag_response(
         source = _source_from_document(document)
         if source and source not in sources_used:
             sources_used.append(source)
-    if not sources_used:
-        sources_used = list(request_metadata.get("sources_requested") or [])
 
     response_metadata = response.metadata or {}
+    citations, citations_truncated = _compact_citations(response.citations or [])
+    chunk_citations, chunk_citations_truncated = _compact_citations(response.chunk_citations or [])
     trust = response_metadata.get("knowledge_trust")
     trust_state = str(trust.get("state", "")).strip().lower() if isinstance(trust, dict) else None
     metadata = {
@@ -468,6 +531,8 @@ def _compact_rag_response(
         "sources_unavailable": list(request_metadata.get("sources_unavailable") or []),
         "warnings": list(request_metadata.get("warnings") or []),
         "documents_truncated": len(documents) > len(selected_documents),
+        "citations_truncated": citations_truncated,
+        "chunk_citations_truncated": chunk_citations_truncated,
         "max_documents": max_documents,
         "max_content_chars": max_content_chars,
         "hard_citation_coverage": _hard_citation_coverage(response_metadata),
@@ -480,8 +545,8 @@ def _compact_rag_response(
         "mode": mode,
         "query": response.query,
         "documents": compacted_documents,
-        "citations": list(response.citations or []),
-        "chunk_citations": list(response.chunk_citations or []),
+        "citations": citations,
+        "chunk_citations": chunk_citations,
         "metadata": metadata,
         "timings": dict(response.timings or {}),
         "errors": list(response.errors or []),
@@ -663,6 +728,22 @@ def _db_paths_from_context(context: Any | None) -> dict[str, str | None]:
     }
 
 
+def _source_health_existing_paths_from_context(context: Any | None) -> dict[str, str]:
+    """Map MCP context DB paths to source-health storage keys."""
+    db_paths = _db_paths_from_context(context)
+    source_paths = {
+        "media_db": db_paths.get("media_db_path"),
+        "chacha_db": db_paths.get("notes_db_path"),
+        "prompts_db": db_paths.get("prompts_db_path"),
+        "kanban_db": db_paths.get("kanban_db_path"),
+    }
+    return {
+        source_key: str(path)
+        for source_key, path in source_paths.items()
+        if path
+    }
+
+
 def _current_user_from_context(context: Any | None) -> Any | None:
     user_id = getattr(context, "user_id", None)
     if user_id is None:
@@ -742,7 +823,9 @@ class RagModule(BaseModule):
         args = arguments or {}
         if tool_name == _TOOL_CAPABILITIES:
             await self._controls.enforce_protocol_rate(context, tool_name, "utility")
-            return {"ok": True, **rag_transport.build_rag_capabilities_payload()}
+            payload = rag_transport.build_rag_capabilities_payload()
+            payload["limits"] = {**payload.get("limits", {}), "top_k_max": _MCP_TOP_K_MAX}
+            return {"ok": True, **payload}
         if tool_name == _TOOL_SOURCE_HEALTH:
             await self._controls.enforce_protocol_rate(context, tool_name, "search")
             await self._controls.enforce_rag_rbac_rate_limit(context, "rag.search")
@@ -769,7 +852,20 @@ class RagModule(BaseModule):
                     "warnings": authorization.warnings,
                 }
             current_user = _current_user_from_context(context)
-            payload = rag_transport.build_source_health_payload(current_user=current_user)
+            existing_source_paths = _source_health_existing_paths_from_context(context)
+            if existing_source_paths:
+                def _context_existing_paths(
+                    _current_user: Any | None = None,
+                    _request_user_id: str | None = None,
+                ) -> dict[str, str]:
+                    return dict(existing_source_paths)
+
+                payload = rag_transport.build_source_health_payload(
+                    current_user=current_user,
+                    existing_source_db_paths_fn=_context_existing_paths,
+                )
+            else:
+                payload = rag_transport.build_source_health_payload(current_user=current_user)
             visible_sources = [
                 entry
                 for entry in payload.sources
@@ -834,6 +930,16 @@ class RagModule(BaseModule):
                 }
             request_metadata["sources_unavailable"] = list(authorization.sources_unavailable)
             request_metadata["warnings"] = list(request_metadata.get("warnings") or []) + list(authorization.warnings)
+            if not authorization.sources:
+                return {
+                    "ok": False,
+                    "mode": mode,
+                    "reason_code": "source_unavailable",
+                    "message": "No authorized RAG sources are available for this request.",
+                    "sources_requested": list(request_metadata.get("sources_requested") or []),
+                    "sources_unavailable": list(authorization.sources_unavailable),
+                    "warnings": list(request_metadata.get("warnings") or []),
+                }
             request = _copy_rag_request_with_updates(request, {"sources": list(authorization.sources)})
             await self._controls.check_rag_query_quota(context, units=1)
             bundle = rag_transport.build_standard_request_bundle(
@@ -859,13 +965,8 @@ class RagModule(BaseModule):
             if payload.get("ok") is True:
                 await self._controls.log_rag_query_usage(context, units=1)
             return payload
-        except PermissionError as exc:
-            return {
-                "ok": False,
-                "mode": mode,
-                "reason_code": "authorization_denied",
-                "message": str(exc) or "RAG MCP authorization denied.",
-            }
+        except PermissionError:
+            raise
         except Exception as exc:  # noqa: BLE001 - RAG domain errors become structured MCP payloads.
             return {
                 "ok": False,

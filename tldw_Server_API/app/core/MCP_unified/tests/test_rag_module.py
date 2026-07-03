@@ -4,7 +4,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from tldw_Server_API.app.api.v1.schemas.rag_schemas_unified import UnifiedRAGResponse
+from tldw_Server_API.app.api.v1.schemas.rag_schemas_unified import (
+    KnowledgeSourceHealthResponse,
+    UnifiedRAGResponse,
+)
 from tldw_Server_API.app.core.MCP_unified.modules.base import ModuleConfig
 from tldw_Server_API.app.core.MCP_unified.modules.implementations import rag_module as rag_module_impl
 from tldw_Server_API.app.core.MCP_unified.modules.implementations.rag_module import (
@@ -83,6 +86,18 @@ class _DenyNotesSearchRBAC:
 class _NoopRateLimiter:
     async def check_rate_limit(self, *args, **kwargs):  # noqa: ANN001
         del args, kwargs
+
+
+def _install_source_tool_registry(protocol: MCPProtocol, *tool_names: str) -> None:
+    available = set(tool_names)
+    original_find_module_for_tool = protocol.module_registry.find_module_for_tool
+
+    async def find_module_for_tool(tool_name: str):  # noqa: ANN001
+        if tool_name in available:
+            return SimpleNamespace(name="source-module")
+        return await original_find_module_for_tool(tool_name)
+
+    protocol.module_registry.find_module_for_tool = find_module_for_tool  # type: ignore[method-assign]
 
 
 def test_mcp_sources_accept_aliases_but_return_canonical_ids() -> None:
@@ -169,7 +184,7 @@ def test_compact_response_redacts_raw_document_and_response_metadata() -> None:
                     "prompt": "SECRET_PROMPT",
                     "debug": {"raw": "SECRET_DEBUG"},
                 },
-                "provider_payload": {"token": "SECRET_TOKEN"},
+                "provider_payload": {"raw_value": "SECRET_VALUE"},
             }
         ],
         citations=[],
@@ -204,6 +219,69 @@ def test_compact_response_redacts_raw_document_and_response_metadata() -> None:
     assert payload["metadata"]["knowledge_trust_state"] == "grounded"  # nosec B101
 
 
+def test_compact_response_bounds_and_redacts_citations() -> None:
+    response = UnifiedRAGResponse(
+        query="q",
+        documents=[],
+        citations=[
+            {
+                "id": f"c-{index}",
+                "text": "x" * 1200,
+                "title": "Allowed",
+                "metadata": {"path": "SECRET_PATH"},
+                "provider_payload": "SECRET_PROVIDER",
+            }
+            for index in range(25)
+        ],
+        chunk_citations=[
+            {
+                "id": f"chunk-{index}",
+                "snippet": "y" * 1200,
+                "debug": "SECRET_DEBUG",
+            }
+            for index in range(25)
+        ],
+        metadata={},
+    )
+
+    payload = _compact_rag_response(
+        response,
+        mode="search",
+        request_metadata={"sources_requested": ["media_db"], "sources_explicit": True},
+        max_documents=1,
+        max_content_chars=2000,
+    )
+
+    assert len(payload["citations"]) == 20  # nosec B101
+    assert len(payload["chunk_citations"]) == 20  # nosec B101
+    assert len(payload["citations"][0]["text"]) == 1000  # nosec B101
+    assert len(payload["chunk_citations"][0]["snippet"]) == 1000  # nosec B101
+    assert "SECRET_" not in repr(payload["citations"])  # nosec B101
+    assert "SECRET_" not in repr(payload["chunk_citations"])  # nosec B101
+    assert payload["metadata"]["citations_truncated"] is True  # nosec B101
+    assert payload["metadata"]["chunk_citations_truncated"] is True  # nosec B101
+
+
+def test_compact_response_does_not_report_requested_sources_as_used_when_empty() -> None:
+    response = UnifiedRAGResponse(
+        query="q",
+        documents=[],
+        citations=[],
+        chunk_citations=[],
+        metadata={},
+    )
+
+    payload = _compact_rag_response(
+        response,
+        mode="search",
+        request_metadata={"sources_requested": ["media_db"], "sources_explicit": True},
+        max_documents=1,
+        max_content_chars=2000,
+    )
+
+    assert payload["metadata"]["sources_used"] == []  # nosec B101
+
+
 @pytest.mark.asyncio
 async def test_rag_module_exposes_four_strict_tools() -> None:
     module = RagModule(ModuleConfig(name="rag"))
@@ -217,8 +295,18 @@ async def test_rag_module_exposes_four_strict_tools() -> None:
 
 
 @pytest.mark.asyncio
+async def test_rag_capabilities_reports_mcp_top_k_limit() -> None:
+    controls = _RecordingControls()
+    module = RagModule(ModuleConfig(name="rag"), controls=controls)
+
+    out = await module.execute_tool("rag.capabilities", {}, context=RequestContext(request_id="limits", user_id="1"))
+
+    assert out["limits"]["top_k_max"] == 50  # nosec B101
+
+
+@pytest.mark.asyncio
 async def test_rag_search_executes_shared_pipeline_without_generation(monkeypatch: pytest.MonkeyPatch) -> None:
-    module = RagModule(ModuleConfig(name="rag"))
+    module = RagModule(ModuleConfig(name="rag"), controls=_RecordingControls())
     calls: dict[str, object] = {}
 
     async def fake_pipeline(**kwargs):
@@ -257,7 +345,7 @@ async def test_rag_search_executes_shared_pipeline_without_generation(monkeypatc
 
 @pytest.mark.asyncio
 async def test_rag_answer_marks_grounded_cited_output_answered(monkeypatch: pytest.MonkeyPatch) -> None:
-    module = RagModule(ModuleConfig(name="rag"))
+    module = RagModule(ModuleConfig(name="rag"), controls=_RecordingControls())
 
     async def fake_pipeline(**kwargs):  # noqa: ARG001
         return SimpleNamespace(
@@ -285,7 +373,7 @@ async def test_rag_answer_marks_grounded_cited_output_answered(monkeypatch: pyte
 
 @pytest.mark.asyncio
 async def test_rag_answer_never_marks_uncited_output_answered(monkeypatch: pytest.MonkeyPatch) -> None:
-    module = RagModule(ModuleConfig(name="rag"))
+    module = RagModule(ModuleConfig(name="rag"), controls=_RecordingControls())
 
     async def fake_pipeline(**kwargs):  # noqa: ARG001
         return SimpleNamespace(
@@ -315,7 +403,7 @@ async def test_rag_answer_never_marks_uncited_output_answered(monkeypatch: pytes
 async def test_rag_search_applies_supported_scopes_and_disables_external_research(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    module = RagModule(ModuleConfig(name="rag"))
+    module = RagModule(ModuleConfig(name="rag"), controls=_RecordingControls())
     calls: dict[str, object] = {}
 
     async def fake_pipeline(**kwargs):
@@ -413,6 +501,43 @@ async def test_rag_source_health_fails_closed_when_explicit_source_is_unavailabl
     assert out["reason_code"] == "source_unavailable"  # nosec B101
     assert out["sources_unavailable"] == ["notes"]  # nosec B101
     assert out["warnings"] == ["notes unavailable"]  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_rag_source_health_uses_context_db_paths(monkeypatch: pytest.MonkeyPatch) -> None:
+    controls = _RecordingControls()
+    module = RagModule(ModuleConfig(name="rag"), controls=controls)
+    captured_paths: dict[str, str] = {}
+
+    def fake_health_payload(**kwargs):  # noqa: ANN003
+        resolver = kwargs["existing_source_db_paths_fn"]
+        captured_paths.update(resolver(None, None))
+        return KnowledgeSourceHealthResponse(sources=[])
+
+    monkeypatch.setattr(rag_module_impl.rag_transport, "build_source_health_payload", fake_health_payload)
+
+    out = await module.execute_tool(
+        "rag.source_health",
+        {},
+        context=RequestContext(
+            request_id="source-health-db-paths",
+            user_id="1",
+            db_paths={
+                "media": "media.db",
+                "chacha": "notes.db",
+                "prompts": "prompts.db",
+                "kanban": "kanban.db",
+            },
+        ),
+    )
+
+    assert out["ok"] is True  # nosec B101
+    assert captured_paths == {  # nosec B101
+        "media_db": "media.db",
+        "chacha_db": "notes.db",
+        "prompts_db": "prompts.db",
+        "kanban_db": "kanban.db",
+    }
 
 
 @pytest.mark.asyncio
@@ -517,11 +642,37 @@ async def test_default_controls_enforce_source_tool_permission(monkeypatch: pyte
 
 
 @pytest.mark.asyncio
+async def test_default_controls_require_source_tool_module_registered(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = RagModule(ModuleConfig(name="rag"))
+    protocol = MCPProtocol()
+    protocol.rbac_policy = _AllowAllRBAC()
+    protocol.rate_limiter = _NoopRateLimiter()
+    monkeypatch.setattr(mcp_server_module, "_server", SimpleNamespace(protocol=protocol))
+
+    async def fail_if_pipeline_runs(**kwargs):  # noqa: ANN001
+        del kwargs
+        raise AssertionError("pipeline must not run when source module is unavailable")
+
+    monkeypatch.setattr(rag_module_impl, "unified_rag_pipeline", fail_if_pipeline_runs)
+
+    out = await module.execute_tool(
+        "rag.search",
+        {"query": "q", "sources": ["media"]},
+        context=RequestContext(request_id="source-module-required", user_id="1", client_id="unit"),
+    )
+
+    assert out["ok"] is False  # nosec B101
+    assert out["reason_code"] == "source_unavailable"  # nosec B101
+    assert out["sources_unavailable"] == ["media_db"]  # nosec B101
+
+
+@pytest.mark.asyncio
 async def test_default_controls_authorize_character_backed_rag_sources(monkeypatch: pytest.MonkeyPatch) -> None:
     module = RagModule(ModuleConfig(name="rag"))
     protocol = MCPProtocol()
     protocol.rbac_policy = _AllowAllRBAC()
     protocol.rate_limiter = _NoopRateLimiter()
+    _install_source_tool_registry(protocol, "characters.search")
     monkeypatch.setattr(mcp_server_module, "_server", SimpleNamespace(protocol=protocol))
     calls: dict[str, object] = {}
 
@@ -551,6 +702,60 @@ async def test_default_controls_authorize_character_backed_rag_sources(monkeypat
 
     assert out["ok"] is True  # nosec B101
     assert calls["sources"] == ["world_books", "dictionaries"]  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_allow_partial_does_not_run_pipeline_when_all_sources_filtered(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = RagModule(ModuleConfig(name="rag"), controls=_UnavailableNotesControls())
+
+    async def fail_if_pipeline_runs(**kwargs):  # noqa: ANN001
+        del kwargs
+        raise AssertionError("pipeline must not run with no authorized sources")
+
+    monkeypatch.setattr(rag_module_impl, "unified_rag_pipeline", fail_if_pipeline_runs)
+
+    out = await module.execute_tool(
+        "rag.search",
+        {"query": "q", "sources": ["notes"], "allow_partial": True},
+        context=RequestContext(request_id="all-filtered", user_id="1"),
+    )
+
+    assert out["ok"] is False  # nosec B101
+    assert out["reason_code"] == "source_unavailable"  # nosec B101
+    assert out["sources_unavailable"] == ["notes"]  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_default_controls_enforce_rag_query_billing_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = RagModule(ModuleConfig(name="rag"))
+    protocol = MCPProtocol()
+    protocol.rbac_policy = _AllowAllRBAC()
+    protocol.rate_limiter = _NoopRateLimiter()
+    _install_source_tool_registry(protocol, "media.search")
+    monkeypatch.setattr(mcp_server_module, "_server", SimpleNamespace(protocol=protocol))
+
+    async def deny_limit(*, request_like, current_user=None, units: int = 1):  # noqa: ANN001
+        del request_like, current_user, units
+        raise PermissionError("RAG query daily limit exceeded")
+
+    async def fail_if_pipeline_runs(**kwargs):  # noqa: ANN001
+        del kwargs
+        raise AssertionError("pipeline must not run when RAG query billing limit is exceeded")
+
+    monkeypatch.setattr(
+        rag_module_impl.rag_transport,
+        "enforce_rag_query_limit_for_org_context",
+        deny_limit,
+        raising=False,
+    )
+    monkeypatch.setattr(rag_module_impl, "unified_rag_pipeline", fail_if_pipeline_runs)
+
+    with pytest.raises(PermissionError, match="daily limit"):
+        await module.execute_tool(
+            "rag.search",
+            {"query": "q", "sources": ["media"]},
+            context=RequestContext(request_id="rag-quota", user_id="1", client_id="unit"),
+        )
 
 
 @pytest.mark.asyncio
@@ -635,6 +840,8 @@ async def test_rag_module_jsonrpc_tools_call_smoke(monkeypatch: pytest.MonkeyPat
     protocol = MCPProtocol()
     protocol.module_registry = registry
     protocol.rbac_policy = _AllowAllRBAC()
+    protocol.rate_limiter = _NoopRateLimiter()
+    _install_source_tool_registry(protocol, "media.search")
     context = RequestContext(request_id="rag-jsonrpc-smoke", user_id="1", client_id="unit")
 
     search = await protocol.process_request(

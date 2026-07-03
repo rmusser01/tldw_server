@@ -4,35 +4,14 @@ title: Implement rag.* MCP module
 status: Done
 assignee: []
 created_date: ''
-updated_date: 2026-07-03 16:59
+updated_date: '2026-07-03 17:33'
 labels:
-- mcp
-- rag
+  - mcp
+  - rag
 dependencies: []
 references:
-- Docs/superpowers/specs/2026-07-03-rag-mcp-module-design.md
-- Docs/superpowers/plans/2026-07-03-rag-mcp-module-implementation-plan.md
-modified_files:
-- backlog/tasks/task-12120 - Implement-rag.-MCP-module.md
-- Docs/superpowers/plans/2026-07-03-rag-mcp-module-implementation-plan.md
-- Docs/MCP/mcp_tool_catalogs.md
-- Docs/MCP/Unified/User_Guide.md
-- Docs/MCP/Unified/Client_Snippets.md
-- tldw_Server_API/app/api/v1/endpoints/rag_unified.py
-- tldw_Server_API/app/core/RAG/rag_service/transport.py
-- tldw_Server_API/tests/RAG_NEW/unit/test_rag_transport_helpers.py
-- tldw_Server_API/app/core/MCP_unified/modules/implementations/rag_module.py
-- tldw_Server_API/app/core/MCP_unified/tests/test_rag_module.py
-- tldw_Server_API/Config_Files/mcp_modules.yaml
-- tldw_Server_API/Config_Files/mcp_tool_categories.yaml
-- tldw_Server_API/Config_Files/resource_governor_policies.yaml
-- tldw_Server_API/app/core/MCP_unified/module_surface.py
-- tldw_Server_API/app/core/MCP_unified/tool_execution/runtime.py
-- tldw_Server_API/app/core/MCP_unified/tests/test_idempotency_and_category.py
-- tldw_Server_API/app/core/MCP_unified/tests/test_protocol_catalog_filter.py
-- tldw_Server_API/app/core/MCP_unified/tests/test_rag_module_registration.py
-- tldw_Server_API/app/core/MCP_unified/tests/test_knowledge_search_defaults.py
-- tldw_Server_API/tests/MCP_unified/test_mcp_http_auth_paths.py
+  - Docs/superpowers/specs/2026-07-03-rag-mcp-module-design.md
+  - Docs/superpowers/plans/2026-07-03-rag-mcp-module-implementation-plan.md
 ---
 
 ## Description
@@ -62,6 +41,8 @@ Docs/superpowers/plans/2026-07-03-rag-mcp-module-implementation-plan.md
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+2026-07-03 review follow-up: addressed code-review findings for source-module registration checks, all-sources-filtered allow_partial behavior, MCP-to-billing RAG daily quota enforcement, PermissionError propagation for MCP auth/quota failures, bounded/redacted citation payloads, source_health context db_paths, empty sources_used semantics, and MCP top_k capability alignment. Added regression coverage in MCP RAG module tests and RAG transport helper tests. Verification: 67-test MCP/RAG helper/source-health suite passed; focused RAG module + transport helper suite passed; Bandit on touched Python scope completed with zero findings after test fixture cleanup.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
@@ -70,6 +51,8 @@ Docs/superpowers/plans/2026-07-03-rag-mcp-module-implementation-plan.md
 Added a proper rag.* MCP module without a research.* layer. Verification: targeted MCP/RAG suite passed (80 tests), and Bandit completed with zero findings for rag_module.py, rag_service/transport.py, and rag_unified.py.
 
 Review follow-up: integrated code-review findings by making default rag.* MCP controls enforce protocol/RBAC/source authorization, forcing MCP-safe RAG pipeline overrides, redacting raw document/response metadata, returning source_health as an ok/warnings contract, and adding regression coverage. Verification: targeted MCP/RAG suite passed (85 tests), and Bandit completed with zero findings for rag_module.py.
+
+Second review follow-up: integrated remaining findings around source module availability, empty authorized source sets, shared RAG daily billing limit enforcement for MCP, auth/quota error propagation, citation bounds/redaction, source_health context db_paths, and MCP top_k limit alignment. Verification: 67-test MCP/RAG helper/source-health suite passed; Bandit on touched Python scope completed with zero findings.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
