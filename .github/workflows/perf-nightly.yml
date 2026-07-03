@@ -18,6 +18,7 @@ jobs:
       PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
       TEST_MODE: "true"
       DISABLE_HEAVY_STARTUP: "1"
+      PERF: "1"
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
