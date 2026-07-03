@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Any
 
 from tldw_Server_API.app.api.v1.schemas.rag_schemas_unified import (
     UnifiedRAGRequest,
     UnifiedRAGResponse,
 )
+from tldw_Server_API.app.core.RAG.rag_service import transport as rag_transport
+from tldw_Server_API.app.core.RAG.rag_service.response_mapping import (
+    rag_result_from_unified_search_result,
+    rag_result_to_response,
+)
+from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import unified_rag_pipeline
 from tldw_Server_API.app.core.Text2SQL.source_registry import normalize_sources_public
 
 from ..base import BaseModule, create_tool_definition
@@ -30,6 +38,69 @@ _CANONICAL_PUBLIC_SOURCES = (
 _DEFERRED_STAGE_ONE_SOURCES = frozenset({"sql"})
 _SEARCH_MODES = ("hybrid", "vector", "fts")
 _PROFILES = ("fast", "balanced", "accuracy")
+
+_EXTERNAL_RESEARCH_DISABLED_OVERRIDES: dict[str, Any] = {
+    "enable_research_loop": False,
+    "search_url_scraping": False,
+    "enable_image_search": False,
+    "enable_video_search": False,
+    "enable_discussion_search": False,
+    "enable_web_fallback": False,
+    "web_fallback_enabled": False,
+}
+
+_UNSUPPORTED_SOURCE_SCOPES: dict[str, tuple[str, ...]] = {
+    "conversation_id": ("chats",),
+    "conversation_ids": ("chats",),
+    "character_id": ("characters", "chats"),
+    "character_ids": ("characters", "chats"),
+    "prompt_id": ("prompts",),
+    "prompt_ids": ("prompts",),
+}
+
+
+@dataclass(frozen=True, slots=True)
+class _SourceAuthorization:
+    """Result of per-source MCP authorization for a RAG request."""
+
+    sources: list[str]
+    sources_unavailable: list[str]
+    warnings: list[str]
+
+
+class _McpRagControls:
+    """Injectable MCP control hooks used by the RAG module.
+
+    The protocol layer performs the primary module/tool execution checks before
+    calling modules. These hooks keep RAG-specific tests and host integrations
+    explicit without importing FastAPI dependencies into the module.
+    """
+
+    async def enforce_protocol_rate(self, context: Any | None, tool_name: str, category: str) -> None:
+        del context, tool_name, category
+
+    async def enforce_rag_rbac_rate_limit(self, context: Any | None, resource: str) -> None:
+        del context, resource
+
+    async def require_mcp_rag_read_scope(self, context: Any | None, tool_name: str) -> None:
+        del context, tool_name
+
+    async def authorize_sources(
+        self,
+        context: Any | None,
+        sources: list[str],
+        *,
+        sources_explicit: bool,
+        allow_partial: bool,
+    ) -> _SourceAuthorization:
+        del context, sources_explicit, allow_partial
+        return _SourceAuthorization(sources=list(sources), sources_unavailable=[], warnings=[])
+
+    async def check_rag_query_quota(self, context: Any | None, units: int = 1) -> None:
+        del context, units
+
+    async def log_rag_query_usage(self, context: Any | None, units: int = 1) -> None:
+        await rag_transport.log_rag_queries_for_org_context(request_like=context, current_user=None, units=units)
 
 _SEARCH_PROPERTIES: dict[str, Any] = {
     "query": {"type": "string", "minLength": 1, "maxLength": 20000},
@@ -247,11 +318,206 @@ def _compact_rag_response(
         "timings": dict(response.timings or {}),
         "errors": list(response.errors or []),
     }
+    if mode == "answer":
+        payload["answer"] = {
+            "text": _answer_text(response.generated_answer),
+            "status": _answer_status(response),
+        }
     return payload
+
+
+def _answer_text(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        text = value.get("text") or value.get("answer") or value.get("content")
+        if text is not None:
+            return str(text)
+    return "" if value is None else str(value)
+
+
+def _answer_status(response: UnifiedRAGResponse) -> str:
+    """Classify generated answer grounding for MCP clients."""
+    answer = _answer_text(response.generated_answer).strip()
+    if not answer:
+        return "abstained"
+    citations = list(response.citations or []) + list(response.chunk_citations or [])
+    coverage = _hard_citation_coverage(response.metadata or {})
+    trust = (response.metadata or {}).get("knowledge_trust")
+    trust_state = str(trust.get("state", "")).strip().lower() if isinstance(trust, dict) else ""
+    if citations and (coverage is None or coverage >= 0.99) and trust_state not in {"weak", "uncited", "unsupported"}:
+        return "answered"
+    return "partial"
+
+
+def _mcp_safe_search_agent_overrides() -> dict[str, Any]:
+    """Force Stage 1 MCP RAG away from external research/web provider paths."""
+    return dict(_EXTERNAL_RESEARCH_DISABLED_OVERRIDES)
+
+
+def _copy_rag_request_with_updates(request: UnifiedRAGRequest, updates: dict[str, Any]) -> UnifiedRAGRequest:
+    model_copy = getattr(request, "model_copy", None)
+    if callable(model_copy):
+        return model_copy(update=updates)
+    return request.copy(update=updates)
+
+
+def _list_from_scalar_or_list(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return list(value)
+    return [value]
+
+
+def _metadata_values(metadata: dict[str, Any], *keys: str) -> list[Any]:
+    values: list[Any] = []
+    for key in keys:
+        values.extend(_list_from_scalar_or_list(metadata.get(key)))
+    return values
+
+
+def _normalize_media_ids(values: list[Any]) -> list[int]:
+    normalized: list[int] = []
+    for value in values:
+        if isinstance(value, bool):
+            raise ValueError("media_id scope must be an integer")
+        try:
+            media_id = int(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("media_id scope must be an integer") from exc
+        if media_id <= 0:
+            raise ValueError("media_id scope must be positive")
+        if media_id not in normalized:
+            normalized.append(media_id)
+    return normalized
+
+
+def _normalize_note_ids(values: list[Any]) -> list[str]:
+    normalized: list[str] = []
+    for value in values:
+        raw = str(value).strip()
+        if not raw:
+            raise ValueError("note_id scope must not be empty")
+        if raw not in normalized:
+            normalized.append(raw)
+    return normalized
+
+
+def _intersect_or_apply(existing: list[Any] | None, scoped: list[Any]) -> list[Any]:
+    if existing is None:
+        return list(scoped)
+    scoped_set = {str(item) for item in scoped}
+    return [item for item in existing if str(item) in scoped_set]
+
+
+def _apply_supported_source_scopes(
+    request: UnifiedRAGRequest,
+    context: Any | None,
+) -> UnifiedRAGRequest:
+    """Apply enforceable item/workspace scopes before retrieval."""
+    metadata = getattr(context, "metadata", None)
+    if not isinstance(metadata, dict):
+        metadata = {}
+    updates: dict[str, Any] = {}
+
+    media_values = _metadata_values(metadata, "media_id", "media_ids")
+    if media_values:
+        scoped_media_ids = _normalize_media_ids(media_values)
+        updates["include_media_ids"] = _intersect_or_apply(request.include_media_ids, scoped_media_ids)
+
+    note_values = _metadata_values(metadata, "note_id", "note_ids")
+    if note_values:
+        scoped_note_ids = _normalize_note_ids(note_values)
+        updates["include_note_ids"] = _intersect_or_apply(request.include_note_ids, scoped_note_ids)
+
+    workspace_id = metadata.get("workspace_id")
+    if isinstance(workspace_id, str) and workspace_id.strip():
+        updates["workspace_id"] = workspace_id.strip()
+
+    if not updates:
+        return request
+    return _copy_rag_request_with_updates(request, updates)
+
+
+def _unsupported_scope_warnings_or_error(
+    request: UnifiedRAGRequest,
+    request_metadata: dict[str, Any],
+    context: Any | None,
+) -> tuple[UnifiedRAGRequest | None, dict[str, Any] | None, list[str]]:
+    """Fail or filter sources whose scoped retrieval is not enforceable in Stage 1."""
+    metadata = getattr(context, "metadata", None)
+    if not isinstance(metadata, dict):
+        return request, None, []
+    active_scopes = [
+        key
+        for key in _UNSUPPORTED_SOURCE_SCOPES
+        if _list_from_scalar_or_list(metadata.get(key))
+    ]
+    if not active_scopes:
+        return request, None, []
+
+    requested_sources = set(request.sources or [])
+    affected_sources: set[str] = set()
+    for key in active_scopes:
+        affected_sources.update(_UNSUPPORTED_SOURCE_SCOPES[key])
+    affected_requested = sorted(requested_sources & affected_sources)
+    if not affected_requested:
+        return request, None, []
+
+    if request_metadata.get("sources_explicit", False):
+        return None, {
+            "ok": False,
+            "reason_code": "unsupported_scope",
+            "message": "Requested scope cannot be enforced for one or more Stage 1 RAG sources.",
+            "scopes": active_scopes,
+            "sources": affected_requested,
+        }, []
+
+    filtered_sources = [source for source in (request.sources or []) if source not in affected_sources]
+    warnings = [
+        f"filtered unsupported scoped source {source}"
+        for source in affected_requested
+    ]
+    return _copy_rag_request_with_updates(request, {"sources": filtered_sources}), None, warnings
+
+
+def _db_paths_from_context(context: Any | None) -> dict[str, str | None]:
+    raw_paths = getattr(context, "db_paths", None)
+    paths = raw_paths if isinstance(raw_paths, dict) else {}
+    chacha_path = paths.get("chacha") or paths.get("chacha_db") or paths.get("notes") or paths.get("notes_db_path")
+    return {
+        "media_db_path": paths.get("media_db_path") or paths.get("media") or paths.get("media_db"),
+        "notes_db_path": chacha_path,
+        "character_db_path": paths.get("character_db_path") or paths.get("characters") or chacha_path,
+        "kanban_db_path": paths.get("kanban_db_path") or paths.get("kanban"),
+        "prompts_db_path": paths.get("prompts_db_path") or paths.get("prompts"),
+    }
+
+
+def _current_user_from_context(context: Any | None) -> Any | None:
+    user_id = getattr(context, "user_id", None)
+    if user_id is None:
+        return None
+    id_int = None
+    try:
+        id_int = int(user_id)
+    except (TypeError, ValueError):
+        id_int = None
+    return SimpleNamespace(id=user_id, id_int=id_int, username=str(user_id))
 
 
 class RagModule(BaseModule):
     """Read-only MCP tools for curated RAG search and grounded answers."""
+
+    def __init__(
+        self,
+        config: Any,
+        *,
+        controls: _McpRagControls | None = None,
+    ) -> None:
+        super().__init__(config)
+        self._controls = controls or _McpRagControls()
 
     async def on_initialize(self) -> None:
         return None
@@ -305,19 +571,118 @@ class RagModule(BaseModule):
         arguments: dict[str, Any],
         context: Any | None = None,
     ) -> Any:
-        del context
         args = arguments or {}
         if tool_name == _TOOL_CAPABILITIES:
-            return {"ok": True, "tools": [_TOOL_CAPABILITIES, _TOOL_SOURCE_HEALTH, _TOOL_SEARCH, _TOOL_ANSWER]}
+            await self._controls.enforce_protocol_rate(context, tool_name, "utility")
+            return {"ok": True, **rag_transport.build_rag_capabilities_payload()}
         if tool_name == _TOOL_SOURCE_HEALTH:
-            sources = _normalize_mcp_sources(args.get("sources"))
-            return {"ok": True, "sources": [{"source_id": source, "status": "unknown"} for source in sources]}
+            await self._controls.enforce_protocol_rate(context, tool_name, "search")
+            await self._controls.enforce_rag_rbac_rate_limit(context, "rag.search")
+            await self._controls.require_mcp_rag_read_scope(context, tool_name)
+            requested_sources = (
+                _normalize_mcp_sources(args.get("sources"))
+                if args.get("sources") is not None
+                else list(_CANONICAL_PUBLIC_SOURCES)
+            )
+            authorization = await self._controls.authorize_sources(
+                context,
+                requested_sources,
+                sources_explicit=_sources_were_explicit(args),
+                allow_partial=bool(args.get("allow_partial", False)),
+            )
+            current_user = _current_user_from_context(context)
+            payload = rag_transport.build_source_health_payload(current_user=current_user)
+            payload.sources = [
+                entry
+                for entry in payload.sources
+                if entry.source_id in set(authorization.sources)
+            ]
+            return payload
         if tool_name in {_TOOL_SEARCH, _TOOL_ANSWER}:
-            request, metadata = _build_mcp_rag_request(tool_name, args)
+            return await self._execute_rag_query(tool_name, args, context)
+        return {"ok": False, "reason_code": "unknown_tool", "message": f"Unknown tool: {tool_name}"}
+
+    async def _execute_rag_query(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        context: Any | None,
+    ) -> dict[str, Any]:
+        category = "rag_generation" if tool_name == _TOOL_ANSWER else "search"
+        await self._controls.enforce_protocol_rate(context, tool_name, category)
+        try:
+            request, request_metadata = _build_mcp_rag_request(tool_name, arguments)
+            request = _apply_supported_source_scopes(request, context)
+            request, scope_error, scope_warnings = _unsupported_scope_warnings_or_error(
+                request,
+                request_metadata,
+                context,
+            )
+            if scope_error is not None:
+                scope_error["mode"] = "answer" if tool_name == _TOOL_ANSWER else "search"
+                return scope_error
+            if scope_warnings:
+                request_metadata["warnings"] = list(scope_warnings)
+        except ValueError as exc:
+            return {"ok": False, "reason_code": "invalid_arguments", "message": str(exc)}
+
+        mode = "answer" if tool_name == _TOOL_ANSWER else "search"
+        try:
+            await self._controls.enforce_rag_rbac_rate_limit(context, "rag.search")
+            await self._controls.require_mcp_rag_read_scope(context, tool_name)
+            authorization = await self._controls.authorize_sources(
+                context,
+                list(request.sources or []),
+                sources_explicit=bool(request_metadata.get("sources_explicit", False)),
+                allow_partial=bool(request_metadata.get("allow_partial", False)),
+            )
+            if authorization.sources_unavailable and not request_metadata.get("allow_partial", False):
+                return {
+                    "ok": False,
+                    "mode": mode,
+                    "reason_code": "source_unavailable",
+                    "sources_unavailable": authorization.sources_unavailable,
+                    "warnings": authorization.warnings,
+                }
+            request_metadata["sources_unavailable"] = list(authorization.sources_unavailable)
+            request_metadata["warnings"] = list(request_metadata.get("warnings") or []) + list(authorization.warnings)
+            request = _copy_rag_request_with_updates(request, {"sources": list(authorization.sources)})
+            await self._controls.check_rag_query_quota(context, units=1)
+            bundle = rag_transport.build_standard_request_bundle(
+                request=request,
+                current_user=_current_user_from_context(context),
+                db_paths=_db_paths_from_context(context),
+                media_db=None,
+                chacha_db=None,
+                prompts_db=None,
+            )
+            pipeline_kwargs = dict(bundle.pipeline_kwargs)
+            pipeline_kwargs.update(_mcp_safe_search_agent_overrides())
+            pipeline_kwargs["enable_generation"] = tool_name == _TOOL_ANSWER
+            result = await unified_rag_pipeline(**pipeline_kwargs)
+            response = rag_result_to_response(rag_result_from_unified_search_result(result))
+            payload = _compact_rag_response(
+                response,
+                mode=mode,
+                request_metadata=request_metadata,
+                max_documents=int(request_metadata["max_documents"]),
+                max_content_chars=int(request_metadata["max_content_chars"]),
+            )
+            if payload.get("ok") is True:
+                await self._controls.log_rag_query_usage(context, units=1)
+            return payload
+        except PermissionError as exc:
             return {
                 "ok": False,
-                "reason_code": "not_implemented",
-                "query": request.query,
-                "metadata": metadata,
+                "mode": mode,
+                "reason_code": "authorization_denied",
+                "message": str(exc) or "RAG MCP authorization denied.",
             }
-        return {"ok": False, "reason_code": "unknown_tool", "message": f"Unknown tool: {tool_name}"}
+        except Exception as exc:  # noqa: BLE001 - RAG domain errors become structured MCP payloads.
+            return {
+                "ok": False,
+                "mode": mode,
+                "reason_code": "rag_pipeline_error",
+                "message": "RAG pipeline failed.",
+                "error_type": exc.__class__.__name__,
+            }

@@ -306,7 +306,7 @@ git commit -m "feat: add rag mcp contract helpers"
 - Modify: `tldw_Server_API/app/core/MCP_unified/modules/implementations/rag_module.py`
 - Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_rag_module.py`
 
-- [ ] **Step 1: Write failing module tests**
+- [x] **Step 1: Write failing module tests**
 
 Add async tests for:
 
@@ -371,7 +371,7 @@ Also add tests for:
 - MCP execution forces out-of-scope Search-Agent and research defaults off even when config/profile defaults enable `enable_research_loop`, `search_url_scraping`, `enable_image_search`, `enable_video_search`, web fallback, or similar external provider behavior.
 - RAG-domain pipeline exceptions become structured `ok:false` payloads.
 
-- [ ] **Step 2: Run module tests to verify failures**
+- [x] **Step 2: Run module tests to verify failures**
 
 Run:
 
@@ -383,7 +383,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: FAIL because `RagModule.get_tools()` and `execute_tool()` are not implemented.
 
-- [ ] **Step 3: Implement `RagModule`**
+- [x] **Step 3: Implement `RagModule`**
 
 Implement:
 
@@ -431,13 +431,13 @@ Execution rules:
 - `context.db_paths` keys should accept existing MCP conventions (`media`, `chacha`, `prompts`, `kanban`) and map to RAG pipeline keys (`media_db_path`, `notes_db_path`, `character_db_path`, `prompts_db_path`, `kanban_db_path`).
 - Do not enable Search-Agent web/research loop flags, URL scraping, image search, or video search through MCP first-slice arguments.
 
-- [ ] **Step 4: Run module tests to verify pass**
+- [x] **Step 4: Run module tests to verify pass**
 
 Run the pytest command from Step 2.
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add \

@@ -1,14 +1,68 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from tldw_Server_API.app.api.v1.schemas.rag_schemas_unified import UnifiedRAGResponse
 from tldw_Server_API.app.core.MCP_unified.modules.base import ModuleConfig
+from tldw_Server_API.app.core.MCP_unified.modules.implementations import rag_module as rag_module_impl
 from tldw_Server_API.app.core.MCP_unified.modules.implementations.rag_module import (
     RagModule,
     _build_mcp_rag_request,
     _compact_rag_response,
 )
+from tldw_Server_API.app.core.MCP_unified.protocol import RequestContext
+
+
+class _RecordingControls:
+    def __init__(self) -> None:
+        self.calls: list[tuple[object, ...]] = []
+
+    async def enforce_protocol_rate(self, context, tool_name: str, category: str):  # noqa: ANN001
+        self.calls.append(("protocol_rate", tool_name, category))
+
+    async def enforce_rag_rbac_rate_limit(self, context, resource: str):  # noqa: ANN001
+        self.calls.append(("rbac_rate", resource))
+
+    async def require_mcp_rag_read_scope(self, context, tool_name: str):  # noqa: ANN001
+        self.calls.append(("read_scope", tool_name))
+
+    async def authorize_sources(
+        self,
+        context,  # noqa: ANN001
+        sources: list[str],
+        *,
+        sources_explicit: bool,
+        allow_partial: bool,
+    ):
+        self.calls.append(("authorize_sources", tuple(sources), sources_explicit, allow_partial))
+        return rag_module_impl._SourceAuthorization(sources=sources, sources_unavailable=[], warnings=[])
+
+    async def check_rag_query_quota(self, context, units: int = 1):  # noqa: ANN001
+        self.calls.append(("quota", units))
+
+    async def log_rag_query_usage(self, context, units: int = 1):  # noqa: ANN001
+        self.calls.append(("usage", units))
+
+
+class _UnavailableNotesControls(_RecordingControls):
+    async def authorize_sources(
+        self,
+        context,  # noqa: ANN001
+        sources: list[str],
+        *,
+        sources_explicit: bool,
+        allow_partial: bool,
+    ):
+        self.calls.append(("authorize_sources", tuple(sources), sources_explicit, allow_partial))
+        allowed = [source for source in sources if source != "notes"]
+        unavailable = ["notes"] if "notes" in sources else []
+        return rag_module_impl._SourceAuthorization(
+            sources=allowed,
+            sources_unavailable=unavailable,
+            warnings=["notes unavailable"] if unavailable else [],
+        )
 
 
 def test_mcp_sources_accept_aliases_but_return_canonical_ids() -> None:
@@ -86,3 +140,299 @@ async def test_rag_module_exposes_four_strict_tools() -> None:
     for tool_name in ("rag.capabilities", "rag.source_health", "rag.search", "rag.answer"):
         assert tools[tool_name]["inputSchema"]["additionalProperties"] is False  # nosec B101
     assert tools["rag.answer"]["metadata"]["category"] == "rag_generation"  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_rag_search_executes_shared_pipeline_without_generation(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = RagModule(ModuleConfig(name="rag"))
+    calls: dict[str, object] = {}
+
+    async def fake_pipeline(**kwargs):
+        calls.update(kwargs)
+        return SimpleNamespace(
+            documents=[{"id": "d1", "content": "Evidence", "metadata": {"source": "media_db"}, "score": 0.9}],
+            query="q",
+            metadata={"hard_citations": {"coverage": 1.0}},
+            timings={"retrieval": 1.2},
+            citations=[],
+            chunk_citations=[],
+            generated_answer=None,
+            errors=[],
+            total_time=1.2,
+            cache_hit=False,
+            expanded_queries=[],
+        )
+
+    monkeypatch.setattr(rag_module_impl, "unified_rag_pipeline", fake_pipeline)
+    ctx = RequestContext(
+        request_id="r1",
+        user_id="1",
+        db_paths={"media": "media.db", "chacha": "notes.db"},
+    )
+
+    out = await module.execute_tool("rag.search", {"query": "q", "sources": ["media"]}, context=ctx)
+
+    assert out["ok"] is True  # nosec B101
+    assert out["mode"] == "search"  # nosec B101
+    assert "answer" not in out  # nosec B101
+    assert calls["enable_generation"] is False  # nosec B101
+    assert calls["sources"] == ["media_db"]  # nosec B101
+    assert calls["media_db_path"] == "media.db"  # nosec B101
+    assert calls["notes_db_path"] == "notes.db"  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_rag_answer_marks_grounded_cited_output_answered(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = RagModule(ModuleConfig(name="rag"))
+
+    async def fake_pipeline(**kwargs):  # noqa: ARG001
+        return SimpleNamespace(
+            documents=[{"id": "d1", "content": "Evidence", "metadata": {"source": "media_db"}, "score": 0.9}],
+            query="q",
+            metadata={"hard_citations": {"coverage": 1.0}, "knowledge_trust": {"state": "grounded"}},
+            timings={},
+            citations=[{"id": "c1"}],
+            chunk_citations=[],
+            generated_answer="Grounded answer.",
+            errors=[],
+            total_time=0.1,
+            cache_hit=False,
+            expanded_queries=[],
+        )
+
+    monkeypatch.setattr(rag_module_impl, "unified_rag_pipeline", fake_pipeline)
+
+    out = await module.execute_tool("rag.answer", {"query": "q"}, context=RequestContext(request_id="r2", user_id="1"))
+
+    assert out["ok"] is True  # nosec B101
+    assert out["answer"]["text"] == "Grounded answer."  # nosec B101
+    assert out["answer"]["status"] == "answered"  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_rag_answer_never_marks_uncited_output_answered(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = RagModule(ModuleConfig(name="rag"))
+
+    async def fake_pipeline(**kwargs):  # noqa: ARG001
+        return SimpleNamespace(
+            documents=[{"id": "d1", "content": "Weak evidence", "metadata": {"source": "media_db"}, "score": 0.4}],
+            query="q",
+            metadata={"hard_citations": {"coverage": 0.0}, "knowledge_trust": {"state": "weak"}},
+            timings={},
+            citations=[],
+            chunk_citations=[],
+            generated_answer="Unsupported answer.",
+            errors=[],
+            total_time=0.1,
+            cache_hit=False,
+            expanded_queries=[],
+        )
+
+    monkeypatch.setattr(rag_module_impl, "unified_rag_pipeline", fake_pipeline)
+
+    out = await module.execute_tool("rag.answer", {"query": "q"}, context=RequestContext(request_id="r3", user_id="1"))
+
+    assert out["ok"] is True  # nosec B101
+    assert out["answer"]["status"] in {"partial", "abstained"}  # nosec B101
+    assert out["answer"]["status"] != "answered"  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_rag_search_applies_supported_scopes_and_disables_external_research(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = RagModule(ModuleConfig(name="rag"))
+    calls: dict[str, object] = {}
+
+    async def fake_pipeline(**kwargs):
+        calls.update(kwargs)
+        return SimpleNamespace(
+            documents=[],
+            query="q",
+            metadata={},
+            timings={},
+            citations=[],
+            chunk_citations=[],
+            generated_answer=None,
+            errors=[],
+            total_time=0.1,
+            cache_hit=False,
+            expanded_queries=[],
+        )
+
+    monkeypatch.setattr(rag_module_impl, "unified_rag_pipeline", fake_pipeline)
+    ctx = RequestContext(
+        request_id="r4",
+        user_id="1",
+        session_id="session-1",
+        metadata={"media_ids": [1, "2"], "note_id": "note-7", "workspace_id": "ws-1"},
+    )
+
+    await module.execute_tool("rag.search", {"query": "q", "sources": ["media", "notes"]}, context=ctx)
+
+    assert calls["include_media_ids"] == [1, 2]  # nosec B101
+    assert calls["include_note_ids"] == ["note-7"]  # nosec B101
+    assert calls["workspace_id"] == "ws-1"  # nosec B101
+    assert calls["enable_research_loop"] is False  # nosec B101
+    assert calls["search_url_scraping"] is False  # nosec B101
+    assert calls["enable_image_search"] is False  # nosec B101
+    assert calls["enable_video_search"] is False  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_rag_capabilities_uses_only_protocol_rate_control() -> None:
+    controls = _RecordingControls()
+    module = RagModule(ModuleConfig(name="rag"), controls=controls)
+
+    out = await module.execute_tool("rag.capabilities", {}, context=RequestContext(request_id="r5", user_id="1"))
+
+    assert out["ok"] is True  # nosec B101
+    assert controls.calls == [("protocol_rate", "rag.capabilities", "utility")]  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_rag_source_health_uses_read_controls_without_query_quota() -> None:
+    controls = _RecordingControls()
+    module = RagModule(ModuleConfig(name="rag"), controls=controls)
+
+    out = await module.execute_tool("rag.source_health", {}, context=RequestContext(request_id="r6", user_id="1"))
+
+    assert hasattr(out, "sources")  # nosec B101
+    assert ("protocol_rate", "rag.source_health", "search") in controls.calls  # nosec B101
+    assert ("rbac_rate", "rag.search") in controls.calls  # nosec B101
+    assert ("read_scope", "rag.source_health") in controls.calls  # nosec B101
+    assert not any(call[0] == "quota" for call in controls.calls)  # nosec B101
+    assert not any(call[0] == "usage" for call in controls.calls)  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_rag_search_uses_quota_and_usage_controls(monkeypatch: pytest.MonkeyPatch) -> None:
+    controls = _RecordingControls()
+    module = RagModule(ModuleConfig(name="rag"), controls=controls)
+
+    async def fake_pipeline(**kwargs):  # noqa: ARG001
+        return SimpleNamespace(
+            documents=[],
+            query="q",
+            metadata={},
+            timings={},
+            citations=[],
+            chunk_citations=[],
+            generated_answer=None,
+            errors=[],
+            total_time=0.1,
+            cache_hit=False,
+            expanded_queries=[],
+        )
+
+    monkeypatch.setattr(rag_module_impl, "unified_rag_pipeline", fake_pipeline)
+
+    out = await module.execute_tool("rag.search", {"query": "q"}, context=RequestContext(request_id="r7", user_id="1"))
+
+    assert out["ok"] is True  # nosec B101
+    assert ("protocol_rate", "rag.search", "search") in controls.calls  # nosec B101
+    assert ("rbac_rate", "rag.search") in controls.calls  # nosec B101
+    assert ("read_scope", "rag.search") in controls.calls  # nosec B101
+    assert ("quota", 1) in controls.calls  # nosec B101
+    assert ("usage", 1) in controls.calls  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_rag_answer_uses_generation_category_controls(monkeypatch: pytest.MonkeyPatch) -> None:
+    controls = _RecordingControls()
+    module = RagModule(ModuleConfig(name="rag"), controls=controls)
+
+    async def fake_pipeline(**kwargs):  # noqa: ARG001
+        return SimpleNamespace(
+            documents=[],
+            query="q",
+            metadata={},
+            timings={},
+            citations=[],
+            chunk_citations=[],
+            generated_answer=None,
+            errors=[],
+            total_time=0.1,
+            cache_hit=False,
+            expanded_queries=[],
+        )
+
+    monkeypatch.setattr(rag_module_impl, "unified_rag_pipeline", fake_pipeline)
+
+    await module.execute_tool("rag.answer", {"query": "q"}, context=RequestContext(request_id="r8", user_id="1"))
+
+    assert ("protocol_rate", "rag.answer", "rag_generation") in controls.calls  # nosec B101
+    assert ("quota", 1) in controls.calls  # nosec B101
+    assert ("usage", 1) in controls.calls  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_explicit_unavailable_source_fails_closed() -> None:
+    module = RagModule(ModuleConfig(name="rag"), controls=_UnavailableNotesControls())
+
+    out = await module.execute_tool(
+        "rag.search",
+        {"query": "q", "sources": ["notes"]},
+        context=RequestContext(request_id="r9", user_id="1"),
+    )
+
+    assert out["ok"] is False  # nosec B101
+    assert out["reason_code"] == "source_unavailable"  # nosec B101
+    assert out["sources_unavailable"] == ["notes"]  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_allow_partial_filters_unavailable_sources(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = RagModule(ModuleConfig(name="rag"), controls=_UnavailableNotesControls())
+    calls: dict[str, object] = {}
+
+    async def fake_pipeline(**kwargs):
+        calls.update(kwargs)
+        return SimpleNamespace(
+            documents=[],
+            query="q",
+            metadata={},
+            timings={},
+            citations=[],
+            chunk_citations=[],
+            generated_answer=None,
+            errors=[],
+            total_time=0.1,
+            cache_hit=False,
+            expanded_queries=[],
+        )
+
+    monkeypatch.setattr(rag_module_impl, "unified_rag_pipeline", fake_pipeline)
+
+    out = await module.execute_tool(
+        "rag.search",
+        {"query": "q", "sources": ["media", "notes"], "allow_partial": True},
+        context=RequestContext(request_id="r10", user_id="1"),
+    )
+
+    assert out["ok"] is True  # nosec B101
+    assert calls["sources"] == ["media_db"]  # nosec B101
+    assert out["metadata"]["sources_unavailable"] == ["notes"]  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_explicit_unsupported_conversation_scope_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = RagModule(ModuleConfig(name="rag"))
+    called = False
+
+    async def fake_pipeline(**kwargs):  # noqa: ARG001
+        nonlocal called
+        called = True
+        return SimpleNamespace(documents=[], query="q", metadata={}, timings={}, citations=[], chunk_citations=[])
+
+    monkeypatch.setattr(rag_module_impl, "unified_rag_pipeline", fake_pipeline)
+
+    out = await module.execute_tool(
+        "rag.search",
+        {"query": "q", "sources": ["chats"]},
+        context=RequestContext(request_id="r11", user_id="1", metadata={"conversation_id": "c1"}),
+    )
+
+    assert out["ok"] is False  # nosec B101
+    assert out["reason_code"] == "unsupported_scope"  # nosec B101
+    assert called is False  # nosec B101
