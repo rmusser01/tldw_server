@@ -651,10 +651,15 @@ export function useMessageState(props: MessageStateProps) {
     })
   }, [props.moodConfidence, resolvedMoodLabel, showMoodConfidence, t])
   const baseCharacterAvatar = resolveCharacterBaseAvatarUrl(props.characterIdentity)
+  const visualCharacterAvatar =
+    shouldUseCharacterIdentity && typeof props.visualAssetUrl === "string"
+      ? props.visualAssetUrl.trim()
+      : ""
   const moodCharacterAvatar = shouldUseCharacterIdentity
     ? resolveCharacterMoodImageUrl(props.characterIdentity, resolvedMoodLabel)
     : ""
-  const characterAvatar = moodCharacterAvatar || baseCharacterAvatar
+  const characterAvatar =
+    visualCharacterAvatar || moodCharacterAvatar || baseCharacterAvatar
   const resolvedModelImage =
     shouldUseCharacterIdentity && characterAvatar
       ? characterAvatar

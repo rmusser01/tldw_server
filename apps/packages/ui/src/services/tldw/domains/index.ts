@@ -15,3 +15,7 @@ export {
 } from "./setup-onboarding"
 export { workspaceApiMethods, type WorkspaceApiMethods } from "./workspace-api"
 export { webClipperMethods, type WebClipperMethods } from "./web-clipper"
+export {
+  visualIdentityMethods,
+  type VisualIdentityMethods
+} from "./visual-identities"

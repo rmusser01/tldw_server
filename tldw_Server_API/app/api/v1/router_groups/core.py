@@ -162,6 +162,17 @@ def iter_core_router_specs() -> Iterable[RouterSpec]:
     append_imported_router_spec(
         specs,
         ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.visual_identities",
+            log_name="visual_identities",
+            prefix=f"{API_V1_PREFIX}/visual-identities",
+            tags=("visual-identities",),
+            route_key="visual-identities",
+        ),
+    )
+
+    append_imported_router_spec(
+        specs,
+        ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.tools",
             log_name="tools",
             prefix=f"{API_V1_PREFIX}",

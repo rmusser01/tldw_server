@@ -1148,6 +1148,13 @@ export default defineBackground({
       return null;
     };
 
+    type UploadResult = {
+      ok: boolean;
+      status?: number;
+      data?: any;
+      error?: string;
+    };
+
     const handleUpload = async (payload: {
       path?: string;
       method?: string;
@@ -1178,7 +1185,7 @@ export default defineBackground({
       timeoutMs?: number;
       responseType?: "json" | "text" | "arrayBuffer";
       quickIngestSessionId?: string;
-    }) => {
+    }): Promise<UploadResult> => {
       const {
         path,
         method = "POST",
@@ -1243,7 +1250,7 @@ export default defineBackground({
           },
           fieldName: string,
           { appendLegacyFileAlias = false }: { appendLegacyFileAlias?: boolean } = {},
-        ): { ok: true } | { ok: false; status: number; error: string } => {
+        ): UploadResult => {
           if (item?.data === undefined || item?.data === null) return { ok: true };
           const bytes = normalizeFileData(item.data);
           if (!bytes || bytes.byteLength === 0) {

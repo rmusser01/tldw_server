@@ -3,9 +3,12 @@ import type {
   AudiobookChapterAsset,
   AudiobookProject
 } from "@/db/dexie/types"
+import type { LegacyAudiobookMigrationMarker } from "../audiobook-projects"
 
 const { projectRows, assetRows, projectTable, assetTable } = vi.hoisted(() => {
-  type ProjectRow = AudiobookProject & Record<string, unknown>
+  type ProjectRow = AudiobookProject & {
+    audioStudioMigration?: LegacyAudiobookMigrationMarker
+  } & Record<string, unknown>
 
   const projectRows = new Map<string, ProjectRow>()
   const assetRows = new Map<string, AudiobookChapterAsset>()

@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { AddSourceModal } from "../SourcesPane/AddSourceModal"
+import type { AddSourceTab } from "@/types/workspace"
 
 const {
   mockUploadMedia,
@@ -18,7 +19,7 @@ const {
 
 const workspaceStoreState = {
   addSourceModalOpen: true,
-  addSourceModalTab: "upload" as const,
+  addSourceModalTab: "upload" as AddSourceTab,
   addSourceProcessing: false,
   addSourceError: null as string | null,
   sources: [] as Array<{ mediaId: number }>,

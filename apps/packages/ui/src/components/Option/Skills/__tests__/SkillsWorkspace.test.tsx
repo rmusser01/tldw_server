@@ -104,7 +104,8 @@ describe("SkillsWorkspace capability states", () => {
       "data-ds-component",
       "RecoveryCallout"
     )
-    expect(screen.getByLabelText("Diagnostics")).toHaveTextContent("/api/v1/skills")
+    expect(screen.getByLabelText("Diagnostics")).toHaveTextContent("[server-endpoint]")
+    expect(screen.getByLabelText("Diagnostics")).not.toHaveTextContent("/api/v1/skills")
     expect(screen.queryByTestId("skills-manager")).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole("button", { name: "Refresh capabilities" }))

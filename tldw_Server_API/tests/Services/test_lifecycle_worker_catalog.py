@@ -117,6 +117,7 @@ TASK5_JOB_POLLER_SPEC_NAMES = {
     "media_ingest_heavy_jobs_task",
     "reading_digest_jobs_task",
     "llamacpp_acquisition_jobs_task",
+    "visual_identity_jobs_task",
     "vn_asset_jobs_task",
     "vn_asset_generation_jobs_task",
     "companion_reflection_jobs_task",

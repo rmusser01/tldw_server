@@ -60,8 +60,8 @@ export interface ScheduledTaskCreatePanelProps {
   ) => Promise<ScheduledTaskPreviewResponse> | ScheduledTaskPreviewResponse
   onCreateAutomationDefinition?: (
     payload: ScheduledTaskDefinitionCreateRequest
-  ) => Promise<ScheduledTaskDefinitionResponse | unknown> | ScheduledTaskDefinitionResponse | unknown
-  onAutomationDefinitionCreated?: (definition: ScheduledTaskDefinitionResponse | unknown) => void
+  ) => Promise<ScheduledTaskDefinitionResponse> | ScheduledTaskDefinitionResponse
+  onAutomationDefinitionCreated?: (definition: ScheduledTaskDefinitionResponse) => void
 }
 
 const WATCHLISTS_HREF = "/watchlists"

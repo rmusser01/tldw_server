@@ -112,6 +112,56 @@ class MissingVisualDirectiveAdapter:
         )
 
 
+class VisualIdentityDirectiveAdapter:
+    async def generate_turn(self, context: VNPlayTurnContext) -> TurnResult:
+        return TurnResult(
+            narrative_text="Mira smiles.",
+            dialogue=[{"speaker": "Mira", "text": "This shelf is familiar."}],
+            visual_directives=[
+                {
+                    "asset_type": "sprite",
+                    "labels": {"emotion": "visual_identity_only"},
+                    "visual_identity": {
+                        "asset_type": "sprite",
+                        "actor_kind": "character",
+                        "actor_id": context.session.primary_character_id,
+                        "expression_key": "happy",
+                        "role_id": "hero",
+                        "role_label": "Hero",
+                    },
+                },
+            ],
+            scene_updates={"location_key": "library"},
+        )
+
+
+class MixedVisualIdentityDirectiveAdapter:
+    async def generate_turn(self, context: VNPlayTurnContext) -> TurnResult:
+        return TurnResult(
+            narrative_text="The library brightens as Mira smiles.",
+            dialogue=[{"speaker": "Mira", "text": "This shelf is familiar."}],
+            visual_directives=[
+                {"asset_type": "background", "labels": {"location": "library"}},
+                {
+                    "asset_type": "sprite",
+                    "labels": {"emotion": "happy"},
+                    "visual_identity": {
+                        "asset_type": "sprite",
+                        "actor_kind": "character",
+                        "actor_id": context.session.primary_character_id,
+                        "expression_key": "happy",
+                    },
+                },
+            ],
+            scene_updates={"location_key": "library"},
+        )
+
+
+class FailingVisualIdentityResolver:
+    def resolve_expression_asset(self, **kwargs: Any) -> Any:
+        raise RuntimeError("visual identity resolver exploded")
+
+
 class InspectingStoryAdapter:
     def __init__(self, repo: VNPlayRepository, owner_user_id: int) -> None:
         self.repo = repo
@@ -1645,14 +1695,14 @@ async def test_turn_records_resolver_error_without_failing_text_turn(
 
     def fail_resolution(
         manifest: Mapping[str, Any],
-        directives: Sequence[Mapping[str, Any]],
+        directive: Mapping[str, Any],
         *,
         seed: str,
-    ) -> list[VisualDirectiveResolution]:
+    ) -> VisualDirectiveResolution:
         raise RuntimeError("resolver exploded")
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.core.VN_Play.service.resolve_scene_directives",
+        "tldw_Server_API.app.core.VN_Play.service.resolve_visual_directive",
         fail_resolution,
     )
 
@@ -1672,6 +1722,100 @@ async def test_turn_records_resolver_error_without_failing_text_turn(
     assert len(rejected_events) == 2
     assert rejected_events[0]["event_payload"]["reason"] == "resolver_error"
     assert rejected_events[0]["event_payload"]["directive"]["asset_type"] == "background"
+    assert response.warnings[0]["error_type"] == "RuntimeError"
+    assert "error" not in response.warnings[0]
+    assert service.get_session(session.id).active_turn_request_id is None
+
+
+@pytest.mark.asyncio
+async def test_turn_rejects_visual_identity_directive_without_resolver(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    character_id, pack_id, background_item_id, _ = create_visual_pack(chacha_db)
+    service = VNPlayService(
+        repo=VNPlayRepository.initialized(chacha_db),
+        owner_user_id=42,
+        adapter=MixedVisualIdentityDirectiveAdapter(),
+    )
+    session = service.create_session(
+        mode="freeform",
+        title="Library night",
+        primary_character_id=character_id,
+        vn_asset_pack_id=pack_id,
+        seed="seed-1",
+    )
+
+    response = await service.submit_turn(
+        session.id,
+        input_text="Smile",
+        client_scene_version=0,
+        idempotency_key="visual-identity-no-resolver-turn-1",
+    )
+
+    applied_events = [
+        event
+        for event in response.events
+        if event["event_type"] == "visual_directive_applied"
+    ]
+    rejected_events = [
+        event
+        for event in response.events
+        if event["event_type"] == "visual_directive_rejected"
+    ]
+    state = service.repo.get_scene_state(session.id, owner_user_id=42)
+    assert response.status == "completed"
+    assert len(applied_events) == 1
+    assert applied_events[0]["event_payload"]["item"]["item_id"] == background_item_id
+    assert len(rejected_events) == 1
+    assert rejected_events[0]["event_payload"]["reason"] == "visual_identity_resolver_unavailable"
+    assert (
+        rejected_events[0]["event_payload"]["directive"]["visual_identity"][
+            "expression_key"
+        ]
+        == "happy"
+    )
+    assert state is not None
+    assert state["current_background_item_id"] == background_item_id
+    assert state["active_sprite_items"] == []
+
+
+@pytest.mark.asyncio
+async def test_turn_records_visual_identity_resolver_error_without_failing_text_turn(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    character_id, pack_id, _, _ = create_visual_pack(chacha_db)
+    service = VNPlayService(
+        repo=VNPlayRepository.initialized(chacha_db),
+        owner_user_id=42,
+        adapter=VisualIdentityDirectiveAdapter(),
+        visual_identity_service=FailingVisualIdentityResolver(),
+    )
+    session = service.create_session(
+        mode="freeform",
+        title="Library night",
+        primary_character_id=character_id,
+        vn_asset_pack_id=pack_id,
+        seed="seed-1",
+    )
+
+    response = await service.submit_turn(
+        session.id,
+        input_text="Smile",
+        client_scene_version=0,
+        idempotency_key="visual-identity-resolver-error-turn-1",
+    )
+
+    rejected_events = [
+        event
+        for event in response.events
+        if event["event_type"] == "visual_directive_rejected"
+    ]
+    assert response.status == "completed"
+    assert len(rejected_events) == 1
+    assert rejected_events[0]["event_payload"]["reason"] == "resolver_error"
+    assert rejected_events[0]["event_payload"]["directive"]["visual_identity"][
+        "role_id"
+    ] == "hero"
     assert response.warnings[0]["error_type"] == "RuntimeError"
     assert "error" not in response.warnings[0]
     assert service.get_session(session.id).active_turn_request_id is None

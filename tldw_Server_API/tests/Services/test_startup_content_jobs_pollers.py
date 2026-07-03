@@ -53,6 +53,7 @@ def _specs_by_name(startup_pollers: Any) -> dict[str, Any]:
         "media_ingest_heavy_jobs_task",
         "reading_digest_jobs_task",
         "llamacpp_acquisition_jobs_task",
+        "visual_identity_jobs_task",
         "vn_asset_jobs_task",
         "vn_asset_generation_jobs_task",
         "companion_reflection_jobs_task",
@@ -85,6 +86,7 @@ def test_content_jobs_worker_specs_use_expected_names() -> None:
         "media_ingest_heavy_jobs_task",
         "reading_digest_jobs_task",
         "llamacpp_acquisition_jobs_task",
+        "visual_identity_jobs_task",
         "vn_asset_jobs_task",
         "vn_asset_generation_jobs_task",
         "companion_reflection_jobs_task",
@@ -105,6 +107,7 @@ def test_content_jobs_worker_spec_factories_delegate_to_existing_worker_services
         ("media_ingest_heavy_jobs_task", "_run_media_ingest_heavy_jobs_worker_service"),
         ("reading_digest_jobs_task", "_run_reading_digest_jobs_worker_service"),
         ("llamacpp_acquisition_jobs_task", "_run_llamacpp_acquisition_jobs_worker_service"),
+        ("visual_identity_jobs_task", "_run_visual_identity_jobs_worker_service"),
         ("vn_asset_jobs_task", "_run_vn_asset_jobs_worker_service"),
         ("vn_asset_generation_jobs_task", "_run_vn_asset_generation_jobs_worker_service"),
         ("companion_reflection_jobs_task", "_run_companion_reflection_jobs_worker_service"),
@@ -129,6 +132,7 @@ def test_content_jobs_worker_spec_factories_delegate_to_existing_worker_services
         ("media_ingest_heavy_jobs_task", "media_ingest_heavy_jobs_task-stop"),
         ("reading_digest_jobs_task", "reading_digest_jobs_task-stop"),
         ("llamacpp_acquisition_jobs_task", "llamacpp_acquisition_jobs_task-stop"),
+        ("visual_identity_jobs_task", "visual_identity_jobs_task-stop"),
         ("vn_asset_jobs_task", "vn_asset_jobs_task-stop"),
         ("vn_asset_generation_jobs_task", "vn_asset_generation_jobs_task-stop"),
         ("companion_reflection_jobs_task", "companion_reflection_jobs_task-stop"),
@@ -156,6 +160,7 @@ def test_content_jobs_worker_spec_predicates_use_route_enabled_arguments(
         "media_ingest_heavy_jobs_task",
         "reading_digest_jobs_task",
         "llamacpp_acquisition_jobs_task",
+        "visual_identity_jobs_task",
         "vn_asset_jobs_task",
         "vn_asset_generation_jobs_task",
         "companion_reflection_jobs_task",
@@ -169,6 +174,7 @@ def test_content_jobs_worker_spec_predicates_use_route_enabled_arguments(
                 "media_ingest_heavy_jobs_task": "MEDIA_INGEST_HEAVY_JOBS_WORKER_ENABLED",
                 "reading_digest_jobs_task": "READING_DIGEST_JOBS_WORKER_ENABLED",
                 "llamacpp_acquisition_jobs_task": "LLAMACPP_ACQUISITION_JOBS_WORKER_ENABLED",
+                "visual_identity_jobs_task": "VISUAL_IDENTITY_JOBS_WORKER_ENABLED",
                 "vn_asset_jobs_task": "VN_ASSET_JOBS_WORKER_ENABLED",
                 "vn_asset_generation_jobs_task": "VN_ASSET_GENERATION_JOBS_WORKER_ENABLED",
                 "companion_reflection_jobs_task": "COMPANION_REFLECTION_JOBS_WORKER_ENABLED",
@@ -188,6 +194,7 @@ def test_content_jobs_worker_spec_predicates_use_route_enabled_arguments(
         ),
         (("reading",), {}),
         (("llamacpp-acquisition",), {}),
+        (("visual-identities",), {"default_stable": True}),
         (("vn-assets",), {"default_stable": True}),
         (
             ("vn-assets-generation",),
@@ -239,6 +246,13 @@ async def test_start_content_jobs_pollers_combines_handles_in_order(
         calls.append("llamacpp-acquisition")
         return ("llamacpp-stop", "llamacpp-task")
 
+    async def _record_visual_identity(**kwargs: object) -> tuple[str, str]:
+        """Record that the Visual Identity worker starter ran."""
+
+        del kwargs
+        calls.append("visual-identity")
+        return ("visual-identity-stop", "visual-identity-task")
+
     async def _record_vn_asset(**kwargs: object) -> tuple[str, str, str, str]:
         """Record that the VN asset worker starter ran."""
 
@@ -262,6 +276,7 @@ async def test_start_content_jobs_pollers_combines_handles_in_order(
         "_start_llamacpp_acquisition_jobs_worker",
         _record_llamacpp_acquisition,
     )
+    monkeypatch.setattr(startup_pollers, "_start_visual_identity_jobs_worker", _record_visual_identity)
     monkeypatch.setattr(startup_pollers, "_start_vn_asset_jobs_workers", _record_vn_asset)
     monkeypatch.setattr(startup_pollers, "_start_companion_reflection_jobs_worker", _record_companion)
 
@@ -280,6 +295,7 @@ async def test_start_content_jobs_pollers_combines_handles_in_order(
         "media-ingest",
         "reading-digest",
         "llamacpp-acquisition",
+        "visual-identity",
         "vn-asset",
         "companion",
     ]
@@ -299,6 +315,8 @@ async def test_start_content_jobs_pollers_combines_handles_in_order(
     assert handles.reading_digest_jobs_task == "reading-task"
     assert handles.llamacpp_acquisition_jobs_stop_event == "llamacpp-stop"
     assert handles.llamacpp_acquisition_jobs_task == "llamacpp-task"
+    assert handles.visual_identity_jobs_stop_event == "visual-identity-stop"
+    assert handles.visual_identity_jobs_task == "visual-identity-task"
     assert handles.vn_asset_jobs_stop_event == "vn-asset-stop"
     assert handles.vn_asset_jobs_task == "vn-asset-task"
     assert handles.vn_asset_generation_jobs_stop_event == "vn-generation-stop"
@@ -363,6 +381,11 @@ async def test_start_content_jobs_pollers_passes_inventory_to_workers(
     )
     monkeypatch.setattr(
         startup_pollers,
+        "_start_visual_identity_jobs_worker",
+        _record_worker("visual-identity", ("visual-identity-stop", "visual-identity-task")),
+    )
+    monkeypatch.setattr(
+        startup_pollers,
         "_start_vn_asset_jobs_workers",
         _record_worker("vn-asset", ("vn-asset-stop", "vn-asset-task", "vn-generation-stop", "vn-generation-task")),
     )
@@ -391,6 +414,7 @@ async def test_start_content_jobs_pollers_passes_inventory_to_workers(
         "media-ingest": worker_inventory,
         "reading-digest": worker_inventory,
         "llamacpp-acquisition": worker_inventory,
+        "visual-identity": worker_inventory,
         "vn-asset": worker_inventory,
         "companion": worker_inventory,
     }
@@ -575,6 +599,72 @@ async def test_media_ingest_jobs_workers_register_with_worker_inventory_when_ena
             "category": "jobs",
             "shutdown_phase": startup_pollers.ShutdownPhase.JOB_POLLER_QUIESCE,
         },
+    ]
+
+
+@pytest.mark.asyncio
+async def test_visual_identity_jobs_worker_registers_with_worker_inventory_when_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_pollers = _import_startup_content_jobs_pollers()
+    registrations: list[dict[str, object]] = []
+    should_start_calls: list[tuple[str, str, dict[str, object]]] = []
+
+    class _FakeWorkerInventory:
+        """Test double that records custom worker registration calls."""
+
+        async def register_custom(self, **kwargs: object) -> tuple[str, str]:
+            """Capture registration kwargs and return deterministic handles."""
+
+            registrations.append(kwargs)
+            return "visual_identity_jobs_task-task", "visual_identity_jobs_task-stop"
+
+    monkeypatch.setattr(
+        startup_pollers,
+        "_make_event",
+        lambda: (_ for _ in ()).throw(AssertionError("legacy event path should not run")),
+    )
+    monkeypatch.setattr(
+        startup_pollers,
+        "_create_task",
+        lambda coro: (_ for _ in ()).throw(AssertionError("legacy task path should not run")),
+    )
+
+    def _register_owned_job_poller(*args: object, **kwargs: object) -> None:
+        raise AssertionError("legacy poller registration should not run")
+
+    def _should_start_worker(flag_key: str, route_key: str, **kwargs: object) -> bool:
+        should_start_calls.append((flag_key, route_key, kwargs))
+        return True
+
+    stop_event, task = await startup_pollers._start_visual_identity_jobs_worker(
+        app="app",
+        owned_job_pollers=[],
+        register_owned_job_poller=_register_owned_job_poller,
+        should_start_worker=_should_start_worker,
+        worker_inventory=_FakeWorkerInventory(),
+    )
+
+    assert (stop_event, task) == (
+        "visual_identity_jobs_task-stop",
+        "visual_identity_jobs_task-task",
+    )
+    assert should_start_calls == [
+        (
+            "VISUAL_IDENTITY_JOBS_WORKER_ENABLED",
+            "visual-identities",
+            {"default_stable": True},
+        )
+    ]
+    assert registrations == [
+        {
+            "name": "visual_identity_jobs_task",
+            "task_name": "visual_identity_jobs_task",
+            "coroutine_factory": startup_pollers._run_visual_identity_jobs_worker_service,
+            "timeout_sec": 5.0,
+            "category": "jobs",
+            "shutdown_phase": startup_pollers.ShutdownPhase.JOB_POLLER_QUIESCE,
+        }
     ]
 
 

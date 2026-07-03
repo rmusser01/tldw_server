@@ -60,15 +60,15 @@ const createResponse = (data: unknown, status = 200) => ({
   text: async () => JSON.stringify(data ?? {})
 })
 
-const expectSetupAdminRequestsAuthenticated = (
-  calls: Array<[Record<string, unknown>]>
-) => {
-  const setupCalls = calls.filter(([init]) =>
-    String(init?.path || "").startsWith("/api/v1/setup/admin/")
-  )
+const expectSetupAdminRequestsAuthenticated = (calls: unknown[][]) => {
+  const setupCalls = calls
+    .map(([init]) => init as Record<string, unknown> | undefined)
+    .filter((init) =>
+      String(init?.path || "").startsWith("/api/v1/setup/admin/")
+    )
 
   expect(setupCalls.length).toBeGreaterThan(0)
-  for (const [init] of setupCalls) {
+  for (const init of setupCalls) {
     expect(init).not.toHaveProperty("noAuth", true)
   }
 }
