@@ -17,6 +17,59 @@ and this project adheres to Some kind of Versioning
 ### Removed
 
 
+## [0.1.35] - 2026-07-03
+
+> Rollup coverage: this entry covers current `dev` work that landed after the
+> `0.1.34` release-prep metadata through PR #2594 plus the post-PR #2571 CI
+> follow-ups in this release branch. It includes PRs #2582, #2583, #2584,
+> #2586, #2588, #2574, #2593, #2594, #2060, #2061, and #2062.
+
+### Added
+
+- **Visual Identity Expression Packs** — Added visual identity repository
+  foundations, storage validation, ZIP import jobs, activation service support,
+  API endpoints, frontend client utilities, chat metadata integration, pack
+  management UI, generated-file provenance bridging, and visual identity
+  casting resolver APIs/overrides.
+- **MCP Docs Source Synchronization** — Added MCP docs source sync settings,
+  local/URL docs source registries, approved URL source tracking, URL and local
+  page sync tooling, and host-boundary/query URL regression coverage.
+- **Research Workspace And Release Publishing Hooks** — Added research
+  workspace source ingest failure-code exposure and backend PyPI auto-publish
+  workflow wiring for main-branch version releases.
+
+### Changed
+
+- **Documentation And Provider Surface Cleanup** — Split published docs into
+  user and developer wiki entry points and fixed llama.cpp provider alias
+  handling for character chat.
+- **CI And Dependency Maintenance** — Updated Docker publishing actions,
+  repaired AuthNZ multi-user load-test fixtures, synced `USER_DB_BASE_DIR`
+  reset behavior into core settings, and unquarantined the
+  TTS_NEW/Embeddings/Character_Chat_NEW suites after green validation.
+- **Visual Identity Review Hardening** — Hardened visual identity storage,
+  idempotency, source-context detection, provenance validation/replay, override
+  version fallback, and frontend TypeScript baseline behavior.
+
+### Fixed
+
+- **MCP Docs Source Privacy And Consistency** — Fixed docs source import failure
+  cleanup, source document counts, local tombstone bounds, redirected URL source
+  reconciliation/retargeting, tombstoned docs lookup filtering, acquisition
+  privacy redaction, and URL acquisition privacy review findings.
+- **Post-PR 2571 CI Follow-Ups** — Fixed Guardian generic notification logging
+  so synthetic `ts` metadata is added only to the sanitized recorded copy, and
+  retargeted the stale theme-toggle UX smoke assertion from the specialized
+  chat route to a current shared-shell route.
+- **Research Workspace Source Worker** — Fixed workspace source ingest
+  failure-code exposure for the current research workspace source-worker path.
+
+### Removed
+
+- Removed the stale test-quarantine mechanism for the previously quarantined
+  TTS_NEW, Embeddings, and Character_Chat_NEW suites.
+
+
 ## [0.1.34] - 2026-07-02
 
 > Rollup coverage: this entry covers current `dev` work that landed after the

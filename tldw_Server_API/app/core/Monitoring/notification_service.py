@@ -528,7 +528,7 @@ class NotificationService:
         """Record a generic notification payload (not tied to TopicAlert).
 
         Applies severity threshold filtering and writes to JSONL sink.
-        Adds ``ts`` field if not present.
+        Adds ``ts`` to the recorded copy if not present.
         """
         severity = payload.get("severity") or payload.get("rule_severity")
         if not self._meets_threshold(severity):

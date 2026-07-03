@@ -352,6 +352,22 @@ describe("App layout routing", () => {
     expect(layout).toHaveAttribute("data-hide-sidebar", "true")
   })
 
+  it("treats runtime single-user API key overrides as authenticated shell state", async () => {
+    currentConfig = {
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "single-user"
+    }
+    setRuntimeApiKey("runtime-api-key")
+
+    renderApp("/media")
+
+    const layout = await screen.findByTestId("option-layout")
+    await waitFor(() => {
+      expect(layout).toHaveAttribute("data-hide-header", "false")
+    })
+    expect(layout).toHaveAttribute("data-hide-sidebar", "false")
+  })
+
   it("keeps setup in a setup-only shell even when authenticated", async () => {
     process.env.NEXT_PUBLIC_X_API_KEY = "env-api-key"
 
