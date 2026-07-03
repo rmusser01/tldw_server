@@ -1,7 +1,7 @@
 # RAG MCP Module Design
 
 Date: 2026-07-03
-Status: Draft for spec review
+Status: Reviewed for implementation planning
 Backlog: TASK-12118
 
 ## Summary
@@ -167,7 +167,7 @@ Defaults:
 
 ## Curated Input Surface
 
-The tools should not expose the full `UnifiedRAGRequest` schema directly. That schema is an HTTP power-user interface. MCP should expose a smaller curated surface with a controlled `advanced` escape hatch only for options intentionally supported in this slice.
+The tools should not expose the full `UnifiedRAGRequest` schema directly. That schema is an HTTP power-user interface. MCP should expose a smaller curated surface with only the options intentionally supported in this slice.
 
 Common arguments:
 
@@ -182,13 +182,21 @@ Common arguments:
 - `max_content_chars`
 - `allow_partial`
 - citation options
-- `advanced`
+
+The first implementation slice does not include an `advanced` escape hatch. Any later advanced options must be added as explicit top-level schema fields or as a separately reviewed allowlisted object with named keys, default behavior, validation, and tests.
+
+Source selection contract:
+
+- accepted public canonical source ids are `media_db`, `notes`, `chats`, `characters`, `kanban`, `prompts`, `world_books`, `dictionaries`, and `sql`
+- friendly aliases supported by existing normalization may be accepted as input, such as `media` for `media_db`, but output metadata should use canonical source ids
+- the module must capture whether `sources` was explicit before creating `UnifiedRAGRequest`, because existing source normalization turns `None` into the default canonical source
+- response metadata should include canonical `sources_requested`, `sources_used`, and `sources_unavailable`
 
 Default source behavior:
 
 - implicit/default source selection may return partial results with warnings
 - explicit source requests are strict by default
-- if the caller requests `["media", "notes"]` and notes are unavailable, return `ok:false` unless `allow_partial=true`
+- if the caller requests `["media", "notes"]`, normalize that to `["media_db", "notes"]`; if notes are unavailable, return `ok:false` unless `allow_partial=true`
 
 Every tool schema should use `additionalProperties=false`.
 
@@ -225,19 +233,23 @@ The shared helper should be a service-level seam. It should not import FastAPI r
 
 ## Security And Governance
 
-The MCP module must preserve the controls currently layered on HTTP RAG routes.
+The MCP module must preserve the controls currently layered on comparable HTTP RAG routes. Parity is per tool, not one global control set.
 
 Required parity:
 
-- top-level MCP tool execution permission: `tools.execute:rag.<tool>`
-- RAG-specific RBAC/resource posture equivalent to `rbac_rate_limit("rag.search")`
-- media/source read entitlement equivalent to `MEDIA_READ`
-- token-scope constraints equivalent to `TokenScopeGuard`
-- RAG query daily quota equivalent to `LimitCategory.RAG_QUERIES_DAY`
-- MCP per-tool/category rate limiting
-- source scope filtering
-- usage logging/accounting
-- safe config and request metadata propagation
+| Tool | HTTP analogue | Required controls |
+| --- | --- | --- |
+| `rag.capabilities` | `GET /api/v1/rag/capabilities` | `tools.execute:rag.capabilities`, module enablement, MCP protocol rate limiting, safe config redaction |
+| `rag.source_health` | `GET /api/v1/rag/source-health` | `tools.execute:rag.source_health`, MCP protocol rate limiting equivalent to HTTP `check_rate_limit`, RAG-specific RBAC/resource posture equivalent to `rbac_rate_limit("rag.search")`, source read entitlement equivalent to `MEDIA_READ`, token-scope constraints equivalent to `TokenScopeGuard`, MCP per-tool/category rate limiting, source scope filtering |
+| `rag.search` | `POST /api/v1/rag/search` with generation disabled | `tools.execute:rag.search`, `rag.source_health` controls, RAG query daily quota equivalent to `LimitCategory.RAG_QUERIES_DAY`, usage logging/accounting |
+| `rag.answer` | `POST /api/v1/rag/search` with generation enabled | `tools.execute:rag.answer`, `rag.search` controls, LLM-provider-safe request metadata propagation, generation-specific rate/cost category posture |
+
+`rag.source_health` and `rag.capabilities` should not consume the RAG query daily quota unless a future policy deliberately changes that behavior. `rag.search` and `rag.answer` should consume the quota consistently with query execution.
+
+MCP rate-limit categories should be concrete:
+
+- `rag.search` should use the existing search/read posture, with config mapping `rag.search: search` unless implementation proves another existing category is more appropriate.
+- `rag.answer` should use a distinct generation posture, with config mapping `rag.answer: rag_generation` and a matching resource-governor policy/config path. If that category is not configured, the module should not silently rely on the runtime fallback to ordinary `read`.
 
 If any of those controls are not available as reusable service helpers today, the implementation should extract reusable helpers rather than copying endpoint-local logic into the module.
 
@@ -264,8 +276,9 @@ Canonical inner payload:
   "citations": [],
   "chunk_citations": [],
   "metadata": {
-    "sources_requested": ["media", "notes"],
-    "sources_used": ["media"],
+    "sources_requested": ["media_db", "notes"],
+    "sources_explicit": true,
+    "sources_used": ["media_db"],
     "sources_unavailable": [],
     "allow_partial": false,
     "search_mode": "hybrid",
@@ -369,20 +382,20 @@ Test coverage should prove three things:
 Required tests:
 
 - tool schema tests for all four tools, including strict schemas and caps
-- argument mapping tests from curated MCP args to constrained `UnifiedRAGRequest`
-- shared-control parity tests for:
-  - `check_rate_limit`
-  - `rbac_rate_limit("rag.search")`
-  - `MEDIA_READ`
-  - `TokenScopeGuard`
-  - `LimitCategory.RAG_QUERIES_DAY`
+- argument mapping tests from curated MCP args to constrained `UnifiedRAGRequest`, including source alias normalization and preservation of `sources_explicit`
+- shared-control parity tests for the per-tool matrix above, including:
+  - `rbac_rate_limit("rag.search")` posture where applicable
+  - `MEDIA_READ` where applicable
+  - `TokenScopeGuard` where applicable
+  - `LimitCategory.RAG_QUERIES_DAY` only for executing RAG queries
   - source scoping
-  - usage logging
+  - usage logging for query execution
 - result compaction tests for bounded documents, truncation flags, normalized citations, preserved chunk citations, and derived hard-citation coverage
 - error contract tests for invalid args, auth/RBAC/source denial, quota denial, RAG-domain failures, and partial source behavior
+- tests proving `advanced` is rejected in the first slice
 - permission tests for `tools.execute:rag.capabilities`, `rag.source_health`, `rag.search`, and `rag.answer`
 - catalog tests proving visibility filtering does not grant execution rights
-- MCP category/rate tests for `rag.search` and `rag.answer`
+- MCP category/rate tests for `rag.search` and `rag.answer`, including configured `rag_generation` behavior and failure/guard coverage when that category is missing
 - config tests proving the module loads from `mcp_modules.yaml`
 - regression tests proving `knowledge.search` remains FTS discovery
 - follow-up or regression coverage for direct RAG consumers such as `slides.generate.from_rag`
@@ -397,7 +410,7 @@ Implementation verification should include:
 
 1. Add `RagModule` with the four initial tools.
 2. Enable it by default only if shared RAG controls are enforced through MCP; otherwise ship disabled until parity is complete.
-3. Add `rag.search` and `rag.answer` to MCP tool category config, with `rag.answer` in a costlier category than ordinary read tools.
+3. Add `rag.search: search` and `rag.answer: rag_generation` to MCP tool category config, and add the matching resource-governor policy/config for `mcp.rag_generation`.
 4. Add curated workflow catalogs for existing-library research, but treat catalogs as discovery curation only.
 5. Keep batch, stream, ablation, feedback, ingestion, note-writing, and export out of the first slice.
 6. Document the HTTP-to-MCP crosswalk:
@@ -411,6 +424,8 @@ Implementation verification should include:
 
 - MCP clients can discover and call `rag.search` and `rag.answer`.
 - Results are citation-aware, bounded, and machine-readable.
+- Source aliases are accepted only through existing normalization, while response metadata reports canonical source ids and preserves whether `sources` was explicit.
+- Unsupported `advanced` arguments are rejected in the first slice.
 - Implementation reuses shared RAG request resolution, response mapping, quota checks, source checks, and usage accounting.
 - Tool permissions and source permissions are enforced independently of catalog membership.
 - Catalogs reduce discovery noise without introducing a `research.*` facade.
