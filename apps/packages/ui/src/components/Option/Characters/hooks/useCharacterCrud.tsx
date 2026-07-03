@@ -473,10 +473,23 @@ export function useCharacterCrud(deps: UseCharacterCrudDeps) {
       const data = await tldwClient.exportCharacter(id, { format: 'v3' })
 
       if (format === 'png') {
+        // Only allow the PNG exporter to fetch a remote avatar from the
+        // configured tldw server origin (same-origin is always allowed). An
+        // arbitrary card `avatar_url` is otherwise skipped, not fetched.
+        let allowedAvatarOrigins: string[] | undefined
+        try {
+          const cfg = await tldwClient.getConfig()
+          if (cfg?.serverUrl) {
+            allowedAvatarOrigins = [cfg.serverUrl]
+          }
+        } catch {
+          // Fall back to same-origin-only when the server URL can't be resolved.
+        }
         await exportCharacterToPNG(data, {
           avatarUrl: record.avatar_url,
           avatarBase64: record.image_base64,
-          filename: `${name.replace(/[^a-z0-9]/gi, '_')}_character.png`
+          filename: `${name.replace(/[^a-z0-9]/gi, '_')}_character.png`,
+          allowedAvatarOrigins
         })
       } else {
         exportCharacterToJSON(data, `${name.replace(/[^a-z0-9]/gi, '_')}_character.json`)
@@ -922,18 +935,34 @@ export function useCharacterCrud(deps: UseCharacterCrudDeps) {
         return
       }
 
-      let previousData: unknown = undefined
+      // Optimistically update EVERY cached character list. The Manager table
+      // caches under a 3-element key (["tldw:listCharacters", params, scope])
+      // with a paginated `{ items }` shape, while the header uses the bare
+      // ["tldw:listCharacters"] array key — so match by prefix and handle both
+      // shapes instead of writing a single (wrong) key.
+      let previousEntries: [readonly unknown[], unknown][] = []
       let previousPreview: any = undefined
+      const applyFavoriteToCached = (c: any) => {
+        const cId = String(c?.id || c?.slug || c?.name || "")
+        if (cId !== id) return c
+        return { ...c, extensions: nextExtensions ?? {} }
+      }
+      const updateCachedList = (old: any): any => {
+        if (Array.isArray(old)) return old.map(applyFavoriteToCached)
+        if (old && Array.isArray(old.items)) {
+          return { ...old, items: old.items.map(applyFavoriteToCached) }
+        }
+        return old
+      }
       try {
-        previousData = qc.getQueryData?.(["tldw:listCharacters"])
-        qc.setQueryData?.(["tldw:listCharacters"], (old: any) => {
-          if (!Array.isArray(old)) return old
-          return old.map((c: any) => {
-            const cId = String(c?.id || c?.slug || c?.name || "")
-            if (cId !== id) return c
-            return { ...c, extensions: nextExtensions ?? {} }
-          })
-        })
+        previousEntries =
+          (qc.getQueriesData?.({ queryKey: ["tldw:listCharacters"] }) as
+            | [readonly unknown[], unknown][]
+            | undefined) ?? []
+        qc.setQueriesData?.(
+          { queryKey: ["tldw:listCharacters"] },
+          updateCachedList
+        )
       } catch {
         // Optimistic update not available
       }
@@ -958,8 +987,8 @@ export function useCharacterCrud(deps: UseCharacterCrudDeps) {
         )
         qc.invalidateQueries({ queryKey: ["tldw:listCharacters"] })
       } catch (error: any) {
-        if (previousData !== undefined) {
-          try { qc.setQueryData?.(["tldw:listCharacters"], previousData) } catch { /* noop */ }
+        for (const [key, prev] of previousEntries) {
+          try { qc.setQueryData?.(key, prev) } catch { /* noop */ }
         }
         if (previousPreview !== undefined) {
           setPreviewCharacter(previousPreview)

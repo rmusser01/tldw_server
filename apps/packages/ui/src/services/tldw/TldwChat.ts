@@ -279,6 +279,9 @@ export interface TldwChatOptions {
   jsonMode?: boolean
   researchContext?: ChatResearchContext
   chatDebugMetadata?: ChatRequestDebugMetadata
+  // Caller-owned AbortSignal (e.g. the UI Stop signal). When it fires, the
+  // internal per-call controller is aborted so the underlying request stops.
+  signal?: AbortSignal
 }
 export { getLastChatCompletionDebugSnapshot }
 export type { ChatCompletionDebugSnapshot }
@@ -321,7 +324,11 @@ export interface ChatStreamChunk {
 }
 
 export class TldwChatService {
-  private currentController: AbortController | null = null
+  // Per-call controllers are tracked here so that `cancelStream()` can act as a
+  // global "stop everything" without any single call clobbering another. Each
+  // `streamMessage` invocation owns its own controller (see below); we never
+  // share one controller across concurrent streams (Compare mode, double-send).
+  private activeControllers: Set<AbortController> = new Set()
 
   /**
    * Send a chat completion request
@@ -421,6 +428,26 @@ export class TldwChatService {
     options: TldwChatOptions,
     onChunk?: (chunk: ChatStreamChunk) => void
   ): AsyncGenerator<string, void, unknown> {
+    // Per-call abort controller: concurrent streams must not cancel each other.
+    const controller = new AbortController()
+    this.activeControllers.add(controller)
+
+    // Combine the caller's signal (e.g. the UI Stop signal) with this call's
+    // controller so a Stop actually aborts the underlying request/transport,
+    // while internal timeouts abort only this call (not the caller's signal).
+    const callerSignal = options.signal
+    let detachCallerSignal: (() => void) | null = null
+    if (callerSignal) {
+      if (callerSignal.aborted) {
+        controller.abort()
+      } else {
+        const onCallerAbort = () => controller.abort()
+        callerSignal.addEventListener("abort", onCallerAbort, { once: true })
+        detachCallerSignal = () =>
+          callerSignal.removeEventListener("abort", onCallerAbort)
+      }
+    }
+
     try {
       await tldwClient.initialize()
       const normalizedTools =
@@ -439,11 +466,6 @@ export class TldwChatService {
         )
       }
 
-      // Cancel any existing stream
-      this.cancelStream()
-
-      // Create new abort controller
-      this.currentController = new AbortController()
       const cfg = (await tldwClient.getConfig().catch(() => null)) as
         | {
             chatRequestTimeoutMs?: number
@@ -507,14 +529,13 @@ export class TldwChatService {
         30_000
       )
       const stream = tldwClient.streamChatCompletion(request, {
-        signal: this.currentController.signal,
+        signal: controller.signal,
         streamIdleTimeoutMs,
         debugMetadata: options.chatDebugMetadata
       })
 
       let idleTimer: ReturnType<typeof setTimeout> | null = null
       let startupTimer: ReturnType<typeof setTimeout> | null = null
-      const controller = this.currentController
       let sawVisibleProgress = false
       let timeoutReason: "startup" | "idle" | null = null
 
@@ -610,18 +631,23 @@ export class TldwChatService {
       }
       throw new Error('Stream completion failed', { cause: error })
     } finally {
-      this.currentController = null
+      this.activeControllers.delete(controller)
+      detachCallerSignal?.()
     }
   }
 
   /**
-   * Cancel the current streaming request
+   * Cancel all in-flight streaming requests.
+   *
+   * This is a global "stop everything" used by external callers. New streams no
+   * longer auto-invoke this, so starting a stream never cancels other in-flight
+   * streams (Compare mode, double-send, regenerate-while-streaming).
    */
   cancelStream(): void {
-    if (this.currentController) {
-      this.currentController.abort()
-      this.currentController = null
+    for (const controller of this.activeControllers) {
+      controller.abort()
     }
+    this.activeControllers.clear()
   }
 
   /**

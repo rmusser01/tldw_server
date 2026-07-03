@@ -13,6 +13,7 @@ import {
 import type { TFunction } from "i18next"
 import { useTranslation } from "react-i18next"
 import { useCollectionsStore } from "@/store/collections"
+import { openExternalUrl } from "@/utils/safe-external-url"
 import { useTldwApiClient } from "@/hooks/useTldwApiClient"
 import type { ReadingItemSummary, ReadingStatus } from "@/types/collections"
 import { StatusBadge } from "../common/StatusBadge"
@@ -110,7 +111,7 @@ export const ReadingItemCard: React.FC<ReadingItemCardProps> = ({
       key: "open",
       icon: <ExternalLink className="h-4 w-4" />,
       label: t("collections:reading.openOriginal", "Open original"),
-      onClick: () => item.url && window.open(item.url, "_blank"),
+      onClick: () => item.url && openExternalUrl(item.url, "_blank"),
       disabled: !item.url
     },
     { type: "divider" },

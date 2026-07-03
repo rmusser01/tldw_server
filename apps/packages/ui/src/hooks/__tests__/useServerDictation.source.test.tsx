@@ -36,12 +36,23 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   }
 }))
 
+// When set, the next MediaRecorder construction throws (simulates a ctor
+// failure after getUserMedia has already acquired a live stream).
+let recorderCtorShouldThrow = false
+
 class MockMediaRecorder {
   ondataavailable: ((event: { data: Blob }) => void) | null = null
   onerror: ((event: Event) => void) | null = null
   onstop: (() => void | Promise<void>) | null = null
   mimeType = "audio/webm"
   state = "inactive"
+
+  constructor() {
+    if (recorderCtorShouldThrow) {
+      recorderCtorShouldThrow = false
+      throw new Error("MediaRecorder construction failed")
+    }
+  }
 
   start = vi.fn(() => {
     this.state = "recording"
@@ -94,6 +105,7 @@ const createMockStream = () =>
 describe("useServerDictation selected source handling", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    recorderCtorShouldThrow = false
     mockGetUserMedia.mockResolvedValue(createMockStream())
     mockTranscribeAudio.mockResolvedValue({ text: "transcript" })
     delete (
@@ -168,5 +180,55 @@ describe("useServerDictation selected source handling", () => {
 
     expect(onError).toHaveBeenCalledWith(startupError)
     expect(mockNotificationError).toHaveBeenCalledTimes(1)
+  })
+
+  it("stops the acquired stream when the MediaRecorder constructor throws", async () => {
+    recorderCtorShouldThrow = true
+    const onError = vi.fn()
+    const { result } = renderHook(() => buildHook({ onError }))
+
+    await act(async () => {
+      await result.current.startServerDictation({
+        sourceKind: "default_mic",
+        deviceId: null
+      })
+    })
+
+    // The stream was acquired before the ctor threw; its tracks must be stopped
+    // via the ref-held stream so the mic indicator does not stay on.
+    expect(mockGetUserMedia).toHaveBeenCalledTimes(1)
+    expect(mockTrackStop).toHaveBeenCalled()
+    expect(onError).toHaveBeenCalledTimes(1)
+    expect(result.current.isServerDictating).toBe(false)
+
+    // Owner released: a subsequent start acquires the mic again.
+    await act(async () => {
+      await result.current.startServerDictation({
+        sourceKind: "default_mic",
+        deviceId: null
+      })
+    })
+    expect(mockGetUserMedia).toHaveBeenCalledTimes(2)
+  })
+
+  it("does not orphan a stream on a rapid double-start", async () => {
+    const { result } = renderHook(() => buildHook())
+
+    await act(async () => {
+      // Fire two starts before the first getUserMedia resolves.
+      const first = result.current.startServerDictation({
+        sourceKind: "default_mic",
+        deviceId: null
+      })
+      const second = result.current.startServerDictation({
+        sourceKind: "default_mic",
+        deviceId: null
+      })
+      await Promise.all([first, second])
+    })
+
+    // The synchronous re-entry guard must short-circuit the second start.
+    expect(mockGetUserMedia).toHaveBeenCalledTimes(1)
+    expect(result.current.isServerDictating).toBe(true)
   })
 })

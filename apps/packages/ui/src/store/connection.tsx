@@ -599,187 +599,69 @@ const deriveOnboardingConfigStep = (
   return currentState.configStep === "none" ? "health" : currentState.configStep
 }
 
+// Synchronous in-flight guard for checkOnce. It is set BEFORE the first await
+// so concurrent callers can't slip past the overlap check while persisted flags
+// are being read (the store `isChecking` flag was previously only set after
+// several awaits, leaving a race window). Released at every exit path below.
+let checkInFlight = false
+
 export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, get) => ({
   state: initialState,
 
   async checkOnce(options = {}) {
     const prev = get().state
 
-    // Avoid overlapping checks
-    if (prev.isChecking) {
+    // Avoid overlapping checks. Claim the in-flight guard synchronously (no
+    // await between reading and setting it) so a second caller can't proceed.
+    if (prev.isChecking || checkInFlight) {
       return
     }
+    checkInFlight = true
 
-    // Load all persisted flags upfront
-    const persistedFirstRun = await getFirstRunCompleteFlag()
-    const persistedUserPersona = await getUserPersonaFlag()
-    const persistedServerUrl = await getPersistedServerUrl()
-    const forceUnconfigured = await getForceUnconfiguredFlag()
-    const bypass = await getOfflineBypassFlag()
+    try {
+      // Load all persisted flags upfront
+      const persistedFirstRun = await getFirstRunCompleteFlag()
+      const persistedUserPersona = await getUserPersonaFlag()
+      const persistedServerUrl = await getPersistedServerUrl()
+      const forceUnconfigured = await getForceUnconfiguredFlag()
+      const bypass = await getOfflineBypassFlag()
 
-    const needsFirstRunSync = !prev.hasCompletedFirstRun && persistedFirstRun
-    const needsPersonaSync = prev.userPersona !== persistedUserPersona
+      const needsFirstRunSync = !prev.hasCompletedFirstRun && persistedFirstRun
+      const needsPersonaSync = prev.userPersona !== persistedUserPersona
 
-    const currentState =
-      needsFirstRunSync || needsPersonaSync
-        ? {
-            ...prev,
+      const currentState =
+        needsFirstRunSync || needsPersonaSync
+          ? {
+              ...prev,
+              ...(needsFirstRunSync ? { hasCompletedFirstRun: true } : {}),
+              ...(needsPersonaSync ? { userPersona: persistedUserPersona } : {})
+            }
+          : prev
+
+      // Apply persisted first-run flag if not already set. Merge onto the LATEST
+      // state (not the captured snapshot) so a concurrent update isn't reverted.
+      if (currentState !== prev) {
+        set((s) => ({
+          state: {
+            ...s.state,
             ...(needsFirstRunSync ? { hasCompletedFirstRun: true } : {}),
             ...(needsPersonaSync ? { userPersona: persistedUserPersona } : {})
           }
-        : prev
-
-    // Apply persisted first-run flag if not already set
-    if (currentState !== prev) {
-      set({
-        state: currentState
-      })
-    }
-
-    // Test-only hook: force a missing/unconfigured state without network calls.
-    if (forceUnconfigured) {
-      set({
-        state: {
-          ...currentState,
-          errorKind: "none",
-          phase: ConnectionPhase.UNCONFIGURED,
-          serverUrl: persistedServerUrl,
-          isConnected: false,
-          isChecking: false,
-          consecutiveFailures: 0,
-          offlineBypass: false,
-          lastCheckedAt: Date.now(),
-          lastError: null,
-          lastStatusCode: null,
-          knowledgeStatus: "unknown",
-          knowledgeLastCheckedAt: null,
-          knowledgeError: null
-        }
-      })
-      return
-    }
-
-    // Optional test toggle: allow CI/Playwright to treat the app as "connected"
-    // without hitting a live server. Controlled via env VITE_TLDW_E2E_ALLOW_OFFLINE
-    // or chrome.storage.local[__tldw_allow_offline].
-    if (bypass) {
-      const serverUrl =
-        persistedServerUrl ??
-        (await ensurePlaceholderConfig()) ??
-        currentState.serverUrl ??
-        "offline://local"
-
-      set({
-        state: {
-          ...currentState,
-          phase: ConnectionPhase.CONNECTED,
-          serverUrl,
-          isConnected: true,
-          isChecking: false,
-          consecutiveFailures: 0,
-          offlineBypass: true,
-          errorKind: "none",
-          lastCheckedAt: Date.now(),
-          lastError: null,
-          lastStatusCode: null,
-          knowledgeStatus: "ready",
-          knowledgeLastCheckedAt: Date.now(),
-          knowledgeError: null
-        }
-      })
-      return
-    }
-
-    // Throttle repeated checks when already connected recently.
-    // This prevents the landing page/header from hammering the server.
-    const now = Date.now()
-    const nextChecksSinceConfigChange = currentState.checksSinceConfigChange + 1
-    if (
-      !options.force &&
-      currentState.isConnected &&
-      currentState.phase === ConnectionPhase.CONNECTED &&
-      currentState.lastCheckedAt != null &&
-      now - currentState.lastCheckedAt < CONNECTED_THROTTLE_MS
-    ) {
-      return
-    }
-
-    const isBackgroundRefresh =
-      currentState.isConnected && currentState.phase === ConnectionPhase.CONNECTED
-    set({
-      state: {
-        ...currentState,
-        phase: isBackgroundRefresh
-          ? ConnectionPhase.CONNECTED
-          : ConnectionPhase.SEARCHING,
-        serverUrl: persistedServerUrl ?? currentState.serverUrl,
-        errorKind: isBackgroundRefresh ? currentState.errorKind : "none",
-        isChecking: true,
-        offlineBypass: false,
-        lastError: isBackgroundRefresh ? currentState.lastError : null,
-        checksSinceConfigChange: nextChecksSinceConfigChange
-      }
-    })
-
-    try {
-      let cfg = await tldwClient.getConfig()
-      const quickstartWebUiServerUrl = getQuickstartWebUiServerUrl()
-      const recoveryProbeSourceServerUrl = cfg?.serverUrl ?? currentState.serverUrl ?? null
-      let serverUrl = quickstartWebUiServerUrl ?? cfg?.serverUrl ?? null
-
-      if (
-        quickstartWebUiServerUrl &&
-        cfg?.serverUrl !== quickstartWebUiServerUrl
-      ) {
-        await tldwClient.updateConfig({ serverUrl: quickstartWebUiServerUrl })
-        cfg = {
-          ...(cfg || {}),
-          serverUrl: quickstartWebUiServerUrl,
-          authMode: cfg?.authMode || "single-user"
-        } as TldwConfig
-        serverUrl = quickstartWebUiServerUrl
+        }))
       }
 
-      if (!serverUrl) {
-        try {
-          // Only reuse a previously stored URL; do not implicitly
-          // fall back to the hard-coded localhost default here.
-          const storedUrl = await getStoredTldwServerURL()
-          if (storedUrl) {
-            await tldwClient.updateConfig({
-              serverUrl: storedUrl
-            })
-            cfg = await tldwClient.getConfig()
-            serverUrl = cfg?.serverUrl ?? storedUrl
-          }
-        } catch {
-          // ignore fallback errors; we will treat as unconfigured below
-        }
-      }
-
-      const hasSingleUserApiKeyValue = hasSingleUserApiKey(cfg)
-      const missingSingleUserApiKey =
-        Boolean(serverUrl) &&
-        (cfg?.authMode ?? "single-user") === "single-user" &&
-        !hasSingleUserApiKeyValue
-
-      // If we have a server URL but no single-user API key, treat as
-      // unconfigured/unauthenticated instead of marking the app connected
-      // off an unauthenticated liveness check.
-      // Users must explicitly configure their own credentials in
-      // Settings/Onboarding before authenticated pages can function.
-      if (missingSingleUserApiKey) {
-        set({
+      // Test-only hook: force a missing/unconfigured state without network calls.
+      if (forceUnconfigured) {
+        set((s) => ({
           state: {
-            ...currentState,
+            ...s.state,
+            errorKind: "none",
             phase: ConnectionPhase.UNCONFIGURED,
-            serverUrl,
+            serverUrl: persistedServerUrl,
             isConnected: false,
             isChecking: false,
             consecutiveFailures: 0,
             offlineBypass: false,
-            errorKind: "none",
-            configStep: "auth",
             lastCheckedAt: Date.now(),
             lastError: null,
             lastStatusCode: null,
@@ -787,244 +669,392 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
             knowledgeLastCheckedAt: null,
             knowledgeError: null
           }
-        })
+        }))
+        checkInFlight = false
         return
       }
 
-      if (!serverUrl) {
-        set({
+      // Optional test toggle: allow CI/Playwright to treat the app as "connected"
+      // without hitting a live server. Controlled via env VITE_TLDW_E2E_ALLOW_OFFLINE
+      // or chrome.storage.local[__tldw_allow_offline].
+      if (bypass) {
+        const serverUrl =
+          persistedServerUrl ??
+          (await ensurePlaceholderConfig()) ??
+          currentState.serverUrl ??
+          "offline://local"
+
+        set((s) => ({
           state: {
-            ...currentState,
-            phase: ConnectionPhase.UNCONFIGURED,
-            serverUrl: null,
-            isConnected: false,
-            isChecking: false,
-            consecutiveFailures: 0,
-            offlineBypass: false,
-            errorKind: "none",
-            lastCheckedAt: Date.now(),
-            lastError: null,
-            lastStatusCode: null,
-            knowledgeStatus: "unknown",
-            knowledgeLastCheckedAt: null,
-            knowledgeError: null
-          }
-        })
-        return
-      }
-
-      await tldwClient.initialize()
-
-      // Request health via background for detailed status codes.
-      // Health endpoints may require auth; apiSend injects headers based
-      // on tldwConfig (API key / access token).
-      const noAuthForHealth = !cfg ||
-        (!hasSingleUserApiKeyValue &&
-          !cfg.accessToken &&
-          cfg.authMode !== "multi-user")
-
-      const healthPromise = (async () => {
-        try {
-          const resp = await apiSend({
-            path: HEALTH_LIVENESS_PATH,
-            method: 'GET',
-            timeoutMs: CONNECTION_TIMEOUT_MS,
-            // Allow unauthenticated health checks when no credentials have
-            // been configured yet so first‑run onboarding can still detect a
-            // reachable server URL. Once an API key or access token exists,
-            // health should run with auth.
-            noAuth: noAuthForHealth
-          })
-          return { ok: Boolean(resp?.ok), status: Number(resp?.status) || 0, error: resp?.ok ? null : (resp?.error || null) }
-        } catch (e) {
-          return { ok: false, status: 0, error: (e as Error)?.message || 'Network error' }
-        }
-      })()
-      let healthResult = await Promise.race([
-        healthPromise,
-        new Promise<{ ok: boolean; status: number; error: string | null }>((resolve) =>
-          setTimeout(() => resolve({ ok: false, status: 0, error: 'timeout' }), CONNECTION_TIMEOUT_MS)
-        )
-      ])
-
-      const fallbackServerUrl = deriveCurrentHostRecoveryServerUrl(
-        quickstartWebUiServerUrl ? recoveryProbeSourceServerUrl : serverUrl
-      )
-      if (
-        !healthResult.ok &&
-        healthResult.status === 0 &&
-        isNetworkTransportFailure(healthResult.error) &&
-        fallbackServerUrl
-      ) {
-        const probeOk = await probeServerLiveness(
-          fallbackServerUrl,
-          Math.min(5_000, CONNECTION_TIMEOUT_MS)
-        )
-        if (probeOk) {
-          if (!quickstartWebUiServerUrl) {
-            await tldwClient.updateConfig({ serverUrl: fallbackServerUrl })
-            serverUrl = fallbackServerUrl
-            cfg = {
-              ...(cfg || {}),
-              serverUrl: fallbackServerUrl
-            } as TldwConfig
-          }
-          const fallbackHasSingleUserApiKey = hasSingleUserApiKey(cfg)
-          const fallbackNoAuth = !cfg ||
-            (!fallbackHasSingleUserApiKey &&
-              !cfg.accessToken &&
-              cfg.authMode !== "multi-user")
-          const fallbackResp = await apiSend({
-            path: HEALTH_LIVENESS_PATH,
-            method: "GET",
-            timeoutMs: CONNECTION_TIMEOUT_MS,
-            noAuth: fallbackNoAuth
-          })
-          healthResult = {
-            ok: Boolean(fallbackResp?.ok),
-            status: Number(fallbackResp?.status) || 0,
-            error: fallbackResp?.ok ? null : (fallbackResp?.error || null)
-          }
-        }
-      }
-
-      const ok = healthResult.ok
-      const resolvedHealthError = maybeAnnotateCorsMismatchError({
-        error: healthResult.error,
-        status: healthResult.status,
-        serverUrl
-      })
-
-      let knowledgeStatus: KnowledgeStatus = currentState.knowledgeStatus
-      let knowledgeLastCheckedAt = currentState.knowledgeLastCheckedAt
-      let knowledgeError = currentState.knowledgeError
-      const shouldRefreshKnowledge =
-        !currentState.knowledgeLastCheckedAt ||
-        now - currentState.knowledgeLastCheckedAt >= KNOWLEDGE_RECHECK_INTERVAL_MS ||
-        currentState.knowledgeStatus !== "ready"
-
-      if (ok && shouldRefreshKnowledge) {
-        try {
-          // Add timeout to RAG health check to prevent hanging
-          // Increased from 5s to 15s to avoid false "offline" status when RAG is slow but working
-          const ragPromise = tldwClient.ragHealth()
-          const ragTimeout = new Promise<null>((resolve) =>
-            setTimeout(() => resolve(null), 15000)
-          )
-          const rag = await Promise.race([ragPromise, ragTimeout])
-          if (rag !== null) {
-            knowledgeStatus = deriveKnowledgeStatusFromHealth(rag)
-          } else {
-            knowledgeStatus = "offline"
-            knowledgeError = "rag-timeout"
-          }
-          knowledgeLastCheckedAt = Date.now()
-          if (knowledgeStatus === "empty") {
-            knowledgeError = "no-index"
-          }
-        } catch (e) {
-          knowledgeStatus = "offline"
-          knowledgeLastCheckedAt = Date.now()
-          knowledgeError = (e as Error)?.message ?? "unknown-error"
-        }
-      } else if (!ok) {
-        knowledgeStatus = "offline"
-        knowledgeLastCheckedAt = Date.now()
-        knowledgeError = "core-offline"
-      }
-
-      let errorKind: ConnectionState["errorKind"] = "none"
-      const nextConsecutiveFailures = ok ? 0 : currentState.consecutiveFailures + 1
-
-      if (ok) {
-        if (knowledgeStatus === "offline") {
-          errorKind = "partial"
-        } else {
-          errorKind = "none"
-        }
-      } else {
-        const status = healthResult.status
-        if (status === 401 || status === 403) {
-          errorKind = "auth"
-        } else {
-          errorKind = "unreachable"
-        }
-      }
-
-      const holdConnectedOnTransientFailure =
-        !ok &&
-        errorKind === "unreachable" &&
-        currentState.isConnected &&
-        currentState.phase === ConnectionPhase.CONNECTED &&
-        nextConsecutiveFailures < CONNECTED_FAILURE_THRESHOLD
-
-      if (holdConnectedOnTransientFailure) {
-        set({
-          state: {
-            ...currentState,
+            ...s.state,
             phase: ConnectionPhase.CONNECTED,
+            serverUrl,
             isConnected: true,
             isChecking: false,
-            offlineBypass: false,
+            consecutiveFailures: 0,
+            offlineBypass: true,
+            errorKind: "none",
             lastCheckedAt: Date.now(),
-            lastError: resolvedHealthError || "transient-health-check-failure",
-            lastStatusCode: healthResult.status || 0,
-            errorKind: "partial",
-            consecutiveFailures: nextConsecutiveFailures
+            lastError: null,
+            lastStatusCode: null,
+            knowledgeStatus: "ready",
+            knowledgeLastCheckedAt: Date.now(),
+            knowledgeError: null
           }
-        })
+        }))
+        checkInFlight = false
         return
       }
 
-      set({
+      // Throttle repeated checks when already connected recently.
+      // This prevents the landing page/header from hammering the server.
+      const now = Date.now()
+      const nextChecksSinceConfigChange = currentState.checksSinceConfigChange + 1
+      if (
+        !options.force &&
+        currentState.isConnected &&
+        currentState.phase === ConnectionPhase.CONNECTED &&
+        currentState.lastCheckedAt != null &&
+        now - currentState.lastCheckedAt < CONNECTED_THROTTLE_MS
+      ) {
+        checkInFlight = false
+        return
+      }
+
+      const isBackgroundRefresh =
+        currentState.isConnected && currentState.phase === ConnectionPhase.CONNECTED
+      set((s) => ({
         state: {
-          ...currentState,
-          phase: ok ? ConnectionPhase.CONNECTED : ConnectionPhase.ERROR,
-          serverUrl,
-          isConnected: ok,
-          isChecking: false,
-          consecutiveFailures:
-            ok
-              ? 0
-              : errorKind === "unreachable"
-                ? nextConsecutiveFailures
-                : 0,
+          ...s.state,
+          phase: isBackgroundRefresh
+            ? ConnectionPhase.CONNECTED
+            : ConnectionPhase.SEARCHING,
+          serverUrl: persistedServerUrl ?? currentState.serverUrl,
+          errorKind: isBackgroundRefresh ? currentState.errorKind : "none",
+          isChecking: true,
           offlineBypass: false,
-          lastCheckedAt: Date.now(),
-          lastError: ok ? null : (resolvedHealthError || 'timeout-or-offline'),
-          lastStatusCode: ok ? null : healthResult.status,
-          knowledgeStatus,
-          knowledgeLastCheckedAt,
-          knowledgeError,
-          errorKind,
+          lastError: isBackgroundRefresh ? currentState.lastError : null,
           checksSinceConfigChange: nextChecksSinceConfigChange
         }
-      })
-    } catch (error) {
-      const fallbackError =
-        maybeAnnotateCorsMismatchError({
-          error: (error as Error)?.message ?? "unknown-error",
-          status: 0,
-          serverUrl: currentState.serverUrl
-        }) ?? "unknown-error"
-      set({
-        state: {
-          ...currentState,
-          phase: ConnectionPhase.ERROR,
-          isConnected: false,
-          isChecking: false,
-          consecutiveFailures: currentState.consecutiveFailures + 1,
-          offlineBypass: false,
-          lastCheckedAt: Date.now(),
-          lastError: fallbackError,
-          lastStatusCode: 0,
-          knowledgeStatus: "offline",
-          knowledgeLastCheckedAt: Date.now(),
-          knowledgeError: fallbackError,
-          errorKind: "unreachable",
-          checksSinceConfigChange: nextChecksSinceConfigChange
+      }))
+
+      try {
+        let cfg = await tldwClient.getConfig()
+        const quickstartWebUiServerUrl = getQuickstartWebUiServerUrl()
+        const recoveryProbeSourceServerUrl = cfg?.serverUrl ?? currentState.serverUrl ?? null
+        let serverUrl = quickstartWebUiServerUrl ?? cfg?.serverUrl ?? null
+
+        if (
+          quickstartWebUiServerUrl &&
+          cfg?.serverUrl !== quickstartWebUiServerUrl
+        ) {
+          await tldwClient.updateConfig({ serverUrl: quickstartWebUiServerUrl })
+          cfg = {
+            ...(cfg || {}),
+            serverUrl: quickstartWebUiServerUrl,
+            authMode: cfg?.authMode || "single-user"
+          } as TldwConfig
+          serverUrl = quickstartWebUiServerUrl
         }
-      })
+
+        if (!serverUrl) {
+          try {
+            // Only reuse a previously stored URL; do not implicitly
+            // fall back to the hard-coded localhost default here.
+            const storedUrl = await getStoredTldwServerURL()
+            if (storedUrl) {
+              await tldwClient.updateConfig({
+                serverUrl: storedUrl
+              })
+              cfg = await tldwClient.getConfig()
+              serverUrl = cfg?.serverUrl ?? storedUrl
+            }
+          } catch {
+            // ignore fallback errors; we will treat as unconfigured below
+          }
+        }
+
+        const hasSingleUserApiKeyValue = hasSingleUserApiKey(cfg)
+        const missingSingleUserApiKey =
+          Boolean(serverUrl) &&
+          (cfg?.authMode ?? "single-user") === "single-user" &&
+          !hasSingleUserApiKeyValue
+
+        // If we have a server URL but no single-user API key, treat as
+        // unconfigured/unauthenticated instead of marking the app connected
+        // off an unauthenticated liveness check.
+        // Users must explicitly configure their own credentials in
+        // Settings/Onboarding before authenticated pages can function.
+        if (missingSingleUserApiKey) {
+          set((s) => ({
+            state: {
+              ...s.state,
+              phase: ConnectionPhase.UNCONFIGURED,
+              serverUrl,
+              isConnected: false,
+              isChecking: false,
+              consecutiveFailures: 0,
+              offlineBypass: false,
+              errorKind: "none",
+              configStep: "auth",
+              lastCheckedAt: Date.now(),
+              lastError: null,
+              lastStatusCode: null,
+              knowledgeStatus: "unknown",
+              knowledgeLastCheckedAt: null,
+              knowledgeError: null
+            }
+          }))
+          checkInFlight = false
+          return
+        }
+
+        if (!serverUrl) {
+          set((s) => ({
+            state: {
+              ...s.state,
+              phase: ConnectionPhase.UNCONFIGURED,
+              serverUrl: null,
+              isConnected: false,
+              isChecking: false,
+              consecutiveFailures: 0,
+              offlineBypass: false,
+              errorKind: "none",
+              lastCheckedAt: Date.now(),
+              lastError: null,
+              lastStatusCode: null,
+              knowledgeStatus: "unknown",
+              knowledgeLastCheckedAt: null,
+              knowledgeError: null
+            }
+          }))
+          checkInFlight = false
+          return
+        }
+
+        await tldwClient.initialize()
+
+        // Request health via background for detailed status codes.
+        // Health endpoints may require auth; apiSend injects headers based
+        // on tldwConfig (API key / access token).
+        const noAuthForHealth = !cfg ||
+          (!hasSingleUserApiKeyValue &&
+            !cfg.accessToken &&
+            cfg.authMode !== "multi-user")
+
+        const healthPromise = (async () => {
+          try {
+            const resp = await apiSend({
+              path: HEALTH_LIVENESS_PATH,
+              method: 'GET',
+              timeoutMs: CONNECTION_TIMEOUT_MS,
+              // Allow unauthenticated health checks when no credentials have
+              // been configured yet so first‑run onboarding can still detect a
+              // reachable server URL. Once an API key or access token exists,
+              // health should run with auth.
+              noAuth: noAuthForHealth
+            })
+            return { ok: Boolean(resp?.ok), status: Number(resp?.status) || 0, error: resp?.ok ? null : (resp?.error || null) }
+          } catch (e) {
+            return { ok: false, status: 0, error: (e as Error)?.message || 'Network error' }
+          }
+        })()
+        let healthResult = await Promise.race([
+          healthPromise,
+          new Promise<{ ok: boolean; status: number; error: string | null }>((resolve) =>
+            setTimeout(() => resolve({ ok: false, status: 0, error: 'timeout' }), CONNECTION_TIMEOUT_MS)
+          )
+        ])
+
+        const fallbackServerUrl = deriveCurrentHostRecoveryServerUrl(
+          quickstartWebUiServerUrl ? recoveryProbeSourceServerUrl : serverUrl
+        )
+        if (
+          !healthResult.ok &&
+          healthResult.status === 0 &&
+          isNetworkTransportFailure(healthResult.error) &&
+          fallbackServerUrl
+        ) {
+          const probeOk = await probeServerLiveness(
+            fallbackServerUrl,
+            Math.min(5_000, CONNECTION_TIMEOUT_MS)
+          )
+          if (probeOk) {
+            if (!quickstartWebUiServerUrl) {
+              await tldwClient.updateConfig({ serverUrl: fallbackServerUrl })
+              serverUrl = fallbackServerUrl
+              cfg = {
+                ...(cfg || {}),
+                serverUrl: fallbackServerUrl
+              } as TldwConfig
+            }
+            const fallbackHasSingleUserApiKey = hasSingleUserApiKey(cfg)
+            const fallbackNoAuth = !cfg ||
+              (!fallbackHasSingleUserApiKey &&
+                !cfg.accessToken &&
+                cfg.authMode !== "multi-user")
+            const fallbackResp = await apiSend({
+              path: HEALTH_LIVENESS_PATH,
+              method: "GET",
+              timeoutMs: CONNECTION_TIMEOUT_MS,
+              noAuth: fallbackNoAuth
+            })
+            healthResult = {
+              ok: Boolean(fallbackResp?.ok),
+              status: Number(fallbackResp?.status) || 0,
+              error: fallbackResp?.ok ? null : (fallbackResp?.error || null)
+            }
+          }
+        }
+
+        const ok = healthResult.ok
+        const resolvedHealthError = maybeAnnotateCorsMismatchError({
+          error: healthResult.error,
+          status: healthResult.status,
+          serverUrl
+        })
+
+        let knowledgeStatus: KnowledgeStatus = currentState.knowledgeStatus
+        let knowledgeLastCheckedAt = currentState.knowledgeLastCheckedAt
+        let knowledgeError = currentState.knowledgeError
+        const shouldRefreshKnowledge =
+          !currentState.knowledgeLastCheckedAt ||
+          now - currentState.knowledgeLastCheckedAt >= KNOWLEDGE_RECHECK_INTERVAL_MS ||
+          currentState.knowledgeStatus !== "ready"
+
+        if (ok && shouldRefreshKnowledge) {
+          try {
+            // Add timeout to RAG health check to prevent hanging
+            // Increased from 5s to 15s to avoid false "offline" status when RAG is slow but working
+            const ragPromise = tldwClient.ragHealth()
+            const ragTimeout = new Promise<null>((resolve) =>
+              setTimeout(() => resolve(null), 15000)
+            )
+            const rag = await Promise.race([ragPromise, ragTimeout])
+            if (rag !== null) {
+              knowledgeStatus = deriveKnowledgeStatusFromHealth(rag)
+            } else {
+              knowledgeStatus = "offline"
+              knowledgeError = "rag-timeout"
+            }
+            knowledgeLastCheckedAt = Date.now()
+            if (knowledgeStatus === "empty") {
+              knowledgeError = "no-index"
+            }
+          } catch (e) {
+            knowledgeStatus = "offline"
+            knowledgeLastCheckedAt = Date.now()
+            knowledgeError = (e as Error)?.message ?? "unknown-error"
+          }
+        } else if (!ok) {
+          knowledgeStatus = "offline"
+          knowledgeLastCheckedAt = Date.now()
+          knowledgeError = "core-offline"
+        }
+
+        let errorKind: ConnectionState["errorKind"] = "none"
+        const nextConsecutiveFailures = ok ? 0 : currentState.consecutiveFailures + 1
+
+        if (ok) {
+          if (knowledgeStatus === "offline") {
+            errorKind = "partial"
+          } else {
+            errorKind = "none"
+          }
+        } else {
+          const status = healthResult.status
+          if (status === 401 || status === 403) {
+            errorKind = "auth"
+          } else {
+            errorKind = "unreachable"
+          }
+        }
+
+        const holdConnectedOnTransientFailure =
+          !ok &&
+          errorKind === "unreachable" &&
+          currentState.isConnected &&
+          currentState.phase === ConnectionPhase.CONNECTED &&
+          nextConsecutiveFailures < CONNECTED_FAILURE_THRESHOLD
+
+        if (holdConnectedOnTransientFailure) {
+          set((s) => ({
+            state: {
+              ...s.state,
+              phase: ConnectionPhase.CONNECTED,
+              isConnected: true,
+              isChecking: false,
+              offlineBypass: false,
+              lastCheckedAt: Date.now(),
+              lastError: resolvedHealthError || "transient-health-check-failure",
+              lastStatusCode: healthResult.status || 0,
+              errorKind: "partial",
+              consecutiveFailures: nextConsecutiveFailures
+            }
+          }))
+          checkInFlight = false
+          return
+        }
+
+        set((s) => ({
+          state: {
+            ...s.state,
+            phase: ok ? ConnectionPhase.CONNECTED : ConnectionPhase.ERROR,
+            serverUrl,
+            isConnected: ok,
+            isChecking: false,
+            consecutiveFailures:
+              ok
+                ? 0
+                : errorKind === "unreachable"
+                  ? nextConsecutiveFailures
+                  : 0,
+            offlineBypass: false,
+            lastCheckedAt: Date.now(),
+            lastError: ok ? null : (resolvedHealthError || 'timeout-or-offline'),
+            lastStatusCode: ok ? null : healthResult.status,
+            knowledgeStatus,
+            knowledgeLastCheckedAt,
+            knowledgeError,
+            errorKind,
+            checksSinceConfigChange: nextChecksSinceConfigChange
+          }
+        }))
+      } catch (error) {
+        const fallbackError =
+          maybeAnnotateCorsMismatchError({
+            error: (error as Error)?.message ?? "unknown-error",
+            status: 0,
+            serverUrl: currentState.serverUrl
+          }) ?? "unknown-error"
+        set((s) => ({
+          state: {
+            ...s.state,
+            phase: ConnectionPhase.ERROR,
+            isConnected: false,
+            isChecking: false,
+            consecutiveFailures: currentState.consecutiveFailures + 1,
+            offlineBypass: false,
+            lastCheckedAt: Date.now(),
+            lastError: fallbackError,
+            lastStatusCode: 0,
+            knowledgeStatus: "offline",
+            knowledgeLastCheckedAt: Date.now(),
+            knowledgeError: fallbackError,
+            errorKind: "unreachable",
+            checksSinceConfigChange: nextChecksSinceConfigChange
+          }
+        }))
+      }
+      // Release the in-flight guard for both the normal-completion and caught-error
+      // paths (they converge here after the try/catch above).
+      checkInFlight = false
+    } catch (guardError) {
+      // A throw anywhere above (persisted-flag reads, pre-check state syncs, or
+      // the health check) must still release the synchronous in-flight guard;
+      // otherwise every future health check would be permanently deadlocked.
+      checkInFlight = false
+      throw guardError
     }
   },
 

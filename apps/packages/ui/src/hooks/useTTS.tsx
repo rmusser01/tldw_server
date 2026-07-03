@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import {
   getElevenLabsModel,
   getElevenLabsVoiceId,
@@ -36,10 +36,18 @@ export const useTTS = () => {
   const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(
     null
   )
+  // Refs (stable across renders) let cancel()/unmount always free the in-flight
+  // segment: the current object URL, the current audio element, and a settler
+  // that resolves the pending playAudio() promise so speak()'s loop unwinds.
+  const currentUrlRef = useRef<string | null>(null)
+  const currentAudioRef = useRef<HTMLAudioElement | null>(null)
+  const settlePlaybackRef = useRef<(() => void) | null>(null)
+  const cancelledRef = useRef(false)
   const notification = useAntdNotification()
   const { t } = useTranslation("playground")
 
   const speak = async ({ utterance, saveClip, clipMeta }: VoiceOptions) => {
+    cancelledRef.current = false
     let debugMeta: { provider?: string; mimeType?: string; size?: number } | null =
       null
     try {
@@ -230,6 +238,7 @@ export const useTTS = () => {
       let nextAudioPromise: Promise<AudioResult> | null = null
 
       for (let i = 0; i < sentences.length; i++) {
+        if (cancelledRef.current) break
         setIsSpeaking(true)
 
         let currentAudioData: AudioResult
@@ -281,17 +290,20 @@ export const useTTS = () => {
           })
         }
         const url = URL.createObjectURL(blob)
+        currentUrlRef.current = url
         const audio = new Audio(url)
         audio.playbackRate = playbackSpeed
 
         const canPlay = audio.canPlayType(currentAudioData.mimeType)
         if (!canPlay) {
           URL.revokeObjectURL(url)
+          currentUrlRef.current = null
           throw new Error(
             `Your browser cannot play ${currentAudioData.mimeType}. Try MP3 or WAV.`
           )
         }
 
+        currentAudioRef.current = audio
         setAudioElement(audio)
 
         const playAudio = () =>
@@ -300,11 +312,15 @@ export const useTTS = () => {
             const finish = (err?: unknown) => {
               if (done) return
               done = true
+              settlePlaybackRef.current = null
               audio.onended = null
               audio.onerror = null
               if (err) reject(err)
               else resolve()
             }
+            // Allow cancel()/unmount to resolve this promise even though
+            // audio.pause() fires neither onended nor onerror.
+            settlePlaybackRef.current = () => finish()
             audio.onended = () => finish()
             audio.onerror = () =>
               finish(
@@ -327,11 +343,18 @@ export const useTTS = () => {
               .catch(console.error) || Promise.resolve()
           ])
         } finally {
+          settlePlaybackRef.current = null
           URL.revokeObjectURL(url)
+          if (currentUrlRef.current === url) currentUrlRef.current = null
         }
       }
 
-      if (shouldSaveClip && clipId && savedSegments.length > 0) {
+      if (
+        shouldSaveClip &&
+        clipId &&
+        savedSegments.length > 0 &&
+        !cancelledRef.current
+      ) {
         const textPreview = processedUtterance.replace(/\s+/g, " ").trim()
         const preview =
           textPreview.length > 160
@@ -367,9 +390,11 @@ export const useTTS = () => {
         }
       }
 
+      currentAudioRef.current = null
       setIsSpeaking(false)
       setAudioElement(null)
     } catch (error) {
+      currentAudioRef.current = null
       setIsSpeaking(false)
       setAudioElement(null)
       // eslint-disable-next-line no-console
@@ -388,9 +413,32 @@ export const useTTS = () => {
   }
 
   const cancel = () => {
-    if (audioElement) {
-      audioElement.pause()
-      audioElement.currentTime = 0
+    cancelledRef.current = true
+
+    // Settle the in-flight playAudio() promise so speak()'s loop unwinds and its
+    // `finally { URL.revokeObjectURL }` runs (pause() alone fires no event).
+    const settle = settlePlaybackRef.current
+    settlePlaybackRef.current = null
+    if (settle) settle()
+
+    // Free the current segment URL directly as a safety net (idempotent with the
+    // finally block; double-revoke is harmless).
+    if (currentUrlRef.current) {
+      try {
+        URL.revokeObjectURL(currentUrlRef.current)
+      } catch {}
+      currentUrlRef.current = null
+    }
+
+    // Prefer the ref (stable) so unmount can stop the latest audio even when the
+    // captured `audioElement` state closure is stale.
+    const activeAudio = currentAudioRef.current || audioElement
+    if (activeAudio) {
+      try {
+        activeAudio.pause()
+        activeAudio.currentTime = 0
+      } catch {}
+      currentAudioRef.current = null
       setAudioElement(null)
       setIsSpeaking(false)
       return

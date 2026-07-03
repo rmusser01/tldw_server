@@ -36,6 +36,9 @@ const mockedApiSend = vi.mocked(apiSend)
 const mockedClient = vi.mocked(tldwClient, true)
 const mockedRuntimeApiKey = vi.mocked(getRuntimeSingleUserApiKeyOverride)
 const originalDeploymentMode = process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
+// Fixed wall-clock so state-setup timestamps are deterministic across runs
+// (workflow code must use real Date.now(), but test fixtures should not).
+const FIXED_NOW_MS = 1_700_000_000_000
 
 const setConnectionState = (overrides: Record<string, unknown>) => {
   const prev = useConnectionStore.getState().state
@@ -845,5 +848,129 @@ describe("connection store stability", () => {
     expect(state.phase).toBe(ConnectionPhase.UNCONFIGURED)
     expect(state.isConnected).toBe(false)
     expect(state.configStep).toBe("url")
+  })
+
+  it("does not revert a concurrent config edit when a slow health check finishes (H7)", async () => {
+    setConnectionState({
+      phase: ConnectionPhase.SEARCHING,
+      isConnected: false,
+      isChecking: false,
+      configStep: "url",
+      hasCompletedFirstRun: false,
+      userPersona: null,
+      knowledgeStatus: "ready",
+      knowledgeLastCheckedAt: FIXED_NOW_MS,
+      lastCheckedAt: FIXED_NOW_MS - 60_000,
+      consecutiveFailures: 0,
+      errorKind: "none"
+    })
+
+    // Gate the health check so it stays in-flight while other actions run.
+    let releaseHealth: (value: {
+      ok: boolean
+      status: number
+      data?: unknown
+    }) => void = () => {}
+    const healthGate = new Promise<{
+      ok: boolean
+      status: number
+      data?: unknown
+    }>((resolve) => {
+      releaseHealth = resolve
+    })
+    mockedApiSend.mockReturnValue(healthGate as never)
+
+    // Start the (slow) health check but do not await it yet.
+    const checkPromise = useConnectionStore.getState().checkOnce({ force: true })
+
+    // While it is in-flight, concurrent onboarding actions mutate the store.
+    await useConnectionStore
+      .getState()
+      .setConfigPartial({ serverUrl: "http://concurrent.test:9999" })
+    await useConnectionStore.getState().markFirstRunComplete()
+
+    // Let the slow health check complete. Its terminal write must merge onto the
+    // LATEST state, not the snapshot captured before the concurrent edits.
+    releaseHealth({ ok: true, status: 200, data: { status: "alive" } })
+    await checkPromise
+
+    const final = useConnectionStore.getState().state
+    expect(final.configStep).toBe("auth")
+    expect(final.hasCompletedFirstRun).toBe(true)
+    expect(final.phase).toBe(ConnectionPhase.CONNECTED)
+    expect(final.isConnected).toBe(true)
+  })
+
+  it("ignores a concurrent checkOnce while one is already in flight (H7 guard)", async () => {
+    setConnectionState({
+      phase: ConnectionPhase.SEARCHING,
+      isConnected: false,
+      isChecking: false,
+      knowledgeStatus: "ready",
+      knowledgeLastCheckedAt: Date.now(),
+      lastCheckedAt: Date.now() - 60_000
+    })
+
+    let releaseHealth: (value: {
+      ok: boolean
+      status: number
+      data?: unknown
+    }) => void = () => {}
+    const healthGate = new Promise<{
+      ok: boolean
+      status: number
+      data?: unknown
+    }>((resolve) => {
+      releaseHealth = resolve
+    })
+    mockedApiSend.mockReturnValue(healthGate as never)
+
+    // The in-flight guard is claimed synchronously (before the first await), so
+    // the second call must bail before issuing its own health request.
+    const first = useConnectionStore.getState().checkOnce({ force: true })
+    const second = useConnectionStore.getState().checkOnce({ force: true })
+
+    releaseHealth({ ok: true, status: 200, data: { status: "alive" } })
+    await Promise.all([first, second])
+
+    expect(mockedApiSend).toHaveBeenCalledTimes(1)
+  })
+
+  it("releases the in-flight guard when a step before the health check throws (H7 deadlock)", async () => {
+    // A first-run flag in storage makes checkOnce run its first-run-sync set(...)
+    // BEFORE it flips isChecking, so a throw there leaves isChecking false and the
+    // synchronous in-flight guard as the only thing that could block a retry.
+    setConnectionState({
+      phase: ConnectionPhase.CONNECTED,
+      serverUrl: "http://127.0.0.1:8000",
+      isConnected: true,
+      isChecking: false,
+      hasCompletedFirstRun: false,
+      userPersona: null,
+      knowledgeStatus: "ready",
+      knowledgeLastCheckedAt: FIXED_NOW_MS,
+      lastCheckedAt: FIXED_NOW_MS - 60_000
+    })
+    localStorage.setItem("__tldw_first_run_complete", "true")
+    mockedApiSend.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { status: "alive" }
+    } as never)
+
+    // Throw from a store subscriber to simulate a pre-`try` step failing.
+    const unsubscribe = useConnectionStore.subscribe(() => {
+      throw new Error("pre-check boom")
+    })
+    await expect(
+      useConnectionStore.getState().checkOnce({ force: true })
+    ).rejects.toThrow("pre-check boom")
+    unsubscribe()
+
+    // If the guard had leaked, this second checkOnce would bail before issuing a
+    // health request; it must run and reach apiSend instead.
+    mockedApiSend.mockClear()
+    await useConnectionStore.getState().checkOnce({ force: true })
+    expect(mockedApiSend).toHaveBeenCalled()
   })
 })

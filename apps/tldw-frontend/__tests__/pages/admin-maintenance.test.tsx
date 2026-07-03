@@ -1,4 +1,3 @@
-import type { ReactNode } from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -15,19 +14,10 @@ const mocks = vi.hoisted(() => ({
   showToast: vi.fn(),
   buildAuthHeaders: vi.fn(() => ({ Authorization: 'Bearer test-token' })),
   getApiBaseUrl: vi.fn(() => 'http://example.com/api/v1'),
-  isAdmin: true,
-}));
-
-vi.mock('@web/components/layout/Layout', () => ({
-  Layout: ({ children }: { children: ReactNode }) => <div>{children}</div>,
 }));
 
 vi.mock('@web/components/ui/ToastProvider', () => ({
   useToast: () => ({ show: mocks.showToast }),
-}));
-
-vi.mock('@web/hooks/useIsAdmin', () => ({
-  useIsAdmin: () => mocks.isAdmin,
 }));
 
 vi.mock('@web/lib/api', () => ({
@@ -42,7 +32,6 @@ describe.skipIf(SKIP_INTEGRATION_TESTS)('AdminMaintenancePage effective config f
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.isAdmin = true;
     originalFetch = globalThis.fetch;
   });
 

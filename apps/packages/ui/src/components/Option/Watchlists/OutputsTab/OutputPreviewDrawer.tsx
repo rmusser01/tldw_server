@@ -322,7 +322,10 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
   // Open in new tab (for HTML)
   const handleOpenInNewTab = () => {
     if (!content || output?.format !== "html") return
-    const safeHtml = sanitizedHtml || content
+    // Never fall back to raw `content`: when DOMPurify strips everything it
+    // returns "", and re-injecting unsanitized HTML into the same-origin
+    // blob: tab would reintroduce the XSS. Match the rendered view (:638).
+    const safeHtml = sanitizedHtml || ""
     const blob = new Blob([safeHtml], { type: "text/html" })
     const url = URL.createObjectURL(blob)
     window.open(url, "_blank")

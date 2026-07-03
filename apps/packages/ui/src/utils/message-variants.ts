@@ -72,9 +72,13 @@ export const applyVariantToMessage = (
     reasoning_time_taken:
       variant.reasoning_time_taken ?? message.reasoning_time_taken,
     createdAt: variant.createdAt ?? message.createdAt,
-    serverMessageId: variant.serverMessageId ?? message.serverMessageId,
-    serverMessageVersion:
-      variant.serverMessageVersion ?? message.serverMessageVersion,
+    // A swiped variant carries its own server identity. Do NOT fall back to the
+    // previously-displayed variant's serverMessageId when the target variant is
+    // not yet persisted, otherwise a later edit/delete would target the wrong
+    // server row. Persisted variants supply their own id; unpersisted ones stay
+    // undefined so downstream edit/delete can gate on it.
+    serverMessageId: variant.serverMessageId,
+    serverMessageVersion: variant.serverMessageVersion,
     metadataExtra: variant.metadataExtra,
     id: variant.id ?? message.id
   }

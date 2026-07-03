@@ -87,7 +87,11 @@ export const useAudiobookGeneration = () => {
           throw new Error("TTS synthesis function not available")
         }
 
-        const result = await context.synthesize(context.utterance)
+        // Thread the abort signal through so cancelGeneration() aborts the
+        // in-flight chapter synthesis, not just the between-chapter poll.
+        const result = await context.synthesize(context.utterance, {
+          signal: abortControllerRef.current?.signal
+        })
         const blob = new Blob([result.buffer], { type: result.mimeType })
         return blob
       } catch (error) {

@@ -34,18 +34,28 @@ export function useStorage<T = unknown>(
   const [value, setValue] = useState<T | undefined>(defaultValueRef.current)
   const [isLoading, setIsLoading] = useState(true)
 
+  // Track the freshest value so functional updates (`setValue(v => ...)`) don't
+  // read a stale render closure and drop updates.
+  const valueRef = useRef<T | undefined>(value)
+  const applyValue = useCallback((next: T | undefined) => {
+    valueRef.current = next
+    setValue(next)
+  }, [])
+
   useEffect(() => {
     let cancelled = false
+    // `storage.get()` snapshots the backend synchronously but resolves in a
+    // later microtask. If a `watch` callback delivers a fresher value (from
+    // another write) in that window, the stale get() result must NOT clobber
+    // it. This flag records that a watch update already won the race.
+    let watchUpdated = false
     setIsLoading(true)
     storage
       .get<T>(options.key)
       .then((stored) => {
         if (cancelled) return
-        if (stored === undefined) {
-          setValue(defaultValueRef.current)
-        } else {
-          setValue(stored)
-        }
+        if (watchUpdated) return
+        applyValue(stored === undefined ? defaultValueRef.current : stored)
       })
       .finally(() => {
         if (!cancelled) {
@@ -53,22 +63,36 @@ export function useStorage<T = unknown>(
         }
       })
 
+    // Subscribe so cross-instance / cross-tab writes apply without a reload.
+    const unwatch = storage.watch({
+      [options.key]: (change) => {
+        if (cancelled) return
+        watchUpdated = true
+        applyValue(
+          change.newValue === undefined
+            ? defaultValueRef.current
+            : (change.newValue as T)
+        )
+      }
+    })
+
     return () => {
       cancelled = true
+      unwatch()
     }
-  }, [options.key, storage])
+  }, [options.key, storage, applyValue])
 
   const setStoredValue = useCallback<SetValue<T>>(
     async (next) => {
       const resolved =
         typeof next === "function"
-          ? (next as (prev: T | undefined) => T)(value)
+          ? (next as (prev: T | undefined) => T)(valueRef.current)
           : next
-      setValue(resolved)
+      applyValue(resolved)
       await storage.set(options.key, resolved)
     },
-    [options.key, storage, value]
+    [options.key, storage, applyValue]
   )
 
-  return [value, setStoredValue, { isLoading, setRenderValue: setValue }]
+  return [value, setStoredValue, { isLoading, setRenderValue: applyValue }]
 }

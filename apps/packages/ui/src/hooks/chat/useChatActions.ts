@@ -35,6 +35,7 @@ import {
 import { generateBranchFromMessageIds } from "@/db/dexie/branch"
 import { type UploadedFile } from "@/db/dexie/types"
 import { buildAssistantErrorContent } from "@/utils/chat-error-message"
+import { buildCharacterChatAssistantErrorContent } from "./useCharacterChatMode"
 import { detectCharacterMood } from "@/utils/character-mood"
 import { WEBUI_CHARACTER_CHAT_SOURCE } from "@/utils/character-chat-session"
 import {
@@ -591,6 +592,23 @@ export const useChatActions = ({
   )
   const messagesRef = React.useRef(messages)
   const discardCurrentTurnOnAbortRef = React.useRef(false)
+  // Tracks the abort controller owned by the most recently started turn. Used so
+  // a finishing turn only resets the shared streaming flag / controller if it
+  // still owns it (a newer in-flight turn may have taken ownership).
+  const activeAbortControllerRef = React.useRef<AbortController | null>(null)
+  const releaseAbortControllerIfOwned = React.useCallback(
+    (turnSignal: AbortSignal): boolean => {
+      if (
+        activeAbortControllerRef.current &&
+        activeAbortControllerRef.current.signal === turnSignal
+      ) {
+        activeAbortControllerRef.current = null
+        return true
+      }
+      return false
+    },
+    []
+  )
 
   React.useEffect(() => {
     messagesRef.current = messages
@@ -1091,6 +1109,7 @@ export const useChatActions = ({
       setIsProcessing,
       setStreaming,
       setAbortController,
+      releaseAbortControllerIfOwned,
       historyId: resolvedHistoryId ?? historyId,
       setHistoryId,
       fileRetrievalEnabled,
@@ -1320,6 +1339,7 @@ export const useChatActions = ({
     let pendingStreamingText = ""
     let pendingReasoningTime = 0
     let lastStreamingUpdateAt = 0
+    let inactivityTimer: ReturnType<typeof setTimeout> | null = null
 
     const flushStreamingUpdate = () => {
       if (pendingStreamingText.length === 0) return
@@ -1714,6 +1734,23 @@ export const useChatActions = ({
         normalizedModel.length > 0 ? normalizedModel : resolvedModel
 
       const shouldPersistToServer = !temporaryChat
+      // Stream-inactivity watchdog: if no chunk arrives within the timeout, abort
+      // the underlying stream so a stalled character response cannot hang forever.
+      const STREAM_INACTIVITY_TIMEOUT_MS = 60_000
+      let inactivityAborted = false
+      const turnController =
+        activeAbortControllerRef.current &&
+        activeAbortControllerRef.current.signal === signal
+          ? activeAbortControllerRef.current
+          : null
+      const resetInactivityTimer = () => {
+        if (inactivityTimer) clearTimeout(inactivityTimer)
+        inactivityTimer = setTimeout(() => {
+          inactivityAborted = true
+          turnController?.abort()
+        }, STREAM_INACTIVITY_TIMEOUT_MS)
+      }
+      resetInactivityTimer()
       for await (const chunk of tldwClient.streamCharacterChatCompletion(
         chatId,
         {
@@ -1731,6 +1768,7 @@ export const useChatActions = ({
         },
         { signal }
       )) {
+        resetInactivityTimer()
         const interruptionEvent =
           chunk && typeof chunk === "object" && !Array.isArray(chunk)
             ? (chunk as Record<string, unknown>)
@@ -1784,6 +1822,15 @@ export const useChatActions = ({
       }
       cancelStreamingUpdate()
       flushStreamingUpdate()
+      if (inactivityTimer) clearTimeout(inactivityTimer)
+
+      if (inactivityAborted) {
+        const timeoutError = new Error(
+          "Stream timed out: no data received for 60 seconds"
+        )
+        ;(timeoutError as any).name = "StreamInactivityTimeout"
+        throw timeoutError
+      }
 
       if (signal?.aborted) {
         const abortError = new Error("AbortError")
@@ -2118,7 +2165,11 @@ export const useChatActions = ({
           return true
         }
       })
-      const assistantContent = buildAssistantErrorContent(fullText, e)
+      const assistantContent = buildCharacterChatAssistantErrorContent(
+        fullText,
+        e,
+        t
+      )
       const interruptionReason =
         e instanceof Error ? e.message : t("somethingWentWrong")
       if (generateMessageId) {
@@ -2155,8 +2206,12 @@ export const useChatActions = ({
       })
 
       if (!errorSave) {
+        const isInactivityTimeout =
+          e instanceof Error && (e as any).name === "StreamInactivityTimeout"
         notification.error({
-          message: t("error"),
+          message: isInactivityTimeout
+            ? t("playground:streamTimeout", { defaultValue: "Stream timed out" })
+            : t("error"),
           description: e instanceof Error ? e.message : t("somethingWentWrong")
         })
       }
@@ -2166,7 +2221,12 @@ export const useChatActions = ({
     } finally {
       discardCurrentTurnOnAbortRef.current = false
       cancelStreamingUpdate()
-      setAbortController(null)
+      if (inactivityTimer) clearTimeout(inactivityTimer)
+      // Only null the shared controller if this turn still owns it, so a newer
+      // in-flight turn's controller is not clobbered (and stays cancellable).
+      if (releaseAbortControllerIfOwned(signal)) {
+        setAbortController(null)
+      }
     }
   }
 
@@ -2426,9 +2486,11 @@ export const useChatActions = ({
       const newController = new AbortController()
       signal = newController.signal
       setAbortController(newController)
+      activeAbortControllerRef.current = newController
     } else {
       setAbortController(controller)
       signal = controller.signal
+      activeAbortControllerRef.current = controller
     }
 
     const messageSteeringForTurn = messageSteeringOverride
@@ -2475,26 +2537,8 @@ export const useChatActions = ({
       dynamicUIRequest ?? requestOverrides?.dynamicUIRequest
     const turnUserMetadataExtra =
       userMetadataExtra ?? requestOverrides?.userMetadataExtra
-    const chatModeParams = await buildChatModeParams({
-      ...(requestOverrides ?? {}),
-      ragMediaIds: turnRagMediaIds,
-      fileRetrievalEnabled: turnFileRetrievalEnabled,
-      selectedKnowledge: turnSelectedKnowledge,
-      selectedModel: effectiveSelectedModel,
-      messageSteering: messageSteeringForTurn,
-      userMessageType,
-      assistantMessageType,
-      imageGenerationRequest,
-      imageGenerationRefine,
-      imageGenerationPromptMode,
-      imageGenerationSource,
-      imageEventSyncPolicy,
-      researchContext,
-      dynamicUIRequest: turnDynamicUIRequest,
-      userMetadataExtra: turnUserMetadataExtra
-    })
-    const baseMessages = chatHistory || messages
-    const baseHistory = memory || history
+    // Declared before the try so the catch/finally can still read them even if
+    // a pre-stream await throws below.
     const capturedReplyTargetId = replyTarget?.id ?? null
     const replyActive =
       Boolean(replyTarget) &&
@@ -2502,27 +2546,50 @@ export const useChatActions = ({
       !isRegenerate &&
       !isContinue &&
       !selectedCharacter?.id
-    const replyOverrides = replyActive
-      ? (() => {
-          const userMessageId = generateID()
-          const assistantMessageId = generateID()
-          return {
-            userMessageId,
-            assistantMessageId,
-            userParentMessageId: replyTarget?.id ?? null,
-            assistantParentMessageId: userMessageId
-          }
-        })()
-      : {}
-    const chatModeParamsWithReply = replyActive
-      ? { ...chatModeParams, ...replyOverrides }
-      : chatModeParams
-    const chatModeParamsWithRegen = {
-      ...chatModeParamsWithReply,
-      regenerateFromMessage: isRegenerate ? regenerateFromMessage : undefined
-    }
 
     try {
+      // Pre-stream awaits run inside the try so a failure resets streaming state
+      // (and lets the caller drain its queue) instead of stranding the UI.
+      const chatModeParams = await buildChatModeParams({
+        ...(requestOverrides ?? {}),
+        ragMediaIds: turnRagMediaIds,
+        fileRetrievalEnabled: turnFileRetrievalEnabled,
+        selectedKnowledge: turnSelectedKnowledge,
+        selectedModel: effectiveSelectedModel,
+        messageSteering: messageSteeringForTurn,
+        userMessageType,
+        assistantMessageType,
+        imageGenerationRequest,
+        imageGenerationRefine,
+        imageGenerationPromptMode,
+        imageGenerationSource,
+        imageEventSyncPolicy,
+        researchContext,
+        dynamicUIRequest: turnDynamicUIRequest,
+        userMetadataExtra: turnUserMetadataExtra
+      })
+      const baseMessages = chatHistory || messages
+      const baseHistory = memory || history
+      const replyOverrides = replyActive
+        ? (() => {
+            const userMessageId = generateID()
+            const assistantMessageId = generateID()
+            return {
+              userMessageId,
+              assistantMessageId,
+              userParentMessageId: replyTarget?.id ?? null,
+              assistantParentMessageId: userMessageId
+            }
+          })()
+        : {}
+      const chatModeParamsWithReply = replyActive
+        ? { ...chatModeParams, ...replyOverrides }
+        : chatModeParams
+      const chatModeParamsWithRegen = {
+        ...chatModeParamsWithReply,
+        regenerateFromMessage: isRegenerate ? regenerateFromMessage : undefined
+      }
+
       if (isContinue) {
         const continueMessages = chatHistory || messages
         const continueHistory = memory || history
@@ -2985,6 +3052,9 @@ export const useChatActions = ({
             setStreaming: () => {},
             setIsProcessing: () => {},
             setAbortController: () => {},
+            // Compare owns the shared controller for the whole turn (see the
+            // single reset after Promise.all). Sub-turns must not release it.
+            releaseAbortControllerIfOwned: () => false,
             messageSteering: messageSteeringForTurn
           })
           const compareEnhancedParams = {
@@ -3033,6 +3103,7 @@ export const useChatActions = ({
           setIsProcessing(false)
           setStreaming(false)
           setAbortController(null)
+          activeAbortControllerRef.current = null
           return aggregateChatSubmitResults(compareResults)
         }
       }
@@ -3043,6 +3114,11 @@ export const useChatActions = ({
         message: t("error"),
         description: errorMessage
       })
+      // If this turn still owns the shared controller (e.g. a pre-stream failure
+      // before any chat mode ran), release it so the UI is not left streaming.
+      if (releaseAbortControllerIfOwned(signal)) {
+        setAbortController(null)
+      }
       setIsProcessing(false)
       setStreaming(false)
       return chatSubmitFailed(errorMessage)
@@ -3092,6 +3168,7 @@ export const useChatActions = ({
     setStreaming(true)
     const newController = new AbortController()
     setAbortController(newController)
+    activeAbortControllerRef.current = newController
     const signal = newController.signal
 
     const baseMessages = messages
@@ -3204,9 +3281,13 @@ export const useChatActions = ({
         description: errorMessage
       })
     } finally {
-      setStreaming(false)
-      setIsProcessing(false)
-      setAbortController(null)
+      // Only reset shared streaming state if this turn still owns the
+      // controller (an inner chat mode may already have released it).
+      if (releaseAbortControllerIfOwned(signal)) {
+        setStreaming(false)
+        setIsProcessing(false)
+        setAbortController(null)
+      }
       if (shouldConsumeSteering) {
         clearMessageSteering()
       }

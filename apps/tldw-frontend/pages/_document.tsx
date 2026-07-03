@@ -1,5 +1,11 @@
 import { Html, Head, Main, NextScript } from "next/document";
 
+// NOTE: This is the ONLY executable inline script in the app. The
+// Content-Security-Policy in next.config.mjs allowlists it by SHA-256 hash so
+// that script-src can drop 'unsafe-inline'. If you edit THEME_BOOTSTRAP_SCRIPT
+// below, you MUST regenerate `themeBootstrapScriptHash` in next.config.mjs or
+// the browser will block this script (theme flash on load). Regeneration command
+// is documented next to that constant.
 const THEME_BOOTSTRAP_SCRIPT = `
 (() => {
   try {

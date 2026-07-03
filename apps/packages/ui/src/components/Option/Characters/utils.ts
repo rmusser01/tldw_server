@@ -42,6 +42,13 @@ export const CHARACTER_FOLDER_TOKEN_PREFIXES = [
   "__tldw_folder:"
 ] as const
 
+/**
+ * Maximum size for an imported character card. A larger file is rejected at the
+ * preview boundary so a huge card can't freeze the tab on `file.text()` +
+ * synchronous `JSON.parse`.
+ */
+export const MAX_IMPORT_FILE_BYTES = 10 * 1024 * 1024
+
 export const IMPORT_ALLOWED_EXTENSIONS = [
   ".png",
   ".webp",
@@ -487,6 +494,29 @@ export const parseCharacterImportPreview = async (
         values: {
           extension: extension || "no extension",
           allowed
+        }
+      }
+    }
+  }
+
+  if (file.size > MAX_IMPORT_FILE_BYTES) {
+    return {
+      id: `${file.name}-${file.lastModified}-${index}`,
+      file,
+      fileName: file.name,
+      format,
+      name: defaultName,
+      description: "",
+      tagCount: 0,
+      fieldCount: 0,
+      avatarUrl: null,
+      parseError: {
+        key: "settings:manageCharacters.import.previewTooLarge",
+        fallback:
+          "File is too large to import ({{sizeMb}} MB). Maximum allowed is {{maxMb}} MB.",
+        values: {
+          sizeMb: Math.round((file.size / (1024 * 1024)) * 10) / 10,
+          maxMb: Math.floor(MAX_IMPORT_FILE_BYTES / (1024 * 1024))
         }
       }
     }

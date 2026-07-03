@@ -14,6 +14,7 @@ import {
 import type { ToolCall } from "@/types/tool-calls"
 import { publishChatLoopEvent } from "@/services/chat-loop/bridge"
 import { extractChatLoopEvent } from "@/services/chat-loop/stream"
+import { extractStreamTransportInterruption } from "@/utils/extract-token-from-chunk"
 import type { ChatRequestDebugMetadata } from "@/services/tldw/chat-request-debug"
 
 export interface ChatTldwOptions {
@@ -120,6 +121,11 @@ export class ChatTldw {
 
     const tldwMessages = this.convertToTldwMessages(messages)
     const toolCalls: ToolCall[] = []
+    // Captures the background transport's `stream_transport_interrupted`
+    // sentinel. TldwChat surfaces it via onChunk (not as a text token), so we
+    // hold onto the raw chunk here and re-emit it after the token loop so the
+    // chat pipeline can finalize a truncated answer as interrupted.
+    let interruptionChunk: Record<string, unknown> | null = null
 
     const applyToolCallDelta = (deltas: any[]) => {
       deltas.forEach((delta, fallbackIndex) => {
@@ -169,6 +175,10 @@ export class ChatTldw {
         publishChatLoopEvent(loopEvent)
       }
 
+      if (extractStreamTransportInterruption(chunk)) {
+        interruptionChunk = chunk as Record<string, unknown>
+      }
+
       const deltas =
         chunk?.choices?.[0]?.delta?.tool_calls ??
         chunk?.choices?.[0]?.tool_calls ??
@@ -181,6 +191,9 @@ export class ChatTldw {
     const stream = tldwChat.streamMessage(
       tldwMessages,
       {
+        // Thread the UI AbortSignal so Stop aborts the underlying request in
+        // all modes (not just polling `signal.aborted` at the loop top).
+        signal,
         model: this.model,
         temperature: this.temperature,
         maxTokens: this.maxTokens,
@@ -220,6 +233,13 @@ export class ChatTldw {
           // `content` / `choices[0].delta.content`. Yielding the plain
           // string keeps the simple path working (`typeof chunk === 'string'`).
           yield token
+        }
+        // The extension port can drop after the first byte; TldwChat surfaces a
+        // synthesized `stream_transport_interrupted` sentinel via onChunk rather
+        // than as a text token. Re-emit it (as an object chunk) so downstream
+        // chat-modes finalize the partial answer as interrupted, not complete.
+        if (interruptionChunk && !signal?.aborted) {
+          yield interruptionChunk
         }
       } finally {
         // Synthesize a minimal LangChain-style result for handleLLMEnd

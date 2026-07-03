@@ -41,6 +41,7 @@ import {
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import type { RunDetailResponse, ScrapedItem, WatchlistRunAudioStatus } from "@/types/watchlists"
 import { formatRelativeTime } from "@/utils/dateFormatters"
+import { safeExternalUrl } from "@/utils/safe-external-url"
 import { StatusTag } from "../shared"
 import { isWatchlistRunTerminal } from "../shared/runStatus"
 import { mapWatchlistsError } from "../shared/watchlists-error"
@@ -747,17 +748,19 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
       dataIndex: "title",
       key: "title",
       ellipsis: true,
-      render: (title: string | null, record) => (
+      render: (title: string | null, record) => {
+        const safeUrl = safeExternalUrl(record.url)
+        return (
         <div className="space-y-1">
           <div className="font-medium">
-            {record.url ? (
+            {safeUrl ? (
               <a
-                href={record.url}
+                href={safeUrl}
                 target="_blank"
                 rel="noreferrer"
                 className="text-primary hover:underline"
               >
-                {title || record.url}
+                {title || safeUrl}
               </a>
             ) : (
               title || t("watchlists:runs.detail.itemsUntitled", "Untitled")
@@ -767,7 +770,8 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
             <div className="text-xs text-text-muted line-clamp-2">{record.summary}</div>
           )}
         </div>
-      )
+        )
+      }
     },
     {
       title: t("watchlists:runs.detail.itemsColumns.status", "Status"),
@@ -884,6 +888,7 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
     <div className="space-y-3" data-testid="watchlists-run-items-constrained-list">
       {items.map((item) => {
         const title = getItemTitle(item)
+        const itemSafeUrl = safeExternalUrl(item.url)
         return (
           <article
             key={item.id}
@@ -945,8 +950,8 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
                     : t("watchlists:runs.detail.needsReview", "Needs review")}
                 </span>
               </span>
-              {item.url ? (
-                <a href={item.url} target="_blank" rel="noreferrer" className="text-sm text-primary hover:underline">
+              {itemSafeUrl ? (
+                <a href={itemSafeUrl} target="_blank" rel="noreferrer" className="text-sm text-primary hover:underline">
                   {t("watchlists:runs.detail.openSource", "Open source")}
                 </a>
               ) : null}

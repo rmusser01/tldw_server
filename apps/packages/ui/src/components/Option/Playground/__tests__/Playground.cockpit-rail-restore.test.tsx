@@ -41,7 +41,7 @@ const renderShell = ({
 };
 
 describe("Playground cockpit rail restore tabs", () => {
-  it("mounts the context restore control on the left edge below the collapsed chat rail while runtime stays expanded", () => {
+  it("mounts the context restore control on the chat content edge while runtime stays expanded", () => {
     const { onLeftRailVisibleChange } = renderShell({
       leftRailVisible: false,
       rightRailVisible: true,
@@ -61,11 +61,12 @@ describe("Playground cockpit rail restore tabs", () => {
     expect(contextRestore.parentElement).toHaveClass(
       ...COCKPIT_LEFT_RESTORE_WRAPPER_CLASS.split(" "),
     );
+    expect(contextRestore.parentElement).toHaveClass("absolute", "left-0");
     expect(contextRestore.parentElement).toHaveClass("left-0");
+    expect(contextRestore.parentElement).not.toHaveClass("fixed");
     expect(contextRestore.parentElement).not.toHaveClass("left-12");
     expect(contextRestore.parentElement).not.toHaveClass("top-1/2");
     expect(contextRestore.parentElement).not.toHaveClass("-translate-y-1/2");
-    expect(contextRestore.parentElement).not.toHaveClass("absolute");
     expect(contextRestore.parentElement).not.toHaveClass("relative");
     expect(contextRestore).toHaveClass("h-24", "w-8");
     expect(contextRestore).not.toHaveClass("h-32", "w-9");

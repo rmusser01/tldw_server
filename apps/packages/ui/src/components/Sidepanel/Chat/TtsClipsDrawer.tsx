@@ -132,6 +132,10 @@ export const TtsClipsDrawer: React.FC<TtsClipsDrawerProps> = ({ open, onClose })
         return
       }
 
+      // Stop/abort any clip that is already playing before starting a different
+      // one, otherwise both play simultaneously.
+      stopPlayback()
+
       const ordered = [...clip.segments].sort((a, b) => a.index - b.index)
       if (!ordered.length) return
 

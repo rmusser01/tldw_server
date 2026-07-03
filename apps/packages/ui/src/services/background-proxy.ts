@@ -19,6 +19,11 @@ import type {
   PathOrUrl,
   UpperLower
 } from "@/services/tldw/openapi-guard"
+import {
+  isAbsoluteUrlAllowlisted,
+  isSameOriginAbsoluteUrlForConfiguredServer,
+  parseHttpOrigin
+} from "@/utils/absolute-url-guard"
 
 const ERROR_LOG_THROTTLE_MS = 15_000
 const RATE_LIMIT_LOG_THROTTLE_MS = 60_000
@@ -30,7 +35,15 @@ const STREAM_QUEUE_DRAIN_BATCH_LIMIT = 32
 const STREAM_QUEUE_DRAIN_SLICE_MS = 12
 const SAFE_RUNTIME_MESSAGE_TIMEOUT_MS = 3_000
 const UNSAFE_RUNTIME_MESSAGE_TIMEOUT_FLOOR_MS = 5_000
-const DEFAULT_UNSAFE_RUNTIME_MESSAGE_TIMEOUT_MS = 10_000
+// The MV3 worker only replies to an unsafe (write) request once the whole
+// server operation finishes, so this messaging-ack timeout must cover the
+// longest normal generation/ingest (non-stream chat, media kickoff, export)
+// rather than the ~10s it used to be — a 10s cap killed in-flight writes that
+// the worker had actually completed, losing the result. A genuinely dead
+// worker still rejects fast (connection errors), so this only affects the
+// slow-but-alive case. Keep it above the generation request-timeout default.
+const DEFAULT_UNSAFE_RUNTIME_MESSAGE_TIMEOUT_MS = 130_000
+const DEFAULT_UPLOAD_RUNTIME_MESSAGE_TIMEOUT_MS = 130_000
 const ABSOLUTE_URL_BLOCK_ERROR =
   "Direct stream fallback is allowed only for allowlisted absolute URLs."
 const BACKEND_UNREACHABLE_PATTERN =
@@ -62,18 +75,6 @@ const normalizeKnownPathQuirks = <P extends PathOrUrl>(rawPath: P): P => {
 const isAudioStudioArtifactMediaPath = (path: string): boolean =>
   /\/api\/v1\/audio-studio\/projects\/[^/?#]+\/artifacts\/[^/?#]+\/media(?:[?#]|$)/.test(path)
 
-const parseHttpOrigin = (value: unknown): string | null => {
-  const raw = String(value || "").trim()
-  if (!raw) return null
-  try {
-    const parsed = new URL(raw)
-    if (!/^https?:$/i.test(parsed.protocol)) return null
-    return parsed.origin.toLowerCase()
-  } catch {
-    return null
-  }
-}
-
 const normalizeExpectedStatuses = (statuses: unknown): Set<number> => {
   if (!Array.isArray(statuses)) return new Set()
   return new Set(
@@ -89,69 +90,10 @@ const normalizeExpectedStatuses = (statuses: unknown): Set<number> => {
   )
 }
 
-const toAllowlistEntries = (value: unknown): string[] => {
-  if (Array.isArray(value)) {
-    return value
-      .map((entry) => String(entry || "").trim())
-      .filter((entry) => entry.length > 0)
-  }
-  if (typeof value === "string") {
-    const trimmed = value.trim()
-    if (!trimmed) return []
-    if (!trimmed.includes(",")) return [trimmed]
-    return trimmed
-      .split(",")
-      .map((entry) => entry.trim())
-      .filter((entry) => entry.length > 0)
-  }
-  return []
-}
-
-const configuredServerOrigin = (cfg: Record<string, unknown> | null): string | null => {
-  return parseHttpOrigin(cfg?.serverUrl)
-}
-
-const absoluteOriginAllowlistFromConfig = (
-  cfg: Record<string, unknown> | null
-): Set<string> => {
-  const out = new Set<string>()
-  const serverOrigin = configuredServerOrigin(cfg)
-  if (serverOrigin) out.add(serverOrigin)
-  for (const entry of toAllowlistEntries(cfg?.absoluteUrlAllowlist)) {
-    const parsedOrigin = parseHttpOrigin(entry)
-    if (parsedOrigin) out.add(parsedOrigin)
-  }
-  return out
-}
-
-const isAbsoluteUrlAllowlisted = (
-  absoluteUrl: string,
-  cfg: Record<string, unknown> | null
-): boolean => {
-  try {
-    const target = new URL(absoluteUrl)
-    if (!/^https?:$/i.test(target.protocol)) return false
-    const allowlistedOrigins = absoluteOriginAllowlistFromConfig(cfg)
-    return allowlistedOrigins.has(target.origin.toLowerCase())
-  } catch {
-    return false
-  }
-}
-
-const isSameOriginAbsoluteUrlForConfiguredServer = (
-  absoluteUrl: string,
-  cfg: Record<string, unknown> | null
-): boolean => {
-  const serverOrigin = configuredServerOrigin(cfg)
-  if (!serverOrigin) return false
-  try {
-    const target = new URL(absoluteUrl)
-    if (!/^https?:$/i.test(target.protocol)) return false
-    return target.origin.toLowerCase() === serverOrigin
-  } catch {
-    return false
-  }
-}
+// Origin-allowlist / same-origin helpers (parseHttpOrigin,
+// isAbsoluteUrlAllowlisted, isSameOriginAbsoluteUrlForConfiguredServer) are
+// imported from the canonical utils/absolute-url-guard module — behaviour is
+// unchanged (this file's copies were byte-for-byte identical to the guard's).
 
 const extractHttpStatus = (value: unknown): number | null => {
   const statusCandidate = (value as { status?: unknown } | null)?.status
@@ -354,6 +296,20 @@ const createAbortError = (
   return abortError
 }
 
+type StreamInterruptedError = Error & { code?: string; interrupted?: true }
+
+// Surfaced when a non-idempotent streamed request (chat completions,
+// complete-v2) loses its extension port before/around the first token. We must
+// NOT replay it (that would double-generate and persist a duplicate message),
+// so instead we raise a clear error the caller can show as an interruption.
+const createStreamInterruptedError = (message: string): StreamInterruptedError => {
+  const error = new Error(message) as StreamInterruptedError
+  error.name = "StreamInterruptedError"
+  error.code = "STREAM_INTERRUPTED"
+  error.interrupted = true
+  return error
+}
+
 const shouldNotifyBackendUnavailable = (entry: {
   method: string
   path: string
@@ -441,6 +397,82 @@ export interface BgRequestInit<
 // instead of firing N identical ones. Only concurrent requests are shared — once
 // the promise settles it is removed, so caching/staleness semantics are unchanged.
 const inFlightGetRequests = new Map<string, Promise<unknown>>()
+
+type DirectRuntimeStorage = Pick<
+  ReturnType<typeof createSafeStorage>,
+  "get" | "set"
+>
+
+// Module-level single-flight for the web/direct fallback token refresh. Mirrors
+// the extension worker's `refreshInFlight`: concurrent 401s (a common pattern
+// when many components refetch on a page load) trigger exactly ONE refresh
+// instead of a stampede that would each spend and rotate the refresh token,
+// persisting a dead one.
+let webRefreshInFlight: Promise<void> | null = null
+
+const refreshAuthDirect = async (
+  storage: DirectRuntimeStorage
+): Promise<void> => {
+  if (!webRefreshInFlight) {
+    webRefreshInFlight = (async () => {
+      const cfg =
+        ((await storage.get("tldwConfig").catch(() => null)) as
+          | Record<string, unknown>
+          | null) || null
+      const refreshToken = String((cfg?.refreshToken as string) || "").trim()
+      // Signal failure (throw) rather than resolving silently: request-core
+      // treats a resolved refreshAuth as success and would retry with the stale
+      // token. Throwing makes it mark the refresh as failed so a still-401 retry
+      // surfaces "Session expired" instead of masking the failure.
+      if (!refreshToken) {
+        throw new Error("Token refresh failed: no refresh token available")
+      }
+      const resp = await tldwRequest(
+        {
+          path: "/api/v1/auth/refresh",
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: { refresh_token: refreshToken },
+          noAuth: true
+        },
+        { getConfig: () => storage.get("tldwConfig").catch(() => null) }
+      )
+      const tokens = (resp?.ok ? resp.data : null) as
+        | { access_token?: string; refresh_token?: string }
+        | null
+      if (!tokens?.access_token) {
+        throw new Error(
+          `Token refresh failed: ${resp?.error || `no access token in refresh response (status ${resp?.status ?? "unknown"})`}`
+        )
+      }
+      const latest =
+        ((await storage.get("tldwConfig").catch(() => null)) as
+          | Record<string, unknown>
+          | null) ||
+        cfg ||
+        {}
+      await storage.set("tldwConfig", {
+        ...latest,
+        accessToken: tokens.access_token,
+        refreshToken:
+          tokens.refresh_token ||
+          (latest?.refreshToken as string) ||
+          refreshToken
+      })
+    })().finally(() => {
+      webRefreshInFlight = null
+    })
+  }
+  await webRefreshInFlight
+}
+
+// Runtime for the web/direct fallback. Supplies a working `refreshAuth` so
+// request-core's 401 refresh-and-retry runs in the browser (not just inside the
+// extension worker), and single-flights it across concurrent callers.
+const createDirectRuntime = (storage: DirectRuntimeStorage) => ({
+  getConfig: () => storage.get("tldwConfig").catch(() => null),
+  refreshAuth: () => refreshAuthDirect(storage)
+})
 
 export async function bgRequest<
   T = any,
@@ -612,7 +644,7 @@ async function bgRequestImpl<
         abortSignal,
         responseType
       },
-      { getConfig: () => storage.get("tldwConfig").catch(() => null) }
+      createDirectRuntime(storage)
     )
   }
   const resolveArrayBufferResponse = async (
@@ -665,7 +697,7 @@ async function bgRequestImpl<
         abortSignal,
         responseType
       },
-      { getConfig: () => storage.get("tldwConfig").catch(() => null) }
+      createDirectRuntime(storage)
     )
     if (!resp?.ok) {
       const msg = formatErrorMessage(
@@ -865,7 +897,7 @@ async function bgRequestImpl<
       abortSignal,
       responseType
     },
-    { getConfig: () => storage.get("tldwConfig").catch(() => null) }
+    createDirectRuntime(storage)
   )
   if (!resp?.ok) {
     const msg = formatErrorMessage(
@@ -1238,6 +1270,24 @@ export async function* bgStream<
     return
   }
 
+  // Derive the connection (time-to-first-token) timeout from config instead of a
+  // hard-coded 5s. Time-to-first-byte over 5s is normal for large prompts, RAG,
+  // or a cold local model, and a premature disconnect used to replay the whole
+  // request. Reuse the stream idle-timeout budget (chat default 45s).
+  const streamStorage = createSafeStorage()
+  const streamCfg =
+    (await streamStorage
+      .get<Record<string, unknown>>("tldwConfig")
+      .catch(() => null)) || null
+  const connectionTimeoutMs = deriveStreamIdleTimeout(
+    streamCfg,
+    String(path),
+    Number(streamIdleTimeoutMs)
+  )
+  // Only idempotent (GET/HEAD/OPTIONS) streams may be replayed via direct fetch
+  // after a transport loss. Non-idempotent generation POSTs must not be re-sent.
+  const methodAllowsStreamReplay = isSafeFallbackMethod(method)
+
   // Extension port-based streaming with connection-time and connection-establish fallback.
   let port: ReturnType<typeof browser.runtime.connect>
   try {
@@ -1255,15 +1305,15 @@ export async function* bgStream<
   let firstDataReceived = false
   let connectionTimedOut = false
 
-  // Connection timeout - if no data arrives within 5s, fall back to direct fetch
-  const CONNECTION_TIMEOUT_MS = 5000
+  // Connection timeout - if no first token arrives within the derived window,
+  // give up on the port. Whether we may then replay depends on idempotency.
   const connectionTimer = setTimeout(() => {
     if (!firstDataReceived && !done) {
       connectionTimedOut = true
       done = true
       try { port.disconnect() } catch {}
     }
-  }, CONNECTION_TIMEOUT_MS)
+  }, connectionTimeoutMs)
 
   const onMessage = (msg: any) => {
     if (msg?.event === 'data') {
@@ -1340,10 +1390,18 @@ export async function* bgStream<
         sliceStartedAt = Date.now()
       }
     }
-    // If connection timed out before receiving any data, fall back to direct fetch
+    // If connection timed out before receiving any data, only idempotent
+    // requests may be replayed via direct fetch. The worker may already be
+    // generating server-side for a non-idempotent POST, so replaying it would
+    // double-generate and persist a duplicate message — surface a timeout error.
     if (connectionTimedOut) {
-      yield* bgStreamDirect({ path, method, headers, body, streamIdleTimeoutMs, abortSignal })
-      return
+      if (methodAllowsStreamReplay) {
+        yield* bgStreamDirect({ path, method, headers, body, streamIdleTimeoutMs, abortSignal })
+        return
+      }
+      throw createStreamInterruptedError(
+        `Stream connection timed out after ${connectionTimeoutMs}ms without a first token`
+      )
     }
     const shouldFallbackAfterEarlyError =
       !firstDataReceived &&
@@ -1351,8 +1409,17 @@ export async function* bgStream<
       Boolean(error) &&
       (isExtensionTransportFailure(error) || !hasHttpStatus(error))
     if (shouldFallbackAfterEarlyError) {
-      yield* bgStreamDirect({ path, method, headers, body, streamIdleTimeoutMs, abortSignal })
-      return
+      // Same rule for an early transport failure: replay idempotent requests
+      // only; never re-send a non-idempotent generation POST.
+      if (methodAllowsStreamReplay) {
+        yield* bgStreamDirect({ path, method, headers, body, streamIdleTimeoutMs, abortSignal })
+        return
+      }
+      throw createStreamInterruptedError(
+        error instanceof Error
+          ? error.message
+          : String(error || "Stream transport interrupted")
+      )
     }
     const shouldGracefullyEndAfterPartialStreamError =
       firstDataReceived &&
@@ -1425,8 +1492,14 @@ export async function bgUpload<T = any, P extends AllowedPath = AllowedPath, M e
   const methodIsSafeFallback = isSafeFallbackMethod(method)
   if (hasRuntimeMessage) {
     try {
-      // Add timeout to extension messaging for uploads
-      const resolvedTimeout = typeof timeoutMs === "number" && timeoutMs > 0 ? timeoutMs : 60000
+      // Add timeout to extension messaging for uploads. The worker only acks
+      // after the upload (and any synchronous processing kickoff) completes, so
+      // a short cap would abort large-but-progressing uploads the worker is
+      // still finishing.
+      const resolvedTimeout =
+        typeof timeoutMs === "number" && timeoutMs > 0
+          ? timeoutMs
+          : DEFAULT_UPLOAD_RUNTIME_MESSAGE_TIMEOUT_MS
       const uploadTimeout = Math.max(5000, resolvedTimeout)
       const uploadPromise = browser.runtime.sendMessage({
         type: 'tldw:upload',
@@ -1526,7 +1599,7 @@ export async function bgUpload<T = any, P extends AllowedPath = AllowedPath, M e
   const storage = createSafeStorage()
   const resp = await tldwRequest(
     { path, method, body: formData, timeoutMs, responseType },
-    { getConfig: () => storage.get("tldwConfig").catch(() => null) }
+    createDirectRuntime(storage)
   )
   if (!resp?.ok) {
     const msg = formatErrorMessage(

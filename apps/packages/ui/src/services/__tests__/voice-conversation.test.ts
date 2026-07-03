@@ -223,9 +223,11 @@ describe("voice conversation contract", () => {
       resolveProvider
     })
 
+    // TASK-12106: the token is sent as an {type:"auth"} first frame, never in the URL.
     expect(result.websocketUrl).toBe(
-      "ws://127.0.0.1:8000/api/v1/audio/chat/stream?token=secret-token"
+      "ws://127.0.0.1:8000/api/v1/audio/chat/stream"
     )
+    expect(result.websocketUrl).not.toContain("secret-token")
     expect(result.llm).toEqual({})
     expect(result.tts).toEqual({
       model: "kokoro",

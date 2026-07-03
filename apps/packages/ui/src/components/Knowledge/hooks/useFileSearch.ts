@@ -2,6 +2,7 @@ import React from "react"
 import { useTranslation } from "react-i18next"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import type { RagSettings } from "@/services/rag/unified-rag"
+import { openExternalUrl } from "@/utils/safe-external-url"
 import {
   formatRagResult,
   type RagCopyFormat,
@@ -219,7 +220,7 @@ export function useFileSearch({
   const handleOpen = React.useCallback((item: RagResult) => {
     const url = getResultUrl(item)
     if (!url) return
-    window.open(String(url), "_blank")
+    openExternalUrl(String(url), "_blank")
   }, [])
 
   const handlePin = React.useCallback(

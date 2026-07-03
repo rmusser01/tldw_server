@@ -3813,15 +3813,26 @@ export const duplicateWorkspaceSnapshot = (
 // Store
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Captured store setter so `onRehydrateStorage` can publish the post-processed
+// hydrated state THROUGH the store (notifying subscribers) instead of mutating
+// the passed-in state object in place. The creator runs before hydration, so
+// this is always assigned by the time the rehydrate callback fires (this also
+// avoids a temporal-dead-zone reference to `useWorkspaceStore` when the backing
+// storage is synchronous and hydration happens during store construction).
+let publishWorkspaceHydration: ((next: WorkspaceState) => void) | null = null
+
 export const useWorkspaceStore = createWithEqualityFn<WorkspaceState>()(
   persist<WorkspaceState, [], [], PersistedWorkspaceState>(
-    (set, get) => ({
-      ...initialState,
-      ...createSourcesSlice(set, get),
-      ...createStudioSlice(set, get),
-      ...createUISlice(set, get),
-      ...createWorkspaceListSlice(set, get),
-    }),
+    (set, get) => {
+      publishWorkspaceHydration = (next) => set(next, true)
+      return {
+        ...initialState,
+        ...createSourcesSlice(set, get),
+        ...createStudioSlice(set, get),
+        ...createUISlice(set, get),
+        ...createWorkspaceListSlice(set, get),
+      }
+    },
     {
       name: WORKSPACE_STORAGE_KEY,
       storage: createJSONStorage(() => createWorkspaceStorage()),
@@ -3967,6 +3978,16 @@ export const useWorkspaceStore = createWithEqualityFn<WorkspaceState>()(
           }
 
           state.storeHydrated = true
+
+          // Publish the post-processed hydrated state THROUGH the store so
+          // subscribers (already-mounted components, loading gates keyed on
+          // `storeHydrated`) are notified. Persist applies the raw persisted
+          // values via its own `set()` BEFORE this callback, but the mutations
+          // above (date revival, snapshot application, `storeHydrated`) happen
+          // afterwards and would otherwise never be broadcast. Spreading into a
+          // fresh object gives `set` a new reference so the update is not
+          // dropped as a no-op; `replace: true` matches the shape we mutated.
+          publishWorkspaceHydration?.({ ...state })
         }
       }
     }

@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   Dropdown,
   Tooltip,
@@ -43,6 +43,11 @@ import {
   buildCharactersRoute as buildCharactersRouteUrl,
   resolveCharactersDestinationMode
 } from "@/utils/characters-route"
+import {
+  readFavoriteFromExtensions,
+  applyFavoriteToExtensions,
+  MAX_IMPORT_FILE_BYTES
+} from "@/components/Option/Characters/utils"
 
 type Props = {
   className?: string
@@ -104,12 +109,6 @@ type CharacterSelection = {
 
 type CharacterSortMode = "favorites" | "az"
 
-type FavoriteCharacter = {
-  id?: string
-  slug?: string
-  name: string
-}
-
 const MAX_PERSONA_IMAGE_BYTES = 5 * 1024 * 1024
 const MAX_MOOD_IMAGE_BYTES = 5 * 1024 * 1024
 
@@ -167,6 +166,7 @@ export const CharacterSelect: React.FC<Props> = ({
 }) => {
   const { t } = useTranslation(["option", "common", "settings", "playground"])
   const notification = useAntdNotification()
+  const queryClient = useQueryClient()
   const modal = useAntdModal()
   const confirmWithModal = useConfirmModal()
   const [selectedCharacter, setSelectedCharacter] =
@@ -240,10 +240,6 @@ export const CharacterSelect: React.FC<Props> = ({
   const [menuDensity] = useStorage<"comfortable" | "compact">(
     "menuDensity",
     "comfortable"
-  )
-  const [favoriteCharacters, setFavoriteCharacters] = useStorage<FavoriteCharacter[]>(
-    "favoriteCharacters",
-    []
   )
   const [sortMode, setSortMode] = useStorage<CharacterSortMode>(
     "characterSortMode",
@@ -1023,6 +1019,21 @@ export const CharacterSelect: React.FC<Props> = ({
       const file = event.target.files?.[0]
       if (!file) return
 
+      if (file.size > MAX_IMPORT_FILE_BYTES) {
+        notification.error({
+          message: t("settings:manageCharacters.notification.error", {
+            defaultValue: "Error"
+          }),
+          description: t("settings:manageCharacters.import.tooLarge", {
+            defaultValue:
+              "This file is too large to import. Please choose a smaller file (under {{maxMb}} MB).",
+            maxMb: Math.floor(MAX_IMPORT_FILE_BYTES / (1024 * 1024))
+          })
+        })
+        event.target.value = ""
+        return
+      }
+
       const getImageOnlyDetail = (error: unknown): ImageOnlyErrorDetail | null => {
         const details = (error as ImportError)?.details
         if (!details || typeof details !== "object") return null
@@ -1137,18 +1148,6 @@ export const CharacterSelect: React.FC<Props> = ({
     })
   }, [data, searchQuery])
 
-  const favoriteIndex = React.useMemo(() => {
-    const ids = new Set<string>()
-    const slugs = new Set<string>()
-    const names = new Set<string>()
-    ;(favoriteCharacters || []).forEach((fav) => {
-      if (fav.id) ids.add(String(fav.id))
-      if (fav.slug) slugs.add(String(fav.slug))
-      if (fav.name) names.add(String(fav.name))
-    })
-    return { ids, slugs, names }
-  }, [favoriteCharacters])
-
   const getCharacterDisplayName = React.useCallback((character: CharacterSummary) => {
     return (
       character.name ||
@@ -1158,41 +1157,117 @@ export const CharacterSelect: React.FC<Props> = ({
     ).toString()
   }, [])
 
+  // Favorite is a server-side flag (extensions.tldw.favorite) so the header and
+  // the Characters Manager share a single source of truth instead of a stale
+  // localStorage mirror.
   const isFavoriteCharacter = React.useCallback(
-    (character: CharacterSummary) => {
-      const id = character.id != null ? String(character.id) : ""
-      const slug = character.slug ? String(character.slug) : ""
-      const name = getCharacterDisplayName(character)
-      return (
-        (id && favoriteIndex.ids.has(id)) ||
-        (slug && favoriteIndex.slugs.has(slug)) ||
-        (name && favoriteIndex.names.has(name))
-      )
-    },
-    [favoriteIndex, getCharacterDisplayName]
+    (character: CharacterSummary) =>
+      readFavoriteFromExtensions(character.extensions),
+    []
   )
 
   const toggleFavoriteCharacter = React.useCallback(
-    (character: CharacterSummary) => {
-      const name = getCharacterDisplayName(character).trim()
-      const id = character.id != null ? String(character.id) : undefined
-      const slug = character.slug ? String(character.slug) : undefined
-      if (!name) return
-      void setFavoriteCharacters((prev) => {
-        const list = Array.isArray(prev) ? prev : []
-        const next = list.filter((fav) => {
-          if (id && fav.id && fav.id === id) return false
-          if (slug && fav.slug && fav.slug === slug) return false
-          if (name && fav.name === name) return false
-          return true
+    async (character: CharacterSummary) => {
+      const id =
+        character.id != null
+          ? String(character.id)
+          : character.slug
+            ? String(character.slug)
+            : ""
+      if (!id) return
+
+      const nextFavorite = !readFavoriteFromExtensions(character.extensions)
+      const nextExtensions = applyFavoriteToExtensions(
+        character.extensions,
+        nextFavorite
+      )
+      if (nextExtensions === null) {
+        notification.warning({
+          message: t(
+            "settings:manageCharacters.notification.favoriteInvalidExtensions",
+            {
+              defaultValue: "Couldn't update favorite"
+            }
+          ),
+          description: t(
+            "settings:manageCharacters.notification.favoriteInvalidExtensionsDesc",
+            {
+              defaultValue:
+                "This character has invalid extensions JSON. Fix the extensions field before toggling favorite."
+            }
+          )
         })
-        if (next.length === list.length) {
-          next.push({ id, slug, name })
+        return
+      }
+
+      const matchesCharacter = (candidate: any) => {
+        const candidateId =
+          candidate?.id != null
+            ? String(candidate.id)
+            : candidate?.slug
+              ? String(candidate.slug)
+              : ""
+        return candidateId === id
+      }
+      const applyToItem = (candidate: any) =>
+        matchesCharacter(candidate)
+          ? { ...candidate, extensions: nextExtensions ?? {} }
+          : candidate
+      const updateCachedList = (old: any): any => {
+        if (Array.isArray(old)) return old.map(applyToItem)
+        if (old && Array.isArray(old.items)) {
+          return { ...old, items: old.items.map(applyToItem) }
         }
-        return next
-      })
+        return old
+      }
+
+      // Optimistically update every cached character list (bare header key and
+      // the Manager's 3-element paginated keys) by prefix match.
+      let previousEntries: [readonly unknown[], unknown][] = []
+      try {
+        previousEntries =
+          (queryClient.getQueriesData?.({
+            queryKey: ["tldw:listCharacters"]
+          }) as [readonly unknown[], unknown][] | undefined) ?? []
+        queryClient.setQueriesData?.(
+          { queryKey: ["tldw:listCharacters"] },
+          updateCachedList
+        )
+      } catch {
+        // Optimistic update not available
+      }
+
+      try {
+        await tldwClient.initialize().catch(() => null)
+        await tldwClient.updateCharacter(
+          id,
+          { extensions: nextExtensions ?? {} },
+          character.version
+        )
+        queryClient.invalidateQueries({ queryKey: ["tldw:listCharacters"] })
+      } catch (error) {
+        for (const [key, prev] of previousEntries) {
+          try {
+            queryClient.setQueryData?.(key, prev)
+          } catch {
+            // noop
+          }
+        }
+        const messageText =
+          error instanceof Error ? error.message : String(error)
+        notification.error({
+          message: t("settings:manageCharacters.notification.error", {
+            defaultValue: "Error"
+          }),
+          description:
+            messageText ||
+            t("settings:manageCharacters.notification.someError", {
+              defaultValue: "Something went wrong. Please try again later"
+            })
+        })
+      }
     },
-    [getCharacterDisplayName, setFavoriteCharacters]
+    [notification, queryClient, t]
   )
 
   const sortedCharacters = React.useMemo(() => {
@@ -1260,7 +1335,7 @@ export const CharacterSelect: React.FC<Props> = ({
               onClick={(event) => {
                 event.preventDefault()
                 event.stopPropagation()
-                toggleFavoriteCharacter(character)
+                void toggleFavoriteCharacter(character)
               }}
               aria-label={favoriteTitle}
               title={favoriteTitle}

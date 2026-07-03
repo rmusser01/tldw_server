@@ -8,15 +8,19 @@ import { getContentFromCurrentTab } from "~/libs/get-html";
 import { ChatHistory } from "@/store/option";
 import {
   deleteChatForEdit,
+  deleteChatAfterMessageId,
   generateID,
   getPromptById,
   removeMessageByIndex,
+  removeMessageById,
   updateMessageByIndex,
+  updateMessageById,
 } from "@/db/dexie/helpers";
 import { useTranslation } from "react-i18next";
 import { usePageAssist } from "@/context";
 import { formatDocs } from "@/utils/format-docs";
 import { buildAssistantErrorContent } from "@/utils/chat-error-message";
+import { buildCharacterChatAssistantErrorContent } from "@/hooks/chat/useCharacterChatMode";
 import { detectCharacterMood } from "@/utils/character-mood";
 import { useStorage } from "@plasmohq/storage/hook";
 import { useStoreChatModelSettings } from "@/store/model";
@@ -1227,6 +1231,7 @@ export const useMessage = () => {
     characterOverride?: Character | null,
     regenerateFromMessage?: Message,
     serverChatIdOverride?: string | null,
+    controller?: AbortController,
   ) => {
     setStreaming(true);
     const activeCharacter = characterOverride ?? selectedCharacter;
@@ -1285,6 +1290,7 @@ export const useMessage = () => {
         : history;
     let fullText = "";
     let contentToSave = "";
+    let inactivityTimer: ReturnType<typeof setTimeout> | null = null;
     const resolvedAssistantMessageId = generateID();
     const resolvedUserMessageId = !isRegenerate ? generateID() : undefined;
     let persistedUserServerMessageId: string | undefined;
@@ -1599,6 +1605,18 @@ export const useMessage = () => {
         normalizedModel.length > 0 ? normalizedModel : model;
 
       const shouldPersistToServer = !temporaryChat;
+      // Stream-inactivity watchdog: if no chunk arrives within the timeout, abort
+      // the underlying stream so a stalled character response cannot hang forever.
+      const STREAM_INACTIVITY_TIMEOUT_MS = 60_000;
+      let inactivityAborted = false;
+      const resetInactivityTimer = () => {
+        if (inactivityTimer) clearTimeout(inactivityTimer);
+        inactivityTimer = setTimeout(() => {
+          inactivityAborted = true;
+          controller?.abort();
+        }, STREAM_INACTIVITY_TIMEOUT_MS);
+      };
+      resetInactivityTimer();
       for await (const chunk of tldwClient.streamCharacterChatCompletion(
         chatId,
         {
@@ -1609,6 +1627,7 @@ export const useMessage = () => {
         },
         { signal },
       )) {
+        resetInactivityTimer();
         const loopEvent = extractChatLoopEvent(chunk);
         if (loopEvent) {
           dispatchChatLoopEvent(loopEvent);
@@ -1653,6 +1672,16 @@ export const useMessage = () => {
         count++;
         if (signal?.aborted) break;
       }
+      if (inactivityTimer) clearTimeout(inactivityTimer);
+
+      if (inactivityAborted) {
+        const timeoutError = new Error(
+          "Stream timed out: no data received for 60 seconds",
+        );
+        (timeoutError as any).name = "StreamInactivityTimeout";
+        throw timeoutError;
+      }
+
       if (signal?.aborted) {
         const abortError = new Error("AbortError");
         (abortError as any).name = "AbortError";
@@ -1901,7 +1930,11 @@ export const useMessage = () => {
         return;
       }
 
-      const assistantContent = buildAssistantErrorContent(fullText, e);
+      const assistantContent = buildCharacterChatAssistantErrorContent(
+        fullText,
+        e,
+        t,
+      );
       if (generateMessageId) {
         setMessages((prev) =>
           prev.map((msg) =>
@@ -1930,8 +1963,14 @@ export const useMessage = () => {
       });
 
       if (!errorSave) {
+        const isInactivityTimeout =
+          e instanceof Error && (e as any).name === "StreamInactivityTimeout";
         notification.error({
-          message: t("error"),
+          message: isInactivityTimeout
+            ? t("playground:streamTimeout", {
+                defaultValue: "Stream timed out",
+              })
+            : t("error"),
           description: e?.message || t("somethingWentWrong"),
         });
       }
@@ -1939,6 +1978,7 @@ export const useMessage = () => {
       setStreaming(false);
     } finally {
       discardCurrentTurnOnAbortRef.current = false;
+      if (inactivityTimer) clearTimeout(inactivityTimer);
       setAbortController(null);
     }
   };
@@ -2367,11 +2407,14 @@ export const useMessage = () => {
         : resolvedSelectedModel
       ).trim() || "image-generation";
     let signal: AbortSignal;
+    let activeController: AbortController;
     if (!controller) {
       const newController = new AbortController();
+      activeController = newController;
       signal = newController.signal;
       setAbortController(newController);
     } else {
+      activeController = controller;
       setAbortController(controller);
       signal = controller.signal;
     }
@@ -2550,6 +2593,7 @@ export const useMessage = () => {
               trackedCharacterForSend,
               regenerateFromMessage,
               serverChatIdOverride,
+              activeController,
             );
           } else if (sendMode === "tracked_persona" && isPersonaAssistantSelection(effectiveSelectedAssistant)) {
             const personaServerChat = await ensurePersonaServerChat({
@@ -2778,7 +2822,13 @@ export const useMessage = () => {
           idx === index ? { ...item, content: message } : item,
         );
         setHistory(updatedHistory);
-        await updateMessageByIndex(historyId, index, message);
+        // TASK-12104: address the Dexie row by stable id (not UI array index),
+        // which is offset by any non-persisted greeting seed at UI index 0.
+        if (currentHumanMessage?.id) {
+          await updateMessageById(historyId, currentHumanMessage.id, message);
+        } else {
+          await updateMessageByIndex(historyId, index, message);
+        }
         if (
           serverChatId &&
           (selectedCharacter?.id || serverChatAssistantKind === "persona") &&
@@ -2805,8 +2855,15 @@ export const useMessage = () => {
       setMessages(previousMessages);
       const previousHistory = newHistory.slice(0, index);
       setHistory(previousHistory);
-      await updateMessageByIndex(historyId, index, message);
-      await deleteChatForEdit(historyId, index);
+      // TASK-12104: id-address the edited row (and delete what follows it) so a
+      // greeting-offset UI index cannot overwrite/keep the wrong Dexie rows.
+      if (currentHumanMessage?.id) {
+        await updateMessageById(historyId, currentHumanMessage.id, message);
+        await deleteChatAfterMessageId(historyId, currentHumanMessage.id);
+      } else {
+        await updateMessageByIndex(historyId, index, message);
+        await deleteChatForEdit(historyId, index);
+      }
       // Server-backed edit and cleanup
       if (
         serverChatId &&
@@ -2870,7 +2927,12 @@ export const useMessage = () => {
         idx === index ? { ...item, content: message } : item,
       );
       setHistory(updatedHistory);
-      await updateMessageByIndex(historyId, index, message);
+      // TASK-12104: address the assistant Dexie row by stable id.
+      if (currentAssistant?.id) {
+        await updateMessageById(historyId, currentAssistant.id, message);
+      } else {
+        await updateMessageByIndex(historyId, index, message);
+      }
       // Server-backed: update assistant server message too
       if (
         serverChatId &&
@@ -2926,7 +2988,14 @@ export const useMessage = () => {
       }
 
       if (historyId) {
-        await removeMessageByIndex(historyId, index);
+        // TASK-12104: remove the Dexie row by stable id so a non-persisted
+        // greeting at UI index 0 does not shift us onto the wrong row. An
+        // unsaved greeting's id is absent from Dexie, so this is a safe no-op.
+        if (target.id) {
+          await removeMessageById(historyId, target.id);
+        } else {
+          await removeMessageByIndex(historyId, index);
+        }
       }
 
       setMessages(messages.filter((_, idx) => idx !== index));

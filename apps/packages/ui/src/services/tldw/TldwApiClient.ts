@@ -130,9 +130,10 @@ const DEFAULT_SERVER_URL = "http://127.0.0.1:8000"
 const CHARACTER_CACHE_TTL_MS = 5 * 60 * 1000
 const CHAT_MESSAGES_CACHE_TTL_MS = 60 * 1000
 const RAG_QUERY_MAX_LENGTH = 20000
-const CHAT_COMPLETION_ERROR_MESSAGE = "Chat completion failed."
-const CHAT_COMPLETION_ERRORS_MESSAGE =
-  "One or more internal errors were suppressed."
+// Speech synthesis can take much longer than the 10s default request timeout
+// (e.g. long passages on local Kokoro), so give it a generous default that
+// callers can still override.
+const TTS_REQUEST_TIMEOUT_MS = 120000
 
 const toRecordOrNull = (value: unknown): Record<string, unknown> | null =>
   value && typeof value === "object" && !Array.isArray(value)
@@ -151,69 +152,6 @@ const isSavedDegradedCharacterPersistError = (error: unknown): boolean => {
     ?? toRecordOrNull(candidate?.details?.detail)
     ?? toRecordOrNull(candidate?.details)
   return detail?.code === "persist_validation_degraded" && detail?.saved === true
-}
-
-const isSuspiciousChatCompletionString = (value: string): boolean =>
-  /traceback|stack(?:\s*trace)?|exception|error|\/Users\/|[A-Za-z]:\\|\.py:\d+/i.test(
-    value
-  )
-
-const normalizeChatCompletionResponseBody = (
-  value: unknown
-): Record<string, unknown> | unknown[] => {
-  if (typeof value === "string") {
-    if (isSuspiciousChatCompletionString(value)) {
-      return {
-        error: CHAT_COMPLETION_ERROR_MESSAGE,
-        errors: [CHAT_COMPLETION_ERRORS_MESSAGE]
-      }
-    }
-    return { content: value }
-  }
-  const sanitized = sanitizeChatCompletionPayload(value)
-  if (Array.isArray(sanitized)) {
-    return sanitized
-  }
-  if (sanitized && typeof sanitized === "object") {
-    return sanitized as Record<string, unknown>
-  }
-  return { content: sanitized ?? "" }
-}
-
-const sanitizeChatCompletionPayload = (value: unknown): unknown => {
-  if (typeof value === "string") {
-    return isSuspiciousChatCompletionString(value)
-      ? CHAT_COMPLETION_ERROR_MESSAGE
-      : value
-  }
-  if (Array.isArray(value)) {
-    return value.map((item) => sanitizeChatCompletionPayload(item))
-  }
-  if (value && typeof value === "object") {
-    const sanitized: Record<string, unknown> = {}
-    for (const [key, item] of Object.entries(value)) {
-      if (
-        key === "details" ||
-        key === "exception" ||
-        key === "traceback" ||
-        key === "stack" ||
-        key === "stack_trace"
-      ) {
-        continue
-      }
-      if (key === "error" && item) {
-        sanitized[key] = CHAT_COMPLETION_ERROR_MESSAGE
-        continue
-      }
-      if (key === "errors" && item) {
-        sanitized[key] = [CHAT_COMPLETION_ERRORS_MESSAGE]
-        continue
-      }
-      sanitized[key] = sanitizeChatCompletionPayload(item)
-    }
-    return sanitized
-  }
-  return value
 }
 
 const toOptionalNumber = (value: unknown): number | null => {
@@ -2670,11 +2608,14 @@ export class TldwApiClientBase {
       timeoutMs: options?.timeoutMs,
       abortSignal: options?.signal
     })
-    // bgRequest returns parsed data; for non-streaming chat we expect a JSON structure or text. To keep existing consumers happy, wrap as Response-like
-    // For simplicity, return a minimal object with json() and text()
+    // bgRequest throws on any non-2xx response, so a resolved value here is
+    // always a successful completion. Return the parsed body unmodified — the
+    // streaming path does not scrub content, and scrubbing successful replies
+    // that merely mention "error"/"exception" or include a file path was
+    // silently corrupting legitimate assistant content. Wrap as Response-like
+    // to keep existing consumers happy.
     const data = res as any
-    const safeData = normalizeChatCompletionResponseBody(data)
-    return createJsonResponseLike(safeData, { status: 200 })
+    return createJsonResponseLike(data, { status: 200 })
   }
 
   async *streamChatCompletion(request: ChatCompletionRequest, options?: ChatCompletionStreamOptions): AsyncGenerator<any, void, unknown> {
@@ -6505,9 +6446,10 @@ export class TldwApiClientBase {
       extraParams?: Record<string, any>
       stream?: boolean
       signal?: AbortSignal
+      timeoutMs?: number
     }
   ): Promise<ArrayBuffer> {
-    await this.ensureConfigForRequest(true)
+    const cfg = await this.ensureConfigForRequest(true)
     const body: Record<string, any> = { input: text, text }
     if (options?.voice) body.voice = options.voice
     if (options?.model) body.model = options.model
@@ -6542,12 +6484,19 @@ export class TldwApiClientBase {
           return "audio/mpeg"
       }
     })()
+    const cfgTtsTimeout = Number((cfg as any)?.ttsRequestTimeoutMs)
+    const timeoutMs =
+      options?.timeoutMs ??
+      (Number.isFinite(cfgTtsTimeout) && cfgTtsTimeout > 0
+        ? cfgTtsTimeout
+        : TTS_REQUEST_TIMEOUT_MS)
     const data = await this.request<any>({
       path: "/api/v1/audio/speech",
       method: "POST",
       headers: { Accept: accept },
       body,
       responseType: "arrayBuffer",
+      timeoutMs,
       abortSignal: options?.signal
     })
 
@@ -8008,6 +7957,19 @@ Object.assign(
   workspaceApiMethods,
   webClipperMethods
 )
+
+// createChatCompletion and synthesizeSpeech are implemented on
+// TldwApiClientBase and are intentionally excluded from the domain interface
+// via TldwDomainMethodOverride, so the base-class versions are the canonical
+// (type-visible) ones. The legacy duplicates in the chat-rag / models-audio
+// mixins were overwriting them at runtime, which (a) re-introduced the
+// non-streaming sanitizer that corrupts successful assistant replies and
+// (b) dropped the generous TTS timeout. Re-apply the base implementations so
+// runtime matches the declared types and the fixes take effect.
+Object.assign(TldwApiClient.prototype, {
+  createChatCompletion: TldwApiClientBase.prototype.createChatCompletion,
+  synthesizeSpeech: TldwApiClientBase.prototype.synthesizeSpeech
+})
 
 // Also expose core helpers that domain files reference via `this`
 export type TldwApiClientCore = TldwApiClient
