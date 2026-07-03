@@ -1,6 +1,4 @@
 """Property-based tests for Chunker.chunk_text (audit F10)."""
-import unicodedata
-
 import pytest
 from hypothesis import HealthCheck, given, settings, strategies as st
 
@@ -27,57 +25,51 @@ def test_empty_input_yields_no_chunks(max_size):
     assert Chunker().chunk_text("", method="words", max_size=max_size, overlap=0) == []
 
 
-# --- Property adjustment (audit F10; see task-9-report.md for full writeup) ---
+# --- Property fix (audit F10 review finding; see task-9-report.md) ---
 #
 # `Chunker._sanitize_input` (app/core/Chunking/chunker.py:1355-1445) is a
 # documented, intentional security-sanitization step that chunk_text always
-# runs before chunking:
+# runs before chunking. Two of its transforms are relevant here:
 #
-#   1. chunker.py:1428-1437 -- bidirectional-override control characters
-#      (U+202A-E, U+2066-9) are *unconditionally* replaced with a space
-#      ("could be used for spoofing"), regardless of test mode. Unlike null
-#      bytes / other control chars (which the same method explicitly
-#      preserves under PYTEST_CURRENT_TEST for property-testing purposes,
-#      chunker.py:1386/1423), bidi-override chars have no such carve-out --
-#      the omission is deliberate. Replacing one with a space can split a
-#      single "word" (as tokenized by str.split() on the raw input) into two
-#      tokens, so naive substring-preservation does not hold for text
-#      containing them. We exclude these 9 codepoints from the fuzzed
-#      alphabet: they change tokenization, not just content, which is a
-#      different property than the one under test here.
-#   2. chunker.py:1391-1394 -- NFC unicode normalization is applied
-#      "to prevent various unicode-based attacks", but only when it does not
-#      change the character count (so chunk offsets are preserved). This
-#      guard does not imply the character *identity* is preserved: some
-#      codepoints (e.g. CJK Compatibility Ideographs with a canonical
-#      singleton decomposition, such as U+F900 -> U+8C48) normalize to a
-#      different, length-preserving codepoint. Confirmed via manual repro:
-#      `sanitize_input("豈")` returns "豈" (both render as "豈").
-#      This is the documented, intended effect of canonicalizing
-#      look-alike characters for security, not a bug -- so the expectation
-#      mirrors that same NFC-if-length-preserving rule instead of asserting
-#      raw byte-for-byte identity.
-_BIDI_OVERRIDE_CHARS = "‪‫‬‭‮⁦⁧⁨⁩"
-
-
-def _expected_word(word: str) -> str:
-    """Mirror the length-preserving NFC normalization documented at
-    chunker.py:1391-1394."""
-    normalized = unicodedata.normalize("NFC", word)
-    return normalized if len(normalized) == len(word) else word
-
-
+#   1. chunker.py:1391-1394 -- NFC unicode normalization is applied only when
+#      it does not change the *whole string's* character count (so chunk
+#      offsets are preserved).
+#   2. chunker.py:1428-1437 -- bidirectional-override control characters
+#      (U+202A-E, U+2066-9) are unconditionally replaced with a space
+#      ("could be used for spoofing"), which can split a raw "word" into two
+#      tokens.
+#
+# The previous version of this test reimplemented rule (1) on a per-word
+# basis (normalizing each word individually and keeping the normalized form
+# only if that single word's NFC form was length-preserving). That diverges
+# from the sanitizer's real whole-string gate: a text whose overall NFC
+# normalization changes length is left entirely un-normalized by the
+# sanitizer, even though some individual word within it might normalize
+# losslessly in isolation. That mismatch produced a false-positive failure
+# for correct sanitizer behavior -- repro:
+# `Chunker().chunk_text("é 敖", method="words", max_size=64,
+# overlap=0)` leaves the text un-normalized (the whole-string NFC form has a
+# different length), but the old per-word helper predicted normalization of
+# the second word regardless.
+#
+# Fix: stop re-deriving the gating logic in the test and instead call
+# `Chunker()._sanitize_input(text)` once on the whole input, then assert that
+# every expected word came from the real sanitizer's output. This also makes
+# the bidi-override alphabet exclusion unnecessary: since expected words are
+# now split from the *sanitized* text (not the raw text), a bidi char being
+# replaced with a space is already reflected in the expected tokenization.
 @pytest.mark.unit
 @settings(suppress_health_check=[HealthCheck.too_slow], max_examples=50, deadline=None)
-@given(
-    text=st.text(
-        alphabet=st.characters(exclude_characters=_BIDI_OVERRIDE_CHARS),
-        min_size=1,
-        max_size=5_000,
-    ).filter(lambda s: s.strip())
-)
+@given(text=st.text(min_size=1, max_size=5_000).filter(lambda s: s.strip()))
 def test_nonempty_input_content_is_preserved_in_chunks(text):
-    chunks = Chunker().chunk_text(text, method="words", max_size=64, overlap=0)
+    chunker = Chunker()
+    sanitized = chunker._sanitize_input(text)
+    if not sanitized.strip():
+        # Sanitization (e.g. bidi-override removal) can reduce an input that
+        # was non-blank pre-sanitization down to whitespace-only; nothing to
+        # check in that case.
+        return
+    chunks = chunker.chunk_text(text, method="words", max_size=64, overlap=0)
     joined = " ".join(chunks)
-    for word in text.split()[:5]:
-        assert _expected_word(word) in joined
+    for word in sanitized.split()[:5]:
+        assert word in joined
