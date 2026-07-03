@@ -535,7 +535,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Visual_Ident
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add tldw_Server_API/app/api/v1/schemas/visual_identity_schemas.py \
@@ -980,7 +980,7 @@ Resolution source values are part of the contract:
 - `legacy_character_mood`: character actor used legacy mood image fallback without an override path.
 - `placeholder`: no pack or legacy asset was available.
 
-- [ ] **Step 1: Write failing service tests for strict override**
+- [x] **Step 1: Write failing service tests for strict override**
 
 Add to `test_visual_identity_service.py`:
 
@@ -1002,7 +1002,7 @@ def test_resolver_rejects_override_pack_version_mismatch(...):
     # Assert ValueError("pack_version_mismatch") and no actor binding fallback.
 ```
 
-- [ ] **Step 2: Write failing fallback and actor-kind tests**
+- [x] **Step 2: Write failing fallback and actor-kind tests**
 
 Add:
 
@@ -1036,7 +1036,7 @@ def test_resolver_rejects_cross_user_override_pack(...):
     # Assert ValueError("pack_not_found") or ValueError("pack_not_owned") and no default binding fallback.
 ```
 
-- [ ] **Step 3: Run tests to verify they fail**
+- [x] **Step 3: Run tests to verify they fail**
 
 Run:
 
@@ -1046,7 +1046,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Visual_Ident
 
 Expected: FAIL because override arguments are not implemented.
 
-- [ ] **Step 4: Extend dataclass and service method signature**
+- [x] **Step 4: Extend dataclass and service method signature**
 
 In `VisualIdentityResolvedAsset`, add:
 
@@ -1066,7 +1066,7 @@ override_pack_version_id: int | None = None,
 allow_override_fallback: bool = False,
 ```
 
-- [ ] **Step 5: Implement override validation**
+- [x] **Step 5: Implement override validation**
 
 Add private helpers:
 
@@ -1088,7 +1088,7 @@ Rules:
 - Version exists but not for pack: `pack_version_mismatch`.
 - Do not fall back to actor default binding when override validation fails.
 
-- [ ] **Step 6: Implement override expression lookup**
+- [x] **Step 6: Implement override expression lookup**
 
 Use `repository.list_assets_for_version`. Candidate order for override:
 
@@ -1107,7 +1107,7 @@ If no candidate matches and fallback is allowed:
 
 Do not use character legacy mood images for persona actors in either normal or override fallback paths.
 
-- [ ] **Step 7: Run service tests**
+- [x] **Step 7: Run service tests**
 
 Run:
 

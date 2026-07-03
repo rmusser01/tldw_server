@@ -289,8 +289,8 @@ class VisualIdentityService:
                     "pack_default",
                     normalize_expression_key(
                         str(
-                            pack.get("default_expression_key")
-                            or version.get("default_expression_key")
+                            version.get("default_expression_key")
+                            or pack.get("default_expression_key")
                             or ""
                         )
                     ),

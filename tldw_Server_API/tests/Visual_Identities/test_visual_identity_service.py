@@ -277,6 +277,69 @@ def test_resolver_override_fallback_opt_in_records_reason(
     assert resolved.fallback_reason == "override_expression_missing:pack_default"
 
 
+def test_resolver_override_fallback_uses_requested_version_default(
+    chacha_db: CharactersRAGDB,
+    repo: VisualIdentityRepository,
+    service: VisualIdentityService,
+) -> None:
+    character_id = _create_character(chacha_db, name="Inactive Override Version Character")
+    binding_draft = _create_ready_draft(repo, assets=("neutral",), title="Inactive Binding Pack")
+    service.activate_draft(
+        draft_id=binding_draft["id"],
+        actor_kind="character",
+        actor_id=character_id,
+    )
+    override_pack, version_one, version_one_assets = _create_versioned_pack(
+        repo,
+        title="Inactive Override Pack",
+        assets=("happy",),
+        default_expression_key="happy",
+    )
+    version_two = repo.create_pack_version(
+        owner_user_id=OWNER_USER_ID,
+        pack_id=override_pack["id"],
+        version_number=2,
+        manifest={},
+        default_expression_key="neutral",
+    )
+    repo.create_asset(
+        owner_user_id=OWNER_USER_ID,
+        pack_id=override_pack["id"],
+        pack_version_id=version_two["id"],
+        expression_key="neutral",
+        original_expression_key="neutral",
+        display_label="Neutral",
+        source_filename="neutral.png",
+        storage_relpath="visual_identities/inactive-override-neutral.png",
+        content_type="image/png",
+        bytes=123,
+        sha256="sha256-inactive-override-neutral",
+        width=64,
+        height=64,
+    )
+    repo.set_active_version(
+        owner_user_id=OWNER_USER_ID,
+        pack_id=override_pack["id"],
+        pack_version_id=version_two["id"],
+    )
+
+    resolved = service.resolve_expression_asset(
+        actor_kind="character",
+        actor_id=character_id,
+        requested_expression_key="sad",
+        override_pack_id=override_pack["id"],
+        override_pack_version_id=version_one["id"],
+        allow_override_fallback=True,
+    )
+
+    assert resolved.pack_id == override_pack["id"]
+    assert resolved.pack_version_id == version_one["id"]
+    assert resolved.asset_id == version_one_assets["happy"]["id"]
+    assert resolved.expression_key == "happy"
+    assert resolved.fallback_reason == "override_expression_missing:pack_default"
+    assert resolved.resolution_source == "override_fallback"
+
+
 def test_resolver_override_fallback_opt_in_can_fall_through_to_normal_binding(
     chacha_db: CharactersRAGDB,
     repo: VisualIdentityRepository,
