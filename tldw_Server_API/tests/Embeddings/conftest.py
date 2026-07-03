@@ -2,6 +2,7 @@ import os
 import pytest
 import asyncio
 import inspect
+from pathlib import Path
 from typing import Final
 
 from tldw_Server_API.app.main import app
@@ -9,6 +10,7 @@ from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user, U
 from tldw_Server_API.app.api.v1.API_Deps import auth_deps
 from fastapi import Request
 from fastapi.testclient import TestClient
+from tldw_Server_API.tests._plugins.quarantine import quarantine_items
 
 
 @pytest.fixture
@@ -284,3 +286,8 @@ def pgvector_dsn():  # pragma: no cover - test helper for environments without P
 @pytest.fixture
 def pgvector_temp_table(pgvector_dsn):  # pragma: no cover - test helper for environments without PG
     pytest.skip("pgvector temporary table not available in this test run")
+
+
+def pytest_collection_modifyitems(config, items):
+    """Quarantine known-failing suite (audits/2026-07-02-quarantined-suites.md)."""
+    quarantine_items(__file__, items)

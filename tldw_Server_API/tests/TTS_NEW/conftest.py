@@ -40,6 +40,7 @@ from tldw_Server_API.app.core.TTS.tts_exceptions import (
     TTSGenerationError,
     TTSRateLimitError
 )
+from tldw_Server_API.tests._plugins.quarantine import quarantine_items
 
 # =====================================================================
 # Test Markers
@@ -445,3 +446,8 @@ def cleanup_after_test():
     # Any cleanup code here
     import gc
     gc.collect()
+
+
+def pytest_collection_modifyitems(config, items):
+    """Quarantine known-failing suite (audits/2026-07-02-quarantined-suites.md)."""
+    quarantine_items(__file__, items)

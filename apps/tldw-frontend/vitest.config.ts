@@ -35,5 +35,15 @@ export default defineConfig({
       '../packages/ui/src/**/__tests__/**/*.spec.{ts,tsx}',
     ],
     exclude: ['node_modules/**', 'dist/**', 'build/**', 'pages/**'],
+    coverage: {
+      provider: 'v8',
+      reporter: ['text-summary', 'json-summary'],
+      include: ['components/**/*.{ts,tsx}', 'hooks/**/*.{ts,tsx}', 'lib/**/*.{ts,tsx}'],
+      exclude: ['**/__tests__/**', '**/*.d.ts'],
+      // Report-only (no thresholds): pre-existing test failures must not
+      // suppress the summary, since vitest v8's default is to skip the
+      // coverage report when any test fails (audit F4).
+      reportOnFailure: true,
+    },
   },
 });

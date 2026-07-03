@@ -612,11 +612,6 @@ testpaths = ["tldw_Server_API/tests", "tldw_Server_API/app/core/MCP_unified/test
 python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-norecursedirs = [
-    "tldw_Server_API/tests/Character_Chat_NEW",
-    "tldw_Server_API/tests/TTS_NEW",
-    "tldw_Server_API/tests/Embeddings"
-]
 plugins = [
     # Shared fixtures/plugins for the suite
     "tldw_Server_API.tests._plugins.authnz_fixtures",
