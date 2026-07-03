@@ -204,14 +204,27 @@ def regular_user():
 
 @pytest.fixture(autouse=True)
 def _reset_app_lifecycle_state():
-    """Clear stale drain state on the shared app before each test.
+    """Clear stale drain state on THIS conftest's pinned ``app`` before each test.
 
-    Tests that run the app lifespan (``with TestClient(app)``) call
-    mark_lifecycle_shutdown on exit, leaving the module-level ``app`` marked
-    draining. Later tests that reuse ``app`` without re-running startup then
-    get 503 {"status": "not_ready", "reason": "shutdown_in_progress"} from
-    DrainGateMiddleware for every request (issue #2581 triage finding: all
-    46 directory-run failures were this interference; every file passes solo).
+    Why the root-conftest reset (tests/conftest.py,
+    _reset_main_app_lifecycle_state_between_tests) is not enough here,
+    verified empirically for issue #2581 (46F -> 0F with this fixture;
+    removing it reproduces the 46 failures):
+
+    1. Test modules import ``app`` at collection time, pinning the ORIGINAL
+       app object (this conftest pins the same one at line 8).
+    2. ``test_backpressure_and_quotas.py`` calls ``reload_app_main()``, which
+       permanently replaces ``sys.modules['tldw_Server_API.app.main']`` with
+       a new module (new app object) and never restores the original.
+    3. A later ``with TestClient(app)`` lifespan exit marks the pinned
+       ORIGINAL app draining (mark_lifecycle_shutdown).
+    4. The root fixture re-imports ``app.main`` at reset time, so it resets
+       only the NEW app; the drained original — which every pinned test
+       still routes through — stays drained, and DrainGateMiddleware 503s
+       every request: {"status": "not_ready", "reason": "shutdown_in_progress"}.
+
+    This fixture resets the pinned original directly. The underlying
+    reload_app_main sys.modules leak is tracked in issue #2585.
     """
     from tldw_Server_API.app.services.app_lifecycle import reset_lifecycle_state
 

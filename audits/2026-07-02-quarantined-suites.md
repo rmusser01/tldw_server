@@ -53,11 +53,9 @@ Measured 2026-07-02 (60s per-test timeout, unrestricted directory-wide local run
 > `property/test_ambiguous_sender_heuristics.py` showed a transient failure
 > in a partial run but passed the full run (possible hypothesis flake).
 
-Exit criteria per suite: starting from the curated `ci.yml` gating shard file
-lists as the known-green inventory (see the correction above), 0 failures
-with `RUN_QUARANTINED=1` across the full, un-curated directory — not just the
-shard subset — then delete the quarantine hook from its conftest and close
-issue #2581 once all three suites clear. Reproduce:
+Exit criteria (met 2026-07-03 for all three suites — see the CLOSED banner):
+0 failures with `RUN_QUARANTINED=1` across the full, un-curated directory,
+then delete the quarantine hook. Historical reproduce command:
 
     RUN_QUARANTINED=1 PYTHONPATH=. PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 TEST_MODE=true \
     DISABLE_HEAVY_STARTUP=1 .venv/bin/python -m pytest tldw_Server_API/tests/<suite> -q \
