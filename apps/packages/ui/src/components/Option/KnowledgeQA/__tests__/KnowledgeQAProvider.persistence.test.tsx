@@ -93,6 +93,8 @@ describe("KnowledgeQAProvider persistence safeguards", () => {
   })
 
   it("switches into local-only mode when thread creation falls back to local ids", async () => {
+    createChatMock.mockRejectedValueOnce(new Error("create failed"))
+
     render(
       <KnowledgeQAProvider>
         <ContextProbe />
@@ -113,6 +115,30 @@ describe("KnowledgeQAProvider persistence safeguards", () => {
       expect(latestContext!.currentThreadId).toMatch(/^local-/)
       expect(latestContext!.isLocalOnlyThread).toBe(true)
     })
+  })
+
+  it("creates a remote Knowledge QA thread when no default character is available", async () => {
+    render(
+      <KnowledgeQAProvider>
+        <ContextProbe />
+      </KnowledgeQAProvider>
+    )
+
+    await waitFor(() => expect(latestContext).not.toBeNull())
+
+    await act(async () => {
+      await expect(latestContext!.createNewThread("No character thread")).resolves.toBe(
+        "thread-1"
+      )
+    })
+
+    expect(searchCharactersMock).toHaveBeenCalled()
+    expect(listCharactersMock).toHaveBeenCalled()
+    expect(createChatMock).toHaveBeenCalledWith(
+      expect.not.objectContaining({ character_id: expect.anything() })
+    )
+    expect(latestContext!.currentThreadId).toBe("thread-1")
+    expect(latestContext!.isLocalOnlyThread).toBe(false)
   })
 
   it("shows persistence warning only on first chat message save failure", async () => {

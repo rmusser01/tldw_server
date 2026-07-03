@@ -513,6 +513,21 @@ const seedTldwConfigFromEnv = async (): Promise<void> => {
     const existing = (await storage.get<TldwConfig>("tldwConfig").catch(() => null)) || null
     const storedServerUrl =
       (await storage.get<string>("tldwServerUrl").catch(() => null)) || null
+    const existingSingleUserKey =
+      existing?.authMode === "single-user" && typeof existing.apiKey === "string"
+        ? normalizeApiKey(existing.apiKey)
+        : null
+    if (
+      !envAuthOptedOut &&
+      !apiKey &&
+      !apiBearer &&
+      existingSingleUserKey &&
+      !isPlaceholderApiKey(existingSingleUserKey) &&
+      !getRuntimeSingleUserApiKeyOverride()
+    ) {
+      setRuntimeApiKey(existingSingleUserKey)
+      setRuntimeSingleUserApiKeyOverride(existingSingleUserKey)
+    }
     const quickstartWebUiServerUrl = getQuickstartWebUiServerUrl()
     const effectiveExplicitWebHost =
       !quickstartWebUiServerUrl && isCurrentBrowserOrigin(repairedExplicitWebHost)

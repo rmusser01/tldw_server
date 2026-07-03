@@ -289,7 +289,7 @@ export const chatRagMethods = {
     const { timeoutMs, signal, ...rest } = options || {}
     const normalizedQuery = this.normalizeRagQuery(query)
     try {
-      return await bgRequest<any>({
+      return await this.requestWithCurrentConfig<any>({
         path: '/api/v1/rag/search',
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -322,7 +322,7 @@ export const chatRagMethods = {
         { status }
       )
       try {
-        return await bgRequest<any>({
+        return await this.requestWithCurrentConfig<any>({
           path: '/api/v1/rag/search',
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -510,7 +510,7 @@ export const chatRagMethods = {
   },
 
   async createChat(this: TldwApiClientCore, payload: Record<string, any>, options?: { scope?: ChatScope }): Promise<ServerChatSummary> {
-    const res = await bgRequest<any>({
+    const res = await this.requestWithCurrentConfig<any>({
       path: "/api/v1/chats/",
       method: "POST",
       headers: { "Content-Type": "application/json" },
