@@ -244,9 +244,9 @@ Expected result after implementation: both test files pass.
 
 **Tests:** `test_audio_cpp_adapter.py`, `test_audio_cpp_tts_service.py`
 
-**Status:** Not Started
+**Status:** Complete
 
-- [ ] **Step 1: Write failing adapter tests**
+- [x] **Step 1: Write failing adapter tests**
 
 Cover:
 
@@ -277,7 +277,7 @@ python -m pytest -q tldw_Server_API/tests/TTS_NEW/unit/adapters/test_audio_cpp_a
 
 Expected result before implementation: import failure for `audio_cpp_adapter`.
 
-- [ ] **Step 2: Write failing service routing test**
+- [x] **Step 2: Write failing service routing test**
 
 Use the TTS factory/service test pattern to prove:
 
@@ -295,7 +295,7 @@ python -m pytest -q tldw_Server_API/tests/TTS_NEW/integration/test_audio_cpp_tts
 
 Expected result before implementation: routing or adapter import failure.
 
-- [ ] **Step 3: Implement adapter**
+- [x] **Step 3: Implement adapter**
 
 Create `tldw_Server_API/app/core/TTS/adapters/audio_cpp_adapter.py`.
 
@@ -309,7 +309,7 @@ Implementation requirements:
 - Do not pass generic `voice`, `voice_id`, or unverified voice fields.
 - Clean request scratch files after generation unless `retain_request_artifacts` is true.
 
-- [ ] **Step 4: Re-run adapter and service tests**
+- [x] **Step 4: Re-run adapter and service tests**
 
 Run:
 
