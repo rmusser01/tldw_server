@@ -39,6 +39,7 @@ These tools should reuse the existing RAG request-resolution, pipeline, response
 - No silent web fallback, URL scraping, image search, video search, or external provider research loop in the first slice.
 - No replacement of `knowledge.search` with RAG behavior.
 - No direct HTTP call from MCP back into the FastAPI route.
+- No SQL RAG source in the first slice until SQL readiness, source authorization, and safe result-shaping semantics are defined.
 
 ## Current State
 
@@ -47,6 +48,7 @@ MCP Unified already has a production module architecture under `tldw_Server_API/
 Default enabled modules include:
 
 - `media`
+- `template`
 - `mcp_discovery`
 - `governance`
 - `notes`
@@ -187,10 +189,11 @@ The first implementation slice does not include an `advanced` escape hatch. Any 
 
 Source selection contract:
 
-- accepted public canonical source ids are `media_db`, `notes`, `chats`, `characters`, `kanban`, `prompts`, `world_books`, `dictionaries`, and `sql`
+- accepted Stage 1 public canonical source ids are `media_db`, `notes`, `chats`, `characters`, `kanban`, `prompts`, `world_books`, and `dictionaries`
 - friendly aliases supported by existing normalization may be accepted as input, such as `media` for `media_db`, but output metadata should use canonical source ids
 - the module must capture whether `sources` was explicit before creating `UnifiedRAGRequest`, because existing source normalization turns `None` into the default canonical source
 - response metadata should include canonical `sources_requested`, `sources_used`, and `sources_unavailable`
+- `sql` is deferred in Stage 1 even though `DataSource.SQL` exists, because the current source-health helper does not publish SQL readiness and the MCP-safe SQL authorization/result contract is not defined yet
 
 Default source behavior:
 
@@ -211,25 +214,26 @@ The target flow is:
    - retrieval plan
    - canonical sources
    - profile defaults
-   - search-agent defaults
+   - MCP-safe retrieval defaults
    - user id
    - feedback user id where relevant
    - pipeline kwargs
 4. The helper accepts database paths/handles from either:
    - FastAPI dependencies for HTTP
    - `RequestContext.db_paths` for MCP
-5. Source scopes from the MCP request context are applied before retrieval:
+5. Source scopes from the MCP request context are applied before retrieval where the current RAG schema/retriever can enforce them:
    - `media_id`
    - `note_id`
-   - `conversation_id`
-   - `character_id`
-   - `prompt_id`
    - workspace/session metadata where available
 6. The module executes the shared RAG pipeline through the shared bundle.
 7. Existing response mapping converts core output into the common RAG response.
 8. `RagModule` compacts the response for MCP payload caps while preserving citations and trust metadata.
 
 The shared helper should be a service-level seam. It should not import FastAPI request objects or MCP protocol classes directly. Transport adapters should pass explicit user/context values into it.
+
+The first implementation must not inherit Search-Agent or research defaults wholesale. The MCP adapter should force-disable external retrieval behavior that is out of scope for Stage 1, including web fallback, URL scraping, image/video search, and external research loops. If existing profile or Search-Agent defaults can enable those paths, the MCP adapter needs an explicit allowlist or forced-false override layer with regression tests.
+
+Scoped retrieval for `conversation_id`, `character_id`, and `prompt_id` is deferred until the corresponding RAG schemas and retrievers can enforce those filters. If a caller supplies those scopes with explicit sources in Stage 1, `rag.*` should fail closed with a clear `unsupported_scope` or `source_unavailable` reason. If those sources are selected implicitly and no safe scope enforcement exists, the module should omit them and add warnings rather than running unscoped retrieval.
 
 ## Security And Governance
 
@@ -240,9 +244,24 @@ Required parity:
 | Tool | HTTP analogue | Required controls |
 | --- | --- | --- |
 | `rag.capabilities` | `GET /api/v1/rag/capabilities` | `tools.execute:rag.capabilities`, module enablement, MCP protocol rate limiting, safe config redaction |
-| `rag.source_health` | `GET /api/v1/rag/source-health` | `tools.execute:rag.source_health`, MCP protocol rate limiting equivalent to HTTP `check_rate_limit`, RAG-specific RBAC/resource posture equivalent to `rbac_rate_limit("rag.search")`, source read entitlement equivalent to `MEDIA_READ`, token-scope constraints equivalent to `TokenScopeGuard`, MCP per-tool/category rate limiting, source scope filtering |
+| `rag.source_health` | `GET /api/v1/rag/source-health` | `tools.execute:rag.source_health`, MCP protocol rate limiting equivalent to HTTP `check_rate_limit`, RAG-specific RBAC/resource posture equivalent to `rbac_rate_limit("rag.search")`, per-source authorization from the matrix below, token-scope constraints equivalent to `TokenScopeGuard`, MCP per-tool/category rate limiting, source scope filtering |
 | `rag.search` | `POST /api/v1/rag/search` with generation disabled | `tools.execute:rag.search`, `rag.source_health` controls, RAG query daily quota equivalent to `LimitCategory.RAG_QUERIES_DAY`, usage logging/accounting |
 | `rag.answer` | `POST /api/v1/rag/search` with generation enabled | `tools.execute:rag.answer`, `rag.search` controls, LLM-provider-safe request metadata propagation, generation-specific rate/cost category posture |
+
+Because `rag.*` calls the RAG service path directly, it must not bypass MCP source-module permissions. Before retrieval, the module should normalize requested sources and authorize each source independently:
+
+| Source | Stage 1 authorization requirement |
+| --- | --- |
+| `media_db` | media module enabled, source read entitlement equivalent to `MEDIA_READ`, and permission to execute the relevant read/search media tool path |
+| `notes` | notes module enabled and permission to execute the relevant `notes.*` read/search tool path |
+| `chats` | chats module enabled and permission to execute the relevant `chats.*` read/search tool path; fail closed when requested scopes cannot be enforced |
+| `characters` | characters module enabled and permission to execute the relevant `characters.*` read/search tool path; fail closed when requested scopes cannot be enforced |
+| `kanban` | kanban module enabled and permission to execute the relevant `kanban.*` read/search tool path |
+| `prompts` | prompts module enabled and permission to execute the relevant `prompts.*` read/search tool path; fail closed when requested scopes cannot be enforced |
+| `world_books` | backing module/source entitlement available and enabled; otherwise explicit requests fail closed and implicit defaults filter it with a warning |
+| `dictionaries` | backing module/source entitlement available and enabled; otherwise explicit requests fail closed and implicit defaults filter it with a warning |
+
+Explicitly denied or unavailable sources should fail closed unless `allow_partial=true`. Implicit/default source selection should filter unauthorized or unavailable sources and report warnings plus `sources_unavailable` metadata. Catalog visibility must never grant execution rights for a source.
 
 `rag.source_health` and `rag.capabilities` should not consume the RAG query daily quota unless a future policy deliberately changes that behavior. `rag.search` and `rag.answer` should consume the quota consistently with query execution.
 
@@ -263,7 +282,7 @@ For JSON-RPC `tools/call`, the existing MCP runtime wraps dict results under:
 
 `result.content[0].json`
 
-The runtime also returns `module`, `tool`, and `eval` alongside the content. The HTTP `/tools/execute` facade can expose the same inner payload under its existing `result` field.
+The runtime also returns `module`, `tool`, and `eval` alongside the content. The current HTTP `/tools/execute` facade should preserve its existing wrapper shape for JSON results. If clients need the raw inner payload surfaced directly under a `result` field, that should be added as a compatible opt-in or versioned facade behavior rather than a silent contract change.
 
 Canonical inner payload:
 
@@ -388,16 +407,20 @@ Required tests:
   - `MEDIA_READ` where applicable
   - `TokenScopeGuard` where applicable
   - `LimitCategory.RAG_QUERIES_DAY` only for executing RAG queries
-  - source scoping
+  - per-source MCP module enablement and source tool/entitlement checks
+  - source scoping, including fail-closed coverage for unsupported `conversation_id`, `character_id`, and `prompt_id` scopes
   - usage logging for query execution
+- tests proving MCP Stage 1 forces off out-of-scope external/search-agent defaults even when config/profile defaults enable them
 - result compaction tests for bounded documents, truncation flags, normalized citations, preserved chunk citations, and derived hard-citation coverage
 - error contract tests for invalid args, auth/RBAC/source denial, quota denial, RAG-domain failures, and partial source behavior
 - tests proving `advanced` is rejected in the first slice
+- tests proving `sql` is rejected/deferred in Stage 1 and omitted from `rag.source_health` unless a future SQL health contract is implemented
 - permission tests for `tools.execute:rag.capabilities`, `rag.source_health`, `rag.search`, and `rag.answer`
 - catalog tests proving visibility filtering does not grant execution rights
 - MCP category/rate tests for `rag.search` and `rag.answer`, including configured `rag_generation` behavior and failure/guard coverage when that category is missing
 - config tests proving the module loads from `mcp_modules.yaml`
 - regression tests proving `knowledge.search` remains FTS discovery
+- compatibility tests proving JSON-RPC `tools/call` and HTTP `/tools/execute` retain their current wrapper contracts
 - follow-up or regression coverage for direct RAG consumers such as `slides.generate.from_rag`
 
 Implementation verification should include:
@@ -425,9 +448,12 @@ Implementation verification should include:
 - MCP clients can discover and call `rag.search` and `rag.answer`.
 - Results are citation-aware, bounded, and machine-readable.
 - Source aliases are accepted only through existing normalization, while response metadata reports canonical source ids and preserves whether `sources` was explicit.
+- SQL is explicitly rejected/deferred in Stage 1 unless SQL source health and MCP-safe authorization semantics are implemented first.
 - Unsupported `advanced` arguments are rejected in the first slice.
 - Implementation reuses shared RAG request resolution, response mapping, quota checks, source checks, and usage accounting.
-- Tool permissions and source permissions are enforced independently of catalog membership.
+- Tool permissions, per-source module enablement, and source permissions are enforced independently of catalog membership.
+- Unsupported item scopes fail closed for explicit source requests and are filtered with warnings for implicit/default source selection.
+- Out-of-scope external/search-agent defaults cannot enable web fallback or provider research behavior in Stage 1.
 - Catalogs reduce discovery noise without introducing a `research.*` facade.
 - `knowledge.search` remains FTS discovery.
 - The first slice does not include batch, stream, ablation, feedback, ingestion, note-writing, or export workflows.
