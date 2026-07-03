@@ -176,6 +176,11 @@ def test_advanced_is_rejected():
         _build_mcp_rag_request("rag.search", {"query": "q", "advanced": {"debug_mode": True}})
 
 
+def test_sql_source_is_rejected_in_stage_one():
+    with pytest.raises(ValueError, match="sql"):
+        _build_mcp_rag_request("rag.search", {"query": "q", "sources": ["sql"]})
+
+
 def test_compact_response_truncates_documents_and_preserves_citations():
     response = UnifiedRAGResponse(
         query="q",
@@ -215,8 +220,9 @@ Implement only pure helpers first:
 
 ```python
 _CANONICAL_PUBLIC_SOURCES = (
-    "media_db", "notes", "chats", "characters", "kanban", "prompts", "world_books", "dictionaries", "sql",
+    "media_db", "notes", "chats", "characters", "kanban", "prompts", "world_books", "dictionaries",
 )
+_DEFERRED_STAGE_ONE_SOURCES = {"sql"}
 _SEARCH_MODES = ("hybrid", "vector", "fts")
 _PROFILES = ("fast", "balanced", "accuracy")
 
@@ -230,6 +236,9 @@ def _build_mcp_rag_request(tool_name: str, arguments: dict[str, Any]) -> tuple[U
         raise ValueError("advanced is not supported by rag.* first slice")
     sources_explicit = _sources_were_explicit(arguments)
     sources = normalize_sources_public(arguments.get("sources"))
+    deferred = sorted(set(sources) & _DEFERRED_STAGE_ONE_SOURCES)
+    if deferred:
+        raise ValueError(f"unsupported Stage 1 source: {deferred[0]}")
     payload = {
         "query": _required_string(arguments, "query", max_length=20000),
         "sources": sources,
@@ -255,7 +264,7 @@ def _build_mcp_rag_request(tool_name: str, arguments: dict[str, Any]) -> tuple[U
     }
 ```
 
-Add `_compact_rag_response()`, `_answer_status()`, and `_domain_error_payload()` as pure functions. Keep all payloads JSON-serializable and avoid provider secrets, paths, and prompts.
+Add `_compact_rag_response()`, `_answer_status()`, `_domain_error_payload()`, `_mcp_safe_search_agent_overrides()`, and `_unsupported_scope_warnings_or_error()` as pure functions. Keep all payloads JSON-serializable and avoid provider secrets, paths, and prompts.
 
 - [ ] **Step 4: Run contract tests to verify pass**
 
@@ -326,9 +335,14 @@ Also add tests for:
 
 - `rag.answer` includes `answer.status`.
 - `rag.source_health` returns safe canonical source entries and does not consume RAG query quota.
-- `rag.source_health`, `rag.search`, and `rag.answer` fail closed without `media.read` or wildcard permission in `context.metadata["permissions"]`.
+- `rag.source_health`, `rag.search`, and `rag.answer` authorize each normalized source independently instead of treating `media.read` as global source access.
+- `tools/call` enforces `tools.execute:rag.capabilities`, `tools.execute:rag.source_health`, `tools.execute:rag.search`, and `tools.execute:rag.answer` independently.
 - `rag.search` and `rag.answer` call the RAG query quota checker before pipeline execution and the best-effort usage logger after successful execution.
 - explicit unavailable source returns `ok:false` unless `allow_partial=true`.
+- `sources=["sql"]` returns a Stage 1 rejection rather than entering the pipeline.
+- explicit requests with unsupported `conversation_id`, `character_id`, or `prompt_id` scopes fail closed with `unsupported_scope` or `source_unavailable`.
+- implicit/default source selection filters sources whose scopes cannot be enforced and reports warnings instead of running unscoped retrieval.
+- MCP execution forces out-of-scope Search-Agent and research defaults off even when config/profile defaults enable `enable_research_loop`, `search_url_scraping`, `enable_image_search`, `enable_video_search`, web fallback, or similar external provider behavior.
 - RAG-domain pipeline exceptions become structured `ok:false` payloads.
 
 - [ ] **Step 2: Run module tests to verify failures**
@@ -368,7 +382,19 @@ Execution rules:
 - `rag.capabilities` returns `build_rag_capabilities_payload()`.
 - `rag.source_health` returns `build_source_health_payload()` using `context.user_id` and `context.db_paths` where possible.
 - `rag.search` and `rag.answer` call `_build_mcp_rag_request()`, `build_standard_request_bundle()`, `unified_rag_pipeline(**bundle.pipeline_kwargs)`, `rag_result_to_response(rag_result_from_unified_search_result(result))`, then `_compact_rag_response()`.
-- `rag.source_health`, `rag.search`, and `rag.answer` call a small `_require_media_read_permission(context)` helper before source access. The helper should accept `*` and `media.read` from `context.metadata["permissions"]` and fail closed when permissions are absent or malformed.
+- `rag.source_health`, `rag.search`, and `rag.answer` call `_authorize_sources(context, sources, sources_explicit, allow_partial)` before source access. The helper should check module availability and tool/source permission per normalized source, using `tools.execute:<source tool>` where applicable and `media.read` only for `media_db`.
+- Use this Stage 1 source authorization map:
+  - `media_db`: media module enabled, `media.read` or wildcard entitlement, and permission for the relevant `media.*` read/search path.
+  - `notes`: notes module enabled and permission for the relevant `notes.*` read/search path.
+  - `chats`: chats module enabled and permission for the relevant `chats.*` read/search path; fail closed when requested scopes cannot be enforced.
+  - `characters`: characters module enabled and permission for the relevant `characters.*` read/search path; fail closed when requested scopes cannot be enforced.
+  - `kanban`: kanban module enabled and permission for the relevant `kanban.*` read/search path.
+  - `prompts`: prompts module enabled and permission for the relevant `prompts.*` read/search path; fail closed when requested scopes cannot be enforced.
+  - `world_books`: backing module/source entitlement available and enabled; explicit requests fail closed otherwise, implicit defaults filter with a warning.
+  - `dictionaries`: backing module/source entitlement available and enabled; explicit requests fail closed otherwise, implicit defaults filter with a warning.
+- `_authorize_sources()` returns the filtered canonical source list plus `sources_unavailable` and warnings. Explicitly denied or unavailable sources fail closed unless `allow_partial=true`; implicit/default sources are filtered with warnings.
+- `_unsupported_scope_warnings_or_error()` must inspect `context.metadata`/persona scope for `conversation_id`, `character_id`, and `prompt_id`. When these scopes are supplied with explicit affected sources, return `ok:false` with `unsupported_scope` or `source_unavailable`; when sources are implicit/default, filter affected sources and add warnings.
+- `_mcp_safe_search_agent_overrides()` must be merged into pipeline kwargs after `build_standard_request_bundle()` so profile/config defaults cannot enable out-of-scope external behavior. Force these keys false/disabled in Stage 1: `enable_research_loop`, `search_url_scraping`, `enable_image_search`, `enable_video_search`, `enable_discussion_search` when it would call external providers, web fallback flags, and any equivalent research/web provider toggles present in the payload.
 - `rag.search` and `rag.answer` call an injectable `_check_rag_query_quota(context, units=1)` before pipeline execution. The default implementation should use existing Billing enforcement (`LimitCategory.RAG_QUERIES_DAY`) when org context is available, and preserve single-user/orgless behavior where Billing is disabled or explicitly orgless.
 - `rag.search` and `rag.answer` call `log_rag_queries_for_org_context()` after successful query execution. Ledger failures remain best-effort and must not change the tool result.
 - `context.db_paths` keys should accept existing MCP conventions (`media`, `chacha`, `prompts`, `kanban`) and map to RAG pipeline keys (`media_db_path`, `notes_db_path`, `character_db_path`, `prompts_db_path`, `kanban_db_path`).
@@ -616,8 +642,12 @@ git commit -m "docs: document rag mcp tools"
 - [ ] `rag.search` returns bounded evidence and omits `answer`.
 - [ ] `rag.answer` returns bounded evidence plus `answer.status`.
 - [ ] Source aliases normalize to canonical ids and preserve `sources_explicit`.
+- [ ] `sql` is rejected/deferred in Stage 1 and is not advertised by `rag.source_health`.
+- [ ] Per-source authorization/module enablement is enforced independently; `media.read` only authorizes `media_db`.
 - [ ] Explicit unavailable sources fail closed unless `allow_partial=true`.
+- [ ] Unsupported `conversation_id`, `character_id`, and `prompt_id` scopes fail closed for explicit source requests and filter with warnings for implicit/default source selection.
 - [ ] `advanced` is rejected.
+- [ ] MCP-safe overrides force off external Search-Agent/research defaults, web fallback, URL scraping, image search, and video search in Stage 1.
 - [ ] Catalog filtering does not grant execute permission.
 - [ ] `rag.source_health` and `rag.capabilities` do not consume `RAG_QUERIES_DAY`.
 - [ ] `rag.search` and `rag.answer` enforce RAG query quota and usage accounting.
