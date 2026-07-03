@@ -1,0 +1,48 @@
+name: perf-nightly
+
+on:
+  schedule:
+    - cron: "0 6 * * *"  # Daily at 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  perf:
+    name: performance-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      PYTHONPATH: .
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+      TEST_MODE: "true"
+      DISABLE_HEAVY_STARTUP: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      - name: Setup Python and dependencies
+        uses: ./.github/actions/setup-python-deps
+        with:
+          python-version: "3.12"
+          use-uv: "true"
+          cache-dependency-path: |
+            pyproject.toml
+            uv.lock
+          extras: dev
+
+      - name: Run performance suite
+        run: |
+          pytest -q --disable-warnings -p pytest_asyncio.plugin -p timeout --timeout=300 \
+            tldw_Server_API/tests/performance \
+            -m "not jobs and not e2e" \
+            --junitxml=perf-results.xml
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: perf-results
+          path: perf-results.xml
+          retention-days: 30
