@@ -129,7 +129,7 @@ def test_release_helper_raises_when_post_release_anchor_is_missing() -> None:
     readme_text = (
         "## Current Status\n\n"
         "- `0.1.34` Beta status. Expect rough edges and please report issues.\n"
-        "- The `dev` branch carries post-`0.1.34` branch work beyond `0.1.34`.\n"
+        "- The `dev` branch carries work beyond `0.1.34`.\n"
     )
 
     with pytest.raises(ValueError, match="post-release reference"):

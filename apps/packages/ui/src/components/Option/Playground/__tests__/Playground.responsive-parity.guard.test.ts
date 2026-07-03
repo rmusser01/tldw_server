@@ -45,7 +45,7 @@ describe("Playground responsive parity guard", () => {
     expect(playgroundSource).toContain("hidden sm:inline-flex")
     expect(playgroundSource).toContain("px-2 pt-1 sm:px-4 sm:pt-2")
     expect(playgroundSource).toContain("px-2 sm:px-4")
-    expect(playgroundSource).toContain('!isMobileViewport ? (')
+    expect(playgroundSource).toContain('!isMobileViewport && !focusModeActive ? (')
     expect(formSource).toContain(
       "grid grid-cols-[auto_minmax(0,1fr)] items-end gap-2"
     )

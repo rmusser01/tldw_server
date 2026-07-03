@@ -312,12 +312,12 @@ def update_readme_release_references(readme_text: str, version: str) -> str:
     if count == 0:
         raise ValueError("Missing README anchor for beyond-release reference")
 
-    updated_text, post_count = re.subn(
+    updated_text, _post_count = re.subn(
         rf"(?m)^(Currently landing on `dev` \(post-`){_SEMVER_PATTERN}(` branch work\):)$",
         rf"\g<1>{version}\g<2>",
         updated_text,
     )
-    if post_count == 0:
+    if f"post-`{version}` branch work" not in updated_text:
         raise ValueError("Missing README anchor for post-release reference")
 
     return updated_text
