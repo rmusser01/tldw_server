@@ -14,6 +14,7 @@ from tldw_Server_API.app.core.MCP_unified.modules.implementations.prompts_module
 from tldw_Server_API.app.core.MCP_unified.modules.implementations.knowledge_module import KnowledgeModule
 from tldw_Server_API.app.core.MCP_unified.modules.implementations.characters_module import CharactersModule
 from tldw_Server_API.app.core.MCP_unified.modules.implementations.chats_module import ChatsModule
+from tldw_Server_API.app.core.MCP_unified.modules.implementations.docs_module import DocsModule
 from tldw_Server_API.app.core.MCP_unified.modules.implementations.template_module import TemplateModule
 
 
@@ -35,7 +36,7 @@ class _MinimalModule(BaseModule):
 
 
 @pytest.mark.asyncio
-async def test_write_tools_have_ingestion_or_management_category():
+async def test_write_tools_have_ingestion_or_management_category(tmp_path):
     modules = [
         MediaModule(ModuleConfig(name="media")),
         NotesModule(ModuleConfig(name="notes")),
@@ -43,6 +44,7 @@ async def test_write_tools_have_ingestion_or_management_category():
         KnowledgeModule(ModuleConfig(name="knowledge")),
         CharactersModule(ModuleConfig(name="characters")),
         ChatsModule(ModuleConfig(name="chats")),
+        DocsModule(ModuleConfig(name="docs", settings={"db_path": str(tmp_path / "docs.db"), "trusted_roots": []})),
         TemplateModule(ModuleConfig(name="template")),
     ]
 

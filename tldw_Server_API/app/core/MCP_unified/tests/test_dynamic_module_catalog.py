@@ -29,10 +29,7 @@ class _DynamicToolModule(BaseModule):
         return {"ok": True}
 
     async def get_tools(self) -> list[dict[str, Any]]:
-        return [
-            {"name": name, "description": "", "inputSchema": {"type": "object"}}
-            for name in self.tool_names
-        ]
+        return [{"name": name, "description": "", "inputSchema": {"type": "object"}} for name in self.tool_names]
 
     async def execute_tool(
         self,
@@ -155,6 +152,66 @@ def test_default_mcp_modules_config_declares_prompts_module_with_empty_config_al
     assert prompts_module["settings"]["prompt_list_page_size"] == 50  # nosec B101
     assert prompts_module["settings"]["max_rendered_prompt_chars"] == 100000  # nosec B101
     assert prompts_module["settings"]["config_prompts"] == {"enabled": True, "entries": []}  # nosec B101
+
+
+def test_default_mcp_modules_config_declares_docs_module_without_web_acquisition() -> None:
+    config_path = Path("tldw_Server_API/Config_Files/mcp_modules.yaml")
+    data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    modules = {module["id"]: module for module in data["modules"]}
+
+    docs_module = modules["docs"]
+
+    assert docs_module["enabled"] is True  # nosec B101
+    assert docs_module["class"] == (  # nosec B101
+        "tldw_Server_API.app.core.MCP_unified.modules.implementations.docs_module:DocsModule"
+    )
+    assert docs_module["department"] == "knowledge"  # nosec B101
+    assert docs_module["settings"]["enable_web_acquisition"] is False  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_server_registers_docs_module_without_media_or_rag_dependencies(monkeypatch, tmp_path: Path) -> None:
+    from tldw_Server_API.app.core.MCP_unified.modules.registry import reset_module_registry
+    from tldw_Server_API.app.core.MCP_unified.server import MCPServer
+
+    await reset_module_registry()
+    config_path = tmp_path / "mcp_modules.yaml"
+    config_path.write_text(
+        f"""
+modules:
+  - id: docs
+    class: tldw_Server_API.app.core.MCP_unified.modules.implementations.docs_module:DocsModule
+    enabled: true
+    name: Docs Corpus
+    version: "0.1.0"
+    department: knowledge
+    settings:
+      db_path: {str(tmp_path / "docs.db")}
+      trusted_roots:
+        - {str(tmp_path)}
+      enable_web_acquisition: false
+      web_source_profile: locked_down
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MCP_MODULES_CONFIG", str(config_path))
+    monkeypatch.setenv("MCP_MODULES", "")
+    monkeypatch.setenv("MCP_ENABLE_MEDIA_MODULE", "0")
+    monkeypatch.setenv("MCP_ENABLE_FILESYSTEM_MODULE", "0")
+    server = MCPServer()
+
+    try:
+        await server._register_default_modules()
+        docs_module = await server.module_registry.find_module_for_tool("docs.status")
+        ingest_module = await server.module_registry.find_module_for_tool("docs.ingest_url")
+
+        assert docs_module is not None  # nosec B101
+        assert ingest_module is None  # nosec B101
+        status = await docs_module.execute_tool("docs.status", {}, context=None)
+        assert status["web_acquisition_enabled"] is False  # nosec B101
+    finally:
+        await server.module_registry.shutdown_all()
+        await reset_module_registry()
 
 
 @pytest.mark.asyncio

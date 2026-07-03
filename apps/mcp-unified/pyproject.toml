@@ -57,6 +57,10 @@ fastapi = [
 sqlite = [
   "SQLAlchemy>=2.0.29",
 ]
+docs-web = [
+  "beautifulsoup4>=4.12.0",
+  "trafilatura>=1.6.0",
+]
 federation = [
   "pydantic>=2.0.0",
   "loguru>=0.7.0",
@@ -91,6 +95,11 @@ include-package-data = false
 license-files = ["LICENSE"]
 packages = [
   "mcp_unified",
+  "mcp_unified.docs",
+  "mcp_unified.docs.acquisition",
+  "mcp_unified.docs.importers",
+  "mcp_unified.docs.retrieval",
+  "mcp_unified.docs.store",
   "mcp_unified.federation",
   "mcp_unified.filesystem_locks",
   "mcp_unified.gateway",
@@ -108,3 +117,4 @@ packages = [
 
 [tool.setuptools.package-data]
 mcp_unified = ["py.typed", "README.md", "USER_GUIDE.md"]
+"mcp_unified.docs.store" = ["schema.sql"]

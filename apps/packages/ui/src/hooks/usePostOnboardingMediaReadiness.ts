@@ -1,6 +1,7 @@
 import React from "react"
 
 import { tldwClient, type TldwConfig } from "@/services/tldw/TldwApiClient"
+import { getRuntimeSingleUserApiKeyOverride } from "@/services/tldw/runtime-auth-override"
 
 export type PostOnboardingMediaReadinessStatus =
   | "checking"
@@ -38,7 +39,10 @@ const hasRequiredAuth = (config: TldwConfig | null): boolean => {
   if (config.authMode === "multi-user") {
     return Boolean(String(config.accessToken || "").trim())
   }
-  return Boolean(String(config.apiKey || "").trim())
+  return Boolean(
+    String(config.apiKey || "").trim() ||
+      getRuntimeSingleUserApiKeyOverride()
+  )
 }
 
 const getCurrentOrigin = (): string => {
