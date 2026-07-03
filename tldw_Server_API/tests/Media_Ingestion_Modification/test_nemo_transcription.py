@@ -190,6 +190,61 @@ class TestNemoTranscription:
         assert kwargs.get("target_lang") == "en"
 
     @patch('tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo.load_canary_model')
+    def test_transcribe_with_canary_resamples_numpy_before_direct_transcribe(self, mock_load_model):
+        """Canary direct NumPy path should honor non-16kHz caller sample rates."""
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo import (
+            transcribe_with_canary,
+        )
+
+        audio_data = np.ones(8000, dtype=np.float32)
+        mock_model = MagicMock()
+        mock_model.transcribe.return_value = ["resampled canary"]
+        mock_load_model.return_value = mock_model
+
+        result = transcribe_with_canary(audio_data, 8000, "en")
+
+        assert result == "resampled canary"
+        args, _kwargs = mock_model.transcribe.call_args
+        assert isinstance(args[0], list)
+        assert len(args[0][0]) == 16000
+
+    @patch('tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo.load_parakeet_model')
+    def test_transcribe_with_parakeet_resamples_numpy_before_direct_transcribe(self, mock_load_model):
+        """Parakeet direct NumPy path should honor non-16kHz caller sample rates."""
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo import (
+            transcribe_with_parakeet,
+        )
+
+        audio_data = np.ones(8000, dtype=np.float32)
+        mock_model = MagicMock()
+        mock_model.transcribe.return_value = ["resampled parakeet"]
+        mock_load_model.return_value = mock_model
+
+        result = transcribe_with_parakeet(audio_data, 8000, "standard")
+
+        assert result == "resampled parakeet"
+        args, _kwargs = mock_model.transcribe.call_args
+        assert len(args[0]) == 16000
+
+    @patch('tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo.load_parakeet_model')
+    def test_transcribe_with_parakeet_empty_numpy_does_not_resample_crash(self, mock_load_model):
+        """Parakeet direct NumPy path should not crash before provider validation on empty audio."""
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo import (
+            transcribe_with_parakeet,
+        )
+
+        audio_data = np.array([], dtype=np.float32)
+        mock_model = MagicMock()
+        mock_model.transcribe.return_value = ["empty parakeet"]
+        mock_load_model.return_value = mock_model
+
+        result = transcribe_with_parakeet(audio_data, 8000, "standard")
+
+        assert result == "empty parakeet"
+        args, _kwargs = mock_model.transcribe.call_args
+        assert args[0].size == 0
+
+    @patch('tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo.load_canary_model')
     def test_transcribe_with_canary_sanitizes_runtime_errors(self, mock_load_model):
         """Canary runtime failures should not leak backend exception text."""
         from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo import (

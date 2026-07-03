@@ -713,11 +713,18 @@ async def create_transcription(
             )
         except ImportError as e:
             logger.debug(
-                'convert_to_wav import failed; using original temp file: path={}, error={}',
+                'convert_to_wav import failed; rejecting audio upload: path={}, error={}',
                 temp_audio_path,
                 e,
             )
-            canonical_path = temp_audio_path
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=_dictation_error_detail(
+                    http_status=status.HTTP_400_BAD_REQUEST,
+                    detail_status="invalid_audio",
+                    message="Audio file could not be converted to canonical WAV.",
+                ),
+            ) from e
         else:
             try:
                 canonical_path = _convert_to_wav(
@@ -728,16 +735,56 @@ async def create_transcription(
                 )
             except (ConversionError, OSError, RuntimeError, ValueError) as e:
                 logger.debug(
-                    'convert_to_wav failed; using original temp file: path={}, error={}',
+                    'convert_to_wav failed; rejecting audio upload: path={}, error={}',
                     temp_audio_path,
                     e,
                 )
-                canonical_path = temp_audio_path
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=_dictation_error_detail(
+                        http_status=status.HTTP_400_BAD_REQUEST,
+                        detail_status="invalid_audio",
+                        message="Audio file could not be converted to canonical WAV.",
+                    ),
+                ) from e
+
+        if not canonical_path:
+            logger.debug(
+                'convert_to_wav returned empty output; rejecting audio upload: input_path={}',
+                temp_audio_path,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=_dictation_error_detail(
+                    http_status=status.HTTP_400_BAD_REQUEST,
+                    detail_status="invalid_audio",
+                    message="Audio file could not be converted to canonical WAV.",
+                ),
+            )
+
+        canonical_path_obj = PathLib(canonical_path)
+        if (
+            canonical_path_obj.suffix.lower() != ".wav"
+            or not canonical_path_obj.exists()
+        ):
+            logger.debug(
+                'convert_to_wav returned unusable output; rejecting audio upload: input_path={}, output_path={}',
+                temp_audio_path,
+                canonical_path,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=_dictation_error_detail(
+                    http_status=status.HTTP_400_BAD_REQUEST,
+                    detail_status="invalid_audio",
+                    message="Audio file could not be converted to canonical WAV.",
+                ),
+            )
 
         if is_test_mode():
             logger.debug("TEST_MODE: canonical audio path resolved")
 
-        base_dir = PathLib(canonical_path).parent
+        base_dir = canonical_path_obj.parent
 
         sf_mod = _audio_shim_attr("sf")
         duration_seconds = 0.0

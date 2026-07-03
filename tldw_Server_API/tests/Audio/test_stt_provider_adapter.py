@@ -577,6 +577,179 @@ def test_transcribe_batch_canary_normalizes_artifact(monkeypatch, tmp_path):
 
 
 @pytest.mark.unit
+def test_transcribe_batch_canary_converts_compressed_input_before_soundfile(monkeypatch, tmp_path):
+    spa = _import_module()
+
+    import numpy as np
+    import soundfile as sf
+    import sys
+
+    compressed_file = tmp_path / "sample_canary.mp3"
+    compressed_file.write_bytes(b"not really mp3")
+    converted_wav = tmp_path / "sample_canary.wav"
+    sf.write(str(converted_wav), np.zeros(1600, dtype="float32"), 16000)
+
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as atlib
+
+    captured = {}
+
+    def fake_convert_to_wav(path, *args, **kwargs):
+        captured["input_path"] = str(path)
+        return str(converted_wav)
+
+    monkeypatch.setattr(atlib, "convert_to_wav", fake_convert_to_wav)
+
+    fake_nemo_mod = types.ModuleType(
+        "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo"
+    )
+
+    def fake_transcribe_with_canary(audio_np, sample_rate, language, task="transcribe", target_language=None):
+        assert sample_rate == 16000
+        assert len(audio_np) == 1600
+        return "canary transcript"
+
+    fake_nemo_mod.transcribe_with_canary = fake_transcribe_with_canary
+    monkeypatch.setitem(
+        sys.modules,
+        "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo",
+        fake_nemo_mod,
+    )
+
+    adapter = spa.CanaryAdapter()
+    artifact = adapter.transcribe_batch(
+        str(compressed_file),
+        model="nemo-canary-1b",
+        language="en",
+        base_dir=tmp_path,
+    )
+
+    assert artifact["text"] == "canary transcript"
+    assert captured["input_path"] == str(compressed_file)
+
+
+@pytest.mark.unit
+def test_transcribe_batch_qwen3_asr_converts_compressed_input(monkeypatch, tmp_path):
+    spa = _import_module()
+
+    import sys
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as atlib
+
+    compressed_file = tmp_path / "sample_qwen3.webm"
+    compressed_file.write_bytes(b"not really webm")
+    converted_wav = tmp_path / "sample_qwen3.wav"
+    converted_wav.write_bytes(b"RIFFfakeWAVE")
+    captured = {}
+
+    monkeypatch.setattr(atlib, "convert_to_wav", lambda path, *args, **kwargs: str(converted_wav))
+
+    fake_qwen3_mod = types.ModuleType(
+        "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Qwen3ASR"
+    )
+
+    def fake_transcribe_with_qwen3_asr(
+        audio_path,
+        *,
+        model_path=None,
+        language=None,
+        word_timestamps=False,
+        base_dir=None,
+        cancel_check=None,
+    ):
+        captured["audio_path"] = str(audio_path)
+        captured["base_dir"] = base_dir
+        return {
+            "text": "qwen3 transcript",
+            "language": language or "en",
+            "segments": [
+                {"start_seconds": 0.0, "end_seconds": 1.0, "Text": "qwen3 transcript"}
+            ],
+            "diarization": {"enabled": False, "speakers": None},
+            "usage": {"duration_ms": 1000, "tokens": None},
+            "metadata": {"provider": "qwen3-asr", "model": model_path or "model"},
+        }
+
+    fake_qwen3_mod.transcribe_with_qwen3_asr = fake_transcribe_with_qwen3_asr
+    monkeypatch.setitem(
+        sys.modules,
+        "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Qwen3ASR",
+        fake_qwen3_mod,
+    )
+
+    adapter = spa.Qwen3ASRAdapter()
+    artifact = adapter.transcribe_batch(
+        str(compressed_file),
+        model="./models/qwen3_asr/1.7B",
+        language="en",
+        base_dir=tmp_path,
+    )
+
+    assert artifact["text"] == "qwen3 transcript"
+    assert captured["audio_path"] == str(converted_wav)
+    assert captured["base_dir"] == tmp_path
+
+
+@pytest.mark.unit
+def test_transcribe_batch_vibevoice_converts_compressed_input(monkeypatch, tmp_path):
+    spa = _import_module()
+
+    import sys
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as atlib
+
+    compressed_file = tmp_path / "sample_vibevoice.m4a"
+    compressed_file.write_bytes(b"not really m4a")
+    converted_wav = tmp_path / "sample_vibevoice.wav"
+    converted_wav.write_bytes(b"RIFFfakeWAVE")
+    captured = {}
+
+    monkeypatch.setattr(atlib, "convert_to_wav", lambda path, *args, **kwargs: str(converted_wav))
+
+    fake_vibe_mod = types.ModuleType(
+        "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_VibeVoice"
+    )
+
+    def fake_transcribe_with_vibevoice(
+        audio_path,
+        *,
+        model_id=None,
+        language=None,
+        hotwords=None,
+        base_dir=None,
+        cancel_check=None,
+    ):
+        captured["audio_path"] = str(audio_path)
+        captured["base_dir"] = base_dir
+        return {
+            "text": "vibe transcript",
+            "language": language or "en",
+            "segments": [
+                {"start_seconds": 0.0, "end_seconds": 1.0, "Text": "vibe transcript"}
+            ],
+            "diarization": {"enabled": False, "speakers": None},
+            "usage": {"duration_ms": 1000, "tokens": None},
+            "metadata": {"provider": "vibevoice", "model": model_id or "model"},
+        }
+
+    fake_vibe_mod.transcribe_with_vibevoice = fake_transcribe_with_vibevoice
+    monkeypatch.setitem(
+        sys.modules,
+        "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_VibeVoice",
+        fake_vibe_mod,
+    )
+
+    adapter = spa.VibeVoiceAdapter()
+    artifact = adapter.transcribe_batch(
+        str(compressed_file),
+        model="microsoft/VibeVoice-ASR",
+        language="en",
+        base_dir=tmp_path,
+    )
+
+    assert artifact["text"] == "vibe transcript"
+    assert captured["audio_path"] == str(converted_wav)
+    assert captured["base_dir"] == tmp_path
+
+
+@pytest.mark.unit
 def test_transcribe_batch_external_normalizes_artifact(monkeypatch, tmp_path):
     spa = _import_module()
 

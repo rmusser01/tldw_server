@@ -152,6 +152,56 @@ def _raise_if_cancelled(cancel_check: Callable[[], bool] | None) -> None:
         raise TranscriptionCancelled("Cancelled by user")
 
 
+def _resolve_adapter_audio_path(audio_path: str, base_dir: Path | None) -> Path:
+    path_obj = Path(audio_path)
+    if base_dir is None:
+        return path_obj
+
+    safe_path = resolve_safe_local_path(path_obj, base_dir)
+    if safe_path is None:
+        raise BadRequestError(f"Audio path rejected outside base_dir: {audio_path}")
+    return safe_path
+
+
+def _canonicalize_wav_for_soundfile_adapter(audio_path: str, base_dir: Path | None) -> Path:
+    path_obj = _resolve_adapter_audio_path(audio_path, base_dir)
+    if path_obj.suffix.lower() == ".wav":
+        return path_obj
+
+    try:
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib import (  # type: ignore
+            ConversionError,
+            convert_to_wav,
+        )
+    except ImportError as exc:
+        raise BadRequestError("Audio WAV conversion is not available for this STT provider") from exc
+
+    try:
+        converted_path = convert_to_wav(
+            str(path_obj),
+            offset=0,
+            overwrite=False,
+            base_dir=base_dir,
+        )
+    except (ConversionError, OSError, RuntimeError, ValueError) as exc:
+        raise BadRequestError(f"Failed to convert audio file to WAV: {exc}") from exc
+
+    if not converted_path:
+        raise BadRequestError("Audio conversion did not produce a usable WAV file")
+
+    converted_obj = Path(converted_path)
+    if base_dir is not None:
+        safe_converted = resolve_safe_local_path(converted_obj, base_dir)
+        if safe_converted is None:
+            raise BadRequestError(f"Converted audio path rejected outside base_dir: {converted_path}")
+        converted_obj = safe_converted
+
+    if converted_obj.suffix.lower() != ".wav" or not converted_obj.exists():
+        raise BadRequestError("Audio conversion did not produce a usable WAV file")
+
+    return converted_obj
+
+
 def _normalize_parakeet_variant(raw: str | None) -> str:
     variant = (raw or "").strip().lower()
     if not variant or variant not in _SUPPORTED_PARAKEET_VARIANTS:
@@ -460,13 +510,7 @@ class CanaryAdapter(SttProviderAdapter):
             transcribe_with_canary,
         )
 
-        path_obj = Path(audio_path)
-        if base_dir is not None:
-            # Enforce that local audio paths stay within base_dir for path safety.
-            safe_path = resolve_safe_local_path(path_obj, base_dir)
-            if safe_path is None:
-                raise BadRequestError(f"Audio path rejected outside base_dir: {audio_path}")
-            path_obj = safe_path
+        path_obj = _canonicalize_wav_for_soundfile_adapter(audio_path, base_dir)
 
         _raise_if_cancelled(cancel_check)
         try:
@@ -636,8 +680,9 @@ class Qwen3ASRAdapter(SttProviderAdapter):
                 model_path = "./models/qwen3_asr/1.7B"
 
         _raise_if_cancelled(cancel_check)
+        audio_path_for_provider = str(_canonicalize_wav_for_soundfile_adapter(audio_path, base_dir))
         artifact = transcribe_with_qwen3_asr(
-            audio_path,
+            audio_path_for_provider,
             model_path=model_path,
             language=language,
             word_timestamps=word_timestamps,
@@ -694,8 +739,9 @@ class VibeVoiceAdapter(SttProviderAdapter):
                 model_name = "microsoft/VibeVoice-ASR"
 
         _raise_if_cancelled(cancel_check)
+        audio_path_for_provider = str(_canonicalize_wav_for_soundfile_adapter(audio_path, base_dir))
         artifact = transcribe_with_vibevoice(
-            audio_path,
+            audio_path_for_provider,
             model_id=model_name,
             language=language,
             hotwords=list(hotwords) if hotwords else None,

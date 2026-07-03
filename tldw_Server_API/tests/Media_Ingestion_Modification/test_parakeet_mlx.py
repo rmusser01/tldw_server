@@ -7,6 +7,8 @@ import numpy as np
 import tempfile
 import os
 import builtins
+import sys
+import types
 from pathlib import Path
 from unittest.mock import Mock, patch, MagicMock, call
 import soundfile as sf
@@ -201,6 +203,71 @@ class TestParakeetMLX:
 
         model = mlx_mod.load_parakeet_mlx_model(force_reload=True)
         assert model is None
+
+    def test_speech_to_text_parakeet_mlx_buffered_converts_compressed_path(self, monkeypatch, tmp_path):
+        """MLX buffered path should not pass compressed source files to soundfile loaders."""
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import Audio_Buffered_Transcription as buffered_mod
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import Audio_Transcription_Lib as atlib
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import Audio_Transcription_Parakeet_MLX as mlx_mod
+
+        compressed_file = tmp_path / "sample.m4a"
+        compressed_file.write_bytes(b"not really m4a")
+        converted_wav = tmp_path / "sample.wav"
+        converted_wav.write_bytes(b"RIFFfakeWAVE")
+        captured = {}
+
+        monkeypatch.setattr(mlx_mod, "check_mlx_available", lambda: True)
+        monkeypatch.setattr(atlib, "get_stt_config", lambda: {"mlx_chunk_duration": 30.0})
+        monkeypatch.setitem(
+            sys.modules,
+            "librosa",
+            types.SimpleNamespace(get_duration=lambda path: 120.0),
+        )
+
+        def fake_convert_to_wav(path, *args, **kwargs):
+            captured["convert_input"] = str(path)
+            return str(converted_wav)
+
+        def fake_transcribe_long_audio(audio_path, *args, **kwargs):
+            captured["audio_path"] = str(audio_path)
+            return "mlx transcript"
+
+        monkeypatch.setattr(atlib, "convert_to_wav", fake_convert_to_wav)
+        monkeypatch.setattr(buffered_mod, "transcribe_long_audio", fake_transcribe_long_audio)
+
+        segments = atlib.speech_to_text_parakeet(
+            str(compressed_file),
+            variant="mlx",
+            base_dir=tmp_path,
+        )
+
+        assert captured["convert_input"] == str(compressed_file)
+        assert captured["audio_path"] == str(converted_wav)
+        assert segments[0]["Text"] == "mlx transcript"
+
+    def test_speech_to_text_parakeet_mlx_rejects_converted_path_outside_base_dir(self, monkeypatch, tmp_path):
+        """MLX conversion output should remain inside base_dir when one is provided."""
+        from tldw_Server_API.app.core.exceptions import STTTranscriptionError
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import Audio_Transcription_Lib as atlib
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import Audio_Transcription_Parakeet_MLX as mlx_mod
+
+        compressed_file = tmp_path / "sample.m4a"
+        compressed_file.write_bytes(b"not really m4a")
+        outside_dir = tmp_path.parent / f"{tmp_path.name}_outside"
+        outside_dir.mkdir(exist_ok=True)
+        converted_wav = outside_dir / "sample.wav"
+        converted_wav.write_bytes(b"RIFFfakeWAVE")
+
+        monkeypatch.setattr(mlx_mod, "check_mlx_available", lambda: True)
+        monkeypatch.setattr(atlib, "get_stt_config", lambda: {"mlx_chunk_duration": 30.0})
+        monkeypatch.setattr(atlib, "convert_to_wav", lambda *args, **kwargs: str(converted_wav))
+
+        with pytest.raises(STTTranscriptionError, match="outside the allowed directory"):
+            atlib.speech_to_text_parakeet(
+                str(compressed_file),
+                variant="mlx",
+                base_dir=tmp_path,
+            )
 
     @patch('tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Parakeet_MLX.load_parakeet_mlx_model')
     @patch('tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Parakeet_MLX.check_mlx_available')

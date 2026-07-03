@@ -401,6 +401,45 @@ def _load_audio_for_parakeet_nemo(audio_file_path: str, target_sr: int = 16000) 
     return np.ascontiguousarray(audio_np, dtype=np.float32), target_sr, audio_duration
 
 
+def _ensure_wav_path_for_parakeet_mlx(audio_file_path: str, base_dir: Optional[Path] = None) -> str:
+    path_obj = Path(audio_file_path)
+    if path_obj.suffix.lower() == ".wav":
+        return str(path_obj)
+
+    try:
+        wav_file_path = convert_to_wav(
+            str(path_obj),
+            offset=0,
+            overwrite=False,
+            base_dir=base_dir,
+        )
+    except (ConversionError, OSError, RuntimeError, TypeError, ValueError) as exc:
+        logging.debug(f"Parakeet MLX WAV conversion failed: {type(exc).__name__}")
+        raise STTTranscriptionError(
+            "Parakeet MLX audio loading failed: WAV conversion failed for compressed input."
+        ) from exc
+
+    if not wav_file_path:
+        raise STTTranscriptionError(
+            "Parakeet MLX audio loading failed: WAV conversion did not produce a usable WAV file."
+        )
+
+    wav_path = Path(wav_file_path)
+    if base_dir is not None:
+        safe_wav_path = resolve_safe_local_path(wav_path, base_dir)
+        if safe_wav_path is None:
+            raise STTTranscriptionError(
+                "Parakeet MLX audio loading failed: converted WAV path is outside the allowed directory."
+            )
+        wav_path = safe_wav_path
+
+    if wav_path.suffix.lower() != ".wav" or not wav_path.exists():
+        raise STTTranscriptionError(
+            "Parakeet MLX audio loading failed: WAV conversion did not produce a usable WAV file."
+        )
+    return str(wav_path)
+
+
 def _resolve_project_root() -> Path:
     """
     Return the repository root used to anchor shared model directories.
@@ -3005,6 +3044,7 @@ def speech_to_text_parakeet(
                     logging.warning("MLX not available on this platform, falling back to standard Parakeet")
                     variant = "standard"
                 else:
+                    audio_file_path = _ensure_wav_path_for_parakeet_mlx(audio_file_path, base_dir=base_dir)
                     stt_cfg = get_stt_config() or {}
                     raw_chunk_duration = stt_cfg.get("mlx_chunk_duration")
                     raw_overlap_duration = stt_cfg.get("mlx_overlap_duration")
