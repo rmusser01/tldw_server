@@ -58,11 +58,17 @@ async def _build_app(tmp_path, monkeypatch):
     # media/audit rows) through the previous app's pool into the previous
     # tmp database — logins then 401 and FK constraints fail (issue #2580).
     # Mirrors the canonical reset set in tests/AuthNZ/conftest.py.
+    from tldw_Server_API.app.core.Audit.unified_audit_service import shutdown_audit_service
+    from tldw_Server_API.app.core.AuthNZ.alerting import reset_security_alert_dispatcher
     from tldw_Server_API.app.core.AuthNZ.api_key_manager import reset_api_key_manager
     from tldw_Server_API.app.core.AuthNZ.lockout_tracker import reset_lockout_tracker
     from tldw_Server_API.app.core.AuthNZ.rate_limiter import reset_rate_limiter
+    from tldw_Server_API.app.core.AuthNZ.scheduler import reset_authnz_scheduler
     from tldw_Server_API.app.core.AuthNZ.token_blacklist import reset_token_blacklist
+    from tldw_Server_API.app.core.Billing.enforcement import reset_billing_enforcer
+    from tldw_Server_API.app.core.Billing.subscription_service import reset_subscription_service
     from tldw_Server_API.app.core.DB_Management.Users_DB import reset_users_db
+    from tldw_Server_API.app.services.org_invite_service import reset_invite_service
     from tldw_Server_API.app.services.registration_service import reset_registration_service
     from tldw_Server_API.app.services.storage_cleanup_service import reset_cleanup_service
     from tldw_Server_API.app.services.storage_quota_service import reset_storage_service
@@ -72,15 +78,21 @@ async def _build_app(tmp_path, monkeypatch):
     await reset_db_pool()
     await reset_session_manager()
     await reset_token_blacklist()
+    await reset_security_alert_dispatcher()
+    await reset_authnz_scheduler()
     await reset_rate_limiter()
     await reset_lockout_tracker()
     reset_settings()
     reset_jwt_service()
     await reset_registration_service()
+    await reset_invite_service()
+    await reset_subscription_service()
+    reset_billing_enforcer()
     await reset_api_key_manager()
     await reset_storage_service()
     await reset_cleanup_service()
     await reset_users_db()
+    await shutdown_audit_service()
 
     await ensure_authnz_schema_ready_once()
 
