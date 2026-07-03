@@ -14,18 +14,23 @@ references:
 documentation:
 - docs/superpowers/plans/2026-07-03-audio-cpp-tts-provider-implementation-plan.md
 modified_files:
+- Docs/STT-TTS/TTS-SETUP-GUIDE.md
 - Docs/superpowers/plans/2026-07-03-audio-cpp-tts-provider-implementation-plan.md
 - backlog/tasks/task-12125 - Implement-audio.cpp-TTS-provider-and-setup-integration.md
+- Helper_Scripts/install_tts_audio_cpp.py
 - tldw_Server_API/Config_Files/tts_providers_config.yaml
 - tldw_Server_API/app/core/TTS/adapter_registry.py
+- tldw_Server_API/app/core/TTS/adapters/audio_cpp_adapter.py
 - tldw_Server_API/app/core/TTS/adapters/audio_cpp_client.py
 - tldw_Server_API/app/core/TTS/adapters/audio_cpp_config.py
-- tldw_Server_API/app/core/TTS/adapters/audio_cpp_adapter.py
+- tldw_Server_API/app/core/TTS/adapters/audio_cpp_sidecar_supervisor.py
 - tldw_Server_API/tests/TTS_NEW/fixtures/empty_config.txt
 - tldw_Server_API/tests/TTS_NEW/integration/test_audio_cpp_tts_service.py
 - tldw_Server_API/tests/TTS_NEW/unit/adapters/test_audio_cpp_adapter.py
 - tldw_Server_API/tests/TTS_NEW/unit/adapters/test_audio_cpp_client.py
 - tldw_Server_API/tests/TTS_NEW/unit/adapters/test_audio_cpp_config.py
+- tldw_Server_API/tests/TTS_NEW/unit/adapters/test_audio_cpp_sidecar_supervisor.py
+- tldw_Server_API/tests/TTS_NEW/unit/test_audio_cpp_installer.py
 - tldw_Server_API/tests/TTS_NEW/unit/test_audio_cpp_registry.py
 - tldw_Server_API/tests/TTS_NEW/unit/test_audio_cpp_tts_config.py
 ---
@@ -41,8 +46,8 @@ Implement the accepted Approach A design for `0xShug0/audio.cpp`: a disabled-by-
 - [x] #1 `audio_cpp` is registered as a first-class TTS provider with explicit aliases, namespaced model aliases, disabled-by-default config, and no regression to existing `pocket_tts` routing.
 - [x] #2 The adapter/client can synthesize through `audiocpp_server` using the existing `/api/v1/audio/speech` flow, with tested request translation, WAV response handling, one-shot streaming compatibility, format conversion handoff, and sanitized error mapping.
 - [x] #3 Reference-audio and option passthrough behavior is safe by default: loopback-only base URLs unless explicitly allowed, external reference audio disabled unless configured, server-local scratch paths constrained, and only allowlisted scalar options sent upstream.
-- [ ] #4 Managed sidecar support can render upstream server config, choose a loopback port, wait for health, avoid tight restart loops, and shut down cleanly without exposing arbitrary command args or process output.
-- [ ] #5 Installer/setup helpers and documentation cover explicit clone/build/config/model steps without silent network downloads during normal server startup or inference.
+- [x] #4 Managed sidecar support can render upstream server config, choose a loopback port, wait for health, avoid tight restart loops, and shut down cleanly without exposing arbitrary command args or process output.
+- [x] #5 Installer/setup helpers and documentation cover explicit clone/build/config/model steps without silent network downloads during normal server startup or inference.
 - [ ] #6 Focused pytest, Ruff, and Bandit verification are recorded for the touched implementation scope.
 <!-- AC:END -->
 
@@ -78,6 +83,12 @@ Follow `docs/superpowers/plans/2026-07-03-audio-cpp-tts-provider-implementation-
 - Stage 3 adjacent regression: `..\..\.venv\Scripts\python.exe -m pytest -q tldw_Server_API/tests/TTS_NEW/unit/test_fish_s2_registry.py tldw_Server_API/tests/TTS_NEW/unit/test_pocket_tts_cpp_registry.py` passed with 5 passed, 6 warnings in 64.60s.
 - Stage 3 Ruff check passed for `audio_cpp_adapter.py`, `test_audio_cpp_adapter.py`, and `test_audio_cpp_tts_service.py`.
 - Stage 3 post-review refactor moved reference-audio file writes off the event loop; final focused rerun passed with 9 passed, 7 warnings in 76.92s.
+- Stage 4 red test: `..\..\.venv\Scripts\python.exe -m pytest -q --tb=short tldw_Server_API/tests/TTS_NEW/unit/adapters/test_audio_cpp_sidecar_supervisor.py tldw_Server_API/tests/TTS_NEW/unit/test_audio_cpp_installer.py` failed as expected with 9 missing-module/import failures for `audio_cpp_sidecar_supervisor` and `Helper_Scripts.install_tts_audio_cpp`.
+- Stage 4 implementation added `AudioCppSidecarSupervisor`, managed-mode adapter startup wiring, `Helper_Scripts/install_tts_audio_cpp.py`, sidecar/installer tests, and `Docs/STT-TTS/TTS-SETUP-GUIDE.md` setup guidance.
+- Stage 4 green test: the same sidecar/installer command passed with 9 passed, 6 warnings in 71.75s.
+- Stage 4 self-review found that omitting an explicit subprocess environment would inherit parent secrets. Added a failing sidecar test that set `HF_TOKEN` and `OPENAI_API_KEY` and expected them not to be passed to the child process; it failed with missing `env`, then passed after adding an allowlisted sidecar env.
+- Stage 4 Ruff check passed for `audio_cpp_sidecar_supervisor.py`, `audio_cpp_adapter.py`, `install_tts_audio_cpp.py`, `test_audio_cpp_sidecar_supervisor.py`, and `test_audio_cpp_installer.py` after env hardening.
+- Stage 4 adapter regression: `..\..\.venv\Scripts\python.exe -m pytest -q --tb=short tldw_Server_API/tests/TTS_NEW/unit/adapters/test_audio_cpp_adapter.py tldw_Server_API/tests/TTS_NEW/integration/test_audio_cpp_tts_service.py tldw_Server_API/tests/TTS_NEW/unit/adapters/test_audio_cpp_sidecar_supervisor.py tldw_Server_API/tests/TTS_NEW/unit/test_audio_cpp_installer.py` passed with 18 passed, 9 warnings in 85.71s.
 
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 

@@ -296,6 +296,9 @@ python Helper_Scripts/TTS_Installers/install_tts_vibevoice.py --variant 1.5B
 python Helper_Scripts/TTS_Installers/install_tts_omnivoice_sidecar.py \
   --model-path models/omnivoice_sidecar/models/OmniVoice
 
+# audio.cpp sidecar config helper (explicit clone/build/model flags)
+python Helper_Scripts/install_tts_audio_cpp.py --patch-config
+
 # NeuTTS (deps; optional prefetch)
 python Helper_Scripts/TTS_Installers/install_tts_neutts.py --prefetch
 
@@ -364,6 +367,105 @@ Example request:
   }
 }
 ```
+
+### audio.cpp Setup
+
+`audio_cpp` is an optional TTS provider backed by the external
+[`0xShug0/audio.cpp`](https://github.com/0xShug0/audio.cpp) executable or HTTP
+server. It is disabled by default and does not vendor audio.cpp source or
+prebuilt binaries into tldw_server.
+
+The first supported path is CUDA-first for the managed HTTP server. Upstream also
+documents other build backends for parts of audio.cpp, but this tldw integration
+treats non-CUDA managed server builds as future verification work unless you run
+and validate the external server yourself.
+
+#### External Server Mode
+
+Run `audiocpp_server` yourself and point tldw at its loopback URL:
+
+```yaml
+providers:
+  audio_cpp:
+    enabled: true
+    base_url: "http://127.0.0.1:8080"
+    model: "audio-cpp/pocket-tts"
+    auto_download: false
+    extra_params:
+      managed: false
+      allow_remote_base_url: false
+      external_voice_reference_mode: "disabled"
+```
+
+The adapter checks `/health` and `/v1/models` during initialization. By default,
+`base_url` must be loopback. Set `allow_remote_base_url: true` only when an
+admin intentionally exposes a trusted remote audio.cpp server.
+
+Reference-audio cloning in external mode is disabled by default because upstream
+expects `voice_ref` to be a path readable by the audio.cpp server process. To use
+it with a separate server, set `external_voice_reference_mode: "shared_path"` and
+configure `shared_scratch_dir` to a directory that both tldw and the server can
+read.
+
+#### Managed Sidecar Mode
+
+Managed mode lets tldw start a loopback sidecar with:
+
+```text
+audiocpp_server --config <generated server_config_path>
+```
+
+Patch the provider config without enabling it:
+
+```bash
+python Helper_Scripts/install_tts_audio_cpp.py --patch-config
+```
+
+Enable it in the generated config or run:
+
+```bash
+python Helper_Scripts/install_tts_audio_cpp.py --patch-config --enable-provider
+```
+
+The helper builds repo-local paths under `models/audio_cpp`, sets
+`extra_params.managed: true`, and writes runtime-specific settings under
+`extra_params.server`. It does not clone, build, or download models unless you
+pass explicit admin flags such as `--clone`, `--configure`, `--build`, or
+`--install-model`.
+
+The generated sidecar config stays under `models/audio_cpp`, binds to
+`127.0.0.1`, autoselects a free port by default, waits for `/health`, backs off
+after startup failure, and can stop after an idle interval. Normal speech
+requests cannot inject extra command arguments or environment variables.
+
+#### Build And Model Package Commands
+
+The helper exposes explicit commands for operators who want a single entry point:
+
+```bash
+python Helper_Scripts/install_tts_audio_cpp.py --clone
+python Helper_Scripts/install_tts_audio_cpp.py --configure --build
+python Helper_Scripts/install_tts_audio_cpp.py --install-model --package-id pocket-tts
+```
+
+Model installation is always explicit. audio.cpp's upstream
+`tools/model_manager.py` handles package installation, including any gated
+packages or token requirements. Do not put Hugging Face tokens or API keys in
+`tts_providers_config.yaml`.
+
+No model download happens during normal tldw startup or a `/audio/speech`
+request. If the configured model files are missing, initialization or generation
+fails closed instead of fetching assets silently.
+
+Runtime note: audio.cpp can register lazy-loaded model ids at server startup, but
+models and task sessions may remain resident after first use until the sidecar
+process exits. Use `idle_shutdown_seconds` to release that memory in managed
+mode, or restart an external server when you need to unload resident models.
+
+License and packaging note: audio.cpp is Apache-2.0 while tldw_server is GPLv2
+per project metadata. This implementation treats audio.cpp as an optional
+external component installed by user/admin action. Vendoring, static linking, or
+shipping prebuilt audio.cpp binaries needs separate legal and packaging review.
 
 ### Model Auto-Download Controls
 

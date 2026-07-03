@@ -22,6 +22,7 @@ from ..tts_exceptions import (
 from .audio_cpp_client import AudioCppClient, AudioCppSpeechResult
 from .audio_cpp_config import PROVIDER_KEY as AUDIO_CPP_PROVIDER_KEY
 from .audio_cpp_config import AudioCppConfig, filter_request_options
+from .audio_cpp_sidecar_supervisor import AudioCppSidecarSupervisor
 from .base import (
     AudioFormat,
     ProviderStatus,
@@ -76,6 +77,8 @@ class AudioCppTTSAdapter(TTSAdapter):
         self.max_text_length = int(cfg.get("max_text_length") or 5000)
         self._client: Any | None = cfg.get("client") or cfg.get("_client")
         self._owns_client = self._client is None
+        self._sidecar_supervisor: Any | None = cfg.get("sidecar_supervisor") or cfg.get("_sidecar_supervisor")
+        self._owns_sidecar_supervisor = self._sidecar_supervisor is None
         self._available_models: list[str] = []
         self._voices = self._parse_voice_catalog(cfg)
 
@@ -104,8 +107,17 @@ class AudioCppTTSAdapter(TTSAdapter):
 
     async def initialize(self) -> bool:
         if self._client is None:
+            base_url = self._audio_cpp_config.base_url
+            if self._audio_cpp_config.managed:
+                if self._sidecar_supervisor is None:
+                    self._sidecar_supervisor = AudioCppSidecarSupervisor(
+                        self.config,
+                        repo_root=self._audio_cpp_config.repo_root,
+                    )
+                    self._owns_sidecar_supervisor = True
+                base_url = await self._sidecar_supervisor.ensure_started()
             self._client = AudioCppClient(
-                base_url=self._audio_cpp_config.base_url,
+                base_url=base_url,
                 timeout=float(self._audio_cpp_config.timeout),
                 allow_remote_base_url=self._audio_cpp_config.allow_remote_base_url,
             )
@@ -187,14 +199,19 @@ class AudioCppTTSAdapter(TTSAdapter):
 
     async def _cleanup_resources(self) -> None:
         client = self._client
-        if client is None or not self._owns_client:
-            return
-        close = getattr(client, "close", None)
-        if not callable(close):
-            return
-        maybe_close = close()
-        if inspect.isawaitable(maybe_close):
-            await maybe_close
+        if client is not None and self._owns_client:
+            close = getattr(client, "close", None)
+            if callable(close):
+                maybe_close = close()
+                if inspect.isawaitable(maybe_close):
+                    await maybe_close
+        supervisor = self._sidecar_supervisor
+        if supervisor is not None and self._owns_sidecar_supervisor:
+            shutdown = getattr(supervisor, "shutdown", None)
+            if callable(shutdown):
+                maybe_shutdown = shutdown()
+                if inspect.isawaitable(maybe_shutdown):
+                    await maybe_shutdown
 
     def _parse_voice_catalog(self, config: dict[str, Any]) -> dict[str, VoiceInfo]:
         extras = config.get("extra_params") if isinstance(config.get("extra_params"), dict) else {}
