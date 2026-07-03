@@ -60,7 +60,7 @@ Do not modify in the first slice:
 - Modify: `tldw_Server_API/tests/RAG_NEW/unit/test_rag_unified_search_agent_defaults.py`
 - Modify: `tldw_Server_API/tests/RAG_NEW/integration/test_rag_source_health_endpoint.py`
 
-- [ ] **Step 1: Write failing helper extraction tests**
+- [x] **Step 1: Write failing helper extraction tests**
 
 Create `tldw_Server_API/tests/RAG_NEW/unit/test_rag_transport_helpers.py` with tests for:
 
@@ -91,7 +91,7 @@ def test_build_source_health_payload_uses_existing_paths_without_leaking_paths(m
 
 Also update existing tests to import `build_unified_pipeline_kwargs`, `resolve_existing_source_db_paths`, and source-health helpers from `tldw_Server_API.app.core.RAG.rag_service.transport` instead of monkeypatching `rag_unified`.
 
-- [ ] **Step 2: Run tests to verify failures**
+- [x] **Step 2: Run tests to verify failures**
 
 Run:
 
@@ -105,7 +105,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: FAIL because `rag_service.transport` does not exist and existing tests still target endpoint-local helpers.
 
-- [ ] **Step 3: Add `rag_service.transport`**
+- [x] **Step 3: Add `rag_service.transport`**
 
 Move or wrap these route-local helpers from `rag_unified.py` into `transport.py`:
 
@@ -130,7 +130,7 @@ Implementation notes:
 - `log_rag_queries_for_org_context()` should preserve best-effort behavior and never raise.
 - `rag_unified.py` should import these helpers and expose thin route wrappers only.
 
-- [ ] **Step 4: Run extraction tests to verify pass**
+- [x] **Step 4: Run extraction tests to verify pass**
 
 Run the same pytest command from Step 2.
 
@@ -289,7 +289,7 @@ Run the pytest command from Step 2.
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add \

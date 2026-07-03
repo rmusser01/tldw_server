@@ -7,7 +7,6 @@ All features are accessible through explicit parameters.
 
 import asyncio
 import hashlib
-import inspect
 import json
 import os
 import time
@@ -63,6 +62,7 @@ from tldw_Server_API.app.core.RAG.rag_service.request_resolution import (
     ResolvedRAGRequest,
     resolve_rag_request,
 )
+from tldw_Server_API.app.core.RAG.rag_service import transport as rag_transport
 from tldw_Server_API.app.core.RAG.rag_service.retrieval_plan import (
     RetrievalPlan,
     build_retrieval_plan,
@@ -73,7 +73,7 @@ from tldw_Server_API.app.core.RAG.rag_service.response_mapping import (
 )
 from tldw_Server_API.app.core.RAG.rag_service.source_health import build_source_health_entries
 from tldw_Server_API.app.core.RAG.rag_service.streaming_executor import stream_rag_events
-from tldw_Server_API.app.core.config import get_config_value, settings
+from tldw_Server_API.app.core.config import get_config_value
 
 # Unified Pipeline
 from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import (
@@ -211,36 +211,18 @@ def _build_unified_pipeline_kwargs(
     retrieval_plan: Optional[RetrievalPlan] = None,
 ) -> dict[str, Any]:
     """Translate a resolved standard request into core pipeline keyword arguments."""
-    if resolved_request is None:
-        resolved_request = resolve_rag_request(
-            request,
-            current_user=current_user,
-            single_user_id_resolver=DatabasePaths.get_single_user_id,
-            search_agent_setting_fn=_search_agent_setting,
-        )
-    if retrieval_plan is None:
-        retrieval_plan = build_retrieval_plan(resolved_request)
-    payload = dict(resolved_request.payload)
-    payload["sources"] = list(retrieval_plan.sources)
-    payload["media_db_path"] = db_paths.get("media_db_path")
-    payload["notes_db_path"] = db_paths.get("notes_db_path")
-    payload["character_db_path"] = db_paths.get("character_db_path")
-    payload["kanban_db_path"] = db_paths.get("kanban_db_path")
-    payload["prompts_db_path"] = db_paths.get("prompts_db_path")
-    payload["media_db"] = media_db
-    payload["chacha_db"] = chacha_db
-    if prompts_db is not None:
-        payload["prompts_db"] = prompts_db
-    payload["index_namespace"] = retrieval_plan.index_namespace
-    payload["retrieval_plan"] = retrieval_plan
-    payload["user_id"] = resolved_request.user_id
-    payload["feedback_user_id"] = resolved_request.feedback_user_id
-    signature = inspect.signature(unified_rag_pipeline)
-    params = list(signature.parameters.values())
-    if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params):
-        return payload
-    allowed = set(signature.parameters.keys())
-    return {k: v for k, v in payload.items() if k in allowed}
+    return rag_transport.build_unified_pipeline_kwargs(
+        request=request,
+        db_paths=db_paths,
+        media_db=media_db,
+        chacha_db=chacha_db,
+        current_user=current_user,
+        prompts_db=prompts_db,
+        resolved_request=resolved_request,
+        retrieval_plan=retrieval_plan,
+        search_agent_setting_fn=_search_agent_setting,
+        single_user_id_resolver=DatabasePaths.get_single_user_id,
+    )
 
 
 def _build_batch_pipeline_kwargs(
@@ -285,23 +267,15 @@ def _build_standard_request_bundle(
     prompts_db: Optional[PromptsDatabase] = None,
 ) -> ResolvedRequestBundle:
     """Resolve a standard request once and attach endpoint-owned pipeline resources."""
-    return build_request_bundle(
+    return rag_transport.build_standard_request_bundle(
         request=request,
         current_user=current_user,
-        resolve_request_kwargs={
-            "single_user_id_resolver": DatabasePaths.get_single_user_id,
-            "search_agent_setting_fn": _search_agent_setting,
-        },
-        pipeline_kwargs_builder=lambda *, resolved_request, retrieval_plan: _build_unified_pipeline_kwargs(
-            request=request,
-            db_paths=db_paths,
-            media_db=media_db,
-            chacha_db=chacha_db,
-            prompts_db=prompts_db,
-            current_user=current_user,
-            resolved_request=resolved_request,
-            retrieval_plan=retrieval_plan,
-        ),
+        db_paths=db_paths,
+        media_db=media_db,
+        chacha_db=chacha_db,
+        prompts_db=prompts_db,
+        search_agent_setting_fn=_search_agent_setting,
+        single_user_id_resolver=DatabasePaths.get_single_user_id,
     )
 
 
@@ -476,26 +450,7 @@ def _resolve_kanban_db_path(current_user: Optional[User], request_user_id: Optio
 
 def _resolve_source_health_user_id(current_user: Optional[User], request_user_id: Optional[str] = None) -> Optional[str]:
     """Resolve a filesystem-safe user directory component without creating storage."""
-    candidates: list[Any] = []
-    if current_user is not None:
-        for attr in ("id", "id_int"):
-            candidates.append(getattr(current_user, attr, None))
-    candidates.append(request_user_id)
-
-    for candidate in candidates:
-        if candidate is None:
-            continue
-        raw = str(candidate).strip()
-        if raw.isdigit() and int(raw) > 0:
-            return raw
-    try:
-        fallback = DatabasePaths.get_single_user_id()
-        fallback_raw = str(fallback).strip()
-        if fallback_raw.isdigit() and int(fallback_raw) > 0:
-            return fallback_raw
-    except (RuntimeError, ValueError, OSError, TypeError):
-        logger.debug("Failed to resolve single-user ID for source health path", exc_info=True)
-    return None
+    return rag_transport.resolve_source_health_user_id(current_user, request_user_id)
 
 
 def _resolve_existing_source_db_paths(
@@ -503,32 +458,12 @@ def _resolve_existing_source_db_paths(
     request_user_id: Optional[str] = None,
 ) -> dict[str, str]:
     """Return existing source database paths without creating source storage."""
-    user_id = _resolve_source_health_user_id(current_user, request_user_id)
-    if user_id is None:
-        return {}
-
-    user_dir = DatabasePaths.resolve_user_db_base_dir() / user_id
-    candidates = {
-        "media_db": user_dir / DatabasePaths.MEDIA_DB_NAME,
-        "chacha_db": user_dir / DatabasePaths.CHACHA_DB_NAME,
-        "prompts_db": user_dir / DatabasePaths.PROMPTS_SUBDIR / DatabasePaths.PROMPTS_DB_NAME,
-        "kanban_db": user_dir / DatabasePaths.KANBAN_DB_NAME,
-    }
-    return {
-        source_key: str(path)
-        for source_key, path in candidates.items()
-        if path.is_file()
-    }
+    return rag_transport.resolve_existing_source_db_paths(current_user, request_user_id)
 
 
 def _media_db_uses_non_file_storage() -> bool:
     """Return whether Media DB search is configured for non-file content storage."""
-    backend_mode_hint = (
-        os.getenv("CONTENT_DB_MODE")
-        or os.getenv("TLDW_CONTENT_DB_BACKEND")
-        or str(settings.get("CONTENT_DB_BACKEND", "sqlite"))
-    )
-    return backend_mode_hint.strip().lower() in {"postgres", "postgresql"}
+    return rag_transport.media_db_uses_non_file_storage()
 
 
 def _build_source_health_source_sets(
@@ -537,41 +472,10 @@ def _build_source_health_source_sets(
     media_backend_uses_non_file_storage: bool = False,
 ) -> tuple[set[Any], set[Any]]:
     """Derive ready and empty source sets without creating source storage."""
-    configured: set[Any] = set()
-    empty: set[Any] = set()
-    if "media_db" in existing_paths or media_backend_uses_non_file_storage:
-        configured.add("media_db")
-    else:
-        empty.add("media_db")
-    if "chacha_db" in existing_paths:
-        configured.update(
-            {
-                "notes",
-                "chats",
-                "characters",
-                "world_books",
-                "dictionaries",
-            }
-        )
-    else:
-        empty.update(
-            {
-                "notes",
-                "chats",
-                "characters",
-                "world_books",
-                "dictionaries",
-            }
-        )
-    if "prompts_db" in existing_paths:
-        configured.add("prompts")
-    else:
-        empty.add("prompts")
-    if "kanban_db" in existing_paths:
-        configured.add("kanban")
-    else:
-        empty.add("kanban")
-    return configured, empty
+    return rag_transport.build_source_health_source_sets(
+        existing_paths=existing_paths,
+        media_backend_uses_non_file_storage=media_backend_uses_non_file_storage,
+    )
 
 
 from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
@@ -592,71 +496,11 @@ async def _log_rag_queries_for_org(
 
     This function never raises; failures are logged at debug level only.
     """
-    if units <= 0:
-        return
-
-    try:
-        # Resolve org_id from request state if available.
-        org_id: Optional[int] = None
-        try:
-            state = getattr(request_raw, "state", None)
-            if state is not None:
-                org_ids = getattr(state, "org_ids", None)
-                if isinstance(org_ids, (list, tuple)) and org_ids:
-                    org_id_candidate = org_ids[0]
-                    try:
-                        org_id = int(org_id_candidate)
-                    except (TypeError, ValueError):
-                        org_id = None
-        except (AttributeError, TypeError):
-            org_id = None
-
-        # Fallback: derive org_id from AuthNZ org memberships.
-        if org_id is None and current_user and current_user.id_int is not None:
-            try:
-                from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
-                from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
-
-                pool = await get_db_pool()
-                repo = AuthnzOrgsTeamsRepo(db_pool=pool)
-                memberships = await repo.list_org_memberships_for_user(current_user.id_int)
-                if memberships:
-                    candidate = memberships[0].get("org_id")
-                    if candidate is not None:
-                        org_id = int(candidate)
-            except Exception:  # noqa: BLE001 - best-effort fallback for org lookup
-                org_id = None
-
-        if org_id is None:
-            return
-
-        try:
-            from datetime import datetime, timezone
-
-            from tldw_Server_API.app.core.DB_Management.Resource_Daily_Ledger import (
-                LedgerEntry,
-                ResourceDailyLedger,
-            )
-
-            ledger = ResourceDailyLedger()
-            await ledger.initialize()
-
-            now = datetime.now(timezone.utc)
-            entry = LedgerEntry(  # type: ignore[call-arg]
-                entity_scope="org",
-                entity_value=str(org_id),
-                category="rag_queries",
-                units=int(units),
-                op_id=f"rag:{org_id}:{uuid4()}",
-                occurred_at=now,
-            )
-            await ledger.add(entry)
-        except Exception:  # noqa: BLE001 - ledger failures must not impact requests
-            # Ledger write failures must never impact request flow.
-            logger.debug("RAG query ledger write failed; continuing without usage record", exc_info=True)
-    except Exception:  # noqa: BLE001 - guard against unexpected failures in logging helper
-        # Guard against any unexpected failure paths.
-        logger.debug("RAG query logging failed; continuing without usage record", exc_info=True)
+    await rag_transport.log_rag_queries_for_org_context(
+        request_like=request_raw,
+        current_user=current_user,
+        units=units,
+    )
 
 
 # =============== Ablation helper ===============

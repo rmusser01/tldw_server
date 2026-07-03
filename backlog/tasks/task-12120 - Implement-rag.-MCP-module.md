@@ -11,6 +11,9 @@ references:
 modified_files:
 - backlog/tasks/task-12120 - Implement-rag.-MCP-module.md
 - Docs/superpowers/plans/2026-07-03-rag-mcp-module-implementation-plan.md
+- tldw_Server_API/app/api/v1/endpoints/rag_unified.py
+- tldw_Server_API/app/core/RAG/rag_service/transport.py
+- tldw_Server_API/tests/RAG_NEW/unit/test_rag_transport_helpers.py
 - tldw_Server_API/app/core/MCP_unified/modules/implementations/rag_module.py
 - tldw_Server_API/app/core/MCP_unified/tests/test_rag_module.py
 ---
