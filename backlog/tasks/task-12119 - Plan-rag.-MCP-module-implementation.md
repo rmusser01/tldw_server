@@ -9,6 +9,7 @@ labels:
 priority: High
 documentation:
 - Docs/superpowers/specs/2026-07-03-rag-mcp-module-design.md
+- Docs/superpowers/plans/2026-07-03-rag-mcp-module-implementation-plan.md
 modified_files:
 - Docs/superpowers/plans/2026-07-03-rag-mcp-module-implementation-plan.md
 ---
