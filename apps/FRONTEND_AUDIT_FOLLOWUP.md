@@ -53,7 +53,7 @@ Files if a revert/patch is needed: `apps/packages/ui/src/services/persona-stream
 | Ticket | What | Why deferred |
 |---|---|---|
 | `task-12113` | Finalize R3 (WS token-out-of-URL) | Gated on **V1** above — mark Done once smoke-tested live. |
-| `task-12102` | Re-enable TS `strict` / remove `ignoreBuildErrors` | Blocked on **~66 pre-existing `tsc` errors** at `strict:false` (16 frontend + ~50 packages/ui) in unrelated code. A real migration: clear the baseline (a `typecheck` script was added to measure it), then enable incrementally. Not a flag flip. |
+| `task-12116` | Re-enable TS `strict` / remove `ignoreBuildErrors` | Blocked on **~66 pre-existing `tsc` errors** at `strict:false` (16 frontend + ~50 packages/ui) in unrelated code. A real migration: clear the baseline (a `typecheck` script was added to measure it), then enable incrementally. Not a flag flip. (Renumbered from `task-12102`, which a teammate independently used on `dev`.) |
 | `task-12108` | Consolidate the 3 `characterChatMode` copies | The high-value **stream-inactivity watchdog** already shipped on both live paths; the full 3-copy merge is a large refactor and the character-chat files are actively churning on `dev` — best done once that settles. |
 | H1 follow-up (in `task-12093`) | Drop CSP `'unsafe-eval'` | Needs per-feature (WASM/OCR/tokenizer) browser verification. Also consider a build-time-computed theme-script hash + CSP `report-uri` + HSTS (HSTS is deployment-sensitive for self-hosted HTTP/LAN). |
 | `task-12103` | Delete the `extension/routes` mirror | Runtime-unused but kept in sync by **~22 parity tests**; removal must migrate/retire those tests first — negative-value churn during dev's active route work. Quarantined via `_RUNTIME_UNUSED.md`. |
