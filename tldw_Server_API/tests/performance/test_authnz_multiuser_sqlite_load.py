@@ -3,6 +3,7 @@ import importlib
 import json
 import os
 import time
+from typing import Any, Awaitable, Callable
 from unittest.mock import patch
 
 import pytest
@@ -45,6 +46,11 @@ async def _build_app(tmp_path, monkeypatch):
     try:
         from tldw_Server_API.app.core.config import settings as core_settings
         core_settings["CSRF_ENABLED"] = False
+        # The lazy core-settings mapping materializes USER_DB_BASE_DIR from env
+        # once; DatabasePaths prefers the settings value over env when it is
+        # non-default, so without this sync the SECOND _build_app in a session
+        # would keep routing per-user DBs into the FIRST test's tmp dir.
+        core_settings["USER_DB_BASE_DIR"] = user_db_base
     except Exception:
         _ = None
 
@@ -165,7 +171,7 @@ async def test_multi_user_sqlite_register_login_load(tmp_path, monkeypatch):
             return i, j, resp.status_code, resp.text
         return None
 
-    async def _run_with_sem(func, *args):
+    async def _run_with_sem(func: Callable[..., Awaitable[Any]], *args: Any) -> Any:
         async with sem:
             return await func(*args)
 
