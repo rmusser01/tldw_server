@@ -355,9 +355,31 @@ def _load_audio_for_parakeet_nemo(audio_file_path: str, target_sr: int = 16000) 
         audio_data, sample_rate = sf.read(audio_file_path, dtype="float32", always_2d=False)
     except Exception as exc:
         logging.debug(f"Soundfile could not load Parakeet audio: {type(exc).__name__}")
-        raise STTTranscriptionError(
-            "Parakeet audio loading failed; convert the input to a WAV-compatible format before transcription."
-        ) from exc
+        if Path(audio_file_path).suffix.lower() == ".wav":
+            raise STTTranscriptionError(
+                "Parakeet audio loading failed; convert the input to a WAV-compatible format before transcription."
+            ) from exc
+
+        try:
+            wav_file_path = convert_to_wav(audio_file_path, overwrite=True)
+        except Exception as conversion_exc:
+            logging.debug(f"Parakeet WAV conversion failed: {type(conversion_exc).__name__}")
+            raise STTTranscriptionError(
+                "Parakeet audio loading failed: WAV conversion failed for compressed input."
+            ) from conversion_exc
+
+        if not wav_file_path or Path(wav_file_path).suffix.lower() != ".wav" or not Path(wav_file_path).exists():
+            raise STTTranscriptionError(
+                "Parakeet audio loading failed: WAV conversion did not produce a usable WAV file."
+            ) from exc
+
+        try:
+            audio_data, sample_rate = sf.read(wav_file_path, dtype="float32", always_2d=False)
+        except Exception as retry_exc:
+            logging.debug(f"Soundfile could not load converted Parakeet WAV: {type(retry_exc).__name__}")
+            raise STTTranscriptionError(
+                "Parakeet audio loading failed after WAV conversion."
+            ) from retry_exc
 
     sample_rate = int(sample_rate)
     if sample_rate <= 0:

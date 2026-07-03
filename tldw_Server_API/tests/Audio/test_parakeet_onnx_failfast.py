@@ -266,3 +266,67 @@ def test_load_audio_for_parakeet_nemo_wraps_unexpected_soundfile_errors(
 
     with pytest.raises(atlib.STTTranscriptionError, match="audio loading failed"):
         atlib._load_audio_for_parakeet_nemo(str(tmp_path / "input.wav"))
+
+
+@pytest.mark.unit
+def test_load_audio_for_parakeet_nemo_converts_compressed_input_before_retry(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Compressed inputs should be converted to WAV before retrying soundfile."""
+
+    compressed_audio = tmp_path / "input.mp3"
+    compressed_audio.write_bytes(b"not really mp3")
+    converted_audio = tmp_path / "input.wav"
+    expected_audio = np.zeros(16000, dtype=np.float32)
+    read_paths: list[Path] = []
+
+    def fake_read(path, **_kwargs):
+        read_paths.append(Path(path))
+        if Path(path) == compressed_audio:
+            raise RuntimeError("unsupported compressed format")
+        if Path(path) == converted_audio:
+            return expected_audio, 16000
+        raise AssertionError(f"unexpected read path: {path}")
+
+    fake_soundfile = types.SimpleNamespace(read=fake_read)
+    monkeypatch.setitem(sys.modules, "soundfile", fake_soundfile)
+
+    def fake_convert_to_wav(path, *_args, **_kwargs):
+        assert Path(path) == compressed_audio
+        converted_audio.write_bytes(b"fake wav")
+        return str(converted_audio)
+
+    monkeypatch.setattr(atlib, "convert_to_wav", fake_convert_to_wav)
+
+    audio, sample_rate, duration = atlib._load_audio_for_parakeet_nemo(str(compressed_audio))
+
+    assert read_paths == [compressed_audio, converted_audio]
+    assert sample_rate == 16000
+    assert duration == 1.0
+    np.testing.assert_array_equal(audio, expected_audio)
+
+
+@pytest.mark.unit
+def test_load_audio_for_parakeet_nemo_fails_when_wav_conversion_fails(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Failed compressed-input conversion should not retry the original path."""
+
+    compressed_audio = tmp_path / "input.mp3"
+    compressed_audio.write_bytes(b"not really mp3")
+    fake_soundfile = types.SimpleNamespace(
+        read=Mock(side_effect=RuntimeError("unsupported compressed format")),
+    )
+    monkeypatch.setitem(sys.modules, "soundfile", fake_soundfile)
+    monkeypatch.setattr(
+        atlib,
+        "convert_to_wav",
+        Mock(side_effect=atlib.ConversionError("ffmpeg failed")),
+    )
+
+    with pytest.raises(atlib.STTTranscriptionError, match="WAV conversion failed"):
+        atlib._load_audio_for_parakeet_nemo(str(compressed_audio))
+
+    assert fake_soundfile.read.call_count == 1
