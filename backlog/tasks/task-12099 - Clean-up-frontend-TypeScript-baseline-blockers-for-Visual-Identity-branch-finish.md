@@ -5,6 +5,7 @@ status: Done
 references:
 - TASK-12090.5
 - codex/visual-identity-expression-packs
+- https://github.com/rmusser01/tldw_server/pull/2584
 ---
 
 ## Description
