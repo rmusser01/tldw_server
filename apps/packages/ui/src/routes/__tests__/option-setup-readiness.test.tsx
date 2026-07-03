@@ -9,9 +9,12 @@ import OptionSetup from "../option-setup"
 
 const mocks = vi.hoisted(() => ({
   useSetupOnboarding: vi.fn(),
+  useConnectionState: vi.fn(),
   navigate: vi.fn(),
   setConfigPartial: vi.fn(),
-  testConnectionFromOnboarding: vi.fn()
+  testConnectionFromOnboarding: vi.fn(),
+  refresh: vi.fn(),
+  adoptState: vi.fn()
 }))
 
 vi.mock("~/components/Layouts/Layout", () => ({
@@ -78,11 +81,41 @@ vi.mock("@/hooks/useSetupOnboarding", () => ({
 }))
 
 vi.mock("@/hooks/useConnectionState", () => ({
+  useConnectionState: () => mocks.useConnectionState(),
   useConnectionActions: () => ({
     setConfigPartial: mocks.setConfigPartial,
     testConnectionFromOnboarding: mocks.testConnectionFromOnboarding
   })
 }))
+
+const firstRunState = (status: string) => ({ status })
+
+const firstRunMetadata = () => ({
+  setup_required: true,
+  setup_completed: false,
+  remote_setup_enabled: false,
+  connection: {
+    frontend_origin: null,
+    api_origin: "http://127.0.0.1:8000",
+    browser_access: "local"
+  }
+})
+
+const setupReturn = ({
+  state = firstRunState("completed"),
+  metadata = null,
+  loading = false
+}: {
+  state?: ReturnType<typeof firstRunState> | null
+  metadata?: ReturnType<typeof firstRunMetadata> | null
+  loading?: boolean
+} = {}) => ({
+  state,
+  metadata,
+  loading,
+  refresh: mocks.refresh,
+  adoptState: mocks.adoptState
+})
 
 const renderRoute = () =>
   render(
@@ -95,12 +128,10 @@ describe("OptionSetup readiness route", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     localStorage.clear()
-    mocks.useSetupOnboarding.mockReturnValue({
-      state: { status: "completed" },
-      metadata: null,
-      loading: false,
-      adoptState: vi.fn()
+    mocks.useConnectionState.mockReturnValue({
+      serverUrl: "http://127.0.0.1:8000"
     })
+    mocks.useSetupOnboarding.mockReturnValue(setupReturn())
   })
 
   it("exposes a route heading when setup does not require the wizard", () => {
@@ -115,32 +146,172 @@ describe("OptionSetup readiness route", () => {
     expect(screen.queryByTestId("unified-setup-shell")).not.toBeInTheDocument()
   })
 
-  it("keeps the wizard as the only h1 when setup is required", () => {
-    mocks.useSetupOnboarding.mockReturnValue({
-      state: { status: "not_started" },
-      metadata: null,
-      loading: false,
-      adoptState: vi.fn()
-    })
+  it("shows the setup entry choice before the wizard when backend setup is incomplete", () => {
+    mocks.useSetupOnboarding.mockReturnValue(
+      setupReturn({
+        state: firstRunState("not_started"),
+        metadata: firstRunMetadata()
+      })
+    )
 
     renderRoute()
 
     const headings = screen.getAllByRole("heading", { level: 1 })
     expect(headings).toHaveLength(1)
-    expect(headings[0]).toHaveTextContent("First-time setup")
+    expect(headings[0]).toHaveTextContent("Choose where to set up tldw")
     expect(
-      screen.getByRole("heading", { level: 2, name: "Setup operator recovery" })
-    ).toBeInTheDocument()
+      screen.queryByRole("heading", { level: 2, name: "Connect your tldw server" })
+    ).not.toBeInTheDocument()
+    expect(screen.queryByTestId("setup-required-panel")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("unified-setup-shell")).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Set up in WebUI" }))
+
     expect(screen.getByTestId("unified-setup-shell")).toBeInTheDocument()
   })
 
+  it("enters the existing wizard after choosing WebUI setup and can go back to choices", () => {
+    mocks.useSetupOnboarding.mockReturnValue(
+      setupReturn({
+        state: firstRunState("not_started"),
+        metadata: firstRunMetadata()
+      })
+    )
+
+    renderRoute()
+
+    fireEvent.click(screen.getByRole("button", { name: "Set up in WebUI" }))
+
+    expect(screen.getByTestId("unified-setup-shell")).toBeInTheDocument()
+    let headings = screen.getAllByRole("heading", { level: 1 })
+    expect(headings).toHaveLength(1)
+    expect(headings[0]).toHaveTextContent("First-time setup")
+
+    fireEvent.click(screen.getByRole("button", { name: "Back to setup choices" }))
+
+    headings = screen.getAllByRole("heading", { level: 1 })
+    expect(headings).toHaveLength(1)
+    expect(headings[0]).toHaveTextContent("Choose where to set up tldw")
+    expect(screen.queryByTestId("unified-setup-shell")).not.toBeInTheDocument()
+  })
+
+  it("keeps blocked setup on the recovery choice instead of routing into the wizard", () => {
+    mocks.useSetupOnboarding.mockReturnValue(
+      setupReturn({
+        state: firstRunState("blocked"),
+        metadata: firstRunMetadata()
+      })
+    )
+
+    renderRoute()
+
+    expect(screen.getByRole("button", { name: "Set up in WebUI" })).toBeDisabled()
+    expect(screen.queryByTestId("unified-setup-shell")).not.toBeInTheDocument()
+  })
+
+  it("refreshes first-run state after API setup handoff", () => {
+    mocks.useSetupOnboarding.mockReturnValue(
+      setupReturn({
+        state: firstRunState("not_started"),
+        metadata: firstRunMetadata()
+      })
+    )
+
+    renderRoute()
+
+    fireEvent.click(
+      screen.getByRole("link", {
+        name: /open api server setup.*opens in a new tab/i
+      })
+    )
+    fireEvent.click(screen.getByRole("button", { name: "I finished API server setup" }))
+
+    expect(mocks.refresh).toHaveBeenCalledTimes(1)
+  })
+
+  it("returns to the recovery choice if refreshed state becomes blocked after WebUI mode was selected", () => {
+    mocks.useSetupOnboarding.mockReturnValue(
+      setupReturn({
+        state: firstRunState("not_started"),
+        metadata: firstRunMetadata()
+      })
+    )
+    const view = renderRoute()
+
+    fireEvent.click(screen.getByRole("button", { name: "Set up in WebUI" }))
+    expect(screen.getByTestId("unified-setup-shell")).toBeInTheDocument()
+
+    mocks.useSetupOnboarding.mockReturnValue(
+      setupReturn({
+        state: firstRunState("blocked"),
+        metadata: firstRunMetadata()
+      })
+    )
+    view.rerender(
+      <MemoryRouter>
+        <OptionSetup />
+      </MemoryRouter>
+    )
+
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Choose where to set up tldw" })
+    ).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Set up in WebUI" })).toBeDisabled()
+    expect(screen.queryByTestId("unified-setup-shell")).not.toBeInTheDocument()
+  })
+
+  it("keeps the manual connection and recovery UI when setup metadata is missing", () => {
+    mocks.useSetupOnboarding.mockReturnValue(
+      setupReturn({
+        state: firstRunState("not_started"),
+        metadata: null,
+        loading: false
+      })
+    )
+
+    renderRoute()
+
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Connect your tldw server" })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Setup operator recovery" })
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole("heading", { level: 1, name: "Choose where to set up tldw" })
+    ).not.toBeInTheDocument()
+  })
+
+  it("keeps the manual connection and recovery UI when setup state is missing", () => {
+    mocks.useSetupOnboarding.mockReturnValue(
+      setupReturn({
+        state: null,
+        metadata: firstRunMetadata(),
+        loading: false
+      })
+    )
+
+    renderRoute()
+
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Connect your tldw server" })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Setup operator recovery" })
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole("heading", { level: 1, name: "Choose where to set up tldw" })
+    ).not.toBeInTheDocument()
+  })
+
   it("uses the route heading while initial setup state is loading", () => {
-    mocks.useSetupOnboarding.mockReturnValue({
-      state: null,
-      metadata: null,
-      loading: true,
-      adoptState: vi.fn()
-    })
+    mocks.useSetupOnboarding.mockReturnValue(
+      setupReturn({
+        state: null,
+        metadata: null,
+        loading: true
+      })
+    )
 
     renderRoute()
 
