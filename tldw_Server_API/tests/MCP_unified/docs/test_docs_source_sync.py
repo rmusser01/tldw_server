@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import closing
+import json
 from pathlib import Path
 
 import pytest
@@ -246,7 +247,11 @@ def test_url_page_sync_retires_previous_redirect_target_when_canonical_changes_w
     service = DocsSourceSyncService(settings=settings, store=store, resolver=resolver, transport=transport)
 
     result = service.sync_source(scope=scope, request=SyncSourceRequest(source_id=source_id, mode="apply"))
-    listed = DocsMCPToolProvider(settings=settings, store=store).execute("docs.list", {"kind": "sources"}, scope=scope)
+    provider = DocsMCPToolProvider(settings=settings, store=store)
+    listed = provider.execute("docs.list", {"kind": "sources"}, scope=scope)
+    listed_documents = provider.execute("docs.list", {"kind": "documents"}, scope=scope)
+    provider_search = provider.execute("docs.search", {"query": "newcmarker"}, scope=scope)
+    provider_context = provider.execute("docs.context", {"query": "newcmarker"}, scope=scope)
     stored_source = store.get_source(scope=scope, source_id=source_id)
     links = store.source_document_links(scope=scope, source_id=source_id)
     active_links = [link for link in links if link["status"] == "active"]
@@ -257,6 +262,7 @@ def test_url_page_sync_retires_previous_redirect_target_when_canonical_changes_w
     )
     future_service = DocsSourceSyncService(settings=settings, store=store, resolver=resolver, transport=future_transport)
     future_service.sync_source(scope=scope, request=SyncSourceRequest(source_id=source_id, mode="dry_run"))
+    serialized = json.dumps([result, listed, listed_documents, provider_search, provider_context], sort_keys=True)
 
     assert result["counts"]["updated"] == 1  # nosec B101
     assert "token=secret" not in repr(result["source"])  # nosec B101
@@ -265,9 +271,12 @@ def test_url_page_sync_retires_previous_redirect_target_when_canonical_changes_w
     assert listed["sources"][0]["canonical_uri"] == "https://example.com/c"  # nosec B101
     assert listed["sources"][0]["document_count"] == 1  # nosec B101
     assert stored_source["id"] == source_id  # nosec B101
-    assert stored_source["source_url"] == "https://example.com/c?token=secret"  # nosec B101
-    assert [link["source_item_uri"] for link in active_links] == ["https://example.com/c?token=secret"]  # nosec B101
-    assert future_transport.calls[0][1].target == "/c?token=secret"  # nosec B101
+    assert stored_source["canonical_uri"] == "https://example.com/c"  # nosec B101
+    assert stored_source["source_url"] == "https://example.com/c"  # nosec B101
+    assert [link["source_item_uri"] for link in active_links] == ["https://example.com/c"]  # nosec B101
+    assert future_transport.calls[0][1].target == "/c"  # nosec B101
+    assert "token=secret" not in serialized  # nosec B101
+    assert "?token" not in serialized  # nosec B101
     assert old_search == []  # nosec B101
     assert new_search  # nosec B101
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -60,7 +61,7 @@ def test_service_returns_approval_required_without_fetch(tmp_path: Path) -> None
     assert transport.calls == []  # nosec B101
 
 
-def test_service_robots_flag_does_not_disable_fetch_without_robots_client(tmp_path: Path) -> None:
+def test_service_respect_robots_fails_closed_without_robots_client(tmp_path: Path) -> None:
     settings = DocsSettings.from_mapping(
         {
             "enable_web_acquisition": True,
@@ -77,10 +78,10 @@ def test_service_robots_flag_does_not_disable_fetch_without_robots_client(tmp_pa
 
     result = service.ingest_url(scope=AccessScope(), url="https://example.com/docs")
 
-    assert result["status"] == "created"  # nosec B101
-    assert result["reason_code"] == "ok"  # nosec B101
-    assert resolver.calls == [("example.com", 443)]  # nosec B101
-    assert len(transport.calls) == 1  # nosec B101
+    assert result["status"] == "denied"  # nosec B101
+    assert result["reason_code"] == "robots_unavailable"  # nosec B101
+    assert resolver.calls == []  # nosec B101
+    assert transport.calls == []  # nosec B101
 
 
 def test_service_ingests_approved_page_into_search_and_context(tmp_path: Path) -> None:
@@ -149,7 +150,9 @@ def test_service_reports_unchanged_for_same_content(tmp_path: Path) -> None:
     assert second["status"] == "unchanged"  # nosec B101
 
 
-def test_service_preserves_query_in_stored_canonical_uri_without_redacted_final_url_leakage(tmp_path: Path) -> None:
+def test_service_does_not_store_or_return_query_bearing_url_when_query_persistence_disabled(
+    tmp_path: Path,
+) -> None:
     settings = DocsSettings.from_mapping(
         {
             "enable_web_acquisition": True,
@@ -166,15 +169,23 @@ def test_service_preserves_query_in_stored_canonical_uri_without_redacted_final_
         ]
     )
     service = DocsAcquisitionService(settings=settings, store=store, resolver=resolver, transport=transport)
+    scope = AccessScope()
 
-    first = service.ingest_url(scope=AccessScope(), url="https://example.com/page?version=alpha")
-    second = service.ingest_url(scope=AccessScope(), url="https://example.com/page?version=beta")
-    documents = store.list_documents(scope=AccessScope(), limit=10, offset=0)
+    result = service.ingest_url(scope=scope, url="https://example.com/page?token=secret")
+    documents = store.list_documents(scope=scope, limit=10, offset=0)
+    stored = store.get_document(scope, result["document"]["id"], mode="full")
+    search = DocsRetrievalService(store).search(scope=scope, request=SearchRequest(query="alpha"))
+    context = DocsContextBuilder(DocsRetrievalService(store)).build(scope=scope, request=ContextRequest(query="alpha"))
 
-    assert first["status"] == "created"  # nosec B101
-    assert second["status"] == "created"  # nosec B101
-    assert first["fetch"]["final_url"] == "https://example.com/page"  # nosec B101
-    assert sorted(document["canonical_uri"] for document in documents) == [  # nosec B101
-        "https://example.com/page?version=alpha",
-        "https://example.com/page?version=beta",
-    ]
+    serialized = json.dumps([result, documents, stored, search, context], sort_keys=True)
+
+    assert result["status"] == "created"  # nosec B101
+    assert result["document"]["canonical_uri"] == "https://example.com/page"  # nosec B101
+    assert result["document"]["source_url"] is None  # nosec B101
+    assert result["source"] is None  # nosec B101
+    assert result["fetch"]["final_url"] == "https://example.com/page"  # nosec B101
+    assert "url_query_not_persisted" in result["warnings"]  # nosec B101
+    assert documents[0]["canonical_uri"] == "https://example.com/page"  # nosec B101
+    assert documents[0]["source_url"] is None  # nosec B101
+    assert "token=secret" not in serialized  # nosec B101
+    assert "?token" not in serialized  # nosec B101

@@ -50,6 +50,14 @@ class URLFetcher:
                 normalized = normalize_url(current_url)
             except URLPolicyError:
                 return FetchResult(status="denied", reason="malformed_url", redirects=tuple(redirects))
+            if self.settings.respect_robots:
+                return FetchResult(
+                    status="denied",
+                    reason="robots_unavailable",
+                    final_url=normalized.redacted_url,
+                    redirects=tuple(redirects),
+                    safe_argument_hash=decision.safe_argument_hash,
+                )
             if not bool(getattr(self.transport, "dials_validated_address", False)):
                 return FetchResult(
                     status="denied",

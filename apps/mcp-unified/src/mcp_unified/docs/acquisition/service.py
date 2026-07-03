@@ -64,21 +64,29 @@ class DocsAcquisitionService:
         fetched = fetched_document["fetch"]
         parsed = fetched_document["parsed"]
         content_type = fetched_document["content_type"]
-        previous_hash = _existing_content_hash(self.store, scope, parsed.canonical_uri)
+        can_persist_query_uri = self.settings.persist_url_query_strings or not url_has_query(parsed.canonical_uri)
+        document_canonical_uri = (
+            parsed.canonical_uri if can_persist_query_uri else redacted_url_for_display(parsed.canonical_uri)
+        )
+        document_source_url = parsed.source_url if can_persist_query_uri else None
+        citation_base = parsed.source_url or parsed.canonical_uri
+        if not can_persist_query_uri:
+            citation_base = document_canonical_uri
+        previous_hash = _existing_content_hash(self.store, scope, document_canonical_uri)
         new_hash = sha256(parsed.text.encode("utf-8")).hexdigest()
         keyword_tuple = tuple(keywords)
         collection_tuple = tuple(collection_names)
         chunks = [
-            {"text": chunk, "citation": f"{parsed.source_url or parsed.canonical_uri}#{index + 1}"}
+            {"text": chunk, "citation": f"{citation_base}#{index + 1}"}
             for index, chunk in enumerate(chunks_from_text(parsed.text))
         ]
         document_id = self.store.upsert_document(
             scope=scope,
             title=parsed.title,
             document_type=parsed.document_type,
-            canonical_uri=parsed.canonical_uri,
+            canonical_uri=document_canonical_uri,
             source_path=parsed.source_path,
-            source_url=parsed.source_url,
+            source_url=document_source_url,
             text=parsed.text,
             sections=[asdict(section) for section in parsed.sections],
             chunks=chunks,
@@ -94,8 +102,7 @@ class DocsAcquisitionService:
         )
         warnings = list(parsed.warnings)
         source: dict[str, Any] | None = None
-        can_persist_query_source = self.settings.persist_url_query_strings or not url_has_query(parsed.canonical_uri)
-        if can_persist_query_source:
+        if can_persist_query_uri:
             redacted_source_url = redacted_url_for_display(parsed.canonical_uri)
             source_id = self.store.upsert_source(
                 scope=scope,
@@ -131,8 +138,8 @@ class DocsAcquisitionService:
             "document": {
                 "id": document_id,
                 "title": parsed.title,
-                "canonical_uri": parsed.canonical_uri,
-                "source_url": parsed.source_url,
+                "canonical_uri": document_canonical_uri,
+                "source_url": document_source_url,
                 "chunks": len(chunks),
                 "extraction_method": parsed.extraction_method,
             },

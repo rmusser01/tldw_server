@@ -12,7 +12,7 @@ from .importers.base import ParsedDocument, chunks_from_text
 from .importers.local import DocsImportService
 from .models import AccessScope, SyncSourceRequest
 from .settings import DocsSettings
-from .source_utils import file_uri_for_path, redacted_url_for_display
+from .source_utils import file_uri_for_path, redacted_url_for_display, url_has_query
 from .store.sqlite import DocsCatalogStore
 
 _SYNC_MODES = {"dry_run", "apply"}
@@ -352,10 +352,13 @@ class DocsSourceSyncService:
         source_id = int(source["id"])
         parsed = fetched_document["parsed"]
         fetched = fetched_document["fetch"]
-        chunks, content_hash = self._parsed_url_sync_item(parsed)
+        can_persist_query_uri = self.settings.persist_url_query_strings or not url_has_query(parsed.canonical_uri)
+        sync_uri = parsed.canonical_uri if can_persist_query_uri else redacted_url_for_display(parsed.canonical_uri)
+        document_source_url = parsed.source_url if can_persist_query_uri else None
+        chunks, content_hash = self._parsed_url_sync_item(parsed, citation_base=sync_uri)
         links = self.store.source_document_links(scope=scope, source_id=source_id)
-        link = _url_page_link(links=links, source_url=source_url, parsed_uri=parsed.canonical_uri)
-        stale_active_links = _stale_url_page_links(links=links, parsed_uri=parsed.canonical_uri)
+        link = _url_page_link(links=links, source_url=source_url, parsed_uri=sync_uri)
+        stale_active_links = _stale_url_page_links(links=links, parsed_uri=sync_uri)
         item_status = (
             "updated"
             if stale_active_links
@@ -374,15 +377,15 @@ class DocsSourceSyncService:
         document_id = int(link["document_id"]) if link is not None else None
 
         if mode == "apply":
-            if _url_source_needs_retarget(source=source, parsed_uri=parsed.canonical_uri):
+            if _url_source_needs_retarget(source=source, parsed_uri=sync_uri):
                 try:
                     retargeted = self.store.retarget_source(
                         scope=scope,
                         source_id=source_id,
-                        canonical_uri=parsed.canonical_uri,
+                        canonical_uri=sync_uri,
                         display_name=parsed.title,
-                        source_url=parsed.canonical_uri,
-                        redacted_source_url=redacted_url_for_display(parsed.canonical_uri),
+                        source_url=sync_uri,
+                        redacted_source_url=redacted_url_for_display(sync_uri),
                     )
                 except DocsError as exc:
                     return self._failed(
@@ -405,9 +408,9 @@ class DocsSourceSyncService:
                     scope=scope,
                     title=parsed.title,
                     document_type=parsed.document_type,
-                    canonical_uri=parsed.canonical_uri,
+                    canonical_uri=sync_uri,
                     source_path=parsed.source_path,
-                    source_url=parsed.source_url,
+                    source_url=document_source_url,
                     text=parsed.text,
                     sections=[asdict(section) for section in parsed.sections],
                     chunks=chunks,
@@ -419,7 +422,7 @@ class DocsSourceSyncService:
                     scope=scope,
                     source_id=source_id,
                     document_id=document_id,
-                    source_item_uri=parsed.canonical_uri,
+                    source_item_uri=sync_uri,
                     status="active",
                     last_hash=content_hash,
                     metadata={"importer": "url"},
@@ -530,11 +533,17 @@ class DocsSourceSyncService:
         content_hash = sha256(parsed.text.encode("utf-8")).hexdigest()
         return parsed, chunks, content_hash
 
-    def _parsed_url_sync_item(self, parsed: ParsedDocument) -> tuple[list[dict[str, str]], str]:
+    def _parsed_url_sync_item(
+        self,
+        parsed: ParsedDocument,
+        *,
+        citation_base: str | None = None,
+    ) -> tuple[list[dict[str, str]], str]:
+        base = citation_base or parsed.source_url or parsed.canonical_uri
         chunks = [
             {
                 "text": chunk,
-                "citation": f"{parsed.source_url or parsed.canonical_uri}#{idx + 1}",
+                "citation": f"{base}#{idx + 1}",
             }
             for idx, chunk in enumerate(chunks_from_text(parsed.text))
         ]
