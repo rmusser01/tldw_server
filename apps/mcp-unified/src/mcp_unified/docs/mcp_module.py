@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
 from .acquisition.extract import available_extractors
 from .acquisition.service import DocsAcquisitionService
+from .discovery import DocsSourceDiscoveryService
 from .importers.local import DocsImportService
-from .models import AccessScope, ContextRequest, SearchFilters, SearchRequest, SyncSourceRequest
+from .models import AccessScope, ContextRequest, DiscoverSourceRequest, SearchFilters, SearchRequest, SyncSourceRequest
 from .retrieval.aliases import DocsAliasResolver
 from .retrieval.context import DocsContextBuilder
 from .retrieval.search import DocsRetrievalService
@@ -91,6 +92,11 @@ class DocsMCPToolProvider:
         self.source_sync = DocsSourceSyncService(settings=settings, store=self.store)
         self.acquisition = (
             DocsAcquisitionService(settings=settings, store=self.store) if settings.enable_web_acquisition else None
+        )
+        self.discovery = (
+            DocsSourceDiscoveryService(settings=settings, store=self.store)
+            if settings.enable_source_discovery and settings.enable_web_acquisition
+            else None
         )
 
     def tool_definitions(self) -> list[dict[str, Any]]:
@@ -232,6 +238,27 @@ class DocsMCPToolProvider:
                     "ingestion",
                 )
             )
+        if self.discovery is not None:
+            tools.append(
+                _tool(
+                    "docs.discover_source",
+                    "Discover bounded sitemap or page-link URL candidates and optionally register or ingest them.",
+                    {
+                        "url": {"type": "string"},
+                        "kind": {"type": "string"},
+                        "mode": {"type": "string"},
+                        "apply_action": {"type": "string"},
+                        "max_pages": {"type": "integer"},
+                        "max_depth": {"type": "integer"},
+                        "collections": {"type": "array"},
+                        "keywords": {"type": "array"},
+                        "title": {"type": "string"},
+                        "include_seed": {"type": "boolean"},
+                    },
+                    ["url"],
+                    "ingestion",
+                )
+            )
         return tools
 
     def execute(self, tool_name: str, arguments: dict[str, Any] | None, *, scope: AccessScope) -> Any:
@@ -312,6 +339,15 @@ class DocsMCPToolProvider:
                 collection_names=tuple(str(item) for item in args.get("collections") or ()),
                 title_override=_optional_str(args.get("title")),
             )
+        if tool_name == "docs.discover_source":
+            if not self.settings.enable_source_discovery:
+                return {"status": "denied", "reason_code": "source_discovery_disabled"}
+            if self.discovery is None:
+                return {"status": "denied", "reason_code": "web_acquisition_disabled"}
+            request, error = _discover_source_request_from_args(args)
+            if error is not None:
+                return error
+            return self.discovery.discover_source(scope=scope, request=request)
         if tool_name == "docs.sync_source":
             if not self.settings.enable_source_sync:
                 return {"status": "denied", "reason_code": "source_sync_disabled"}
@@ -443,12 +479,157 @@ def _sync_source_request_from_args(
     ), None
 
 
+def _discover_source_request_from_args(
+    args: dict[str, Any],
+) -> tuple[DiscoverSourceRequest, dict[str, str] | None]:
+    url = _optional_str(args.get("url"))
+    if url is None:
+        return DiscoverSourceRequest(url=""), _invalid_discovery_request("url")
+    kind, error = _optional_discovery_choice(
+        args.get("kind"),
+        "kind",
+        default="auto",
+        allowed={"auto", "sitemap", "page_links"},
+    )
+    if error is not None:
+        return DiscoverSourceRequest(url=url), error
+    mode, error = _optional_discovery_choice(
+        args.get("mode"),
+        "mode",
+        default="dry_run",
+        allowed={"dry_run", "apply"},
+    )
+    if error is not None:
+        return DiscoverSourceRequest(url=url), error
+    apply_action, error = _optional_discovery_choice_or_none(
+        args.get("apply_action"),
+        "apply_action",
+        allowed={"register", "ingest", "register_and_ingest"},
+    )
+    if error is not None:
+        return DiscoverSourceRequest(url=url), error
+    max_pages, error = _optional_discovery_positive_int(args.get("max_pages"), "max_pages")
+    if error is not None:
+        return DiscoverSourceRequest(url=url), error
+    max_depth, error = _optional_discovery_positive_int(args.get("max_depth"), "max_depth")
+    if error is not None:
+        return DiscoverSourceRequest(url=url), error
+    collections, error = _optional_string_tuple(args.get("collections"), "collections")
+    if error is not None:
+        return DiscoverSourceRequest(url=url), error
+    keywords, error = _optional_string_tuple(args.get("keywords"), "keywords")
+    if error is not None:
+        return DiscoverSourceRequest(url=url), error
+    include_seed, error = _optional_discovery_bool(args.get("include_seed"), "include_seed", default=False)
+    if error is not None:
+        return DiscoverSourceRequest(url=url), error
+
+    return DiscoverSourceRequest(
+        url=url,
+        kind=kind,
+        mode=mode,
+        apply_action=apply_action,
+        max_pages=max_pages,
+        max_depth=max_depth,
+        collections=collections,
+        keywords=keywords,
+        title=_optional_str(args.get("title")),
+        include_seed=include_seed,
+    ), None
+
+
 def _invalid_sync_request(field: str) -> dict[str, str]:
     return {
         "status": "denied",
         "reason_code": "source_sync_request_invalid",
         "field": field,
     }
+
+
+def _invalid_discovery_request(field: str) -> dict[str, str]:
+    return {
+        "status": "denied",
+        "reason_code": "source_discovery_request_invalid",
+        "field": field,
+    }
+
+
+def _optional_discovery_choice(
+    value: Any,
+    field: str,
+    *,
+    default: str,
+    allowed: set[str],
+) -> tuple[str, dict[str, str] | None]:
+    text = _optional_str(value)
+    if text is None:
+        return default, None
+    normalized = text.lower()
+    if normalized not in allowed:
+        return default, _invalid_discovery_request(field)
+    return normalized, None
+
+
+def _optional_discovery_choice_or_none(
+    value: Any,
+    field: str,
+    *,
+    allowed: set[str],
+) -> tuple[str | None, dict[str, str] | None]:
+    text = _optional_str(value)
+    if text is None:
+        return None, None
+    normalized = text.lower()
+    if normalized not in allowed:
+        return None, _invalid_discovery_request(field)
+    return normalized, None
+
+
+def _optional_discovery_positive_int(value: Any, field: str) -> tuple[int | None, dict[str, str] | None]:
+    if value is None:
+        return None, None
+    if isinstance(value, bool):
+        return None, _invalid_discovery_request(field)
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None, None
+        try:
+            parsed = int(text, 10)
+        except ValueError:
+            return None, _invalid_discovery_request(field)
+    elif isinstance(value, int):
+        parsed = value
+    else:
+        return None, _invalid_discovery_request(field)
+
+    if parsed <= 0:
+        return None, _invalid_discovery_request(field)
+    return parsed, None
+
+
+def _optional_discovery_bool(value: Any, field: str, *, default: bool) -> tuple[bool, dict[str, str] | None]:
+    if value is None:
+        return default, None
+    if isinstance(value, bool):
+        return value, None
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if not normalized:
+            return default, None
+        if normalized in {"1", "true", "t", "yes", "y", "on"}:
+            return True, None
+        if normalized in {"0", "false", "f", "no", "n", "off"}:
+            return False, None
+    return default, _invalid_discovery_request(field)
+
+
+def _optional_string_tuple(value: Any, field: str) -> tuple[tuple[str, ...], dict[str, str] | None]:
+    if value is None:
+        return (), None
+    if isinstance(value, str) or isinstance(value, Mapping) or not isinstance(value, Iterable):
+        return (), _invalid_discovery_request(field)
+    return tuple(text for item in value if (text := str(item).strip())), None
 
 
 def _optional_choice(

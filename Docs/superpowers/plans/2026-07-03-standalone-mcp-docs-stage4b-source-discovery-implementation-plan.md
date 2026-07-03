@@ -880,7 +880,7 @@ git commit -m "feat: apply docs source discovery"
 - Modify: `apps/mcp-unified/src/mcp_unified/docs/__init__.py`
 - Test: `tldw_Server_API/tests/MCP_unified/docs/test_docs_mcp_provider.py`
 
-- [ ] **Step 1: Write failing provider tests**
+- [x] **Step 1: Write failing provider tests**
 
 Add:
 
@@ -921,7 +921,7 @@ def test_provider_stale_discover_source_call_is_disabled(tmp_path: Path) -> None
     assert result["reason_code"] == "source_discovery_disabled"  # nosec B101
 ```
 
-- [ ] **Step 2: Run red tests**
+- [x] **Step 2: Run red tests**
 
 Run:
 
@@ -935,7 +935,7 @@ Run:
 
 Expected: FAIL with missing provider support.
 
-- [ ] **Step 3: Wire provider**
+- [x] **Step 3: Wire provider**
 
 In `DocsMCPToolProvider.__init__`, instantiate:
 
@@ -972,13 +972,13 @@ _tool(
 
 Add `_discover_source_request_from_args()` mirroring `_sync_source_request_from_args()` with explicit validation.
 
-- [ ] **Step 4: Run green tests**
+- [x] **Step 4: Run green tests**
 
 Run the command from Step 2.
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/mcp-unified/src/mcp_unified/docs/mcp_module.py \
