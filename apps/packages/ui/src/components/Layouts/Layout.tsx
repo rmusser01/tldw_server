@@ -654,6 +654,11 @@ type LayoutShellGlobal = {
   setOverrides?: (overrides: LayoutShellOverrides | null) => void
 }
 
+export type OptionLayoutShellOverrideRequest = Pick<
+  LayoutShellOverrides,
+  "hideHeader" | "hideSidebar"
+>
+
 const LayoutShellContext = React.createContext<LayoutShellContextValue>({
   inShell: false
 })
@@ -669,24 +674,23 @@ const getGlobalShell = (): LayoutShellGlobal | null => {
   return scope.__tldwOptionShell
 }
 
-function NestedLayoutContent({
-  props,
-  shell,
-  globalShell
-}: {
-  props: OptionLayoutProps
-  shell: LayoutShellContextValue
-  globalShell: LayoutShellGlobal | null
-}) {
+export function useOptionLayoutShellOverrides(
+  request: OptionLayoutShellOverrideRequest | null
+) {
+  const shell = useContext(LayoutShellContext)
+  const globalShell = getGlobalShell()
   const location = useLocation()
   const requestedOverrides = React.useMemo(() => {
+    if (!request) return null
+
     const overrides: LayoutShellOverrides = {}
-    if (props.hideHeader) overrides.hideHeader = true
-    if (props.hideSidebar) overrides.hideSidebar = true
+    if (request.hideHeader) overrides.hideHeader = true
+    if (request.hideSidebar) overrides.hideSidebar = true
     if (Object.keys(overrides).length === 0) return null
+
     overrides.sourcePath = location.pathname
     return overrides
-  }, [location.pathname, props.hideHeader, props.hideSidebar])
+  }, [location.pathname, request?.hideHeader, request?.hideSidebar])
 
   React.useEffect(() => {
     if (!requestedOverrides) return
@@ -714,6 +718,18 @@ function NestedLayoutContent({
       setOverrides?.(null)
     }
   }, [globalShell?.setOverrides, requestedOverrides, shell.setOverrides])
+}
+
+function NestedLayoutContent({ props }: { props: OptionLayoutProps }) {
+  const requestedOverrides = React.useMemo(() => {
+    const overrides: OptionLayoutShellOverrideRequest = {}
+    if (props.hideHeader) overrides.hideHeader = true
+    if (props.hideSidebar) overrides.hideSidebar = true
+    if (Object.keys(overrides).length === 0) return null
+    return overrides
+  }, [props.hideHeader, props.hideSidebar])
+
+  useOptionLayoutShellOverrides(requestedOverrides)
 
   return (
     <DemoModeProvider>
@@ -790,13 +806,7 @@ export default function OptionLayout(props: OptionLayoutProps) {
     (globalShell?.ownerId == null || globalShell.ownerId !== ownerId)
 
   if (shell.inShell || externalShell || isNextApp) {
-    return (
-      <NestedLayoutContent
-        props={props}
-        shell={shell}
-        globalShell={globalShell}
-      />
-    )
+    return <NestedLayoutContent props={props} />
   }
 
   return (

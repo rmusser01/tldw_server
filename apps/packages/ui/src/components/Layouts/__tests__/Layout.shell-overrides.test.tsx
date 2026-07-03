@@ -2,10 +2,10 @@
 
 import React from "react"
 import { MemoryRouter } from "react-router-dom"
-import { render } from "@testing-library/react"
+import { render, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import OptionLayout from "../Layout"
+import OptionLayout, { useOptionLayoutShellOverrides } from "../Layout"
 
 const storeMessageOptionMock = vi.hoisted(() =>
   vi.fn(() => ({ historyId: null, serverChatId: null }))
@@ -93,5 +93,50 @@ describe("OptionLayout shell overrides", () => {
 
     expect(otherOwnerSetOverrides).not.toHaveBeenCalled()
     vi.useRealTimers()
+  })
+
+  it("lets route content request header and sidebar shell hiding", async () => {
+    const setOverrides = vi.fn()
+    const externalShell: {
+      mounted: boolean
+      ownerId: string
+      setOverrides?: (overrides: unknown) => void
+    } = {
+      mounted: true,
+      ownerId: "root-shell",
+      setOverrides
+    }
+    ;(
+      globalThis as typeof globalThis & {
+        __tldwOptionShell?: typeof externalShell
+      }
+    ).__tldwOptionShell = externalShell
+
+    function FocusRouteContent() {
+      useOptionLayoutShellOverrides({
+        hideHeader: true,
+        hideSidebar: true
+      })
+
+      return <div>Focus route</div>
+    }
+
+    const { unmount } = render(
+      <MemoryRouter initialEntries={["/chat"]}>
+        <FocusRouteContent />
+      </MemoryRouter>
+    )
+
+    await waitFor(() => {
+      expect(setOverrides).toHaveBeenCalledWith({
+        hideHeader: true,
+        hideSidebar: true,
+        sourcePath: "/chat"
+      })
+    })
+
+    unmount()
+
+    expect(setOverrides).toHaveBeenLastCalledWith(null)
   })
 })
