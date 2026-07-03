@@ -85,6 +85,33 @@ describe("visual identity API domain contract", () => {
     expect(Object.keys(fields)).toEqual(["expression_key"])
   })
 
+  it("imports a generated file asset with source context", async () => {
+    mocks.bgRequest.mockResolvedValue({ id: 12 })
+
+    await visualIdentityMethods.createVisualIdentityAssetFromGeneratedFile.call({}, 5, {
+      generated_file_id: 42,
+      expression_key: "happy",
+      draft_id: 7,
+      source_feature: "vn_assets",
+      source_context: { vn_item_id: 29, vn_slot_label: "Happy" },
+      idempotency_key: "vn-assets:42:happy"
+    })
+
+    expect(mocks.bgRequest).toHaveBeenCalledWith({
+      path: "/api/v1/visual-identities/packs/5/assets/from-generated-file",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: {
+        generated_file_id: 42,
+        expression_key: "happy",
+        draft_id: 7,
+        source_feature: "vn_assets",
+        source_context: { vn_item_id: 29, vn_slot_label: "Happy" },
+        idempotency_key: "vn-assets:42:happy"
+      }
+    })
+  })
+
   it("starts ZIP import using the archive field", async () => {
     mocks.bgUpload.mockResolvedValue({ draft_id: 4, status: "queued" })
     const archive = {

@@ -66,6 +66,7 @@ export interface VisualIdentityAssetResponse {
   original_expression_key: string
   display_label: string
   source_filename: string
+  source_context: Record<string, unknown>
   content_type: string
   bytes: number
   sha256: string
@@ -169,6 +170,7 @@ export interface VisualIdentityGeneratedFileAssetRequest {
   expression_key: string
   draft_id?: number | null
   source_feature?: string
+  source_context?: Record<string, unknown>
   idempotency_key: string
 }
 
