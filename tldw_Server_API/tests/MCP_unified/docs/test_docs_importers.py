@@ -109,6 +109,34 @@ def test_import_directory_skips_unsupported_files(tmp_path: Path) -> None:
     assert [document["title"] for document in result["documents"]] == ["Guide"]  # nosec B101
 
 
+def test_import_directory_skips_symlink_escaping_source_directory(tmp_path: Path) -> None:
+    trusted_root = tmp_path
+    root = trusted_root / "workspace"
+    root.mkdir()
+    (root / "public.md").write_text("# Public\n\nSQLite public.\n", encoding="utf-8")
+    secret = trusted_root / "secret.md"
+    secret.write_text("# Secret\n\nClassified sibling content.\n", encoding="utf-8")
+    link = root / "secret.md"
+    try:
+        link.symlink_to(secret)
+    except OSError as exc:
+        pytest.skip(f"symlinks unavailable in this environment: {exc}")
+    service, store = _service(tmp_path, trusted_root)
+    scope = AccessScope(owner_scope="owner-a", profile_scope="profile-a")
+
+    result = service.import_path(
+        scope=scope,
+        path=root,
+        keywords=(),
+        collection_names=(),
+    )
+    search_results = store.search_chunks(scope=scope, query="Classified", limit=10)
+
+    assert result["status"] == "created"  # nosec B101
+    assert [document["title"] for document in result["documents"]] == ["Public"]  # nosec B101
+    assert search_results == []  # nosec B101
+
+
 def test_import_directory_materializes_metadata_iterables_for_each_file(tmp_path: Path) -> None:
     root = tmp_path / "workspace"
     root.mkdir()

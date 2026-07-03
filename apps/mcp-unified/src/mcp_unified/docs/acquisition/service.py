@@ -11,6 +11,7 @@ from ..errors import DocsError
 from ..importers.base import chunks_from_text
 from ..models import AccessScope
 from ..settings import DocsSettings
+from ..source_utils import redacted_url_for_display, source_defaults_metadata, url_has_query
 from ..store.sqlite import DocsCatalogStore
 from .extract import extract_fetched_document
 from .fetcher import URLFetcher
@@ -49,15 +50,118 @@ class DocsAcquisitionService:
                 "redirects": [],
             }
 
-        fetched = self.fetcher.fetch(url)
-        if fetched.status != "fetched":
+        fetched_document = self._fetch_parsed_url(url=url, title_override=title_override)
+        if fetched_document["status"] != "fetched":
             logger.info(
                 "Docs URL fetch did not produce ingestable content: status={} reason={} final_url={} redirects={}",
-                fetched.status,
-                fetched.reason,
-                fetched.final_url,
-                len(fetched.redirects),
+                fetched_document["status"],
+                fetched_document["reason_code"],
+                fetched_document.get("final_url"),
+                len(fetched_document.get("redirects", [])),
             )
+            return fetched_document
+
+        fetched = fetched_document["fetch"]
+        parsed = fetched_document["parsed"]
+        content_type = fetched_document["content_type"]
+        can_persist_query_uri = self.settings.persist_url_query_strings or not url_has_query(parsed.canonical_uri)
+        document_canonical_uri = (
+            parsed.canonical_uri if can_persist_query_uri else redacted_url_for_display(parsed.canonical_uri)
+        )
+        document_source_url = parsed.source_url if can_persist_query_uri else None
+        citation_base = parsed.source_url or parsed.canonical_uri
+        if not can_persist_query_uri:
+            citation_base = document_canonical_uri
+        previous_hash = _existing_content_hash(self.store, scope, document_canonical_uri)
+        new_hash = sha256(parsed.text.encode("utf-8")).hexdigest()
+        keyword_tuple = tuple(keywords)
+        collection_tuple = tuple(collection_names)
+        chunks = [
+            {"text": chunk, "citation": f"{citation_base}#{index + 1}"}
+            for index, chunk in enumerate(chunks_from_text(parsed.text))
+        ]
+        document_id = self.store.upsert_document(
+            scope=scope,
+            title=parsed.title,
+            document_type=parsed.document_type,
+            canonical_uri=document_canonical_uri,
+            source_path=parsed.source_path,
+            source_url=document_source_url,
+            text=parsed.text,
+            sections=[asdict(section) for section in parsed.sections],
+            chunks=chunks,
+            keywords=keyword_tuple,
+            collection_names=collection_tuple,
+            metadata={
+                "importer": "url",
+                "extraction_method": parsed.extraction_method,
+                "fetch_status_code": fetched.status_code,
+                "redirect_count": len(fetched.redirects),
+                "warnings": list(parsed.warnings),
+            },
+        )
+        warnings = list(parsed.warnings)
+        source: dict[str, Any] | None = None
+        if can_persist_query_uri:
+            redacted_source_url = redacted_url_for_display(parsed.canonical_uri)
+            source_id = self.store.upsert_source(
+                scope=scope,
+                source_type="url_page",
+                canonical_uri=parsed.canonical_uri,
+                display_name=parsed.title,
+                source_path=None,
+                source_url=parsed.canonical_uri,
+                redacted_source_url=redacted_source_url,
+                policy_profile=self.settings.web_source_profile,
+                sync_enabled=True,
+                metadata=source_defaults_metadata(
+                    keywords=keyword_tuple,
+                    collection_names=collection_tuple,
+                ),
+            )
+            self.store.link_source_document(
+                scope=scope,
+                source_id=source_id,
+                document_id=document_id,
+                source_item_uri=parsed.canonical_uri,
+                status="active",
+                last_hash=new_hash,
+                metadata={"importer": "url"},
+            )
+            source = self.store.get_source(scope=scope, source_id=source_id)
+        else:
+            warnings.append("url_query_not_persisted")
+        status = "created" if previous_hash is None else "unchanged" if previous_hash == new_hash else "updated"
+        return {
+            "status": status,
+            "reason_code": "ok",
+            "document": {
+                "id": document_id,
+                "title": parsed.title,
+                "canonical_uri": document_canonical_uri,
+                "source_url": document_source_url,
+                "chunks": len(chunks),
+                "extraction_method": parsed.extraction_method,
+            },
+            "fetch": {
+                "final_url": fetched.final_url,
+                "status_code": fetched.status_code,
+                "redirects": [asdict(item) for item in fetched.redirects],
+                "content_type": content_type,
+                "bytes": len(fetched.body),
+            },
+            "source": source,
+            "warnings": warnings,
+        }
+
+    def _fetch_parsed_url(
+        self,
+        *,
+        url: str,
+        title_override: str | None = None,
+    ) -> dict[str, Any]:
+        fetched = self.fetcher.fetch(url)
+        if fetched.status != "fetched":
             return {
                 "status": fetched.status,
                 "reason_code": fetched.reason,
@@ -78,52 +182,12 @@ class DocsAcquisitionService:
                 "final_url": fetched.final_url,
                 "redirects": [asdict(item) for item in fetched.redirects],
             }
-
-        previous_hash = _existing_content_hash(self.store, scope, parsed.canonical_uri)
-        new_hash = sha256(parsed.text.encode("utf-8")).hexdigest()
-        chunks = [
-            {"text": chunk, "citation": f"{parsed.source_url or parsed.canonical_uri}#{index + 1}"}
-            for index, chunk in enumerate(chunks_from_text(parsed.text))
-        ]
-        document_id = self.store.upsert_document(
-            scope=scope,
-            title=parsed.title,
-            document_type=parsed.document_type,
-            canonical_uri=parsed.canonical_uri,
-            source_path=parsed.source_path,
-            source_url=parsed.source_url,
-            text=parsed.text,
-            sections=[asdict(section) for section in parsed.sections],
-            chunks=chunks,
-            keywords=keywords,
-            collection_names=collection_names,
-            metadata={
-                "importer": "url",
-                "extraction_method": parsed.extraction_method,
-                "fetch_status_code": fetched.status_code,
-                "redirect_count": len(fetched.redirects),
-                "warnings": list(parsed.warnings),
-            },
-        )
-        status = "created" if previous_hash is None else "unchanged" if previous_hash == new_hash else "updated"
         return {
-            "status": status,
+            "status": "fetched",
             "reason_code": "ok",
-            "document": {
-                "id": document_id,
-                "title": parsed.title,
-                "canonical_uri": parsed.canonical_uri,
-                "source_url": parsed.source_url,
-                "chunks": len(chunks),
-                "extraction_method": parsed.extraction_method,
-            },
-            "fetch": {
-                "final_url": fetched.final_url,
-                "status_code": fetched.status_code,
-                "redirects": [asdict(item) for item in fetched.redirects],
-                "content_type": content_type,
-                "bytes": len(fetched.body),
-            },
+            "fetch": fetched,
+            "parsed": parsed,
+            "content_type": content_type,
         }
 
 

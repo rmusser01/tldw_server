@@ -10,6 +10,7 @@ from typing import Literal, cast
 from .models import AccessScope
 
 SourceProfile = Literal["locked_down", "local_first", "online_capable"]
+StalePolicy = Literal["report", "tombstone"]
 
 _TRUE_VALUES = {"true", "1", "yes", "on"}
 _FALSE_VALUES = {"false", "0", "no", "off"}
@@ -33,7 +34,7 @@ def _coerce_bool(value: object, field_name: str) -> bool:
 def _coerce_trusted_roots(value: object) -> tuple[Path, ...]:
     if value is None or value == "":
         return ()
-    if isinstance(value, str | PathLike):
+    if isinstance(value, (str, PathLike)):
         items = (value,)
     else:
         items = tuple(value) if isinstance(value, Iterable) else (value,)
@@ -114,6 +115,13 @@ def _coerce_source_profile(value: object, field_name: str) -> SourceProfile:
     return cast(SourceProfile, value)
 
 
+def _coerce_stale_policy(value: object, field_name: str) -> StalePolicy:
+    text = "report" if value is None else str(value).strip().lower()
+    if text not in {"report", "tombstone"}:
+        raise ValueError(f"{field_name} must be report or tombstone")
+    return cast(StalePolicy, text)
+
+
 @dataclass(frozen=True)
 class DocsSettings:
     db_path: Path
@@ -132,6 +140,13 @@ class DocsSettings:
     url_user_agent: str = _DEFAULT_URL_USER_AGENT
     respect_robots: bool = False
     allow_arbitrary_public_domains: bool = False
+    enable_source_sync: bool = True
+    max_sync_documents: int = 500
+    max_sync_pages: int = 25
+    max_sync_run_items: int = 500
+    default_stale_policy: StalePolicy = "report"
+    sitemap_sync_enabled: bool = False
+    persist_url_query_strings: bool = False
 
     @classmethod
     def from_mapping(cls, values: dict) -> "DocsSettings":
@@ -181,5 +196,30 @@ class DocsSettings:
             allow_arbitrary_public_domains=_coerce_bool(
                 values.get("allow_arbitrary_public_domains", False),
                 "allow_arbitrary_public_domains",
+            ),
+            enable_source_sync=_coerce_bool(values.get("enable_source_sync", True), "enable_source_sync"),
+            max_sync_documents=_coerce_positive_int(
+                values.get("max_sync_documents", 500),
+                "max_sync_documents",
+            ),
+            max_sync_pages=_coerce_positive_int(
+                values.get("max_sync_pages", 25),
+                "max_sync_pages",
+            ),
+            max_sync_run_items=_coerce_positive_int(
+                values.get("max_sync_run_items", 500),
+                "max_sync_run_items",
+            ),
+            default_stale_policy=_coerce_stale_policy(
+                values.get("default_stale_policy", "report"),
+                "default_stale_policy",
+            ),
+            sitemap_sync_enabled=_coerce_bool(
+                values.get("sitemap_sync_enabled", False),
+                "sitemap_sync_enabled",
+            ),
+            persist_url_query_strings=_coerce_bool(
+                values.get("persist_url_query_strings", False),
+                "persist_url_query_strings",
             ),
         )

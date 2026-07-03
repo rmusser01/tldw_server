@@ -6,6 +6,12 @@ from typing import Any, Literal
 ScopeValue = str | None
 DocumentType = Literal["markdown", "mdx", "text", "html", "other"]
 RetrievalMode = Literal["metadata", "snippet", "section", "full", "chunk", "chunk_with_neighbors"]
+SourceType = Literal["local_file", "local_directory", "url_page", "url_sitemap"]
+SourceLinkStatus = Literal["active", "tombstoned", "failed"]
+SyncMode = Literal["dry_run", "apply"]
+StalePolicy = Literal["report", "tombstone"]
+SyncItemStatus = Literal["created", "updated", "unchanged", "missing", "tombstoned", "failed", "skipped"]
+SyncRunStatus = Literal["completed", "partial", "skipped", "denied", "failed"]
 
 
 @dataclass(frozen=True)
@@ -54,6 +60,35 @@ class DocumentRecord:
     source_url: str | None
     content_hash: str
     metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class SourceRecord:
+    id: int
+    source_type: SourceType
+    canonical_uri: str
+    display_name: str
+    source_path: str | None
+    source_url: str | None
+    redacted_source_url: str | None
+    sync_enabled: bool
+    last_sync_status: str | None
+    last_sync_started_at: str | None
+    last_sync_completed_at: str | None
+    last_error_code: str | None
+    document_count: int = 0
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class SyncSourceRequest:
+    source_id: int | None = None
+    source_uri: str | None = None
+    mode: SyncMode = "dry_run"
+    max_documents: int | None = None
+    max_pages: int | None = None
+    stale_policy: StalePolicy = "report"
+    force: bool = False
 
 
 @dataclass(frozen=True)

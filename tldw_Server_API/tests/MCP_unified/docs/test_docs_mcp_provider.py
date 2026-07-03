@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 
+from mcp_unified.docs.acquisition.models import FetchResponse
+from mcp_unified.docs.acquisition.service import DocsAcquisitionService
 from mcp_unified.docs.mcp_module import DocsMCPToolProvider
 from mcp_unified.docs.models import AccessScope
 from mcp_unified.docs.settings import DocsSettings
 from mcp_unified.docs.store.sqlite import DocsCatalogStore
+from tldw_Server_API.tests.MCP_unified.docs.helpers import FakeResolver, FakeTransport
 
 pytestmark = pytest.mark.unit
 
@@ -146,6 +150,45 @@ def test_provider_ingest_url_delegates_to_acquisition_service(tmp_path: Path) ->
     ]
 
 
+def test_provider_retrieval_outputs_do_not_leak_query_bearing_ingest_url(tmp_path: Path) -> None:
+    settings = DocsSettings.from_mapping(
+        {
+            "db_path": str(tmp_path / "docs.db"),
+            "enable_web_acquisition": True,
+            "web_source_profile": "online_capable",
+            "allow_arbitrary_public_domains": True,
+        }
+    )
+    store = DocsCatalogStore(tmp_path / "docs.db")
+    store.migrate()
+    scope = AccessScope(owner_scope="owner-a", profile_scope="profile-a")
+    acquisition = DocsAcquisitionService(
+        settings=settings,
+        store=store,
+        resolver=FakeResolver({"example.com": ["93.184.216.34"]}),
+        transport=FakeTransport(
+            [FetchResponse(status_code=200, headers={"content-type": "text/plain"}, body_chunks=[b"alpha docs"])]
+        ),
+    )
+    provider = DocsMCPToolProvider(settings=settings, store=store)
+    provider.acquisition = acquisition
+
+    ingest = provider.execute("docs.ingest_url", {"url": "https://example.com/page?token=secret"}, scope=scope)
+
+    search = provider.execute("docs.search", {"query": "alpha"}, scope=scope)
+    document = provider.execute("docs.get", {"id": str(ingest["document"]["id"]), "mode": "full"}, scope=scope)
+    context = provider.execute("docs.context", {"query": "alpha"}, scope=scope)
+    listing = provider.execute("docs.list", {"kind": "documents"}, scope=scope)
+    serialized = json.dumps([ingest, search, document, context, listing], sort_keys=True)
+
+    assert ingest["document"]["canonical_uri"] == "https://example.com/page"  # nosec B101
+    assert ingest["document"]["source_url"] is None  # nosec B101
+    assert search["results"][0]["uri"] == "https://example.com/page"  # nosec B101
+    assert document["source_url"] is None  # nosec B101
+    assert "token=secret" not in serialized  # nosec B101
+    assert "?token" not in serialized  # nosec B101
+
+
 def test_provider_rejects_empty_ingest_url_when_enabled(tmp_path: Path) -> None:
     settings = DocsSettings.from_mapping({"db_path": str(tmp_path / "docs.db"), "enable_web_acquisition": True})
     provider = DocsMCPToolProvider(settings=settings)
@@ -247,6 +290,10 @@ def test_provider_status_reports_web_acquisition_disabled(tmp_path: Path) -> Non
     assert status["web_policy"]["allow_arbitrary_public_domains"] is False  # nosec B101
     assert status["web_policy"]["preapproved_domains"] == []  # nosec B101
     assert status["web_policy"]["allowed_url_prefixes"] == []  # nosec B101
+    assert status["source_sync"]["enabled"] is True  # nosec B101
+    assert status["source_sync"]["default_stale_policy"] == "report"  # nosec B101
+    assert status["source_sync"]["max_sync_documents"] == 500  # nosec B101
+    assert status["source_sync"]["sitemap_sync_enabled"] is False  # nosec B101
 
 
 def test_provider_status_reports_custom_web_policy(tmp_path: Path) -> None:

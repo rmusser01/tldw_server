@@ -51,6 +51,18 @@ def test_from_mapping_uses_safe_url_acquisition_defaults() -> None:
     assert settings.allow_arbitrary_public_domains is False  # nosec B101
 
 
+def test_from_mapping_uses_safe_source_sync_defaults() -> None:
+    settings = DocsSettings.from_mapping({})
+
+    assert settings.enable_source_sync is True  # nosec B101
+    assert settings.max_sync_documents == 500  # nosec B101
+    assert settings.max_sync_pages == 25  # nosec B101
+    assert settings.max_sync_run_items == 500  # nosec B101
+    assert settings.default_stale_policy == "report"  # nosec B101
+    assert settings.sitemap_sync_enabled is False  # nosec B101
+    assert settings.persist_url_query_strings is False  # nosec B101
+
+
 def test_from_mapping_parses_url_acquisition_values() -> None:
     settings = DocsSettings.from_mapping(
         {
@@ -82,6 +94,28 @@ def test_from_mapping_parses_url_acquisition_values() -> None:
     assert settings.allow_arbitrary_public_domains is False  # nosec B101
 
 
+def test_from_mapping_parses_source_sync_values() -> None:
+    settings = DocsSettings.from_mapping(
+        {
+            "enable_source_sync": "false",
+            "max_sync_documents": "9",
+            "max_sync_pages": "7",
+            "max_sync_run_items": "5",
+            "default_stale_policy": "tombstone",
+            "sitemap_sync_enabled": "true",
+            "persist_url_query_strings": "true",
+        }
+    )
+
+    assert settings.enable_source_sync is False  # nosec B101
+    assert settings.max_sync_documents == 9  # nosec B101
+    assert settings.max_sync_pages == 7  # nosec B101
+    assert settings.max_sync_run_items == 5  # nosec B101
+    assert settings.default_stale_policy == "tombstone"  # nosec B101
+    assert settings.sitemap_sync_enabled is True  # nosec B101
+    assert settings.persist_url_query_strings is True  # nosec B101
+
+
 def test_from_mapping_parses_default_scope() -> None:
     settings = DocsSettings.from_mapping({"default_scope": {"owner_scope": "owner-a", "profile_scope": "profile-a"}})
 
@@ -92,6 +126,12 @@ def test_from_mapping_parses_default_scope() -> None:
 def test_from_mapping_rejects_unknown_web_source_profile(profile: str) -> None:
     with pytest.raises(ValueError, match="web_source_profile"):
         DocsSettings.from_mapping({"web_source_profile": profile})
+
+
+@pytest.mark.parametrize("value", ["", "delete", "hide"])
+def test_from_mapping_rejects_unknown_default_stale_policy(value: str) -> None:
+    with pytest.raises(ValueError, match="default_stale_policy"):
+        DocsSettings.from_mapping({"default_stale_policy": value})
 
 
 @pytest.mark.parametrize("field", ["max_url_redirects", "max_url_body_bytes"])
