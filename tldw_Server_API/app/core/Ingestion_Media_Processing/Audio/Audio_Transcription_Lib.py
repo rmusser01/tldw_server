@@ -19,6 +19,7 @@ import hashlib
 import importlib
 import inspect
 import json
+import math
 import multiprocessing
 import os
 import queue
@@ -147,7 +148,7 @@ def _get_original_whisper_model() -> Any | None:
     _ORIGINAL_WHISPER_MODEL_IMPORT_ATTEMPTED = True
     try:
         module = importlib.import_module("faster_whisper")
-        _ORIGINAL_WHISPER_MODEL = getattr(module, "WhisperModel")
+        _ORIGINAL_WHISPER_MODEL = module.WhisperModel
         _ORIGINAL_WHISPER_MODEL_IMPORT_ERROR = None
     except Exception as exc:
         _ORIGINAL_WHISPER_MODEL_IMPORT_ERROR = exc
@@ -171,8 +172,8 @@ def _get_qwen2audio_classes() -> tuple[Any, Any] | None:
     try:
         module = importlib.import_module("transformers")
         _QWEN2AUDIO_CLASSES = (
-            getattr(module, "AutoProcessor"),
-            getattr(module, "Qwen2AudioForConditionalGeneration"),
+            module.AutoProcessor,
+            module.Qwen2AudioForConditionalGeneration,
         )
         _QWEN2AUDIO_IMPORT_ERROR = None
     except Exception as exc:
@@ -315,6 +316,89 @@ def _resample_audio_if_needed(audio: np.ndarray, sample_rate: int, target_sr: in
         x_old = np.linspace(0.0, 1.0, num=len(audio), endpoint=False)
         x_new = np.linspace(0.0, 1.0, num=new_len, endpoint=False)
         return np.interp(x_new, x_old, audio).astype(np.float32, copy=False)
+
+
+def _resample_audio_without_librosa(audio: np.ndarray, sample_rate: int, target_sr: int = 16000) -> np.ndarray:
+    """Return mono float32 audio at target_sr without importing librosa."""
+    if sample_rate == target_sr:
+        return audio.astype(np.float32, copy=False)
+
+    try:
+        from scipy import signal
+
+        divisor = math.gcd(int(sample_rate), int(target_sr))
+        up = int(target_sr) // divisor
+        down = int(sample_rate) // divisor
+        if up <= 1000 and down <= 1000:
+            return signal.resample_poly(audio, up, down).astype(np.float32, copy=False)
+        logging.debug(f"Polyphase Parakeet resampling factors too large (up={up}, down={down}); using linear fallback.")
+    except ImportError as exc:
+        logging.debug(f"SciPy unavailable for Parakeet resampling; using linear fallback: {exc}")
+    except _AUDIO_TRANSCRIPTION_NONCRITICAL_EXCEPTIONS as exc:
+        logging.debug(f"Polyphase Parakeet resampling failed; using linear fallback: {type(exc).__name__}")
+
+    ratio = float(target_sr) / float(sample_rate)
+    new_len = max(1, int(round(len(audio) * ratio)))
+    x_old = np.linspace(0.0, 1.0, num=len(audio), endpoint=False, dtype=np.float32)
+    x_new = np.linspace(0.0, 1.0, num=new_len, endpoint=False, dtype=np.float32)
+    return np.interp(x_new, x_old, audio).astype(np.float32, copy=False)
+
+
+def _load_audio_for_parakeet_nemo(audio_file_path: str, target_sr: int = 16000) -> tuple[np.ndarray, int, float]:
+    """Load file audio for Nemo-backed Parakeet variants without importing librosa."""
+    try:
+        import soundfile as sf
+    except ImportError as exc:
+        raise STTTranscriptionError("Parakeet audio loading requires the soundfile package.") from exc
+
+    try:
+        audio_data, sample_rate = sf.read(audio_file_path, dtype="float32", always_2d=False)
+    except Exception as exc:
+        logging.debug(f"Soundfile could not load Parakeet audio: {type(exc).__name__}")
+        if Path(audio_file_path).suffix.lower() == ".wav":
+            raise STTTranscriptionError(
+                "Parakeet audio loading failed; convert the input to a WAV-compatible format before transcription."
+            ) from exc
+
+        try:
+            wav_file_path = convert_to_wav(audio_file_path, overwrite=True)
+        except Exception as conversion_exc:
+            logging.debug(f"Parakeet WAV conversion failed: {type(conversion_exc).__name__}")
+            raise STTTranscriptionError(
+                "Parakeet audio loading failed: WAV conversion failed for compressed input."
+            ) from conversion_exc
+
+        if not wav_file_path or Path(wav_file_path).suffix.lower() != ".wav" or not Path(wav_file_path).exists():
+            raise STTTranscriptionError(
+                "Parakeet audio loading failed: WAV conversion did not produce a usable WAV file."
+            ) from exc
+
+        try:
+            audio_data, sample_rate = sf.read(wav_file_path, dtype="float32", always_2d=False)
+        except Exception as retry_exc:
+            logging.debug(f"Soundfile could not load converted Parakeet WAV: {type(retry_exc).__name__}")
+            raise STTTranscriptionError(
+                "Parakeet audio loading failed after WAV conversion."
+            ) from retry_exc
+
+    sample_rate = int(sample_rate)
+    if sample_rate <= 0:
+        raise STTTranscriptionError("Parakeet audio loading failed: invalid sample rate.")
+
+    audio_np = np.asarray(audio_data, dtype=np.float32)
+    if audio_np.ndim == 0:
+        audio_np = audio_np.reshape(1)
+    elif audio_np.ndim == 2:
+        audio_np = audio_np.mean(axis=1).astype(np.float32, copy=False)
+    elif audio_np.ndim > 2:
+        raise STTTranscriptionError("Parakeet audio loading failed: unsupported channel layout.")
+
+    if audio_np.size == 0:
+        raise STTTranscriptionError("Parakeet audio loading failed: audio file contains no samples.")
+
+    audio_duration = float(audio_np.shape[0]) / float(sample_rate)
+    audio_np = _resample_audio_without_librosa(audio_np, sample_rate, target_sr=target_sr)
+    return np.ascontiguousarray(audio_np, dtype=np.float32), target_sr, audio_duration
 
 
 def _resolve_project_root() -> Path:
@@ -2906,13 +2990,7 @@ def speech_to_text_parakeet(
         )
         audio_file_path = str(audio_path)
 
-        # Get audio duration for segment creation
-        try:
-            import librosa
-            audio_duration = librosa.get_duration(path=audio_file_path)
-        except _AUDIO_TRANSCRIPTION_NONCRITICAL_EXCEPTIONS:
-            audio_duration = None
-            logging.warning("Could not determine audio duration")
+        audio_duration = None
 
         # Route to appropriate Parakeet implementation
         if variant == "mlx":
@@ -2940,6 +3018,16 @@ def speech_to_text_parakeet(
                     mlx_sentence_max_words = _coerce_int(stt_cfg.get("mlx_sentence_max_words"))
                     mlx_sentence_silence_gap = _coerce_float(stt_cfg.get("mlx_sentence_silence_gap"))
                     mlx_sentence_max_duration = _coerce_float(stt_cfg.get("mlx_sentence_max_duration"))
+
+                    # MLX chunking still relies on file-level duration and its
+                    # existing tests patch librosa here. Keep this isolated to
+                    # the MLX branch so ONNX does not pay librosa import cost.
+                    try:
+                        import librosa
+                        audio_duration = librosa.get_duration(path=audio_file_path)
+                    except _AUDIO_TRANSCRIPTION_NONCRITICAL_EXCEPTIONS:
+                        audio_duration = None
+                        logging.warning("Could not determine audio duration")
 
                     chunk_duration = _coerce_float(raw_chunk_duration)
                     if chunk_duration is None:
@@ -3042,16 +3130,32 @@ def speech_to_text_parakeet(
                 variant = "standard"
 
         # For other variants or fallback, use Nemo implementation
-        import librosa
-
-        # Load audio data for Nemo implementation
         from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo import (
             transcribe_with_parakeet,
         )
-        audio_data, sample_rate = librosa.load(audio_file_path, sr=16000, mono=True)
+        audio_data, sample_rate, audio_duration = _load_audio_for_parakeet_nemo(audio_file_path, target_sr=16000)
+
+        transcribe_kwargs: dict[str, Any] = {}
+        if variant == "onnx":
+            try:
+                stt_cfg = get_stt_config() or {}
+            except _AUDIO_TRANSCRIPTION_NONCRITICAL_EXCEPTIONS:
+                stt_cfg = {}
+
+            chunk_duration = _coerce_float(stt_cfg.get("nemo_chunk_duration"), default=120.0)
+            if chunk_duration is not None and chunk_duration > 0:
+                overlap_duration = _coerce_float(stt_cfg.get("nemo_overlap_duration"), default=15.0)
+                if overlap_duration is None or overlap_duration < 0:
+                    overlap_duration = 15.0
+                if overlap_duration >= chunk_duration:
+                    overlap_duration = max(0.0, chunk_duration / 8.0)
+                transcribe_kwargs = {
+                    "chunk_duration": chunk_duration,
+                    "overlap_duration": overlap_duration,
+                }
 
         # Transcribe with Parakeet
-        text = transcribe_with_parakeet(audio_data, sample_rate, variant)
+        text = transcribe_with_parakeet(audio_data, sample_rate, variant, **transcribe_kwargs)
         if isinstance(text, str) and _looks_like_error_text(text):
             raise STTTranscriptionError(text)
 

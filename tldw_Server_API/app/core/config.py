@@ -4405,6 +4405,8 @@ def load_and_log_configs():
             or 'istupakov/parakeet-tdt-0.6b-v3-onnx'
         )
         parakeet_onnx_revision = _get_str('STT-Settings', 'parakeet_onnx_revision', None)
+        nemo_chunk_duration = _get_float('STT-Settings', 'nemo_chunk_duration', 120.0)
+        nemo_overlap_duration = _get_float('STT-Settings', 'nemo_overlap_duration', 15.0)
         mlx_chunk_duration = _get_float('STT-Settings', 'mlx_chunk_duration', 30.0)
         mlx_overlap_duration = _get_float('STT-Settings', 'mlx_overlap_duration', 5.0)
         buffered_chunk_duration = _get_float('STT-Settings', 'buffered_chunk_duration', mlx_chunk_duration)
@@ -5281,6 +5283,8 @@ def load_and_log_configs():
                 'nemo_model_variant': nemo_model_variant,
                 'nemo_device': nemo_device,
                 'nemo_cache_dir': nemo_cache_dir,
+                'nemo_chunk_duration': nemo_chunk_duration,
+                'nemo_overlap_duration': nemo_overlap_duration,
                 'streaming_fallback_to_whisper': streaming_fallback_to_whisper,
                 'parakeet_onnx_model_id': parakeet_onnx_model_id,
                 'parakeet_onnx_revision': parakeet_onnx_revision,
@@ -5334,6 +5338,8 @@ def load_and_log_configs():
                 'nemo_model_variant': nemo_model_variant,
                 'nemo_device': nemo_device,
                 'nemo_cache_dir': nemo_cache_dir,
+                'nemo_chunk_duration': nemo_chunk_duration,
+                'nemo_overlap_duration': nemo_overlap_duration,
                 'streaming_fallback_to_whisper': streaming_fallback_to_whisper,
                 'parakeet_onnx_model_id': parakeet_onnx_model_id,
                 'parakeet_onnx_revision': parakeet_onnx_revision,
