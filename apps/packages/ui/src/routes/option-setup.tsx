@@ -52,7 +52,9 @@ const OptionSetup = () => {
             metadata={metadata}
             configuredServerUrl={configuredServerUrl}
             onStartWebUiSetup={() => setSetupEntryMode("webui")}
-            onRefreshSetupState={refresh}
+            onRefreshSetupState={() => {
+              void Promise.resolve(refresh()).catch(() => undefined)
+            }}
           />
         </div>
       ) : null}
