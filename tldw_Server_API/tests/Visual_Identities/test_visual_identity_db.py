@@ -38,7 +38,55 @@ def test_visual_identity_tables_are_created(chacha_db: CharactersRAGDB) -> None:
 def test_asset_source_context_column_is_added_idempotently(
     chacha_db: CharactersRAGDB,
 ) -> None:
-    ensure_visual_identity_tables(chacha_db)
+    with chacha_db.transaction() as conn:
+        conn.execute(
+            """
+            CREATE TABLE visual_identity_assets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                owner_user_id INTEGER NOT NULL,
+                pack_id INTEGER,
+                draft_id INTEGER,
+                pack_version_id INTEGER,
+                expression_key TEXT NOT NULL,
+                original_expression_key TEXT NOT NULL DEFAULT '',
+                display_label TEXT NOT NULL DEFAULT '',
+                source_filename TEXT NOT NULL,
+                storage_relpath TEXT NOT NULL,
+                content_type TEXT NOT NULL,
+                bytes INTEGER NOT NULL CHECK(bytes > 0),
+                sha256 TEXT NOT NULL,
+                width INTEGER NOT NULL CHECK(width > 0),
+                height INTEGER NOT NULL CHECK(height > 0),
+                is_animated INTEGER NOT NULL DEFAULT 0 CHECK(is_animated IN (0, 1)),
+                frame_count INTEGER,
+                duration_ms INTEGER,
+                preview_relpath TEXT,
+                deleted INTEGER NOT NULL DEFAULT 0 CHECK(deleted IN (0, 1)),
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                CHECK(draft_id IS NOT NULL OR pack_version_id IS NOT NULL)
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO visual_identity_assets (
+                owner_user_id,
+                draft_id,
+                expression_key,
+                source_filename,
+                storage_relpath,
+                content_type,
+                bytes,
+                sha256,
+                width,
+                height
+            )
+            VALUES (1, 7, 'neutral', 'neutral.png', 'visual_identities/neutral.png',
+                    'image/png', 123, 'sha256-neutral', 64, 64)
+            """
+        )
+
     ensure_visual_identity_tables(chacha_db)
 
     columns = {
@@ -48,6 +96,14 @@ def test_asset_source_context_column_is_added_idempotently(
         ).fetchall()
     }
     assert "source_context_json" in columns
+    assert (
+        chacha_db.execute_query(
+            "SELECT source_context_json FROM visual_identity_assets WHERE id = 1"
+        ).fetchone()["source_context_json"]
+        == "{}"
+    )
+
+    ensure_visual_identity_tables(chacha_db)
 
 
 def test_ensure_visual_identity_tables_rejects_non_sqlite_before_transaction() -> None:
@@ -422,6 +478,35 @@ def test_create_asset_persists_source_context(chacha_db: CharactersRAGDB) -> Non
         "generated_file_id": 42,
         "source_feature": "vn_assets",
     }
+
+
+@pytest.mark.parametrize("source_context", ([], ""))
+def test_create_asset_rejects_falsey_non_mapping_source_context(
+    chacha_db: CharactersRAGDB,
+    source_context: object,
+) -> None:
+    repo = VisualIdentityRepository.initialized(chacha_db)
+    draft = repo.create_draft(
+        owner_user_id=1,
+        title="Invalid Context Draft",
+        source_kind="generated",
+        status="ready_for_review",
+    )
+
+    with pytest.raises(ValueError, match="invalid_source_context"):
+        repo.create_asset(
+            owner_user_id=1,
+            draft_id=draft["id"],
+            expression_key="happy",
+            source_filename="happy.webp",
+            storage_relpath="packs/draft-1/happy.webp",
+            content_type="image/webp",
+            bytes=12,
+            sha256="sha256-happy-invalid-context",
+            width=64,
+            height=64,
+            source_context=source_context,  # type: ignore[arg-type]
+        )
 
 
 def test_update_draft_validation_summary_is_owner_scoped(chacha_db: CharactersRAGDB) -> None:

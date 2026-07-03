@@ -632,7 +632,8 @@ class VisualIdentityRepository:
             width=width,
             height=height,
         )
-        source_context_json = _json_dump(_canonicalize_source_context(source_context or {}))
+        raw_source_context = {} if source_context is None else source_context
+        source_context_json = _json_dump(_canonicalize_source_context(raw_source_context))
         with self.db.transaction() as conn:
             cursor = conn.execute(
                 """
@@ -1136,10 +1137,9 @@ class VisualIdentityRepository:
                         key=lambda item: (str(item["expression_key"]), int(item["asset_id"])),
                     )
                 ]
-            copied_assets: list[dict[str, Any]] = []
             for asset in draft_assets:
                 source_context_json = str(asset.get("source_context_json") or "{}")
-                asset_cursor = conn.execute(
+                conn.execute(
                     """
                     INSERT INTO visual_identity_assets (
                         owner_user_id,
@@ -1185,17 +1185,6 @@ class VisualIdentityRepository:
                         asset["duration_ms"],
                         asset["preview_relpath"],
                     ),
-                )
-                copied_assets.append(
-                    {
-                        **asset,
-                        "id": int(asset_cursor.lastrowid),
-                        "pack_id": pack_id,
-                        "draft_id": None,
-                        "pack_version_id": pack_version_id,
-                        "source_context_json": source_context_json,
-                        "deleted": 0,
-                    }
                 )
             copied_assets = [
                 dict(row)
