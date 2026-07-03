@@ -162,7 +162,7 @@ Three entire test trees never run under a default `pytest` invocation. This is "
 
 **(b) Rate limiting suppressed rather than tested (F7).** `tests/Chat/conftest.py:21-46` (autouse) sets `CHARACTER_RATE_LIMIT_OPS=1000000` to prevent incidental 429s. Pragmatic — but there is no dedicated `tests/RateLimiting/` suite asserting that limits *do* fire; rate-limit assertions are scattered (e.g. `tests/Evaluations/integration/test_rate_limits_endpoint.py`).
 
-**(c) Skip/xfail debt (F9).** 247 markers (40 `skip`, 196 `skipif`, 11 `xfail`), unaudited. `skipif` on missing services is legitimate; the 40 unconditional skips deserve a triage pass.
+**(c) Skip/xfail debt (F9).** 247 markers (40 `skip`, 196 `skipif`, 11 `xfail`), unaudited. `skipif` on missing services is legitimate; the 40 unconditional skips were triaged 2026-07-02: all carry accurate same-line `reason=` text already, so the remaining value is enforcement (a meta-test now guards new reason-less skips).
 
 **Reproduce:** `grep -rEn "pytest.mark.(skip|skipif|xfail)" tldw_Server_API/tests --include="*.py" | wc -l`
 
@@ -213,7 +213,7 @@ A dedicated `tldw_Server_API/tests/Security/` suite exists (13 files, ~1,450 lin
 | F6 | 2:1 happy-path vs error-path assertion skew | **5** | §4.1 | Require a 4xx case per new endpoint test (review checklist); backfill top-traffic endpoints first |
 | F7 | Rate limiting suppressed in fixtures, no dedicated suite | **5** | `Chat/conftest.py:21-46` | Create `tests/RateLimiting/test_limits_fire.py` asserting 429 + `Retry-After` with a low-limit override fixture |
 | F8 | Performance testing minimal, no CI baseline | **4** | `tests/performance/` (3 files) | Nightly (not PR-gating) job running `-m benchmark` with `pytest-benchmark --benchmark-compare-fail=mean:10%` |
-| F9 | 247 skip/skipif/xfail markers unaudited | **4** | grep, §3.2c | Triage the 40 unconditional `skip`s; require `reason=` + issue link (enforceable via a small conftest hook) |
+| F9 | 247 skip/skipif/xfail markers unaudited | **4** | grep, §3.2c | DONE 2026-07-02: triage found 0 reason-less skips; meta-test `tests/CI/test_skip_markers_have_reasons.py` now enforces `reason=` |
 | F10 | Hypothesis underused; no fuzzing of ingestion/upload validation | **3** | §4.4 | Add `@given` tests for chunker + upload validators (see R6) |
 
 ---
