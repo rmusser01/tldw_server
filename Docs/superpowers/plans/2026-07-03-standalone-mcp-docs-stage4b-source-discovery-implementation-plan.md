@@ -1238,7 +1238,7 @@ git commit -m "feat: sync docs sitemap sources"
 - Modify: `tldw_Server_API/tests/MCP_unified/docs/test_docs_module_shim.py`
 - Modify: `tldw_Server_API/Config_Files/mcp_modules.yaml` only if explicit defaults need to be visible.
 
-- [ ] **Step 1: Write host shim tests**
+- [x] **Step 1: Write host shim tests**
 
 Add:
 
@@ -1271,7 +1271,7 @@ Extend `test_repo_docs_mcp_config_keeps_web_acquisition_disabled`:
 assert settings.get("enable_source_discovery", False) is False  # nosec B101
 ```
 
-- [ ] **Step 2: Run red/green**
+- [x] **Step 2: Run red/green**
 
 Run:
 
@@ -1283,7 +1283,7 @@ Run:
 
 Expected first run: FAIL if host/provider wiring is incomplete. After provider wiring, PASS. If config lacks explicit `enable_source_discovery`, either keep the `.get(..., False)` assertion or add the explicit disabled config key with docs-only rationale.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add tldw_Server_API/tests/MCP_unified/docs/test_docs_module_shim.py \
