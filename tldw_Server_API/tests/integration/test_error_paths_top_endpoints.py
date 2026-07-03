@@ -1,14 +1,4 @@
 """Error-path sweep: unauthenticated and malformed-body cases for top endpoints (audit F6)."""
-import os
-
-# Audio routers are skipped under pytest by default (see
-# tldw_Server_API/app/core/testing.py::audio_imports_enabled_for_runtime and
-# tldw_Server_API/app/api/v1/router_groups/content.py); opt in explicitly so
-# /api/v1/audio/* routes below actually exist on the app under test. Must be
-# set before the first `from tldw_Server_API.app.main import app` in this
-# process (mirrors tests/Audio/conftest.py and tests/TTS_NEW/conftest.py).
-os.environ.setdefault("MINIMAL_TEST_INCLUDE_AUDIO", "1")
-
 import pytest
 from fastapi.testclient import TestClient
 
@@ -20,8 +10,8 @@ PROTECTED_ROUTES = [
     ("POST", "/api/v1/embeddings", {"input": None}),               # input required
     ("POST", "/api/v1/rag/search", {"query": None}),               # query required
     ("POST", "/api/v1/media/search", None),                        # GET is 405; endpoint is POST-only
-    ("POST", "/api/v1/audio/transcriptions", {}),                  # multipart file required
-    ("POST", "/api/v1/audio/speech", {"input": 42}),               # input must be str
+    ("POST", "/api/v1/media/add", {}),                              # media_type required; always registered (content.py, unconditional)
+    ("POST", "/api/v1/chatbooks/export", {"content_selections": "not-a-dict"}),  # content_selections must be a dict; always registered (content.py, unconditional)
     ("GET", "/api/v1/notes/", None),
     ("GET", "/api/v1/prompts/", None),
     ("GET", "/api/v1/characters/", None),
