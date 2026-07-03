@@ -17,6 +17,7 @@
 - Stage 4A source sync spec: `Docs/superpowers/specs/2026-07-01-standalone-mcp-docs-stage4a-sync-source-design.md`
 - Stage 4A implementation plan: `Docs/superpowers/plans/2026-07-02-standalone-mcp-docs-stage4a-source-sync-implementation-plan.md`
 - Backlog planning task: `TASK-12122`
+- Backlog implementation task: `TASK-12124`
 
 ## Scope
 
@@ -1297,9 +1298,9 @@ Only include `mcp_modules.yaml` if it actually changed.
 
 **Files:**
 
-- Modify: `backlog/tasks/task-12122 - Plan-standalone-MCP-docs-Stage-4B-source-discovery-implementation.md`
+- Modify: `backlog/tasks/task-12124 - Implement-standalone-MCP-docs-Stage-4B-source-discovery.md`
 
-- [ ] **Step 1: Run focused docs tests**
+- [x] **Step 1: Run focused docs tests**
 
 Run:
 
@@ -1309,7 +1310,7 @@ Run:
 
 Expected: PASS.
 
-- [ ] **Step 2: Run Bandit on touched Python paths**
+- [x] **Step 2: Run Bandit on touched Python paths**
 
 Run:
 
@@ -1319,7 +1320,7 @@ Run:
 
 Expected: exit 0 or only accepted test-file assert findings already annotated with `# nosec B101`. Fix new findings in touched production code before continuing.
 
-- [ ] **Step 3: Run import-boundary test explicitly**
+- [x] **Step 3: Run import-boundary test explicitly**
 
 Run:
 
@@ -1329,7 +1330,7 @@ Run:
 
 Expected: PASS; no top-level optional web dependency imports and no `tldw_Server_API` imports from `mcp_unified.docs`.
 
-- [ ] **Step 4: Run diff hygiene**
+- [x] **Step 4: Run diff hygiene**
 
 Run:
 
@@ -1339,7 +1340,7 @@ git diff --check
 
 Expected: no output.
 
-- [ ] **Step 5: Update Backlog task**
+- [x] **Step 5: Update Backlog task**
 
 Record:
 
@@ -1349,11 +1350,12 @@ Record:
 - Bandit result or docs-only skip if this plan task stops before code implementation;
 - final summary.
 
-- [ ] **Step 6: Commit plan closeout**
+- [x] **Step 6: Commit plan closeout**
 
 ```bash
-git add backlog/tasks/task-12122\ -\ Plan-standalone-MCP-docs-Stage-4B-source-discovery-implementation.md
-git commit -m "chore: close mcp docs discovery plan task"
+git add Docs/superpowers/plans/2026-07-03-standalone-mcp-docs-stage4b-source-discovery-implementation-plan.md \
+  backlog/tasks/task-12124\ -\ Implement-standalone-MCP-docs-Stage-4B-source-discovery.md
+git commit -m "chore: close mcp docs discovery implementation task"
 ```
 
 For the current planning-only PR, Bandit can be skipped with the rationale "documentation and Backlog metadata only." For the later implementation PR, Bandit is required on touched Python paths.
