@@ -41,6 +41,8 @@ Verification:
 - `python -m compileall -q` on touched production files -> passed.
 - `git diff --check` -> passed; Git reported expected Windows LF-to-CRLF warnings only.
 - `python -m bandit -r ... -f json -o C:\Users\GDesktop-1\AppData\Local\Temp\bandit_audio_transcription_pipeline.json` -> ran; nonzero due existing low-severity subprocess findings in `Audio_Transcription_Lib.py` outside this diff.
+
+PR: https://github.com/rmusser01/tldw_server/pull/2597
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
