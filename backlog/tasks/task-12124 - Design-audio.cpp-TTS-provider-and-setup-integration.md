@@ -46,6 +46,7 @@ Write `Docs/superpowers/specs/2026-07-03-audio-cpp-tts-integration-design.md` fr
 - Created `Docs/superpowers/specs/2026-07-03-audio-cpp-tts-integration-design.md` from the approved brainstorming sections.
 - Kept the first slice scoped to Approach A: a first-class `audio_cpp` TTS provider and setup story, with Approach C deferred until TTS proves the runtime and path-safety model.
 - Recorded review corrections for upstream server support, server-local reference-audio paths, single-chunk streaming compatibility, configured voice mappings, model-manager wrapping, and optional external-component licensing boundaries.
+- Amended the spec after review to tighten current-codebase integration risks: config-schema preservation, provider enum/routing, namespaced model aliases, loopback-only default `base_url`, external reference-audio opt-in, sidecar lifecycle controls, verified voice request fields, and format-advertising tests.
 - Verification is documentation-only: no backend code paths were changed, so Bandit is not applicable for this task.
 
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
@@ -54,7 +55,7 @@ Write `Docs/superpowers/specs/2026-07-03-audio-cpp-tts-integration-design.md` fr
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 
-Design spec written for integrating `0xShug0/audio.cpp` as an optional tldw_server TTS backend. The spec covers architecture, configuration, setup/installer scope, TTS request and response behavior, security, testing, documentation, and the staged follow-up path from Approach A to broader Audio Studio support.
+Design spec written and amended for integrating `0xShug0/audio.cpp` as an optional tldw_server TTS backend. The spec covers architecture, provider registration, configuration, setup/installer scope, TTS request and response behavior, security, testing, documentation, and the staged follow-up path from Approach A to broader Audio Studio support.
 
 <!-- SECTION:FINAL_SUMMARY:END -->
 
