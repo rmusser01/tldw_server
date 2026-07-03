@@ -225,7 +225,7 @@ def _normalize_expression_or_422(value: str, *, field_name: str = "expression_ke
 
 def _handle_value_error(exc: ValueError) -> HTTPException:
     detail = str(exc) or "invalid_request"
-    if "not_found" in detail:
+    if "not_found" in detail or "not_owned" in detail:
         return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
     if "conflict" in detail or detail in {"visual_identity_draft_not_ready"}:
         return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
@@ -1083,6 +1083,11 @@ async def resolve_visual_identity_binding(
     expression_key: str = Query("neutral"),
     manual_override_expression_key: str | None = Query(default=None),
     mood_expression_key: str | None = Query(default=None),
+    role_id: str | None = Query(default=None),
+    role_label: str | None = Query(default=None),
+    override_pack_id: int | None = Query(default=None, ge=1),
+    override_pack_version_id: int | None = Query(default=None, ge=1),
+    allow_override_fallback: bool = Query(default=False),
     service: VisualIdentityService = Depends(_service),
 ) -> VisualIdentityResolveResponse:
     normalized_expression = _normalize_expression_or_422(expression_key)
@@ -1093,6 +1098,11 @@ async def resolve_visual_identity_binding(
             requested_expression_key=normalized_expression,
             manual_override_expression_key=manual_override_expression_key,
             mood_expression_key=mood_expression_key,
+            role_id=role_id,
+            role_label=role_label,
+            override_pack_id=override_pack_id,
+            override_pack_version_id=override_pack_version_id,
+            allow_override_fallback=allow_override_fallback,
         )
     except ValueError as exc:
         raise _handle_value_error(exc) from exc
@@ -1112,4 +1122,7 @@ async def resolve_visual_identity_binding(
         is_animated=resolved.is_animated,
         content_type=resolved.content_type,
         asset_url=asset_url,
+        role_id=resolved.role_id,
+        role_label=resolved.role_label,
+        resolution_source=resolved.resolution_source,
     )

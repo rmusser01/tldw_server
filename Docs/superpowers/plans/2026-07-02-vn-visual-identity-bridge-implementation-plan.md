@@ -1132,7 +1132,7 @@ git commit -m "TASK-12090.3 add visual identity casting resolver overrides"
 - Modify: `tldw_Server_API/app/api/v1/endpoints/visual_identities.py`
 - Modify: `tldw_Server_API/tests/Visual_Identities/test_visual_identities_api.py`
 
-- [ ] **Step 1: Write failing endpoint compatibility and override tests**
+- [x] **Step 1: Write failing endpoint compatibility and override tests**
 
 In `test_visual_identities_api.py`, add:
 
@@ -1150,7 +1150,7 @@ def test_resolve_endpoint_accepts_role_override_fields(...):
     # Assert response includes role_id, role_label, resolution_source.
 ```
 
-- [ ] **Step 2: Write failing typed error tests**
+- [x] **Step 2: Write failing typed error tests**
 
 Add:
 
@@ -1185,7 +1185,7 @@ def test_resolve_endpoint_reports_pack_version_mismatch(...):
 
 Use existing `_handle_value_error` conventions. If needed, map override errors to 409 for valid resource but missing expression and 404 for not-found ownership failures.
 
-- [ ] **Step 3: Run endpoint tests to verify they fail**
+- [x] **Step 3: Run endpoint tests to verify they fail**
 
 Run:
 
@@ -1195,7 +1195,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Visual_Ident
 
 Expected: FAIL because endpoint query params and response fields are missing.
 
-- [ ] **Step 4: Extend Pydantic response schema**
+- [x] **Step 4: Extend Pydantic response schema**
 
 In `VisualIdentityResolveResponse`:
 
@@ -1205,7 +1205,7 @@ role_label: str | None = None
 resolution_source: str | None = None
 ```
 
-- [ ] **Step 5: Extend endpoint query parameters**
+- [x] **Step 5: Extend endpoint query parameters**
 
 In `resolve_visual_identity_binding` add:
 
@@ -1219,7 +1219,7 @@ allow_override_fallback: bool = Query(default=False),
 
 Pass these through to `service.resolve_expression_asset`.
 
-- [ ] **Step 6: Include response fields**
+- [x] **Step 6: Include response fields**
 
 Return:
 
@@ -1229,7 +1229,7 @@ role_label=resolved.role_label,
 resolution_source=resolved.resolution_source,
 ```
 
-- [ ] **Step 7: Run endpoint tests**
+- [x] **Step 7: Run endpoint tests**
 
 Run:
 
@@ -1239,7 +1239,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Visual_Ident
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add tldw_Server_API/app/api/v1/schemas/visual_identity_schemas.py \

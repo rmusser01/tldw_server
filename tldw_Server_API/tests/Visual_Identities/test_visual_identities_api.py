@@ -163,6 +163,44 @@ def _seed_ready_draft(repo: VisualIdentityRepository, *, owner_user_id: int) -> 
     return draft
 
 
+def _create_versioned_pack(
+    repo: VisualIdentityRepository,
+    *,
+    owner_user_id: int,
+    title: str,
+    assets: tuple[str, ...],
+    default_expression_key: str = "neutral",
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, dict[str, Any]]]:
+    pack = repo.create_pack(
+        owner_user_id=owner_user_id,
+        title=title,
+        default_expression_key=default_expression_key,
+    )
+    version = repo.create_pack_version(
+        owner_user_id=owner_user_id,
+        pack_id=pack["id"],
+        version_number=1,
+        manifest={},
+        default_expression_key=default_expression_key,
+    )
+    version_assets: dict[str, dict[str, Any]] = {}
+    for expression_key in assets:
+        version_assets[expression_key] = repo.create_asset(
+            owner_user_id=owner_user_id,
+            pack_id=pack["id"],
+            pack_version_id=version["id"],
+            expression_key=expression_key,
+            source_filename=f"{expression_key}.png",
+            storage_relpath=f"packs/{pack['id']}/{expression_key}.png",
+            content_type="image/png",
+            bytes=12,
+            sha256=f"sha256-{pack['id']}-{expression_key}",
+            width=64,
+            height=64,
+        )
+    return pack, version, version_assets
+
+
 def _png_bytes(*, color: str = "purple") -> bytes:
     buffer = BytesIO()
     Image.new("RGBA", (8, 8), color).save(buffer, format="PNG")
@@ -265,6 +303,226 @@ def test_resolve_bound_asset_returns_content_url_and_null_direct_fallback(
         f"/assets/{payload['asset_id']}/content"
     )
     assert payload["fallback_reason"] is None
+
+
+def test_resolve_endpoint_preserves_existing_query_contract(
+    chacha_db: CharactersRAGDB,
+    repo: VisualIdentityRepository,
+) -> None:
+    character_id = _seed_character(chacha_db)
+    draft = _seed_ready_draft(repo, owner_user_id=1)
+    client = _client(chacha_db)
+    client.post(
+        f"/api/v1/visual-identities/drafts/{draft['id']}/activate",
+        json={"actor_kind": "character", "actor_id": character_id},
+    )
+
+    response = client.get(
+        "/api/v1/visual-identities/bindings/resolve",
+        params={
+            "actor_kind": "character",
+            "actor_id": character_id,
+            "expression_key": "neutral",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["role_id"] is None
+    assert payload["role_label"] is None
+    assert payload["resolution_source"] == "binding"
+
+
+def test_resolve_endpoint_accepts_role_override_fields(
+    chacha_db: CharactersRAGDB,
+    repo: VisualIdentityRepository,
+) -> None:
+    character_id = _seed_character(chacha_db, name="API Override Character")
+    draft = _seed_ready_draft(repo, owner_user_id=1)
+    client = _client(chacha_db)
+    client.post(
+        f"/api/v1/visual-identities/drafts/{draft['id']}/activate",
+        json={"actor_kind": "character", "actor_id": character_id},
+    )
+    override_pack, override_version, override_assets = _create_versioned_pack(
+        repo,
+        owner_user_id=1,
+        title="API Override Pack",
+        assets=("happy",),
+        default_expression_key="happy",
+    )
+
+    response = client.get(
+        "/api/v1/visual-identities/bindings/resolve",
+        params={
+            "actor_kind": "character",
+            "actor_id": character_id,
+            "expression_key": "happy",
+            "role_id": "hero",
+            "role_label": "Hero",
+            "override_pack_id": override_pack["id"],
+            "override_pack_version_id": override_version["id"],
+            "allow_override_fallback": "false",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["pack_id"] == override_pack["id"]
+    assert payload["pack_version_id"] == override_version["id"]
+    assert payload["asset_id"] == override_assets["happy"]["id"]
+    assert payload["role_id"] == "hero"
+    assert payload["role_label"] == "Hero"
+    assert payload["resolution_source"] == "override"
+    assert payload["fallback_reason"] is None
+
+
+def test_resolve_endpoint_reports_override_expression_missing(
+    chacha_db: CharactersRAGDB,
+    repo: VisualIdentityRepository,
+) -> None:
+    character_id = _seed_character(chacha_db, name="API Missing Override Character")
+    binding_pack, binding_version, _ = _create_versioned_pack(
+        repo,
+        owner_user_id=1,
+        title="API Missing Binding Pack",
+        assets=("sad",),
+        default_expression_key="missing-default",
+    )
+    repo.upsert_binding(
+        owner_user_id=1,
+        actor_kind="character",
+        actor_id=character_id,
+        pack_id=binding_pack["id"],
+        active_version_id=binding_version["id"],
+    )
+    override_pack, override_version, _ = _create_versioned_pack(
+        repo,
+        owner_user_id=1,
+        title="API Missing Override Pack",
+        assets=("angry",),
+        default_expression_key="missing-default",
+    )
+
+    response = _client(chacha_db).get(
+        "/api/v1/visual-identities/bindings/resolve",
+        params={
+            "actor_kind": "character",
+            "actor_id": character_id,
+            "expression_key": "sad",
+            "override_pack_id": override_pack["id"],
+            "override_pack_version_id": override_version["id"],
+        },
+    )
+
+    assert response.status_code in {409, 422}
+    assert response.json()["detail"] == "override_expression_missing"
+
+
+def test_resolve_endpoint_reports_invalid_actor_without_placeholder_masking(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    response = _client(chacha_db).get(
+        "/api/v1/visual-identities/bindings/resolve",
+        params={
+            "actor_kind": "character",
+            "actor_id": 999999,
+            "expression_key": "neutral",
+        },
+    )
+
+    assert response.status_code in {404, 422}
+    assert response.json()["detail"] in {
+        "visual_identity_actor_kind_invalid",
+        "visual_identity_character_not_found",
+        "visual_identity_persona_not_found",
+    }
+
+
+def test_resolve_endpoint_reports_cross_user_override_pack(
+    chacha_db: CharactersRAGDB,
+    repo: VisualIdentityRepository,
+) -> None:
+    character_id = _seed_character(chacha_db, name="API Cross User Override Character")
+    binding_pack, binding_version, _ = _create_versioned_pack(
+        repo,
+        owner_user_id=1,
+        title="API Cross User Binding Pack",
+        assets=("happy",),
+    )
+    repo.upsert_binding(
+        owner_user_id=1,
+        actor_kind="character",
+        actor_id=character_id,
+        pack_id=binding_pack["id"],
+        active_version_id=binding_version["id"],
+    )
+    override_pack, override_version, _ = _create_versioned_pack(
+        repo,
+        owner_user_id=2,
+        title="API Cross User Override Pack",
+        assets=("happy",),
+    )
+
+    response = _client(chacha_db).get(
+        "/api/v1/visual-identities/bindings/resolve",
+        params={
+            "actor_kind": "character",
+            "actor_id": character_id,
+            "expression_key": "happy",
+            "override_pack_id": override_pack["id"],
+            "override_pack_version_id": override_version["id"],
+        },
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] in {"pack_not_found", "pack_not_owned"}
+
+
+def test_resolve_endpoint_reports_pack_version_mismatch(
+    chacha_db: CharactersRAGDB,
+    repo: VisualIdentityRepository,
+) -> None:
+    character_id = _seed_character(chacha_db, name="API Version Mismatch Character")
+    binding_pack, binding_version, _ = _create_versioned_pack(
+        repo,
+        owner_user_id=1,
+        title="API Version Mismatch Binding Pack",
+        assets=("happy",),
+    )
+    repo.upsert_binding(
+        owner_user_id=1,
+        actor_kind="character",
+        actor_id=character_id,
+        pack_id=binding_pack["id"],
+        active_version_id=binding_version["id"],
+    )
+    override_pack, _, _ = _create_versioned_pack(
+        repo,
+        owner_user_id=1,
+        title="API Version Mismatch Override Pack",
+        assets=("sad",),
+    )
+    _, other_version, _ = _create_versioned_pack(
+        repo,
+        owner_user_id=1,
+        title="API Version Mismatch Other Pack",
+        assets=("happy",),
+    )
+
+    response = _client(chacha_db).get(
+        "/api/v1/visual-identities/bindings/resolve",
+        params={
+            "actor_kind": "character",
+            "actor_id": character_id,
+            "expression_key": "happy",
+            "override_pack_id": override_pack["id"],
+            "override_pack_version_id": other_version["id"],
+        },
+    )
+
+    assert response.status_code in {409, 422}
+    assert response.json()["detail"] == "pack_version_mismatch"
 
 
 def test_zip_import_replays_idempotency_and_persists_job_id(
