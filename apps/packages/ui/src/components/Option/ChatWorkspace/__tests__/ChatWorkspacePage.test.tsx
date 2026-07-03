@@ -101,6 +101,7 @@ vi.mock("../WorkspaceChatPanel", () => ({
         backendAvailable: chatPanelRuntimeState.backendAvailable,
         streaming: true,
         selectedModelLabel: "gpt-test",
+        hasModelSelected: true,
         selectedPersonaLabel: "Analyst",
         assistantSource: "explicit"
       })

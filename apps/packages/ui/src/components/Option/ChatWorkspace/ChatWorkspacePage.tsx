@@ -26,7 +26,9 @@ const createInitialRuntimeState = (
 ): ChatWorkspaceRuntimeState => ({
   backendAvailable,
   streaming: false,
+  sendError: null,
   selectedModelLabel: "No model selected",
+  hasModelSelected: false,
   selectedPersonaLabel: null,
   assistantSource:
     effectiveAssistantDefault?.status === "unavailable" ? "unavailable" : "none",
@@ -174,11 +176,13 @@ export const ChatWorkspacePage = () => {
         browsedSourceId={browsedSourceId}
         stagedSources={stagedSources}
         selectedModelLabel={runtimeState.selectedModelLabel}
+        hasModelSelected={runtimeState.hasModelSelected}
         selectedPersonaLabel={runtimeState.selectedPersonaLabel}
         assistantSource={runtimeState.assistantSource}
         workspaceAssistantDegradedReason={
           runtimeState.workspaceAssistantDegradedReason
         }
+        sendError={runtimeState.sendError}
         effectiveAssistantDefault={effectiveAssistantDefault}
         backendAvailable={backendAvailable}
         chatBackendAvailable={backendAvailable && workspaceReady}

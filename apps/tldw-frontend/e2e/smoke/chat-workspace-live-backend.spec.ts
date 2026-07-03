@@ -658,9 +658,10 @@ test.describe("Chat Workspace live-backend smoke coverage", () => {
   })
 
   test("shows stop generation while the workspace stream is active", async ({ page }) => {
+    const streamDelayMs = 1_000
     const fixture = await installBackendFixture(page, {
       mode: "streaming",
-      streamDelayMs: 4_000
+      streamDelayMs
     })
     await seedChatWorkspaceState(page)
     await openSeededChatWorkspace(page)
@@ -671,6 +672,14 @@ test.describe("Chat Workspace live-backend smoke coverage", () => {
 
     const stopButton = page.getByRole("button", { name: "Stop generating" })
     await expect(stopButton).toBeVisible()
+    await expect(
+      page.getByLabel("Chat workspace status").getByText("Streaming")
+    ).toBeVisible()
+    await expect(
+      page
+        .getByRole("complementary", { name: "Chat workspace inspector" })
+        .getByText("Streaming")
+    ).toBeVisible()
     await expect.poll(() => fixture.chatCreates.length).toBeGreaterThan(0)
     expect(fixture.chatCreates[0]?.body).toMatchObject({
       scope_type: "workspace",
@@ -684,6 +693,17 @@ test.describe("Chat Workspace live-backend smoke coverage", () => {
 
     await stopButton.click()
     await expect(stopButton).toBeHidden()
+    await expect(page.getByText("streamed workspace reply")).toHaveCount(0)
+    await page.waitForTimeout(streamDelayMs + 250)
+    await expect(page.getByText("streamed workspace reply")).toHaveCount(0)
+    await expect(
+      page.getByLabel("Chat workspace status").getByText("Streaming")
+    ).toHaveCount(0)
+    await expect(
+      page
+        .getByRole("complementary", { name: "Chat workspace inspector" })
+        .getByText("Streaming")
+    ).toHaveCount(0)
   })
 
   test("preserves draft and staged fallback context after send failure", async ({ page }) => {
@@ -709,6 +729,14 @@ test.describe("Chat Workspace live-backend smoke coverage", () => {
 
     await expect(
       page.getByRole("alert").filter({ hasText: "Stream completion failed" })
+    ).toBeVisible()
+    await expect(
+      page.getByLabel("Chat workspace status").getByText("Send failed")
+    ).toBeVisible()
+    await expect(
+      page
+        .getByRole("complementary", { name: "Chat workspace inspector" })
+        .getByText("Draft and staged context were preserved for retry.")
     ).toBeVisible()
     await expect(page.getByLabel("Chat workspace message")).toHaveValue(draft)
     await expect(

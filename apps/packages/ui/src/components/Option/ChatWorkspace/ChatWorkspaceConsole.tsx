@@ -23,11 +23,13 @@ export type ChatWorkspaceConsoleProps = {
   browsedSourceId: string | null
   stagedSources: StagedWorkspaceSource[]
   selectedModelLabel: string
+  hasModelSelected: boolean
   selectedPersonaLabel: string | null
   assistantSource: ChatWorkspaceAssistantSource
   workspaceAssistantDegradedReason?: ChatWorkspaceRuntimeState[
     "workspaceAssistantDegradedReason"
   ]
+  sendError?: string | null
   effectiveAssistantDefault?: EffectiveWorkspaceAssistantDefault | null
   backendAvailable: boolean
   chatBackendAvailable: boolean
@@ -48,9 +50,11 @@ export const ChatWorkspaceConsole = ({
   browsedSourceId,
   stagedSources,
   selectedModelLabel,
+  hasModelSelected,
   selectedPersonaLabel,
   assistantSource,
   workspaceAssistantDegradedReason,
+  sendError,
   effectiveAssistantDefault,
   backendAvailable,
   chatBackendAvailable,
@@ -62,6 +66,7 @@ export const ChatWorkspaceConsole = ({
   onRuntimeStateChange
 }: ChatWorkspaceConsoleProps) => {
   const normalizedWorkspaceId = normalizeWorkspaceId(workspaceId)
+  const workspaceReady = normalizedWorkspaceId !== null
   const stagedSourceIds = stagedSources.map((source) => source.sourceId)
   const inspectorSources = stagedSources.map((source) => ({
     sourceId: source.sourceId,
@@ -104,8 +109,13 @@ export const ChatWorkspaceConsole = ({
           </div>
           <WorkspaceStatusStrip
             backendAvailable={backendAvailable}
+            workspaceReady={workspaceReady}
             streaming={streaming}
+            sendError={sendError}
             stagedSourceCount={stagedSources.length}
+            hasModelSelected={hasModelSelected}
+            selectedPersonaLabel={selectedPersonaLabel}
+            assistantSource={assistantSource}
           />
         </main>
 
@@ -115,11 +125,14 @@ export const ChatWorkspaceConsole = ({
             stagedSourceCount={stagedSources.length}
             stagedSources={inspectorSources}
             selectedModelLabel={selectedModelLabel}
+            hasModelSelected={hasModelSelected}
             selectedPersonaLabel={selectedPersonaLabel}
             assistantSource={assistantSource}
             workspaceAssistantDegradedReason={workspaceAssistantDegradedReason}
             backendAvailable={backendAvailable}
+            workspaceReady={workspaceReady}
             streaming={streaming}
+            sendError={sendError}
           />
         </div>
       </div>

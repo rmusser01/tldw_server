@@ -33,9 +33,11 @@ describe("InspectorRail", () => {
           { sourceId: "source-2", title: "Research Clip" }
         ]}
         selectedModelLabel="gpt-test"
+        hasModelSelected
         selectedPersonaLabel="Analyst"
         assistantSource="explicit"
         backendAvailable
+        workspaceReady
         streaming={false}
       />
     )
@@ -48,23 +50,28 @@ describe("InspectorRail", () => {
     expect(screen.getByText("Ready via registry")).toBeInTheDocument()
   })
 
-  it("labels inactive v1 panels honestly", () => {
+  it("explains backend recovery without inactive placeholder panels", () => {
     render(
       <InspectorRail
         scopeLabel="No workspace"
         stagedSourceCount={0}
         stagedSources={[]}
         selectedModelLabel="No model selected"
+        hasModelSelected={false}
         selectedPersonaLabel={null}
         assistantSource="none"
         backendAvailable={false}
         streaming={false}
+        workspaceReady
       />
     )
 
-    expect(screen.getByText("Not configured")).toBeInTheDocument()
-    expect(screen.getByText("No active task")).toBeInTheDocument()
     expect(screen.getByText("Server unavailable")).toBeInTheDocument()
+    expect(
+      screen.getByText("Reconnect to the server before sending workspace chat.")
+    ).toBeInTheDocument()
+    expect(screen.queryByText("Approvals")).not.toBeInTheDocument()
+    expect(screen.queryByText("Task Progress")).not.toBeInTheDocument()
   })
 
   it("uses stable source metadata for duplicate staged source titles", () => {
@@ -77,9 +84,11 @@ describe("InspectorRail", () => {
           { sourceId: "source-2", title: "Meeting Notes" }
         ]}
         selectedModelLabel="gpt-test"
+        hasModelSelected
         selectedPersonaLabel={null}
         assistantSource="none"
         backendAvailable
+        workspaceReady
         streaming={false}
       />
     )
@@ -100,9 +109,11 @@ describe("InspectorRail", () => {
         stagedSourceCount={0}
         stagedSources={[]}
         selectedModelLabel="gpt-test"
+        hasModelSelected
         selectedPersonaLabel="Workspace Analyst"
         assistantSource="workspace"
         backendAvailable
+        workspaceReady
         streaming={false}
       />
     )
@@ -118,16 +129,65 @@ describe("InspectorRail", () => {
         stagedSourceCount={0}
         stagedSources={[]}
         selectedModelLabel="gpt-test"
+        hasModelSelected
         selectedPersonaLabel={null}
         assistantSource="unavailable"
         workspaceAssistantDegradedReason="persona_deleted"
         backendAvailable
         streaming={false}
+        workspaceReady
       />
     )
 
     expect(screen.getByText("Workspace default unavailable")).toBeInTheDocument()
     expect(screen.getByText("Persona deleted")).toBeInTheDocument()
     expect(screen.queryByText("No persona selected")).not.toBeInTheDocument()
+  })
+
+  it("shows workspace hydration as not ready even while the server is connected", () => {
+    render(
+      <InspectorRail
+        scopeLabel="Workspace"
+        stagedSourceCount={0}
+        stagedSources={[]}
+        selectedModelLabel="gpt-test"
+        hasModelSelected
+        selectedPersonaLabel={null}
+        assistantSource="none"
+        backendAvailable
+        streaming={false}
+        workspaceReady={false}
+      />
+    )
+
+    expect(screen.getByText("Loading workspace context")).toBeInTheDocument()
+    expect(
+      screen.getByText("Wait for workspace identity before sending.")
+    ).toBeInTheDocument()
+    expect(screen.queryByText("Ready via registry")).not.toBeInTheDocument()
+  })
+
+  it("surfaces send failures and missing model recovery in the inspector", () => {
+    render(
+      <InspectorRail
+        scopeLabel="Default workspace"
+        stagedSourceCount={0}
+        stagedSources={[]}
+        selectedModelLabel="No model selected"
+        hasModelSelected={false}
+        selectedPersonaLabel={null}
+        assistantSource="none"
+        backendAvailable
+        streaming={false}
+        workspaceReady
+        sendError="Send failed"
+      />
+    )
+
+    expect(screen.getByText("Send failed")).toBeInTheDocument()
+    expect(screen.getByText("Choose a model before sending.")).toBeInTheDocument()
+    expect(
+      screen.getByText("Persona is optional; workspace defaults apply when available.")
+    ).toBeInTheDocument()
   })
 })
