@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .acquisition.service import DocsAcquisitionService
+from .discovery import DiscoveredURLCandidate, DocsSourceDiscoveryService
 from .errors import DocsError
 from .importers.base import ParsedDocument, chunks_from_text
 from .importers.local import DocsImportService
@@ -47,6 +48,12 @@ class DocsSourceSyncService:
             resolver=resolver,
             transport=transport,
         )
+        self.discovery = DocsSourceDiscoveryService(
+            settings=settings,
+            store=store,
+            resolver=resolver,
+            transport=transport,
+        )
 
     def sync_source(self, *, scope: AccessScope, request: SyncSourceRequest) -> dict[str, Any]:
         if not self.settings.enable_source_sync:
@@ -80,6 +87,8 @@ class DocsSourceSyncService:
             return self._sync_local_directory(scope=scope, source=source, request=request)
         if source["source_type"] == "url_page":
             return self._sync_url_page(scope=scope, source=source, request=request)
+        if source["source_type"] == "url_sitemap":
+            return self._sync_url_sitemap(scope=scope, source=source, request=request)
         return self._denied(source=source, request=request, reason_code="source_sync_unsupported_type")
 
     def _get_source(self, *, scope: AccessScope, request: SyncSourceRequest) -> dict[str, Any] | None:
@@ -510,6 +519,224 @@ class DocsSourceSyncService:
             warnings=list(parsed.warnings),
         )
 
+    def _sync_url_sitemap(
+        self,
+        *,
+        scope: AccessScope,
+        source: dict[str, Any],
+        request: SyncSourceRequest,
+    ) -> dict[str, Any]:
+        if not self.settings.enable_web_acquisition:
+            return _response(
+                status="denied",
+                reason_code="web_acquisition_disabled",
+                source=source,
+                request=request,
+            )
+
+        source_url = str(source.get("source_url") or "").strip()
+        if not source_url:
+            return self._failed(
+                source=source,
+                request=request,
+                reason_code="source_url_missing",
+                warning="URL sitemap source does not include a source URL.",
+            )
+
+        max_pages = self._sitemap_page_limit(request)
+        candidates, warnings, discovery_status = self.discovery.discover_sitemap_candidates(
+            url=source_url,
+            max_pages=max_pages,
+        )
+        if discovery_status.get("status") != "completed":
+            reason_code = str(discovery_status.get("reason_code") or "sitemap_fetch_failed")
+            status = "denied" if discovery_status.get("status") in {"denied", "approval_required"} else "failed"
+            return _sync_response(
+                status=status,
+                reason_code=reason_code,
+                source=source,
+                request=request,
+                counts=dict(_ZERO_COUNTS),
+                items=[],
+                warnings=warnings,
+            )
+
+        mode = str(request.mode).strip().lower()
+        stale_policy = str(request.stale_policy).strip().lower()
+        source_id = int(source["id"])
+        counts = dict(_ZERO_COUNTS)
+        items: list[dict[str, Any]] = []
+        links = self.store.source_document_links(scope=scope, source_id=source_id)
+        links_by_uri = {str(link["source_item_uri"]): link for link in links}
+        accepted_candidates = [candidate for candidate in candidates if candidate.status == "accepted"]
+        current_uris = {candidate.url for candidate in accepted_candidates}
+        stale_links = [] if "source_discovery_limit_exceeded" in warnings else [
+            link
+            for link in links
+            if str(link["source_item_uri"]) not in current_uris and link.get("status") != "tombstoned"
+        ]
+        sync_item_count = len(accepted_candidates) + len(stale_links)
+        if sync_item_count > self.settings.max_sync_run_items:
+            return _sync_response(
+                status="denied",
+                reason_code="source_sync_limit_exceeded",
+                source=source,
+                request=request,
+                counts=dict(_ZERO_COUNTS),
+                items=[],
+                warnings=[f"sync_item_count={sync_item_count} exceeds max_sync_run_items={self.settings.max_sync_run_items}"],
+            )
+
+        default_keywords = _metadata_string_tuple(source.get("metadata"), "default_keywords")
+        default_collections = _metadata_string_tuple(source.get("metadata"), "default_collections")
+
+        for candidate in candidates:
+            if candidate.status != "accepted":
+                counts["skipped"] += 1
+                items.append(_sitemap_candidate_item(candidate, status="skipped"))
+                continue
+            link = links_by_uri.get(candidate.url)
+            if mode == "apply":
+                item = self._apply_sitemap_candidate(
+                    scope=scope,
+                    source_id=source_id,
+                    candidate=candidate,
+                    link=link,
+                    default_keywords=default_keywords,
+                    default_collections=default_collections,
+                    force=request.force,
+                )
+                counts[item["status"]] += 1
+                items.append(item)
+                continue
+
+            item_status = "created" if link is None or link.get("status") == "tombstoned" else "unchanged"
+            if request.force and item_status == "unchanged":
+                item_status = "updated"
+            counts[item_status] += 1
+            items.append(
+                _sitemap_candidate_item(
+                    candidate,
+                    status=item_status,
+                    document_id=int(link["document_id"]) if link is not None else None,
+                )
+            )
+
+        for link in stale_links:
+            item_uri = str(link["source_item_uri"])
+            if stale_policy == "tombstone":
+                counts["tombstoned"] += 1
+                item_status = "tombstoned"
+                if mode == "apply":
+                    self.store.tombstone_source_item(
+                        scope=scope,
+                        source_id=source_id,
+                        source_item_uri=item_uri,
+                    )
+                    self._tombstone_matching_url_page(scope=scope, source_item_uri=item_uri)
+            else:
+                counts["missing"] += 1
+                item_status = "missing"
+            items.append(
+                {
+                    "source_item_uri": redacted_url_for_display(item_uri),
+                    "status": item_status,
+                    "document_id": int(link["document_id"]),
+                    "canonical_uri": redacted_url_for_display(str(link.get("canonical_uri") or item_uri)),
+                    "title": link.get("title"),
+                }
+            )
+
+        run_status = "partial" if counts["failed"] else "completed"
+        reason_code = "partial_failure" if counts["failed"] else "ok"
+        if mode == "apply":
+            self.store.record_sync_run(
+                scope=scope,
+                source_id=source_id,
+                mode=mode,
+                status=run_status,
+                requested_limits={
+                    "max_documents": request.max_documents,
+                    "max_pages": request.max_pages,
+                    "effective_max_pages": max_pages,
+                    "effective_max_documents": self._document_limit(request),
+                },
+                counts=counts,
+                warnings=warnings,
+                error_code=None if reason_code == "ok" else reason_code,
+                metadata={"source_type": source["source_type"]},
+            )
+            source = self.store.get_source(scope=scope, source_id=source_id) or source
+
+        return _sync_response(
+            status=run_status,
+            reason_code=reason_code,
+            source=source,
+            request=request,
+            counts=counts,
+            items=items,
+            warnings=warnings,
+        )
+
+    def _apply_sitemap_candidate(
+        self,
+        *,
+        scope: AccessScope,
+        source_id: int,
+        candidate: DiscoveredURLCandidate,
+        link: dict[str, Any] | None,
+        default_keywords: tuple[str, ...],
+        default_collections: tuple[str, ...],
+        force: bool,
+    ) -> dict[str, Any]:
+        result = self.acquisition.ingest_url(
+            scope=scope,
+            url=candidate.url,
+            keywords=default_keywords,
+            collection_names=default_collections,
+        )
+        document = result.get("document")
+        document_id = int(document["id"]) if isinstance(document, dict) and document.get("id") else None
+        if result.get("reason_code") != "ok" or document_id is None:
+            return _sitemap_candidate_item(
+                candidate,
+                status="failed",
+                reason_code=str(result.get("reason_code") or "ingest_failed"),
+            )
+
+        stored_document = self.store.get_document(scope, document_id, mode="metadata")
+        self.store.link_source_document(
+            scope=scope,
+            source_id=source_id,
+            document_id=document_id,
+            source_item_uri=candidate.url,
+            status="active",
+            last_hash=str(stored_document.get("content_hash") or ""),
+            metadata={"importer": "url_sitemap"},
+        )
+        item_status = str(result.get("status") or "updated")
+        if force and link is not None and item_status == "unchanged":
+            item_status = "updated"
+        if item_status not in _ZERO_COUNTS:
+            item_status = "updated"
+        return _sitemap_candidate_item(
+            candidate,
+            status=item_status,
+            document_id=document_id,
+            canonical_uri=str(document.get("canonical_uri") or candidate.display_url),
+            title=str(document.get("title") or ""),
+        )
+
+    def _tombstone_matching_url_page(self, *, scope: AccessScope, source_item_uri: str) -> None:
+        page_source = self.store.get_source(scope=scope, canonical_uri=source_item_uri)
+        if page_source is None or page_source.get("source_type") != "url_page":
+            return
+        self.store.tombstone_source_item(
+            scope=scope,
+            source_id=int(page_source["id"]),
+            source_item_uri=source_item_uri,
+        )
+
     def _denied(self, *, source: dict[str, Any], request: SyncSourceRequest, reason_code: str) -> dict[str, Any]:
         return _response(status="skipped", reason_code=reason_code, source=source, request=request)
 
@@ -555,6 +782,14 @@ class DocsSourceSyncService:
 
     def _document_limit(self, request: SyncSourceRequest) -> int:
         limits = [self.settings.max_sync_documents, self.settings.max_sync_run_items]
+        if request.max_documents is not None:
+            limits.append(int(request.max_documents))
+        return min(limits)
+
+    def _sitemap_page_limit(self, request: SyncSourceRequest) -> int:
+        limits = [self.settings.max_sync_pages, self.settings.max_sync_run_items]
+        if request.max_pages is not None:
+            limits.append(int(request.max_pages))
         if request.max_documents is not None:
             limits.append(int(request.max_documents))
         return min(limits)
@@ -731,6 +966,27 @@ def _metadata_string_tuple(metadata: object, key: str) -> tuple[str, ...]:
     else:
         values = (value,)
     return tuple(str(item).strip() for item in values if str(item).strip())
+
+
+def _sitemap_candidate_item(
+    candidate: DiscoveredURLCandidate,
+    *,
+    status: str,
+    reason_code: str = "ok",
+    document_id: int | None = None,
+    canonical_uri: str | None = None,
+    title: str | None = None,
+) -> dict[str, Any]:
+    item: dict[str, Any] = {
+        "source_item_uri": candidate.display_url,
+        "status": status,
+        "reason_code": reason_code,
+        "canonical_uri": redacted_url_for_display(canonical_uri or candidate.display_url),
+        "title": title,
+    }
+    if document_id is not None:
+        item["document_id"] = document_id
+    return item
 
 
 def _existing_content_hash(store: DocsCatalogStore, scope: AccessScope, canonical_uri: str) -> str | None:

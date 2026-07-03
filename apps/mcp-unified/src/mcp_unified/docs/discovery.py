@@ -131,6 +131,40 @@ class DocsSourceDiscoveryService:
             source=source,
         )
 
+    def discover_sitemap_candidates(
+        self,
+        *,
+        url: str,
+        max_pages: int,
+    ) -> tuple[list[DiscoveredURLCandidate], list[str], dict[str, Any]]:
+        fetched = self.fetcher.fetch(url)
+        if fetched.status != "fetched":
+            return [], [str(fetched.reason or "sitemap_fetch_failed")], {
+                "status": fetched.status,
+                "reason_code": fetched.reason or "sitemap_fetch_failed",
+                "safe_argument_hash": fetched.safe_argument_hash,
+            }
+
+        parsed = parse_sitemap_urlset(fetched.body, max_pages=max_pages, parent_url=url)
+        if parsed.reason_code != "ok":
+            return [], [parsed.reason_code], {
+                "status": parsed.status,
+                "reason_code": parsed.reason_code,
+            }
+
+        warnings: list[str] = []
+        if parsed.skipped:
+            warnings.append("source_discovery_limit_exceeded")
+        candidates, filter_warnings = _filter_candidates(
+            parsed.candidates,
+            seed_url=fetched.canonical_url or url,
+            policy=self.policy,
+            settings=self.settings,
+            max_pages=max_pages,
+        )
+        warnings.extend(filter_warnings)
+        return candidates, warnings, {"status": "completed", "reason_code": "ok"}
+
     def _candidates_for_fetched(
         self,
         *,

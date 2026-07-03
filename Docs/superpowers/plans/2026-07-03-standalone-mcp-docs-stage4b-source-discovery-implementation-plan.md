@@ -995,7 +995,7 @@ git commit -m "feat: expose docs source discovery tool"
 - Modify: `apps/mcp-unified/src/mcp_unified/docs/discovery.py`
 - Test: `tldw_Server_API/tests/MCP_unified/docs/test_docs_source_sync.py`
 
-- [ ] **Step 1: Write failing sitemap sync tests**
+- [x] **Step 1: Write failing sitemap sync tests**
 
 Add:
 
@@ -1164,7 +1164,7 @@ def test_url_sitemap_sync_tombstones_missing_links_only_in_apply_mode(tmp_path: 
     assert store.search_chunks(scope=scope, query="new", limit=10)  # nosec B101
 ```
 
-- [ ] **Step 2: Run red tests**
+- [x] **Step 2: Run red tests**
 
 Run:
 
@@ -1178,7 +1178,7 @@ Run:
 
 Expected: FAIL because sitemap sync currently returns `sitemap_sync_disabled` or unsupported.
 
-- [ ] **Step 3: Implement shared sitemap sync**
+- [x] **Step 3: Implement shared sitemap sync**
 
 Prefer adding a helper on `DocsSourceDiscoveryService`, for example:
 
@@ -1216,13 +1216,13 @@ Then in `DocsSourceSyncService.sync_source()` replace the disabled-only `url_sit
 - report or tombstone stale links according to `request.stale_policy`;
 - record sync run only in apply mode.
 
-- [ ] **Step 4: Run green tests**
+- [x] **Step 4: Run green tests**
 
 Run the command from Step 2.
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/mcp-unified/src/mcp_unified/docs/sync.py \
