@@ -10,7 +10,6 @@ from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user, U
 from tldw_Server_API.app.api.v1.API_Deps import auth_deps
 from fastapi import Request
 from fastapi.testclient import TestClient
-from tldw_Server_API.tests._plugins.quarantine import quarantine_items
 
 
 @pytest.fixture
@@ -204,6 +203,23 @@ def regular_user():
 
 
 @pytest.fixture(autouse=True)
+def _reset_app_lifecycle_state():
+    """Clear stale drain state on the shared app before each test.
+
+    Tests that run the app lifespan (``with TestClient(app)``) call
+    mark_lifecycle_shutdown on exit, leaving the module-level ``app`` marked
+    draining. Later tests that reuse ``app`` without re-running startup then
+    get 503 {"status": "not_ready", "reason": "shutdown_in_progress"} from
+    DrainGateMiddleware for every request (issue #2581 triage finding: all
+    46 directory-run failures were this interference; every file passes solo).
+    """
+    from tldw_Server_API.app.services.app_lifecycle import reset_lifecycle_state
+
+    reset_lifecycle_state(app)
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _sanitize_jsonschema_module(monkeypatch):
     """Ensure sys.modules['jsonschema'] is a proper ModuleType when present.
 
@@ -287,7 +303,3 @@ def pgvector_dsn():  # pragma: no cover - test helper for environments without P
 def pgvector_temp_table(pgvector_dsn):  # pragma: no cover - test helper for environments without PG
     pytest.skip("pgvector temporary table not available in this test run")
 
-
-def pytest_collection_modifyitems(config, items):
-    """Quarantine known-failing suite (audits/2026-07-02-quarantined-suites.md)."""
-    quarantine_items(__file__, items)

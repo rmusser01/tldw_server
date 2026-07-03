@@ -1,5 +1,14 @@
 # Quarantined Test Suites — burn-down tracker
 
+> **CLOSED 2026-07-03 — all three suites unquarantined.** Full unrestricted
+> re-runs on current `dev` came back green: Character_Chat_NEW 476P/4S/0F,
+> TTS_NEW 626P/8S/0F, Embeddings 421P/18S/0F (after fixing one real
+> cross-test bug: stale app-lifecycle drain state; see the autouse
+> `_reset_app_lifecycle_state` fixture in `tests/Embeddings/conftest.py`).
+> The quarantine hooks, the shared `tests/_plugins/quarantine.py` helper,
+> and ci.yml's `RUN_QUARANTINED` env vars are all removed. This document is
+> retained as a historical record of the 2026-07-02 measurements.
+
 Tracking issue: https://github.com/rmusser01/tldw_server/issues/2581
 
 These suites were hidden from **default, argument-less `pytest` collection and
@@ -34,8 +43,8 @@ Measured 2026-07-02 (60s per-test timeout, unrestricted directory-wide local run
 | Suite | Failed | Passed | Skipped/xfail | Runtime | Status |
 |---|---|---|---|---|---|
 | tests/Character_Chat_NEW | 68 | 408 | 4 | 6m45s | **UNQUARANTINED 2026-07-03** — full re-run on dev: 476 passed / 4 skipped / 0 failed (1h14m); hook removed |
-| tests/TTS_NEW | 325 | 309 | 2 xfail | 10m24s | quarantined; re-triage in progress |
-| tests/Embeddings | 192 | 230 | 17 | 2m54s | quarantined; re-triage in progress |
+| tests/TTS_NEW | 325 | 309 | 2 xfail | 10m24s | **UNQUARANTINED 2026-07-03** — re-run on dev: 626 passed / 8 skipped / 0 failed (7m06s) |
+| tests/Embeddings | 192 | 230 | 17 | 2m54s | **UNQUARANTINED 2026-07-03** — re-run on dev: 421 passed / 18 skipped / 0 failed (2m37s) after lifecycle-drain fixture fix |
 
 > **2026-07-03 update:** the Character_Chat_NEW failures did not reproduce on
 > current `dev` — the suite went green via intervening Character_Chat work
