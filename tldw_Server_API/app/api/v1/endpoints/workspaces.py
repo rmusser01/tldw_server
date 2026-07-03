@@ -135,6 +135,9 @@ from tldw_Server_API.app.core.exceptions import WorkspaceArtifactExportStateErro
 router = APIRouter()
 
 WORKSPACE_ACTIVE_JOB_STATUSES = {"queued", "processing", "running", "retrying"}
+JOB_ERROR_CODE_ALLOWED_CHARS = frozenset(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-"
+)
 
 
 def get_workspace_sandbox_volume_service() -> SandboxWorkspaceVolumeService:
@@ -524,8 +527,23 @@ def _job_status_payload(job: dict[str, Any]) -> dict[str, Any]:
         "job_type": job.get("job_type"),
         "progress_percent": job.get("progress_percent"),
         "progress_message": job.get("progress_message"),
+        "error_code": _safe_job_error_code(job.get("error_code")),
         "error_message": job.get("error_message"),
     }
+
+
+def _safe_job_error_code(value: Any) -> str | None:
+    """Return an API-safe Jobs error code for workspace job summaries.
+
+    Error codes are public identifiers, not free-form error text. Only
+    non-empty `[A-Za-z0-9_.-]` values are exposed, capped to 128 characters.
+    """
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    if any(char not in JOB_ERROR_CODE_ALLOWED_CHARS for char in raw):
+        return None
+    return raw[:128]
 
 
 def _workspace_file_inventory_job_status(job: dict[str, Any] | None) -> dict[str, Any] | None:

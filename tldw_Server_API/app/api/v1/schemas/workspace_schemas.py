@@ -516,6 +516,7 @@ class WorkspaceSourceJobStatus(BaseModel):
     job_type: str | None = None
     progress_percent: float | None = None
     progress_message: str | None = None
+    error_code: str | None = None
     error_message: str | None = None
 
 

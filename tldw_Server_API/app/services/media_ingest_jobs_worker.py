@@ -54,9 +54,19 @@ class _ProgressState:
 
 
 class MediaIngestJobError(RuntimeError):
-    def __init__(self, message: str, *, retryable: bool = False, backoff_seconds: int | None = None) -> None:
+    """Domain error that lets WorkerSDK persist structured media-ingest failures."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        retryable: bool = False,
+        backoff_seconds: int | None = None,
+        failure_code: str | None = None,
+    ) -> None:
         super().__init__(message)
         self.retryable = retryable
+        self.failure_code = str(failure_code or "").strip() or None
         if backoff_seconds is not None:
             self.backoff_seconds = backoff_seconds
 
@@ -153,7 +163,11 @@ def _workspace_source_job_fields(payload: dict[str, Any]) -> tuple[str, str, int
     source_id = str(payload.get("workspace_source_id") or payload.get("source_id") or "").strip()
     media_id = _coerce_positive_int(payload.get("media_id"))
     if not workspace_id or not source_id or media_id is None:
-        raise MediaIngestJobError("workspace source job missing required identifiers", retryable=False)
+        raise MediaIngestJobError(
+            "workspace source job missing required identifiers",
+            retryable=False,
+            failure_code="workspace_source_invalid_payload",
+        )
     return workspace_id, source_id, media_id
 
 
@@ -282,7 +296,11 @@ def _sync_collection_item_terminal_result(
 def _resolve_user_id(job: dict[str, Any], payload: dict[str, Any]) -> str:
     owner = job.get("owner_user_id") or payload.get("user_id")
     if owner is None or str(owner).strip() == "":
-        raise MediaIngestJobError("missing owner_user_id", retryable=False)
+        raise MediaIngestJobError(
+            "missing owner_user_id",
+            retryable=False,
+            failure_code="media_ingest_missing_owner",
+        )
     return str(owner)
 
 
@@ -392,7 +410,11 @@ async def _handle_workspace_source_job(job: dict[str, Any], jm: JobManager, prog
 
         media = get_media_by_id(db, media_id)
         if media is None:
-            raise MediaIngestJobError("workspace source media item not found", retryable=False)
+            raise MediaIngestJobError(
+                "workspace source media item not found",
+                retryable=False,
+                failure_code="workspace_source_media_not_found",
+            )
 
         progress.percent = 55.0
         progress.message = "check extraction"
@@ -436,13 +458,21 @@ async def _handle_job(job: dict[str, Any], jm: JobManager, progress: _ProgressSt
     if job_type == _WORKSPACE_SOURCE_JOB_TYPE:
         return await _handle_workspace_source_job(job, jm, progress)
     if job_type != _MEDIA_JOB_TYPE:
-        raise MediaIngestJobError("unsupported job_type", retryable=False)
+        raise MediaIngestJobError(
+            "unsupported job_type",
+            retryable=False,
+            failure_code="media_ingest_unsupported_job_type",
+        )
 
     user_id = _resolve_user_id(job, payload)
     planned_item_id = _planned_collection_item_id(payload)
     source = payload.get("source")
     if not source:
-        raise MediaIngestJobError("missing source", retryable=False)
+        raise MediaIngestJobError(
+            "missing source",
+            retryable=False,
+            failure_code="media_ingest_missing_source",
+        )
 
     source_kind = str(payload.get("source_kind") or "").lower() or "url"
     input_ref = payload.get("input_ref") or payload.get("original_filename") or source
