@@ -29,6 +29,8 @@ modified_files:
 - tldw_Server_API/tests/MCP_unified/docs/test_docs_source_discovery.py
 - tldw_Server_API/tests/MCP_unified/docs/test_docs_source_sync.py
 - backlog/tasks/task-12124 - Implement-standalone-MCP-docs-Stage-4B-source-discovery.md
+references:
+- https://github.com/rmusser01/tldw_server/pull/2598
 ---
 
 ## Description
@@ -61,7 +63,7 @@ Implemented Stage 4B source discovery from the approved plan using test-first sl
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Stage 4B standalone MCP docs source discovery is implemented and verified. docs.discover_source is disabled by default and only advertised when web acquisition and source discovery are enabled. It supports bounded sitemap and page-link discovery with dry-run, register, ingest, and register_and_ingest flows. Registered url_sitemap sources refresh through docs.sync_source with dry-run/apply/stale handling. Verification: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/MCP_unified/docs -q -> 295 passed, 4 warnings; Bandit on apps/mcp-unified/src/mcp_unified/docs and tldw_Server_API/tests/MCP_unified/docs -> 0 findings; import-boundary test -> 6 passed; git diff --check -> clean.
+Stage 4B standalone MCP docs source discovery is implemented and verified. docs.discover_source is disabled by default and only advertised when web acquisition and source discovery are enabled. It supports bounded sitemap and page-link discovery with dry-run, register, ingest, and register_and_ingest flows. Registered url_sitemap sources refresh through docs.sync_source with dry-run/apply/stale handling. PR: https://github.com/rmusser01/tldw_server/pull/2598. Verification: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/MCP_unified/docs -q -> 295 passed, 4 warnings; Bandit on apps/mcp-unified/src/mcp_unified/docs and tldw_Server_API/tests/MCP_unified/docs -> 0 findings; import-boundary test -> 6 passed; git diff --check -> clean.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
