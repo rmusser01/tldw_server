@@ -43,12 +43,12 @@ export interface ScheduledTaskAutomationDefinitionEditorProps {
   ) => Promise<ScheduledTaskPreviewResponse> | ScheduledTaskPreviewResponse
   onCreate?: (
     payload: ScheduledTaskDefinitionCreateRequest
-  ) => Promise<ScheduledTaskDefinitionResponse | unknown> | ScheduledTaskDefinitionResponse | unknown
+  ) => Promise<ScheduledTaskDefinitionResponse> | ScheduledTaskDefinitionResponse
   onUpdate?: (
     payload: ScheduledTaskDefinitionUpdateRequest
-  ) => Promise<ScheduledTaskDefinitionResponse | unknown> | ScheduledTaskDefinitionResponse | unknown
+  ) => Promise<ScheduledTaskDefinitionResponse> | ScheduledTaskDefinitionResponse
   onCancel: () => void
-  onSaved?: (definition: ScheduledTaskDefinitionResponse | unknown) => void
+  onSaved?: (definition: ScheduledTaskDefinitionResponse) => void
 }
 
 const DEFAULT_SCOPE_JSON = "{}"

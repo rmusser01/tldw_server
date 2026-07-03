@@ -1167,7 +1167,7 @@ export const listExternalServers = async (params: {
 
 export const getMcpHubReadiness = async (): Promise<McpHubReadiness> => {
   return await bgRequestClient<McpHubReadiness>({
-    path: "/api/v1/mcp/hub/readiness",
+    path: asClientPath("/api/v1/mcp/hub/readiness"),
     method: "GET"
   })
 }

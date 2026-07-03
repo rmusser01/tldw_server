@@ -285,7 +285,7 @@ const withIdempotency = (
   return trimmed ? { "Idempotency-Key": trimmed } : undefined
 }
 
-const buildQuery = (params?: Record<string, unknown>): string => {
+const buildQuery = (params?: object): string => {
   if (!params) return ""
 
   const query = new URLSearchParams()

@@ -42,6 +42,7 @@ const baseProps = {
   pageSize: 20,
   selectedId: null,
   onSelectNote: vi.fn(),
+  onCreateNote: vi.fn(),
   onChangePage: vi.fn(),
   onResetEditor: vi.fn(),
   onOpenSettings: vi.fn(),
@@ -65,10 +66,10 @@ describe("NotesListPanel empty and error states", () => {
       />
     )
 
-    expect(await screen.findByText("No notes match these filters")).toBeInTheDocument()
+    expect(await screen.findByText("No notes match your filters")).toBeInTheDocument()
     expect(screen.queryByText("No notes yet")).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }))
+    fireEvent.click(screen.getByRole("button", { name: "Clear search & filters" }))
     expect(onClearFilters).toHaveBeenCalledTimes(1)
   })
 
@@ -87,7 +88,8 @@ describe("NotesListPanel empty and error states", () => {
         {...baseProps}
         notes={[note]}
         total={1}
-        listError={new Error("Backend unavailable")}
+        hasError
+        errorMessage="Backend unavailable"
         isStaleResults
         onRetry={vi.fn()}
       />
