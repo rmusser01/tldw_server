@@ -8,6 +8,7 @@ import pytest
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.VisualIdentity_DB import VisualIdentityRepository
+from tldw_Server_API.app.core.exceptions import BadRequestError
 from tldw_Server_API.app.core.Visual_Identities.service import VisualIdentityService
 
 
@@ -36,6 +37,24 @@ def service(chacha_db: CharactersRAGDB) -> VisualIdentityService:
     return VisualIdentityService(chacha_db, owner_user_id=OWNER_USER_ID)
 
 
+def test_service_constructor_does_not_initialize_repository_schema(
+    chacha_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_initialized(cls, db):
+        raise AssertionError("schema initialization should be explicit")
+
+    monkeypatch.setattr(
+        VisualIdentityRepository,
+        "initialized",
+        classmethod(fail_initialized),
+    )
+
+    service = VisualIdentityService(chacha_db, owner_user_id=OWNER_USER_ID)
+
+    assert isinstance(service.repository, VisualIdentityRepository)
+
+
 def test_service_create_pack_has_no_active_version_until_activation(
     service: VisualIdentityService,
 ) -> None:
@@ -44,6 +63,21 @@ def test_service_create_pack_has_no_active_version_until_activation(
     assert pack["status"] == "active"
     assert pack["active_version_id"] is None
     assert pack["default_expression_key"] == "neutral"
+
+
+def test_resolve_override_version_without_pack_raises_domain_error(
+    chacha_db: CharactersRAGDB,
+    service: VisualIdentityService,
+) -> None:
+    character_id = _create_character(chacha_db)
+
+    with pytest.raises(BadRequestError, match="pack_not_found"):
+        service.resolve_expression_asset(
+            actor_kind="character",
+            actor_id=character_id,
+            requested_expression_key="happy",
+            override_pack_version_id=10,
+        )
 
 
 def test_resolve_prefers_manual_override_over_mood(

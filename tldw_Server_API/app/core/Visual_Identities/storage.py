@@ -464,7 +464,13 @@ def _write_same_dir_temp_file(target_path: Path, content: bytes) -> Path:
     )
     temp_path = Path(raw_temp_path)
     try:
-        with os.fdopen(fd, "wb") as file_obj:
+        file_obj = os.fdopen(fd, "wb")
+    except Exception:
+        os.close(fd)
+        temp_path.unlink(missing_ok=True)
+        raise
+    try:
+        with file_obj:
             file_obj.write(content)
             file_obj.flush()
             os.fsync(file_obj.fileno())

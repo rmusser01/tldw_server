@@ -7,10 +7,15 @@ from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.VisualIdentity_DB import VisualIdentityRepository
+from tldw_Server_API.app.core.exceptions import BadRequestError
 from tldw_Server_API.app.core.Visual_Identities.expression_slots import normalize_expression_key
 
 
 ActorId = int | str
+
+
+class VisualIdentityServiceError(BadRequestError):
+    """Raised when Visual Identity service input violates the domain contract."""
 
 
 @dataclass(frozen=True)
@@ -57,7 +62,7 @@ class VisualIdentityService:
         self.db = db
         self.owner_user_id = int(owner_user_id)
         self.jobs_manager = jobs_manager
-        self.repository = VisualIdentityRepository.initialized(db)
+        self.repository = VisualIdentityRepository(db)
 
     def create_pack(
         self,
@@ -90,7 +95,7 @@ class VisualIdentityService:
     ) -> VisualIdentityActivationResult:
         """Activate a ready draft and optionally bind it to an owned actor."""
         if (actor_kind is None) != (actor_id is None):
-            raise ValueError("visual_identity_binding_actor_required")
+            raise VisualIdentityServiceError("visual_identity_binding_actor_required")
         normalized_actor_id = (
             self._validate_actor_for_binding(actor_kind, actor_id)
             if actor_kind is not None and actor_id is not None
@@ -129,7 +134,7 @@ class VisualIdentityService:
         normalized_actor_id = self._validate_actor_for_binding(actor_kind, actor_id)
         normalized_requested = normalize_expression_key(requested_expression_key)
         if override_pack_version_id is not None and override_pack_id is None:
-            raise ValueError("pack_not_found")
+            raise VisualIdentityServiceError("pack_not_found")
         if override_pack_id is not None:
             return self._resolve_override_expression_asset(
                 actor_kind=actor_kind,
@@ -325,7 +330,7 @@ class VisualIdentityService:
             )
 
         if not allow_override_fallback:
-            raise ValueError("override_expression_missing")
+            raise VisualIdentityServiceError("override_expression_missing")
 
         fallback = self.resolve_expression_asset(
             actor_kind=actor_kind,
@@ -354,28 +359,28 @@ class VisualIdentityService:
         try:
             normalized_pack_id = int(pack_id)
         except (TypeError, ValueError) as exc:
-            raise ValueError("pack_not_found") from exc
+            raise VisualIdentityServiceError("pack_not_found") from exc
 
         pack = self.repository.get_pack(normalized_pack_id, owner_user_id=self.owner_user_id)
         if pack is None:
-            raise ValueError("pack_not_found")
+            raise VisualIdentityServiceError("pack_not_found")
 
         if pack_version_id is None:
-            raise ValueError("pack_version_not_found")
+            raise VisualIdentityServiceError("pack_version_not_found")
         else:
             try:
                 normalized_pack_version_id = int(pack_version_id)
             except (TypeError, ValueError) as exc:
-                raise ValueError("pack_version_not_found") from exc
+                raise VisualIdentityServiceError("pack_version_not_found") from exc
 
         version = self.repository.get_pack_version(
             normalized_pack_version_id,
             owner_user_id=self.owner_user_id,
         )
         if version is None:
-            raise ValueError("pack_version_not_found")
+            raise VisualIdentityServiceError("pack_version_not_found")
         if int(version["pack_id"]) != normalized_pack_id:
-            raise ValueError("pack_version_mismatch")
+            raise VisualIdentityServiceError("pack_version_mismatch")
         return pack, version
 
     def _override_fallback_source(self, resolution_source: str) -> str:
@@ -485,25 +490,25 @@ class VisualIdentityService:
             try:
                 character_id = int(actor_id)
             except (TypeError, ValueError) as exc:
-                raise ValueError("visual_identity_character_not_found") from exc
+                raise VisualIdentityServiceError("visual_identity_character_not_found") from exc
             if self.db.get_character_card_by_id(character_id) is None:
-                raise ValueError("visual_identity_character_not_found")
+                raise VisualIdentityServiceError("visual_identity_character_not_found")
             return character_id
 
         if actor_kind == "persona":
             persona_id = str(actor_id).strip()
             if not persona_id:
-                raise ValueError("visual_identity_persona_not_found")
+                raise VisualIdentityServiceError("visual_identity_persona_not_found")
             persona = self.db.get_persona_profile(
                 persona_id,
                 user_id=str(self.owner_user_id),
                 include_deleted=False,
             )
             if persona is None:
-                raise ValueError("visual_identity_persona_not_found")
+                raise VisualIdentityServiceError("visual_identity_persona_not_found")
             return persona_id
 
-        raise ValueError("visual_identity_actor_kind_invalid")
+        raise VisualIdentityServiceError("visual_identity_actor_kind_invalid")
 
     def _resolved_asset(
         self,

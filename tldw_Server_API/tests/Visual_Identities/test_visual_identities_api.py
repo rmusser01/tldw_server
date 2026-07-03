@@ -1109,7 +1109,7 @@ def test_asset_content_requires_owner(
     assert owner_response.status_code == 200
     assert owner_response.content == b"owned-png-bytes"
     assert owner_response.headers["content-type"] == "image/png"
-    assert owner_response.headers["cache-control"] == "public, max-age=31536000, immutable"
+    assert owner_response.headers["cache-control"] == "private, max-age=31536000, immutable"
     assert foreign_response.status_code == 404
 
 

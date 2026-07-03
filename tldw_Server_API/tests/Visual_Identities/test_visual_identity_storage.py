@@ -284,6 +284,32 @@ def test_safe_write_fails_closed_when_hardlink_publish_is_unavailable(
         )
 
 
+def test_same_dir_temp_write_closes_fd_when_fdopen_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage = _storage_module()
+    target_path = tmp_path / "asset.png"
+    closed_fds: list[int] = []
+    real_close = storage.os.close
+
+    def fail_fdopen(fd: int, mode: str):
+        raise OSError("fdopen failed")
+
+    def record_close(fd: int) -> None:
+        closed_fds.append(fd)
+        real_close(fd)
+
+    monkeypatch.setattr(storage.os, "fdopen", fail_fdopen)
+    monkeypatch.setattr(storage.os, "close", record_close)
+
+    with pytest.raises(OSError, match="fdopen failed"):
+        storage._write_same_dir_temp_file(target_path, b"content")
+
+    assert len(closed_fds) == 1
+    assert list(tmp_path.glob(f".{target_path.name}.*.tmp")) == []
+
+
 def test_duplicate_hash_preview_with_corrupt_existing_file_fails(tmp_path: Path) -> None:
     storage = _storage_module()
     image_path = tmp_path / "avatar.png"

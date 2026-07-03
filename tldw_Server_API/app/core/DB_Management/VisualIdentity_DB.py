@@ -12,6 +12,7 @@ from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 IDEMPOTENCY_IN_PROGRESS_STALE_AFTER_SECONDS = 15 * 60
+_VISUAL_IDENTITY_SCHEMA_READY_KEYS: set[tuple[str, str | int]] = set()
 
 VISUAL_IDENTITY_SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS visual_identity_packs (
@@ -147,6 +148,12 @@ def ensure_visual_identity_tables(db: CharactersRAGDB) -> None:
         _ensure_visual_identity_idempotency_columns(conn)
 
 
+def _schema_ready_key(db: CharactersRAGDB) -> tuple[str, str | int]:
+    if getattr(db, "is_memory_db", False):
+        return ("memory", id(db))
+    return ("sqlite", str(getattr(db, "db_path_str", id(db))))
+
+
 def _ensure_visual_identity_asset_columns(conn: sqlite3.Connection) -> None:
     columns = {
         str(row[1])
@@ -174,7 +181,8 @@ class VisualIdentityRepository:
     def __init__(self, db: CharactersRAGDB):
         _require_sqlite_chacha_db(db)
         self.db = db
-        self._schema_initialized = False
+        self._schema_ready_key = _schema_ready_key(db)
+        self._schema_initialized = self._schema_ready_key in _VISUAL_IDENTITY_SCHEMA_READY_KEYS
 
     @classmethod
     def initialized(cls, db: CharactersRAGDB) -> VisualIdentityRepository:
@@ -184,6 +192,7 @@ class VisualIdentityRepository:
 
     def initialize_schema(self) -> None:
         ensure_visual_identity_tables(self.db)
+        _VISUAL_IDENTITY_SCHEMA_READY_KEYS.add(self._schema_ready_key)
         self._schema_initialized = True
 
     def create_pack(
@@ -1644,6 +1653,9 @@ class VisualIdentityRepository:
 
     def _ensure_schema_initialized(self) -> None:
         if self._schema_initialized:
+            return
+        if self._schema_ready_key in _VISUAL_IDENTITY_SCHEMA_READY_KEYS:
+            self._schema_initialized = True
             return
         self.initialize_schema()
 

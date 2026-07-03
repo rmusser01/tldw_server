@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import tempfile
@@ -66,7 +67,7 @@ from tldw_Server_API.app.services.storage_quota_service import get_storage_servi
 
 router = APIRouter()
 
-_IMMUTABLE_ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable"
+_IMMUTABLE_ASSET_CACHE_CONTROL = "private, max-age=31536000, immutable"
 _UPLOAD_CHUNK_SIZE_BYTES = 1024 * 1024
 _API_PREFIX = "/api/v1/visual-identities"
 _READ_LIMIT = Depends(rbac_rate_limit("visual-identities.read"))
@@ -415,7 +416,11 @@ async def _upload_to_temp_file(
     max_bytes: int,
 ) -> tuple[Path, int]:
     suffix = Path(str(upload.filename or "")).suffix
-    handle = tempfile.NamedTemporaryFile(prefix="visual_identity_upload_", suffix=suffix, delete=False)
+    handle = tempfile.NamedTemporaryFile(
+        prefix="visual_identity_upload_",
+        suffix=suffix,
+        delete=False,
+    )
     temp_path = Path(handle.name)
     total = 0
     try:
@@ -430,7 +435,7 @@ async def _upload_to_temp_file(
                         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                         detail="file_too_large",
                     )
-                handle.write(chunk)
+                await asyncio.to_thread(handle.write, chunk)
         if total <= 0:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,

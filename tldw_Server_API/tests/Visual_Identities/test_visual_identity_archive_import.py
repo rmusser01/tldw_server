@@ -6,6 +6,7 @@ import zipfile
 from collections.abc import Mapping
 from io import BytesIO
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Generator
 
 import pytest
@@ -13,6 +14,7 @@ from PIL import Image
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.VisualIdentity_DB import VisualIdentityRepository
+from tldw_Server_API.app.core.Visual_Identities import archive_import
 from tldw_Server_API.app.core.Visual_Identities.archive_import import (
     import_visual_identity_expression_zip,
 )
@@ -78,6 +80,85 @@ def test_archive_import_maps_default_aliases_and_custom_slots(
     assert set(slot_map) == {"neutral", "custom:smirk"}
     assert slot_map["neutral"]["source_filename"] == "sprites/default.png"
     assert slot_map["custom:smirk"]["display_label"] == "Smirk"
+
+
+def test_archive_import_temp_names_are_unique_for_same_member_basename(
+    repo: VisualIdentityRepository,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    draft = repo.create_draft(owner_user_id=1, title="Temp Names", source_kind="zip")
+    archive_path = _zip_with_entries(
+        tmp_path / "same-basename.zip",
+        {
+            "poses/left/sprite.png": _png_bytes("green"),
+            "poses/right/sprite.png": _png_bytes("blue"),
+        },
+    )
+    temp_names: list[str] = []
+    stored_count = 0
+
+    def fake_copy_zip_entry_to_temp_file(
+        archive: zipfile.ZipFile,
+        info: zipfile.ZipInfo,
+        temp_path: Path,
+    ) -> None:
+        temp_names.append(temp_path.name)
+        temp_path.write_bytes(_png_bytes())
+
+    def fake_validate_and_store_visual_identity_asset(**kwargs: Any) -> SimpleNamespace:
+        nonlocal stored_count
+        stored_count += 1
+        return SimpleNamespace(
+            relpath=f"stored/{stored_count}.png",
+            content_type="image/png",
+            bytes=12,
+            sha256=f"sha256-{stored_count}",
+            width=16,
+            height=16,
+            is_animated=False,
+            frame_count=1,
+            duration_ms=None,
+            preview_relpath=None,
+        )
+
+    monkeypatch.setattr(
+        archive_import,
+        "_copy_zip_entry_to_temp_file",
+        fake_copy_zip_entry_to_temp_file,
+    )
+    monkeypatch.setattr(
+        archive_import,
+        "validate_and_store_visual_identity_asset",
+        fake_validate_and_store_visual_identity_asset,
+    )
+
+    with zipfile.ZipFile(archive_path) as archive:
+        infos = {info.filename: info for info in archive.infolist()}
+        slot_map = archive_import._store_candidates(
+            archive,
+            [
+                archive_import._ImportCandidate(
+                    info=infos["poses/left/sprite.png"],
+                    normalized_path="poses/left/sprite.png",
+                    expression_key="left",
+                ),
+                archive_import._ImportCandidate(
+                    info=infos["poses/right/sprite.png"],
+                    normalized_path="poses/right/sprite.png",
+                    expression_key="right",
+                ),
+            ],
+            repo=repo,
+            owner_user_id=1,
+            draft_id=draft["id"],
+            storage_root=tmp_path / "store",
+            summary=archive_import._empty_summary(source_filename="collisions.zip"),
+        )
+
+    assert set(slot_map) == {"left", "right"}
+    assert len(temp_names) == 2
+    assert len(set(temp_names)) == 2
 
 
 def test_duplicate_expression_keys_import_first_by_normalized_path_and_report_duplicates(

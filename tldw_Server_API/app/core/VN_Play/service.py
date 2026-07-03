@@ -14,7 +14,6 @@ from tldw_Server_API.app.core.DB_Management.VNPlay_DB import VNPlayRepository
 from tldw_Server_API.app.core.DB_Management.VNPolicy_DB import VNProfileSnapshotRepository
 from tldw_Server_API.app.core.DB_Management.VNScripts_DB import VNScriptsRepository
 from tldw_Server_API.app.core.VN_Assets.service import VNAssetPackService
-from tldw_Server_API.app.core.Visual_Identities.service import VisualIdentityService
 from tldw_Server_API.app.core.VN_Play.assets import (
     is_visual_identity_directive,
     resolve_scene_directives,
@@ -4252,6 +4251,7 @@ class VNPlayService:
         seed = session.seed or f"session-{session_id}"
 
         for index, directive_payload in enumerate(directive_payloads):
+            is_visual_identity = is_visual_identity_directive(directive_payload)
             events.append(
                 self.repo.append_event(
                     session_id=session_id,
@@ -4268,15 +4268,24 @@ class VNPlayService:
             )
 
             resolution = None
+            directive_error_type = manifest_error
             directive_rejection_reason = default_rejection_reason
-            if (
-                visual_identity_resolver is not None
-                and is_visual_identity_directive(directive_payload)
-            ):
-                resolution = resolve_visual_identity_directive(
-                    visual_identity_resolver,
-                    directive_payload,
-                )
+            if is_visual_identity:
+                if visual_identity_resolver is None:
+                    directive_rejection_reason = "visual_identity_resolver_unavailable"
+                else:
+                    try:
+                        resolution = resolve_visual_identity_directive(
+                            visual_identity_resolver,
+                            directive_payload,
+                        )
+                    except Exception as exc:
+                        logger.exception(
+                            "Failed to resolve VN Play Visual Identity directive: session_id={}",
+                            session_id,
+                        )
+                        directive_error_type = exc.__class__.__name__
+                        directive_rejection_reason = "resolver_error"
             elif manifest is not None:
                 try:
                     resolution = resolve_visual_directive(
@@ -4290,7 +4299,7 @@ class VNPlayService:
                         session_id,
                         session.vn_asset_pack_id,
                     )
-                    manifest_error = exc.__class__.__name__
+                    directive_error_type = exc.__class__.__name__
                     directive_rejection_reason = "resolver_error"
             if resolution is not None and resolution.applied and resolution.item is not None:
                 item = dict(resolution.item)
@@ -4328,7 +4337,7 @@ class VNPlayService:
                 directive_payload,
                 reason=reason,
                 scene_version=scene_version,
-                error_type=manifest_error,
+                error_type=directive_error_type,
             )
             warnings.append(warning)
             events.append(
@@ -4351,11 +4360,6 @@ class VNPlayService:
         return events, scene_updates, warnings
 
     def _get_visual_identity_service(self) -> Any:
-        if self._visual_identity_service is None:
-            self._visual_identity_service = VisualIdentityService(
-                self.repo.db,
-                owner_user_id=self.owner_user_id,
-            )
         return self._visual_identity_service
 
     def _build_pack_manifest(self, pack_id: int) -> dict[str, Any]:

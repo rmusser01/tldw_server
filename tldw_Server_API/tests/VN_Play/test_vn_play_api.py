@@ -1,3 +1,4 @@
+import asyncio
 import json
 from collections.abc import Generator, Iterator
 from typing import Any
@@ -1118,8 +1119,8 @@ async def test_session_response_includes_resolved_scene_assets(
     )
 
 
-@pytest.mark.asyncio
-async def test_session_response_includes_visual_identity_cast_sprite(
+@pytest.mark.unit
+def test_session_response_includes_visual_identity_cast_sprite(
     client: TestClient,
     chacha_db: CharactersRAGDB,
 ) -> None:
@@ -1138,11 +1139,13 @@ async def test_session_response_includes_visual_identity_cast_sprite(
         vn_asset_pack_id=pack_id,
         seed="seed-vi",
     )
-    await service.submit_turn(
-        session.id,
-        input_text="Smile",
-        client_scene_version=0,
-        idempotency_key="visual-identity-cast-turn-1",
+    asyncio.run(
+        service.submit_turn(
+            session.id,
+            input_text="Smile",
+            client_scene_version=0,
+            idempotency_key="visual-identity-cast-turn-1",
+        )
     )
 
     response = client.get(f"/api/v1/vn-play/sessions/{session.id}")

@@ -777,6 +777,7 @@ def _build_persist_validation_degraded_detail(assistant_message_id: str) -> dict
 
 
 def _optional_int_metadata(value: Any) -> int | None:
+    """Return an integer metadata value when the stored field is numeric."""
     if isinstance(value, bool) or value is None:
         return None
     try:
@@ -786,6 +787,7 @@ def _optional_int_metadata(value: Any) -> int | None:
 
 
 def _optional_text_metadata(value: Any) -> str | None:
+    """Return a stripped text metadata value or None when the field is empty."""
     if not isinstance(value, str):
         return None
     normalized = value.strip()

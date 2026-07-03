@@ -238,8 +238,8 @@ def _store_candidates(
     slot_map: dict[str, dict[str, Any]] = {}
     with tempfile.TemporaryDirectory(prefix="visual_identity_import_") as tmp_dir:
         temp_root = Path(tmp_dir)
-        for candidate in candidates:
-            temp_path = temp_root / PurePosixPath(candidate.normalized_path).name
+        for index, candidate in enumerate(candidates):
+            temp_path = temp_root / _candidate_temp_filename(candidate, index)
             try:
                 _copy_zip_entry_to_temp_file(archive, candidate.info, temp_path)
                 stored = validate_and_store_visual_identity_asset(
@@ -292,6 +292,16 @@ def _store_candidates(
                 }
             )
     return slot_map
+
+
+def _candidate_temp_filename(candidate: _ImportCandidate, index: int) -> str:
+    """Return a collision-resistant temporary filename for one selected ZIP entry."""
+    safe_expression = "".join(
+        char if char.isalnum() or char in {"_", "-", "."} else "_"
+        for char in candidate.expression_key
+    )
+    source_name = PurePosixPath(candidate.normalized_path).name
+    return f"{index:03d}-{safe_expression}-{source_name}"
 
 
 def _copy_zip_entry_to_temp_file(
