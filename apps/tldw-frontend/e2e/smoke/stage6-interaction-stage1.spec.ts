@@ -51,12 +51,12 @@ test.describe("Stage 6 interaction stage 1 defect closures", () => {
     expect(bodyText).not.toContain("{{percentage}}")
   })
 
-  test("chat route exposes an explicit theme toggle control", async ({
+  test("home route exposes an explicit theme toggle control", async ({
     page
   }) => {
     await prepareChatRoute(page)
 
-    await page.goto("/chat", {
+    await page.goto("/", {
       waitUntil: "domcontentloaded",
       timeout: LOAD_TIMEOUT
     })
