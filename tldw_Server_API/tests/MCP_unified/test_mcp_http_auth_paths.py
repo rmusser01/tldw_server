@@ -389,6 +389,58 @@ def test_tools_execute_attaches_workspace_headers_to_metadata(monkeypatch):
     assert server.last_metadata.get("cwd") == "src/app"
 
 
+def test_tools_execute_preserves_rag_json_content_wrapper(monkeypatch):
+    monkeypatch.setattr(mcp_ep, "is_single_user_profile_mode", lambda: True)
+
+    class _RagJsonServer(_DummyServer):
+        async def handle_http_request(
+            self,
+            request,
+            client_id: Optional[str] = None,
+            user_id: Optional[str] = None,
+            metadata: Optional[Dict[str, Any]] = None,
+        ):
+            from tldw_Server_API.app.core.MCP_unified.protocol import MCPResponse
+
+            self.last_metadata = metadata or {}
+            arguments = getattr(request, "params", {}).get("arguments", {})
+            return MCPResponse(
+                result={
+                    "content": [
+                        {
+                            "type": "json",
+                            "json": {
+                                "ok": True,
+                                "tool": getattr(request, "params", {}).get("name"),
+                                "query": arguments.get("query"),
+                            },
+                        }
+                    ],
+                    "module": "rag",
+                },
+                id=getattr(request, "id", None),
+            )
+
+    server = _RagJsonServer()
+    monkeypatch.setattr(mcp_ep, "get_mcp_server", lambda: server)
+
+    headers = {"X-API-KEY": os.getenv("SINGLE_USER_API_KEY", "THIS-IS-A-SECURE-KEY-123-FAKE-KEY")}
+    payload = {"tool_name": "rag.search", "arguments": {"query": "hello"}}
+
+    response = client.post("/api/v1/mcp/tools/execute", headers=headers, json=payload)
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["module"] == "rag"
+    assert body["result"]["content"][0]["type"] == "json"
+    assert body["result"]["content"][0]["json"] == {
+        "ok": True,
+        "tool": "rag.search",
+        "query": "hello",
+    }
+    assert "query" not in body["result"]
+
+
 def test_tools_execute_api_key_scopes_enforced(monkeypatch):
     """
     Ensure /mcp/tools/execute respects API key scopes.

@@ -42,6 +42,17 @@ def test_module_surface_classifies_rag_as_read_only() -> None:
     assert MODULE_RISK_TIERS["rag"][0] == "read_only"  # nosec B101
 
 
+def test_rag_docs_include_curated_catalog_and_jsonrpc_examples() -> None:
+    catalog_docs = Path("Docs/MCP/mcp_tool_catalogs.md").read_text()
+    snippets_docs = Path("Docs/MCP/Unified/Client_Snippets.md").read_text()
+
+    assert "Recommended Catalog: `library-rag`" in catalog_docs  # nosec B101
+    for tool_name in ("rag.capabilities", "rag.source_health", "rag.search", "rag.answer"):
+        assert tool_name in catalog_docs  # nosec B101
+    assert '"name":"rag.search"' in snippets_docs  # nosec B101
+    assert '"name":"rag.answer"' in snippets_docs  # nosec B101
+
+
 class _CategoryProbeRateLimiter:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str]] = []

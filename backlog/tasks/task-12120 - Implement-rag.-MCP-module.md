@@ -1,7 +1,7 @@
 ---
 id: TASK-12120
 title: Implement rag.* MCP module
-status: In Progress
+status: Done
 labels:
 - mcp
 - rag
@@ -11,6 +11,9 @@ references:
 modified_files:
 - backlog/tasks/task-12120 - Implement-rag.-MCP-module.md
 - Docs/superpowers/plans/2026-07-03-rag-mcp-module-implementation-plan.md
+- Docs/MCP/mcp_tool_catalogs.md
+- Docs/MCP/Unified/User_Guide.md
+- Docs/MCP/Unified/Client_Snippets.md
 - tldw_Server_API/app/api/v1/endpoints/rag_unified.py
 - tldw_Server_API/app/core/RAG/rag_service/transport.py
 - tldw_Server_API/tests/RAG_NEW/unit/test_rag_transport_helpers.py
@@ -24,6 +27,8 @@ modified_files:
 - tldw_Server_API/app/core/MCP_unified/tests/test_idempotency_and_category.py
 - tldw_Server_API/app/core/MCP_unified/tests/test_protocol_catalog_filter.py
 - tldw_Server_API/app/core/MCP_unified/tests/test_rag_module_registration.py
+- tldw_Server_API/app/core/MCP_unified/tests/test_knowledge_search_defaults.py
+- tldw_Server_API/tests/MCP_unified/test_mcp_http_auth_paths.py
 ---
 
 ## Description
@@ -56,7 +61,7 @@ Docs/superpowers/plans/2026-07-03-rag-mcp-module-implementation-plan.md
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Added a proper rag.* MCP module without a research.* layer. Verification: targeted MCP/RAG suite passed (80 tests), and Bandit completed with zero findings for rag_module.py, rag_service/transport.py, and rag_unified.py.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

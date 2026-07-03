@@ -12,7 +12,8 @@ from tldw_Server_API.app.core.MCP_unified.modules.implementations.rag_module imp
     _build_mcp_rag_request,
     _compact_rag_response,
 )
-from tldw_Server_API.app.core.MCP_unified.protocol import RequestContext
+from tldw_Server_API.app.core.MCP_unified.modules.registry import ModuleRegistry
+from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol, MCPRequest, RequestContext
 
 
 class _RecordingControls:
@@ -63,6 +64,12 @@ class _UnavailableNotesControls(_RecordingControls):
             sources_unavailable=unavailable,
             warnings=["notes unavailable"] if unavailable else [],
         )
+
+
+class _AllowAllRBAC:
+    async def check_permission(self, *args, **kwargs):  # noqa: ANN001
+        del args, kwargs
+        return True
 
 
 def test_mcp_sources_accept_aliases_but_return_canonical_ids() -> None:
@@ -436,3 +443,58 @@ async def test_explicit_unsupported_conversation_scope_fails_closed(monkeypatch:
     assert out["ok"] is False  # nosec B101
     assert out["reason_code"] == "unsupported_scope"  # nosec B101
     assert called is False  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_rag_module_jsonrpc_tools_call_smoke(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_pipeline(**kwargs):  # noqa: ANN001
+        generated_answer = "Grounded answer." if kwargs.get("enable_generation") else None
+        return SimpleNamespace(
+            documents=[{"id": "d1", "content": "Evidence", "metadata": {"source": "media_db"}, "score": 0.9}],
+            query=kwargs["query"],
+            metadata={"hard_citations": {"coverage": 1.0}, "knowledge_trust": {"state": "grounded"}},
+            timings={},
+            citations=[{"id": "c1"}] if generated_answer else [],
+            chunk_citations=[],
+            generated_answer=generated_answer,
+            errors=[],
+            total_time=0.1,
+            cache_hit=False,
+            expanded_queries=[],
+        )
+
+    monkeypatch.setattr(rag_module_impl, "unified_rag_pipeline", fake_pipeline)
+
+    registry = ModuleRegistry()
+    await registry.register_module("rag", RagModule, ModuleConfig(name="rag"))
+    protocol = MCPProtocol()
+    protocol.module_registry = registry
+    protocol.rbac_policy = _AllowAllRBAC()
+    context = RequestContext(request_id="rag-jsonrpc-smoke", user_id="1", client_id="unit")
+
+    search = await protocol.process_request(
+        MCPRequest(
+            method="tools/call",
+            params={"name": "rag.search", "arguments": {"query": "q"}},
+            id="smoke-rag-search",
+        ),
+        context,
+    )
+    answer = await protocol.process_request(
+        MCPRequest(
+            method="tools/call",
+            params={"name": "rag.answer", "arguments": {"query": "q"}},
+            id="smoke-rag-answer",
+        ),
+        context,
+    )
+
+    assert search.error is None  # nosec B101
+    assert answer.error is None  # nosec B101
+    search_payload = search.result["content"][0]["json"]
+    answer_payload = answer.result["content"][0]["json"]
+    assert search.result["content"][0]["type"] == "json"  # nosec B101
+    assert answer.result["content"][0]["type"] == "json"  # nosec B101
+    assert search_payload["ok"] is True  # nosec B101
+    assert "answer" not in search_payload  # nosec B101
+    assert answer_payload["answer"]["status"] in {"answered", "partial", "abstained"}  # nosec B101

@@ -97,6 +97,19 @@ When `catalog_strict` is omitted or false, unresolved catalogs use the default
 fail-open behavior. When `catalog_strict: true`, unresolved catalogs return an
 empty tool list.
 
+Recommended Catalog: `library-rag`
+- Use this catalog to keep existing-library retrieval workflows compact for autonomous clients.
+- Catalogs shape discovery only; they do not create a `research.*` MCP layer and do not grant execution rights.
+- Suggested entries:
+  - `rag.capabilities`
+  - `rag.source_health`
+  - `rag.search`
+  - `rag.answer`
+  - `knowledge.search`
+  - `knowledge.get`
+  - `media.search`
+  - `notes.search`
+
 Recommended Catalog: `kanban-safe-orchestrator`
 - Use this catalog to expose only workflow-control primitives to autonomous agents.
 - Suggested entries:

@@ -627,7 +627,7 @@ git commit -m "config: register rag mcp module"
 - Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_profile_presets.py` only if adding `rag.*` to built-in profile metadata exposes a missing-prefix test.
 - Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_protocol_allowed_tools.py` only if discovery/canExecute fixtures need `rag.*` coverage.
 
-- [ ] **Step 1: Write failing docs/discovery tests where applicable**
+- [x] **Step 1: Write failing docs/discovery tests where applicable**
 
 If built-in profile metadata is updated to include `rag.search` or `rag.answer`, add/update tests so `rag` is categorized and progressive disclosure limits still pass.
 
@@ -652,7 +652,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: PASS if no profile metadata changes are needed; otherwise FAIL until category fixtures are updated.
 
-- [ ] **Step 2: Update docs**
+- [x] **Step 2: Update docs**
 
 Add a concise `rag.*` section:
 
@@ -693,7 +693,7 @@ Add JSON-RPC snippets for:
 {"jsonrpc":"2.0","method":"tools/call","params":{"name":"rag.answer","arguments":{"query":"Summarize the evidence on contextual retrieval.", "sources":["media_db"], "include_documents":true}},"id":"rag-answer-1"}
 ```
 
-- [ ] **Step 3: Run targeted test suite**
+- [x] **Step 3: Run targeted test suite**
 
 Run:
 
@@ -713,7 +713,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 4: Run smoke through MCP protocol**
+- [x] **Step 4: Run smoke through MCP protocol**
 
 Add or run an automated smoke test that registers `RagModule` with a stub pipeline and calls:
 
@@ -731,7 +731,7 @@ Expected:
 
 Also add or run an automated HTTP facade smoke through `POST /api/v1/mcp/tools/execute` for `rag.search` with a stub server, asserting the existing wrapper contract remains intact.
 
-- [ ] **Step 5: Run Bandit on touched code scopes**
+- [x] **Step 5: Run Bandit on touched code scopes**
 
 Run:
 
@@ -745,7 +745,7 @@ source .venv/bin/activate && python -m bandit -r \
 
 Expected: exit 0 or no new findings in touched code. Fix new findings before continuing.
 
-- [ ] **Step 6: Commit final docs and hardening**
+- [x] **Step 6: Commit final docs and hardening**
 
 ```bash
 git add \
