@@ -1442,7 +1442,7 @@ git commit -m "TASK-12090.5 add VN visual identity casting adapter"
 - Modify: `Docs/superpowers/plans/2026-07-02-vn-visual-identity-bridge-implementation-plan.md` only if updating plan task checkboxes during execution.
 - Modify: Backlog task metadata through MCP if available.
 
-- [ ] **Step 1: Run focused backend tests**
+- [x] **Step 1: Run focused backend tests**
 
 Run:
 
@@ -1453,12 +1453,14 @@ source .venv/bin/activate && python -m pytest \
   tldw_Server_API/tests/Visual_Identities/test_visual_identity_db.py \
   tldw_Server_API/tests/Visual_Identities/test_visual_identity_service.py \
   tldw_Server_API/tests/Visual_Identities/test_visual_identities_api.py \
+  tldw_Server_API/tests/VN_Play/test_vn_play_assets.py \
+  tldw_Server_API/tests/VN_Play/test_vn_play_api.py::test_session_response_includes_visual_identity_cast_sprite \
   -q
 ```
 
 Expected: PASS.
 
-- [ ] **Step 2: Run focused frontend tests**
+- [x] **Step 2: Run focused frontend tests**
 
 Run:
 
@@ -1471,7 +1473,7 @@ cd apps/packages/ui && bunx vitest run \
 
 Expected: PASS.
 
-- [ ] **Step 3: Run TypeScript diagnostics for frontend package**
+- [x] **Step 3: Run TypeScript diagnostics for frontend package**
 
 Run:
 
@@ -1481,7 +1483,7 @@ cd apps/packages/ui && bunx tsc --noEmit --pretty false
 
 Expected: PASS. If the full package has known baseline diagnostics, record every diagnostic that references new/touched Stage 11 frontend files and fix those before finishing.
 
-- [ ] **Step 4: Run Bandit on touched backend scope**
+- [x] **Step 4: Run Bandit on touched backend scope**
 
 Run:
 
@@ -1491,12 +1493,14 @@ source .venv/bin/activate && python -m bandit -r \
   tldw_Server_API/app/core/DB_Management/VisualIdentity_DB.py \
   tldw_Server_API/app/api/v1/endpoints/visual_identities.py \
   tldw_Server_API/app/api/v1/schemas/visual_identity_schemas.py \
+  tldw_Server_API/app/core/VN_Play/assets.py \
+  tldw_Server_API/app/core/VN_Play/service.py \
   -f json -o /tmp/bandit_vn_visual_identity_stage11.json
 ```
 
 Expected: exit 0 or only pre-existing non-touched findings documented with rationale.
 
-- [ ] **Step 5: Run final status and diff review**
+- [x] **Step 5: Run final status and diff review**
 
 Run:
 
@@ -1507,14 +1511,14 @@ git diff --stat
 
 Expected: only intended implementation/plan/Backlog files are modified.
 
-- [ ] **Step 6: Commit final verification metadata if needed**
+- [x] **Step 6: Commit final verification metadata if needed**
 
 If any plan or Backlog metadata was updated:
 
 ```bash
 git add Docs/superpowers/plans/2026-07-02-vn-visual-identity-bridge-implementation-plan.md \
-  "backlog/tasks/task-12090.3 - Plan-VN-visual-identity-bridge-and-resolver-implementation.md"
-git commit -m "TASK-12090.3 record VN bridge verification"
+  "backlog/tasks/task-12090.5 - Implement-Stage-11B-VN-visual-identity-role-and-casting-resolver.md"
+git commit -m "TASK-12090.5 record Stage 11B verification"
 ```
 
 ---
