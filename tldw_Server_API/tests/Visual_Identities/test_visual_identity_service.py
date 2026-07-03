@@ -175,6 +175,53 @@ def test_activation_copies_draft_assets_into_version_instead_of_mutating_them(
     assert all(asset["pack_version_id"] == activation.pack_version_id for asset in version_assets)
 
 
+def test_activation_copies_asset_source_context_to_version(
+    repo: VisualIdentityRepository,
+    service: VisualIdentityService,
+) -> None:
+    draft = repo.create_draft(
+        owner_user_id=OWNER_USER_ID,
+        title="Context Draft",
+        source_kind="generated",
+        status="ready_for_review",
+        default_expression_key="neutral",
+    )
+    repo.create_asset(
+        owner_user_id=OWNER_USER_ID,
+        draft_id=draft["id"],
+        expression_key="neutral",
+        source_filename="neutral.webp",
+        storage_relpath="visual_identities/neutral.webp",
+        content_type="image/webp",
+        bytes=12,
+        sha256="sha256-neutral-context",
+        width=64,
+        height=64,
+        source_context={"source_feature": "vn_assets", "generated_file_id": 42},
+    )
+
+    activation = service.activate_draft(draft_id=draft["id"])
+    version_assets = repo.list_assets_for_version(
+        activation.pack_version_id,
+        owner_user_id=OWNER_USER_ID,
+    )
+
+    assert json.loads(version_assets[0]["source_context_json"]) == {
+        "generated_file_id": 42,
+        "source_feature": "vn_assets",
+    }
+    manifest = json.loads(
+        repo.get_pack_version(
+            activation.pack_version_id,
+            owner_user_id=OWNER_USER_ID,
+        )["manifest_json"]
+    )
+    assert manifest["assets"][0]["source_context"] == {
+        "generated_file_id": 42,
+        "source_feature": "vn_assets",
+    }
+
+
 def test_activation_uses_slot_map_replacement_asset(
     repo: VisualIdentityRepository,
     service: VisualIdentityService,

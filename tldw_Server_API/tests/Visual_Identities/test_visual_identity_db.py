@@ -35,6 +35,21 @@ def test_visual_identity_tables_are_created(chacha_db: CharactersRAGDB) -> None:
     }.issubset(table_names)
 
 
+def test_asset_source_context_column_is_added_idempotently(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    ensure_visual_identity_tables(chacha_db)
+    ensure_visual_identity_tables(chacha_db)
+
+    columns = {
+        row[1]
+        for row in chacha_db.execute_query(
+            "PRAGMA table_info(visual_identity_assets)"
+        ).fetchall()
+    }
+    assert "source_context_json" in columns
+
+
 def test_ensure_visual_identity_tables_rejects_non_sqlite_before_transaction() -> None:
     class NonSqliteDB:
         backend_type = BackendType.POSTGRESQL
@@ -379,6 +394,34 @@ def test_draft_creation_status_slot_map_and_assets(chacha_db: CharactersRAGDB) -
     assert [row["id"] for row in repo.list_draft_assets(draft["id"], owner_user_id=1)] == [
         asset["id"]
     ]
+
+
+def test_create_asset_persists_source_context(chacha_db: CharactersRAGDB) -> None:
+    repo = VisualIdentityRepository.initialized(chacha_db)
+    draft = repo.create_draft(
+        owner_user_id=1,
+        title="Context Draft",
+        source_kind="generated",
+        status="ready_for_review",
+    )
+    asset = repo.create_asset(
+        owner_user_id=1,
+        draft_id=draft["id"],
+        expression_key="happy",
+        source_filename="happy.webp",
+        storage_relpath="packs/draft-1/happy.webp",
+        content_type="image/webp",
+        bytes=12,
+        sha256="sha256-happy",
+        width=64,
+        height=64,
+        source_context={"source_feature": "vn_assets", "generated_file_id": 42},
+    )
+
+    assert json.loads(asset["source_context_json"]) == {
+        "generated_file_id": 42,
+        "source_feature": "vn_assets",
+    }
 
 
 def test_update_draft_validation_summary_is_owner_scoped(chacha_db: CharactersRAGDB) -> None:
@@ -772,7 +815,11 @@ def test_activate_draft_as_version_copies_assets_and_supports_string_actor_id(
     assert version_assets[0]["draft_id"] is None
     assert version_assets[0]["pack_version_id"] == version["id"]
     assert json.loads(version["manifest_json"])["assets"] == [
-        {"asset_id": version_assets[0]["id"], "expression_key": "neutral"}
+        {
+            "asset_id": version_assets[0]["id"],
+            "expression_key": "neutral",
+            "source_context": {},
+        }
     ]
     assert binding is not None
     assert str(binding["actor_id"]) == persona_id

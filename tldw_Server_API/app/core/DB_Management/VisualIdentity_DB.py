@@ -75,6 +75,7 @@ CREATE TABLE IF NOT EXISTS visual_identity_assets (
     sha256 TEXT NOT NULL,
     width INTEGER NOT NULL CHECK(width > 0),
     height INTEGER NOT NULL CHECK(height > 0),
+    source_context_json TEXT NOT NULL DEFAULT '{}',
     is_animated INTEGER NOT NULL DEFAULT 0 CHECK(is_animated IN (0, 1)),
     frame_count INTEGER,
     duration_ms INTEGER,
@@ -142,7 +143,20 @@ def ensure_visual_identity_tables(db: CharactersRAGDB) -> None:
     with db.transaction() as conn:
         for statement in VISUAL_IDENTITY_SCHEMA_STATEMENTS:
             conn.execute(statement)
+        _ensure_visual_identity_asset_columns(conn)
         _ensure_visual_identity_idempotency_columns(conn)
+
+
+def _ensure_visual_identity_asset_columns(conn: sqlite3.Connection) -> None:
+    columns = {
+        str(row[1])
+        for row in conn.execute("PRAGMA table_info(visual_identity_assets)").fetchall()
+    }
+    if "source_context_json" not in columns:
+        conn.execute(
+            "ALTER TABLE visual_identity_assets "
+            "ADD COLUMN source_context_json TEXT NOT NULL DEFAULT '{}'"
+        )
 
 
 def _ensure_visual_identity_idempotency_columns(conn: sqlite3.Connection) -> None:
@@ -606,6 +620,7 @@ class VisualIdentityRepository:
         frame_count: int | None = None,
         duration_ms: int | None = None,
         preview_relpath: str | None = None,
+        source_context: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         self._ensure_schema_initialized()
         pack_id = self._normalize_asset_attachment(
@@ -617,6 +632,7 @@ class VisualIdentityRepository:
             width=width,
             height=height,
         )
+        source_context_json = _json_dump(_canonicalize_source_context(source_context or {}))
         with self.db.transaction() as conn:
             cursor = conn.execute(
                 """
@@ -635,12 +651,13 @@ class VisualIdentityRepository:
                     sha256,
                     width,
                     height,
+                    source_context_json,
                     is_animated,
                     frame_count,
                     duration_ms,
                     preview_relpath
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     owner_user_id,
@@ -657,6 +674,7 @@ class VisualIdentityRepository:
                     sha256,
                     width,
                     height,
+                    source_context_json,
                     int(is_animated),
                     frame_count,
                     duration_ms,
@@ -1120,6 +1138,7 @@ class VisualIdentityRepository:
                 ]
             copied_assets: list[dict[str, Any]] = []
             for asset in draft_assets:
+                source_context_json = str(asset.get("source_context_json") or "{}")
                 asset_cursor = conn.execute(
                     """
                     INSERT INTO visual_identity_assets (
@@ -1137,13 +1156,14 @@ class VisualIdentityRepository:
                         sha256,
                         width,
                         height,
+                        source_context_json,
                         is_animated,
                         frame_count,
                         duration_ms,
                         preview_relpath,
                         deleted
                     )
-                    VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+                    VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
                     """,
                     (
                         owner_user_id,
@@ -1159,6 +1179,7 @@ class VisualIdentityRepository:
                         asset["sha256"],
                         asset["width"],
                         asset["height"],
+                        source_context_json,
                         asset["is_animated"],
                         asset["frame_count"],
                         asset["duration_ms"],
@@ -1172,6 +1193,7 @@ class VisualIdentityRepository:
                         "pack_id": pack_id,
                         "draft_id": None,
                         "pack_version_id": pack_version_id,
+                        "source_context_json": source_context_json,
                         "deleted": 0,
                     }
                 )
@@ -1717,6 +1739,24 @@ def _json_dump(value: Any) -> str:
     return json.dumps(value)
 
 
+def _canonicalize_source_context(value: object) -> dict[str, Any]:
+    from tldw_Server_API.app.core.Visual_Identities.source_context import (
+        canonicalize_source_context,
+    )
+
+    return canonicalize_source_context(value)
+
+
+def _json_loads_dict(value: Any) -> dict[str, Any]:
+    try:
+        loaded = json.loads(str(value or "{}"))
+    except json.JSONDecodeError as exc:
+        raise ValueError("visual_identity_source_context_invalid") from exc
+    if not isinstance(loaded, dict):
+        raise ValueError("visual_identity_source_context_invalid")
+    return loaded
+
+
 def _draft_slot_asset_selections(
     draft: Mapping[str, Any],
 ) -> list[dict[str, Any]] | None:
@@ -1780,6 +1820,7 @@ def _build_activation_manifest(
             {
                 "asset_id": int(asset["id"]),
                 "expression_key": str(asset["expression_key"]),
+                "source_context": _json_loads_dict(asset.get("source_context_json")),
             }
             for asset in sorted(
                 assets,
