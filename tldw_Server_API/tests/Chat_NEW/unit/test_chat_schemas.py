@@ -117,6 +117,21 @@ class TestChatCompletionRequest:
         assert request.messages[0].role == "user"
 
     @pytest.mark.unit
+    @pytest.mark.parametrize("api_provider", ["llama", "llama.cpp"])
+    def test_llamacpp_aliases_normalize_to_canonical_provider(
+        self: "TestChatCompletionRequest",
+        api_provider: str,
+    ) -> None:
+        """Test WebUI llama provider ids route through the canonical llama.cpp adapter."""
+        request = ChatCompletionRequest(
+            api_provider=api_provider,
+            model="local-model",
+            messages=[{"role": "user", "content": "Hello"}],
+        )
+
+        assert request.api_provider == "llama.cpp"
+
+    @pytest.mark.unit
     def test_request_accepts_typed_research_context(self):
         """Test request accepts a bounded typed research_context payload."""
         request = ChatCompletionRequest(
