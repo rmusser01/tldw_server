@@ -19,7 +19,7 @@ MAX_SOURCE_CONTEXT_STRING_LENGTH = 512
 PROMPT_TEXT_KEYS = {"prompt", "negative_prompt", "system_prompt", "user_prompt", "prompt_text"}
 PROMPT_REFERENCE_KEYS = {"prompt_id", "prompt_ref", "prompt_label"}
 
-_BASE64_LIKE_RE = re.compile(r"^[A-Za-z0-9+/]+={0,2}$")
+_BASE64_LIKE_RE = re.compile(r"^[A-Za-z0-9+/_-]+={0,2}$")
 
 
 def canonicalize_source_context(value: object) -> dict[str, Any]:
@@ -95,12 +95,16 @@ def _source_context_json(value: Mapping[str, Any]) -> str:
 
 
 def _is_base64_like_payload(value: str) -> bool:
-    if len(value) < 48 or len(value) % 4:
+    if len(value) < 43:
         return False
     if not _BASE64_LIKE_RE.fullmatch(value):
         return False
+    unpadded = value.rstrip("=")
+    if len(unpadded) % 4 == 1:
+        return False
+    normalized = value + ("=" * (-len(value) % 4))
     try:
-        decoded = base64.b64decode(value, validate=True)
+        decoded = base64.b64decode(normalized, altchars=b"-_", validate=True)
     except (binascii.Error, ValueError):
         return False
     return len(decoded) >= 32
