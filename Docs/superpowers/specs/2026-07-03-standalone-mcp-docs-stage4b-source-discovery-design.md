@@ -38,8 +38,10 @@ instance, browser automation, or mandatory scraping dependencies.
 - Reuse Stage 4A source records and source-document links so discovered pages
   are visible through `docs.list(kind="sources")` and refreshable through
   `docs.sync_source`.
-- Keep web scraping optional: `beautifulsoup4` and `trafilatura` remain lazy
-  optional extractors, not baseline imports.
+- Keep web scraping optional: when installed, `beautifulsoup4` is preferred for
+  HTML link extraction and `trafilatura` remains preferred for page body
+  extraction through the Stage 2 ingestion path. Both remain lazy optional
+  imports, not baseline dependencies.
 - Preserve locked-down deployment profiles where URL acquisition and discovery
   are unavailable unless explicitly configured.
 - Keep `mcp_unified.docs` independent from `tldw_Server_API` runtime imports.
@@ -136,9 +138,12 @@ Profile behavior:
 - `online_capable`: same as `local_first`, plus unknown public domains only
   when `allow_arbitrary_public_domains=true`.
 
-`sitemap_sync_enabled` remains default `false`. Stage 4B may enable sitemap
-source registration and initial ingestion while leaving repeated sitemap sync
-behind this explicit flag.
+`sitemap_sync_enabled` remains default `false`. Stage 4B may allow sitemap
+source registration and initial ingestion when source discovery is enabled, but
+repeated refresh through `docs.sync_source` still returns
+`sitemap_sync_disabled` until this flag is true. Registration responses should
+include that warning when they create a sitemap source that is not yet
+syncable.
 
 ## Tool Contract
 
@@ -205,6 +210,7 @@ Response shape:
     {
       "url": "https://example.com/docs/install",
       "display_url": "https://example.com/docs/install",
+      "safe_argument_hash": "ab12...",
       "status": "accepted",
       "reason_code": "ok",
       "source_kind": "sitemap",
@@ -215,11 +221,14 @@ Response shape:
 }
 ```
 
-Apply-mode responses include `source.id`, per-candidate ingest status,
-document IDs when ingestion succeeds, and bounded warnings. URL query strings
-must be redacted in all public fields unless query persistence is explicitly
-enabled and a future privileged diagnostic path is added. Stage 4B does not add
-that diagnostic path.
+Candidate `url`, `display_url`, and `parent_url` fields are public display
+values, not privileged fetch logs. They must use redacted URL forms whenever
+query strings are present. `safe_argument_hash` is the stable correlation value
+for a query-bearing candidate. Apply-mode responses include `source.id`,
+per-candidate ingest status, document IDs when ingestion succeeds, and bounded
+warnings. Raw query-bearing fetch URLs must not appear in public tool responses
+even when `persist_url_query_strings=true`; a future privileged diagnostic path
+would be required for that. Stage 4B does not add that diagnostic path.
 
 ## Discovery Semantics
 
@@ -261,8 +270,9 @@ Rules:
 
 - Fetch the seed URL through `URLFetcher`.
 - Accept only HTML content types for link discovery.
-- Extract links with a stdlib `html.parser` based extractor first. BeautifulSoup
-  may be used if installed, but must remain a lazy optional import.
+- Prefer BeautifulSoup for link extraction when `beautifulsoup4` is installed,
+  imported lazily inside the extractor. Fall back to a stdlib `html.parser`
+  extractor when BeautifulSoup is unavailable.
 - Normalize relative links against the final fetched seed URL.
 - Drop fragments before dedupe.
 - Skip unsupported schemes such as `mailto:`, `tel:`, `data:`, `file:`, and
@@ -329,6 +339,10 @@ Rules:
 - Apply mode ingests accepted current candidates through
   `DocsAcquisitionService.ingest_url()` and links successful documents to the
   sitemap source with the page URL as `source_item_uri`.
+- Sitemap source defaults in `docs_sources.metadata_json`, including
+  `default_keywords` and `default_collections`, are passed into each page
+  ingestion call and merged with any existing user organization using the Stage
+  4A sync-aware merge semantics.
 - Active sitemap links absent from the current sitemap are reported as
   `missing` under `stale_policy=report`.
 - Under `stale_policy=tombstone`, apply mode tombstones sitemap source links
@@ -420,7 +434,11 @@ Unit tests:
 - sitemap parser rejects or skips out-of-scope candidates;
 - page-link extractor normalizes relative links, drops fragments, skips
   unsupported schemes, and dedupes candidates;
+- page-link extractor prefers BeautifulSoup when installed and falls back to
+  stdlib parsing without making `beautifulsoup4` mandatory;
 - query-bearing candidates are skipped unless query persistence is enabled;
+- query-bearing candidates never expose raw query strings in public tool
+  response fields;
 - dry-run does not mutate source, document, chunk, keyword, collection, or run
   tables.
 
@@ -430,6 +448,8 @@ Integration tests:
   candidates and no documents;
 - apply sitemap discovery with fake sitemap and fake page bodies ingests
   bounded pages and creates searchable FTS5 chunks;
+- sitemap discovery and sitemap sync apply registered default collections and
+  keywords to ingested pages without replacing user-added metadata;
 - apply register mode creates a `url_sitemap` source without ingesting pages;
 - `docs.sync_source` refreshes a registered `url_sitemap` source when
   `sitemap_sync_enabled=true`;
@@ -472,12 +492,12 @@ bulk page ingestion and repeated sitemap sync to follow-ups.
   `sitemap_index_unsupported`.
 - Whether apply mode should persist bounded discovery run summaries in
   `docs_sync_runs.metadata_json` or add a small `docs_discovery_runs` table.
-- Whether page-link extraction should use stdlib only in the first PR, leaving
-  BeautifulSoup-assisted anchor metadata to a follow-up.
+- Whether page-link extraction should expose additional BeautifulSoup-derived
+  anchor metadata beyond URL and rel filtering.
 
 Recommended defaults:
 
 - Defer sitemap indexes unless the first implementation remains small.
 - Avoid a new discovery-runs table until there is a concrete audit UI/API need.
-- Use stdlib link extraction first; keep BeautifulSoup optional for rich body
-  extraction already covered by Stage 2.
+- Prefer BeautifulSoup when installed for link extraction, with a stdlib parser
+  fallback so the standalone package still works without optional web extras.

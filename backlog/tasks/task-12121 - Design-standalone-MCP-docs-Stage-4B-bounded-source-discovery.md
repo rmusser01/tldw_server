@@ -45,13 +45,12 @@ Write the Stage 4B design/spec for bounded source discovery in the standalone MC
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
+Design review follow-up completed before implementation planning. Issues found and addressed: clarified optional BeautifulSoup/trafilatura usage; tightened query-bearing candidate response redaction with safe_argument_hash; clarified sitemap registration versus sitemap_sync_enabled repeated refresh; required sitemap source default keywords/collections to flow into page ingestion while preserving user-added organization; added tests for optional BeautifulSoup fallback, query redaction, and metadata preservation.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
