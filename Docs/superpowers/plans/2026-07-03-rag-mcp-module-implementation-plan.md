@@ -136,7 +136,7 @@ Run the same pytest command from Step 2.
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add \
@@ -156,7 +156,7 @@ git commit -m "refactor: share rag transport helpers"
 - Create: `tldw_Server_API/app/core/MCP_unified/modules/implementations/rag_module.py`
 - Create/Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_rag_module.py`
 
-- [ ] **Step 1: Write failing contract tests**
+- [x] **Step 1: Write failing contract tests**
 
 Add tests that import private helpers from `rag_module.py` until the module API stabilizes:
 
@@ -219,7 +219,7 @@ def test_compact_response_truncates_documents_and_preserves_citations():
     assert payload["metadata"]["max_content_chars"] == 3
 ```
 
-- [ ] **Step 2: Run tests to verify failures**
+- [x] **Step 2: Run tests to verify failures**
 
 Run:
 
@@ -231,7 +231,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: FAIL because `rag_module.py` and helpers do not exist.
 
-- [ ] **Step 3: Add contract helpers in `rag_module.py`**
+- [x] **Step 3: Add contract helpers in `rag_module.py`**
 
 Implement only pure helpers first:
 
@@ -283,7 +283,7 @@ def _build_mcp_rag_request(tool_name: str, arguments: dict[str, Any]) -> tuple[U
 
 Add `_compact_rag_response()`, `_answer_status()`, `_domain_error_payload()`, `_mcp_safe_search_agent_overrides()`, and `_unsupported_scope_warnings_or_error()` as pure functions. Keep all payloads JSON-serializable and avoid provider secrets, paths, and prompts.
 
-- [ ] **Step 4: Run contract tests to verify pass**
+- [x] **Step 4: Run contract tests to verify pass**
 
 Run the pytest command from Step 2.
 
