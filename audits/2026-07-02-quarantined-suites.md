@@ -31,11 +31,18 @@ collected and skipped-with-reason by default (opt in: `RUN_QUARANTINED=1`).
 
 Measured 2026-07-02 (60s per-test timeout, unrestricted directory-wide local run):
 
-| Suite | Failed | Passed | Skipped/xfail | Runtime |
-|---|---|---|---|---|
-| tests/Character_Chat_NEW | 68 | 408 | 4 | 6m45s |
-| tests/TTS_NEW | 325 | 309 | 2 xfail | 10m24s |
-| tests/Embeddings | 192 | 230 | 17 | 2m54s |
+| Suite | Failed | Passed | Skipped/xfail | Runtime | Status |
+|---|---|---|---|---|---|
+| tests/Character_Chat_NEW | 68 | 408 | 4 | 6m45s | **UNQUARANTINED 2026-07-03** — full re-run on dev: 476 passed / 4 skipped / 0 failed (1h14m); hook removed |
+| tests/TTS_NEW | 325 | 309 | 2 xfail | 10m24s | quarantined; re-triage in progress |
+| tests/Embeddings | 192 | 230 | 17 | 2m54s | quarantined; re-triage in progress |
+
+> **2026-07-03 update:** the Character_Chat_NEW failures did not reproduce on
+> current `dev` — the suite went green via intervening Character_Chat work
+> (the 2026-07-02 numbers were measured against a main-based checkout under
+> back-to-back-suite load). Its quarantine hook is removed. One watch item:
+> `property/test_ambiguous_sender_heuristics.py` showed a transient failure
+> in a partial run but passed the full run (possible hypothesis flake).
 
 Exit criteria per suite: starting from the curated `ci.yml` gating shard file
 lists as the known-green inventory (see the correction above), 0 failures
