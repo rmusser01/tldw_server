@@ -1,3 +1,5 @@
+"""HTTP URL fetching with MCP docs egress policy enforcement."""
+
 from __future__ import annotations
 
 import socket
@@ -18,6 +20,8 @@ _MAX_HEADER_BYTES = 65536
 
 
 class URLFetcher:
+    """Fetch allowed HTTP(S) URLs through validated DNS resolution and transport."""
+
     def __init__(
         self,
         *,
@@ -32,6 +36,7 @@ class URLFetcher:
         self.transport = transport or ValidatedAddressHTTPTransport()
 
     def fetch(self, raw_url: str) -> FetchResult:
+        """Fetch a URL after policy checks, redirect validation, and size limits."""
         current_url = raw_url
         redirects: list[RedirectHop] = []
         while True:

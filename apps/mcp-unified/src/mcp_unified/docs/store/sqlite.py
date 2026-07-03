@@ -1,3 +1,5 @@
+"""SQLite storage for the standalone MCP documentation catalog."""
+
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
@@ -6,7 +8,6 @@ from hashlib import sha256
 from importlib import resources
 import json
 from pathlib import Path
-import re
 import sqlite3
 from typing import Any
 
@@ -39,7 +40,6 @@ _SCOPE_TABLE_INFO_SQL = {
 _INDEX_LIST_SQL = {
     "docs_documents": "PRAGMA index_list(docs_documents)",
 }
-_SAFE_SQLITE_IDENTIFIER_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _SCOPE_BACKFILL_SQL = {
     "docs_documents": (
         "UPDATE docs_documents SET owner_scope = ? WHERE owner_scope IS NULL",
@@ -75,6 +75,7 @@ class DocsCatalogStore:
         self.db_path = Path(db_path)
 
     def connect(self) -> sqlite3.Connection:
+        """Open a configured SQLite connection for catalog operations."""
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(self.db_path, timeout=_SQLITE_BUSY_TIMEOUT_SECONDS)
         conn.row_factory = sqlite3.Row
@@ -1797,12 +1798,8 @@ def _table_has_unique_index(conn: sqlite3.Connection, table_name: str, columns: 
         if not bool(index["unique"]):
             continue
         index_name = str(index["name"])
-        if not _SAFE_SQLITE_IDENTIFIER_RE.fullmatch(index_name):
-            continue
         try:
-            # lgtm[py/sql-injection]: index_name comes from SQLite metadata and is
-            # validated against a simple identifier allowlist before interpolation.
-            indexed_columns = conn.execute(f'PRAGMA index_info("{index_name}")').fetchall()
+            indexed_columns = conn.execute("SELECT name FROM pragma_index_info(?)", (index_name,)).fetchall()
         except sqlite3.Error:
             continue
         if tuple(row["name"] for row in indexed_columns) == columns:

@@ -337,6 +337,55 @@ def test_migrate_backfills_legacy_null_default_scope_rows(tmp_path: Path) -> Non
     assert [document["title"] for document in documents] == ["Updated Legacy Doc"]  # nosec B101
 
 
+def test_migrate_recognizes_existing_scope_unique_index_with_quoted_name(tmp_path: Path) -> None:
+    db_path = tmp_path / "docs.db"
+    with closing(DocsCatalogStore(db_path).connect()) as conn:
+        conn.execute(
+            """
+            CREATE TABLE docs_documents (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                owner_scope TEXT NOT NULL DEFAULT '',
+                profile_scope TEXT NOT NULL DEFAULT '',
+                title TEXT NOT NULL,
+                document_type TEXT NOT NULL,
+                canonical_uri TEXT NOT NULL,
+                source_path TEXT,
+                source_url TEXT,
+                content_hash TEXT NOT NULL,
+                text TEXT NOT NULL,
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                package_name TEXT,
+                package_version TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX "legacy scope uri unique idx"
+            ON docs_documents (owner_scope, profile_scope, canonical_uri)
+            """
+        )
+        conn.commit()
+
+    DocsCatalogStore(db_path).migrate()
+
+    with closing(DocsCatalogStore(db_path).connect()) as conn:
+        unique_scope_indexes = [
+            row["name"]
+            for row in conn.execute("PRAGMA index_list(docs_documents)").fetchall()
+            if bool(row["unique"])
+            and tuple(
+                column["name"]
+                for column in conn.execute("SELECT name FROM pragma_index_info(?)", (row["name"],)).fetchall()
+            )
+            == ("owner_scope", "profile_scope", "canonical_uri")
+        ]
+
+    assert unique_scope_indexes == ["legacy scope uri unique idx"]  # nosec B101
+
+
 def test_list_keywords_includes_keyword_field(tmp_path: Path) -> None:
     store = DocsCatalogStore(tmp_path / "docs.db")
     store.migrate()

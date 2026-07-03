@@ -12,7 +12,7 @@ from .importers.base import ParsedDocument, chunks_from_text
 from .importers.local import DocsImportService
 from .models import AccessScope, SyncSourceRequest
 from .settings import DocsSettings
-from .source_utils import file_uri_for_path, redacted_url_for_display, url_has_query
+from .source_utils import file_uri_for_path, path_from_file_uri, redacted_url_for_display, url_has_query
 from .store.sqlite import DocsCatalogStore
 
 _SYNC_MODES = {"dry_run", "apply"}
@@ -97,10 +97,19 @@ class DocsSourceSyncService:
         try:
             target = self._source_path(source)
             resolved = self.importer._assert_allowed_path(target)
+            if not resolved.is_file():
+                if _is_tombstone_stale_policy(request):
+                    return self._failed(
+                        source=source,
+                        request=request,
+                        reason_code="import_path_not_found",
+                        warning="Import path does not exist.",
+                    )
+                return self._sync_local_paths(scope=scope, source=source, request=request, files=[])
         except DocsError as exc:
             return self._failed(source=source, request=request, reason_code=exc.code, warning=exc.message)
 
-        files = [resolved] if resolved.is_file() else []
+        files = [resolved]
         return self._sync_local_paths(scope=scope, source=source, request=request, files=files)
 
     def _sync_local_directory(
@@ -113,7 +122,16 @@ class DocsSourceSyncService:
         try:
             target = self._source_path(source)
             resolved = self.importer._assert_allowed_path(target)
-            files = self.importer._iter_import_files(resolved) if resolved.is_dir() else []
+            if not resolved.is_dir():
+                if _is_tombstone_stale_policy(request):
+                    return self._failed(
+                        source=source,
+                        request=request,
+                        reason_code="import_path_not_found",
+                        warning="Import path does not exist.",
+                    )
+                return self._sync_local_paths(scope=scope, source=source, request=request, files=[])
+            files = self.importer._iter_import_files(resolved)
         except DocsError as exc:
             return self._failed(source=source, request=request, reason_code=exc.code, warning=exc.message)
 
@@ -168,6 +186,19 @@ class DocsSourceSyncService:
                         "source_item_uri": item_uri,
                         "status": "failed",
                         "reason_code": exc.code,
+                    }
+                )
+                continue
+            except (OSError, UnicodeDecodeError) as exc:
+                reason = "read_failed" if isinstance(exc, OSError) else "decode_failed"
+                counts["failed"] += 1
+                warnings.append(reason)
+                items.append(
+                    {
+                        "source_item_uri": item_uri,
+                        "status": "failed",
+                        "reason_code": reason,
+                        "message": str(exc),
                     }
                 )
                 continue
@@ -508,7 +539,14 @@ class DocsSourceSyncService:
             return Path(str(source_path))
         canonical_uri = str(source.get("canonical_uri") or "")
         if canonical_uri.startswith("file://"):
-            return Path(canonical_uri.removeprefix("file://"))
+            try:
+                return path_from_file_uri(canonical_uri)
+            except ValueError as exc:
+                raise DocsError(
+                    code="source_path_invalid",
+                    message="Local source canonical URI is not a local file URI.",
+                    details={"source_id": source.get("id"), "canonical_uri": canonical_uri},
+                ) from exc
         raise DocsError(
             code="source_path_missing",
             message="Local source does not include a source path.",
@@ -598,6 +636,10 @@ def _validate_request(request: SyncSourceRequest) -> dict[str, Any] | None:
         return {"status": "denied", "reason_code": "source_sync_request_invalid", "field": "force"}
 
     return None
+
+
+def _is_tombstone_stale_policy(request: SyncSourceRequest) -> bool:
+    return str(request.stale_policy).strip().lower() == "tombstone"
 
 
 def _response(

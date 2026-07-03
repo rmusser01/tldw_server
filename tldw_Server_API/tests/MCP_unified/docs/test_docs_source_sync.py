@@ -12,6 +12,7 @@ from mcp_unified.docs.errors import DocsError
 from mcp_unified.docs.mcp_module import DocsMCPToolProvider
 from mcp_unified.docs.models import AccessScope, SyncSourceRequest
 from mcp_unified.docs.settings import DocsSettings
+from mcp_unified.docs.source_utils import file_uri_for_path
 from mcp_unified.docs.sync import DocsSourceSyncService
 from mcp_unified.docs.store.sqlite import DocsCatalogStore
 from tldw_Server_API.tests.MCP_unified.docs.helpers import FakeResolver, FakeTransport
@@ -700,6 +701,137 @@ def test_local_directory_sync_tombstone_hides_document_from_default_search(tmp_p
 
     assert result["counts"]["tombstoned"] == 1  # nosec B101
     assert search["results"] == []  # nosec B101
+
+
+@pytest.mark.parametrize(
+    ("exception", "reason_code"),
+    [
+        (OSError("permission denied"), "read_failed"),
+        (UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte"), "decode_failed"),
+    ],
+)
+def test_local_directory_sync_records_file_parse_failures_and_continues(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    exception: Exception,
+    reason_code: str,
+) -> None:
+    root = tmp_path / "workspace"
+    root.mkdir()
+    good = root / "good.md"
+    bad = root / "bad.md"
+    good.write_text("# Good\n\nOld good content.\n", encoding="utf-8")
+    bad.write_text("# Bad\n\nBad content.\n", encoding="utf-8")
+    provider = DocsMCPToolProvider(settings=DocsSettings(db_path=tmp_path / "docs.db", trusted_roots=(root,)))
+    scope = AccessScope()
+    imported = provider.execute("docs.import_path", {"path": str(root)}, scope=scope)
+    source_id = imported["source"]["id"]
+    good.write_text("# Good\n\nNew good content.\n", encoding="utf-8")
+    original_parse = provider.source_sync._parsed_local_sync_item
+
+    def flaky_parse(file_path: Path):
+        if file_path.name == "bad.md":
+            raise exception
+        return original_parse(file_path)
+
+    monkeypatch.setattr(provider.source_sync, "_parsed_local_sync_item", flaky_parse)
+
+    try:
+        result = provider.execute("docs.sync_source", {"source_id": source_id, "mode": "apply"}, scope=scope)
+    except (OSError, UnicodeDecodeError) as exc:
+        pytest.fail(f"sync should record {type(exc).__name__} as an item failure")
+    search = provider.execute("docs.search", {"query": "New"}, scope=scope)
+
+    assert result["status"] == "partial"  # nosec B101
+    assert result["reason_code"] == "partial_failure"  # nosec B101
+    assert result["counts"]["failed"] == 1  # nosec B101
+    assert result["counts"]["updated"] == 1  # nosec B101
+    assert reason_code in result["warnings"]  # nosec B101
+    assert any(item["reason_code"] == reason_code for item in result["items"])  # nosec B101
+    assert search["results"][0]["title"] == "Good"  # nosec B101
+
+
+def test_local_directory_sync_missing_source_root_does_not_tombstone_existing_links(tmp_path: Path) -> None:
+    root = tmp_path / "workspace"
+    root.mkdir()
+    guide = root / "guide.md"
+    guide.write_text("# Guide\n\nSQLite content.\n", encoding="utf-8")
+    provider = DocsMCPToolProvider(settings=DocsSettings(db_path=tmp_path / "docs.db", trusted_roots=(tmp_path,)))
+    scope = AccessScope()
+    imported = provider.execute("docs.import_path", {"path": str(root)}, scope=scope)
+    source_id = imported["source"]["id"]
+    guide.unlink()
+    root.rmdir()
+
+    result = provider.execute(
+        "docs.sync_source",
+        {"source_id": source_id, "mode": "apply", "stale_policy": "tombstone"},
+        scope=scope,
+    )
+    search = provider.execute("docs.search", {"query": "SQLite"}, scope=scope)
+    links = provider.store.source_document_links(scope=scope, source_id=source_id)
+
+    assert result["status"] == "failed"  # nosec B101
+    assert result["reason_code"] == "import_path_not_found"  # nosec B101
+    assert result["counts"]["tombstoned"] == 0  # nosec B101
+    assert search["results"]  # nosec B101
+    assert links[0]["status"] == "active"  # nosec B101
+
+
+def test_local_file_sync_missing_source_file_does_not_tombstone_existing_link(tmp_path: Path) -> None:
+    root = tmp_path / "workspace"
+    root.mkdir()
+    guide = root / "guide.md"
+    guide.write_text("# Guide\n\nSQLite content.\n", encoding="utf-8")
+    provider = DocsMCPToolProvider(settings=DocsSettings(db_path=tmp_path / "docs.db", trusted_roots=(root,)))
+    scope = AccessScope()
+    imported = provider.execute("docs.import_path", {"path": str(guide)}, scope=scope)
+    source_id = imported["source"]["id"]
+    guide.unlink()
+
+    result = provider.execute(
+        "docs.sync_source",
+        {"source_id": source_id, "mode": "apply", "stale_policy": "tombstone"},
+        scope=scope,
+    )
+    search = provider.execute("docs.search", {"query": "SQLite"}, scope=scope)
+    links = provider.store.source_document_links(scope=scope, source_id=source_id)
+
+    assert result["status"] == "failed"  # nosec B101
+    assert result["reason_code"] == "import_path_not_found"  # nosec B101
+    assert result["counts"]["tombstoned"] == 0  # nosec B101
+    assert search["results"]  # nosec B101
+    assert links[0]["status"] == "active"  # nosec B101
+
+
+def test_local_file_sync_decodes_file_uri_source_path(tmp_path: Path) -> None:
+    root = tmp_path / "workspace"
+    root.mkdir()
+    guide = root / "guide with spaces.md"
+    guide.write_text("# Guide\n\nSQLite content.\n", encoding="utf-8")
+    store = DocsCatalogStore(tmp_path / "docs.db")
+    store.migrate()
+    scope = AccessScope()
+    source_id = store.upsert_source(
+        scope=scope,
+        source_type="local_file",
+        canonical_uri=file_uri_for_path(guide),
+        display_name=guide.name,
+        source_path=None,
+        source_url=None,
+        redacted_source_url=None,
+        policy_profile="locked_down",
+        sync_enabled=True,
+        metadata={},
+    )
+    provider = DocsMCPToolProvider(settings=DocsSettings(db_path=tmp_path / "docs.db", trusted_roots=(root,)), store=store)
+
+    result = provider.execute("docs.sync_source", {"source_id": source_id, "mode": "apply"}, scope=scope)
+    search = provider.execute("docs.search", {"query": "SQLite"}, scope=scope)
+
+    assert result["counts"]["created"] == 1  # nosec B101
+    assert result["items"][0]["canonical_uri"] == file_uri_for_path(guide)  # nosec B101
+    assert search["results"][0]["title"] == "Guide"  # nosec B101
 
 
 def test_local_directory_sync_tombstone_hides_document_from_lookup_and_facets(tmp_path: Path) -> None:

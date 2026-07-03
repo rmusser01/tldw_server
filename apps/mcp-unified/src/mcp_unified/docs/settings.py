@@ -34,7 +34,7 @@ def _coerce_bool(value: object, field_name: str) -> bool:
 def _coerce_trusted_roots(value: object) -> tuple[Path, ...]:
     if value is None or value == "":
         return ()
-    if isinstance(value, str | PathLike):
+    if isinstance(value, (str, PathLike)):
         items = (value,)
     else:
         items = tuple(value) if isinstance(value, Iterable) else (value,)
