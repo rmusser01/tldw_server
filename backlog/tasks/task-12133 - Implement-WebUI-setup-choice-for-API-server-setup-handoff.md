@@ -4,7 +4,7 @@ title: Implement WebUI setup choice for API server setup handoff
 status: In Progress
 assignee: []
 created_date: '2026-07-03 22:59'
-updated_date: '2026-07-03 23:29'
+updated_date: '2026-07-03 23:45'
 labels:
   - webui
   - setup
@@ -45,6 +45,8 @@ Implementation started in isolated worktree .worktrees/codex-webui-setup-choice-
 Task 1 complete: helper and resolver committed in f8adf59740. Spec-compliance and code-quality reviews approved. Focused helper Vitest passed: 12 tests.
 
 Task 2 complete: SetupEntryChoice component committed in 5ed2d65140. Spec-compliance and code-quality reviews approved. Focused component/helper Vitest passed: 23 tests.
+
+Task 3 complete: /setup route integration committed in c48d86f2aa, with review fixes 8e559b37d4 and f57ae2ba97. Spec-compliance and code-quality reviews approved. Focused route Vitest passed: option-setup-readiness 17 tests. Combined setup Vitest passed: setup-entry-choice-utils, SetupEntryChoice, option-setup-readiness, setup-status, 51 tests. Bandit skipped for Task 3 because only TypeScript/React files changed.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
