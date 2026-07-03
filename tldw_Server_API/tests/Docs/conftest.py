@@ -13,6 +13,8 @@ _REQUIRED_PUBLISHED_FILES = (
     "Docs/Published/User_Guides/WebUI_Extension/Getting-Started-STT_and_TTS.md",
     "Docs/Published/User_Guides/WebUI_Extension/TTS_Getting_Started.md",
     "Docs/Published/User_Guides/WebUI_Extension/TTS-SETUP-GUIDE.md",
+    "Docs/Published/Wiki/User_Wiki.md",
+    "Docs/Published/Wiki/Developer_Wiki.md",
 )
 
 
@@ -39,6 +41,11 @@ def _refresh_docs_published(repo_root: Path) -> None:
 
     _preserve_and_copy(src_dir / "API-related", dest_dir / "API-related")
     _preserve_and_copy(src_dir / "Code_Documentation", dest_dir / "Code_Documentation")
+    _preserve_and_copy(src_dir / "Wiki", dest_dir / "Wiki")
+    _preserve_and_copy(src_dir / "ADR", dest_dir / "ADR")
+    architecture = src_dir / "Architecture.md"
+    if architecture.exists():
+        shutil.copy2(architecture, dest_dir / "Architecture.md")
     _preserve_and_copy(src_dir / "Deployment", dest_dir / "Deployment", skip_monitoring=True)
     _preserve_and_copy(src_dir / "Deployment" / "Monitoring", dest_dir / "Monitoring")
     _preserve_and_copy(src_dir / "Evaluations", dest_dir / "Evaluations")

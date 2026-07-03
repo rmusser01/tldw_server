@@ -51,9 +51,10 @@ jobs:
         run: |
           set -e
           test -f Docs/Published/index.md
-          for d in API-related Code_Documentation Deployment Evaluations Monitoring User_Guides; do
+          for d in API-related ADR Code_Documentation Deployment Evaluations Monitoring User_Guides Wiki; do
             test -d "Docs/Published/$d" || { echo "Missing Docs/Published/$d"; exit 1; }
           done
+          test -f Docs/Published/Architecture.md || { echo "Missing Docs/Published/Architecture.md"; exit 1; }
           # Ensure there are Markdown files to build
           count=$(find Docs/Published -type f -name "*.md" | wc -l)
           echo "Markdown files found: $count"
