@@ -833,15 +833,37 @@ export const useFolderStore = createWithEqualityFn<FolderState>()(
     }),
     {
       name: 'tldw-folder-store',
+      // Baseline version so future shape changes can migrate instead of discarding
+      // persisted state (see apps/FRONTEND_AUDIT.md §6 / TASK-12102).
+      version: 1,
+      migrate: (persisted) => persisted as any,
       // Use throttled storage to avoid exceeding browser write quota limits
       storage: createJSONStorage(() => createThrottledLocalStorage(1000)),
       // Persist UI prefs + cache metadata (not the server data itself).
+      // NOTE: `folderApiAvailable` is intentionally NOT persisted. It is a
+      // transient runtime signal: a single 404 sets it false to avoid hammering
+      // a server that lacks the folder API for the rest of the session, but it
+      // must reset to `null` (unknown, retryable) on the next session so one
+      // transient 404 cannot disable folder sync forever.
       partialize: (state) => ({
         uiPrefs: state.uiPrefs,
         viewMode: state.viewMode,
-        lastSynced: state.lastSynced,
-        folderApiAvailable: state.folderApiAvailable
-      })
+        lastSynced: state.lastSynced
+      }),
+      // Never rehydrate `folderApiAvailable` from storage. Besides not persisting
+      // it going forward (see partialize), this strips any stale `false` written
+      // by an earlier build so users already "stuck" with folder sync disabled
+      // recover to the retryable `null` default on their next load. Behaves like
+      // the default shallow merge otherwise.
+      merge: (persistedState, currentState) => {
+        const persisted = (persistedState ?? {}) as Partial<FolderState>
+        const { folderApiAvailable: _legacyFolderApiAvailable, ...rest } =
+          persisted
+        return {
+          ...currentState,
+          ...rest
+        }
+      }
     }
   )
 )

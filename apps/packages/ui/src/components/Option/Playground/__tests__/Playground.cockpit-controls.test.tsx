@@ -99,6 +99,10 @@ const storageState = vi.hoisted(() => ({
   values: new Map<string, unknown>(),
 }));
 
+const layoutShellOverrideState = vi.hoisted(() => ({
+  overrides: [] as unknown[],
+}));
+
 const modelSettingsState = vi.hoisted(() => ({
   value: {
     systemPrompt: "",
@@ -198,6 +202,13 @@ vi.mock("@/components/Option/Playground/PlaygroundForm", () => ({
 
 vi.mock("@/components/Option/Playground/PlaygroundChat", () => ({
   PlaygroundChat: () => <div data-testid="playground-chat" />,
+}));
+
+vi.mock("@/components/Layouts/Layout", () => ({
+  default: ({ children }: { children: React.ReactNode }) => children,
+  useOptionLayoutShellOverrides: (overrides: unknown) => {
+    layoutShellOverrideState.overrides.push(overrides);
+  },
 }));
 
 vi.mock("@/components/Sidepanel/Chat/ArtifactsPanel", () => ({
@@ -324,6 +335,7 @@ vi.mock("@plasmohq/storage/hook", () => ({
 
 vi.mock("@/hooks/useMediaQuery", () => ({
   useMobile: () => false,
+  useDesktop: () => true,
 }));
 
 vi.mock("@/hooks/useLoadLocalConversation", () => ({
@@ -370,6 +382,9 @@ vi.mock("react-router-dom", async () => {
 describe("Playground cockpit controls", () => {
   beforeEach(() => {
     storageState.values.clear();
+    storageState.values.set("playgroundChatContextRailVisible", true);
+    storageState.values.set("playgroundChatRuntimeRailVisible", true);
+    layoutShellOverrideState.overrides = [];
     modelSettingsState.value.systemPrompt = "";
     modelSettingsState.value.setSystemPrompt = vi.fn();
     modelSettingsState.value.temperature = 0.7;
@@ -513,16 +528,9 @@ describe("Playground cockpit controls", () => {
         within(contextRail).getByText("1 knowledge item"),
       ).toBeInTheDocument();
       expect(within(contextRail).getByText("2 media scopes")).toBeInTheDocument();
-      const statusStrip = screen.getByRole("status", { name: "Chat status" });
-      expect(statusStrip).toHaveTextContent("Web search on");
-      expect(statusStrip).toHaveTextContent("1 file");
-      expect(statusStrip).toHaveTextContent("1 knowledge item");
-      expect(statusStrip).toHaveTextContent("+1 more");
       expect(
-        within(statusStrip).getByRole("button", {
-          name: /open search & context/i,
-        }),
-      ).toBeInTheDocument();
+        screen.queryByRole("status", { name: "Chat status" }),
+      ).not.toBeInTheDocument();
       expect(within(contextRail).getByText("Temporary chat")).toBeInTheDocument();
       expect(within(contextRail).getByText("History linked")).toBeInTheDocument();
       expect(
@@ -707,7 +715,7 @@ describe("Playground cockpit controls", () => {
     }
   }, 15000);
 
-  it("surfaces active web search progress in the cockpit status strip", async () => {
+  it("surfaces active web search state in the cockpit context rail", async () => {
     messageOptionState.value.streaming = false;
     messageOptionState.value.isSearchingInternet = true;
     messageOptionState.value.selectedAssistant = null;
@@ -715,12 +723,13 @@ describe("Playground cockpit controls", () => {
 
     render(<Playground />);
 
-    const statusStrip = await screen.findByRole("status", {
-      name: "Chat status",
-    });
-    expect(statusStrip).toHaveTextContent("Searching web");
-    expect(statusStrip).toHaveTextContent("Web search on");
-    expect(statusStrip).not.toHaveTextContent("Ready");
+    const contextRail = within(
+      await screen.findByTestId("playground-cockpit-left-rail"),
+    ).getByTestId("playground-context-rail");
+    expect(within(contextRail).getByText("Web search on")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("status", { name: "Chat status" }),
+    ).not.toBeInTheDocument();
   });
 
   it("logs selected prompt lookup failures while keeping the prompt unavailable state visible", async () => {
@@ -952,6 +961,7 @@ describe("Playground cockpit controls", () => {
       ).toEqual(
         expect.objectContaining({
           tab: "character",
+          applyAs: "tracked",
           source: "playground-cockpit",
           returnFocusSelector: "[data-cockpit-assistant-select-trigger]",
         }),
@@ -994,6 +1004,7 @@ describe("Playground cockpit controls", () => {
       ).toEqual(
         expect.objectContaining({
           tab: "persona",
+          applyAs: "tracked",
           source: "playground-cockpit",
           returnFocusSelector: "[data-cockpit-assistant-select-trigger]",
         }),
@@ -1028,6 +1039,7 @@ describe("Playground cockpit controls", () => {
       ).toEqual(
         expect.objectContaining({
           tab: "character",
+          applyAs: "tracked",
           returnFocusSelector: "[data-cockpit-assistant-select-trigger]",
         }),
       );
@@ -1202,8 +1214,35 @@ describe("Playground cockpit controls", () => {
     expect(
       screen.queryByRole("region", { name: "Next message composition" }),
     ).toBeNull();
+    await waitFor(() => {
+      expect(layoutShellOverrideState.overrides).toContainEqual({
+        hideHeader: true,
+        hideSidebar: true,
+      });
+    });
+    expect(
+      screen.queryByTestId("playground-chat-layout-mode-trigger"),
+    ).toBeNull();
+    expect(
+      screen.queryByTestId("playground-shortcuts-help-trigger"),
+    ).toBeNull();
+    const exitFocus = screen.getByTestId("playground-focus-exit");
+    expect(exitFocus).toHaveTextContent("Exit focus");
     expect(screen.getByTestId("playground-chat")).toBeInTheDocument();
     expect(screen.getByTestId("playground-form")).toBeInTheDocument();
+
+    fireEvent.click(exitFocus);
+
+    await waitFor(() => {
+      expect(storageState.values.get("playgroundChatLayoutMode")).toBe(
+        "cockpit",
+      );
+      expect(
+        layoutShellOverrideState.overrides[
+          layoutShellOverrideState.overrides.length - 1
+        ],
+      ).toBeNull();
+    });
   });
 
   it("wires ready-state runtime regenerate to the shared chat handler", async () => {
@@ -1232,7 +1271,7 @@ describe("Playground cockpit controls", () => {
     );
   });
 
-  it("reflects degraded server readiness in the cockpit runtime and status strip", async () => {
+  it("reflects degraded server readiness in the cockpit runtime rail", async () => {
     messageOptionState.value.streaming = false;
     messageOptionState.value.selectedAssistant = null;
     messageOptionState.value.selectedCharacter = null;
@@ -1255,9 +1294,9 @@ describe("Playground cockpit controls", () => {
     expect(
       within(runtimeInspector).getByText("Degraded: chacha_notes"),
     ).toBeInTheDocument();
-    expect(screen.getByRole("status", { name: "Chat status" })).toHaveTextContent(
-      "chacha_notes",
-    );
+    expect(
+      screen.queryByRole("status", { name: "Chat status" }),
+    ).not.toBeInTheDocument();
   });
 
   it("keeps streaming primary when degraded readiness is warning-only", async () => {
@@ -1281,10 +1320,9 @@ describe("Playground cockpit controls", () => {
     ).getByTestId("playground-runtime-inspector");
     expect(within(runtimeInspector).getByText("Streaming")).toBeInTheDocument();
 
-    const status = screen.getByRole("status", { name: "Chat status" });
-    expect(status).toHaveTextContent("Streaming");
-    expect(status).toHaveTextContent("embeddings");
-    expect(status).toHaveTextContent("Chat remains available.");
+    expect(
+      screen.queryByRole("status", { name: "Chat status" }),
+    ).not.toBeInTheDocument();
   });
 
   it("surfaces blocked server readiness as chat-critical unavailable state", async () => {
@@ -1313,12 +1351,9 @@ describe("Playground cockpit controls", () => {
       ),
     ).toBeInTheDocument();
 
-    const status = screen.getByRole("status", { name: "Chat status" });
-    expect(status).toHaveTextContent("Server unavailable");
-    expect(status).toHaveTextContent(
-      "Reconnect to the server or review server settings before sending.",
-    );
-    expect(status).not.toHaveTextContent("Chat remains available.");
+    expect(
+      screen.queryByRole("status", { name: "Chat status" }),
+    ).not.toBeInTheDocument();
   });
 
   it("keeps provider setup blocking consistent across empty-state and cockpit rails", async () => {
@@ -1373,10 +1408,9 @@ describe("Playground cockpit controls", () => {
     });
     expect(runtimeInspector).toHaveTextContent("Provider setup needed");
 
-    const status = screen.getByRole("status", { name: "Chat status" });
-    expect(status).toHaveTextContent("Model setup needed");
-    expect(status).toHaveTextContent("Provider setup needed");
-    expect(status).not.toHaveTextContent("Ready");
+    expect(
+      screen.queryByRole("status", { name: "Chat status" }),
+    ).not.toBeInTheDocument();
   });
 
   it("keeps the cockpit visibly degraded when readiness details are empty", async () => {
@@ -1399,8 +1433,8 @@ describe("Playground cockpit controls", () => {
       screen.getByTestId("playground-cockpit-right-rail"),
     ).getByTestId("playground-runtime-inspector");
     expect(within(runtimeInspector).getByText("Degraded")).toBeInTheDocument();
-    expect(screen.getByRole("status", { name: "Chat status" })).toHaveTextContent(
-      "Degraded",
-    );
+    expect(
+      screen.queryByRole("status", { name: "Chat status" }),
+    ).not.toBeInTheDocument();
   });
 });

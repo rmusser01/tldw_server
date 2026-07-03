@@ -80,6 +80,10 @@ const desktopViewportState = vi.hoisted(() => ({
   value: true
 }))
 
+const storageState = vi.hoisted(() => ({
+  value: new Map<string, unknown>()
+}))
+
 const artifactFixture = vi.hoisted(() => ({
   id: "artifact-1",
   title: "Generated table",
@@ -201,7 +205,9 @@ vi.mock("@/hooks/useSmartScroll", () => ({
 }))
 
 vi.mock("@/services/settings/ui-settings", () => ({
-  CHAT_BACKGROUND_IMAGE_SETTING: "chatBackgroundImage"
+  CHAT_BACKGROUND_IMAGE_SETTING: "chatBackgroundImage",
+  HEADER_SHORTCUT_IDS: [],
+  SIDEBAR_SHORTCUT_IDS: []
 }))
 
 vi.mock("../Knowledge/utils/unsupported-types", () => ({
@@ -224,7 +230,10 @@ vi.mock("@/hooks/useSetting", () => ({
 }))
 
 vi.mock("@plasmohq/storage/hook", () => ({
-  useStorage: (_key: string, defaultValue: unknown) => [defaultValue]
+  useStorage: (key: string, defaultValue: unknown) => [
+    storageState.value.has(key) ? storageState.value.get(key) : defaultValue,
+    vi.fn()
+  ]
 }))
 
 vi.mock("@/hooks/useMediaQuery", () => ({
@@ -271,6 +280,7 @@ vi.mock("react-router-dom", async () => {
 describe("Playground thread search integration", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    storageState.value.clear()
     mobileViewportState.value = false
     desktopViewportState.value = true
     loadLocalConversationMock.mockClear()
@@ -402,6 +412,8 @@ describe("Playground thread search integration", () => {
 
   it("shows mobile artifacts sheet context and returns focus to trigger when closing", async () => {
     mobileViewportState.value = true
+    desktopViewportState.value = false
+    storageState.value.set("playgroundChatLayoutMode", "cockpit")
     artifactsState.value.isOpen = true
 
     render(<Playground />)

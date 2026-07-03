@@ -10,7 +10,7 @@ build-backend = "setuptools.build_meta"
 ###########################
 [project]
 name = "tldw-server"
-version = "0.1.33"
+version = "0.1.34"
 description = "A comprehensive research assistant and media analysis platform - Too Long; Didn't Watch Server"
 requires-python = ">=3.10"
 readme = "README.md"
@@ -517,6 +517,7 @@ tldw_Server_API = [
   "Databases/**/*.sql",
   "Samples/Workflows/*.json",
 ]
+mcp_unified = ["docs/store/schema.sql"]
 
 [tool.setuptools.exclude-package-data]
 tldw_Server_API = [
@@ -611,11 +612,6 @@ testpaths = ["tldw_Server_API/tests", "tldw_Server_API/app/core/MCP_unified/test
 python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-norecursedirs = [
-    "tldw_Server_API/tests/Character_Chat_NEW",
-    "tldw_Server_API/tests/TTS_NEW",
-    "tldw_Server_API/tests/Embeddings"
-]
 plugins = [
     # Shared fixtures/plugins for the suite
     "tldw_Server_API.tests._plugins.authnz_fixtures",

@@ -194,6 +194,48 @@ describe("syncChatSettingsForServerChat", () => {
     })
     expect(result).toEqual(localSettings)
   })
+
+  it("treats missing remote chat settings as empty without warning", async () => {
+    const serverChatId = "chat-settings-missing"
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    const error = new Error("Chat settings not found") as Error & { status?: number }
+    error.status = 404
+    mocks.getChatSettings.mockRejectedValueOnce(error)
+
+    try {
+      const result = await syncChatSettingsForServerChat({
+        historyId: null,
+        serverChatId
+      })
+
+      expect(result).toBeNull()
+      expect(mocks.updateChatSettings).not.toHaveBeenCalled()
+      expect(warnSpy).not.toHaveBeenCalled()
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
+  it("does not swallow unrelated not-found messages without a 404 status", async () => {
+    const serverChatId = "chat-settings-unrelated-not-found"
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    mocks.getChatSettings.mockRejectedValueOnce(new Error("Prompt not found"))
+
+    try {
+      const result = await syncChatSettingsForServerChat({
+        historyId: null,
+        serverChatId
+      })
+
+      expect(result).toBeNull()
+      expect(warnSpy).toHaveBeenCalledWith(
+        "Failed to fetch server chat settings",
+        expect.any(Error)
+      )
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
 })
 
 describe("normalizeChatSettingsRecord", () => {

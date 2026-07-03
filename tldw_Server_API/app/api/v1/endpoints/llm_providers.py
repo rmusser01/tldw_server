@@ -42,6 +42,13 @@ from tldw_Server_API.app.core.LLM_Calls.provider_readiness import (
     normalize_catalog_provider_for_chat as _normalize_catalog_provider_for_chat,
     provider_readiness as _provider_readiness,
 )
+from tldw_Server_API.app.core.LLM_Calls.provider_config_resolution import (
+    has_custom_openai_env_configuration,
+    resolve_provider_api_key_value,
+    resolve_provider_endpoint_url,
+    resolve_provider_model_value,
+    valid_provider_api_key,
+)
 from tldw_Server_API.app.core.LLM_Calls.openrouter_model_inventory import (
     discover_openrouter_models as _discover_openrouter_models_shared,
 )
@@ -1357,8 +1364,13 @@ def get_configured_providers(
         runtime_context = _build_runtime_context(config_parser)
         providers = []
 
-        # Check if we have the required sections
-        if not config_parser.has_section('API') and not config_parser.has_section('Local-API'):
+        # Check if we have the required sections or env-only custom OpenAI config
+        has_env_custom_openai = has_custom_openai_env_configuration("custom_openai_api")
+        if (
+            not config_parser.has_section('API')
+            and not config_parser.has_section('Local-API')
+            and not has_env_custom_openai
+        ):
             logger.warning("No API or Local-API sections found in config")
             return {
                 'providers': [],
@@ -1371,16 +1383,6 @@ def get_configured_providers(
             api_keys_by_provider = get_api_keys()
         except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS:
             api_keys_by_provider = {}
-
-        def _valid_api_key(value: Optional[str]) -> Optional[str]:
-            if not isinstance(value, str):
-                return None
-            trimmed = value.strip()
-            if not trimmed:
-                return None
-            if trimmed.startswith("<") and trimmed.endswith(">"):
-                return None
-            return trimmed
 
         # Define provider mappings with their config keys
         provider_mappings = {
@@ -1597,11 +1599,12 @@ def get_configured_providers(
             section_name = provider_info.get('section')
 
             config_section_exists = bool(section_name and config_parser.has_section(section_name))
+            custom_env_configured = has_custom_openai_env_configuration(provider_name)
             # Allow MLX to surface even when only env-based config exists
-            if not config_section_exists and provider_name != "mlx":
+            if not config_section_exists and provider_name != "mlx" and not custom_env_configured:
                 continue
             # For MLX, proceed even if the [MLX] section is absent to allow env-only configs or to show as disabled
-            section_exists = config_section_exists or provider_name == "mlx"
+            section_exists = config_section_exists or provider_name == "mlx" or custom_env_configured
             if not section_exists:
                 continue
 
@@ -1616,27 +1619,33 @@ def get_configured_providers(
                 api_key = None
                 if api_key_field and config_section_exists and config_parser.has_option(section_name, api_key_field):
                     api_key = config_parser.get(section_name, api_key_field, fallback='')
-                api_key = _valid_api_key(api_key) or _valid_api_key(api_keys_by_provider.get(provider_name))
+                api_key = valid_provider_api_key(api_key) or valid_provider_api_key(api_keys_by_provider.get(provider_name))
                 if api_key:
                     is_configured = True
                     api_key_value = api_key
             else:
                 # Check for endpoint URL for local providers
                 endpoint_field = provider_info.get('endpoint_field')
-                if endpoint_field and config_section_exists and config_parser.has_option(section_name, endpoint_field):
-                    endpoint_url = config_parser.get(section_name, endpoint_field, fallback='')
-                    if endpoint_url and endpoint_url.strip() and not endpoint_url.startswith('<'):
-                        is_configured = True
+                endpoint_url = resolve_provider_endpoint_url(
+                    provider_name,
+                    config_parser,
+                    section_name,
+                    endpoint_field,
+                )
+                if endpoint_url:
+                    is_configured = True
                 # Optional API key support for local endpoints that require it
                 api_key_field = provider_info.get('api_key_field')
-                if api_key_field and config_section_exists and config_parser.has_option(section_name, api_key_field):
-                    val = config_parser.get(section_name, api_key_field, fallback='')
-                    if val and not val.startswith('<') and not val.endswith('>'):
-                        api_key_value = val
+                api_key_value = resolve_provider_api_key_value(
+                    provider_name,
+                    config_parser,
+                    section_name,
+                    api_key_field,
+                )
                 api_key_value = (
-                    _valid_api_key(api_key_value)
-                    or _valid_api_key(api_keys_by_provider.get(provider_name))
-                    or _valid_api_key(api_keys_by_provider.get(_normalize_catalog_provider_for_chat(provider_name)))
+                    valid_provider_api_key(api_key_value)
+                    or valid_provider_api_key(api_keys_by_provider.get(provider_name))
+                    or valid_provider_api_key(api_keys_by_provider.get(_normalize_catalog_provider_for_chat(provider_name)))
                 )
 
             # Always include the provider, but mark if it's configured
@@ -1644,8 +1653,13 @@ def get_configured_providers(
             model_field = provider_info.get('model_field')
             models = []
 
-            if model_field and config_section_exists and config_parser.has_option(section_name, model_field):
-                model_value = config_parser.get(section_name, model_field, fallback='')
+            model_value = resolve_provider_model_value(
+                provider_name,
+                config_parser,
+                section_name,
+                model_field,
+            )
+            if model_value:
                 models = parse_model_string(model_value)
             # Env-based model path for MLX when no config section is present
             if provider_name == "mlx" and not models:
@@ -1817,7 +1831,12 @@ def get_configured_providers(
                     provider_data['endpoint'] = endpoint_url
                 else:
                     endpoint_field = provider_info.get('endpoint_field')
-                    if endpoint_field and config_parser.has_option(section_name, endpoint_field):
+                    if (
+                        endpoint_field
+                        and section_name
+                        and config_parser.has_section(section_name)
+                        and config_parser.has_option(section_name, endpoint_field)
+                    ):
                         provider_data['endpoint'] = config_parser.get(section_name, endpoint_field, fallback='')
 
             # Add other useful config fields
@@ -1835,7 +1854,9 @@ def get_configured_providers(
 
             # Centralized capability diagnostics
             try:
-                provider_data['requires_api_key'] = provider_requires_api_key(provider_name)
+                provider_data['requires_api_key'] = provider_requires_api_key(
+                    _normalize_catalog_provider_for_chat(provider_name)
+                )
                 # Start with defaults from static map
                 capabilities = dict(PROVIDER_CAPABILITIES.get(provider_name, {}))
                 envelope = registry_capability_envelopes.get(provider_name)

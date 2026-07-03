@@ -58,6 +58,7 @@ export function useAudioRecorder(): AudioRecorderResult {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const startTimeRef = useRef<number>(0)
   const captureOwnerRef = useRef(false)
+  const startingRef = useRef(false)
 
   const stopTimer = useCallback(() => {
     if (timerRef.current !== null) {
@@ -98,8 +99,13 @@ export function useAudioRecorder(): AudioRecorderResult {
   }, [])
 
   const startRecording = useCallback(async (options: AudioRecorderOptions = {}) => {
-    chunksRef.current = []
+    // Synchronous re-entry guard: a rapid double-start (or a start while
+    // already recording) must not run a second getUserMedia and orphan the
+    // first stream. Refs are checked/set synchronously before the first await.
+    if (startingRef.current || recorderRef.current) return
     reserveCaptureOwner()
+    startingRef.current = true
+    chunksRef.current = []
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -114,6 +120,16 @@ export function useAudioRecorder(): AudioRecorderResult {
         if (event.data.size > 0) {
           chunksRef.current.push(event.data)
         }
+      }
+
+      recorder.onerror = () => {
+        // A MediaRecorder error may fire without a matching onstop (device
+        // unplugged, hardware glitch). Mirror onstop's teardown so the mic
+        // track is stopped and the capture owner released on every path.
+        stopTimer()
+        stopMediaTracks()
+        setStatus("idle")
+        recorderRef.current = null
       }
 
       recorder.onstop = () => {
@@ -139,7 +155,10 @@ export function useAudioRecorder(): AudioRecorderResult {
     } catch (error) {
       stopTimer()
       stopMediaTracks()
+      recorderRef.current = null
       throw error
+    } finally {
+      startingRef.current = false
     }
   }, [reserveCaptureOwner, stopTimer, stopMediaTracks])
 

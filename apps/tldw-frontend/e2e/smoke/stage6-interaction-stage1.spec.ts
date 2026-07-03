@@ -32,12 +32,12 @@ test.describe("Stage 6 interaction stage 1 defect closures", () => {
     expect(bodyText).not.toContain("{{percentage}}")
   })
 
-  test("home route exposes an explicit theme toggle control", async ({
+  test("chat route exposes an explicit theme toggle control", async ({
     page
   }) => {
     await seedAuth(page)
 
-    await page.goto("/", {
+    await page.goto("/chat", {
       waitUntil: "domcontentloaded",
       timeout: LOAD_TIMEOUT
     })

@@ -753,9 +753,10 @@ export const modelsAudioMethods = {
       extraParams?: Record<string, any>
       stream?: boolean
       signal?: AbortSignal
+      timeoutMs?: number
     }
   ): Promise<ArrayBuffer> {
-    await this.ensureConfigForRequest(true)
+    const cfg = await this.ensureConfigForRequest(true)
     const body: Record<string, any> = { input: text, text }
     if (options?.voice) body.voice = options.voice
     if (options?.model) body.model = options.model
@@ -790,13 +791,21 @@ export const modelsAudioMethods = {
           return "audio/mpeg"
       }
     })()
+    // TTS synthesis of more than a short paragraph routinely exceeds the 10s default
+    // request timeout; give it a generous, overridable timeout. See FRONTEND_AUDIT.md / TASK-12101.
+    const ttsTimeoutMs =
+      options?.timeoutMs ??
+      (Number((cfg as any)?.ttsRequestTimeoutMs) > 0
+        ? Number((cfg as any).ttsRequestTimeoutMs)
+        : 120000)
     const data = await this.request<any>({
       path: "/api/v1/audio/speech",
       method: "POST",
       headers: { Accept: accept },
       body,
       responseType: "arrayBuffer",
-      abortSignal: options?.signal
+      abortSignal: options?.signal,
+      timeoutMs: ttsTimeoutMs
     })
 
     const normalizeArrayBuffer = async (value: unknown): Promise<ArrayBuffer | null> => {

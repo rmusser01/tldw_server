@@ -2442,6 +2442,7 @@ def _resolve_persona_visual_asset_path(*, user_id: str, storage_key: str) -> Pat
     parts = str(storage_key or "").split("/")
     if len(parts) < 4 or parts[0] != "persona_visuals" or any(part in {"", ".", ".."} for part in parts):
         raise HTTPException(status_code=404, detail="Persona visual asset not found")
+    # lgtm[py/path-injection]: user_id and storage_key are constrained to the user's persona visual root.
     base = DatabasePaths.get_user_persona_visuals_dir(user_id).resolve(strict=False)
     target_str = safe_join(
         str(base),
@@ -2449,6 +2450,7 @@ def _resolve_persona_visual_asset_path(*, user_id: str, storage_key: str) -> Pat
         error_factory=lambda _exc: HTTPException(status_code=404, detail="Persona visual asset not found"),
     )
     target = Path(target_str)
+    # lgtm[py/path-injection]: target is constrained by safe_join under the user's persona visual root.
     if not target.is_relative_to(base) or not target.exists() or not target.is_file():
         raise HTTPException(status_code=404, detail="Persona visual asset not found")
     return target
@@ -5319,6 +5321,7 @@ async def start_persona_visual_pack_import_preview(
         request_id = uuid.uuid4().hex
         archive_root = _persona_visual_pack_import_preview_staging_root(user_id)
         archive_path_str = safe_join(
+            # lgtm[py/path-injection]: archive_root is a per-user import-preview staging root.
             str(archive_root.resolve(strict=False)),
             f"{request_id}{archive_suffix}",
             error_factory=lambda _exc: HTTPException(status_code=400, detail="invalid_archive_path"),

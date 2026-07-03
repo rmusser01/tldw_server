@@ -1,0 +1,47 @@
+{
+  "title": {
+    "message": "Sources"
+  },
+  "description": {
+    "message": "Manage local folders and archive snapshots that sync into notes or media."
+  },
+  "offline": {
+    "message": "Server is offline. Connect to manage ingestion sources."
+  },
+  "actions_new": {
+    "message": "New source"
+  },
+  "actions_sync": {
+    "message": "Sync now"
+  },
+  "actions_uploadArchive": {
+    "message": "Upload archive"
+  },
+  "actions_reattach": {
+    "message": "Reattach"
+  },
+  "states_unsupported": {
+    "message": "This server does not advertise ingestion source support."
+  },
+  "states_empty": {
+    "message": "No ingestion sources yet."
+  },
+  "form_sourceType": {
+    "message": "Source type"
+  },
+  "form_localDirectory": {
+    "message": "Local directory"
+  },
+  "form_archiveSnapshot": {
+    "message": "Archive snapshot"
+  },
+  "form_path": {
+    "message": "Server directory path"
+  },
+  "form_pathHelp": {
+    "message": "This is a path on the tldw server host, not a local browser or extension folder."
+  },
+  "form_archiveHint": {
+    "message": "Upload archive after creation"
+  }
+}

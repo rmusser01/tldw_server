@@ -98,72 +98,10 @@ const buildSanitizedRagSearchError = (
   return sanitizedError
 }
 
-const CHAT_COMPLETION_ERROR_MESSAGE = "Chat completion failed."
-const CHAT_COMPLETION_ERRORS_MESSAGE =
-  "One or more internal errors were suppressed."
-
-const isSuspiciousChatCompletionString = (value: string): boolean =>
-  /traceback|stack(?:\s*trace)?|exception|error|\/Users\/|[A-Za-z]:\\|\.py:\d+/i.test(
-    value
-  )
-
-const normalizeChatCompletionResponseBody = (
-  value: unknown
-): Record<string, unknown> | unknown[] => {
-  if (typeof value === "string") {
-    if (isSuspiciousChatCompletionString(value)) {
-      return {
-        error: CHAT_COMPLETION_ERROR_MESSAGE,
-        errors: [CHAT_COMPLETION_ERRORS_MESSAGE]
-      }
-    }
-    return { content: value }
-  }
-  const sanitized = sanitizeChatCompletionPayload(value)
-  if (Array.isArray(sanitized)) {
-    return sanitized
-  }
-  if (sanitized && typeof sanitized === "object") {
-    return sanitized as Record<string, unknown>
-  }
-  return { content: sanitized ?? "" }
-}
-
-const sanitizeChatCompletionPayload = (value: unknown): unknown => {
-  if (typeof value === "string") {
-    return isSuspiciousChatCompletionString(value)
-      ? CHAT_COMPLETION_ERROR_MESSAGE
-      : value
-  }
-  if (Array.isArray(value)) {
-    return value.map((item) => sanitizeChatCompletionPayload(item))
-  }
-  if (value && typeof value === "object") {
-    const sanitized: Record<string, unknown> = {}
-    for (const [key, item] of Object.entries(value)) {
-      if (
-        key === "details" ||
-        key === "exception" ||
-        key === "traceback" ||
-        key === "stack" ||
-        key === "stack_trace"
-      ) {
-        continue
-      }
-      if (key === "error" && item) {
-        sanitized[key] = CHAT_COMPLETION_ERROR_MESSAGE
-        continue
-      }
-      if (key === "errors" && item) {
-        sanitized[key] = [CHAT_COMPLETION_ERRORS_MESSAGE]
-        continue
-      }
-      sanitized[key] = sanitizeChatCompletionPayload(item)
-    }
-    return sanitized
-  }
-  return value
-}
+// NOTE: the chat-completion "sanitizer" that used to live here corrupted successful
+// non-streaming replies (any content containing "error"/"exception"/a file path was
+// replaced with "Chat completion failed."). It was removed — bgRequest throws on non-2xx,
+// so createChatCompletion only ever sees success bodies. See FRONTEND_AUDIT.md (C1) / TASK-12091.
 
 export const chatRagMethods = {
   normalizeChatSummary(input: any): ServerChatSummary {
@@ -304,9 +242,12 @@ export const chatRagMethods = {
     })
     // bgRequest returns parsed data; for non-streaming chat we expect a JSON structure or text. To keep existing consumers happy, wrap as Response-like
     // For simplicity, return a minimal object with json() and text()
+    // NOTE: bgRequest throws on non-2xx, so `res` here is always a SUCCESS body.
+    // Do NOT run it through the error-string "sanitizer" — that corrupts legitimate
+    // assistant replies that merely mention "error"/"exception"/a file path, and the
+    // streaming path never sanitized. See apps/FRONTEND_AUDIT.md (C1) / TASK-12091.
     const data = res as any
-    const safeData = normalizeChatCompletionResponseBody(data)
-    return createJsonResponseLike(safeData, { status: 200 })
+    return createJsonResponseLike(data, { status: 200 })
   },
 
   async *streamChatCompletion(this: TldwApiClientCore, request: ChatCompletionRequest, options?: ChatCompletionStreamOptions): AsyncGenerator<any, void, unknown> {
@@ -348,7 +289,7 @@ export const chatRagMethods = {
     const { timeoutMs, signal, ...rest } = options || {}
     const normalizedQuery = this.normalizeRagQuery(query)
     try {
-      return await bgRequest<any>({
+      return await this.requestWithCurrentConfig<any>({
         path: '/api/v1/rag/search',
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -381,7 +322,7 @@ export const chatRagMethods = {
         { status }
       )
       try {
-        return await bgRequest<any>({
+        return await this.requestWithCurrentConfig<any>({
           path: '/api/v1/rag/search',
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -569,7 +510,7 @@ export const chatRagMethods = {
   },
 
   async createChat(this: TldwApiClientCore, payload: Record<string, any>, options?: { scope?: ChatScope }): Promise<ServerChatSummary> {
-    const res = await bgRequest<any>({
+    const res = await this.requestWithCurrentConfig<any>({
       path: "/api/v1/chats/",
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -615,7 +556,8 @@ export const chatRagMethods = {
     const query = buildQuery(toChatScopeParams(options?.scope))
     return await bgRequest<ChatSettingsResponse>({
       path: appendPathQuery(`/api/v1/chats/${cid}/settings`, query),
-      method: "GET"
+      method: "GET",
+      expectedStatuses: [404]
     })
   },
 

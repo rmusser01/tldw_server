@@ -269,7 +269,7 @@ export const classifyCharacterChatFailureRecovery = (
   };
 };
 
-const buildCharacterChatAssistantErrorContent = (
+export const buildCharacterChatAssistantErrorContent = (
   botMessage: string | undefined,
   rawError: unknown,
   t: TFunction,

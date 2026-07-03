@@ -34,7 +34,7 @@ from tldw_Server_API.app.core.TTS.fish_s2_reference_imports import (
     FishS2ReferenceImportError,
     parse_fish_s2_reference_import_result,
 )
-from tldw_Server_API.app.core.TTS.tts_exceptions import TTSError
+from tldw_Server_API.app.core.TTS.tts_exceptions import TTSError, TTSProviderError
 from tldw_Server_API.app.core.TTS.tts_service_v2 import TTSServiceV2
 
 router = APIRouter(
@@ -69,6 +69,8 @@ def _fish_s2_public_item_error(exc: Exception) -> str:
             return "Fish S2 reference voice was not found"
         if exc.error_code == "INVALID_REFERENCE_AUDIO":
             return "Fish S2 reference audio is invalid"
+        if isinstance(exc, TTSProviderError) and exc.message:
+            return exc.message
     return "Fish S2 reference import item failed"
 
 

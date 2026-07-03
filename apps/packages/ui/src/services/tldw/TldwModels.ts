@@ -2,6 +2,7 @@ import { Storage } from "@plasmohq/storage"
 import { tldwClient, TldwModel, type TldwConfig } from "./TldwApiClient"
 import { createSafeStorage } from "@/utils/safe-storage"
 import { isPlaceholderApiKey } from "@/utils/api-key"
+import { getRuntimeSingleUserApiKeyOverride } from "@/services/tldw/runtime-auth-override"
 import {
   getProviderDisplayName,
   inferProviderFromModel
@@ -70,6 +71,11 @@ const isAbortLikeModelFetchError = (error: unknown): boolean => {
     candidate?.code === "REQUEST_ABORTED" ||
     message.includes("abort")
   )
+}
+
+const hasUsableApiKey = (value: unknown): boolean => {
+  const key = String(value || "").trim()
+  return Boolean(key && !isPlaceholderApiKey(key))
 }
 
 export interface ModelInfo {
@@ -166,10 +172,7 @@ export class TldwModelsService {
       return Boolean(String(config.accessToken || "").trim())
     }
 
-    const key = String(config.apiKey || "").trim()
-    if (!key) return false
-    if (isPlaceholderApiKey(key)) return false
-    return true
+    return hasUsableApiKey(getRuntimeSingleUserApiKeyOverride()) || hasUsableApiKey(config.apiKey)
   }
 
   private buildCacheScope(config: TldwConfig | null): string {
@@ -177,7 +180,9 @@ export class TldwModelsService {
     const serverUrl = String(config.serverUrl || "").trim().toLowerCase()
     const authMode = String(config.authMode || "single-user")
     const hasAccessToken = Boolean(String(config.accessToken || "").trim())
-    const hasApiKey = Boolean(String(config.apiKey || "").trim())
+    const hasApiKey =
+      hasUsableApiKey(config.apiKey) ||
+      hasUsableApiKey(getRuntimeSingleUserApiKeyOverride())
     const orgId = config.orgId != null ? String(config.orgId) : "none"
     return `${serverUrl}|${authMode}|${hasAccessToken ? "token" : hasApiKey ? "key" : "none"}|${orgId}`
   }

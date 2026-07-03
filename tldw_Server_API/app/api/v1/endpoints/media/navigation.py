@@ -136,6 +136,7 @@ def _strip_html_tags_linear(text: str) -> str:
 
 
 def _contains_html_tag_linear(text: str) -> bool:
+    """Return True when text contains a simple bounded HTML tag pattern."""
     for index, char in enumerate(text):
         if char != "<":
             continue
@@ -148,6 +149,7 @@ def _contains_html_tag_linear(text: str) -> bool:
 
 
 def _contains_markdown_hint(text: str) -> bool:
+    """Return True when text contains common Markdown structure markers."""
     if "```" in text:
         return True
     for line in text.splitlines():
@@ -167,6 +169,7 @@ def _contains_markdown_hint(text: str) -> bool:
 
 
 def _strip_asterisk_emphasis(text: str) -> str:
+    """Remove simple asterisk emphasis from titles without regex backtracking."""
     output: list[str] = []
     index = 0
     while index < len(text):
@@ -210,6 +213,7 @@ def _strip_asterisk_emphasis(text: str) -> str:
 
 
 def _strip_underscore_emphasis(text: str) -> str:
+    """Remove simple underscore emphasis while preserving word-internal underscores."""
     output: list[str] = []
     index = 0
     while index < len(text):
@@ -243,6 +247,7 @@ def _strip_underscore_emphasis(text: str) -> str:
 
 
 def _tighten_navigation_punctuation(text: str) -> str:
+    """Collapse spacing around punctuation that commonly appears in navigation titles."""
     while "_ " in text:
         text = text.replace("_ ", "_")
     while " _" in text:
@@ -259,6 +264,7 @@ def _tighten_navigation_punctuation(text: str) -> str:
 
 
 def _looks_like_multi_entry_start(token: str, next_token: str | None) -> bool:
+    """Return True when tokens look like the start of a second TOC entry."""
     stripped = token.strip()
     lowered = stripped.lower()
     if stripped.endswith("."):
@@ -277,6 +283,7 @@ def _looks_like_multi_entry_start(token: str, next_token: str | None) -> bool:
 
 
 def _truncate_multi_entry_title(text: str) -> str:
+    """Trim generated TOC titles that accidentally merge multiple entries."""
     tokens = text.split()
     for index, token in enumerate(tokens[1:], start=1):
         if not token.isdigit() or len(token) > 4:
@@ -309,6 +316,7 @@ class MediaNavigationDb(Protocol):
 
 
 def _to_int(value: Any) -> int | None:
+    """Coerce storage values to int, returning None for invalid values."""
     try:
         if value is None:
             return None
@@ -318,6 +326,7 @@ def _to_int(value: Any) -> int | None:
 
 
 def _to_float(value: Any) -> float | None:
+    """Coerce storage values to float, returning None for invalid values."""
     try:
         if value is None:
             return None
@@ -1117,6 +1126,7 @@ def _extract_chunk_metadata_nodes(
 
 
 def _extract_generated_heading_nodes(content: str) -> list[dict[str, Any]]:
+    # lgtm[py/polynomial-redos]: heading extraction uses bounded line parsing before node creation.
     matches = list(_MD_HEADING_LINE_RE.finditer(content))
     if not matches:
         return []
@@ -1179,6 +1189,7 @@ def _extract_generated_toc_nodes(
     if not content.strip():
         return []
 
+    # lgtm[py/polynomial-redos]: TOC parsing is bounded to a fixed window before matching.
     marker = _TOC_MARKER_RE.search(content[: min(len(content), 50_000)])
     if not marker:
         return []
@@ -1186,6 +1197,7 @@ def _extract_generated_toc_nodes(
     toc_window_end = min(len(content), marker.end() + 35_000)
     toc_segment = content[marker.end() : toc_window_end]
 
+    # lgtm[py/polynomial-redos]: raw_entries is populated from bounded splitlines, not repeated regex over full content.
     raw_entries: list[tuple[str, int]] = []
     seen: set[tuple[str, int]] = set()
     last_page: int | None = None
@@ -1196,6 +1208,7 @@ def _extract_generated_toc_nodes(
         if not line:
             continue
 
+        # lgtm[py/polynomial-redos]: TOC entries are matched one cleaned line at a time from a bounded window.
         line_match = _TOC_ENTRY_RE.match(line)
         if not line_match:
             if len(raw_entries) >= 6 and _HEADING_STYLE_TITLE_RE.match(line):

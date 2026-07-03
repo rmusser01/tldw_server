@@ -88,6 +88,28 @@ describe("PlaygroundStatusStrip first-slice state", () => {
     expect(status).not.toHaveTextContent("Ready");
   });
 
+  it("keeps critical reason text available to the live status region on mobile", () => {
+    render(
+      <PlaygroundStatusStrip
+        mode="cockpit"
+        streaming={false}
+        selectedProvider="openai"
+        selectedModel="gpt-4.1-mini"
+        messageCount={3}
+        sessionLabel="Server chat"
+        hasContext={false}
+        temporaryChat={false}
+        degradedChecks={[]}
+        errorMessage="Server unreachable"
+      />,
+    );
+
+    const errorReason = screen.getByText("Server unreachable");
+    expect(errorReason.className).toContain("sr-only");
+    expect(errorReason.className).toContain("sm:not-sr-only");
+    expect(errorReason.className).not.toContain("hidden");
+  });
+
   it("handles explicit null context summaries without throwing", () => {
     render(
       <PlaygroundStatusStrip

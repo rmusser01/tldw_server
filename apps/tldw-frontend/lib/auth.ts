@@ -1,5 +1,6 @@
 import { apiClient } from './api';
 import { getRuntimeApiBearer, getRuntimeApiKey } from './authStorage';
+import { clearRequestHistory } from './history';
 
 export interface LoginCredentials {
   username: string;
@@ -209,6 +210,9 @@ class AuthService {
     if (typeof window !== 'undefined') {
       localStorage.removeItem('access_token');
       localStorage.removeItem('user');
+      // Purge any credentials/tokens that may have been captured in the
+      // request-history ring so they cannot survive logout.
+      clearRequestHistory();
     }
   }
 

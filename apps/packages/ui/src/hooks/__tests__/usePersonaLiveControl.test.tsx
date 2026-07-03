@@ -9,12 +9,16 @@ const mocks = vi.hoisted(() => ({
   createPersonaLiveSession: vi.fn(),
   focusPersonaLiveSession: vi.fn(),
   stopPersonaLiveSession: vi.fn(),
-  buildPersonaWebSocketUrl: vi.fn(() => "ws://persona.test/api/v1/persona/stream"),
+  buildPersonaWebSocketUrl: vi.fn(() => ({
+    url: "ws://persona.test/api/v1/persona/stream",
+    protocols: ["bearer", "test-key"]
+  })),
   ensureConfigForRequest: vi.fn()
 }))
 
 vi.mock("@/services/persona-live-control", () => ({
-  listPersonaLiveSessions: () => mocks.listPersonaLiveSessions(),
+  listPersonaLiveSessions: (input: unknown) =>
+    mocks.listPersonaLiveSessions(input),
   createPersonaLiveSession: (input: unknown) =>
     mocks.createPersonaLiveSession(input),
   focusPersonaLiveSession: (sessionId: unknown) =>
@@ -50,7 +54,10 @@ class MockWebSocket {
   onclose: (() => void) | null = null
   onerror: (() => void) | null = null
 
-  constructor(public readonly url: string) {
+  constructor(
+    public readonly url: string,
+    public readonly protocols?: string | string[]
+  ) {
     MockWebSocket.instances.push(this)
   }
 
@@ -361,6 +368,36 @@ describe("usePersonaLiveControl", () => {
     )
   })
 
+  it("clears a pending WebSocket connect timeout on unmount", async () => {
+    mocks.listPersonaLiveSessions.mockResolvedValueOnce({
+      sessions: [session({ sessionId: "sess-send", isFocused: true })],
+      focusedSessionId: "sess-send"
+    })
+
+    const { result, unmount } = renderHook(() => usePersonaLiveControl())
+    await waitFor(() => expect(result.current.focusedSession?.sessionId).toBe("sess-send"))
+    vi.useFakeTimers()
+
+    act(() => {
+      void result.current.sendText("draft", {
+        clientMessageId: "draft-timeout"
+      })
+    })
+
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(MockWebSocket.instances).toHaveLength(1)
+    expect(vi.getTimerCount()).toBeGreaterThan(0)
+
+    unmount()
+
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
   it("reuses a caller-provided client_message_id when retrying a failed draft", async () => {
     mocks.listPersonaLiveSessions.mockResolvedValueOnce({
       sessions: [session({ sessionId: "sess-send", isFocused: true })],
@@ -414,5 +451,78 @@ describe("usePersonaLiveControl", () => {
 
     expect(result.current.canSendText).toBe(true)
     expect(result.current.voiceAvailable).toBe(false)
+  })
+
+  it("opens the stream with the auth subprotocol and no token in the url", async () => {
+    mocks.listPersonaLiveSessions.mockResolvedValueOnce({
+      sessions: [session({ sessionId: "sess-proto", isFocused: true })],
+      focusedSessionId: "sess-proto"
+    })
+
+    const { result } = renderHook(() => usePersonaLiveControl())
+    await waitFor(() =>
+      expect(result.current.focusedSession?.sessionId).toBe("sess-proto")
+    )
+
+    act(() => {
+      void result.current.sendText("hi", { clientMessageId: "proto-msg" })
+    })
+
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1))
+    const ws = MockWebSocket.instances[0]
+    expect(ws.url).not.toContain("token")
+    expect(ws.url).not.toContain("api_key")
+    expect(ws.url).not.toContain("test-key")
+    expect(ws.protocols).toEqual(["bearer", "test-key"])
+
+    act(() => {
+      ws.emitOpen()
+    })
+  })
+
+  it("times out the handshake when onopen never fires and reports a connect failure", async () => {
+    mocks.listPersonaLiveSessions.mockResolvedValueOnce({
+      sessions: [session({ sessionId: "sess-timeout", isFocused: true })],
+      focusedSessionId: "sess-timeout"
+    })
+
+    const { result } = renderHook(() => usePersonaLiveControl())
+    await waitFor(() =>
+      expect(result.current.focusedSession?.sessionId).toBe("sess-timeout")
+    )
+
+    vi.useFakeTimers()
+
+    let sendPromise!: Promise<{
+      ok: boolean
+      clientMessageId: string
+      error?: string
+    }>
+    act(() => {
+      sendPromise = result.current.sendText("hi", {
+        clientMessageId: "timeout-msg"
+      })
+    })
+
+    // Flush the ensureConfigForRequest microtask so the socket + timer exist.
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(MockWebSocket.instances).toHaveLength(1)
+    expect(result.current.streamState).toBe("connecting")
+
+    // Advance past the handshake timeout without ever firing onopen.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10000)
+    })
+
+    await expect(sendPromise).resolves.toEqual({
+      ok: false,
+      clientMessageId: "timeout-msg",
+      error: "Persona live stream failed to connect"
+    })
+    expect(result.current.streamState).toBe("error")
+    expect(MockWebSocket.instances[0].readyState).toBe(MockWebSocket.CLOSED)
   })
 })

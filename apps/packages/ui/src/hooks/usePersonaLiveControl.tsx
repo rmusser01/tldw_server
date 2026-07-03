@@ -38,6 +38,9 @@ export type PersonaLiveSendTextOptions = {
 
 const SEND_TEXT_ACTION = "send_text_ws"
 const STREAM_CONNECT_ERROR = "Persona live stream failed to connect"
+// Abort the handshake if `onopen` never fires so the connect promise rejects and
+// the caller can retry instead of hanging in "connecting".
+const STREAM_CONNECT_TIMEOUT_MS = 10000
 
 const terminalLifecycles = new Set(["stopping", "stopped", "error"])
 
@@ -118,6 +121,9 @@ export function usePersonaLiveControl(options: PersonaLiveControlOptions = {}) {
   const focusedSessionIdRef = React.useRef(focusedSessionId)
   const wsRef = React.useRef<WebSocket | null>(null)
   const streamConnectPromiseRef = React.useRef<Promise<WebSocket> | null>(null)
+  const streamConnectTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+  const streamConnectRejectRef = React.useRef<((error: Error) => void) | null>(null)
+  const mountedRef = React.useRef(true)
 
   React.useEffect(() => {
     sessionsRef.current = sessions
@@ -176,11 +182,26 @@ export function usePersonaLiveControl(options: PersonaLiveControlOptions = {}) {
 
   React.useEffect(
     () => () => {
+      mountedRef.current = false
       streamConnectPromiseRef.current = null
+      if (streamConnectTimerRef.current) {
+        clearTimeout(streamConnectTimerRef.current)
+        streamConnectTimerRef.current = null
+      }
+      const rejectConnect = streamConnectRejectRef.current
+      streamConnectRejectRef.current = null
+      rejectConnect?.(new Error(STREAM_CONNECT_ERROR))
       const ws = wsRef.current
       wsRef.current = null
-      if (ws && ws.readyState < WebSocket.CLOSING) {
-        ws.close()
+      if (ws) {
+        // Detach handlers so a late onopen/onclose can't run state updates after
+        // unmount, then close.
+        ws.onopen = null
+        ws.onerror = null
+        ws.onclose = null
+        if (ws.readyState < WebSocket.CLOSING) {
+          ws.close()
+        }
       }
     },
     []
@@ -264,25 +285,62 @@ export function usePersonaLiveControl(options: PersonaLiveControlOptions = {}) {
     const connectPromise = tldwClient
       .ensureConfigForRequest(true)
       .then((config) => {
-        const url = buildPersonaWebSocketUrl(config)
-        const ws = new WebSocket(url)
+        // Bail if the hook unmounted during the awaits so we don't create a
+        // socket that nothing will ever close.
+        if (!mountedRef.current) {
+          streamConnectPromiseRef.current = null
+          throw new Error(STREAM_CONNECT_ERROR)
+        }
+        const { url, protocols } = buildPersonaWebSocketUrl(config)
+        const ws = new WebSocket(url, protocols)
         wsRef.current = ws
 
         return new Promise<WebSocket>((resolve, reject) => {
           let settled = false
+          streamConnectRejectRef.current = reject
+          let connectTimer: ReturnType<typeof setTimeout> | null = setTimeout(() => {
+            connectTimer = null
+            streamConnectTimerRef.current = null
+            failConnect()
+          }, STREAM_CONNECT_TIMEOUT_MS)
+          streamConnectTimerRef.current = connectTimer
+          const clearConnectTimer = () => {
+            if (connectTimer) {
+              if (streamConnectTimerRef.current === connectTimer) {
+                streamConnectTimerRef.current = null
+              }
+              clearTimeout(connectTimer)
+              connectTimer = null
+            }
+          }
           const failConnect = () => {
             if (settled) return
             settled = true
+            clearConnectTimer()
+            if (streamConnectRejectRef.current === reject) {
+              streamConnectRejectRef.current = null
+            }
             streamConnectPromiseRef.current = null
             if (wsRef.current === ws) {
               wsRef.current = null
             }
-            setStreamState("error")
+            try {
+              ws.close()
+            } catch {
+              // ignore close errors
+            }
+            if (mountedRef.current) {
+              setStreamState("error")
+            }
             reject(new Error(STREAM_CONNECT_ERROR))
           }
 
           ws.onopen = () => {
             settled = true
+            clearConnectTimer()
+            if (streamConnectRejectRef.current === reject) {
+              streamConnectRejectRef.current = null
+            }
             streamConnectPromiseRef.current = null
             setStreamState("open")
             resolve(ws)
@@ -293,6 +351,7 @@ export function usePersonaLiveControl(options: PersonaLiveControlOptions = {}) {
               failConnect()
               return
             }
+            clearConnectTimer()
             if (wsRef.current === ws) {
               setStreamState("closed")
             }
@@ -301,7 +360,9 @@ export function usePersonaLiveControl(options: PersonaLiveControlOptions = {}) {
       })
       .catch((err) => {
         streamConnectPromiseRef.current = null
-        setStreamState("error")
+        if (mountedRef.current) {
+          setStreamState("error")
+        }
         throw err
       })
 
@@ -355,7 +416,9 @@ export function usePersonaLiveControl(options: PersonaLiveControlOptions = {}) {
           err,
           "Failed to send Persona live message"
         )
-        setLastSendError(message)
+        if (mountedRef.current) {
+          setLastSendError(message)
+        }
         return {
           ok: false,
           clientMessageId,

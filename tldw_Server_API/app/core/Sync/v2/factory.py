@@ -90,6 +90,7 @@ def sync_v2_storage_exists_for_user(user_id: str) -> bool:
         return _sync_v2_database_url_exists(database_url, default_path)
     if sqlite_path:
         return _sync_v2_sqlite_path_exists(sqlite_path)
+    # lgtm[py/path-injection]: default_path is built from a normalized Sync v2 user ID.
     return default_path.exists()
 
 
@@ -106,6 +107,7 @@ def _sync_v2_store_for_user(
 @lru_cache(maxsize=256)
 def _chacha_notes_db_for_user(user_id: str) -> CharactersRAGDB:
     db_path = DatabasePaths.get_chacha_db_path(user_id)
+    # lgtm[py/path-injection]: db_path is resolved through DatabasePaths user storage normalization.
     db_path.parent.mkdir(parents=True, exist_ok=True)
     return CharactersRAGDB(db_path=str(db_path), client_id=str(user_id))
 
@@ -194,6 +196,7 @@ def _sync_v2_database_url_exists(database_url: str, default_path: Path) -> bool:
     if scheme in {"postgres", "postgresql"}:
         return True
     if scheme in {"sqlite", "file", ""}:
+        # lgtm[py/path-injection]: SQLite URL paths are resolved under default_path.parent unless absolute/admin configured.
         return _sync_v2_sqlite_url_path(database_url, default_path).exists()
     return True
 

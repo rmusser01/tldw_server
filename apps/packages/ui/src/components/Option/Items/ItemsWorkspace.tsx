@@ -17,6 +17,7 @@ import { Filter, RefreshCw, Search, Star, Trash2 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { PageShell } from "@/components/Common/PageShell"
 import WorkspaceConnectionGate from "@/components/Common/WorkspaceConnectionGate"
+import { safeExternalUrl } from "@/utils/safe-external-url"
 import { useTldwApiClient } from "@/hooks/useTldwApiClient"
 import { useUndoNotification } from "@/hooks/useUndoNotification"
 import {
@@ -810,6 +811,7 @@ export const ItemsWorkspace: React.FC = () => {
           {items.map((item) => {
             const selected = selectedItemIds.includes(item.id)
             const publishedLabel = formatDateOnlyLabel(item.published_at)
+            const itemSafeUrl = safeExternalUrl(item.url)
 
             return (
               <div
@@ -846,9 +848,9 @@ export const ItemsWorkspace: React.FC = () => {
                     <div className="flex flex-wrap items-center gap-2 text-xs text-text-muted">
                       {item.domain && <span>{item.domain}</span>}
                       {publishedLabel && <span>{publishedLabel}</span>}
-                      {item.url && (
+                      {itemSafeUrl && (
                         <a
-                          href={item.url}
+                          href={itemSafeUrl}
                           target="_blank"
                           rel="noreferrer"
                           className="underline hover:text-primary"

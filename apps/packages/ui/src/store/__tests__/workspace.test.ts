@@ -78,6 +78,8 @@ const resetWorkspaceStore = () => {
     workspaceTag: "",
     workspaceCreatedAt: null,
     workspaceChatReferenceId: "",
+    assistantDefaults: null,
+    effectiveAssistantDefault: null,
     sources: [],
     selectedSourceIds: [],
     sourceFolders: [],
@@ -321,6 +323,50 @@ describe("workspace store snapshot persistence", () => {
         workspaceTag: "workspace:renamed-research"
       })
     )
+  })
+
+  it("persists workspace assistant defaults without resolved effective labels", async () => {
+    useWorkspaceStore.getState().initializeWorkspace("Assistant Workspace")
+    const workspaceId = useWorkspaceStore.getState().workspaceId
+
+    useWorkspaceStore.setState({
+      assistantDefaults: {
+        assistantKind: "persona",
+        assistantId: "persona-1",
+        personaMemoryMode: "read_only",
+        voice: null,
+        style: null,
+        toolPolicyProfileId: null
+      },
+      effectiveAssistantDefault: {
+        status: "available",
+        source: "workspace",
+        assistantKind: "persona",
+        assistantId: "persona-1",
+        label: "Resolved Persona Label",
+        personaMemoryMode: "read_only",
+        degradedReason: null
+      }
+    })
+    useWorkspaceStore.getState().saveCurrentWorkspace()
+
+    await Promise.resolve()
+
+    const persistedRaw = localStorage.getItem(STORAGE_KEY)
+    expect(persistedRaw).toBeTruthy()
+    const persisted = persistedRaw ? JSON.parse(persistedRaw) : null
+    const snapshot = persisted?.state?.workspaceSnapshots?.[workspaceId]
+
+    expect(snapshot?.assistantDefaults).toEqual({
+      assistantKind: "persona",
+      assistantId: "persona-1",
+      personaMemoryMode: "read_only",
+      voice: null,
+      style: null,
+      toolPolicyProfileId: null
+    })
+    expect(snapshot?.effectiveAssistantDefault).toBeUndefined()
+    expect(JSON.stringify(snapshot)).not.toContain("Resolved Persona Label")
   })
 
   it("creates isolated snapshots for new workspaces", () => {
@@ -594,6 +640,84 @@ describe("workspace store snapshot persistence", () => {
       "history-123"
     )
     expect(state.storeHydrated).toBe(true)
+  })
+
+  it("publishes post-processed hydrated state through set so subscribers are notified", async () => {
+    resetWorkspaceStore()
+
+    const persistedState = {
+      state: {
+        workspaceId: "workspace-h8",
+        workspaceName: "H8 Name",
+        workspaceTag: "workspace:h8",
+        workspaceCreatedAt: "2026-02-01T00:00:00.000Z",
+        workspaceChatReferenceId: "h8-chat-ref",
+        // Top-level sources are intentionally empty; the canonical data lives in
+        // the active snapshot and is only applied inside onRehydrateStorage.
+        sources: [],
+        selectedSourceIds: [],
+        generatedArtifacts: [],
+        notes: "",
+        currentNote: { ...DEFAULT_WORKSPACE_NOTE },
+        leftPaneCollapsed: false,
+        rightPaneCollapsed: false,
+        audioSettings: { ...DEFAULT_AUDIO_SETTINGS },
+        savedWorkspaces: [],
+        archivedWorkspaces: [],
+        workspaceSnapshots: {
+          "workspace-h8": {
+            workspaceId: "workspace-h8",
+            workspaceName: "H8 Snapshot",
+            workspaceTag: "workspace:h8-snapshot",
+            workspaceCreatedAt: "2026-02-02T00:00:00.000Z",
+            workspaceChatReferenceId: "h8-snapshot-chat-ref",
+            sources: [
+              {
+                id: "source-h8-1",
+                mediaId: 8001,
+                title: "H8 Source",
+                type: "pdf",
+                addedAt: "2026-02-03T00:00:00.000Z"
+              }
+            ],
+            selectedSourceIds: [],
+            generatedArtifacts: [],
+            notes: "",
+            currentNote: { ...DEFAULT_WORKSPACE_NOTE },
+            leftPaneCollapsed: false,
+            rightPaneCollapsed: false,
+            audioSettings: { ...DEFAULT_AUDIO_SETTINGS }
+          }
+        },
+        workspaceChatSessions: {}
+      },
+      version: 0
+    }
+
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(persistedState))
+
+    const notified: Array<{ storeHydrated: boolean; sourcesLen: number }> = []
+    const unsubscribe = useWorkspaceStore.subscribe((current) => {
+      notified.push({
+        storeHydrated: current.storeHydrated,
+        sourcesLen: current.sources.length
+      })
+    })
+
+    await useWorkspaceStore.persist.rehydrate()
+    unsubscribe()
+
+    // A subscriber notification must carry the fully post-processed state:
+    // `storeHydrated` flipped to true AND the active snapshot's sources applied.
+    // With the previous in-place mutation this was never published (subscribers
+    // only ever saw the raw persisted merge with storeHydrated:false).
+    expect(
+      notified.some(
+        (entry) => entry.storeHydrated === true && entry.sourcesLen === 1
+      )
+    ).toBe(true)
+    expect(useWorkspaceStore.getState().storeHydrated).toBe(true)
+    expect(useWorkspaceStore.getState().sources).toHaveLength(1)
   })
 
   it("marks interrupted generating artifacts as failed during rehydration", async () => {

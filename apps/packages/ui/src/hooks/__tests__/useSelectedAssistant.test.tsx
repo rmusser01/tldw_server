@@ -102,7 +102,18 @@ vi.mock("@plasmohq/storage/hook", async () => {
         setRenderValue(resolved)
       }
 
-      return [value, setValue, { isLoading: false, setRenderValue }] as const
+      const setRenderValueWithLog = (next: unknown) => {
+        mocks.operations.push(
+          `useStorage.${key}.render:${next == null ? "null" : "value"}`
+        )
+        setRenderValue(next)
+      }
+
+      return [
+        value,
+        setValue,
+        { isLoading: false, setRenderValue: setRenderValueWithLog }
+      ] as const
     }
   }
 })
@@ -210,6 +221,45 @@ describe("useSelectedAssistant", () => {
     })
 
     expect(mocks.characterLocal.has(SELECTED_CHARACTER_STORAGE_KEY)).toBe(false)
+  })
+
+  it("updates the legacy character mirror before broadcasting character selections", async () => {
+    const first = renderHook(() => useSelectedAssistant())
+    const second = renderHook(() => useSelectedAssistant())
+
+    await act(async () => {
+      await first.result.current[1]({
+        kind: "character",
+        id: "char-next",
+        name: "Next Character",
+        metadata: {
+          selectionMode: "tracked"
+        }
+      })
+    })
+
+    await waitFor(() => {
+      expect(second.result.current[0]).toMatchObject({
+        kind: "character",
+        id: "char-next",
+        name: "Next Character"
+      })
+    })
+
+    const mirrorUpdateIndex = mocks.operations.indexOf(
+      `characterLocal.set:${SELECTED_CHARACTER_STORAGE_KEY}`
+    )
+    const subscriberRenderIndex = mocks.operations.indexOf(
+      `useStorage.${SELECTED_ASSISTANT_STORAGE_KEY}.render:value`
+    )
+
+    expect(mirrorUpdateIndex).toBeGreaterThanOrEqual(0)
+    expect(subscriberRenderIndex).toBeGreaterThanOrEqual(0)
+    expect(mirrorUpdateIndex).toBeLessThan(subscriberRenderIndex)
+    expect(mocks.characterLocal.get(SELECTED_CHARACTER_STORAGE_KEY)).toMatchObject({
+      id: "char-next",
+      name: "Next Character"
+    })
   })
 
   it("does not mirror overlay character selections into legacy character storage", async () => {

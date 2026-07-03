@@ -832,7 +832,16 @@ export const escapeHtml = (value: string): string =>
 const SAFE_URL_PROTOCOLS = /^(https?:|mailto:|tel:|note:|#|\/)/i
 
 const sanitizeUrl = (url: string): string => {
-  const trimmed = url.trim()
+  // Strip C0 control characters (incl. tab/newline/CR) and DEL first: browsers
+  // remove them when resolving a URL, so `java\tscript:` would otherwise match
+  // neither branch below and be emitted verbatim as an executable scheme.
+  let stripped = ''
+  for (const ch of url) {
+    const code = ch.charCodeAt(0)
+    if (code <= 0x1f || code === 0x7f) continue
+    stripped += ch
+  }
+  const trimmed = stripped.trim()
   if (!trimmed) return ''
   if (SAFE_URL_PROTOCOLS.test(trimmed)) return trimmed
   // Block javascript:, data:, vbscript:, etc.

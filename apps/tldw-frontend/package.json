@@ -13,6 +13,7 @@
     "compile:prod": "cross-env TLDW_BUILD_PROFILE=production node scripts/build-with-profile.mjs --bundler=webpack && node scripts/verify-shared-token-sync.mjs --dir .next",
     "compile:dev": "cross-env TLDW_BUILD_PROFILE=development node scripts/build-with-profile.mjs --bundler=webpack && node scripts/verify-shared-token-sync.mjs --dir .next",
     "check:token-sync": "node scripts/verify-shared-token-sync.mjs --dir .next",
+    "typecheck": "cross-env NODE_OPTIONS=--max-old-space-size=8192 tsc --noEmit",
     "start": "next start",
     "smoke": "node scripts/smoke.mjs",
     "e2e:login": "node scripts/playwright-login.mjs",

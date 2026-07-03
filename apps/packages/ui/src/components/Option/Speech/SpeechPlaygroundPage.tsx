@@ -346,6 +346,7 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
   const [recordingStream, setRecordingStream] = React.useState<MediaStream | null>(null)
   const recorderRef = React.useRef<MediaRecorder | null>(null)
   const recordingStreamRef = React.useRef<MediaStream | null>(null)
+  const startingRecordingRef = React.useRef(false)
   const captureOwnerRef = React.useRef(false)
   const chunksRef = React.useRef<BlobPart[]>([])
   const startedAtRef = React.useRef<number | null>(null)
@@ -581,6 +582,11 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
       setIsTranscribing(true)
       return
     }
+    // Synchronous re-entry guard: a double-clicked record button must not run a
+    // second getUserMedia (and orphan the first stream) while a start is still
+    // in flight. Checked/set synchronously before the first await.
+    if (startingRecordingRef.current) return
+    startingRecordingRef.current = true
     try {
       setRecordingError(null)
       reserveCaptureOwner()
@@ -589,9 +595,11 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
           ? { deviceId: { exact: captureDeviceId } }
           : true
       })
+      // Assign the stream ref BEFORE constructing the recorder so a ctor throw
+      // is caught below and stopRecordingStreamTracks() can stop its tracks.
+      recordingStreamRef.current = stream
       const recorder = new MediaRecorder(stream)
       recorderRef.current = recorder
-      recordingStreamRef.current = stream
       chunksRef.current = []
       startedAtRef.current = Date.now()
       liveTextRef.current = ""
@@ -744,6 +752,8 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
       releaseCaptureOwner()
       setIsRecording(false)
       setIsTranscribing(false)
+    } finally {
+      startingRecordingRef.current = false
     }
   }
 

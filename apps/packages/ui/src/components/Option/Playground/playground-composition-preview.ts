@@ -173,11 +173,16 @@ export const buildPlaygroundCompositionPreviewSummary = ({
   const assistantName =
     assistantSummary.name ||
     assistantSummary.compositionTitle ||
+    (assistantSummary.mode === "none"
+      ? "No assistant attached to next message"
+      : null) ||
     assistantSummary.detail ||
     "";
   const assistantDetail =
     assistantSummary.compositionDetail !== undefined
       ? assistantSummary.compositionDetail
+      : assistantSummary.mode === "none"
+        ? null
       : assistantSummary.detail === assistantName
         ? null
         : assistantSummary.detail;

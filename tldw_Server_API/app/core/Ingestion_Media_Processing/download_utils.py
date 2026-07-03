@@ -74,7 +74,7 @@ def _validate_target_path(target_dir: Path, filename: str) -> Path:
     if filename in {".", ".."}:
         raise ValueError("Unsafe filename for download.")
     # Path construction is intentional here; resolve_safe_local_path validates containment.
-    # nosec B108  # noqa: S108  # codeql[py/path-injection]: validated by resolve_safe_local_path
+    # nosec B108  # noqa: S108  # lgtm[py/path-injection]: validated by resolve_safe_local_path
     candidate = target_dir / filename
     resolved = resolve_safe_local_path(candidate, target_dir)
     if resolved is None:
@@ -330,7 +330,7 @@ async def download_url_async(
                     except _DOWNLOAD_UTILS_NONCRITICAL_EXCEPTIONS:
                         pass
                 # Basic sanitization; seed_segment fallback is validated via _validate_target_path below.
-                # nosec B108  # noqa: S108  # codeql[py/path-injection]: safe_name validated at line 353
+                # nosec B108  # noqa: S108  # lgtm[py/path-injection]: safe_name validated at line 353
                 safe_name = "".join(c if c.isalnum() or c in ("-", "_", ".") else "_" for c in filename) or seed_segment
                 # Determine effective suffix, checking allowed_extensions when requested.
                 candidates = _extension_candidates_from_name(safe_name)
@@ -450,7 +450,7 @@ async def download_url_async(
                 pass
 
         # Basic sanitization; seed_segment fallback is validated via _validate_target_path below.
-        # nosec B108  # noqa: S108  # codeql[py/path-injection]: safe_name validated at line 483
+        # nosec B108  # noqa: S108  # lgtm[py/path-injection]: safe_name validated at line 483
         safe_name = "".join(
             c if c.isalnum() or c in ("-", "_", ".") else "_"
             for c in filename

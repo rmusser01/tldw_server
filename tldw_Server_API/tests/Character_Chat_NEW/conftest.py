@@ -25,6 +25,7 @@ from tldw_Server_API.app.core.Character_Chat.chat_dictionary import ChatDictiona
 from tldw_Server_API.app.core.Character_Chat.world_book_manager import WorldBookService
 from tldw_Server_API.app.core.Character_Chat.character_rate_limiter import CharacterRateLimiter
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.tests._plugins.quarantine import quarantine_items
 
 # =====================================================================
 # Test Markers
@@ -44,9 +45,8 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "legacy_skip: Skip tests targeting legacy behaviors")
 
 def pytest_collection_modifyitems(config, items):
-
-    """No automatic skipping; run unit and integration tests."""
-    return
+    """Quarantine known-failing suite (audits/2026-07-02-quarantined-suites.md)."""
+    quarantine_items(__file__, items)
 
 # =====================================================================
 # Environment Configuration

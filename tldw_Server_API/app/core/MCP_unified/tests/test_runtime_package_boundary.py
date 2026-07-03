@@ -482,10 +482,11 @@ def test_mcp_unified_package_metadata_declares_release_gate() -> None:
     assert metadata.LICENSE_EXPRESSION == "GPL-3.0-only"
 
     extras = metadata.OPTIONAL_EXTRAS
-    assert set(extras) == {
+    assert set(extras) == {  # nosec B101
         "core",
         "fastapi",
         "sqlite",
+        "docs-web",
         "federation",
         "gateway",
         "dev",
@@ -745,6 +746,11 @@ def test_mcp_unified_standalone_pyproject_matches_release_metadata() -> None:
     setuptools_config = pyproject["tool"]["setuptools"]
     assert setuptools_config["packages"] == [  # nosec B101
         "mcp_unified",
+        "mcp_unified.docs",
+        "mcp_unified.docs.acquisition",
+        "mcp_unified.docs.importers",
+        "mcp_unified.docs.retrieval",
+        "mcp_unified.docs.store",
         "mcp_unified.federation",
         "mcp_unified.filesystem_locks",
         "mcp_unified.gateway",
@@ -759,6 +765,7 @@ def test_mcp_unified_standalone_pyproject_matches_release_metadata() -> None:
     assert setuptools_config["package-dir"] == {"": "src"}  # nosec B101
     assert pyproject["tool"]["setuptools"]["package-data"] == {  # nosec B101
         "mcp_unified": ["py.typed", "README.md", "USER_GUIDE.md"],
+        "mcp_unified.docs.store": ["schema.sql"],
     }
 
     assert _dependency_names(project["dependencies"]) == set(metadata.PROJECT_DEPENDENCIES)

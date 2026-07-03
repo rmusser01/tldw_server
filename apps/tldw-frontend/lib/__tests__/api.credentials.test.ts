@@ -112,6 +112,19 @@ describe("shouldIncludeBrowserCredentials", () => {
     })
   })
 
+  it("treats placeholder single-user API keys as unset for env and runtime auth", () => {
+    process.env.NEXT_PUBLIC_X_API_KEY = "CHANGE_ME_TO_SECURE_API_KEY"
+    setRuntimeApiKey("CHANGE_ME_TO_SECURE_API_KEY")
+
+    expect(hasEnvApiAuth()).toBe(false)
+
+    return loadApiHelpers().then((apiModule) => {
+      expect(apiModule.hasEnvAuthConfigured()).toBe(false)
+      expect(apiModule.buildAuthHeaders("GET")).not.toHaveProperty("X-API-KEY")
+      expect(apiModule.shouldIncludeBrowserCredentials()).toBe(true)
+    })
+  })
+
   it("keeps auth recovery routes out of the unauthorized login redirect loop", () => {
     return loadApiHelpers().then((apiModule) => {
       expect(apiModule.shouldRedirectUnauthorizedToLogin("/login")).toBe(false)

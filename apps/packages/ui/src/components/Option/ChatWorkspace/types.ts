@@ -1,4 +1,7 @@
-import type { WorkspaceSourceType } from "@/types/workspace"
+import type {
+  WorkspaceAssistantDefaultDegradedReason,
+  WorkspaceSourceType
+} from "@/types/workspace"
 
 export type StagedSourceAvailability =
   | "ready"
@@ -16,9 +19,17 @@ export type StagedWorkspaceSource = {
   statusMessage?: string
 }
 
+export type ChatWorkspaceAssistantSource =
+  | "explicit"
+  | "workspace"
+  | "none"
+  | "unavailable"
+
 export type ChatWorkspaceRuntimeState = {
   backendAvailable: boolean
   streaming: boolean
   selectedModelLabel: string
   selectedPersonaLabel: string | null
+  assistantSource: ChatWorkspaceAssistantSource
+  workspaceAssistantDegradedReason?: WorkspaceAssistantDefaultDegradedReason | null
 }

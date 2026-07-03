@@ -792,6 +792,7 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_assistant_defaults_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_resource_memberships_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_db.py
+              tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
           - name: db-privileges
             paths: >-
@@ -1148,6 +1149,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_file_mime_detection.py
               tldw_Server_API/tests/Character_Chat/test_rate_limits_specific.py
+              tldw_Server_API/tests/RateLimiting/test_character_rate_limiter_429.py
           - name: chat-character-legacy-worldbook
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_world_book_and_limits.py
@@ -1634,6 +1636,10 @@ jobs:
       SHARD_NAME: ${{ matrix.shard.name }}
       TEST_PATHS: ${{ matrix.shard.paths }}
       RESULTS_DIR: test-results-linux-3.12-${{ matrix.shard.name }}
+      # Preserve pre-quarantine CI behavior: these shards pass explicit file
+      # lists from tests/Character_Chat_NEW, tests/TTS_NEW, and tests/Embeddings,
+      # which the quarantine conftest hooks would otherwise skip.
+      RUN_QUARANTINED: "1"
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
@@ -2186,6 +2192,7 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_assistant_defaults_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_resource_memberships_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_db.py
+              tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
           - name: db-privileges
             paths: >-
@@ -2542,6 +2549,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_file_mime_detection.py
               tldw_Server_API/tests/Character_Chat/test_rate_limits_specific.py
+              tldw_Server_API/tests/RateLimiting/test_character_rate_limiter_429.py
           - name: chat-character-legacy-worldbook
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_world_book_and_limits.py
@@ -3028,6 +3036,10 @@ jobs:
       SHARD_NAME: ${{ matrix.shard.name }}
       TEST_PATHS: ${{ matrix.shard.paths }}
       RESULTS_DIR: test-results-linux-3.13-${{ matrix.shard.name }}
+      # Preserve pre-quarantine CI behavior: these shards pass explicit file
+      # lists from tests/Character_Chat_NEW, tests/TTS_NEW, and tests/Embeddings,
+      # which the quarantine conftest hooks would otherwise skip.
+      RUN_QUARANTINED: "1"
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
@@ -3453,6 +3465,7 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_assistant_defaults_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_resource_memberships_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_db.py
+              tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
           - name: db-privileges
             paths: >-
@@ -3809,6 +3822,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_file_mime_detection.py
               tldw_Server_API/tests/Character_Chat/test_rate_limits_specific.py
+              tldw_Server_API/tests/RateLimiting/test_character_rate_limiter_429.py
           - name: chat-character-legacy-worldbook
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_world_book_and_limits.py
@@ -4271,6 +4285,10 @@ jobs:
       SHARD_NAME: ${{ matrix.shard.name }}
       TEST_PATHS: ${{ matrix.shard.paths }}
       RESULTS_DIR: test-results-macos-latest-3.12-${{ matrix.shard.name }}
+      # Preserve pre-quarantine CI behavior: these shards pass explicit file
+      # lists from tests/Character_Chat_NEW, tests/TTS_NEW, and tests/Embeddings,
+      # which the quarantine conftest hooks would otherwise skip.
+      RUN_QUARANTINED: "1"
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
@@ -4644,6 +4662,7 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_assistant_defaults_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_resource_memberships_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_db.py
+              tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
           - name: db-privileges
             paths: >-
@@ -5000,6 +5019,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_file_mime_detection.py
               tldw_Server_API/tests/Character_Chat/test_rate_limits_specific.py
+              tldw_Server_API/tests/RateLimiting/test_character_rate_limiter_429.py
           - name: chat-character-legacy-worldbook
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_world_book_and_limits.py
@@ -5462,6 +5482,10 @@ jobs:
       SHARD_NAME: ${{ matrix.shard.name }}
       TEST_PATHS: ${{ matrix.shard.paths }}
       RESULTS_DIR: test-results-windows-latest-3.12-${{ matrix.shard.name }}
+      # Preserve pre-quarantine CI behavior: these shards pass explicit file
+      # lists from tests/Character_Chat_NEW, tests/TTS_NEW, and tests/Embeddings,
+      # which the quarantine conftest hooks would otherwise skip.
+      RUN_QUARANTINED: "1"
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
@@ -5836,6 +5860,7 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_assistant_defaults_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_resource_memberships_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_db.py
+              tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
           - name: db-privileges
             paths: >-
@@ -6192,6 +6217,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_file_mime_detection.py
               tldw_Server_API/tests/Character_Chat/test_rate_limits_specific.py
+              tldw_Server_API/tests/RateLimiting/test_character_rate_limiter_429.py
           - name: chat-character-legacy-worldbook
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_world_book_and_limits.py
@@ -6654,6 +6680,10 @@ jobs:
       SHARD_NAME: ${{ matrix.shard.name }}
       TEST_PATHS: ${{ matrix.shard.paths }}
       RESULTS_DIR: test-results-${{ matrix.os }}-3.13-${{ matrix.shard.name }}
+      # Preserve pre-quarantine CI behavior: these shards pass explicit file
+      # lists from tests/Character_Chat_NEW, tests/TTS_NEW, and tests/Embeddings,
+      # which the quarantine conftest hooks would otherwise skip.
+      RUN_QUARANTINED: "1"
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
@@ -6794,6 +6824,10 @@ jobs:
       PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
       TEST_MODE: '0'
       DISABLE_HEAVY_STARTUP: '1'
+      # Preserve pre-quarantine CI behavior: this job passes an explicit file
+      # from tests/Character_Chat_NEW, which the quarantine conftest hook
+      # would otherwise skip.
+      RUN_QUARANTINED: "1"
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd

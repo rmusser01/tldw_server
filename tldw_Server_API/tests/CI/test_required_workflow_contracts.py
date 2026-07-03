@@ -150,7 +150,14 @@ def test_coverage_required_uses_documented_global_floor() -> None:
     workflow = _load(".github/workflows/coverage-required.yml")
     steps = workflow["jobs"]["coverage-required"]["steps"]
     coverage_step = _get_step(steps, "Run global coverage floor")
-    assert "--cov-fail-under=5" in coverage_step["run"]
+    assert "--cov-fail-under=12" in coverage_step["run"]
+
+
+def test_coverage_required_enforces_authnz_coverage_floor() -> None:
+    workflow = _load(".github/workflows/coverage-required.yml")
+    steps = workflow["jobs"]["coverage-required"]["steps"]
+    authnz_step = _get_step(steps, "AuthNZ coverage floor")
+    assert "--cov-fail-under=35" in authnz_step["run"]
 
 
 def test_frontend_required_lane_exists() -> None:
@@ -456,7 +463,6 @@ def test_setup_ffmpeg_action_can_skip_ffmpeg_but_keep_portaudio() -> None:
     )
     linux_script = linux_step["run"]
     assert 'inputs.install-ffmpeg' in linux_script
-    assert "azure.archive.ubuntu.com" in linux_script  # lgtm[py/incomplete-url-substring-sanitization] workflow literal contract
     assert (
         "grep -rl 'packages.microsoft.com' /etc/apt/sources.list.d | xargs -r sudo rm -f || true"
         in linux_script
@@ -489,7 +495,11 @@ def test_wait_for_postgres_action_bounds_linux_client_install() -> None:
     install_step = _get_step(action["runs"]["steps"], "Install client (Linux)")
     install_script = install_step["run"]
     assert "command -v pg_isready" in install_script
-    assert "azure.archive.ubuntu.com" in install_script  # lgtm[py/incomplete-url-substring-sanitization] workflow literal contract
+    assert (
+        "grep -rl 'azure.archive.ubuntu.com' /etc/apt/sources.list.d | xargs -r sudo sed -i "
+        "'s|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' || true"
+        in install_script
+    )
     assert "Acquire::http::Timeout=20" in install_script
     assert "Acquire::https::Timeout=20" in install_script
     assert "sudo apt-get install -y --no-install-recommends postgresql-client" in install_script
@@ -1216,17 +1226,26 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             f"tldw_Server_API/tests/{dirname}/"
             for dirname in auth_db_dirs
         }
+        # Individual files outside auth_db_dirs that are legitimately bundled
+        # into an auth/db shard (e.g. persona-adjacent API tests living under
+        # a feature directory rather than a DB-specific one).
+        auth_db_extra_files = {
+            "tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py",
+        }
         auth_db_files = {
             str(path)
             for dirname in auth_db_dirs
             for path in Path("tldw_Server_API/tests", dirname).glob("**/test*.py")
-        }
+        } | auth_db_extra_files
         covered_auth_db_files: dict[str, str] = {}
         for shard_name in auth_db_shards:
             for pattern in shard_path_sets[shard_name]:
-                assert any(
-                    pattern == root.rstrip("/") or pattern.startswith(root)
-                    for root in auth_db_roots
+                assert (
+                    any(
+                        pattern == root.rstrip("/") or pattern.startswith(root)
+                        for root in auth_db_roots
+                    )
+                    or pattern in auth_db_extra_files
                 )
                 if Path(pattern).is_dir():
                     prefix = f"{pattern.rstrip('/')}/"
@@ -1466,14 +1485,22 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "chat-character-legacy-files",
             "chat-character-legacy-worldbook",
         }
+        # test_character_rate_limiter_429.py lives outside Character_Chat but
+        # is bundled with the legacy character rate-limit tests it mirrors.
+        legacy_character_extra_files = {
+            "tldw_Server_API/tests/RateLimiting/test_character_rate_limiter_429.py",
+        }
         legacy_character_files = {
             str(path)
             for path in Path("tldw_Server_API/tests/Character_Chat").glob("**/test*.py")
-        }
+        } | legacy_character_extra_files
         covered_legacy_character_files: dict[str, str] = {}
         for shard_name in legacy_character_shards:
             for pattern in shard_path_sets[shard_name]:
-                assert pattern.startswith("tldw_Server_API/tests/Character_Chat/")
+                assert (
+                    pattern.startswith("tldw_Server_API/tests/Character_Chat/")
+                    or pattern in legacy_character_extra_files
+                )
                 matches = {
                     filename
                     for filename in legacy_character_files

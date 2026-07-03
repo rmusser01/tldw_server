@@ -107,7 +107,7 @@ class TestErrorScenarios:
 
                      # Simulate slow network by blocking (create_embedding is synchronous)
             import time
-            time.sleep(10)
+            time.sleep(0.5)  # must exceed the 0.1s wait_for timeout below; was 10s wasted wall-clock
             return np.random.rand(1536).tolist()
 
         with patch('tldw_Server_API.app.core.Evaluations.rag_evaluator.create_embedding') as mock_embed:

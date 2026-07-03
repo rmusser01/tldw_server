@@ -9,6 +9,12 @@ import {
   type BrowserSurface
 } from "@/services/tldw/browser-networking"
 import { getRuntimeSingleUserApiKeyOverride } from "@/services/tldw/runtime-auth-override"
+import {
+  ABSOLUTE_URL_BLOCK_ERROR,
+  isAbsoluteUrlAllowlisted as guardIsAbsoluteUrlAllowlisted,
+  isSameOriginAbsoluteUrlForConfiguredServer as guardIsSameOriginAbsoluteUrlForConfiguredServer,
+  type AllowlistWarnHooks
+} from "@/utils/absolute-url-guard"
 
 export type TldwRequestPayload = {
   path: PathOrUrl
@@ -35,8 +41,6 @@ export type BrowserRequestTransport = {
   url: string
 }
 
-const ABSOLUTE_URL_BLOCK_ERROR =
-  "Absolute URL requests are blocked unless the request origin is explicitly allowlisted."
 const REQUEST_LOG_PREFIX = "[tldw:request]"
 const malformedConfigServerUrlWarnings = new Set<string>()
 const malformedAllowlistEntryWarnings = new Set<string>()
@@ -61,6 +65,11 @@ const isMediaApiPath = (path: string): boolean => /\/api\/v1\/media(?:\/|\?|$)/.
 const isFilesApiPath = (path: string): boolean => /\/api\/v1\/files(?:\/|\?|$)/.test(path)
 const isSlidesApiPath = (path: string): boolean => /\/api\/v1\/slides(?:\/|\?|$)/.test(path)
 const SLIDES_REQUEST_TIMEOUT_FLOOR_MS = 120000
+// LLM generation and RAG endpoints routinely run far longer than the generic
+// 10s request default. Using the short default aborts normal generations
+// mid-response and surfaces as a spurious "Network error". Default these paths
+// to a generation-appropriate timeout instead (still overridable via config).
+const GENERATION_REQUEST_TIMEOUT_DEFAULT_MS = 120000
 
 const getCurrentBrowserSurface = (): BrowserSurface => {
   if (typeof window === "undefined") {
@@ -97,14 +106,14 @@ export const deriveRequestTimeout = (
       ? Number(cfg.chatRequestTimeoutMs)
       : Number(cfg?.requestTimeoutMs) > 0
         ? Number(cfg.requestTimeoutMs)
-        : 10000
+        : GENERATION_REQUEST_TIMEOUT_DEFAULT_MS
   }
   if (p.includes("/api/v1/rag/")) {
     return Number(cfg?.ragRequestTimeoutMs) > 0
       ? Number(cfg.ragRequestTimeoutMs)
       : Number(cfg?.requestTimeoutMs) > 0
         ? Number(cfg.requestTimeoutMs)
-        : 10000
+        : GENERATION_REQUEST_TIMEOUT_DEFAULT_MS
   }
   if (isMediaApiPath(p)) {
     return Number(cfg?.mediaRequestTimeoutMs) > 0
@@ -143,24 +152,6 @@ export const parseRetryAfter = (headerValue?: string | null): number | null => {
   return null
 }
 
-const toAllowlistEntries = (value: unknown): string[] => {
-  if (Array.isArray(value)) {
-    return value
-      .map((entry) => String(entry || "").trim())
-      .filter((entry) => entry.length > 0)
-  }
-  if (typeof value === "string") {
-    const trimmed = value.trim()
-    if (!trimmed) return []
-    if (!trimmed.includes(",")) return [trimmed]
-    return trimmed
-      .split(",")
-      .map((entry) => entry.trim())
-      .filter((entry) => entry.length > 0)
-  }
-  return []
-}
-
 const warnMalformedServerUrl = (raw: string, error: unknown) => {
   const key = raw.trim()
   if (!key || malformedConfigServerUrlWarnings.has(key)) return
@@ -181,76 +172,30 @@ const warnMalformedAllowlistEntry = (raw: string, error: unknown) => {
   )
 }
 
-const parseConfiguredServerOrigin = (cfg: TldwConfigLike): string | null => {
-  const configuredServerUrl = String(
-    (cfg as Record<string, unknown> | null)?.serverUrl || ""
-  ).trim()
-  if (!configuredServerUrl) return null
-  try {
-    const serverParsed = new URL(configuredServerUrl)
-    if (!/^https?:$/i.test(serverParsed.protocol)) return null
-    return serverParsed.origin.toLowerCase()
-  } catch (error) {
-    warnMalformedServerUrl(configuredServerUrl, error)
-    return null
-  }
-}
-
-const absoluteOriginAllowlistFromConfig = (cfg: TldwConfigLike): Set<string> => {
-  const out = new Set<string>()
-  const configuredServerUrl = String((cfg as Record<string, unknown> | null)?.serverUrl || "").trim()
-  if (configuredServerUrl) {
-    try {
-      const serverParsed = new URL(configuredServerUrl)
-      if (/^https?:$/i.test(serverParsed.protocol)) {
-        out.add(serverParsed.origin.toLowerCase())
-      }
-    } catch {
-      // Ignore malformed configured server URL.
-    }
-  }
-  const entries = toAllowlistEntries((cfg as Record<string, unknown> | null)?.absoluteUrlAllowlist)
-  for (const entry of entries) {
-    try {
-      const parsed = new URL(entry)
-      if (/^https?:$/i.test(parsed.protocol)) {
-        out.add(parsed.origin.toLowerCase())
-      }
-    } catch (error) {
-      warnMalformedAllowlistEntry(entry, error)
-    }
-  }
-  return out
+// The origin-allowlist / same-origin primitives live in the canonical
+// utils/absolute-url-guard module. request-core keeps its once-per-value
+// malformed-config warnings, so it passes those diagnostics through as hooks;
+// the actual allowlist/same-origin logic is not duplicated here.
+const requestCoreAllowlistWarnHooks: AllowlistWarnHooks = {
+  onMalformedServerUrl: warnMalformedServerUrl,
+  onMalformedAllowlistEntry: warnMalformedAllowlistEntry
 }
 
 const isSameOriginAbsoluteUrlForConfiguredServer = (
   absoluteUrl: string,
   cfg: TldwConfigLike
-): boolean => {
-  const configuredServerOrigin = parseConfiguredServerOrigin(cfg)
-  if (!configuredServerOrigin) return false
-  try {
-    const target = new URL(absoluteUrl)
-    if (!/^https?:$/i.test(target.protocol)) return false
-    return target.origin.toLowerCase() === configuredServerOrigin
-  } catch {
-    return false
-  }
-}
+): boolean =>
+  guardIsSameOriginAbsoluteUrlForConfiguredServer(
+    absoluteUrl,
+    cfg,
+    requestCoreAllowlistWarnHooks
+  )
 
 const isAbsoluteUrlAllowlisted = (
   absoluteUrl: string,
   cfg: TldwConfigLike
-): boolean => {
-  try {
-    const target = new URL(absoluteUrl)
-    if (!/^https?:$/i.test(target.protocol)) return false
-    const allowlistedOrigins = absoluteOriginAllowlistFromConfig(cfg)
-    return allowlistedOrigins.has(target.origin.toLowerCase())
-  } catch {
-    return false
-  }
-}
+): boolean =>
+  guardIsAbsoluteUrlAllowlisted(absoluteUrl, cfg, requestCoreAllowlistWarnHooks)
 
 export const resolveBrowserRequestTransport = ({
   config,
@@ -390,12 +335,20 @@ export const tldwRequest = async (
       if (kl === "x-api-key" || kl === "authorization") delete h[k]
     }
     if (!hostedMode) {
-      const runtimeApiKey = getRuntimeSingleUserApiKeyOverride()
-      if (runtimeApiKey) {
+      const runtimeApiKey = String(getRuntimeSingleUserApiKeyOverride() || "").trim()
+      if (runtimeApiKey && !isPlaceholderApiKey(runtimeApiKey)) {
         h["X-API-KEY"] = runtimeApiKey
       } else if (cfg?.authMode === "single-user") {
         const key = (cfg?.apiKey || "").trim()
         if (!key) {
+          if (runtimeApiKey && isPlaceholderApiKey(runtimeApiKey)) {
+            return {
+              ok: false,
+              status: 401,
+              error:
+                "tldw server API key is still set to a placeholder value. Replace it with your real API key in Settings -> tldw server before continuing."
+            }
+          }
           return {
             ok: false,
             status: 401,
@@ -456,16 +409,18 @@ export const tldwRequest = async (
           ? body
           : JSON.stringify(body)
 
+    // lgtm[js/request-forgery]: url is same-origin/configured-server transport or an allowlisted absolute URL checked above.
     let resp = await fetchFn(url, {
       method,
       headers: h,
       body: resolvedBody,
       signal: controller.signal
     })
-    if (timeoutId) {
-      clearTimeout(timeoutId)
-      timeoutId = null
-    }
+    // Headers have arrived; fetch() resolves before the body is read. Re-arm the
+    // timeout so the body read below is bounded too — otherwise a server that
+    // sends headers then stalls hangs forever despite the "timeout".
+    if (timeoutId) clearTimeout(timeoutId)
+    timeoutId = setTimeout(() => controller.abort(), timeoutMs)
 
     if (
       !shouldSkipAuth &&
@@ -475,6 +430,11 @@ export const tldwRequest = async (
       cfg?.refreshToken &&
       runtime.refreshAuth
     ) {
+      // The first request is finished; stop its timer before refreshing/retrying.
+      if (timeoutId) {
+        clearTimeout(timeoutId)
+        timeoutId = null
+      }
       let refreshSucceeded = false
       try {
         await runtime.refreshAuth()
@@ -494,16 +454,18 @@ export const tldwRequest = async (
       if (updated?.accessToken) retryHeaders["Authorization"] = `Bearer ${updated.accessToken}`
       const retryController = new AbortController()
       retryTimeoutId = setTimeout(() => retryController.abort(), timeoutMs)
+      // lgtm[js/request-forgery]: retry reuses the same validated URL from the initial request.
       resp = await fetchFn(url, {
         method,
         headers: retryHeaders,
-        body: body ? (typeof body === "string" ? body : JSON.stringify(body)) : undefined,
+        // Reuse the binary-aware serialization from the first attempt. A plain
+        // JSON.stringify here corrupts FormData/Blob uploads into "{}".
+        body: resolvedBody,
         signal: retryController.signal
       })
-      if (retryTimeoutId) {
-        clearTimeout(retryTimeoutId)
-        retryTimeoutId = null
-      }
+      // Re-arm so the retry body read is bounded as well.
+      if (retryTimeoutId) clearTimeout(retryTimeoutId)
+      retryTimeoutId = setTimeout(() => retryController.abort(), timeoutMs)
       if (!refreshSucceeded && resp.status === 401) {
         return {
           ok: false,

@@ -342,6 +342,79 @@ describe("useChatActions persona integration", () => {
     )
   })
 
+  it("routes an inherited workspace persona default when no explicit assistant is selected", async () => {
+    const inheritedWorkspaceAssistant = {
+      kind: "persona" as const,
+      id: "workspace-helper",
+      name: "Workspace Helper",
+      metadata: {
+        selectionMode: "tracked",
+        source: "workspace",
+        personaMemoryMode: "read_write"
+      }
+    }
+    const options = {
+      ...createHookOptions(),
+      selectedAssistant: inheritedWorkspaceAssistant,
+      inheritedAssistant: inheritedWorkspaceAssistant,
+      inheritedPersonaMemoryMode: "read_write" as const
+    }
+    createChatMock.mockResolvedValueOnce({
+      id: "workspace-persona-chat",
+      title: "Workspace persona chat",
+      assistant_kind: "persona",
+      assistant_id: "workspace-helper",
+      persona_memory_mode: "read_write"
+    })
+    const { result } = renderHook(() => useChatActions(options as any))
+
+    await act(async () => {
+      await result.current.onSubmit({
+        message: "Use workspace persona",
+        image: ""
+      })
+    })
+
+    expect(createChatMock).toHaveBeenCalledWith({
+      assistant_kind: "persona",
+      assistant_id: "workspace-helper",
+      persona_memory_mode: "read_write",
+      state: "in-progress",
+      topic_label: undefined,
+      cluster_id: undefined,
+      source: undefined,
+      external_ref: undefined
+    })
+    expect(options.setServerChatAssistantKind).toHaveBeenCalledWith("persona")
+    expect(options.setServerChatAssistantId).toHaveBeenCalledWith(
+      "workspace-helper"
+    )
+    expect(savePlaygroundSessionMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        serverChatId: "workspace-persona-chat",
+        trackedAssistantKind: "persona",
+        trackedAssistantId: "workspace-helper",
+        trackedAssistantDisplayName: "Workspace Helper",
+        serverChatPersonaMemoryMode: "read_write"
+      })
+    )
+    expect(normalChatModeMock).toHaveBeenCalledWith(
+      "Use workspace persona",
+      "",
+      false,
+      [],
+      [],
+      expect.any(AbortSignal),
+      expect.objectContaining({
+        assistantIdentity: {
+          name: "Workspace Helper",
+          avatarUrl: undefined
+        },
+        serverChatId: "workspace-persona-chat"
+      })
+    )
+  })
+
   it("does not forward stale character state into the first persona send", async () => {
     const options = {
       ...createHookOptions(),

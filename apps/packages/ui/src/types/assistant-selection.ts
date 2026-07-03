@@ -1,4 +1,5 @@
 import type { Character } from "@/types/character"
+import { createImageDataUrl } from "@/utils/image-utils"
 import {
   normalizePersonaBuddySummary,
   type PersonaBuddySummary
@@ -87,6 +88,24 @@ const normalizeOptionalText = (value: unknown): string | null | undefined => {
   return value
 }
 
+const resolveAvatarUrl = (
+  candidate: StoredSelectionRecord
+): string | null | undefined => {
+  const avatarUrl = normalizeOptionalText(candidate.avatar_url)
+  if (typeof avatarUrl === "string" && avatarUrl.trim().length > 0) {
+    return avatarUrl
+  }
+
+  const embeddedImageBase64 =
+    typeof candidate.image_base64 === "string"
+      ? candidate.image_base64.trim()
+      : ""
+  const embeddedImageUrl = embeddedImageBase64
+    ? createImageDataUrl(embeddedImageBase64)
+    : null
+  return embeddedImageUrl ?? avatarUrl
+}
+
 export const isAssistantKind = (value: unknown): value is AssistantKind =>
   value === "character" || value === "persona"
 
@@ -118,7 +137,7 @@ export const normalizeAssistantSelection = (
     id,
     slug: normalizeOptionalText(candidate.slug),
     name,
-    avatar_url: normalizeOptionalText(candidate.avatar_url),
+    avatar_url: resolveAvatarUrl(candidate),
     greeting: normalizeOptionalText(candidate.greeting),
     system_prompt: normalizeOptionalText(candidate.system_prompt),
     buddy_summary: normalizePersonaBuddySummary(rawBuddySummary),

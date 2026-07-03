@@ -358,7 +358,12 @@ export const buildVoiceConversationPreflight = async (
     : {}
 
   return {
-    websocketUrl: `${resolveBrowserWebSocketBase(serverUrl)}/api/v1/audio/chat/stream?token=${encodeURIComponent(token)}`,
+    // TASK-12106: the auth token is intentionally NOT placed in the URL (it would
+    // leak into access/proxy logs). The audio WS endpoint authenticates from an
+    // {type:"auth", token} first frame sent by the client after `onopen`
+    // (streaming_service.py:641-647 multi-user / 720-723 single-user). The token
+    // is still validated above so callers fail fast when it is missing.
+    websocketUrl: `${resolveBrowserWebSocketBase(serverUrl)}/api/v1/audio/chat/stream`,
     llm,
     tts: ttsConfig
   }

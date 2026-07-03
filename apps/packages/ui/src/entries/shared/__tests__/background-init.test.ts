@@ -1,3 +1,5 @@
+import fs from "node:fs"
+import path from "node:path"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
@@ -61,22 +63,30 @@ const flushPromises = async () => {
 
 describe("background clipper rollout guard", () => {
   const watchHandlers: Record<string, ((value: any) => void) | undefined> = {}
+  let storedTldwConfig: Record<string, unknown>
   const storage = {
     watch: vi.fn((handlers: Record<string, (value: any) => void>) => {
       Object.assign(watchHandlers, handlers)
     }),
     get: vi.fn(async (key: string) => {
       if (key === "tldwConfig") {
-        return {
-          serverUrl: "http://127.0.0.1:8000",
-          authMode: "single-user"
-        }
+        return storedTldwConfig
       }
       return null
     }),
     set: vi.fn(async () => undefined)
   }
   const warmModels = vi.fn(async () => null)
+
+  it("reads quickstart deployment mode from extension-safe import.meta.env", () => {
+    const source = fs.readFileSync(
+      path.resolve(__dirname, "../background-init.ts"),
+      "utf8"
+    )
+
+    expect(source).toContain("import.meta.env")
+    expect(source).toContain("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE")
+  })
 
   beforeEach(() => {
     Object.keys(watchHandlers).forEach((key) => {
@@ -94,6 +104,10 @@ describe("background clipper rollout guard", () => {
     mocks.contextMenusRemoveAll.mockResolvedValue(undefined)
     mocks.alarmsClear.mockResolvedValue(undefined)
     mocks.alarmsCreate.mockResolvedValue(undefined)
+    storedTldwConfig = {
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "single-user"
+    }
   })
 
   it("creates the clipper menu only when the connected server advertises support", async () => {
@@ -127,6 +141,103 @@ describe("background clipper rollout guard", () => {
     expect(mocks.contextMenusCreate).not.toHaveBeenCalledWith(
       expect.objectContaining({ id: "save-to-clipper-pa" })
     )
+  })
+
+  it("skips same-origin WebUI OpenAPI drift probes", async () => {
+    const previousFetch = globalThis.fetch
+    const previousMode = process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
+    const fetchSpy = vi.fn()
+    vi.stubGlobal("fetch", fetchSpy)
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+    storedTldwConfig = {
+      serverUrl: window.location.origin,
+      authMode: "single-user",
+      apiKey: "test-api-key"
+    }
+    try {
+      await initBackground({
+        storage: storage as never,
+        contextMenuId: { webui: "open-web-ui-pa", sidePanel: "open-side-panel-pa" },
+        saveToClipperMenuId: "save-to-clipper-pa",
+        saveToCompanionMenuId: "save-to-companion-pa",
+        saveToNotesMenuId: "save-to-notes-pa",
+        narrateSelectionMenuId: "narrate-selection-pa",
+        transcribeMenuId: {
+          transcribe: "transcribe-media-pa",
+          transcribeAndSummarize: "transcribe-and-summarize-media-pa"
+        },
+        warmModels,
+        capabilities: {
+          sendToTldw: false,
+          processLocal: false,
+          transcribe: false,
+          openApiCheck: true
+        },
+        onActionIconClickChange: vi.fn(),
+        onContextMenuClickChange: vi.fn()
+      })
+      await flushPromises()
+
+      expect(fetchSpy).not.toHaveBeenCalled()
+    } finally {
+      vi.stubGlobal("fetch", previousFetch)
+      if (previousMode === undefined) {
+        delete process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
+      } else {
+        process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = previousMode
+      }
+    }
+  })
+
+  it("keeps advanced same-origin OpenAPI drift probes enabled", async () => {
+    const previousFetch = globalThis.fetch
+    const previousMode = process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
+    const fetchSpy = vi.fn(async () => ({ ok: false }))
+    vi.stubGlobal("fetch", fetchSpy)
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "advanced"
+    storedTldwConfig = {
+      serverUrl: window.location.origin,
+      authMode: "single-user",
+      apiKey: "test-api-key"
+    }
+    try {
+      await initBackground({
+        storage: storage as never,
+        contextMenuId: { webui: "open-web-ui-pa", sidePanel: "open-side-panel-pa" },
+        saveToClipperMenuId: "save-to-clipper-pa",
+        saveToCompanionMenuId: "save-to-companion-pa",
+        saveToNotesMenuId: "save-to-notes-pa",
+        narrateSelectionMenuId: "narrate-selection-pa",
+        transcribeMenuId: {
+          transcribe: "transcribe-media-pa",
+          transcribeAndSummarize: "transcribe-and-summarize-media-pa"
+        },
+        warmModels,
+        capabilities: {
+          sendToTldw: false,
+          processLocal: false,
+          transcribe: false,
+          openApiCheck: true
+        },
+        onActionIconClickChange: vi.fn(),
+        onContextMenuClickChange: vi.fn()
+      })
+      await flushPromises()
+
+      expect(fetchSpy).toHaveBeenCalledWith(
+        `${window.location.origin}/openapi.json`,
+        expect.objectContaining({
+          headers: { "X-API-KEY": "test-api-key" }
+        })
+      )
+    } finally {
+      vi.stubGlobal("fetch", previousFetch)
+      if (previousMode === undefined) {
+        delete process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
+      } else {
+        process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = previousMode
+      }
+    }
   })
 
   it("does not block startup on capability refreshes or model warmup", async () => {

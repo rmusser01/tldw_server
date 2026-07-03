@@ -693,6 +693,7 @@ async def _item_file_response(
     except ValueError as exc:
         raise _content_not_found() from exc
 
+    # lgtm[py/path-injection]: full_path is resolved by resolve_vn_asset_storage_path.
     if not full_path.is_file():
         raise _content_not_found()
 
@@ -1040,6 +1041,7 @@ async def start_pack_import_preview(
     archive_token = uuid.uuid4().hex
     archive_root = _vn_pack_import_preview_staging_root(owner_user_id)
     archive_path_str = safe_join(
+        # lgtm[py/path-injection]: archive_root is a per-user import-preview staging root.
         str(archive_root.resolve(strict=False)),
         f"{archive_token}{VNPACK_EXTENSION}",
         error_factory=lambda _exc: HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_archive_path"),

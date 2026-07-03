@@ -1,6 +1,6 @@
 # Workspace Assistant Defaults PRD
 
-Status: Draft
+Status: V1 implemented for Workspace schema/API, Workspace settings, and Chat Workspace startup. Later Workspace-bound surfaces remain future adoption stages.
 
 Owner: Persona module / Workspaces integration
 

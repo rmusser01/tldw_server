@@ -1,5 +1,8 @@
 import { browser } from "./wxt-browser"
-import { setRuntimeApiKey } from "@web/lib/authStorage"
+import {
+  setEnvApiKeySuppressedForSession,
+  setRuntimeApiKey
+} from "@web/lib/authStorage"
 import { createSafeStorage } from "@/utils/safe-storage"
 import type { TldwConfig } from "@/services/tldw/TldwApiClient"
 import { FEATURE_FLAGS } from "@/hooks/useFeatureFlags"
@@ -18,7 +21,10 @@ import {
   resolveWebUiQuickstartServerUrl,
   type BrowserSurface
 } from "@/services/tldw/browser-networking"
-import { setRuntimeSingleUserApiKeyOverride } from "@/services/tldw/runtime-auth-override"
+import {
+  getRuntimeSingleUserApiKeyOverride,
+  setRuntimeSingleUserApiKeyOverride
+} from "@/services/tldw/runtime-auth-override"
 
 const isRecord = (value: unknown): value is Record<string, unknown> => {
   return typeof value === "object" && value !== null
@@ -202,6 +208,7 @@ const DEFAULT_TLDW_SERVER_URL = "http://127.0.0.1:8000"
 const RUNTIME_CONFIG_ENDPOINT = "/api/_tldw-webui/runtime-config"
 const RUNTIME_AUTH_METADATA_KEY = "tldwRuntimeAuthMetadata"
 const RUNTIME_AUTH_METADATA_VERSION = 1
+const RUNTIME_ENV_AUTH_OPT_OUT_KEY = "tldwRuntimeEnvAuthOptOut"
 const PLACEHOLDER_API_KEYS = new Set([
   "change-me",
   "changeme",
@@ -475,8 +482,26 @@ const seedTldwConfigFromEnv = async (): Promise<void> => {
   const apiKey = (process.env.NEXT_PUBLIC_X_API_KEY || "").trim() || null
   const apiBearer = (process.env.NEXT_PUBLIC_API_BEARER || "").trim() || null
 
+  const envAuthOptedOut = (() => {
+    try {
+      return window.localStorage.getItem(RUNTIME_ENV_AUTH_OPT_OUT_KEY) === "true"
+    } catch {
+      return false
+    }
+  })()
+  setEnvApiKeySuppressedForSession(envAuthOptedOut)
+
+  if (envAuthOptedOut) {
+    setRuntimeApiKey(null)
+    setRuntimeSingleUserApiKeyOverride(null)
+  } else if (apiKey && !getRuntimeSingleUserApiKeyOverride()) {
+    setRuntimeApiKey(apiKey)
+    setRuntimeSingleUserApiKeyOverride(apiKey)
+  }
+
   if (initialServerUrl && explicitWebHost !== initialServerUrl) {
     try {
+      // lgtm[js/clear-text-storage-of-sensitive-data]: tldw-api-host stores non-secret server metadata only.
       window.localStorage.setItem("tldw-api-host", initialServerUrl)
     } catch {
       // Best-effort only; ignore storage failures in web contexts.
@@ -488,6 +513,21 @@ const seedTldwConfigFromEnv = async (): Promise<void> => {
     const existing = (await storage.get<TldwConfig>("tldwConfig").catch(() => null)) || null
     const storedServerUrl =
       (await storage.get<string>("tldwServerUrl").catch(() => null)) || null
+    const existingSingleUserKey =
+      existing?.authMode === "single-user" && typeof existing.apiKey === "string"
+        ? normalizeApiKey(existing.apiKey)
+        : null
+    if (
+      !envAuthOptedOut &&
+      !apiKey &&
+      !apiBearer &&
+      existingSingleUserKey &&
+      !isPlaceholderApiKey(existingSingleUserKey) &&
+      !getRuntimeSingleUserApiKeyOverride()
+    ) {
+      setRuntimeApiKey(existingSingleUserKey)
+      setRuntimeSingleUserApiKeyOverride(existingSingleUserKey)
+    }
     const quickstartWebUiServerUrl = getQuickstartWebUiServerUrl()
     const effectiveExplicitWebHost =
       !quickstartWebUiServerUrl && isCurrentBrowserOrigin(repairedExplicitWebHost)
@@ -502,6 +542,7 @@ const seedTldwConfigFromEnv = async (): Promise<void> => {
 
     if (serverUrl && initialServerUrl !== serverUrl) {
       try {
+        // lgtm[js/clear-text-storage-of-sensitive-data]: tldw-api-host stores non-secret server metadata only.
         window.localStorage.setItem("tldw-api-host", serverUrl)
       } catch {
         // Best-effort only; ignore storage failures in web contexts.

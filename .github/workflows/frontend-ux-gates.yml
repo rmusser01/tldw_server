@@ -146,7 +146,7 @@ jobs:
       TLDW_WEB_AUTOSTART: 'true'
       NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE: advanced
       NEXT_PUBLIC_API_URL: http://127.0.0.1:8000
-      TLDW_WEB_CMD: 'env NODE_OPTIONS=--max-old-space-size=4096 bun run start -- -p 8080'
+      TLDW_WEB_CMD: 'env NODE_OPTIONS=--max-old-space-size=4096 PORT=8080 HOSTNAME=0.0.0.0 node .next/standalone/apps/tldw-frontend/server.js'
       TLDW_SMOKE_HARD_GATE: '1'
       OPENAI_API_KEY: ${{ format('sk-mock-chat-cockpit-{0}-{1}', github.run_id, github.run_attempt) }}
       OPENAI_API_BASE: http://127.0.0.1:18080/v1
@@ -178,6 +178,13 @@ jobs:
       - name: Build frontend production bundle for smoke gate
         working-directory: apps/tldw-frontend
         run: bun run build:prod
+
+      - name: Stage Next standalone static assets
+        working-directory: apps/tldw-frontend
+        run: |
+          mkdir -p .next/standalone/apps/tldw-frontend/.next
+          cp -R public .next/standalone/apps/tldw-frontend/public
+          cp -R .next/static .next/standalone/apps/tldw-frontend/.next/static
 
       - name: Install Playwright Chromium
         run: bunx playwright install --with-deps chromium

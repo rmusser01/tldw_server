@@ -79,6 +79,8 @@ export type PlaygroundStatusStripProps = {
 
 const pillClass =
   "inline-flex min-h-[24px] max-w-full items-center rounded-md border border-border bg-surface px-2 text-xs font-medium text-text";
+const mobileAccessiblePillClass =
+  `${pillClass} sr-only sm:not-sr-only sm:inline-flex`;
 const actionClass =
   "inline-flex min-h-[26px] items-center gap-1 rounded-md border border-border bg-surface2 px-2 text-xs font-medium text-text hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus";
 
@@ -304,9 +306,9 @@ export const PlaygroundStatusStrip = ({
       aria-label={t("cockpit.chatStatus", "Chat status")}
       aria-live="polite"
       aria-atomic="false"
-      className="flex min-w-0 flex-wrap items-center justify-between gap-3 border-t border-border bg-surface px-3 py-2 text-xs text-text-muted"
+      className="flex min-w-0 flex-wrap items-center justify-between gap-1 border-t border-border bg-surface px-2 py-1 text-xs text-text-muted sm:gap-3 sm:px-3 sm:py-2"
     >
-      <div className="flex min-w-0 flex-wrap items-center gap-2">
+      <div className="flex min-w-0 flex-wrap items-center gap-1 sm:gap-2">
         <span
           className={`${pillClass} gap-1.5 ${
             runtimeState === "error" || runtimeState === "server-blocked"
@@ -343,11 +345,15 @@ export const PlaygroundStatusStrip = ({
           {runtimeLabel}
         </span>
         {characterPersistenceLabel ? (
-          <span className={pillClass}>{characterPersistenceLabel}</span>
+          <span className={`${pillClass} hidden sm:inline-flex`}>
+            {characterPersistenceLabel}
+          </span>
         ) : null}
         {visibleContextSummary.map((summary, index) => (
           <span
-            className={`${pillClass} gap-1 border-info/40 bg-info/10 text-info`}
+            className={`${pillClass} ${
+              index > 0 ? "hidden sm:inline-flex" : ""
+            } gap-1 border-info/40 bg-info/10 text-info`}
             key={`context-summary-${index}-${summary}`}
           >
             {index === 0 ? (
@@ -358,7 +364,7 @@ export const PlaygroundStatusStrip = ({
         ))}
         {hiddenContextSummaryLabel ? (
           <span
-            className={`${pillClass} border-info/40 bg-info/10 text-info`}
+            className={`${pillClass} hidden border-info/40 bg-info/10 text-info sm:inline-flex`}
           >
             {hiddenContextSummaryLabel}
           </span>
@@ -386,28 +392,40 @@ export const PlaygroundStatusStrip = ({
           </>
         ) : null}
         {errorMessage ? (
-          <span className={pillClass}>{errorMessage}</span>
+          <span className={mobileAccessiblePillClass}>
+            {errorMessage}
+          </span>
         ) : (
           <>
             {serverBlockedReason ? (
-              <span className={pillClass}>{serverBlockedReason}</span>
+              <span className={mobileAccessiblePillClass}>
+                {serverBlockedReason}
+              </span>
             ) : null}
             {missingModelReason ? (
-              <span className={pillClass}>{missingModelReason}</span>
+              <span className={mobileAccessiblePillClass}>
+                {missingModelReason}
+              </span>
             ) : null}
             {modelUnavailableReason ? (
-              <span className={pillClass}>{modelUnavailableReason}</span>
+              <span className={mobileAccessiblePillClass}>
+                {modelUnavailableReason}
+              </span>
             ) : null}
             {contextLoadingReason ? (
-              <span className={pillClass}>{contextLoadingReason}</span>
+              <span className={mobileAccessiblePillClass}>
+                {contextLoadingReason}
+              </span>
             ) : null}
             {webSearchReason ? (
-              <span className={pillClass}>{webSearchReason}</span>
+              <span className={mobileAccessiblePillClass}>
+                {webSearchReason}
+              </span>
             ) : null}
             {!serverBlocked
               ? degradedChecks.map((check, index) => (
                   <span
-                    className={pillClass}
+                    className={mobileAccessiblePillClass}
                     key={`degraded-${index}-${check}`}
                   >
                     {check}
@@ -415,13 +433,15 @@ export const PlaygroundStatusStrip = ({
                 ))
               : null}
             {degradedChatAvailableLabel ? (
-              <span className={pillClass}>{degradedChatAvailableLabel}</span>
+              <span className={mobileAccessiblePillClass}>
+                {degradedChatAvailableLabel}
+              </span>
             ) : null}
           </>
         )}
       </div>
-      <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <span className="max-w-[18rem] truncate font-medium text-text">
+      <div className="flex min-w-0 flex-wrap items-center gap-1 sm:gap-2">
+        <span className="hidden max-w-[18rem] truncate font-medium text-text sm:inline">
           {routeLabel}
         </span>
         <span>{messageLabel}</span>

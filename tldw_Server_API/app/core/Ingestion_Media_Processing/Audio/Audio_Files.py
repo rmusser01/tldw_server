@@ -25,6 +25,7 @@
 import asyncio
 import json
 import os
+import string
 import tempfile
 import time
 import uuid
@@ -652,12 +653,14 @@ def download_audio_file(
             msg = str(e)
             if any(k in msg.lower() for k in ["disk quota exceeded", "quota exceeded", "exceed", "exceeds"]):
                 with contextlib.suppress(_AUDIO_FILES_NONCRITICAL_EXCEPTIONS):
+                    # lgtm[py/path-injection]: save_path is resolved by _resolve_audio_download_path under save_dir.
                     Path(save_path).unlink(missing_ok=True)
                 raise AudioFileSizeError(
                     f"Downloaded content for {safe_url} exceeded the configured limit."
                 ) from e
             # Clean up and wrap remaining errors
             with contextlib.suppress(_AUDIO_FILES_NONCRITICAL_EXCEPTIONS):
+                # lgtm[py/path-injection]: save_path is resolved by _resolve_audio_download_path under save_dir.
                 Path(save_path).unlink(missing_ok=True)
             raise AudioDownloadError(f"Download failed for {safe_url}: {e}") from e
         # Success path

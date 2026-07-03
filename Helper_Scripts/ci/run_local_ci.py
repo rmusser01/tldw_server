@@ -337,7 +337,8 @@ def phase_guards(ctx: Context, full: bool = False) -> PhaseResult:
 
 def _pytest_base_cmd(jobs: str) -> list[str]:
     """Build the base pytest command for local CI."""
-    cmd = _py("-m", "pytest", "-q", "--disable-warnings", "-p", "no:cacheprovider")
+    cmd = _py("-m", "pytest", "-q", "--disable-warnings", "-p", "no:cacheprovider",
+              "-p", "pytest_asyncio.plugin")
     if jobs and jobs != "0":
         cmd += ["-p", "xdist.plugin", "-n", jobs]
     return cmd

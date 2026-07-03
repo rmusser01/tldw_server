@@ -35,7 +35,9 @@ import {
 import { generateBranchFromMessageIds } from "@/db/dexie/branch"
 import { type UploadedFile } from "@/db/dexie/types"
 import { buildAssistantErrorContent } from "@/utils/chat-error-message"
+import { buildCharacterChatAssistantErrorContent } from "./useCharacterChatMode"
 import { detectCharacterMood } from "@/utils/character-mood"
+import { WEBUI_CHARACTER_CHAT_SOURCE } from "@/utils/character-chat-session"
 import {
   buildMessageVariant,
   getLastUserMessageId,
@@ -166,9 +168,14 @@ type ChatModeOverrides = {
   selectedKnowledge?: Knowledge | null
 } & Record<string, unknown>
 
+type PersonaMemoryMode = "read_only" | "read_write"
+
 const loadActorSettings = () => import("@/services/actor-settings")
 const STREAMING_UPDATE_INTERVAL_MS = 80
 const toChatSubmitResult = normalizeChatSubmitResult
+
+const normalizePersonaMemoryMode = (value: unknown): PersonaMemoryMode | null =>
+  value === "read_only" || value === "read_write" ? value : null
 
 const persistTrackedPersonaPlaygroundSession = async ({
   chatId,
@@ -272,6 +279,25 @@ const attemptCharacterStreamRecoveryPersist = async ({
   }
 }
 
+const normalizePositiveCharacterId = (value: unknown): number | undefined => {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+    return Math.trunc(value)
+  }
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number.parseInt(value, 10)
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined
+  }
+  return undefined
+}
+
+const characterIdsMatch = (
+  left: string | number | null | undefined,
+  right: string | number | null | undefined
+): boolean => {
+  if (left == null || right == null) return false
+  return String(left) === String(right)
+}
+
 type UseChatActionsOptions = {
   t: TFunction
   notification: NotificationInstance
@@ -362,6 +388,8 @@ type UseChatActionsOptions = {
   invalidateServerChatHistory: () => void
   selectedCharacter: Character | null
   selectedAssistant: AssistantSelection | null
+  inheritedAssistant?: AssistantSelection | null
+  inheritedPersonaMemoryMode?: PersonaMemoryMode | null
   messageSteeringMode: MessageSteeringMode
   messageSteeringForceNarrate: boolean
   clearMessageSteering: () => void
@@ -410,6 +438,7 @@ export const useChatActions = ({
   serverChatClusterId,
   serverChatSource,
   serverChatExternalRef,
+  scope,
   setServerChatId,
   setServerChatTitle,
   setServerChatCharacterId,
@@ -442,6 +471,8 @@ export const useChatActions = ({
   invalidateServerChatHistory,
   selectedCharacter,
   selectedAssistant,
+  inheritedAssistant,
+  inheritedPersonaMemoryMode,
   messageSteeringMode,
   messageSteeringForceNarrate,
   clearMessageSteering
@@ -508,9 +539,41 @@ export const useChatActions = ({
       serverChatCharacterId
     ]
   )
+  const inheritedTrackedAssistant = React.useMemo<AssistantSelection | null>(() => {
+    if (
+      effectiveAssistantState.mode !== "plain" ||
+      selectedAssistant ||
+      serverChatId ||
+      serverChatAssistantKind ||
+      serverChatAssistantId ||
+      serverChatCharacterId ||
+      messages.length > 0 ||
+      history.length > 0
+    ) {
+      return null
+    }
+    if (
+      !isPersonaAssistantSelection(inheritedAssistant) ||
+      getAssistantSelectionMode(inheritedAssistant) !== "tracked"
+    ) {
+      return null
+    }
+
+    return inheritedAssistant
+  }, [
+    effectiveAssistantState.mode,
+    history.length,
+    inheritedAssistant,
+    messages.length,
+    selectedAssistant,
+    serverChatAssistantId,
+    serverChatAssistantKind,
+    serverChatCharacterId,
+    serverChatId
+  ])
   const effectiveSelectedAssistant = React.useMemo<AssistantSelection | null>(() => {
     if (effectiveAssistantState.mode === "plain") {
-      return selectedAssistant
+      return inheritedTrackedAssistant ?? selectedAssistant
     }
 
     const matchesDraftSelection =
@@ -533,7 +596,28 @@ export const useChatActions = ({
         draftMetadata?.system_prompt ??
         null
     }
-  }, [effectiveAssistantState, selectedAssistant])
+  }, [effectiveAssistantState, inheritedTrackedAssistant, selectedAssistant])
+  const routingSelectedAssistant = inheritedTrackedAssistant ?? selectedAssistant
+  const selectedPersonaMemoryMode = React.useMemo(() => {
+    if (!isPersonaAssistantSelection(routingSelectedAssistant)) return null
+
+    const inheritedMatchesSelectedPersona =
+      isPersonaAssistantSelection(inheritedAssistant) &&
+      String(inheritedAssistant.id) === String(routingSelectedAssistant.id)
+
+    return (
+      (inheritedMatchesSelectedPersona
+        ? normalizePersonaMemoryMode(inheritedPersonaMemoryMode)
+        : null) ??
+      normalizePersonaMemoryMode(
+        routingSelectedAssistant.metadata?.personaMemoryMode
+      )
+    )
+  }, [
+    inheritedAssistant,
+    inheritedPersonaMemoryMode,
+    routingSelectedAssistant
+  ])
   const greetingEnabled = chatSettings?.greetingEnabled ?? true
   const greetingSelectionId =
     typeof chatSettings?.greetingSelectionId === "string"
@@ -571,6 +655,23 @@ export const useChatActions = ({
   )
   const messagesRef = React.useRef(messages)
   const discardCurrentTurnOnAbortRef = React.useRef(false)
+  // Tracks the abort controller owned by the most recently started turn. Used so
+  // a finishing turn only resets the shared streaming flag / controller if it
+  // still owns it (a newer in-flight turn may have taken ownership).
+  const activeAbortControllerRef = React.useRef<AbortController | null>(null)
+  const releaseAbortControllerIfOwned = React.useCallback(
+    (turnSignal: AbortSignal): boolean => {
+      if (
+        activeAbortControllerRef.current &&
+        activeAbortControllerRef.current.signal === turnSignal
+      ) {
+        activeAbortControllerRef.current = null
+        return true
+      }
+      return false
+    },
+    []
+  )
 
   React.useEffect(() => {
     messagesRef.current = messages
@@ -1071,6 +1172,7 @@ export const useChatActions = ({
       setIsProcessing,
       setStreaming,
       setAbortController,
+      releaseAbortControllerIfOwned,
       historyId: resolvedHistoryId ?? historyId,
       setHistoryId,
       fileRetrievalEnabled,
@@ -1093,10 +1195,12 @@ export const useChatActions = ({
   const ensurePersonaServerChatWithState = React.useCallback(
     async ({
       assistant,
-      serverChatIdOverride
+      serverChatIdOverride,
+      requestedPersonaMemoryMode
     }: {
       assistant: AssistantSelection & { kind: "persona" }
       serverChatIdOverride?: string | null
+      requestedPersonaMemoryMode?: PersonaMemoryMode | null
     }): Promise<{
       chatId: string
       historyId: string | null
@@ -1105,6 +1209,7 @@ export const useChatActions = ({
       ensurePersonaServerChat({
         assistant,
         serverChatIdOverride,
+        requestedPersonaMemoryMode,
         serverChatId,
         serverChatTitle,
         serverChatAssistantKind,
@@ -1118,7 +1223,11 @@ export const useChatActions = ({
         serverChatExternalRef,
         historyId,
         temporaryChat,
-        createChat: (payload) => tldwClient.createChat(payload),
+        scope,
+        createChat: (payload, options) =>
+          options
+            ? tldwClient.createChat(payload, options)
+            : tldwClient.createChat(payload),
         ensureServerChatHistoryId,
         invalidateServerChatHistory,
         setServerChatId,
@@ -1150,6 +1259,7 @@ export const useChatActions = ({
       serverChatState,
       serverChatTitle,
       serverChatTopic,
+      scope,
       setServerChatAssistantId,
       setServerChatAssistantKind,
       setServerChatCharacterId,
@@ -1300,6 +1410,7 @@ export const useChatActions = ({
     let pendingStreamingText = ""
     let pendingReasoningTime = 0
     let lastStreamingUpdateAt = 0
+    let inactivityTimer: ReturnType<typeof setTimeout> | null = null
 
     const flushStreamingUpdate = () => {
       if (pendingStreamingText.length === 0) return
@@ -1438,14 +1549,45 @@ export const useChatActions = ({
       setMessages(newMessageList)
 
       const activeCharacterId = String(activeCharacter.id)
+      const latestStoreChatState = (() => {
+        try {
+          return useStoreMessageOption.getState()
+        } catch {
+          return null
+        }
+      })()
+      const latestStoreChatId =
+        typeof latestStoreChatState?.serverChatId === "string" &&
+        latestStoreChatState.serverChatId.trim().length > 0
+          ? latestStoreChatState.serverChatId.trim()
+          : null
+      const latestStoreCharacterId =
+        latestStoreChatState?.serverChatCharacterId != null
+          ? latestStoreChatState.serverChatCharacterId
+          : null
+      const latestStoreCharacterMatches =
+        latestStoreChatId != null &&
+        latestStoreCharacterId != null &&
+        String(latestStoreCharacterId) === activeCharacterId
+      const effectiveServerChatId = latestStoreCharacterMatches
+        ? latestStoreChatId
+        : serverChatId
+      const effectiveServerChatCharacterId = latestStoreCharacterMatches
+        ? latestStoreCharacterId
+        : serverChatCharacterId
+      const effectiveServerChatSource = latestStoreCharacterMatches
+        ? latestStoreChatState?.serverChatSource ?? serverChatSource
+        : serverChatSource
       const serverCharacterId =
-        serverChatCharacterId != null ? String(serverChatCharacterId) : null
+        effectiveServerChatCharacterId != null
+          ? String(effectiveServerChatCharacterId)
+          : null
       const overrideChatId =
         typeof serverChatIdOverride === "string" &&
         serverChatIdOverride.trim().length > 0
           ? serverChatIdOverride.trim()
           : null
-      const resolvedServerChatId = overrideChatId || serverChatId
+      const resolvedServerChatId = overrideChatId || effectiveServerChatId
       const shouldResetServerChat =
         Boolean(resolvedServerChatId) &&
         (!serverCharacterId || serverCharacterId !== activeCharacterId)
@@ -1467,6 +1609,9 @@ export const useChatActions = ({
       }
 
       let chatId = shouldResetServerChat ? null : resolvedServerChatId
+      let chatCharacterId: string | number | null = shouldResetServerChat
+        ? null
+        : effectiveServerChatCharacterId
       let createdNewChat = false
       if (!chatId) {
         const created = await tldwClient.createChat({
@@ -1474,7 +1619,7 @@ export const useChatActions = ({
           state: serverChatState || "in-progress",
           topic_label: serverChatTopic || undefined,
           cluster_id: serverChatClusterId || undefined,
-          source: serverChatSource || undefined,
+          source: effectiveServerChatSource || WEBUI_CHARACTER_CHAT_SOURCE,
           external_ref: serverChatExternalRef || undefined
         }) as TldwChatMeta
 
@@ -1520,6 +1665,7 @@ export const useChatActions = ({
           created && typeof created === "object"
             ? created.character_id ?? activeCharacter?.id ?? null
             : activeCharacter?.id ?? null
+        chatCharacterId = createdCharacterId
         const normalizedCharacterAssistantId =
           createdCharacterId != null ? String(createdCharacterId) : activeCharacterId
         setServerChatTitle(createdTitle)
@@ -1530,6 +1676,7 @@ export const useChatActions = ({
         setServerChatMetaLoaded(true)
         invalidateServerChatHistory()
       } else {
+        chatCharacterId = effectiveServerChatCharacterId
         setServerChatAssistantKind("character")
         setServerChatAssistantId(activeCharacterId)
         setServerChatPersonaMemoryMode(null)
@@ -1658,6 +1805,23 @@ export const useChatActions = ({
         normalizedModel.length > 0 ? normalizedModel : resolvedModel
 
       const shouldPersistToServer = !temporaryChat
+      // Stream-inactivity watchdog: if no chunk arrives within the timeout, abort
+      // the underlying stream so a stalled character response cannot hang forever.
+      const STREAM_INACTIVITY_TIMEOUT_MS = 60_000
+      let inactivityAborted = false
+      const turnController =
+        activeAbortControllerRef.current &&
+        activeAbortControllerRef.current.signal === signal
+          ? activeAbortControllerRef.current
+          : null
+      const resetInactivityTimer = () => {
+        if (inactivityTimer) clearTimeout(inactivityTimer)
+        inactivityTimer = setTimeout(() => {
+          inactivityAborted = true
+          turnController?.abort()
+        }, STREAM_INACTIVITY_TIMEOUT_MS)
+      }
+      resetInactivityTimer()
       for await (const chunk of tldwClient.streamCharacterChatCompletion(
         chatId,
         {
@@ -1675,6 +1839,7 @@ export const useChatActions = ({
         },
         { signal }
       )) {
+        resetInactivityTimer()
         const interruptionEvent =
           chunk && typeof chunk === "object" && !Array.isArray(chunk)
             ? (chunk as Record<string, unknown>)
@@ -1728,6 +1893,15 @@ export const useChatActions = ({
       }
       cancelStreamingUpdate()
       flushStreamingUpdate()
+      if (inactivityTimer) clearTimeout(inactivityTimer)
+
+      if (inactivityAborted) {
+        const timeoutError = new Error(
+          "Stream timed out: no data received for 60 seconds"
+        )
+        ;(timeoutError as any).name = "StreamInactivityTimeout"
+        throw timeoutError
+      }
 
       if (signal?.aborted) {
         const abortError = new Error("AbortError")
@@ -1776,18 +1950,42 @@ export const useChatActions = ({
         let resolvedMoodConfidence: number | undefined
         let resolvedMoodTopic: string | undefined
         let metadataExtra: Record<string, unknown> | undefined
+        let speakerCharacterName: string | undefined
         try {
-          fallbackSpeakerId = Number.parseInt(
-            String(activeCharacter.id),
-            10
+          const directedSpeakerId =
+            normalizePositiveCharacterId(directedCharacterId)
+          fallbackSpeakerId = normalizePositiveCharacterId(activeCharacter.id)
+          const chatSpeakerId = normalizePositiveCharacterId(chatCharacterId)
+          const activeCharacterMatchesChat =
+            chatCharacterId == null ||
+            characterIdsMatch(chatCharacterId, activeCharacter.id)
+          const selectedCharacterMatchesActive = characterIdsMatch(
+            selectedCharacter?.id,
+            activeCharacter.id
           )
+          const selectedAssistantMatchesActive =
+            selectedAssistant?.kind === "character" &&
+            characterIdsMatch(selectedAssistant.id, activeCharacter.id)
+          const explicitCharacterName =
+            typeof (character as any)?.name === "string"
+              ? String((character as any).name).trim()
+              : ""
+          const explicitCharacterMatchesActive =
+            characterIdsMatch(character?.id, activeCharacter.id) &&
+            explicitCharacterName.length > 0 &&
+            explicitCharacterName !== "Assistant"
+          speakerCharacterName =
+            activeCharacterMatchesChat &&
+            (createdNewChat ||
+              selectedCharacterMatchesActive ||
+              selectedAssistantMatchesActive ||
+              explicitCharacterMatchesActive)
+              ? characterName
+              : undefined
           speakerCharacterId =
-            Number.isFinite(directedCharacterId ?? NaN) &&
-            (directedCharacterId ?? 0) > 0
-              ? directedCharacterId
-              : Number.isFinite(fallbackSpeakerId) && fallbackSpeakerId > 0
-                ? fallbackSpeakerId
-                : undefined
+            directedSpeakerId ?? (activeCharacterMatchesChat
+              ? fallbackSpeakerId
+              : chatSpeakerId ?? fallbackSpeakerId)
           detectedMood = detectCharacterMood({
             assistantText: finalPersistedContent,
             userText: message
@@ -1805,9 +2003,13 @@ export const useChatActions = ({
 
           const persistPayload: Record<string, unknown> = {
             assistant_content: finalPersistedContent,
-            assistant_message_id: generateMessageId,
-            speaker_character_id: speakerCharacterId,
-            speaker_character_name: characterName
+            assistant_message_id: generateMessageId
+          }
+          if (speakerCharacterId != null) {
+            persistPayload.speaker_character_id = speakerCharacterId
+          }
+          if (speakerCharacterName) {
+            persistPayload.speaker_character_name = speakerCharacterName
           }
           if (resolvedMoodLabel) {
             persistPayload.mood_label = resolvedMoodLabel
@@ -1823,7 +2025,7 @@ export const useChatActions = ({
           }
           metadataExtra = {
             speaker_character_id: speakerCharacterId ?? null,
-            speaker_character_name: characterName,
+            speaker_character_name: speakerCharacterName ?? null,
             mood_label: resolvedMoodLabel,
             mood_confidence: resolvedMoodConfidence ?? null,
             mood_topic: resolvedMoodTopic ?? null
@@ -1858,7 +2060,7 @@ export const useChatActions = ({
                 serverMessageVersion: createdAsstVersion,
                 metadataExtra,
                 speakerCharacterId: speakerCharacterId ?? null,
-                speakerCharacterName: characterName,
+                speakerCharacterName,
                 moodLabel: resolvedMoodLabel,
                 moodConfidence: resolvedMoodConfidence ?? null,
                 moodTopic: resolvedMoodTopic ?? null
@@ -1885,7 +2087,7 @@ export const useChatActions = ({
                   serverMessageVersion: savedOutcome.version,
                   metadataExtra,
                   speakerCharacterId: speakerCharacterId ?? null,
-                  speakerCharacterName: characterName,
+                  speakerCharacterName,
                   moodLabel: resolvedMoodLabel,
                   moodConfidence: resolvedMoodConfidence ?? null,
                   moodTopic: resolvedMoodTopic ?? null
@@ -1904,16 +2106,16 @@ export const useChatActions = ({
                   if (m.id !== generateMessageId) return m
                   const serverMessageId =
                     createdAsst?.id != null ? String(createdAsst.id) : undefined
-                return updateActiveVariant(m, {
-                  serverMessageId,
-                  serverMessageVersion: createdAsst?.version,
-                  metadataExtra,
-                  speakerCharacterId: speakerCharacterId ?? null,
-                  speakerCharacterName: characterName,
-                  moodLabel: resolvedMoodLabel,
-                  moodConfidence: resolvedMoodConfidence ?? null,
-                  moodTopic: resolvedMoodTopic ?? null
-                })
+                  return updateActiveVariant(m, {
+                    serverMessageId,
+                    serverMessageVersion: createdAsst?.version,
+                    metadataExtra,
+                    speakerCharacterId: speakerCharacterId ?? null,
+                    speakerCharacterName,
+                    moodLabel: resolvedMoodLabel,
+                    moodConfidence: resolvedMoodConfidence ?? null,
+                    moodTopic: resolvedMoodTopic ?? null
+                  })
                 }) as Message[])
               )
             } catch (fallbackError) {
@@ -2034,7 +2236,11 @@ export const useChatActions = ({
           return true
         }
       })
-      const assistantContent = buildAssistantErrorContent(fullText, e)
+      const assistantContent = buildCharacterChatAssistantErrorContent(
+        fullText,
+        e,
+        t
+      )
       const interruptionReason =
         e instanceof Error ? e.message : t("somethingWentWrong")
       if (generateMessageId) {
@@ -2071,8 +2277,12 @@ export const useChatActions = ({
       })
 
       if (!errorSave) {
+        const isInactivityTimeout =
+          e instanceof Error && (e as any).name === "StreamInactivityTimeout"
         notification.error({
-          message: t("error"),
+          message: isInactivityTimeout
+            ? t("playground:streamTimeout", { defaultValue: "Stream timed out" })
+            : t("error"),
           description: e instanceof Error ? e.message : t("somethingWentWrong")
         })
       }
@@ -2082,7 +2292,12 @@ export const useChatActions = ({
     } finally {
       discardCurrentTurnOnAbortRef.current = false
       cancelStreamingUpdate()
-      setAbortController(null)
+      if (inactivityTimer) clearTimeout(inactivityTimer)
+      // Only null the shared controller if this turn still owns it, so a newer
+      // in-flight turn's controller is not clobbered (and stays cancellable).
+      if (releaseAbortControllerIfOwned(signal)) {
+        setAbortController(null)
+      }
     }
   }
 
@@ -2342,9 +2557,11 @@ export const useChatActions = ({
       const newController = new AbortController()
       signal = newController.signal
       setAbortController(newController)
+      activeAbortControllerRef.current = newController
     } else {
       setAbortController(controller)
       signal = controller.signal
+      activeAbortControllerRef.current = controller
     }
 
     const messageSteeringForTurn = messageSteeringOverride
@@ -2391,26 +2608,8 @@ export const useChatActions = ({
       dynamicUIRequest ?? requestOverrides?.dynamicUIRequest
     const turnUserMetadataExtra =
       userMetadataExtra ?? requestOverrides?.userMetadataExtra
-    const chatModeParams = await buildChatModeParams({
-      ...(requestOverrides ?? {}),
-      ragMediaIds: turnRagMediaIds,
-      fileRetrievalEnabled: turnFileRetrievalEnabled,
-      selectedKnowledge: turnSelectedKnowledge,
-      selectedModel: effectiveSelectedModel,
-      messageSteering: messageSteeringForTurn,
-      userMessageType,
-      assistantMessageType,
-      imageGenerationRequest,
-      imageGenerationRefine,
-      imageGenerationPromptMode,
-      imageGenerationSource,
-      imageEventSyncPolicy,
-      researchContext,
-      dynamicUIRequest: turnDynamicUIRequest,
-      userMetadataExtra: turnUserMetadataExtra
-    })
-    const baseMessages = chatHistory || messages
-    const baseHistory = memory || history
+    // Declared before the try so the catch/finally can still read them even if
+    // a pre-stream await throws below.
     const capturedReplyTargetId = replyTarget?.id ?? null
     const replyActive =
       Boolean(replyTarget) &&
@@ -2418,27 +2617,50 @@ export const useChatActions = ({
       !isRegenerate &&
       !isContinue &&
       !selectedCharacter?.id
-    const replyOverrides = replyActive
-      ? (() => {
-          const userMessageId = generateID()
-          const assistantMessageId = generateID()
-          return {
-            userMessageId,
-            assistantMessageId,
-            userParentMessageId: replyTarget?.id ?? null,
-            assistantParentMessageId: userMessageId
-          }
-        })()
-      : {}
-    const chatModeParamsWithReply = replyActive
-      ? { ...chatModeParams, ...replyOverrides }
-      : chatModeParams
-    const chatModeParamsWithRegen = {
-      ...chatModeParamsWithReply,
-      regenerateFromMessage: isRegenerate ? regenerateFromMessage : undefined
-    }
 
     try {
+      // Pre-stream awaits run inside the try so a failure resets streaming state
+      // (and lets the caller drain its queue) instead of stranding the UI.
+      const chatModeParams = await buildChatModeParams({
+        ...(requestOverrides ?? {}),
+        ragMediaIds: turnRagMediaIds,
+        fileRetrievalEnabled: turnFileRetrievalEnabled,
+        selectedKnowledge: turnSelectedKnowledge,
+        selectedModel: effectiveSelectedModel,
+        messageSteering: messageSteeringForTurn,
+        userMessageType,
+        assistantMessageType,
+        imageGenerationRequest,
+        imageGenerationRefine,
+        imageGenerationPromptMode,
+        imageGenerationSource,
+        imageEventSyncPolicy,
+        researchContext,
+        dynamicUIRequest: turnDynamicUIRequest,
+        userMetadataExtra: turnUserMetadataExtra
+      })
+      const baseMessages = chatHistory || messages
+      const baseHistory = memory || history
+      const replyOverrides = replyActive
+        ? (() => {
+            const userMessageId = generateID()
+            const assistantMessageId = generateID()
+            return {
+              userMessageId,
+              assistantMessageId,
+              userParentMessageId: replyTarget?.id ?? null,
+              assistantParentMessageId: userMessageId
+            }
+          })()
+        : {}
+      const chatModeParamsWithReply = replyActive
+        ? { ...chatModeParams, ...replyOverrides }
+        : chatModeParams
+      const chatModeParamsWithRegen = {
+        ...chatModeParamsWithReply,
+        regenerateFromMessage: isRegenerate ? regenerateFromMessage : undefined
+      }
+
       if (isContinue) {
         const continueMessages = chatHistory || messages
         const continueHistory = memory || history
@@ -2622,24 +2844,24 @@ export const useChatActions = ({
           hasEffectiveAssistant: Boolean(
             effectiveSelectedAssistant?.kind && effectiveSelectedAssistant?.id
           ),
-          draftAssistantKind: selectedAssistant?.kind ?? null,
+          draftAssistantKind: routingSelectedAssistant?.kind ?? null,
           draftAssistantSelectionMode: getAssistantSelectionMode(
-            selectedAssistant
+            routingSelectedAssistant
           )
         })
         const resolvedSendMode =
-          getAssistantSelectionMode(selectedAssistant) === "tracked" &&
-          selectedAssistant?.kind === "persona"
+          getAssistantSelectionMode(routingSelectedAssistant) === "tracked" &&
+          routingSelectedAssistant?.kind === "persona"
             ? "tracked_persona"
-            : getAssistantSelectionMode(selectedAssistant) === "tracked" &&
-                selectedAssistant?.kind === "character"
+            : getAssistantSelectionMode(routingSelectedAssistant) === "tracked" &&
+                routingSelectedAssistant?.kind === "character"
               ? "tracked_character"
               : sendMode
         const trackedPersonaAssistantForSend =
           resolvedSendMode === "tracked_persona"
-            ? isPersonaAssistantSelection(selectedAssistant) &&
-              getAssistantSelectionMode(selectedAssistant) === "tracked"
-              ? selectedAssistant
+            ? isPersonaAssistantSelection(routingSelectedAssistant) &&
+              getAssistantSelectionMode(routingSelectedAssistant) === "tracked"
+              ? routingSelectedAssistant
               : isPersonaAssistantSelection(effectiveSelectedAssistant)
                 ? effectiveSelectedAssistant
                 : null
@@ -2661,7 +2883,8 @@ export const useChatActions = ({
 
             const personaServerChat = await ensurePersonaServerChatWithState({
               assistant: trackedPersonaAssistantForSend,
-              serverChatIdOverride
+              serverChatIdOverride,
+              requestedPersonaMemoryMode: selectedPersonaMemoryMode
             })
             await persistTrackedPersonaPlaygroundSession({
               chatId: personaServerChat.chatId,
@@ -2699,15 +2922,22 @@ export const useChatActions = ({
             return toChatSubmitResult(personaResult)
           }
 
+          const currentChatTrackedCharacter =
+            resolvedSendMode === "tracked_character"
+              ? resolveTrackedCharacterForCurrentChat()
+              : null
+          const draftTrackedCharacter =
+            resolvedSendMode === "tracked_character" &&
+            routingSelectedAssistant?.kind === "character" &&
+            getAssistantSelectionMode(routingSelectedAssistant) === "tracked"
+              ? assistantSelectionToCharacter<Character & Record<string, unknown>>(
+                  routingSelectedAssistant
+                )
+              : null
           const resolvedSelectedCharacter =
             resolvedSendMode === "tracked_character"
-              ? (selectedAssistant?.kind === "character" &&
-                  getAssistantSelectionMode(selectedAssistant) === "tracked"
-                    ? assistantSelectionToCharacter<
-                        Character & Record<string, unknown>
-                      >(selectedAssistant)
-                    : null) ||
-                resolveTrackedCharacterForCurrentChat() ||
+              ? draftTrackedCharacter ||
+                currentChatTrackedCharacter ||
                 assistantSelectionToCharacter<Character & Record<string, unknown>>(
                   effectiveSelectedAssistant
                 )
@@ -2894,6 +3124,9 @@ export const useChatActions = ({
             setStreaming: () => {},
             setIsProcessing: () => {},
             setAbortController: () => {},
+            // Compare owns the shared controller for the whole turn (see the
+            // single reset after Promise.all). Sub-turns must not release it.
+            releaseAbortControllerIfOwned: () => false,
             messageSteering: messageSteeringForTurn
           })
           const compareEnhancedParams = {
@@ -2942,6 +3175,7 @@ export const useChatActions = ({
           setIsProcessing(false)
           setStreaming(false)
           setAbortController(null)
+          activeAbortControllerRef.current = null
           return aggregateChatSubmitResults(compareResults)
         }
       }
@@ -2952,6 +3186,11 @@ export const useChatActions = ({
         message: t("error"),
         description: errorMessage
       })
+      // If this turn still owns the shared controller (e.g. a pre-stream failure
+      // before any chat mode ran), release it so the UI is not left streaming.
+      if (releaseAbortControllerIfOwned(signal)) {
+        setAbortController(null)
+      }
       setIsProcessing(false)
       setStreaming(false)
       return chatSubmitFailed(errorMessage)
@@ -3001,6 +3240,7 @@ export const useChatActions = ({
     setStreaming(true)
     const newController = new AbortController()
     setAbortController(newController)
+    activeAbortControllerRef.current = newController
     const signal = newController.signal
 
     const baseMessages = messages
@@ -3113,9 +3353,13 @@ export const useChatActions = ({
         description: errorMessage
       })
     } finally {
-      setStreaming(false)
-      setIsProcessing(false)
-      setAbortController(null)
+      // Only reset shared streaming state if this turn still owns the
+      // controller (an inner chat mode may already have released it).
+      if (releaseAbortControllerIfOwned(signal)) {
+        setStreaming(false)
+        setIsProcessing(false)
+        setAbortController(null)
+      }
       if (shouldConsumeSteering) {
         clearMessageSteering()
       }

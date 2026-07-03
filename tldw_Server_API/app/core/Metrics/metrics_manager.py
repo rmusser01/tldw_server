@@ -193,6 +193,7 @@ class MetricsRegistry:
             return "unknown"
         digest = hmac.digest(
             cls._sensitive_label_hash_key(),
+            # lgtm[py/weak-sensitive-data-hashing]: HMAC-SHA256 is used for label pseudonymization, not password storage.
             value_str.encode("utf-8"),
             "sha256",
         ).hex()[:16]

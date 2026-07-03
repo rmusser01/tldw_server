@@ -265,6 +265,56 @@ describe("runtime-bootstrap chrome shim", () => {
     })
   })
 
+  it("shares the env single-user API key with tldw request auth in advanced mode", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "advanced"
+    process.env.NEXT_PUBLIC_API_URL = "http://127.0.0.1:8000"
+    process.env.NEXT_PUBLIC_X_API_KEY = "advanced-api-key"
+
+    await importAndAwaitBootstrap()
+
+    const { getRuntimeSingleUserApiKeyOverride } = await import(
+      "@/services/tldw/runtime-auth-override"
+    )
+
+    expect(getRuntimeSingleUserApiKeyOverride()).toBe("advanced-api-key")
+    await vi.waitFor(() => {
+      const nextConfig = readStoredValue("tldwConfig") as Record<string, unknown>
+      expect(nextConfig).toMatchObject({
+        authMode: "single-user",
+        serverUrl: "http://127.0.0.1:8000"
+      })
+      expect(nextConfig.apiKey).toBeUndefined()
+      expect(localStorage.getItem("tldwConfig")).not.toContain("advanced-api-key")
+    })
+  })
+
+  it("uses an existing stored single-user key as a runtime override before scrubbing it", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "advanced"
+    process.env.NEXT_PUBLIC_API_URL = "http://127.0.0.1:8000"
+    delete process.env.NEXT_PUBLIC_X_API_KEY
+    localStorage.setItem(
+      "tldwConfig",
+      JSON.stringify({
+        authMode: "single-user",
+        apiKey: "manual-user-key",
+        serverUrl: "http://127.0.0.1:8000"
+      })
+    )
+
+    await importAndAwaitBootstrap()
+    const { getRuntimeSingleUserApiKeyOverride } = await import(
+      "@/services/tldw/runtime-auth-override"
+    )
+
+    expect(getRuntimeSingleUserApiKeyOverride()).toBe("manual-user-key")
+    await vi.waitFor(() => {
+      const nextConfig = readStoredValue("tldwConfig") as Record<string, unknown>
+      expect(nextConfig.serverUrl).toBe("http://127.0.0.1:8000")
+      expect(nextConfig.apiKey).toBeUndefined()
+      expect(localStorage.getItem("tldwConfig")).not.toContain("manual-user-key")
+    })
+  })
+
   it("repairs a stale env LAN host to the current browser host during bootstrap", async () => {
     process.env.NEXT_PUBLIC_API_URL = "http://192.168.5.184:8000"
 
@@ -640,6 +690,32 @@ describe("runtime-bootstrap chrome shim", () => {
     expect(localStorage.getItem("tldwConfig")).not.toContain("stale-env-access")
     expect(localStorage.getItem("tldwConfig")).not.toContain("stale-env-refresh")
     expect(readStoredValue("tldwRuntimeAuthMetadata")).toBeNull()
+  })
+
+  it("does not reapply env single-user auth after an explicit browser opt-out", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "advanced"
+    process.env.NEXT_PUBLIC_API_URL = "http://127.0.0.1:8000"
+    process.env.NEXT_PUBLIC_X_API_KEY = "env-key"
+    localStorage.setItem("tldwRuntimeEnvAuthOptOut", "true")
+    localStorage.setItem(
+      "tldwConfig",
+      JSON.stringify({
+        authMode: "single-user",
+        serverUrl: "http://127.0.0.1:8000"
+      })
+    )
+
+    await importAndAwaitBootstrap()
+
+    const { getApiKey, hasEnvApiAuth } = await import("@web/lib/authStorage")
+    const { getRuntimeSingleUserApiKeyOverride } = await import(
+      "@/services/tldw/runtime-auth-override"
+    )
+
+    expect(getApiKey()).toBeNull()
+    expect(hasEnvApiAuth()).toBe(false)
+    expect(getRuntimeSingleUserApiKeyOverride()).toBeNull()
+    expect(localStorage.getItem("tldwConfig")).not.toContain("env-key")
   })
 
   it("does not fetch runtime config for extension protocols", async () => {

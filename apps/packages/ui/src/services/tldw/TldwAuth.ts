@@ -45,6 +45,7 @@ const buildApiKeyValidationUrl = (serverUrl: string): string => {
 
 export class TldwAuthService {
   private refreshTimer: NodeJS.Timeout | null = null
+  private refreshInFlight: Promise<TokenResponse> | null = null
 
   constructor() {
   }
@@ -226,9 +227,23 @@ export class TldwAuthService {
   }
 
   /**
-   * Refresh access token using refresh token
+   * Refresh access token using refresh token.
+   *
+   * Single-flighted: concurrent callers (e.g. the pre-expiry timer racing a 401
+   * refresh) share one in-flight request so the backend's rotating refresh
+   * token is not spent twice, which would persist a dead token.
    */
   async refreshToken(): Promise<TokenResponse> {
+    if (this.refreshInFlight) {
+      return this.refreshInFlight
+    }
+    this.refreshInFlight = this.performTokenRefresh().finally(() => {
+      this.refreshInFlight = null
+    })
+    return this.refreshInFlight
+  }
+
+  private async performTokenRefresh(): Promise<TokenResponse> {
     const config = await tldwClient.getConfig()
     if (!config || !config.refreshToken) {
       throw new Error('No refresh token available')
@@ -258,6 +273,30 @@ export class TldwAuthService {
     }
 
     return tokens
+  }
+
+  /**
+   * (Re-)arm the pre-expiry refresh timer after a page load.
+   *
+   * The timer set during login/verify/refresh is discarded on reload, so a
+   * multi-user user who reloads would otherwise never auto-refresh and every
+   * request would 401 once the access token expired. Safe to call repeatedly:
+   * it is a no-op in hosted mode, when a timer is already armed, or when no
+   * refresh token is present. When a refresh token exists but no timer is
+   * scheduled it performs a single refresh, which rotates the access token and
+   * re-arms the timer via setupTokenRefresh.
+   */
+  async initTokenRefresh(): Promise<void> {
+    if (this.isHostedMode()) return
+    if (this.refreshTimer) return
+    const config = await tldwClient.getConfig()
+    if (!config || config.authMode !== 'multi-user') return
+    if (!config.refreshToken) return
+    try {
+      await this.refreshToken()
+    } catch (error) {
+      console.error('Token refresh on init failed:', error)
+    }
   }
 
   /**

@@ -20,6 +20,7 @@ import {
   updateWatchlistContentAlertRule
 } from "@/services/watchlists"
 import { Alert } from "@/components/ui/primitives"
+import { safeExternalUrl } from "@/utils/safe-external-url"
 import { useWatchlistsStore } from "@/store/watchlists"
 import type {
   WatchlistContentAlert,
@@ -614,8 +615,8 @@ export const AlertsTab: React.FC = () => {
           ) : (
             alerts.map((alert) => {
               const sourceName = alert.evidence?.source_name || `Source ${alert.source_id}`
-              const sourceUrl = alert.evidence?.source_url || null
-              const itemUrl = alert.evidence?.url || null
+              const sourceUrl = safeExternalUrl(alert.evidence?.source_url)
+              const itemUrl = safeExternalUrl(alert.evidence?.url)
               const rule = rules.find((candidate) => candidate.id === alert.rule_id)
               const nextReadStatus: WatchlistContentAlertStatus = alert.status === "read" ? "unread" : "read"
               return (

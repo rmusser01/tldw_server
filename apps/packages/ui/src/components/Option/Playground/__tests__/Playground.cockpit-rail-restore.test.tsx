@@ -26,14 +26,12 @@ const renderShell = ({
   render(
     <PlaygroundCockpitShell
       mode="cockpit"
-      onModeChange={vi.fn()}
       leftRailVisible={leftRailVisible}
       rightRailVisible={rightRailVisible}
       onLeftRailVisibleChange={onLeftRailVisibleChange}
       onRightRailVisibleChange={onRightRailVisibleChange}
       leftRail={<div>Context tools</div>}
       rightRail={<div>Runtime tools</div>}
-      statusStrip={<div>Ready</div>}
     >
       <div>Chat transcript</div>
     </PlaygroundCockpitShell>,
@@ -43,7 +41,7 @@ const renderShell = ({
 };
 
 describe("Playground cockpit rail restore tabs", () => {
-  it("mounts the context restore control flush to the cockpit edge while runtime stays expanded", () => {
+  it("mounts the context restore control on the chat content edge while runtime stays expanded", () => {
     const { onLeftRailVisibleChange } = renderShell({
       leftRailVisible: false,
       rightRailVisible: true,
@@ -63,10 +61,13 @@ describe("Playground cockpit rail restore tabs", () => {
     expect(contextRestore.parentElement).toHaveClass(
       ...COCKPIT_LEFT_RESTORE_WRAPPER_CLASS.split(" "),
     );
-    expect(contextRestore.parentElement).not.toHaveClass("left-10");
+    expect(contextRestore.parentElement).not.toHaveClass("fixed");
+    expect(contextRestore.parentElement).not.toHaveClass("left-12");
     expect(contextRestore.parentElement).not.toHaveClass("top-1/2");
     expect(contextRestore.parentElement).not.toHaveClass("-translate-y-1/2");
     expect(contextRestore.parentElement).not.toHaveClass("relative");
+    expect(contextRestore).toHaveClass("h-24", "w-8");
+    expect(contextRestore).not.toHaveClass("h-32", "w-9");
     expect(
       screen
         .getByTestId("playground-cockpit-main")
@@ -141,6 +142,29 @@ describe("Playground cockpit rail restore tabs", () => {
 
     fireEvent.click(contextRestore);
     fireEvent.click(runtimeRestore);
+    expect(onLeftRailVisibleChange).toHaveBeenCalledWith(true);
+    expect(onRightRailVisibleChange).toHaveBeenCalledWith(true);
+  });
+
+  it("keeps mobile restore tabs available when cockpit rails are hidden", () => {
+    const { onLeftRailVisibleChange, onRightRailVisibleChange } = renderShell({
+      leftRailVisible: false,
+      rightRailVisible: false,
+    });
+
+    const mobileRails = screen.getByTestId("playground-cockpit-mobile-rails");
+    expect(mobileRails).toHaveAttribute("data-mobile-panel", "none");
+
+    const contextTab = screen.getByRole("tab", {
+      name: /restore context sidechannel/i,
+    });
+    const runtimeTab = screen.getByRole("tab", {
+      name: /restore runtime sidechannel/i,
+    });
+
+    fireEvent.click(contextTab);
+    fireEvent.click(runtimeTab);
+
     expect(onLeftRailVisibleChange).toHaveBeenCalledWith(true);
     expect(onRightRailVisibleChange).toHaveBeenCalledWith(true);
   });

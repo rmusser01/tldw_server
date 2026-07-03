@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   getConfig: vi.fn(),
   initialize: vi.fn(),
   getModels: vi.fn(),
+  getRuntimeSingleUserApiKeyOverride: vi.fn(),
   storageGet: vi.fn(async () => null),
   storageSet: vi.fn(async () => undefined)
 }))
@@ -28,6 +29,11 @@ vi.mock("@/utils/safe-storage", () => ({
   })
 }))
 
+vi.mock("@/services/tldw/runtime-auth-override", () => ({
+  getRuntimeSingleUserApiKeyOverride: (...args: unknown[]) =>
+    (mocks.getRuntimeSingleUserApiKeyOverride as (...args: unknown[]) => unknown)(...args)
+}))
+
 const importService = async () => import("@/services/tldw/TldwModels")
 
 describe("TldwModelsService caching", () => {
@@ -36,6 +42,7 @@ describe("TldwModelsService caching", () => {
     mocks.getConfig.mockReset()
     mocks.initialize.mockReset()
     mocks.getModels.mockReset()
+    mocks.getRuntimeSingleUserApiKeyOverride.mockReset()
     mocks.storageGet.mockReset()
     mocks.storageSet.mockReset()
 
@@ -45,9 +52,58 @@ describe("TldwModelsService caching", () => {
       apiKey: "test-key"
     })
     mocks.initialize.mockResolvedValue(undefined)
+    mocks.getRuntimeSingleUserApiKeyOverride.mockReturnValue(null)
     mocks.storageGet.mockResolvedValue(null)
     mocks.storageSet.mockResolvedValue(undefined)
   })
+
+  it("fetches models when single-user auth is provided by the WebUI runtime", async () => {
+    mocks.getConfig.mockResolvedValue({
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "single-user"
+    })
+    mocks.getRuntimeSingleUserApiKeyOverride.mockReturnValue("runtime-key")
+    mocks.getModels.mockResolvedValue([
+      { id: "local-model", name: "Local Model", provider: "llama", type: "chat" }
+    ])
+
+    const { TldwModelsService } = await importService()
+    const service = new TldwModelsService()
+
+    const models = await service.getModels()
+
+    expect(models.map((model) => model.id)).toEqual(["local-model"])
+    expect(mocks.getModels).toHaveBeenCalledTimes(1)
+    expect(mocks.storageSet).toHaveBeenCalledWith(
+      "tldwModelsCache",
+      expect.objectContaining({
+        scope: "http://127.0.0.1:8000|single-user|key|none"
+      })
+    )
+  })
+
+  it.each(["CHANGE_ME_TO_SECURE_API_KEY", "   "])(
+    "does not treat invalid runtime single-user auth %s as model-ready",
+    async (runtimeKey) => {
+      mocks.getConfig.mockResolvedValue({
+        serverUrl: "http://127.0.0.1:8000",
+        authMode: "single-user"
+      })
+      mocks.getRuntimeSingleUserApiKeyOverride.mockReturnValue(runtimeKey)
+      mocks.getModels.mockResolvedValue([
+        { id: "local-model", name: "Local Model", provider: "llama", type: "chat" }
+      ])
+
+      const { TldwModelsService } = await importService()
+      const service = new TldwModelsService()
+
+      const models = await service.getModels()
+
+      expect(models).toEqual([])
+      expect(mocks.getModels).not.toHaveBeenCalled()
+      expect(mocks.storageSet).not.toHaveBeenCalled()
+    }
+  )
 
   it("dedupes concurrent in-flight model fetches", async () => {
     vi.useFakeTimers()

@@ -71,8 +71,10 @@ export const useServerDictation = (
   } = options
 
   const serverRecorderRef = React.useRef<MediaRecorder | null>(null)
+  const serverStreamRef = React.useRef<MediaStream | null>(null)
   const serverChunksRef = React.useRef<BlobPart[]>([])
   const captureOwnerRef = React.useRef(false)
+  const startingRef = React.useRef(false)
   const [isServerDictating, setIsServerDictating] = React.useState(false)
 
   const reportError = React.useCallback(
@@ -114,6 +116,10 @@ export const useServerDictation = (
   const startServerDictation = React.useCallback(async (
     source?: AudioCaptureRequestedSource
   ) => {
+    // Synchronous re-entry guard: a double-clicked dictation button must not
+    // run a second getUserMedia (and orphan the first stream) while a start is
+    // still in flight. Checked/set synchronously before the first await.
+    if (startingRef.current) return
     if (isServerDictating) {
       stopServerDictation()
       return
@@ -144,12 +150,17 @@ export const useServerDictation = (
       return
     }
 
+    startingRef.current = true
     try {
       const requestedDeviceId =
         source?.sourceKind === "mic_device" ? source.deviceId : null
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: buildAudioConstraints(requestedDeviceId)
       })
+      // Hold the acquired stream in a ref so the synchronous catch below can
+      // stop its tracks if `new MediaRecorder(stream)` or recorder.start()
+      // throws.
+      serverStreamRef.current = stream
       const recorder = new MediaRecorder(stream)
       serverChunksRef.current = []
 
@@ -171,6 +182,7 @@ export const useServerDictation = (
         try {
           stream.getTracks().forEach((trk) => trk.stop())
         } catch {}
+        serverStreamRef.current = null
         serverRecorderRef.current = null
         releaseCaptureOwner()
         setIsServerDictating(false)
@@ -290,6 +302,7 @@ export const useServerDictation = (
           try {
             stream.getTracks().forEach((trk) => trk.stop())
           } catch {}
+          serverStreamRef.current = null
           serverRecorderRef.current = null
           releaseCaptureOwner()
           setIsServerDictating(false)
@@ -325,9 +338,17 @@ export const useServerDictation = (
           </div>
         )
       })
+      // Stop any stream acquired before the throw (e.g. a MediaRecorder ctor
+      // or recorder.start() failure) so the mic indicator does not stay on.
+      try {
+        serverStreamRef.current?.getTracks().forEach((trk) => trk.stop())
+      } catch {}
+      serverStreamRef.current = null
       serverRecorderRef.current = null
       setIsServerDictating(false)
       releaseCaptureOwner()
+    } finally {
+      startingRef.current = false
     }
   }, [
     canUseServerStt,

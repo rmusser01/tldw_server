@@ -1,3 +1,5 @@
+"""Host adapter implementations for MCP Unified compatibility shims."""
+
 from __future__ import annotations
 
 from .tldw_runtime import build_default_runtime_dependencies

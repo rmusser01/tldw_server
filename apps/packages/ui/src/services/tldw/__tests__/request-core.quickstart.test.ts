@@ -103,4 +103,43 @@ describe("tldwRequest quickstart and advanced transport", () => {
       })
     )
   })
+
+  it("rejects placeholder runtime single-user API keys before sending a request", async () => {
+    delete process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json"
+        }
+      })
+    )
+
+    const runtimeAuth = await import("@/services/tldw/runtime-auth-override")
+    runtimeAuth.setRuntimeSingleUserApiKeyOverride("CHANGE_ME_TO_SECURE_API_KEY")
+    expect(runtimeAuth.getRuntimeSingleUserApiKeyOverride()).toBeNull()
+    try {
+      const { tldwRequest } = await import("@/services/tldw/request-core")
+      const result = await tldwRequest(
+        {
+          path: "/api/v1/health",
+          method: "GET"
+        },
+        {
+          getConfig: async () => ({
+            serverUrl: "https://api.example.test:9443",
+            authMode: "single-user"
+          }),
+          fetchFn: fetchMock
+        }
+      )
+
+      expect(result.ok).toBe(false)
+      expect(result.status).toBe(401)
+      expect(fetchMock).not.toHaveBeenCalled()
+    } finally {
+      runtimeAuth.clearRuntimeAuthOverride()
+    }
+  })
 })

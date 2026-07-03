@@ -147,7 +147,7 @@ describe("ComposerToolbar web search", () => {
     )
   })
 
-  it("hides the options panel when rendered collapsed for external send placement", () => {
+  it("keeps the desktop status chip row when controls are collapsed for external send placement", () => {
     render(
       <ComposerToolbar
         {...({
@@ -160,8 +160,25 @@ describe("ComposerToolbar web search", () => {
 
     const panel = screen.getByTestId("composer-options-panel")
     expect(panel.className).toBe("mt-2 flex flex-col gap-1")
-    expect(screen.queryByText("Model selector")).toBeNull()
+    expect(screen.getByText("Model selector")).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Send" })).toBeNull()
+  })
+
+  it("opens casual advanced controls from the collapsed desktop context strip", () => {
+    render(
+      <ComposerToolbar
+        {...createProps({
+          optionsExpanded: false,
+          sendControlPlacement: "external"
+        })}
+      />
+    )
+
+    fireEvent.click(screen.getByTestId("composer-casual-advanced-chip"))
+
+    expect(
+      screen.getByTestId("composer-casual-advanced-controls-row")
+    ).toBeInTheDocument()
   })
 
   it("keeps mobile image attachment discoverable when options are collapsed", () => {

@@ -115,6 +115,75 @@ describe("TldwApiClient connection storage sync", () => {
     })
   })
 
+  it("uses the in-memory WebUI config for chat creation", async () => {
+    const client = new TldwApiClient()
+    await client.updateConfig({
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "single-user",
+      apiKey: "test-api-key"
+    })
+    mocks.tldwRequest.mockResolvedValue({
+      ok: true,
+      status: 201,
+      data: { id: "thread-1", title: "Knowledge thread" }
+    })
+
+    await expect(
+      client.createChat({ title: "Knowledge thread", source: "knowledge_qa" })
+    ).resolves.toMatchObject({ id: "thread-1", title: "Knowledge thread" })
+
+    expect(mocks.bgRequest).not.toHaveBeenCalled()
+    expect(mocks.tldwRequest).toHaveBeenCalledTimes(1)
+    const [request, runtime] = mocks.tldwRequest.mock.calls[0]
+    expect(request).toMatchObject({
+      path: "/api/v1/chats/",
+      method: "POST",
+      body: { title: "Knowledge thread", source: "knowledge_qa" }
+    })
+    await expect(runtime.getConfig()).resolves.toMatchObject({
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "single-user",
+      apiKey: "test-api-key"
+    })
+  })
+
+  it("uses the in-memory WebUI config for RAG search", async () => {
+    const client = new TldwApiClient()
+    await client.updateConfig({
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "single-user",
+      apiKey: "test-api-key"
+    })
+    mocks.tldwRequest.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: {
+        results: [],
+        generated_answer: "No relevant sources found."
+      }
+    })
+
+    await expect(
+      client.ragSearch("What changed?", { sources: ["media_db"] })
+    ).resolves.toMatchObject({
+      generated_answer: "No relevant sources found."
+    })
+
+    expect(mocks.bgRequest).not.toHaveBeenCalled()
+    expect(mocks.tldwRequest).toHaveBeenCalledTimes(1)
+    const [request, runtime] = mocks.tldwRequest.mock.calls[0]
+    expect(request).toMatchObject({
+      path: "/api/v1/rag/search",
+      method: "POST",
+      body: { query: "What changed?", sources: ["media_db"] }
+    })
+    await expect(runtime.getConfig()).resolves.toMatchObject({
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "single-user",
+      apiKey: "test-api-key"
+    })
+  })
+
   it("uses the in-memory WebUI config for OpenAPI discovery", async () => {
     const client = new TldwApiClient()
     await client.updateConfig({
@@ -144,5 +213,46 @@ describe("TldwApiClient connection storage sync", () => {
       authMode: "single-user",
       apiKey: "test-api-key"
     })
+  })
+
+  it("skips same-origin quickstart OpenAPI discovery", async () => {
+    const previousMode = process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+    try {
+      const client = new TldwApiClient()
+      await client.updateConfig({
+        serverUrl: window.location.origin,
+        authMode: "single-user",
+        apiKey: "test-api-key"
+      })
+
+      await expect(client.getOpenAPISpec()).resolves.toBeNull()
+
+      expect(mocks.bgRequest).not.toHaveBeenCalled()
+      expect(mocks.tldwRequest).not.toHaveBeenCalled()
+    } finally {
+      if (previousMode === undefined) {
+        delete process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
+      } else {
+        process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = previousMode
+      }
+    }
+  })
+
+  it("marks missing per-chat settings as an expected 404", async () => {
+    const client = new TldwApiClient()
+    mocks.bgRequest.mockResolvedValue({ settings: null })
+
+    await expect(client.getChatSettings("chat-1")).resolves.toEqual({
+      settings: null
+    })
+
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/chats/chat-1/settings?scope_type=global",
+        method: "GET",
+        expectedStatuses: [404]
+      })
+    )
   })
 })

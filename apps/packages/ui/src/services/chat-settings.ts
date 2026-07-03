@@ -414,6 +414,31 @@ export const normalizeChatSettingsRecord = (
   raw: any
 ): ChatSettingsRecord | null => coerceSettings(raw)
 
+const isMissingRemoteChatSettingsError = (error: unknown): boolean => {
+  const candidate = error as
+    | {
+        status?: unknown
+        response?: { status?: unknown }
+        details?: { status?: unknown }
+      }
+    | null
+  const status = Number(
+    candidate?.status ??
+      candidate?.response?.status ??
+      candidate?.details?.status
+  )
+  if (Number.isFinite(status) && Math.trunc(status) === 404) {
+    return true
+  }
+
+  const message = error instanceof Error ? error.message : String(error || "")
+  return (
+    /\b404\b/i.test(message) ||
+    /chat\s+settings.*not\s+found/i.test(message) ||
+    /not\s+found.*chat\s+settings/i.test(message)
+  )
+}
+
 const toEpoch = (value: string | undefined): number => {
   if (!value) return 0
   const parsed = Date.parse(value)
@@ -664,8 +689,7 @@ export const syncChatSettingsForServerChat = async (params: {
     const res = await tldwClient.getChatSettings(serverChatId)
     remoteSettings = coerceSettings(res.settings)
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error || "")
-    if (!message.includes("404")) {
+    if (!isMissingRemoteChatSettingsError(error)) {
       console.warn("Failed to fetch server chat settings", error)
     }
   }

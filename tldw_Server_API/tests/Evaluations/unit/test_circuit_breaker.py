@@ -12,6 +12,28 @@ from unittest.mock import Mock, AsyncMock, patch
 from tldw_Server_API.app.core.Evaluations.circuit_breaker import CircuitBreaker, CircuitBreakerConfig, CircuitState, CircuitOpenError
 
 
+class _FakeClock:
+    """Deterministic stand-in for ``time.time()`` used to fast-forward the
+    circuit breaker's recovery-timeout checks without real wall-clock waits.
+    """
+
+    def __init__(self, start: float = 1_000_000.0) -> None:
+        self.now = start
+
+    def time(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+
+@pytest.fixture
+def fake_clock(monkeypatch):
+    clock = _FakeClock()
+    monkeypatch.setattr("time.time", clock.time)
+    return clock
+
+
 @pytest.mark.unit
 class TestCircuitBreakerInit:
     """Test CircuitBreaker initialization."""
@@ -80,7 +102,7 @@ class TestCircuitBreakerStates:
         assert cb.stats.consecutive_failures == 0  # Reset after transition
         assert cb.stats.last_failure_time is not None
 
-    def test_transition_to_half_open_after_timeout(self):
+    def test_transition_to_half_open_after_timeout(self, fake_clock):
 
         """Test transition to half-open state after recovery timeout."""
         config = CircuitBreakerConfig(failure_threshold=2, recovery_timeout=1)
@@ -92,8 +114,8 @@ class TestCircuitBreakerStates:
         asyncio.run(cb._on_failure())
         assert cb.state == CircuitState.OPEN
 
-        # Wait for recovery timeout
-        time.sleep(1.1)
+        # Fast-forward past the recovery timeout
+        fake_clock.advance(1.1)
 
         # Trigger transition by checking if should attempt reset
         if cb._should_attempt_reset():
@@ -357,7 +379,7 @@ class TestCircuitBreakerRecovery:
     """Test circuit breaker recovery mechanisms."""
 
     @pytest.mark.asyncio
-    async def test_automatic_recovery_after_timeout(self):
+    async def test_automatic_recovery_after_timeout(self, fake_clock):
         """Test automatic recovery after timeout period."""
         config = CircuitBreakerConfig(
             failure_threshold=2,
@@ -377,8 +399,8 @@ class TestCircuitBreakerRecovery:
 
         assert cb.state == CircuitState.OPEN
 
-        # Wait for recovery
-        time.sleep(0.6)
+        # Fast-forward past the recovery timeout
+        fake_clock.advance(0.6)
 
         # Successful call should trigger transition to half-open then closed
         def success_func():
@@ -412,7 +434,7 @@ class TestCircuitBreakerRecovery:
         assert cb.stats.last_failure_time is None
 
     @pytest.mark.asyncio
-    async def test_half_open_single_test(self):
+    async def test_half_open_single_test(self, fake_clock):
         """Test that half-open state allows single test call."""
         config = CircuitBreakerConfig(failure_threshold=2, recovery_timeout=0.1)
         cb = CircuitBreaker("test", config)
@@ -422,8 +444,8 @@ class TestCircuitBreakerRecovery:
         await cb._on_failure()
         assert cb.state == CircuitState.OPEN
 
-        # Wait for recovery timeout to elapse
-        time.sleep(0.15)
+        # Fast-forward past the recovery timeout
+        fake_clock.advance(0.15)
 
         call_count = 0
 

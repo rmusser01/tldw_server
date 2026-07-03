@@ -12,6 +12,7 @@ import type {
   StagedWorkspaceSource
 } from "./types"
 import { normalizeWorkspaceId } from "./workspaceIdentity"
+import type { EffectiveWorkspaceAssistantDefault } from "@/types/workspace"
 
 type WorkspaceContextState = {
   workspaceId: string | null
@@ -20,18 +21,28 @@ type WorkspaceContextState = {
 }
 
 const createInitialRuntimeState = (
-  backendAvailable: boolean
+  backendAvailable: boolean,
+  effectiveAssistantDefault?: EffectiveWorkspaceAssistantDefault | null
 ): ChatWorkspaceRuntimeState => ({
   backendAvailable,
   streaming: false,
   selectedModelLabel: "No model selected",
-  selectedPersonaLabel: null
+  selectedPersonaLabel: null,
+  assistantSource:
+    effectiveAssistantDefault?.status === "unavailable" ? "unavailable" : "none",
+  workspaceAssistantDegradedReason:
+    effectiveAssistantDefault?.status === "unavailable"
+      ? effectiveAssistantDefault.degradedReason
+      : null
 })
 
 export const ChatWorkspacePage = () => {
   const rawWorkspaceId = useWorkspaceStore((state) => state.workspaceId)
   const workspaceName = useWorkspaceStore((state) => state.workspaceName)
   const sources = useWorkspaceStore((state) => state.sources)
+  const effectiveAssistantDefault = useWorkspaceStore(
+    (state) => state.effectiveAssistantDefault
+  )
   const setRouteContext = useChatSurfaceCoordinatorStore(
     (state) => state.setRouteContext
   )
@@ -53,7 +64,7 @@ export const ChatWorkspacePage = () => {
     }))
   const [runtimeState, setRuntimeState] =
     React.useState<ChatWorkspaceRuntimeState>(() =>
-      createInitialRuntimeState(backendAvailable)
+      createInitialRuntimeState(backendAvailable, effectiveAssistantDefault)
     )
 
   const scopeLabel = workspaceName || "Workspace"
@@ -140,6 +151,11 @@ export const ChatWorkspacePage = () => {
         stagedSources={stagedSources}
         selectedModelLabel={runtimeState.selectedModelLabel}
         selectedPersonaLabel={runtimeState.selectedPersonaLabel}
+        assistantSource={runtimeState.assistantSource}
+        workspaceAssistantDegradedReason={
+          runtimeState.workspaceAssistantDegradedReason
+        }
+        effectiveAssistantDefault={effectiveAssistantDefault}
         backendAvailable={backendAvailable}
         chatBackendAvailable={backendAvailable && workspaceReady}
         streaming={runtimeState.streaming}

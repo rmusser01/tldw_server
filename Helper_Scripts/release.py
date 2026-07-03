@@ -290,16 +290,6 @@ def update_readme_release_references(readme_text: str, version: str) -> str:
             rf"\g<1>{version}\g<2>",
             "current release line",
         ),
-        (
-            rf"(?m)^(- The `dev` branch currently contains additional unreleased work beyond `){_SEMVER_PATTERN}(`; see \[CHANGELOG\.md\]\(CHANGELOG\.md\) for branch-level detail and \[Docs/Published/RELEASE_NOTES\.md\]\(Docs/Published/RELEASE_NOTES\.md\) for the published release entry point\.)$",
-            rf"\g<1>{version}\g<2>",
-            "beyond-release reference",
-        ),
-        (
-            rf"(?m)^(Currently landing on `dev` \(post-`){_SEMVER_PATTERN}(` branch work\):)$",
-            rf"\g<1>{version}\g<2>",
-            "post-release reference",
-        ),
     ]
 
     updated_text = readme_text
@@ -307,6 +297,28 @@ def update_readme_release_references(readme_text: str, version: str) -> str:
         updated_text, count = re.subn(pattern, replacement, updated_text)
         if count == 0:
             raise ValueError(f"Missing README anchor for {anchor_name}")
+
+    branch_line_pattern = rf"(?m)^- The `dev` branch .*beyond `{_SEMVER_PATTERN}`.*$"
+
+    def _replace_branch_line(match: re.Match[str]) -> str:
+        return re.sub(_SEMVER_PATTERN, version, match.group(0))
+
+    updated_text, count = re.subn(
+        branch_line_pattern,
+        _replace_branch_line,
+        updated_text,
+        count=1,
+    )
+    if count == 0:
+        raise ValueError("Missing README anchor for beyond-release reference")
+
+    updated_text, _post_count = re.subn(
+        rf"(?m)^(Currently landing on `dev` \(post-`){_SEMVER_PATTERN}(` branch work\):)$",
+        rf"\g<1>{version}\g<2>",
+        updated_text,
+    )
+    if f"post-`{version}` branch work" not in updated_text:
+        raise ValueError("Missing README anchor for post-release reference")
 
     return updated_text
 

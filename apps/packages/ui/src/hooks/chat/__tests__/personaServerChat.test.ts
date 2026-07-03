@@ -131,6 +131,56 @@ describe("ensurePersonaServerChat", () => {
     )
   })
 
+  it("uses the requested persona memory mode when creating a new persona-backed chat", async () => {
+    const setters = createSetterBundle()
+    const createChat = vi.fn().mockResolvedValue({
+      id: "persona-chat-memory",
+      title: "Memory persona chat",
+      assistant_kind: "persona",
+      assistant_id: "garden-helper",
+      persona_memory_mode: "read_write"
+    })
+
+    const result = await ensurePersonaServerChat({
+      assistant: {
+        kind: "persona",
+        id: "garden-helper",
+        name: "Garden Helper"
+      },
+      requestedPersonaMemoryMode: "read_write",
+      serverChatId: null,
+      serverChatTitle: null,
+      serverChatAssistantKind: null,
+      serverChatAssistantId: null,
+      serverChatPersonaMemoryMode: null,
+      serverChatMetaLoaded: false,
+      serverChatState: "in-progress",
+      serverChatTopic: null,
+      serverChatClusterId: null,
+      serverChatSource: null,
+      serverChatExternalRef: null,
+      historyId: null,
+      temporaryChat: false,
+      createChat,
+      ensureServerChatHistoryId: vi.fn().mockResolvedValue("history-memory"),
+      invalidateServerChatHistory: vi.fn(),
+      ...setters
+    })
+
+    expect(createChat).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assistant_kind: "persona",
+        assistant_id: "garden-helper",
+        persona_memory_mode: "read_write"
+      }),
+      undefined
+    )
+    expect(setters.setServerChatPersonaMemoryMode).toHaveBeenCalledWith(
+      "read_write"
+    )
+    expect(result.personaMemoryMode).toBe("read_write")
+  })
+
   it("starts a brand new persona chat with fresh metadata even when stale state remains in the store", async () => {
     const setters = createSetterBundle()
     const createChat = vi.fn().mockResolvedValue({
@@ -389,7 +439,7 @@ describe("ensurePersonaServerChat", () => {
     expect(result).toEqual({
       chatId: "restored-chat",
       historyId: "history-restored",
-      personaMemoryMode: "read_only"
+      personaMemoryMode: "read_write"
     })
   })
 })

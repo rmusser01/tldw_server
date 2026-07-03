@@ -123,7 +123,7 @@ describe("usePlaygroundPersistence", () => {
     })
   })
 
-  it("immediately persists tracked character identity when greeting auto-creates a server chat", async () => {
+  it("does not autosave tracked character greetings before the send path owns persistence", async () => {
     renderHook(
       (deps: ReturnType<typeof buildDeps>) => usePlaygroundPersistence(deps),
       {
@@ -147,37 +147,11 @@ describe("usePlaygroundPersistence", () => {
     )
 
     await waitFor(() => {
-      expect(mocks.savePlaygroundSession).toHaveBeenCalledWith(
-        expect.objectContaining({
-          serverChatId: "chat-1",
-          trackedAssistantKind: "character",
-          trackedAssistantId: "tracked-character",
-          trackedCharacterId: "tracked-character",
-          trackedAssistantDisplayName: "Tracked Character",
-          trackedAssistantAvatarUrl: "https://example.test/avatar.png",
-          serverChatPersonaMemoryMode: null,
-          scopeKey: "scope:chat"
-        })
-      )
+      expect(mocks.initialize).not.toHaveBeenCalled()
+      expect(mocks.createChat).not.toHaveBeenCalled()
+      expect(mocks.addChatMessage).not.toHaveBeenCalled()
     })
-
-    expect(mocks.savePlaygroundSession).toHaveBeenCalledWith(
-      expect.objectContaining({
-        trackedAssistantSelection: expect.objectContaining({
-          kind: "character",
-          id: "tracked-character",
-          name: "Tracked Character",
-          greeting: "Ready for overlay continuity proof.",
-          system_prompt: "Stay in character.",
-          metadata: expect.objectContaining({
-            selectionMode: "tracked"
-          })
-        })
-      })
-    )
-    expect(
-      mocks.savePlaygroundSession.mock.invocationCallOrder[0]
-    ).toBeLessThan(mocks.addChatMessage.mock.invocationCallOrder[0])
+    expect(mocks.savePlaygroundSession).not.toHaveBeenCalled()
   })
 
   it("saves plain chats without requiring a default character", async () => {
@@ -298,7 +272,7 @@ describe("usePlaygroundPersistence", () => {
     expect(notificationApi.error).not.toHaveBeenCalled()
   })
 
-  it("uses a WebUI character-aware fallback title for tracked character persistence", async () => {
+  it("does not autosave tracked character turns because character sends own persistence", async () => {
     const notificationApi = {
       error: vi.fn(),
       warning: vi.fn(),
@@ -311,7 +285,10 @@ describe("usePlaygroundPersistence", () => {
       {
         initialProps: buildDeps({
           notificationApi,
-          history: [{ role: "assistant", content: "Welcome to the archive." }],
+          history: [
+            { role: "assistant", content: "Welcome to the archive." },
+            { role: "user", content: "Show me the old city." }
+          ],
           selectedCharacter: {
             id: "mira",
             name: "Mira"
@@ -322,14 +299,11 @@ describe("usePlaygroundPersistence", () => {
     )
 
     await waitFor(() => {
-      expect(mocks.createChat).toHaveBeenCalledWith(
-        expect.objectContaining({
-          character_id: "mira",
-          title: "Mira role-play",
-          source: "webui-character-chat"
-        })
-      )
+      expect(mocks.initialize).not.toHaveBeenCalled()
+      expect(mocks.createChat).not.toHaveBeenCalled()
+      expect(mocks.addChatMessage).not.toHaveBeenCalled()
     })
+    expect(notificationApi.error).not.toHaveBeenCalled()
   })
 
   it("does not persist a stale selected character as tracked for a plain chat", async () => {
@@ -359,6 +333,36 @@ describe("usePlaygroundPersistence", () => {
         })
       )
     })
+    expect(mocks.savePlaygroundSession).not.toHaveBeenCalled()
+  })
+
+  it("does not fall back to a plain chat while character workflow is waiting for its tracked selection", async () => {
+    const notificationApi = {
+      error: vi.fn(),
+      warning: vi.fn(),
+      info: vi.fn(),
+      success: vi.fn()
+    }
+
+    renderHook(
+      (deps: ReturnType<typeof buildDeps>) => usePlaygroundPersistence(deps),
+      {
+        initialProps: buildDeps({
+          notificationApi,
+          characterWorkflowActive: true,
+          history: [{ role: "user", content: "Continue the character scene" }],
+          selectedCharacter: null,
+          selectedAssistantMode: null,
+          assistantOverlayActive: false
+        })
+      }
+    )
+
+    await waitFor(() => {
+      expect(mocks.initialize).not.toHaveBeenCalled()
+      expect(mocks.createChat).not.toHaveBeenCalled()
+    })
+    expect(notificationApi.error).not.toHaveBeenCalled()
     expect(mocks.savePlaygroundSession).not.toHaveBeenCalled()
   })
 

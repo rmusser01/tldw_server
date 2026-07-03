@@ -56,6 +56,7 @@ import type {
   WatchlistSource
 } from "@/types/watchlists"
 import { formatRelativeTime } from "@/utils/dateFormatters"
+import { openExternalUrl } from "@/utils/safe-external-url"
 import {
   buildServerItemViewCreatePayload,
   buildDefaultItemsViewPresets,
@@ -1945,7 +1946,7 @@ export const ItemsTab: React.FC = () => {
 
   const openSelectedItemOriginal = useCallback(() => {
     if (!selectedItem?.url) return
-    window.open(selectedItem.url, "_blank", "noopener,noreferrer")
+    openExternalUrl(selectedItem.url, "_blank", "noopener,noreferrer")
   }, [selectedItem])
 
   const navigateHome = useCallback(() => {

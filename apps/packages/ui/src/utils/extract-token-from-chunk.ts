@@ -16,6 +16,28 @@ const extractText = (value: unknown, depth: number = 0): string => {
   return ""
 }
 
+/**
+ * Detect the synthesized `stream_transport_interrupted` sentinel that the
+ * background stream proxy emits when the extension port drops AFTER the first
+ * byte. It carries no assistant text (so `extractTokenFromChunk` returns ""),
+ * which is why it must be recognized separately and propagated to the chat
+ * pipeline so a truncated answer is finalized as interrupted, not complete.
+ */
+export function extractStreamTransportInterruption(
+  chunk: unknown
+): { detail: string | null } | null {
+  if (!chunk || typeof chunk !== "object" || Array.isArray(chunk)) return null
+  const record = chunk as Record<string, unknown>
+  const event =
+    typeof record.event === "string" ? record.event.toLowerCase() : ""
+  if (event !== "stream_transport_interrupted") return null
+  const detail =
+    typeof record.detail === "string" && record.detail.trim().length > 0
+      ? record.detail.trim()
+      : null
+  return { detail }
+}
+
 export function extractTokenFromChunk(chunk: unknown): string {
   if (typeof chunk === "string") return chunk
   if (!chunk || typeof chunk !== "object") return ""

@@ -65,6 +65,21 @@ import {
   buildConferenceCollectionCreatePayload,
   buildConferenceCollectionItemPayload,
 } from "@/services/tldw/conference-collections";
+import {
+  ABSOLUTE_URL_BLOCK_ERROR,
+  evaluateAbsoluteUrlAccess,
+} from "@/utils/absolute-url-guard";
+import {
+  createSerializedSessionStateWriter,
+  getSessionStorageArea,
+  readPersistedSessionState,
+  selectInterruptedIngestFunnelIds,
+  serializeIngestSessions,
+  serializePendingReplay,
+  serializeQuickIngestBatches,
+  serializeQuickIngestSessions,
+  type PersistedQuickIngestBatch,
+} from "@/entries/background-session-store";
 
 type BackgroundDiagnostics = {
   startedAt: number;
@@ -286,6 +301,16 @@ type QuickIngestModalSession = {
   abortControllers: Set<AbortController>;
 };
 
+// Metadata carried alongside each remotely-queued ingest job so results can be
+// mapped back to their originating entry/file. Defined at module scope so both
+// the live quick-ingest run and the post-restart resume path share one type.
+type QuickIngestRemoteResultMeta = {
+  id: string;
+  type: string;
+  url?: string;
+  fileName?: string;
+};
+
 const warmModels = async (
   force = false,
   throwOnError = false,
@@ -407,6 +432,9 @@ export default defineBackground({
             err,
           );
         });
+        // Rehydrate persisted ingest/auth-replay/quick-ingest session state and
+        // resume any polling interrupted by a worker suspension (TASK-12094).
+        void rehydrateSessionState();
       } catch (error) {
         console.error("Error in initLogic:", error);
       }
@@ -444,6 +472,112 @@ export default defineBackground({
     const ingestSessions = new Map<string, IngestSession>();
     const pendingAuthReplay = new Set<string>();
     const quickIngestModalSessions = new Map<string, QuickIngestModalSession>();
+    // Durable per-session record of a quick-ingest batch's remote-job polling
+    // phase (job ids + progress cursor + already-collected results). Persisted so
+    // the polling phase can be resumed/finalized after a worker restart even
+    // though the multipart UPLOAD that produced the job ids cannot be resumed.
+    const quickIngestBatchRecords = new Map<string, PersistedQuickIngestBatch>();
+
+    // MV3 worker-survivability (TASK-12094): the maps above are wiped when
+    // Chrome suspends an idle service worker (~30s). We mirror them into
+    // chrome.storage.session (fallback local) on mutation and rehydrate them on
+    // worker restart, and drive ingest polling from a chrome.alarms backstop so
+    // completed ingests still notify / cancel + retry still find the session.
+    const INGEST_POLL_ALARM_NAME = "tldw:ingest-poll";
+    const INGEST_POLL_ALARM_PERIOD_MINUTES = 0.5;
+    // Backstop alarm that resumes an interrupted quick-ingest remote-job poll
+    // after the worker is suspended mid-batch.
+    const QUICK_INGEST_POLL_ALARM_NAME = "tldw:quick-ingest-poll";
+    const QUICK_INGEST_POLL_ALARM_PERIOD_MINUTES = 0.5;
+    // Funnel ids currently being polled inside this live worker; used to avoid
+    // starting a duplicate poll from the alarm/rehydrate backstop.
+    const activeIngestPollFunnelIds = new Set<string>();
+    // Quick-ingest session ids whose remote-job poll is running (live or resumed)
+    // in this worker; avoids a duplicate resume from the alarm/rehydrate backstop.
+    const activeQuickIngestBatchSessionIds = new Set<string>();
+    let sessionStateHydrated = false;
+
+    // Serialize the actual storage writes so that the many rapid, fire-and-forget
+    // persist calls below cannot land out of order (an older Map snapshot
+    // clobbering a newer one). The snapshot is taken synchronously at call time;
+    // the writer coalesces overlapping writes so only the latest snapshot wins.
+    const writeSessionStateSerialized = createSerializedSessionStateWriter(
+      getSessionStorageArea(),
+      (error) => logBackgroundError("persist session state", error),
+    );
+
+    const persistSessionState = (): void => {
+      try {
+        writeSessionStateSerialized({
+          ingestSessions: serializeIngestSessions(ingestSessions),
+          pendingAuthReplay: serializePendingReplay(pendingAuthReplay),
+          quickIngestSessions:
+            serializeQuickIngestSessions(quickIngestModalSessions),
+          quickIngestBatches:
+            serializeQuickIngestBatches(quickIngestBatchRecords),
+        });
+      } catch (error) {
+        logBackgroundError("persist session state", error);
+      }
+    };
+
+    const hasActiveIngestPollSessions = (): boolean => {
+      for (const session of ingestSessions.values()) {
+        if (
+          (session.status === "queued" || session.status === "running") &&
+          !session.awaitingAuth &&
+          Array.isArray(session.jobIds) &&
+          session.jobIds.length > 0
+        ) {
+          return true;
+        }
+      }
+      return false;
+    };
+
+    // Keep a chrome.alarms backstop alive whenever there is an ingest still
+    // being polled. If the worker is suspended mid-poll, the alarm wakes it so
+    // polling resumes and the completed ingest still notifies the UI.
+    const scheduleIngestPollAlarm = async (): Promise<void> => {
+      try {
+        if (!browser?.alarms) return;
+        if (!hasActiveIngestPollSessions()) {
+          await browser.alarms.clear(INGEST_POLL_ALARM_NAME);
+          return;
+        }
+        const existing = await browser.alarms
+          .get(INGEST_POLL_ALARM_NAME)
+          .catch(() => null);
+        if (existing) return;
+        await browser.alarms.create(INGEST_POLL_ALARM_NAME, {
+          periodInMinutes: INGEST_POLL_ALARM_PERIOD_MINUTES,
+        });
+      } catch (error) {
+        logBackgroundError("schedule ingest poll alarm", error);
+      }
+    };
+
+    // Keep a chrome.alarms backstop alive whenever a quick-ingest batch has a
+    // persisted remote-job polling phase outstanding, so a suspended worker is
+    // woken to resume and finalize it.
+    const scheduleQuickIngestBatchAlarm = async (): Promise<void> => {
+      try {
+        if (!browser?.alarms) return;
+        if (quickIngestBatchRecords.size === 0) {
+          await browser.alarms.clear(QUICK_INGEST_POLL_ALARM_NAME);
+          return;
+        }
+        const existing = await browser.alarms
+          .get(QUICK_INGEST_POLL_ALARM_NAME)
+          .catch(() => null);
+        if (existing) return;
+        await browser.alarms.create(QUICK_INGEST_POLL_ALARM_NAME, {
+          periodInMinutes: QUICK_INGEST_POLL_ALARM_PERIOD_MINUTES,
+        });
+      } catch (error) {
+        logBackgroundError("schedule quick ingest poll alarm", error);
+      }
+    };
 
     const INGEST_FUNNEL_METRICS_KEY = "tldw:ingestFunnelMetrics";
     const INGEST_FUNNEL_METRICS_LIMIT = 200;
@@ -660,6 +794,9 @@ export default defineBackground({
         canRetry,
         timestampSeconds: session.timestampSeconds ?? undefined,
       });
+      // Persist after every status change so the session survives suspension
+      // and cancel/retry can find it after a worker restart.
+      void persistSessionState();
     };
 
     const sendIngestReadyMessage = async (
@@ -1052,7 +1189,13 @@ export default defineBackground({
         responseType,
       } = payload || {};
       const cfg = await storage.get<any>("tldwConfig");
-      const isAbsolute = typeof path === "string" && /^https?:/i.test(path);
+      const absoluteAccess = evaluateAbsoluteUrlAccess(path, cfg);
+      const isAbsolute = absoluteAccess.isAbsolute;
+      // Mirror the request-path guard: refuse cross-origin absolute URLs that
+      // are not explicitly allowlisted before any fetch or credential use.
+      if (absoluteAccess.blocked) {
+        return { ok: false, status: 400, error: ABSOLUTE_URL_BLOCK_ERROR };
+      }
       const toArrayBuffer = (bytes: Uint8Array): ArrayBuffer => {
         if (bytes.buffer instanceof ArrayBuffer) {
           return bytes.buffer.slice(
@@ -1141,30 +1284,34 @@ export default defineBackground({
           }
         }
         const headers: Record<string, string> = {};
-        if (cfg?.authMode === "single-user") {
-          const key = (cfg?.apiKey || "").trim();
-          if (!key) {
-            return {
-              ok: false,
-              status: 401,
-              error:
-                "Add or update your API key in Settings → tldw server, then try again.",
-            };
+        // Skip credentials for allowlisted-but-cross-origin absolute URLs,
+        // matching request-core's `shouldSkipAuth` behavior.
+        if (!absoluteAccess.skipAuth) {
+          if (cfg?.authMode === "single-user") {
+            const key = (cfg?.apiKey || "").trim();
+            if (!key) {
+              return {
+                ok: false,
+                status: 401,
+                error:
+                  "Add or update your API key in Settings → tldw server, then try again.",
+              };
+            }
+            headers["X-API-KEY"] = key;
           }
-          headers["X-API-KEY"] = key;
-        }
-        if (cfg?.authMode === "multi-user") {
-          const token = (cfg?.accessToken || "").trim();
-          if (!token)
-            return {
-              ok: false,
-              status: 401,
-              error: "Not authenticated. Please login under Settings > tldw.",
-            };
-          headers["Authorization"] = `Bearer ${token}`;
-        }
-        if (cfg?.orgId) {
-          headers["X-TLDW-Org-Id"] = String(cfg.orgId);
+          if (cfg?.authMode === "multi-user") {
+            const token = (cfg?.accessToken || "").trim();
+            if (!token)
+              return {
+                ok: false,
+                status: 401,
+                error: "Not authenticated. Please login under Settings > tldw.",
+              };
+            headers["Authorization"] = `Bearer ${token}`;
+          }
+          if (cfg?.orgId) {
+            headers["X-TLDW-Org-Id"] = String(cfg.orgId);
+          }
         }
         const controller = new AbortController();
         const quickIngestSessionId = String(
@@ -1270,6 +1417,333 @@ export default defineBackground({
         return enqueueChatRequest(() => runTldwRequest(payload));
       }
       return await runTldwRequest(payload);
+    };
+
+    // Best-effort PATCH of a planned conference-collection item. Shared by the
+    // live quick-ingest run and the post-restart resume path.
+    const patchConferenceCollectionItem = async (
+      planned:
+        | { collectionId: number; itemId: number }
+        | null
+        | undefined,
+      body: Record<string, unknown>,
+      timeoutMs: number,
+    ) => {
+      if (!planned) return;
+      await handleTldwRequest({
+        path: `/api/v1/media/collections/${encodeURIComponent(
+          String(planned.collectionId),
+        )}/items/${encodeURIComponent(String(planned.itemId))}`,
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body,
+        timeoutMs,
+      }).catch((error) => {
+        logBackgroundError("quick ingest collection item patch", error);
+      });
+    };
+
+    // Cancel the outstanding remote ingest batches tracked by `tracker`.
+    const cancelRemoteIngestBatches = async (
+      tracker: ReturnType<
+        typeof createIngestJobsTracker<QuickIngestRemoteResultMeta>
+      >,
+      reason: string,
+    ) => {
+      await tracker.cancelTrackedBatches(async (batchId) => {
+        try {
+          await handleTldwRequest({
+            path: `/api/v1/media/ingest/jobs/cancel?batch_id=${encodeURIComponent(
+              batchId,
+            )}&reason=${encodeURIComponent(reason || "user_cancelled")}`,
+            method: "POST",
+            timeoutMs: 10_000,
+          });
+        } catch (error) {
+          logBackgroundError(`cancel quick ingest batch ${batchId}`, error);
+        }
+      });
+    };
+
+    // Poll the remote ingest jobs held by `tracker` to terminal state. This is
+    // the single implementation used by both the live quick-ingest run and the
+    // resume-after-restart path, so both map results identically.
+    const pollRemoteIngestJobs = (opts: {
+      tracker: ReturnType<
+        typeof createIngestJobsTracker<QuickIngestRemoteResultMeta>
+      >;
+      ingestTimeoutMs: number;
+      isCancelled: () => boolean;
+      onPendingJobIds?: (jobIds: number[]) => void;
+    }): Promise<any[]> => {
+      return pollTrackedIngestJobs({
+        tracker: opts.tracker,
+        timeoutMs: opts.ingestTimeoutMs,
+        pollIntervalMs: 1200,
+        isCancelled: opts.isCancelled,
+        onCancel: async () => {
+          await cancelRemoteIngestBatches(opts.tracker, "user_cancelled");
+        },
+        onPendingJobIds: opts.onPendingJobIds,
+        fetchJob: async (jobId) =>
+          (await handleTldwRequest({
+            path: `/api/v1/media/ingest/jobs/${jobId}`,
+            method: "GET",
+            timeoutMs: 4200,
+          })) as
+            | { ok: boolean; status?: number; data?: any; error?: string }
+            | undefined,
+        mapRequestError: (item, response) => {
+          if (
+            isLikelyAuthError(Number(response?.status || 0), response?.error)
+          ) {
+            return {
+              id: item.meta.id,
+              status: "error",
+              url: item.meta.url,
+              fileName: item.meta.fileName,
+              type: item.meta.type,
+              error: response?.error || "Authentication required.",
+              data: undefined,
+            };
+          }
+          return undefined;
+        },
+        mapCompleted: (item, data) => ({
+          id: item.meta.id,
+          status: "ok",
+          url: item.meta.url,
+          fileName: item.meta.fileName,
+          type: item.meta.type,
+          data,
+        }),
+        mapCancelled: (item) => ({
+          id: item.meta.id,
+          status: "error",
+          url: item.meta.url,
+          fileName: item.meta.fileName,
+          type: item.meta.type,
+          error: "Cancelled by user.",
+          data: undefined,
+        }),
+        mapFailure: (item, details) => ({
+          id: item.meta.id,
+          status: "error",
+          url: item.meta.url,
+          fileName: item.meta.fileName,
+          type: item.meta.type,
+          error: String(details.error || `Ingest ${details.status || "failed"}`),
+          data: details.data,
+        }),
+      });
+    };
+
+    // Resume + finalize a quick-ingest batch's remote-job polling phase from its
+    // persisted record after a worker restart. Re-polls ALL originally-submitted
+    // jobs (server job status is idempotent, so already-completed jobs return
+    // immediately) and re-emits progress + a terminal message so the sidepanel is
+    // not left stuck and a post-restart cancel is honored.
+    const resumeQuickIngestBatch = async (
+      record: PersistedQuickIngestBatch,
+    ): Promise<void> => {
+      const sessionId = String(record.sessionId || "").trim();
+      if (!sessionId) return;
+      if (activeQuickIngestBatchSessionIds.has(sessionId)) return;
+      activeQuickIngestBatchSessionIds.add(sessionId);
+
+      const isCancelled = () => isQuickIngestCancelled(sessionId);
+      const totalCount = record.totalCount;
+      const ingestTimeoutMs = Math.max(record.ingestTimeoutMs || 0, 60_000);
+      const out: any[] = Array.isArray(record.collectedResults)
+        ? record.collectedResults.slice()
+        : [];
+      let processedCount = record.processedCount;
+      const plannedItems = new Map<
+        string,
+        { collectionId: number; itemId: number; idempotencyKey?: string | null }
+      >();
+      for (const planned of record.plannedConferenceItems || []) {
+        plannedItems.set(planned.key, {
+          collectionId: planned.collectionId,
+          itemId: planned.itemId,
+          idempotencyKey: planned.idempotencyKey ?? null,
+        });
+      }
+
+      const emitProgress = (result: any) => {
+        processedCount += 1;
+        void emitBackgroundMessage(undefined, "tldw:quick-ingest/progress", {
+          sessionId,
+          result,
+          processedCount,
+          totalCount,
+        });
+      };
+
+      try {
+        const tracker =
+          createIngestJobsTracker<QuickIngestRemoteResultMeta>();
+        for (const job of record.remoteJobs || []) {
+          try {
+            tracker.trackJobs(job.batchId, [job.jobId], {
+              id: String((job.meta as any)?.id || ""),
+              type: String((job.meta as any)?.type || ""),
+              url:
+                typeof (job.meta as any)?.url === "string"
+                  ? (job.meta as any).url
+                  : undefined,
+              fileName:
+                typeof (job.meta as any)?.fileName === "string"
+                  ? (job.meta as any).fileName
+                  : undefined,
+            });
+          } catch (error) {
+            logBackgroundError(
+              `resume quick ingest track job ${job.jobId}`,
+              error,
+            );
+          }
+        }
+
+        if (tracker.hasItems()) {
+          const remoteResults = await pollRemoteIngestJobs({
+            tracker,
+            ingestTimeoutMs,
+            isCancelled,
+          });
+          for (const result of remoteResults) {
+            await patchConferenceCollectionItem(
+              plannedItems.get(String(result?.id || "")),
+              {
+                status: result?.status === "ok" ? "completed" : "failed",
+                media_id:
+                  result?.status === "ok"
+                    ? extractCompletedIngestJobMediaId(result?.data)
+                    : undefined,
+                error_summary:
+                  result?.status === "ok"
+                    ? undefined
+                    : String(result?.error || "Ingest failed"),
+              },
+              ingestTimeoutMs,
+            );
+            out.push(result);
+            emitProgress(result);
+          }
+        }
+
+        if (isCancelled()) {
+          await emitBackgroundMessage(undefined, "tldw:quick-ingest/cancelled", {
+            sessionId,
+            reason: "user_cancelled",
+            jobIds: (record.remoteJobs || []).map((job) => job.jobId),
+          });
+        } else {
+          await emitBackgroundMessage(undefined, "tldw:quick-ingest/completed", {
+            sessionId,
+            results: out,
+            summary: { resumedAfterRestart: true },
+          });
+        }
+      } catch (error) {
+        logBackgroundError(`resume quick ingest ${sessionId}`, error);
+        await emitBackgroundMessage(undefined, "tldw:quick-ingest/failed", {
+          sessionId,
+          error:
+            error instanceof Error
+              ? error.message
+              : String(error || "Quick ingest failed."),
+        });
+      } finally {
+        quickIngestBatchRecords.delete(sessionId);
+        quickIngestModalSessions.delete(sessionId);
+        activeQuickIngestBatchSessionIds.delete(sessionId);
+        void persistSessionState();
+        void scheduleQuickIngestBatchAlarm();
+      }
+    };
+
+    // On worker restart / alarm fire: resume any persisted remote-job polling
+    // batch. Safe to call repeatedly — the active-session guard prevents a live
+    // or in-flight resume from being started twice.
+    const resumeQuickIngestBatches = async (): Promise<void> => {
+      for (const record of Array.from(quickIngestBatchRecords.values())) {
+        if (activeQuickIngestBatchSessionIds.has(record.sessionId)) continue;
+        void resumeQuickIngestBatch(record);
+      }
+      await scheduleQuickIngestBatchAlarm();
+    };
+
+    // Report-as-interrupted the specified quick-ingest modal sessions that were
+    // rehydrated from persisted state but have NO resumable remote-job batch —
+    // their multipart upload phase was killed mid-flight (no live fetch to
+    // resume), so we emit a terminal message to unblock the sidepanel. Only ever
+    // called from rehydrate (once per worker) and only for previous-worker
+    // sessions, so it never races a freshly-started or completing live batch.
+    const reportInterruptedQuickIngestUploads = async (
+      sessionIds: string[],
+    ): Promise<void> => {
+      for (const sessionId of sessionIds) {
+        if (quickIngestBatchRecords.has(sessionId)) continue;
+        if (activeQuickIngestBatchSessionIds.has(sessionId)) continue;
+        const session = quickIngestModalSessions.get(sessionId);
+        if (!session) continue;
+        activeQuickIngestBatchSessionIds.add(sessionId);
+        try {
+          if (session.cancelled) {
+            await emitBackgroundMessage(
+              undefined,
+              "tldw:quick-ingest/cancelled",
+              { sessionId, reason: "user_cancelled", jobIds: [] },
+            );
+          } else {
+            await emitBackgroundMessage(undefined, "tldw:quick-ingest/failed", {
+              sessionId,
+              error:
+                "Quick ingest was interrupted by a browser/service-worker restart before it finished.",
+            });
+          }
+        } finally {
+          quickIngestModalSessions.delete(sessionId);
+          activeQuickIngestBatchSessionIds.delete(sessionId);
+          void persistSessionState();
+        }
+      }
+    };
+
+    // Regular ingest sessions restored from a previous worker that are still in a
+    // pre-submission state (queued/running, no jobIds, not awaiting auth) were
+    // interrupted before their non-resumable job submission finished.
+    // resumeActiveIngestSessions() cannot resume them (there are no jobIds to
+    // poll), so report each once as failed/interrupted and clear it — otherwise
+    // the sidepanel is left stuck on "Checking for existing media…" forever.
+    // Mirrors reportInterruptedQuickIngestUploads for the no-remote-batch case.
+    const reportInterruptedIngestSessions = async (
+      funnelIds: string[],
+    ): Promise<void> => {
+      for (const funnelId of funnelIds) {
+        const session = ingestSessions.get(funnelId);
+        if (!session) continue;
+        if (activeIngestPollFunnelIds.has(funnelId)) continue;
+        // Re-check the live session in case it advanced since the snapshot.
+        if (session.status !== "queued" && session.status !== "running") {
+          continue;
+        }
+        if (session.awaitingAuth) continue;
+        if (Array.isArray(session.jobIds) && session.jobIds.length > 0) continue;
+        const msg =
+          "Ingest was interrupted by a browser/service-worker restart before it finished.";
+        session.lastError = msg;
+        await emitIngestStatus(session, {
+          status: "failed",
+          error: msg,
+          progressMessage: msg,
+          canCancel: false,
+          canRetry: false,
+        });
+        ingestSessions.delete(funnelId);
+        void persistSessionState();
+      }
     };
 
     const extractIngestJobIds = (data: any): number[] => {
@@ -1529,6 +2003,73 @@ export default defineBackground({
       return { ok: true };
     };
 
+    // Terminal-state handling for an ingest poll result. Extracted so both the
+    // inline (live-worker) poll and the alarm/rehydrate resume path share the
+    // exact same completion / auth / cancel / failure behavior.
+    const finalizeIngestSession = async (
+      session: IngestSession,
+      pollResult: Awaited<ReturnType<typeof pollIngestJobsForSession>>,
+    ): Promise<void> => {
+      if (pollResult.finalStatus === "completed" && pollResult.mediaId != null) {
+        session.mediaId = pollResult.mediaId;
+        await appendIngestFunnelMetric("media_completed", session.funnelId, {
+          mediaId: pollResult.mediaId,
+          deduped: false,
+        });
+        await emitIngestStatus(session, {
+          status: "completed",
+          mediaId: pollResult.mediaId,
+          progressPercent: 100,
+          progressMessage: "Ingest complete. Opening media-scoped chat.",
+          canCancel: false,
+          canRetry: false,
+        });
+        await sendIngestReadyMessage(session.tabId, {
+          funnelId: session.funnelId,
+          mediaId: String(pollResult.mediaId),
+          url: session.url,
+          mode: "rag_media",
+          timestampSeconds:
+            typeof session.timestampSeconds === "number" &&
+            session.timestampSeconds >= 0
+              ? session.timestampSeconds
+              : undefined,
+        });
+        notify("tldw_server", "Ready. Opened media-scoped chat in sidebar.");
+      } else if (pollResult.finalStatus === "auth_required") {
+        await queueAuthRecovery(
+          session,
+          pollResult.error || "Authentication required.",
+        );
+      } else if (pollResult.finalStatus === "cancelled") {
+        await emitIngestStatus(session, {
+          status: "cancelled",
+          progressMessage: "Ingest cancelled.",
+          canCancel: false,
+          canRetry: true,
+        });
+        notify("tldw_server", "Ingest was cancelled.");
+      } else {
+        const failureMessage =
+          pollResult.error ||
+          (pollResult.finalStatus === "timeout"
+            ? "Ingest timed out. Retry or open Media to inspect job status."
+            : "No completed media yet. Open Media to check job status.");
+        session.lastError = failureMessage;
+        await emitIngestStatus(session, {
+          status: "failed",
+          error: failureMessage,
+          progressMessage: failureMessage,
+          canCancel: false,
+          canRetry: true,
+        });
+        notify("tldw_server", failureMessage);
+      }
+      // Reconcile the poll alarm now that this session has reached a terminal
+      // state (clears the alarm once no active ingest remains).
+      await scheduleIngestPollAlarm();
+    };
+
     const startContextMenuIngest = async (
       session: IngestSession,
       options?: {
@@ -1713,75 +2254,20 @@ export default defineBackground({
         "Queued for processing. Preparing chat when ready…",
       );
 
-      const pollResult = await pollIngestJobsForSession(session, {
-        timeoutMs: 10 * 60 * 1000,
-        intervalMs: 1500,
-      });
-      if (
-        pollResult.finalStatus === "completed" &&
-        pollResult.mediaId != null
-      ) {
-        session.mediaId = pollResult.mediaId;
-        await appendIngestFunnelMetric("media_completed", session.funnelId, {
-          mediaId: pollResult.mediaId,
-          deduped: false,
+      // Register an alarm backstop before polling so that, if Chrome suspends
+      // the worker mid-poll, the alarm resumes polling on wake (TASK-12094).
+      activeIngestPollFunnelIds.add(session.funnelId);
+      void scheduleIngestPollAlarm();
+      let pollResult: Awaited<ReturnType<typeof pollIngestJobsForSession>>;
+      try {
+        pollResult = await pollIngestJobsForSession(session, {
+          timeoutMs: 10 * 60 * 1000,
+          intervalMs: 1500,
         });
-        await emitIngestStatus(session, {
-          status: "completed",
-          mediaId: pollResult.mediaId,
-          progressPercent: 100,
-          progressMessage: "Ingest complete. Opening media-scoped chat.",
-          canCancel: false,
-          canRetry: false,
-        });
-        await sendIngestReadyMessage(session.tabId, {
-          funnelId: session.funnelId,
-          mediaId: String(pollResult.mediaId),
-          url: session.url,
-          mode: "rag_media",
-          timestampSeconds:
-            typeof session.timestampSeconds === "number" &&
-            session.timestampSeconds >= 0
-              ? session.timestampSeconds
-              : undefined,
-        });
-        notify("tldw_server", "Ready. Opened media-scoped chat in sidebar.");
-        return;
+      } finally {
+        activeIngestPollFunnelIds.delete(session.funnelId);
       }
-
-      if (pollResult.finalStatus === "auth_required") {
-        await queueAuthRecovery(
-          session,
-          pollResult.error || "Authentication required.",
-        );
-        return;
-      }
-
-      if (pollResult.finalStatus === "cancelled") {
-        await emitIngestStatus(session, {
-          status: "cancelled",
-          progressMessage: "Ingest cancelled.",
-          canCancel: false,
-          canRetry: true,
-        });
-        notify("tldw_server", "Ingest was cancelled.");
-        return;
-      }
-
-      const failureMessage =
-        pollResult.error ||
-        (pollResult.finalStatus === "timeout"
-          ? "Ingest timed out. Retry or open Media to inspect job status."
-          : "No completed media yet. Open Media to check job status.");
-      session.lastError = failureMessage;
-      await emitIngestStatus(session, {
-        status: "failed",
-        error: failureMessage,
-        progressMessage: failureMessage,
-        canCancel: false,
-        canRetry: true,
-      });
-      notify("tldw_server", failureMessage);
+      await finalizeIngestSession(session, pollResult);
     };
 
     const retryIngestSessionById = async (
@@ -1794,6 +2280,7 @@ export default defineBackground({
         return { ok: false, error: "Ingest is already in progress." };
       }
       pendingAuthReplay.delete(funnelId);
+      void persistSessionState();
       session.retryCount += 1;
       void startContextMenuIngest(session, {
         trackContextClick: false,
@@ -1816,6 +2303,100 @@ export default defineBackground({
           reason: "auth_replay",
         });
       }
+      void persistSessionState();
+    };
+
+    // Re-poll a rehydrated ingest session (after a worker restart / alarm wake)
+    // using its persisted jobIds, then run the shared terminal handling.
+    const resumeIngestSessionPoll = async (
+      session: IngestSession,
+    ): Promise<void> => {
+      if (activeIngestPollFunnelIds.has(session.funnelId)) return;
+      if (session.status !== "queued" && session.status !== "running") return;
+      if (session.awaitingAuth) return;
+      if (!Array.isArray(session.jobIds) || session.jobIds.length === 0) return;
+      activeIngestPollFunnelIds.add(session.funnelId);
+      try {
+        const pollResult = await pollIngestJobsForSession(session, {
+          timeoutMs: 10 * 60 * 1000,
+          intervalMs: 1500,
+        });
+        await finalizeIngestSession(session, pollResult);
+      } catch (error) {
+        logBackgroundError(`resume ingest ${session.funnelId}`, error);
+      } finally {
+        activeIngestPollFunnelIds.delete(session.funnelId);
+      }
+    };
+
+    const resumeActiveIngestSessions = async (): Promise<void> => {
+      const candidates = Array.from(ingestSessions.values()).filter(
+        (session) =>
+          (session.status === "queued" || session.status === "running") &&
+          !session.awaitingAuth &&
+          Array.isArray(session.jobIds) &&
+          session.jobIds.length > 0 &&
+          !activeIngestPollFunnelIds.has(session.funnelId),
+      );
+      for (const session of candidates) {
+        void resumeIngestSessionPoll(session);
+      }
+      await scheduleIngestPollAlarm();
+    };
+
+    // Rehydrate persisted session state after a worker restart, then resume any
+    // interrupted ingest polling and replay pending 401 auth-recoveries. Runs at
+    // most once per worker lifetime.
+    const rehydrateSessionState = async (): Promise<void> => {
+      if (sessionStateHydrated) return;
+      sessionStateHydrated = true;
+      let state;
+      try {
+        state = await readPersistedSessionState();
+      } catch (error) {
+        logBackgroundError("read session state", error);
+        return;
+      }
+      for (const [funnelId, value] of Object.entries(state.ingestSessions)) {
+        if (!ingestSessions.has(funnelId)) {
+          ingestSessions.set(funnelId, value as unknown as IngestSession);
+        }
+      }
+      for (const funnelId of state.pendingAuthReplay) {
+        pendingAuthReplay.add(funnelId);
+      }
+      for (const entry of state.quickIngestSessions) {
+        if (!quickIngestModalSessions.has(entry.sessionId)) {
+          quickIngestModalSessions.set(entry.sessionId, {
+            sessionId: entry.sessionId,
+            cancelled: entry.cancelled,
+            abortControllers: new Set(),
+          });
+        }
+      }
+      for (const batch of state.quickIngestBatches) {
+        if (!quickIngestBatchRecords.has(batch.sessionId)) {
+          quickIngestBatchRecords.set(batch.sessionId, batch);
+        }
+      }
+      // Quick-ingest modal sessions restored from a previous worker that have no
+      // resumable remote-job batch were interrupted during their (non-resumable)
+      // upload phase — report those once so the sidepanel is not left stuck.
+      const interruptedUploadSessionIds = state.quickIngestSessions
+        .map((entry) => entry.sessionId)
+        .filter((sessionId) => !quickIngestBatchRecords.has(sessionId));
+      // Snapshot the ingest sessions that were interrupted mid pre-submission
+      // (queued/running with no jobIds and not awaiting auth) up front, before
+      // the auth-replay path can begin re-driving any of them.
+      const interruptedIngestFunnelIds = selectInterruptedIngestFunnelIds(
+        state.ingestSessions,
+        state.pendingAuthReplay,
+      );
+      await resumeActiveIngestSessions();
+      void replayPendingAuthSessions();
+      await resumeQuickIngestBatches();
+      await reportInterruptedQuickIngestUploads(interruptedUploadSessionIds);
+      await reportInterruptedIngestSessions(interruptedIngestFunnelIds);
     };
 
     const runQuickIngestBatch = async (
@@ -1864,12 +2445,6 @@ export default defineBackground({
       const totalCount = entries.length + files.length;
       let processedCount = 0;
       const out: any[] = [];
-      type QuickIngestRemoteResultMeta = {
-        id: string;
-        type: string;
-        url?: string;
-        fileName?: string;
-      };
       const queuedRemoteJobs =
         createIngestJobsTracker<QuickIngestRemoteResultMeta>();
       const conferenceBatchMetadata =
@@ -2086,18 +2661,7 @@ export default defineBackground({
         planned: PlannedConferenceCollectionItem | undefined,
         body: Record<string, unknown>,
       ) => {
-        if (!planned) return;
-        await handleTldwRequest({
-          path: `/api/v1/media/collections/${encodeURIComponent(
-            String(planned.collectionId),
-          )}/items/${encodeURIComponent(String(planned.itemId))}`,
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body,
-          timeoutMs: ingestTimeoutMs,
-        }).catch((error) => {
-          logBackgroundError("quick ingest collection item patch", error);
-        });
+        await patchConferenceCollectionItem(planned, body, ingestTimeoutMs);
       };
 
       const applyPlannedConferenceFields = (
@@ -2270,87 +2834,54 @@ export default defineBackground({
         return trackedJobIds.length;
       };
 
-      const cancelQueuedRemoteBatches = async (reason: string) => {
-        await queuedRemoteJobs.cancelTrackedBatches(async (batchId) => {
-          try {
-            await handleTldwRequest({
-              path: `/api/v1/media/ingest/jobs/cancel?batch_id=${encodeURIComponent(
-                batchId,
-              )}&reason=${encodeURIComponent(reason || "user_cancelled")}`,
-              method: "POST",
-              timeoutMs: 10_000,
-            });
-          } catch (error) {
-            logBackgroundError(`cancel quick ingest batch ${batchId}`, error);
-          }
-        });
-      };
-
-      const pollQueuedRemoteJobs = async (): Promise<any[]> => {
-        return await pollTrackedIngestJobs({
+      // Poll the queued remote jobs to completion using the shared implementation
+      // (also used by the post-restart resume path) so both map results the same.
+      const pollQueuedRemoteJobs = async (): Promise<any[]> =>
+        pollRemoteIngestJobs({
           tracker: queuedRemoteJobs,
-          timeoutMs: ingestTimeoutMs,
-          pollIntervalMs: 1200,
+          ingestTimeoutMs,
           isCancelled,
-          onCancel: async () => {
-            await cancelQueuedRemoteBatches("user_cancelled");
-          },
           onPendingJobIds: (jobIds) => {
             runtimeContext?.setJobIds(jobIds);
           },
-          fetchJob: async (jobId) =>
-            (await handleTldwRequest({
-              path: `/api/v1/media/ingest/jobs/${jobId}`,
-              method: "GET",
-              timeoutMs: 4200,
-            })) as
-              | { ok: boolean; status?: number; data?: any; error?: string }
-              | undefined,
-          mapRequestError: (item, response) => {
-            if (
-              isLikelyAuthError(Number(response?.status || 0), response?.error)
-            ) {
-              return {
-                id: item.meta.id,
-                status: "error",
-                url: item.meta.url,
-                fileName: item.meta.fileName,
-                type: item.meta.type,
-                error: response?.error || "Authentication required.",
-                data: undefined,
-              };
-            }
-            return undefined;
-          },
-          mapCompleted: (item, data) => ({
-            id: item.meta.id,
-            status: "ok",
-            url: item.meta.url,
-            fileName: item.meta.fileName,
-            type: item.meta.type,
-            data,
-          }),
-          mapCancelled: (item) => ({
-            id: item.meta.id,
-            status: "error",
-            url: item.meta.url,
-            fileName: item.meta.fileName,
-            type: item.meta.type,
-            error: "Cancelled by user.",
-            data: undefined,
-          }),
-          mapFailure: (item, details) => ({
-            id: item.meta.id,
-            status: "error",
-            url: item.meta.url,
-            fileName: item.meta.fileName,
-            type: item.meta.type,
-            error: String(
-              details.error || `Ingest ${details.status || "failed"}`,
-            ),
-            data: details.data,
-          }),
         });
+
+      // Snapshot the resumable remote-job phase so a worker restart can re-poll
+      // and finalize it. Only the queued/remote-job phase is durable — the raw
+      // multipart uploads that produced these job ids cannot be resumed.
+      const persistQuickIngestBatchRecord = () => {
+        if (!sessionId) return;
+        quickIngestBatchRecords.set(sessionId, {
+          sessionId,
+          totalCount,
+          processedCount,
+          ingestTimeoutMs,
+          remoteJobs: queuedRemoteJobs.getItems().map((item) => ({
+            jobId: item.jobId,
+            batchId: item.batchId,
+            meta: item.meta as unknown as Record<string, unknown>,
+          })),
+          collectedResults: out.slice(),
+          plannedConferenceItems: Array.from(
+            plannedConferenceItems.entries(),
+          ).map(([key, value]) => ({
+            key,
+            collectionId: value.collectionId,
+            itemId: value.itemId,
+            idempotencyKey: value.idempotencyKey ?? null,
+          })),
+        });
+        activeQuickIngestBatchSessionIds.add(sessionId);
+        void persistSessionState();
+        void scheduleQuickIngestBatchAlarm();
+      };
+
+      const clearQuickIngestBatchRecord = () => {
+        if (!sessionId) return;
+        quickIngestBatchRecords.delete(sessionId);
+        activeQuickIngestBatchSessionIds.delete(sessionId);
+        void persistSessionState();
+        void scheduleQuickIngestBatchAlarm();
       };
 
       await createPlannedConferenceItems();
@@ -2559,24 +3090,33 @@ export default defineBackground({
       }
 
       if (shouldStoreRemote && queuedRemoteJobs.hasItems()) {
-        const remoteResults = await pollQueuedRemoteJobs();
-        for (const result of remoteResults) {
-          await patchPlannedConferenceItem(
-            plannedConferenceItems.get(String(result?.id || "")),
-            {
-              status: result?.status === "ok" ? "completed" : "failed",
-              media_id:
-                result?.status === "ok"
-                  ? extractCompletedIngestJobMediaId(result?.data)
-                  : undefined,
-              error_summary:
-                result?.status === "ok"
-                  ? undefined
-                  : String(result?.error || "Ingest failed"),
-            },
-          );
-          out.push(result);
-          emitProgress(result);
+        // Persist the resumable remote-job phase before we start polling so a
+        // worker suspension mid-poll can be resumed from the alarm/startup path.
+        persistQuickIngestBatchRecord();
+        try {
+          const remoteResults = await pollQueuedRemoteJobs();
+          for (const result of remoteResults) {
+            await patchPlannedConferenceItem(
+              plannedConferenceItems.get(String(result?.id || "")),
+              {
+                status: result?.status === "ok" ? "completed" : "failed",
+                media_id:
+                  result?.status === "ok"
+                    ? extractCompletedIngestJobMediaId(result?.data)
+                    : undefined,
+                error_summary:
+                  result?.status === "ok"
+                    ? undefined
+                    : String(result?.error || "Ingest failed"),
+              },
+            );
+            out.push(result);
+            emitProgress(result);
+          }
+        } finally {
+          // The live poll finished (or threw) in this worker; drop the durable
+          // record so the alarm/startup path does not re-poll it.
+          clearQuickIngestBatchRecord();
         }
       }
 
@@ -2600,6 +3140,7 @@ export default defineBackground({
           const sessionId = String((payload as any)?.sessionId || "").trim();
           if (sessionId) {
             quickIngestModalSessions.delete(sessionId);
+            void persistSessionState();
           }
         }
       },
@@ -2641,6 +3182,7 @@ export default defineBackground({
             cancelled: false,
             abortControllers: new Set(),
           });
+          void persistSessionState();
         }
         return startAck;
       }
@@ -2654,6 +3196,7 @@ export default defineBackground({
         const session = getQuickIngestModalSession(sessionId);
         if (session) {
           session.cancelled = true;
+          void persistSessionState();
           for (const controller of Array.from(session.abortControllers)) {
             try {
               controller.abort();
@@ -2760,6 +3303,24 @@ export default defineBackground({
       return undefined;
     };
 
+    // Defense-in-depth: only honor privileged runtime messages/ports that
+    // originate from this extension's own contexts. A compromised content
+    // script still shares our runtime id, but this rejects any sender whose id
+    // differs from ours (e.g. another extension). When the id cannot be
+    // determined (non-extension test/web contexts), we do not block.
+    const isTrustedRuntimeSender = (
+      sender: { id?: string } | null | undefined,
+    ): boolean => {
+      try {
+        const selfId = (browser as any)?.runtime?.id;
+        const senderId = sender?.id;
+        if (selfId && senderId && senderId !== selfId) return false;
+      } catch {
+        // Fall through: identity indeterminate, do not block.
+      }
+      return true;
+    };
+
     browser.storage.onChanged.addListener((changes, areaName) => {
       if (areaName !== "local") return;
       if (
@@ -2772,6 +3333,14 @@ export default defineBackground({
     });
 
     browser.runtime.onConnect.addListener((port) => {
+      if (!isTrustedRuntimeSender(port.sender)) {
+        try {
+          port.disconnect();
+        } catch (error) {
+          logBackgroundError("reject untrusted port", error);
+        }
+        return;
+      }
       if (port.name === "pgCopilot") {
         isCopilotRunning = true;
         backgroundDiagnostics.ports.copilot += 1;
@@ -2814,7 +3383,11 @@ export default defineBackground({
                   "Not authenticated. Configure tldw credentials in Settings > tldw.",
                 );
               }
-              const url = `${base}/api/v1/audio/stream/transcribe?token=${encodeURIComponent(token)}`;
+              // TASK-12106: keep the auth token OUT of the URL (URLs leak into
+              // access/proxy logs and history). The transcribe WS authenticates
+              // from an {type:"auth", token} first frame sent below on open
+              // (streaming_service.py:641-647 multi-user / 720-723 single-user).
+              const url = `${base}/api/v1/audio/stream/transcribe`;
               ws = new WebSocket(url);
               ws.binaryType = "arraybuffer";
               connectTimer = setTimeout(() => {
@@ -2836,6 +3409,13 @@ export default defineBackground({
                 if (connectTimer) {
                   clearTimeout(connectTimer);
                   connectTimer = null;
+                }
+                // Send auth as the first frame, before the content script starts
+                // streaming audio (it only sends audio after the "open" event).
+                try {
+                  ws?.send(JSON.stringify({ type: "auth", token }));
+                } catch (error) {
+                  logBackgroundError("stt websocket send auth", error);
                 }
                 safePost({ event: "open" });
               };
@@ -3211,6 +3791,14 @@ export default defineBackground({
 
     // Stream handler via Port API
     browser.runtime.onConnect.addListener((port) => {
+      if (!isTrustedRuntimeSender(port.sender)) {
+        try {
+          port.disconnect();
+        } catch (error) {
+          logBackgroundError("reject untrusted stream port", error);
+        }
+        return;
+      }
       if (port.name === "tldw:stream") {
         backgroundDiagnostics.ports.stream += 1;
         backgroundDiagnostics.lastStreamAt = Date.now();
@@ -3232,7 +3820,14 @@ export default defineBackground({
             if (!cfg?.serverUrl) throw new Error("tldw server not configured");
             const baseUrl = String(cfg.serverUrl).replace(/\/$/, "");
             const path = msg.path as string;
-            const url = path.startsWith("http")
+            const streamAccess = evaluateAbsoluteUrlAccess(path, cfg);
+            // Mirror the request-path guard: refuse cross-origin absolute URLs
+            // that are not explicitly allowlisted before opening the stream.
+            if (streamAccess.blocked) {
+              safePost({ event: "error", message: ABSOLUTE_URL_BLOCK_ERROR });
+              return;
+            }
+            const url = streamAccess.isAbsolute
               ? path
               : `${baseUrl}${path.startsWith("/") ? "" : "/"}${path}`;
             const headers: Record<string, string> = { ...(msg.headers || {}) };
@@ -3241,27 +3836,31 @@ export default defineBackground({
               if (kl === "x-api-key" || kl === "authorization")
                 delete headers[k];
             }
-            if (cfg.authMode === "single-user") {
-              const key = (cfg.apiKey || "").trim();
-              if (!key) {
-                safePost({
-                  event: "error",
-                  message:
-                    "Add or update your API key in Settings → tldw server, then try again.",
-                });
-                return;
-              }
-              headers["X-API-KEY"] = key;
-            } else if (cfg.authMode === "multi-user") {
-              const token = (cfg.accessToken || "").trim();
-              if (token) headers["Authorization"] = `Bearer ${token}`;
-              else {
-                safePost({
-                  event: "error",
-                  message:
-                    "Not authenticated. Please login under Settings > tldw.",
-                });
-                return;
+            // Skip credentials for allowlisted-but-cross-origin absolute URLs,
+            // matching request-core's `shouldSkipAuth` behavior.
+            if (!streamAccess.skipAuth) {
+              if (cfg.authMode === "single-user") {
+                const key = (cfg.apiKey || "").trim();
+                if (!key) {
+                  safePost({
+                    event: "error",
+                    message:
+                      "Add or update your API key in Settings → tldw server, then try again.",
+                  });
+                  return;
+                }
+                headers["X-API-KEY"] = key;
+              } else if (cfg.authMode === "multi-user") {
+                const token = (cfg.accessToken || "").trim();
+                if (token) headers["Authorization"] = `Bearer ${token}`;
+                else {
+                  safePost({
+                    event: "error",
+                    message:
+                      "Not authenticated. Please login under Settings > tldw.",
+                  });
+                  return;
+                }
               }
             }
             headers["Accept"] = "text/event-stream";
@@ -3304,6 +3903,7 @@ export default defineBackground({
               signal: abort.signal,
             });
             if (
+              !streamAccess.skipAuth &&
               resp.status === 401 &&
               cfg.authMode === "multi-user" &&
               cfg.refreshToken
@@ -3472,6 +4072,9 @@ export default defineBackground({
 
     runtimeOnMessage.addListener(
       (message: any, sender: any, sendResponse: any) => {
+        if (!isTrustedRuntimeSender(sender)) {
+          return false;
+        }
         backgroundDiagnostics.runtimeMessageCount += 1;
         backgroundDiagnostics.lastRuntimeMessageType =
           typeof message?.type === "string" ? message.type : null;
@@ -3511,10 +4114,38 @@ export default defineBackground({
 
     if (browser?.alarms) {
       browser.alarms.onAlarm.addListener((alarm) => {
+        if (alarm.name === INGEST_POLL_ALARM_NAME) {
+          backgroundDiagnostics.alarmFires += 1;
+          backgroundDiagnostics.lastAlarmAt = Date.now();
+          // Ensure state is hydrated (worker may have just woken), then resume
+          // any ingest polling interrupted by suspension (TASK-12094).
+          void (async () => {
+            await rehydrateSessionState();
+            await resumeActiveIngestSessions();
+          })();
+          return;
+        }
+        if (alarm.name === QUICK_INGEST_POLL_ALARM_NAME) {
+          backgroundDiagnostics.alarmFires += 1;
+          backgroundDiagnostics.lastAlarmAt = Date.now();
+          // Ensure state is hydrated (worker may have just woken), then resume
+          // any interrupted quick-ingest remote-job polling (TASK-12094).
+          void (async () => {
+            await rehydrateSessionState();
+            await resumeQuickIngestBatches();
+          })();
+          return;
+        }
         if (alarm.name !== MODEL_WARM_ALARM_NAME) return;
         backgroundDiagnostics.alarmFires += 1;
         backgroundDiagnostics.lastAlarmAt = Date.now();
         void warmModels(true);
+      });
+    }
+
+    if (browser?.runtime?.onStartup) {
+      browser.runtime.onStartup.addListener(() => {
+        void rehydrateSessionState();
       });
     }
 

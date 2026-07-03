@@ -28,7 +28,16 @@ const state = vi.hoisted(() => ({
     serverChatId: "chat-overlay-1",
     serverChatAssistantKind: null as string | null,
     serverChatAssistantId: null as string | null,
-    serverChatCharacterId: null as string | null
+    serverChatCharacterId: null as string | null,
+    setHistoryId: vi.fn(),
+    setHistory: vi.fn(),
+    setMessages: vi.fn(),
+    setServerChatId: vi.fn(),
+    setServerChatCharacterId: vi.fn(),
+    setServerChatAssistantKind: vi.fn(),
+    setServerChatAssistantId: vi.fn(),
+    setServerChatPersonaMemoryMode: vi.fn(),
+    setServerChatMetaLoaded: vi.fn()
   }
 }))
 
@@ -97,6 +106,12 @@ vi.mock("antd", async () => {
     children
   }: any) => {
     const containerRef = React.useRef<HTMLDivElement | null>(null)
+
+    React.useEffect(() => {
+      if (open) {
+        onOpenChange?.(true)
+      }
+    }, [open, onOpenChange])
 
     React.useEffect(() => {
       if (!open) return
@@ -175,7 +190,16 @@ describe("AssistantSelect behavior", () => {
       serverChatId: "chat-overlay-1",
       serverChatAssistantKind: null,
       serverChatAssistantId: null,
-      serverChatCharacterId: null
+      serverChatCharacterId: null,
+      setHistoryId: vi.fn(),
+      setHistory: vi.fn(),
+      setMessages: vi.fn(),
+      setServerChatId: vi.fn(),
+      setServerChatCharacterId: vi.fn(),
+      setServerChatAssistantKind: vi.fn(),
+      setServerChatAssistantId: vi.fn(),
+      setServerChatPersonaMemoryMode: vi.fn(),
+      setServerChatMetaLoaded: vi.fn()
     }
     mocks.listAllCharacters.mockResolvedValue([
       { id: "char-1", name: "Alpha", system_prompt: "Summary prompt" },
@@ -724,6 +748,40 @@ describe("AssistantSelect behavior", () => {
     })
   })
 
+  it("keeps event-supplied tracked mode when dropdown open change fires", async () => {
+    const user = userEvent.setup()
+    renderAssistantSelect({
+      selectionModePreference: "overlay",
+      labelOverride: "Apply assistant"
+    })
+
+    window.dispatchEvent(
+      new CustomEvent("tldw:open-assistant-select", {
+        detail: {
+          tab: "character",
+          applyAs: "tracked",
+          source: "playground-cockpit"
+        }
+      })
+    )
+
+    await user.click(await screen.findByRole("button", { name: "Alpha" }))
+
+    await waitFor(() => {
+      expect(mocks.setSelectedAssistant).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind: "character",
+          id: "char-1",
+          name: "Alpha",
+          metadata: expect.objectContaining({
+            selectionMode: "tracked"
+          })
+        })
+      )
+    })
+    expect(mocks.updateSettings).not.toHaveBeenCalled()
+  })
+
   it("uses the latest prop-driven selection mode when choosing after rerender", async () => {
     const user = userEvent.setup()
     const { rerenderAssistantSelect } = renderAssistantSelect({
@@ -804,7 +862,16 @@ describe("AssistantSelect behavior", () => {
       serverChatId: "chat-overlay-1",
       serverChatAssistantKind: "character",
       serverChatAssistantId: null,
-      serverChatCharacterId: "char-9"
+      serverChatCharacterId: "char-9",
+      setHistoryId: vi.fn(),
+      setHistory: vi.fn(),
+      setMessages: vi.fn(),
+      setServerChatId: vi.fn(),
+      setServerChatCharacterId: vi.fn(),
+      setServerChatAssistantKind: vi.fn(),
+      setServerChatAssistantId: vi.fn(),
+      setServerChatPersonaMemoryMode: vi.fn(),
+      setServerChatMetaLoaded: vi.fn()
     }
 
     renderAssistantSelect({
@@ -826,5 +893,55 @@ describe("AssistantSelect behavior", () => {
       expect(mocks.setSelectedAssistant).not.toHaveBeenCalled()
     })
     expect(mocks.updateSettings).not.toHaveBeenCalled()
+  })
+
+  it("clears the active server chat when selecting a different tracked character", async () => {
+    const user = userEvent.setup()
+    state.option = {
+      historyId: "history-miku",
+      serverChatId: "chat-miku",
+      serverChatAssistantKind: "character",
+      serverChatAssistantId: "char-1",
+      serverChatCharacterId: "char-1",
+      setHistoryId: vi.fn(),
+      setHistory: vi.fn(),
+      setMessages: vi.fn(),
+      setServerChatId: vi.fn(),
+      setServerChatCharacterId: vi.fn(),
+      setServerChatAssistantKind: vi.fn(),
+      setServerChatAssistantId: vi.fn(),
+      setServerChatPersonaMemoryMode: vi.fn(),
+      setServerChatMetaLoaded: vi.fn()
+    }
+    mocks.selectedAssistant.value = {
+      kind: "character",
+      id: "char-1",
+      name: "Alpha"
+    }
+
+    renderAssistantSelect()
+
+    await user.click(await screen.findByRole("button", { name: "Alpha" }))
+    await user.click(await screen.findByRole("button", { name: "Beta" }))
+
+    expect(state.option.setHistoryId).toHaveBeenCalledWith(null, {
+      preserveServerChatId: false
+    })
+    expect(state.option.setHistory).toHaveBeenCalledWith([])
+    expect(state.option.setMessages).toHaveBeenCalledWith([])
+    expect(state.option.setServerChatCharacterId).toHaveBeenCalledWith(null)
+    expect(state.option.setServerChatAssistantKind).toHaveBeenCalledWith(null)
+    expect(state.option.setServerChatAssistantId).toHaveBeenCalledWith(null)
+    expect(state.option.setServerChatPersonaMemoryMode).toHaveBeenCalledWith(null)
+    expect(state.option.setServerChatMetaLoaded).toHaveBeenCalledWith(false)
+    expect(state.option.setServerChatId).toHaveBeenCalledWith(null)
+    expect(mocks.setSelectedAssistant).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "character",
+        id: "char-2",
+        name: "Beta",
+        metadata: expect.objectContaining({ selectionMode: "tracked" })
+      })
+    )
   })
 })

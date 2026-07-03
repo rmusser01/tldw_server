@@ -1,15 +1,19 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import type { Character } from "@/types/character"
+import type { ChatHistory, Message } from "@/store/option/types"
 import { ChatGreetingPicker } from "../ChatGreetingPicker"
 import { useChatSettingsRecord } from "@/hooks/chat/useChatSettingsRecord"
 import { normalizeChatSettingsRecord } from "@/services/chat-settings"
 import type { ChatSettingsRecord } from "@/types/chat-session-settings"
+import { tldwClient } from "@/services/tldw/TldwApiClient"
 import {
   buildGreetingOptionsFromEntries,
   buildGreetingsChecksumFromOptions,
   collectGreetingEntries
 } from "@/utils/character-greetings"
+
+const notificationErrorMock = vi.hoisted(() => vi.fn())
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -23,6 +27,9 @@ vi.mock("@plasmohq/storage/hook", () => ({
 }))
 
 vi.mock("antd", () => ({
+  notification: {
+    error: notificationErrorMock
+  },
   Select: ({ value, onChange, options, disabled }: any) => (
     <select
       data-testid="greeting-select"
@@ -51,6 +58,13 @@ vi.mock("@/hooks/chat/useChatSettingsRecord", () => ({
   useChatSettingsRecord: vi.fn()
 }))
 
+vi.mock("@/services/tldw/TldwApiClient", () => ({
+  tldwClient: {
+    initialize: vi.fn(),
+    addChatMessage: vi.fn()
+  }
+}))
+
 const character = {
   id: "char-1",
   name: "Guide",
@@ -66,7 +80,8 @@ const alternateGreetingId = greetingOptions[1]?.id ?? null
 
 const renderPicker = (
   settingsPatch: Partial<ChatSettingsRecord>,
-  updateSettings: (patch: Partial<ChatSettingsRecord>) => Promise<ChatSettingsRecord | null>
+  updateSettings: (patch: Partial<ChatSettingsRecord>) => Promise<ChatSettingsRecord | null>,
+  extraProps: Record<string, unknown> = {}
 ) => {
   const settings = normalizeChatSettingsRecord(settingsPatch)
   vi.mocked(useChatSettingsRecord).mockReturnValue({
@@ -81,6 +96,7 @@ const renderPicker = (
       messages={[]}
       historyId="history-1"
       serverChatId={null}
+      {...extraProps}
     />
   )
 }
@@ -175,5 +191,194 @@ describe("ChatGreetingPicker", () => {
 
     const select = screen.getByTestId("greeting-select") as HTMLSelectElement
     expect(select.value).toBe(alternateGreetingId)
+  })
+
+  it("selects the current greeting as the first character message", async () => {
+    const updateSettings = vi.fn(
+      async (_patch: Partial<ChatSettingsRecord>) => null
+    )
+    vi.mocked(tldwClient.initialize).mockResolvedValue(null)
+    vi.mocked(tldwClient.addChatMessage).mockResolvedValue({
+      id: "server-message-1",
+      version: 3
+    } as any)
+    let messageState: Message[] = []
+    let historyState: ChatHistory = []
+    const setMessages = vi.fn(
+      (next: Message[] | ((prev: Message[]) => Message[])) => {
+        messageState =
+          typeof next === "function" ? next(messageState) : next
+      }
+    )
+    const setHistory = vi.fn(
+      (next: ChatHistory | ((prev: ChatHistory) => ChatHistory)) => {
+        historyState =
+          typeof next === "function" ? next(historyState) : next
+      }
+    )
+
+    renderPicker(
+      {
+        useCharacterDefault: false,
+        greetingSelectionId: alternateGreetingId,
+        greetingsChecksum: checksum,
+        greetingEnabled: true
+      },
+      updateSettings,
+      {
+        serverChatId: "server-chat-1",
+        setMessages,
+        setHistory
+      }
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: /select greeting/i }))
+
+    await waitFor(() => {
+      expect(messageState[0]).toEqual(
+        expect.objectContaining({
+          isBot: true,
+          role: "assistant",
+          name: "Guide",
+          message: "Good to see you",
+          messageType: "character:greeting",
+          serverMessageId: "server-message-1",
+          serverMessageVersion: 3
+        })
+      )
+    })
+    expect(historyState).toEqual([
+      expect.objectContaining({
+        role: "assistant",
+        content: "Good to see you",
+        messageType: "character:greeting"
+      })
+    ])
+    expect(tldwClient.addChatMessage).toHaveBeenCalledWith("server-chat-1", {
+      role: "assistant",
+      content: "Good to see you"
+    })
+  })
+
+  it("does not persist the same greeting twice during a rapid double select", async () => {
+    const updateSettings = vi.fn(
+      async (_patch: Partial<ChatSettingsRecord>) => null
+    )
+    vi.mocked(tldwClient.initialize).mockResolvedValue(null)
+    let resolveAdd: (value: unknown) => void = () => {}
+    vi.mocked(tldwClient.addChatMessage).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveAdd = resolve
+        }) as any
+    )
+    let messageState: Message[] = []
+    let historyState: ChatHistory = []
+    const setMessages = vi.fn(
+      (next: Message[] | ((prev: Message[]) => Message[])) => {
+        messageState =
+          typeof next === "function" ? next(messageState) : next
+      }
+    )
+    const setHistory = vi.fn(
+      (next: ChatHistory | ((prev: ChatHistory) => ChatHistory)) => {
+        historyState =
+          typeof next === "function" ? next(historyState) : next
+      }
+    )
+
+    renderPicker(
+      {
+        useCharacterDefault: false,
+        greetingSelectionId: alternateGreetingId,
+        greetingsChecksum: checksum,
+        greetingEnabled: true
+      },
+      updateSettings,
+      {
+        serverChatId: "server-chat-1",
+        setMessages,
+        setHistory
+      }
+    )
+
+    const button = screen.getByRole("button", { name: /select greeting/i })
+    fireEvent.click(button)
+    fireEvent.click(button)
+
+    await waitFor(() => {
+      expect(tldwClient.addChatMessage).toHaveBeenCalledTimes(1)
+    })
+
+    resolveAdd({ id: "server-message-1", version: 3 })
+    await waitFor(() => {
+      expect(messageState).toHaveLength(1)
+    })
+    expect(historyState).toHaveLength(1)
+  })
+
+  it("notifies when a selected greeting cannot be synced to the server chat", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    vi.mocked(tldwClient.addChatMessage).mockRejectedValueOnce(
+      new Error("server unavailable")
+    )
+    const updateSettings = vi.fn(
+      async (patch: Partial<ChatSettingsRecord>) =>
+        normalizeChatSettingsRecord({
+          greetingSelectionId: patch.greetingSelectionId,
+          greetingSelectionChecksum: patch.greetingSelectionChecksum,
+          greetingEnabled: true
+        })
+    )
+    let messageState: Message[] = []
+    let historyState: ChatHistory = []
+    const setMessages = vi.fn((next: Message[] | ((prev: Message[]) => Message[])) => {
+      messageState = typeof next === "function" ? next(messageState) : next
+    })
+    const setHistory = vi.fn((next: ChatHistory | ((prev: ChatHistory) => ChatHistory)) => {
+      historyState = typeof next === "function" ? next(historyState) : next
+    })
+
+    try {
+      renderPicker(
+        {
+          greetingSelectionId: alternateGreetingId,
+          greetingSelectionChecksum: checksum,
+          greetingEnabled: true
+        },
+        updateSettings,
+        {
+          serverChatId: "server-chat-1",
+          setMessages,
+          setHistory
+        }
+      )
+
+      fireEvent.click(screen.getByRole("button", { name: /select greeting/i }))
+
+      await waitFor(() => {
+        expect(notificationErrorMock).toHaveBeenCalledWith(
+          expect.objectContaining({
+            message: "Greeting sync failed",
+            description:
+              "The greeting was added locally but could not be saved to the server chat."
+          })
+        )
+      })
+      expect(messageState[0]).toEqual(
+        expect.objectContaining({
+          message: "Good to see you",
+          messageType: "character:greeting"
+        })
+      )
+      expect(historyState[0]).toEqual(
+        expect.objectContaining({
+          content: "Good to see you",
+          messageType: "character:greeting"
+        })
+      )
+    } finally {
+      warnSpy.mockRestore()
+    }
   })
 })

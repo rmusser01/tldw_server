@@ -57,6 +57,7 @@ async def download_file(
 
     base_dir = _resolve_storage_base_dir(user.id, file_record)
     try:
+        # lgtm[py/path-injection]: base_dir comes from the generated-file record owner scope.
         base_dir_resolved = base_dir.resolve()
         resolved_path_str = safe_join(str(base_dir_resolved), storage_path)
         if resolved_path_str is None:
@@ -65,6 +66,7 @@ async def download_file(
     except ValueError:
         raise HTTPException(status_code=403, detail="Invalid file path") from None
 
+    # lgtm[py/path-injection]: full_path is produced by safe_join under base_dir_resolved.
     if not full_path.is_file():
         raise HTTPException(status_code=404, detail="File not found on disk")
 

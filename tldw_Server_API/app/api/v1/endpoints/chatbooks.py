@@ -219,6 +219,7 @@ def _setup_secure_temp_directory(user_id: str) -> Path:
 
 def _resolve_chatbook_temp_file(temp_dir: Path, safe_filename: str, *, prefix: str) -> Path:
     """Resolve a sanitized upload filename under the checked chatbooks temp directory."""
+    # lgtm[py/path-injection]: temp_dir is normalized by _setup_secure_temp_directory.
     temp_dir_resolved = temp_dir.resolve(strict=True)
     joined = safe_join(
         str(temp_dir_resolved),
@@ -900,6 +901,7 @@ async def import_chatbook(
             # For async jobs, return a failure response with job_id so clients can inspect status.
             if import_request.async_mode and result:
                 # Enqueue failed; cleanup temp file since no worker will consume it.
+                # lgtm[py/path-injection]: temp_file is resolved by _resolve_chatbook_temp_file.
                 if temp_file is not None and temp_file.exists():
                     try:
                         # lgtm[py/path-injection] temp_file is resolved by _resolve_chatbook_temp_file.
@@ -935,6 +937,7 @@ async def import_chatbook(
         raise HTTPException(status_code=500, detail="An error occurred while importing the chatbook") from None
     finally:
         # Cleanup uploaded file if not async
+        # lgtm[py/path-injection]: temp_file is resolved by _resolve_chatbook_temp_file.
         if temp_file is not None and not import_request.async_mode and temp_file.exists():
             try:
                 # lgtm[py/path-injection] temp_file is resolved by _resolve_chatbook_temp_file.
@@ -1185,6 +1188,7 @@ async def preview_chatbook(
         raise HTTPException(status_code=500, detail="An error occurred while previewing the chatbook") from None
     finally:
         # Ensure preview upload cleanup on all paths
+        # lgtm[py/path-injection]: temp_file is resolved by _resolve_chatbook_temp_file.
         if temp_file is not None and temp_file.exists():
             try:
                 # lgtm[py/path-injection] temp_file is resolved by _resolve_chatbook_temp_file.

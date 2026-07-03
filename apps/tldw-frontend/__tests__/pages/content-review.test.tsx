@@ -1,4 +1,3 @@
-import type { ReactNode } from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -33,10 +32,6 @@ vi.mock('dexie', () => ({
 
 vi.mock('@web/components/ui/ToastProvider', () => ({
   useToast: () => ({ show: mocks.showToast }),
-}));
-
-vi.mock('@web/components/layout/Layout', () => ({
-  Layout: ({ children }: { children: ReactNode }) => <div>{children}</div>,
 }));
 
 vi.mock('@web/lib/api', () => ({

@@ -204,32 +204,14 @@ describe("Playground mature cockpit surfaces", () => {
     expect(openContext).toHaveBeenCalledTimes(1)
   })
 
-  it("keeps critical warnings visible when both cockpit rails are collapsed", () => {
+  it("keeps the chat surface visible without adding a bottom status rail when both cockpit rails are collapsed", () => {
     render(
       <PlaygroundCockpitShell
         mode="cockpit"
-        onModeChange={vi.fn()}
         leftRailVisible={false}
         rightRailVisible={false}
         leftRail={<div>Context controls</div>}
         rightRail={<div>Runtime controls</div>}
-        statusStrip={
-          <PlaygroundStatusStrip
-            mode="cockpit"
-            streaming={false}
-            selectedProvider="openai"
-            selectedModel="gpt-4.1-mini"
-            messageCount={2}
-            sessionLabel="Server chat"
-            sessionTitle="Archived investigation"
-            sessionStatus="failed"
-            sessionStatusLabel="Load failed"
-            sessionError="Conversation no longer exists"
-            hasContext={false}
-            degradedChecks={["Chacha notes unavailable"]}
-            temporaryChat={false}
-          />
-        }
       >
         <div>Chat transcript</div>
       </PlaygroundCockpitShell>
@@ -238,17 +220,12 @@ describe("Playground mature cockpit surfaces", () => {
     expect(screen.queryByTestId("playground-cockpit-left-rail")).toBeNull()
     expect(screen.queryByTestId("playground-cockpit-right-rail")).toBeNull()
     expect(screen.getByTestId("playground-cockpit-mode-summary")).toHaveTextContent(
-      "Cockpit rails hidden. Status remains visible."
+      "Cockpit rails hidden. Chat and composer remain active."
     )
-
-    const status = screen.getByRole("status", { name: "Chat status" })
-    expect(within(status).getByText("Load failed")).toBeInTheDocument()
     expect(
-      within(status).getByText("Conversation no longer exists")
-    ).toBeInTheDocument()
-    expect(
-      within(status).getByText("Chacha notes unavailable")
-    ).toBeInTheDocument()
+      screen.queryByTestId("playground-cockpit-status-strip")
+    ).not.toBeInTheDocument()
+    expect(screen.getByText("Chat transcript")).toBeInTheDocument()
   })
 
   it("uses a controlled mobile cockpit panel instead of independent details", () => {
@@ -257,14 +234,12 @@ describe("Playground mature cockpit surfaces", () => {
     render(
       <PlaygroundCockpitShell
         mode="cockpit"
-        onModeChange={vi.fn()}
         leftRailVisible
         rightRailVisible
         mobilePanel={"context" satisfies PlaygroundCockpitMobilePanel}
         onMobilePanelChange={onMobilePanelChange}
         leftRail={<div>Context controls</div>}
         rightRail={<div>Runtime controls</div>}
-        statusStrip={<div>Ready</div>}
       >
         <div>Chat transcript</div>
       </PlaygroundCockpitShell>
@@ -297,18 +272,14 @@ describe("Playground mature cockpit surfaces", () => {
   })
 
   it("keeps mobile cockpit panel state explicit while preserving the draft surface", () => {
-    const onModeChange = vi.fn()
-
     render(
       <PlaygroundCockpitShell
         mode="cockpit"
-        onModeChange={onModeChange}
         leftRailVisible
         rightRailVisible
         mobilePanel={"context" satisfies PlaygroundCockpitMobilePanel}
         leftRail={<div>Context controls</div>}
         rightRail={<div>Runtime controls</div>}
-        statusStrip={<div>Ready</div>}
       >
         <label htmlFor="mobile-draft">Message</label>
         <textarea id="mobile-draft" data-testid="mobile-draft" defaultValue="Draft stays here" />
@@ -329,13 +300,10 @@ describe("Playground mature cockpit surfaces", () => {
       "min-h-[44px]"
     )
 
-    const focusFromPanel = within(mobilePanels).getByRole("button", {
-      name: "Return to focus chat",
-    })
-    expect(focusFromPanel).toBeInTheDocument()
-
-    fireEvent.click(focusFromPanel)
-
-    expect(onModeChange).toHaveBeenCalledWith("focus")
+    expect(
+      within(mobilePanels).queryByRole("button", {
+        name: "Return to focus chat",
+      })
+    ).not.toBeInTheDocument()
   })
 })

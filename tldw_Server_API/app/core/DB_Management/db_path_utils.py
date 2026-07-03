@@ -120,6 +120,7 @@ def _ensure_dir(path: Path, *, label: str) -> bool:
         if path.is_symlink():
             logger.error(f"Refusing to use symlinked {label} directory {path}")
             raise StorageUnavailableError(f"Failed to create {label} directory") from e
+        # lgtm[py/path-injection] callers pass paths normalized to trusted project/user database roots.
         if path.is_dir():
             return False
         logger.error(f"Failed to create {label} directory {path}: {e}")

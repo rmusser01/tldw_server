@@ -18,7 +18,8 @@
 import importlib.util
 import inspect
 import os
-import subprocess
+# Used for a fixed, shell-free optional package installer.
+import subprocess  # nosec B404
 import sys
 import tempfile
 from dataclasses import dataclass
@@ -280,7 +281,7 @@ def install_parakeet_mlx() -> bool:
             "git+https://github.com/senstella/parakeet-mlx.git"
         ]
 
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True)  # nosec B603
 
         if result.returncode == 0:
             logger.info("Successfully installed parakeet-mlx")

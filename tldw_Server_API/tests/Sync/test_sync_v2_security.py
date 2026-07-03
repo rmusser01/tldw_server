@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import pytest
 
+from tldw_Server_API.app.core.Sync.v2.blob_store import (
+    SyncBlobStoreError,
+    _commit_temp_path,
+)
 from tldw_Server_API.app.core.Sync.v2.models import SyncEnvelope, SyncKeyRecord
 from tldw_Server_API.app.core.Sync.v2.security import (
     PrivatePayloadValidationError,
@@ -10,6 +14,8 @@ from tldw_Server_API.app.core.Sync.v2.security import (
     redact_private_mapping_for_log,
     validate_private_payload,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def _stored_envelope(**overrides) -> SyncEnvelope:
@@ -121,6 +127,26 @@ def test_private_mapping_redaction_is_recursive_and_preserves_safe_metadata():
     assert "known private note" not in rendered
     assert "ciphertext:secret" not in rendered
     assert "wrapped:secret" not in rendered
+
+
+@pytest.mark.parametrize(
+    ("digest", "upload_segment", "message"),
+    [
+        ("a" * 63, "upload", "digest must be 64 hex chars"),
+        ("g" * 64, "upload", "digest must be hex"),
+        ("a" * 64, "../upload", "upload_segment contains unsafe path characters"),
+    ],
+)
+def test_sync_blob_temp_path_validates_digest_and_upload_segment(
+    tmp_path,
+    digest,
+    upload_segment,
+    message,
+):
+    final_path = tmp_path / "blob.bin"
+
+    with pytest.raises(SyncBlobStoreError, match=message):
+        _commit_temp_path(final_path, digest=digest, upload_segment=upload_segment)
 
 
 def test_private_mapping_redacts_human_readable_private_fields_recursively():

@@ -15,10 +15,6 @@ from fastapi.testclient import TestClient
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 
 
-
-pytestmark = pytest.mark.pg_jobs
-
-
 def _ensure_jobs_router_registered(app) -> None:
     has_events_route = any(
         isinstance(route, APIRoute)

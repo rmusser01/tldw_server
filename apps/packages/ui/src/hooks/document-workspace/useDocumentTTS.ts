@@ -69,6 +69,17 @@ export interface UseDocumentTTSReturn {
 const DEFAULT_VOICE = DEFAULT_TLDW_TTS_VOICE
 const DEFAULT_SPEED = 1.0
 
+/** Detach all listeners we attach in speak() so a stopped/replaced audio element
+ * can't fire onpause/onerror/ontimeupdate and clobber state after teardown. */
+const detachAudioListeners = (audio: HTMLAudioElement | null): void => {
+  if (!audio) return
+  audio.onended = null
+  audio.onerror = null
+  audio.onplay = null
+  audio.onpause = null
+  audio.ontimeupdate = null
+}
+
 const readStoredVoicePreference = (): string => {
   if (typeof window === "undefined") return ""
   try {
@@ -158,6 +169,7 @@ export function useDocumentTTS(): UseDocumentTTSReturn {
   useEffect(() => {
     return () => {
       if (audioRef.current) {
+        detachAudioListeners(audioRef.current)
         audioRef.current.pause()
         audioRef.current = null
       }
@@ -209,6 +221,7 @@ export function useDocumentTTS(): UseDocumentTTSReturn {
   const speak = useCallback(async (text: string) => {
     // Stop any current playback
     if (audioRef.current) {
+      detachAudioListeners(audioRef.current)
       audioRef.current.pause()
       audioRef.current = null
     }
@@ -273,6 +286,11 @@ export function useDocumentTTS(): UseDocumentTTSReturn {
       }
 
       audio.onerror = () => {
+        // Free the blob URL on the error path too (onended isn't fired on error).
+        if (audioUrlRef.current) {
+          URL.revokeObjectURL(audioUrlRef.current)
+          audioUrlRef.current = null
+        }
         setState((prev) => ({
           ...prev,
           isPlaying: false,
@@ -308,7 +326,16 @@ export function useDocumentTTS(): UseDocumentTTSReturn {
 
       audio.volume = volume
 
-      await audio.play()
+      try {
+        await audio.play()
+      } catch (playErr) {
+        // A Stop/pause issued right after Speak aborts the play() promise; that
+        // is expected teardown, not a playback error worth surfacing.
+        if (playErr instanceof DOMException && playErr.name === "AbortError") {
+          return
+        }
+        throw playErr
+      }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "TTS failed"
       setState((prev) => ({
@@ -339,6 +366,9 @@ export function useDocumentTTS(): UseDocumentTTSReturn {
   // Stop playback
   const stop = useCallback(() => {
     if (audioRef.current) {
+      // Detach first so the pause() below can't fire onpause and leave isPaused
+      // stale after we reset state.
+      detachAudioListeners(audioRef.current)
       audioRef.current.pause()
       audioRef.current.currentTime = 0
       audioRef.current = null

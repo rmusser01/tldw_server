@@ -13,7 +13,7 @@ import time
 from functools import lru_cache
 from html import unescape
 from typing import Any, TypedDict
-from urllib.parse import unquote, urlencode, urlparse
+from urllib.parse import parse_qsl, quote, unquote, urlencode, urlparse, urlunparse
 
 #
 # 3rd-Party Imports
@@ -84,6 +84,11 @@ _WEBSEARCH_SENSITIVE_LOG_KEYS = {
     "x-api-key",
     "x-subscription-token",
 }
+_WEBSEARCH_SENSITIVE_PAIR_RE = re.compile(
+    r"(?i)\b("
+    + "|".join(re.escape(key) for key in sorted(_WEBSEARCH_SENSITIVE_LOG_KEYS, key=len, reverse=True))
+    + r")\s*=\s*[^&\s]+"
+)
 
 
 def _redact_websearch_log_value(value: Any) -> Any:
@@ -100,7 +105,35 @@ def _redact_websearch_log_value(value: Any) -> Any:
         return [_redact_websearch_log_value(item) for item in value]
     if isinstance(value, tuple):
         return tuple(_redact_websearch_log_value(item) for item in value)
+    if isinstance(value, str):
+        return _redact_websearch_log_text(value)
     return value
+
+
+def _redact_websearch_log_text(value: str) -> str:
+    parsed = urlparse(value)
+    if parsed.scheme in {"http", "https"} and parsed.netloc:
+        safe_pairs = [
+            (
+                key,
+                "[REDACTED]"
+                if key.strip().lower() in _WEBSEARCH_SENSITIVE_LOG_KEYS
+                else redacted_value,
+            )
+            for key, raw_value in parse_qsl(parsed.query, keep_blank_values=True)
+            for redacted_value in (_redact_websearch_log_text(raw_value),)
+        ]
+        safe_query = urlencode(safe_pairs, doseq=True, quote_via=quote)
+        return urlunparse(parsed._replace(query=safe_query, fragment=""))
+    return _WEBSEARCH_SENSITIVE_PAIR_RE.sub(lambda match: f"{match.group(1)}=[REDACTED]", value)
+
+
+def _debug_websearch_json(message: str, value: Any) -> None:
+    logging.opt(lazy=True).debug(
+        "{}: {}",
+        message,
+        lambda: json.dumps(_redact_websearch_log_value(value), indent=2),
+    )
 
 
 def _websearch_browser_headers(
@@ -1710,14 +1743,14 @@ def test_perform_websearch_google():
     # Google Searches
     try:
         perform_websearch("google", "What is the capital of France?", "US", "en", "en", 10)
-        print("Test 1 completed")
+        logging.info("Google websearch smoke test 1 completed")
         # FIXME - Fails. Need to fix arg formatting
         perform_websearch("google", "What is the capital of France?", "US", "en", "en", 10, date_range="y", safesearch="active", site_blacklist=["spam-site.com"])
-        print("Test 2 completed")
+        logging.info("Google websearch smoke test 2 completed")
         perform_websearch("google", "What is the capital of France?", "US", "en", "en", 10)
-        print("Test 3 completed")
+        logging.info("Google websearch smoke test 3 completed")
     except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
-        print("Error performing google searches")
+        logging.exception("Error performing google searches")
     pass
 
 
@@ -1730,20 +1763,20 @@ def test_perform_websearch_brave():
     # Brave Searches
     try:
         perform_websearch("brave", "What is the capital of France?", "US", "en", "en", 10)
-        print("Test 7 completed")
+        logging.info("Brave websearch smoke test completed")
     except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
-        print("Error performing brave searches")
+        logging.exception("Error performing brave searches")
 
 
 def test_perform_websearch_ddg():
     # DuckDuckGo Searches
     try:
         perform_websearch("duckduckgo", "What is the capital of France?", "US", "en", "en", 10)
-        print("Test 6 completed")
+        logging.info("DuckDuckGo websearch smoke test 1 completed")
         perform_websearch("duckduckgo", "What is the capital of France?", "US", "en", "en", 10, date_range="y")
-        print("Test 7 completed")
+        logging.info("DuckDuckGo websearch smoke test 2 completed")
     except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
-        print("Error performing duckduckgo searches")
+        logging.exception("Error performing duckduckgo searches")
 
 
 # FIXME
@@ -1751,27 +1784,27 @@ def test_perform_websearch_kagi():
     # Kagi Searches
     try:
         perform_websearch("kagi", "What is the capital of France?", "US", "en", "en", 10)
-        print("Test 8 completed")
+        logging.info("Kagi websearch smoke test completed")
     except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
-        print("Error performing kagi searches")
+        logging.exception("Error performing kagi searches")
 
 # FIXME
 def test_perform_websearch_serper():
     # Serper Searches
     try:
         perform_websearch("serper", "What is the capital of France?", "US", "en", "en", 10)
-        print("Test 9 completed")
+        logging.info("Serper websearch smoke test completed")
     except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
-        print("Error performing serper searches")
+        logging.exception("Error performing serper searches")
 
 # FIXME
 def test_perform_websearch_tavily():
     # Tavily Searches
     try:
         perform_websearch("tavily", "What is the capital of France?", "US", "en", "en", 10)
-        print("Test 10 completed")
+        logging.info("Tavily websearch smoke test completed")
     except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
-        print("Error performing tavily searches")
+        logging.exception("Error performing tavily searches")
 
 
 # FIXME
@@ -1779,9 +1812,9 @@ def test_perform_websearch_searx():
     # Searx Searches
     try:
         perform_websearch("searx", "What is the capital of France?", "US", "en", "en", 10)
-        print("Test 11 completed")
+        logging.info("Searx websearch smoke test completed")
     except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
-        print("Error performing searx searches")
+        logging.exception("Error performing searx searches")
 
 
 # FIXME
@@ -1789,9 +1822,9 @@ def test_perform_websearch_yandex():
     #Yandex Searches
     try:
         perform_websearch("yandex", "What is the capital of France?", "US", "en", "en", 10)
-        print("Test 12 completed")
+        logging.info("Yandex websearch smoke test completed")
     except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
-        print("Error performing yandex searches")
+        logging.exception("Error performing yandex searches")
     pass
 
 #
@@ -2061,13 +2094,11 @@ def test_search_brave():
     result_filter = None
     result = search_web_brave(search_term, country, search_lang, ui_lang, result_count, safesearch, date_range,
                              result_filter)
-    print("Brave Search Results:")
-    print(result)
+    _debug_websearch_json("Brave search smoke raw results", result)
 
     output_dict = {"results": []}
     parse_brave_results(result, output_dict)
-    print("Parsed Brave Results:")
-    print(json.dumps(output_dict, indent=2))
+    _debug_websearch_json("Parsed Brave search smoke results", output_dict)
 
 
 def parse_brave_results(raw_results: dict, output_dict: dict) -> None:
@@ -2236,23 +2267,18 @@ def test_search_duckduckgo():
             timelimit="w",
             max_results=10
         )
-        print(f"Number of results: {len(results)}")
-        for result in results:
-            print(f"Title: {result['title']}")
-            print(f"URL: {result['href']}")
-            print(f"Snippet: {result['body']}")
-            print("---")
+        logging.info(f"DuckDuckGo search smoke result count: {len(results)}")
+        _debug_websearch_json("DuckDuckGo search smoke raw results", results)
 
         # Parse the results
         output_dict = {"results": []}
         parse_duckduckgo_results({"results": results}, output_dict)
-        print("Parsed DuckDuckGo Results:")
-        print(json.dumps(output_dict, indent=2))
+        _debug_websearch_json("Parsed DuckDuckGo results", output_dict)
 
     except ValueError as e:
-        print(f"Invalid input: {str(e)}")
+        logging.warning(f"Invalid DuckDuckGo smoke input: {str(e)}")
     except (NetworkError, RetryExhaustedError) as e:
-        print(f"Request error: {str(e)}")
+        logging.warning(f"DuckDuckGo smoke request error: {str(e)}")
 
 
 def parse_duckduckgo_results(raw_results: dict, output_dict: dict) -> None:
@@ -2528,7 +2554,7 @@ def test_search_google():
         site_blacklist=site_blacklist,
         sort_results_by=sort_results_by,
     )
-    print(result)
+    logging.debug(f"Google search smoke raw results: {_redact_websearch_log_value(result)}")
     return result
 
 
@@ -2540,10 +2566,10 @@ def parse_google_results(raw_results: dict, output_dict: dict) -> None:
         raw_results (Dict): Raw Google API response.
         output_dict (Dict): Dictionary to store processed results.
     """
-    # Lower verbosity: only log raw payload at debug level
-    logging.debug(
+    # Lower verbosity: only log raw payload at debug level.
+    logging.opt(lazy=True).debug(
         "Raw results received: {}",
-        json.dumps(_redact_websearch_log_value(raw_results), indent=2),
+        lambda: json.dumps(_redact_websearch_log_value(raw_results), indent=2),
     )
     try:
         # Initialize results list if not present
@@ -2637,7 +2663,7 @@ def test_parse_google_results():
     raw_results = {}
     raw_results = test_search_google()
     parse_google_results(raw_results, parsed_results)
-    print(f"Parsed search results: {parsed_results}")
+    logging.debug(f"Parsed Google search smoke results: {parsed_results}")
     pass
 
 
@@ -2675,7 +2701,7 @@ def test_search_kagi():
     search_term = "How can I bake a cherry cake"
     result_count = 10
     result = search_web_kagi(search_term, result_count)
-    print(result)
+    logging.debug(f"Kagi search smoke raw results: {_redact_websearch_log_value(result)}")
 
 
 def parse_kagi_results(raw_results: dict, output_dict: dict) -> None:
@@ -2849,7 +2875,7 @@ def test_search_searx():
     # Use a different Searx instance to avoid rate limiting
     searx_url = "https://searx.be"  # Example of a different Searx instance
     result = search_web_searx("What goes into making a cherry cake?", searx_url=searx_url)
-    print(result)
+    logging.debug(f"Searx search smoke raw results: {_redact_websearch_log_value(result)}")
 
 def parse_searx_results(searx_search_results, web_search_results_dict):
     try:
@@ -3110,7 +3136,7 @@ def search_web_tavily(search_query, result_count=10, site_whitelist=None, site_b
 
 def test_search_tavily():
     result = search_web_tavily("How can I bake a cherry cake?")
-    print(result)
+    logging.debug(f"Tavily search smoke raw results: {_redact_websearch_log_value(result)}")
 
 
 def parse_tavily_results(tavily_search_results, web_search_results_dict):
