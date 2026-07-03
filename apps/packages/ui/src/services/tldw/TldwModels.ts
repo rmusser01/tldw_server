@@ -73,6 +73,11 @@ const isAbortLikeModelFetchError = (error: unknown): boolean => {
   )
 }
 
+const hasUsableApiKey = (value: unknown): boolean => {
+  const key = String(value || "").trim()
+  return Boolean(key && !isPlaceholderApiKey(key))
+}
+
 export interface ModelInfo {
   id: string
   name: string
@@ -167,13 +172,7 @@ export class TldwModelsService {
       return Boolean(String(config.accessToken || "").trim())
     }
 
-    const runtimeApiKey = String(getRuntimeSingleUserApiKeyOverride() || "").trim()
-    if (runtimeApiKey && !isPlaceholderApiKey(runtimeApiKey)) return true
-
-    const key = String(config.apiKey || "").trim()
-    if (!key) return false
-    if (isPlaceholderApiKey(key)) return false
-    return true
+    return hasUsableApiKey(getRuntimeSingleUserApiKeyOverride()) || hasUsableApiKey(config.apiKey)
   }
 
   private buildCacheScope(config: TldwConfig | null): string {
@@ -181,12 +180,9 @@ export class TldwModelsService {
     const serverUrl = String(config.serverUrl || "").trim().toLowerCase()
     const authMode = String(config.authMode || "single-user")
     const hasAccessToken = Boolean(String(config.accessToken || "").trim())
-    const apiKey = String(config.apiKey || "").trim()
-    const runtimeApiKey = String(getRuntimeSingleUserApiKeyOverride() || "").trim()
-    const hasApiKey = Boolean(
-      (apiKey && !isPlaceholderApiKey(apiKey)) ||
-        (runtimeApiKey && !isPlaceholderApiKey(runtimeApiKey))
-    )
+    const hasApiKey =
+      hasUsableApiKey(config.apiKey) ||
+      hasUsableApiKey(getRuntimeSingleUserApiKeyOverride())
     const orgId = config.orgId != null ? String(config.orgId) : "none"
     return `${serverUrl}|${authMode}|${hasAccessToken ? "token" : hasApiKey ? "key" : "none"}|${orgId}`
   }

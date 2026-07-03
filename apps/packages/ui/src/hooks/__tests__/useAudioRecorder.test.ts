@@ -16,6 +16,7 @@ const AUDIO_CAPTURE_COORDINATOR_KEY = Symbol.for(
 
 // Track constructed recorders so tests can trigger lifecycle events (onerror).
 const recorderInstances: MockMediaRecorder[] = []
+let failNextRecorderStart = false
 
 class MockMediaRecorder {
   ondataavailable: ((e: { data: Blob }) => void) | null = null
@@ -29,6 +30,10 @@ class MockMediaRecorder {
   }
 
   start = vi.fn(() => {
+    if (failNextRecorderStart) {
+      failNextRecorderStart = false
+      throw new Error("MediaRecorder start failed")
+    }
     this.state = "recording"
   })
 
@@ -63,6 +68,7 @@ describe("useAudioRecorder", () => {
     vi.useFakeTimers()
     vi.clearAllMocks()
     recorderInstances.length = 0
+    failNextRecorderStart = false
     mockGetUserMedia.mockResolvedValue({
       getTracks: () => [{ stop: mockTrackStop }]
     })
@@ -311,5 +317,24 @@ describe("useAudioRecorder", () => {
     // A start while already recording must not acquire a second stream.
     expect(mockGetUserMedia).toHaveBeenCalledTimes(1)
     expect(recorderInstances).toHaveLength(1)
+  })
+
+  it("clears recorder state when MediaRecorder.start throws synchronously", async () => {
+    const { result } = renderHook(() => useAudioRecorder())
+
+    failNextRecorderStart = true
+
+    await act(async () => {
+      await expect(result.current.startRecording()).rejects.toThrow(
+        "MediaRecorder start failed"
+      )
+    })
+
+    await act(async () => {
+      await result.current.startRecording()
+    })
+
+    expect(mockGetUserMedia).toHaveBeenCalledTimes(2)
+    expect(result.current.status).toBe("recording")
   })
 })

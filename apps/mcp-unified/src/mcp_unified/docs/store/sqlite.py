@@ -6,6 +6,7 @@ from hashlib import sha256
 from importlib import resources
 import json
 from pathlib import Path
+import re
 import sqlite3
 from typing import Any
 
@@ -18,6 +19,8 @@ _STORE_PACKAGE = "mcp_unified.docs.store"
 _SCHEMA_RESOURCE = "schema.sql"
 _SCOPE_SENTINEL = ""
 _FTS_PHRASE_QUOTE = '"'
+_SQLITE_BUSY_TIMEOUT_SECONDS = 5.0
+_SQLITE_BUSY_TIMEOUT_MS = 5000
 _COUNT_SQL = {
     "docs_documents": "SELECT COUNT(*) AS count FROM docs_documents",
     "docs_chunks": "SELECT COUNT(*) AS count FROM docs_chunks",
@@ -30,6 +33,10 @@ _SCOPE_TABLE_INFO_SQL = {
     "docs_keywords": "PRAGMA table_info(docs_keywords)",
     "docs_aliases": "PRAGMA table_info(docs_aliases)",
 }
+_INDEX_LIST_SQL = {
+    "docs_documents": "PRAGMA index_list(docs_documents)",
+}
+_SAFE_SQLITE_IDENTIFIER_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _SCOPE_BACKFILL_SQL = {
     "docs_documents": (
         "UPDATE docs_documents SET owner_scope = ? WHERE owner_scope IS NULL",
@@ -58,9 +65,14 @@ class DocsCatalogStore:
 
     def connect(self) -> sqlite3.Connection:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=_SQLITE_BUSY_TIMEOUT_SECONDS)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute(f"PRAGMA busy_timeout = {_SQLITE_BUSY_TIMEOUT_MS}")
+        try:
+            conn.execute("PRAGMA journal_mode = WAL")
+        except sqlite3.Error as exc:
+            logger.debug("Could not enable WAL mode for docs catalog: {}", exc)
         return conn
 
     def migrate(self) -> None:
@@ -100,6 +112,7 @@ class DocsCatalogStore:
         keywords: Iterable[str],
         collection_names: Iterable[str],
         metadata: Mapping[str, Any],
+        prune_orphan_keywords: bool = True,
     ) -> int:
         owner_scope, profile_scope = _scope_values(scope)
         metadata_map = dict(metadata or {})
@@ -159,6 +172,8 @@ class DocsCatalogStore:
 
                 self._replace_document_rows(conn, document_id, title, sections, chunks)
                 self._replace_document_keywords(conn, owner_scope, profile_scope, document_id, keywords)
+                if prune_orphan_keywords:
+                    self._prune_orphan_keywords(conn, owner_scope, profile_scope)
                 self._replace_collection_memberships(
                     conn,
                     owner_scope,
@@ -553,6 +568,13 @@ class DocsCatalogStore:
             with conn:
                 self._assert_document_in_scope(conn, owner_scope, profile_scope, document_id)
                 self._replace_document_keywords(conn, owner_scope, profile_scope, document_id, keywords)
+                self._prune_orphan_keywords(conn, owner_scope, profile_scope)
+
+    def prune_orphan_keywords(self, *, scope: AccessScope) -> None:
+        owner_scope, profile_scope = _scope_values(scope)
+        with closing(self.connect()) as conn:
+            with conn:
+                self._prune_orphan_keywords(conn, owner_scope, profile_scope)
 
     def _resolve_document_id(self, scope: AccessScope, name: str) -> int | None:
         owner_scope, profile_scope = _scope_values(scope)
@@ -808,6 +830,13 @@ class DocsCatalogStore:
                 """,
                 (int(row["id"]), document_id),
             )
+
+    @staticmethod
+    def _prune_orphan_keywords(
+        conn: sqlite3.Connection,
+        owner_scope: str,
+        profile_scope: str,
+    ) -> None:
         conn.execute(
             """
             DELETE FROM docs_keywords
@@ -1057,15 +1086,19 @@ def _table_has_scope_columns(conn: sqlite3.Connection, table_name: str) -> bool:
 
 def _table_has_unique_index(conn: sqlite3.Connection, table_name: str, columns: tuple[str, ...]) -> bool:
     try:
-        indexes = conn.execute(f"PRAGMA index_list({table_name})").fetchall()
-    except sqlite3.Error:
+        indexes = conn.execute(_INDEX_LIST_SQL[table_name]).fetchall()
+    except (KeyError, sqlite3.Error):
         return False
     for index in indexes:
         if not bool(index["unique"]):
             continue
-        index_name = index["name"]
+        index_name = str(index["name"])
+        if not _SAFE_SQLITE_IDENTIFIER_RE.fullmatch(index_name):
+            continue
         try:
-            indexed_columns = conn.execute(f"PRAGMA index_info({index_name})").fetchall()
+            # codeql[py/sql-injection]: index_name comes from SQLite metadata and is
+            # validated against a simple identifier allowlist before interpolation.
+            indexed_columns = conn.execute(f'PRAGMA index_info("{index_name}")').fetchall()
         except sqlite3.Error:
             continue
         if tuple(row["name"] for row in indexed_columns) == columns:

@@ -155,6 +155,7 @@ export function useAudioRecorder(): AudioRecorderResult {
     } catch (error) {
       stopTimer()
       stopMediaTracks()
+      recorderRef.current = null
       throw error
     } finally {
       startingRef.current = false

@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -121,6 +123,17 @@ def test_release_helper_updates_repository_readme_release_references() -> None:
     assert f"`{target_version}` Beta status. Expect rough edges and please report issues." in updated_text
     assert f"beyond `{target_version}`" in updated_text
     assert f"post-`{target_version}` branch work" in updated_text
+
+
+def test_release_helper_raises_when_post_release_anchor_is_missing() -> None:
+    readme_text = (
+        "## Current Status\n\n"
+        "- `0.1.34` Beta status. Expect rough edges and please report issues.\n"
+        "- The `dev` branch carries post-`0.1.34` branch work beyond `0.1.34`.\n"
+    )
+
+    with pytest.raises(ValueError, match="post-release reference"):
+        update_readme_release_references(readme_text, "9.9.9")
 
 
 def test_mkdocs_version_metadata_raises_for_missing_anchor() -> None:

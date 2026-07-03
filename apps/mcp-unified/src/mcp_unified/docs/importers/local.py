@@ -57,8 +57,12 @@ class DocsImportService:
                 keywords=keyword_tuple,
                 collection_names=collection_tuple,
                 metadata={"importer": "local"},
+                prune_orphan_keywords=False,
             )
             imported.append({"id": document_id, "title": parsed.title, "chunks": len(chunks)})
+
+        if imported:
+            self.store.prune_orphan_keywords(scope=scope)
 
         return {"status": "created" if imported else "unchanged", "documents": imported}
 
@@ -105,7 +109,14 @@ class DocsImportService:
                 details={"path": str(path), "suffix": suffix},
             )
         self._assert_file_size(path)
-        text = path.read_text(encoding="utf-8")
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError as exc:
+            raise DocsError(
+                code="import_file_decode_error",
+                message="Import file is not valid UTF-8.",
+                details={"path": str(path.resolve())},
+            ) from exc
 
         if suffix in {".md", ".markdown"}:
             return parse_markdown(path, text, "markdown")

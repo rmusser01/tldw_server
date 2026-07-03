@@ -644,15 +644,10 @@ export const Playground = () => {
     return [
       routeCharacterIntent.chatId ?? "",
       routeCharacterIntent.characterId ?? "",
-      location.key ?? "",
-      location.search ?? "",
-      location.hash ?? "",
     ].join("|");
   }, [
-    location.hash,
-    location.key,
-    location.search,
-    routeCharacterIntent,
+    routeCharacterIntent?.chatId,
+    routeCharacterIntent?.characterId,
   ]);
   const routeCharacterIntentChatId = routeCharacterIntent?.chatId ?? null;
   const routeCharacterIntentId = routeCharacterIntent?.characterId ?? null;

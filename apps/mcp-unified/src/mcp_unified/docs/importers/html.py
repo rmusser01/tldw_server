@@ -73,6 +73,8 @@ class StaticHTMLTextParser(HTMLParser):
             self._append_text(clean, leading_space=leading_space)
             if trailing_space:
                 self.parts.append(" ")
+        elif (leading_space or trailing_space) and self.parts and not self.parts[-1].endswith((" ", "\n")):
+            self.parts.append(" ")
 
     def close(self) -> None:
         super().close()

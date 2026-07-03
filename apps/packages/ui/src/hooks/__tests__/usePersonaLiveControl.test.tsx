@@ -17,7 +17,8 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock("@/services/persona-live-control", () => ({
-  listPersonaLiveSessions: () => mocks.listPersonaLiveSessions(),
+  listPersonaLiveSessions: (input: unknown) =>
+    mocks.listPersonaLiveSessions(input),
   createPersonaLiveSession: (input: unknown) =>
     mocks.createPersonaLiveSession(input),
   focusPersonaLiveSession: (sessionId: unknown) =>
@@ -365,6 +366,36 @@ describe("usePersonaLiveControl", () => {
         "Persona live stream failed to connect"
       )
     )
+  })
+
+  it("clears a pending WebSocket connect timeout on unmount", async () => {
+    mocks.listPersonaLiveSessions.mockResolvedValueOnce({
+      sessions: [session({ sessionId: "sess-send", isFocused: true })],
+      focusedSessionId: "sess-send"
+    })
+
+    const { result, unmount } = renderHook(() => usePersonaLiveControl())
+    await waitFor(() => expect(result.current.focusedSession?.sessionId).toBe("sess-send"))
+    vi.useFakeTimers()
+
+    act(() => {
+      void result.current.sendText("draft", {
+        clientMessageId: "draft-timeout"
+      })
+    })
+
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(MockWebSocket.instances).toHaveLength(1)
+    expect(vi.getTimerCount()).toBeGreaterThan(0)
+
+    unmount()
+
+    expect(vi.getTimerCount()).toBe(0)
   })
 
   it("reuses a caller-provided client_message_id when retrying a failed draft", async () => {

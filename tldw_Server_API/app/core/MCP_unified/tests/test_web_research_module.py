@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urlparse
 
 import pytest
 
@@ -327,7 +328,7 @@ async def test_duplicate_urls_fetched_once() -> None:
 
 async def test_permission_check_denies_source_before_fetch() -> None:
     def _check(url: str, context: Any) -> str:
-        return "deny" if "example.com" in url else "allow"  # codeql[py/incomplete-url-substring-sanitization] test-only fake permission policy
+        return "deny" if urlparse(url).hostname == "example.com" else "allow"
 
     search = _FakeSearchModule(_search_ok())  # example.com/1, example.org/2, example.net/3
     fetch = _FakeFetchModule(default=_fetch_ok())

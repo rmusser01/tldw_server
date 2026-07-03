@@ -23,16 +23,6 @@ def available_extractors() -> list[str]:
 def extract_fetched_document(*, url: str, content_type: str, body: bytes) -> ParsedDocument:
     text = _decode_body(body, content_type)
     media_type = _media_type(content_type)
-    if media_type in _TEXT_CONTENT_TYPES:
-        return ParsedDocument(
-            title=_title_from_url(url),
-            document_type="text",
-            text=text.strip(),
-            sections=[],
-            canonical_uri=url,
-            source_url=url,
-            extraction_method="text",
-        )
     if media_type not in _HTML_CONTENT_TYPES:
         return ParsedDocument(
             title=_title_from_url(url),

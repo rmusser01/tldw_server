@@ -38,6 +38,78 @@ class _FakeLogger:
     def info(self, *args, **kwargs):
         pass
 
+    def opt(self, **_kwargs):
+        return self
+
+
+class _FakeLazyLogger(_FakeLogger):
+    def __init__(self):
+        super().__init__()
+        self.debug_messages: list[str] = []
+        self.lazy_calls = 0
+        self._lazy = False
+
+    def opt(self, *, lazy: bool = False, **_kwargs):
+        self._lazy = lazy
+        if lazy:
+            self.lazy_calls += 1
+        return self
+
+    def debug(self, message, *args, **_kwargs):
+        rendered_args = [arg() if self._lazy and callable(arg) else arg for arg in args]
+        self.debug_messages.append(str(message).format(*rendered_args))
+        self._lazy = False
+
+
+def test_brave_smoke_debug_logs_are_redacted_and_lazy(monkeypatch):
+    logger = _FakeLazyLogger()
+    monkeypatch.setattr(ws, "logging", logger)
+    monkeypatch.setattr(
+        ws,
+        "search_web_brave",
+        lambda *_args, **_kwargs: {
+            "query": {"original": "cake"},
+            "web": {
+                "results": [
+                    {
+                        "title": "Cake",
+                        "url": "https://example.com/path?api_key=secret",
+                        "description": "token=secret",
+                    }
+                ]
+            },
+        },
+    )
+
+    ws.test_search_brave()
+
+    rendered = "\n".join(logger.debug_messages)
+    assert "api_key=secret" not in rendered
+    assert "token=secret" not in rendered
+    assert logger.lazy_calls >= 2
+
+
+def test_duckduckgo_smoke_debug_logs_are_redacted(monkeypatch):
+    logger = _FakeLazyLogger()
+    monkeypatch.setattr(ws, "logging", logger)
+    monkeypatch.setattr(
+        ws,
+        "search_web_duckduckgo",
+        lambda *_args, **_kwargs: [
+            {
+                "title": "Duck",
+                "href": "https://example.com/path?token=secret",
+                "body": "api_key=secret",
+            }
+        ],
+    )
+
+    ws.test_search_duckduckgo()
+
+    rendered = "\n".join(logger.debug_messages)
+    assert "token=secret" not in rendered
+    assert "api_key=secret" not in rendered
+
 
 @pytest.mark.parametrize(
     ("helper_name", "provider_label"),

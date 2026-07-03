@@ -237,6 +237,11 @@ vi.mock("@/hooks/useSmartScroll", () => ({
 
 vi.mock("@/services/settings/ui-settings", () => ({
   CHAT_BACKGROUND_IMAGE_SETTING: "chatBackgroundImage",
+  HEADER_SHORTCUTS_EXPANDED_SETTING: "headerShortcutsExpanded",
+  HEADER_SHORTCUTS_LAUNCHER_VIEW_SETTING: "headerShortcutsLauncherView",
+  HEADER_SHORTCUT_SELECTION_SETTING: "headerShortcutSelection",
+  HEADER_SHORTCUT_IDS: [],
+  SIDEBAR_SHORTCUT_IDS: [],
 }));
 
 vi.mock("../Knowledge/utils/unsupported-types", () => ({
@@ -648,7 +653,7 @@ describe("Playground cockpit shell", () => {
     );
   });
 
-  it("rehydrates the same explicit character route under a fresh location key before syncing stale selection", async () => {
+  it("does not rehydrate the same explicit character route under a fresh location key", async () => {
     window.history.replaceState(
       {},
       "",
@@ -702,17 +707,8 @@ describe("Playground cockpit shell", () => {
 
     rerender(<Playground />);
 
-    await waitFor(() => {
-      expect(tldwClientState.getCharacter).toHaveBeenCalledTimes(2);
-    });
-    expect(routerNavigateState.navigate).not.toHaveBeenCalledWith(
-      {
-        pathname: "/chat",
-        search: "?mode=character&characterId=previous-character",
-        hash: "",
-      },
-      { replace: true },
-    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(tldwClientState.getCharacter).toHaveBeenCalledTimes(1);
   });
 
   it("hydrates character route intent from the browser URL when router search is empty", async () => {
@@ -1556,7 +1552,7 @@ describe("Playground cockpit shell", () => {
     });
     expect(storageState.values.get("playgroundChatLayoutMode")).toBe("focus");
     expect(
-      screen.getByRole("button", { name: /show cockpit panels/i }),
+      screen.getByRole("button", { name: /exit focus/i }),
     ).toBeInTheDocument();
   });
 
@@ -1601,7 +1597,7 @@ describe("Playground cockpit shell", () => {
     });
 
     fireEvent.click(
-      screen.getByRole("button", { name: /show cockpit panels/i }),
+      screen.getByRole("button", { name: /exit focus/i }),
     );
 
     await waitFor(() => {

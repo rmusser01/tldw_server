@@ -28,7 +28,7 @@ class SearchFilters:
 @dataclass(frozen=True)
 class SearchRequest:
     query: str
-    filters: SearchFilters = SearchFilters()
+    filters: SearchFilters = field(default_factory=SearchFilters)
     limit: int = 10
     offset: int = 0
     snippet_length: int = 300
@@ -37,7 +37,7 @@ class SearchRequest:
 @dataclass(frozen=True)
 class ContextRequest:
     query: str
-    filters: SearchFilters = SearchFilters()
+    filters: SearchFilters = field(default_factory=SearchFilters)
     max_chunks: int = 8
     max_documents: int = 4
     max_characters: int = 12_000

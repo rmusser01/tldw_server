@@ -49,6 +49,7 @@ export const ChatGreetingPicker: React.FC<Props> = ({
   const [draftSelectionId, setDraftSelectionId] = React.useState<string | null>(
     null
   )
+  const greetingPersistInFlightRef = React.useRef(false)
 
   const hasNonGreetingMessages = React.useMemo(
     () =>
@@ -168,6 +169,7 @@ export const ChatGreetingPicker: React.FC<Props> = ({
 
   const handleSelectFirstMessage = async () => {
     if (!selectedOption?.text || !setMessages) return
+    if (greetingPersistInFlightRef.current) return
     const rendered = replaceUserDisplayNamePlaceholders(
       selectedOption.text,
       userDisplayName
@@ -260,6 +262,7 @@ export const ChatGreetingPicker: React.FC<Props> = ({
     )
     if (!serverChatId || existingServerGreeting) return
 
+    greetingPersistInFlightRef.current = true
     try {
       await tldwClient.initialize().catch(() => null)
       const createdGreeting = (await tldwClient.addChatMessage(serverChatId, {
@@ -301,6 +304,8 @@ export const ChatGreetingPicker: React.FC<Props> = ({
         })
       })
       console.warn("Failed to persist selected character greeting:", error)
+    } finally {
+      greetingPersistInFlightRef.current = false
     }
   }
 

@@ -75,6 +75,19 @@ def test_non_html_content_type_bypasses_rich_extractors(monkeypatch: pytest.Monk
     assert parsed.text == '{"name":"sqlite"}'  # nosec B101
 
 
+def test_markdown_content_type_uses_same_text_fallback() -> None:
+    parsed = extract_fetched_document(
+        url="https://example.com/README.md",
+        content_type="text/markdown",
+        body=b"# Guide\n\nDocs body",
+    )
+
+    assert parsed.title == "README.md"  # nosec B101
+    assert parsed.document_type == "text"  # nosec B101
+    assert parsed.extraction_method == "text"  # nosec B101
+    assert parsed.text == "# Guide\n\nDocs body"  # nosec B101
+
+
 def test_trafilatura_is_used_when_available(monkeypatch: pytest.MonkeyPatch) -> None:
     module = SimpleNamespace(extract=lambda text, include_comments=False, include_tables=True: "Rich body")
 

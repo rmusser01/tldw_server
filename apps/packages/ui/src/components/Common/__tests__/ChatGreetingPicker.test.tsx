@@ -260,6 +260,63 @@ describe("ChatGreetingPicker", () => {
     })
   })
 
+  it("does not persist the same greeting twice during a rapid double select", async () => {
+    const updateSettings = vi.fn(
+      async (_patch: Partial<ChatSettingsRecord>) => null
+    )
+    vi.mocked(tldwClient.initialize).mockResolvedValue(null)
+    let resolveAdd: (value: unknown) => void = () => {}
+    vi.mocked(tldwClient.addChatMessage).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveAdd = resolve
+        }) as any
+    )
+    let messageState: Message[] = []
+    let historyState: ChatHistory = []
+    const setMessages = vi.fn(
+      (next: Message[] | ((prev: Message[]) => Message[])) => {
+        messageState =
+          typeof next === "function" ? next(messageState) : next
+      }
+    )
+    const setHistory = vi.fn(
+      (next: ChatHistory | ((prev: ChatHistory) => ChatHistory)) => {
+        historyState =
+          typeof next === "function" ? next(historyState) : next
+      }
+    )
+
+    renderPicker(
+      {
+        useCharacterDefault: false,
+        greetingSelectionId: alternateGreetingId,
+        greetingsChecksum: checksum,
+        greetingEnabled: true
+      },
+      updateSettings,
+      {
+        serverChatId: "server-chat-1",
+        setMessages,
+        setHistory
+      }
+    )
+
+    const button = screen.getByRole("button", { name: /select greeting/i })
+    fireEvent.click(button)
+    fireEvent.click(button)
+
+    await waitFor(() => {
+      expect(tldwClient.addChatMessage).toHaveBeenCalledTimes(1)
+    })
+
+    resolveAdd({ id: "server-message-1", version: 3 })
+    await waitFor(() => {
+      expect(messageState).toHaveLength(1)
+    })
+    expect(historyState).toHaveLength(1)
+  })
+
   it("notifies when a selected greeting cannot be synced to the server chat", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined)
     vi.mocked(tldwClient.addChatMessage).mockRejectedValueOnce(

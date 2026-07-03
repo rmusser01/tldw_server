@@ -1,5 +1,5 @@
-import { act, renderHook, waitFor } from "@testing-library/react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { Storage } from "@web/extension/shims/plasmo-storage"
 import { useStorage } from "@web/extension/shims/plasmo-storage-hook"
@@ -7,6 +7,10 @@ import { useStorage } from "@web/extension/shims/plasmo-storage-hook"
 describe("plasmo storage cross-instance change propagation (H10)", () => {
   beforeEach(() => {
     localStorage.clear()
+  })
+
+  afterEach(() => {
+    cleanup()
   })
 
   it("notifies a watcher on a different instance when another instance writes", async () => {

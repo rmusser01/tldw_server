@@ -22,10 +22,6 @@ export type PersonaWebSocketConnection = {
  * `_should_treat_bearer_as_api_key` (persona.py:3663-3679) then maps a
  * single-user / non-JWT bearer onto the API-key path server-side.
  *
- * NEEDS LIVE-SERVER VALIDATION before merge:
- *  - The server does not echo the offered subprotocol; confirm the browser
- *    still completes the handshake against a running backend.
- *
  * Subprotocol values must be RFC 6455 tokens. Default tldw keys (secrets
  * token_urlsafe / token_hex) and JWTs are token-safe, but a user-set custom API
  * key containing separators (space, `,`, `/`, `=` ...) would make

@@ -134,6 +134,11 @@ class SourcePolicy:
     ) -> None:
         if web_source_profile not in _SOURCE_PROFILES:
             raise ValueError("web_source_profile must be one of: locked_down, local_first, online_capable")
+        if web_source_profile == "locked_down":
+            if preapproved_domains:
+                raise ValueError("locked_down source policy cannot configure preapproved_domains")
+            if allow_arbitrary_public_domains:
+                raise ValueError("locked_down source policy cannot allow arbitrary public domains")
         self.web_source_profile = web_source_profile
         self.preapproved_domains = _parse_domain_rules(preapproved_domains, "preapproved_domains")
         self.allowed_url_prefixes = _parse_prefix_rules(allowed_url_prefixes, "allowed_url_prefixes")
@@ -303,6 +308,12 @@ def _parse_prefix_rule(prefix: str, field_name: str) -> URLPrefixRule:
         raise ValueError(f"{field_name} contains invalid URL prefix: {exc.reason}") from exc
     if _has_dot_segment(normalized.decoded_path):
         raise ValueError(f"{field_name} cannot contain dot path segments")
+    try:
+        ipaddress.ip_address(normalized.host)
+    except ValueError:
+        pass
+    else:
+        raise ValueError(f"{field_name} cannot contain IP literal hosts")
     return URLPrefixRule(
         matched_rule=normalized.redacted_url,
         scheme=normalized.scheme,

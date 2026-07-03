@@ -317,7 +317,7 @@ def update_readme_release_references(readme_text: str, version: str) -> str:
         rf"\g<1>{version}\g<2>",
         updated_text,
     )
-    if post_count == 0 and f"post-`{version}` branch work" not in updated_text:
+    if post_count == 0:
         raise ValueError("Missing README anchor for post-release reference")
 
     return updated_text

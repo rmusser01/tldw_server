@@ -47,16 +47,29 @@ def test_models_define_acquisition_contract_names() -> None:
     assert Transport is not None  # nosec B101
 
 
-def test_locked_down_ignores_domain_only_allow_rules() -> None:
-    policy = SourcePolicy(
-        web_source_profile="locked_down",
-        preapproved_domains=("docs.example.com",),
+def test_normalized_url_default_canonical_url_uses_redacted_url() -> None:
+    normalized = NormalizedURL(
+        scheme="https",
+        host="example.com",
+        port=None,
+        path="/docs",
+        decoded_path="/docs",
+        redacted_url="https://example.com/docs",
     )
 
-    decision = policy.evaluate("https://docs.example.com/reference")
+    assert normalized.canonical_url == "https://example.com/docs"  # nosec B101
 
-    assert decision.status == "approval_required"  # nosec B101
-    assert decision.reason == "source_approval_required"  # nosec B101
+
+@pytest.mark.parametrize(
+    "settings",
+    [
+        {"preapproved_domains": ("docs.example.com",)},
+        {"allow_arbitrary_public_domains": True},
+    ],
+)
+def test_locked_down_rejects_ignored_allow_configuration(settings: dict[str, object]) -> None:
+    with pytest.raises(ValueError, match="locked_down"):
+        SourcePolicy(web_source_profile="locked_down", **settings)
 
 
 def test_locked_down_allows_explicit_allowed_url_prefixes() -> None:
@@ -309,6 +322,11 @@ def test_invalid_domain_rule_config_fails_fast() -> None:
 def test_invalid_url_prefix_config_fails_fast() -> None:
     with pytest.raises(ValueError, match="allowed_url_prefixes"):
         SourcePolicy(**_settings(allowed_url_prefixes=["not a url"]))
+
+
+def test_ip_literal_allowed_url_prefix_config_fails_fast() -> None:
+    with pytest.raises(ValueError, match="IP literal"):
+        SourcePolicy(**_settings(allowed_url_prefixes=["https://93.184.216.34/docs/"]))
 
 
 def test_safe_argument_hash_changes_with_query_and_redacted_url_omits_query_details() -> None:

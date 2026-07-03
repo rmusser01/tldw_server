@@ -212,12 +212,19 @@ def _discard_temp_path(temp_path: Path) -> None:
 
 
 def _commit_temp_path(final_path: Path, *, digest: str, upload_segment: str) -> Path:
+    if len(digest) != 64:
+        raise SyncBlobStoreError("digest must be 64 hex chars")
+    try:
+        bytes.fromhex(digest)
+    except ValueError as exc:
+        raise SyncBlobStoreError("digest must be hex") from exc
+    safe_upload_segment = _safe_segment(upload_segment, field_name="upload_segment")
     # codeql[py/path-injection]: final_path is constrained by resolve_storage_key.
     temp_file = tempfile.NamedTemporaryFile(
         delete=False,
         dir=final_path.parent,
         # codeql[py/path-injection]: digest and upload_segment are validated before temp path creation.
-        prefix=f"{digest}.{upload_segment}.",
+        prefix=f"{digest}.{safe_upload_segment}.",
         suffix=".tmp",
     )
     temp_path = Path(temp_file.name)

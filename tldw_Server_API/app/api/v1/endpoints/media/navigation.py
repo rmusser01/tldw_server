@@ -1117,7 +1117,6 @@ def _extract_chunk_metadata_nodes(
                 "target_start": int(rec["start_char"]),
                 "target_end": int(rec["end_char"]),
                 "target_href": None,
-                # codeql[py/polynomial-redos]: heading extraction uses bounded line parsing before this node is built.
                 "source": "chunk_metadata",
                 "confidence": 0.7,
             }
@@ -1127,6 +1126,7 @@ def _extract_chunk_metadata_nodes(
 
 
 def _extract_generated_heading_nodes(content: str) -> list[dict[str, Any]]:
+    # codeql[py/polynomial-redos]: heading extraction uses bounded line parsing before node creation.
     matches = list(_MD_HEADING_LINE_RE.finditer(content))
     if not matches:
         return []
@@ -1181,7 +1181,6 @@ def _extract_generated_toc_nodes(
     db: MediaNavigationDb,
     media: dict[str, Any],
 ) -> list[dict[str, Any]]:
-    # codeql[py/polynomial-redos]: TOC parsing is bounded to a fixed window and line-by-line matching below.
     media_type = str(media.get("type") or "").strip().lower()
     if media_type in {"audio", "video"}:
         return []
@@ -1190,6 +1189,7 @@ def _extract_generated_toc_nodes(
     if not content.strip():
         return []
 
+    # codeql[py/polynomial-redos]: TOC parsing is bounded to a fixed window before matching.
     marker = _TOC_MARKER_RE.search(content[: min(len(content), 50_000)])
     if not marker:
         return []
@@ -1208,6 +1208,7 @@ def _extract_generated_toc_nodes(
         if not line:
             continue
 
+        # codeql[py/polynomial-redos]: TOC entries are matched one cleaned line at a time from a bounded window.
         line_match = _TOC_ENTRY_RE.match(line)
         if not line_match:
             if len(raw_entries) >= 6 and _HEADING_STYLE_TITLE_RE.match(line):

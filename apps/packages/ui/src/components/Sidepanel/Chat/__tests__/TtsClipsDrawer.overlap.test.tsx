@@ -1,5 +1,5 @@
 import React from "react"
-import { act, fireEvent, render } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { TtsClipsDrawer } from "@/components/Sidepanel/Chat/TtsClipsDrawer"
@@ -86,15 +86,8 @@ describe("TtsClipsDrawer overlapping playback", () => {
 
     render(<TtsClipsDrawer open onClose={() => {}} />)
 
-    const rows = Array.from(
-      document.querySelectorAll<HTMLDivElement>(".rounded-xl")
-    )
-    expect(rows.length).toBe(2)
-
-    const playA = rows[0].querySelector("button") as HTMLButtonElement
-    const playB = rows[1].querySelector("button") as HTMLButtonElement
-    expect(playA).toBeTruthy()
-    expect(playB).toBeTruthy()
+    const playA = screen.getByRole("button", { name: "Play clip Clip A" })
+    const playB = screen.getByRole("button", { name: "Play clip Clip B" })
 
     // Start clip A. It stays "playing" because play() never settles.
     await act(async () => {

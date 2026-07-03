@@ -4,10 +4,10 @@ import React, { Dispatch, SetStateAction, createContext } from "react"
 // This context now only handles abort controllers for streaming requests
 interface PageAssistContext {
   controller: AbortController | null
-  setController: Dispatch<SetStateAction<AbortController>>
+  setController: Dispatch<SetStateAction<AbortController | null>>
 
   embeddingController: AbortController | null
-  setEmbeddingController: Dispatch<SetStateAction<AbortController>>
+  setEmbeddingController: Dispatch<SetStateAction<AbortController | null>>
 }
 
 export const PageAssistContext = createContext<PageAssistContext>({

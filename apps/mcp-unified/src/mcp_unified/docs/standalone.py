@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+import os
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -45,7 +46,9 @@ class StandaloneDocsMount:
 
 
 def _default_standalone_db_path() -> Path:
-    return Path.home() / ".local" / "share" / "tldw_mcp" / "docs.db"
+    data_home = os.environ.get("XDG_DATA_HOME")
+    base_dir = Path(data_home).expanduser() if data_home else Path.home() / ".local" / "share"
+    return base_dir / "tldw_mcp" / "docs.db"
 
 
 def standalone_docs_settings_for_profile(

@@ -251,80 +251,88 @@ export const TtsClipsDrawer: React.FC<TtsClipsDrawerProps> = ({ open, onClose })
         />
       ) : (
         <div className="flex flex-col gap-3">
-          {list.map((clip) => (
-            <div
-              key={clip.id}
-              className="flex flex-col gap-2 rounded-xl border border-border bg-surface2/70 p-3"
-            >
-              <Tooltip title={clip.utterance || clip.textPreview}>
-                <div className="text-sm text-text truncate">
-                  {clip.textPreview || clip.utterance}
+          {list.map((clip) => {
+            const clipLabel = clip.textPreview || clip.utterance || clip.id
+            const playButtonLabel =
+              playingClipId === clip.id
+                ? `Stop clip ${clipLabel}`
+                : `Play clip ${clipLabel}`
+            return (
+              <div
+                key={clip.id}
+                className="flex flex-col gap-2 rounded-xl border border-border bg-surface2/70 p-3"
+              >
+                <Tooltip title={clip.utterance || clip.textPreview}>
+                  <div className="text-sm text-text truncate">
+                    {clip.textPreview || clip.utterance}
+                  </div>
+                </Tooltip>
+                <div className="flex flex-wrap items-center gap-2 text-[11px] text-text-muted">
+                  <span>{formatTimestamp(clip.createdAt)}</span>
+                  <span>{t("playground:ttsClips.segmentsLabel", { count: clip.segments.length, defaultValue: "{{count}} segments" })}</span>
+                  {clip.provider && (
+                    <Tag color="blue" className="!text-[10px]">
+                      {clip.provider}
+                    </Tag>
+                  )}
+                  {clip.voice && (
+                    <Tag color="purple" className="!text-[10px]">
+                      {clip.voice}
+                    </Tag>
+                  )}
                 </div>
-              </Tooltip>
-              <div className="flex flex-wrap items-center gap-2 text-[11px] text-text-muted">
-                <span>{formatTimestamp(clip.createdAt)}</span>
-                <span>{t("playground:ttsClips.segmentsLabel", { count: clip.segments.length, defaultValue: "{{count}} segments" })}</span>
-                {clip.provider && (
-                  <Tag color="blue" className="!text-[10px]">
-                    {clip.provider}
-                  </Tag>
-                )}
-                {clip.voice && (
-                  <Tag color="purple" className="!text-[10px]">
-                    {clip.voice}
-                  </Tag>
-                )}
+                <div className="flex items-center gap-2">
+                  <Tooltip
+                    title={
+                      playingClipId === clip.id
+                        ? t("playground:tts.stop", "Stop")
+                        : t("playground:tts.play", "Play")
+                    }
+                  >
+                    <button
+                      type="button"
+                      aria-label={playButtonLabel}
+                      onClick={() => handleTogglePlay(clip)}
+                      className="rounded-md border border-border bg-surface px-2 py-1 text-text-muted hover:bg-surface2 hover:text-text"
+                    >
+                      {playingClipId === clip.id ? (
+                        <Square className="h-4 w-4 text-danger" />
+                      ) : (
+                        <Volume2 className="h-4 w-4" />
+                      )}
+                    </button>
+                  </Tooltip>
+                  <Tooltip
+                    title={
+                      clip.segments.length > 1
+                        ? t(
+                            "playground:ttsClips.downloadAll",
+                            "Download all segments"
+                          )
+                        : t("playground:ttsClips.download", "Download")
+                    }
+                  >
+                    <button
+                      type="button"
+                      onClick={() => handleDownload(clip)}
+                      className="rounded-md border border-border bg-surface px-2 py-1 text-text-muted hover:bg-surface2 hover:text-text"
+                    >
+                      <Download className="h-4 w-4" />
+                    </button>
+                  </Tooltip>
+                  <Tooltip title={t("common:delete", "Delete") as string}>
+                    <button
+                      type="button"
+                      onClick={() => handleDelete(clip)}
+                      className="rounded-md border border-border bg-surface px-2 py-1 text-text-muted hover:bg-surface2 hover:text-text"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </Tooltip>
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                <Tooltip
-                  title={
-                    playingClipId === clip.id
-                      ? t("playground:tts.stop", "Stop")
-                      : t("playground:tts.play", "Play")
-                  }
-                >
-                  <button
-                    type="button"
-                    onClick={() => handleTogglePlay(clip)}
-                    className="rounded-md border border-border bg-surface px-2 py-1 text-text-muted hover:bg-surface2 hover:text-text"
-                  >
-                    {playingClipId === clip.id ? (
-                      <Square className="h-4 w-4 text-danger" />
-                    ) : (
-                      <Volume2 className="h-4 w-4" />
-                    )}
-                  </button>
-                </Tooltip>
-                <Tooltip
-                  title={
-                    clip.segments.length > 1
-                      ? t(
-                          "playground:ttsClips.downloadAll",
-                          "Download all segments"
-                        )
-                      : t("playground:ttsClips.download", "Download")
-                  }
-                >
-                  <button
-                    type="button"
-                    onClick={() => handleDownload(clip)}
-                    className="rounded-md border border-border bg-surface px-2 py-1 text-text-muted hover:bg-surface2 hover:text-text"
-                  >
-                    <Download className="h-4 w-4" />
-                  </button>
-                </Tooltip>
-                <Tooltip title={t("common:delete", "Delete") as string}>
-                  <button
-                    type="button"
-                    onClick={() => handleDelete(clip)}
-                    className="rounded-md border border-border bg-surface px-2 py-1 text-text-muted hover:bg-surface2 hover:text-text"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                </Tooltip>
-              </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
     </Drawer>

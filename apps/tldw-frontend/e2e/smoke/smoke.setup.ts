@@ -411,14 +411,17 @@ export async function seedAuth(
         accessToken: cfg.accessToken
       }
 
-      localStorage.setItem("tldwConfig", JSON.stringify(authConfig)) // codeql[js/clear-text-storage-of-sensitive-data] synthetic E2E auth seed only
+      // codeql[js/clear-text-storage-of-sensitive-data]: synthetic E2E auth seed only.
+      localStorage.setItem("tldwConfig", JSON.stringify(authConfig))
       localStorage.setItem("isMigrated", "true")
       // Backward-compat for routes still reading legacy top-level keys.
       localStorage.setItem("serverUrl", cfg.serverUrl)
       localStorage.setItem("tldwServerUrl", cfg.serverUrl)
       localStorage.setItem("authMode", cfg.authMode)
-      localStorage.setItem("apiKey", cfg.apiKey) // codeql[js/clear-text-storage-of-sensitive-data] test-only legacy auth compatibility key
-      localStorage.setItem("accessToken", cfg.accessToken) // codeql[js/clear-text-storage-of-sensitive-data] synthetic E2E auth seed only
+      // codeql[js/clear-text-storage-of-sensitive-data]: test-only legacy auth compatibility key.
+      localStorage.setItem("apiKey", cfg.apiKey)
+      // codeql[js/clear-text-storage-of-sensitive-data]: synthetic E2E auth seed only.
+      localStorage.setItem("accessToken", cfg.accessToken)
       localStorage.setItem("__tldw_first_run_complete", "true")
       localStorage.setItem("assistant_setup_dismissed", "true")
       localStorage.setItem("__tldw_test_bypass", "true")

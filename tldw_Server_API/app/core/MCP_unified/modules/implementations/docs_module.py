@@ -26,19 +26,29 @@ class DocsModule(BaseModule):
         return provider
 
     async def on_initialize(self) -> None:
+        """Initialize the docs provider and log the resolved database path."""
+
         provider = self._ensure_provider()
         logger.info("Initialized Docs MCP module with db_path={}", provider.settings.db_path)
 
     async def on_shutdown(self) -> None:
+        """Release module resources during host shutdown."""
+
         return None
 
     async def check_health(self) -> dict[str, bool]:
+        """Return whether the docs provider has been initialized."""
+
         return {"initialized": getattr(self, "_provider", None) is not None}
 
     async def get_tools(self) -> list[dict[str, Any]]:
+        """Return the docs tool definitions exposed to the MCP runtime."""
+
         return self._ensure_provider().tool_definitions()
 
     async def execute_tool(self, tool_name: str, arguments: dict[str, Any], context: Any | None = None) -> Any:
+        """Validate and execute one docs MCP tool in the caller's access scope."""
+
         args = dict(arguments or {})
         try:
             self.validate_tool_arguments(tool_name, args)

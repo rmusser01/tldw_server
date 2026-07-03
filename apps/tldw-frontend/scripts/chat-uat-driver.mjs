@@ -57,12 +57,14 @@ async function main() {
 
   await context.addInitScript(({ serverUrl, apiKey }) => {
     const cfg = { serverUrl, authMode: "single-user", apiKey, accessToken: "" }
-    localStorage.setItem("tldwConfig", JSON.stringify(cfg)) // codeql[js/clear-text-storage-of-sensitive-data] synthetic UAT browser auth seed only
+    // codeql[js/clear-text-storage-of-sensitive-data]: synthetic UAT browser auth seed only.
+    localStorage.setItem("tldwConfig", JSON.stringify(cfg))
     localStorage.setItem("isMigrated", "true")
     localStorage.setItem("serverUrl", serverUrl)
     localStorage.setItem("tldwServerUrl", serverUrl)
     localStorage.setItem("authMode", "single-user")
-    localStorage.setItem("apiKey", apiKey) // codeql[js/clear-text-storage-of-sensitive-data] test-only legacy auth compatibility key
+    // codeql[js/clear-text-storage-of-sensitive-data]: test-only legacy auth compatibility key.
+    localStorage.setItem("apiKey", apiKey)
     localStorage.setItem("accessToken", "")
     localStorage.setItem("__tldw_first_run_complete", "true")
     localStorage.setItem("assistant_setup_dismissed", "true")

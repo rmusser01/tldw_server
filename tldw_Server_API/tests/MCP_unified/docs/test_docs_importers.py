@@ -181,6 +181,17 @@ def test_static_html_preserves_inline_text_breaks_and_nested_headings() -> None:
     assert "Next\nline" in parsed.text  # nosec B101
 
 
+def test_static_html_preserves_whitespace_between_inline_elements() -> None:
+    parsed = parse_html_document(
+        text="<p><span>Hello</span> <span>World</span></p>",
+        title_hint="fallback",
+        canonical_uri="memory://inline-spacing",
+    )
+
+    assert "Hello World" in parsed.text  # nosec B101
+    assert "HelloWorld" not in parsed.text  # nosec B101
+
+
 def test_static_html_preserves_div_breaks_and_preformatted_text() -> None:
     parsed = parse_html_document(
         text="<div>First</div><div>Second</div><pre>def main():\n    return 1\n</pre>",
@@ -190,6 +201,25 @@ def test_static_html_preserves_div_breaks_and_preformatted_text() -> None:
 
     assert "First\nSecond" in parsed.text  # nosec B101
     assert "def main():\n    return 1" in parsed.text  # nosec B101
+
+
+def test_import_wraps_non_utf8_files_in_docs_error(tmp_path: Path) -> None:
+    root = tmp_path / "workspace"
+    root.mkdir()
+    path = root / "latin1.md"
+    path.write_bytes("caf\xe9".encode("latin-1"))
+    service, _store = _service(tmp_path, root)
+
+    with pytest.raises(DocsError) as excinfo:
+        service.import_path(
+            scope=AccessScope(owner_scope="owner-a", profile_scope="profile-a"),
+            path=path,
+            keywords=(),
+            collection_names=(),
+        )
+
+    assert excinfo.value.code == "import_file_decode_error"  # nosec B101
+    assert excinfo.value.details["path"] == str(path.resolve())  # nosec B101
 
 
 def test_import_rejects_path_outside_trusted_roots(tmp_path: Path) -> None:

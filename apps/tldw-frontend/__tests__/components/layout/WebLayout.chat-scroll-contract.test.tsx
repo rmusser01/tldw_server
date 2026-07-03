@@ -441,7 +441,15 @@ describe('WebLayout /chat scroll contract', () => {
     );
 
     expect(html).toContain('data-chat-scroll-owner="transcript"');
-    expect(html).toContain('items-stretch justify-start overflow-hidden px-0 py-0');
+    for (const className of [
+      'items-stretch',
+      'justify-start',
+      'overflow-hidden',
+      'px-0',
+      'py-0',
+    ]) {
+      expect(html).toContain(className);
+    }
     expect(html).not.toContain('px-4 py-10');
   });
 

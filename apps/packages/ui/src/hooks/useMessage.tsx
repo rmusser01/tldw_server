@@ -1979,7 +1979,9 @@ export const useMessage = () => {
     } finally {
       discardCurrentTurnOnAbortRef.current = false;
       if (inactivityTimer) clearTimeout(inactivityTimer);
-      setAbortController(null);
+      setAbortController((current: AbortController | null) =>
+        current === controller ? null : current,
+      );
     }
   };
 

@@ -13,7 +13,7 @@ import time
 from functools import lru_cache
 from html import unescape
 from typing import Any, TypedDict
-from urllib.parse import unquote, urlencode, urlparse
+from urllib.parse import parse_qsl, quote, unquote, urlencode, urlparse, urlunparse
 
 #
 # 3rd-Party Imports
@@ -84,6 +84,11 @@ _WEBSEARCH_SENSITIVE_LOG_KEYS = {
     "x-api-key",
     "x-subscription-token",
 }
+_WEBSEARCH_SENSITIVE_PAIR_RE = re.compile(
+    r"(?i)\b("
+    + "|".join(re.escape(key) for key in sorted(_WEBSEARCH_SENSITIVE_LOG_KEYS, key=len, reverse=True))
+    + r")\s*=\s*[^&\s]+"
+)
 
 
 def _redact_websearch_log_value(value: Any) -> Any:
@@ -100,7 +105,35 @@ def _redact_websearch_log_value(value: Any) -> Any:
         return [_redact_websearch_log_value(item) for item in value]
     if isinstance(value, tuple):
         return tuple(_redact_websearch_log_value(item) for item in value)
+    if isinstance(value, str):
+        return _redact_websearch_log_text(value)
     return value
+
+
+def _redact_websearch_log_text(value: str) -> str:
+    parsed = urlparse(value)
+    if parsed.scheme in {"http", "https"} and parsed.netloc:
+        safe_pairs = [
+            (
+                key,
+                "[REDACTED]"
+                if key.strip().lower() in _WEBSEARCH_SENSITIVE_LOG_KEYS
+                else redacted_value,
+            )
+            for key, raw_value in parse_qsl(parsed.query, keep_blank_values=True)
+            for redacted_value in (_redact_websearch_log_text(raw_value),)
+        ]
+        safe_query = urlencode(safe_pairs, doseq=True, quote_via=quote)
+        return urlunparse(parsed._replace(query=safe_query, fragment=""))
+    return _WEBSEARCH_SENSITIVE_PAIR_RE.sub(lambda match: f"{match.group(1)}=[REDACTED]", value)
+
+
+def _debug_websearch_json(message: str, value: Any) -> None:
+    logging.opt(lazy=True).debug(
+        "{}: {}",
+        message,
+        lambda: json.dumps(_redact_websearch_log_value(value), indent=2),
+    )
 
 
 def _websearch_browser_headers(
@@ -2061,11 +2094,11 @@ def test_search_brave():
     result_filter = None
     result = search_web_brave(search_term, country, search_lang, ui_lang, result_count, safesearch, date_range,
                              result_filter)
-    logging.debug(f"Brave search smoke raw results: {_redact_websearch_log_value(result)}")
+    _debug_websearch_json("Brave search smoke raw results", result)
 
     output_dict = {"results": []}
     parse_brave_results(result, output_dict)
-    logging.debug(f"Parsed Brave search smoke results: {json.dumps(output_dict, indent=2)}")
+    _debug_websearch_json("Parsed Brave search smoke results", output_dict)
 
 
 def parse_brave_results(raw_results: dict, output_dict: dict) -> None:
@@ -2235,15 +2268,12 @@ def test_search_duckduckgo():
             max_results=10
         )
         logging.info(f"DuckDuckGo search smoke result count: {len(results)}")
-        for result in results:
-            logging.debug(f"DuckDuckGo title: {result['title']}")
-            logging.debug(f"DuckDuckGo URL: {result['href']}")
-            logging.debug(f"DuckDuckGo snippet: {result['body']}")
+        _debug_websearch_json("DuckDuckGo search smoke raw results", results)
 
         # Parse the results
         output_dict = {"results": []}
         parse_duckduckgo_results({"results": results}, output_dict)
-        logging.debug(f"Parsed DuckDuckGo results: {json.dumps(output_dict, indent=2)}")
+        _debug_websearch_json("Parsed DuckDuckGo results", output_dict)
 
     except ValueError as e:
         logging.warning(f"Invalid DuckDuckGo smoke input: {str(e)}")
@@ -2537,12 +2567,10 @@ def parse_google_results(raw_results: dict, output_dict: dict) -> None:
         output_dict (Dict): Dictionary to store processed results.
     """
     # Lower verbosity: only log raw payload at debug level.
-    log_opt = getattr(logging, "opt", None)
-    if callable(log_opt):
-        log_opt(lazy=True).debug(
-            "Raw results received: {}",
-            lambda: json.dumps(_redact_websearch_log_value(raw_results), indent=2),
-        )
+    logging.opt(lazy=True).debug(
+        "Raw results received: {}",
+        lambda: json.dumps(_redact_websearch_log_value(raw_results), indent=2),
+    )
     try:
         # Initialize results list if not present
         if "results" not in output_dict:

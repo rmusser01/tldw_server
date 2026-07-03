@@ -179,6 +179,13 @@ jobs:
         working-directory: apps/tldw-frontend
         run: bun run build:prod
 
+      - name: Stage Next standalone static assets
+        working-directory: apps/tldw-frontend
+        run: |
+          mkdir -p .next/standalone/apps/tldw-frontend/.next
+          cp -R public .next/standalone/apps/tldw-frontend/public
+          cp -R .next/static .next/standalone/apps/tldw-frontend/.next/static
+
       - name: Install Playwright Chromium
         run: bunx playwright install --with-deps chromium
         working-directory: apps/tldw-frontend
