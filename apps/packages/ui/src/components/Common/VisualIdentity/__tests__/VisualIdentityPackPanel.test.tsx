@@ -77,6 +77,7 @@ const makeClient = () => ({
     original_expression_key: "neutral",
     display_label: "Neutral",
     source_filename: "neutral-new.webp",
+    source_context: {},
     content_type: "image/webp",
     bytes: 512,
     sha256: "sha-new",
