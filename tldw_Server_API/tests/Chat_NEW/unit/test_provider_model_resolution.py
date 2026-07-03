@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pytest
 
 from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import ChatCompletionRequest
@@ -44,6 +46,27 @@ def test_resolve_provider_and_model_inline_alias(monkeypatch):
     assert debug_info["raw"]["model"] == "anthropic/claude-sonnet"
     assert debug_info["normalized"]["provider"] == "anthropic"
     assert debug_info["normalized"]["model"] == selected_model
+
+
+@pytest.mark.unit
+def test_resolve_provider_and_model_normalizes_llamacpp_catalog_alias() -> None:
+    """Catalog provider id `llama` should execute through the llama.cpp adapter."""
+    request = SimpleNamespace(api_provider="llama", model="local-model")
+
+    metrics_provider, metrics_model, selected_provider, selected_model, debug_info = (
+        resolve_provider_and_model(
+            request_data=request,
+            metrics_default_provider="openai",
+            normalize_default_provider="openai",
+        )
+    )
+
+    assert metrics_provider == "llama.cpp"
+    assert metrics_model == "local-model"
+    assert selected_provider == "llama.cpp"
+    assert selected_model == "local-model"
+    assert debug_info["raw"]["api_provider"] == "llama"
+    assert debug_info["normalized"]["provider"] == "llama.cpp"
 
 
 @pytest.mark.unit
