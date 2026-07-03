@@ -18,6 +18,10 @@ def test_load_and_log_configs_exposes_stt_default_model_keys():
     assert "default_streaming_transcription_model" in stt
     assert "parakeet_onnx_model_id" in stt
     assert "parakeet_onnx_revision" in stt
+    assert "nemo_chunk_duration" in stt
+    assert "nemo_overlap_duration" in stt
     assert stt["default_batch_transcription_model"] == "parakeet-tdt-0.6b-v3-onnx"
     assert stt["default_streaming_transcription_model"] == "parakeet-tdt-0.6b-v3-onnx"
     assert stt["nemo_model_variant"] == "onnx"
+    assert stt["nemo_chunk_duration"] == 120.0
+    assert stt["nemo_overlap_duration"] == 15.0

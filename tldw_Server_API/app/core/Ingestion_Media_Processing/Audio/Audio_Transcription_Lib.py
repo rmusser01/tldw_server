@@ -3111,8 +3111,27 @@ def speech_to_text_parakeet(
         )
         audio_data, sample_rate, audio_duration = _load_audio_for_parakeet_nemo(audio_file_path, target_sr=16000)
 
+        transcribe_kwargs: dict[str, Any] = {}
+        if variant == "onnx":
+            try:
+                stt_cfg = get_stt_config() or {}
+            except _AUDIO_TRANSCRIPTION_NONCRITICAL_EXCEPTIONS:
+                stt_cfg = {}
+
+            chunk_duration = _coerce_float(stt_cfg.get("nemo_chunk_duration"), default=120.0)
+            if chunk_duration is not None and chunk_duration > 0:
+                overlap_duration = _coerce_float(stt_cfg.get("nemo_overlap_duration"), default=15.0)
+                if overlap_duration is None or overlap_duration < 0:
+                    overlap_duration = 15.0
+                if overlap_duration >= chunk_duration:
+                    overlap_duration = max(0.0, chunk_duration / 8.0)
+                transcribe_kwargs = {
+                    "chunk_duration": chunk_duration,
+                    "overlap_duration": overlap_duration,
+                }
+
         # Transcribe with Parakeet
-        text = transcribe_with_parakeet(audio_data, sample_rate, variant)
+        text = transcribe_with_parakeet(audio_data, sample_rate, variant, **transcribe_kwargs)
         if isinstance(text, str) and _looks_like_error_text(text):
             raise STTTranscriptionError(text)
 

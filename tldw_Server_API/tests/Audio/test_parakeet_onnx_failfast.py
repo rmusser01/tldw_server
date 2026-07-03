@@ -140,10 +140,11 @@ def test_speech_to_text_parakeet_onnx_loads_audio_without_librosa(monkeypatch, t
 
     captured: dict[str, object] = {}
 
-    def fake_transcribe_with_parakeet(audio_data, received_sample_rate, variant):
+    def fake_transcribe_with_parakeet(audio_data, received_sample_rate, variant, **kwargs):
         captured["audio_data"] = audio_data
         captured["sample_rate"] = received_sample_rate
         captured["variant"] = variant
+        captured["kwargs"] = kwargs
         return "parakeet onnx transcript"
 
     monkeypatch.setattr(nemo_mod, "transcribe_with_parakeet", fake_transcribe_with_parakeet)
@@ -163,3 +164,49 @@ def test_speech_to_text_parakeet_onnx_loads_audio_without_librosa(monkeypatch, t
     assert captured["sample_rate"] == 16000
     assert captured["variant"] == "onnx"
     assert segments[0]["Text"] == "parakeet onnx transcript"
+
+
+@pytest.mark.unit
+def test_speech_to_text_parakeet_onnx_passes_configured_chunking(monkeypatch, tmp_path):
+    """Long-form Parakeet ONNX should receive bounded chunking settings."""
+    audio_file = tmp_path / "sample.wav"
+    _write_test_wav(audio_file, sample_rate=16000, duration_seconds=2.0)
+
+    monkeypatch.setattr(
+        atlib,
+        "get_stt_config",
+        lambda: {
+            "nemo_chunk_duration": 1.0,
+            "nemo_overlap_duration": 0.25,
+        },
+    )
+
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo as nemo_mod
+
+    captured: dict[str, object] = {}
+
+    def fake_transcribe_with_parakeet(audio_data, received_sample_rate, variant, **kwargs):
+        captured["audio_data"] = audio_data
+        captured["sample_rate"] = received_sample_rate
+        captured["variant"] = variant
+        captured["kwargs"] = kwargs
+        return "chunked parakeet onnx transcript"
+
+    monkeypatch.setattr(nemo_mod, "transcribe_with_parakeet", fake_transcribe_with_parakeet)
+
+    segments = atlib.speech_to_text_parakeet(
+        str(audio_file),
+        variant="onnx",
+        selected_source_lang="en",
+        vad_filter=False,
+        base_dir=tmp_path,
+    )
+
+    assert isinstance(captured["audio_data"], np.ndarray)
+    assert captured["sample_rate"] == 16000
+    assert captured["variant"] == "onnx"
+    assert captured["kwargs"] == {
+        "chunk_duration": 1.0,
+        "overlap_duration": 0.25,
+    }
+    assert segments[0]["Text"] == "chunked parakeet onnx transcript"
