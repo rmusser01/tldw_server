@@ -522,6 +522,23 @@ scopes:
     ownership_predicates:
       - same_org
     doc_url: https://docs.example.com/privileges/audio-speech
+  - id: audio.realtime
+    description: Use native and OpenAI-compatible realtime speech WebSocket sessions.
+    resource_tags:
+      - audio
+      - stt
+      - tts
+      - realtime
+    sensitivity_tier: high
+    rate_limit_class: elevated
+    default_roles:
+      - admin
+      - analyst
+      - developer
+    feature_flag_id: null
+    ownership_predicates:
+      - same_org
+    doc_url: https://docs.example.com/privileges/audio-realtime
   - id: audio.tts_provider_unload
     description: Unload initialized TTS provider runtimes from server memory.
     resource_tags:

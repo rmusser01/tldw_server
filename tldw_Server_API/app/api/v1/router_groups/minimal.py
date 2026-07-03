@@ -200,6 +200,31 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
                 attr_name="ws_router",
                 skip_context=minimal_skip_context,
             ),
+            ImportedRouterSpec(
+                import_path="tldw_Server_API.app.api.v1.endpoints.audio.audio_realtime",
+                log_name="audio_realtime",
+                prefix=f"{API_V1_PREFIX}/audio",
+                tags=("audio-realtime",),
+                route_key="audio-realtime",
+                skip_context=minimal_skip_context,
+            ),
+            ImportedRouterSpec(
+                import_path="tldw_Server_API.app.api.v1.endpoints.audio.audio_realtime",
+                log_name="audio_realtime_websocket",
+                prefix=f"{API_V1_PREFIX}/audio",
+                tags=("audio-realtime",),
+                route_key="audio-realtime",
+                attr_name="ws_router",
+                skip_context=minimal_skip_context,
+            ),
+            ImportedRouterSpec(
+                import_path="tldw_Server_API.app.api.v1.endpoints.realtime_compat",
+                log_name="realtime_compat",
+                prefix="/v1",
+                tags=("audio-realtime",),
+                route_key="audio-realtime",
+                skip_context=minimal_skip_context,
+            ),
         ):
             append_imported_router_spec(specs, audio_spec)
     else:

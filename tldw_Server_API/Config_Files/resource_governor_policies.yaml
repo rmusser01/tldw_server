@@ -265,6 +265,8 @@ policies:
 
 # Route/tag mapping helpers. Middleware may use these to resolve policy_id.
 route_map:
+  by_route:
+    audio-realtime: audio.default
   by_tag:
     health: core.default
     authentication: authnz.default
@@ -345,6 +347,7 @@ route_map:
     rag: rag.default
     watchlists: watchlists.default
     resource-governor: core.default
+    audio-realtime: audio.default
   by_path:
     "/health": core.default
     "/healthz": core.default
@@ -382,6 +385,7 @@ route_map:
     "/api/v1/chat/*": chat.default
     "/api/v1/embeddings*": embeddings.default
     "/api/v1/vector-stores*": embeddings.default
+    "/v1/realtime": audio.default
     "/api/v1/audio*": audio.default
     "/api/v1/evaluations*": evals.default
     "/api/v1/feedback*": evals.default

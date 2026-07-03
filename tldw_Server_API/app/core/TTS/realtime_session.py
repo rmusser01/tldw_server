@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from typing import Any
@@ -104,6 +105,17 @@ class BufferedRealtimeSession(RealtimeTTSSession):
         await self._text_queue.put(None)
         self._closed = True
 
+    async def close(self) -> None:
+        """Abort the buffered session without synthesizing uncommitted text."""
+
+        self._buffer = ""
+        self._closed = True
+        if not self._worker_task.done():
+            self._worker_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._worker_task
+        await self._audio_queue.put(None)
+
     async def audio_stream(self) -> AsyncGenerator[bytes, None]:
         while True:
             chunk = await self._audio_queue.get()
@@ -120,6 +132,8 @@ class BufferedRealtimeSession(RealtimeTTSSession):
                     break
                 if not text.strip():
                     continue
+                extra_params = dict(self._config.extra_params or {})
+                target_sample_rate = _pop_target_sample_rate(extra_params)
                 request = OpenAISpeechRequest(
                     model=self._config.model,
                     input=text,
@@ -127,8 +141,9 @@ class BufferedRealtimeSession(RealtimeTTSSession):
                     response_format=self._config.response_format,
                     speed=self._config.speed,
                     stream=True,
+                    target_sample_rate=target_sample_rate,
                     lang_code=self._config.lang_code,
-                    extra_params=self._config.extra_params,
+                    extra_params=extra_params or None,
                 )
                 async for chunk in self._tts_service.generate_speech(
                     request,
@@ -147,3 +162,16 @@ class BufferedRealtimeSession(RealtimeTTSSession):
             )
         finally:
             await self._audio_queue.put(None)
+
+
+def _pop_target_sample_rate(extra_params: dict[str, Any]) -> int | None:
+    """Move sample-rate aliases from realtime config extras to the OpenAI request field."""
+
+    raw_value = extra_params.pop("target_sample_rate", None)
+    if raw_value is None:
+        raw_value = extra_params.pop("sample_rate", None)
+    try:
+        parsed = int(raw_value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
