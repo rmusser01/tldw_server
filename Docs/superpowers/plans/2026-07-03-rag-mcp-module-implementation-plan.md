@@ -316,7 +316,8 @@ async def test_rag_module_exposes_four_strict_tools():
     module = RagModule(ModuleConfig(name="rag"))
     tools = {tool["name"]: tool for tool in await module.get_tools()}
     assert set(tools) == {"rag.capabilities", "rag.source_health", "rag.search", "rag.answer"}
-    assert tools["rag.search"]["inputSchema"]["additionalProperties"] is False
+    for tool_name in ("rag.capabilities", "rag.source_health", "rag.search", "rag.answer"):
+        assert tools[tool_name]["inputSchema"]["additionalProperties"] is False
     assert tools["rag.answer"]["metadata"]["category"] == "rag_generation"
 
 
@@ -351,6 +352,9 @@ async def test_rag_search_executes_shared_pipeline_without_generation(monkeypatc
 Also add tests for:
 
 - `rag.answer` includes `answer.status`.
+- `rag.answer` maps sufficiently cited/grounded output to `answer.status="answered"`.
+- `rag.answer` maps generated output with no citations to `partial` or `abstained`, never `answered`.
+- `rag.answer` maps weak evidence, failed citation coverage, or low trust metadata to `partial` or `abstained`, never `answered`.
 - `rag.source_health` returns safe canonical source entries and does not consume RAG query quota.
 - `rag.source_health`, `rag.search`, and `rag.answer` authorize each normalized source independently instead of treating `media.read` as global source access.
 - `tools/call` enforces `tools.execute:rag.capabilities`, `tools.execute:rag.source_health`, `tools.execute:rag.search`, and `tools.execute:rag.answer` independently.
@@ -479,13 +483,22 @@ def test_rag_search_and_answer_have_concrete_mcp_policies():
     assert "mcp.rag_generation" in policies["policies"]
 
 
+def test_rag_answer_missing_generation_category_is_guarded(monkeypatch):
+    mapping = dict(MCP_TOOL_CATEGORY_MAP)
+    mapping.pop("rag.answer", None)
+    monkeypatch.setattr(protocol_module, "MCP_TOOL_CATEGORY_MAP", mapping)
+    # tools/call must fail closed or produce an explicit guarded config error.
+    # It must not rate-limit or execute rag.answer as read/default.
+    assert call_rag_answer_with_fake_rate_limiter().reason_code == "rag_generation_category_required"
+
+
 def test_module_surface_classifies_rag_as_read_only():
     assert MODULE_RISK_TIERS["rag"][0] == "read_only"
 ```
 
 Add a policy test that `resource_governor_policies.yaml` contains concrete `mcp.search` and `mcp.rag_generation` policies, or the equivalent operation mapping used by MCP rate limiting. Do not leave `rag.search` mapped to `search` without a concrete `mcp.search` policy or deliberate tested alias to an existing category.
 
-Add protocol-level category tests with a fake rate limiter proving `tools/call` for `rag.search` receives category `search` and `tools/call` for `rag.answer` receives category `rag_generation` via `MCP_TOOL_CATEGORY_MAP`/`mcp_tool_categories.yaml`, because the runtime only trusts a small built-in set of metadata categories before consulting the config map.
+Add protocol-level category tests with a fake rate limiter proving `tools/call` for `rag.search` receives category `search` and `tools/call` for `rag.answer` receives category `rag_generation` via `MCP_TOOL_CATEGORY_MAP`/`mcp_tool_categories.yaml`, because the runtime only trusts a small built-in set of metadata categories before consulting the config map. Add a negative test that removes or hides the `rag.answer: rag_generation` mapping and asserts `rag.answer` fails closed with an explicit guarded config error instead of falling back to `read`, `search`, or `default`.
 
 In `test_protocol_catalog_filter.py`, add a catalog regression using the existing `tool_catalog_provider` injection:
 
@@ -570,7 +583,7 @@ Add a resource-governor policy in `resource_governor_policies.yaml`:
 
 If the policy file has an MCP category map, map `mcp.search` and `mcp.rag_generation` there rather than creating dead policies.
 
-Do not rely on tool metadata alone for MCP rate limiting. Keep metadata for governance/observability, but make runtime categories deterministic through `mcp_tool_categories.yaml`.
+Do not rely on tool metadata alone for MCP rate limiting. Keep metadata for governance/observability, but make runtime categories deterministic through `mcp_tool_categories.yaml`. `rag.answer` must require the configured `rag_generation` category; if that mapping or matching policy is missing, return a guarded configuration error and do not execute the tool under the runtime fallback category.
 
 Add to `module_surface.py`:
 
@@ -750,8 +763,9 @@ git commit -m "docs: document rag mcp tools"
 ## Final Verification Checklist
 
 - [ ] `rag.capabilities`, `rag.source_health`, `rag.search`, and `rag.answer` are discoverable.
+- [ ] All four `rag.*` tool schemas use `additionalProperties=false`.
 - [ ] `rag.search` returns bounded evidence and omits `answer`.
-- [ ] `rag.answer` returns bounded evidence plus `answer.status`.
+- [ ] `rag.answer` returns bounded evidence plus `answer.status`, and weak/uncited answers are `partial` or `abstained` rather than `answered`.
 - [ ] Source aliases normalize to canonical ids, reject unknown/internal sources such as `claims`, and preserve `sources_explicit`.
 - [ ] Response metadata includes `sources_requested`, `sources_used`, `sources_unavailable`, and truncation fields.
 - [ ] `sql` is rejected/deferred in Stage 1 and is not advertised by `rag.source_health`.
@@ -767,7 +781,7 @@ git commit -m "docs: document rag mcp tools"
 - [ ] Curated `library-rag`/catalog documentation exists and catalog filtering does not grant execute permission.
 - [ ] `rag.source_health` and `rag.capabilities` do not consume `RAG_QUERIES_DAY`.
 - [ ] `rag.search` and `rag.answer` enforce RAG query quota and usage accounting.
-- [ ] `mcp.search` and `mcp.rag_generation` have concrete category/rate policies.
+- [ ] `mcp.search` and `mcp.rag_generation` have concrete category/rate policies, and missing `rag_generation` config fails closed instead of falling back to `read`.
 - [ ] `knowledge.search` remains FTS/source-module discovery, not a RAG wrapper.
 - [ ] JSON-RPC `tools/call` and HTTP `/tools/execute` wrapper contracts are preserved.
 - [ ] Targeted pytest suite passes.
