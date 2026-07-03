@@ -23,9 +23,13 @@ class _NoopTelemetry:
         _operation_name: str,
         _attributes: dict[str, Any] | None = None,
     ) -> Any:
-        class _Context:
-            def __enter__(self) -> None:
+        class _Span:
+            def set_attribute(self, _key: str, _value: Any) -> None:
                 return None
+
+        class _Context:
+            def __enter__(self) -> _Span:
+                return _Span()
 
             def __exit__(self, *_exc_info: Any) -> None:
                 return None
@@ -679,3 +683,92 @@ async def test_protocol_resources_list_uses_catalog_filter(monkeypatch):
     uris = {res.get("uri") for res in result.get("resources", [])}
     assert "allowed://one" in uris
     assert "blocked://one" not in uris
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_catalog_membership_does_not_grant_rag_execute_permission() -> None:
+    from tldw_Server_API.app.core.MCP_unified.modules.base import BaseModule, ModuleConfig, create_tool_definition
+    from tldw_Server_API.app.core.MCP_unified.modules.registry import ModuleRegistry
+    from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol, MCPRequest, RequestContext
+
+    class _ToolCatalogProvider:
+        async def resolve_tool_names(
+            self,
+            *,
+            catalog_name: str | None,
+            catalog_id: Any,
+            metadata: dict[str, Any],
+            strict: bool,
+        ) -> set[str]:
+            del catalog_name, catalog_id, metadata, strict
+            return {"rag.search", "rag.answer", "knowledge.search"}
+
+    class _RagModuleStub(BaseModule):
+        async def on_initialize(self) -> None:
+            return None
+
+        async def on_shutdown(self) -> None:
+            return None
+
+        async def check_health(self) -> dict[str, bool]:
+            return {"ok": True}
+
+        async def get_tools(self) -> list[dict[str, Any]]:
+            return [
+                create_tool_definition(
+                    name="rag.search",
+                    description="RAG search",
+                    parameters={"properties": {"query": {"type": "string"}}, "required": ["query"]},
+                    metadata={"category": "search", "readOnlyHint": True},
+                ),
+                create_tool_definition(
+                    name="rag.answer",
+                    description="RAG answer",
+                    parameters={"properties": {"query": {"type": "string"}}, "required": ["query"]},
+                    metadata={"category": "rag_generation", "readOnlyHint": True},
+                ),
+            ]
+
+        def validate_tool_arguments(self, tool_name: str, arguments: dict[str, Any]) -> None:
+            del tool_name
+            if "query" not in arguments:
+                raise ValueError("query required")
+
+        async def execute_tool(
+            self,
+            tool_name: str,
+            arguments: dict[str, Any],
+            context: RequestContext | None = None,
+        ) -> dict[str, str]:
+            del arguments, context
+            return {"tool": tool_name}
+
+    registry = ModuleRegistry()
+    await registry.register_module("rag", _RagModuleStub, ModuleConfig(name="rag"))
+    proto = MCPProtocol(dependencies=_protocol_dependencies(tool_catalog_provider=_ToolCatalogProvider()))
+    proto.module_registry = registry
+
+    async def _allow_module(_context: RequestContext, _module_id: str) -> bool:
+        return True
+
+    async def _deny_answer(_context: RequestContext, tool_name: str, **_kwargs: Any) -> bool:
+        return tool_name != "rag.answer"
+
+    proto._has_module_permission = _allow_module  # type: ignore[method-assign]
+    proto._has_tool_permission = _deny_answer  # type: ignore[method-assign]
+
+    ctx = RequestContext(request_id="rag-catalog", user_id="1", client_id="unit")
+    listed = await proto._handle_tools_list({"catalog": "library-rag", "catalog_strict": True}, ctx)
+    by_name = {tool["name"]: tool for tool in listed["tools"]}
+
+    assert set(by_name) == {"rag.search", "rag.answer"}  # nosec B101
+    assert by_name["rag.search"]["canExecute"] is True  # nosec B101
+    assert by_name["rag.answer"]["canExecute"] is False  # nosec B101
+
+    denied = await proto.process_request(
+        MCPRequest(method="tools/call", params={"name": "rag.answer", "arguments": {"query": "q"}}, id=1),
+        ctx,
+    )
+
+    assert denied.error is not None  # nosec B101

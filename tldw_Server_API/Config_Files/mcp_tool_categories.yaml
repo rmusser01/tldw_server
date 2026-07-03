@@ -12,6 +12,8 @@ delete_media: ingestion
 
 media.search: read
 knowledge.search: read
+rag.search: search
+rag.answer: rag_generation
 notes.search: read
 chats.search: read
 prompts.search: read

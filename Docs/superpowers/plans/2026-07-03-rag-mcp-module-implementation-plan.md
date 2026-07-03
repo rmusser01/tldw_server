@@ -459,7 +459,7 @@ git commit -m "feat: add rag mcp module"
 - Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_protocol_catalog_filter.py`
 - Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_config_safe_defaults.py` if category-map coverage needs extension.
 
-- [ ] **Step 1: Write failing registration/config tests**
+- [x] **Step 1: Write failing registration/config tests**
 
 Add tests:
 
@@ -531,7 +531,7 @@ async def test_catalog_membership_does_not_grant_rag_execute_permission():
 
 This test must prove catalogs reduce discovery noise only. They must not bypass `tools.execute:rag.*`, API-key scopes, MCP scopes, governance category checks, or module/source authorization.
 
-- [ ] **Step 2: Run registration/config tests to verify failures**
+- [x] **Step 2: Run registration/config tests to verify failures**
 
 Run:
 
@@ -545,7 +545,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: FAIL because `rag` is not configured yet.
 
-- [ ] **Step 3: Update config**
+- [x] **Step 3: Update config**
 
 Add to `mcp_modules.yaml` after `knowledge`:
 
@@ -585,13 +585,15 @@ If the policy file has an MCP category map, map `mcp.search` and `mcp.rag_genera
 
 Do not rely on tool metadata alone for MCP rate limiting. Keep metadata for governance/observability, but make runtime categories deterministic through `mcp_tool_categories.yaml`. `rag.answer` must require the configured `rag_generation` category; if that mapping or matching policy is missing, return a guarded configuration error and do not execute the tool under the runtime fallback category.
 
+Implementation note: the runtime category allowlist now recognizes `rag_generation`, so `rag.answer` cannot silently fall back to `read` when using the default module metadata. The YAML category map and `mcp.rag_generation` policy are still installed as the operator-visible configuration path.
+
 Add to `module_surface.py`:
 
 ```python
 "rag": ("read_only", "Run grounded retrieval and answer generation over configured knowledge sources."),
 ```
 
-- [ ] **Step 4: Run registration/config tests to verify pass**
+- [x] **Step 4: Run registration/config tests to verify pass**
 
 Run the pytest command from Step 2.
 

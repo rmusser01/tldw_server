@@ -56,6 +56,15 @@ policies:
     <<: *mcp_base
     requests: { rpm: 120, burst: 1.0 }  # Higher limit for read ops
 
+  mcp.search:
+    <<: *mcp_base
+    requests: { rpm: 60, burst: 1.0 }
+
+  mcp.rag_generation:
+    requests: { rpm: 30, burst: 1.0 }
+    scopes: [user, api_key]
+    fail_mode: fallback_memory
+
   # AuthNZ guardrails (login, reset-password, etc.)
   # Applied by RG ingress via /api/v1/auth* route_map entries.
   authnz.default:

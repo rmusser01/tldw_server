@@ -16,6 +16,14 @@ modified_files:
 - tldw_Server_API/tests/RAG_NEW/unit/test_rag_transport_helpers.py
 - tldw_Server_API/app/core/MCP_unified/modules/implementations/rag_module.py
 - tldw_Server_API/app/core/MCP_unified/tests/test_rag_module.py
+- tldw_Server_API/Config_Files/mcp_modules.yaml
+- tldw_Server_API/Config_Files/mcp_tool_categories.yaml
+- tldw_Server_API/Config_Files/resource_governor_policies.yaml
+- tldw_Server_API/app/core/MCP_unified/module_surface.py
+- tldw_Server_API/app/core/MCP_unified/tool_execution/runtime.py
+- tldw_Server_API/app/core/MCP_unified/tests/test_idempotency_and_category.py
+- tldw_Server_API/app/core/MCP_unified/tests/test_protocol_catalog_filter.py
+- tldw_Server_API/app/core/MCP_unified/tests/test_rag_module_registration.py
 ---
 
 ## Description
