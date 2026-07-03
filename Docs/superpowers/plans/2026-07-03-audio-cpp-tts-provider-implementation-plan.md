@@ -330,9 +330,9 @@ Expected result after implementation: both test files pass.
 
 **Tests:** `test_audio_cpp_sidecar_supervisor.py`, `test_audio_cpp_installer.py`
 
-**Status:** Not Started
+**Status:** Complete
 
-- [ ] **Step 1: Write failing sidecar tests**
+- [x] **Step 1: Write failing sidecar tests**
 
 Cover:
 
@@ -353,7 +353,7 @@ python -m pytest -q tldw_Server_API/tests/TTS_NEW/unit/adapters/test_audio_cpp_s
 
 Expected result before implementation: import failure for `audio_cpp_sidecar_supervisor`.
 
-- [ ] **Step 2: Write failing installer tests**
+- [x] **Step 2: Write failing installer tests**
 
 Cover pure functions only:
 
@@ -372,7 +372,7 @@ python -m pytest -q tldw_Server_API/tests/TTS_NEW/unit/test_audio_cpp_installer.
 
 Expected result before implementation: missing installer module or helper failures.
 
-- [ ] **Step 3: Implement sidecar supervisor and installer helper**
+- [x] **Step 3: Implement sidecar supervisor and installer helper**
 
 Create:
 
@@ -389,7 +389,7 @@ Implementation requirements:
 - Sidecar stdout/stderr may be logged at debug with truncation, but user-facing exceptions stay sanitized.
 - Installer network and build operations require explicit CLI flags.
 
-- [ ] **Step 4: Update setup documentation**
+- [x] **Step 4: Update setup documentation**
 
 Modify `Docs/STT-TTS/TTS-SETUP-GUIDE.md` with:
 
@@ -402,7 +402,7 @@ Modify `Docs/STT-TTS/TTS-SETUP-GUIDE.md` with:
 - loopback, remote-base-url opt-in, and reference-audio shared-path warnings.
 - license boundary: optional external component, no vendored binaries in this implementation.
 
-- [ ] **Step 5: Re-run focused tests**
+- [x] **Step 5: Re-run focused tests**
 
 Run:
 
