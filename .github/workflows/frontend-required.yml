@@ -113,6 +113,7 @@ jobs:
         continue-on-error: true
         working-directory: apps/tldw-frontend
         run: |
+          set -o pipefail
           bun run test:coverage 2>&1 | tail -30
           echo "NOTE: report-only; thresholds land after a baseline is observed in CI (audit F4)."
 

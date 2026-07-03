@@ -19,7 +19,7 @@ def quarantine_items(conftest_file: str, items) -> None:
     here = Path(conftest_file).resolve().parent
     skip = pytest.mark.skip(
         reason="quarantined: known-failing suite, run with RUN_QUARANTINED=1 "
-        "(audits/2026-07-02-quarantined-suites.md)"
+        "(see issue #2581 and audits/2026-07-02-quarantined-suites.md)"
     )
     for item in items:
         try:

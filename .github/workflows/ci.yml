@@ -2549,6 +2549,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_file_mime_detection.py
               tldw_Server_API/tests/Character_Chat/test_rate_limits_specific.py
+              tldw_Server_API/tests/RateLimiting/test_character_rate_limiter_429.py
           - name: chat-character-legacy-worldbook
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_world_book_and_limits.py
@@ -3821,6 +3822,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_file_mime_detection.py
               tldw_Server_API/tests/Character_Chat/test_rate_limits_specific.py
+              tldw_Server_API/tests/RateLimiting/test_character_rate_limiter_429.py
           - name: chat-character-legacy-worldbook
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_world_book_and_limits.py
@@ -5017,6 +5019,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_file_mime_detection.py
               tldw_Server_API/tests/Character_Chat/test_rate_limits_specific.py
+              tldw_Server_API/tests/RateLimiting/test_character_rate_limiter_429.py
           - name: chat-character-legacy-worldbook
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_world_book_and_limits.py
@@ -6214,6 +6217,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_file_mime_detection.py
               tldw_Server_API/tests/Character_Chat/test_rate_limits_specific.py
+              tldw_Server_API/tests/RateLimiting/test_character_rate_limiter_429.py
           - name: chat-character-legacy-worldbook
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_world_book_and_limits.py

@@ -191,7 +191,7 @@ grep -rE "status_code == (4|5)" tldw_Server_API/tests --include="*.py" | wc -l
 
 ### 4.2 Security tests
 
-A dedicated `tldw_Server_API/tests/Security/` suite exists (13 files, ~1,450 lines): path traversal (`test_mediawiki_security.py`), SSRF/egress (`test_egress.py`, `test_websearch_egress_guard.py`), RBAC (`test_text2sql_rbac_and_acl.py`). **Gaps:** no SQL-injection suite beyond text2sql; no XSS/input-sanitization sweep; and the two OAuth admin endpoints (F2) — the most token-sensitive surfaces — have zero tests including auth-bypass cases.
+A dedicated `tldw_Server_API/tests/Security/` suite exists (13 files, ~1,450 lines): path traversal (`test_mediawiki_security.py`), SSRF/egress (`test_egress.py`, `test_websearch_egress_guard.py`), RBAC (`test_text2sql_rbac_and_acl.py`). **Gaps:** no SQL-injection suite beyond text2sql; no XSS/input-sanitization sweep; and the OAuth admin surfaces were initially believed untested but are covered (see §1.3 correction).
 
 ### 4.3 Performance tests (F8)
 
@@ -297,13 +297,18 @@ Routes and schemas verified against `storage_user_folders.py:25,46`, `storage_us
 -]
 ```
 
-and in each affected directory's `conftest.py`:
-
-```python
-import pytest
-collect_ignore_glob: list[str] = []
-pytestmark = pytest.mark.quarantined  # register marker; CI runs -m "not quarantined"
-```
+**Implemented approach (2026-07-02, remediation pass):** the `pytest.mark.quarantined` /
+`collect_ignore_glob` sketch above was abandoned in favor of a shared helper,
+`quarantine_items()` in `tldw_Server_API/tests/_plugins/quarantine.py`. Each
+affected directory's `conftest.py` defines a `pytest_collection_modifyitems`
+hook that delegates to `quarantine_items(__file__, items)`, which skips (with
+a reason linking issue #2581) every collected item whose path lives under
+that conftest's own directory, unless `RUN_QUARANTINED=1` is set. The
+delegation-by-path scoping matters because `pytest_collection_modifyitems`
+receives the **full, session-wide item list** even when defined in a
+subdirectory conftest — a naive per-conftest hook that skips everything it
+sees would quarantine the entire suite, not just its own directory; see
+`audits/2026-07-02-quarantined-suites.md` for the burn-down tracker.
 
 Then burn the quarantine list down file by file. (First step, zero risk: run `pytest <dir> --co -q` for each to learn whether they even collect.)
 
