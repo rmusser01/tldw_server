@@ -1,7 +1,7 @@
 ---
 id: TASK-12125
 title: Implement audio.cpp TTS provider and setup integration
-status: In Progress
+status: Done
 labels:
 - audio
 - tts
@@ -48,7 +48,7 @@ Implement the accepted Approach A design for `0xShug0/audio.cpp`: a disabled-by-
 - [x] #3 Reference-audio and option passthrough behavior is safe by default: loopback-only base URLs unless explicitly allowed, external reference audio disabled unless configured, server-local scratch paths constrained, and only allowlisted scalar options sent upstream.
 - [x] #4 Managed sidecar support can render upstream server config, choose a loopback port, wait for health, avoid tight restart loops, and shut down cleanly without exposing arbitrary command args or process output.
 - [x] #5 Installer/setup helpers and documentation cover explicit clone/build/config/model steps without silent network downloads during normal server startup or inference.
-- [ ] #6 Focused pytest, Ruff, and Bandit verification are recorded for the touched implementation scope.
+- [x] #6 Focused pytest, Ruff, and Bandit verification are recorded for the touched implementation scope.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -89,6 +89,12 @@ Follow `docs/superpowers/plans/2026-07-03-audio-cpp-tts-provider-implementation-
 - Stage 4 self-review found that omitting an explicit subprocess environment would inherit parent secrets. Added a failing sidecar test that set `HF_TOKEN` and `OPENAI_API_KEY` and expected them not to be passed to the child process; it failed with missing `env`, then passed after adding an allowlisted sidecar env.
 - Stage 4 Ruff check passed for `audio_cpp_sidecar_supervisor.py`, `audio_cpp_adapter.py`, `install_tts_audio_cpp.py`, `test_audio_cpp_sidecar_supervisor.py`, and `test_audio_cpp_installer.py` after env hardening.
 - Stage 4 adapter regression: `..\..\.venv\Scripts\python.exe -m pytest -q --tb=short tldw_Server_API/tests/TTS_NEW/unit/adapters/test_audio_cpp_adapter.py tldw_Server_API/tests/TTS_NEW/integration/test_audio_cpp_tts_service.py tldw_Server_API/tests/TTS_NEW/unit/adapters/test_audio_cpp_sidecar_supervisor.py tldw_Server_API/tests/TTS_NEW/unit/test_audio_cpp_installer.py` passed with 18 passed, 9 warnings in 85.71s.
+- Stage 5 focused audio.cpp suite: `..\..\.venv\Scripts\python.exe -m pytest -q --tb=short tldw_Server_API/tests/TTS_NEW/unit/test_audio_cpp_registry.py tldw_Server_API/tests/TTS_NEW/unit/test_audio_cpp_tts_config.py tldw_Server_API/tests/TTS_NEW/unit/adapters/test_audio_cpp_config.py tldw_Server_API/tests/TTS_NEW/unit/adapters/test_audio_cpp_client.py tldw_Server_API/tests/TTS_NEW/unit/adapters/test_audio_cpp_adapter.py tldw_Server_API/tests/TTS_NEW/unit/adapters/test_audio_cpp_sidecar_supervisor.py tldw_Server_API/tests/TTS_NEW/unit/test_audio_cpp_installer.py tldw_Server_API/tests/TTS_NEW/integration/test_audio_cpp_tts_service.py` passed with 34 passed, 14 warnings in 124.60s.
+- Stage 5 adjacent regression note: the plan-named `tldw_Server_API/tests/TTS_NEW/unit/adapters/test_pocket_tts_cpp_adapter.py` is absent in this checkout. Substituted `tldw_Server_API/tests/TTS_NEW/unit/test_pocket_tts_cpp_registry.py` plus `test_pocket_tts_cpp_installer.py`.
+- Stage 5 adjacent regression: `..\..\.venv\Scripts\python.exe -m pytest -q --tb=short --basetemp .pytest_tmp_adjacent tldw_Server_API/tests/TTS_NEW/unit/test_fish_s2_registry.py tldw_Server_API/tests/TTS_NEW/unit/test_pocket_tts_cpp_registry.py tldw_Server_API/tests/TTS_NEW/unit/test_pocket_tts_cpp_installer.py` passed with 14 passed, 6 warnings in 44.55s. The first substitute run without `--basetemp` failed only because pytest tried to create temp paths under `C:\Users\GDesktop-1\AppData\Local\Temp\pytest-of-GDesktop-1`, outside the writable sandbox.
+- Stage 5 Ruff check passed for all touched Python files in the implementation plan.
+- Stage 5 Bandit check passed: `..\..\.venv\Scripts\python.exe -m bandit -r tldw_Server_API/app/core/TTS/adapters/audio_cpp_client.py tldw_Server_API/app/core/TTS/adapters/audio_cpp_config.py tldw_Server_API/app/core/TTS/adapters/audio_cpp_sidecar_supervisor.py tldw_Server_API/app/core/TTS/adapters/audio_cpp_adapter.py Helper_Scripts/install_tts_audio_cpp.py -f json -o models/audio_cpp/test_artifacts/bandit_audio_cpp_tts.json`; report summary had 0 results, 0 high, 0 medium, 0 low findings.
+- Known limitations: no live `audiocpp_server` smoke test was run in this environment; managed mode remains documented as CUDA-first; generic `/v1/tasks/run`, STT, VAD, diarization, and other Approach C task surfaces are not included in this TTS slice.
 
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
@@ -96,16 +102,16 @@ Follow `docs/superpowers/plans/2026-07-03-audio-cpp-tts-provider-implementation-
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 
-Pending implementation.
+Approach A is implemented for TTS: `audio_cpp` is registered as a disabled-by-default provider, routes through the existing `TTSServiceV2` flow, includes client/config/adapter/managed-sidecar support, has explicit setup helpers and docs, and keeps request options, paths, reference audio, process args, and subprocess environment constrained by default. Verification passed for focused audio.cpp tests, adjacent provider regressions, Ruff, and Bandit. Follow-up Approach C work should reuse `AudioCppClient` and `AudioCppSidecarSupervisor` for broader `/v1/tasks/run`-style audio processing surfaces after a real runtime smoke test is available.
 
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or documented as non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or documented as non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

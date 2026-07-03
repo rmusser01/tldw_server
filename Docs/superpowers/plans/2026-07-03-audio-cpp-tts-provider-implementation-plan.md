@@ -423,9 +423,9 @@ Expected result after implementation: both test files pass.
 
 **Tests:** All files created in this plan plus adjacent registry, config, and service tests.
 
-**Status:** Not Started
+**Status:** Complete
 
-- [ ] **Step 1: Run focused test suite**
+- [x] **Step 1: Run focused test suite**
 
 Run:
 
@@ -444,7 +444,7 @@ python -m pytest -q `
 
 Expected result: all focused tests pass.
 
-- [ ] **Step 2: Run adjacent regression tests**
+- [x] **Step 2: Run adjacent regression tests**
 
 Run:
 
@@ -458,7 +458,7 @@ python -m pytest -q `
 
 Expected result: adjacent provider routing and installer tests pass. If any named file is absent in this checkout, record the absent path in `TASK-12125` and run the closest existing adjacent test discovered with `rg --files`.
 
-- [ ] **Step 3: Run Ruff on touched Python files**
+- [x] **Step 3: Run Ruff on touched Python files**
 
 Run after source files exist:
 
@@ -483,7 +483,7 @@ python -m ruff check `
 
 Expected result: Ruff exits 0.
 
-- [ ] **Step 4: Run Bandit on touched implementation files**
+- [x] **Step 4: Run Bandit on touched implementation files**
 
 Run:
 
@@ -500,7 +500,7 @@ python -m bandit -r `
 
 Expected result: no new high or medium findings in touched code. Fix new findings before closeout.
 
-- [ ] **Step 5: Update task tracking and self-review**
+- [x] **Step 5: Update task tracking and self-review**
 
 Update `TASK-12125` with:
 
@@ -530,7 +530,7 @@ git diff --check -- `
 
 Expected result: no whitespace errors.
 
-- [ ] **Step 6: Commit scoped slices**
+- [x] **Step 6: Commit scoped slices**
 
 Prefer small commits by stage. Stage explicit paths only, and do not include unrelated untracked files.
 
