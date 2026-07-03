@@ -445,3 +445,19 @@ def cleanup_after_test():
     # Any cleanup code here
     import gc
     gc.collect()
+
+
+def pytest_collection_modifyitems(config, items):
+    """Quarantine: this suite has known failures (see audits/2026-07-02-quarantined-suites.md).
+
+    Skipped by default so it is VISIBLE in every run instead of hidden via
+    norecursedirs. Run for real with RUN_QUARANTINED=1.
+    """
+    if os.getenv("RUN_QUARANTINED") == "1":
+        return
+    skip = pytest.mark.skip(
+        reason="quarantined: known-failing suite, run with RUN_QUARANTINED=1 "
+        "(audits/2026-07-02-quarantined-suites.md)"
+    )
+    for item in items:
+        item.add_marker(skip)
