@@ -204,7 +204,11 @@ class TestParakeetMLX:
         model = mlx_mod.load_parakeet_mlx_model(force_reload=True)
         assert model is None
 
-    def test_speech_to_text_parakeet_mlx_buffered_converts_compressed_path(self, monkeypatch, tmp_path):
+    def test_speech_to_text_parakeet_mlx_buffered_converts_compressed_path(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
         """MLX buffered path should not pass compressed source files to soundfile loaders."""
         from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import Audio_Buffered_Transcription as buffered_mod
         from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import Audio_Transcription_Lib as atlib
@@ -224,11 +228,12 @@ class TestParakeetMLX:
             types.SimpleNamespace(get_duration=lambda path: 120.0),
         )
 
-        def fake_convert_to_wav(path, *args, **kwargs):
+        def fake_convert_to_wav(path: str, *args: object, **kwargs: object) -> str:
             captured["convert_input"] = str(path)
+            captured["overwrite"] = kwargs.get("overwrite")
             return str(converted_wav)
 
-        def fake_transcribe_long_audio(audio_path, *args, **kwargs):
+        def fake_transcribe_long_audio(audio_path: str, *args: object, **kwargs: object) -> str:
             captured["audio_path"] = str(audio_path)
             return "mlx transcript"
 
@@ -242,10 +247,34 @@ class TestParakeetMLX:
         )
 
         assert captured["convert_input"] == str(compressed_file)
+        assert captured["overwrite"] is True
         assert captured["audio_path"] == str(converted_wav)
         assert segments[0]["Text"] == "mlx transcript"
 
-    def test_speech_to_text_parakeet_mlx_rejects_converted_path_outside_base_dir(self, monkeypatch, tmp_path):
+    def test_speech_to_text_parakeet_mlx_rejects_existing_wav_outside_base_dir(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Existing WAV inputs should still be checked by the MLX helper."""
+        from tldw_Server_API.app.core.exceptions import STTTranscriptionError
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import Audio_Transcription_Lib as atlib
+
+        outside_dir = tmp_path.parent / f"{tmp_path.name}_existing_wav_outside"
+        outside_dir.mkdir(exist_ok=True)
+        outside_wav = outside_dir / "sample.wav"
+        outside_wav.write_bytes(b"RIFFfakeWAVE")
+
+        with pytest.raises(STTTranscriptionError, match="WAV path is outside the allowed directory"):
+            atlib._ensure_wav_path_for_parakeet_mlx(
+                str(outside_wav),
+                base_dir=tmp_path,
+            )
+
+    def test_speech_to_text_parakeet_mlx_rejects_converted_path_outside_base_dir(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
         """MLX conversion output should remain inside base_dir when one is provided."""
         from tldw_Server_API.app.core.exceptions import STTTranscriptionError
         from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import Audio_Transcription_Lib as atlib

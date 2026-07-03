@@ -402,15 +402,23 @@ def _load_audio_for_parakeet_nemo(audio_file_path: str, target_sr: int = 16000) 
 
 
 def _ensure_wav_path_for_parakeet_mlx(audio_file_path: str, base_dir: Optional[Path] = None) -> str:
+    """Return a WAV path for Parakeet MLX while enforcing optional base_dir containment."""
     path_obj = Path(audio_file_path)
     if path_obj.suffix.lower() == ".wav":
+        if base_dir is not None:
+            safe_path = resolve_safe_local_path(path_obj, base_dir)
+            if safe_path is None:
+                raise STTTranscriptionError(
+                    "Parakeet MLX audio loading failed: WAV path is outside the allowed directory."
+                )
+            return str(safe_path)
         return str(path_obj)
 
     try:
         wav_file_path = convert_to_wav(
             str(path_obj),
             offset=0,
-            overwrite=False,
+            overwrite=True,
             base_dir=base_dir,
         )
     except (ConversionError, OSError, RuntimeError, TypeError, ValueError) as exc:

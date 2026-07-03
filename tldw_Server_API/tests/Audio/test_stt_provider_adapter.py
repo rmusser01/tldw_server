@@ -3,6 +3,8 @@ import importlib
 import importlib.machinery
 import sys
 import builtins
+from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -577,7 +579,11 @@ def test_transcribe_batch_canary_normalizes_artifact(monkeypatch, tmp_path):
 
 
 @pytest.mark.unit
-def test_transcribe_batch_canary_converts_compressed_input_before_soundfile(monkeypatch, tmp_path):
+def test_transcribe_batch_canary_converts_compressed_input_before_soundfile(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Canary adapter converts compressed input before soundfile reads it."""
     spa = _import_module()
 
     import numpy as np
@@ -593,8 +599,9 @@ def test_transcribe_batch_canary_converts_compressed_input_before_soundfile(monk
 
     captured = {}
 
-    def fake_convert_to_wav(path, *args, **kwargs):
+    def fake_convert_to_wav(path: str, *args: object, **kwargs: object) -> str:
         captured["input_path"] = str(path)
+        captured["overwrite"] = kwargs.get("overwrite")
         return str(converted_wav)
 
     monkeypatch.setattr(atlib, "convert_to_wav", fake_convert_to_wav)
@@ -603,7 +610,13 @@ def test_transcribe_batch_canary_converts_compressed_input_before_soundfile(monk
         "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo"
     )
 
-    def fake_transcribe_with_canary(audio_np, sample_rate, language, task="transcribe", target_language=None):
+    def fake_transcribe_with_canary(
+        audio_np: Any,
+        sample_rate: int,
+        language: str,
+        task: str = "transcribe",
+        target_language: str | None = None,
+    ) -> str:
         assert sample_rate == 16000
         assert len(audio_np) == 1600
         return "canary transcript"
@@ -625,10 +638,15 @@ def test_transcribe_batch_canary_converts_compressed_input_before_soundfile(monk
 
     assert artifact["text"] == "canary transcript"
     assert captured["input_path"] == str(compressed_file)
+    assert captured["overwrite"] is True
 
 
 @pytest.mark.unit
-def test_transcribe_batch_qwen3_asr_converts_compressed_input(monkeypatch, tmp_path):
+def test_transcribe_batch_qwen3_asr_converts_compressed_input(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Qwen3-ASR adapter passes a freshly converted WAV path to the provider."""
     spa = _import_module()
 
     import sys
@@ -640,21 +658,26 @@ def test_transcribe_batch_qwen3_asr_converts_compressed_input(monkeypatch, tmp_p
     converted_wav.write_bytes(b"RIFFfakeWAVE")
     captured = {}
 
-    monkeypatch.setattr(atlib, "convert_to_wav", lambda path, *args, **kwargs: str(converted_wav))
+    def fake_convert_to_wav(path: str, *args: object, **kwargs: object) -> str:
+        captured["convert_input"] = str(path)
+        captured["overwrite"] = kwargs.get("overwrite")
+        return str(converted_wav)
+
+    monkeypatch.setattr(atlib, "convert_to_wav", fake_convert_to_wav)
 
     fake_qwen3_mod = types.ModuleType(
         "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Qwen3ASR"
     )
 
     def fake_transcribe_with_qwen3_asr(
-        audio_path,
+        audio_path: str,
         *,
-        model_path=None,
-        language=None,
-        word_timestamps=False,
-        base_dir=None,
-        cancel_check=None,
-    ):
+        model_path: str | None = None,
+        language: str | None = None,
+        word_timestamps: bool = False,
+        base_dir: Path | None = None,
+        cancel_check: object = None,
+    ) -> dict[str, Any]:
         captured["audio_path"] = str(audio_path)
         captured["base_dir"] = base_dir
         return {
@@ -684,12 +707,18 @@ def test_transcribe_batch_qwen3_asr_converts_compressed_input(monkeypatch, tmp_p
     )
 
     assert artifact["text"] == "qwen3 transcript"
+    assert captured["convert_input"] == str(compressed_file)
+    assert captured["overwrite"] is True
     assert captured["audio_path"] == str(converted_wav)
     assert captured["base_dir"] == tmp_path
 
 
 @pytest.mark.unit
-def test_transcribe_batch_vibevoice_converts_compressed_input(monkeypatch, tmp_path):
+def test_transcribe_batch_vibevoice_converts_compressed_input(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """VibeVoice adapter passes a freshly converted WAV path to the provider."""
     spa = _import_module()
 
     import sys
@@ -701,21 +730,26 @@ def test_transcribe_batch_vibevoice_converts_compressed_input(monkeypatch, tmp_p
     converted_wav.write_bytes(b"RIFFfakeWAVE")
     captured = {}
 
-    monkeypatch.setattr(atlib, "convert_to_wav", lambda path, *args, **kwargs: str(converted_wav))
+    def fake_convert_to_wav(path: str, *args: object, **kwargs: object) -> str:
+        captured["convert_input"] = str(path)
+        captured["overwrite"] = kwargs.get("overwrite")
+        return str(converted_wav)
+
+    monkeypatch.setattr(atlib, "convert_to_wav", fake_convert_to_wav)
 
     fake_vibe_mod = types.ModuleType(
         "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_VibeVoice"
     )
 
     def fake_transcribe_with_vibevoice(
-        audio_path,
+        audio_path: str,
         *,
-        model_id=None,
-        language=None,
-        hotwords=None,
-        base_dir=None,
-        cancel_check=None,
-    ):
+        model_id: str | None = None,
+        language: str | None = None,
+        hotwords: list[str] | None = None,
+        base_dir: Path | None = None,
+        cancel_check: object = None,
+    ) -> dict[str, Any]:
         captured["audio_path"] = str(audio_path)
         captured["base_dir"] = base_dir
         return {
@@ -745,6 +779,8 @@ def test_transcribe_batch_vibevoice_converts_compressed_input(monkeypatch, tmp_p
     )
 
     assert artifact["text"] == "vibe transcript"
+    assert captured["convert_input"] == str(compressed_file)
+    assert captured["overwrite"] is True
     assert captured["audio_path"] == str(converted_wav)
     assert captured["base_dir"] == tmp_path
 

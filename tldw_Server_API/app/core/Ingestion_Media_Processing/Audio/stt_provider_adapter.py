@@ -153,6 +153,7 @@ def _raise_if_cancelled(cancel_check: Callable[[], bool] | None) -> None:
 
 
 def _resolve_adapter_audio_path(audio_path: str, base_dir: Path | None) -> Path:
+    """Resolve an adapter input path and enforce base_dir containment when provided."""
     path_obj = Path(audio_path)
     if base_dir is None:
         return path_obj
@@ -164,6 +165,7 @@ def _resolve_adapter_audio_path(audio_path: str, base_dir: Path | None) -> Path:
 
 
 def _canonicalize_wav_for_soundfile_adapter(audio_path: str, base_dir: Path | None) -> Path:
+    """Convert compressed adapter input to a fresh WAV path accepted by soundfile loaders."""
     path_obj = _resolve_adapter_audio_path(audio_path, base_dir)
     if path_obj.suffix.lower() == ".wav":
         return path_obj
@@ -180,7 +182,7 @@ def _canonicalize_wav_for_soundfile_adapter(audio_path: str, base_dir: Path | No
         converted_path = convert_to_wav(
             str(path_obj),
             offset=0,
-            overwrite=False,
+            overwrite=True,
             base_dir=base_dir,
         )
     except (ConversionError, OSError, RuntimeError, ValueError) as exc:

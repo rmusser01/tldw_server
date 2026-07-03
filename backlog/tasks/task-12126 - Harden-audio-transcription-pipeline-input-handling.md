@@ -43,6 +43,21 @@ Verification:
 - `python -m bandit -r ... -f json -o C:\Users\GDesktop-1\AppData\Local\Temp\bandit_audio_transcription_pipeline.json` -> ran; nonzero due existing low-severity subprocess findings in `Audio_Transcription_Lib.py` outside this diff.
 
 PR: https://github.com/rmusser01/tldw_server/pull/2597
+
+PR review follow-up:
+- Rebased on latest `origin/dev` (`48f66ad281`) and dropped unrelated carried-over `audio.cpp` planning commits from the PR branch.
+- Verified and fixed existing-WAV `base_dir` validation for the Parakeet MLX helper.
+- Forced endpoint and direct-provider conversion calls to use fresh canonical WAV outputs (`overwrite=True`) to avoid spoofed `.wav` bypasses and stale sibling WAV reuse.
+- Added docstrings/type hints requested for new helpers/tests without broad style churn.
+- Hardened `_prepare_numpy_audio_for_nemo` for invalid sample rates and oversized fallback interpolation.
+- Added direct helper regression tests for stereo downmix, polyphase guard fallback, SciPy import fallback, invalid sample rates, and oversized resample ratios.
+
+PR review verification:
+- `python -m pytest tldw_Server_API/tests/Audio/test_audio_transcriptions_adapter_path.py tldw_Server_API/tests/Audio/test_stt_provider_adapter.py tldw_Server_API/tests/Media_Ingestion_Modification/test_nemo_transcription.py tldw_Server_API/tests/Media_Ingestion_Modification/test_parakeet_mlx.py -q --basetemp C:\Users\GDesktop-1\AppData\Local\Temp\tldw_pytest_tmp_pr_rebase_final` -> `85 passed, 2 skipped`.
+- `python -m ruff check ... --select E9,F821,F822,F823,B904,BLE001` -> passed.
+- `python -m compileall -q` on touched production files -> passed.
+- `git diff --check` -> passed; Git reported expected Windows LF-to-CRLF warnings only.
+- `python -m bandit -r ... -f json -o C:\Users\GDesktop-1\AppData\Local\Temp\bandit_audio_transcription_pipeline_pr_rebase_final.json` -> ran; nonzero due existing low-severity subprocess findings in `Audio_Transcription_Lib.py` outside this diff.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done

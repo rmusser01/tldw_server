@@ -1,5 +1,6 @@
 import io
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
@@ -21,10 +22,10 @@ def _make_wav_bytes(duration_sec: float = 0.1, sr: int = 16000) -> bytes:
 
 
 def test_audio_transcriptions_uses_adapter_base_dir(
-    monkeypatch,
-    bypass_api_limits,
-):
-
+    monkeypatch: pytest.MonkeyPatch,
+    bypass_api_limits: Any,
+) -> None:
+    """Successful uploads pass adapter base_dir and force canonical WAV conversion."""
 
     monkeypatch.setenv("TEST_MODE", "true")
     monkeypatch.setenv("AUTH_MODE", "single_user")
@@ -39,25 +40,25 @@ def test_audio_transcriptions_uses_adapter_base_dir(
     async def _fake_get_request_user() -> User:
         return User(id=1, username="single_user")
 
-    async def _allow_job(*_args, **_kwargs):
+    async def _allow_job(*_args: object, **_kwargs: object) -> tuple[bool, None]:
         return True, None
 
-    async def _noop_async(*_args, **_kwargs):
+    async def _noop_async(*_args: object, **_kwargs: object) -> None:
         return None
 
     class _StubAdapter:
         def transcribe_batch(
             self,
-            audio_path,
+            audio_path: str,
             *,
-            model=None,
-            language=None,
-            task="transcribe",
-            word_timestamps=False,
-            prompt=None,
-            hotwords=None,
-            base_dir=None,
-        ):
+            model: str | None = None,
+            language: str | None = None,
+            task: str = "transcribe",
+            word_timestamps: bool = False,
+            prompt: str | None = None,
+            hotwords: list[str] | None = None,
+            base_dir: Path | None = None,
+        ) -> dict[str, Any]:
             assert hotwords is None
             assert base_dir is not None
             assert base_dir == Path(audio_path).parent
@@ -77,10 +78,10 @@ def test_audio_transcriptions_uses_adapter_base_dir(
             }
 
     class _StubRegistry:
-        def resolve_provider_for_model(self, _model):
+        def resolve_provider_for_model(self, _model: object) -> tuple[str, str, None]:
             return "external", "external:stub", None
 
-        def get_adapter(self, _provider):
+        def get_adapter(self, _provider: object) -> _StubAdapter:
             return _StubAdapter()
 
     monkeypatch.setattr(audio_ep, "can_start_job", _allow_job)
@@ -90,8 +91,15 @@ def test_audio_transcriptions_uses_adapter_base_dir(
     monkeypatch.setattr(audio_ep, "add_daily_minutes", _noop_async)
     import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_provider_adapter as stt_adapter
 
+    captured_conversion: dict[str, Any] = {}
+
+    def _capture_convert_to_wav(path: str, *args: object, **kwargs: object) -> str:
+        captured_conversion["path"] = path
+        captured_conversion["overwrite"] = kwargs.get("overwrite")
+        return path
+
     monkeypatch.setattr(stt_adapter, "get_stt_provider_registry", lambda: _StubRegistry())
-    monkeypatch.setattr(atlib, "convert_to_wav", lambda path, *args, **kwargs: path)
+    monkeypatch.setattr(atlib, "convert_to_wav", _capture_convert_to_wav)
 
     app = FastAPI()
     app.dependency_overrides[get_request_user] = _fake_get_request_user
@@ -113,6 +121,8 @@ def test_audio_transcriptions_uses_adapter_base_dir(
         assert resp.status_code == 200, resp.text
         body = resp.json()
         assert body["text"] == "stub transcript"
+        assert Path(captured_conversion["path"]).suffix == ".wav"
+        assert captured_conversion["overwrite"] is True
 
 
 def test_audio_transcriptions_derives_suffix_for_extensionless_upload(
@@ -357,9 +367,10 @@ def test_audio_transcriptions_prevents_cross_provider_fallback(
 
 
 def test_audio_transcriptions_rejects_upload_when_wav_conversion_fails(
-    monkeypatch,
-    bypass_api_limits,
-):
+    monkeypatch: pytest.MonkeyPatch,
+    bypass_api_limits: Any,
+) -> None:
+    """Reject compressed uploads instead of falling back when WAV conversion fails."""
     monkeypatch.setenv("TEST_MODE", "true")
     monkeypatch.setenv("AUTH_MODE", "single_user")
     monkeypatch.setenv("SINGLE_USER_API_KEY", TEST_API_KEY)
@@ -374,24 +385,24 @@ def test_audio_transcriptions_rejects_upload_when_wav_conversion_fails(
     async def _fake_get_request_user() -> User:
         return User(id=1, username="single_user")
 
-    async def _allow_job(*_args, **_kwargs):
+    async def _allow_job(*_args: object, **_kwargs: object) -> tuple[bool, None]:
         return True, None
 
-    async def _noop_async(*_args, **_kwargs):
+    async def _noop_async(*_args: object, **_kwargs: object) -> None:
         return None
 
     class _StubAdapter:
-        def transcribe_batch(self, *args, **kwargs):
+        def transcribe_batch(self, *args: object, **kwargs: object) -> None:
             pytest.fail("adapter should not receive original upload after conversion failure")
 
     class _StubRegistry:
-        def resolve_provider_for_model(self, _model):
+        def resolve_provider_for_model(self, _model: object) -> tuple[str, str, None]:
             return "external", "external:stub", None
 
-        def get_adapter(self, _provider):
+        def get_adapter(self, _provider: object) -> _StubAdapter:
             return _StubAdapter()
 
-    def _fail_convert(*_args, **_kwargs):
+    def _fail_convert(*_args: object, **_kwargs: object) -> None:
         raise atlib.ConversionError("ffmpeg failed")
 
     monkeypatch.setattr(audio_ep, "can_start_job", _allow_job)
@@ -425,11 +436,12 @@ def test_audio_transcriptions_rejects_upload_when_wav_conversion_fails(
 
 @pytest.mark.parametrize("conversion_output_kind", ["empty", "non_wav"])
 def test_audio_transcriptions_rejects_unusable_conversion_output(
-    monkeypatch,
-    bypass_api_limits,
-    tmp_path,
-    conversion_output_kind,
-):
+    monkeypatch: pytest.MonkeyPatch,
+    bypass_api_limits: Any,
+    tmp_path: Path,
+    conversion_output_kind: str,
+) -> None:
+    """Reject conversion outputs that are empty, missing, or not canonical WAV files."""
     monkeypatch.setenv("TEST_MODE", "true")
     monkeypatch.setenv("AUTH_MODE", "single_user")
     monkeypatch.setenv("SINGLE_USER_API_KEY", TEST_API_KEY)
@@ -444,21 +456,21 @@ def test_audio_transcriptions_rejects_unusable_conversion_output(
     async def _fake_get_request_user() -> User:
         return User(id=1, username="single_user")
 
-    async def _allow_job(*_args, **_kwargs):
+    async def _allow_job(*_args: object, **_kwargs: object) -> tuple[bool, None]:
         return True, None
 
-    async def _noop_async(*_args, **_kwargs):
+    async def _noop_async(*_args: object, **_kwargs: object) -> None:
         return None
 
     class _StubAdapter:
-        def transcribe_batch(self, *args, **kwargs):
+        def transcribe_batch(self, *args: object, **kwargs: object) -> None:
             pytest.fail("adapter should not receive a non-WAV conversion output")
 
     class _StubRegistry:
-        def resolve_provider_for_model(self, _model):
+        def resolve_provider_for_model(self, _model: object) -> tuple[str, str, None]:
             return "external", "external:stub", None
 
-        def get_adapter(self, _provider):
+        def get_adapter(self, _provider: object) -> _StubAdapter:
             return _StubAdapter()
 
     if conversion_output_kind == "empty":

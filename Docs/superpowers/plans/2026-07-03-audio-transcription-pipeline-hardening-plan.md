@@ -21,5 +21,5 @@
 ## Stage 4: Verification and Closeout
 **Goal**: Validate the focused bugfix without widening the branch scope.
 **Success Criteria**: Focused pytest targets pass, Ruff passes on touched Python files, Bandit runs on touched Python paths, and task notes capture any known skips.
-**Tests**: Focused pytest suite passed (`79 passed, 2 skipped`); high-signal Ruff rules passed; `compileall` passed; `git diff --check` passed; Bandit ran and reported only existing low-severity subprocess findings outside this diff.
+**Tests**: After PR review fixes, focused pytest suite passed (`85 passed, 2 skipped`); high-signal Ruff rules passed; `compileall` passed; `git diff --check` passed; Bandit ran and reported only existing low-severity subprocess findings outside this diff.
 **Status**: Complete

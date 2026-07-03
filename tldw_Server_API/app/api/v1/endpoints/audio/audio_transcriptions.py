@@ -704,6 +704,20 @@ async def create_transcription(
             temp_audio_path = tmp_file.name
 
         # Convert to canonical 16k mono WAV for consistent processing; base_dir constrains output location.
+        def _raise_invalid_audio(cause: Exception | None = None) -> None:
+            """Raise the canonical invalid_audio response for failed WAV preparation."""
+            exc = HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=_dictation_error_detail(
+                    http_status=status.HTTP_400_BAD_REQUEST,
+                    detail_status="invalid_audio",
+                    message="Audio file could not be converted to canonical WAV.",
+                ),
+            )
+            if cause is not None:
+                raise exc from cause
+            raise exc
+
         try:
             from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib import (
                 ConversionError,
@@ -717,20 +731,13 @@ async def create_transcription(
                 temp_audio_path,
                 e,
             )
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=_dictation_error_detail(
-                    http_status=status.HTTP_400_BAD_REQUEST,
-                    detail_status="invalid_audio",
-                    message="Audio file could not be converted to canonical WAV.",
-                ),
-            ) from e
+            _raise_invalid_audio(cause=e)
         else:
             try:
                 canonical_path = _convert_to_wav(
                     temp_audio_path,
                     offset=0,
-                    overwrite=False,
+                    overwrite=True,
                     base_dir=PathLib(temp_audio_path).parent,
                 )
             except (ConversionError, OSError, RuntimeError, ValueError) as e:
@@ -739,28 +746,14 @@ async def create_transcription(
                     temp_audio_path,
                     e,
                 )
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=_dictation_error_detail(
-                        http_status=status.HTTP_400_BAD_REQUEST,
-                        detail_status="invalid_audio",
-                        message="Audio file could not be converted to canonical WAV.",
-                    ),
-                ) from e
+                _raise_invalid_audio(cause=e)
 
         if not canonical_path:
             logger.debug(
                 'convert_to_wav returned empty output; rejecting audio upload: input_path={}',
                 temp_audio_path,
             )
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=_dictation_error_detail(
-                    http_status=status.HTTP_400_BAD_REQUEST,
-                    detail_status="invalid_audio",
-                    message="Audio file could not be converted to canonical WAV.",
-                ),
-            )
+            _raise_invalid_audio()
 
         canonical_path_obj = PathLib(canonical_path)
         if (
@@ -772,14 +765,7 @@ async def create_transcription(
                 temp_audio_path,
                 canonical_path,
             )
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=_dictation_error_detail(
-                    http_status=status.HTTP_400_BAD_REQUEST,
-                    detail_status="invalid_audio",
-                    message="Audio file could not be converted to canonical WAV.",
-                ),
-            )
+            _raise_invalid_audio()
 
         if is_test_mode():
             logger.debug("TEST_MODE: canonical audio path resolved")

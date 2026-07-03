@@ -90,6 +90,9 @@ _NEMO_RESAMPLE_EXCEPTIONS: tuple[type[BaseException], ...] = (
     ImportError,
     *_NEMO_NONCRITICAL_EXCEPTIONS,
 )
+_NEMO_MIN_SAMPLE_RATE = 8000
+_NEMO_MAX_SAMPLE_RATE = 192000
+_NEMO_MAX_RESAMPLE_RATIO = 8.0
 
 torch: Any | None = None
 _TORCH_IMPORT_ERROR: Exception | None = None
@@ -146,14 +149,23 @@ def _prepare_numpy_audio_for_nemo(
     *,
     target_sample_rate: int = 16000,
 ) -> tuple[np.ndarray, int]:
+    """Normalize NumPy audio to mono float32 and resample it for NeMo models."""
     audio_np = np.asarray(audio_data, dtype=np.float32)
     if audio_np.ndim == 0:
         audio_np = audio_np.reshape(1)
     elif audio_np.ndim > 1:
         audio_np = np.mean(audio_np, axis=1).astype(np.float32, copy=False)
+    if sample_rate <= 0:
+        raise ValueError("NeMo numpy audio preparation failed: sample_rate must be positive.")
+    if target_sample_rate <= 0:
+        raise ValueError("NeMo numpy audio preparation failed: target_sample_rate must be positive.")
+    if sample_rate < _NEMO_MIN_SAMPLE_RATE or sample_rate > _NEMO_MAX_SAMPLE_RATE:
+        raise ValueError(
+            "NeMo numpy audio preparation failed: sample_rate is outside the supported range."
+        )
     if audio_np.size == 0:
         return np.ascontiguousarray(audio_np, dtype=np.float32), target_sample_rate
-    if sample_rate == target_sample_rate or sample_rate <= 0:
+    if sample_rate == target_sample_rate:
         return np.ascontiguousarray(audio_np, dtype=np.float32), target_sample_rate
 
     try:
@@ -169,7 +181,11 @@ def _prepare_numpy_audio_for_nemo(
         logging.debug(f"NeMo numpy audio polyphase resample failed; using linear fallback: {type(exc).__name__}")
 
     ratio = float(target_sample_rate) / float(sample_rate)
+    if ratio > _NEMO_MAX_RESAMPLE_RATIO:
+        raise ValueError("NeMo numpy audio preparation failed: resample ratio is too large.")
     new_len = max(1, int(round(len(audio_np) * ratio)))
+    if new_len > int(len(audio_np) * _NEMO_MAX_RESAMPLE_RATIO):
+        raise ValueError("NeMo numpy audio preparation failed: resampled audio would be too large.")
     x_old = np.linspace(0.0, 1.0, num=len(audio_np), endpoint=False, dtype=np.float32)
     x_new = np.linspace(0.0, 1.0, num=new_len, endpoint=False, dtype=np.float32)
     resampled = np.interp(x_new, x_old, audio_np)
