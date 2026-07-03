@@ -6,8 +6,8 @@ from dataclasses import dataclass, replace
 from html.parser import HTMLParser
 from typing import Any, Literal
 from urllib.parse import urljoin, urlsplit, urlunsplit
-from xml.etree import ElementTree
 
+from defusedxml import ElementTree
 from .acquisition.fetcher import URLFetcher
 from .acquisition.service import DocsAcquisitionService
 from .acquisition.policy import safe_argument_hash
