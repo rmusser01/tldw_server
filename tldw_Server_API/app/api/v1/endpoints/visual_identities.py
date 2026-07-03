@@ -661,34 +661,12 @@ async def create_visual_identity_asset_from_generated_file(
     normalized_expression = _normalize_expression_or_422(request.expression_key)
     normalized_source_feature = str(request.source_feature or "").strip().lower()
     is_vn_source = normalized_source_feature == SOURCE_FEATURE_VN_ASSETS
-    generated_file: dict[str, Any] | None = None
     source_feature = SOURCE_FEATURE_VN_ASSETS if is_vn_source else request.source_feature
-    if is_vn_source:
-        generated_file = await files_repo.get_file_by_id(request.generated_file_id)
-        if not generated_file:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="generated_file_not_found",
-            )
-        try:
-            validate_generated_file_record_for_expression_asset(
-                owner_user_id=service.owner_user_id,
-                generated_file_record=generated_file,
-                source_feature=source_feature,
-            )
-            canonical_context = build_vn_visual_identity_source_context(
-                user_id=service.owner_user_id,
-                vn_repository=VNAssetPacksRepository.initialized(service.db),
-                generated_file_record=generated_file,
-                requested_context=request.source_context,
-            )
-        except ValueError as exc:
-            raise _handle_value_error(exc) from exc
-    else:
-        try:
-            canonical_context = canonicalize_source_context(request.source_context)
-        except ValueError as exc:
-            raise _handle_value_error(exc) from exc
+    try:
+        idempotency_source_context = canonicalize_source_context(request.source_context)
+    except ValueError as exc:
+        raise _handle_value_error(exc) from exc
+
     scope = "visual_identity_generated_file_asset"
     resource_id = f"pack:{pack_id}:generated-file-asset"
     payload_hash = _canonical_payload_hash(
@@ -698,7 +676,7 @@ async def create_visual_identity_asset_from_generated_file(
             "expression_key": normalized_expression,
             "draft_id": request.draft_id,
             "source_feature": source_feature,
-            "source_context": canonical_context,
+            "source_context": idempotency_source_context,
         }
     )
     replay, claim_token = _claim_or_replay_idempotency(
@@ -713,19 +691,33 @@ async def create_visual_identity_asset_from_generated_file(
         return replay  # type: ignore[return-value]
     if claim_token is None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="idempotency_claim_missing")
+
     try:
-        if generated_file is None:
-            generated_file = await files_repo.get_file_by_id(request.generated_file_id)
-            if not generated_file:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="generated_file_not_found",
-                )
+        generated_file = await files_repo.get_file_by_id(request.generated_file_id)
+        if not generated_file:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="generated_file_not_found",
+            )
+        if is_vn_source:
             validate_generated_file_record_for_expression_asset(
                 owner_user_id=service.owner_user_id,
                 generated_file_record=generated_file,
                 source_feature=source_feature,
             )
+            canonical_context = build_vn_visual_identity_source_context(
+                user_id=service.owner_user_id,
+                vn_repository=VNAssetPacksRepository.initialized(service.db),
+                generated_file_record=generated_file,
+                requested_context=request.source_context,
+            )
+        else:
+            validate_generated_file_record_for_expression_asset(
+                owner_user_id=service.owner_user_id,
+                generated_file_record=generated_file,
+                source_feature=source_feature,
+            )
+            canonical_context = idempotency_source_context
         draft = _draft_for_asset_upload(service, pack, draft_id=request.draft_id)
         stored = copy_generated_file_record_to_expression_asset(
             owner_user_id=service.owner_user_id,
@@ -752,6 +744,15 @@ async def create_visual_identity_asset_from_generated_file(
             claim_token=claim_token,
         )
         raise _handle_value_error(exc) from exc
+    except HTTPException:
+        _release_idempotency_claim(
+            service,
+            scope=scope,
+            resource_id=resource_id,
+            idempotency_key=request.idempotency_key,
+            claim_token=claim_token,
+        )
+        raise
     except Exception:
         _release_idempotency_claim(
             service,

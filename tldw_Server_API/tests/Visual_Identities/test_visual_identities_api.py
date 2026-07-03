@@ -632,6 +632,95 @@ def test_generated_file_asset_import_records_vn_context_and_rejects_item_mismatc
     assert any((storage_root / "1").glob("packs/draft-*/happy/*.png"))
 
 
+def test_vn_generated_file_import_derives_context_and_replays_without_live_source(
+    chacha_db: CharactersRAGDB,
+    repo: VisualIdentityRepository,
+    storage_root: Path,
+    outputs_root: Path,
+) -> None:
+    pack = repo.create_pack(owner_user_id=1, title="VN Generated Expressions")
+    source_path = outputs_root / "1" / SOURCE_FEATURE_VN_ASSETS / "maya_happy.png"
+    source_path.parent.mkdir(parents=True)
+    source_bytes = _png_bytes(color="blue")
+    source_path.write_bytes(source_bytes)
+
+    character_id = _seed_character(chacha_db, name="Maya")
+    vn_repo = VNAssetPacksRepository.initialized(chacha_db)
+    vn_pack = vn_repo.create_pack(
+        owner_user_id=1,
+        primary_character_id=character_id,
+        title="Maya Sprite Pack",
+    )
+    vn_slot = vn_repo.create_slot(
+        pack_id=int(vn_pack["id"]),
+        asset_type="sprite",
+        slot_key="happy",
+        labels={"expression": "happy"},
+    )
+    vn_item = vn_repo.create_item(
+        pack_id=int(vn_pack["id"]),
+        slot_id=int(vn_slot["id"]),
+        generated_file_id=77,
+        storage_ref=f"{SOURCE_FEATURE_VN_ASSETS}/maya_happy.png",
+        mime_type="image/png",
+        width=8,
+        height=8,
+        bytes=len(source_bytes),
+    )
+    item_id = int(vn_item["id"])
+    files_repo = FakeGeneratedFilesRepo(
+        {
+            77: {
+                "id": 77,
+                "user_id": 1,
+                "is_deleted": False,
+                "file_category": "image",
+                "source_feature": SOURCE_FEATURE_VN_ASSETS,
+                "source_ref": vn_asset_source_ref(item_id),
+                "storage_path": f"{SOURCE_FEATURE_VN_ASSETS}/maya_happy.png",
+                "mime_type": "image/png",
+                "original_filename": "maya_happy.png",
+            }
+        }
+    )
+    client = _client(chacha_db, files_repo=files_repo)
+    request = {
+        "generated_file_id": 77,
+        "expression_key": "happy",
+        "source_feature": SOURCE_FEATURE_VN_ASSETS,
+        "idempotency_key": "vn-generated-context-default-replay",
+    }
+
+    first = client.post(
+        f"/api/v1/visual-identities/packs/{pack['id']}/assets/from-generated-file",
+        json=request,
+    )
+    files_repo.records.pop(77)
+    replay = client.post(
+        f"/api/v1/visual-identities/packs/{pack['id']}/assets/from-generated-file",
+        json=request,
+    )
+
+    assert first.status_code == 201
+    assert first.json()["source_context"] == {
+        "filename": "maya_happy.png",
+        "generated_file_id": 77,
+        "mime_type": "image/png",
+        "source_feature": SOURCE_FEATURE_VN_ASSETS,
+        "source_ref": vn_asset_source_ref(item_id),
+        "vn_asset_type": "sprite",
+        "vn_item_id": item_id,
+        "vn_pack_id": int(vn_pack["id"]),
+        "vn_slot_id": int(vn_slot["id"]),
+        "vn_slot_key": "happy",
+    }
+    assert replay.status_code == 201
+    assert replay.json() == first.json()
+    assert files_repo.accessed_ids == [77]
+    assert _visual_identity_asset_count(chacha_db, owner_user_id=1) == 1
+    assert any((storage_root / "1").glob("packs/draft-*/happy/*.png"))
+
+
 def test_generated_file_asset_import_rejects_invalid_file_without_creating_draft(
     chacha_db: CharactersRAGDB,
     repo: VisualIdentityRepository,

@@ -16,7 +16,7 @@ OWNER_USER_ID = 1
 class FakeVNAssetPacksRepository:
     def __init__(self) -> None:
         self.items = {
-            29: {"id": 29, "pack_id": 7, "slot_id": 11},
+            29: {"id": 29, "pack_id": 7, "slot_id": 11, "generated_file_id": 42},
         }
         self.slots = {
             11: {"id": 11, "pack_id": 7, "slot_key": "happy", "asset_type": "sprite"},
@@ -90,6 +90,26 @@ def test_vn_bridge_verifies_structural_vn_ids_before_persisting(
             "vn_slot_id": 11,
             "vn_slot_key": "happy",
             "vn_asset_type": "sprite",
+        },
+    )
+
+    assert context["vn_item_id"] == 29
+    assert context["vn_pack_id"] == 7
+    assert context["vn_slot_id"] == 11
+    assert context["vn_slot_key"] == "happy"
+    assert context["vn_asset_type"] == "sprite"
+
+
+def test_vn_bridge_derives_structural_vn_fields_without_requested_hints(
+    vn_repository: FakeVNAssetPacksRepository,
+) -> None:
+    context = build_vn_visual_identity_source_context(
+        user_id=OWNER_USER_ID,
+        vn_repository=vn_repository,
+        generated_file_record={
+            "id": 42,
+            "source_feature": "vn_assets",
+            "source_ref": "vn_asset_item:29",
         },
     )
 
@@ -194,6 +214,23 @@ def test_vn_bridge_rejects_item_source_ref_mismatch(
                 "source_ref": "vn_asset_item:29",
             },
             requested_context={"vn_item_id": 30},
+        )
+
+
+def test_vn_bridge_rejects_item_generated_file_mismatch(
+    vn_repository: FakeVNAssetPacksRepository,
+) -> None:
+    vn_repository.items[29]["generated_file_id"] = 99
+
+    with pytest.raises(ValueError, match="vn_generated_file_context_mismatch"):
+        build_vn_visual_identity_source_context(
+            user_id=OWNER_USER_ID,
+            vn_repository=vn_repository,
+            generated_file_record={
+                "id": 42,
+                "source_feature": "vn_assets",
+                "source_ref": "vn_asset_item:29",
+            },
         )
 
 

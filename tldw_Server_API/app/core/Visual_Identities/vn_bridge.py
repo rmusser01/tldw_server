@@ -62,6 +62,7 @@ def build_vn_visual_identity_source_context(
     requested_item_id = _coerce_optional_positive_int(requested.get("vn_item_id"))
     derived_item_id = _parse_required_vn_item_id_from_source_ref(source_ref)
     vn_item_id = requested_item_id if requested_item_id is not None else derived_item_id
+    generated_file_id = _coerce_required_positive_int(generated_file_record.get("id"))
 
     if source_ref != vn_asset_source_ref(vn_item_id):
         _raise_context_mismatch()
@@ -70,6 +71,7 @@ def build_vn_visual_identity_source_context(
         user_id=user_id,
         vn_repository=vn_repository,
         item_id=vn_item_id,
+        generated_file_id=generated_file_id,
     )
 
     context = {
@@ -80,7 +82,7 @@ def build_vn_visual_identity_source_context(
     context.update(
         {
             "source_feature": source_feature.lower(),
-            "generated_file_id": _coerce_optional_positive_int(generated_file_record.get("id")),
+            "generated_file_id": generated_file_id,
             "filename": _filename_from_generated_file(generated_file_record),
             "mime_type": _optional_string(generated_file_record.get("mime_type")),
             "source_ref": source_ref,
@@ -121,6 +123,7 @@ def _load_verified_item_context(
     user_id: int | str,
     vn_repository: VNAssetPacksRepositoryProtocol,
     item_id: int,
+    generated_file_id: int,
 ) -> tuple[Mapping[str, Any], Mapping[str, Any], Mapping[str, Any]]:
     item = vn_repository.get_item(item_id)
     if item is None:
@@ -128,6 +131,10 @@ def _load_verified_item_context(
 
     item_pack_id = _coerce_required_positive_int(item.get("pack_id"))
     item_slot_id = _coerce_required_positive_int(item.get("slot_id"))
+    item_generated_file_id = _coerce_required_positive_int(item.get("generated_file_id"))
+    if item_generated_file_id != generated_file_id:
+        _raise_context_mismatch()
+
     slot = vn_repository.get_slot(item_slot_id)
     pack = vn_repository.get_pack(item_pack_id)
     if slot is None or pack is None:
@@ -151,16 +158,17 @@ def _copy_verified_structural_hint(
     key: str,
     expected: Any,
 ) -> None:
-    if key not in requested:
-        return
-
-    requested_value = requested[key]
     if isinstance(expected, int):
-        requested_value = _coerce_optional_positive_int(requested_value)
+        if key in requested:
+            requested_value = _coerce_optional_positive_int(requested[key])
+            if requested_value != expected:
+                _raise_context_mismatch()
     else:
-        requested_value = _optional_string(requested_value)
-    if requested_value != expected:
-        _raise_context_mismatch()
+        expected = _required_string(expected)
+        if key in requested:
+            requested_value = _optional_string(requested[key])
+            if requested_value != expected:
+                _raise_context_mismatch()
     context[key] = expected
 
 
@@ -186,6 +194,13 @@ def _optional_string(value: Any) -> str | None:
         return None
     normalized = str(value).strip()
     return normalized or None
+
+
+def _required_string(value: Any) -> str:
+    normalized = _optional_string(value)
+    if normalized is None:
+        _raise_context_mismatch()
+    return normalized
 
 
 def _coerce_optional_positive_int(value: Any) -> int | None:
