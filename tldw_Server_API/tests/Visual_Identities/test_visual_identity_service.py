@@ -145,6 +145,263 @@ def test_activation_binds_pack_to_persona_uuid_string(
     assert resolved.asset_id is not None
 
 
+def test_resolver_explicit_override_resolves_requested_expression(
+    chacha_db: CharactersRAGDB,
+    repo: VisualIdentityRepository,
+    service: VisualIdentityService,
+) -> None:
+    character_id = _create_character(chacha_db, name="Override Character")
+    binding_draft = _create_ready_draft(repo, assets=("neutral",), title="Binding Pack")
+    service.activate_draft(
+        draft_id=binding_draft["id"],
+        actor_kind="character",
+        actor_id=character_id,
+    )
+    override_pack, override_version, override_assets = _create_versioned_pack(
+        repo,
+        title="Override Pack",
+        assets=("happy",),
+    )
+
+    resolved = service.resolve_expression_asset(
+        actor_kind="character",
+        actor_id=character_id,
+        requested_expression_key="happy",
+        role_id="hero",
+        role_label="Hero",
+        override_pack_id=override_pack["id"],
+        override_pack_version_id=override_version["id"],
+    )
+
+    assert resolved.pack_id == override_pack["id"]
+    assert resolved.pack_version_id == override_version["id"]
+    assert resolved.asset_id == override_assets["happy"]["id"]
+    assert resolved.resolution_source == "override"
+    assert resolved.role_id == "hero"
+    assert resolved.role_label == "Hero"
+
+
+def test_resolver_override_missing_expression_is_strict_by_default(
+    chacha_db: CharactersRAGDB,
+    repo: VisualIdentityRepository,
+    service: VisualIdentityService,
+) -> None:
+    character_id = _create_character(chacha_db, name="Strict Override Character")
+    binding_draft = _create_ready_draft(repo, assets=("sad",), title="Strict Binding Pack")
+    service.activate_draft(
+        draft_id=binding_draft["id"],
+        actor_kind="character",
+        actor_id=character_id,
+    )
+    override_pack, override_version, _ = _create_versioned_pack(
+        repo,
+        title="Strict Override Pack",
+        assets=("angry",),
+        default_expression_key="missing-default",
+    )
+
+    with pytest.raises(ValueError, match="^override_expression_missing$"):
+        service.resolve_expression_asset(
+            actor_kind="character",
+            actor_id=character_id,
+            requested_expression_key="sad",
+            override_pack_id=override_pack["id"],
+            override_pack_version_id=override_version["id"],
+        )
+
+
+def test_resolver_rejects_override_pack_version_mismatch(
+    chacha_db: CharactersRAGDB,
+    repo: VisualIdentityRepository,
+    service: VisualIdentityService,
+) -> None:
+    character_id = _create_character(chacha_db, name="Mismatch Override Character")
+    binding_draft = _create_ready_draft(repo, assets=("happy",), title="Mismatch Binding Pack")
+    service.activate_draft(
+        draft_id=binding_draft["id"],
+        actor_kind="character",
+        actor_id=character_id,
+    )
+    override_pack, _, _ = _create_versioned_pack(
+        repo,
+        title="Mismatch Override Pack",
+        assets=("sad",),
+    )
+    _, other_version, _ = _create_versioned_pack(
+        repo,
+        title="Other Override Pack",
+        assets=("happy",),
+    )
+
+    with pytest.raises(ValueError, match="^pack_version_mismatch$"):
+        service.resolve_expression_asset(
+            actor_kind="character",
+            actor_id=character_id,
+            requested_expression_key="happy",
+            override_pack_id=override_pack["id"],
+            override_pack_version_id=other_version["id"],
+        )
+
+
+def test_resolver_override_fallback_opt_in_records_reason(
+    chacha_db: CharactersRAGDB,
+    repo: VisualIdentityRepository,
+    service: VisualIdentityService,
+) -> None:
+    character_id = _create_character(chacha_db, name="Override Fallback Character")
+    binding_draft = _create_ready_draft(repo, assets=("happy",), title="Fallback Binding Pack")
+    service.activate_draft(
+        draft_id=binding_draft["id"],
+        actor_kind="character",
+        actor_id=character_id,
+    )
+    override_pack, override_version, override_assets = _create_versioned_pack(
+        repo,
+        title="Fallback Override Pack",
+        assets=("neutral",),
+    )
+
+    resolved = service.resolve_expression_asset(
+        actor_kind="character",
+        actor_id=character_id,
+        requested_expression_key="sad",
+        override_pack_id=override_pack["id"],
+        override_pack_version_id=override_version["id"],
+        allow_override_fallback=True,
+    )
+
+    assert resolved.pack_id == override_pack["id"]
+    assert resolved.pack_version_id == override_version["id"]
+    assert resolved.asset_id == override_assets["neutral"]["id"]
+    assert resolved.resolution_source == "override_fallback"
+    assert resolved.fallback_reason == "override_expression_missing:pack_default"
+
+
+def test_resolver_override_fallback_opt_in_can_fall_through_to_normal_binding(
+    chacha_db: CharactersRAGDB,
+    repo: VisualIdentityRepository,
+    service: VisualIdentityService,
+) -> None:
+    character_id = _create_character(chacha_db, name="Override Binding Fallback Character")
+    binding_draft = _create_ready_draft(
+        repo,
+        assets=("sad",),
+        title="Normal Binding Pack",
+        default_expression_key="missing-default",
+    )
+    activation = service.activate_draft(
+        draft_id=binding_draft["id"],
+        actor_kind="character",
+        actor_id=character_id,
+    )
+    binding_assets = {
+        asset["expression_key"]: asset
+        for asset in repo.list_assets_for_version(
+            activation.pack_version_id,
+            owner_user_id=OWNER_USER_ID,
+        )
+    }
+    override_pack, override_version, _ = _create_versioned_pack(
+        repo,
+        title="Empty Override Fallback Pack",
+        assets=("angry",),
+        default_expression_key="missing-default",
+    )
+
+    resolved = service.resolve_expression_asset(
+        actor_kind="character",
+        actor_id=character_id,
+        requested_expression_key="sad",
+        role_id="rival",
+        role_label="Rival",
+        override_pack_id=override_pack["id"],
+        override_pack_version_id=override_version["id"],
+        allow_override_fallback=True,
+    )
+
+    assert resolved.pack_id == activation.pack_id
+    assert resolved.pack_version_id == activation.pack_version_id
+    assert resolved.asset_id == binding_assets["sad"]["id"]
+    assert resolved.resolution_source == "override_binding_fallback"
+    assert "override_expression_missing" in resolved.fallback_reason
+    assert resolved.role_id == "rival"
+    assert resolved.role_label == "Rival"
+
+
+def test_persona_without_pack_does_not_use_character_legacy_mood(
+    chacha_db: CharactersRAGDB,
+    service: VisualIdentityService,
+) -> None:
+    _create_character(
+        chacha_db,
+        name="Legacy Mood Source Character",
+        extensions={"tldw": {"mood_images": {"happy": "legacy://happy.png"}}},
+    )
+    persona_id = chacha_db.create_persona_profile(
+        {"user_id": str(OWNER_USER_ID), "name": "Persona Without Pack"}
+    )
+
+    resolved = service.resolve_expression_asset(
+        actor_kind="persona",
+        actor_id=persona_id,
+        requested_expression_key="happy",
+    )
+
+    assert resolved.fallback_reason == "placeholder"
+    assert resolved.resolution_source == "placeholder"
+    assert resolved.asset_url is None
+
+
+@pytest.mark.parametrize(
+    ("actor_kind", "actor_id", "expected_error"),
+    (
+        ("character", 999999, "visual_identity_character_not_found"),
+        ("persona", "missing-persona", "visual_identity_persona_not_found"),
+    ),
+)
+def test_resolver_rejects_invalid_actor(
+    service: VisualIdentityService,
+    actor_kind: str,
+    actor_id: int | str,
+    expected_error: str,
+) -> None:
+    with pytest.raises(ValueError, match=f"^{expected_error}$"):
+        service.resolve_expression_asset(
+            actor_kind=actor_kind,
+            actor_id=actor_id,
+            requested_expression_key="happy",
+        )
+
+
+def test_resolver_rejects_cross_user_override_pack(
+    chacha_db: CharactersRAGDB,
+    repo: VisualIdentityRepository,
+    service: VisualIdentityService,
+) -> None:
+    character_id = _create_character(chacha_db, name="Cross User Override Character")
+    binding_draft = _create_ready_draft(repo, assets=("happy",), title="Cross User Binding")
+    service.activate_draft(
+        draft_id=binding_draft["id"],
+        actor_kind="character",
+        actor_id=character_id,
+    )
+    override_pack, override_version, _ = _create_versioned_pack(
+        repo,
+        owner_user_id=OWNER_USER_ID + 1,
+        title="Other User Override Pack",
+        assets=("happy",),
+    )
+
+    with pytest.raises(ValueError, match="^(pack_not_found|pack_not_owned)$"):
+        service.resolve_expression_asset(
+            actor_kind="character",
+            actor_id=character_id,
+            requested_expression_key="happy",
+            override_pack_id=override_pack["id"],
+            override_pack_version_id=override_version["id"],
+        )
+
+
 def test_activation_copies_draft_assets_into_version_instead_of_mutating_them(
     chacha_db: CharactersRAGDB,
     repo: VisualIdentityRepository,
@@ -575,3 +832,48 @@ def _create_draft_asset(
         width=64,
         height=64,
     )
+
+
+def _create_versioned_pack(
+    repo: VisualIdentityRepository,
+    *,
+    title: str,
+    assets: tuple[str, ...],
+    owner_user_id: int = OWNER_USER_ID,
+    default_expression_key: str = "neutral",
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, dict[str, Any]]]:
+    pack = repo.create_pack(
+        owner_user_id=owner_user_id,
+        title=title,
+        default_expression_key=default_expression_key,
+    )
+    version = repo.create_pack_version(
+        owner_user_id=owner_user_id,
+        pack_id=pack["id"],
+        version_number=1,
+        manifest={},
+        default_expression_key=default_expression_key,
+    )
+    pack = repo.set_active_version(
+        owner_user_id=owner_user_id,
+        pack_id=pack["id"],
+        pack_version_id=version["id"],
+    )
+    version_assets = {}
+    for expression_key in assets:
+        version_assets[expression_key] = repo.create_asset(
+            owner_user_id=owner_user_id,
+            pack_id=pack["id"],
+            pack_version_id=version["id"],
+            expression_key=expression_key,
+            original_expression_key=expression_key,
+            display_label=expression_key.title(),
+            source_filename=f"{expression_key}.png",
+            storage_relpath=f"visual_identities/{title}-{expression_key}.png",
+            content_type="image/png",
+            bytes=123,
+            sha256=f"sha256-{title}-{expression_key}",
+            width=64,
+            height=64,
+        )
+    return pack, version, version_assets

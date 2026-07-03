@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
@@ -40,6 +40,9 @@ class VisualIdentityResolvedAsset:
     is_animated: bool = False
     content_type: str | None = None
     asset_url: str | None = None
+    role_id: str | None = None
+    role_label: str | None = None
+    resolution_source: str = "binding"
 
 
 class VisualIdentityService:
@@ -115,34 +118,58 @@ class VisualIdentityService:
         requested_expression_key: str,
         manual_override_expression_key: str | None = None,
         mood_expression_key: str | None = None,
+        *,
+        role_id: str | None = None,
+        role_label: str | None = None,
+        override_pack_id: int | None = None,
+        override_pack_version_id: int | None = None,
+        allow_override_fallback: bool = False,
     ) -> VisualIdentityResolvedAsset:
         """Resolve the best asset for a requested actor expression."""
-        if actor_kind not in {"character", "persona"}:
-            raise ValueError("visual_identity_actor_kind_invalid")
-
+        normalized_actor_id = self._validate_actor_for_binding(actor_kind, actor_id)
         normalized_requested = normalize_expression_key(requested_expression_key)
+        if override_pack_version_id is not None and override_pack_id is None:
+            raise ValueError("pack_not_found")
+        if override_pack_id is not None:
+            return self._resolve_override_expression_asset(
+                actor_kind=actor_kind,
+                actor_id=normalized_actor_id,
+                requested_expression_key=normalized_requested,
+                role_id=role_id,
+                role_label=role_label,
+                override_pack_id=override_pack_id,
+                override_pack_version_id=override_pack_version_id,
+                allow_override_fallback=allow_override_fallback,
+                manual_override_expression_key=manual_override_expression_key,
+                mood_expression_key=mood_expression_key,
+            )
+
         binding = self.repository.resolve_active_binding(
             owner_user_id=self.owner_user_id,
             actor_kind=actor_kind,
-            actor_id=actor_id,
+            actor_id=normalized_actor_id,
         )
         if binding is None:
             legacy = self._resolve_legacy_character_mood(
                 actor_kind=actor_kind,
-                actor_id=actor_id,
+                actor_id=normalized_actor_id,
                 manual_override_expression_key=normalize_expression_key(
                     manual_override_expression_key or ""
                 ),
                 requested_expression_key=normalized_requested,
                 mood_expression_key=normalize_expression_key(mood_expression_key or ""),
                 default_expression_key="neutral",
+                role_id=role_id,
+                role_label=role_label,
             )
             if legacy is not None:
                 return legacy
             return self._placeholder(
                 actor_kind=actor_kind,
-                actor_id=actor_id,
+                actor_id=normalized_actor_id,
                 requested_expression_key=normalized_requested,
+                role_id=role_id,
+                role_label=role_label,
             )
 
         pack_version_id = int(binding["active_version_id"])
@@ -168,12 +195,17 @@ class VisualIdentityService:
             if asset is not None:
                 return self._resolved_asset(
                     actor_kind=actor_kind,
-                    actor_id=actor_id,
+                    actor_id=normalized_actor_id,
                     requested_expression_key=normalized_requested,
                     binding=binding,
                     asset=asset,
                     expression_key=expression_key,
                     fallback_reason=fallback_reason,
+                    resolution_source=(
+                        "binding" if fallback_reason == "requested" else "binding_fallback"
+                    ),
+                    role_id=role_id,
+                    role_label=role_label,
                 )
 
         for alias in ("neutral", "default", "normal"):
@@ -186,17 +218,20 @@ class VisualIdentityService:
                     continue
                 return self._resolved_asset(
                     actor_kind=actor_kind,
-                    actor_id=actor_id,
+                    actor_id=normalized_actor_id,
                     requested_expression_key=normalized_requested,
                     binding=binding,
                     asset=asset,
                     expression_key=str(asset["expression_key"]),
                     fallback_reason="neutral_alias",
+                    resolution_source="binding_fallback",
+                    role_id=role_id,
+                    role_label=role_label,
                 )
 
         legacy = self._resolve_legacy_character_mood(
             actor_kind=actor_kind,
-            actor_id=actor_id,
+            actor_id=normalized_actor_id,
             manual_override_expression_key=normalize_expression_key(
                 manual_override_expression_key or ""
             ),
@@ -207,15 +242,149 @@ class VisualIdentityService:
             )
             or "neutral",
             binding=binding,
+            role_id=role_id,
+            role_label=role_label,
         )
         if legacy is not None:
             return legacy
 
         return self._placeholder(
             actor_kind=actor_kind,
-            actor_id=actor_id,
+            actor_id=normalized_actor_id,
             requested_expression_key=normalized_requested,
+            role_id=role_id,
+            role_label=role_label,
         )
+
+    def _resolve_override_expression_asset(
+        self,
+        *,
+        actor_kind: str,
+        actor_id: ActorId,
+        requested_expression_key: str | None,
+        role_id: str | None,
+        role_label: str | None,
+        override_pack_id: int,
+        override_pack_version_id: int | None,
+        allow_override_fallback: bool,
+        manual_override_expression_key: str | None,
+        mood_expression_key: str | None,
+    ) -> VisualIdentityResolvedAsset:
+        """Resolve against an explicit pack/version override before actor binding fallback."""
+        pack, version = self._require_owned_override_version(
+            pack_id=override_pack_id,
+            pack_version_id=override_pack_version_id,
+        )
+        assets: dict[str, dict[str, Any]] = {}
+        for asset in self.repository.list_assets_for_version(
+            int(version["id"]),
+            owner_user_id=self.owner_user_id,
+        ):
+            assets.setdefault(str(asset["expression_key"]), asset)
+
+        candidates = [("requested", requested_expression_key)]
+        if allow_override_fallback:
+            candidates.append(
+                (
+                    "pack_default",
+                    normalize_expression_key(
+                        str(
+                            pack.get("default_expression_key")
+                            or version.get("default_expression_key")
+                            or ""
+                        )
+                    ),
+                )
+            )
+            candidates.extend(("neutral_alias", alias) for alias in ("neutral", "default", "normal"))
+
+        for fallback_reason, expression_key in candidates:
+            if not expression_key:
+                continue
+            asset = assets.get(expression_key)
+            if asset is None:
+                continue
+            return self._resolved_version_asset(
+                actor_kind=actor_kind,
+                actor_id=actor_id,
+                requested_expression_key=requested_expression_key,
+                pack_id=int(pack["id"]),
+                pack_version_id=int(version["id"]),
+                asset=asset,
+                expression_key=str(asset["expression_key"]),
+                fallback_reason=(
+                    fallback_reason
+                    if fallback_reason == "requested"
+                    else f"override_expression_missing:{fallback_reason}"
+                ),
+                resolution_source=(
+                    "override" if fallback_reason == "requested" else "override_fallback"
+                ),
+                role_id=role_id,
+                role_label=role_label,
+            )
+
+        if not allow_override_fallback:
+            raise ValueError("override_expression_missing")
+
+        fallback = self.resolve_expression_asset(
+            actor_kind=actor_kind,
+            actor_id=actor_id,
+            requested_expression_key=requested_expression_key or "",
+            manual_override_expression_key=manual_override_expression_key,
+            mood_expression_key=mood_expression_key,
+            role_id=role_id,
+            role_label=role_label,
+        )
+        return replace(
+            fallback,
+            fallback_reason=f"override_expression_missing:{fallback.fallback_reason}",
+            resolution_source=self._override_fallback_source(fallback.resolution_source),
+            role_id=role_id,
+            role_label=role_label,
+        )
+
+    def _require_owned_override_version(
+        self,
+        *,
+        pack_id: int,
+        pack_version_id: int | None,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Return an owned override pack and version or raise a typed resolver error."""
+        try:
+            normalized_pack_id = int(pack_id)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("pack_not_found") from exc
+
+        pack = self.repository.get_pack(normalized_pack_id, owner_user_id=self.owner_user_id)
+        if pack is None:
+            raise ValueError("pack_not_found")
+
+        if pack_version_id is None:
+            raise ValueError("pack_version_not_found")
+        else:
+            try:
+                normalized_pack_version_id = int(pack_version_id)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("pack_version_not_found") from exc
+
+        version = self.repository.get_pack_version(
+            normalized_pack_version_id,
+            owner_user_id=self.owner_user_id,
+        )
+        if version is None:
+            raise ValueError("pack_version_not_found")
+        if int(version["pack_id"]) != normalized_pack_id:
+            raise ValueError("pack_version_mismatch")
+        return pack, version
+
+    def _override_fallback_source(self, resolution_source: str) -> str:
+        """Map normal resolver source into the matching override fallback source."""
+        if resolution_source in {"binding", "binding_fallback"}:
+            return "override_binding_fallback"
+        if resolution_source == "legacy_character_mood":
+            return "override_legacy_fallback"
+        return "override_placeholder_fallback"
 
     def _resolve_legacy_character_mood(
         self,
@@ -227,6 +396,8 @@ class VisualIdentityService:
         mood_expression_key: str | None,
         default_expression_key: str | None,
         binding: dict[str, Any] | None = None,
+        role_id: str | None = None,
+        role_label: str | None = None,
     ) -> VisualIdentityResolvedAsset | None:
         """Resolve legacy character mood image metadata without copying bytes."""
         if actor_kind != "character":
@@ -278,6 +449,9 @@ class VisualIdentityService:
                     is_animated=False,
                     content_type=None,
                     asset_url=image_url,
+                    role_id=role_id,
+                    role_label=role_label,
+                    resolution_source="legacy_character_mood",
                 )
         return None
 
@@ -341,13 +515,46 @@ class VisualIdentityService:
         asset: dict[str, Any],
         expression_key: str,
         fallback_reason: str,
+        resolution_source: str,
+        role_id: str | None,
+        role_label: str | None,
     ) -> VisualIdentityResolvedAsset:
         """Build a resolved asset result from a selected version asset row."""
+        return self._resolved_version_asset(
+            actor_kind=actor_kind,
+            actor_id=actor_id,
+            requested_expression_key=requested_expression_key,
+            pack_id=int(binding["pack_id"]),
+            pack_version_id=int(binding["active_version_id"]),
+            asset=asset,
+            expression_key=expression_key,
+            fallback_reason=fallback_reason,
+            resolution_source=resolution_source,
+            role_id=role_id,
+            role_label=role_label,
+        )
+
+    def _resolved_version_asset(
+        self,
+        *,
+        actor_kind: str,
+        actor_id: ActorId,
+        requested_expression_key: str | None,
+        pack_id: int,
+        pack_version_id: int,
+        asset: dict[str, Any],
+        expression_key: str,
+        fallback_reason: str,
+        resolution_source: str,
+        role_id: str | None,
+        role_label: str | None,
+    ) -> VisualIdentityResolvedAsset:
+        """Build a resolved asset result from a selected pack version asset row."""
         return VisualIdentityResolvedAsset(
             actor_kind=actor_kind,
             actor_id=actor_id,
-            pack_id=int(binding["pack_id"]),
-            pack_version_id=int(binding["active_version_id"]),
+            pack_id=pack_id,
+            pack_version_id=pack_version_id,
             expression_key=expression_key,
             requested_expression_key=requested_expression_key,
             asset_id=int(asset["id"]),
@@ -356,6 +563,9 @@ class VisualIdentityService:
             is_animated=bool(asset.get("is_animated")),
             content_type=str(asset["content_type"]),
             asset_url=None,
+            role_id=role_id,
+            role_label=role_label,
+            resolution_source=resolution_source,
         )
 
     def _placeholder(
@@ -364,6 +574,8 @@ class VisualIdentityService:
         actor_kind: str,
         actor_id: ActorId,
         requested_expression_key: str | None,
+        role_id: str | None = None,
+        role_label: str | None = None,
     ) -> VisualIdentityResolvedAsset:
         """Build an explicit placeholder result for unresolved visual identities."""
         return VisualIdentityResolvedAsset(
@@ -379,4 +591,7 @@ class VisualIdentityService:
             is_animated=False,
             content_type=None,
             asset_url=None,
+            role_id=role_id,
+            role_label=role_label,
+            resolution_source="placeholder",
         )
