@@ -1,4 +1,43 @@
-from tldw_Server_API.app.core.VN_Play.assets import resolve_visual_directive
+from tldw_Server_API.app.core.Visual_Identities.service import VisualIdentityResolvedAsset
+from tldw_Server_API.app.core.VN_Play.assets import (
+    resolve_visual_directive,
+    resolve_visual_identity_directive,
+)
+
+
+class _FakeVisualIdentityResolver:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def resolve_expression_asset(self, **kwargs):
+        self.calls.append(dict(kwargs))
+        return VisualIdentityResolvedAsset(
+            actor_kind=str(kwargs["actor_kind"]),
+            actor_id=kwargs["actor_id"],
+            role_id=kwargs.get("role_id"),
+            role_label=kwargs.get("role_label"),
+            pack_id=5,
+            pack_version_id=6,
+            expression_key="happy",
+            requested_expression_key=str(kwargs["requested_expression_key"]),
+            asset_id=9,
+            storage_relpath="visual_identities/asset.webp",
+            fallback_reason="requested",
+            is_animated=True,
+            content_type="image/webp",
+            resolution_source="override",
+        )
+
+
+class _StrictOverrideIdResolver:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def resolve_expression_asset(self, **kwargs):
+        self.calls.append(dict(kwargs))
+        if kwargs.get("override_pack_id") == "bad-pack":
+            raise ValueError("pack_not_found")
+        raise AssertionError("invalid override id was not preserved for strict validation")
 
 
 def test_resolver_prefers_preferred_approved_item() -> None:
@@ -29,6 +68,73 @@ def test_resolver_prefers_preferred_approved_item() -> None:
 
     assert resolved.applied is True
     assert resolved.item["item_id"] == 2
+
+
+def test_visual_identity_directive_resolves_role_override_sprite() -> None:
+    resolver = _FakeVisualIdentityResolver()
+
+    resolved = resolve_visual_identity_directive(
+        resolver,
+        {
+            "asset_type": "sprite",
+            "actor_kind": "character",
+            "actor_id": 42,
+            "role_id": "hero",
+            "role_label": "Hero",
+            "expression_key": "happy",
+            "override_pack_id": 5,
+            "override_pack_version_id": 6,
+            "allow_override_fallback": True,
+            "labels": {"emotion": "happy"},
+        },
+    )
+
+    assert resolver.calls == [
+        {
+            "actor_kind": "character",
+            "actor_id": 42,
+            "requested_expression_key": "happy",
+            "manual_override_expression_key": None,
+            "mood_expression_key": None,
+            "role_id": "hero",
+            "role_label": "Hero",
+            "override_pack_id": 5,
+            "override_pack_version_id": 6,
+            "allow_override_fallback": True,
+        }
+    ]
+    assert resolved is not None
+    assert resolved.applied is True
+    assert resolved.item is not None
+    assert resolved.item["source"] == "visual_identity"
+    assert resolved.item["asset_type"] == "sprite"
+    assert resolved.item["content_url"] == (
+        "/api/v1/visual-identities/packs/5/assets/9/content"
+    )
+    assert resolved.item["labels"]["emotion"] == "happy"
+    assert resolved.item["metadata"]["visual_identity"]["role_id"] == "hero"
+    assert resolved.item["metadata"]["visual_identity"]["resolution_source"] == "override"
+
+
+def test_visual_identity_directive_preserves_invalid_override_ids_for_strict_resolver() -> None:
+    resolver = _StrictOverrideIdResolver()
+
+    resolved = resolve_visual_identity_directive(
+        resolver,
+        {
+            "asset_type": "sprite",
+            "actor_kind": "character",
+            "actor_id": 42,
+            "expression_key": "happy",
+            "override_pack_id": "bad-pack",
+            "override_pack_version_id": 6,
+        },
+    )
+
+    assert resolver.calls[0]["override_pack_id"] == "bad-pack"
+    assert resolved is not None
+    assert resolved.applied is False
+    assert resolved.reason == "pack_not_found"
 
 
 def test_resolver_supports_manifest_collection_aliases() -> None:

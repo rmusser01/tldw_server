@@ -14,7 +14,13 @@ from tldw_Server_API.app.core.DB_Management.VNPlay_DB import VNPlayRepository
 from tldw_Server_API.app.core.DB_Management.VNPolicy_DB import VNProfileSnapshotRepository
 from tldw_Server_API.app.core.DB_Management.VNScripts_DB import VNScriptsRepository
 from tldw_Server_API.app.core.VN_Assets.service import VNAssetPackService
-from tldw_Server_API.app.core.VN_Play.assets import resolve_scene_directives
+from tldw_Server_API.app.core.Visual_Identities.service import VisualIdentityService
+from tldw_Server_API.app.core.VN_Play.assets import (
+    is_visual_identity_directive,
+    resolve_scene_directives,
+    resolve_visual_directive,
+    resolve_visual_identity_directive,
+)
 from tldw_Server_API.app.core.VN_Play.branch_navigation import (
     branch_filter_ids,
     build_branch_navigation,
@@ -285,12 +291,14 @@ class VNPlayService:
         adapter: VNPlayTurnAdapter | None = None,
         generation_adapter: Any | None = None,
         moderation_adapter: Any | None = None,
+        visual_identity_service: Any | None = None,
     ) -> None:
         self.repo = repo
         self.owner_user_id = owner_user_id
         self.adapter = adapter or DeterministicVNPlayTurnAdapter()
         self.generation_adapter = generation_adapter or ScriptedVNGenerationAdapter()
         self.generation_moderation_adapter = moderation_adapter or GenerationModerationAdapter()
+        self._visual_identity_service = visual_identity_service
         self._manifest_cache: dict[int, dict[str, Any]] = {}
 
     def create_session(
@@ -907,6 +915,13 @@ class VNPlayService:
                 session.vn_asset_pack_id,
             )
             _append_enrichment_warning(enriched, exc)
+            active_sprites = [
+                sprite
+                for sprite in _list_of_dicts(enriched.get("active_sprite_items"))
+                if _is_embedded_scene_asset(sprite)
+            ]
+            if active_sprites:
+                enriched["active_sprites"] = active_sprites
             return enriched
 
         items_by_id = _manifest_items_by_id(manifest)
@@ -920,6 +935,9 @@ class VNPlayService:
 
         active_sprites: list[dict[str, Any]] = []
         for sprite in _list_of_dicts(enriched.get("active_sprite_items")):
+            if _is_embedded_scene_asset(sprite):
+                active_sprites.append(sprite)
+                continue
             item_id = sprite.get("item_id")
             if isinstance(item_id, int) and item_id in items_by_id:
                 active_sprites.append(items_by_id[item_id])
@@ -4209,39 +4227,31 @@ class VNPlayService:
         manifest: Mapping[str, Any] | None = None
         manifest_error: str | None = None
         default_rejection_reason = "manifest_unavailable"
+        directive_payloads = [dict(directive) for directive in directives]
+        has_visual_identity_directive = any(
+            is_visual_identity_directive(directive) for directive in directive_payloads
+        )
+        needs_manifest = any(
+            not is_visual_identity_directive(directive) for directive in directive_payloads
+        )
 
-        try:
-            manifest = self._build_pack_manifest(session.vn_asset_pack_id)
-        except Exception as exc:
-            logger.exception(
-                "Failed to build VN asset manifest for VN Play visual directives: "
-                "session_id={}, pack_id={}",
-                session_id,
-                session.vn_asset_pack_id,
-            )
-            manifest_error = exc.__class__.__name__
-
-        if manifest is not None:
+        if needs_manifest:
             try:
-                resolutions = resolve_scene_directives(
-                    manifest,
-                    directives,
-                    seed=session.seed or f"session-{session_id}",
-                )
+                manifest = self._build_pack_manifest(session.vn_asset_pack_id)
             except Exception as exc:
                 logger.exception(
-                    "Failed to resolve VN Play visual directives: session_id={}, pack_id={}",
+                    "Failed to build VN asset manifest for VN Play visual directives: "
+                    "session_id={}, pack_id={}",
                     session_id,
                     session.vn_asset_pack_id,
                 )
                 manifest_error = exc.__class__.__name__
-                default_rejection_reason = "resolver_error"
-                resolutions = []
-        else:
-            resolutions = []
+        visual_identity_resolver = (
+            self._get_visual_identity_service() if has_visual_identity_directive else None
+        )
+        seed = session.seed or f"session-{session_id}"
 
-        for index, directive in enumerate(directives):
-            directive_payload = dict(directive)
+        for index, directive_payload in enumerate(directive_payloads):
             events.append(
                 self.repo.append_event(
                     session_id=session_id,
@@ -4257,7 +4267,31 @@ class VNPlayService:
                 )
             )
 
-            resolution = resolutions[index] if index < len(resolutions) else None
+            resolution = None
+            directive_rejection_reason = default_rejection_reason
+            if (
+                visual_identity_resolver is not None
+                and is_visual_identity_directive(directive_payload)
+            ):
+                resolution = resolve_visual_identity_directive(
+                    visual_identity_resolver,
+                    directive_payload,
+                )
+            elif manifest is not None:
+                try:
+                    resolution = resolve_visual_directive(
+                        manifest,
+                        directive_payload,
+                        seed=f"{seed}:{index}",
+                    )
+                except Exception as exc:
+                    logger.exception(
+                        "Failed to resolve VN Play visual directive: session_id={}, pack_id={}",
+                        session_id,
+                        session.vn_asset_pack_id,
+                    )
+                    manifest_error = exc.__class__.__name__
+                    directive_rejection_reason = "resolver_error"
             if resolution is not None and resolution.applied and resolution.item is not None:
                 item = dict(resolution.item)
                 asset_type = _visual_asset_type(directive_payload, item)
@@ -4288,7 +4322,7 @@ class VNPlayService:
             reason = (
                 resolution.reason
                 if resolution is not None and resolution.reason
-                else default_rejection_reason
+                else directive_rejection_reason
             )
             warning = _visual_directive_warning(
                 directive_payload,
@@ -4315,6 +4349,14 @@ class VNPlayService:
         if sprite_items:
             scene_updates["active_sprite_items"] = sprite_items
         return events, scene_updates, warnings
+
+    def _get_visual_identity_service(self) -> Any:
+        if self._visual_identity_service is None:
+            self._visual_identity_service = VisualIdentityService(
+                self.repo.db,
+                owner_user_id=self.owner_user_id,
+            )
+        return self._visual_identity_service
 
     def _build_pack_manifest(self, pack_id: int) -> dict[str, Any]:
         manifest = self._manifest_cache.get(pack_id)
@@ -4796,6 +4838,15 @@ def _manifest_items_by_id(manifest: Mapping[str, Any]) -> dict[int, dict[str, An
             if isinstance(item_id, int):
                 items_by_id[item_id] = item
     return items_by_id
+
+
+def _is_embedded_scene_asset(item: Mapping[str, Any]) -> bool:
+    if item.get("source") == "visual_identity":
+        return True
+    metadata = item.get("metadata")
+    if isinstance(metadata, Mapping) and isinstance(metadata.get("visual_identity"), Mapping):
+        return True
+    return "visual_identity_asset_id" in item
 
 
 def _append_enrichment_warning(state: dict[str, Any], exc: Exception) -> None:

@@ -39,6 +39,7 @@ from tldw_Server_API.app.core.VN_Play.constants import MODE_SCRIPTED_STORY
 from tldw_Server_API.app.core.VN_Play.models import TurnResult
 from tldw_Server_API.app.core.VN_Play.service import VNPlayService, VNPlayTurnContext
 from tldw_Server_API.app.core.VN_Scripts.service import VNScriptService
+from tldw_Server_API.app.core.Visual_Identities.service import VisualIdentityResolvedAsset
 
 
 @pytest.fixture
@@ -206,6 +207,57 @@ class _VisualDirectiveAdapter:
             ],
             scene_updates={"location_key": "library"},
         )
+
+
+class _VisualIdentityDirectiveAdapter:
+    async def generate_turn(self, context: VNPlayTurnContext) -> TurnResult:
+        return TurnResult(
+            narrative_text="The hero smiles.",
+            dialogue=[{"speaker": "Narrator", "text": "The hero smiles."}],
+            visual_directives=[
+                {
+                    "asset_type": "sprite",
+                    "actor_kind": "character",
+                    "actor_id": context.session.primary_character_id,
+                    "role_id": "hero",
+                    "role_label": "Hero",
+                    "expression_key": "happy",
+                    "override_pack_id": 50,
+                    "override_pack_version_id": 60,
+                    "allow_override_fallback": True,
+                    "labels": {"emotion": "happy"},
+                }
+            ],
+        )
+
+
+class _FakeVisualIdentityResolver:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+        self.binding_mutations: list[dict[str, object]] = []
+
+    def resolve_expression_asset(self, **kwargs):
+        self.calls.append(dict(kwargs))
+        return VisualIdentityResolvedAsset(
+            actor_kind=str(kwargs["actor_kind"]),
+            actor_id=kwargs["actor_id"],
+            role_id=kwargs.get("role_id"),
+            role_label=kwargs.get("role_label"),
+            pack_id=50,
+            pack_version_id=60,
+            expression_key="happy",
+            requested_expression_key=str(kwargs["requested_expression_key"]),
+            asset_id=70,
+            storage_relpath="visual_identities/hero-happy.webp",
+            fallback_reason="requested",
+            is_animated=True,
+            content_type="image/webp",
+            resolution_source="override",
+        )
+
+    def upsert_binding(self, **kwargs):
+        self.binding_mutations.append(dict(kwargs))
+        raise AssertionError("VN casting resolver must not mutate actor bindings")
 
 
 class _ScriptedGenerationAdapter:
@@ -1064,6 +1116,61 @@ async def test_session_response_includes_resolved_scene_assets(
     assert body["scene_state"]["active_sprites"][0]["content_url"].endswith(
         f"/items/{sprite_item_id}/content"
     )
+
+
+@pytest.mark.asyncio
+async def test_session_response_includes_visual_identity_cast_sprite(
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+) -> None:
+    character_id, pack_id, _, _ = _create_visual_pack(chacha_db)
+    visual_identity_resolver = _FakeVisualIdentityResolver()
+    service = VNPlayService(
+        repo=VNPlayRepository.initialized(chacha_db),
+        owner_user_id=42,
+        adapter=_VisualIdentityDirectiveAdapter(),
+        visual_identity_service=visual_identity_resolver,
+    )
+    session = service.create_session(
+        mode="freeform",
+        title="Visual identity casting",
+        primary_character_id=character_id,
+        vn_asset_pack_id=pack_id,
+        seed="seed-vi",
+    )
+    await service.submit_turn(
+        session.id,
+        input_text="Smile",
+        client_scene_version=0,
+        idempotency_key="visual-identity-cast-turn-1",
+    )
+
+    response = client.get(f"/api/v1/vn-play/sessions/{session.id}")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert visual_identity_resolver.binding_mutations == []
+    assert visual_identity_resolver.calls == [
+        {
+            "actor_kind": "character",
+            "actor_id": character_id,
+            "requested_expression_key": "happy",
+            "manual_override_expression_key": None,
+            "mood_expression_key": None,
+            "role_id": "hero",
+            "role_label": "Hero",
+            "override_pack_id": 50,
+            "override_pack_version_id": 60,
+            "allow_override_fallback": True,
+        }
+    ]
+    sprite = body["scene_state"]["active_sprites"][0]
+    assert sprite["source"] == "visual_identity"
+    assert sprite["content_url"].endswith(
+        "/api/v1/visual-identities/packs/50/assets/70/content"
+    )
+    assert sprite["metadata"]["visual_identity"]["role_id"] == "hero"
+    assert sprite["metadata"]["visual_identity"]["resolution_source"] == "override"
 
 
 def test_setup_options_returns_selector_safe_character_and_pack(

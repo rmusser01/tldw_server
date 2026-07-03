@@ -1361,6 +1361,81 @@ git add apps/packages/ui/src/types/visual-identities.ts \
 git commit -m "TASK-12090.3 add frontend casting resolver parameters"
 ```
 
+### Task 9A: VN Runtime Casting Adapter
+
+**Files:**
+- Modify: `tldw_Server_API/app/core/VN_Play/assets.py`
+- Modify: `tldw_Server_API/app/core/VN_Play/service.py`
+- Modify: `tldw_Server_API/tests/VN_Play/test_vn_play_assets.py`
+- Modify: `tldw_Server_API/tests/VN_Play/test_vn_play_api.py`
+
+- [x] **Step 1: Write failing Visual Identity directive adapter tests**
+
+Add `VN_Play.assets` tests proving a sprite directive with actor, role, expression, and override pack/version fields calls `resolve_expression_asset` with the Stage 11B override semantics and returns a renderable sprite item without writing bindings.
+
+- [x] **Step 2: Write failing VN runtime integration test**
+
+Add a focused VN Play service/API test where a turn adapter emits a Visual Identity sprite directive. Inject a fake Visual Identity resolver, submit a turn, and assert the resolved sprite appears in `scene_state.active_sprites` with a Visual Identity content URL and role/casting metadata.
+
+- [x] **Step 3: Run tests to verify they fail**
+
+Run:
+
+```bash
+source .venv/bin/activate && python -m pytest \
+  tldw_Server_API/tests/VN_Play/test_vn_play_assets.py \
+  tldw_Server_API/tests/VN_Play/test_vn_play_api.py::test_session_response_includes_visual_identity_cast_sprite \
+  -q
+```
+
+Expected: FAIL because VN Play does not yet route sprite directives through Visual Identity.
+
+- [x] **Step 4: Implement runtime adapter**
+
+Add a non-persistent Visual Identity directive resolver that:
+
+- recognizes sprite directives with `actor_kind` and `actor_id` fields, including optional nested `visual_identity` payloads;
+- infers `expression_key` from explicit fields or sprite labels such as `expression`, `emotion`, or `mood`;
+- calls `VisualIdentityService.resolve_expression_asset` with `role_id`, `role_label`, `override_pack_id`, `override_pack_version_id`, and `allow_override_fallback`;
+- converts a resolved asset into a renderable sprite item with `content_url`, labels, metadata, and `source: "visual_identity"`;
+- returns directive rejection reasons for typed resolver errors instead of mutating actor bindings.
+
+- [x] **Step 5: Integrate adapter into VN Play visual directive application**
+
+In `_apply_visual_directives`, resolve Visual Identity sprite directives before/alongside VN asset manifest directives and preserve embedded Visual Identity sprite items when enriching scene state.
+
+- [x] **Step 6: Run focused tests and backend checks**
+
+Run:
+
+```bash
+source .venv/bin/activate && python -m pytest \
+  tldw_Server_API/tests/VN_Play/test_vn_play_assets.py \
+  tldw_Server_API/tests/VN_Play/test_vn_play_api.py::test_session_response_includes_visual_identity_cast_sprite \
+  -q
+source .venv/bin/activate && python -m compileall -q \
+  tldw_Server_API/app/core/VN_Play/assets.py \
+  tldw_Server_API/app/core/VN_Play/service.py
+source .venv/bin/activate && python -m bandit -r \
+  tldw_Server_API/app/core/VN_Play/assets.py \
+  tldw_Server_API/app/core/VN_Play/service.py \
+  -f json -o /tmp/bandit_task12090_5_vn_play_casting_adapter.json
+```
+
+Expected: PASS, with Bandit `errors: []` and no new findings.
+
+- [x] **Step 7: Commit**
+
+```bash
+git add tldw_Server_API/app/core/VN_Play/assets.py \
+  tldw_Server_API/app/core/VN_Play/service.py \
+  tldw_Server_API/tests/VN_Play/test_vn_play_assets.py \
+  tldw_Server_API/tests/VN_Play/test_vn_play_api.py \
+  Docs/superpowers/plans/2026-07-02-vn-visual-identity-bridge-implementation-plan.md \
+  "backlog/tasks/task-12090.5 - Implement-Stage-11B-VN-visual-identity-role-and-casting-resolver.md"
+git commit -m "TASK-12090.5 add VN visual identity casting adapter"
+```
+
 ### Task 10: Stage 11B And Final Verification
 
 **Files:**
