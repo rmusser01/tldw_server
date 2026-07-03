@@ -15,6 +15,9 @@ _FAILED_JOB_STATUSES = frozenset({"failed", "cancelled", "quarantined"})
 _PROCESSING_STATES = frozenset({"queued", "ingesting", "extracting", "chunking", "indexing", "retrying"})
 _PENDING_REASONS = frozenset({"vector_index_pending", "chunking_pending", "extraction_pending"})
 _WORKSPACE_SOURCE_JOB_TYPE = "workspace_source_ingest"
+_ERROR_CODE_ALLOWED_CHARS = frozenset(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-"
+)
 
 
 def build_source_status_projection(
@@ -335,7 +338,7 @@ def _status_from_failed_job(source: dict[str, Any], job: dict[str, Any]) -> dict
     return _base_status(
         source,
         state="failed",
-        reason="job_failed",
+        reason=_failed_job_reason(job),
         progress_percent=_coerce_float(job.get("progress_percent")),
         progress_message=job.get("error_message") or _job_result_error(job) or "Ingestion job failed.",
         job=_job_payload(job),
@@ -649,7 +652,7 @@ def _state_from_job(job: dict[str, Any]) -> str:
 
 
 def _job_payload(job: dict[str, Any]) -> dict[str, Any]:
-    return {
+    payload = {
         "id": job.get("id"),
         "uuid": job.get("uuid"),
         "status": job.get("status"),
@@ -658,6 +661,10 @@ def _job_payload(job: dict[str, Any]) -> dict[str, Any]:
         "progress_message": job.get("progress_message"),
         "error_message": job.get("error_message") or _job_result_error(job),
     }
+    error_code = _job_error_code(job)
+    if error_code is not None:
+        payload["error_code"] = error_code
+    return payload
 
 
 def _attach_stale_job(
@@ -675,6 +682,31 @@ def _job_result_error(job: dict[str, Any]) -> str | None:
     result = _normalize_mapping(job.get("result"))
     raw = result.get("error") or result.get("message")
     return str(raw) if raw else None
+
+
+def _failed_job_reason(job: dict[str, Any]) -> str:
+    """Return the public source-status reason for a failed Jobs row.
+
+    Workspace-source jobs can expose their sanitized persisted error code.
+    Other job types stay collapsed to the generic `job_failed` reason.
+    """
+    if _is_workspace_source_job(job):
+        return _job_error_code(job) or "job_failed"
+    return "job_failed"
+
+
+def _job_error_code(job: dict[str, Any]) -> str | None:
+    """Return a safe, identifier-like Jobs error code for API projection.
+
+    Only non-empty `[A-Za-z0-9_.-]` values are exposed, capped to 128
+    characters, so free-form worker errors cannot become public reason codes.
+    """
+    raw = str(job.get("error_code") or "").strip()
+    if not raw:
+        return None
+    if any(char not in _ERROR_CODE_ALLOWED_CHARS for char in raw):
+        return None
+    return raw[:128]
 
 
 def _job_sort_value(job: dict[str, Any]) -> tuple[str, int]:

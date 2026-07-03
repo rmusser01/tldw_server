@@ -359,6 +359,7 @@ def test_workspace_context_filters_active_jobs_to_workspace_sources(
             "job_type": "workspace_source_ingest",
             "progress_percent": 55,
             "progress_message": "Chunking ready source",
+            "error_code": "unsafe/error code with spaces",
             "payload": {"workspace_id": "ws-preview", "media_id": 1},
         },
         {
@@ -407,6 +408,16 @@ def test_workspace_context_filters_active_jobs_to_workspace_sources(
     assert response.status_code == 200, response.text
     payload = response.json()
     assert [job["uuid"] for job in payload["active_jobs"]] == ["uuid-matched"]
+    assert payload["active_jobs"][0]["error_code"] is None
+
+
+@pytest.mark.unit
+def test_workspace_job_status_payload_truncates_safe_error_code() -> None:
+    safe_code = "a" * 200
+
+    payload = workspaces_endpoint._job_status_payload({"error_code": safe_code})
+
+    assert payload["error_code"] == "a" * 128
 
 
 @pytest.mark.integration

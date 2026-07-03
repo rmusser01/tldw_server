@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 
@@ -404,6 +406,72 @@ async def test_workspace_source_ingest_job_reports_existing_media_readiness(monk
     assert updated.get("progress_message") == "completed"
     assert float(updated.get("progress_percent") or 0.0) == 100.0
     assert media_db.closed is True
+
+
+@pytest.mark.unit
+async def test_workspace_source_ingest_job_missing_media_sets_stable_failure_code(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
+    monkeypatch.delenv("JOBS_DB_URL", raising=False)
+
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+    import tldw_Server_API.app.services.media_ingest_jobs_worker as worker
+
+    class _MissingWorkspaceMediaDB:
+        def __init__(self) -> None:
+            self.closed = False
+
+        def get_media_by_id(
+            self,
+            media_id: int,
+            *,
+            include_deleted: bool = False,
+            include_trash: bool = False,
+        ) -> dict[str, object] | None:
+            _ = (include_deleted, include_trash)
+            assert media_id == 404
+            return None
+
+        def close_connection(self) -> None:
+            self.closed = True
+
+    media_db = _MissingWorkspaceMediaDB()
+    monkeypatch.setattr(worker, "_create_db", lambda _user_id: media_db, raising=True)
+
+    jm = JobManager()
+    row = jm.create_job(
+        domain="media_ingest",
+        queue="default",
+        job_type="workspace_source_ingest",
+        payload={
+            "workspace_id": "ws-missing",
+            "workspace_source_id": "src-missing",
+            "media_id": 404,
+            "source_type": "pdf",
+            "title": "Missing workspace source",
+        },
+        owner_user_id="1",
+    )
+
+    job = jm.get_job(int(row.get("id")))
+    with pytest.raises(worker.MediaIngestJobError) as exc_info:
+        await worker._handle_job(job, jm, worker._ProgressState())
+
+    assert str(exc_info.value) == "workspace source media item not found"
+    assert exc_info.value.retryable is False
+    assert exc_info.value.failure_code == "workspace_source_media_not_found"
+    assert media_db.closed is True
+
+
+@pytest.mark.unit
+def test_media_ingest_job_error_exposes_optional_failure_code() -> None:
+    import tldw_Server_API.app.services.media_ingest_jobs_worker as worker
+
+    exc = worker.MediaIngestJobError("fallback failure")
+
+    assert exc.failure_code is None
 
 
 @pytest.mark.asyncio
