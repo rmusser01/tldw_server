@@ -1,10 +1,10 @@
 ---
 id: TASK-12126
 title: Implement Chat Macros v1 and wrapup command
-status: To Do
+status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-07-03 23:38'
+updated_date: '2026-07-03 23:40'
 labels: []
 dependencies: []
 documentation:
@@ -31,12 +31,13 @@ Implement the approved Chat Macros v1 system and built-in /wrapup command accord
 
 <!-- SECTION:NOTES:BEGIN -->
 Implementation should follow Docs/superpowers/plans/2026-07-03-chat-macros-implementation-plan.md. The plan was produced from the approved design spec and reviewed in three subagent passes; blocking review comments were folded into the plan. Start implementation with the plan Task 1 and keep commits task-sized.
+
+Implementation started in worktree .worktrees/chat-macros-v1 on branch codex/chat-macros-v1.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
