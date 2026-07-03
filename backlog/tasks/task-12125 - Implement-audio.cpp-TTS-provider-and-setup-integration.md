@@ -18,7 +18,11 @@ modified_files:
 - backlog/tasks/task-12125 - Implement-audio.cpp-TTS-provider-and-setup-integration.md
 - tldw_Server_API/Config_Files/tts_providers_config.yaml
 - tldw_Server_API/app/core/TTS/adapter_registry.py
+- tldw_Server_API/app/core/TTS/adapters/audio_cpp_client.py
+- tldw_Server_API/app/core/TTS/adapters/audio_cpp_config.py
 - tldw_Server_API/tests/TTS_NEW/fixtures/empty_config.txt
+- tldw_Server_API/tests/TTS_NEW/unit/adapters/test_audio_cpp_client.py
+- tldw_Server_API/tests/TTS_NEW/unit/adapters/test_audio_cpp_config.py
 - tldw_Server_API/tests/TTS_NEW/unit/test_audio_cpp_registry.py
 - tldw_Server_API/tests/TTS_NEW/unit/test_audio_cpp_tts_config.py
 ---
@@ -58,6 +62,12 @@ Follow `docs/superpowers/plans/2026-07-03-audio-cpp-tts-provider-implementation-
 - Stage 1 implementation added `TTSProvider.AUDIO_CPP`, provider/model aliases, lazy default adapter mapping, disabled `audio_cpp` YAML config, and format preferences limited to `wav`, `mp3`, `opus`, `flac`, `aac`, and `pcm`.
 - Stage 1 green test: the same audio.cpp test command passed with 5 passed, 5 warnings in 35.09s.
 - Stage 1 adjacent regression: `..\..\.venv\Scripts\python.exe -m pytest -q tldw_Server_API/tests/TTS_NEW/unit/test_fish_s2_registry.py tldw_Server_API/tests/TTS_NEW/unit/test_pocket_tts_cpp_registry.py` passed with 5 passed, 6 warnings in 40.86s.
+- Stage 2 red test: `..\..\.venv\Scripts\python.exe -m pytest -q tldw_Server_API/tests/TTS_NEW/unit/adapters/test_audio_cpp_client.py tldw_Server_API/tests/TTS_NEW/unit/adapters/test_audio_cpp_config.py` failed during collection with missing `audio_cpp_client` and `audio_cpp_config` modules.
+- Stage 2 implementation added `AudioCppClient`, `AudioCppSpeechResult`, `AudioCppConfig`, base URL and managed-host validation, option allowlist filtering, server-config rendering, path containment checks, and generated scratch reference names.
+- Stage 2 green test: the same client/config command passed with 11 passed, 10 warnings in 52.02s, then after Ruff fixes passed again with 11 passed, 10 warnings in 68.63s.
+- Stage 2 combined focused test: `..\..\.venv\Scripts\python.exe -m pytest -q tldw_Server_API/tests/TTS_NEW/unit/test_audio_cpp_registry.py tldw_Server_API/tests/TTS_NEW/unit/test_audio_cpp_tts_config.py tldw_Server_API/tests/TTS_NEW/unit/adapters/test_audio_cpp_client.py tldw_Server_API/tests/TTS_NEW/unit/adapters/test_audio_cpp_config.py` passed with 16 passed, 10 warnings in 99.73s.
+- Stage 2 adjacent regression: `..\..\.venv\Scripts\python.exe -m pytest -q tldw_Server_API/tests/TTS_NEW/unit/test_fish_s2_registry.py tldw_Server_API/tests/TTS_NEW/unit/test_pocket_tts_cpp_registry.py` passed with 5 passed, 6 warnings in 64.47s.
+- Stage 2 Ruff check passed for `audio_cpp_client.py`, `audio_cpp_config.py`, `test_audio_cpp_client.py`, and `test_audio_cpp_config.py`; `git diff --check` also passed for the Stage 2 touched files.
 
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 

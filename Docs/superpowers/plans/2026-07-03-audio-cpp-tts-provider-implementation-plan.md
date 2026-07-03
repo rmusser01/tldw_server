@@ -155,9 +155,9 @@ Expected result after implementation: both test files pass.
 
 **Tests:** `test_audio_cpp_client.py`, `test_audio_cpp_config.py`
 
-**Status:** Not Started
+**Status:** Complete
 
-- [ ] **Step 1: Write failing client tests**
+- [x] **Step 1: Write failing client tests**
 
 Use `httpx.MockTransport` or the project equivalent to cover:
 
@@ -186,7 +186,7 @@ python -m pytest -q tldw_Server_API/tests/TTS_NEW/unit/adapters/test_audio_cpp_c
 
 Expected result before implementation: import failure for `audio_cpp_client`.
 
-- [ ] **Step 2: Write failing config validation tests**
+- [x] **Step 2: Write failing config validation tests**
 
 Cover:
 
@@ -208,7 +208,7 @@ python -m pytest -q tldw_Server_API/tests/TTS_NEW/unit/adapters/test_audio_cpp_c
 
 Expected result before implementation: import failure for `audio_cpp_config`.
 
-- [ ] **Step 3: Implement client and config modules**
+- [x] **Step 3: Implement client and config modules**
 
 Create:
 
@@ -223,7 +223,7 @@ Implementation requirements:
 - Keep config parsing independent from the adapter so sidecar and installer code can reuse it.
 - Treat provider `backend` as a setup hint unless upstream config documents a matching server field.
 
-- [ ] **Step 4: Re-run focused tests**
+- [x] **Step 4: Re-run focused tests**
 
 Run:
 
