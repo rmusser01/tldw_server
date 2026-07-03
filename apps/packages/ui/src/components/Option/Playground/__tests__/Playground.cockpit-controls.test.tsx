@@ -99,6 +99,10 @@ const storageState = vi.hoisted(() => ({
   values: new Map<string, unknown>(),
 }));
 
+const layoutShellOverrideState = vi.hoisted(() => ({
+  overrides: [] as unknown[],
+}));
+
 const modelSettingsState = vi.hoisted(() => ({
   value: {
     systemPrompt: "",
@@ -198,6 +202,13 @@ vi.mock("@/components/Option/Playground/PlaygroundForm", () => ({
 
 vi.mock("@/components/Option/Playground/PlaygroundChat", () => ({
   PlaygroundChat: () => <div data-testid="playground-chat" />,
+}));
+
+vi.mock("@/components/Layouts/Layout", () => ({
+  default: ({ children }: { children: React.ReactNode }) => children,
+  useOptionLayoutShellOverrides: (overrides: unknown) => {
+    layoutShellOverrideState.overrides.push(overrides);
+  },
 }));
 
 vi.mock("@/components/Sidepanel/Chat/ArtifactsPanel", () => ({
@@ -373,6 +384,7 @@ describe("Playground cockpit controls", () => {
     storageState.values.clear();
     storageState.values.set("playgroundChatContextRailVisible", true);
     storageState.values.set("playgroundChatRuntimeRailVisible", true);
+    layoutShellOverrideState.overrides = [];
     modelSettingsState.value.systemPrompt = "";
     modelSettingsState.value.setSystemPrompt = vi.fn();
     modelSettingsState.value.temperature = 0.7;
@@ -1202,8 +1214,35 @@ describe("Playground cockpit controls", () => {
     expect(
       screen.queryByRole("region", { name: "Next message composition" }),
     ).toBeNull();
+    await waitFor(() => {
+      expect(layoutShellOverrideState.overrides).toContainEqual({
+        hideHeader: true,
+        hideSidebar: true,
+      });
+    });
+    expect(
+      screen.queryByTestId("playground-chat-layout-mode-trigger"),
+    ).toBeNull();
+    expect(
+      screen.queryByTestId("playground-shortcuts-help-trigger"),
+    ).toBeNull();
+    const exitFocus = screen.getByTestId("playground-focus-exit");
+    expect(exitFocus).toHaveTextContent("Exit focus");
     expect(screen.getByTestId("playground-chat")).toBeInTheDocument();
     expect(screen.getByTestId("playground-form")).toBeInTheDocument();
+
+    fireEvent.click(exitFocus);
+
+    await waitFor(() => {
+      expect(storageState.values.get("playgroundChatLayoutMode")).toBe(
+        "cockpit",
+      );
+      expect(
+        layoutShellOverrideState.overrides[
+          layoutShellOverrideState.overrides.length - 1
+        ],
+      ).toBeNull();
+    });
   });
 
   it("wires ready-state runtime regenerate to the shared chat handler", async () => {

@@ -45,6 +45,7 @@ import {
 import { buildPlaygroundCompositionPreviewSummary } from "./playground-composition-preview";
 import { ChatErrorBoundary } from "@/components/Common/Playground/ChatErrorBoundary";
 import { hasVisibleAssistantResponse } from "@/components/Common/Playground/message-visibility";
+import { useOptionLayoutShellOverrides } from "@/components/Layouts/Layout";
 import { useMessageOption } from "@/hooks/useMessageOption";
 import { usePlaygroundSessionPersistence } from "@/hooks/usePlaygroundSessionPersistence";
 import { shouldRestorePersistedPlaygroundSession } from "@/hooks/playground-session-restore";
@@ -66,6 +67,7 @@ import {
   ChevronDown,
   Keyboard,
   Maximize2,
+  Minimize2,
   PanelRightOpen,
   Search,
   X,
@@ -761,14 +763,23 @@ export const Playground = () => {
     chatLayoutMode === "focus" || chatLayoutMode === "cockpit"
       ? chatLayoutMode
       : defaultChatLayoutMode;
+  const focusModeActive = normalizedChatLayoutMode === "focus";
+  useOptionLayoutShellOverrides(
+    focusModeActive
+      ? {
+          hideHeader: true,
+          hideSidebar: true,
+        }
+      : null,
+  );
   const normalizedCockpitContextRailVisible =
     cockpitContextRailVisible !== false;
   const normalizedCockpitRuntimeRailVisible =
     cockpitRuntimeRailVisible !== false;
   const mobileCockpitComposerConstrained =
-    isMobileViewport && normalizedChatLayoutMode === "cockpit";
+    isMobileViewport && !focusModeActive;
   const cockpitRailCollapsedWideContent =
-    normalizedChatLayoutMode === "cockpit" &&
+    !focusModeActive &&
     (!normalizedCockpitContextRailVisible ||
       !normalizedCockpitRuntimeRailVisible);
   const chatContentWidthClassName = cockpitRailCollapsedWideContent
@@ -781,15 +792,18 @@ export const Playground = () => {
     [setChatLayoutMode],
   );
   const nextChatLayoutMode: PlaygroundCockpitMode =
-    normalizedChatLayoutMode === "focus" ? "cockpit" : "focus";
+    focusModeActive ? "cockpit" : "focus";
   const chatLayoutToggleLabel =
-    normalizedChatLayoutMode === "focus"
+    focusModeActive
       ? toText(t("playground:cockpit.showPanels", "Show cockpit panels"))
       : toText(t("playground:cockpit.enterFocus", "Enter focus chat"));
   const chatLayoutToggleText =
-    normalizedChatLayoutMode === "focus"
+    focusModeActive
       ? toText(t("playground:cockpit.cockpit", "Cockpit"))
       : toText(t("playground:cockpit.focus", "Focus"));
+  const exitFocusLabel = toText(
+    t("playground:cockpit.exitFocus", "Exit focus"),
+  );
 
   React.useEffect(() => {
     setRouteContext({ routeId: "chat", surface: "webui" });
@@ -3514,6 +3528,20 @@ export const Playground = () => {
         </div>
       )}
 
+      {focusModeActive && (
+        <button
+          type="button"
+          data-testid="playground-focus-exit"
+          aria-label={exitFocusLabel}
+          title={exitFocusLabel}
+          onClick={() => handleChatLayoutModeChange("cockpit")}
+          className="fixed right-3 top-3 z-50 inline-flex min-h-[34px] items-center gap-2 rounded-full border border-border bg-surface/95 px-3 py-1.5 text-xs font-semibold text-text shadow-lg backdrop-blur transition hover:bg-surface2 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus sm:right-4 sm:top-4"
+        >
+          <Minimize2 className="h-3.5 w-3.5" aria-hidden="true" />
+          <span>{exitFocusLabel}</span>
+        </button>
+      )}
+
       <div className="relative z-10 flex h-full min-h-0 w-full">
         <PlaygroundCockpitShell
           mode={normalizedChatLayoutMode}
@@ -3530,7 +3558,7 @@ export const Playground = () => {
             data-testid="playground-chat-shell"
             className="flex h-full min-h-0 min-w-0 flex-1 flex-col"
           >
-            {parentMeta?.parentHistoryId && (
+            {!focusModeActive && parentMeta?.parentHistoryId && (
               <div className="flex w-full justify-center px-5 pt-2">
                 <div className="inline-flex flex-wrap items-center justify-center gap-2">
                   <button
@@ -3575,7 +3603,8 @@ export const Playground = () => {
                 </div>
               </div>
             )}
-            <div className="px-2 pt-1 sm:px-4 sm:pt-2">
+            {!focusModeActive && (
+              <div className="px-2 pt-1 sm:px-4 sm:pt-2">
               <div
                 className={`mx-auto flex w-full ${chatContentWidthClassName} items-center justify-between gap-2 text-[10px] text-text-muted sm:text-[11px]`}
               >
@@ -3613,7 +3642,7 @@ export const Playground = () => {
                     type="button"
                     data-testid="playground-chat-layout-mode-trigger"
                     aria-label={chatLayoutToggleLabel}
-                    aria-pressed={normalizedChatLayoutMode === "focus"}
+                    aria-pressed={focusModeActive}
                     onClick={() => handleChatLayoutModeChange(nextChatLayoutMode)}
                     title={chatLayoutToggleLabel}
                     className="inline-flex min-h-[26px] min-w-[26px] items-center justify-center gap-1 rounded-full border border-border bg-surface2 px-1.5 py-0.5 text-text hover:bg-surface sm:px-2"
@@ -3919,6 +3948,7 @@ export const Playground = () => {
                 />
               ) : null}
             </div>
+            )}
             <div
               ref={containerRef}
               data-testid={
@@ -3970,7 +4000,7 @@ export const Playground = () => {
                   : ""
               }`}
             >
-              {!isMobileViewport ? (
+              {!isMobileViewport && !focusModeActive ? (
                 <div
                   className={`mx-auto w-full ${chatContentWidthClassName} px-4 pt-2 text-[11px] text-text-muted`}
                 >
@@ -4055,7 +4085,7 @@ export const Playground = () => {
             </div>
           </div>
         </PlaygroundCockpitShell>
-        {shouldShowArtifactsEdgeExpand && (
+        {!focusModeActive && shouldShowArtifactsEdgeExpand && (
           <button
             ref={artifactsEdgeExpandRef}
             type="button"
@@ -4084,7 +4114,7 @@ export const Playground = () => {
             </span>
           </button>
         )}
-        {artifactsOpen && (
+        {!focusModeActive && artifactsOpen && (
           <>
             <div className="hidden h-full w-[36%] min-w-[280px] max-w-[520px] shrink-0 lg:flex">
               {renderArtifactsPanel()}
