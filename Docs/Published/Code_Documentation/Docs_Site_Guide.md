@@ -12,16 +12,29 @@ This document explains how the tldw_Server documentation site is organized, buil
 
 The public docs site is for OSS, self-host, and developer documentation. Hosted/commercial docs are excluded from the published site and should live in the private repo instead of this public docs pipeline.
 
+The published site is audience-first:
+
+- `User Wiki`: install, run, configure, and use tldw_server.
+- `Developer Wiki`: contribute to, test, package, and understand the codebase.
+
+These wiki pages are MkDocs landing pages in this repository, not the separate GitHub Wiki feature.
+
 ## What Gets Published
 
 Only these folders are included on the public site:
 
+- `Docs/Wiki`
 - `Docs/API-related`
+- `Docs/ADR`
 - `Docs/Code_Documentation`
 - `Docs/Deployment` (excluding its nested `Monitoring`)
 - `Docs/Deployment/Monitoring` (published as top-level `Monitoring`)
 - `Docs/Evals`
 - `Docs/User_Guides`
+
+These root-level files are also included when present:
+
+- `Docs/Architecture.md`
 
 The curated content is synced into `Docs/Published/`. Do not manually edit files in `Docs/Published/` - they can be overwritten by the refresh script or CI.
 
@@ -32,6 +45,9 @@ Hosted/commercial docs are excluded from this curated set even when they live un
 - Script: `Helper_Scripts/refresh_docs_published.sh`
 - What it does:
   - Copies the approved folders from `Docs/` to `Docs/Published/`
+  - Copies the audience wiki landing pages from `Docs/Wiki`
+  - Copies architecture decision records from `Docs/ADR`
+  - Copies `Docs/Architecture.md` when present
   - Promotes `Docs/Deployment/Monitoring` to top-level `Docs/Published/Monitoring`
   - Removes the nested `Monitoring` under `Deployment` to avoid duplication
   - Preserves each section's `index.md` landing page
@@ -88,6 +104,9 @@ To change the logo: replace `Docs/Logo.png` and run the refresh script.
 - The sidebar and ordering are defined explicitly in `mkdocs.yml` under `nav:`
 - When adding a new page you want visible in the sidebar, add a new entry under the appropriate section in `mkdocs.yml`
 - The nav uses paths relative to `Docs/Published/`
+- Keep the top-level navigation audience-first: `Home`, `User Wiki`, `Developer Wiki`, and shared reference links.
+- User-facing workflow docs belong under the `User Wiki` nav tree.
+- Contributor, implementation, architecture, and docs-maintenance material belongs under the `Developer Wiki` nav tree.
 
 Example nav entry (under Code section):
 
@@ -107,6 +126,10 @@ Tip: keep titles short and parallel (e.g., "Guide", "Reference", "Checklist").
 5. Commit and push; CI will refresh, build, and deploy the site
 
 Notes:
+- Put audience chooser pages in `Docs/Wiki/`
+- Put user-facing workflow guides in `Docs/User_Guides/` or `Docs/Getting_Started/`
+- Put contributor-facing implementation guides in `Docs/Code_Documentation/`
+- Put public architecture decision records in `Docs/ADR/`
 - Keep file names stable after they’re published to avoid broken links
 - Use relative links within the allowed folders; avoid linking to WIP docs outside the curated set
 - Prefer images stored under `Docs/assets/` or section subfolders; the refresh script copies section contents

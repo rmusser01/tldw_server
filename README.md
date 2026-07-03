@@ -92,7 +92,7 @@ Good fit for:
 
 `make quickstart` remains the shortest Docker single-user + WebUI alias. It runs setup, start, and verification for the first profile.
 
-For a user-facing map of key workflows across the server API, WebUI, and browser extension, start with the [User Guides documentation map](Docs/User_Guides/index.md).
+For user-facing workflows across setup, the WebUI, browser extension, local models, APIs, and administration, start with the [User Wiki](Docs/Wiki/User_Wiki.md). Contributors should start with the [Developer Wiki](Docs/Wiki/Developer_Wiki.md).
 
 After cloning, you can run the optional Makefile helper checks with `make quickstart-prereqs`, or verify Python 3.10+, ffmpeg, and Docker manually for your chosen profile. On a fresh checkout, the setup targets are still the source of truth because they create the lightweight setup environment they need.
 
@@ -1457,6 +1457,8 @@ Run locally
 <summary>Documentation and resources</summary>
 
 **Getting Started Guides:**
+- [User Wiki](Docs/Wiki/User_Wiki.md) - install, run, configure, and use tldw_server
+- [Developer Wiki](Docs/Wiki/Developer_Wiki.md) - contribute to, test, package, and understand the codebase
 - [User Guides Documentation Map](Docs/User_Guides/index.md) - task-oriented map for setup, WebUI, extension, API, and admin workflows
 - [Getting Started Index](Docs/Getting_Started/README.md) - choose the right setup path
 - [Docker Single-User + WebUI Profile](Docs/Getting_Started/Profile_Docker_Single_User.md) - self-host with Docker and the WebUI
