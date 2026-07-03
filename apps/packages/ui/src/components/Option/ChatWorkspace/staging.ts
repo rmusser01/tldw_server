@@ -33,6 +33,12 @@ export const stageWorkspaceSources = (
   return Array.from(byId.values())
 }
 
+export const unstageWorkspaceSource = (
+  existing: StagedWorkspaceSource[],
+  sourceId: string
+): StagedWorkspaceSource[] =>
+  existing.filter((source) => source.sourceId !== sourceId)
+
 const formatRowValueForInsert = (
   value: string,
   fallback: string,

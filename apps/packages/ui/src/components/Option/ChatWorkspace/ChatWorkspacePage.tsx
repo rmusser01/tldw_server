@@ -6,7 +6,7 @@ import { useWorkspaceStore } from "@/store/workspace"
 import { ConnectionPhase } from "@/types/connection"
 
 import { ChatWorkspaceConsole } from "./ChatWorkspaceConsole"
-import { stageWorkspaceSources } from "./staging"
+import { stageWorkspaceSources, unstageWorkspaceSource } from "./staging"
 import type {
   ChatWorkspaceRuntimeState,
   StagedWorkspaceSource
@@ -43,6 +43,9 @@ export const ChatWorkspacePage = () => {
   const effectiveAssistantDefault = useWorkspaceStore(
     (state) => state.effectiveAssistantDefault
   )
+  const sourcesLoading = useWorkspaceStore((state) => state.sourcesLoading)
+  const sourcesError = useWorkspaceStore((state) => state.sourcesError)
+  const focusSourceById = useWorkspaceStore((state) => state.focusSourceById)
   const setRouteContext = useChatSurfaceCoordinatorStore(
     (state) => state.setRouteContext
   )
@@ -94,6 +97,7 @@ export const ChatWorkspacePage = () => {
 
   const handleBrowseSource = React.useCallback(
     (sourceId: string) => {
+      focusSourceById(sourceId)
       setWorkspaceContext((current) => ({
         workspaceId,
         browsedSourceId: sourceId,
@@ -101,7 +105,7 @@ export const ChatWorkspacePage = () => {
           current.workspaceId === workspaceId ? current.stagedSources : []
       }))
     },
-    [workspaceId]
+    [focusSourceById, workspaceId]
   )
 
   const handleStageSources = React.useCallback(
@@ -133,6 +137,24 @@ export const ChatWorkspacePage = () => {
     )
   }, [workspaceId])
 
+  const handleUnstageSource = React.useCallback(
+    (sourceId: string) => {
+      setWorkspaceContext((current) =>
+        current.workspaceId === workspaceId
+          ? {
+              workspaceId,
+              browsedSourceId: current.browsedSourceId,
+              stagedSources: unstageWorkspaceSource(
+                current.stagedSources,
+                sourceId
+              )
+            }
+          : current
+      )
+    },
+    [workspaceId]
+  )
+
   const handleRuntimeStateChange = React.useCallback(
     (state: ChatWorkspaceRuntimeState) => {
       setRuntimeState((current) => ({ ...current, ...state }))
@@ -147,6 +169,8 @@ export const ChatWorkspacePage = () => {
         workspaceId={workspaceId}
         workspaceName={scopeLabel}
         sources={sources}
+        sourcesLoading={sourcesLoading}
+        sourcesError={sourcesError}
         browsedSourceId={browsedSourceId}
         stagedSources={stagedSources}
         selectedModelLabel={runtimeState.selectedModelLabel}
@@ -161,6 +185,7 @@ export const ChatWorkspacePage = () => {
         streaming={runtimeState.streaming}
         onBrowseSource={handleBrowseSource}
         onStageSources={handleStageSources}
+        onUnstageSource={handleUnstageSource}
         onClearStagedSources={handleClearStagedSources}
         onRuntimeStateChange={handleRuntimeStateChange}
       />

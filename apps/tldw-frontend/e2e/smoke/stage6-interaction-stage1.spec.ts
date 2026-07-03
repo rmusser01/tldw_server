@@ -1,14 +1,33 @@
+import type { Page } from "@playwright/test"
 import { test, expect, seedAuth, SMOKE_LOAD_TIMEOUT } from "./smoke.setup"
 import { waitForAppShell } from "../utils/helpers"
 
 const LOAD_TIMEOUT = SMOKE_LOAD_TIMEOUT
 const UNRESOLVED_TEMPLATE_PATTERN = /\{\{[^{}\n]{1,120}\}\}/g
 
+const prepareChatRoute = async (page: Page) => {
+  await page.route("**/api/v1/llm/providers**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ providers: [], any_configured: false })
+    })
+  })
+  await page.route("**/api/v1/llm/models/metadata**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ models: [], total: 0 })
+    })
+  })
+  await seedAuth(page)
+}
+
 test.describe("Stage 6 interaction stage 1 defect closures", () => {
   test("chat route does not expose unresolved template placeholders", async ({
     page
   }) => {
-    await seedAuth(page)
+    await prepareChatRoute(page)
 
     await page.goto("/chat", {
       waitUntil: "domcontentloaded",
@@ -35,7 +54,7 @@ test.describe("Stage 6 interaction stage 1 defect closures", () => {
   test("chat route exposes an explicit theme toggle control", async ({
     page
   }) => {
-    await seedAuth(page)
+    await prepareChatRoute(page)
 
     await page.goto("/chat", {
       waitUntil: "domcontentloaded",

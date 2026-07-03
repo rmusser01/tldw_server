@@ -1,13 +1,19 @@
 import { useMemo, useState } from "react"
+import { Link, useInRouterContext } from "react-router-dom"
 import type { WorkspaceSource } from "@/types/workspace"
 
 export type WorkspaceRailProps = {
   workspaceName: string
   sources: WorkspaceSource[]
+  sourcesLoading?: boolean
+  sourcesError?: string | null
   browsedSourceId: string | null
   stagedSourceIds: string[]
   onBrowseSource: (sourceId: string) => void
   onStageSources: (sourceIds: string[]) => void
+  onUnstageSource?: (sourceId: string) => void
+  addSourceHref?: string
+  openLibraryHref?: string
 }
 
 const panelClass = "rounded-md border border-border bg-surface px-3 py-2"
@@ -15,17 +21,36 @@ const headingClass = "text-[11px] font-semibold text-text-muted"
 const buttonClass =
   "inline-flex min-h-[28px] min-w-0 items-center justify-center break-words rounded-md border border-border px-2.5 py-1 text-xs font-medium text-text transition-colors hover:bg-surface2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-50"
 
-const getSourceStatus = (source: WorkspaceSource) => source.status || "ready"
+const DEFAULT_ADD_SOURCE_HREF = "/research-workspace?tab=sources"
+const DEFAULT_OPEN_LIBRARY_HREF = "/media"
+
+type SourceRailStatus = "ready" | "processing" | "error" | "unavailable"
+
+const getSourceStatus = (source: WorkspaceSource): SourceRailStatus => {
+  if (source.status === "processing" || source.status === "error") {
+    return source.status
+  }
+  if (source.status === "ready" || !source.status) {
+    return "ready"
+  }
+  return "unavailable"
+}
 
 export const WorkspaceRail = ({
   workspaceName,
   sources,
+  sourcesLoading = false,
+  sourcesError = null,
   browsedSourceId,
   stagedSourceIds,
   onBrowseSource,
-  onStageSources
+  onStageSources,
+  onUnstageSource,
+  addSourceHref = DEFAULT_ADD_SOURCE_HREF,
+  openLibraryHref = DEFAULT_OPEN_LIBRARY_HREF
 }: WorkspaceRailProps) => {
   const [filter, setFilter] = useState("")
+  const inRouterContext = useInRouterContext()
   const stagedSourceIdSet = useMemo(
     () => new Set(stagedSourceIds),
     [stagedSourceIds]
@@ -79,17 +104,35 @@ export const WorkspaceRail = ({
       <section className={panelClass}>
         <h3 className={headingClass}>Library</h3>
         <div className="mt-2 flex flex-wrap gap-2">
-          <button type="button" className={buttonClass} disabled>
-            Add source unavailable
-          </button>
-          <button type="button" className={buttonClass} disabled>
-            Open library unavailable
-          </button>
+          {inRouterContext ? (
+            <>
+              <Link to={addSourceHref} className={buttonClass}>
+                Add source
+              </Link>
+              <Link to={openLibraryHref} className={buttonClass}>
+                Open library
+              </Link>
+            </>
+          ) : (
+            <>
+              <a href={addSourceHref} className={buttonClass}>
+                Add source
+              </a>
+              <a href={openLibraryHref} className={buttonClass}>
+                Open library
+              </a>
+            </>
+          )}
         </div>
       </section>
 
       <section className={panelClass}>
         <h3 className={headingClass}>Sources</h3>
+        {sourcesLoading && sources.length > 0 ? (
+          <p className="mt-2 text-xs text-text-muted" role="status">
+            Refreshing workspace sources
+          </p>
+        ) : null}
         {visibleSources.length > 0 ? (
           <ul className="mt-2 space-y-2">
             {visibleSources.map((source) => {
@@ -137,19 +180,30 @@ export const WorkspaceRail = ({
                       >
                         Browse {source.title}
                       </button>
-                      <button
-                        type="button"
-                        className={buttonClass}
-                        aria-label={`Stage ${source.title}${actionNameSuffix} for chat`}
-                        disabled={!isReady}
-                        onClick={() => {
-                          if (isReady) {
-                            onStageSources([source.id])
-                          }
-                        }}
-                      >
-                        Stage {source.title} for chat
-                      </button>
+                      {isStaged ? (
+                        <button
+                          type="button"
+                          className={buttonClass}
+                          aria-label={`Unstage ${source.title}${actionNameSuffix} from chat`}
+                          onClick={() => onUnstageSource?.(source.id)}
+                        >
+                          Unstage {source.title} from chat
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className={buttonClass}
+                          aria-label={`Stage ${source.title}${actionNameSuffix} for chat`}
+                          disabled={!isReady}
+                          onClick={() => {
+                            if (isReady) {
+                              onStageSources([source.id])
+                            }
+                          }}
+                        >
+                          Stage {source.title} for chat
+                        </button>
+                      )}
                     </div>
                   </div>
                 </li>
@@ -158,7 +212,13 @@ export const WorkspaceRail = ({
           </ul>
         ) : (
           <p className="mt-2 rounded-md border border-dashed border-border bg-surface2/40 px-2 py-1.5 text-xs text-text-muted">
-            No sources match the filter
+            {sourcesError
+              ? sourcesError
+              : sourcesLoading
+                ? "Loading workspace sources"
+                : sources.length === 0
+                  ? "No workspace sources yet"
+                  : "No sources match the filter"}
           </p>
         )}
       </section>

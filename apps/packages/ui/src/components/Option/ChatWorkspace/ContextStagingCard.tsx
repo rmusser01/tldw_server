@@ -7,6 +7,7 @@ export type ContextStagingCardProps = {
   onClear: () => void
   onInsert: () => void
   onSend: () => void
+  onRemoveSource?: (sourceId: string) => void
 }
 
 const actionButtonClass =
@@ -21,7 +22,8 @@ export const ContextStagingCard = ({
   canSend = true,
   onClear,
   onInsert,
-  onSend
+  onSend,
+  onRemoveSource
 }: ContextStagingCardProps) => {
   const hasSources = sources.length > 0
   const sendDisabled = isSending || !canSend || !hasSources
@@ -56,9 +58,21 @@ export const ContextStagingCard = ({
                   <span className="min-w-0 break-words font-medium text-text">
                     {source.title}
                   </span>
-                  <span className="rounded-full border border-border bg-surface px-2 py-0.5 text-[11px] font-medium text-text-muted">
-                    {source.availability}
-                  </span>
+                  <div className="flex min-w-0 flex-wrap items-center gap-2">
+                    <span className="rounded-full border border-border bg-surface px-2 py-0.5 text-[11px] font-medium text-text-muted">
+                      {source.availability}
+                    </span>
+                    {onRemoveSource ? (
+                      <button
+                        type="button"
+                        className={actionButtonClass}
+                        onClick={() => onRemoveSource(source.sourceId)}
+                        aria-label={`Remove ${source.title} from staged context`}
+                      >
+                        Remove
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
                 <div className="flex min-w-0 flex-wrap gap-x-2 gap-y-1 text-xs text-text-muted">
                   <span className="min-w-0 break-words">{source.scopeLabel}</span>

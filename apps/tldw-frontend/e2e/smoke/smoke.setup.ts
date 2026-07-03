@@ -716,6 +716,27 @@ export const SMOKE_HARD_GATE_ALLOWLIST: SmokeHardGateAllowlistRule[] = [
     routes: ["/characters"]
   },
   {
+    id: "m5-chat-workspace-startup-backend-refused-console",
+    scope: "console",
+    pattern: /Failed to load resource: net::ERR_CONNECTION_REFUSED/i,
+    rationale:
+      "Chat Workspace route smoke may run without a local API server; focused smoke proof covers the scoped backend chat flow.",
+    owner: "WebUI",
+    expiresOn: "2026-09-30",
+    routes: ["/chat-workspace"]
+  },
+  {
+    id: "m5-chat-workspace-startup-backend-refused-request",
+    scope: "request",
+    pattern:
+      /\/api\/v1\/(?:notifications(?:\/stream)?|persona\/profiles)(?:[/?][^)]*)?\s+\(net::ERR_CONNECTION_REFUSED\)/i,
+    rationale:
+      "Chat Workspace startup probes for notifications/persona data can be unavailable in route-only smoke; scoped backend chat is covered by the focused proof.",
+    owner: "WebUI",
+    expiresOn: "2026-09-30",
+    routes: ["/chat-workspace"]
+  },
+  {
     id: "m5-model-metadata-rate-limit-log-noise",
     scope: "console",
     pattern:

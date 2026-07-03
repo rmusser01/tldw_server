@@ -32,6 +32,7 @@ export type WorkspaceChatPanelProps = {
   workspaceName?: string | null
   stagedSources: StagedWorkspaceSource[]
   onClearStagedSources: () => void
+  onRemoveStagedSource?: (sourceId: string) => void
   backendAvailable: boolean
   effectiveAssistantDefault?: EffectiveWorkspaceAssistantDefault | null
   onRuntimeStateChange?: (state: ChatWorkspaceRuntimeState) => void
@@ -101,6 +102,7 @@ export const WorkspaceChatPanel = ({
   workspaceName,
   stagedSources,
   onClearStagedSources,
+  onRemoveStagedSource,
   backendAvailable,
   effectiveAssistantDefault,
   onRuntimeStateChange
@@ -390,6 +392,7 @@ export const WorkspaceChatPanel = ({
             onClear={onClearStagedSources}
             onInsert={insertStagedSummary}
             onSend={submitMessage}
+            onRemoveSource={onRemoveStagedSource}
           />
         ) : null}
 

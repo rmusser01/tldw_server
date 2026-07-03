@@ -1169,6 +1169,10 @@ jobs:
           - name: chat-character-db-api
             paths: >-
               tldw_Server_API/tests/Characters/test_characters_endpoint.py
+          - name: visual-identities
+            paths: >-
+              tldw_Server_API/tests/Character_Chat/test_visual_identity_expression_metadata.py
+              tldw_Server_API/tests/Visual_Identities
           - name: chat-character-unit-core
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/test_utils.py
@@ -2565,6 +2569,10 @@ jobs:
           - name: chat-character-db-api
             paths: >-
               tldw_Server_API/tests/Characters/test_characters_endpoint.py
+          - name: visual-identities
+            paths: >-
+              tldw_Server_API/tests/Character_Chat/test_visual_identity_expression_metadata.py
+              tldw_Server_API/tests/Visual_Identities
           - name: chat-character-unit-core
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/test_utils.py
@@ -3834,6 +3842,10 @@ jobs:
           - name: chat-character-db-api
             paths: >-
               tldw_Server_API/tests/Characters/test_characters_endpoint.py
+          - name: visual-identities
+            paths: >-
+              tldw_Server_API/tests/Character_Chat/test_visual_identity_expression_metadata.py
+              tldw_Server_API/tests/Visual_Identities
           - name: chat-character-unit-core
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/test_utils.py
@@ -5027,6 +5039,10 @@ jobs:
           - name: chat-character-db-api
             paths: >-
               tldw_Server_API/tests/Characters/test_characters_endpoint.py
+          - name: visual-identities
+            paths: >-
+              tldw_Server_API/tests/Character_Chat/test_visual_identity_expression_metadata.py
+              tldw_Server_API/tests/Visual_Identities
           - name: chat-character-unit-core
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/test_utils.py
@@ -6221,6 +6237,10 @@ jobs:
           - name: chat-character-db-api
             paths: >-
               tldw_Server_API/tests/Characters/test_characters_endpoint.py
+          - name: visual-identities
+            paths: >-
+              tldw_Server_API/tests/Character_Chat/test_visual_identity_expression_metadata.py
+              tldw_Server_API/tests/Visual_Identities
           - name: chat-character-unit-core
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/test_utils.py

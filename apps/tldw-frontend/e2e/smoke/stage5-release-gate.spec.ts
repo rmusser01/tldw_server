@@ -81,11 +81,20 @@ type CriticalRoute = {
   expectedPath?: string
   allowRedirectPanel?: boolean
   loadTimeoutMs?: number
+  focusedProof?: string
 }
+
+const FOCUSED_PROOF_ROUTES = new Map<string, string>([
+  ["/chat-workspace", "e2e/smoke/chat-workspace-live-backend.spec.ts"]
+])
 
 const CRITICAL_ROUTES: CriticalRoute[] = [
   { path: "/chat", name: "Chat" },
-  { path: "/chat-workspace", name: "Chat Workspace" },
+  {
+    path: "/chat-workspace",
+    name: "Chat Workspace",
+    focusedProof: "e2e/smoke/chat-workspace-live-backend.spec.ts"
+  },
   { path: "/settings", name: "Settings" },
   { path: "/chat/settings", name: "Chat Settings", expectedPath: "/settings/chat" },
   { path: "/settings/chatbooks", name: "Chatbooks Settings" },
@@ -117,6 +126,14 @@ test.describe("Stage 5 release gate", () => {
       test.setTimeout(
         Math.max(180_000, routeLoadTimeout * NAVIGATION_MAX_ATTEMPTS + 45_000)
       )
+      const expectedFocusedProof = FOCUSED_PROOF_ROUTES.get(route.path)
+      if (expectedFocusedProof) {
+        expect(
+          route.focusedProof,
+          `${route.name} (${route.path}) must reference its focused smoke proof`
+        ).toBe(expectedFocusedProof)
+      }
+
       await seedAuth(page)
 
       const response = await gotoCriticalRoute(

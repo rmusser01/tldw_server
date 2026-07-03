@@ -85,6 +85,40 @@ describe("ContextStagingCard", () => {
     expect(onSend).toHaveBeenCalledTimes(1)
   })
 
+  it("removes one staged source without clearing all staged context", () => {
+    const onRemoveSource = vi.fn()
+    const onClear = vi.fn()
+
+    render(
+      <ContextStagingCard
+        sources={[
+          staged[0],
+          {
+            sourceId: "s2",
+            mediaId: 2,
+            title: "Research Clip",
+            type: "video",
+            scopeLabel: "Default workspace",
+            availability: "ready"
+          }
+        ]}
+        onClear={onClear}
+        onInsert={vi.fn()}
+        onSend={vi.fn()}
+        onRemoveSource={onRemoveSource}
+      />
+    )
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Remove Operator Notes from staged context"
+      })
+    )
+
+    expect(onRemoveSource).toHaveBeenCalledWith("s1")
+    expect(onClear).not.toHaveBeenCalled()
+  })
+
   it("disables send and labels the sending state without relying on color", () => {
     const onSend = vi.fn()
 

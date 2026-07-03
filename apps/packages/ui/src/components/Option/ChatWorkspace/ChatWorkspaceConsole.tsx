@@ -18,6 +18,8 @@ export type ChatWorkspaceConsoleProps = {
   workspaceId?: string | null
   workspaceName: string
   sources: WorkspaceSource[]
+  sourcesLoading?: boolean
+  sourcesError?: string | null
   browsedSourceId: string | null
   stagedSources: StagedWorkspaceSource[]
   selectedModelLabel: string
@@ -32,6 +34,7 @@ export type ChatWorkspaceConsoleProps = {
   streaming: boolean
   onBrowseSource: (sourceId: string) => void
   onStageSources: (sourceIds: string[]) => void
+  onUnstageSource: (sourceId: string) => void
   onClearStagedSources: () => void
   onRuntimeStateChange: (state: ChatWorkspaceRuntimeState) => void
 }
@@ -40,6 +43,8 @@ export const ChatWorkspaceConsole = ({
   workspaceId,
   workspaceName,
   sources,
+  sourcesLoading,
+  sourcesError,
   browsedSourceId,
   stagedSources,
   selectedModelLabel,
@@ -52,6 +57,7 @@ export const ChatWorkspaceConsole = ({
   streaming,
   onBrowseSource,
   onStageSources,
+  onUnstageSource,
   onClearStagedSources,
   onRuntimeStateChange
 }: ChatWorkspaceConsoleProps) => {
@@ -72,10 +78,13 @@ export const ChatWorkspaceConsole = ({
           <WorkspaceRail
             workspaceName={workspaceName}
             sources={sources}
+            sourcesLoading={sourcesLoading}
+            sourcesError={sourcesError}
             browsedSourceId={browsedSourceId}
             stagedSourceIds={stagedSourceIds}
             onBrowseSource={onBrowseSource}
             onStageSources={onStageSources}
+            onUnstageSource={onUnstageSource}
           />
         </div>
 
@@ -87,6 +96,7 @@ export const ChatWorkspaceConsole = ({
               workspaceName={workspaceName}
               stagedSources={stagedSources}
               onClearStagedSources={onClearStagedSources}
+              onRemoveStagedSource={onUnstageSource}
               backendAvailable={chatBackendAvailable}
               effectiveAssistantDefault={effectiveAssistantDefault}
               onRuntimeStateChange={onRuntimeStateChange}
