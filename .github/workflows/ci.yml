@@ -1636,10 +1636,6 @@ jobs:
       SHARD_NAME: ${{ matrix.shard.name }}
       TEST_PATHS: ${{ matrix.shard.paths }}
       RESULTS_DIR: test-results-linux-3.12-${{ matrix.shard.name }}
-      # Preserve pre-quarantine CI behavior: these shards pass explicit file
-      # lists from tests/Character_Chat_NEW, tests/TTS_NEW, and tests/Embeddings,
-      # which the quarantine conftest hooks would otherwise skip.
-      RUN_QUARANTINED: "1"
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
@@ -3036,10 +3032,6 @@ jobs:
       SHARD_NAME: ${{ matrix.shard.name }}
       TEST_PATHS: ${{ matrix.shard.paths }}
       RESULTS_DIR: test-results-linux-3.13-${{ matrix.shard.name }}
-      # Preserve pre-quarantine CI behavior: these shards pass explicit file
-      # lists from tests/Character_Chat_NEW, tests/TTS_NEW, and tests/Embeddings,
-      # which the quarantine conftest hooks would otherwise skip.
-      RUN_QUARANTINED: "1"
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
@@ -4285,10 +4277,6 @@ jobs:
       SHARD_NAME: ${{ matrix.shard.name }}
       TEST_PATHS: ${{ matrix.shard.paths }}
       RESULTS_DIR: test-results-macos-latest-3.12-${{ matrix.shard.name }}
-      # Preserve pre-quarantine CI behavior: these shards pass explicit file
-      # lists from tests/Character_Chat_NEW, tests/TTS_NEW, and tests/Embeddings,
-      # which the quarantine conftest hooks would otherwise skip.
-      RUN_QUARANTINED: "1"
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
@@ -5482,10 +5470,6 @@ jobs:
       SHARD_NAME: ${{ matrix.shard.name }}
       TEST_PATHS: ${{ matrix.shard.paths }}
       RESULTS_DIR: test-results-windows-latest-3.12-${{ matrix.shard.name }}
-      # Preserve pre-quarantine CI behavior: these shards pass explicit file
-      # lists from tests/Character_Chat_NEW, tests/TTS_NEW, and tests/Embeddings,
-      # which the quarantine conftest hooks would otherwise skip.
-      RUN_QUARANTINED: "1"
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
@@ -6680,10 +6664,6 @@ jobs:
       SHARD_NAME: ${{ matrix.shard.name }}
       TEST_PATHS: ${{ matrix.shard.paths }}
       RESULTS_DIR: test-results-${{ matrix.os }}-3.13-${{ matrix.shard.name }}
-      # Preserve pre-quarantine CI behavior: these shards pass explicit file
-      # lists from tests/Character_Chat_NEW, tests/TTS_NEW, and tests/Embeddings,
-      # which the quarantine conftest hooks would otherwise skip.
-      RUN_QUARANTINED: "1"
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
@@ -6824,10 +6804,6 @@ jobs:
       PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
       TEST_MODE: '0'
       DISABLE_HEAVY_STARTUP: '1'
-      # Preserve pre-quarantine CI behavior: this job passes an explicit file
-      # from tests/Character_Chat_NEW, which the quarantine conftest hook
-      # would otherwise skip.
-      RUN_QUARANTINED: "1"
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd

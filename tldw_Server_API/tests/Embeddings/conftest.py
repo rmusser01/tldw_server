@@ -10,7 +10,6 @@ from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user, U
 from tldw_Server_API.app.api.v1.API_Deps import auth_deps
 from fastapi import Request
 from fastapi.testclient import TestClient
-from tldw_Server_API.tests._plugins.quarantine import quarantine_items
 
 
 @pytest.fixture
@@ -204,6 +203,36 @@ def regular_user():
 
 
 @pytest.fixture(autouse=True)
+def _reset_app_lifecycle_state():
+    """Clear stale drain state on THIS conftest's pinned ``app`` before each test.
+
+    Why the root-conftest reset (tests/conftest.py,
+    _reset_main_app_lifecycle_state_between_tests) is not enough here,
+    verified empirically for issue #2581 (46F -> 0F with this fixture;
+    removing it reproduces the 46 failures):
+
+    1. Test modules import ``app`` at collection time, pinning the ORIGINAL
+       app object (this conftest pins the same one at line 8).
+    2. ``test_backpressure_and_quotas.py`` calls ``reload_app_main()``, which
+       permanently replaces ``sys.modules['tldw_Server_API.app.main']`` with
+       a new module (new app object) and never restores the original.
+    3. A later ``with TestClient(app)`` lifespan exit marks the pinned
+       ORIGINAL app draining (mark_lifecycle_shutdown).
+    4. The root fixture re-imports ``app.main`` at reset time, so it resets
+       only the NEW app; the drained original — which every pinned test
+       still routes through — stays drained, and DrainGateMiddleware 503s
+       every request: {"status": "not_ready", "reason": "shutdown_in_progress"}.
+
+    This fixture resets the pinned original directly. The underlying
+    reload_app_main sys.modules leak is tracked in issue #2585.
+    """
+    from tldw_Server_API.app.services.app_lifecycle import reset_lifecycle_state
+
+    reset_lifecycle_state(app)
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _sanitize_jsonschema_module(monkeypatch):
     """Ensure sys.modules['jsonschema'] is a proper ModuleType when present.
 
@@ -287,7 +316,3 @@ def pgvector_dsn():  # pragma: no cover - test helper for environments without P
 def pgvector_temp_table(pgvector_dsn):  # pragma: no cover - test helper for environments without PG
     pytest.skip("pgvector temporary table not available in this test run")
 
-
-def pytest_collection_modifyitems(config, items):
-    """Quarantine known-failing suite (audits/2026-07-02-quarantined-suites.md)."""
-    quarantine_items(__file__, items)
