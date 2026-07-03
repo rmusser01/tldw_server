@@ -5,6 +5,7 @@
 provider_priority:
   - kitten_tts  # Local ONNX voices with first-use model download
   - pocket_tts_cpp # Local PocketTTS.cpp voice cloning
+  - audio_cpp   # External or managed audio.cpp server (disabled by default)
   - openai      # Reliable, high quality
   - kokoro      # Local, fast
   - pocket_tts  # Local ONNX voice cloning
@@ -166,6 +167,58 @@ providers:
     cache_ttl_hours: 24
     cache_max_bytes_per_user: 1073741824
     persist_direct_voice_references: false
+
+  # audio.cpp Configuration (external or managed audiocpp_server)
+  audio_cpp:
+    enabled: false  # Disabled by default; enable after installing/running audio.cpp
+    backend: "cuda"
+    base_url: "http://127.0.0.1:8080"
+    model: "audio-cpp/pocket-tts"
+    model_path: "models/audio_cpp/pocket-tts"
+    binary_path: null
+    device: "cuda"
+    timeout: 300
+    sample_rate: 24000
+    max_concurrent_generations: 1
+    auto_download: false
+    extra_params:
+      managed: false
+      allow_remote_base_url: false
+      retain_request_artifacts: false
+      external_voice_reference_mode: "disabled"  # disabled | shared_path
+      request_option_allowlist:
+        - max_tokens
+        - seed
+      server:
+        host: "127.0.0.1"
+        port: 8080
+        autoselect_port: true
+        port_probe_max: 10
+        startup_timeout_seconds: 30
+        healthcheck_interval_seconds: 0.25
+        startup_backoff_seconds: 5
+        idle_shutdown_seconds: 900
+        terminate_timeout_seconds: 10
+        server_config_path: "models/audio_cpp/server.json"
+        models_root: "models/audio_cpp"
+        shared_scratch_dir: "models/audio_cpp/runtime/scratch"
+        lazy_load: true
+        device: 0
+        threads: 1
+        model:
+          id: "pocket-tts"
+          family: "pocket_tts"
+          path: "models/audio_cpp/pocket-tts"
+          task: "tts"
+          mode: "offline"
+          load_options:
+            language: "english"
+          session_options:
+            language: "english"
+      voices:
+        alba:
+          upstream_value: "alba"
+          request_field: null
 
   # KittenTTS ONNX Configuration (local; English single-speaker voices)
   kitten_tts:
@@ -559,6 +612,7 @@ format_preferences:
   index_tts: ["mp3", "wav"]
   pocket_tts: ["wav", "mp3", "opus", "flac", "pcm", "aac"]
   pocket_tts_cpp: ["wav", "mp3", "opus", "flac", "pcm", "aac"]
+  audio_cpp: ["wav", "mp3", "opus", "flac", "aac", "pcm"]
   lux_tts: ["wav", "mp3", "opus", "flac", "pcm", "aac"]
   qwen3_tts: ["wav", "mp3", "opus", "flac", "pcm"]
 

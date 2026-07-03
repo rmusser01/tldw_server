@@ -68,9 +68,9 @@ Record that decision in `TASK-12125` before editing source files.
 
 **Tests:** `test_audio_cpp_registry.py`, `test_audio_cpp_tts_config.py`
 
-**Status:** Not Started
+**Status:** Complete
 
-- [ ] **Step 1: Write failing registry tests**
+- [x] **Step 1: Write failing registry tests**
 
 Add tests like:
 
@@ -97,7 +97,7 @@ python -m pytest -q tldw_Server_API/tests/TTS_NEW/unit/test_audio_cpp_registry.p
 
 Expected result before implementation: failure because `TTSProvider.AUDIO_CPP` is not present.
 
-- [ ] **Step 2: Write failing config tests**
+- [x] **Step 2: Write failing config tests**
 
 Assert that `tts_providers_config.yaml` loads with:
 
@@ -117,7 +117,7 @@ python -m pytest -q tldw_Server_API/tests/TTS_NEW/unit/test_audio_cpp_tts_config
 
 Expected result before implementation: failure because `audio_cpp` config is absent.
 
-- [ ] **Step 3: Implement registry and YAML scaffold**
+- [x] **Step 3: Implement registry and YAML scaffold**
 
 Modify:
 
@@ -134,7 +134,7 @@ Implementation requirements:
 - Add a disabled YAML provider block that keeps audio.cpp-specific fields inside `extra_params`.
 - Add format preferences only for formats the first pass can return or convert: `wav`, `mp3`, `opus`, `flac`, `aac`, and `pcm`.
 
-- [ ] **Step 4: Re-run focused tests**
+- [x] **Step 4: Re-run focused tests**
 
 Run:
 
