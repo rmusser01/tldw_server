@@ -46,7 +46,12 @@ describe("useVisualIdentityResolver", () => {
       actor_id: 7,
       expression_key: "happy",
       manual_override_expression_key: null,
-      mood_expression_key: null
+      mood_expression_key: null,
+      override_pack_id: null,
+      override_pack_version_id: null,
+      role_id: null,
+      role_label: null,
+      allow_override_fallback: null
     })
   })
 
@@ -64,6 +69,60 @@ describe("useVisualIdentityResolver", () => {
 
     expect(result.current.resolution).toBeNull()
     expect(resolveVisualIdentityBinding).not.toHaveBeenCalled()
+  })
+
+  it("keeps override pack resolutions out of the default binding cache", async () => {
+    const resolveVisualIdentityBinding = vi.fn(
+      async (request: { override_pack_id?: number | null }) => ({
+        actor_kind: "character" as const,
+        actor_id: 731,
+        pack_id: request.override_pack_id ?? 1,
+        pack_version_id: request.override_pack_id ? 22 : 2,
+        expression_key: "happy",
+        requested_expression_key: "happy",
+        asset_id: request.override_pack_id ? 990 : 9,
+        storage_relpath: "visual_identities/asset.webp",
+        fallback_reason: null,
+        is_animated: false,
+        content_type: "image/webp",
+        asset_url: `/api/v1/visual-identities/packs/${request.override_pack_id ?? 1}/assets/${request.override_pack_id ? 990 : 9}/content`
+      })
+    )
+
+    const { result, rerender } = renderHook(
+      (props: { overridePackId?: number | null }) =>
+        useVisualIdentityResolver({
+          actorKind: "character",
+          actorId: 731,
+          expressionKey: "happy",
+          overridePackId: props.overridePackId,
+          client: { resolveVisualIdentityBinding }
+        }),
+      { initialProps: { overridePackId: null } }
+    )
+
+    await waitFor(() => {
+      expect(result.current.resolution?.asset_id).toBe(9)
+    })
+
+    rerender({ overridePackId: 77 })
+
+    await waitFor(() => {
+      expect(result.current.resolution?.asset_id).toBe(990)
+    })
+    expect(resolveVisualIdentityBinding.mock.calls.length).toBeGreaterThanOrEqual(2)
+    expect(resolveVisualIdentityBinding).toHaveBeenCalledWith({
+      actor_kind: "character",
+      actor_id: 731,
+      expression_key: "happy",
+      manual_override_expression_key: null,
+      mood_expression_key: null,
+      override_pack_id: 77,
+      override_pack_version_id: null,
+      role_id: null,
+      role_label: null,
+      allow_override_fallback: null
+    })
   })
 
   it("marks an expression unavailable when resolution falls back to another asset", async () => {

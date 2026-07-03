@@ -261,7 +261,12 @@ export const visualIdentityMethods = {
       actor_id: request.actor_id,
       expression_key: request.expression_key,
       manual_override_expression_key: request.manual_override_expression_key,
-      mood_expression_key: request.mood_expression_key
+      mood_expression_key: request.mood_expression_key,
+      role_id: request.role_id,
+      role_label: request.role_label,
+      override_pack_id: request.override_pack_id,
+      override_pack_version_id: request.override_pack_version_id,
+      allow_override_fallback: request.allow_override_fallback
     })
     return await bgRequest<VisualIdentityResolveResponse>({
       path: apiPath(`${VISUAL_IDENTITIES_BASE_PATH}/bindings/resolve${query}`),

@@ -180,6 +180,27 @@ describe("visual identity API domain contract", () => {
     })
   })
 
+  it("resolves actor bindings with role override query parameters", async () => {
+    mocks.bgRequest.mockResolvedValue({ asset_id: 9 })
+
+    await visualIdentityMethods.resolveVisualIdentityBinding.call({}, {
+      actor_kind: "character",
+      actor_id: 123,
+      expression_key: "happy",
+      role_id: "hero",
+      role_label: "Hero",
+      override_pack_id: 5,
+      override_pack_version_id: 6,
+      allow_override_fallback: true
+    })
+
+    expect(mocks.bgRequest).toHaveBeenCalledWith({
+      path:
+        "/api/v1/visual-identities/bindings/resolve?actor_kind=character&actor_id=123&expression_key=happy&role_id=hero&role_label=Hero&override_pack_id=5&override_pack_version_id=6&allow_override_fallback=true",
+      method: "GET"
+    })
+  })
+
   it("builds immutable asset content paths", () => {
     expect(visualIdentityMethods.getVisualIdentityAssetContentPath.call({}, 5, 8)).toBe(
       "/api/v1/visual-identities/packs/5/assets/8/content"

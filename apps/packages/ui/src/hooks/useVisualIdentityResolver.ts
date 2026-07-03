@@ -2,17 +2,14 @@ import React from "react"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import type {
   VisualIdentityActorKind,
+  VisualIdentityResolveRequest,
   VisualIdentityResolveResponse
 } from "@/types/visual-identities"
 
 export type VisualIdentityResolverClient = {
-  resolveVisualIdentityBinding: (request: {
-    actor_kind: VisualIdentityActorKind
-    actor_id: number | string
-    expression_key?: string
-    manual_override_expression_key?: string | null
-    mood_expression_key?: string | null
-  }) => Promise<VisualIdentityResolveResponse>
+  resolveVisualIdentityBinding: (
+    request: VisualIdentityResolveRequest
+  ) => Promise<VisualIdentityResolveResponse>
 }
 
 export type UseVisualIdentityResolverOptions = {
@@ -21,6 +18,11 @@ export type UseVisualIdentityResolverOptions = {
   expressionKey?: string | null
   manualOverrideExpressionKey?: string | null
   moodExpressionKey?: string | null
+  roleId?: string | null
+  roleLabel?: string | null
+  overridePackId?: number | null
+  overridePackVersionId?: number | null
+  allowOverrideFallback?: boolean | null
   enabled?: boolean
   client?: VisualIdentityResolverClient
 }
@@ -55,7 +57,12 @@ const buildResolverCacheKey = ({
   actorId,
   expressionKey,
   manualOverrideExpressionKey,
-  moodExpressionKey
+  moodExpressionKey,
+  roleId,
+  roleLabel,
+  overridePackId,
+  overridePackVersionId,
+  allowOverrideFallback
 }: Required<
   Pick<
     UseVisualIdentityResolverOptions,
@@ -64,6 +71,11 @@ const buildResolverCacheKey = ({
     | "expressionKey"
     | "manualOverrideExpressionKey"
     | "moodExpressionKey"
+    | "roleId"
+    | "roleLabel"
+    | "overridePackId"
+    | "overridePackVersionId"
+    | "allowOverrideFallback"
   >
 >) =>
   JSON.stringify([
@@ -71,7 +83,12 @@ const buildResolverCacheKey = ({
     String(actorId),
     expressionKey || "neutral",
     manualOverrideExpressionKey || "",
-    moodExpressionKey || ""
+    moodExpressionKey || "",
+    roleId || "",
+    roleLabel || "",
+    overridePackId ?? "",
+    overridePackVersionId ?? "",
+    allowOverrideFallback ?? ""
   ])
 
 export const useVisualIdentityResolver = ({
@@ -80,6 +97,11 @@ export const useVisualIdentityResolver = ({
   expressionKey = "neutral",
   manualOverrideExpressionKey = null,
   moodExpressionKey = null,
+  roleId = null,
+  roleLabel = null,
+  overridePackId = null,
+  overridePackVersionId = null,
+  allowOverrideFallback = null,
   enabled = true,
   client = tldwClient
 }: UseVisualIdentityResolverOptions): UseVisualIdentityResolverResult => {
@@ -101,15 +123,25 @@ export const useVisualIdentityResolver = ({
       actorId: normalizedActorId,
       expressionKey,
       manualOverrideExpressionKey,
-      moodExpressionKey
+      moodExpressionKey,
+      roleId,
+      roleLabel,
+      overridePackId,
+      overridePackVersionId,
+      allowOverrideFallback
     })
   }, [
+    allowOverrideFallback,
     actorKind,
     canResolve,
     expressionKey,
     manualOverrideExpressionKey,
     moodExpressionKey,
-    normalizedActorId
+    normalizedActorId,
+    overridePackId,
+    overridePackVersionId,
+    roleId,
+    roleLabel
   ])
 
   React.useEffect(() => {
@@ -137,7 +169,12 @@ export const useVisualIdentityResolver = ({
         actor_id: normalizedActorId,
         expression_key: expressionKey || "neutral",
         manual_override_expression_key: manualOverrideExpressionKey || null,
-        mood_expression_key: moodExpressionKey || null
+        mood_expression_key: moodExpressionKey || null,
+        role_id: roleId || null,
+        role_label: roleLabel || null,
+        override_pack_id: overridePackId ?? null,
+        override_pack_version_id: overridePackVersionId ?? null,
+        allow_override_fallback: allowOverrideFallback ?? null
       })
       .then((nextResolution) => {
         if (cancelled) return
@@ -160,6 +197,7 @@ export const useVisualIdentityResolver = ({
     }
   }, [
     actorKind,
+    allowOverrideFallback,
     cacheKey,
     canResolve,
     client,
@@ -167,7 +205,11 @@ export const useVisualIdentityResolver = ({
     manualOverrideExpressionKey,
     moodExpressionKey,
     normalizedActorId,
-    revision
+    overridePackId,
+    overridePackVersionId,
+    revision,
+    roleId,
+    roleLabel
   ])
 
   const refresh = React.useCallback(() => {

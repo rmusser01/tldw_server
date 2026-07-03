@@ -140,15 +140,23 @@ export interface VisualIdentityResolveRequest {
   expression_key?: string
   manual_override_expression_key?: string | null
   mood_expression_key?: string | null
+  role_id?: string | null
+  role_label?: string | null
+  override_pack_id?: number | null
+  override_pack_version_id?: number | null
+  allow_override_fallback?: boolean | null
 }
 
 export interface VisualIdentityResolveResponse {
   actor_kind: VisualIdentityActorKind
   actor_id: number | string
+  role_id?: string | null
+  role_label?: string | null
   pack_id: number | null
   pack_version_id: number | null
   expression_key: string | null
   requested_expression_key: string | null
+  resolution_source?: string | null
   asset_id: number | null
   storage_relpath: string | null
   fallback_reason: string | null

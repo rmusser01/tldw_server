@@ -732,7 +732,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/Visual_Identities/vn_bridge.py \
@@ -1257,7 +1257,7 @@ git commit -m "TASK-12090.3 expose visual identity casting resolver API"
 - Modify: `apps/packages/ui/src/hooks/useVisualIdentityResolver.ts`
 - Modify: `apps/packages/ui/src/hooks/__tests__/useVisualIdentityResolver.test.tsx`
 
-- [ ] **Step 1: Write failing client query test**
+- [x] **Step 1: Write failing client query test**
 
 Add to `tldw-api-client.visual-identities.test.ts`:
 
@@ -1284,11 +1284,11 @@ it("resolves actor bindings with role override query parameters", async () => {
 })
 ```
 
-- [ ] **Step 2: Write failing hook cache-key test**
+- [x] **Step 2: Write failing hook cache-key test**
 
 In `useVisualIdentityResolver.test.tsx`, add a test that renders twice with same actor/expression but different `override_pack_id`, and assert the fake client is called for the second override instead of returning stale cached default-binding data.
 
-- [ ] **Step 3: Run tests to verify they fail**
+- [x] **Step 3: Run tests to verify they fail**
 
 Run:
 
@@ -1300,7 +1300,7 @@ cd apps/packages/ui && bunx vitest run \
 
 Expected: FAIL because query and cache-key fields are missing.
 
-- [ ] **Step 4: Extend frontend types**
+- [x] **Step 4: Extend frontend types**
 
 In `VisualIdentityResolveRequest`:
 
@@ -1320,11 +1320,11 @@ role_label?: string | null
 resolution_source?: string | null
 ```
 
-- [ ] **Step 5: Extend client query builder**
+- [x] **Step 5: Extend client query builder**
 
 In `resolveVisualIdentityBinding`, include the new optional fields in `buildQuery`.
 
-- [ ] **Step 6: Extend `useVisualIdentityResolver` options and cache key**
+- [x] **Step 6: Extend `useVisualIdentityResolver` options and cache key**
 
 Add options:
 
@@ -1338,7 +1338,7 @@ allowOverrideFallback?: boolean | null
 
 Include these in `buildResolverCacheKey` and pass them to `client.resolveVisualIdentityBinding`.
 
-- [ ] **Step 7: Run frontend tests**
+- [x] **Step 7: Run frontend tests**
 
 Run:
 
