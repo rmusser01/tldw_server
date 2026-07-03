@@ -158,7 +158,9 @@ norecursedirs = [
 ]
 ```
 
-Three entire test trees never run under a default `pytest` invocation. This is "disabling tests instead of fixing them" — explicitly forbidden by this repo's own CLAUDE.md ("NEVER: Disable tests instead of fixing them"). Whether these suites currently pass is **Unable to verify** (they'd need to be run: `pytest tldw_Server_API/tests/Embeddings -x -q --co` to at least check collection).
+> **Correction (2026-07-02, remediation pass):** the original framing — "three entire test trees never run" — overstated the blast radius. `norecursedirs` only affects *default, argument-less* collection; it never applied to explicit CLI paths. `.github/workflows/ci.yml`'s gating shard jobs (`full-suite-linux-312-shards`, `full-suite-linux-313-shards`, `full-suite-macos-312-shards`, `full-suite-windows-312-shards`, `full-suite-os-313-release-shards`, `character-chat-rate-limits`) pass explicit file lists from all three directories (e.g. ~270 `tests/Embeddings/test_*.py` patterns, the whole `tests/TTS_NEW` dir, and curated `tests/Character_Chat_NEW` files), so those curated subsets kept running in CI the entire time. The exclusion actually hid the suites from *default local collection and local full-suite runs* (`pytest` with no args, `pytest tests/`), not from CI. Consequently, the quarantine hooks added by this remediation (skip-unless-`RUN_QUARANTINED=1` in each directory's `conftest.py`) ship with `RUN_QUARANTINED: "1"` set in the `env:` block of every one of the above CI jobs, so the previously-passing CI-gated subset keeps running byte-for-byte identically; only default/local collection behavior changes.
+
+Three entire test trees never run under a default `pytest` invocation with no arguments (see correction above for the CI-gated-shard nuance). This is "disabling tests instead of fixing them" — explicitly forbidden by this repo's own CLAUDE.md ("NEVER: Disable tests instead of fixing them"). Whether these suites currently pass **outside** the CI-curated subsets is **Unable to verify** (they'd need to be run: `pytest tldw_Server_API/tests/Embeddings -x -q --co` to at least check collection).
 
 **(b) Rate limiting suppressed rather than tested (F7).** `tests/Chat/conftest.py:21-46` (autouse) sets `CHARACTER_RATE_LIMIT_OPS=1000000` to prevent incidental 429s. Pragmatic — but there is no dedicated `tests/RateLimiting/` suite asserting that limits *do* fire; rate-limit assertions are scattered (e.g. `tests/Evaluations/integration/test_rate_limits_endpoint.py`).
 
@@ -207,7 +209,7 @@ A dedicated `tldw_Server_API/tests/Security/` suite exists (13 files, ~1,450 lin
 |---|---|---|---|---|
 | F1 | Coverage gate floor is 5%; measured gated coverage 13.39%; ~30k tests run uncovered | **9** | `coverage-required.yml:79`; local run 2026-07-02 | R1 below |
 | F2 | 3 storage routes untested (folder create, file PATCH/DELETE) + thin trash-mutation coverage — *revised down from "5 files zero tests"; see correction in §1.3* | **5** | route-path grep, §1.3 | R2 below |
-| F3 | 3 test dirs excluded via `norecursedirs` — silently never run | **8** | `pyproject.toml:614-618` | R3 below |
+| F3 | 3 test dirs excluded via `norecursedirs` — hidden from default/local collection only; CI gating shards ran curated file lists throughout — *revised 2026-07-02; see correction in §3.2(a)* | **8** | `pyproject.toml:614-618`, §3.2(a) | R3 below |
 | F4 | Frontend coverage installed but unconfigured/ungated | **6** | both `vitest.config.ts` files lack `coverage` key | R4 below |
 | F5 | ~292 `time.sleep` calls; worst `sleep(10)` in Evaluations | **6** | §2.4 | R5 below |
 | F6 | 2:1 happy-path vs error-path assertion skew | **5** | §4.1 | Require a 4xx case per new endpoint test (review checklist); backfill top-traffic endpoints first |
