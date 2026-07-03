@@ -20,7 +20,10 @@ modified_files:
 - tldw_Server_API/app/core/TTS/adapter_registry.py
 - tldw_Server_API/app/core/TTS/adapters/audio_cpp_client.py
 - tldw_Server_API/app/core/TTS/adapters/audio_cpp_config.py
+- tldw_Server_API/app/core/TTS/adapters/audio_cpp_adapter.py
 - tldw_Server_API/tests/TTS_NEW/fixtures/empty_config.txt
+- tldw_Server_API/tests/TTS_NEW/integration/test_audio_cpp_tts_service.py
+- tldw_Server_API/tests/TTS_NEW/unit/adapters/test_audio_cpp_adapter.py
 - tldw_Server_API/tests/TTS_NEW/unit/adapters/test_audio_cpp_client.py
 - tldw_Server_API/tests/TTS_NEW/unit/adapters/test_audio_cpp_config.py
 - tldw_Server_API/tests/TTS_NEW/unit/test_audio_cpp_registry.py
@@ -36,8 +39,8 @@ Implement the accepted Approach A design for `0xShug0/audio.cpp`: a disabled-by-
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 `audio_cpp` is registered as a first-class TTS provider with explicit aliases, namespaced model aliases, disabled-by-default config, and no regression to existing `pocket_tts` routing.
-- [ ] #2 The adapter/client can synthesize through `audiocpp_server` using the existing `/api/v1/audio/speech` flow, with tested request translation, WAV response handling, one-shot streaming compatibility, format conversion handoff, and sanitized error mapping.
-- [ ] #3 Reference-audio and option passthrough behavior is safe by default: loopback-only base URLs unless explicitly allowed, external reference audio disabled unless configured, server-local scratch paths constrained, and only allowlisted scalar options sent upstream.
+- [x] #2 The adapter/client can synthesize through `audiocpp_server` using the existing `/api/v1/audio/speech` flow, with tested request translation, WAV response handling, one-shot streaming compatibility, format conversion handoff, and sanitized error mapping.
+- [x] #3 Reference-audio and option passthrough behavior is safe by default: loopback-only base URLs unless explicitly allowed, external reference audio disabled unless configured, server-local scratch paths constrained, and only allowlisted scalar options sent upstream.
 - [ ] #4 Managed sidecar support can render upstream server config, choose a loopback port, wait for health, avoid tight restart loops, and shut down cleanly without exposing arbitrary command args or process output.
 - [ ] #5 Installer/setup helpers and documentation cover explicit clone/build/config/model steps without silent network downloads during normal server startup or inference.
 - [ ] #6 Focused pytest, Ruff, and Bandit verification are recorded for the touched implementation scope.
@@ -68,6 +71,13 @@ Follow `docs/superpowers/plans/2026-07-03-audio-cpp-tts-provider-implementation-
 - Stage 2 combined focused test: `..\..\.venv\Scripts\python.exe -m pytest -q tldw_Server_API/tests/TTS_NEW/unit/test_audio_cpp_registry.py tldw_Server_API/tests/TTS_NEW/unit/test_audio_cpp_tts_config.py tldw_Server_API/tests/TTS_NEW/unit/adapters/test_audio_cpp_client.py tldw_Server_API/tests/TTS_NEW/unit/adapters/test_audio_cpp_config.py` passed with 16 passed, 10 warnings in 99.73s.
 - Stage 2 adjacent regression: `..\..\.venv\Scripts\python.exe -m pytest -q tldw_Server_API/tests/TTS_NEW/unit/test_fish_s2_registry.py tldw_Server_API/tests/TTS_NEW/unit/test_pocket_tts_cpp_registry.py` passed with 5 passed, 6 warnings in 64.47s.
 - Stage 2 Ruff check passed for `audio_cpp_client.py`, `audio_cpp_config.py`, `test_audio_cpp_client.py`, and `test_audio_cpp_config.py`; `git diff --check` also passed for the Stage 2 touched files.
+- Stage 3 red test: `..\..\.venv\Scripts\python.exe -m pytest -q tldw_Server_API/tests/TTS_NEW/unit/adapters/test_audio_cpp_adapter.py tldw_Server_API/tests/TTS_NEW/integration/test_audio_cpp_tts_service.py` failed during collection with missing `tldw_Server_API.app.core.TTS.adapters.audio_cpp_adapter`, as expected before implementation.
+- Stage 3 implementation added `AudioCppTTSAdapter`, tested capabilities, allowlisted request translation, full-byte one-shot streaming compatibility, managed/shared reference-audio staging, catalog-only voice behavior, and service routing through `TTSServiceV2`.
+- Stage 3 green test: the same adapter/service command passed with 9 passed, 7 warnings in 80.59s, then after Ruff fixes passed again with 9 passed, 7 warnings in 79.52s.
+- Stage 3 combined focused test: `..\..\.venv\Scripts\python.exe -m pytest -q tldw_Server_API/tests/TTS_NEW/unit/test_audio_cpp_registry.py tldw_Server_API/tests/TTS_NEW/unit/test_audio_cpp_tts_config.py tldw_Server_API/tests/TTS_NEW/unit/adapters/test_audio_cpp_config.py tldw_Server_API/tests/TTS_NEW/unit/adapters/test_audio_cpp_client.py tldw_Server_API/tests/TTS_NEW/unit/adapters/test_audio_cpp_adapter.py tldw_Server_API/tests/TTS_NEW/integration/test_audio_cpp_tts_service.py` passed with 25 passed, 12 warnings in 117.02s.
+- Stage 3 adjacent regression: `..\..\.venv\Scripts\python.exe -m pytest -q tldw_Server_API/tests/TTS_NEW/unit/test_fish_s2_registry.py tldw_Server_API/tests/TTS_NEW/unit/test_pocket_tts_cpp_registry.py` passed with 5 passed, 6 warnings in 64.60s.
+- Stage 3 Ruff check passed for `audio_cpp_adapter.py`, `test_audio_cpp_adapter.py`, and `test_audio_cpp_tts_service.py`.
+- Stage 3 post-review refactor moved reference-audio file writes off the event loop; final focused rerun passed with 9 passed, 7 warnings in 76.92s.
 
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
