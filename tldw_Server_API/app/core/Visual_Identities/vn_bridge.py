@@ -60,23 +60,17 @@ def build_vn_visual_identity_source_context(
 
     source_ref = _optional_string(generated_file_record.get("source_ref"))
     requested_item_id = _coerce_optional_positive_int(requested.get("vn_item_id"))
-    derived_item_id = _parse_vn_item_id_from_source_ref(source_ref)
+    derived_item_id = _parse_required_vn_item_id_from_source_ref(source_ref)
     vn_item_id = requested_item_id if requested_item_id is not None else derived_item_id
 
-    if vn_item_id is not None and source_ref != vn_asset_source_ref(vn_item_id):
+    if source_ref != vn_asset_source_ref(vn_item_id):
         _raise_context_mismatch()
 
-    item: Mapping[str, Any] | None = None
-    slot: Mapping[str, Any] | None = None
-    pack: Mapping[str, Any] | None = None
-    if vn_item_id is not None:
-        item, slot, pack = _load_verified_item_context(
-            user_id=user_id,
-            vn_repository=vn_repository,
-            item_id=vn_item_id,
-        )
-    elif any(key in requested for key in _STRUCTURAL_VN_KEYS):
-        _raise_context_mismatch()
+    item, slot, pack = _load_verified_item_context(
+        user_id=user_id,
+        vn_repository=vn_repository,
+        item_id=vn_item_id,
+    )
 
     context = {
         key: value
@@ -93,32 +87,31 @@ def build_vn_visual_identity_source_context(
         }
     )
 
-    if vn_item_id is not None:
-        context["vn_item_id"] = vn_item_id
-        _copy_verified_structural_hint(
-            context,
-            requested=requested,
-            key="vn_pack_id",
-            expected=_coerce_required_positive_int(pack.get("id") if pack is not None else None),
-        )
-        _copy_verified_structural_hint(
-            context,
-            requested=requested,
-            key="vn_slot_id",
-            expected=_coerce_required_positive_int(slot.get("id") if slot is not None else None),
-        )
-        _copy_verified_structural_hint(
-            context,
-            requested=requested,
-            key="vn_slot_key",
-            expected=_optional_string(slot.get("slot_key") if slot is not None else None),
-        )
-        _copy_verified_structural_hint(
-            context,
-            requested=requested,
-            key="vn_asset_type",
-            expected=_optional_string(slot.get("asset_type") if slot is not None else None),
-        )
+    context["vn_item_id"] = vn_item_id
+    _copy_verified_structural_hint(
+        context,
+        requested=requested,
+        key="vn_pack_id",
+        expected=_coerce_required_positive_int(pack.get("id")),
+    )
+    _copy_verified_structural_hint(
+        context,
+        requested=requested,
+        key="vn_slot_id",
+        expected=_coerce_required_positive_int(slot.get("id")),
+    )
+    _copy_verified_structural_hint(
+        context,
+        requested=requested,
+        key="vn_slot_key",
+        expected=_optional_string(slot.get("slot_key")),
+    )
+    _copy_verified_structural_hint(
+        context,
+        requested=requested,
+        key="vn_asset_type",
+        expected=_optional_string(slot.get("asset_type")),
+    )
 
     return canonicalize_source_context(context)
 
@@ -171,12 +164,12 @@ def _copy_verified_structural_hint(
     context[key] = expected
 
 
-def _parse_vn_item_id_from_source_ref(source_ref: str | None) -> int | None:
+def _parse_required_vn_item_id_from_source_ref(source_ref: str | None) -> int:
     if not source_ref:
-        return None
+        _raise_context_mismatch()
     match = _VN_ITEM_SOURCE_REF_RE.fullmatch(source_ref)
     if match is None:
-        return None
+        _raise_context_mismatch()
     return _coerce_required_positive_int(match.group(1))
 
 
@@ -200,9 +193,11 @@ def _coerce_optional_positive_int(value: Any) -> int | None:
         return None
     if isinstance(value, bool):
         _raise_context_mismatch()
-    try:
+    if isinstance(value, int):
+        normalized = value
+    elif isinstance(value, str) and value.isdigit():
         normalized = int(value)
-    except (TypeError, ValueError):
+    else:
         _raise_context_mismatch()
     if normalized < 1:
         _raise_context_mismatch()

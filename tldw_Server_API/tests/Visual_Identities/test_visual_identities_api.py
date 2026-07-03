@@ -581,6 +581,7 @@ def test_generated_file_asset_import_records_vn_context_and_rejects_item_mismatc
     }
     assert _visual_identity_asset_count(chacha_db, owner_user_id=1) == 1
 
+    item_mismatch_key = "vn-generated-context-item-mismatch"
     item_mismatch = client.post(
         f"/api/v1/visual-identities/packs/{pack['id']}/assets/from-generated-file",
         json={
@@ -588,12 +589,18 @@ def test_generated_file_asset_import_records_vn_context_and_rejects_item_mismatc
             "expression_key": "sad",
             "source_feature": SOURCE_FEATURE_VN_ASSETS,
             "source_context": {"vn_item_id": item_id + 1},
-            "idempotency_key": "vn-generated-context-item-mismatch",
+            "idempotency_key": item_mismatch_key,
         },
     )
 
-    assert item_mismatch.status_code in {422, 404}
+    assert item_mismatch.status_code == 422
+    assert item_mismatch.json()["detail"] == "vn_generated_file_context_mismatch"
     assert _visual_identity_asset_count(chacha_db, owner_user_id=1) == 1
+    assert _visual_identity_idempotency_count(
+        chacha_db,
+        owner_user_id=1,
+        idempotency_key=item_mismatch_key,
+    ) == 0
 
     mismatched_contexts = [
         {"vn_item_id": item_id, "vn_pack_id": vn_pack_id + 1},
@@ -602,6 +609,7 @@ def test_generated_file_asset_import_records_vn_context_and_rejects_item_mismatc
         {"vn_item_id": item_id, "vn_asset_type": "background"},
     ]
     for index, source_context in enumerate(mismatched_contexts, start=1):
+        idempotency_key = f"vn-generated-context-structural-mismatch-{index}"
         mismatch = client.post(
             f"/api/v1/visual-identities/packs/{pack['id']}/assets/from-generated-file",
             json={
@@ -609,12 +617,18 @@ def test_generated_file_asset_import_records_vn_context_and_rejects_item_mismatc
                 "expression_key": "sad",
                 "source_feature": SOURCE_FEATURE_VN_ASSETS,
                 "source_context": source_context,
-                "idempotency_key": f"vn-generated-context-structural-mismatch-{index}",
+                "idempotency_key": idempotency_key,
             },
         )
 
-        assert mismatch.status_code in {422, 404}
+        assert mismatch.status_code == 422
+        assert mismatch.json()["detail"] == "vn_generated_file_context_mismatch"
         assert _visual_identity_asset_count(chacha_db, owner_user_id=1) == 1
+        assert _visual_identity_idempotency_count(
+            chacha_db,
+            owner_user_id=1,
+            idempotency_key=idempotency_key,
+        ) == 0
     assert any((storage_root / "1").glob("packs/draft-*/happy/*.png"))
 
 
@@ -683,6 +697,22 @@ def _visual_identity_asset_count(db: CharactersRAGDB, *, owner_user_id: int) -> 
     row = db.execute_query(
         "SELECT COUNT(*) FROM visual_identity_assets WHERE owner_user_id = ?",
         (owner_user_id,),
+    ).fetchone()
+    return int(row[0])
+
+
+def _visual_identity_idempotency_count(
+    db: CharactersRAGDB,
+    *,
+    owner_user_id: int,
+    idempotency_key: str,
+) -> int:
+    row = db.execute_query(
+        """
+        SELECT COUNT(*) FROM visual_identity_idempotency
+        WHERE owner_user_id = ? AND idempotency_key = ?
+        """,
+        (owner_user_id, idempotency_key),
     ).fetchone()
     return int(row[0])
 

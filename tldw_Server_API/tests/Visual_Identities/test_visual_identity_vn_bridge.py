@@ -100,6 +100,60 @@ def test_vn_bridge_verifies_structural_vn_ids_before_persisting(
     assert context["vn_asset_type"] == "sprite"
 
 
+def test_vn_bridge_accepts_digit_string_structural_ids(
+    vn_repository: FakeVNAssetPacksRepository,
+) -> None:
+    context = build_vn_visual_identity_source_context(
+        user_id=str(OWNER_USER_ID),
+        vn_repository=vn_repository,
+        generated_file_record={
+            "id": "42",
+            "source_feature": "vn_assets",
+            "source_ref": "vn_asset_item:29",
+        },
+        requested_context={
+            "vn_item_id": "29",
+            "vn_pack_id": "7",
+            "vn_slot_id": "11",
+        },
+    )
+
+    assert context["generated_file_id"] == 42
+    assert context["vn_item_id"] == 29
+    assert context["vn_pack_id"] == 7
+    assert context["vn_slot_id"] == 11
+
+
+@pytest.mark.parametrize(
+    "source_ref",
+    [
+        None,
+        "",
+        "vn_asset_item",
+        "vn_asset_item:not-an-int",
+        "image_gen:29",
+    ],
+)
+def test_vn_bridge_rejects_missing_or_malformed_source_ref(
+    source_ref: str | None,
+    vn_repository: FakeVNAssetPacksRepository,
+) -> None:
+    generated_file_record = {
+        "id": 42,
+        "source_feature": "vn_assets",
+    }
+    if source_ref is not None:
+        generated_file_record["source_ref"] = source_ref
+
+    with pytest.raises(ValueError, match="vn_generated_file_context_mismatch"):
+        build_vn_visual_identity_source_context(
+            user_id=OWNER_USER_ID,
+            vn_repository=vn_repository,
+            generated_file_record=generated_file_record,
+            requested_context={"vn_slot_label": "Happy"},
+        )
+
+
 def test_vn_bridge_rejects_item_source_ref_mismatch(
     vn_repository: FakeVNAssetPacksRepository,
 ) -> None:
@@ -123,6 +177,9 @@ def test_vn_bridge_rejects_item_source_ref_mismatch(
         {"vn_item_id": 29, "vn_slot_id": 12},
         {"vn_item_id": 29, "vn_slot_key": "sad"},
         {"vn_item_id": 29, "vn_asset_type": "background"},
+        {"vn_item_id": 29.9},
+        {"vn_item_id": 29, "vn_pack_id": 7.9},
+        {"vn_item_id": 29, "vn_slot_id": 11.1},
     ],
 )
 def test_vn_bridge_rejects_unverified_structural_hints(
@@ -139,4 +196,21 @@ def test_vn_bridge_rejects_unverified_structural_hints(
                 "source_ref": "vn_asset_item:29",
             },
             requested_context=requested_context,
+        )
+
+
+def test_vn_bridge_rejects_cross_user_pack_owner(
+    vn_repository: FakeVNAssetPacksRepository,
+) -> None:
+    vn_repository.packs[7]["owner_user_id"] = OWNER_USER_ID + 1
+
+    with pytest.raises(ValueError, match="vn_generated_file_context_mismatch"):
+        build_vn_visual_identity_source_context(
+            user_id=OWNER_USER_ID,
+            vn_repository=vn_repository,
+            generated_file_record={
+                "id": 42,
+                "source_feature": "vn_assets",
+                "source_ref": "vn_asset_item:29",
+            },
         )
