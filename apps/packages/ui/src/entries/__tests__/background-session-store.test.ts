@@ -1,15 +1,19 @@
 import { describe, expect, it } from "vitest"
 import {
   SESSION_STATE_STORAGE_KEY,
+  createSerializedSessionStateWriter,
   deserializeSessionState,
   emptySessionState,
+  isInterruptedPreSubmissionIngestSession,
   readPersistedSessionState,
+  selectInterruptedIngestFunnelIds,
   serializeIngestSessions,
   serializePendingReplay,
   serializeQuickIngestBatches,
   serializeQuickIngestSessions,
   writePersistedSessionState,
   type PersistedQuickIngestBatch,
+  type PersistedSessionState,
   type SessionStorageArea
 } from "@/entries/background-session-store"
 
@@ -187,5 +191,181 @@ describe("quick-ingest batch resume persistence", () => {
       itemId: 70,
       idempotencyKey: "idem-1"
     })
+  })
+})
+
+describe("interrupted pre-submission ingest sessions", () => {
+  it("classifies a queued no-jobIds session as interrupted", () => {
+    expect(
+      isInterruptedPreSubmissionIngestSession({
+        funnelId: "ingest-1",
+        status: "queued",
+        jobIds: []
+      })
+    ).toBe(true)
+    expect(
+      isInterruptedPreSubmissionIngestSession({
+        funnelId: "ingest-2",
+        status: "running"
+        // jobIds absent entirely
+      })
+    ).toBe(true)
+  })
+
+  it("does not classify resumable, awaiting-auth, or terminal sessions", () => {
+    // Has jobIds -> resumable by the poll, not interrupted.
+    expect(
+      isInterruptedPreSubmissionIngestSession({
+        status: "queued",
+        jobIds: [7]
+      })
+    ).toBe(false)
+    // Awaiting auth -> driven by the auth-replay path.
+    expect(
+      isInterruptedPreSubmissionIngestSession({
+        status: "running",
+        jobIds: [],
+        awaitingAuth: true
+      })
+    ).toBe(false)
+    // Terminal states are already reported.
+    expect(
+      isInterruptedPreSubmissionIngestSession({ status: "failed", jobIds: [] })
+    ).toBe(false)
+    expect(
+      isInterruptedPreSubmissionIngestSession({
+        status: "completed",
+        jobIds: []
+      })
+    ).toBe(false)
+    expect(isInterruptedPreSubmissionIngestSession(null)).toBe(false)
+    expect(isInterruptedPreSubmissionIngestSession(undefined)).toBe(false)
+  })
+
+  it("selects only stranded funnelIds and excludes auth-replay ids", () => {
+    const ingestSessions = {
+      "ingest-stranded": {
+        funnelId: "ingest-stranded",
+        status: "queued",
+        jobIds: []
+      },
+      "ingest-polling": {
+        funnelId: "ingest-polling",
+        status: "running",
+        jobIds: [42]
+      },
+      "ingest-auth": {
+        funnelId: "ingest-auth",
+        status: "queued",
+        jobIds: []
+      }
+    }
+    // ingest-auth is queued for auth replay; it must not be reported failed.
+    const selected = selectInterruptedIngestFunnelIds(ingestSessions, [
+      "ingest-auth"
+    ])
+    expect(selected).toEqual(["ingest-stranded"])
+  })
+
+  it("reports + clears a persisted no-jobIds queued session on resume", async () => {
+    // Mirror the background rehydrate flow: read persisted state, select the
+    // stranded funnelIds, then run the report-and-clear loop against a live Map.
+    const area = createMemoryArea()
+    await writePersistedSessionState(
+      {
+        ...emptySessionState(),
+        ingestSessions: {
+          "ingest-stuck": {
+            funnelId: "ingest-stuck",
+            url: "https://example.test/stuck",
+            status: "queued",
+            jobIds: []
+          }
+        }
+      },
+      area
+    )
+
+    const restored = await readPersistedSessionState(area)
+    const funnelIds = selectInterruptedIngestFunnelIds(
+      restored.ingestSessions,
+      restored.pendingAuthReplay
+    )
+    expect(funnelIds).toEqual(["ingest-stuck"])
+
+    // Simulate a fresh worker's in-memory Map + reporter.
+    const live = new Map<string, Record<string, unknown>>(
+      Object.entries(restored.ingestSessions)
+    )
+    const reported: Array<{ funnelId: string; status: string }> = []
+    for (const funnelId of funnelIds) {
+      reported.push({ funnelId, status: "failed" })
+      live.delete(funnelId)
+    }
+
+    expect(reported).toEqual([{ funnelId: "ingest-stuck", status: "failed" }])
+    // Session is cleared so the sidepanel is not left stuck.
+    expect(live.has("ingest-stuck")).toBe(false)
+  })
+})
+
+describe("serialized session state writer", () => {
+  const versioned = (tag: string): PersistedSessionState => ({
+    ...emptySessionState(),
+    pendingAuthReplay: [tag]
+  })
+
+  it("coalesces rapid persists and ends on the latest snapshot", async () => {
+    const store: Record<string, unknown> = {}
+    const setOrder: string[] = []
+    let setCount = 0
+    // The first write is deliberately SLOW; a naive parallel writer would let
+    // that stale early snapshot land last. The latch must serialize so only the
+    // newest snapshot ("v5") is written last.
+    const area: SessionStorageArea = {
+      get: async (key) => (key in store ? { [key]: store[key] } : {}),
+      set: async (items) => {
+        setCount++
+        const state = items[SESSION_STATE_STORAGE_KEY] as PersistedSessionState
+        const tag = state.pendingAuthReplay[0]
+        await new Promise((r) => setTimeout(r, tag === "v1" ? 25 : 1))
+        Object.assign(store, items)
+        setOrder.push(tag)
+      }
+    }
+
+    const write = createSerializedSessionStateWriter(area)
+    for (let i = 1; i <= 5; i++) {
+      write(versioned(`v${i}`))
+    }
+    // Let the write chain drain.
+    await new Promise((r) => setTimeout(r, 60))
+
+    const stored = store[SESSION_STATE_STORAGE_KEY] as PersistedSessionState
+    expect(stored.pendingAuthReplay).toEqual(["v5"])
+    // Only the in-flight first write + one coalesced final write happen.
+    expect(setOrder).toEqual(["v1", "v5"])
+    expect(setCount).toBe(2)
+  })
+
+  it("no-ops without a storage area and reports write errors", async () => {
+    // No area -> writePersistedSessionState no-ops; must not throw.
+    const writeNull = createSerializedSessionStateWriter(null)
+    expect(() => writeNull(emptySessionState())).not.toThrow()
+
+    const errors: unknown[] = []
+    const failingArea: SessionStorageArea = {
+      get: async () => ({}),
+      set: async () => {
+        throw new Error("boom")
+      }
+    }
+    const write = createSerializedSessionStateWriter(failingArea, (e) =>
+      errors.push(e)
+    )
+    write(versioned("v1"))
+    await new Promise((r) => setTimeout(r, 5))
+    expect(errors).toHaveLength(1)
+    expect((errors[0] as Error).message).toBe("boom")
   })
 })

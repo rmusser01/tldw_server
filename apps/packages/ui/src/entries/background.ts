@@ -70,12 +70,14 @@ import {
   evaluateAbsoluteUrlAccess,
 } from "@/utils/absolute-url-guard";
 import {
+  createSerializedSessionStateWriter,
+  getSessionStorageArea,
   readPersistedSessionState,
+  selectInterruptedIngestFunnelIds,
   serializeIngestSessions,
   serializePendingReplay,
   serializeQuickIngestBatches,
   serializeQuickIngestSessions,
-  writePersistedSessionState,
   type PersistedQuickIngestBatch,
 } from "@/entries/background-session-store";
 
@@ -495,9 +497,18 @@ export default defineBackground({
     const activeQuickIngestBatchSessionIds = new Set<string>();
     let sessionStateHydrated = false;
 
-    const persistSessionState = async (): Promise<void> => {
+    // Serialize the actual storage writes so that the many rapid, fire-and-forget
+    // persist calls below cannot land out of order (an older Map snapshot
+    // clobbering a newer one). The snapshot is taken synchronously at call time;
+    // the writer coalesces overlapping writes so only the latest snapshot wins.
+    const writeSessionStateSerialized = createSerializedSessionStateWriter(
+      getSessionStorageArea(),
+      (error) => logBackgroundError("persist session state", error),
+    );
+
+    const persistSessionState = (): void => {
       try {
-        await writePersistedSessionState({
+        writeSessionStateSerialized({
           ingestSessions: serializeIngestSessions(ingestSessions),
           pendingAuthReplay: serializePendingReplay(pendingAuthReplay),
           quickIngestSessions:
@@ -1700,6 +1711,41 @@ export default defineBackground({
       }
     };
 
+    // Regular ingest sessions restored from a previous worker that are still in a
+    // pre-submission state (queued/running, no jobIds, not awaiting auth) were
+    // interrupted before their non-resumable job submission finished.
+    // resumeActiveIngestSessions() cannot resume them (there are no jobIds to
+    // poll), so report each once as failed/interrupted and clear it — otherwise
+    // the sidepanel is left stuck on "Checking for existing media…" forever.
+    // Mirrors reportInterruptedQuickIngestUploads for the no-remote-batch case.
+    const reportInterruptedIngestSessions = async (
+      funnelIds: string[],
+    ): Promise<void> => {
+      for (const funnelId of funnelIds) {
+        const session = ingestSessions.get(funnelId);
+        if (!session) continue;
+        if (activeIngestPollFunnelIds.has(funnelId)) continue;
+        // Re-check the live session in case it advanced since the snapshot.
+        if (session.status !== "queued" && session.status !== "running") {
+          continue;
+        }
+        if (session.awaitingAuth) continue;
+        if (Array.isArray(session.jobIds) && session.jobIds.length > 0) continue;
+        const msg =
+          "Ingest was interrupted by a browser/service-worker restart before it finished.";
+        session.lastError = msg;
+        await emitIngestStatus(session, {
+          status: "failed",
+          error: msg,
+          progressMessage: msg,
+          canCancel: false,
+          canRetry: false,
+        });
+        ingestSessions.delete(funnelId);
+        void persistSessionState();
+      }
+    };
+
     const extractIngestJobIds = (data: any): number[] => {
       const jobs = Array.isArray(data?.jobs) ? data.jobs : [];
       const ids: number[] = [];
@@ -2339,10 +2385,18 @@ export default defineBackground({
       const interruptedUploadSessionIds = state.quickIngestSessions
         .map((entry) => entry.sessionId)
         .filter((sessionId) => !quickIngestBatchRecords.has(sessionId));
+      // Snapshot the ingest sessions that were interrupted mid pre-submission
+      // (queued/running with no jobIds and not awaiting auth) up front, before
+      // the auth-replay path can begin re-driving any of them.
+      const interruptedIngestFunnelIds = selectInterruptedIngestFunnelIds(
+        state.ingestSessions,
+        state.pendingAuthReplay,
+      );
       await resumeActiveIngestSessions();
       void replayPendingAuthSessions();
       await resumeQuickIngestBatches();
       await reportInterruptedQuickIngestUploads(interruptedUploadSessionIds);
+      await reportInterruptedIngestSessions(interruptedIngestFunnelIds);
     };
 
     const runQuickIngestBatch = async (

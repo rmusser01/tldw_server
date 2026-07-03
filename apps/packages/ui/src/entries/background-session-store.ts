@@ -274,3 +274,83 @@ export const writePersistedSessionState = async (
   if (!area) return
   await area.set({ [SESSION_STATE_STORAGE_KEY]: state })
 }
+
+// True when a persisted ingest session is one a restarted worker cannot resume:
+// it is still in a pre-submission lifecycle state (queued/running) but has no
+// jobIds to poll and is not awaiting an auth replay. Such a session was
+// interrupted (e.g. mid "Checking for existing media...") before its
+// non-resumable job submission completed, so it must be reported as failed —
+// otherwise the sidepanel is left waiting forever.
+export const isInterruptedPreSubmissionIngestSession = (
+  session: PersistedIngestSession | null | undefined
+): boolean => {
+  if (!session || typeof session !== "object") return false
+  const record = session as Record<string, unknown>
+  const status = record.status
+  if (status !== "queued" && status !== "running") return false
+  if (record.awaitingAuth === true) return false
+  const jobIds = record.jobIds
+  if (Array.isArray(jobIds) && jobIds.length > 0) return false
+  return true
+}
+
+// Given the persisted ingest sessions and the pending-auth-replay ids, return
+// the funnelIds that were interrupted mid pre-submission and therefore cannot be
+// resumed by the jobId-driven poll. Auth-replay ids are excluded because those
+// sessions are re-driven by the auth replay path once credentials return.
+export const selectInterruptedIngestFunnelIds = (
+  ingestSessions: Record<string, PersistedIngestSession>,
+  pendingAuthReplay: Iterable<string> = []
+): string[] => {
+  const replay = new Set<string>()
+  for (const id of pendingAuthReplay) {
+    const trimmed = String(id || "").trim()
+    if (trimmed) replay.add(trimmed)
+  }
+  const out: string[] = []
+  if (ingestSessions && typeof ingestSessions === "object") {
+    for (const [funnelId, session] of Object.entries(ingestSessions)) {
+      if (replay.has(funnelId)) continue
+      if (isInterruptedPreSubmissionIngestSession(session)) out.push(funnelId)
+    }
+  }
+  return out
+}
+
+// Serialize fire-and-forget writes to a single storage area so rapid, overlapping
+// persists cannot land out of order (an older snapshot overwriting a newer one).
+// Each call records the latest snapshot; while a write is in flight, further
+// calls only update the pending snapshot, and one final write is issued with the
+// newest snapshot once the in-flight write settles ("write again if dirty").
+// Callers are never blocked — the returned function is synchronous.
+export const createSerializedSessionStateWriter = (
+  area: SessionStorageArea | null = getSessionStorageArea(),
+  onError?: (error: unknown) => void
+): ((state: PersistedSessionState) => void) => {
+  let pending: PersistedSessionState | null = null
+  let inFlight: Promise<void> | null = null
+
+  const drain = async (): Promise<void> => {
+    // Keep writing while newer snapshots have arrived. There is no `await`
+    // between the loop's `pending` check and clearing `inFlight`, so a caller
+    // can only ever run while we are suspended on the write below (inFlight set)
+    // or once we are fully idle (inFlight null) — never in between.
+    while (pending) {
+      const next = pending
+      pending = null
+      try {
+        await writePersistedSessionState(next, area)
+      } catch (error) {
+        onError?.(error)
+      }
+    }
+    inFlight = null
+  }
+
+  return (state: PersistedSessionState) => {
+    pending = state
+    if (!inFlight) {
+      inFlight = drain()
+    }
+  }
+}

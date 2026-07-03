@@ -47,7 +47,7 @@ Medium/Low findings and the full "verified-OK" list are in §4–§10.
 
 ## 0.6 Remediation status (2026-07-02)
 
-All Critical and High findings above were **fixed** in this pass (working tree on `dev`; not yet committed). Each fix ships with focused unit tests. Backlog tasks `task-12091`…`task-12103` track the work.
+Every Critical and High **bug** finding above was **fixed** in this pass, each with focused unit tests. The two remaining items are not bug fixes: the **config-hardening** task (12102, TS-strict) is a partial/phased migration, and a few **residual refinements** (H1 CSP `unsafe-eval`, 12103 dead-tree removal) need out-of-band verification — both are called out explicitly in the rows below and in "Residuals", so "fixed" refers to the defects, not to those tracked follow-ups. Backlog tasks `task-12091`…`task-12103` track the work.
 
 **Verification:** the new + affected suites all pass — 127 tests across 14 packages/ui files, 6 (C2 redaction), 11 (shim/nav), and 23 existing store/audio/client regression tests. The only red test is a **pre-existing** `workspace.ts` quota-warning test that fails identically on baseline `dev` (confirmed via `git stash` by two reviewers) and is unrelated to these changes.
 

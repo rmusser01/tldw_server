@@ -54,16 +54,16 @@ Reuse note: existing per-component sanitizers (`transformMarkdownUrl` in `Common
 ### window.open sites guarded (openExternalUrl)
 `Sidepanel/Chat/hooks/useRagResultsDisplay.tsx`; `KnowledgeQA/SourceCard.tsx`; `KnowledgeQA/SourceViewerModal.tsx`; `Watchlists/ItemsTab/ItemsTab.tsx`; `Collections/ReadingList/ReadingItemCard.tsx`; `Knowledge/hooks/useKnowledgeSearch.ts`; `Knowledge/hooks/useFileSearch.ts`. (`SourceCard.tsx:698` opens a hardcoded `/document-workspace` path — not attacker-controlled, left as-is.)
 
-### CSP (next.config.mjs `async headers()`, applied to `/:path*`)
+### CSP (next.config.mjs `async headers()`, applied to `/:path*`) — SHIPPED (hardened)
 ```
 default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none';
-script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; style-src 'self' 'unsafe-inline';
+script-src 'self' 'unsafe-eval' blob: 'sha256-<theme-bootstrap-hash>'; style-src 'self' 'unsafe-inline';
 img-src 'self' data: blob: https: http:; font-src 'self' data:;
 media-src 'self' data: blob: https: http:; connect-src 'self' https: http: ws: wss: data: blob:;
 worker-src 'self' blob:; frame-src 'self' blob: data: https: http:
 ```
-`object-src 'none'` + `base-uri 'self'` + `frame-ancestors 'none'` are the hard protections. `script-src` keeps `'unsafe-inline'`/`'unsafe-eval'` (required by the `_document` theme-bootstrap inline script, antd runtime, Next.js) and `blob:` (Web Workers: OCR/diff/tokenizer). Resource directives (img/media/connect/frame) stay broad so external thumbnails, remote backends, realtime-audio WebSockets, and blob:/PDF iframe previews keep working.
-**Follow-up:** tighten `script-src` to nonce/hash-based (drop `'unsafe-inline'`/`'unsafe-eval'`) — this also lets CSP block `javascript:` navigation directly. Consider adding `X-Content-Type-Options: nosniff` and `Referrer-Policy`.
+`'unsafe-inline'` was **dropped** from `script-src` — the one trusted inline script (`_document` theme bootstrap) is SHA-256-hash-allowlisted instead, so inline-script injection / `javascript:` execution is blocked by the browser. Also shipped: `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, `X-Frame-Options: DENY`, and a locked-down `Permissions-Policy`. `object-src 'none'` + `base-uri 'self'` + `frame-ancestors 'none'` remain the hard protections; resource directives stay broad so external thumbnails, remote backends, realtime-audio WebSockets, and blob:/PDF iframe previews keep working.
+**Remaining follow-up:** `'unsafe-eval'` is retained (WASM/OCR/tokenizer) — dropping it needs per-feature browser verification. Consider computing the theme-script hash at build time (it's a manually-pinned constant today that must be regenerated when the script changes), plus CSP `report-to`/`report-uri` and HSTS.
 
 ### Same-family fixes
 - `OutputPreviewDrawer.tsx` `handleOpenInNewTab`: `safeHtml = sanitizedHtml || content` → `|| ""` (matches sibling rendered view; no raw HTML into the blob: tab).

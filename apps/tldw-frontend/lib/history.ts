@@ -32,7 +32,22 @@ const SENSITIVE_HEADERS = new Set([
 ]);
 
 // Body keys (compared case-insensitively) whose values must never be persisted.
-const SENSITIVE_BODY_KEYS = new Set(['access_token', 'refresh_token']);
+// Stored lower-cased because lookups normalize the key via `.toLowerCase()`.
+// Covers OAuth/JWT tokens plus common credential-shaped keys (api keys,
+// passwords, client secrets) so they are stripped on non-auth routes too.
+const SENSITIVE_BODY_KEYS = new Set([
+  'access_token',
+  'refresh_token',
+  'id_token',
+  'session_token',
+  'api_key',
+  'apikey',
+  'x-api-key',
+  'jwt',
+  'secret',
+  'password',
+  'client_secret',
+]);
 
 // Auth routes whose response bodies carry credentials; their response bodies
 // are dropped entirely rather than merely key-redacted.
@@ -65,7 +80,10 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 // placeholder. Returns the original reference for non-plain values so we never
 // corrupt Blobs/ArrayBuffers or other non-JSON payloads.
 function redactTokens(value: unknown, depth = 0): unknown {
-  if (depth > 6) return value;
+  // Fail CLOSED past the depth limit: a security redactor must never return a
+  // raw (unredacted) subtree, since credentials could be nested deeper than we
+  // walk. Replace the entire truncated subtree with the placeholder instead.
+  if (depth > 6) return REDACTED;
   if (Array.isArray(value)) {
     return value.map((entry) => redactTokens(entry, depth + 1));
   }

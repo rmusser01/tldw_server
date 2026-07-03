@@ -99,6 +99,90 @@ describe("background proxy web token refresh", () => {
     )
   })
 
+  it("signals refresh failure when /auth/refresh returns no access_token (no masking with stale token)", async () => {
+    let refreshHits = 0
+    let staleRetryHits = 0
+    const fetchSpy = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.endsWith("/api/v1/auth/refresh")) {
+        refreshHits += 1
+        // Refresh "succeeds" at the HTTP level but returns no access_token.
+        return new Response(JSON.stringify({ detail: "expired" }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        })
+      }
+      const auth = new Headers(init?.headers).get("Authorization") ?? ""
+      if (auth === "Bearer stale-access") {
+        staleRetryHits += 1
+        return new Response("unauthorized", { status: 401 })
+      }
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      })
+    })
+    vi.stubGlobal("fetch", fetchSpy as any)
+
+    const { bgRequest } = await importProxy()
+
+    // Because refreshAuthDirect signals failure, request-core marks the refresh
+    // as failed and the still-401 retry surfaces "Session expired" rather than
+    // resolving as if the (stale-token) retry had succeeded.
+    await expect(
+      bgRequest<{ ok: boolean }>({
+        path: "/api/v1/notes/search/" as unknown as `/${string}`,
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: { q: "hello" }
+      })
+    ).rejects.toThrow(/session expired/i)
+
+    expect(refreshHits).toBe(1)
+    // The retry ran with the stale token and 401'd; it must NOT have been
+    // treated as a success, and no bogus token was persisted.
+    expect(staleRetryHits).toBeGreaterThanOrEqual(1)
+    expect((mocks.store.tldwConfig as Record<string, unknown>).accessToken).toBe(
+      "stale-access"
+    )
+  })
+
+  it("signals refresh failure when /auth/refresh itself returns 401", async () => {
+    let refreshHits = 0
+    const fetchSpy = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.endsWith("/api/v1/auth/refresh")) {
+        refreshHits += 1
+        return new Response("unauthorized", { status: 401 })
+      }
+      const auth = new Headers(init?.headers).get("Authorization") ?? ""
+      if (auth === "Bearer stale-access") {
+        return new Response("unauthorized", { status: 401 })
+      }
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      })
+    })
+    vi.stubGlobal("fetch", fetchSpy as any)
+
+    const { bgRequest } = await importProxy()
+
+    await expect(
+      bgRequest<{ ok: boolean }>({
+        path: "/api/v1/notes/search/" as unknown as `/${string}`,
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: { q: "hello" }
+      })
+    ).rejects.toThrow(/session expired/i)
+
+    expect(refreshHits).toBe(1)
+    expect((mocks.store.tldwConfig as Record<string, unknown>).accessToken).toBe(
+      "stale-access"
+    )
+  })
+
   it("single-flights concurrent 401 refreshes into one refresh call", async () => {
     let refreshHits = 0
     let releaseRefresh: () => void = () => {}

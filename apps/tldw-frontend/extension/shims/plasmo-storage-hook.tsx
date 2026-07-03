@@ -44,11 +44,17 @@ export function useStorage<T = unknown>(
 
   useEffect(() => {
     let cancelled = false
+    // `storage.get()` snapshots the backend synchronously but resolves in a
+    // later microtask. If a `watch` callback delivers a fresher value (from
+    // another write) in that window, the stale get() result must NOT clobber
+    // it. This flag records that a watch update already won the race.
+    let watchUpdated = false
     setIsLoading(true)
     storage
       .get<T>(options.key)
       .then((stored) => {
         if (cancelled) return
+        if (watchUpdated) return
         applyValue(stored === undefined ? defaultValueRef.current : stored)
       })
       .finally(() => {
@@ -61,6 +67,7 @@ export function useStorage<T = unknown>(
     const unwatch = storage.watch({
       [options.key]: (change) => {
         if (cancelled) return
+        watchUpdated = true
         applyValue(
           change.newValue === undefined
             ? defaultValueRef.current

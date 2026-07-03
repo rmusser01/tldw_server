@@ -92,8 +92,11 @@ const notifyGlobal = (storageKey: string, change: StorageChange) => {
   set.forEach((cb) => {
     try {
       cb(change)
-    } catch {
-      // ignore watcher errors
+    } catch (err) {
+      // A misbehaving watch callback must not break sibling watchers or the
+      // write that triggered the notification — but the failure must not be
+      // silently swallowed either, or watcher-callback bugs become invisible.
+      console.error("[plasmo-storage] watch callback threw", err)
     }
   })
 }
@@ -106,16 +109,24 @@ if (typeof window !== "undefined") {
     if (event.storageArea && event.storageArea !== window.localStorage) return
     if (event.key == null) return
     if (!globalWatchers.has(event.key)) return
-    notifyGlobal(event.key, {
-      oldValue:
-        event.oldValue == null
-          ? undefined
-          : defaultSerde.deserializer(event.oldValue),
-      newValue:
-        event.newValue == null
-          ? undefined
-          : defaultSerde.deserializer(event.newValue)
-    })
+    try {
+      // A foreign tab or external script can write an arbitrary, non-JSON
+      // value to a watched key. Deserialization + watcher dispatch must never
+      // throw out of the window `storage` handler (an uncaught error there is
+      // globally unhandled), so guard the whole body defensively.
+      notifyGlobal(event.key, {
+        oldValue:
+          event.oldValue == null
+            ? undefined
+            : defaultSerde.deserializer(event.oldValue),
+        newValue:
+          event.newValue == null
+            ? undefined
+            : defaultSerde.deserializer(event.newValue)
+      })
+    } catch (err) {
+      console.error("[plasmo-storage] failed to process storage event", err)
+    }
   })
 }
 

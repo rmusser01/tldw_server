@@ -58,6 +58,41 @@ describe("plasmo storage cross-instance change propagation (H10)", () => {
     await waitFor(() => expect(result.current[0]).toBe(true))
   })
 
+  it("does not clobber a fresher watch() update with a stale initial get()", async () => {
+    const instance = new Storage({ area: "local" })
+
+    // Control exactly when the initial get() resolves so we can interleave a
+    // watch update in between the synchronous get() call and its microtask.
+    let resolveGet: (value: string | undefined) => void = () => {}
+    vi.spyOn(instance, "get").mockImplementation(
+      () =>
+        new Promise<string | undefined>((resolve) => {
+          resolveGet = resolve
+        }) as Promise<never>
+    )
+
+    const external = new Storage({ area: "local" })
+
+    const { result } = renderHook(() =>
+      useStorage<string>({ key: "raced", instance, defaultValue: "default" })
+    )
+
+    // A fresher value arrives via watch() before the initial get() resolves.
+    await act(async () => {
+      await external.set("raced", "fresh")
+    })
+    expect(result.current[0]).toBe("fresh")
+
+    // The stale initial get() now resolves — it must NOT overwrite "fresh".
+    await act(async () => {
+      resolveGet("stale")
+      await Promise.resolve()
+    })
+
+    expect(result.current[0]).toBe("fresh")
+    vi.restoreAllMocks()
+  })
+
   it("functional setValue uses the freshest value, not a stale closure", async () => {
     const { result } = renderHook(() => useStorage<number>("counter", 0))
 

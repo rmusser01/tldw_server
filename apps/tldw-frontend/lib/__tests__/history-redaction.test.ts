@@ -114,6 +114,73 @@ describe('request history redaction', () => {
     expect(raw).not.toContain('LEAK-3');
   });
 
+  it('redacts additional credential-shaped body keys on non-auth routes', () => {
+    addRequestHistory({
+      id: '3b',
+      method: 'POST',
+      url: '/some/route',
+      timestamp: new Date().toISOString(),
+      requestBody: {
+        id_token: 'IDT-LEAK',
+        session_token: 'SESS-LEAK',
+        api_key: 'APIK-LEAK',
+        apiKey: 'APIK2-LEAK',
+        'x-api-key': 'XAPIK-LEAK',
+        jwt: 'JWT-LEAK',
+        secret: 'SEC-LEAK',
+        password: 'PW-LEAK',
+        client_secret: 'CS-LEAK',
+        keep: 'visible-value',
+      },
+      responseBody: { data: { api_key: 'RESP-APIK-LEAK' } },
+    });
+
+    const raw = localStorage.getItem(KEY) || '';
+    for (const leaked of [
+      'IDT-LEAK',
+      'SESS-LEAK',
+      'APIK-LEAK',
+      'APIK2-LEAK',
+      'XAPIK-LEAK',
+      'JWT-LEAK',
+      'SEC-LEAK',
+      'PW-LEAK',
+      'CS-LEAK',
+      'RESP-APIK-LEAK',
+    ]) {
+      expect(raw).not.toContain(leaked);
+    }
+    // Non-sensitive keys stay readable for debugging value.
+    expect(raw).toContain('visible-value');
+
+    const [item] = getRequestHistory();
+    const body = item.requestBody as Record<string, unknown>;
+    expect(body.id_token).toBe('[REDACTED]');
+    expect(body.api_key).toBe('[REDACTED]');
+    expect(body.apiKey).toBe('[REDACTED]');
+    expect(body.client_secret).toBe('[REDACTED]');
+    expect(body.keep).toBe('visible-value');
+  });
+
+  it('fails closed on tokens nested deeper than the redaction depth limit', () => {
+    // Bury a token below the (>6) recursion depth. The old fail-open behavior
+    // returned the raw subtree past the limit, leaking the token.
+    addRequestHistory({
+      id: '3c',
+      method: 'POST',
+      url: '/some/route',
+      timestamp: new Date().toISOString(),
+      responseBody: {
+        a: { b: { c: { d: { e: { f: { g: { access_token: 'DEEP-LEAK' } } } } } } },
+      },
+    });
+
+    const raw = localStorage.getItem(KEY) || '';
+    expect(raw).not.toContain('DEEP-LEAK');
+    // The truncated subtree is replaced with the redaction placeholder.
+    expect(raw).toContain('[REDACTED]');
+  });
+
   it('clearRequestHistory empties the store', () => {
     addRequestHistory({
       id: '4',

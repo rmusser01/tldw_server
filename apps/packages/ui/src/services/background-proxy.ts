@@ -420,7 +420,13 @@ const refreshAuthDirect = async (
           | Record<string, unknown>
           | null) || null
       const refreshToken = String((cfg?.refreshToken as string) || "").trim()
-      if (!refreshToken) return
+      // Signal failure (throw) rather than resolving silently: request-core
+      // treats a resolved refreshAuth as success and would retry with the stale
+      // token. Throwing makes it mark the refresh as failed so a still-401 retry
+      // surfaces "Session expired" instead of masking the failure.
+      if (!refreshToken) {
+        throw new Error("Token refresh failed: no refresh token available")
+      }
       const resp = await tldwRequest(
         {
           path: "/api/v1/auth/refresh",
@@ -434,7 +440,11 @@ const refreshAuthDirect = async (
       const tokens = (resp?.ok ? resp.data : null) as
         | { access_token?: string; refresh_token?: string }
         | null
-      if (!tokens?.access_token) return
+      if (!tokens?.access_token) {
+        throw new Error(
+          `Token refresh failed: ${resp?.error || `no access token in refresh response (status ${resp?.status ?? "unknown"})`}`
+        )
+      }
       const latest =
         ((await storage.get("tldwConfig").catch(() => null)) as
           | Record<string, unknown>

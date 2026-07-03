@@ -36,6 +36,9 @@ const mockedApiSend = vi.mocked(apiSend)
 const mockedClient = vi.mocked(tldwClient, true)
 const mockedRuntimeApiKey = vi.mocked(getRuntimeSingleUserApiKeyOverride)
 const originalDeploymentMode = process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
+// Fixed wall-clock so state-setup timestamps are deterministic across runs
+// (workflow code must use real Date.now(), but test fixtures should not).
+const FIXED_NOW_MS = 1_700_000_000_000
 
 const setConnectionState = (overrides: Record<string, unknown>) => {
   const prev = useConnectionStore.getState().state
@@ -856,8 +859,8 @@ describe("connection store stability", () => {
       hasCompletedFirstRun: false,
       userPersona: null,
       knowledgeStatus: "ready",
-      knowledgeLastCheckedAt: Date.now(),
-      lastCheckedAt: Date.now() - 60_000,
+      knowledgeLastCheckedAt: FIXED_NOW_MS,
+      lastCheckedAt: FIXED_NOW_MS - 60_000,
       consecutiveFailures: 0,
       errorKind: "none"
     })
@@ -931,5 +934,43 @@ describe("connection store stability", () => {
     await Promise.all([first, second])
 
     expect(mockedApiSend).toHaveBeenCalledTimes(1)
+  })
+
+  it("releases the in-flight guard when a step before the health check throws (H7 deadlock)", async () => {
+    // A first-run flag in storage makes checkOnce run its first-run-sync set(...)
+    // BEFORE it flips isChecking, so a throw there leaves isChecking false and the
+    // synchronous in-flight guard as the only thing that could block a retry.
+    setConnectionState({
+      phase: ConnectionPhase.CONNECTED,
+      serverUrl: "http://127.0.0.1:8000",
+      isConnected: true,
+      isChecking: false,
+      hasCompletedFirstRun: false,
+      userPersona: null,
+      knowledgeStatus: "ready",
+      knowledgeLastCheckedAt: FIXED_NOW_MS,
+      lastCheckedAt: FIXED_NOW_MS - 60_000
+    })
+    localStorage.setItem("__tldw_first_run_complete", "true")
+    mockedApiSend.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { status: "alive" }
+    } as never)
+
+    // Throw from a store subscriber to simulate a pre-`try` step failing.
+    const unsubscribe = useConnectionStore.subscribe(() => {
+      throw new Error("pre-check boom")
+    })
+    await expect(
+      useConnectionStore.getState().checkOnce({ force: true })
+    ).rejects.toThrow("pre-check boom")
+    unsubscribe()
+
+    // If the guard had leaked, this second checkOnce would bail before issuing a
+    // health request; it must run and reach apiSend instead.
+    mockedApiSend.mockClear()
+    await useConnectionStore.getState().checkOnce({ force: true })
+    expect(mockedApiSend).toHaveBeenCalled()
   })
 })

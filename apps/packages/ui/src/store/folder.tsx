@@ -833,6 +833,10 @@ export const useFolderStore = createWithEqualityFn<FolderState>()(
     }),
     {
       name: 'tldw-folder-store',
+      // Baseline version so future shape changes can migrate instead of discarding
+      // persisted state (see apps/FRONTEND_AUDIT.md §6 / TASK-12102).
+      version: 1,
+      migrate: (persisted) => persisted as any,
       // Use throttled storage to avoid exceeding browser write quota limits
       storage: createJSONStorage(() => createThrottledLocalStorage(1000)),
       // Persist UI prefs + cache metadata (not the server data itself).

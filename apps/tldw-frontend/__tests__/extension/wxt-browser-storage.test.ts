@@ -90,6 +90,45 @@ describe("wxt-browser storage shim", () => {
     storage.onChanged.removeListener(listener)
   })
 
+  it("emits onChanged only for committed keys when a later key in a multi-key set fails", async () => {
+    const listener = vi.fn()
+    storage.onChanged.addListener(listener)
+
+    // First key serializes/writes fine; the second throws mid-set. The earlier
+    // (committed) key must still emit onChanged, the failed key must not, and
+    // the overall promise must reject.
+    const realSetItem = Storage.prototype.setItem
+    const setItemSpy = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(function (
+        this: globalThis.Storage,
+        key: string,
+        value: string
+      ) {
+        if (key === "bad") {
+          throw new Error("QuotaExceededError")
+        }
+        realSetItem.call(this, key, value)
+      })
+
+    await expect(
+      storage.local.set({ good: "committed", bad: "explodes" })
+    ).rejects.toThrow("QuotaExceededError")
+
+    // onChanged fired exactly once, for the committed key only.
+    expect(listener).toHaveBeenCalledTimes(1)
+    const [changes, areaName] = listener.mock.calls[0]
+    expect(areaName).toBe("local")
+    expect(Object.keys(changes)).toEqual(["good"])
+    expect(changes.good.newValue).toBe("committed")
+    expect(changes.bad).toBeUndefined()
+    // The committed key really landed in the backend.
+    expect(localStorage.getItem("good")).toBe(JSON.stringify("committed"))
+
+    setItemSpy.mockRestore()
+    storage.onChanged.removeListener(listener)
+  })
+
   it("emits onChanged with the area name after a successful set", async () => {
     const listener = vi.fn()
     storage.onChanged.addListener(listener)
