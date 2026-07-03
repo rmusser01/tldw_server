@@ -20,8 +20,10 @@ and this project adheres to Some kind of Versioning
 ## [0.1.34] - 2026-07-02
 
 > Rollup coverage: this entry covers current `dev` work that landed after the
-> `0.1.33` release-prep metadata through PR #2568, including the post-PR #2567
-> review follow-ups and current-main CodeQL alert cleanup.
+> `0.1.33` release-prep metadata through PR #2579 plus the PR #2571
+> release-stabilization commits. It includes PRs #2570, #2573, #2575, #2576,
+> #2565, #2578, #2316, and #2579, along with the post-PR #2567/#2568 review
+> follow-ups and current-main/PR #2571 CodeQL alert cleanup.
 
 ### Added
 
@@ -29,6 +31,17 @@ and this project adheres to Some kind of Versioning
   regression coverage for Jobs event-filter SQL helpers, public metrics-label
   hashing, frontend auth persistence, and the `mcp-unified` PEP 561
   `py.typed` marker/package-data contract.
+- **Standalone MCP Docs Corpus And Acquisition** — Added the `mcp-unified`
+  docs package boundary, SQLite corpus store, local/HTML/Markdown importers,
+  retrieval context helpers, Context7-compatible MCP tool provider/module
+  registration, URL source policy, URL fetching/extraction/acquisition service,
+  and standalone docs server mounting.
+- **Workspace Defaults, Chat Focus, And Testing Audit Coverage** — Added
+  workspace default-assistant state, WebUI settings surfaces, persona-default
+  application for Chat Workspace startup, true fullscreen chat focus mode, a
+  testing implementation audit, visible quarantine policy coverage, frontend
+  coverage summaries, storage/rate-limit/error-path/fuzz regression suites, and
+  a non-gating nightly performance workflow.
 
 ### Changed
 
@@ -38,8 +51,18 @@ and this project adheres to Some kind of Versioning
   formatting, and restored browser persistence for manually entered API keys
   and bearer tokens while preserving environment-provided auth precedence.
 - **CodeQL Suppression Hygiene** — Updated validated path/auth/download/sync
-  suppressions from legacy LGTM comments to scoped CodeQL annotations with
+  suppressions to current LGTM-compatible CodeQL suppression comments with
   local rationale on the reviewed paths.
+- **WebUI Chat And Frontend/Extension Hardening** — Reworked character and
+  assistant selection, character greeting picking, Playground chat
+  rail/cockpit layout, character-route state refresh, background-session
+  storage, request history redaction, token refresh, absolute-URL/CSP guards,
+  and browser-storage shims.
+- **Release CI Gate Stabilization** — Aligned release helper/docs contracts,
+  responsive parity guards, pytest shard/quarantine behavior, local CI
+  `pytest-asyncio` loading, playground a11y mocks, stale UX smoke assertions,
+  and CodeQL suppression syntax/rationale with the current release gate
+  behavior.
 
 ### Fixed
 
@@ -47,11 +70,31 @@ and this project adheres to Some kind of Versioning
   ownership, missing helper/class docstrings, pytest unit markers, metrics tests
   using public label normalization, WebSearch logging ambiguity, frontend auth
   reload behavior, and the `mcp-unified` typed-marker package-data mismatch.
+- **WebUI Chat, Character, And Workspace Regressions** — Fixed llama.cpp
+  provider discovery and single-user auth bootstrap, character avatar/greeting
+  behavior, chat rail spacing and mobile overlap, character chat reset on
+  tracked-character changes, route-switch refresh regressions, fullscreen chat
+  focus behavior, Knowledge QA smoke auth, and workspace assistant-default
+  effective-state handling.
+- **Frontend/Extension Security And Reliability Findings** — Fixed credential
+  persistence in request history, source-anchor URL handling, extension upload
+  credential allowlisting, MV3 background session persistence, abort/stream
+  lifecycle cleanup, chat POST retry behavior, audio/TTS playback cleanup,
+  voice backpressure/watchdog handling, and character card import/export size
+  caps.
+- **MCP Docs, Monitoring, And Release Gate Findings** — Fixed docs URL policy
+  fail-closed host handling, ambiguous/numeric host rejection, matched-rule
+  redaction, query-preserving fetch requests without result leakage, TLS 1.2
+  minimums for HTTPS acquisition, Guardian notification timestamp mutation, and
+  stale PR #2571 CodeQL/code-scanning alert state.
 
 ### Removed
 
 - Removed stray WebSearch parser diagnostic `print()` calls from the current
   release line.
+- Removed the stale WebUI auth stack, dead extension routes tree, redundant chat
+  sidebar rail control, and obsolete release-gate assumptions that no longer
+  matched the current UI.
 
 
 ## [0.1.33] - 2026-07-01
