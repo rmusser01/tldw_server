@@ -214,3 +214,121 @@ def test_discover_sitemap_filters_scope_duplicates_and_query_leaks(tmp_path: Pat
     assert result["candidates"][0]["url"] == "https://example.com/docs/a"  # nosec B101
     assert "token=secret" not in serialized  # nosec B101
     assert "?token" not in serialized  # nosec B101
+
+
+def test_discover_sitemap_same_origin_setting_is_strict(tmp_path: Path) -> None:
+    body = b"<urlset><url><loc>https://docs.example.net/guide</loc></url></urlset>"
+    resolver = FakeResolver({"example.com": ["93.184.216.34"]})
+    settings = _settings(
+        tmp_path,
+        allowed_url_prefixes=(
+            "https://example.com/sitemap.xml",
+            "https://example.com/docs/",
+            "https://docs.example.net/",
+        ),
+    )
+    strict_service = DocsSourceDiscoveryService(
+        settings=settings,
+        store=_store(tmp_path),
+        resolver=resolver,
+        transport=FakeTransport([FetchResponse(status_code=200, headers={"content-type": "application/xml"}, body_chunks=[body])]),
+    )
+
+    strict_result = strict_service.discover_source(
+        scope=AccessScope(),
+        request=DiscoverSourceRequest(url="https://example.com/sitemap.xml", kind="sitemap"),
+    )
+
+    assert strict_result["counts"]["denied"] == 1  # nosec B101
+    assert strict_result["candidates"][0]["reason_code"] == "candidate_out_of_scope"  # nosec B101
+
+    loose_service = DocsSourceDiscoveryService(
+        settings=DocsSettings.from_mapping({**settings.__dict__, "discovery_same_origin_only": False}),
+        store=_store(tmp_path),
+        resolver=resolver,
+        transport=FakeTransport([FetchResponse(status_code=200, headers={"content-type": "application/xml"}, body_chunks=[body])]),
+    )
+
+    loose_result = loose_service.discover_source(
+        scope=AccessScope(),
+        request=DiscoverSourceRequest(url="https://example.com/sitemap.xml", kind="sitemap"),
+    )
+
+    assert loose_result["counts"]["accepted"] == 1  # nosec B101
+
+
+def test_discover_sitemap_apply_register_creates_source_without_documents(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    resolver = FakeResolver({"example.com": ["93.184.216.34"]})
+    transport = FakeTransport(
+        [
+            FetchResponse(
+                status_code=200,
+                headers={"content-type": "application/xml"},
+                body_chunks=[b"<urlset><url><loc>https://example.com/docs/a</loc></url></urlset>"],
+            )
+        ]
+    )
+    service = DocsSourceDiscoveryService(settings=_settings(tmp_path), store=store, resolver=resolver, transport=transport)
+
+    result = service.discover_source(
+        scope=AccessScope(),
+        request=DiscoverSourceRequest(
+            url="https://example.com/sitemap.xml",
+            kind="sitemap",
+            mode="apply",
+            apply_action="register",
+            collections=("Reference",),
+            keywords=("docs",),
+            title="Example docs sitemap",
+        ),
+    )
+
+    assert result["status"] == "completed"  # nosec B101
+    assert result["source"]["source_type"] == "url_sitemap"  # nosec B101
+    assert "sitemap_sync_disabled" in result["warnings"]  # nosec B101
+    assert store.status()["counts"]["documents"] == 0  # nosec B101
+    sources = store.list_sources(scope=AccessScope())
+    assert sources[0]["metadata"]["default_collections"] == ["Reference"]  # nosec B101
+    assert sources[0]["metadata"]["default_keywords"] == ["docs"]  # nosec B101
+
+
+def test_discover_sitemap_apply_ingests_candidates_and_links_sitemap_source(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    resolver = FakeResolver({"example.com": ["93.184.216.34"]})
+    transport = FakeTransport(
+        [
+            FetchResponse(
+                status_code=200,
+                headers={"content-type": "application/xml"},
+                body_chunks=[b"<urlset><url><loc>https://example.com/docs/a</loc></url></urlset>"],
+            ),
+            FetchResponse(
+                status_code=200,
+                headers={"content-type": "text/plain"},
+                body_chunks=[b"alpha reference body"],
+            ),
+        ]
+    )
+    settings = _settings(tmp_path, sitemap_sync_enabled=True)
+    service = DocsSourceDiscoveryService(settings=settings, store=store, resolver=resolver, transport=transport)
+
+    result = service.discover_source(
+        scope=AccessScope(),
+        request=DiscoverSourceRequest(
+            url="https://example.com/sitemap.xml",
+            kind="sitemap",
+            mode="apply",
+            apply_action="register_and_ingest",
+            collections=("Reference",),
+            keywords=("docs",),
+        ),
+    )
+
+    assert result["counts"]["ingested"] == 1  # nosec B101
+    assert result["candidates"][0]["document_id"]  # nosec B101
+    assert store.search_chunks(scope=AccessScope(), query="alpha", limit=10)  # nosec B101
+    assert [item["name"] for item in store.list_collections(scope=AccessScope())] == ["Reference"]  # nosec B101
+    assert [item["keyword"] for item in store.list_keywords(scope=AccessScope())] == ["docs"]  # nosec B101
+    links = store.source_document_links(scope=AccessScope(), source_id=result["source"]["id"])
+    assert links[0]["source_item_uri"] == "https://example.com/docs/a"  # nosec B101

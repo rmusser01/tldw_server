@@ -14,7 +14,7 @@ from .acquisition.policy import safe_argument_hash
 from .acquisition.policy import SourcePolicy
 from .models import AccessScope, DiscoverSourceRequest
 from .settings import DocsSettings
-from .source_utils import redacted_url_for_display, url_has_query
+from .source_utils import redacted_url_for_display, source_defaults_metadata, url_has_query
 from .store.sqlite import DocsCatalogStore
 
 CandidateStatus = Literal["accepted", "duplicate", "denied", "skipped", "ingested", "failed"]
@@ -31,6 +31,7 @@ class DiscoveredURLCandidate:
     parent_url: str
     parent_display_url: str
     safe_argument_hash: str
+    document_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -112,12 +113,22 @@ class DocsSourceDiscoveryService:
             max_pages=_effective_discovery_page_limit(request, self.settings),
         )
         warnings.extend(filter_warnings)
+        source: dict[str, Any] | None = None
+        if request.mode == "apply":
+            source, candidates, apply_warnings = self._apply_discovery(
+                scope=scope,
+                kind=kind,
+                request=request,
+                candidates=candidates,
+            )
+            warnings.extend(apply_warnings)
         return _discovery_response(
             status="completed",
             reason_code="ok",
             request=request,
             candidates=candidates,
             warnings=warnings,
+            source=source,
         )
 
     def _candidates_for_fetched(
@@ -154,6 +165,120 @@ class DocsSourceDiscoveryService:
             ]
             return candidates, []
         return [], ["source_discovery_kind_unsupported"]
+
+    def _apply_discovery(
+        self,
+        *,
+        scope: AccessScope,
+        kind: str,
+        request: DiscoverSourceRequest,
+        candidates: list[DiscoveredURLCandidate],
+    ) -> tuple[dict[str, Any] | None, list[DiscoveredURLCandidate], list[str]]:
+        apply_action = request.apply_action or self.settings.discovery_apply_default
+        source: dict[str, Any] | None = None
+        warnings: list[str] = []
+        if kind == "sitemap" and apply_action in {"register", "register_and_ingest"}:
+            source = self._register_sitemap_source(scope=scope, request=request)
+            if not self.settings.sitemap_sync_enabled:
+                warnings.append("sitemap_sync_disabled")
+
+        if apply_action in {"ingest", "register_and_ingest"}:
+            candidates = self._ingest_accepted_candidates(
+                scope=scope,
+                request=request,
+                candidates=candidates,
+                source=source,
+            )
+            if source is not None:
+                source = self.store.get_source(scope=scope, source_id=int(source["id"]))
+
+        return _public_source_for_response(source), candidates, warnings
+
+    def _register_sitemap_source(self, *, scope: AccessScope, request: DiscoverSourceRequest) -> dict[str, Any]:
+        can_persist_query_uri = self.settings.persist_url_query_strings or not url_has_query(request.url)
+        canonical_uri = request.url if can_persist_query_uri else redacted_url_for_display(request.url)
+        redacted_source_url = redacted_url_for_display(request.url)
+        metadata: dict[str, Any] = source_defaults_metadata(
+            keywords=request.keywords,
+            collection_names=request.collections,
+        )
+        metadata.update(
+            {
+                "discovery_kind": "sitemap",
+                "same_origin_only": self.settings.discovery_same_origin_only,
+            }
+        )
+        source_id = self.store.upsert_source(
+            scope=scope,
+            source_type="url_sitemap",
+            canonical_uri=canonical_uri,
+            display_name=request.title or redacted_source_url,
+            source_path=None,
+            source_url=request.url if can_persist_query_uri else None,
+            redacted_source_url=redacted_source_url,
+            policy_profile=self.settings.web_source_profile,
+            sync_enabled=self.settings.sitemap_sync_enabled,
+            metadata=metadata,
+        )
+        source = self.store.get_source(scope=scope, source_id=source_id)
+        if source is None:
+            raise RuntimeError("Registered sitemap source could not be loaded")
+        return source
+
+    def _ingest_accepted_candidates(
+        self,
+        *,
+        scope: AccessScope,
+        request: DiscoverSourceRequest,
+        candidates: list[DiscoveredURLCandidate],
+        source: dict[str, Any] | None,
+    ) -> list[DiscoveredURLCandidate]:
+        ingested: list[DiscoveredURLCandidate] = []
+        for candidate in candidates:
+            if candidate.status != "accepted":
+                ingested.append(candidate)
+                continue
+            result = self.acquisition.ingest_url(
+                scope=scope,
+                url=candidate.url,
+                keywords=request.keywords,
+                collection_names=request.collections,
+            )
+            document = result.get("document")
+            document_id = int(document["id"]) if isinstance(document, Mapping) and document.get("id") else None
+            if result.get("reason_code") == "ok" and document_id is not None:
+                if source is not None:
+                    stored_document = self.store.get_document(scope, document_id, mode="metadata")
+                    self.store.link_source_document(
+                        scope=scope,
+                        source_id=int(source["id"]),
+                        document_id=document_id,
+                        source_item_uri=candidate.url,
+                        status="active",
+                        last_hash=str(stored_document.get("content_hash") or ""),
+                        metadata={"importer": "url_sitemap"},
+                    )
+                ingested.append(
+                    _replace_candidate(
+                        candidate,
+                        candidate.url,
+                        candidate.display_url,
+                        "ingested",
+                        "ok",
+                        document_id=document_id,
+                    )
+                )
+                continue
+            ingested.append(
+                _replace_candidate(
+                    candidate,
+                    candidate.url,
+                    candidate.display_url,
+                    "failed",
+                    str(result.get("reason_code") or "ingest_failed"),
+                )
+            )
+        return ingested
 
 
 class _LinkHTMLParser(HTMLParser):
@@ -234,8 +359,8 @@ def extract_page_links(base_url: str, body: bytes) -> list[str]:
     return _unique_links(links)
 
 
-def public_candidate(candidate: DiscoveredURLCandidate) -> dict[str, str]:
-    return {
+def public_candidate(candidate: DiscoveredURLCandidate) -> dict[str, Any]:
+    public = {
         "url": candidate.display_url,
         "status": candidate.status,
         "reason_code": candidate.reason_code,
@@ -243,6 +368,9 @@ def public_candidate(candidate: DiscoveredURLCandidate) -> dict[str, str]:
         "parent_url": candidate.parent_display_url,
         "safe_argument_hash": candidate.safe_argument_hash,
     }
+    if candidate.document_id is not None:
+        public["document_id"] = candidate.document_id
+    return public
 
 
 def _validate_discovery_request(
@@ -319,10 +447,8 @@ def _filter_candidates(
             )
             continue
         if settings.discovery_same_origin_only and _origin(candidate_url) != seed_origin:
-            decision = policy.evaluate(candidate_url)
-            if decision.status != "allowed":
-                filtered.append(_replace_candidate(candidate, candidate_url, display_url, "denied", "candidate_out_of_scope"))
-                continue
+            filtered.append(_replace_candidate(candidate, candidate_url, display_url, "denied", "candidate_out_of_scope"))
+            continue
         decision = policy.evaluate(candidate_url)
         if decision.status != "allowed":
             filtered.append(_replace_candidate(candidate, candidate_url, display_url, "denied", "candidate_out_of_scope"))
@@ -401,6 +527,8 @@ def _replace_candidate(
     display_url: str,
     status: CandidateStatus,
     reason_code: str,
+    *,
+    document_id: int | None = None,
 ) -> DiscoveredURLCandidate:
     return DiscoveredURLCandidate(
         url=url,
@@ -411,7 +539,23 @@ def _replace_candidate(
         parent_url=candidate.parent_url,
         parent_display_url=candidate.parent_display_url,
         safe_argument_hash=safe_argument_hash(url),
+        document_id=document_id,
     )
+
+
+def _public_source_for_response(source: dict[str, Any] | None) -> dict[str, Any] | None:
+    if source is None:
+        return None
+    public = dict(source)
+    if public.get("source_type") in {"url_page", "url_sitemap"}:
+        redacted_uri = public.get("redacted_source_url")
+        if not isinstance(redacted_uri, str) or not redacted_uri.strip():
+            redacted_uri = redacted_url_for_display(str(public.get("canonical_uri") or public.get("source_url") or ""))
+        public.pop("source_url", None)
+        public["canonical_uri"] = redacted_uri
+        public["display_uri"] = redacted_uri
+        public["redacted_source_url"] = redacted_uri
+    return public
 
 
 def _origin(url: str) -> tuple[str, str, int | None]:

@@ -755,7 +755,7 @@ git commit -m "feat: add docs source discovery dry run"
 - Modify: `apps/mcp-unified/src/mcp_unified/docs/discovery.py`
 - Test: `tldw_Server_API/tests/MCP_unified/docs/test_docs_source_discovery.py`
 
-- [ ] **Step 1: Write failing apply tests**
+- [x] **Step 1: Write failing apply tests**
 
 Add:
 
@@ -827,7 +827,7 @@ def test_discover_sitemap_apply_ingests_candidates_and_links_sitemap_source(tmp_
     assert links[0]["source_item_uri"] == "https://example.com/docs/a"  # nosec B101
 ```
 
-- [ ] **Step 2: Run red tests**
+- [x] **Step 2: Run red tests**
 
 Run:
 
@@ -840,7 +840,7 @@ Run:
 
 Expected: FAIL because apply mode is not implemented.
 
-- [ ] **Step 3: Implement apply mode**
+- [x] **Step 3: Implement apply mode**
 
 In `DocsSourceDiscoveryService.discover_source()`:
 
@@ -858,13 +858,13 @@ metadata.update({"discovery_kind": "sitemap", "same_origin_only": self.settings.
 - when a candidate ingests and a sitemap source exists, load the document via `store.get_document(scope, document_id, mode="metadata")` and link it with `store.link_source_document()`;
 - never pass query-bearing raw URLs into public response fields.
 
-- [ ] **Step 4: Run green tests**
+- [x] **Step 4: Run green tests**
 
 Run the command from Step 2.
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/mcp-unified/src/mcp_unified/docs/discovery.py \
