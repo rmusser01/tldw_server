@@ -60,6 +60,25 @@ def _source_sync_status(settings: DocsSettings) -> dict[str, Any]:
     }
 
 
+def _source_discovery_status(settings: DocsSettings) -> dict[str, Any]:
+    enabled = settings.enable_source_discovery
+    available = enabled and settings.enable_web_acquisition
+    disabled_reason = None if available else (
+        "web_acquisition_disabled" if enabled else "source_discovery_disabled"
+    )
+    return {
+        "enabled": enabled,
+        "available": available,
+        "disabled_reason": disabled_reason,
+        "supported_kinds": ["sitemap", "page_links"],
+        "max_discovery_pages": settings.max_discovery_pages,
+        "max_discovery_depth": settings.max_discovery_depth,
+        "max_discovery_sitemaps": settings.max_discovery_sitemaps,
+        "discovery_apply_default": settings.discovery_apply_default,
+        "discovery_same_origin_only": settings.discovery_same_origin_only,
+    }
+
+
 class DocsMCPToolProvider:
     def __init__(self, *, settings: DocsSettings, store: DocsCatalogStore | None = None) -> None:
         self.settings = settings
@@ -225,6 +244,7 @@ class DocsMCPToolProvider:
             status["web_source_profile"] = self.settings.web_source_profile
             status["web_policy"] = _web_policy_status(self.settings)
             status["source_sync"] = _source_sync_status(self.settings)
+            status["source_discovery"] = _source_discovery_status(self.settings)
             status["web_acquisition_unavailable_reason"] = (
                 None if self.acquisition is not None else "web_acquisition_disabled"
             )

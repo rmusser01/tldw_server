@@ -294,6 +294,29 @@ def test_provider_status_reports_web_acquisition_disabled(tmp_path: Path) -> Non
     assert status["source_sync"]["default_stale_policy"] == "report"  # nosec B101
     assert status["source_sync"]["max_sync_documents"] == 500  # nosec B101
     assert status["source_sync"]["sitemap_sync_enabled"] is False  # nosec B101
+    assert status["source_discovery"]["enabled"] is False  # nosec B101
+    assert status["source_discovery"]["available"] is False  # nosec B101
+    assert status["source_discovery"]["disabled_reason"] == "source_discovery_disabled"  # nosec B101
+    assert status["source_discovery"]["supported_kinds"] == ["sitemap", "page_links"]  # nosec B101
+
+
+def test_provider_status_reports_source_discovery_when_enabled(tmp_path: Path) -> None:
+    settings = DocsSettings.from_mapping(
+        {
+            "db_path": str(tmp_path / "docs.db"),
+            "enable_web_acquisition": True,
+            "enable_source_discovery": True,
+            "web_source_profile": "locked_down",
+            "allowed_url_prefixes": ("https://example.com/docs/",),
+        }
+    )
+    provider = DocsMCPToolProvider(settings=settings)
+
+    status = provider.execute("docs.status", {}, scope=AccessScope())
+
+    assert status["source_discovery"]["enabled"] is True  # nosec B101
+    assert status["source_discovery"]["available"] is True  # nosec B101
+    assert status["source_discovery"]["max_discovery_pages"] == 25  # nosec B101
 
 
 def test_provider_status_reports_custom_web_policy(tmp_path: Path) -> None:

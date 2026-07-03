@@ -11,6 +11,7 @@ from .models import AccessScope
 
 SourceProfile = Literal["locked_down", "local_first", "online_capable"]
 StalePolicy = Literal["report", "tombstone"]
+DiscoveryApplyDefault = Literal["register", "ingest", "register_and_ingest"]
 
 _TRUE_VALUES = {"true", "1", "yes", "on"}
 _FALSE_VALUES = {"false", "0", "no", "off"}
@@ -122,6 +123,13 @@ def _coerce_stale_policy(value: object, field_name: str) -> StalePolicy:
     return cast(StalePolicy, text)
 
 
+def _coerce_discovery_apply_default(value: object, field_name: str) -> DiscoveryApplyDefault:
+    text = "register" if value is None else str(value).strip().lower()
+    if text not in {"register", "ingest", "register_and_ingest"}:
+        raise ValueError(f"{field_name} must be register, ingest, or register_and_ingest")
+    return cast(DiscoveryApplyDefault, text)
+
+
 @dataclass(frozen=True)
 class DocsSettings:
     db_path: Path
@@ -147,6 +155,12 @@ class DocsSettings:
     default_stale_policy: StalePolicy = "report"
     sitemap_sync_enabled: bool = False
     persist_url_query_strings: bool = False
+    enable_source_discovery: bool = False
+    max_discovery_pages: int = 25
+    max_discovery_depth: int = 1
+    max_discovery_sitemaps: int = 3
+    discovery_apply_default: DiscoveryApplyDefault = "register"
+    discovery_same_origin_only: bool = True
 
     @classmethod
     def from_mapping(cls, values: dict) -> "DocsSettings":
@@ -221,5 +235,29 @@ class DocsSettings:
             persist_url_query_strings=_coerce_bool(
                 values.get("persist_url_query_strings", False),
                 "persist_url_query_strings",
+            ),
+            enable_source_discovery=_coerce_bool(
+                values.get("enable_source_discovery", False),
+                "enable_source_discovery",
+            ),
+            max_discovery_pages=_coerce_positive_int(
+                values.get("max_discovery_pages", 25),
+                "max_discovery_pages",
+            ),
+            max_discovery_depth=_coerce_positive_int(
+                values.get("max_discovery_depth", 1),
+                "max_discovery_depth",
+            ),
+            max_discovery_sitemaps=_coerce_positive_int(
+                values.get("max_discovery_sitemaps", 3),
+                "max_discovery_sitemaps",
+            ),
+            discovery_apply_default=_coerce_discovery_apply_default(
+                values.get("discovery_apply_default", "register"),
+                "discovery_apply_default",
+            ),
+            discovery_same_origin_only=_coerce_bool(
+                values.get("discovery_same_origin_only", True),
+                "discovery_same_origin_only",
             ),
         )
