@@ -9,6 +9,7 @@ const {
   createChatMock,
   streamCharacterChatCompletionMock,
   persistCharacterCompletionMock,
+  addChatMessageMock,
   normalChatModeMock,
   resolveVisualIdentityBindingMock
 } = vi.hoisted(() => ({
@@ -18,6 +19,7 @@ const {
     assistant_message_id: "assistant-server-1",
     version: 1
   })),
+  addChatMessageMock: vi.fn(async () => ({ id: "user-server-1", version: 1 })),
   normalChatModeMock: vi.fn(),
   resolveVisualIdentityBindingMock: vi.fn(async () => ({
     actor_kind: "character",
@@ -153,7 +155,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
     createChat: createChatMock,
     streamCharacterChatCompletion: streamCharacterChatCompletionMock,
     persistCharacterCompletion: persistCharacterCompletionMock,
-    addChatMessage: vi.fn(async () => ({ id: "user-server-1", version: 1 })),
+    addChatMessage: addChatMessageMock,
     getChatSettings: vi.fn(async () => ({ settings: null })),
     initialize: vi.fn(async () => null),
     resolveVisualIdentityBinding: resolveVisualIdentityBindingMock
@@ -408,7 +410,8 @@ describe("useChatActions character integration", () => {
       expect.objectContaining({
         assistant_content: "Tracked reply",
         speaker_character_id: 42
-      })
+      }),
+      undefined
     )
     const lastPersistCall = persistCharacterCompletionMock.mock.calls.at(-1) as
       | unknown[]
@@ -476,7 +479,8 @@ describe("useChatActions character integration", () => {
         assistant_content: "Tracked reply",
         speaker_character_id: 99,
         speaker_character_name: "Miku"
-      })
+      }),
+      undefined
     )
   })
 
@@ -533,7 +537,8 @@ describe("useChatActions character integration", () => {
         assistant_content: "Tracked reply",
         speaker_character_id: 4,
         speaker_character_name: "Ashley"
-      })
+      }),
+      undefined
     )
   })
 
@@ -590,7 +595,71 @@ describe("useChatActions character integration", () => {
         assistant_content: "Tracked reply",
         speaker_character_id: 99,
         speaker_character_name: "Miku"
-      })
+      }),
+      undefined
     )
+  })
+
+  it("passes workspace scope through when creating a character-backed chat", async () => {
+    const scope = { type: "workspace", workspaceId: "workspace-1" } as const
+    const options = {
+      ...createHookOptions(),
+      scope,
+      serverChatId: null,
+      serverChatTitle: null,
+      serverChatCharacterId: null,
+      serverChatAssistantKind: null,
+      serverChatAssistantId: null,
+      selectedCharacter: null,
+      selectedAssistant: {
+        kind: "character" as const,
+        id: "char-scoped",
+        name: "Scoped Character",
+        system_prompt: "Scoped prompt",
+        metadata: {
+          selectionMode: "tracked" as const
+        }
+      }
+    }
+    const { result } = renderHook(() => useChatActions(options as any))
+
+    await act(async () => {
+      await result.current.onSubmit({
+        message: "Hello workspace character",
+        image: ""
+      })
+    })
+
+    expect(createChatMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        character_id: "char-scoped",
+        state: "in-progress"
+      }),
+      { scope }
+    )
+    expect(addChatMessageMock).toHaveBeenCalledWith(
+      "unexpected-new-chat",
+      expect.objectContaining({
+        role: "user",
+        content: "Hello workspace character"
+      }),
+      { scope }
+    )
+    expect(streamCharacterChatCompletionMock).toHaveBeenCalledWith(
+      "unexpected-new-chat",
+      expect.objectContaining({
+        include_character_context: true,
+        model: "deepseek-chat"
+      }),
+      expect.objectContaining({ scope })
+    )
+    expect(persistCharacterCompletionMock).toHaveBeenCalledWith(
+      "unexpected-new-chat",
+      expect.objectContaining({
+        assistant_content: "Tracked reply"
+      }),
+      { scope }
+    )
+    expect(normalChatModeMock).not.toHaveBeenCalled()
   })
 })

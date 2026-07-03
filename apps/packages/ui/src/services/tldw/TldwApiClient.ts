@@ -4973,10 +4973,14 @@ export class TldwApiClientBase {
     })
   }
 
-  async getChatSettings(chat_id: string | number): Promise<ChatSettingsResponse> {
+  async getChatSettings(
+    chat_id: string | number,
+    options?: { scope?: ChatScope }
+  ): Promise<ChatSettingsResponse> {
     const cid = String(chat_id)
+    const query = this.buildQuery(toChatScopeParams(options?.scope))
     return await bgRequest<ChatSettingsResponse>({
-      path: `/api/v1/chats/${cid}/settings`,
+      path: appendPathQuery(`/api/v1/chats/${cid}/settings`, query),
       method: "GET",
       expectedStatuses: [404]
     })
@@ -4984,11 +4988,13 @@ export class TldwApiClientBase {
 
   async updateChatSettings(
     chat_id: string | number,
-    settings: Record<string, unknown>
+    settings: Record<string, unknown>,
+    options?: { scope?: ChatScope }
   ): Promise<ChatSettingsResponse> {
     const cid = String(chat_id)
+    const query = this.buildQuery(toChatScopeParams(options?.scope))
     return await bgRequest<ChatSettingsResponse>({
-      path: `/api/v1/chats/${cid}/settings`,
+      path: appendPathQuery(`/api/v1/chats/${cid}/settings`, query),
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: { settings }

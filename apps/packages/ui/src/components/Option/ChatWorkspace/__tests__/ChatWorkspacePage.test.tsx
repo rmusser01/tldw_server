@@ -33,6 +33,9 @@ const workspaceState = vi.hoisted((): { value: any } => ({
     }
   }
 }))
+const workspaceActions = vi.hoisted(() => ({
+  focusSourceById: vi.fn(() => true)
+}))
 const connectionState = vi.hoisted(() => ({
   value: {
     phase: "connected",
@@ -43,6 +46,9 @@ const connectionState = vi.hoisted(() => ({
 const chatPanelClearHandlers = vi.hoisted(
   () => new Map<string, () => void>()
 )
+const chatPanelRemoveHandlers = vi.hoisted(
+  () => new Map<string, (sourceId: string) => void>()
+)
 
 vi.mock("@/store/chat-surface-coordinator", () => ({
   useChatSurfaceCoordinatorStore: (selector: any) =>
@@ -51,7 +57,12 @@ vi.mock("@/store/chat-surface-coordinator", () => ({
 
 vi.mock("@/store/workspace", () => ({
   useWorkspaceStore: (selector: any) =>
-    selector(workspaceState.value)
+    selector({
+      sourcesLoading: false,
+      sourcesError: null,
+      ...workspaceActions,
+      ...workspaceState.value
+    })
 }))
 
 vi.mock("@/hooks/useConnectionState", () => ({
@@ -63,6 +74,7 @@ vi.mock("../WorkspaceChatPanel", () => ({
     stagedSources,
     workspaceId,
     onClearStagedSources,
+    onRemoveStagedSource,
     backendAvailable,
     effectiveAssistantDefault,
     onRuntimeStateChange
@@ -70,6 +82,7 @@ vi.mock("../WorkspaceChatPanel", () => ({
     stagedSources: unknown[]
     workspaceId?: string | null
     onClearStagedSources: () => void
+    onRemoveStagedSource?: (sourceId: string) => void
     backendAvailable: boolean
     effectiveAssistantDefault?: { assistantId?: string | null } | null
     onRuntimeStateChange?: (state: unknown) => void
@@ -78,6 +91,9 @@ vi.mock("../WorkspaceChatPanel", () => ({
 
     if (workspaceId) {
       chatPanelClearHandlers.set(workspaceId, onClearStagedSources)
+      if (onRemoveStagedSource) {
+        chatPanelRemoveHandlers.set(workspaceId, onRemoveStagedSource)
+      }
     }
 
     React.useEffect(() => {
@@ -108,6 +124,7 @@ describe("ChatWorkspacePage", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     chatPanelRuntimeState.backendAvailable = true
+    workspaceActions.focusSourceById.mockReturnValue(true)
     workspaceState.value = {
       workspaceId: "workspace-1",
       workspaceName: "Default workspace",
@@ -137,6 +154,7 @@ describe("ChatWorkspacePage", () => {
       serverUrl: "http://127.0.0.1:8000"
     }
     chatPanelClearHandlers.clear()
+    chatPanelRemoveHandlers.clear()
   })
 
   it("sets chat surface route context and renders the console regions", () => {
@@ -159,6 +177,7 @@ describe("ChatWorkspacePage", () => {
     render(<ChatWorkspacePage />)
 
     fireEvent.click(screen.getByRole("button", { name: "Browse Operator Notes" }))
+    expect(workspaceActions.focusSourceById).toHaveBeenCalledWith("source-1")
     expect(screen.getByTestId("workspace-chat-panel")).toHaveTextContent("staged:0")
 
     fireEvent.click(
@@ -336,6 +355,46 @@ describe("ChatWorkspacePage", () => {
 
     act(() => {
       clearWorkspaceOne?.()
+    })
+
+    expect(screen.getByTestId("workspace-chat-panel")).toHaveTextContent("staged:1")
+    expect(screen.getByTestId("workspace-chat-panel")).toHaveTextContent(
+      "workspace:workspace-2"
+    )
+  })
+
+  it("ignores stale individual unstage callbacks from a previous workspace", () => {
+    const { rerender } = render(<ChatWorkspacePage />)
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Stage Operator Notes for chat" })
+    )
+    expect(screen.getByTestId("workspace-chat-panel")).toHaveTextContent("staged:1")
+    const removeWorkspaceOne = chatPanelRemoveHandlers.get("workspace-1")
+    expect(removeWorkspaceOne).toBeDefined()
+
+    workspaceState.value = {
+      workspaceId: "workspace-2",
+      workspaceName: "Second workspace",
+      sources: [
+        {
+          id: "source-2",
+          mediaId: 202,
+          title: "Second Notes",
+          type: "document",
+          status: "ready",
+          addedAt: new Date("2026-05-03T00:00:00Z")
+        }
+      ]
+    }
+    rerender(<ChatWorkspacePage />)
+    fireEvent.click(
+      screen.getByRole("button", { name: "Stage Second Notes for chat" })
+    )
+    expect(screen.getByTestId("workspace-chat-panel")).toHaveTextContent("staged:1")
+
+    act(() => {
+      removeWorkspaceOne?.("source-1")
     })
 
     expect(screen.getByTestId("workspace-chat-panel")).toHaveTextContent("staged:1")

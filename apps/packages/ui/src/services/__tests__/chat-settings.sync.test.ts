@@ -141,7 +141,8 @@ describe("syncChatSettingsForServerChat", () => {
     expect(mocks.updateChatSettings).toHaveBeenCalledTimes(1)
     expect(mocks.updateChatSettings).toHaveBeenCalledWith(
       serverChatId,
-      localSettings
+      localSettings,
+      undefined
     )
     expect(result).toEqual(localSettings)
   })
@@ -181,7 +182,8 @@ describe("syncChatSettingsForServerChat", () => {
           id: "persona-11",
           system_prompt_snapshot: "Keep answers structured and calm."
         })
-      })
+      }),
+      undefined
     )
     expect(
       state.storage.get(
@@ -235,6 +237,36 @@ describe("syncChatSettingsForServerChat", () => {
     } finally {
       warnSpy.mockRestore()
     }
+  })
+
+  it("passes workspace scope through server settings sync", async () => {
+    const historyId = "history-workspace-sync"
+    const serverChatId = "chat-workspace-sync"
+    const scope = { type: "workspace", workspaceId: "workspace-1" } as const
+    const localSettings = createSettings({
+      authorNote: "Workspace-scoped note."
+    })
+    state.storage.set(
+      getChatSettingsStorageKey(
+        resolveChatSettingsKey({ historyId, serverChatId: null })
+      ),
+      localSettings
+    )
+    state.remoteSettings = null
+
+    const result = await syncChatSettingsForServerChat({
+      historyId,
+      serverChatId,
+      scope
+    })
+
+    expect(mocks.getChatSettings).toHaveBeenCalledWith(serverChatId, { scope })
+    expect(mocks.updateChatSettings).toHaveBeenCalledWith(
+      serverChatId,
+      localSettings,
+      { scope }
+    )
+    expect(result).toEqual(localSettings)
   })
 })
 

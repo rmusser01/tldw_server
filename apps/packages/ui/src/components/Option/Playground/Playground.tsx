@@ -68,8 +68,10 @@ import {
   Keyboard,
   Maximize2,
   Minimize2,
+  Moon,
   PanelRightOpen,
   Search,
+  Sun,
   X,
 } from "lucide-react";
 import { CHAT_BACKGROUND_IMAGE_SETTING } from "@/services/settings/ui-settings";
@@ -83,6 +85,7 @@ import { useStorage } from "@plasmohq/storage/hook";
 import { DEFAULT_CHAT_SETTINGS } from "@/types/chat-settings";
 import { useMcpToolsStore } from "@/store/mcp-tools";
 import { useDesktop, useMobile } from "@/hooks/useMediaQuery";
+import { useDarkMode } from "@/hooks/useDarkmode";
 import { useLoadLocalConversation } from "@/hooks/useLoadLocalConversation";
 import { tldwClient } from "@/services/tldw/TldwApiClient";
 import { resolvePlaygroundShortcutAction } from "./playground-shortcuts";
@@ -368,6 +371,7 @@ export const Playground = () => {
     React.useState<ComposerDockLayoutMetrics | null>(null);
   const [composerHasDraft, setComposerHasDraft] = React.useState(false);
   const { t } = useTranslation(["playground", "common"]);
+  const { mode: themeMode, toggleDarkMode } = useDarkMode();
   const navigate = useNavigate();
   const [chatBackgroundImage] = useSetting(CHAT_BACKGROUND_IMAGE_SETTING);
   const [stickyChatInput] = useStorage(
@@ -796,6 +800,10 @@ export const Playground = () => {
     focusModeActive
       ? toText(t("playground:cockpit.cockpit", "Cockpit"))
       : toText(t("playground:cockpit.focus", "Focus"));
+  const isDarkTheme = themeMode !== "light";
+  const themeToggleLabel = isDarkTheme
+    ? toText(t("common:theme.switchToLight", "Switch to light theme"))
+    : toText(t("common:theme.switchToDark", "Switch to dark theme"));
   const exitFocusLabel = toText(
     t("playground:cockpit.exitFocus", "Exit focus"),
   );
@@ -3633,6 +3641,20 @@ export const Playground = () => {
                   </span>
                 </div>
                 <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    data-testid="chat-header-theme-toggle"
+                    aria-label={themeToggleLabel}
+                    onClick={toggleDarkMode}
+                    title={themeToggleLabel}
+                    className="inline-flex min-h-[26px] min-w-[26px] items-center justify-center rounded-full border border-border bg-surface2 px-1.5 py-0.5 text-text hover:bg-surface sm:px-2"
+                  >
+                    {isDarkTheme ? (
+                      <Sun className="h-3 w-3" aria-hidden="true" />
+                    ) : (
+                      <Moon className="h-3 w-3" aria-hidden="true" />
+                    )}
+                  </button>
                   <button
                     type="button"
                     data-testid="playground-chat-layout-mode-trigger"

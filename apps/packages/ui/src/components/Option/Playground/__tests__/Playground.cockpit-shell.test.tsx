@@ -77,6 +77,11 @@ const storageState = vi.hoisted(() => ({
   values: new Map<string, unknown>(),
 }));
 
+const darkModeState = vi.hoisted(() => ({
+  mode: "dark" as "system" | "dark" | "light",
+  toggleDarkMode: vi.fn(),
+}));
+
 const chatSettingsState = vi.hoisted(() => ({
   syncChatSettingsForServerChat: vi.fn(async (_params: unknown) => null),
 }));
@@ -288,6 +293,13 @@ vi.mock("@/hooks/useSetting", () => ({
   useSetting: () => [""],
 }));
 
+vi.mock("@/hooks/useDarkmode", () => ({
+  useDarkMode: () => ({
+    mode: darkModeState.mode,
+    toggleDarkMode: darkModeState.toggleDarkMode,
+  }),
+}));
+
 vi.mock("@plasmohq/storage/hook", () => ({
   useStorage: (key: string, defaultValue: unknown) => {
     const [value, setValue] = React.useState(
@@ -378,6 +390,8 @@ describe("Playground cockpit shell", () => {
     sessionPersistenceState.value.sessionScopeReady = true;
     sessionPersistenceState.value.clearPersistedSession.mockClear();
     chatSettingsState.syncChatSettingsForServerChat.mockClear();
+    darkModeState.mode = "dark";
+    darkModeState.toggleDarkMode.mockClear();
 	    cockpitChatRenderState.starterDeckSignals = [];
 	    routerLocationState.value = null;
     routerNavigateState.navigate.mockClear();
@@ -427,6 +441,17 @@ describe("Playground cockpit shell", () => {
         forceRefresh: true,
       });
     });
+  });
+
+  it("exposes the shared theme toggle contract in the cockpit header", async () => {
+    render(<Playground />);
+
+    const themeToggle = await screen.findByTestId("chat-header-theme-toggle");
+    expect(themeToggle).toHaveAccessibleName("Switch to light theme");
+
+    fireEvent.click(themeToggle);
+
+    expect(darkModeState.toggleDarkMode).toHaveBeenCalledTimes(1);
   });
 
   it("renders Character Chat recent sessions only for the active character workflow", async () => {

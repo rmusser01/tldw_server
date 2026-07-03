@@ -4,7 +4,8 @@ import {
   buildStagedSourceFromWorkspaceSource,
   formatStagedSourceInsertText,
   getReadyStagedMediaIds,
-  stageWorkspaceSources
+  stageWorkspaceSources,
+  unstageWorkspaceSource
 } from "../staging"
 
 const source = (overrides: Partial<WorkspaceSource> = {}): WorkspaceSource => ({
@@ -55,6 +56,16 @@ describe("chat workspace staging", () => {
 
     expect(staged).toHaveLength(1)
     expect(staged[0].title).toBe("Renamed")
+  })
+
+  it("removes one staged source without clearing the rest", () => {
+    const first = buildStagedSourceFromWorkspaceSource(source(), "A")
+    const second = buildStagedSourceFromWorkspaceSource(
+      source({ id: "source-2", mediaId: 202, title: "Research Clip" }),
+      "A"
+    )
+
+    expect(unstageWorkspaceSource([first, second], "source-1")).toEqual([second])
   })
 
   it("formats insert text and leaves sending to the user", () => {
