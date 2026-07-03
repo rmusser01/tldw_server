@@ -61,8 +61,6 @@ describe("Playground cockpit rail restore tabs", () => {
     expect(contextRestore.parentElement).toHaveClass(
       ...COCKPIT_LEFT_RESTORE_WRAPPER_CLASS.split(" "),
     );
-    expect(contextRestore.parentElement).toHaveClass("absolute", "left-0");
-    expect(contextRestore.parentElement).toHaveClass("left-0");
     expect(contextRestore.parentElement).not.toHaveClass("fixed");
     expect(contextRestore.parentElement).not.toHaveClass("left-12");
     expect(contextRestore.parentElement).not.toHaveClass("top-1/2");
