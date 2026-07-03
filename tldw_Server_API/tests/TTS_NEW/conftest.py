@@ -455,9 +455,15 @@ def pytest_collection_modifyitems(config, items):
     """
     if os.getenv("RUN_QUARANTINED") == "1":
         return
+    here = Path(__file__).resolve().parent
     skip = pytest.mark.skip(
         reason="quarantined: known-failing suite, run with RUN_QUARANTINED=1 "
         "(audits/2026-07-02-quarantined-suites.md)"
     )
     for item in items:
-        item.add_marker(skip)
+        try:
+            item_path = Path(str(getattr(item, "path", None) or item.fspath)).resolve()
+        except Exception:
+            continue
+        if here == item_path or here in item_path.parents:
+            item.add_marker(skip)

@@ -132,6 +132,7 @@ ls tldw_Server_API/tests/Character_Chat_NEW/conftest.py tldw_Server_API/tests/TT
 
 ```python
 import os
+from pathlib import Path
 
 import pytest
 
@@ -141,15 +142,26 @@ def pytest_collection_modifyitems(config, items):
 
     Skipped by default so it is VISIBLE in every run instead of hidden via
     norecursedirs. Run for real with RUN_QUARANTINED=1.
+
+    Scoped to this conftest's own directory: pytest_collection_modifyitems
+    receives the FULL session item list even in a subdirectory conftest, so
+    an unscoped loop would skip every collected test in the whole run, not
+    just this suite.
     """
     if os.getenv("RUN_QUARANTINED") == "1":
         return
+    here = Path(__file__).resolve().parent
     skip = pytest.mark.skip(
         reason="quarantined: known-failing suite, run with RUN_QUARANTINED=1 "
         "(audits/2026-07-02-quarantined-suites.md)"
     )
     for item in items:
-        item.add_marker(skip)
+        try:
+            item_path = Path(str(getattr(item, "path", None) or item.fspath)).resolve()
+        except Exception:
+            continue
+        if here == item_path or here in item_path.parents:
+            item.add_marker(skip)
 ```
 
 - [ ] **Step 3: Delete the `norecursedirs` block from `pyproject.toml`** (lines 614-618, the whole `norecursedirs = [...]` assignment).
