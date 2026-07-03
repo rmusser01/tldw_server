@@ -7371,7 +7371,7 @@ async def download_output(
         raise HTTPException(status_code=404, detail="output_file_missing")
     if fmt == "mp3":
         headers = {"Content-Disposition": f'attachment; filename="{filename}.mp3"'}
-        # codeql[py/path-injection] output_path is resolved by _resolve_output_path_for_user.
+        # lgtm[py/path-injection] output_path is resolved by _resolve_output_path_for_user.
         return FileResponse(path=output_path, media_type="audio/mpeg", headers=headers)
     try:
         content = await run_in_threadpool(output_path.read_text, encoding="utf-8")

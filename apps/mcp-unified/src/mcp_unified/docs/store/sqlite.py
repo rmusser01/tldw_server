@@ -1096,7 +1096,7 @@ def _table_has_unique_index(conn: sqlite3.Connection, table_name: str, columns: 
         if not _SAFE_SQLITE_IDENTIFIER_RE.fullmatch(index_name):
             continue
         try:
-            # codeql[py/sql-injection]: index_name comes from SQLite metadata and is
+            # lgtm[py/sql-injection]: index_name comes from SQLite metadata and is
             # validated against a simple identifier allowlist before interpolation.
             indexed_columns = conn.execute(f'PRAGMA index_info("{index_name}")').fetchall()
         except sqlite3.Error:

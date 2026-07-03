@@ -756,7 +756,7 @@ def _item_for_path(
 
 def _canonical_path(path: Path, label: str) -> Path:
     try:
-        # codeql[py/path-injection] llama.cpp inventory paths are admin-configured and checked against allowed bases before launch.
+        # lgtm[py/path-injection] llama.cpp inventory paths are admin-configured and checked against allowed bases before launch.
         return path.expanduser().resolve()
     except (OSError, RuntimeError, ValueError) as exc:
         raise ServerError(f"{label} path could not be resolved.") from exc

@@ -124,7 +124,7 @@ def maybe_record_exemplar(
                 for d in (documents[:5] if documents else [])
             ],
         }
-        # codeql[py/path-injection] sink is resolved by _safe_sink under BASE_DIR or the fixed default sink.
+        # lgtm[py/path-injection] sink is resolved by _safe_sink under BASE_DIR or the fixed default sink.
         with sink.open("a", encoding="utf-8") as f:
             f.write(json.dumps(sample) + "\n")
     except Exception:

@@ -112,15 +112,15 @@ def _normalize_user_db_base_dir(raw_path: Path) -> Path:
 
 def _ensure_dir(path: Path, *, label: str) -> bool:
     try:
-        # codeql[py/path-injection] callers pass paths normalized to trusted project/user database roots.
+        # lgtm[py/path-injection] callers pass paths normalized to trusted project/user database roots.
         path.mkdir(parents=True, exist_ok=False)
         return True
     except FileExistsError as e:
-        # codeql[py/path-injection] callers pass paths normalized to trusted project/user database roots.
+        # lgtm[py/path-injection] callers pass paths normalized to trusted project/user database roots.
         if path.is_symlink():
             logger.error(f"Refusing to use symlinked {label} directory {path}")
             raise StorageUnavailableError(f"Failed to create {label} directory") from e
-        # codeql[py/path-injection] callers pass paths normalized to trusted project/user database roots.
+        # lgtm[py/path-injection] callers pass paths normalized to trusted project/user database roots.
         if path.is_dir():
             return False
         logger.error(f"Failed to create {label} directory {path}: {e}")

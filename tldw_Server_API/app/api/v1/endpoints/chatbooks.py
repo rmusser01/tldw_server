@@ -219,7 +219,7 @@ def _setup_secure_temp_directory(user_id: str) -> Path:
 
 def _resolve_chatbook_temp_file(temp_dir: Path, safe_filename: str, *, prefix: str) -> Path:
     """Resolve a sanitized upload filename under the checked chatbooks temp directory."""
-    # codeql[py/path-injection]: temp_dir is normalized by _setup_secure_temp_directory.
+    # lgtm[py/path-injection]: temp_dir is normalized by _setup_secure_temp_directory.
     temp_dir_resolved = temp_dir.resolve(strict=True)
     joined = safe_join(
         str(temp_dir_resolved),
@@ -783,7 +783,7 @@ async def import_chatbook(
 
         temp_file = _resolve_chatbook_temp_file(temp_dir, safe_filename, prefix="import")
 
-        # codeql[py/path-injection] temp_file is resolved by _resolve_chatbook_temp_file under the checked temp dir.
+        # lgtm[py/path-injection] temp_file is resolved by _resolve_chatbook_temp_file under the checked temp dir.
         with open(temp_file, "wb") as f:
             shutil.copyfileobj(file.file, f)
 
@@ -792,7 +792,7 @@ async def import_chatbook(
             valid, error = ChatbookValidator.validate_zip_file(str(temp_file))
             if not valid:
                 try:
-                    # codeql[py/path-injection] temp_file is resolved by _resolve_chatbook_temp_file.
+                    # lgtm[py/path-injection] temp_file is resolved by _resolve_chatbook_temp_file.
                     temp_file.unlink()
                 except _CHATBOOKS_NONCRITICAL_EXCEPTIONS as e:
                     logger.warning(
@@ -901,10 +901,10 @@ async def import_chatbook(
             # For async jobs, return a failure response with job_id so clients can inspect status.
             if import_request.async_mode and result:
                 # Enqueue failed; cleanup temp file since no worker will consume it.
-                # codeql[py/path-injection]: temp_file is resolved by _resolve_chatbook_temp_file.
+                # lgtm[py/path-injection]: temp_file is resolved by _resolve_chatbook_temp_file.
                 if temp_file is not None and temp_file.exists():
                     try:
-                        # codeql[py/path-injection] temp_file is resolved by _resolve_chatbook_temp_file.
+                        # lgtm[py/path-injection] temp_file is resolved by _resolve_chatbook_temp_file.
                         temp_file.unlink()
                     except _CHATBOOKS_NONCRITICAL_EXCEPTIONS as e:
                         logger.warning(
@@ -937,10 +937,10 @@ async def import_chatbook(
         raise HTTPException(status_code=500, detail="An error occurred while importing the chatbook") from None
     finally:
         # Cleanup uploaded file if not async
-        # codeql[py/path-injection]: temp_file is resolved by _resolve_chatbook_temp_file.
+        # lgtm[py/path-injection]: temp_file is resolved by _resolve_chatbook_temp_file.
         if temp_file is not None and not import_request.async_mode and temp_file.exists():
             try:
-                # codeql[py/path-injection] temp_file is resolved by _resolve_chatbook_temp_file.
+                # lgtm[py/path-injection] temp_file is resolved by _resolve_chatbook_temp_file.
                 temp_file.unlink()
             except _CHATBOOKS_NONCRITICAL_EXCEPTIONS as e:
                 logger.warning(f"Cleanup of temp import file failed: path={temp_file}, user={user.id}, error={e}")
@@ -1023,7 +1023,7 @@ async def preview_chatbook(
 
         temp_file = _resolve_chatbook_temp_file(temp_dir, safe_filename, prefix="preview")
 
-        # codeql[py/path-injection] temp_file is resolved by _resolve_chatbook_temp_file under the checked temp dir.
+        # lgtm[py/path-injection] temp_file is resolved by _resolve_chatbook_temp_file under the checked temp dir.
         with open(temp_file, "wb") as f:
             shutil.copyfileobj(file.file, f)
 
@@ -1032,7 +1032,7 @@ async def preview_chatbook(
             ok, err = ChatbookValidator.validate_zip_file(str(temp_file))
             if not ok:
                 try:
-                    # codeql[py/path-injection] temp_file is resolved by _resolve_chatbook_temp_file.
+                    # lgtm[py/path-injection] temp_file is resolved by _resolve_chatbook_temp_file.
                     temp_file.unlink()
                 except _CHATBOOKS_NONCRITICAL_EXCEPTIONS as e:
                     logger.warning(
@@ -1048,7 +1048,7 @@ async def preview_chatbook(
         if source_format == ChatbookImportSourceFormat.OPENWEBUI_JSON:
             preview_data, error = await asyncio.to_thread(service.preview_openwebui_json, str(temp_file))
             try:
-                # codeql[py/path-injection] temp_file is resolved by _resolve_chatbook_temp_file.
+                # lgtm[py/path-injection] temp_file is resolved by _resolve_chatbook_temp_file.
                 temp_file.unlink()
             except _CHATBOOKS_NONCRITICAL_EXCEPTIONS as e:
                 logger.warning(f"Cleanup of preview temp file failed: path={temp_file}, user={user.id}, error={e}")
@@ -1095,7 +1095,7 @@ async def preview_chatbook(
 
         # Cleanup temp file
         try:
-            # codeql[py/path-injection] temp_file is resolved by _resolve_chatbook_temp_file.
+            # lgtm[py/path-injection] temp_file is resolved by _resolve_chatbook_temp_file.
             temp_file.unlink()
         except _CHATBOOKS_NONCRITICAL_EXCEPTIONS as e:
             logger.warning(f"Cleanup of preview temp file failed: path={temp_file}, user={user.id}, error={e}")
@@ -1188,10 +1188,10 @@ async def preview_chatbook(
         raise HTTPException(status_code=500, detail="An error occurred while previewing the chatbook") from None
     finally:
         # Ensure preview upload cleanup on all paths
-        # codeql[py/path-injection]: temp_file is resolved by _resolve_chatbook_temp_file.
+        # lgtm[py/path-injection]: temp_file is resolved by _resolve_chatbook_temp_file.
         if temp_file is not None and temp_file.exists():
             try:
-                # codeql[py/path-injection] temp_file is resolved by _resolve_chatbook_temp_file.
+                # lgtm[py/path-injection] temp_file is resolved by _resolve_chatbook_temp_file.
                 temp_file.unlink()
             except _CHATBOOKS_NONCRITICAL_EXCEPTIONS as e:
                 logger.warning(f"Cleanup of preview temp file failed: path={temp_file}, user={user.id}, error={e}")

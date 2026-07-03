@@ -11,7 +11,7 @@ const seedConfiguredAuthWithoutReadinessBypass = async (page: Page) => {
     }
 
     try {
-      // codeql[js/clear-text-storage-of-sensitive-data]: synthetic E2E auth seed only.
+      // lgtm[js/clear-text-storage-of-sensitive-data]: synthetic E2E auth seed only.
       localStorage.setItem("tldwConfig", JSON.stringify(authConfig))
       localStorage.setItem("isMigrated", "true")
       localStorage.setItem("__tldw_first_run_complete", "true")
@@ -20,7 +20,7 @@ const seedConfiguredAuthWithoutReadinessBypass = async (page: Page) => {
       localStorage.setItem("tldwServerUrl", cfg.serverUrl)
       localStorage.setItem("tldw-api-host", cfg.serverUrl)
       localStorage.setItem("authMode", "single-user")
-      // codeql[js/clear-text-storage-of-sensitive-data]: test-only legacy auth compatibility key.
+      // lgtm[js/clear-text-storage-of-sensitive-data]: test-only legacy auth compatibility key.
       localStorage.setItem("apiKey", cfg.apiKey)
       localStorage.removeItem("__tldw_allow_offline")
       localStorage.removeItem("__tldw_test_bypass")

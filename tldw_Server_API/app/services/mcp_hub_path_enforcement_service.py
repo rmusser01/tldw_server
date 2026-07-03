@@ -103,12 +103,12 @@ def _is_within(root: Path, candidate: Path) -> bool:
 
 
 def _normalize_candidate_path(raw_path: str, *, base_path: Path) -> Path:
-    # codeql[py/path-injection]: candidates are checked against workspace/scope roots before use.
+    # lgtm[py/path-injection]: candidates are checked against workspace/scope roots before use.
     candidate = Path(raw_path).expanduser()
     if not candidate.is_absolute():
-        # codeql[py/path-injection] relative candidates are scope-checked before use.
+        # lgtm[py/path-injection] relative candidates are scope-checked before use.
         return (base_path / candidate).resolve(strict=False)
-    # codeql[py/path-injection] absolute candidates are checked against workspace/scope roots before use.
+    # lgtm[py/path-injection] absolute candidates are checked against workspace/scope roots before use.
     return candidate.resolve(strict=False)
 
 

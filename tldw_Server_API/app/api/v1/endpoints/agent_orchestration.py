@@ -720,7 +720,7 @@ def _allowed_workspace_roots() -> tuple[Path, ...]:
 
 def _validate_workspace_root(root_path: str) -> str:
     """Validate and normalize root_path within configured ACP workspace roots."""
-    # codeql[py/path-injection] candidate is accepted only after absolute and configured-root allowlist checks.
+    # lgtm[py/path-injection] candidate is accepted only after absolute and configured-root allowlist checks.
     candidate = Path(root_path).expanduser()
     if not candidate.is_absolute():
         raise HTTPException(

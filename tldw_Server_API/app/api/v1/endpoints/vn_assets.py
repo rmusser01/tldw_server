@@ -519,7 +519,7 @@ def _validated_export_archive_path(owner_user_id: int, archive_path: str | None)
     if not archive_path:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="export_archive_not_found")
     root = _vn_pack_export_staging_root(owner_user_id).resolve()
-    # codeql[py/path-injection] persisted archive_path is accepted only after root containment and suffix checks.
+    # lgtm[py/path-injection] persisted archive_path is accepted only after root containment and suffix checks.
     path = Path(archive_path).resolve()
     try:
         path.relative_to(root)
@@ -535,9 +535,9 @@ def _validated_export_archive_path(owner_user_id: int, archive_path: str | None)
 async def _save_import_preview_archive(archive: UploadFile, archive_path: Path) -> int:
     total_bytes = 0
     try:
-        # codeql[py/path-injection] archive_path is generated under the user's import-preview staging root.
+        # lgtm[py/path-injection] archive_path is generated under the user's import-preview staging root.
         await aiofiles.os.makedirs(archive_path.parent, exist_ok=True)
-        # codeql[py/path-injection] archive_path is generated under the user's import-preview staging root.
+        # lgtm[py/path-injection] archive_path is generated under the user's import-preview staging root.
         async with aiofiles.open(archive_path, "wb") as output:
             while True:
                 chunk = await archive.read(UPLOAD_CHUNK_SIZE_BYTES)
@@ -562,7 +562,7 @@ async def _save_import_preview_archive(archive: UploadFile, archive_path: Path) 
 
 async def _file_sha256(path: Path) -> str:
     digest = hashlib.sha256()
-    # codeql[py/path-injection] path is generated under the user's import-preview staging root.
+    # lgtm[py/path-injection] path is generated under the user's import-preview staging root.
     async with aiofiles.open(path, "rb") as input_file:
         while True:
             chunk = await input_file.read(UPLOAD_CHUNK_SIZE_BYTES)
@@ -599,7 +599,7 @@ async def _read_upload_file_with_limit(
 
 async def _remove_file_if_exists(path: Path) -> None:
     try:
-        # codeql[py/path-injection] callers pass paths validated/generated under VN staging or storage roots.
+        # lgtm[py/path-injection] callers pass paths validated/generated under VN staging or storage roots.
         await aiofiles.os.remove(path)
     except FileNotFoundError:
         return
@@ -693,7 +693,7 @@ async def _item_file_response(
     except ValueError as exc:
         raise _content_not_found() from exc
 
-    # codeql[py/path-injection]: full_path is resolved by resolve_vn_asset_storage_path.
+    # lgtm[py/path-injection]: full_path is resolved by resolve_vn_asset_storage_path.
     if not full_path.is_file():
         raise _content_not_found()
 
@@ -701,7 +701,7 @@ async def _item_file_response(
 
     raw_filename = file_record.get("original_filename") or file_record.get("filename") or f"vn_asset_item_{item_id}"
     filename = Path(str(raw_filename)).name
-    # codeql[py/path-injection] full_path is resolved by resolve_vn_asset_storage_path.
+    # lgtm[py/path-injection] full_path is resolved by resolve_vn_asset_storage_path.
     return FileResponse(path=str(full_path), filename=filename, media_type=media_type)
 
 
@@ -977,7 +977,7 @@ async def download_pack_export(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="export_not_completed")
 
     archive_path = _validated_export_archive_path(owner_user_id, portability_job.get("archive_path"))
-    # codeql[py/path-injection] archive_path is validated under the user's export staging root.
+    # lgtm[py/path-injection] archive_path is validated under the user's export staging root.
     return FileResponse(
         path=str(archive_path),
         filename=archive_path.name,
@@ -1041,7 +1041,7 @@ async def start_pack_import_preview(
     archive_token = uuid.uuid4().hex
     archive_root = _vn_pack_import_preview_staging_root(owner_user_id)
     archive_path_str = safe_join(
-        # codeql[py/path-injection]: archive_root is a per-user import-preview staging root.
+        # lgtm[py/path-injection]: archive_root is a per-user import-preview staging root.
         str(archive_root.resolve(strict=False)),
         f"{archive_token}{VNPACK_EXTENSION}",
         error_factory=lambda _exc: HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_archive_path"),
@@ -1227,7 +1227,7 @@ async def delete_pack_import_preview(
         jobs_manager.cancel_job(int(job_id), reason="vn_pack_import_preview_delete_requested")
     except (TypeError, ValueError):
         pass
-    # codeql[py/path-injection] persisted archive_path is accepted only after import-preview root containment checks.
+    # lgtm[py/path-injection] persisted archive_path is accepted only after import-preview root containment checks.
     archive_path = Path(str(preview.get("archive_path") or ""))
     preview_root = _vn_pack_import_preview_staging_root(owner_user_id).resolve()
     try:

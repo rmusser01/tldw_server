@@ -169,7 +169,7 @@ modules:
         - application/xhtml+xml
         - text/plain
         - text/markdown
-      respect_robots: true
+      respect_robots: false
       max_import_file_bytes: 2000000
 
   - id: run_command

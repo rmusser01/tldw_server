@@ -8,7 +8,7 @@ from urllib.parse import urljoin, urlsplit
 
 from ..settings import DocsSettings
 from .models import FetchResponse, FetchResult, NormalizedURL, RedirectHop, ResolvedAddress, URLRequest
-from .policy import SourcePolicy
+from .policy import SourcePolicy, URLPolicyError, normalize_url
 from .resolver import StdlibResolver, is_unsafe_egress_ip
 
 _DEFAULT_PORTS = {"http": 80, "https": 443}
@@ -44,8 +44,11 @@ class URLFetcher:
                     redirects=tuple(redirects),
                     safe_argument_hash=decision.safe_argument_hash,
                 )
-            normalized = decision.normalized_url
-            if normalized is None:
+            if decision.normalized_url is None:
+                return FetchResult(status="denied", reason="malformed_url", redirects=tuple(redirects))
+            try:
+                normalized = normalize_url(current_url)
+            except URLPolicyError:
                 return FetchResult(status="denied", reason="malformed_url", redirects=tuple(redirects))
             if not bool(getattr(self.transport, "dials_validated_address", False)):
                 return FetchResult(
@@ -231,6 +234,7 @@ class ValidatedAddressHTTPTransport:
             stream = raw_socket
             if request.normalized_url.scheme == "https":
                 context = ssl.create_default_context()
+                context.minimum_version = ssl.TLSVersion.TLSv1_2
                 stream = context.wrap_socket(raw_socket, server_hostname=request.normalized_url.host)
             with stream:
                 _write_request(stream, request)

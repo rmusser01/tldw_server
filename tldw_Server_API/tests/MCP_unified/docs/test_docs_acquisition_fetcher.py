@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import gzip
 import socket
+import ssl
 from collections.abc import Iterable
 
 import pytest
 
-from mcp_unified.docs.acquisition.fetcher import URLFetcher, _write_request
+from mcp_unified.docs.acquisition import fetcher as fetcher_module
+from mcp_unified.docs.acquisition.fetcher import URLFetcher, ValidatedAddressHTTPTransport, _write_request
 from mcp_unified.docs.acquisition.models import FetchResponse, NormalizedURL, ResolvedAddress, URLRequest
 from mcp_unified.docs.acquisition.policy import SourcePolicy
 from mcp_unified.docs.acquisition.resolver import StdlibResolver
@@ -36,6 +38,20 @@ class FailingTransport(FakeTransport):
     ) -> FetchResponse:
         self.calls.append((address, request, timeout_seconds))
         raise TimeoutError("request timed out")
+
+
+class DummySocket:
+    def __init__(self) -> None:
+        self.timeout: float | None = None
+
+    def settimeout(self, timeout: float) -> None:
+        self.timeout = timeout
+
+    def __enter__(self) -> "DummySocket":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        return None
 
 
 def _settings(**overrides: object) -> DocsSettings:
@@ -86,6 +102,58 @@ def test_fetcher_uses_validated_address_and_identity_encoding() -> None:
     assert transport.calls[0][0].ip == "93.184.216.34"  # nosec B101
     assert transport.calls[0][1].headers["accept-encoding"] == "identity"  # nosec B101
     assert result.body == b"<h1>Ok</h1>"  # nosec B101
+
+
+def test_validated_transport_sets_tls12_minimum_for_https(monkeypatch: pytest.MonkeyPatch) -> None:
+    raw_socket = DummySocket()
+    wrapped_socket = DummySocket()
+
+    class DummySSLContext:
+        def __init__(self) -> None:
+            self.minimum_version: ssl.TLSVersion | None = None
+            self.wrap_call: tuple[DummySocket, str] | None = None
+
+        def wrap_socket(self, socket_to_wrap: DummySocket, *, server_hostname: str) -> DummySocket:
+            self.wrap_call = (socket_to_wrap, server_hostname)
+            return wrapped_socket
+
+    context = DummySSLContext()
+
+    def fake_create_connection(address: tuple[str, int], timeout: float) -> DummySocket:
+        assert address == ("93.184.216.34", 443)  # nosec B101
+        assert timeout == 5.0  # nosec B101
+        return raw_socket
+
+    monkeypatch.setattr(fetcher_module.socket, "create_connection", fake_create_connection)
+    monkeypatch.setattr(fetcher_module.ssl, "create_default_context", lambda: context)
+    monkeypatch.setattr(fetcher_module, "_write_request", lambda stream, request: None)
+    monkeypatch.setattr(
+        fetcher_module,
+        "_read_response",
+        lambda stream, max_body_bytes: (200, {"content-type": "text/plain"}, [b"ok"]),
+    )
+
+    response = ValidatedAddressHTTPTransport().request(
+        address=ResolvedAddress(host="example.com", ip="93.184.216.34", port=443),
+        request=URLRequest(
+            normalized_url=NormalizedURL(
+                scheme="https",
+                host="example.com",
+                port=None,
+                path="/docs",
+                decoded_path="/docs",
+                redacted_url="https://example.com/docs",
+            ),
+            max_body_bytes=32,
+            target="/docs",
+        ),
+        timeout_seconds=5.0,
+    )
+
+    assert context.minimum_version is ssl.TLSVersion.TLSv1_2  # nosec B101
+    assert context.wrap_call == (raw_socket, "example.com")  # nosec B101
+    assert response.status_code == 200  # nosec B101
+    assert response.body_chunks == [b"ok"]  # nosec B101
 
 
 def test_fetcher_preserves_query_in_request_target_without_result_leakage() -> None:

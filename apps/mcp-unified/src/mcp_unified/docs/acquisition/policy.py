@@ -122,6 +122,18 @@ def normalize_url(raw_url: str) -> NormalizedURL:
     )
 
 
+def _public_normalized_url(normalized: NormalizedURL) -> NormalizedURL:
+    return NormalizedURL(
+        scheme=normalized.scheme,
+        host=normalized.host,
+        port=normalized.port,
+        path=normalized.path,
+        decoded_path=normalized.decoded_path,
+        canonical_url=normalized.redacted_url,
+        redacted_url=normalized.redacted_url,
+    )
+
+
 class SourcePolicy:
     def __init__(
         self,
@@ -169,7 +181,7 @@ class SourcePolicy:
                 reason="source_host_denied",
                 safe_argument_hash=argument_hash,
                 redacted_url=normalized.redacted_url,
-                normalized_url=normalized,
+                normalized_url=_public_normalized_url(normalized),
             )
 
         for rule in self.denied_domains:
@@ -179,7 +191,7 @@ class SourcePolicy:
                     reason="domain_denied",
                     safe_argument_hash=argument_hash,
                     redacted_url=normalized.redacted_url,
-                    normalized_url=normalized,
+                    normalized_url=_public_normalized_url(normalized),
                     matched_rule=rule.raw_pattern,
                 )
 
@@ -190,7 +202,7 @@ class SourcePolicy:
                     reason="url_prefix_allowed",
                     safe_argument_hash=argument_hash,
                     redacted_url=normalized.redacted_url,
-                    normalized_url=normalized,
+                    normalized_url=_public_normalized_url(normalized),
                     matched_rule=rule.matched_rule,
                 )
 
@@ -204,7 +216,7 @@ class SourcePolicy:
                     reason="domain_allowed",
                     safe_argument_hash=argument_hash,
                     redacted_url=normalized.redacted_url,
-                    normalized_url=normalized,
+                    normalized_url=_public_normalized_url(normalized),
                     matched_rule=rule.raw_pattern,
                 )
 
@@ -214,7 +226,7 @@ class SourcePolicy:
                 reason="arbitrary_public_domain_allowed",
                 safe_argument_hash=argument_hash,
                 redacted_url=normalized.redacted_url,
-                normalized_url=normalized,
+                normalized_url=_public_normalized_url(normalized),
             )
 
         return _approval_required(argument_hash, normalized)
@@ -226,7 +238,7 @@ def _approval_required(argument_hash: str, normalized: NormalizedURL) -> SourceD
         reason="source_approval_required",
         safe_argument_hash=argument_hash,
         redacted_url=normalized.redacted_url,
-        normalized_url=normalized,
+        normalized_url=_public_normalized_url(normalized),
     )
 
 

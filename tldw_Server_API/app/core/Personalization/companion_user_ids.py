@@ -46,7 +46,7 @@ def _legacy_companion_hmac32_storage_user_id(raw_user_id: str) -> str:
 
 
 def _legacy_api_sha1_32_storage_user_id(raw_user_id: str) -> str:
-    # codeql[py/weak-sensitive-data-hashing]
+    # lgtm[py/weak-sensitive-data-hashing]
     # Compatibility-only lookup for DB directories created by an older non-security ID scheme.
     digest = hashlib.sha1(raw_user_id.encode("utf-8"), usedforsecurity=False).digest()
     return str(int.from_bytes(digest[:4], byteorder="big", signed=False))

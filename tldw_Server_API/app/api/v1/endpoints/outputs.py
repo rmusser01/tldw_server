@@ -289,7 +289,7 @@ async def create_output(
     )
     out_dir = _outputs_dir_for_user(user_id)
     try:
-        # codeql[py/path-injection] out_dir is resolved under the normalized per-user database root.
+        # lgtm[py/path-injection] out_dir is resolved under the normalized per-user database root.
         out_dir.mkdir(parents=True, exist_ok=True)
     except _OUTPUTS_NONCRITICAL_EXCEPTIONS as e:
         logger.error("outputs directory creation failed")
@@ -338,7 +338,7 @@ async def create_output(
                 raise HTTPException(status_code=500, detail="tts_generation_failed") from exc
         else:
             try:
-                # codeql[py/path-injection] path is resolved by _resolve_output_path_for_user.
+                # lgtm[py/path-injection] path is resolved by _resolve_output_path_for_user.
                 path.write_text(rendered_text, encoding="utf-8")
             except _OUTPUTS_NONCRITICAL_EXCEPTIONS as exc:
                 logger.error("outputs file write failed")
@@ -364,7 +364,7 @@ async def create_output(
         except _OUTPUTS_NONCRITICAL_EXCEPTIONS as exc:
             logger.error("outputs row insert failed")
             try:
-                # codeql[py/path-injection] path is resolved by _resolve_output_path_for_user.
+                # lgtm[py/path-injection] path is resolved by _resolve_output_path_for_user.
                 path.unlink(missing_ok=True)
             except _OUTPUTS_NONCRITICAL_EXCEPTIONS:
                 logger.warning("outputs insert cleanup file removal failed")
@@ -570,7 +570,7 @@ async def download_output(
         "mp3": "audio/mpeg",
     }
     mt = media_types.get(row.format.lower(), "application/octet-stream")
-    # codeql[py/path-injection] path is resolved by _resolve_output_path_for_user.
+    # lgtm[py/path-injection] path is resolved by _resolve_output_path_for_user.
     return FileResponse(
         str(path),
         media_type=mt,
@@ -625,7 +625,7 @@ async def download_output_by_name(
         "mp3": "audio/mpeg",
     }
     mt = media_types.get(row.format.lower(), "application/octet-stream")
-    # codeql[py/path-injection] path is resolved by _resolve_output_path_for_user.
+    # lgtm[py/path-injection] path is resolved by _resolve_output_path_for_user.
     return FileResponse(
         str(path),
         media_type=mt,
@@ -809,11 +809,11 @@ async def update_output(
         new_filename = f"{base_title}_{ts}{ext}" if ts else f"{base_title}{ext}"
         target_path = _resolve_output_path_for_user(user_id, new_filename)
         try:
-            # codeql[py/path-injection] target_path is resolved by _resolve_output_path_for_user.
+            # lgtm[py/path-injection] target_path is resolved by _resolve_output_path_for_user.
             target_path.write_text(converted, encoding="utf-8")
             if target_path.resolve() != source_path.resolve() and source_path.exists():
                 try:
-                    # codeql[py/path-injection] source_path is resolved by _resolve_output_path_for_user.
+                    # lgtm[py/path-injection] source_path is resolved by _resolve_output_path_for_user.
                     source_path.unlink()
                 except _OUTPUTS_NONCRITICAL_EXCEPTIONS:
                     logger.warning("failed to remove old output file")

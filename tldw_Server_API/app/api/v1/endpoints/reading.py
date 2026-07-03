@@ -859,7 +859,7 @@ async def import_reading_items(
         logger.error("reading_import_job_create_failed")
         if staged_path is not None:
             try:
-                # codeql[py/path-injection] staged_path is produced by stage_reading_import_file under the user's import dir.
+                # lgtm[py/path-injection] staged_path is produced by stage_reading_import_file under the user's import dir.
                 staged_path.unlink(missing_ok=True)
             except OSError:
                 logger.debug("reading_import_staged_file_cleanup_failed")
@@ -1316,7 +1316,7 @@ async def create_reading_archive(
     path = _resolve_output_path_for_user(user_id, filename)
 
     try:
-        # codeql[py/path-injection] path is resolved by _resolve_output_path_for_user under the user's outputs dir.
+        # lgtm[py/path-injection] path is resolved by _resolve_output_path_for_user under the user's outputs dir.
         path.write_text(content, encoding="utf-8")
     except _READING_NONCRITICAL_EXCEPTIONS as exc:
         logger.error("reading_archive_write_failed")
@@ -1344,7 +1344,7 @@ async def create_reading_archive(
     except _READING_NONCRITICAL_EXCEPTIONS as exc:
         logger.error("reading_archive_db_failed")
         try:
-            # codeql[py/path-injection] path is resolved by _resolve_output_path_for_user under the user's outputs dir.
+            # lgtm[py/path-injection] path is resolved by _resolve_output_path_for_user under the user's outputs dir.
             path.unlink(missing_ok=True)
         except OSError:
             logger.warning("reading_archive_cleanup_failed")

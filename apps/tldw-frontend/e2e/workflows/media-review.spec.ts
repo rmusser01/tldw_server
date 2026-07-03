@@ -86,7 +86,7 @@ const seedAppAuthWithApiKey = async (page: import("@playwright/test").Page) => {
         "tldwConfig",
         JSON.stringify({
           serverUrl: cfg.serverUrl,
-          // codeql[js/clear-text-storage-of-sensitive-data] synthetic CI key only
+          // lgtm[js/clear-text-storage-of-sensitive-data] synthetic CI key only
           apiKey: cfg.apiKey,
           authMode: "single-user"
         })

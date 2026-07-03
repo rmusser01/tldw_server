@@ -182,7 +182,7 @@ class OmniVoiceRuntime:
                 retryable=False,
             )
 
-        # codeql[py/path-injection] reference_path is accepted only if contained in managed reference dirs.
+        # lgtm[py/path-injection] reference_path is accepted only if contained in managed reference dirs.
         reference_path = Path(reference_audio_path).expanduser().resolve(strict=False)
         allowed_dirs = self._managed_reference_dirs()
         if any(self._is_relative_to(reference_path, allowed_dir) for allowed_dir in allowed_dirs):

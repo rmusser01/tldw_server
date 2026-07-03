@@ -409,6 +409,7 @@ export const tldwRequest = async (
           ? body
           : JSON.stringify(body)
 
+    // lgtm[js/request-forgery]: url is same-origin/configured-server transport or an allowlisted absolute URL checked above.
     let resp = await fetchFn(url, {
       method,
       headers: h,
@@ -453,6 +454,7 @@ export const tldwRequest = async (
       if (updated?.accessToken) retryHeaders["Authorization"] = `Bearer ${updated.accessToken}`
       const retryController = new AbortController()
       retryTimeoutId = setTimeout(() => retryController.abort(), timeoutMs)
+      // lgtm[js/request-forgery]: retry reuses the same validated URL from the initial request.
       resp = await fetchFn(url, {
         method,
         headers: retryHeaders,
