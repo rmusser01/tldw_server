@@ -170,6 +170,62 @@ describe("OptionSetup readiness route", () => {
     expect(screen.getByTestId("unified-setup-shell")).toBeInTheDocument()
   })
 
+  it.each(["in_progress", "first_chat_complete"])(
+    "shows the setup entry choice for %s backend setup",
+    (status) => {
+      mocks.useSetupOnboarding.mockReturnValue(
+        setupReturn({
+          state: firstRunState(status),
+          metadata: firstRunMetadata()
+        })
+      )
+
+      renderRoute()
+
+      expect(
+        screen.getByRole("heading", {
+          level: 1,
+          name: "Choose where to set up tldw"
+        })
+      ).toBeInTheDocument()
+      expect(
+        screen.queryByRole("heading", {
+          level: 2,
+          name: "Connect your tldw server"
+        })
+      ).not.toBeInTheDocument()
+      expect(screen.queryByTestId("setup-required-panel")).not.toBeInTheDocument()
+    }
+  )
+
+  it("uses the configured server URL for the API setup link when metadata has an internal origin", () => {
+    mocks.useConnectionState.mockReturnValue({
+      serverUrl: "http://api.example.test:9000"
+    })
+    const metadata = firstRunMetadata()
+    mocks.useSetupOnboarding.mockReturnValue(
+      setupReturn({
+        state: firstRunState("not_started"),
+        metadata: {
+          ...metadata,
+          connection: {
+            ...metadata.connection,
+            frontend_origin: "http://localhost:8080",
+            api_origin: "http://app:8000"
+          }
+        }
+      })
+    )
+
+    renderRoute()
+
+    expect(
+      screen.getByRole("link", {
+        name: /open api server setup.*opens in a new tab/i
+      })
+    ).toHaveAttribute("href", "http://api.example.test:9000/setup")
+  })
+
   it("enters the existing wizard after choosing WebUI setup and can go back to choices", () => {
     mocks.useSetupOnboarding.mockReturnValue(
       setupReturn({
