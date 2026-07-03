@@ -217,6 +217,8 @@ Macros reference output profiles by name and may define local overrides within a
 
 `Chat_Macros` needs durable run storage outside Jobs payloads:
 
+Run and branch tables should live in the user's per-user ChaChaNotes database. Macro runs are tied to conversations, workspace-scoped chat, message IDs, and chat retention rules, so storing them beside chat/notes data avoids cross-database ownership problems. The implementation can still expose a dedicated `Chat_Macros` DAO/service boundary; the storage location should not make callers reach directly into unrelated chat internals.
+
 - `macro_runs`
   - `run_id`
   - `user_id`
@@ -236,6 +238,11 @@ Macros reference output profiles by name and may define local overrides within a
   - `model_selection`
   - `status_message_id`
   - `final_message_id`
+  - `final_output`
+  - `final_output_format`
+  - `final_post_status`
+  - `post_idempotency_key`
+  - `cancel_requested_at`
   - `error_code`
   - `error_message`
   - `created_at`
@@ -390,7 +397,7 @@ Command args support normalized aliases:
 - CLI flag: `--keep-forks`
 - Normalized arg key: `keep_forks`
 
-Invalid args fail before a run or job is created.
+Slash command args should use a shell-style parser with quoted strings, repeated flags, and `--flag=value` support. Unknown args, malformed quoting, unsupported repeated args, oversized arg text, or custom question counts above `max_branches` fail before a run or job is created.
 
 ## Execution Flow
 
@@ -408,6 +415,14 @@ Invalid args fail before a run or job is created.
 12. Final output is posted to the original target when writable. Otherwise it remains inspectable in run history.
 13. Scratch ACP forks are closed or hidden unless `--keep-forks` or settings retain them.
 14. Run status, usage, timings, retained fork links, and failure metadata remain available through run detail APIs.
+
+## Result Persistence And Idempotency
+
+The merged final output is stored on the macro run before any attempt to post it back to chat. This keeps results inspectable even when the original target is not writable, the user leaves the page, or the post-back step fails.
+
+When a durable chat target is available, `post_result` should persist through the same chat message path as normal assistant responses and attach macro metadata such as `macro_run_id`, `macro_name`, `macro_digest`, `output_profile`, and branch summary. `macro_runs.final_message_id` points to the persisted assistant message.
+
+Posting must be idempotent. A retry, worker lease recovery, or duplicate `post_result` step must use `post_idempotency_key` or equivalent run-scoped uniqueness so it links the existing final message instead of creating another assistant message. Status-message creation and final-message creation should both tolerate retry after partial failure.
 
 ## Context Snapshotting
 
@@ -455,7 +470,7 @@ Supported options:
 - `--question <text>` repeated. Each occurrence creates one custom branch prompt with generated IDs such as `custom_1`, `custom_2`, and display labels such as `Custom 1`. Named/custom-labeled branches are supported through the structured API or macro YAML rather than the v1 slash flag.
 - `--output-profile <name>`
 - `--keep-forks`
-- `--sync` only when below configured sync thresholds.
+- `--sync` as shorthand for `mode=sync`, allowed only when below configured sync thresholds.
 - `--include-branches` if the selected profile supports branch appendices.
 
 ## Output Profiles
@@ -577,6 +592,17 @@ Chat messages:
 
 The backend stores metadata and Markdown/structured output; the card rendering is a frontend concern.
 
+## Implementation Planning Guidance
+
+The implementation plan should stage this as a vertical slice instead of attempting every surface at once:
+
+1. Backend foundation: schema validation, file-backed registry, built-in `/wrapup`, run tables in ChaChaNotes, and command-router dispatch.
+2. Execution slice: chat-native branch execution, merge, result persistence, idempotent post-back, Jobs background mode, status polling, and cancellation.
+3. Frontend slice: `/wrapup` status/final rendering, run detail, cancellation, and minimal macro settings.
+4. Expansion slice: advanced macro editor, richer output profile editor, ACP fork retention UI, and additional presets.
+
+ACP fork execution remains in the design, but chat-native branch execution is the first proving path because it covers normal chat and workspace chat without depending on fork retention UX.
+
 ## Testing Strategy
 
 Backend tests:
@@ -616,7 +642,5 @@ Frontend tests:
 
 ## Open Questions For Implementation Planning
 
-- Which existing per-user database should own `macro_runs`, or should `Chat_Macros` introduce a dedicated per-user database?
-- Should macro final output be persisted through the same chat message persistence path as normal assistant responses or through a macro artifact table plus a chat message reference?
 - How much of the Skills service can be reused mechanically for path-safe file storage without coupling the domains?
 - Which frontend settings route should host Macro Manager, and should it also be reachable from the command palette?
