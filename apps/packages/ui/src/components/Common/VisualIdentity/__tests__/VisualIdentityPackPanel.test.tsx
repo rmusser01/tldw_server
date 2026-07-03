@@ -1,9 +1,14 @@
 import React from "react"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 
+import { clearVisualIdentityResolverCaches } from "@/hooks/useVisualIdentityResolver"
 import { VisualIdentityPackPanel } from "../VisualIdentityPackPanel"
 import type { VisualIdentityDraftResponse } from "@/types/visual-identities"
+
+vi.mock("@/hooks/useVisualIdentityResolver", () => ({
+  clearVisualIdentityResolverCaches: vi.fn()
+}))
 
 const readyDraft: VisualIdentityDraftResponse = {
   id: 42,
@@ -102,6 +107,10 @@ const makeClient = () => ({
 })
 
 describe("VisualIdentityPackPanel", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
   it("activates an imported ready draft with the current character binding", async () => {
     const client = makeClient()
 
@@ -127,6 +136,7 @@ describe("VisualIdentityPackPanel", () => {
         expect.objectContaining({ actor_kind: "character", actor_id: 7 })
       )
     })
+    expect(clearVisualIdentityResolverCaches).toHaveBeenCalledTimes(1)
   })
 
   it("persists uploaded slot replacements into the draft slot map", async () => {

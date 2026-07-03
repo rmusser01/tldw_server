@@ -52,6 +52,11 @@ export type UseVisualIdentityExpressionAvailabilityResult = {
 const resolutionCache = new Map<string, VisualIdentityResolveResponse | null>()
 const availabilityCache = new Map<string, Record<string, boolean>>()
 
+export const clearVisualIdentityResolverCaches = () => {
+  resolutionCache.clear()
+  availabilityCache.clear()
+}
+
 const buildResolverCacheKey = ({
   actorKind,
   actorId,

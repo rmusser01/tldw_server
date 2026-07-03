@@ -2,6 +2,7 @@ import React from "react"
 import { Button, Tag } from "antd"
 import { RefreshCw, Upload } from "lucide-react"
 
+import { clearVisualIdentityResolverCaches } from "@/hooks/useVisualIdentityResolver"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import type {
   VisualIdentityActorKind,
@@ -244,6 +245,7 @@ export const VisualIdentityPackPanel: React.FC<VisualIdentityPackPanelProps> = (
     setError(null)
     try {
       const activated = await client.activateVisualIdentityDraft(draftId, request)
+      clearVisualIdentityResolverCaches()
       setDraft(activated)
       setStatusMessage("Expression pack activated.")
       await loadPanel()
@@ -280,6 +282,7 @@ export const VisualIdentityPackPanel: React.FC<VisualIdentityPackPanelProps> = (
         expression_key: slotKey,
         display_label: uploaded.display_label || slotKey
       })
+      clearVisualIdentityResolverCaches()
       setDraft(updated)
       setStatusMessage(`${slotKey} asset uploaded.`)
     } catch (uploadError) {
@@ -297,6 +300,7 @@ export const VisualIdentityPackPanel: React.FC<VisualIdentityPackPanelProps> = (
         asset_id: null,
         expression_key: slotKey
       })
+      clearVisualIdentityResolverCaches()
       setDraft(updated)
     } catch (clearError) {
       setError(clearError instanceof Error ? clearError.message : "Failed to clear expression slot.")

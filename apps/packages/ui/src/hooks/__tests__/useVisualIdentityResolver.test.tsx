@@ -2,6 +2,7 @@ import { renderHook, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import {
+  clearVisualIdentityResolverCaches,
   useVisualIdentityExpressionAvailability,
   useVisualIdentityResolver
 } from "../useVisualIdentityResolver"
@@ -123,6 +124,69 @@ describe("useVisualIdentityResolver", () => {
       role_label: null,
       allow_override_fallback: null
     })
+  })
+
+  it("clears cached resolver results when Visual Identity bindings change", async () => {
+    const firstClient = {
+      resolveVisualIdentityBinding: vi.fn(async () => ({
+        actor_kind: "character" as const,
+        actor_id: 318,
+        pack_id: 1,
+        pack_version_id: 2,
+        expression_key: "happy",
+        requested_expression_key: "happy",
+        asset_id: 9,
+        storage_relpath: "visual_identities/old.webp",
+        fallback_reason: null,
+        is_animated: false,
+        content_type: "image/webp",
+        asset_url: "/old.webp"
+      }))
+    }
+    const secondClient = {
+      resolveVisualIdentityBinding: vi.fn(async () => ({
+        actor_kind: "character" as const,
+        actor_id: 318,
+        pack_id: 3,
+        pack_version_id: 4,
+        expression_key: "happy",
+        requested_expression_key: "happy",
+        asset_id: 10,
+        storage_relpath: "visual_identities/new.webp",
+        fallback_reason: null,
+        is_animated: false,
+        content_type: "image/webp",
+        asset_url: "/new.webp"
+      }))
+    }
+
+    const first = renderHook(() =>
+      useVisualIdentityResolver({
+        actorKind: "character",
+        actorId: 318,
+        expressionKey: "happy",
+        client: firstClient
+      })
+    )
+    await waitFor(() => {
+      expect(first.result.current.resolution?.asset_id).toBe(9)
+    })
+    first.unmount()
+
+    clearVisualIdentityResolverCaches()
+
+    const second = renderHook(() =>
+      useVisualIdentityResolver({
+        actorKind: "character",
+        actorId: 318,
+        expressionKey: "happy",
+        client: secondClient
+      })
+    )
+    await waitFor(() => {
+      expect(second.result.current.resolution?.asset_id).toBe(10)
+    })
+    expect(secondClient.resolveVisualIdentityBinding).toHaveBeenCalledTimes(1)
   })
 
   it("marks an expression unavailable when resolution falls back to another asset", async () => {
