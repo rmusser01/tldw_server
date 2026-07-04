@@ -315,6 +315,32 @@ class TestNemoTranscription:
         assert sample_rate == 16000
         assert len(audio_np) == 16000
 
+    def test_prepare_numpy_audio_for_nemo_uses_linear_fallback_when_scipy_fails(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """SciPy resampling failure should fall back to bounded linear interpolation."""
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo import (
+            _prepare_numpy_audio_for_nemo,
+        )
+
+        fake_scipy = types.ModuleType("scipy")
+
+        def fail_resample_poly(*_args: object, **_kwargs: object) -> None:
+            raise RuntimeError("polyphase resampling failed")
+
+        fake_signal = types.SimpleNamespace(resample_poly=fail_resample_poly)
+        fake_scipy.signal = fake_signal
+        monkeypatch.setitem(sys.modules, "scipy", fake_scipy)
+
+        audio_np, sample_rate = _prepare_numpy_audio_for_nemo(
+            np.ones(8000, dtype=np.float32),
+            8000,
+        )
+
+        np.testing.assert_equal(sample_rate, 16000)
+        np.testing.assert_equal(len(audio_np), 16000)
+
     def test_prepare_numpy_audio_for_nemo_rejects_invalid_sample_rates(self) -> None:
         """Invalid or implausible sample rates should fail before resampling."""
         from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo import (
