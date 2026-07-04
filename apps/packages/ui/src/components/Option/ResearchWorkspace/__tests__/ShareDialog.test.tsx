@@ -5,6 +5,7 @@ import { ShareDialog } from "../ShareDialog"
 const {
   mockCreateToken,
   mockShareWorkspace,
+  mockUpdateShare,
   mockRevokeShare,
   mockRevokeToken,
   mockMessage,
@@ -14,6 +15,7 @@ const {
 } = vi.hoisted(() => ({
   mockCreateToken: vi.fn(),
   mockShareWorkspace: vi.fn(),
+  mockUpdateShare: vi.fn(),
   mockRevokeShare: vi.fn(),
   mockRevokeToken: vi.fn(),
   mockMessage: {
@@ -54,6 +56,10 @@ vi.mock("@/hooks/useSharing", () => ({
   }),
   useShareWorkspace: () => ({
     mutateAsync: mockShareWorkspace,
+    isPending: false
+  }),
+  useUpdateShare: () => ({
+    mutateAsync: mockUpdateShare,
     isPending: false
   }),
   useRevokeShare: () => ({
@@ -285,6 +291,60 @@ describe("ShareDialog", () => {
     expect(mockRevokeToken).toHaveBeenCalledWith(99)
     expect(mockMessage.success).toHaveBeenCalledWith("Share link revoked")
     expect(closeTokenConfirm).toHaveBeenCalledTimes(1)
+  })
+
+  it("updates active team or org share access and clone permission", async () => {
+    sharingState.shares = [
+      {
+        id: 42,
+        workspace_id: "workspace-alpha",
+        owner_user_id: 1,
+        share_scope_type: "team",
+        share_scope_id: 7,
+        access_level: "view_chat",
+        allow_clone: false,
+        created_by: 1,
+        is_revoked: false
+      }
+    ]
+    mockUpdateShare.mockResolvedValue({
+      id: 42,
+      workspace_id: "workspace-alpha",
+      owner_user_id: 1,
+      share_scope_type: "team",
+      share_scope_id: 7,
+      access_level: "view_chat_add",
+      allow_clone: true,
+      created_by: 1,
+      is_revoked: false
+    })
+
+    render(
+      <ShareDialog
+        workspaceId="workspace-alpha"
+        open={true}
+        onClose={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("tab", { name: "Active Shares" }))
+
+    fireEvent.change(screen.getByLabelText("Access level for Team #7"), {
+      target: { value: "view_chat_add" }
+    })
+    fireEvent.click(screen.getByRole("checkbox", { name: "Allow cloning for Team #7" }))
+
+    await waitFor(() => {
+      expect(mockUpdateShare).toHaveBeenCalledWith({
+        shareId: 42,
+        access_level: "view_chat_add"
+      })
+      expect(mockUpdateShare).toHaveBeenCalledWith({
+        shareId: 42,
+        allow_clone: true
+      })
+      expect(mockMessage.success).toHaveBeenCalledWith("Share updated")
+    })
   })
 
   it("keeps revoke confirmations open and shows errors when revocation fails", async () => {

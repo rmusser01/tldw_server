@@ -295,6 +295,38 @@ async def _validate_user_has_share_access(share: dict, user: User) -> None:
     raise HTTPException(status_code=403, detail="You do not have access to this share")
 
 
+def _coerce_scope_ids(values: Any) -> set[int]:
+    """Normalize claim/model scope IDs without trusting their input type."""
+    scope_ids: set[int] = set()
+    if values is None:
+        return scope_ids
+    if not isinstance(values, (list, tuple, set)):
+        values = [values]
+    for value in values:
+        coerced = _coerce_int(value)
+        if coerced is not None:
+            scope_ids.add(coerced)
+    return scope_ids
+
+
+async def _validate_share_target_scope(body: ShareWorkspaceRequest, user: User) -> None:
+    """Only create shares for scopes the current user can actually address."""
+    scope_id = int(body.share_scope_id)
+    if body.share_scope_type.value == "team":
+        if scope_id not in _coerce_scope_ids(getattr(user, "team_ids", None)):
+            raise HTTPException(
+                status_code=403,
+                detail="You can only share with teams you belong to.",
+            )
+        return
+
+    if scope_id not in _coerce_scope_ids(getattr(user, "org_ids", None)):
+        raise HTTPException(
+            status_code=403,
+            detail="You can only share with organizations you belong to.",
+        )
+
+
 # ── Workspace ownership verification helper ──
 
 
@@ -434,6 +466,7 @@ async def share_workspace(
 ):
     # [CRITICAL FIX #3] Verify the user owns this workspace
     await _verify_workspace_ownership(workspace_id, user)
+    await _validate_share_target_scope(body, user)
 
     repo = await _maybe_await(_get_repo())
     audit = _get_audit_service()
