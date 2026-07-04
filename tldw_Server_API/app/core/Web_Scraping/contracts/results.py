@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
@@ -19,6 +19,16 @@ def _freeze_value(value: Any) -> Any:
 
 def _freeze_mapping(value: Mapping[str, Any] | None) -> Mapping[str, Any]:
     return MappingProxyType({str(key): _freeze_value(item) for key, item in dict(value or {}).items()})
+
+
+def _normalize_domains(value: str | Sequence[str] | None) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        candidates = value.split(",")
+    else:
+        candidates = value
+    return tuple(str(item).strip() for item in candidates if str(item).strip())
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,6 +65,7 @@ class ExtractionResult:
     method: str | None = None
     preflight_analysis: Mapping[str, Any] | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    extra_fields: Mapping[str, Any] = field(default_factory=dict)
     failure: RuntimeFailure | None = None
 
     def __post_init__(self) -> None:
@@ -65,6 +76,7 @@ class ExtractionResult:
         if self.preflight_analysis is not None:
             object.__setattr__(self, "preflight_analysis", _freeze_mapping(self.preflight_analysis))
         object.__setattr__(self, "metadata", _freeze_mapping(self.metadata))
+        object.__setattr__(self, "extra_fields", _freeze_mapping(self.extra_fields))
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,8 +118,8 @@ class SearchResultsPayload:
     result_count: int = 0
     date_range: str | None = None
     safesearch: str = "active"
-    site_whitelist: tuple[str, ...] = ()
-    site_blacklist: tuple[str, ...] = ()
+    site_whitelist: str | Sequence[str] | None = None
+    site_blacklist: str | Sequence[str] | None = None
     exactTerms: str | None = None
     excludeTerms: str | None = None
     filter: str | None = None
@@ -124,8 +136,8 @@ class SearchResultsPayload:
     extra_fields: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "site_whitelist", tuple(self.site_whitelist or ()))
-        object.__setattr__(self, "site_blacklist", tuple(self.site_blacklist or ()))
+        object.__setattr__(self, "site_whitelist", _normalize_domains(self.site_whitelist))
+        object.__setattr__(self, "site_blacklist", _normalize_domains(self.site_blacklist))
         normalized_results: list[SearchResult | Mapping[str, Any]] = []
         for result in self.results or ():
             if isinstance(result, SearchResult):

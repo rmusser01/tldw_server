@@ -24,6 +24,7 @@ from tldw_Server_API.app.core.Web_Scraping.contracts import (
     extraction_result_to_public_dict,
     preflight_result_to_public_dict,
     search_result_to_public_dict,
+    search_request_to_legacy_kwargs,
     search_results_to_public_dict,
 )
 
@@ -308,6 +309,43 @@ def test_extraction_result_converts_to_existing_public_article_shape() -> None:
 
 
 @pytest.mark.unit
+def test_extraction_result_preserves_legacy_diagnostic_fields() -> None:
+    result = ExtractionResult(
+        url="https://example.com/article",
+        content="Body",
+        extra_fields={
+            "extraction_trace": [{"strategy": "trafilatura", "status": "success"}],
+            "extraction_strategy": "trafilatura",
+            "extraction_strategy_order": ["trafilatura", "readability"],
+        },
+    )
+
+    public = extraction_result_to_public_dict(result)
+
+    assert public["extraction_trace"] == [{"strategy": "trafilatura", "status": "success"}]
+    assert public["extraction_strategy"] == "trafilatura"
+    assert public["extraction_strategy_order"] == ["trafilatura", "readability"]
+
+
+@pytest.mark.unit
+def test_extraction_result_extra_fields_cannot_replace_canonical_article_fields() -> None:
+    result = ExtractionResult(
+        url="https://example.com/article",
+        title="Canonical title",
+        content="Body",
+        extra_fields={
+            "title": "provider override",
+            "extraction_trace": [{"strategy": "trafilatura", "status": "success"}],
+        },
+    )
+
+    public = extraction_result_to_public_dict(result)
+
+    assert public["title"] == "Canonical title"
+    assert public["extraction_trace"] == [{"strategy": "trafilatura", "status": "success"}]
+
+
+@pytest.mark.unit
 def test_failure_converters_keep_article_and_enhanced_shapes_separate() -> None:
     robots_failure = RuntimeFailure(
         status=WebScrapingStatus.POLICY_DENIED,
@@ -462,3 +500,67 @@ def test_search_results_payload_preserves_top_level_provider_extras_when_supplie
     assert public["city"] == "Paris"
     assert public["state"] == "Ile-de-France"
     assert public["more_results_available"] is True
+
+
+@pytest.mark.unit
+def test_search_results_payload_extra_fields_cannot_replace_canonical_keys() -> None:
+    payload = SearchResultsPayload(
+        search_engine="brave",
+        search_query="query",
+        results=(SearchResult(title="Canonical", url="https://example.com"),),
+        warnings=("canonical warning",),
+        extra_fields={
+            "results": [{"title": "provider override"}],
+            "warnings": ["provider warning"],
+            "error": "provider error",
+            "city": "Paris",
+        },
+    )
+
+    public = search_results_to_public_dict(payload)
+
+    assert public["results"] == [
+        {
+            "title": "Canonical",
+            "url": "https://example.com",
+            "content": "",
+            "metadata": {},
+        }
+    ]
+    assert public["warnings"] == ["canonical warning"]
+    assert public["error"] is None
+    assert public["city"] == "Paris"
+
+
+@pytest.mark.unit
+def test_search_results_payload_normalizes_string_domain_filters_without_character_split() -> None:
+    payload = SearchResultsPayload(
+        search_engine="google",
+        search_query="query",
+        site_whitelist="example.com, docs.example",
+        site_blacklist="blocked.example",
+    )
+
+    public = search_results_to_public_dict(payload)
+
+    assert payload.site_whitelist == ("example.com", "docs.example")
+    assert payload.site_blacklist == ("blocked.example",)
+    assert public["site_whitelist"] == ["example.com", "docs.example"]
+    assert public["site_blacklist"] == ["blocked.example"]
+
+
+@pytest.mark.unit
+def test_search_request_converts_domain_filters_to_legacy_list_kwargs() -> None:
+    request = SearchRequest(
+        search_engine="google",
+        search_query="query",
+        site_whitelist="example.com, docs.example",
+        site_blacklist=["blocked.example"],
+    )
+
+    legacy_kwargs = search_request_to_legacy_kwargs(request)
+
+    assert legacy_kwargs["site_whitelist"] == ["example.com", "docs.example"]
+    assert legacy_kwargs["site_blacklist"] == ["blocked.example"]
+    assert isinstance(legacy_kwargs["site_whitelist"], list)
+    assert isinstance(legacy_kwargs["site_blacklist"], list)

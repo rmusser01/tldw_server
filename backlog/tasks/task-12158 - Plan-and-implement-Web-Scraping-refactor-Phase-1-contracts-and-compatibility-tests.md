@@ -30,7 +30,7 @@ modified_files:
 - tldw_Server_API/tests/WebScraping/test_phase1_compatibility_contracts.py
 - tldw_Server_API/tests/Web_Scraping/test_js_required_fallback_metric.py
 - backlog/tasks/task-12158 - Plan-and-implement-Web-Scraping-refactor-Phase-1-contracts-and-compatibility-tests.md
-updated_date: 2026-07-04 23:08
+updated_date: 2026-07-04 23:48
 ---
 
 ## Description
@@ -80,12 +80,33 @@ Verification:
 - `python -m py_compile` on all contracts modules -> passed.
 - `python -m bandit -r tldw_Server_API/app/core/Web_Scraping/contracts -f json -o /tmp/bandit_web_scraping_phase1_contracts.json` -> 0 findings.
 - `git diff --check` -> passed.
+Post-PR code review requested via `superpowers:requesting-code-review` on PR #2636. Reviewer found no Critical issues and three Important contract risks to fix before merge:
+- `extraction_result_to_public_dict()` must preserve legacy extraction diagnostics such as `extraction_trace`, `extraction_strategy`, and `extraction_strategy_order`.
+- `search_results_to_public_dict()` must not let `extra_fields` overwrite canonical public keys like `results`, `error`, or `warnings`.
+- Search domain allow/deny normalization must avoid string-to-character-list corruption and provide a legacy-compatible representation for later adapters.
+
+Next step: add failing tests first, then update contracts/conversion helpers and rerun focused verification.
+Post-review fixes implemented:
+- Added `ExtractionResult.extra_fields` and guarded public conversion so legacy diagnostics (`extraction_trace`, `extraction_strategy`, `extraction_strategy_order`) are preserved without allowing extras to overwrite canonical article fields.
+- Guarded `SearchResultsPayload.extra_fields` so provider extras cannot replace canonical initialized WebSearch keys such as `results`, `error`, or `warnings`.
+- Normalized string/list domain filters in `SearchResultsPayload` and added `search_request_to_legacy_kwargs()` so future adapters can pass list-compatible `site_whitelist` / `site_blacklist` values to the legacy WebSearch surface.
+- Added regression tests for all three review findings.
+
+Post-review verification:
+- `python -m pytest -q --tb=short tldw_Server_API/tests/Web_Scraping/test_phase1_contracts.py` -> 19 passed.
+- `python -m pytest -q --tb=short tldw_Server_API/tests/WebScraping/test_phase1_compatibility_contracts.py` -> 12 passed.
+- `python -m pytest -q --tb=short tldw_Server_API/tests/WebScraping/test_refactor_import_inventory.py` -> 10 passed.
+- `python -m py_compile tldw_Server_API/app/core/Web_Scraping/contracts/*.py` -> passed.
+- `python -m pytest -q -x --tb=short tldw_Server_API/tests/Web_Scraping tldw_Server_API/tests/WebScraping tldw_Server_API/tests/WebSearch` -> 376 passed, 13 skipped.
+- `python -m bandit -r tldw_Server_API/app/core/Web_Scraping/contracts -f json -o /tmp/bandit_web_scraping_phase1_contracts_review_fixes.json` -> 0 findings.
+- `git diff --check` -> passed.
+- Follow-up code-review subagent confirmed the three Important findings are closed and found no new Critical, Important, or Minor issues.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Phase 1 of the Web_Scraping refactor is implemented as an additive contract and compatibility-test slice. Runtime behavior was not moved. The new contracts package is stdlib-only and protected by import-boundary tests; compatibility tests now lock current legacy imports, pre-scrape analyzer attachment for direct and enhanced scrapers, policy-denial dict shapes, and WebSearch initialized/processed result shapes. Focused Web_Scraping/WebScraping/WebSearch verification, compile, Bandit, import guardrail, and diff hygiene all pass.
+Phase 1 of the Web_Scraping refactor is implemented as an additive contract and compatibility-test slice. Runtime behavior was not moved. The new contracts package is stdlib-only and protected by import-boundary tests; compatibility tests lock current legacy imports, pre-scrape analyzer attachment for direct and enhanced scrapers, policy-denial dict shapes, and WebSearch initialized/processed result shapes. Post-PR review fixes now preserve extraction diagnostics through guarded extra fields, prevent WebSearch provider extras from overwriting canonical keys, and add a legacy kwargs adapter for list-compatible search domain filters. Focused Web_Scraping/WebScraping/WebSearch verification, compile, Bandit, import guardrail, follow-up code review, and diff hygiene all pass.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

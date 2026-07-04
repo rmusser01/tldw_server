@@ -6,6 +6,7 @@ from .conversion import (
     extraction_result_to_public_dict,
     preflight_result_to_public_dict,
     search_result_to_public_dict,
+    search_request_to_legacy_kwargs,
     search_results_to_public_dict,
 )
 from .errors import RuntimeFailure
@@ -38,5 +39,6 @@ __all__ = [
     "extraction_result_to_public_dict",
     "preflight_result_to_public_dict",
     "search_result_to_public_dict",
+    "search_request_to_legacy_kwargs",
     "search_results_to_public_dict",
 ]

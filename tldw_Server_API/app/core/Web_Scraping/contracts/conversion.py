@@ -4,7 +4,52 @@ from collections.abc import Mapping
 from typing import Any
 
 from .errors import RuntimeFailure
+from .requests import SearchRequest
 from .results import ExtractionResult, PreflightResult, SearchResult, SearchResultsPayload
+
+
+_ARTICLE_RESERVED_KEYS = {
+    "url",
+    "title",
+    "author",
+    "date",
+    "content",
+    "extraction_successful",
+    "error",
+    "backend",
+    "method",
+    "preflight_analysis",
+    "policy_reason",
+    "policy_mode",
+    "policy_stage",
+    "policy_source",
+}
+
+_SEARCH_RESERVED_KEYS = {
+    "search_engine",
+    "search_query",
+    "content_country",
+    "search_lang",
+    "output_lang",
+    "result_count",
+    "date_range",
+    "safesearch",
+    "site_whitelist",
+    "site_blacklist",
+    "exactTerms",
+    "excludeTerms",
+    "filter",
+    "geolocation",
+    "search_result_language",
+    "sort_results_by",
+    "google_domain",
+    "results",
+    "total_results_found",
+    "search_time",
+    "error",
+    "warnings",
+    "processing_error",
+}
 
 
 def _to_plain(value: Any) -> Any:
@@ -13,6 +58,22 @@ def _to_plain(value: Any) -> Any:
     if isinstance(value, tuple | list):
         return [_to_plain(item) for item in value]
     return value
+
+
+def _merge_extra_fields(
+    payload: dict[str, Any],
+    extra_fields: Mapping[str, Any],
+    reserved_keys: set[str],
+) -> None:
+    for key, value in _to_plain(extra_fields).items():
+        if key in reserved_keys:
+            continue
+        payload[key] = value
+
+
+def _domain_tuple_to_legacy_list(domains: tuple[str, ...]) -> list[str] | None:
+    values = [str(domain).strip() for domain in domains if str(domain).strip()]
+    return values or None
 
 
 def preflight_result_to_public_dict(result: PreflightResult) -> dict[str, Any]:
@@ -46,6 +107,7 @@ def extraction_result_to_public_dict(result: ExtractionResult) -> dict[str, Any]
     if result.failure is not None:
         payload["error"] = result.failure.public_message
         payload.update(result.failure.as_policy_fields())
+    _merge_extra_fields(payload, result.extra_fields, _ARTICLE_RESERVED_KEYS)
     return payload
 
 
@@ -110,5 +172,28 @@ def search_results_to_public_dict(payload: SearchResultsPayload) -> dict[str, An
         "warnings": list(payload.warnings),
         "processing_error": payload.processing_error,
     }
-    public.update(_to_plain(payload.extra_fields))
+    _merge_extra_fields(public, payload.extra_fields, _SEARCH_RESERVED_KEYS)
     return public
+
+
+def search_request_to_legacy_kwargs(request: SearchRequest) -> dict[str, Any]:
+    return {
+        "search_engine": request.search_engine,
+        "search_query": request.search_query,
+        "content_country": request.content_country,
+        "search_lang": request.search_lang,
+        "output_lang": request.output_lang,
+        "result_count": request.result_count,
+        "date_range": request.date_range,
+        "safesearch": request.safesearch,
+        "site_blacklist": _domain_tuple_to_legacy_list(request.site_blacklist),
+        "exactTerms": request.exactTerms,
+        "excludeTerms": request.excludeTerms,
+        "filter": request.filter,
+        "geolocation": request.geolocation,
+        "search_result_language": request.search_result_language,
+        "sort_results_by": request.sort_results_by,
+        "search_params": _to_plain(request.search_params),
+        "site_whitelist": _domain_tuple_to_legacy_list(request.site_whitelist),
+        "google_domain": request.google_domain,
+    }
