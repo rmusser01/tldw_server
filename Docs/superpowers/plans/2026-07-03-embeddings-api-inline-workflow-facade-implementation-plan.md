@@ -533,6 +533,7 @@ class FakePrepared:
             provider="huggingface",
             model="sentence-transformers/all-MiniLM-L6-v2",
             dimensions=None,
+            fallback_chain=["huggingface"],
             execution_path="legacy",
             cache_namespace="endpoint",
         )
