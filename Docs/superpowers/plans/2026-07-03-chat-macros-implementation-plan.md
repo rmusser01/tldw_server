@@ -280,7 +280,7 @@ git commit -m "feat: store chat macro runs in chacha notes"
 - Test: `tldw_Server_API/tests/Chat_Macros/unit/test_macro_storage.py`
 - Test: `tldw_Server_API/tests/Chat_Macros/unit/test_macro_service.py`
 
-- [ ] **Step 1: Write failing storage and settings tests**
+- [x] **Step 1: Write failing storage and settings tests**
 
 Cover:
 
@@ -291,7 +291,7 @@ Cover:
 - Cloning a built-in creates a user-owned macro with a non-conflicting command.
 - Default output profile renders summary/decisions/action_items/open_questions/failed_branches in order.
 
-- [ ] **Step 2: Run tests and verify failure**
+- [x] **Step 2: Run tests and verify failure**
 
 Run:
 
@@ -305,7 +305,7 @@ python -m pytest \
 
 Expected: import errors.
 
-- [ ] **Step 3: Implement storage**
+- [x] **Step 3: Implement storage**
 
 Use the Skills service as a reference, but keep the domain separate:
 
@@ -315,7 +315,7 @@ Use the Skills service as a reference, but keep the domain separate:
 - Bound `MACRO.yaml` bytes and total supporting file bytes.
 - Compute a digest from canonical macro content plus supporting file metadata.
 
-- [ ] **Step 4: Implement service and settings**
+- [x] **Step 4: Implement service and settings**
 
 `ChatMacrosService` should:
 
@@ -327,7 +327,7 @@ Use the Skills service as a reference, but keep the domain separate:
 - Resolve output profiles from settings, with macro-local overrides bounded by global caps.
 - Reject non-empty future permissions.
 
-- [ ] **Step 5: Run tests**
+- [x] **Step 5: Run tests**
 
 Run:
 
@@ -338,12 +338,20 @@ python -m pytest tldw_Server_API/tests/Chat_Macros/unit/test_macro_storage.py tl
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/Chat_Macros tldw_Server_API/tests/Chat_Macros/unit/test_macro_storage.py tldw_Server_API/tests/Chat_Macros/unit/test_macro_service.py
 git commit -m "feat: add chat macro storage service"
 ```
+
+Completed in commits `80eeb8c9e1`, `a2f7ca82ee`, `8f48bd6bc8`, `c826582720`, and `9972f2b768`.
+Verification:
+- Storage/service tests: 14 passed, 3 warnings.
+- Parser/repository regressions: 26 passed, 3 warnings.
+- Bandit on `tldw_Server_API/app/core/Chat_Macros`: JSON results empty.
+- `git diff --check`: clean.
+Reviews: spec and code-quality re-reviews found no findings at `9972f2b768`.
 
 ## Task 4: Chat Macros API
 
