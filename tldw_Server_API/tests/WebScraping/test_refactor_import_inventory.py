@@ -11,10 +11,13 @@ from Helper_Scripts.web_scraping_refactor_inventory import (
     inventory_for_roots,
     main,
     scan_file,
+    write_json_inventory,
+    write_markdown_inventory,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 INVENTORY_JSON = REPO_ROOT / "Docs/Design/web_scraping_refactor_import_inventory.json"
+INVENTORY_MARKDOWN = REPO_ROOT / "Docs/Design/WebScraping_Refactor_Import_Inventory.md"
 NEW_PACKAGE_ROOT = REPO_ROOT / "tldw_Server_API/app/core/Web_Scraping"
 
 
@@ -196,8 +199,11 @@ def test_new_internal_packages_constant_excludes_legacy_wrappers() -> None:
 
 
 @pytest.mark.unit
-def test_import_inventory_artifact_matches_current_import_surface() -> None:
+def test_import_inventory_artifact_matches_current_import_surface(tmp_path: Path) -> None:
     assert INVENTORY_JSON.exists(), "Run Helper_Scripts/web_scraping_refactor_inventory.py to create the inventory artifact"
+    assert INVENTORY_MARKDOWN.exists(), (
+        "Run Helper_Scripts/web_scraping_refactor_inventory.py to create the Markdown inventory artifact"
+    )
 
     expected = json.loads(INVENTORY_JSON.read_text(encoding="utf-8"))
     current = inventory_for_roots(
@@ -223,7 +229,22 @@ def test_import_inventory_artifact_matches_current_import_surface() -> None:
         for target, records in sorted(current.items())
     }
 
+    generated_json = tmp_path / "web_scraping_refactor_import_inventory.json"
+    generated_markdown = tmp_path / "WebScraping_Refactor_Import_Inventory.md"
+    write_json_inventory(
+        generated_json,
+        current,
+        roots=["tldw_Server_API/app", "tldw_Server_API/tests"],
+    )
+    write_markdown_inventory(
+        generated_markdown,
+        current,
+        json_path="Docs/Design/web_scraping_refactor_import_inventory.json",
+    )
+
     assert expected["records"] == current_records
+    assert expected == json.loads(generated_json.read_text(encoding="utf-8"))
+    assert INVENTORY_MARKDOWN.read_text(encoding="utf-8") == generated_markdown.read_text(encoding="utf-8")
 
 
 def _new_internal_package_files() -> list[Path]:
