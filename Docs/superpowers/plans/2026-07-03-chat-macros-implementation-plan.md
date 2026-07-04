@@ -96,7 +96,7 @@ Frontend:
 - Create: `tldw_Server_API/app/core/Chat_Macros/README.md`
 - Test: `tldw_Server_API/tests/Chat_Macros/unit/test_macro_parser.py`
 
-- [ ] **Step 1: Write failing parser/model tests**
+- [x] **Step 1: Write failing parser/model tests**
 
 Add tests for:
 
@@ -125,7 +125,7 @@ def test_parse_slash_args_normalizes_aliases_and_repeated_questions():
     assert args["question"] == ["What changed?", "What is next?"]
 ```
 
-- [ ] **Step 2: Run the new tests and verify they fail**
+- [x] **Step 2: Run the new tests and verify they fail**
 
 Run:
 
@@ -136,7 +136,7 @@ python -m pytest tldw_Server_API/tests/Chat_Macros/unit/test_macro_parser.py -v
 
 Expected: import errors for the new `Chat_Macros` modules.
 
-- [ ] **Step 3: Implement minimal models and parser**
+- [x] **Step 3: Implement minimal models and parser**
 
 Implement:
 
@@ -148,7 +148,7 @@ Implement:
 - Permission validation that rejects non-empty `tool_calls` and `skills`.
 - Step validation that every `merge.consumes` and `post_result.consumes` target exists as a previous `output`.
 
-- [ ] **Step 4: Add the built-in `MACRO.yaml`**
+- [x] **Step 4: Add the built-in `MACRO.yaml`**
 
 Use the spec's `/wrapup` definition, with:
 
@@ -163,7 +163,7 @@ builtin_version: 1
 
 Keep `execution.branch_strategy: auto`, `max_branches: 6`, `retries_per_branch: 1`, and the four default branch prompts from the spec.
 
-- [ ] **Step 5: Run parser tests**
+- [x] **Step 5: Run parser tests**
 
 Run:
 
@@ -174,7 +174,7 @@ python -m pytest tldw_Server_API/tests/Chat_Macros/unit/test_macro_parser.py -v
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/Chat_Macros tldw_Server_API/tests/Chat_Macros/unit/test_macro_parser.py
