@@ -48,3 +48,12 @@ def test_rag_search_request_log_omits_raw_query(monkeypatch, label, metadata):
     assert f"len={len(query)}" in rendered
     for key, value in metadata.items():
         assert f"{key}={value}" in rendered
+
+
+def test_rag_search_request_log_handles_non_string_query(monkeypatch):
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(rag_unified, "logger", logger_stub)
+
+    rag_unified._log_rag_search_request("Unified RAG search", 42)
+
+    assert logger_stub.infos == ["Unified RAG search: query_hash=a1d0c6e8 len=2"]

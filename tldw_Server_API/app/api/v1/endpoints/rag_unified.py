@@ -97,8 +97,8 @@ _RAG_STREAM_DIAGNOSTIC_KEYS = frozenset({"error", "errors", "exception", "traceb
 _PUBLIC_RAG_STREAM_DIAGNOSTIC = "RAG processing diagnostic omitted"
 
 
-def _log_rag_search_request(label: str, query: str | None, **metadata: Any) -> None:
-    query_text = query or ""
+def _log_rag_search_request(label: str, query: object | None, **metadata: Any) -> None:
+    query_text = str(query) if query is not None else ""
     query_hash = hashlib.md5(
         query_text.encode("utf-8"),
         usedforsecurity=False,

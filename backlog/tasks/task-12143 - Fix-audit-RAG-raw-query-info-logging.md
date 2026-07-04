@@ -19,7 +19,7 @@ documentation:
 modified_files:
 - tldw_Server_API/app/api/v1/endpoints/rag_unified.py
 - tldw_Server_API/tests/RAG/test_rag_query_logging.py
-updated_date: 2026-07-04 18:23
+updated_date: 2026-07-05 00:25
 ---
 
 ## Description
@@ -42,16 +42,17 @@ Remediate AUDIT-2026-06-27-CHAT-002 by replacing info-level RAG logs that includ
 - Added `_log_rag_search_request()` to log a non-security MD5 query hash and query length instead of raw query text.
 - Replaced raw info-level query logging in unified and advanced RAG search paths; simple search now reuses the same helper.
 - Added focused unit coverage asserting sensitive query fragments and private paths are absent from rendered info logs while hash/length metadata remains present.
-- Verification: `python -m pytest tldw_Server_API/tests/RAG/test_rag_query_logging.py -q` passed with 2 tests; Bandit over `tldw_Server_API/app/api/v1/endpoints/rag_unified.py` reported 0 findings; `git diff --check` passed; targeted source scan found no old unified/advanced raw-query info log patterns.
-- 2026-07-04 latest-dev refresh: rebased `codex/audit-rag-query-logging-2026-07-04` onto `origin/dev` `fd5c152b065c408e4e8ee5f08da41589f21cb7f5`; merge-base matches `origin/dev`.
-- Latest-dev validation: `.venv/bin/python -m pytest tldw_Server_API/tests/RAG/test_rag_query_logging.py -q` passed with 2 tests; `.venv/bin/python -m bandit -r tldw_Server_API/app/api/v1/endpoints/rag_unified.py -f json -o /tmp/bandit_rag_query_logging_latest.json` reported 0 findings; `git diff --check` passed; targeted raw-query logger scan found no old unified/advanced/simple raw-query info log patterns.
 - Tracking hygiene: moved this RAG audit record from duplicate `TASK-12141` to `TASK-12143` so it does not collide with another active audit PR.
+- Review follow-up: kept Loguru `{}` placeholder logging because this file imports Loguru and that formatting style is supported; added defensive query coercion for non-string helper input with regression coverage.
+- Current-dev refresh: rebased `codex/audit-rag-query-logging-2026-07-04` onto `origin/dev` `09d9ec901e1d4548f7924f1c6bcefa963fadd9bd`; merge-base matches `origin/dev`.
+- Current-dev validation: `/Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest tldw_Server_API/tests/RAG/test_rag_query_logging.py -q` passed with 3 tests; `/Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m bandit -r tldw_Server_API/app/api/v1/endpoints/rag_unified.py -f json -o /tmp/bandit_rag_query_logging_origin_dev_09d9ec.json` reported 0 findings over 1900 LOC; `git diff --check HEAD~1..HEAD` passed.
+2026-07-04 latest-dev refresh: rebased and validated PR #2614 on origin/dev 6b727b221e55646eba663a03571e38302f7fafc2. Tested head beb6e22200b3. Verification: python -m pytest tldw_Server_API/tests/RAG/test_rag_query_logging.py -q => 3 passed, 15 warnings; bandit -r tldw_Server_API/app/api/v1/endpoints/rag_unified.py => 0 findings over 1900 LOC; git diff --check HEAD~1..HEAD => clean.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Fixed AUDIT-2026-06-27-CHAT-002 by routing RAG request info logs through a shared hash/length helper and removing raw query text from unified and advanced search logs. Focused tests now prevent sensitive query fragments from appearing in rendered info logs.
+Hardened RAG query logging to avoid sensitive-query exposure while preserving request tracing. Final refresh validated against origin/dev 6b727b221e55646eba663a03571e38302f7fafc2 with focused tests passing, Bandit clean on touched production scope, and whitespace check clean.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
