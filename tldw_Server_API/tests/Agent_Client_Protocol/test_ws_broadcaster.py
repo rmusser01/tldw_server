@@ -15,6 +15,8 @@ from tldw_Server_API.app.core.Agent_Client_Protocol.consumers.ws_broadcaster imp
     WSBroadcaster,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _make_event(kind: AgentEventKind, session_id: str = "sess-1") -> AgentEvent:
     return AgentEvent(session_id=session_id, kind=kind, payload={"data": kind.value})
@@ -56,8 +58,7 @@ async def test_ws_broadcaster_delivers_events_full_verbosity():
     assert received[2]["kind"] == "completion"
 
 
-@pytest.mark.asyncio
-async def test_ws_broadcaster_allows_unique_consumer_ids():
+async def test_ws_broadcaster_allows_unique_consumer_ids() -> None:
     """Distinct broadcasters should not overwrite each other's bus subscription."""
     bus = SessionEventBus(session_id="sess-unique-consumers")
     first = WSBroadcaster(consumer_id="ws_broadcaster:conn-1")

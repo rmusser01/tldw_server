@@ -1276,16 +1276,16 @@ async def acp_session_stream(
         # available; otherwise fall back to the existing path.
         bus = get_session_event_bus(session_id)
         if bus is not None and last_sequence > 0:
-            from tldw_Server_API.app.core.Agent_Client_Protocol.consumers.ws_broadcaster import WSBroadcaster
-
-            reconnect_conn_id = f"ws-{session_id}-{id(stream)}"
-            reconnect_broadcaster = WSBroadcaster(consumer_id=f"ws_broadcaster:{reconnect_conn_id}")
-            await reconnect_broadcaster.start(bus)
+            from tldw_Server_API.app.core.Agent_Client_Protocol.consumers.ws_broadcaster import (
+                start_reconnect_replay,
+            )
 
             async def _ws_send_str(msg: str) -> None:
                 await stream.send_json(json.loads(msg))
 
-            await reconnect_broadcaster.add_connection(
+            reconnect_conn_id = f"ws-{session_id}-{id(stream)}"
+            reconnect_broadcaster = await start_reconnect_replay(
+                bus,
                 conn_id=reconnect_conn_id,
                 send_callback=_ws_send_str,
                 from_sequence=last_sequence,
@@ -1336,11 +1336,12 @@ async def acp_session_stream(
         logger.exception("WebSocket error for ACP session {}", session_id)
     finally:
         if reconnect_broadcaster is not None:
-            if reconnect_conn_id is not None:
-                with contextlib.suppress(_ACP_ENDPOINT_NONCRITICAL_EXCEPTIONS):
-                    reconnect_broadcaster.remove_connection(reconnect_conn_id)
-            with contextlib.suppress(_ACP_ENDPOINT_NONCRITICAL_EXCEPTIONS):
-                await reconnect_broadcaster.stop()
+            from tldw_Server_API.app.core.Agent_Client_Protocol.consumers.ws_broadcaster import (
+                stop_reconnect_replay,
+            )
+
+            # logs (never silently suppresses) cleanup failures
+            await stop_reconnect_replay(reconnect_broadcaster, reconnect_conn_id)
         # Unregister WebSocket
         if send_callback is not None:
             try:

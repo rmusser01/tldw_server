@@ -57,6 +57,15 @@ class WSBroadcaster(EventConsumer):
     consumer_id: str = "ws_broadcaster"
 
     def __init__(self, consumer_id: str | None = None) -> None:
+        """Initialize the broadcaster.
+
+        Args:
+            consumer_id: Optional unique identifier used when subscribing to
+                the session event bus. Defaults to the class-level
+                ``"ws_broadcaster"``. Pass a unique value (e.g. per
+                reconnect-replay connection) so concurrent broadcasters on the
+                same bus do not overwrite each other's subscriptions.
+        """
         self.consumer_id = consumer_id or self.consumer_id
         self._connections: dict[str, _ConnectionInfo] = {}
         self._bus: SessionEventBus | None = None
@@ -195,3 +204,52 @@ def _passes_filter(kind: AgentEventKind, verbosity: str) -> bool:
         return kind in _SUMMARY_KINDS
     # Unknown verbosity -- default to full
     return True
+
+
+async def start_reconnect_replay(
+    bus: SessionEventBus,
+    *,
+    conn_id: str,
+    send_callback: SendCallback,
+    from_sequence: int,
+) -> WSBroadcaster:
+    """Create and start a dedicated broadcaster that replays missed events.
+
+    Used on WebSocket reconnect: a per-connection broadcaster (unique
+    ``consumer_id`` so concurrent reconnects don't clobber each other's bus
+    subscriptions) is subscribed to *bus* and replays buffered events from
+    *from_sequence* to *send_callback*. Callers must pair this with
+    :func:`stop_reconnect_replay` on disconnect.
+    """
+    broadcaster = WSBroadcaster(consumer_id=f"ws_broadcaster:{conn_id}")
+    await broadcaster.start(bus)
+    await broadcaster.add_connection(
+        conn_id=conn_id,
+        send_callback=send_callback,
+        from_sequence=from_sequence,
+    )
+    return broadcaster
+
+
+async def stop_reconnect_replay(broadcaster: WSBroadcaster, conn_id: str | None) -> None:
+    """Tear down a reconnect-replay broadcaster created by :func:`start_reconnect_replay`.
+
+    Cleanup failures are logged (never silently suppressed) but do not
+    propagate: this runs in disconnect paths where raising would mask the
+    original connection error.
+    """
+    if conn_id is not None:
+        try:
+            broadcaster.remove_connection(conn_id)
+        except Exception as exc:
+            logger.warning(
+                "Failed to remove reconnect replay connection {}: {}", conn_id, exc
+            )
+    try:
+        await broadcaster.stop()
+    except Exception as exc:
+        logger.warning(
+            "Failed to stop reconnect replay broadcaster {}: {}",
+            broadcaster.consumer_id,
+            exc,
+        )

@@ -18,6 +18,6 @@
 
 ## Stage 4: Verification And Task Record
 **Goal**: Prove the remediation and record it for repeatable audit follow-up.
-**Success Criteria**: Focused pytest passes, `git diff --check` passes, Bandit runs on touched production files, and `TASK-12138` records final verification.
+**Success Criteria**: Focused pytest passes, `git diff --check` passes, Bandit runs on touched production files, and `TASK-12146` records final verification.
 **Tests**: `python -m pytest` focused files, `git diff --check`, and Bandit on touched production files.
 **Status**: Complete

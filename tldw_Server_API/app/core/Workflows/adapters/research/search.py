@@ -11,6 +11,7 @@ This module includes adapters for academic search operations:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import tempfile
 import time
@@ -204,7 +205,8 @@ async def run_arxiv_download_adapter(config: dict[str, Any], context: dict[str, 
             response.raise_for_status()
             filename = pdf_url.split("/")[-1] or "paper.pdf"
             output_path = str(art_dir / filename)
-            Path(output_path).write_bytes(response.content)
+            # blocking file write must not stall the event loop
+            await asyncio.to_thread(Path(output_path).write_bytes, response.content)
 
         if callable(context.get("add_artifact")):
             context["add_artifact"](

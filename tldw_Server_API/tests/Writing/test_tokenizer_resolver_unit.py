@@ -147,7 +147,9 @@ def test_tokenizer_http_post_uses_central_http_client(monkeypatch):
             "json": {"content": "hello"},
             "headers": {"X-Test": "1"},
             "timeout": 7.0,
-            "allow_redirects": True,
+            # redirects disabled: these POSTs carry provider credentials and
+            # must not follow cross-origin redirects (PR #2604 review)
+            "allow_redirects": False,
         }
     ]
 
