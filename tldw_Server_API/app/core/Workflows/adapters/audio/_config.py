@@ -126,8 +126,11 @@ class MultiVoiceTTSConfig(BaseAdapterConfig):
 
     sections: list[dict[str, Any]] | None = Field(None, description="Sections [{voice, text}] from compose step")
     voice_assignments: dict[str, str] | None = Field(None, description="Voice marker -> Kokoro voice ID mapping")
+    default_provider: str | None = Field(None, description="Default TTS provider hint")
+    provider: str | None = Field(None, description="Legacy/default TTS provider hint")
     default_model: str = Field("kokoro", description="Default TTS model")
     default_voice: str = Field("af_heart", description="Fallback voice if assignment missing")
+    fallback_provider: str | None = Field(None, description="Optional fallback TTS provider hint")
     response_format: Literal["mp3", "wav", "opus", "flac", "aac"] = Field(
         "mp3", description="Output audio format"
     )

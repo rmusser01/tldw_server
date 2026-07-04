@@ -83,6 +83,7 @@ async def _synthesize_section(
     fmt: str,
     speed: float,
     output_path: Path,
+    provider: str | None = None,
 ) -> int:
     """Synthesize a single text section, returning size in bytes."""
     from tldw_Server_API.app.api.v1.schemas.audio_schemas import OpenAISpeechRequest
@@ -100,7 +101,7 @@ async def _synthesize_section(
     size_bytes = 0
     service = await get_tts_service_v2()
     async with AsyncFileWriter(output_path) as writer:
-        async for chunk in service.generate_speech(req):
+        async for chunk in service.generate_speech(req, provider=provider):
             if isinstance(chunk, (bytes, bytearray)):
                 await writer.write(chunk)
                 size_bytes += len(chunk)
@@ -420,6 +421,7 @@ async def run_multi_voice_tts_adapter(config: dict[str, Any], context: dict[str,
             voice_assignments = prev.get("voice_assignments") or {}
 
     default_model = str(config.get("default_model") or "kokoro")
+    default_provider = str(config.get("default_provider") or config.get("provider") or "").strip() or None
     default_voice = str(config.get("default_voice") or "af_heart")
     fmt = str(config.get("response_format") or "mp3").lower()
     ext = fmt if fmt in {"mp3", "wav", "opus", "flac", "aac"} else "mp3"
@@ -430,7 +432,7 @@ async def run_multi_voice_tts_adapter(config: dict[str, Any], context: dict[str,
     pause_duration = float(config.get("pause_duration_seconds", 1.0))
     do_normalize = bool(config.get("normalize", True))
     target_lufs = float(config.get("target_lufs", -16.0))
-    fallback_provider = config.get("fallback_provider")
+    fallback_provider = str(config.get("fallback_provider") or "").strip() or None
     fallback_voice = str(config.get("fallback_voice") or "nova")
     background_audio_uri = config.get("background_audio_uri")
     if isinstance(background_audio_uri, str):
@@ -491,7 +493,15 @@ async def run_multi_voice_tts_adapter(config: dict[str, Any], context: dict[str,
             continue
 
         try:
-            await _synthesize_section(clean_text, default_model, kokoro_voice, fmt, speed, section_path)
+            await _synthesize_section(
+                clean_text,
+                default_model,
+                kokoro_voice,
+                fmt,
+                speed,
+                section_path,
+                provider=default_provider,
+            )
             segment_files.append(section_path)
             speaker_segments.append(
                 {
@@ -510,7 +520,15 @@ async def run_multi_voice_tts_adapter(config: dict[str, Any], context: dict[str,
             # Fallback attempt
             if fallback_provider:
                 try:
-                    await _synthesize_section(clean_text, "tts-1", fallback_voice, fmt, speed, section_path)
+                    await _synthesize_section(
+                        clean_text,
+                        "tts-1",
+                        fallback_voice,
+                        fmt,
+                        speed,
+                        section_path,
+                        provider=fallback_provider,
+                    )
                     segment_files.append(section_path)
                     speaker_segments.append(
                         {
@@ -549,15 +567,7 @@ async def run_multi_voice_tts_adapter(config: dict[str, Any], context: dict[str,
     else:
         concat_ok = await _concat_files(segment_files, concat_path, fmt)
         if not concat_ok:
-            # Fallback: use the first file
-            if segment_files[0].exists():
-                source_path = segment_files[0]
-                source_path.rename(concat_path)
-                for segment in speaker_segments:
-                    if segment.get("path") == source_path:
-                        segment["path"] = concat_path
-            else:
-                return {"error": "concat_failed"}
+            raise RuntimeError("concat_failed")
 
     # Normalize
     final_path = concat_path
