@@ -1,4 +1,4 @@
-import { resolveBrowserWebSocketBase } from "@/services/tldw/browser-websocket"
+import { buildAudioWebSocketUrl } from "@/services/tldw/audio-websocket-auth"
 import { normalizeTldwTtsResponseFormat } from "@/services/tts"
 import { inferTldwProviderFromModel } from "@/services/tts-provider"
 import { toServerTtsProviderKey } from "@/services/tldw/tts-provider-keys"
@@ -363,7 +363,7 @@ export const buildVoiceConversationPreflight = async (
     // {type:"auth", token} first frame sent by the client after `onopen`
     // (streaming_service.py:641-647 multi-user / 720-723 single-user). The token
     // is still validated above so callers fail fast when it is missing.
-    websocketUrl: `${resolveBrowserWebSocketBase(serverUrl)}/api/v1/audio/chat/stream`,
+    websocketUrl: buildAudioWebSocketUrl(serverUrl, "/api/v1/audio/chat/stream"),
     llm,
     tts: ttsConfig
   }

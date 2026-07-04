@@ -10,6 +10,7 @@ import {
   buildVoiceConversationPreflight,
   normalizeVoiceConversationRuntimeError
 } from "@/services/tldw/voice-conversation"
+import { sendAudioWebSocketAuthFrame } from "@/services/tldw/audio-websocket-auth"
 import { arrayBufferToBase64 } from "@/utils/compress"
 import {
   DEFAULT_TLDW_TTS_MODEL,
@@ -587,9 +588,7 @@ export const useVoiceChatStream = ({
             // {type:"auth", token} first frame via receive_text()
             // (streaming_service.py:641-647 multi-user / 720-723 single-user).
             // `token` is the JWT (multi-user) or API key (single-user).
-            if (token) {
-              ws.send(JSON.stringify({ type: "auth", token }))
-            }
+            sendAudioWebSocketAuthFrame(ws, token)
             const sttConfig: Record<string, any> = {
               enable_vad: true,
               min_silence_ms: voiceChatPauseMs,

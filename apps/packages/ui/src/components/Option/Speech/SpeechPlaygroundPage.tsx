@@ -57,6 +57,10 @@ import {
   setResponseSplitting as persistResponseSplitting
 } from "@/services/tts"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
+import {
+  buildAudioWebSocketUrl,
+  sendAudioWebSocketAuthFrame
+} from "@/services/tldw/audio-websocket-auth"
 import { copyToClipboard } from "@/utils/clipboard"
 import { estimateTtsDurationSeconds, splitMessageContent } from "@/utils/tts"
 import { markdownToText } from "@/utils/markdown-to-text"
@@ -1493,14 +1497,14 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
       return
     }
 
-    const base = serverUrl.replace(/^http/i, "ws").replace(/\/$/, "")
-    const wsUrl = `${base}/api/v1/audio/stream/tts?token=${encodeURIComponent(token)}`
+    const wsUrl = buildAudioWebSocketUrl(serverUrl, "/api/v1/audio/stream/tts")
     const ws = new WebSocket(wsUrl)
     ws.binaryType = "arraybuffer"
     wsRef.current = ws
 
     ws.onopen = () => {
       void (async () => {
+        sendAudioWebSocketAuthFrame(ws, token)
         const requestedFormat = (tldwFormat || ttsSettings?.tldwTtsResponseFormat || "mp3").toLowerCase()
         const format = STREAMING_FORMATS.has(requestedFormat) ? requestedFormat : "mp3"
         if (format !== requestedFormat) {
