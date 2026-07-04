@@ -1,7 +1,7 @@
 ---
 id: TASK-12146
 title: Require media.create for processing endpoints
-status: In Progress
+status: Done
 assignee: []
 created_date: 2026-07-04 17:04
 labels:
@@ -15,7 +15,7 @@ references:
 documentation:
 - Docs/superpowers/reviews/2026-06-27-repo-audit/domains/media-ingestion-storage.md
 priority: high
-updated_date: 2026-07-04 17:12
+updated_date: 2026-07-05 00:26
 modified_files:
 - tldw_Server_API/app/api/v1/API_Deps/media_route_deps.py
 - tldw_Server_API/app/api/v1/endpoints/media/process_audios.py
@@ -57,20 +57,31 @@ Remediate AUDIT-2026-06-27-MEDIA-001: processing-only media endpoints accept upl
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
+- [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
+- [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 - [x] #7 Focused media permission tests pass.
 - [x] #8 Bandit over touched production files reports no new issues.
 - [x] #9 git diff --check passes.
-- [ ] #10 Backlog task records latest-dev base, validation evidence, final summary, and PR link if opened.
+- [x] #10 Backlog task records latest-dev base, validation evidence, final summary, and PR link if opened.
 <!-- DOD:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-2026-07-04: Created remediation worktree from latest origin/dev fd5c152b065c408e4e8ee5f08da41589f21cb7f5 after a successful git fetch origin dev.
-2026-07-04: Red test confirmed MEDIA-001 on current dev. Command: /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest tldw_Server_API/tests/AuthNZ_Unit/test_media_processing_permissions_claims.py -q => 9 failed, 2 passed; missing media.create dependency on process-audios, process-pdfs, process-documents, process-ebooks, process-code, process-emails, mediawiki/ingest-dump, mediawiki/process-dump, plus representative request returned 401/400-class behavior instead of 403. After implementation: same command => 11 passed, 38 warnings. Expanded related command: /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest tldw_Server_API/tests/AuthNZ_Unit/test_media_processing_permissions_claims.py tldw_Server_API/tests/AuthNZ_Unit/test_media_add_permissions_claims.py tldw_Server_API/tests/Media_Ingestion_Modification/test_process_endpoints_contract_parity.py tldw_Server_API/tests/Media/test_media_router_resilient_imports.py -q => 16 passed, 48 warnings. Representative existing processing command: /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest tldw_Server_API/tests/Media/test_process_code_and_uploads.py tldw_Server_API/tests/Media/test_json_document_processing.py tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_upload_failures.py -q => 21 passed, 558 warnings.
-2026-07-04: Final validation on latest origin/dev fd5c152b065c408e4e8ee5f08da41589f21cb7f5. Combined focused tests passed: /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest tldw_Server_API/tests/AuthNZ_Unit/test_media_processing_permissions_claims.py tldw_Server_API/tests/AuthNZ_Unit/test_media_add_permissions_claims.py tldw_Server_API/tests/Media_Ingestion_Modification/test_process_endpoints_contract_parity.py tldw_Server_API/tests/Media/test_media_router_resilient_imports.py tldw_Server_API/tests/Media/test_process_code_and_uploads.py tldw_Server_API/tests/Media/test_json_document_processing.py tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_upload_failures.py -q => 37 passed, 510 warnings. Bandit over touched production files wrote /tmp/bandit_media_processing_permissions.json and exited 0 with no findings. git diff --check exited 0. Untracked watchlist template files were present in the worktree and intentionally left unstaged because they are unrelated.
+2026-07-04: Red test confirmed MEDIA-001 on then-current dev. Command: `/Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest tldw_Server_API/tests/AuthNZ_Unit/test_media_processing_permissions_claims.py -q` initially failed for missing `media.create` dependencies on processing-only media routes; after implementation the focused permission claims passed.
+
+Implemented a shared `media_create_dependencies()` helper and applied it to processing-only media routes that accept user media or remote input, aligning them with the `media.create` permission and RBAC rate-limit boundary. Added route-contract and representative 403 regression coverage.
+
+Current-dev refresh (2026-07-04): rebased `codex/audit-media-processing-permissions-2026-07-04` onto `origin/dev` `09d9ec901e1d4548f7924f1c6bcefa963fadd9bd`; merge-base matches `origin/dev`. Current validation: `/Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest tldw_Server_API/tests/AuthNZ_Unit/test_media_processing_permissions_claims.py -q` passed with 11 tests; `/Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m bandit -r tldw_Server_API/app/api/v1/API_Deps/media_route_deps.py tldw_Server_API/app/api/v1/endpoints/media/process_audios.py tldw_Server_API/app/api/v1/endpoints/media/process_code.py tldw_Server_API/app/api/v1/endpoints/media/process_documents.py tldw_Server_API/app/api/v1/endpoints/media/process_ebooks.py tldw_Server_API/app/api/v1/endpoints/media/process_emails.py tldw_Server_API/app/api/v1/endpoints/media/process_mediawiki.py tldw_Server_API/app/api/v1/endpoints/media/process_pdfs.py tldw_Server_API/app/api/v1/endpoints/media/process_videos.py tldw_Server_API/app/api/v1/endpoints/media/process_web_scraping.py -f json -o /tmp/bandit_media_processing_permissions_origin_dev_09d9ec.json` reported 0 findings over 3222 LOC; `git diff --check HEAD~1..HEAD` passed. The two untracked watchlist template files remain unrelated and intentionally unstaged.
+
+Draft PR: https://github.com/rmusser01/tldw_server/pull/2623. PR remains draft because AI-authored PRs require a human-written Change summary before merge.
+2026-07-04 latest-dev refresh: rebased and validated PR #2623 on origin/dev 6b727b221e55646eba663a03571e38302f7fafc2. Tested head 229de29981b2. Verification: python -m pytest tldw_Server_API/tests/AuthNZ_Unit/test_media_processing_permissions_claims.py -q => 11 passed, 38 warnings; Bandit over media_route_deps.py and media processing endpoints => 0 findings over 3222 LOC; git diff --check HEAD~1..HEAD => clean. Two unrelated untracked watchlist template files remain intentionally unstaged.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Applied media-processing permission dependency coverage across the route family. Final refresh validated against origin/dev 6b727b221e55646eba663a03571e38302f7fafc2 with focused tests passing, Bandit clean on touched production scope, and whitespace check clean; unrelated untracked watchlist templates were left out of the PR.
+<!-- SECTION:FINAL_SUMMARY:END -->
