@@ -15,6 +15,7 @@ from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.core.http_client import afetch, create_async_client
 from tldw_Server_API.app.core.testing import is_test_mode
 from tldw_Server_API.app.core.Workflows.adapters._common import _extract_openai_content
 from tldw_Server_API.app.core.Workflows.adapters._registry import registry
@@ -24,6 +25,12 @@ from tldw_Server_API.app.core.Workflows.adapters.research._config import (
     LiteratureReviewConfig,
     ReferenceParseConfig,
 )
+
+
+async def _managed_afetch(**kwargs: Any) -> Any:
+    timeout = kwargs.get("timeout")
+    async with create_async_client(timeout=timeout) as client:
+        return await afetch(client=client, **kwargs)
 
 
 @registry.register(
@@ -43,8 +50,6 @@ async def run_doi_resolve_adapter(config: dict[str, Any], context: dict[str, Any
       - metadata: dict - Paper metadata
       - resolved: bool
     """
-    import httpx
-
     from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
 
     if callable(context.get("is_cancelled")) and context["is_cancelled"]():
@@ -91,32 +96,32 @@ async def run_doi_resolve_adapter(config: dict[str, Any], context: dict[str, Any
         }
 
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"https://doi.org/{doi}",
-                headers={"Accept": "application/vnd.citationstyles.csl+json"},
-                follow_redirects=True,
-                timeout=30,
-            )
-            response.raise_for_status()
-            data = response.json()
+        response = await _managed_afetch(
+            method="GET",
+            url=f"https://doi.org/{doi}",
+            headers={"Accept": "application/vnd.citationstyles.csl+json"},
+            allow_redirects=True,
+            timeout=30,
+        )
+        response.raise_for_status()
+        data = response.json()
 
-            metadata = {
-                "doi": doi,
-                "title": data.get("title", ""),
-                "authors": [
-                    f"{a.get('given', '')} {a.get('family', '')}".strip()
-                    for a in data.get("author", [])
-                ],
-                "container_title": data.get("container-title", ""),
-                "publisher": data.get("publisher", ""),
-                "issued": data.get("issued", {}).get("date-parts", [[]])[0],
-                "type": data.get("type", ""),
-                "abstract": data.get("abstract", ""),
-                "url": data.get("URL", ""),
-            }
+        metadata = {
+            "doi": doi,
+            "title": data.get("title", ""),
+            "authors": [
+                f"{a.get('given', '')} {a.get('family', '')}".strip()
+                for a in data.get("author", [])
+            ],
+            "container_title": data.get("container-title", ""),
+            "publisher": data.get("publisher", ""),
+            "issued": data.get("issued", {}).get("date-parts", [[]])[0],
+            "type": data.get("type", ""),
+            "abstract": data.get("abstract", ""),
+            "url": data.get("URL", ""),
+        }
 
-            return {"metadata": metadata, "resolved": True}
+        return {"metadata": metadata, "resolved": True}
 
     except Exception:
         logger.error("DOI resolve error")

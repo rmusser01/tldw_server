@@ -6,6 +6,7 @@ import ipaddress
 import json
 import math
 import os
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import lru_cache
@@ -650,10 +651,17 @@ def strict_token_counting_enabled(default: bool = False) -> bool:
 
 def _http_post(*, url: str, payload: dict[str, Any], headers: dict[str, str], timeout: float) -> Any:
     try:
-        import requests  # type: ignore
+        from tldw_Server_API.app.core.http_client import fetch
     except Exception as exc:
         raise TokenizerUnavailable("Provider tokenizer HTTP client unavailable") from exc
-    return requests.post(url, json=payload, headers=headers, timeout=timeout)
+    return fetch(
+        method="POST",
+        url=url,
+        json=payload,
+        headers=headers,
+        timeout=timeout,
+        allow_redirects=True,
+    )
 
 
 def normalize_provider_for_tokenizer(provider: str) -> str:
@@ -883,10 +891,8 @@ def _runtime_probe_exact_resolution(
         )
     finally:
         if original_timeout is not None:
-            try:
+            with suppress(Exception):
                 setattr(encoding, "timeout_seconds", original_timeout)
-            except Exception:
-                pass
 
     return resolution
 
