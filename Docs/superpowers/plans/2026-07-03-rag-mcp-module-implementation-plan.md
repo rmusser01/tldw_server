@@ -60,7 +60,7 @@ Do not modify in the first slice:
 - Modify: `tldw_Server_API/tests/RAG_NEW/unit/test_rag_unified_search_agent_defaults.py`
 - Modify: `tldw_Server_API/tests/RAG_NEW/integration/test_rag_source_health_endpoint.py`
 
-- [ ] **Step 1: Write failing helper extraction tests**
+- [x] **Step 1: Write failing helper extraction tests**
 
 Create `tldw_Server_API/tests/RAG_NEW/unit/test_rag_transport_helpers.py` with tests for:
 
@@ -91,7 +91,7 @@ def test_build_source_health_payload_uses_existing_paths_without_leaking_paths(m
 
 Also update existing tests to import `build_unified_pipeline_kwargs`, `resolve_existing_source_db_paths`, and source-health helpers from `tldw_Server_API.app.core.RAG.rag_service.transport` instead of monkeypatching `rag_unified`.
 
-- [ ] **Step 2: Run tests to verify failures**
+- [x] **Step 2: Run tests to verify failures**
 
 Run:
 
@@ -105,7 +105,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: FAIL because `rag_service.transport` does not exist and existing tests still target endpoint-local helpers.
 
-- [ ] **Step 3: Add `rag_service.transport`**
+- [x] **Step 3: Add `rag_service.transport`**
 
 Move or wrap these route-local helpers from `rag_unified.py` into `transport.py`:
 
@@ -130,13 +130,13 @@ Implementation notes:
 - `log_rag_queries_for_org_context()` should preserve best-effort behavior and never raise.
 - `rag_unified.py` should import these helpers and expose thin route wrappers only.
 
-- [ ] **Step 4: Run extraction tests to verify pass**
+- [x] **Step 4: Run extraction tests to verify pass**
 
 Run the same pytest command from Step 2.
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add \
@@ -156,7 +156,7 @@ git commit -m "refactor: share rag transport helpers"
 - Create: `tldw_Server_API/app/core/MCP_unified/modules/implementations/rag_module.py`
 - Create/Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_rag_module.py`
 
-- [ ] **Step 1: Write failing contract tests**
+- [x] **Step 1: Write failing contract tests**
 
 Add tests that import private helpers from `rag_module.py` until the module API stabilizes:
 
@@ -219,7 +219,7 @@ def test_compact_response_truncates_documents_and_preserves_citations():
     assert payload["metadata"]["max_content_chars"] == 3
 ```
 
-- [ ] **Step 2: Run tests to verify failures**
+- [x] **Step 2: Run tests to verify failures**
 
 Run:
 
@@ -231,7 +231,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: FAIL because `rag_module.py` and helpers do not exist.
 
-- [ ] **Step 3: Add contract helpers in `rag_module.py`**
+- [x] **Step 3: Add contract helpers in `rag_module.py`**
 
 Implement only pure helpers first:
 
@@ -283,13 +283,13 @@ def _build_mcp_rag_request(tool_name: str, arguments: dict[str, Any]) -> tuple[U
 
 Add `_compact_rag_response()`, `_answer_status()`, `_domain_error_payload()`, `_mcp_safe_search_agent_overrides()`, and `_unsupported_scope_warnings_or_error()` as pure functions. Keep all payloads JSON-serializable and avoid provider secrets, paths, and prompts.
 
-- [ ] **Step 4: Run contract tests to verify pass**
+- [x] **Step 4: Run contract tests to verify pass**
 
 Run the pytest command from Step 2.
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add \
@@ -306,7 +306,7 @@ git commit -m "feat: add rag mcp contract helpers"
 - Modify: `tldw_Server_API/app/core/MCP_unified/modules/implementations/rag_module.py`
 - Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_rag_module.py`
 
-- [ ] **Step 1: Write failing module tests**
+- [x] **Step 1: Write failing module tests**
 
 Add async tests for:
 
@@ -371,7 +371,7 @@ Also add tests for:
 - MCP execution forces out-of-scope Search-Agent and research defaults off even when config/profile defaults enable `enable_research_loop`, `search_url_scraping`, `enable_image_search`, `enable_video_search`, web fallback, or similar external provider behavior.
 - RAG-domain pipeline exceptions become structured `ok:false` payloads.
 
-- [ ] **Step 2: Run module tests to verify failures**
+- [x] **Step 2: Run module tests to verify failures**
 
 Run:
 
@@ -383,7 +383,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: FAIL because `RagModule.get_tools()` and `execute_tool()` are not implemented.
 
-- [ ] **Step 3: Implement `RagModule`**
+- [x] **Step 3: Implement `RagModule`**
 
 Implement:
 
@@ -431,13 +431,13 @@ Execution rules:
 - `context.db_paths` keys should accept existing MCP conventions (`media`, `chacha`, `prompts`, `kanban`) and map to RAG pipeline keys (`media_db_path`, `notes_db_path`, `character_db_path`, `prompts_db_path`, `kanban_db_path`).
 - Do not enable Search-Agent web/research loop flags, URL scraping, image search, or video search through MCP first-slice arguments.
 
-- [ ] **Step 4: Run module tests to verify pass**
+- [x] **Step 4: Run module tests to verify pass**
 
 Run the pytest command from Step 2.
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add \
@@ -459,7 +459,7 @@ git commit -m "feat: add rag mcp module"
 - Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_protocol_catalog_filter.py`
 - Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_config_safe_defaults.py` if category-map coverage needs extension.
 
-- [ ] **Step 1: Write failing registration/config tests**
+- [x] **Step 1: Write failing registration/config tests**
 
 Add tests:
 
@@ -531,7 +531,7 @@ async def test_catalog_membership_does_not_grant_rag_execute_permission():
 
 This test must prove catalogs reduce discovery noise only. They must not bypass `tools.execute:rag.*`, API-key scopes, MCP scopes, governance category checks, or module/source authorization.
 
-- [ ] **Step 2: Run registration/config tests to verify failures**
+- [x] **Step 2: Run registration/config tests to verify failures**
 
 Run:
 
@@ -545,7 +545,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: FAIL because `rag` is not configured yet.
 
-- [ ] **Step 3: Update config**
+- [x] **Step 3: Update config**
 
 Add to `mcp_modules.yaml` after `knowledge`:
 
@@ -585,13 +585,15 @@ If the policy file has an MCP category map, map `mcp.search` and `mcp.rag_genera
 
 Do not rely on tool metadata alone for MCP rate limiting. Keep metadata for governance/observability, but make runtime categories deterministic through `mcp_tool_categories.yaml`. `rag.answer` must require the configured `rag_generation` category; if that mapping or matching policy is missing, return a guarded configuration error and do not execute the tool under the runtime fallback category.
 
+Implementation note: the runtime category allowlist now recognizes `rag_generation`, so `rag.answer` cannot silently fall back to `read` when using the default module metadata. The YAML category map and `mcp.rag_generation` policy are still installed as the operator-visible configuration path.
+
 Add to `module_surface.py`:
 
 ```python
 "rag": ("read_only", "Run grounded retrieval and answer generation over configured knowledge sources."),
 ```
 
-- [ ] **Step 4: Run registration/config tests to verify pass**
+- [x] **Step 4: Run registration/config tests to verify pass**
 
 Run the pytest command from Step 2.
 
@@ -625,7 +627,7 @@ git commit -m "config: register rag mcp module"
 - Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_profile_presets.py` only if adding `rag.*` to built-in profile metadata exposes a missing-prefix test.
 - Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_protocol_allowed_tools.py` only if discovery/canExecute fixtures need `rag.*` coverage.
 
-- [ ] **Step 1: Write failing docs/discovery tests where applicable**
+- [x] **Step 1: Write failing docs/discovery tests where applicable**
 
 If built-in profile metadata is updated to include `rag.search` or `rag.answer`, add/update tests so `rag` is categorized and progressive disclosure limits still pass.
 
@@ -650,7 +652,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: PASS if no profile metadata changes are needed; otherwise FAIL until category fixtures are updated.
 
-- [ ] **Step 2: Update docs**
+- [x] **Step 2: Update docs**
 
 Add a concise `rag.*` section:
 
@@ -691,7 +693,7 @@ Add JSON-RPC snippets for:
 {"jsonrpc":"2.0","method":"tools/call","params":{"name":"rag.answer","arguments":{"query":"Summarize the evidence on contextual retrieval.", "sources":["media_db"], "include_documents":true}},"id":"rag-answer-1"}
 ```
 
-- [ ] **Step 3: Run targeted test suite**
+- [x] **Step 3: Run targeted test suite**
 
 Run:
 
@@ -711,7 +713,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 4: Run smoke through MCP protocol**
+- [x] **Step 4: Run smoke through MCP protocol**
 
 Add or run an automated smoke test that registers `RagModule` with a stub pipeline and calls:
 
@@ -729,7 +731,7 @@ Expected:
 
 Also add or run an automated HTTP facade smoke through `POST /api/v1/mcp/tools/execute` for `rag.search` with a stub server, asserting the existing wrapper contract remains intact.
 
-- [ ] **Step 5: Run Bandit on touched code scopes**
+- [x] **Step 5: Run Bandit on touched code scopes**
 
 Run:
 
@@ -743,7 +745,7 @@ source .venv/bin/activate && python -m bandit -r \
 
 Expected: exit 0 or no new findings in touched code. Fix new findings before continuing.
 
-- [ ] **Step 6: Commit final docs and hardening**
+- [x] **Step 6: Commit final docs and hardening**
 
 ```bash
 git add \

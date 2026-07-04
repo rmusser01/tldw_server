@@ -404,6 +404,7 @@ async def test_runtime_config_provider_observes_post_construction_get_config_pat
     [
         ("web", True, "network"),
         ("utility", False, "utility"),
+        ("rag_generation", False, "rag_generation"),
     ],
 )
 async def test_category_preserves_non_legacy_metadata_categories(

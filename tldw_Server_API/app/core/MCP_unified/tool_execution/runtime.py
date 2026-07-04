@@ -179,6 +179,7 @@ class ToolExecutionRuntime:
                         "browser",
                         "code",
                         "filesystem",
+                        "rag_generation",
                         "shell",
                         "search",
                         "tool_discovery",
