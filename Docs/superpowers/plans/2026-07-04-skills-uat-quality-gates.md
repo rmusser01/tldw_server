@@ -280,21 +280,23 @@ git commit -m "docs: add skills uat checklist"
 
 ## Task 5: Verification And Closeout
 
+**Status:** Complete.
+
 **Files:**
 - Modify: `backlog/tasks/task-530.14 - Implement-Skills-UAT-and-quality-gates.md`
 
-- [ ] **Step 1: Run deterministic Skills Playwright UAT**
+- [x] **Step 1: Run deterministic Skills Playwright UAT**
 
 Run:
 
 ```bash
 cd apps/tldw-frontend
-npx playwright test e2e/workflows/tier-5-specialized/skills.spec.ts --project=chromium --reporter=line
+npx playwright test e2e/workflows/tier-5-specialized/skills.spec.ts --project=tier-5 --reporter=line
 ```
 
 Expected: mocked UAT tests pass. Live-server smoke tests may skip if the backend is unavailable.
 
-- [ ] **Step 2: Run focused Vitest only if component files changed**
+- [x] **Step 2: Run focused Vitest only if component files changed**
 
 If only E2E/docs changed, skip this and record why.
 
@@ -305,7 +307,7 @@ cd apps/tldw-frontend
 bunx vitest run ../packages/ui/src/components/Option/Skills/__tests__/Manager.test.tsx ../packages/ui/src/components/Option/Skills/__tests__/SkillPreview.test.tsx
 ```
 
-- [ ] **Step 3: Run diff checks**
+- [x] **Step 3: Run diff checks**
 
 Run:
 
@@ -316,7 +318,7 @@ git status --short
 
 Expected: no whitespace errors; only intended files changed.
 
-- [ ] **Step 4: Bandit decision**
+- [x] **Step 4: Bandit decision**
 
 If no Python files changed, record:
 
@@ -326,11 +328,11 @@ Bandit skipped: frontend E2E and docs-only task.
 
 If Python files changed, run scoped Bandit.
 
-- [ ] **Step 5: Update Backlog final notes**
+- [x] **Step 5: Update Backlog final notes**
 
 Record verification commands, known skips, and final summary.
 
-- [ ] **Step 6: Commit closeout**
+- [x] **Step 6: Commit closeout**
 
 ```bash
 git add "backlog/tasks/task-530.14 - Implement-Skills-UAT-and-quality-gates.md"

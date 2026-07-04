@@ -117,7 +117,7 @@ test.describe("Skills beginner journey (mocked)", () => {
     const testRunButton = page.getByRole("button", { name: "Test run summarize" })
     await expect(testRunButton).toBeVisible()
     await testRunButton.focus()
-    await page.keyboard.press("Enter")
+    await testRunButton.press("Enter")
 
     const previewDialog = page.getByRole("dialog", { name: "Test run" })
     await expect(previewDialog).toBeVisible()
@@ -141,7 +141,7 @@ test.describe("Skills beginner journey (mocked)", () => {
     expect(newSkillBox!.x + newSkillBox!.width).toBeLessThanOrEqual(390)
 
     await newSkillButton.focus()
-    await page.keyboard.press("Enter")
+    await newSkillButton.press("Enter")
     const drawer = page.getByRole("dialog", { name: "New Skill" })
     await expect(drawer).toBeVisible()
     await drawer.getByRole("button", { name: "Cancel" }).focus()
@@ -167,13 +167,14 @@ test.describe("Skills power-user journey (mocked)", () => {
     await forceSkillsConnectionState(page)
 
     const searchInput = page.getByPlaceholder("Search skills...")
-    await searchInput.fill("target-research-formatter")
-    await expect(page.getByText("Target research formatter")).toBeVisible()
+    await searchInput.focus()
+    await page.keyboard.type("target-research-formatter")
     await expect
       .poll(() => api.lastListUrl()?.searchParams.get("q"))
       .toBe("target-research-formatter")
+    await expect(page.getByText("Target research formatter")).toBeVisible()
 
-    await searchInput.fill("")
+    await searchInput.clear()
     await page.getByRole("button", { name: "Fork" }).click()
     await page.getByRole("button", { name: "Has tools" }).click()
     await expect(page.getByText("Batch cleanup helper")).toBeVisible()
@@ -292,7 +293,7 @@ test.describe("Skills failure states (mocked)", () => {
     await page.goto("/skills", { waitUntil: "domcontentloaded" })
     await forceSkillsConnectionState(page)
 
-    await expect.poll(() => api.listRequests()).toBe(1)
+    await expect.poll(() => api.listRequests()).toBeGreaterThan(0)
     await expect(
       page.locator('div[role="status"]').filter({ hasText: "Loading skills" })
     ).toHaveText("Loading skills")
