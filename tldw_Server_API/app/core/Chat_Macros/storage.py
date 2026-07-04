@@ -66,13 +66,13 @@ class ChatMacroStorage:
         name = self._validate_macro_name(name)
         macro_dir = self._existing_macro_dir(name)
         definition, raw_bytes, file_bytes = self._validate_payload(name, raw, supporting_files)
+        existing_file_bytes = self._validate_existing_macro_files(macro_dir)
 
         if supporting_files is not None:
-            self._validate_existing_macro_files(macro_dir)
             self._replace_macro_directory(macro_dir, raw_bytes, file_bytes)
         else:
             self._replace_regular_file_no_follow(macro_dir / MACRO_FILENAME, raw_bytes)
-            file_bytes = self._read_supporting_file_bytes(macro_dir)
+            file_bytes = existing_file_bytes
         return self._stored(name, definition, raw, file_bytes)
 
     def read(self, name: str) -> StoredMacro:
@@ -229,9 +229,9 @@ class ChatMacroStorage:
             if fd >= 0:
                 os.close(fd)
 
-    def _validate_existing_macro_files(self, macro_dir: Path) -> None:
+    def _validate_existing_macro_files(self, macro_dir: Path) -> dict[str, bytes]:
         self._read_regular_file_bytes_no_follow(macro_dir / MACRO_FILENAME)
-        self._read_supporting_file_bytes(macro_dir)
+        return self._read_supporting_file_bytes(macro_dir)
 
     def _replace_macro_directory(self, macro_dir: Path, raw_bytes: bytes, supporting_files: dict[str, bytes]) -> None:
         staging_path = Path(tempfile.mkdtemp(prefix=f".{macro_dir.name}.new.", dir=self.macros_dir))
