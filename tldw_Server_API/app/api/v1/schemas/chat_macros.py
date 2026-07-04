@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 MacroRunMode = Literal["background", "chat_native", "foreground"]
@@ -41,8 +41,17 @@ class ChatMacroCreateRequest(BaseModel):
 
 
 class ChatMacroUpdateRequest(BaseModel):
-    raw: str = Field(min_length=1, max_length=500_000)
+    raw: str | None = Field(default=None, min_length=1, max_length=500_000)
     supporting_files: dict[str, str] | None = None
+    enabled: bool | None = None
+
+    @model_validator(mode="after")
+    def _requires_update_body(self) -> "ChatMacroUpdateRequest":
+        if self.raw is None and self.enabled is None:
+            raise ValueError("raw or enabled is required")
+        if self.raw is None and self.supporting_files is not None:
+            raise ValueError("supporting_files requires raw")
+        return self
 
 
 class ChatMacroValidateRequest(BaseModel):

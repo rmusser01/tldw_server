@@ -768,11 +768,18 @@ git commit -m "feat: run chat macros through jobs"
 - Create: `apps/packages/ui/src/components/Option/Settings/__tests__/ChatMacrosSettings.test.tsx`
 - Modify: `apps/packages/ui/src/routes/option-settings-route-registry.tsx`
 - Modify: `apps/packages/ui/src/routes/route-registry.tsx`
+- Modify: `apps/packages/ui/src/components/Layouts/settings-nav-config.ts`
+- Modify: `apps/packages/ui/src/assets/locale/en/settings.json`
+- Modify: `apps/packages/ui/src/services/tldw/openapi-guard.ts`
+- Modify: `tldw_Server_API/app/api/v1/schemas/chat_macros.py`
+- Modify: `tldw_Server_API/app/api/v1/endpoints/chat_macros.py`
+- Modify: `tldw_Server_API/app/core/Chat_Macros/service.py`
+- Test: `tldw_Server_API/tests/Chat_Macros/integration/test_chat_macros_api.py`
 - Test: `apps/packages/ui/src/components/Option/ChatWorkspace/__tests__/MacroStatusCard.test.tsx`
 - Test: `apps/packages/ui/src/components/Option/ChatWorkspace/__tests__/MacroRunDetailDrawer.test.tsx`
 - Test: `apps/packages/ui/src/components/Option/ChatWorkspace/__tests__/WorkspaceChatPanel.test.tsx`
 
-- [ ] **Step 1: Write failing service tests**
+- [x] **Step 1: Write failing service tests**
 
 Mock `apiSend` and verify:
 
@@ -787,7 +794,7 @@ await setChatMacroEnabled("wrapup", false)
 expect(apiSend).toHaveBeenCalledWith({ path: "/api/v1/chat/macros/wrapup", method: "PUT", body: expect.objectContaining({ enabled: false }) })
 ```
 
-- [ ] **Step 2: Write failing component tests**
+- [x] **Step 2: Write failing component tests**
 
 Cover:
 
@@ -797,7 +804,7 @@ Cover:
 - `WorkspaceChatPanel` chooses `MacroStatusCard` when `message.metadataExtra.chat_macro` is present.
 - `ChatMacrosSettings` lists macros, toggles built-ins enabled/disabled, clones `/wrapup`, edits default output profile settings, and shows validation errors from the backend.
 
-- [ ] **Step 3: Run frontend tests and verify failure**
+- [x] **Step 3: Run frontend tests and verify failure**
 
 Run:
 
@@ -813,7 +820,7 @@ bunx vitest run \
 
 Expected: missing module/component failures.
 
-- [ ] **Step 4: Implement `chat-macros.ts`**
+- [x] **Step 4: Implement `chat-macros.ts`**
 
 Export:
 
@@ -833,7 +840,7 @@ Export:
 
 Use `apiSend` and keep payload types local until generated OpenAPI types are refreshed.
 
-- [ ] **Step 5: Implement settings surface**
+- [x] **Step 5: Implement settings surface**
 
 `ChatMacrosSettings` should provide the minimal required manager from the spec:
 
@@ -846,11 +853,11 @@ Use `apiSend` and keep payload types local until generated OpenAPI types are ref
 
 This first settings surface intentionally defers full user macro authoring/editing polish beyond clone, enable/disable, validation, and settings/output-profile editing. The advanced editor can land after the backend run path and minimal manager are stable.
 
-- [ ] **Step 6: Register settings route**
+- [x] **Step 6: Register settings route**
 
 Add `/settings/chat-macros` to `option-settings-route-registry.tsx`, and mirror it in `route-registry.tsx` if that registry still defines the active options route list. Include route tests if existing route metadata tests require coverage.
 
-- [ ] **Step 7: Implement workspace chat components**
+- [x] **Step 7: Implement workspace chat components**
 
 Use existing design language in `WorkspaceChatPanel`:
 
@@ -860,7 +867,7 @@ Use existing design language in `WorkspaceChatPanel`:
 - Run detail drawer fetches run detail lazily.
 - Do not expose raw branch transcripts if backend redacts them.
 
-- [ ] **Step 8: Wire `WorkspaceChatPanel`**
+- [x] **Step 8: Wire `WorkspaceChatPanel`**
 
 When a message has macro metadata:
 
@@ -868,7 +875,7 @@ When a message has macro metadata:
 - Render normal `PlaygroundMessage` for final assistant content, with a compact macro metadata control.
 - Preserve existing non-macro message behavior.
 
-- [ ] **Step 9: Run frontend tests**
+- [x] **Step 9: Run frontend tests**
 
 Run:
 
@@ -884,12 +891,19 @@ bunx vitest run \
 
 Expected: PASS.
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add apps/packages/ui/src/services/chat-macros.ts apps/packages/ui/src/services/__tests__/chat-macros.test.ts apps/packages/ui/src/components/Option/Settings/ChatMacrosSettings.tsx apps/packages/ui/src/components/Option/Settings/__tests__/ChatMacrosSettings.test.tsx apps/packages/ui/src/routes/option-settings-route-registry.tsx apps/packages/ui/src/routes/route-registry.tsx apps/packages/ui/src/components/Option/ChatWorkspace/MacroStatusCard.tsx apps/packages/ui/src/components/Option/ChatWorkspace/MacroRunDetailDrawer.tsx apps/packages/ui/src/components/Option/ChatWorkspace/WorkspaceChatPanel.tsx apps/packages/ui/src/components/Option/ChatWorkspace/__tests__/MacroStatusCard.test.tsx apps/packages/ui/src/components/Option/ChatWorkspace/__tests__/MacroRunDetailDrawer.test.tsx apps/packages/ui/src/components/Option/ChatWorkspace/__tests__/WorkspaceChatPanel.test.tsx
 git commit -m "feat: add chat macro frontend controls"
 ```
+
+**Task 8 verification notes (2026-07-03/04):**
+
+- Red run captured the intended missing service/component failures plus the missing workspace macro metadata branch.
+- Added the minimal chat macro UI service, settings manager, status card, lazy run-detail drawer, workspace status rendering, settings route, settings nav entry, and OpenAPI path guard entries.
+- Added a backend compatibility fix so `PUT /api/v1/chat/macros/{name}` accepts enabled-only updates for built-in and user macros; this keeps the frontend toggle from depending on full YAML replacement.
+- Verification passed: frontend macro/nav focused suite 6 files / 44 tests; backend chat macro API integration suite 6 tests; OpenAPI path verifier; `compileall` for touched backend files; `git diff --check`; Bandit `/tmp/bandit_chat_macros_task8.json` with `errors: []` and `results: []`.
 
 ## Task 9: End-To-End Verification, Security Sweep, And Docs
 

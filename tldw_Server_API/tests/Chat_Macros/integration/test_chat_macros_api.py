@@ -178,6 +178,29 @@ def test_macro_crud_validate_and_clone(api_client: MacroApiClient):
     assert cloned.json()["definition"]["command"] == "my_wrapup"
 
 
+def test_update_macro_enabled_state_without_replacing_definition(api_client: MacroApiClient):
+    disabled_builtin = api_client.client.put(f"{PREFIX}/wrapup", json={"enabled": False})
+    assert disabled_builtin.status_code == 200, disabled_builtin.text
+    assert disabled_builtin.json()["summary"]["enabled"] is False
+    assert disabled_builtin.json()["definition"]["name"] == "wrapup"
+
+    enabled_builtin = api_client.client.put(f"{PREFIX}/wrapup", json={"enabled": True})
+    assert enabled_builtin.status_code == 200, enabled_builtin.text
+    assert enabled_builtin.json()["summary"]["enabled"] is True
+
+    created = api_client.client.post(
+        PREFIX,
+        json={"name": "daily_digest", "raw": _macro_yaml()},
+    )
+    assert created.status_code == 201, created.text
+
+    disabled_user = api_client.client.put(f"{PREFIX}/daily_digest", json={"enabled": False})
+    assert disabled_user.status_code == 200, disabled_user.text
+    assert disabled_user.json()["summary"]["enabled"] is False
+    assert disabled_user.json()["definition"]["command"] == "daily_digest"
+    assert "enabled: false" in disabled_user.json()["raw"]
+
+
 def test_run_detail_and_cancel(api_client: MacroApiClient):
     defaulted = api_client.client.post(
         f"{PREFIX}/run",

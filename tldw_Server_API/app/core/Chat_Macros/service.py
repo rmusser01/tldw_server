@@ -98,6 +98,18 @@ class ChatMacrosService:
         self._sync_registry_catalog(self._catalog_items())
         return item
 
+    def set_macro_enabled(self, name: str, enabled: bool) -> ChatMacroCatalogItem:
+        if self._load_builtin(name) is not None:
+            return self.set_builtin_enabled(name, enabled)
+
+        stored = self.storage.read(name)
+        loaded = yaml.safe_load(stored.raw)
+        if not isinstance(loaded, dict):
+            raise MacroValidationError("macro definition must be a YAML mapping")
+        loaded["enabled"] = enabled
+        raw = yaml.safe_dump(loaded, sort_keys=False)
+        return self.update_macro(name, raw)
+
     def delete_macro(self, name: str) -> None:
         if self._builtin_item(name) is not None:
             raise MacroStorageError("built-in macros are immutable")

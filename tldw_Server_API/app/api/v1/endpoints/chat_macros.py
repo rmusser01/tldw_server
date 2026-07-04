@@ -406,7 +406,10 @@ async def update_chat_macro(
     service: ChatMacrosService = Depends(get_chat_macros_service),
 ) -> ChatMacroDetail:
     try:
-        item = service.update_macro(name, request.raw, request.supporting_files)
+        if request.raw is None:
+            item = service.set_macro_enabled(name, bool(request.enabled))
+        else:
+            item = service.update_macro(name, request.raw, request.supporting_files)
         return _detail(service, item)
     except (MacroNotFoundError, MacroStorageError, MacroValidationError) as exc:
         _raise_macro_http(exc)

@@ -4,27 +4,13 @@ title: Implement Chat Macros v1 and wrapup command
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: 2026-07-04 06:26
+updated_date: '2026-07-04 06:48'
 labels: []
 dependencies: []
 documentation:
-- Docs/superpowers/specs/2026-07-03-chat-macros-design.md
-- Docs/superpowers/plans/2026-07-03-chat-macros-implementation-plan.md
+  - Docs/superpowers/specs/2026-07-03-chat-macros-design.md
+  - Docs/superpowers/plans/2026-07-03-chat-macros-implementation-plan.md
 priority: medium
-modified_files:
-- Docs/superpowers/plans/2026-07-03-chat-macros-implementation-plan.md
-- tldw_Server_API/app/core/Chat/command_router.py
-- tldw_Server_API/app/api/v1/endpoints/chat.py
-- tldw_Server_API/tests/Chat_NEW/unit/test_command_router.py
-- tldw_Server_API/tests/Chat_NEW/integration/test_chat_completions_api.py
-- tldw_Server_API/app/api/v1/endpoints/chat_macros.py
-- tldw_Server_API/app/core/Chat_Macros/jobs.py
-- tldw_Server_API/app/services/chat_macros_jobs_worker.py
-- tldw_Server_API/app/services/startup_content_jobs_pollers.py
-- tldw_Server_API/tests/Chat_Macros/integration/test_chat_macros_api.py
-- tldw_Server_API/tests/Chat_Macros/unit/test_macro_jobs.py
-- tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
-- tldw_Server_API/tests/Services/test_startup_content_jobs_pollers.py
 ---
 
 ## Description
@@ -79,6 +65,8 @@ Task 5 implementation committed as 969c771070 (feat: route chat macro slash comm
 Task 6 complete: added redacted macro context snapshots, ACP branch capability/fallback decisions, branch runner seams, and the ChatMacroExecutor for preset/custom-question planning, sync/include-branches enforcement, fail-early caps, branch concurrency/retry/cancellation, redacted failure persistence, merge rendering, final output persistence, and idempotent post-back claim metadata. Touched files: tldw_Server_API/app/core/Chat_Macros/context_snapshot.py, tldw_Server_API/app/core/Chat_Macros/acp_adapter.py, tldw_Server_API/app/core/Chat_Macros/branch_runner.py, tldw_Server_API/app/core/Chat_Macros/executor.py, tldw_Server_API/app/core/Chat_Macros/models.py, tldw_Server_API/app/core/Chat_Macros/output_profiles.py, tldw_Server_API/app/core/Chat_Macros/builtin/wrapup/MACRO.yaml, tldw_Server_API/tests/Chat_Macros/unit/test_macro_executor.py, tldw_Server_API/tests/Chat_Macros/unit/test_acp_adapter.py, Docs/superpowers/plans/2026-07-03-chat-macros-implementation-plan.md. Reviewer re-review found no findings; residual risk is real Jobs/LLM/post-back integration in later slices. Verification: focused executor/ACP suite 29 passed, 3 warnings; full Chat_Macros suite 72 passed, 4 warnings; command/chat regression slice 50 passed, 9 skipped, 5 warnings; compileall exit 0; git diff --check exit 0; Bandit /tmp/bandit_chat_macros_task6_final.json errors/results empty.
 
 Task 7 complete: added Chat Macros Jobs enqueue/handler/cancellation/post-back integration, chat_macros_jobs_worker service, startup poller registration, and API/chat /wrapup enqueue wiring. Direct REST runs and /wrapup now require a Jobs manager instead of leaving unexecutable pending runs; cancellation handling tolerates incomplete job payloads while still finalizing Jobs cancellation. Touched files: tldw_Server_API/app/core/Chat_Macros/jobs.py, tldw_Server_API/app/services/chat_macros_jobs_worker.py, tldw_Server_API/app/services/startup_content_jobs_pollers.py, tldw_Server_API/app/api/v1/endpoints/chat_macros.py, tldw_Server_API/app/api/v1/endpoints/chat.py, tests/Chat_Macros/unit/test_macro_jobs.py, tests/Services/test_chat_macros_jobs_worker_startup.py, tests/Services/test_startup_content_jobs_pollers.py, tests/Chat_Macros/integration/test_chat_macros_api.py, tests/Chat_NEW/integration/test_chat_completions_api.py, Docs/superpowers/plans/2026-07-03-chat-macros-implementation-plan.md. Verification: focused enqueue regression 2 passed/5 warnings; missing Jobs and malformed cancellation regressions 3 passed/5 warnings; full Chat_Macros plus /wrapup Chat_NEW slice 85 passed/5 warnings; startup/service worker suite 37 passed/3 warnings; compileall exit 0; git diff --check exit 0; Bandit /tmp/bandit_chat_macros_task7.json errors/results empty. Residual risk: worker uses a conservative unavailable branch runner until real LLM/ACP branch execution is wired into the Jobs runtime.
+
+Task 8 complete: added the minimal chat macro frontend service, settings manager at /settings/chat-macros, settings navigation entry, status card, lazy run-detail drawer, workspace macro status rendering, OpenAPI path guard entries, and tests. Added backend enabled-only update support for PUT /api/v1/chat/macros/{name} so the UI toggle works for built-in and user macros without full YAML replacement. Verification: frontend macro/nav suite 6 files / 44 tests passed; backend chat macro API integration suite 6 tests passed; bun run verify:openapi passed with existing reviewed exceptions only; compileall passed for touched backend files; git diff --check passed; Bandit /tmp/bandit_chat_macros_task8.json errors/results empty.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
