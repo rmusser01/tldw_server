@@ -63,6 +63,17 @@ def test_from_mapping_uses_safe_source_sync_defaults() -> None:
     assert settings.persist_url_query_strings is False  # nosec B101
 
 
+def test_from_mapping_uses_safe_source_discovery_defaults() -> None:
+    settings = DocsSettings.from_mapping({})
+
+    assert settings.enable_source_discovery is False  # nosec B101
+    assert settings.max_discovery_pages == 25  # nosec B101
+    assert settings.max_discovery_depth == 1  # nosec B101
+    assert settings.max_discovery_sitemaps == 3  # nosec B101
+    assert settings.discovery_apply_default == "register"  # nosec B101
+    assert settings.discovery_same_origin_only is True  # nosec B101
+
+
 def test_from_mapping_parses_url_acquisition_values() -> None:
     settings = DocsSettings.from_mapping(
         {
@@ -116,6 +127,26 @@ def test_from_mapping_parses_source_sync_values() -> None:
     assert settings.persist_url_query_strings is True  # nosec B101
 
 
+def test_from_mapping_parses_source_discovery_values() -> None:
+    settings = DocsSettings.from_mapping(
+        {
+            "enable_source_discovery": "true",
+            "max_discovery_pages": "7",
+            "max_discovery_depth": "1",
+            "max_discovery_sitemaps": "2",
+            "discovery_apply_default": "register_and_ingest",
+            "discovery_same_origin_only": "false",
+        }
+    )
+
+    assert settings.enable_source_discovery is True  # nosec B101
+    assert settings.max_discovery_pages == 7  # nosec B101
+    assert settings.max_discovery_depth == 1  # nosec B101
+    assert settings.max_discovery_sitemaps == 2  # nosec B101
+    assert settings.discovery_apply_default == "register_and_ingest"  # nosec B101
+    assert settings.discovery_same_origin_only is False  # nosec B101
+
+
 def test_from_mapping_parses_default_scope() -> None:
     settings = DocsSettings.from_mapping({"default_scope": {"owner_scope": "owner-a", "profile_scope": "profile-a"}})
 
@@ -132,6 +163,12 @@ def test_from_mapping_rejects_unknown_web_source_profile(profile: str) -> None:
 def test_from_mapping_rejects_unknown_default_stale_policy(value: str) -> None:
     with pytest.raises(ValueError, match="default_stale_policy"):
         DocsSettings.from_mapping({"default_stale_policy": value})
+
+
+@pytest.mark.parametrize("value", ["", "crawl", "register+ingest"])
+def test_from_mapping_rejects_unknown_discovery_apply_default(value: str) -> None:
+    with pytest.raises(ValueError, match="discovery_apply_default"):
+        DocsSettings.from_mapping({"discovery_apply_default": value})
 
 
 @pytest.mark.parametrize("field", ["max_url_redirects", "max_url_body_bytes"])

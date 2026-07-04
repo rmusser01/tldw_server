@@ -12,6 +12,10 @@ SyncMode = Literal["dry_run", "apply"]
 StalePolicy = Literal["report", "tombstone"]
 SyncItemStatus = Literal["created", "updated", "unchanged", "missing", "tombstoned", "failed", "skipped"]
 SyncRunStatus = Literal["completed", "partial", "skipped", "denied", "failed"]
+DiscoveryKind = Literal["auto", "sitemap", "page_links"]
+DiscoveryMode = Literal["dry_run", "apply"]
+DiscoveryApplyAction = Literal["register", "ingest", "register_and_ingest"]
+DiscoveryCandidateStatus = Literal["accepted", "duplicate", "denied", "skipped", "ingested", "failed"]
 
 
 @dataclass(frozen=True)
@@ -89,6 +93,22 @@ class SyncSourceRequest:
     max_pages: int | None = None
     stale_policy: StalePolicy = "report"
     force: bool = False
+
+
+@dataclass(frozen=True)
+class DiscoverSourceRequest:
+    """Request one bounded sitemap or page-link discovery run."""
+
+    url: str
+    kind: DiscoveryKind = "auto"
+    mode: DiscoveryMode = "dry_run"
+    apply_action: DiscoveryApplyAction | None = None
+    max_pages: int | None = None
+    max_depth: int | None = None
+    collections: tuple[str, ...] = ()
+    keywords: tuple[str, ...] = ()
+    title: str | None = None
+    include_seed: bool = False
 
 
 @dataclass(frozen=True)

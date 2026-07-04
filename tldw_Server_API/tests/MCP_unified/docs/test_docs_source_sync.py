@@ -604,6 +604,333 @@ def test_provider_sync_source_returns_stable_unsupported_response_for_sitemap(tm
     assert result["counts"] == ZERO_SYNC_COUNTS  # nosec B101
 
 
+def test_url_sitemap_sync_apply_ingests_current_candidates(tmp_path: Path) -> None:
+    store = DocsCatalogStore(tmp_path / "docs.db")
+    store.migrate()
+    scope = AccessScope()
+    source_id = store.upsert_source(
+        scope=scope,
+        source_type="url_sitemap",
+        canonical_uri="https://example.com/sitemap.xml",
+        display_name="Example sitemap",
+        source_path=None,
+        source_url="https://example.com/sitemap.xml",
+        redacted_source_url="https://example.com/sitemap.xml",
+        policy_profile="locked_down",
+        sync_enabled=True,
+        metadata={"default_keywords": ["docs"], "default_collections": ["Reference"]},
+    )
+    settings = DocsSettings.from_mapping(
+        {
+            "db_path": str(tmp_path / "docs.db"),
+            "enable_web_acquisition": True,
+            "sitemap_sync_enabled": True,
+            "web_source_profile": "locked_down",
+            "allowed_url_prefixes": ("https://example.com/sitemap.xml", "https://example.com/docs/"),
+        }
+    )
+    resolver = FakeResolver({"example.com": ["93.184.216.34"]})
+    transport = FakeTransport(
+        [
+            FetchResponse(
+                status_code=200,
+                headers={"content-type": "application/xml"},
+                body_chunks=[b"<urlset><url><loc>https://example.com/docs/a</loc></url></urlset>"],
+            ),
+            FetchResponse(
+                status_code=200,
+                headers={"content-type": "text/plain"},
+                body_chunks=[b"alpha sync body"],
+            ),
+        ]
+    )
+    service = DocsSourceSyncService(settings=settings, store=store, resolver=resolver, transport=transport)
+
+    result = service.sync_source(scope=scope, request=SyncSourceRequest(source_id=source_id, mode="apply"))
+
+    assert result["status"] == "completed"  # nosec B101
+    assert result["counts"]["created"] == 1  # nosec B101
+    assert store.search_chunks(scope=scope, query="alpha", limit=10)  # nosec B101
+    assert _document_count(store.list_keywords(scope), "docs") == 1  # nosec B101
+    assert _document_count(store.list_collections(scope), "Reference") == 1  # nosec B101
+
+
+def test_url_sitemap_sync_dry_run_does_not_mutate(tmp_path: Path) -> None:
+    store = DocsCatalogStore(tmp_path / "docs.db")
+    store.migrate()
+    scope = AccessScope()
+    source_id = store.upsert_source(
+        scope=scope,
+        source_type="url_sitemap",
+        canonical_uri="https://example.com/sitemap.xml",
+        display_name="Example sitemap",
+        source_path=None,
+        source_url="https://example.com/sitemap.xml",
+        redacted_source_url="https://example.com/sitemap.xml",
+        policy_profile="locked_down",
+        sync_enabled=True,
+        metadata={"default_keywords": ["docs"], "default_collections": ["Reference"]},
+    )
+    settings = DocsSettings.from_mapping(
+        {
+            "db_path": str(tmp_path / "docs.db"),
+            "enable_web_acquisition": True,
+            "sitemap_sync_enabled": True,
+            "web_source_profile": "locked_down",
+            "allowed_url_prefixes": ("https://example.com/sitemap.xml", "https://example.com/docs/"),
+        }
+    )
+    resolver = FakeResolver({"example.com": ["93.184.216.34"]})
+    transport = FakeTransport(
+        [
+            FetchResponse(
+                status_code=200,
+                headers={"content-type": "application/xml"},
+                body_chunks=[b"<urlset><url><loc>https://example.com/docs/a</loc></url></urlset>"],
+            ),
+            FetchResponse(
+                status_code=200,
+                headers={"content-type": "text/plain"},
+                body_chunks=[b"alpha sync body"],
+            ),
+        ]
+    )
+    service = DocsSourceSyncService(settings=settings, store=store, resolver=resolver, transport=transport)
+
+    result = service.sync_source(scope=scope, request=SyncSourceRequest(source_id=source_id, mode="dry_run"))
+
+    assert result["status"] == "completed"  # nosec B101
+    assert result["counts"]["created"] == 1  # nosec B101
+    assert store.status()["counts"]["documents"] == 0  # nosec B101
+    assert store.source_document_links(scope=scope, source_id=source_id) == []  # nosec B101
+    assert store.status()["counts"]["sync_runs"] == 0  # nosec B101
+
+
+def test_url_sitemap_sync_preserves_skipped_candidate_reason(tmp_path: Path) -> None:
+    store = DocsCatalogStore(tmp_path / "docs.db")
+    store.migrate()
+    scope = AccessScope()
+    source_id = store.upsert_source(
+        scope=scope,
+        source_type="url_sitemap",
+        canonical_uri="https://example.com/sitemap.xml",
+        display_name="Example sitemap",
+        source_path=None,
+        source_url="https://example.com/sitemap.xml",
+        redacted_source_url="https://example.com/sitemap.xml",
+        policy_profile="locked_down",
+        sync_enabled=True,
+        metadata={},
+    )
+    settings = DocsSettings.from_mapping(
+        {
+            "db_path": str(tmp_path / "docs.db"),
+            "enable_web_acquisition": True,
+            "sitemap_sync_enabled": True,
+            "web_source_profile": "locked_down",
+            "allowed_url_prefixes": ("https://example.com/sitemap.xml", "https://example.com/docs/"),
+            "persist_url_query_strings": False,
+        }
+    )
+    service = DocsSourceSyncService(
+        settings=settings,
+        store=store,
+        resolver=FakeResolver({"example.com": ["93.184.216.34"]}),
+        transport=FakeTransport(
+            [
+                FetchResponse(
+                    status_code=200,
+                    headers={"content-type": "application/xml"},
+                    body_chunks=[b"<urlset><url><loc>https://example.com/docs/a?token=secret</loc></url></urlset>"],
+                )
+            ]
+        ),
+    )
+
+    result = service.sync_source(scope=scope, request=SyncSourceRequest(source_id=source_id, mode="dry_run"))
+
+    assert result["counts"]["skipped"] == 1  # nosec B101
+    assert result["items"][0]["status"] == "skipped"  # nosec B101
+    assert result["items"][0]["reason_code"] == "candidate_query_not_persisted"  # nosec B101
+
+
+def test_url_sitemap_sync_tombstones_missing_links_only_in_apply_mode(tmp_path: Path) -> None:
+    store = DocsCatalogStore(tmp_path / "docs.db")
+    store.migrate()
+    scope = AccessScope()
+    settings = DocsSettings.from_mapping(
+        {
+            "db_path": str(tmp_path / "docs.db"),
+            "enable_web_acquisition": True,
+            "sitemap_sync_enabled": True,
+            "web_source_profile": "locked_down",
+            "allowed_url_prefixes": (
+                "https://example.com/sitemap.xml",
+                "https://example.com/docs/old",
+                "https://example.com/docs/new",
+            ),
+        }
+    )
+    source_id = store.upsert_source(
+        scope=scope,
+        source_type="url_sitemap",
+        canonical_uri="https://example.com/sitemap.xml",
+        display_name="Example sitemap",
+        source_path=None,
+        source_url="https://example.com/sitemap.xml",
+        redacted_source_url="https://example.com/sitemap.xml",
+        policy_profile="locked_down",
+        sync_enabled=True,
+        metadata={},
+    )
+    resolver = FakeResolver({"example.com": ["93.184.216.34"]})
+    acquisition = DocsAcquisitionService(
+        settings=settings,
+        store=store,
+        resolver=resolver,
+        transport=FakeTransport(
+            [FetchResponse(status_code=200, headers={"content-type": "text/plain"}, body_chunks=[b"old sitemap body"])]
+        ),
+    )
+    old_ingested = acquisition.ingest_url(scope=scope, url="https://example.com/docs/old")
+    old_doc = store.get_document(scope, old_ingested["document"]["id"], mode="metadata")
+    store.link_source_document(
+        scope=scope,
+        source_id=source_id,
+        document_id=old_ingested["document"]["id"],
+        source_item_uri="https://example.com/docs/old",
+        status="active",
+        last_hash=old_doc["content_hash"],
+        metadata={"importer": "url_sitemap"},
+    )
+    service = DocsSourceSyncService(
+        settings=settings,
+        store=store,
+        resolver=resolver,
+        transport=FakeTransport(
+            [
+                FetchResponse(
+                    status_code=200,
+                    headers={"content-type": "application/xml"},
+                    body_chunks=[b"<urlset><url><loc>https://example.com/docs/new</loc></url></urlset>"],
+                ),
+                FetchResponse(
+                    status_code=200,
+                    headers={"content-type": "text/plain"},
+                    body_chunks=[b"new sitemap body"],
+                ),
+            ]
+        ),
+    )
+
+    result = service.sync_source(
+        scope=scope,
+        request=SyncSourceRequest(source_id=source_id, mode="apply", stale_policy="tombstone"),
+    )
+    links = store.source_document_links(scope=scope, source_id=source_id)
+    old_links = [link for link in links if link["source_item_uri"] == "https://example.com/docs/old"]
+
+    assert result["counts"]["created"] == 1  # nosec B101
+    assert result["counts"]["tombstoned"] == 1  # nosec B101
+    assert old_links[0]["status"] == "tombstoned"  # nosec B101
+    assert store.search_chunks(scope=scope, query="old", limit=10) == []  # nosec B101
+    assert store.search_chunks(scope=scope, query="new", limit=10)  # nosec B101
+
+
+def test_url_sitemap_sync_does_not_tombstone_when_sitemap_view_is_limited(tmp_path: Path) -> None:
+    store = DocsCatalogStore(tmp_path / "docs.db")
+    store.migrate()
+    scope = AccessScope()
+    source_id = store.upsert_source(
+        scope=scope,
+        source_type="url_sitemap",
+        canonical_uri="https://example.com/sitemap.xml",
+        display_name="Example sitemap",
+        source_path=None,
+        source_url="https://example.com/sitemap.xml",
+        redacted_source_url="https://example.com/sitemap.xml",
+        policy_profile="locked_down",
+        sync_enabled=True,
+        metadata={},
+    )
+    old_doc_id = store.upsert_document(
+        scope=scope,
+        title="Existing B",
+        document_type="html",
+        canonical_uri="https://example.com/docs/b",
+        source_path=None,
+        source_url="https://example.com/docs/b",
+        text="bravo sitemap body",
+        sections=[],
+        chunks=[{"text": "bravo sitemap body", "citation": "https://example.com/docs/b#1"}],
+        keywords=(),
+        collection_names=(),
+        metadata={},
+    )
+    old_doc = store.get_document(scope, old_doc_id, mode="metadata")
+    store.link_source_document(
+        scope=scope,
+        source_id=source_id,
+        document_id=old_doc_id,
+        source_item_uri="https://example.com/docs/b",
+        status="active",
+        last_hash=old_doc["content_hash"],
+        metadata={"importer": "url_sitemap"},
+    )
+    settings = DocsSettings.from_mapping(
+        {
+            "db_path": str(tmp_path / "docs.db"),
+            "enable_web_acquisition": True,
+            "sitemap_sync_enabled": True,
+            "web_source_profile": "locked_down",
+            "allowed_url_prefixes": ("https://example.com/sitemap.xml", "https://example.com/docs/"),
+            "max_sync_pages": 1,
+        }
+    )
+    service = DocsSourceSyncService(
+        settings=settings,
+        store=store,
+        resolver=FakeResolver({"example.com": ["93.184.216.34"]}),
+        transport=FakeTransport(
+            [
+                FetchResponse(
+                    status_code=200,
+                    headers={"content-type": "application/xml"},
+                    body_chunks=[
+                        b"""
+                        <urlset>
+                          <url><loc>https://example.com/docs/a</loc></url>
+                          <url><loc>https://example.com/docs/b</loc></url>
+                        </urlset>
+                        """
+                    ],
+                ),
+                FetchResponse(
+                    status_code=200,
+                    headers={"content-type": "text/plain"},
+                    body_chunks=[b"alpha sitemap body"],
+                ),
+            ]
+        ),
+    )
+
+    result = service.sync_source(
+        scope=scope,
+        request=SyncSourceRequest(source_id=source_id, mode="apply", stale_policy="tombstone"),
+    )
+    old_links = [
+        link
+        for link in store.source_document_links(scope=scope, source_id=source_id)
+        if link["source_item_uri"] == "https://example.com/docs/b"
+    ]
+
+    assert result["counts"]["created"] == 1  # nosec B101
+    assert result["counts"]["tombstoned"] == 0  # nosec B101
+    assert "source_discovery_limit_exceeded" in result["warnings"]  # nosec B101
+    assert old_links[0]["status"] == "active"  # nosec B101
+    assert store.search_chunks(scope=scope, query="bravo", limit=10)  # nosec B101
+
+
 def test_local_file_sync_dry_run_does_not_mutate_document_or_run_rows(tmp_path: Path) -> None:
     root = tmp_path / "workspace"
     root.mkdir()
