@@ -1,17 +1,22 @@
 """Cross-origin redirect credential hardening for the central HTTP client.
 
 Regression coverage for the PR #2604 review finding (qodo "Option B"): the
-manual redirect loops in fetch/afetch reused the caller's headers across
-hops, so a cross-origin redirect would resend Authorization / x-api-key /
-cookies to the redirect target. The client now strips sensitive headers and
-drops cookies whenever a hop leaves the original origin.
+manual redirect loops in fetch/afetch (and the SSE streaming loops) reused
+the caller's headers across hops, so a cross-origin redirect would resend
+Authorization / x-api-key / cookies to the redirect target. The client now
+strips sensitive headers, drops explicit cookies, and clears ambient client
+cookie-jar state whenever a hop leaves the original origin.
 """
 
+from typing import Callable
+
+import httpx
 import pytest
 from hypothesis import given, settings as hyp_settings, strategies as st
 
 from tldw_Server_API.app.core.http_client import (
     SENSITIVE_REDIRECT_HEADERS,
+    _clear_client_cookie_jar,
     _cookies_for_hop,
     _is_cross_origin,
     _strip_sensitive_headers_for_cross_origin,
@@ -19,18 +24,6 @@ from tldw_Server_API.app.core.http_client import (
 )
 
 pytestmark = pytest.mark.unit
-
-
-def _has_httpx() -> bool:
-    try:
-        import httpx  # noqa: F401
-
-        return True
-    except Exception:
-        return False
-
-
-requires_httpx = pytest.mark.skipif(not _has_httpx(), reason="httpx not installed")
 
 # TEST-NET literal IPs: public-range, pass egress checks without DNS, and
 # MockTransport intercepts before any real socket is opened.
@@ -46,7 +39,10 @@ SECRET_HEADERS = {
 
 
 class TestOriginHelpers:
+    """Unit coverage for the origin parsing/comparison helpers."""
+
     def test_default_ports_normalized(self) -> None:
+        """Explicit default ports compare equal to implicit ones."""
         assert _url_origin("http://a.example") == ("http", "a.example", 80)
         assert _url_origin("http://a.example:80/x") == ("http", "a.example", 80)
         assert _url_origin("https://a.example") == ("https", "a.example", 443)
@@ -54,21 +50,28 @@ class TestOriginHelpers:
         assert not _is_cross_origin("https://a.example/x", "https://a.example:443/y")
 
     def test_scheme_host_port_changes_are_cross_origin(self) -> None:
+        """Any change to scheme, host (incl. subdomain), or port is cross-origin."""
         assert _is_cross_origin("https://a.example", "http://a.example")
         assert _is_cross_origin("https://a.example", "https://b.example")
         assert _is_cross_origin("https://a.example", "https://a.example:8443")
         assert _is_cross_origin("https://a.example", "https://sub.a.example")
 
     def test_host_comparison_is_case_insensitive(self) -> None:
+        """Host names are compared lowercased."""
         assert not _is_cross_origin("https://A.Example/x", "https://a.example/y")
 
     def test_unparseable_urls_fail_closed(self) -> None:
+        """Junk URLs are treated as cross-origin, never same-origin."""
         assert _is_cross_origin("https://a.example", "not a url")
         assert _is_cross_origin("", "https://a.example")
 
     def test_invalid_ports_and_malformed_hosts_fail_closed(self) -> None:
-        # urlparse raises ValueError lazily when .port is accessed on these;
-        # _url_origin must swallow that and report None -> cross-origin.
+        """Malformed ports / IPv6 brackets must not defeat the stripping.
+
+        urlparse raises ValueError lazily when ``.port`` is accessed on
+        these; ``_url_origin`` must swallow that and report ``None`` →
+        cross-origin.
+        """
         assert _url_origin("http://a.example:invalid-port/") is None
         assert _is_cross_origin("http://a.example:invalid-port/", "http://a.example/")
         assert _is_cross_origin("http://a.example/", "http://a.example:99999/")
@@ -92,19 +95,24 @@ class TestOriginHelpers:
     def test_url_is_never_cross_origin_with_itself(
         self, scheme: str, host: str, port: int | None, path: str
     ) -> None:
+        """Property: a well-formed URL is always same-origin with itself."""
         netloc = f"{host}:{port}" if port is not None else host
         url = f"{scheme}://{netloc}{path}"
         assert not _is_cross_origin(url, url)
 
 
 class TestHeaderStripping:
+    """Unit coverage for header/cookie stripping decisions."""
+
     def test_same_origin_keeps_everything(self) -> None:
+        """Same-origin hops pass headers through untouched."""
         result = _strip_sensitive_headers_for_cross_origin(
             dict(SECRET_HEADERS), original_url=f"{ORIGIN_A}/a", target_url=f"{ORIGIN_A}/b"
         )
         assert result == SECRET_HEADERS
 
     def test_cross_origin_strips_sensitive_case_insensitively(self) -> None:
+        """Header-name matching ignores case."""
         headers = {"AUTHORIZATION": "x", "x-API-key": "y", "cookie": "z", "X-Custom": "keep"}
         result = _strip_sensitive_headers_for_cross_origin(
             headers, original_url=ORIGIN_A, target_url=ORIGIN_B
@@ -112,6 +120,7 @@ class TestHeaderStripping:
         assert result == {"X-Custom": "keep"}
 
     def test_every_documented_sensitive_header_is_stripped(self) -> None:
+        """The full SENSITIVE_REDIRECT_HEADERS set is enforced."""
         headers = {name: "secret" for name in SENSITIVE_REDIRECT_HEADERS}
         headers["x-trace"] = "keep"
         result = _strip_sensitive_headers_for_cross_origin(
@@ -120,6 +129,7 @@ class TestHeaderStripping:
         assert result == {"x-trace": "keep"}
 
     def test_none_headers_pass_through(self) -> None:
+        """``None`` headers stay ``None``."""
         assert (
             _strip_sensitive_headers_for_cross_origin(
                 None, original_url=ORIGIN_A, target_url=ORIGIN_B
@@ -128,6 +138,7 @@ class TestHeaderStripping:
         )
 
     def test_cookies_dropped_only_cross_origin(self) -> None:
+        """Explicit cookies survive same-origin hops and die cross-origin."""
         cookies = {"session": "abc"}
         assert (
             _cookies_for_hop(cookies, original_url=ORIGIN_A, target_url=f"{ORIGIN_A}/x")
@@ -136,14 +147,26 @@ class TestHeaderStripping:
         assert _cookies_for_hop(cookies, original_url=ORIGIN_A, target_url=ORIGIN_B) is None
         assert _cookies_for_hop(None, original_url=ORIGIN_A, target_url=ORIGIN_B) is None
 
+    def test_clear_client_cookie_jar_handles_httpx_clients(self) -> None:
+        """The jar-clear helper empties an httpx client's cookie store."""
+        client = httpx.Client()
+        try:
+            client.cookies.set("session", "abc", domain="93.184.216.34")
+            assert len(client.cookies) == 1
+            _clear_client_cookie_jar(client)
+            assert len(client.cookies) == 0
+        finally:
+            client.close()
 
-@requires_httpx
+
 class TestRedirectFlows:
     """End-to-end through the real redirect loops via httpx.MockTransport."""
 
     @staticmethod
-    def _handler(seen: dict[str, dict[str, str]]):
-        import httpx
+    def _handler(
+        seen: dict[str, dict[str, str]],
+    ) -> Callable[[httpx.Request], httpx.Response]:
+        """Build a MockTransport handler recording per-host request headers."""
 
         def handler(request: httpx.Request) -> httpx.Response:
             host = request.url.host
@@ -161,10 +184,8 @@ class TestRedirectFlows:
 
         return handler
 
-    @pytest.mark.asyncio
     async def test_afetch_strips_credentials_on_cross_origin_redirect(self) -> None:
-        import httpx
-
+        """The async loop must not resend credentials to a different origin."""
         from tldw_Server_API.app.core.http_client import afetch, create_async_client
 
         seen: dict[str, dict[str, str]] = {}
@@ -191,10 +212,8 @@ class TestRedirectFlows:
         # non-sensitive headers still follow the redirect
         assert target_headers.get("x-custom") == "keep-me"
 
-    @pytest.mark.asyncio
     async def test_afetch_keeps_credentials_on_same_origin_redirect(self) -> None:
-        import httpx
-
+        """Same-origin redirects keep the caller's credentials intact."""
         from tldw_Server_API.app.core.http_client import afetch, create_async_client
 
         seen: dict[str, dict[str, str]] = {}
@@ -226,8 +245,7 @@ class TestRedirectFlows:
         assert seen["/landed"].get("x-api-key") == "sk-secret"
 
     def test_sync_fetch_strips_credentials_on_cross_origin_redirect(self) -> None:
-        import httpx
-
+        """The sync loop applies the same stripping as the async loop."""
         from tldw_Server_API.app.core.http_client import create_client, fetch
 
         seen: dict[str, dict[str, str]] = {}
@@ -246,4 +264,65 @@ class TestRedirectFlows:
         target_headers = seen["203.0.113.7"]
         for name in ("authorization", "x-api-key", "cookie"):
             assert name not in target_headers, f"{name} leaked to redirect target"
+        assert target_headers.get("x-custom") == "keep-me"
+
+    async def test_afetch_clears_ambient_cookie_jar_on_cross_origin_redirect(self) -> None:
+        """Cookies accumulated in the client's jar are wiped at the origin boundary."""
+        from tldw_Server_API.app.core.http_client import afetch, create_async_client
+
+        seen: dict[str, dict[str, str]] = {}
+        client = create_async_client(transport=httpx.MockTransport(self._handler(seen)))
+        try:
+            client.cookies.set("ambient", "jar-secret", domain="93.184.216.34")
+            assert len(client.cookies) == 1
+            resp = await afetch(
+                method="GET",
+                url=f"{ORIGIN_A}/cross-origin",
+                client=client,
+                headers={"X-Custom": "keep-me"},
+            )
+            assert resp.status_code == 200
+            assert len(client.cookies) == 0, "cookie jar not cleared at origin boundary"
+        finally:
+            await client.aclose()
+        assert "cookie" not in seen["203.0.113.7"]
+
+    async def test_sse_stream_strips_credentials_on_cross_origin_redirect(self) -> None:
+        """The SSE streaming redirect loop applies the same stripping."""
+        from tldw_Server_API.app.core.http_client import _astream_sse_httpx, create_async_client
+
+        seen: dict[str, dict[str, str]] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            host = request.url.host
+            seen[host] = dict(request.headers)
+            if host == "93.184.216.34":
+                return httpx.Response(
+                    302, request=request, headers={"Location": f"{ORIGIN_B}/stream"}
+                )
+            return httpx.Response(
+                200,
+                request=request,
+                headers={"Content-Type": "text/event-stream"},
+                text="data: hello\n\n",
+            )
+
+        client = create_async_client(transport=httpx.MockTransport(handler))
+        try:
+            events = [
+                event
+                async for event in _astream_sse_httpx(
+                    url=f"{ORIGIN_A}/sse",
+                    client=client,
+                    headers=dict(SECRET_HEADERS),
+                )
+            ]
+        finally:
+            await client.aclose()
+
+        assert events, "expected at least one SSE event through the redirect"
+        assert seen["93.184.216.34"].get("authorization") == "Bearer secret-token"
+        target_headers = seen["203.0.113.7"]
+        for name in ("authorization", "x-api-key", "cookie"):
+            assert name not in target_headers, f"{name} leaked to SSE redirect target"
         assert target_headers.get("x-custom") == "keep-me"

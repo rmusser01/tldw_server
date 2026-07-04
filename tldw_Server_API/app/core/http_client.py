@@ -1198,6 +1198,30 @@ def _cookies_for_hop(
     return cookies
 
 
+def _clear_client_cookie_jar(client: Any) -> None:
+    """Best-effort clear of a client/session cookie jar at a cross-origin redirect boundary.
+
+    Ambient jar state (cookies accumulated on the httpx client / aiohttp
+    session) would otherwise ride along to the redirect target; mirrors the
+    boundary behavior of the simple-fetch redirect loop's cookie clearing.
+
+    Args:
+        client: httpx ``Client``/``AsyncClient`` or aiohttp ``ClientSession``
+            (any object exposing ``cookies``/``cookie_jar``/``jar``).
+    """
+    for attr_name in ("cookies", "cookie_jar", "jar"):
+        store = getattr(client, attr_name, None)
+        if store is None:
+            continue
+        clear = getattr(store, "clear", None)
+        if callable(clear):
+            with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+                clear()
+            continue
+        if isinstance(store, dict):
+            store.clear()
+
+
 def _get_response_url(resp: Any, fallback: str) -> str:
     try:
         req = getattr(resp, "request", None)
@@ -2402,6 +2426,8 @@ async def _afetch_httpx(
                                     last_exc = NetworkError("Too many redirects")
                                     break
                                 else:
+                                    if _is_cross_origin(url, next_url):
+                                        _clear_client_cookie_jar(ac)
                                     cur_url = next_url
                                     continue
                         else:
@@ -2680,6 +2706,8 @@ async def _afetch_aiohttp(
                     if redirects > DEFAULT_MAX_REDIRECTS:
                         last_exc = NetworkError("Too many redirects")
                         break
+                    if _is_cross_origin(url, next_url):
+                        _clear_client_cookie_jar(session)
                     cur_url = next_url
                     continue
 
@@ -3066,6 +3094,8 @@ def _fetch_httpx_response(
                         redirects += 1
                         if redirects > DEFAULT_MAX_REDIRECTS:
                             raise NetworkError("Too many redirects")  # noqa: TRY003
+                        if _is_cross_origin(url, next_url):
+                            _clear_client_cookie_jar(sc)
                         cur_url = next_url
                         continue
                     if resp.status_code < 400:
@@ -4026,7 +4056,9 @@ async def _astream_sse_httpx(
                         client=ac,
                         method=method.upper(),
                         url=cur_url,
-                        headers=_inject_trace_headers(hdrs),
+                        headers=_strip_sensitive_headers_for_cross_origin(
+                            _inject_trace_headers(hdrs), original_url=url, target_url=cur_url
+                        ),
                         params=params,
                         json=json,
                         data=data,
@@ -4048,6 +4080,8 @@ async def _astream_sse_httpx(
                                 except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
                                     raise NetworkError("Invalid redirect Location header")  # noqa: B904, TRY003
                             redirects += 1
+                            if _is_cross_origin(url, next_url):
+                                _clear_client_cookie_jar(ac)
                             cur_url = next_url
                             continue  # loop to re-validate egress and attempt again
                         # Raise for non-OK statuses pre-body if not retriable
@@ -4162,7 +4196,9 @@ async def _astream_sse_aiohttp(
                     session=session,
                     method=method.upper(),
                     url=cur_url,
-                    headers=_inject_trace_headers(hdrs),
+                    headers=_strip_sensitive_headers_for_cross_origin(
+                        _inject_trace_headers(hdrs), original_url=url, target_url=cur_url
+                    ),
                     params=params,
                     json=json,
                     data=data,
@@ -4182,6 +4218,8 @@ async def _astream_sse_aiohttp(
                         if not next_url:
                             raise NetworkError("Invalid redirect Location header")  # noqa: TRY003
                         redirects += 1
+                        if _is_cross_origin(url, next_url):
+                            _clear_client_cookie_jar(session)
                         cur_url = next_url
                         continue
 
