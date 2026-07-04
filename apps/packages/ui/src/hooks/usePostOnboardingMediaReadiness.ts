@@ -41,7 +41,7 @@ const hasRequiredAuth = (config: TldwConfig | null): boolean => {
   }
   return Boolean(
     String(config.apiKey || "").trim() ||
-      getRuntimeSingleUserApiKeyOverride()
+      String(getRuntimeSingleUserApiKeyOverride() || "").trim()
   )
 }
 

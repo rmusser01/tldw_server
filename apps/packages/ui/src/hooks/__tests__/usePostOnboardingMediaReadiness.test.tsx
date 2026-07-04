@@ -6,7 +6,8 @@ import { usePostOnboardingMediaReadiness } from "../usePostOnboardingMediaReadin
 const mocks = vi.hoisted(() => ({
   getConfig: vi.fn(),
   listMedia: vi.fn(),
-  updateConfig: vi.fn()
+  updateConfig: vi.fn(),
+  getRuntimeSingleUserApiKeyOverride: vi.fn()
 }))
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
@@ -15,6 +16,10 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
     listMedia: mocks.listMedia,
     updateConfig: mocks.updateConfig
   }
+}))
+
+vi.mock("@/services/tldw/runtime-auth-override", () => ({
+  getRuntimeSingleUserApiKeyOverride: mocks.getRuntimeSingleUserApiKeyOverride
 }))
 
 const configuredSingleUser = {
@@ -36,6 +41,23 @@ const deferred = <T,>() => {
 describe("usePostOnboardingMediaReadiness", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.getRuntimeSingleUserApiKeyOverride.mockReturnValue(null)
+  })
+
+  it("treats quickstart runtime auth as configured for media readiness", async () => {
+    mocks.getRuntimeSingleUserApiKeyOverride.mockReturnValue("runtime-key")
+    mocks.getConfig.mockResolvedValue({
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "single-user"
+    })
+    mocks.listMedia.mockResolvedValue([])
+
+    const { result } = renderHook(() => usePostOnboardingMediaReadiness(true))
+
+    await waitFor(() => {
+      expect(result.current.status).toBe("ready")
+    })
+    expect(mocks.listMedia).toHaveBeenCalledWith({ results_per_page: 1 })
   })
 
   it("ignores stale readiness results when a newer check has completed", async () => {

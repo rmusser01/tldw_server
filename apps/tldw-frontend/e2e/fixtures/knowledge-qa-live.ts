@@ -82,11 +82,11 @@ export const getRequiredKnowledgeQaLiveSourceId = (
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === "object" && !Array.isArray(value)
 
-const assertString = (
+function assertString(
   value: unknown,
   label: string,
   manifestPath: string
-): asserts value is string => {
+): asserts value is string {
   if (typeof value !== "string" || value.trim().length === 0) {
     throw new Error(`${manifestPath} has invalid ${label}; expected a non-empty string.`)
   }

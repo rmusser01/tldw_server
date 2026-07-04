@@ -271,7 +271,7 @@ describe("ScheduledTasksPage", () => {
     expect(
       screen.getByText("The connected server does not advertise scheduled task management.")
     ).toBeInTheDocument()
-    expect(screen.getByLabelText("Diagnostics")).toHaveTextContent("/api/v1/scheduled-tasks")
+    expect(screen.getByLabelText("Diagnostics")).toHaveTextContent("[server-endpoint]")
     expect(screen.getByRole("button", { name: "Health & diagnostics" })).toBeInTheDocument()
     expect(mocks.listScheduledTasks).not.toHaveBeenCalled()
   })
@@ -319,10 +319,10 @@ describe("ScheduledTasksPage", () => {
     ).toBeInTheDocument()
 
     const diagnostics = screen.getByLabelText("Diagnostics")
-    expect(within(diagnostics).getByText("/api/v1/scheduled-tasks")).toBeInTheDocument()
+    expect(within(diagnostics).getByText("[server-endpoint]")).toBeInTheDocument()
     expect(within(diagnostics).getByText("401")).toBeInTheDocument()
     expect(
-      within(diagnostics).getByText("Request failed: 401 (GET /api/v1/scheduled-tasks)")
+      within(diagnostics).getByText("Request failed: 401 (GET [server-endpoint])")
     ).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Health & diagnostics" })).toBeInTheDocument()
@@ -365,7 +365,7 @@ describe("ScheduledTasksPage", () => {
     expect(await screen.findByText("Loaded reminder")).toBeInTheDocument()
 
     const diagnostics = screen.getByLabelText("Diagnostics")
-    expect(within(diagnostics).getByText("Watchlist jobs failed at /api/v1/watchlists/jobs")).toBeInTheDocument()
+    expect(within(diagnostics).getByText("Watchlist jobs failed at [server-endpoint]")).toBeInTheDocument()
   })
 
   it("opens the Create tab from the URL", async () => {
