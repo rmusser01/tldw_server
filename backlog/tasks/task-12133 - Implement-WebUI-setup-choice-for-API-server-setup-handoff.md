@@ -1,10 +1,10 @@
 ---
 id: TASK-12133
 title: Implement WebUI setup choice for API server setup handoff
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-07-03 22:59'
-updated_date: '2026-07-03 23:45'
+updated_date: '2026-07-04 01:21'
 labels:
   - webui
   - setup
@@ -24,11 +24,11 @@ Implement the approved WebUI /setup pre-wizard choice screen that explains WebUI
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 SetupEntryChoice renders before the existing WebUI wizard on /setup when backend setup is incomplete.
-- [ ] #2 API server setup link/fallback behavior follows the approved URL-resolution and local/remote copy rules.
-- [ ] #3 Blocked first-run state cannot enter the normal WebUI wizard until refresh returns a mutable state.
-- [ ] #4 Manual connection and recovery UI remain available when first-run state or metadata cannot be loaded.
-- [ ] #5 Focused Vitest, Playwright, typecheck, and applicable security verification are recorded.
+- [x] #1 SetupEntryChoice renders before the existing WebUI wizard on /setup when backend setup is incomplete.
+- [x] #2 API server setup link/fallback behavior follows the approved URL-resolution and local/remote copy rules.
+- [x] #3 Blocked first-run state cannot enter the normal WebUI wizard until refresh returns a mutable state.
+- [x] #4 Manual connection and recovery UI remain available when first-run state or metadata cannot be loaded.
+- [x] #5 Focused Vitest, Playwright, typecheck, and applicable security verification are recorded.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -47,14 +47,28 @@ Task 1 complete: helper and resolver committed in f8adf59740. Spec-compliance an
 Task 2 complete: SetupEntryChoice component committed in 5ed2d65140. Spec-compliance and code-quality reviews approved. Focused component/helper Vitest passed: 23 tests.
 
 Task 3 complete: /setup route integration committed in c48d86f2aa, with review fixes 8e559b37d4 and f57ae2ba97. Spec-compliance and code-quality reviews approved. Focused route Vitest passed: option-setup-readiness 17 tests. Combined setup Vitest passed: setup-entry-choice-utils, SetupEntryChoice, option-setup-readiness, setup-status, 51 tests. Bandit skipped for Task 3 because only TypeScript/React files changed.
+
+Task 4 complete: Playwright /setup desktop/mobile smoke coverage and /setup-to-first-chat handoff coverage committed in 14c143dee1. Added quickstart runtime-auth media-readiness regression and fix so first-source milestone works when the API key is provided by runtime config instead of persisted storage.
+
+Verification for Task 4: Playwright unified-first-run-onboarding passed 6/6; focused Vitest passed 5 files / 53 tests; git diff --check passed for changed files. bun run typecheck still fails on pre-existing unrelated baseline files: AudioStudio/TimelineEditor.tsx, ScheduledTasks/ScheduledTaskAutomationDefinitionEditor.tsx, Skills/Manager.tsx, scheduled-tasks-control-plane.ts, tldw/mcp-hub.ts, voice-cloning.ts, e2e/fixtures/knowledge-qa-live.ts, and e2e/workflows/tier-2-features/flashcards.spec.ts. No errors referenced the changed files. Bandit skipped because only TypeScript/Playwright/Markdown task files changed.
+
+Spec/code review note: the Task 4 review-agent attempt failed due the account usage limit, so the final Task 4 review was completed locally against the changed files and verification output; no task-specific follow-up issues were found.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Implemented the WebUI /setup choice handoff for incomplete backend setup. The flow now presents a pre-wizard choice explaining WebUI setup vs API server setup, links API server /setup separately when browser-openable, keeps blocked state out of the normal WebUI wizard, and preserves manual recovery when setup state/metadata is unavailable.
+
+Verification: focused Vitest passed 5 files / 53 tests; Playwright unified-first-run-onboarding passed 6/6; git diff --check passed. Typecheck remains blocked by pre-existing unrelated baseline errors outside the changed files. Bandit skipped because this implementation touched TypeScript/Playwright/Markdown tracking only.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
