@@ -2,30 +2,34 @@
 id: TASK-12128
 title: Document external docs hosting links
 status: In Progress
+assignee: []
+created_date: ''
+updated_date: '2026-07-04 05:14'
 labels:
-- docs
+  - docs
+dependencies: []
 documentation:
-- Docs/superpowers/specs/2026-07-04-external-docs-hosting-design.md
+  - Docs/superpowers/specs/2026-07-04-external-docs-hosting-design.md
 ---
 
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Ensure README and website copy point readers to the canonical external docs page at tldwproject.org/server/docs, and document how the MkDocs docs are built, updated, and administered for that external host.
+Ensure README and website copy point readers to the canonical external docs page at tldwproject.com/server/docs, and document how the MkDocs docs are built, updated, mirrored, and administered for that external host.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 README links to https://tldwproject.org/server/docs/ as the public docs site.
-- [ ] #2 Docs website landing page links to https://tldwproject.org/server/docs/.
-- [ ] #3 Docs site guide explains external hosting at /server/docs and does not present GitHub Pages as the production target.
+- [ ] #1 README links to https://tldwproject.com/server/docs/ as the public docs site.
+- [ ] #2 Docs website landing page links to https://tldwproject.com/server/docs/.
+- [ ] #3 Docs site guide explains external hosting at /server/docs, manual deploy, optional clone/pull/build automation, and GitHub Pages as a mirror.
 - [ ] #4 Existing MkDocs build path remains documented and locally verifiable.
 <!-- AC:END -->
 
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-Canonical docs live at https://tldwproject.org/server/docs/. GitHub Pages remains enabled as a mirror from the same MkDocs source; do not disable the Pages deploy.
+Canonical docs live at https://tldwproject.com/server/docs/. GitHub Pages remains enabled as a mirror from the same MkDocs source. The external site can start with manual copy/deploy of the built static site; a later site-side clone/pull/build job can detect new versions, build the docs, and update /server/docs/.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
