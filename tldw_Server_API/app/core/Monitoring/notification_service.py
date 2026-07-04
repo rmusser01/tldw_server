@@ -533,9 +533,8 @@ class NotificationService:
         severity = payload.get("severity") or payload.get("rule_severity")
         if not self._meets_threshold(severity):
             return "skipped"
+        payload.setdefault("ts", datetime.now(timezone.utc).isoformat())
         payload_to_record = dict(payload)
-        if "ts" not in payload_to_record:
-            payload_to_record["ts"] = datetime.now(timezone.utc).isoformat()
         # lgtm[py/clear-text-storage-sensitive-data]: payload is redacted before notification persistence.
         safe_payload = _sanitize_notification_payload(payload_to_record)
         file_written = True

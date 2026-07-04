@@ -45,6 +45,7 @@ class VisualIdentityResolvedAsset:
     is_animated: bool = False
     content_type: str | None = None
     asset_url: str | None = None
+    preview_relpath: str | None = None
     role_id: str | None = None
     role_label: str | None = None
     resolution_source: str = "binding"
@@ -568,6 +569,7 @@ class VisualIdentityService:
             is_animated=bool(asset.get("is_animated")),
             content_type=str(asset["content_type"]),
             asset_url=None,
+            preview_relpath=str(asset["preview_relpath"]) if asset.get("preview_relpath") else None,
             role_id=role_id,
             role_label=role_label,
             resolution_source=resolution_source,

@@ -196,11 +196,11 @@ def test_rechecks_size_after_reading_source_content(
     _write_png(image_path)
     original_stat = Path.stat
 
-    def fake_stat(self: Path):
+    def fake_stat(self: Path, *args, **kwargs):
         if self == image_path:
             original = original_stat(self)
             return SimpleNamespace(st_mode=original.st_mode, st_size=1)
-        return original_stat(self)
+        return original_stat(self, *args, **kwargs)
 
     monkeypatch.setattr(Path, "stat", fake_stat)
     monkeypatch.setattr(

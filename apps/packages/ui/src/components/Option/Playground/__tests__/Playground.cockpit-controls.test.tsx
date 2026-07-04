@@ -1221,12 +1221,12 @@ describe("Playground cockpit controls", () => {
       });
     });
     expect(
-      screen.queryByTestId("playground-chat-layout-mode-trigger"),
-    ).toBeNull();
+      screen.getByTestId("playground-chat-layout-mode-trigger"),
+    ).toHaveAccessibleName("Exit focus");
     expect(
       screen.queryByTestId("playground-shortcuts-help-trigger"),
     ).toBeNull();
-    const exitFocus = screen.getByTestId("playground-focus-exit");
+    const exitFocus = screen.getByTestId("playground-chat-layout-mode-trigger");
     expect(exitFocus).toHaveTextContent("Exit focus");
     expect(screen.getByTestId("playground-chat")).toBeInTheDocument();
     expect(screen.getByTestId("playground-form")).toBeInTheDocument();

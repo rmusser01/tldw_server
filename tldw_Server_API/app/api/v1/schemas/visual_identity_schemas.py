@@ -190,6 +190,7 @@ class VisualIdentityResolveResponse(BaseModel):
     is_animated: bool = False
     content_type: str | None = None
     asset_url: str | None = None
+    preview_url: str | None = None
     role_id: str | None = None
     role_label: str | None = None
     resolution_source: str | None = None

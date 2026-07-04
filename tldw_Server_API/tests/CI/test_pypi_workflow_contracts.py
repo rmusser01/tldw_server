@@ -48,11 +48,13 @@ def test_publish_pypi_workflow_preserves_manual_dispatch_and_gates_push() -> Non
     detect_version = workflow["jobs"]["detect-version"]
     assert detect_version["outputs"]["should_publish"] == "${{ steps.detect.outputs.should_publish }}"
 
-    build = workflow["jobs"]["build"]
-    assert build["needs"] == "detect-version"
-    assert build["if"] == (
+    test_suite = workflow["jobs"]["test-suite"]
+    assert test_suite["if"] == (
         "${{ github.event_name == 'workflow_dispatch' || needs.detect-version.outputs.should_publish == 'true' }}"
     )
+
+    build = workflow["jobs"]["build"]
+    assert build["needs"] == ["detect-version", "test-suite"]
 
     publish_testpypi = workflow["jobs"]["publish-testpypi"]
     assert publish_testpypi["if"] == (

@@ -20,7 +20,8 @@ describe("VisualIdentityStage", () => {
           fallback_reason: "requested",
           is_animated: false,
           content_type: "image/png",
-          asset_url: "/api/v1/visual-identities/packs/1/assets/9/content"
+          asset_url: "/api/v1/visual-identities/packs/1/assets/9/content",
+          preview_url: null
         }}
       />
     )

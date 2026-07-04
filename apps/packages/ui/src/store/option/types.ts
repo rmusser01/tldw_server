@@ -105,6 +105,7 @@ export type Message = {
   visualExpressionKey?: string | null
   visualAssetId?: number | null
   visualAssetUrl?: string | null
+  visualPreviewUrl?: string | null
   visualFallbackReason?: string | null
   visualIsAnimated?: boolean | null
 }

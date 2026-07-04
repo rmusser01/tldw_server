@@ -1507,19 +1507,25 @@ test.describe('/chat cockpit real-server parity', () => {
     await expect(page.getByTestId('playground-cockpit-right-rail')).toBeVisible();
     await expect(modeSummary).toHaveText('Context and runtime rails visible.');
 
-    await page.getByRole('button', { name: 'Hide context rail' }).click();
+    await page
+      .getByTestId('playground-cockpit-left-rail')
+      .getByRole('button', { name: 'Collapse context sidechannel' })
+      .click();
     await expect(page.getByTestId('playground-cockpit-left-rail')).toHaveCount(0);
     await expect(page.getByTestId('playground-cockpit-right-rail')).toBeVisible();
     await expect(modeSummary).toHaveText('Context rail hidden. Runtime rail visible.');
-    await page.getByRole('button', { name: 'Hide runtime rail' }).click();
+    await page
+      .getByTestId('playground-cockpit-right-rail')
+      .getByRole('button', { name: 'Collapse runtime sidechannel' })
+      .click();
     await expect(page.getByTestId('playground-cockpit-left-rail')).toHaveCount(0);
     await expect(page.getByTestId('playground-cockpit-right-rail')).toHaveCount(0);
     await expect(modeSummary).toHaveText('Cockpit rails hidden. Chat and composer remain active.');
-    await page.getByRole('button', { name: 'Show context rail' }).click();
+    await page.getByTestId('playground-cockpit-left-rail-restore').click();
     await expect(page.getByTestId('playground-cockpit-left-rail')).toBeVisible();
     await expect(page.getByTestId('playground-cockpit-right-rail')).toHaveCount(0);
     await expect(modeSummary).toHaveText('Runtime rail hidden. Context rail visible.');
-    await page.getByRole('button', { name: 'Show runtime rail' }).click();
+    await page.getByTestId('playground-cockpit-right-rail-restore').click();
     await expect(page.getByTestId('playground-cockpit-right-rail')).toBeVisible();
     await expect(modeSummary).toHaveText('Context and runtime rails visible.');
     const contextRail = getDesktopContextRail(page);
@@ -1625,7 +1631,7 @@ test.describe('/chat cockpit real-server parity', () => {
       fullPage: true,
     });
 
-    await page.getByRole('button', { name: 'Show cockpit panels' }).click();
+    await page.getByTestId('playground-chat-layout-mode-trigger').click();
     await expect(page.getByTestId('playground-cockpit-shell')).toHaveAttribute(
       'data-mode',
       'cockpit'
@@ -1922,7 +1928,7 @@ test.describe('/chat cockpit real-server parity', () => {
     );
     await expect(page.getByTestId('playground-cockpit-mobile-rails')).toHaveCount(0);
 
-    await page.getByRole('button', { name: 'Show cockpit panels' }).click();
+    await page.getByTestId('playground-chat-layout-mode-trigger').click();
     await expect(page.getByTestId('playground-cockpit-shell')).toHaveAttribute(
       'data-mode',
       'cockpit'
@@ -2089,7 +2095,7 @@ test.describe('/chat cockpit real-server parity', () => {
       fullPage: true,
     });
     await expectNoMobileBottomControls();
-    await page.getByRole('button', { name: 'Show cockpit panels' }).click();
+    await page.getByTestId('playground-chat-layout-mode-trigger').click();
     await expect(page.getByTestId('playground-cockpit-shell')).toHaveAttribute(
       'data-mode',
       'cockpit'
@@ -2698,9 +2704,7 @@ test.describe('/chat cockpit real-server parity', () => {
       const followUpResponse = await followUpAttempt;
       expect(followUpResponse).toBeTruthy();
       await assertChatCompletionRenderedOrRecoverable(page, followUpResponse);
-      if (followUpResponse) {
-        await assertProviderQualifiedPayload(page, followUpResponse);
-      }
+      await assertProviderQualifiedPayload(page, followUpResponse!);
     }
 
     await expect(regenerateControl).toBeEnabled({ timeout: 30_000 });

@@ -1013,6 +1013,10 @@ export const PlaygroundChat = ({
     selectedCharacter?.id,
     selectedCharacterName
   ])
+  React.useEffect(() => {
+    setVisualManualExpressionKey(null)
+  }, [visualStageActor?.kind, visualStageActor?.id])
+
   const stageExpressionKey =
     visualManualExpressionKey || latestAssistantMood || "neutral"
   const visualIdentityResolution = useVisualIdentityResolver({

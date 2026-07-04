@@ -261,6 +261,46 @@ def test_start_admission_ignores_expired_active_claim(
     assert admitted_b.phase == RunPhase.starting
 
 
+def test_start_admission_ignores_unclaimed_active_row(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _configure_sqlite_store(monkeypatch, tmp_path)
+    monkeypatch.setenv("SANDBOX_QUEUE_MAX_LENGTH", "10")
+    monkeypatch.setenv("SANDBOX_QUEUE_TTL_SEC", "120")
+
+    orch_a = SandboxOrchestrator()
+    orch_b = SandboxOrchestrator()
+    run_a = _enqueue(orch_a, user_id="claim-user", command="unclaimed-active-a")
+    run_b = _enqueue(orch_b, user_id="claim-user", command="unclaimed-active-b")
+
+    assert orch_a.try_claim_run(run_a, worker_id="worker-a", lease_seconds=30) is not None
+    assert orch_b.try_claim_run(run_b, worker_id="worker-b", lease_seconds=30) is not None
+
+    admitted_a = orch_a.try_admit_run_start(
+        run_a,
+        worker_id="worker-a",
+        max_active_runs=1,
+        lease_seconds=30,
+    )
+    assert admitted_a is not None
+    assert admitted_a.phase == RunPhase.starting
+
+    admitted_a.claim_owner = None
+    admitted_a.claim_expires_at = None
+    orch_a.update_run(run_a, admitted_a)
+
+    admitted_b = orch_b.try_admit_run_start(
+        run_b,
+        worker_id="worker-b",
+        max_active_runs=1,
+        lease_seconds=30,
+    )
+
+    assert admitted_b is not None
+    assert admitted_b.phase == RunPhase.starting
+
+
 @pytest.mark.parametrize(
     "quota_kwargs,run_a,run_b,run_c",
     [

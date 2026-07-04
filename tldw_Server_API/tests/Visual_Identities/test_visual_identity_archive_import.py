@@ -506,7 +506,9 @@ def _png_bytes(color: str = "red") -> bytes:
 def _zip_with_entries(path: Path, entries: Mapping[str, bytes]) -> Path:
     with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for name, content in entries.items():
-            archive.writestr(name, content)
+            info = zipfile.ZipInfo("entry")
+            info.filename = name
+            archive.writestr(info, content)
     return path
 
 

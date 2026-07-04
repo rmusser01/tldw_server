@@ -2,19 +2,15 @@ import React from "react"
 import { Button, Tag } from "antd"
 import { Trash2 } from "lucide-react"
 
-import { getVisualIdentityExpressionDisplayLabel } from "@/utils/visual-identity-expressions"
+import {
+  getVisualIdentityExpressionDisplayLabel,
+  VISUAL_IDENTITY_EXPRESSION_OPTIONS
+} from "@/utils/visual-identity-expressions"
 import { ExpressionAssetUploader } from "./ExpressionAssetUploader"
 
-const CANONICAL_SLOT_ORDER = [
-  "neutral",
-  "happy",
-  "excited",
-  "sad",
-  "angry",
-  "thinking",
-  "confused",
-  "surprised"
-]
+const CANONICAL_SLOT_ORDER: readonly string[] = VISUAL_IDENTITY_EXPRESSION_OPTIONS.map(
+  (option) => option.key
+)
 
 const usePrefersReducedMotion = (): boolean => {
   const [reducedMotion, setReducedMotion] = React.useState(false)

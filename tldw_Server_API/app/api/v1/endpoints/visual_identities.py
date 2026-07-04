@@ -245,6 +245,7 @@ def _idempotency_conflict(*, scope: str, resource_id: str) -> HTTPException:
 
 
 def _require_idempotency_key(idempotency_key: str | None) -> str:
+    """Return a trimmed idempotency key or reject the request."""
     normalized = str(idempotency_key or "").strip()
     if normalized:
         return normalized
@@ -255,12 +256,14 @@ def _require_idempotency_key(idempotency_key: str | None) -> str:
 
 
 def _canonical_payload_hash(payload: dict[str, Any]) -> str:
+    """Return the stable SHA-256 hash used for idempotency payload matching."""
     return hashlib.sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
 
 
 def _sha256_file(path: Path) -> str:
+    """Stream a file into a SHA-256 digest without loading it all at once."""
     digest = hashlib.sha256()
     with path.open("rb") as file_obj:
         for chunk in iter(lambda: file_obj.read(_UPLOAD_CHUNK_SIZE_BYTES), b""):
@@ -339,6 +342,10 @@ def _release_idempotency_claim(
 
 def _asset_content_url(*, pack_id: int, asset_id: int) -> str:
     return f"{_API_PREFIX}/packs/{pack_id}/assets/{asset_id}/content"
+
+
+def _asset_preview_url(*, pack_id: int, asset_id: int) -> str:
+    return f"{_API_PREFIX}/packs/{pack_id}/assets/{asset_id}/preview"
 
 
 def _api_fallback_reason(selection_reason: str | None) -> str | None:
@@ -816,6 +823,43 @@ async def get_visual_identity_asset_content(
     )
 
 
+@router.get(
+    "/packs/{pack_id}/assets/{asset_id}/preview",
+    dependencies=[_READ_LIMIT],
+)
+async def get_visual_identity_asset_preview(
+    pack_id: int,
+    asset_id: int,
+    service: VisualIdentityService = Depends(_service),
+) -> FileResponse:
+    _require_pack(service, pack_id)
+    asset = _require_asset_for_pack(service, pack_id=pack_id, asset_id=asset_id)
+    preview_relpath = str(asset.get("preview_relpath") or "")
+    if not preview_relpath:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="visual_identity_asset_preview_not_found",
+        )
+    try:
+        preview_path = resolve_visual_identity_asset_path(
+            owner_user_id=service.owner_user_id,
+            relpath=preview_relpath,
+        )
+    except ValueError as exc:
+        raise _handle_value_error(exc) from exc
+    if not preview_path.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="visual_identity_asset_preview_not_found",
+        )
+    return FileResponse(
+        preview_path,
+        media_type="image/png",
+        filename=preview_path.name,
+        headers={"Cache-Control": _IMMUTABLE_ASSET_CACHE_CONTROL},
+    )
+
+
 @router.post(
     "/imports/zip",
     response_model=VisualIdentityImportZipStartResponse,
@@ -840,7 +884,7 @@ async def start_visual_identity_zip_import(
     operation_idempotency_key = _require_idempotency_key(idempotency_key)
     source_filename = _safe_upload_filename(archive, fallback="expressions.zip")
     temp_path, byte_count = await _upload_to_temp_file(archive, max_bytes=MAX_EXPRESSION_ZIP_BYTES)
-    file_sha256 = _sha256_file(temp_path)
+    file_sha256 = await asyncio.to_thread(_sha256_file, temp_path)
     scope = "visual_identity_zip_import"
     resource_id = f"pack:{pack_id}" if pack_id is not None else "pack:new"
     payload_hash = _canonical_payload_hash(
@@ -1114,6 +1158,13 @@ async def resolve_visual_identity_binding(
     asset_url = resolved.asset_url
     if asset_url is None and resolved.pack_id is not None and resolved.asset_id is not None:
         asset_url = _asset_content_url(pack_id=resolved.pack_id, asset_id=resolved.asset_id)
+    preview_url = None
+    if (
+        resolved.preview_relpath
+        and resolved.pack_id is not None
+        and resolved.asset_id is not None
+    ):
+        preview_url = _asset_preview_url(pack_id=resolved.pack_id, asset_id=resolved.asset_id)
     return VisualIdentityResolveResponse(
         actor_kind=resolved.actor_kind,  # type: ignore[arg-type]
         actor_id=resolved.actor_id,
@@ -1127,6 +1178,7 @@ async def resolve_visual_identity_binding(
         is_animated=resolved.is_animated,
         content_type=resolved.content_type,
         asset_url=asset_url,
+        preview_url=preview_url,
         role_id=resolved.role_id,
         role_label=resolved.role_label,
         resolution_source=resolved.resolution_source,

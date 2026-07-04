@@ -40,4 +40,4 @@ The helper is intentionally resumable for narrow failure states.
 
 ## PyPI Boundary
 
-PyPI is outside the automatic GitHub Release path in this rollout. The release command only handles the local release commit, tag push, snapshot republish, and GitHub Release publication that drives Docker release images. PyPI remains a narrow manual boundary: run `publish-pypi.yml` manually only after the release is published and you are ready to upload the matching package.
+PyPI is outside the automatic GitHub Release path in this rollout. The release command only handles the local release commit, tag push, snapshot republish, and GitHub Release publication that drives Docker release images. PyPI publishing is handled by `publish-pypi.yml`: manual dispatch remains available, and pushes to `main` that change `pyproject.toml` may publish only when the version is missing from PyPI and the workflow test gate passes.

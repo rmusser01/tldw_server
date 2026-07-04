@@ -25,7 +25,8 @@ describe("useVisualIdentityResolver", () => {
       fallback_reason: "requested",
       is_animated: true,
       content_type: "image/webp",
-      asset_url: "/api/v1/visual-identities/packs/1/assets/9/content"
+      asset_url: "/api/v1/visual-identities/packs/1/assets/9/content",
+      preview_url: null
     }))
 
     const { result } = renderHook(() =>
@@ -86,7 +87,8 @@ describe("useVisualIdentityResolver", () => {
         fallback_reason: null,
         is_animated: false,
         content_type: "image/webp",
-        asset_url: `/api/v1/visual-identities/packs/${request.override_pack_id ?? 1}/assets/${request.override_pack_id ? 990 : 9}/content`
+        asset_url: `/api/v1/visual-identities/packs/${request.override_pack_id ?? 1}/assets/${request.override_pack_id ? 990 : 9}/content`,
+        preview_url: null
       })
     )
 
@@ -140,7 +142,8 @@ describe("useVisualIdentityResolver", () => {
         fallback_reason: null,
         is_animated: false,
         content_type: "image/webp",
-        asset_url: "/old.webp"
+        asset_url: "/old.webp",
+        preview_url: null
       }))
     }
     const secondClient = {
@@ -156,7 +159,8 @@ describe("useVisualIdentityResolver", () => {
         fallback_reason: null,
         is_animated: false,
         content_type: "image/webp",
-        asset_url: "/new.webp"
+        asset_url: "/new.webp",
+        preview_url: null
       }))
     }
 
@@ -205,7 +209,8 @@ describe("useVisualIdentityResolver", () => {
           request.expression_key === "happy" ? "requested" : "default",
         is_animated: false,
         content_type: "image/webp",
-        asset_url: "/api/v1/visual-identities/packs/1/assets/9/content"
+        asset_url: "/api/v1/visual-identities/packs/1/assets/9/content",
+        preview_url: null
       })
     )
 
@@ -224,5 +229,55 @@ describe("useVisualIdentityResolver", () => {
         sad: false
       })
     })
+  })
+
+  it("deduplicates concurrent resolver requests for the same actor expression", async () => {
+    const resolveVisualIdentityBinding = vi.fn(
+      async () =>
+        new Promise<any>((resolve) =>
+          setTimeout(
+            () =>
+              resolve({
+                actor_kind: "character" as const,
+                actor_id: 42,
+                pack_id: 1,
+                pack_version_id: 2,
+                expression_key: "happy",
+                requested_expression_key: "happy",
+                asset_id: 9,
+                storage_relpath: "visual_identities/asset.webp",
+                fallback_reason: null,
+                is_animated: false,
+                content_type: "image/webp",
+                asset_url: "/asset.webp",
+                preview_url: null
+              }),
+            0
+          )
+        )
+    )
+
+    const first = renderHook(() =>
+      useVisualIdentityResolver({
+        actorKind: "character",
+        actorId: 42,
+        expressionKey: "happy",
+        client: { resolveVisualIdentityBinding }
+      })
+    )
+    const second = renderHook(() =>
+      useVisualIdentityResolver({
+        actorKind: "character",
+        actorId: 42,
+        expressionKey: "happy",
+        client: { resolveVisualIdentityBinding }
+      })
+    )
+
+    await waitFor(() => {
+      expect(first.result.current.resolution?.asset_id).toBe(9)
+      expect(second.result.current.resolution?.asset_id).toBe(9)
+    })
+    expect(resolveVisualIdentityBinding).toHaveBeenCalledTimes(1)
   })
 })

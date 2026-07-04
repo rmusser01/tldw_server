@@ -36,6 +36,9 @@ from starlette.staticfiles import StaticFiles
 from tldw_Server_API.app.core.startup_logging import (
     startup_api_key_log_value as _startup_api_key_log_value,
 )
+from tldw_Server_API.app.core.Logging.access_log_middleware import (
+    redact_access_log_message as _redact_access_log_message,
+)
 from tldw_Server_API.app.api.v1.router_registry import include_router_idempotent, register_router_specs
 from tldw_Server_API.app.services.app_lifecycle import (
     mark_lifecycle_shutdown,
@@ -423,10 +426,6 @@ class InterceptHandler(logging.Handler):
             break
         message = record.getMessage()
         try:
-            from tldw_Server_API.app.core.Logging.access_log_middleware import (
-                redact_access_log_message as _redact_access_log_message,
-            )
-
             message = _redact_access_log_message(message)
         except _LOGGING_SETUP_EXCEPTIONS:
             pass

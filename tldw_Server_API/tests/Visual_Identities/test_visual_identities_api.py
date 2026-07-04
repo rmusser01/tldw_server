@@ -159,6 +159,7 @@ def _seed_ready_draft(repo: VisualIdentityRepository, *, owner_user_id: int) -> 
         sha256="abc123",
         width=64,
         height=64,
+        preview_relpath="previews/draft-1/neutral/neutral.png",
     )
     return draft
 
@@ -301,6 +302,10 @@ def test_resolve_bound_asset_returns_content_url_and_null_direct_fallback(
     assert payload["asset_url"] == (
         f"/api/v1/visual-identities/packs/{activation['pack_id']}"
         f"/assets/{payload['asset_id']}/content"
+    )
+    assert payload["preview_url"] == (
+        f"/api/v1/visual-identities/packs/{activation['pack_id']}"
+        f"/assets/{payload['asset_id']}/preview"
     )
     assert payload["fallback_reason"] is None
 

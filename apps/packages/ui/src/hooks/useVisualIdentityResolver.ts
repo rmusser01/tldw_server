@@ -51,10 +51,24 @@ export type UseVisualIdentityExpressionAvailabilityResult = {
 
 const resolutionCache = new Map<string, VisualIdentityResolveResponse | null>()
 const availabilityCache = new Map<string, Record<string, boolean>>()
+const resolutionInFlight = new Map<
+  string,
+  Promise<VisualIdentityResolveResponse | null>
+>()
+const availabilityInFlight = new Map<
+  string,
+  Promise<{ availability: Record<string, boolean>; error: unknown }>
+>()
+const cacheInvalidationListeners = new Set<() => void>()
+let cacheGeneration = 0
 
 export const clearVisualIdentityResolverCaches = () => {
+  cacheGeneration += 1
   resolutionCache.clear()
   availabilityCache.clear()
+  resolutionInFlight.clear()
+  availabilityInFlight.clear()
+  cacheInvalidationListeners.forEach((listener) => listener())
 }
 
 const buildResolverCacheKey = ({
@@ -96,6 +110,46 @@ const buildResolverCacheKey = ({
     allowOverrideFallback ?? ""
   ])
 
+export const resolveVisualIdentityBindingWithCache = (
+  client: VisualIdentityResolverClient,
+  request: VisualIdentityResolveRequest
+): Promise<VisualIdentityResolveResponse | null> => {
+  const cacheKey = buildResolverCacheKey({
+    actorKind: request.actor_kind,
+    actorId: request.actor_id,
+    expressionKey: request.expression_key || "neutral",
+    manualOverrideExpressionKey: request.manual_override_expression_key || null,
+    moodExpressionKey: request.mood_expression_key || null,
+    roleId: request.role_id || null,
+    roleLabel: request.role_label || null,
+    overridePackId: request.override_pack_id ?? null,
+    overridePackVersionId: request.override_pack_version_id ?? null,
+    allowOverrideFallback: request.allow_override_fallback ?? null
+  })
+  if (resolutionCache.has(cacheKey)) {
+    return Promise.resolve(resolutionCache.get(cacheKey) ?? null)
+  }
+  let inFlight = resolutionInFlight.get(cacheKey)
+  if (!inFlight) {
+    const generation = cacheGeneration
+    inFlight = client
+      .resolveVisualIdentityBinding(request)
+      .then((nextResolution) => {
+        if (cacheGeneration === generation) {
+          resolutionCache.set(cacheKey, nextResolution)
+        }
+        return nextResolution
+      })
+      .finally(() => {
+        if (resolutionInFlight.get(cacheKey) === inFlight) {
+          resolutionInFlight.delete(cacheKey)
+        }
+      })
+    resolutionInFlight.set(cacheKey, inFlight)
+  }
+  return inFlight
+}
+
 export const useVisualIdentityResolver = ({
   actorKind,
   actorId,
@@ -120,6 +174,14 @@ export const useVisualIdentityResolver = ({
     React.useState<VisualIdentityResolveResponse | null>(null)
   const [isLoading, setIsLoading] = React.useState(false)
   const [error, setError] = React.useState<unknown>(null)
+
+  React.useEffect(() => {
+    const listener = () => setRevision((value) => value + 1)
+    cacheInvalidationListeners.add(listener)
+    return () => {
+      cacheInvalidationListeners.delete(listener)
+    }
+  }, [])
 
   const cacheKey = React.useMemo(() => {
     if (!canResolve || !actorKind || normalizedActorId == null) return null
@@ -157,7 +219,7 @@ export const useVisualIdentityResolver = ({
       return
     }
 
-    if (resolutionCache.has(cacheKey) && revision === 0) {
+    if (resolutionCache.has(cacheKey)) {
       setResolution(resolutionCache.get(cacheKey) ?? null)
       setIsLoading(false)
       setError(null)
@@ -168,22 +230,20 @@ export const useVisualIdentityResolver = ({
     setIsLoading(true)
     setError(null)
 
-    client
-      .resolveVisualIdentityBinding({
-        actor_kind: actorKind,
-        actor_id: normalizedActorId,
-        expression_key: expressionKey || "neutral",
-        manual_override_expression_key: manualOverrideExpressionKey || null,
-        mood_expression_key: moodExpressionKey || null,
-        role_id: roleId || null,
-        role_label: roleLabel || null,
-        override_pack_id: overridePackId ?? null,
-        override_pack_version_id: overridePackVersionId ?? null,
-        allow_override_fallback: allowOverrideFallback ?? null
-      })
+    resolveVisualIdentityBindingWithCache(client, {
+      actor_kind: actorKind,
+      actor_id: normalizedActorId,
+      expression_key: expressionKey || "neutral",
+      manual_override_expression_key: manualOverrideExpressionKey || null,
+      mood_expression_key: moodExpressionKey || null,
+      role_id: roleId || null,
+      role_label: roleLabel || null,
+      override_pack_id: overridePackId ?? null,
+      override_pack_version_id: overridePackVersionId ?? null,
+      allow_override_fallback: allowOverrideFallback ?? null
+    })
       .then((nextResolution) => {
         if (cancelled) return
-        resolutionCache.set(cacheKey, nextResolution)
         setResolution(nextResolution)
       })
       .catch((nextError) => {
@@ -275,6 +335,14 @@ export const useVisualIdentityExpressionAvailability = ({
   const [isLoading, setIsLoading] = React.useState(false)
   const [error, setError] = React.useState<unknown>(null)
 
+  React.useEffect(() => {
+    const listener = () => setRevision((value) => value + 1)
+    cacheInvalidationListeners.add(listener)
+    return () => {
+      cacheInvalidationListeners.delete(listener)
+    }
+  }, [])
+
   const cacheKey = React.useMemo(() => {
     if (!canResolve || !actorKind || normalizedActorId == null) return null
     return buildAvailabilityCacheKey({
@@ -292,7 +360,7 @@ export const useVisualIdentityExpressionAvailability = ({
       return
     }
 
-    if (availabilityCache.has(cacheKey) && revision === 0) {
+    if (availabilityCache.has(cacheKey)) {
       setAvailability(availabilityCache.get(cacheKey) ?? {})
       setIsLoading(false)
       setError(null)
@@ -303,34 +371,56 @@ export const useVisualIdentityExpressionAvailability = ({
     setIsLoading(true)
     setError(null)
 
-    Promise.all(
-      expressionKeys.map(async (expressionKey) => {
-        try {
-          const resolved = await client.resolveVisualIdentityBinding({
-            actor_kind: actorKind,
-            actor_id: normalizedActorId,
-            expression_key: expressionKey
-          })
-          return [
-            expressionKey,
-            Boolean(resolved.asset_id && resolved.expression_key === expressionKey),
-            null
-          ] as const
-        } catch (nextError) {
-          return [expressionKey, false, nextError] as const
-        }
-      })
-    )
+    let request = availabilityInFlight.get(cacheKey)
+    if (!request) {
+      const generation = cacheGeneration
+      request = Promise.all(
+        expressionKeys.map(async (expressionKey) => {
+          try {
+            const resolved = await client.resolveVisualIdentityBinding({
+              actor_kind: actorKind,
+              actor_id: normalizedActorId,
+              expression_key: expressionKey
+            })
+            return [
+              expressionKey,
+              Boolean(resolved.asset_id && resolved.expression_key === expressionKey),
+              null
+            ] as const
+          } catch (nextError) {
+            return [expressionKey, false, nextError] as const
+          }
+        })
+      )
       .then((entries) => {
-        if (cancelled) return
         const nextAvailability: Record<string, boolean> = {}
         let nextError: unknown = null
         for (const [expressionKey, hasAsset, entryError] of entries) {
           nextAvailability[expressionKey] = hasAsset
           nextError = nextError ?? entryError
         }
-        availabilityCache.set(cacheKey, nextAvailability)
-        setAvailability(nextAvailability)
+        if (cacheGeneration === generation) {
+          availabilityCache.set(cacheKey, nextAvailability)
+        }
+        return { availability: nextAvailability, error: nextError }
+      })
+      .finally(() => {
+        if (availabilityInFlight.get(cacheKey) === request) {
+          availabilityInFlight.delete(cacheKey)
+        }
+      })
+      availabilityInFlight.set(cacheKey, request)
+    }
+
+    request
+      .then((result) => {
+        if (cancelled) return
+        setAvailability(result.availability)
+        setError(result.error)
+      })
+      .catch((nextError) => {
+        if (cancelled) return
+        setAvailability({})
         setError(nextError)
       })
       .finally(() => {
