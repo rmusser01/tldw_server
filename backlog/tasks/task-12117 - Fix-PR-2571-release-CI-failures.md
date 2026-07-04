@@ -42,6 +42,8 @@ Addressed the current 96 CodeQL annotations from check-run 84944194830. Existing
 
 After push, the GitHub code scanning alert gate still surfaced 95 open CodeQL alerts that were not cleared by inline comments. Reviewed and dismissed the PR-associated false-positive/test-only CodeQL alerts in GitHub code scanning; zero open PR CodeQL alerts remain. Also fixed the stale UX smoke assertion that expected the chat header theme toggle on the new Companion Home route by moving that check to `/chat`, where the shared chat header is actually rendered.
 
+Follow-up resolution (fix/ux-smoke-theme-toggle-route): the `/chat` retarget could never pass (the cockpit layout suppresses the classic header entirely); the real regression was `_app.tsx` treating sessions as unauthenticated after the runtime bootstrap moved the stored API key into the in-memory runtime override, which hid the header shell on every route. Fixed `_app.tsx` to count runtime auth material as authenticated and moved the theme-toggle smoke check back to `/` (verified green locally with the full stage6 pair).
+
 Updated CHANGELOG.md release entry for 0.1.34 to cover work that landed after the release metadata push: PRs #2570, #2573, #2575, #2576, #2565, #2578, #2316, #2579, and PR #2571 release-stabilization/CodeQL follow-ups. No version bump was made because pyproject.toml is already prepped as 0.1.34 for this release.
 <!-- SECTION:NOTES:END -->
 
