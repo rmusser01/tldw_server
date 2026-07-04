@@ -108,6 +108,13 @@ def _copy_rag_request_with_updates(
     return request.copy(update=updates)
 
 
+def _safe_query_log_metadata(query: Any) -> tuple[str, int]:
+    """Return non-sensitive query metadata suitable for request logs."""
+    query_text = "" if query is None else str(query)
+    query_hash = hashlib.md5(query_text.encode("utf-8"), usedforsecurity=False).hexdigest()[:8]
+    return query_hash, len(query_text)
+
+
 def _sanitize_rag_stream_value(value: Any, *, diagnostic: bool = False) -> Any:
     """Remove exception details from diagnostics before streaming to clients."""
     if diagnostic:
@@ -1269,7 +1276,13 @@ async def unified_search_endpoint(
     """
     try:
         request = _apply_media_collection_scope(request, collections_db)
-        logger.info(f"Unified RAG search: query='{request.query}', user={current_user.username if current_user else 'anonymous'}")
+        query_hash, query_length = _safe_query_log_metadata(request.query)
+        logger.info(
+            "Unified RAG search: query_hash={} len={} user={}",
+            query_hash,
+            query_length,
+            current_user.username if current_user else "anonymous",
+        )
         # Topic monitoring (non-blocking) for query text
         try:
             from tldw_Server_API.app.core.Monitoring.topic_monitoring_service import get_topic_monitoring_service
@@ -1703,8 +1716,8 @@ async def simple_search_endpoint(
     """
     try:
         try:
-            _qh = hashlib.md5((query or "").encode("utf-8"), usedforsecurity=False).hexdigest()[:8]
-            logger.info(f"Simple search: query_hash={_qh} len={len(query or '')}")
+            query_hash, query_length = _safe_query_log_metadata(query)
+            logger.info("Simple search: query_hash={} len={}", query_hash, query_length)
         except (AttributeError, TypeError, ValueError):
             logger.info("Simple search request received")
         # Topic monitoring (non-blocking)
@@ -2094,7 +2107,8 @@ async def advanced_search_endpoint(
     Advanced search with common features enabled.
     """
     try:
-        logger.info(f"Advanced search: query='{query}'")
+        query_hash, query_length = _safe_query_log_metadata(query)
+        logger.info("Advanced search: query_hash={} len={}", query_hash, query_length)
         # Topic monitoring (non-blocking)
         try:
             from tldw_Server_API.app.core.Monitoring.topic_monitoring_service import get_topic_monitoring_service
