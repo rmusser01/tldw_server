@@ -459,25 +459,35 @@ def test_vz_linux_session_create_vm_readiness_failure_does_not_persist_reuse_sta
             VZLinuxRunner._active_run_dir.pop(run_id, None)  # type: ignore[attr-defined]
 
 
+@pytest.mark.unit
 def test_vz_linux_session_create_vm_guest_agent_mismatch_fails_closed(
-    monkeypatch,
-    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
+    """Reject a newly-created session VM when helper metadata reports mismatch."""
+
     monkeypatch.delenv("TLDW_SANDBOX_VZ_LINUX_FAKE_EXEC", raising=False)
     calls: list[str] = []
     stored: list[dict[str, object]] = []
     terminated: list[str] = []
 
     class _Store:
+        """Minimal session-control store for mismatch assertions."""
+
         def get_vz_session_control(self, session_id: str) -> None:
+            """Return no reusable VM for the tested session."""
             assert session_id == "sess-new-guest-agent-mismatch"
             return None
 
         def put_vz_session_control(self, **kwargs: object) -> None:
+            """Record unexpected session-control persistence."""
             stored.append(dict(kwargs))
 
     class _FakeHelper:
+        """Helper double that creates a VM with mismatched guest metadata."""
+
         def validate_template(self, request: dict[str, object]) -> dict[str, object]:
+            """Pretend the image template is valid."""
             calls.append("validate_template")
             return {
                 "template_id": "vz_linux:new-template",
@@ -486,6 +496,7 @@ def test_vz_linux_session_create_vm_guest_agent_mismatch_fails_closed(
             }
 
         def create_vm(self, request: dict[str, object]) -> HelperVMReply:
+            """Return a created VM whose guest metadata explicitly mismatches."""
             calls.append("create_vm")
             assert request["session_id"] == "sess-new-guest-agent-mismatch"
             assert request["session_mode"] is True
@@ -501,10 +512,12 @@ def test_vz_linux_session_create_vm_guest_agent_mismatch_fails_closed(
             )
 
         def exec_guest(self, *, vm_id: str, request: dict[str, object]) -> HelperExecReply:
+            """Fail the call-order assertion if the runner reaches guest execution."""
             calls.append("exec_guest")
             return HelperExecReply(exit_code=0, stdout=b"should-not-run\n")
 
         def terminate_vm(self, vm_id: str) -> bool:
+            """Record cleanup of the rejected VM."""
             calls.append("terminate_vm")
             terminated.append(vm_id)
             return True

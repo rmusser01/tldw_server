@@ -39,6 +39,7 @@ Close the VZ Linux guest-agent mismatch gap found in current code: newly-created
 - Added a focused regression for a newly-created session VM with mismatched guest metadata. The RED run failed because the command reached exec_guest and completed.
 - Added a create_vm gate that rejects explicit guest-agent mismatch before image-store clone prep, session-control persistence, or exec_guest. Unknown metadata remains allowed to preserve existing metadata-light guest behavior.
 - The guard sets should_terminate_vm before raising so the existing finally cleanup terminates the rejected VM.
+- Review follow-up: added marker, fixture type annotations, and docstrings to the new regression test/local helpers.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
@@ -47,6 +48,7 @@ Close the VZ Linux guest-agent mismatch gap found in current code: newly-created
 - Newly-created VZ Linux VMs with explicit guest-agent mismatch now fail closed before execution.
 - Mismatched newly-created session VMs are not stored for reuse and are terminated through the existing cleanup path.
 - Verification passed: focused regression pytest, related runner pytest selection, guest-agent helper pytest, py_compile, git diff --check, and Bandit on the touched runner file.
+- PR review hygiene comments were addressed in the regression test.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
