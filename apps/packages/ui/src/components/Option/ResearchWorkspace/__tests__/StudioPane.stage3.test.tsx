@@ -793,6 +793,25 @@ describe("StudioPane Stage 3 information architecture and UX polish", () => {
     })
   })
 
+  it("retains presentation metadata on completed slides artifacts", async () => {
+    renderExpandedStudioPane()
+
+    fireEvent.click(screen.getByRole("button", { name: /More outputs/ }))
+    fireEvent.click(screen.getByRole("button", { name: "Slides" }))
+
+    await waitFor(() => {
+      expect(mockUpdateArtifactStatus).toHaveBeenCalledWith(
+        expect.stringMatching(/^artifact-/),
+        "completed",
+        expect.objectContaining({
+          presentationId: "presentation-1",
+          presentationVersion: 1,
+          content: expect.stringContaining("# Slides")
+        })
+      )
+    })
+  })
+
   it("disables blocked artifact outputs from capability health", () => {
     const capabilities = buildUnknownResearchWorkspaceCapabilities()
     capabilities.capabilities.slides_generation = {
