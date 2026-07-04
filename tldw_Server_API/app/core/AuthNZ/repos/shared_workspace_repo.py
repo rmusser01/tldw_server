@@ -237,22 +237,24 @@ class SharedWorkspaceRepo:
         access_level: str | None = None,
         allow_clone: bool | None = None,
     ) -> dict[str, Any] | None:
-        existing = await self.get_share(share_id)
-        if not existing:
-            return None
-
-        next_level = _normalize_access_level(access_level) if access_level is not None else existing["access_level"]
-        next_clone = allow_clone if allow_clone is not None else existing["allow_clone"]
-        ts = self._ts()
-        clone_val = self._bool(next_clone)
+        level = None
+        clone_val = None
+        if access_level is not None:
+            level = _normalize_access_level(access_level)
+        if allow_clone is not None:
+            clone_val = self._bool(allow_clone)
+        if level is None and clone_val is None:
+            return await self.get_share(share_id)
 
         await self.db_pool.execute(
             """
             UPDATE shared_workspaces
-            SET access_level = ?, allow_clone = ?, updated_at = ?
+            SET access_level = COALESCE(?, access_level),
+                allow_clone = COALESCE(?, allow_clone),
+                updated_at = ?
             WHERE id = ?
             """,
-            (next_level, clone_val, ts, share_id),
+            (level, clone_val, self._ts(), share_id),
         )
         return await self.get_share(share_id)
 

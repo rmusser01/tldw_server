@@ -311,8 +311,12 @@ def _coerce_scope_ids(values: Any) -> set[int]:
 
 async def _validate_share_target_scope(body: ShareWorkspaceRequest, user: User) -> None:
     """Only create shares for scopes the current user can actually address."""
-    scope_id = int(body.share_scope_id)
-    if body.share_scope_type.value == "team":
+    scope_id = _coerce_int(body.share_scope_id)
+    if scope_id is None:
+        raise HTTPException(status_code=422, detail="Invalid share scope ID.")
+
+    scope_type = body.share_scope_type.value
+    if scope_type == "team":
         if scope_id not in _coerce_scope_ids(getattr(user, "team_ids", None)):
             raise HTTPException(
                 status_code=403,
@@ -320,11 +324,15 @@ async def _validate_share_target_scope(body: ShareWorkspaceRequest, user: User) 
             )
         return
 
-    if scope_id not in _coerce_scope_ids(getattr(user, "org_ids", None)):
-        raise HTTPException(
-            status_code=403,
-            detail="You can only share with organizations you belong to.",
-        )
+    if scope_type == "org":
+        if scope_id not in _coerce_scope_ids(getattr(user, "org_ids", None)):
+            raise HTTPException(
+                status_code=403,
+                detail="You can only share with organizations you belong to.",
+            )
+        return
+
+    raise HTTPException(status_code=422, detail="Invalid share scope type.")
 
 
 # ── Workspace ownership verification helper ──

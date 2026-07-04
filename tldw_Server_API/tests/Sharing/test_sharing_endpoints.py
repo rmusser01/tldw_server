@@ -179,6 +179,25 @@ async def test_verify_chatbook_ownership_uses_storage_user_id_for_numeric_users(
 
 
 @pytest.mark.asyncio
+async def test_validate_share_target_scope_rejects_invalid_scope_id():
+    from tldw_Server_API.app.api.v1.endpoints import sharing
+
+    body = SimpleNamespace(
+        share_scope_id="not-an-int",
+        share_scope_type=SimpleNamespace(value="team"),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await sharing._validate_share_target_scope(
+            body,
+            SimpleNamespace(team_ids=[1], org_ids=[]),
+        )
+
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.detail == "Invalid share scope ID."
+
+
+@pytest.mark.asyncio
 async def test_shared_with_me_workspace_name_resolution_log_is_sanitized(
     repo,
     test_user,
