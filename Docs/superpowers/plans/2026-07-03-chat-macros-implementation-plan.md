@@ -360,9 +360,10 @@ Reviews: spec and code-quality re-reviews found no findings at `9972f2b768`.
 - Create: `tldw_Server_API/app/api/v1/API_Deps/Chat_Macros_Deps.py`
 - Create: `tldw_Server_API/app/api/v1/endpoints/chat_macros.py`
 - Modify: `tldw_Server_API/app/api/v1/router_groups/core.py`
+- Modify: `tldw_Server_API/app/api/v1/router_groups/minimal.py`
 - Test: `tldw_Server_API/tests/Chat_Macros/integration/test_chat_macros_api.py`
 
-- [ ] **Step 1: Write failing API tests**
+- [x] **Step 1: Write failing API tests**
 
 Use the existing FastAPI test client fixtures. Cover:
 
@@ -378,7 +379,7 @@ Use the existing FastAPI test client fixtures. Cover:
 - `GET /api/v1/chat/macros/runs/{run_id}` returns run detail with branch summaries and redacted-safe errors.
 - `POST /api/v1/chat/macros/runs/{run_id}/cancel` records cancellation.
 
-- [ ] **Step 2: Run API tests and verify failure**
+- [x] **Step 2: Run API tests and verify failure**
 
 Run:
 
@@ -389,7 +390,7 @@ python -m pytest tldw_Server_API/tests/Chat_Macros/integration/test_chat_macros_
 
 Expected: 404 or import errors.
 
-- [ ] **Step 3: Implement schemas**
+- [x] **Step 3: Implement schemas**
 
 Include:
 
@@ -403,7 +404,7 @@ Include:
 
 Keep response payloads stable and frontend-friendly: status strings, run IDs, branch summaries, output profile names, and safe errors.
 
-- [ ] **Step 4: Implement dependency and endpoints**
+- [x] **Step 4: Implement dependency and endpoints**
 
 `get_chat_macros_service(...)` should use:
 
@@ -414,7 +415,7 @@ Keep response payloads stable and frontend-friendly: status strings, run IDs, br
 
 Endpoints should map domain exceptions to `400`, `404`, `409`, `413`, or `500` without leaking raw provider errors.
 
-- [ ] **Step 5: Register router**
+- [x] **Step 5: Register router**
 
 In `router_groups/core.py`, append a `RouterSpec` for:
 
@@ -425,7 +426,7 @@ tags=("chat-macros",)
 route_key="chat-macros"
 ```
 
-- [ ] **Step 6: Run API tests**
+- [x] **Step 6: Run API tests**
 
 Run:
 
@@ -435,6 +436,16 @@ python -m pytest tldw_Server_API/tests/Chat_Macros/integration/test_chat_macros_
 ```
 
 Expected: PASS.
+
+Verification:
+
+- `python -m pytest tldw_Server_API/tests/Chat_Macros/integration/test_chat_macros_api.py -v` -> 3 passed.
+- `python -m pytest tldw_Server_API/tests/Services/test_router_groups_contract.py -k "minimal_test_router_specs or minimal_required_router_specs" -v` -> 10 passed, 166 deselected.
+- `python -m pytest tldw_Server_API/tests/Chat_Macros -v` -> 43 passed.
+- `python -m py_compile tldw_Server_API/app/api/v1/endpoints/chat_macros.py tldw_Server_API/app/api/v1/schemas/chat_macros.py tldw_Server_API/app/api/v1/API_Deps/Chat_Macros_Deps.py` -> passed.
+- Review fixes: broadened run/branch error redaction for bearer/header/JSON-style secrets and persisted the resolved output profile name after fallback.
+- `python -m bandit -r tldw_Server_API/app/api/v1/endpoints/chat_macros.py tldw_Server_API/app/api/v1/API_Deps/Chat_Macros_Deps.py tldw_Server_API/app/api/v1/schemas/chat_macros.py tldw_Server_API/app/api/v1/router_groups/minimal.py tldw_Server_API/app/api/v1/router_groups/core.py -f json -o /tmp/bandit_chat_macros_task4_api_reviewfix.json` -> no findings.
+- `git diff --check` -> passed.
 
 - [ ] **Step 7: Commit**
 
