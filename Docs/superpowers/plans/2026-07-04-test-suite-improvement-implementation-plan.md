@@ -2,14 +2,14 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Close the three systemic gaps behind the April–July 2026 escaped defects (see `audits/2026-07-04-test-suite-audit-round2.md`): (1) contract/invariant gaps → targeted property tests; (2) singleton/lifecycle test-isolation blindness → guard plugin + isolation meta-tests; (3) env-matrix blindness → env-absent tests + auth×DB parametrization. Plus mechanized triage of the ~4k-file suite and a frontend API contract-drift gate.
+**Goal:** Close the systemic gaps behind the April–July 2026 dev-merged defects (see `audits/2026-07-04-test-suite-audit-round2.md`; profile counts only defects present on latest `dev`). Priority follows severity: (1) singleton/lifecycle test-isolation blindness (~27% of defects, **all High severity**, #2585 still open) → guard plugin + isolation meta-tests; (2) env-matrix blindness (~27%, mostly High) → env-absent tests + auth×DB parametrization; (3) contract/invariant gaps (~36%, mostly Medium) → targeted property tests. Plus mechanized triage of the ~4k-file suite and a frontend API contract-drift gate (#2590 class).
 
 **Architecture:** Test/CI-layer only — no production behavior changes (exception: `Helper_Scripts/` tooling and additive `reset_*()` test hooks). Each task is one small PR branched from and targeting `dev`, passing `run_local_ci.py`, coverage gates (12% global / 35% AuthNZ), and the shard-coverage guard. New backend test files follow the `tests/<Module>/property/` + `@pytest.mark.property` convention and must join a `ci.yml` shard path list where the module's shard enumerates individual files (Character_Chat does; `tests/Config` is covered as a whole directory by the `core-config` shard, so files under it need no ci.yml change).
 
 **Tech Stack:** pytest + hypothesis (already a dep, `pyproject.toml:58`), Python AST for triage tooling, openapi-typescript for frontend codegen, Vitest 4 / Playwright, GitHub Actions.
 
 **Source documents:**
-- `audits/2026-07-04-test-suite-audit-round2.md` (this round's findings, RA1–RA7 / RF1–RF3; corrected after adversarial fact-check)
+- `audits/2026-07-04-test-suite-audit-round2.md` (this round's findings, RA1–RA7 / RF1–RF3; corrected after adversarial fact-check; dev-merged defects only)
 - `audits/2026-07-02-testing-implementation-audit.md` (round 1, F1–F10 — remediated in PR #2579; do not redo)
 
 ## Global Constraints
@@ -58,33 +58,7 @@
 - [ ] **Step 4:** `test_dual_backend_end_to_end.py` — either back the vector path with a real temp vector store, or de-mark/rename honestly as a unit test of the merge logic. Note a real vector store means ChromaDB + embeddings (heavy); the honest de-mark is the expected outcome unless `deterministic_embeddings` from the conftest makes the real path cheap. Document the choice in the PR.
 - [ ] **Step 5:** Verify each rewrite is non-tautological by mutation: break the underlying behavior locally → test must fail; restore → pass.
 
-### Task 3 (PR 4): Property tests — character card parser + PNG codec + config parsers — RA4
-
-**Files:**
-- Create: `tldw_Server_API/tests/Character_Chat/property/test_ccv3_parser_properties.py`
-- Create: `tldw_Server_API/tests/Character_Chat/property/test_png_chara_embed_properties.py`
-- Create: `tldw_Server_API/tests/Config/property/test_config_section_parser_properties.py`
-- Modify: `.github/workflows/ci.yml` (Character_Chat shard lists individual files → add the two new files; `tests/Config/` needs no ci.yml change — the `core-config` shard covers the directory, `ci.yml:~584`)
-
-- [ ] **Step 1:** ccv3 parser invariants — `ccv3_parser.py` exposes `parse_v3_card`/`validate_v3_card` only (**no serializer — do not attempt a serialize→parse round-trip**): hypothesis-generated card dicts → parse idempotence (`parse(parse(x)) == parse(x)`), known-field preservation, deterministic rejection of invalid cards via `validate_v3_card`.
-- [ ] **Step 2:** PNG tEXt embed/extract round-trip — this one IS bidirectional: `_encode_png_with_chara_metadata` (`app/api/v1/endpoints/characters_endpoint.py:2961`) → `extract_json_from_image_file` (`app/core/Character_Chat/modules/character_io.py:175`): arbitrary card JSON + generated minimal PNGs survive embed→extract exactly. Precedent tests: `tests/Character_Chat_NEW/unit/test_png_export.py`.
-- [ ] **Step 3:** Config parsers (`app/core/config_sections/*.py`, e.g. `chunking.py` `_parse_bool`:41/`_parse_int`:31): never raise on arbitrary str/None/object; default on garbage; idempotent.
-- [ ] **Step 4:** Mutation spot-check: drop a field in ccv3 parsing → property test fails. Shard guard green.
-
-### Task 4 (PR 5): Property tests — chunking, markdown + triage-ranked picks — RA4
-
-**Files:**
-- Modify: `tldw_Server_API/tests/Chunking/test_chunking_overlap_properties.py` (extend; don't duplicate existing property files)
-- Create: `tldw_Server_API/tests/Notes_Tasks/property/test_markdown_parser_properties.py`
-- Create: 2–3 property files chosen from the Task 1 triage ranking (candidates: pagination invariants, JSON fence extraction, chatbook export/import round-trip)
-- Modify: `.github/workflows/ci.yml` (shard entries where the module shard enumerates files)
-
-- [ ] **Step 1:** Chunking invariants for `app/core/Chunking/chunker.py`: reconstruction (concat minus overlap == source), monotone offsets, overlap ≤ chunk size.
-- [ ] **Step 2:** Markdown checklist parser invariants — `app/core/Notes_Tasks/markdown_parser.py` is parse-only (`parse_note_checklists`; **no render direction — do not attempt a round-trip**): never raises on arbitrary input, reported spans stay within source bounds, hierarchy/indent monotonicity, re-parse idempotence.
-- [ ] **Step 3 (BLOCKED — do not start until `codex/chat-macros-v1` merges to dev):** Chat-macro parser bounds properties. `app/core/Chat_Macros/` does not exist on dev; the parser (and its escaped bounds bug, c1f4e6eb95) lives only on that unmerged branch. If still unmerged when this task runs, substitute another triage-ranked candidate and leave this as a one-line TODO referencing the branch.
-- [ ] **Step 4:** Mutation spot-check: off-by-one in chunker overlap → fails.
-
-### Task 5 (PR 6): Singleton guard plugin (warn mode) + inventory — RA5
+### Task 3 (PR 4): Singleton guard plugin (warn mode) + inventory — RA5 (top merged-defect class by severity)
 
 **Files:**
 - Create: `tldw_Server_API/tests/_plugins/singleton_guard.py`
@@ -98,7 +72,7 @@
 - [ ] **Step 2:** Plugin: snapshot registered global state at module boundaries; emit warning on leakage (state present after module that wasn't before it).
 - [ ] **Step 3:** Verify: run 2–3 high-risk lanes (Embeddings, Jobs, AuthNZ) with guard on; catalog warnings (expected non-zero — that's the point); zero false positives on a clean lane like `tests/Config`.
 
-### Task 6 (PR 7): Reset fixtures + isolation meta-tests + nightly shuffle — RA5
+### Task 4 (PR 5): Reset fixtures + isolation meta-tests + nightly shuffle — RA5
 
 **Files:**
 - Modify: `tldw_Server_API/tests/_plugins/` (reset fixtures for top inventory offenders; add `reset_*()` hooks in app code only where missing and purely additive)
@@ -107,23 +81,51 @@
 - Modify: `.github/workflows/ci.yml` or shard baseline (new `tests/infrastructure/` dir)
 
 - [ ] **Step 1:** Reset fixtures for top-10 inventory offenders; drive guard warnings on those lanes to zero.
-- [ ] **Step 2:** Meta-tests reproducing (minimized) #2580 (singleton cache re-registered against second DB), #2581 (drain state across suites), #2585 (`reload_app_main()` sys.modules identity) — each must fail without its fix/reset.
+- [ ] **Step 2:** Meta-tests reproducing (minimized) #2580 (singleton cache re-registered against second DB), #2581 (drain state across suites), #2585 (`reload_app_main()` sys.modules identity) — each must fail without its fix/reset. #2585 is still open: its meta-test lands xfail-with-issue-link until the fix ships, then flips.
 - [ ] **Step 3:** Nightly `pytest-randomly` (new dev-dep; works under `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` with explicit `-p randomly`, consistent with CI's existing `-p pytest_cov -p pytest_asyncio.plugin` usage) on 2–3 high-risk shards; not PR-blocking; promote only after 5 consecutive green runs.
 
-### Task 7 (PR 8): Env-matrix coverage — RA6
+### Task 5 (PR 6): Env-matrix coverage — RA6
 
 **Files:**
 - Modify: `tldw_Server_API/tests/_plugins/` (parametrized auth-mode × DB-backend fixture composing `tests/AuthNZ/conftest.py` fixtures + `_plugins/postgres.py`)
 - Create: `tldw_Server_API/tests/Config/test_env_absent_defaults.py`
-- Create: env-absent tests alongside egress policy tests
+- Create: env-absent tests alongside the workflows/egress policy tests
 - Create: `Helper_Scripts/ci/minimal_env_smoke.py` + a CI job wiring it (in `backend-required.yml` or `ci.yml`)
 
 **Constraint that shapes this task:** `tldw_Server_API/tests/conftest.py` (and root `conftest.py`) force-set env at import time — `AUTH_MODE=single_user`, `SINGLE_USER_API_KEY`, `DATABASE_URL`, `WORKFLOWS_EGRESS_BLOCK_PRIVATE=false`, `WORKFLOWS_WEBHOOK_ALLOWLIST=*`, and more. Any in-pytest run is therefore already env-polluted before the first test executes.
 
-- [ ] **Step 1:** Apply auth×DB matrix (single/multi × SQLite/`pg_temp_db`) to riskiest modules only: AuthNZ, Jobs operation contracts, egress policy, Chat.
-- [ ] **Step 2:** Env-absent tests: per-test `monkeypatch.delenv(..., raising=False)` of every env var consumed by each `config_sections/*.py` module and the egress policy, **paired with the module's settings-cache reset hook** (delenv alone is defeated by cached settings objects); assert real-deployment defaults (the exact class of the egress-bypass escape, 883b6c4dbd).
+- [ ] **Step 1:** Apply auth×DB matrix (single/multi × SQLite/`pg_temp_db`) to riskiest modules only: AuthNZ, Jobs operation contracts, workflows egress policy, Chat.
+- [ ] **Step 2:** Env-absent tests: per-test `monkeypatch.delenv(..., raising=False)` of every env var consumed by each `config_sections/*.py` module and the workflows egress policy (conftest force-relaxes `WORKFLOWS_EGRESS_*` — deployment defaults are never tested), **paired with the module's settings-cache reset hook** (delenv alone is defeated by cached settings objects); assert real-deployment defaults. This is the #2590/e88c96500f defect class: hardening passes that broke the no-env-var fallback path.
 - [ ] **Step 3:** Minimal-env smoke: **not an in-pytest run** (conftest re-injects env). Boot the server as a subprocess with a scrubbed environment (empty env plus a pinned minimal allowlist), probe startup + auth defaults over HTTP, exit nonzero on drift.
 - [ ] **Step 4:** Verify: AuthNZ 35% coverage gate still green.
+
+### Task 6 (PR 7): Property tests — Jobs contracts, character card parser, PNG codec, config parsers — RA4
+
+**Files:**
+- Create: `tldw_Server_API/tests/Jobs/property/test_operation_contract_properties.py`
+- Create: `tldw_Server_API/tests/Character_Chat/property/test_ccv3_parser_properties.py`
+- Create: `tldw_Server_API/tests/Character_Chat/property/test_png_chara_embed_properties.py`
+- Create: `tldw_Server_API/tests/Config/property/test_config_section_parser_properties.py`
+- Modify: `.github/workflows/ci.yml` (shard entries where the module shard enumerates individual files; `tests/Config/` needs no change — the `core-config` shard covers the directory, `ci.yml:~584`)
+
+- [ ] **Step 1:** Jobs operation-contract invariants — the top merged validation defect (a9b6a2c310, d6319e9e16): hypothesis-generated operation sequences/settings never reach the impossible states those fixes guard against; start from the invariants the fix commits added and generalize.
+- [ ] **Step 2:** ccv3 parser invariants — `ccv3_parser.py` exposes `parse_v3_card`/`validate_v3_card` only (**no serializer — do not attempt a serialize→parse round-trip**): hypothesis-generated card dicts → parse idempotence (`parse(parse(x)) == parse(x)`), known-field preservation, deterministic rejection of invalid cards via `validate_v3_card`.
+- [ ] **Step 3:** PNG tEXt embed/extract round-trip — this one IS bidirectional: `_encode_png_with_chara_metadata` (`app/api/v1/endpoints/characters_endpoint.py:2961`) → `extract_json_from_image_file` (`app/core/Character_Chat/modules/character_io.py:175`): arbitrary card JSON + generated minimal PNGs survive embed→extract exactly. Precedent tests: `tests/Character_Chat_NEW/unit/test_png_export.py`.
+- [ ] **Step 4:** Config parsers (`app/core/config_sections/*.py`, e.g. `chunking.py` `_parse_bool`:41/`_parse_int`:31): never raise on arbitrary str/None/object; default on garbage; idempotent.
+- [ ] **Step 5:** Mutation spot-check: weaken a Jobs contract guard and drop a field in ccv3 parsing → property tests fail. Shard guard green.
+
+### Task 7 (PR 8): Property tests — chunking, markdown + triage-ranked picks — RA4
+
+**Files:**
+- Modify: `tldw_Server_API/tests/Chunking/test_chunking_overlap_properties.py` (extend; don't duplicate existing property files)
+- Create: `tldw_Server_API/tests/Notes_Tasks/property/test_markdown_parser_properties.py`
+- Create: 2–3 property files chosen from the Task 1 triage ranking (candidates: pagination invariants, JSON fence extraction, chatbook export/import round-trip)
+- Modify: `.github/workflows/ci.yml` (shard entries where the module shard enumerates files)
+
+- [ ] **Step 1:** Chunking invariants for `app/core/Chunking/chunker.py`: reconstruction (concat minus overlap == source), monotone offsets, overlap ≤ chunk size.
+- [ ] **Step 2:** Markdown checklist parser invariants — `app/core/Notes_Tasks/markdown_parser.py` is parse-only (`parse_note_checklists`; **no render direction — do not attempt a round-trip**): never raises on arbitrary input, reported spans stay within source bounds, hierarchy/indent monotonicity, re-parse idempotence.
+- [ ] **Step 3:** 2–3 triage-ranked picks. (Chat-macro parser bounds is NOT a candidate: `app/core/Chat_Macros/` exists only on unmerged `codex/chat-macros-v1` and its bugs were caught pre-merge — out of scope under the dev-merged-only rule. Revisit only if/when that branch merges.)
+- [ ] **Step 4:** Mutation spot-check: off-by-one in chunker overlap → fails.
 
 ### Task 8 (PR 9): Backend OpenAPI export + frontend type codegen + drift gate — RF1
 
@@ -171,6 +173,6 @@
 ## Program-Level Verification
 
 - Triage baseline (`test_quality_baseline.txt`) strictly shrinks PR-over-PR once the ratchet is enabled (post-Task 2 decision).
-- Each of #2580/#2581/#2585 has a would-have-caught meta-test (Task 6).
+- Each of #2580/#2581/#2585 has a would-have-caught meta-test (Task 4; #2585's lands xfail-with-issue-link while the issue is open).
 - Mutation spot-checks recorded in each property-test PR description.
 - Drift gate demonstrated red-then-green on a backend-only scratch branch in the Task 8 PR description.
