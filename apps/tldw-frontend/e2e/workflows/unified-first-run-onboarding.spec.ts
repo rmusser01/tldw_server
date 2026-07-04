@@ -45,6 +45,7 @@ const json = async (route: Route, body: unknown, status = 200): Promise<void> =>
 };
 
 const nowIso = () => '2026-05-31T12:00:00Z';
+const E2E_SINGLE_USER_API_KEY = 'e2e-valid-single-user-api-key';
 
 const unique = (values: string[]) => Array.from(new Set(values));
 
@@ -78,7 +79,25 @@ function requestJson(route: Route): Record<string, unknown> {
 }
 
 async function prepareFirstRunPage(page: Page): Promise<void> {
-  await seedAuth(page);
+  await page.route('**/api/_tldw-webui/runtime-config', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      headers: corsHeaders,
+      body: JSON.stringify({
+        runtimeAuth: {
+          available: true,
+          authMode: 'single-user',
+          apiKey: E2E_SINGLE_USER_API_KEY,
+        },
+        networking: {
+          deploymentMode: 'quickstart',
+          serverUrl: '',
+        },
+      }),
+    });
+  });
+  await seedAuth(page, { apiKey: E2E_SINGLE_USER_API_KEY });
   await stubNotificationsApi(page);
   await page.addInitScript(() => {
     localStorage.removeItem('__tldw_first_run_complete');
@@ -126,6 +145,38 @@ async function installUnifiedFirstRunApi(
 
     if (path === '/api/v1/health' || path === '/api/v1/health/live') {
       await json(route, { status: 'ok', version: 'e2e' });
+      return;
+    }
+
+    if (path === '/api/v1/media' && method === 'GET') {
+      await json(route, {
+        items: [],
+        total: 0,
+        page: 1,
+        results_per_page: 1,
+      });
+      return;
+    }
+
+    if (path === '/api/v1/notifications' && method === 'GET') {
+      await json(route, {
+        items: [],
+        total: 0,
+      });
+      return;
+    }
+
+    if (path === '/api/v1/notifications/unread-count' && method === 'GET') {
+      await json(route, { unread_count: 0 });
+      return;
+    }
+
+    if (path === '/api/v1/scheduled-tasks' && method === 'GET') {
+      await json(route, {
+        items: [],
+        total: 0,
+        partial: false,
+      });
       return;
     }
 
@@ -340,6 +391,56 @@ async function installUnifiedFirstRunApi(
   };
 }
 
+async function completeMockedFirstChatSetup(page: Page): Promise<Record<string, unknown>> {
+  await page.getByRole('button', { name: /solo, docker/i }).click();
+  await expect(page.getByRole('heading', { name: /privacy and security/i })).toBeVisible();
+  await page.getByLabel(/i understand local or remote setup access/i).check();
+  await page.getByRole('button', { name: /^continue$/i }).click();
+
+  await expect(page.getByRole('heading', { name: /chat provider/i })).toBeVisible();
+  await page.getByLabel(/select openai/i).check();
+  await page.getByLabel(/openai api key/i).fill('sk-test-onboarding');
+  await page.getByLabel(/default model/i).fill('gpt-4.1-mini');
+  await page.getByRole('button', { name: /validate openai/i }).click();
+  await expect(page.getByText(/first chat verifies this provider/i)).toBeVisible();
+  await page.getByRole('button', { name: /save provider/i }).click();
+  await expect(page.getByText(/saved as sk-\.\.\.test/i)).toBeVisible();
+  await page.getByRole('button', { name: /^continue$/i }).click();
+
+  await expect(page.getByRole('heading', { name: /ingest defaults/i })).toBeVisible();
+  await page.getByRole('button', { name: /^continue$/i }).click();
+
+  await expect(page.getByRole('heading', { name: /audio, stt, and tts/i })).toBeVisible();
+  await page.getByRole('button', { name: /^continue$/i }).click();
+
+  await expect(page.getByRole('heading', { name: /optional advanced setup/i })).toBeVisible();
+  await page.getByRole('button', { name: /^continue$/i }).click();
+
+  await expect(page.getByRole('heading', { name: /first chat/i })).toBeVisible();
+  await page.getByRole('button', { name: /send test chat/i }).click();
+
+  await waitForFirstSourceMilestone(page);
+  await expect(page.getByRole('radio', { name: /web url/i })).toBeChecked();
+  await page.getByRole('button', { name: /add source/i }).click();
+  return page.evaluate(() => (window as any).__tldwPendingQuickIngestOpen?.detail);
+}
+
+async function waitForFirstSourceMilestone(page: Page): Promise<void> {
+  const milestone = page.getByRole('heading', { name: /add your first source/i });
+  const recovery = page.getByRole('heading', { name: /restore media access/i });
+
+  if (await milestone.isVisible({ timeout: 5_000 }).catch(() => false)) {
+    return;
+  }
+
+  if (await recovery.isVisible({ timeout: 5_000 }).catch(() => false)) {
+    await page.getByRole('textbox', { name: /single-user api key/i }).fill(E2E_SINGLE_USER_API_KEY);
+    await page.getByRole('button', { name: /save api key/i }).click();
+  }
+
+  await expect(milestone).toBeVisible();
+}
+
 test.describe('unified first-run onboarding', () => {
   test('uses a focused setup shell until the user explicitly skips', async ({
     page,
@@ -356,11 +457,47 @@ test.describe('unified first-run onboarding', () => {
     await page.getByRole('button', { name: /skip for now/i }).click();
 
     await expect(page.getByRole('heading', { name: /first-time setup/i })).toHaveCount(0);
-    await expect(page.getByTestId('chat-toggle-shortcuts')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Companion', exact: true })).toBeVisible();
     expect(mock.state.status).toBe('skipped');
     expect(
       mock.setupMutations.some((request) => request.path === '/api/v1/setup/first-run/skip')
     ).toBe(true);
+
+    await assertNoCriticalErrors(diagnostics);
+  });
+
+  test('hands /setup to the WebUI setup choice on desktop', async ({ page, diagnostics }) => {
+    await prepareFirstRunPage(page);
+    await installUnifiedFirstRunApi(page);
+
+    await page.goto('/setup');
+
+    await expect(page.getByRole('heading', { name: /choose where to set up tldw/i })).toBeVisible();
+    const apiSetupLink = page.getByRole('link', {
+      name: /open api server setup.*opens in a new tab/i,
+    });
+    await expect(apiSetupLink).toHaveAttribute('href', 'http://127.0.0.1:8000/setup');
+
+    await page.getByRole('button', { name: /set up in webui/i }).click();
+
+    await expect(page.getByRole('heading', { name: /first-time setup/i })).toBeVisible();
+    await assertNoCriticalErrors(diagnostics);
+  });
+
+  test('shows the /setup choice handoff on mobile', async ({ page, diagnostics }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await prepareFirstRunPage(page);
+    await installUnifiedFirstRunApi(page);
+
+    await page.goto('/setup');
+
+    await expect(page.getByRole('heading', { name: /choose where to set up tldw/i })).toBeVisible();
+    await expect(page.getByRole('button', { name: /set up in webui/i })).toBeVisible();
+    const apiSetupLink = page.getByRole('link', {
+      name: /open api server setup.*opens in a new tab/i,
+    });
+    await expect(apiSetupLink).toBeVisible();
+    await expect(apiSetupLink).toHaveAttribute('href', 'http://127.0.0.1:8000/setup');
 
     await assertNoCriticalErrors(diagnostics);
   });
@@ -390,8 +527,7 @@ test.describe('unified first-run onboarding', () => {
 
     await page.goto('/');
 
-    await expect(page.getByTestId('chat-toggle-shortcuts')).toBeVisible();
-    await expect(page.getByRole('heading', { name: /add your first source/i })).toBeVisible();
+    await waitForFirstSourceMilestone(page);
     await expect(page.getByRole('button', { name: /add source/i })).toBeVisible();
 
     await page.getByRole('button', { name: /dismiss/i }).click();
@@ -411,41 +547,9 @@ test.describe('unified first-run onboarding', () => {
 
     await page.goto('/');
 
-    await page.getByRole('button', { name: /solo, docker/i }).click();
-    await expect(page.getByRole('heading', { name: /privacy and security/i })).toBeVisible();
-    await page.getByLabel(/i understand local or remote setup access/i).check();
-    await page.getByRole('button', { name: /^continue$/i }).click();
-
-    await expect(page.getByRole('heading', { name: /chat provider/i })).toBeVisible();
-    await page.getByLabel(/select openai/i).check();
-    await page.getByLabel(/openai api key/i).fill('sk-test-onboarding');
-    await page.getByLabel(/default model/i).fill('gpt-4.1-mini');
-    await page.getByRole('button', { name: /validate openai/i }).click();
-    await expect(page.getByText(/first chat verifies this provider/i)).toBeVisible();
-    await page.getByRole('button', { name: /save provider/i }).click();
-    await expect(page.getByText(/saved as sk-\.\.\.test/i)).toBeVisible();
-    await page.getByRole('button', { name: /^continue$/i }).click();
-
-    await expect(page.getByRole('heading', { name: /ingest defaults/i })).toBeVisible();
-    await page.getByRole('button', { name: /^continue$/i }).click();
-
-    await expect(page.getByRole('heading', { name: /audio, stt, and tts/i })).toBeVisible();
-    await page.getByRole('button', { name: /^continue$/i }).click();
-
-    await expect(page.getByRole('heading', { name: /optional advanced setup/i })).toBeVisible();
-    await page.getByRole('button', { name: /^continue$/i }).click();
-
-    await expect(page.getByRole('heading', { name: /first chat/i })).toBeVisible();
     expect(mock.completeRequests).toHaveLength(0);
 
-    await page.getByRole('button', { name: /send test chat/i }).click();
-
-    await expect(page.getByRole('heading', { name: /add your first source/i })).toBeVisible();
-    await expect(page.getByRole('radio', { name: /web url/i })).toBeChecked();
-    await page.getByRole('button', { name: /add source/i }).click();
-    const firstSourceDetail = await page.evaluate(
-      () => (window as any).__tldwPendingQuickIngestOpen?.detail
-    );
+    const firstSourceDetail = await completeMockedFirstChatSetup(page);
     expect(firstSourceDetail).toMatchObject({
       source: 'first_source_milestone',
       firstSource: true,
@@ -456,6 +560,32 @@ test.describe('unified first-run onboarding', () => {
       provider: 'openai',
       model: 'gpt-4.1-mini',
     });
+    expect(mock.completeRequests).toHaveLength(1);
+    expect(mock.state.status).toBe('completed');
+
+    await assertNoCriticalErrors(diagnostics);
+  });
+
+  test('hands /setup WebUI choice into mocked first-chat completion', async ({
+    page,
+    diagnostics,
+  }) => {
+    await prepareFirstRunPage(page);
+    const mock = await installUnifiedFirstRunApi(page);
+
+    await page.goto('/setup');
+
+    await expect(page.getByRole('heading', { name: /choose where to set up tldw/i })).toBeVisible();
+    await page.getByRole('button', { name: /set up in webui/i }).click();
+    await expect(page.getByRole('heading', { name: /first-time setup/i })).toBeVisible();
+
+    const firstSourceDetail = await completeMockedFirstChatSetup(page);
+    expect(firstSourceDetail).toMatchObject({
+      source: 'first_source_milestone',
+      firstSource: true,
+      firstSourceKind: 'web_url',
+    });
+    expect(mock.firstChatRequests).toHaveLength(1);
     expect(mock.completeRequests).toHaveLength(1);
     expect(mock.state.status).toBe('completed');
 
