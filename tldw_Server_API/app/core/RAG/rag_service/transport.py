@@ -316,12 +316,41 @@ def _allow_orgless_rag_billing_access() -> bool:
         return False
 
 
+def _membership_is_active(membership: dict[str, Any]) -> bool:
+    """Return whether an org membership row grants active access."""
+    return str(membership.get("status") or "").strip().lower() == "active"
+
+
+async def _verified_org_ids_for_user(current_user: Optional[Any]) -> list[int]:
+    """Return active organization ids for a user, or an empty list if unavailable."""
+    if not current_user or getattr(current_user, "id_int", None) is None:
+        return []
+    try:
+        from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+        from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
+
+        pool = await get_db_pool()
+        repo = AuthnzOrgsTeamsRepo(db_pool=pool)
+        memberships = await repo.list_org_memberships_for_user(current_user.id_int)
+    except Exception:  # noqa: BLE001 - callers decide whether missing org context is fatal.
+        return []
+
+    org_ids: list[int] = []
+    for membership in memberships:
+        if not _membership_is_active(membership):
+            continue
+        org_id = _first_positive_int(membership.get("org_id"))
+        if org_id is not None and org_id not in org_ids:
+            org_ids.append(org_id)
+    return org_ids
+
+
 async def resolve_org_id_for_rag_context(
     *,
     request_like: Any = None,
     current_user: Optional[Any] = None,
 ) -> int | None:
-    """Resolve a billing organization from HTTP request state or MCP context metadata."""
+    """Resolve a billing organization from trusted state or verified user memberships."""
     state = getattr(request_like, "state", None)
     if state is not None:
         org_id = _first_positive_int(
@@ -332,31 +361,19 @@ async def resolve_org_id_for_rag_context(
             return org_id
 
     metadata = getattr(request_like, "metadata", None)
+    hinted_org_id = None
     if isinstance(metadata, dict):
-        org_id = _first_positive_int(metadata.get("org_id"), metadata.get("org_ids"))
-        if org_id is not None:
-            return org_id
+        hinted_org_id = _first_positive_int(metadata.get("org_id"), metadata.get("org_ids"))
 
-    direct_org_id = _first_positive_int(getattr(request_like, "org_id", None))
-    if direct_org_id is not None:
-        return direct_org_id
+    hinted_org_id = hinted_org_id or _first_positive_int(getattr(request_like, "org_id", None))
+    verified_org_ids = await _verified_org_ids_for_user(current_user)
+    if not verified_org_ids:
+        return None
 
-    if current_user and getattr(current_user, "id_int", None) is not None:
-        try:
-            from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
-            from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
+    if hinted_org_id in verified_org_ids:
+        return hinted_org_id
 
-            pool = await get_db_pool()
-            repo = AuthnzOrgsTeamsRepo(db_pool=pool)
-            memberships = await repo.list_org_memberships_for_user(current_user.id_int)
-            for membership in memberships:
-                org_id = _first_positive_int(membership.get("org_id"))
-                if org_id is not None:
-                    return org_id
-        except Exception:  # noqa: BLE001 - callers decide whether missing org context is fatal.
-            return None
-
-    return None
+    return verified_org_ids[0]
 
 
 async def enforce_rag_query_limit_for_org_context(

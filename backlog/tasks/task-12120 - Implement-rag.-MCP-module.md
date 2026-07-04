@@ -4,7 +4,7 @@ title: Implement rag.* MCP module
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-07-03 17:33'
+updated_date: '2026-07-04 23:21'
 labels:
   - mcp
   - rag
@@ -43,6 +43,10 @@ Docs/superpowers/plans/2026-07-03-rag-mcp-module-implementation-plan.md
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 2026-07-03 review follow-up: addressed code-review findings for source-module registration checks, all-sources-filtered allow_partial behavior, MCP-to-billing RAG daily quota enforcement, PermissionError propagation for MCP auth/quota failures, bounded/redacted citation payloads, source_health context db_paths, empty sources_used semantics, and MCP top_k capability alignment. Added regression coverage in MCP RAG module tests and RAG transport helper tests. Verification: 67-test MCP/RAG helper/source-health suite passed; focused RAG module + transport helper suite passed; Bandit on touched Python scope completed with zero findings after test fixture cleanup.
+
+2026-07-04 PR follow-up: rebase codex/rag-mcp-module onto latest origin/dev and address fresh PR review comments from CodeRabbit/Qodo/Gemini. Scope: keep PR on rag.* MCP only, fix still-valid comments with minimal changes, validate, then force-push rebased branch and retarget PR to dev.
+
+2026-07-04 PR follow-up completed: rebased codex/rag-mcp-module onto latest origin/dev, tightened rag.* MCP review fixes for explicit-null defaults, strict booleans, include_documents pipeline handling, client-safe RAG error summaries, pipeline exception logging, test marker classification, and verified org metadata hints for RAG billing. Verification: focused RAG/MCP suite passed (73 tests); git diff --check passed; Bandit on touched Python scope completed with zero findings (/tmp/bandit_rag_mcp_pr2587_followup.json).
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

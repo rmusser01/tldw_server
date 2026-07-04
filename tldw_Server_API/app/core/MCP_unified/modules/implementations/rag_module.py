@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any
 
+from loguru import logger
+
 from tldw_Server_API.app.api.v1.schemas.rag_schemas_unified import (
     UnifiedRAGRequest,
     UnifiedRAGResponse,
@@ -158,6 +160,7 @@ class _McpRagControls:
     """
 
     async def enforce_protocol_rate(self, context: Any | None, tool_name: str, category: str) -> None:
+        """Apply MCP protocol rate limits for a RAG tool call."""
         metadata = getattr(context, "metadata", None)
         if isinstance(metadata, dict) and metadata.get("rg_ingress_enforced"):
             return
@@ -179,9 +182,11 @@ class _McpRagControls:
             raise
 
     async def enforce_rag_rbac_rate_limit(self, context: Any | None, resource: str) -> None:
+        """Require read access to the RAG protocol resource."""
         await self._ensure_tool_allowed(context, resource)
 
     async def require_mcp_rag_read_scope(self, context: Any | None, tool_name: str) -> None:
+        """Require the caller's MCP scopes to allow the requested RAG tool."""
         await self._ensure_tool_allowed(context, tool_name)
 
     async def authorize_sources(
@@ -192,6 +197,7 @@ class _McpRagControls:
         sources_explicit: bool,
         allow_partial: bool,
     ) -> _SourceAuthorization:
+        """Filter requested RAG sources by installed source modules and permissions."""
         del sources_explicit, allow_partial
         allowed_sources: list[str] = []
         unavailable_sources: list[str] = []
@@ -218,6 +224,7 @@ class _McpRagControls:
         )
 
     async def check_rag_query_quota(self, context: Any | None, units: int = 1) -> None:
+        """Enforce MCP and billing quotas before running a RAG query."""
         if units <= 0:
             return
         await self.enforce_protocol_rate(context, "rag.query", "rag_generation")
@@ -228,6 +235,7 @@ class _McpRagControls:
         )
 
     async def log_rag_query_usage(self, context: Any | None, units: int = 1) -> None:
+        """Record successful RAG query usage for the caller's billing context."""
         await rag_transport.log_rag_queries_for_org_context(
             request_like=context,
             current_user=_current_user_from_context(context),
@@ -250,6 +258,7 @@ class _McpRagControls:
         return None
 
     async def _tool_allowed(self, context: Any | None, tool_name: str) -> bool:
+        """Return whether protocol RBAC grants the given read-only tool."""
         if context is None or not getattr(context, "user_id", None):
             return False
         has_tool_permission = getattr(self._protocol(), "_has_tool_permission", None)
@@ -258,6 +267,7 @@ class _McpRagControls:
         return bool(await has_tool_permission(context, tool_name, is_write=False))
 
     async def _source_tool_registered(self, tool_name: str) -> bool:
+        """Return whether the source-owning MCP module exposes a backing tool."""
         module_registry = getattr(self._protocol(), "module_registry", None)
         find_module_for_tool = getattr(module_registry, "find_module_for_tool", None)
         if not callable(find_module_for_tool):
@@ -268,6 +278,7 @@ class _McpRagControls:
         return result is not None
 
     async def _ensure_tool_allowed(self, context: Any | None, tool_name: str) -> None:
+        """Raise when the caller lacks permission for a read-only MCP tool."""
         if not await self._tool_allowed(context, tool_name):
             raise PermissionError(f"MCP tool permission denied: {tool_name}")
 
@@ -305,9 +316,10 @@ def _required_string(arguments: dict[str, Any], key: str, *, max_length: int) ->
     return value
 
 
-def _bounded_int(value: Any, *, minimum: int, maximum: int) -> int:
+def _bounded_int(value: Any, *, minimum: int, maximum: int, default: int | None = None) -> int:
+    """Parse an integer argument using the schema default for explicit null."""
     if value is None:
-        return minimum
+        return minimum if default is None else default
     if isinstance(value, bool):
         raise ValueError("integer value must not be boolean")
     try:
@@ -319,9 +331,10 @@ def _bounded_int(value: Any, *, minimum: int, maximum: int) -> int:
     return result
 
 
-def _bounded_float(value: Any, *, minimum: float, maximum: float) -> float:
+def _bounded_float(value: Any, *, minimum: float, maximum: float, default: float | None = None) -> float:
+    """Parse a float argument using the schema default for explicit null."""
     if value is None:
-        return minimum
+        return minimum if default is None else default
     if isinstance(value, bool):
         raise ValueError("float value must not be boolean")
     try:
@@ -331,6 +344,15 @@ def _bounded_float(value: Any, *, minimum: float, maximum: float) -> float:
     if result < minimum or result > maximum:
         raise ValueError(f"float value must be between {minimum} and {maximum}")
     return result
+
+
+def _bounded_bool(value: Any, *, default: bool) -> bool:
+    """Parse a boolean argument using the schema default for explicit null."""
+    if value is None:
+        return default
+    if not isinstance(value, bool):
+        raise ValueError("boolean value required")
+    return value
 
 
 def _enum(value: Any, allowed: tuple[str, ...]) -> str:
@@ -377,21 +399,26 @@ def _build_mcp_rag_request(
 
     sources_explicit = _sources_were_explicit(arguments)
     sources = _normalize_mcp_sources(arguments.get("sources"))
-    max_documents = _bounded_int(arguments.get("max_documents", 6), minimum=0, maximum=20)
-    max_content_chars = _bounded_int(arguments.get("max_content_chars", 2000), minimum=0, maximum=8000)
+    max_documents = _bounded_int(arguments.get("max_documents", 6), minimum=0, maximum=20, default=6)
+    max_content_chars = _bounded_int(
+        arguments.get("max_content_chars", 2000),
+        minimum=0,
+        maximum=8000,
+        default=2000,
+    )
+    include_documents = _bounded_bool(arguments.get("include_documents", True), default=True)
 
     payload: dict[str, Any] = {
         "query": _required_string(arguments, "query", max_length=20000),
         "sources": sources,
         "search_mode": _enum(arguments.get("search_mode", "hybrid"), _SEARCH_MODES),
-        "top_k": _bounded_int(arguments.get("top_k", 10), minimum=1, maximum=_MCP_TOP_K_MAX),
-        "min_score": _bounded_float(arguments.get("min_score", 0.0), minimum=0.0, maximum=1.0),
+        "top_k": _bounded_int(arguments.get("top_k", 10), minimum=1, maximum=_MCP_TOP_K_MAX, default=10),
+        "min_score": _bounded_float(arguments.get("min_score", 0.0), minimum=0.0, maximum=1.0, default=0.0),
         "rag_profile": _optional_enum(arguments.get("rag_profile"), _PROFILES),
         "enable_generation": tool_name == _TOOL_ANSWER,
         "enable_citations": True,
-        "enable_chunk_citations": bool(arguments.get("include_chunk_citations", True)),
+        "enable_chunk_citations": _bounded_bool(arguments.get("include_chunk_citations", True), default=True),
         "include_metadata": True,
-        "include_sources": bool(arguments.get("include_documents", True)),
     }
     if tool_name == _TOOL_SEARCH:
         payload["enable_generation"] = False
@@ -400,7 +427,8 @@ def _build_mcp_rag_request(
     return request, {
         "sources_explicit": sources_explicit,
         "sources_requested": list(sources),
-        "allow_partial": bool(arguments.get("allow_partial", False)),
+        "allow_partial": _bounded_bool(arguments.get("allow_partial", False), default=False),
+        "include_documents": include_documents,
         "max_documents": max_documents,
         "max_content_chars": max_content_chars,
     }
@@ -457,6 +485,19 @@ def _compact_citations(citations: Any) -> tuple[list[dict[str, Any]], bool]:
     return compacted, len(citations) > len(selected)
 
 
+def _compact_errors(errors: Any) -> tuple[list[dict[str, Any]], int]:
+    """Return a stable client-safe error summary without backend exception text."""
+    if not isinstance(errors, list) or not errors:
+        return [], 0
+    return [
+        {
+            "reason_code": "rag_pipeline_error",
+            "message": "RAG pipeline returned one or more errors.",
+            "count": len(errors),
+        }
+    ], len(errors)
+
+
 def _model_to_plain_dict(value: Any) -> dict[str, Any]:
     """Convert Pydantic v1/v2 models to plain JSON-safe dictionaries."""
     model_dump = getattr(value, "model_dump", None)
@@ -507,7 +548,9 @@ def _compact_rag_response(
     max_content_chars: int,
 ) -> dict[str, Any]:
     """Return a bounded JSON-serializable MCP payload from a RAG response."""
-    documents = list(response.documents or [])
+    include_documents = bool(request_metadata.get("include_documents", True))
+    raw_documents = list(response.documents or [])
+    documents = raw_documents if include_documents else []
     selected_documents = documents[:max_documents]
     compacted_documents = [
         _compact_document(document, max_content_chars=max_content_chars)
@@ -523,6 +566,7 @@ def _compact_rag_response(
     response_metadata = response.metadata or {}
     citations, citations_truncated = _compact_citations(response.citations or [])
     chunk_citations, chunk_citations_truncated = _compact_citations(response.chunk_citations or [])
+    errors, error_count = _compact_errors(response.errors or [])
     trust = response_metadata.get("knowledge_trust")
     trust_state = str(trust.get("state", "")).strip().lower() if isinstance(trust, dict) else None
     metadata = {
@@ -530,9 +574,10 @@ def _compact_rag_response(
         "sources_used": sources_used,
         "sources_unavailable": list(request_metadata.get("sources_unavailable") or []),
         "warnings": list(request_metadata.get("warnings") or []),
-        "documents_truncated": len(documents) > len(selected_documents),
+        "documents_truncated": include_documents and len(raw_documents) > len(selected_documents),
         "citations_truncated": citations_truncated,
         "chunk_citations_truncated": chunk_citations_truncated,
+        "error_count": error_count,
         "max_documents": max_documents,
         "max_content_chars": max_content_chars,
         "hard_citation_coverage": _hard_citation_coverage(response_metadata),
@@ -541,7 +586,7 @@ def _compact_rag_response(
         metadata["knowledge_trust_state"] = trust_state
 
     payload: dict[str, Any] = {
-        "ok": not bool(response.errors),
+        "ok": error_count == 0,
         "mode": mode,
         "query": response.query,
         "documents": compacted_documents,
@@ -549,7 +594,7 @@ def _compact_rag_response(
         "chunk_citations": chunk_citations,
         "metadata": metadata,
         "timings": dict(response.timings or {}),
-        "errors": list(response.errors or []),
+        "errors": errors,
     }
     if mode == "answer":
         payload["answer"] = {
@@ -831,7 +876,7 @@ class RagModule(BaseModule):
             await self._controls.enforce_rag_rbac_rate_limit(context, "rag.search")
             await self._controls.require_mcp_rag_read_scope(context, tool_name)
             sources_explicit = _sources_were_explicit(args)
-            allow_partial = bool(args.get("allow_partial", False))
+            allow_partial = _bounded_bool(args.get("allow_partial", False), default=False)
             requested_sources = (
                 _normalize_mcp_sources(args.get("sources"))
                 if args.get("sources") is not None
@@ -953,6 +998,7 @@ class RagModule(BaseModule):
             pipeline_kwargs = dict(bundle.pipeline_kwargs)
             pipeline_kwargs.update(_mcp_safe_search_agent_overrides())
             pipeline_kwargs["enable_generation"] = tool_name == _TOOL_ANSWER
+            pipeline_kwargs["include_sources"] = bool(request_metadata.get("include_documents", True))
             result = await unified_rag_pipeline(**pipeline_kwargs)
             response = rag_result_to_response(rag_result_from_unified_search_result(result))
             payload = _compact_rag_response(
@@ -968,6 +1014,12 @@ class RagModule(BaseModule):
         except PermissionError:
             raise
         except Exception as exc:  # noqa: BLE001 - RAG domain errors become structured MCP payloads.
+            logger.exception(
+                "RAG MCP pipeline failed for tool={tool_name} mode={mode}: {error_type}",
+                tool_name=tool_name,
+                mode=mode,
+                error_type=exc.__class__.__name__,
+            )
             return {
                 "ok": False,
                 "mode": mode,

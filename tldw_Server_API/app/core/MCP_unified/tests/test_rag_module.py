@@ -19,6 +19,8 @@ from tldw_Server_API.app.core.MCP_unified.modules.registry import ModuleRegistry
 from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol, MCPRequest, RequestContext
 from tldw_Server_API.app.core.MCP_unified import server as mcp_server_module
 
+pytestmark = pytest.mark.unit
+
 
 class _RecordingControls:
     def __init__(self) -> None:
@@ -118,6 +120,36 @@ def test_mcp_sources_omitted_tracks_implicit_default() -> None:
     assert metadata["sources_explicit"] is False  # nosec B101
 
 
+def test_mcp_explicit_nulls_use_schema_defaults() -> None:
+    request, metadata = _build_mcp_rag_request(
+        "rag.search",
+        {
+            "query": "q",
+            "top_k": None,
+            "min_score": None,
+            "include_documents": None,
+            "include_chunk_citations": None,
+            "allow_partial": None,
+            "max_documents": None,
+            "max_content_chars": None,
+        },
+    )
+
+    assert request.top_k == 10  # nosec B101
+    assert request.min_score == 0.0  # nosec B101
+    assert request.enable_chunk_citations is True  # nosec B101
+    assert metadata["include_documents"] is True  # nosec B101
+    assert metadata["allow_partial"] is False  # nosec B101
+    assert metadata["max_documents"] == 6  # nosec B101
+    assert metadata["max_content_chars"] == 2000  # nosec B101
+
+
+def test_mcp_boolean_arguments_are_strict() -> None:
+    for key in ("include_documents", "include_chunk_citations", "allow_partial"):
+        with pytest.raises(ValueError, match="boolean"):
+            _build_mcp_rag_request("rag.search", {"query": "q", key: "false"})
+
+
 def test_advanced_is_rejected() -> None:
     with pytest.raises(ValueError, match="advanced"):
         _build_mcp_rag_request("rag.search", {"query": "q", "advanced": {"debug_mode": True}})
@@ -163,6 +195,58 @@ def test_compact_response_truncates_documents_and_preserves_citations() -> None:
     assert payload["metadata"]["documents_truncated"] is False  # nosec B101
     assert payload["metadata"]["max_documents"] == 1  # nosec B101
     assert payload["metadata"]["max_content_chars"] == 3  # nosec B101
+
+
+def test_compact_response_omits_documents_when_requested() -> None:
+    response = UnifiedRAGResponse(
+        query="q",
+        documents=[{"id": "d1", "content": "Evidence", "metadata": {"source": "media_db"}, "score": 0.9}],
+        citations=[],
+        chunk_citations=[],
+        metadata={},
+    )
+
+    payload = _compact_rag_response(
+        response,
+        mode="search",
+        request_metadata={"sources_requested": ["media_db"], "sources_explicit": True, "include_documents": False},
+        max_documents=1,
+        max_content_chars=2000,
+    )
+
+    assert payload["documents"] == []  # nosec B101
+    assert payload["metadata"]["sources_used"] == []  # nosec B101
+    assert payload["metadata"]["documents_truncated"] is False  # nosec B101
+
+
+def test_compact_response_redacts_raw_pipeline_errors() -> None:
+    response = UnifiedRAGResponse(
+        query="q",
+        documents=[],
+        citations=[],
+        chunk_citations=[],
+        metadata={},
+        errors=["Traceback SECRET_PATH provider payload"],
+    )
+
+    payload = _compact_rag_response(
+        response,
+        mode="search",
+        request_metadata={"sources_requested": ["media_db"], "sources_explicit": True},
+        max_documents=1,
+        max_content_chars=2000,
+    )
+
+    assert payload["ok"] is False  # nosec B101
+    assert payload["errors"] == [  # nosec B101
+        {
+            "reason_code": "rag_pipeline_error",
+            "message": "RAG pipeline returned one or more errors.",
+            "count": 1,
+        }
+    ]
+    assert payload["metadata"]["error_count"] == 1  # nosec B101
+    assert "SECRET_PATH" not in repr(payload)  # nosec B101
 
 
 def test_compact_response_redacts_raw_document_and_response_metadata() -> None:
@@ -282,7 +366,6 @@ def test_compact_response_does_not_report_requested_sources_as_used_when_empty()
     assert payload["metadata"]["sources_used"] == []  # nosec B101
 
 
-@pytest.mark.asyncio
 async def test_rag_module_exposes_four_strict_tools() -> None:
     module = RagModule(ModuleConfig(name="rag"))
 
@@ -294,7 +377,6 @@ async def test_rag_module_exposes_four_strict_tools() -> None:
     assert tools["rag.answer"]["metadata"]["category"] == "rag_generation"  # nosec B101
 
 
-@pytest.mark.asyncio
 async def test_rag_capabilities_reports_mcp_top_k_limit() -> None:
     controls = _RecordingControls()
     module = RagModule(ModuleConfig(name="rag"), controls=controls)
@@ -304,7 +386,6 @@ async def test_rag_capabilities_reports_mcp_top_k_limit() -> None:
     assert out["limits"]["top_k_max"] == 50  # nosec B101
 
 
-@pytest.mark.asyncio
 async def test_rag_search_executes_shared_pipeline_without_generation(monkeypatch: pytest.MonkeyPatch) -> None:
     module = RagModule(ModuleConfig(name="rag"), controls=_RecordingControls())
     calls: dict[str, object] = {}
@@ -339,11 +420,45 @@ async def test_rag_search_executes_shared_pipeline_without_generation(monkeypatc
     assert "answer" not in out  # nosec B101
     assert calls["enable_generation"] is False  # nosec B101
     assert calls["sources"] == ["media_db"]  # nosec B101
+    assert calls["include_sources"] is True  # nosec B101
     assert calls["media_db_path"] == "media.db"  # nosec B101
     assert calls["notes_db_path"] == "notes.db"  # nosec B101
 
 
-@pytest.mark.asyncio
+async def test_rag_search_can_suppress_returned_documents(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = RagModule(ModuleConfig(name="rag"), controls=_RecordingControls())
+    calls: dict[str, object] = {}
+
+    async def fake_pipeline(**kwargs):
+        calls.update(kwargs)
+        return SimpleNamespace(
+            documents=[{"id": "d1", "content": "Evidence", "metadata": {"source": "media_db"}, "score": 0.9}],
+            query="q",
+            metadata={},
+            timings={},
+            citations=[],
+            chunk_citations=[],
+            generated_answer=None,
+            errors=[],
+            total_time=0.1,
+            cache_hit=False,
+            expanded_queries=[],
+        )
+
+    monkeypatch.setattr(rag_module_impl, "unified_rag_pipeline", fake_pipeline)
+
+    out = await module.execute_tool(
+        "rag.search",
+        {"query": "q", "include_documents": False},
+        context=RequestContext(request_id="include-documents-false", user_id="1"),
+    )
+
+    assert out["ok"] is True  # nosec B101
+    assert calls["include_sources"] is False  # nosec B101
+    assert out["documents"] == []  # nosec B101
+    assert out["metadata"]["documents_truncated"] is False  # nosec B101
+
+
 async def test_rag_answer_marks_grounded_cited_output_answered(monkeypatch: pytest.MonkeyPatch) -> None:
     module = RagModule(ModuleConfig(name="rag"), controls=_RecordingControls())
 
@@ -371,7 +486,6 @@ async def test_rag_answer_marks_grounded_cited_output_answered(monkeypatch: pyte
     assert out["answer"]["status"] == "answered"  # nosec B101
 
 
-@pytest.mark.asyncio
 async def test_rag_answer_never_marks_uncited_output_answered(monkeypatch: pytest.MonkeyPatch) -> None:
     module = RagModule(ModuleConfig(name="rag"), controls=_RecordingControls())
 
@@ -399,7 +513,6 @@ async def test_rag_answer_never_marks_uncited_output_answered(monkeypatch: pytes
     assert out["answer"]["status"] != "answered"  # nosec B101
 
 
-@pytest.mark.asyncio
 async def test_rag_search_applies_supported_scopes_and_disables_external_research(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -444,7 +557,6 @@ async def test_rag_search_applies_supported_scopes_and_disables_external_researc
     assert calls["search_depth_mode"] is None  # nosec B101
 
 
-@pytest.mark.asyncio
 async def test_rag_capabilities_uses_only_protocol_rate_control() -> None:
     controls = _RecordingControls()
     module = RagModule(ModuleConfig(name="rag"), controls=controls)
@@ -455,7 +567,6 @@ async def test_rag_capabilities_uses_only_protocol_rate_control() -> None:
     assert controls.calls == [("protocol_rate", "rag.capabilities", "utility")]  # nosec B101
 
 
-@pytest.mark.asyncio
 async def test_rag_source_health_uses_read_controls_without_query_quota() -> None:
     controls = _RecordingControls()
     module = RagModule(ModuleConfig(name="rag"), controls=controls)
@@ -471,7 +582,6 @@ async def test_rag_source_health_uses_read_controls_without_query_quota() -> Non
     assert not any(call[0] == "usage" for call in controls.calls)  # nosec B101
 
 
-@pytest.mark.asyncio
 async def test_rag_source_health_reports_unavailable_sources_with_ok_contract() -> None:
     module = RagModule(ModuleConfig(name="rag"), controls=_UnavailableNotesControls())
 
@@ -487,7 +597,6 @@ async def test_rag_source_health_reports_unavailable_sources_with_ok_contract() 
     assert all(source["source_id"] != "notes" for source in out["sources"])  # nosec B101
 
 
-@pytest.mark.asyncio
 async def test_rag_source_health_fails_closed_when_explicit_source_is_unavailable() -> None:
     module = RagModule(ModuleConfig(name="rag"), controls=_UnavailableNotesControls())
 
@@ -503,7 +612,6 @@ async def test_rag_source_health_fails_closed_when_explicit_source_is_unavailabl
     assert out["warnings"] == ["notes unavailable"]  # nosec B101
 
 
-@pytest.mark.asyncio
 async def test_rag_source_health_uses_context_db_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     controls = _RecordingControls()
     module = RagModule(ModuleConfig(name="rag"), controls=controls)
@@ -540,7 +648,6 @@ async def test_rag_source_health_uses_context_db_paths(monkeypatch: pytest.Monke
     }
 
 
-@pytest.mark.asyncio
 async def test_rag_search_uses_quota_and_usage_controls(monkeypatch: pytest.MonkeyPatch) -> None:
     controls = _RecordingControls()
     module = RagModule(ModuleConfig(name="rag"), controls=controls)
@@ -572,7 +679,6 @@ async def test_rag_search_uses_quota_and_usage_controls(monkeypatch: pytest.Monk
     assert ("usage", 1) in controls.calls  # nosec B101
 
 
-@pytest.mark.asyncio
 async def test_rag_answer_uses_generation_category_controls(monkeypatch: pytest.MonkeyPatch) -> None:
     controls = _RecordingControls()
     module = RagModule(ModuleConfig(name="rag"), controls=controls)
@@ -601,7 +707,6 @@ async def test_rag_answer_uses_generation_category_controls(monkeypatch: pytest.
     assert ("usage", 1) in controls.calls  # nosec B101
 
 
-@pytest.mark.asyncio
 async def test_explicit_unavailable_source_fails_closed() -> None:
     module = RagModule(ModuleConfig(name="rag"), controls=_UnavailableNotesControls())
 
@@ -616,7 +721,6 @@ async def test_explicit_unavailable_source_fails_closed() -> None:
     assert out["sources_unavailable"] == ["notes"]  # nosec B101
 
 
-@pytest.mark.asyncio
 async def test_default_controls_enforce_source_tool_permission(monkeypatch: pytest.MonkeyPatch) -> None:
     module = RagModule(ModuleConfig(name="rag"))
     protocol = MCPProtocol()
@@ -641,7 +745,6 @@ async def test_default_controls_enforce_source_tool_permission(monkeypatch: pyte
     assert out["sources_unavailable"] == ["notes"]  # nosec B101
 
 
-@pytest.mark.asyncio
 async def test_default_controls_require_source_tool_module_registered(monkeypatch: pytest.MonkeyPatch) -> None:
     module = RagModule(ModuleConfig(name="rag"))
     protocol = MCPProtocol()
@@ -666,7 +769,6 @@ async def test_default_controls_require_source_tool_module_registered(monkeypatc
     assert out["sources_unavailable"] == ["media_db"]  # nosec B101
 
 
-@pytest.mark.asyncio
 async def test_default_controls_authorize_character_backed_rag_sources(monkeypatch: pytest.MonkeyPatch) -> None:
     module = RagModule(ModuleConfig(name="rag"))
     protocol = MCPProtocol()
@@ -704,7 +806,6 @@ async def test_default_controls_authorize_character_backed_rag_sources(monkeypat
     assert calls["sources"] == ["world_books", "dictionaries"]  # nosec B101
 
 
-@pytest.mark.asyncio
 async def test_allow_partial_does_not_run_pipeline_when_all_sources_filtered(monkeypatch: pytest.MonkeyPatch) -> None:
     module = RagModule(ModuleConfig(name="rag"), controls=_UnavailableNotesControls())
 
@@ -725,7 +826,6 @@ async def test_allow_partial_does_not_run_pipeline_when_all_sources_filtered(mon
     assert out["sources_unavailable"] == ["notes"]  # nosec B101
 
 
-@pytest.mark.asyncio
 async def test_default_controls_enforce_rag_query_billing_limit(monkeypatch: pytest.MonkeyPatch) -> None:
     module = RagModule(ModuleConfig(name="rag"))
     protocol = MCPProtocol()
@@ -758,7 +858,6 @@ async def test_default_controls_enforce_rag_query_billing_limit(monkeypatch: pyt
         )
 
 
-@pytest.mark.asyncio
 async def test_allow_partial_filters_unavailable_sources(monkeypatch: pytest.MonkeyPatch) -> None:
     module = RagModule(ModuleConfig(name="rag"), controls=_UnavailableNotesControls())
     calls: dict[str, object] = {}
@@ -792,7 +891,6 @@ async def test_allow_partial_filters_unavailable_sources(monkeypatch: pytest.Mon
     assert out["metadata"]["sources_unavailable"] == ["notes"]  # nosec B101
 
 
-@pytest.mark.asyncio
 async def test_explicit_unsupported_conversation_scope_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
     module = RagModule(ModuleConfig(name="rag"))
     called = False
@@ -815,7 +913,6 @@ async def test_explicit_unsupported_conversation_scope_fails_closed(monkeypatch:
     assert called is False  # nosec B101
 
 
-@pytest.mark.asyncio
 async def test_rag_module_jsonrpc_tools_call_smoke(monkeypatch: pytest.MonkeyPatch) -> None:
     async def fake_pipeline(**kwargs):  # noqa: ANN001
         generated_answer = "Grounded answer." if kwargs.get("enable_generation") else None

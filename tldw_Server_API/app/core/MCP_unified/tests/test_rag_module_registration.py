@@ -12,6 +12,8 @@ from tldw_Server_API.app.core.MCP_unified.modules.base import BaseModule, Module
 from tldw_Server_API.app.core.MCP_unified.modules.registry import ModuleRegistry
 from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol, MCPRequest, RequestContext
 
+pytestmark = pytest.mark.unit
+
 
 def test_rag_module_is_in_default_module_config() -> None:
     config = yaml.safe_load(Path("tldw_Server_API/Config_Files/mcp_modules.yaml").read_text())
@@ -147,8 +149,6 @@ def _protocol_with_probe_limiter(registry: ModuleRegistry, limiter: _CategoryPro
     )
 
 
-@pytest.mark.unit
-@pytest.mark.asyncio
 async def test_rag_tool_categories_reach_tools_call_rate_limiter() -> None:
     registry = ModuleRegistry()
     await registry.register_module(

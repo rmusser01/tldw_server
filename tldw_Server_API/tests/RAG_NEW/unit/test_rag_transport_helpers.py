@@ -13,6 +13,8 @@ from tldw_Server_API.app.core.RAG.rag_service.transport import (
     resolve_org_id_for_rag_context,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def test_build_unified_pipeline_kwargs_preserves_search_agent_defaults() -> None:
     request = UnifiedRAGRequest(query="default behavior check")
@@ -48,16 +50,52 @@ def test_build_source_health_payload_uses_existing_paths_without_leaking_paths()
     assert "/secret" not in str(payload)  # nosec B101
 
 
-@pytest.mark.asyncio
-async def test_resolve_org_id_for_rag_context_uses_request_metadata_and_state() -> None:
-    metadata_context = SimpleNamespace(metadata={"org_id": "42"})
+async def test_resolve_org_id_for_rag_context_uses_request_state_without_membership() -> None:
     state_context = SimpleNamespace(state=SimpleNamespace(org_ids=[7]))
 
-    assert await resolve_org_id_for_rag_context(request_like=metadata_context) == 42  # nosec B101
     assert await resolve_org_id_for_rag_context(request_like=state_context) == 7  # nosec B101
 
 
-@pytest.mark.asyncio
+async def test_resolve_org_id_for_rag_context_verifies_metadata_hint(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeRepo:
+        def __init__(self, db_pool):  # noqa: ANN001
+            del db_pool
+
+        async def list_org_memberships_for_user(self, user_id):  # noqa: ANN001
+            assert user_id == 1  # nosec B101
+            return [
+                {"org_id": 42, "status": "active"},
+                {"org_id": 99, "status": "inactive"},
+            ]
+
+    async def fake_pool():
+        return object()
+
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.database.get_db_pool", fake_pool)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo.AuthnzOrgsTeamsRepo",
+        FakeRepo,
+    )
+
+    current_user = SimpleNamespace(id_int=1)
+
+    assert await resolve_org_id_for_rag_context(  # nosec B101
+        request_like=SimpleNamespace(metadata={"org_id": "42"}),
+        current_user=current_user,
+    ) == 42
+    assert await resolve_org_id_for_rag_context(  # nosec B101
+        request_like=SimpleNamespace(metadata={"org_id": "99"}),
+        current_user=current_user,
+    ) == 42
+    assert await resolve_org_id_for_rag_context(  # nosec B101
+        request_like=SimpleNamespace(org_id=42),
+        current_user=current_user,
+    ) == 42
+    assert await resolve_org_id_for_rag_context(  # nosec B101
+        request_like=SimpleNamespace(metadata={"org_id": "42"}),
+    ) is None
+
+
 async def test_enforce_rag_query_limit_for_org_context_uses_rag_daily_limit(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, object] = {}
 
@@ -76,7 +114,7 @@ async def test_enforce_rag_query_limit_for_org_context_uses_rag_daily_limit(monk
     monkeypatch.setattr(billing_enforcement, "get_billing_enforcer", lambda: FakeEnforcer())
 
     await enforce_rag_query_limit_for_org_context(
-        request_like=SimpleNamespace(metadata={"org_id": 55}),
+        request_like=SimpleNamespace(state=SimpleNamespace(org_id=55)),
         units=3,
     )
 
@@ -87,7 +125,6 @@ async def test_enforce_rag_query_limit_for_org_context_uses_rag_daily_limit(monk
     }
 
 
-@pytest.mark.asyncio
 async def test_enforce_rag_query_limit_for_org_context_raises_when_blocked(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -101,6 +138,6 @@ async def test_enforce_rag_query_limit_for_org_context_raises_when_blocked(
 
     with pytest.raises(PermissionError, match="daily limit"):
         await enforce_rag_query_limit_for_org_context(
-            request_like=SimpleNamespace(metadata={"org_id": 55}),
+            request_like=SimpleNamespace(state=SimpleNamespace(org_id=55)),
             units=1,
         )
