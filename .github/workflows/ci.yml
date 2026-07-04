@@ -554,6 +554,8 @@ jobs:
           - name: gap-verified-7
             paths: >-
               tldw_Server_API/tests/Guardian
+              tldw_Server_API/tests/RPG
+              tldw_Server_API/tests/Chat_Macros
           - name: gap-verified-8
             paths: >-
               tldw_Server_API/tests/Storage
@@ -1954,6 +1956,8 @@ jobs:
           - name: gap-verified-7
             paths: >-
               tldw_Server_API/tests/Guardian
+              tldw_Server_API/tests/RPG
+              tldw_Server_API/tests/Chat_Macros
           - name: gap-verified-8
             paths: >-
               tldw_Server_API/tests/Storage
