@@ -533,8 +533,8 @@ class VZLinuxRunner(VZBaseRunner):
                     }
                 )
                 vm_id = vm.vm_id
-                guest_agent = classify_vz_linux_guest_agent(vm.details)
-                if guest_agent.get("compatibility") == "mismatch":
+                guest_agent = classify_vz_linux_guest_agent(vm.details) if vm.details else None
+                if guest_agent and guest_agent.get("compatibility") == "mismatch":
                     should_terminate_vm = True
                     reasons = [
                         str(reason)
