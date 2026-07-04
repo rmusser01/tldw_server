@@ -4,27 +4,43 @@ from __future__ import annotations
 
 import json
 import uuid
+from datetime import date, datetime
+from json import JSONDecodeError
 from typing import Any
+
+from pydantic import ValidationError
 
 from tldw_Server_API.app.core.Chat_Macros.exceptions import MacroStorageError
 from tldw_Server_API.app.core.Chat_Macros.models import MacroBranchRecord, MacroRunRecord
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+
+_TERMINAL_RUN_STATUSES = {"completed", "failed", "cancelled"}
 
 
 def _json_dumps(value: Any) -> str:
     return json.dumps(value, ensure_ascii=True, separators=(",", ":"), sort_keys=True)
 
 
-def _json_loads(value: Any, default: Any) -> Any:
+def _json_loads(value: Any, default: Any, *, field_name: str) -> Any:
     if value is None or value == "":
         return default
     if isinstance(value, (dict, list)):
         return value
-    return json.loads(str(value))
+    try:
+        return json.loads(str(value))
+    except (JSONDecodeError, TypeError) as exc:
+        raise MacroStorageError(f"Invalid JSON in {field_name}: {exc}") from exc
 
 
 def _row_to_dict(row: Any) -> dict[str, Any]:
     return dict(row)
+
+
+def _normalize_datetimes(payload: dict[str, Any]) -> dict[str, Any]:
+    for key, value in list(payload.items()):
+        if isinstance(value, (datetime, date)):
+            payload[key] = value.isoformat()
+    return payload
 
 
 class ChatMacroRepository:
@@ -131,7 +147,7 @@ class ChatMacroRepository:
             ).fetchone()
         if row is None:
             return {}
-        settings = _json_loads(row["settings_json"], {})
+        settings = _json_loads(row["settings_json"], {}, field_name="settings_json")
         return settings if isinstance(settings, dict) else {}
 
     def save_settings(self, user_id: str, settings: dict[str, Any]) -> dict[str, Any]:
@@ -228,6 +244,21 @@ class ChatMacroRepository:
     ) -> MacroRunRecord:
         """Update run status and return the saved row."""
         with self.db.transaction() as conn:
+            row = conn.execute(
+                "SELECT * FROM chat_macro_runs WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+            if row is None:
+                raise MacroStorageError(f"macro run not found: {run_id}")
+
+            current = str(row["status"])
+            if current in _TERMINAL_RUN_STATUSES:
+                return self._map_run(row)
+            if status == "running" and current == "cancel_requested":
+                return self._map_run(row)
+            if current == "cancel_requested" and status not in {"cancelled", "failed"}:
+                return self._map_run(row)
+
             cursor = conn.execute(
                 """
                 UPDATE chat_macro_runs
@@ -255,16 +286,28 @@ class ChatMacroRepository:
                     run_id,
                 ),
             )
-        if cursor.rowcount == 0:
+            if cursor.rowcount == 0:
+                raise MacroStorageError(f"macro run not found: {run_id}")
+            row = conn.execute(
+                "SELECT * FROM chat_macro_runs WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+        if row is None:
             raise MacroStorageError(f"macro run not found: {run_id}")
-        run = self.get_run(run_id)
-        if run is None:
-            raise MacroStorageError(f"macro run not found: {run_id}")
-        return run
+        return self._map_run(row)
 
     def request_cancel(self, run_id: str) -> MacroRunRecord:
         """Mark a run as cancel-requested."""
         with self.db.transaction() as conn:
+            row = conn.execute(
+                "SELECT * FROM chat_macro_runs WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+            if row is None:
+                raise MacroStorageError(f"macro run not found: {run_id}")
+            if str(row["status"]) in _TERMINAL_RUN_STATUSES:
+                return self._map_run(row)
+
             cursor = conn.execute(
                 """
                 UPDATE chat_macro_runs
@@ -274,12 +317,15 @@ class ChatMacroRepository:
                 """,
                 (run_id,),
             )
-        if cursor.rowcount == 0:
+            if cursor.rowcount == 0:
+                raise MacroStorageError(f"macro run not found: {run_id}")
+            row = conn.execute(
+                "SELECT * FROM chat_macro_runs WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+        if row is None:
             raise MacroStorageError(f"macro run not found: {run_id}")
-        run = self.get_run(run_id)
-        if run is None:
-            raise MacroStorageError(f"macro run not found: {run_id}")
-        return run
+        return self._map_run(row)
 
     def upsert_branch(
         self,
@@ -406,6 +452,24 @@ class ChatMacroRepository:
     ) -> MacroRunRecord:
         """Record the final chat message created for a macro run."""
         with self.db.transaction() as conn:
+            row = conn.execute(
+                "SELECT * FROM chat_macro_runs WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+            if row is None:
+                raise MacroStorageError(f"macro run not found: {run_id}")
+
+            existing_message_id = row["final_message_id"]
+            existing_key = row["post_idempotency_key"]
+            if existing_message_id is not None or existing_key is not None:
+                if existing_key == post_idempotency_key and existing_message_id == final_message_id:
+                    return self._map_run(row)
+                if existing_key == post_idempotency_key:
+                    raise MacroStorageError(
+                        "post idempotency key is already linked to a different final_message_id"
+                    )
+                raise MacroStorageError("macro run already posted with a different idempotency key")
+
             cursor = conn.execute(
                 """
                 UPDATE chat_macro_runs
@@ -416,29 +480,48 @@ class ChatMacroRepository:
                 """,
                 (final_message_id, post_idempotency_key, run_id),
             )
-        if cursor.rowcount == 0:
+            if cursor.rowcount == 0:
+                raise MacroStorageError(f"macro run not found: {run_id}")
+            row = conn.execute(
+                "SELECT * FROM chat_macro_runs WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+        if row is None:
             raise MacroStorageError(f"macro run not found: {run_id}")
-        run = self.get_run(run_id)
-        if run is None:
-            raise MacroStorageError(f"macro run not found: {run_id}")
-        return run
+        return self._map_run(row)
 
     @staticmethod
     def _map_run(row: Any) -> MacroRunRecord:
-        payload = _row_to_dict(row)
-        payload["normalized_args"] = _json_loads(payload.get("normalized_args"), {})
-        payload["context_snapshot"] = _json_loads(payload.get("context_snapshot"), None)
-        payload["model_selection"] = _json_loads(payload.get("model_selection"), None)
-        payload["source_surface"] = payload.get("surface")
-        payload["error"] = payload.get("error_message")
-        return MacroRunRecord(**payload)
+        try:
+            payload = _normalize_datetimes(_row_to_dict(row))
+            payload["normalized_args"] = _json_loads(
+                payload.get("normalized_args"), {}, field_name="normalized_args"
+            )
+            payload["context_snapshot"] = _json_loads(
+                payload.get("context_snapshot"), None, field_name="context_snapshot"
+            )
+            payload["model_selection"] = _json_loads(
+                payload.get("model_selection"), None, field_name="model_selection"
+            )
+            payload["source_surface"] = payload.get("surface")
+            payload["error"] = payload.get("error_message")
+            return MacroRunRecord(**payload)
+        except MacroStorageError:
+            raise
+        except (TypeError, ValueError, ValidationError) as exc:
+            raise MacroStorageError(f"Invalid macro run row: {exc}") from exc
 
     @staticmethod
     def _map_branch(row: Any) -> MacroBranchRecord:
-        payload = _row_to_dict(row)
-        payload["citations"] = _json_loads(payload.get("citations"), [])
-        payload["usage"] = _json_loads(payload.get("usage"), {})
-        payload["output"] = payload.get("output_text")
-        payload["finished_at"] = payload.get("completed_at")
-        payload["error"] = payload.get("error_message")
-        return MacroBranchRecord(**payload)
+        try:
+            payload = _normalize_datetimes(_row_to_dict(row))
+            payload["citations"] = _json_loads(payload.get("citations"), [], field_name="citations")
+            payload["usage"] = _json_loads(payload.get("usage"), {}, field_name="usage")
+            payload["output"] = payload.get("output_text")
+            payload["finished_at"] = payload.get("completed_at")
+            payload["error"] = payload.get("error_message")
+            return MacroBranchRecord(**payload)
+        except MacroStorageError:
+            raise
+        except (TypeError, ValueError, ValidationError) as exc:
+            raise MacroStorageError(f"Invalid macro branch row: {exc}") from exc

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import inspect
 import sqlite3
 
@@ -45,6 +46,15 @@ def _index_names(db: CharactersRAGDB) -> set[str]:
     return {row["name"] for row in rows}
 
 
+def _index_sql(db: CharactersRAGDB, index_name: str) -> str:
+    with db.transaction() as conn:
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?",
+            (index_name,),
+        ).fetchone()
+    return row["sql"] if row is not None else ""
+
+
 def test_create_run_final_post_and_branch_round_trip(repo):
     run = repo.create_run(
         user_id="1",
@@ -78,7 +88,7 @@ def test_create_run_final_post_and_branch_round_trip(repo):
     assert branches[0].label == "Summary"
 
 
-def test_mark_final_posted_enforces_post_idempotency_key_uniqueness(repo):
+def test_mark_final_posted_allows_same_post_idempotency_key_on_different_runs(repo):
     first = repo.create_run(
         user_id="1",
         macro_name="wrapup",
@@ -98,17 +108,83 @@ def test_mark_final_posted_enforces_post_idempotency_key_uniqueness(repo):
         post_idempotency_key="macro:shared",
     )
     repo.mark_final_posted(
-        first.run_id,
+        second.run_id,
+        final_message_id="msg-2",
+        post_idempotency_key="macro:shared",
+    )
+
+    assert repo.get_run(first.run_id).final_message_id == "msg-1"
+    assert repo.get_run(second.run_id).final_message_id == "msg-2"
+
+
+def test_mark_final_posted_is_idempotent_for_same_run_key_and_message(repo):
+    run = repo.create_run(
+        user_id="1",
+        macro_name="wrapup",
+        macro_command="wrapup",
+        normalized_args={},
+    )
+
+    posted = repo.mark_final_posted(
+        run.run_id,
+        final_message_id="msg-1",
+        post_idempotency_key="macro:shared",
+    )
+    retried = repo.mark_final_posted(
+        run.run_id,
         final_message_id="msg-1",
         post_idempotency_key="macro:shared",
     )
 
-    with pytest.raises((sqlite3.IntegrityError, MacroStorageError)):
+    assert posted.final_message_id == "msg-1"
+    assert retried.final_message_id == "msg-1"
+    assert retried.post_idempotency_key == "macro:shared"
+
+
+def test_mark_final_posted_rejects_same_key_with_different_message(repo):
+    run = repo.create_run(
+        user_id="1",
+        macro_name="wrapup",
+        macro_command="wrapup",
+        normalized_args={},
+    )
+
+    repo.mark_final_posted(
+        run.run_id,
+        final_message_id="msg-1",
+        post_idempotency_key="macro:shared",
+    )
+
+    with pytest.raises(MacroStorageError, match="idempotency"):
         repo.mark_final_posted(
-            second.run_id,
+            run.run_id,
             final_message_id="msg-2",
             post_idempotency_key="macro:shared",
         )
+    assert repo.get_run(run.run_id).final_message_id == "msg-1"
+
+
+def test_mark_final_posted_rejects_different_key_after_posted(repo):
+    run = repo.create_run(
+        user_id="1",
+        macro_name="wrapup",
+        macro_command="wrapup",
+        normalized_args={},
+    )
+
+    repo.mark_final_posted(
+        run.run_id,
+        final_message_id="msg-1",
+        post_idempotency_key="macro:first",
+    )
+
+    with pytest.raises(MacroStorageError, match="already posted"):
+        repo.mark_final_posted(
+            run.run_id,
+            final_message_id="msg-2",
+            post_idempotency_key="macro:second",
+        )
+    assert repo.get_run(run.run_id).post_idempotency_key == "macro:first"
 
 
 def test_request_cancel_records_timestamp_and_status(repo):
@@ -124,6 +200,35 @@ def test_request_cancel_records_timestamp_and_status(repo):
     saved = repo.get_run(run.run_id)
     assert saved.status == "cancel_requested"
     assert saved.cancel_requested_at is not None
+
+
+def test_cancel_request_is_noop_for_terminal_runs(repo):
+    run = repo.create_run(
+        user_id="1",
+        macro_name="wrapup",
+        macro_command="wrapup",
+        normalized_args={},
+    )
+    repo.update_run_status(run.run_id, status="completed")
+
+    cancelled = repo.request_cancel(run.run_id)
+
+    assert cancelled.status == "completed"
+    assert cancelled.cancel_requested_at is None
+
+
+def test_cancel_requested_run_cannot_be_started_or_completed(repo):
+    run = repo.create_run(
+        user_id="1",
+        macro_name="wrapup",
+        macro_command="wrapup",
+        normalized_args={},
+    )
+    repo.request_cancel(run.run_id)
+
+    assert repo.update_run_status(run.run_id, status="running").status == "cancel_requested"
+    assert repo.update_run_status(run.run_id, status="completed").status == "cancel_requested"
+    assert repo.update_run_status(run.run_id, status="cancelled").status == "cancelled"
 
 
 def test_registry_settings_and_status_methods(repo):
@@ -172,9 +277,11 @@ def test_fresh_db_creates_chat_macro_tables_and_indexes(raw_db):
     assert {
         "idx_chat_macro_registry_user_command",
         "idx_chat_macro_runs_user_status_created",
-        "idx_chat_macro_runs_post_idempotency_key_unique",
+        "idx_chat_macro_runs_run_post_idempotency_key_unique",
         "idx_chat_macro_run_branches_run_step",
     }.issubset(_index_names(raw_db))
+    index_sql = _index_sql(raw_db, "idx_chat_macro_runs_run_post_idempotency_key_unique")
+    assert "run_id, post_idempotency_key" in index_sql
 
 
 def test_sqlite_v51_migration_routes_to_v52(tmp_path):
@@ -199,7 +306,7 @@ def test_sqlite_v51_migration_routes_to_v52(tmp_path):
     try:
         assert _schema_version(migrated) == 52
         assert "chat_macro_runs" in _table_names(migrated)
-        assert "idx_chat_macro_runs_post_idempotency_key_unique" in _index_names(migrated)
+        assert "idx_chat_macro_runs_run_post_idempotency_key_unique" in _index_names(migrated)
     finally:
         migrated.close_connection()
 
@@ -212,7 +319,8 @@ def test_postgres_v51_migration_script_contract_and_routing():
     assert "CREATE TABLE IF NOT EXISTS chat_macro_run_branches" in script
     assert "TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP" in script
     assert "BOOLEAN NOT NULL DEFAULT FALSE" in script
-    assert "CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_macro_runs_post_idempotency_key_unique" in script
+    assert "CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_macro_runs_run_post_idempotency_key_unique" in script
+    assert "ON chat_macro_runs(run_id, post_idempotency_key)" in script
     assert "WHERE post_idempotency_key IS NOT NULL" in script
     assert "UPDATE db_schema_version" in script
     assert "SET version = 52" in script
@@ -224,3 +332,54 @@ def test_postgres_v51_migration_script_contract_and_routing():
     postgres_initializer = inspect.getsource(CharactersRAGDB._initialize_schema_postgres)
     assert "_MIGRATION_SQL_V51_TO_V52_POSTGRES" in postgres_initializer
     assert "expected_version=52" in postgres_initializer
+
+
+def test_row_mapping_normalizes_datetime_timestamps():
+    now = datetime(2026, 7, 3, 12, 30, tzinfo=timezone.utc)
+
+    run = ChatMacroRepository._map_run(
+        {
+            "run_id": "run-1",
+            "user_id": "1",
+            "macro_name": "wrapup",
+            "macro_command": "wrapup",
+            "normalized_args": "{}",
+            "created_at": now,
+            "started_at": now,
+            "completed_at": now,
+            "cancel_requested_at": now,
+        }
+    )
+    branch = ChatMacroRepository._map_branch(
+        {
+            "branch_id": "branch-1",
+            "run_id": "run-1",
+            "step_id": "summary",
+            "citations": "[]",
+            "usage": "{}",
+            "created_at": now,
+            "completed_at": now,
+        }
+    )
+
+    assert run.created_at == now.isoformat()
+    assert run.cancel_requested_at == now.isoformat()
+    assert branch.created_at == now.isoformat()
+    assert branch.completed_at == now.isoformat()
+
+
+def test_malformed_run_json_raises_macro_storage_error(repo):
+    run = repo.create_run(
+        user_id="1",
+        macro_name="wrapup",
+        macro_command="wrapup",
+        normalized_args={},
+    )
+    with repo.db.transaction() as conn:
+        conn.execute(
+            "UPDATE chat_macro_runs SET normalized_args = ? WHERE run_id = ?",
+            ("{bad", run.run_id),
+        )
+
+    with pytest.raises(MacroStorageError, match="normalized_args"):
+        repo.get_run(run.run_id)
