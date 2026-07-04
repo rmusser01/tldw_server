@@ -447,12 +447,14 @@ Verification:
 - `python -m bandit -r tldw_Server_API/app/api/v1/endpoints/chat_macros.py tldw_Server_API/app/api/v1/API_Deps/Chat_Macros_Deps.py tldw_Server_API/app/api/v1/schemas/chat_macros.py tldw_Server_API/app/api/v1/router_groups/minimal.py tldw_Server_API/app/api/v1/router_groups/core.py -f json -o /tmp/bandit_chat_macros_task4_api_reviewfix.json` -> no findings.
 - `git diff --check` -> passed.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add tldw_Server_API/app/api/v1/schemas/chat_macros.py tldw_Server_API/app/api/v1/API_Deps/Chat_Macros_Deps.py tldw_Server_API/app/api/v1/endpoints/chat_macros.py tldw_Server_API/app/api/v1/router_groups/core.py tldw_Server_API/tests/Chat_Macros/integration/test_chat_macros_api.py
 git commit -m "feat: expose chat macros api"
 ```
+
+Committed as `874ef6112d`.
 
 ## Task 5: Slash Command Entry Point And Chat Completion Short-Circuit
 
