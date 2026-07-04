@@ -32,15 +32,27 @@ def test_publish_pypi_workflow_installs_setuptools_backend() -> None:
     assert "wheel" in run_script
 
 
-def test_publish_pypi_workflow_is_manual_dispatch_only() -> None:
+def test_publish_pypi_workflow_preserves_manual_dispatch_and_gates_push() -> None:
     workflow = _load(".github/workflows/publish-pypi.yml")
     on = _workflow_on(workflow)
     target = on["workflow_dispatch"]["inputs"]["target"]
+    push = on["push"]
 
-    assert set(on) == {"workflow_dispatch"}
+    assert set(on) == {"workflow_dispatch", "push"}
     assert "release" not in on
+    assert push["branches"] == ["main"]
+    assert push["paths"] == ["pyproject.toml"]
     assert target["options"] == ["testpypi", "pypi"]
     assert target["default"] == "testpypi"
+
+    detect_version = workflow["jobs"]["detect-version"]
+    assert detect_version["outputs"]["should_publish"] == "${{ steps.detect.outputs.should_publish }}"
+
+    build = workflow["jobs"]["build"]
+    assert build["needs"] == "detect-version"
+    assert build["if"] == (
+        "${{ github.event_name == 'workflow_dispatch' || needs.detect-version.outputs.should_publish == 'true' }}"
+    )
 
     publish_testpypi = workflow["jobs"]["publish-testpypi"]
     assert publish_testpypi["if"] == (
@@ -48,4 +60,7 @@ def test_publish_pypi_workflow_is_manual_dispatch_only() -> None:
     )
 
     publish_pypi = workflow["jobs"]["publish-pypi"]
-    assert publish_pypi["if"] == "${{ github.event_name == 'workflow_dispatch' && inputs.target == 'pypi' }}"
+    assert publish_pypi["if"] == (
+        "${{ (github.event_name == 'workflow_dispatch' && inputs.target == 'pypi') || "
+        "(github.event_name == 'push' && needs.detect-version.outputs.should_publish == 'true') }}"
+    )
