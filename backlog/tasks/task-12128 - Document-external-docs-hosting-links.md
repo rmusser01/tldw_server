@@ -1,10 +1,10 @@
 ---
 id: TASK-12128
 title: Document external docs hosting links
-status: In Progress
+status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-07-04 05:30'
+updated_date: '2026-07-04 05:38'
 labels:
   - docs
 dependencies: []
@@ -50,6 +50,8 @@ Verification: canonical tldwproject.com/server/docs URL appears in README, websi
 Bandit skipped: touched implementation files are Markdown, static HTML links, and YAML docs metadata only.
 
 Known skip: broad Docs/Published refresh drift was not committed; CI and external deploy docs still run the refresh before building.
+
+PR: https://github.com/rmusser01/tldw_server/pull/2616
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
