@@ -4,12 +4,13 @@ title: Document external docs hosting links
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-07-04 05:14'
+updated_date: 2026-07-04 05:14
 labels:
-  - docs
+- docs
 dependencies: []
 documentation:
-  - Docs/superpowers/specs/2026-07-04-external-docs-hosting-design.md
+- Docs/superpowers/specs/2026-07-04-external-docs-hosting-design.md
+- Docs/superpowers/plans/2026-07-04-external-docs-hosting-implementation-plan.md
 ---
 
 ## Description
@@ -29,7 +30,7 @@ Ensure README and website copy point readers to the canonical external docs page
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-Canonical docs live at https://tldwproject.com/server/docs/. GitHub Pages remains enabled as a mirror from the same MkDocs source. The external site can start with manual copy/deploy of the built static site; a later site-side clone/pull/build job can detect new versions, build the docs, and update /server/docs/.
+Implementation plan: Docs/superpowers/plans/2026-07-04-external-docs-hosting-implementation-plan.md
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
