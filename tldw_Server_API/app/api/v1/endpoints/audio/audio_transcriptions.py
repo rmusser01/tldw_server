@@ -159,6 +159,16 @@ def _sniff_audio_upload_suffix(sample: bytes) -> str:
     return ""
 
 
+def _has_wav_container_header(path: PathLib) -> bool:
+    """Return True when a file starts with a RIFF/WAVE container header."""
+    try:
+        with path.open("rb") as handle:
+            header = handle.read(12)
+    except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS:
+        return False
+    return len(header) >= 12 and header.startswith(b"RIFF") and header[8:12] == b"WAVE"
+
+
 def _resolve_audio_upload_suffix(
     filename: str | None,
     content_type: str | None,
@@ -759,6 +769,7 @@ async def create_transcription(
         if (
             canonical_path_obj.suffix.lower() != ".wav"
             or not canonical_path_obj.exists()
+            or not _has_wav_container_header(canonical_path_obj)
         ):
             logger.debug(
                 'convert_to_wav returned unusable output; rejecting audio upload: input_path={}, output_path={}',

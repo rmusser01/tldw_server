@@ -434,6 +434,75 @@ def test_audio_transcriptions_rejects_upload_when_wav_conversion_fails(
         assert detail.get("status") == "invalid_audio"
 
 
+def test_audio_transcriptions_rejects_spoofed_wav_output(
+    monkeypatch: pytest.MonkeyPatch,
+    bypass_api_limits: Any,
+) -> None:
+    """Reject a .wav conversion output when its bytes are not a WAV container."""
+    monkeypatch.setenv("TEST_MODE", "true")
+    monkeypatch.setenv("AUTH_MODE", "single_user")
+    monkeypatch.setenv("SINGLE_USER_API_KEY", TEST_API_KEY)
+    monkeypatch.setenv("SINGLE_USER_TEST_API_KEY", TEST_API_KEY)
+    monkeypatch.setenv("SINGLE_USER_FIXED_ID", "1")
+
+    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+    import tldw_Server_API.app.api.v1.endpoints.audio.audio as audio_ep
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as atlib
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_provider_adapter as stt_adapter
+
+    async def _fake_get_request_user() -> User:
+        return User(id=1, username="single_user")
+
+    async def _allow_job(*_args: object, **_kwargs: object) -> tuple[bool, None]:
+        return True, None
+
+    async def _noop_async(*_args: object, **_kwargs: object) -> None:
+        return None
+
+    class _StubAdapter:
+        def transcribe_batch(self, *args: object, **kwargs: object) -> dict[str, Any]:
+            return {"text": "should not transcribe"}
+
+    class _StubRegistry:
+        def resolve_provider_for_model(self, _model: object) -> tuple[str, str, None]:
+            return "external", "external:stub", None
+
+        def get_adapter(self, _provider: object) -> _StubAdapter:
+            return _StubAdapter()
+
+    monkeypatch.setattr(audio_ep, "can_start_job", _allow_job)
+    monkeypatch.setattr(audio_ep, "increment_jobs_started", _noop_async)
+    monkeypatch.setattr(audio_ep, "finish_job", _noop_async)
+    monkeypatch.setattr(audio_ep, "check_daily_minutes_allow", _allow_job)
+    monkeypatch.setattr(audio_ep, "add_daily_minutes", _noop_async)
+    monkeypatch.setattr(stt_adapter, "get_stt_provider_registry", lambda: _StubRegistry())
+    monkeypatch.setattr(atlib, "convert_to_wav", lambda path, *args, **kwargs: path)
+
+    app = FastAPI()
+    app.dependency_overrides[get_request_user] = _fake_get_request_user
+    app.include_router(audio_router, prefix="/api/v1/audio")
+
+    with bypass_api_limits(app), TestClient(app) as client:
+        headers = {"X-API-KEY": TEST_API_KEY}
+        files = {"file": ("sample.wav", io.BytesIO(b"not a wav"), "audio/wav")}
+        data = {"model": "external:stub", "response_format": "json"}
+        resp = client.post(
+            "/api/v1/audio/transcriptions",
+            headers=headers,
+            files=files,
+            data=data,
+        )
+        if resp.status_code == 404:
+            pytest.skip("audio/transcriptions endpoint not mounted in this build")
+        np.testing.assert_equal(
+            resp.status_code,
+            status.HTTP_400_BAD_REQUEST,
+            err_msg=resp.text,
+        )
+        detail = resp.json().get("detail") or {}
+        np.testing.assert_equal(detail.get("status"), "invalid_audio")
+
+
 @pytest.mark.parametrize("conversion_output_kind", ["empty", "non_wav"])
 def test_audio_transcriptions_rejects_unusable_conversion_output(
     monkeypatch: pytest.MonkeyPatch,
