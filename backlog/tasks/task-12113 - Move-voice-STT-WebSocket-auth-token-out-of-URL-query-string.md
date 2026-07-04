@@ -2,7 +2,7 @@
 id: TASK-12113
 title: Move voice/STT WebSocket auth token out of the URL query string
 status: In Progress
-updated_date: '2026-07-04 18:10'
+updated_date: '2026-07-04 18:12'
 labels:
 - bug
 - high
@@ -47,4 +47,6 @@ The client currently authenticates **only** via the URL token (no subprotocol 2n
 2026-07-04 current repo-audit slice started on branch codex/audit-audio-ws-auth-contract-2026-07-04 from origin/dev fd5c152b065c408e4e8ee5f08da41589f21cb7f5. Scope for this branch: AUDIT-2026-06-27-WEBUI-002 and AUDIT-2026-06-27-APIWEB-001 audio TTS/STT/voice-chat WebSocket query-token drift. Implementation plan: Docs/superpowers/plans/2026-07-04-audio-websocket-auth-contract-plan.md. Existing TASK-12113 also mentions persona WebSocket auth and live backend smoke; those remain tracked residuals unless this branch explicitly validates them.
 
 Audio WebSocket remediation validation on branch codex/audit-audio-ws-auth-contract-2026-07-04: focused frontend tests passed (5 files, 63 tests) covering shared audio URL/auth helper, voice preflight, voice stream auth frame ordering, and Speech page compile; backend audio auth contract test passed (7 selected, 5 deselected) covering query-token rejection and first-frame auth acceptance across TTS, STT, and voice chat routes; git diff --check passed; production source token scan found no audio WebSocket query-token strings outside negative tests. Bandit on the touched Python test file reported only LOW B101 pytest assert findings. Persona WS auth and live backend browser smoke remain open in TASK-12113.
+
+Draft PR opened for the audio portion of this task: https://github.com/rmusser01/tldw_server/pull/2630. The PR is intentionally draft pending the repository-required human-written Change summary. TASK-12113 remains In Progress because persona WebSocket auth and live backend/browser smoke acceptance criteria are still open.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
