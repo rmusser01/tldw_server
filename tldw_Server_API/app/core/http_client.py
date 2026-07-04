@@ -1113,6 +1113,85 @@ def _resolve_redirect_url(base_url: str, location: str) -> str | None:
         return None
 
 
+# Headers that carry credentials and must not accompany a redirect hop to a
+# different origin (scheme/host/port) — the redirect target would otherwise
+# receive the caller's secrets.
+SENSITIVE_REDIRECT_HEADERS: frozenset[str] = frozenset({
+    "authorization",
+    "proxy-authorization",
+    "cookie",
+    "x-api-key",
+    "api-key",
+    "x-auth-token",
+})
+
+
+def _url_origin(url: str) -> tuple[str, str, int] | None:
+    """Return ``(scheme, host, port)`` for *url*, normalizing default ports.
+
+    Returns ``None`` when the URL has no parseable scheme/host.
+    """
+    try:
+        parsed = urlparse(url)
+        scheme = (parsed.scheme or "").lower()
+        host = (parsed.hostname or "").lower()
+        if not scheme or not host:
+            return None
+        port = parsed.port or (443 if scheme == "https" else 80)
+        return scheme, host, int(port)
+    except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
+        return None
+
+
+def _is_cross_origin(original_url: str, target_url: str) -> bool:
+    """Return True when *target_url* has a different origin than *original_url*.
+
+    Unparseable URLs are treated as cross-origin (fail closed).
+    """
+    original = _url_origin(original_url)
+    target = _url_origin(target_url)
+    if original is None or target is None:
+        return True
+    return original != target
+
+
+def _strip_sensitive_headers_for_cross_origin(
+    headers: dict[str, str] | None,
+    *,
+    original_url: str,
+    target_url: str,
+) -> dict[str, str] | None:
+    """Drop credential-bearing headers when a request hop leaves the original origin.
+
+    Args:
+        headers: Prepared per-hop request headers (may be ``None``).
+        original_url: URL of the caller's original request.
+        target_url: URL of the hop about to be issued (redirect target).
+
+    Returns:
+        *headers* unchanged for same-origin hops; otherwise a copy with the
+        :data:`SENSITIVE_REDIRECT_HEADERS` removed (case-insensitive).
+    """
+    if not headers or not _is_cross_origin(original_url, target_url):
+        return headers
+    kept = {k: v for k, v in headers.items() if k.lower() not in SENSITIVE_REDIRECT_HEADERS}
+    dropped = sorted(k for k in headers if k.lower() in SENSITIVE_REDIRECT_HEADERS)
+    if dropped:
+        logger.bind(target_host=_parse_host_from_url(target_url)).debug(
+            "Stripped sensitive headers on cross-origin redirect: {}", ", ".join(dropped)
+        )
+    return kept
+
+
+def _cookies_for_hop(
+    cookies: dict[str, str] | None, *, original_url: str, target_url: str
+) -> dict[str, str] | None:
+    """Return *cookies* for same-origin hops, ``None`` for cross-origin hops."""
+    if cookies and _is_cross_origin(original_url, target_url):
+        return None
+    return cookies
+
+
 def _get_response_url(resp: Any, fallback: str) -> str:
     try:
         req = getattr(resp, "request", None)
@@ -2138,6 +2217,10 @@ async def _afetch_httpx(
 
     async def _do_once(ac: httpx.AsyncClient, target_url: str) -> tuple[httpx.Response | None, str]:
         req_headers = _inject_trace_headers(headers)
+        req_headers = _strip_sensitive_headers_for_cross_origin(
+            req_headers, original_url=url, target_url=target_url
+        )
+        req_cookies = _cookies_for_hop(cookies, original_url=url, target_url=target_url)
         # Parity with other paths: drop 'zstd' from Accept-Encoding for httpx
         try:
             with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
@@ -2164,7 +2247,7 @@ async def _afetch_httpx(
                 method=method_upper,
                 url=target_url,
                 headers=req_headers,
-                cookies=cookies,
+                cookies=req_cookies,
                 params=params,
                 json=json,
                 data=data,
@@ -2243,6 +2326,9 @@ async def _afetch_httpx(
                                 _head_get_range_tried = True
                                 try:
                                     req_headers = _inject_trace_headers(headers)
+                                    req_headers = _strip_sensitive_headers_for_cross_origin(
+                                        req_headers, original_url=url, target_url=cur_url
+                                    )
                                     with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                                         req_headers = _sanitize_accept_encoding_for_backend(req_headers, "httpx")
                                     req_headers.setdefault("Range", "bytes=0-0")
@@ -2256,7 +2342,7 @@ async def _afetch_httpx(
                                         method="GET",
                                         url=cur_url,
                                         headers=req_headers,
-                                        cookies=cookies,
+                                        cookies=_cookies_for_hop(cookies, original_url=url, target_url=cur_url),
                                         params=params,
                                         json=json,
                                         data=data,
@@ -2463,6 +2549,10 @@ async def _afetch_aiohttp(
 
     async def _do_once(session: aiohttp.ClientSession, target_url: str) -> tuple[_AiohttpResponse | None, str]:
         req_headers = _inject_trace_headers(headers)
+        req_headers = _strip_sensitive_headers_for_cross_origin(
+            req_headers, original_url=url, target_url=target_url
+        )
+        req_cookies = _cookies_for_hop(cookies, original_url=url, target_url=target_url)
         with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
             req_headers = _sanitize_accept_encoding_for_backend(req_headers, "aiohttp")
         try:
@@ -2487,7 +2577,7 @@ async def _afetch_aiohttp(
                 method=method_upper,
                 url=target_url,
                 headers=req_headers,
-                cookies=cookies,
+                cookies=req_cookies,
                 params=params,
                 json=json,
                 data=data,
@@ -2530,6 +2620,9 @@ async def _afetch_aiohttp(
                         _head_get_range_tried = True
                         try:
                             req_headers = _inject_trace_headers(headers)
+                            req_headers = _strip_sensitive_headers_for_cross_origin(
+                                req_headers, original_url=url, target_url=cur_url
+                            )
                             req_headers.setdefault("Range", "bytes=0-0")
                             try:
                                 _head_fb_to = float(os.getenv("HTTP_HEAD_RANGE_FALLBACK_TIMEOUT", "5"))
@@ -2540,7 +2633,7 @@ async def _afetch_aiohttp(
                                 method="GET",
                                 url=cur_url,
                                 headers=req_headers,
-                                cookies=cookies,
+                                cookies=_cookies_for_hop(cookies, original_url=url, target_url=cur_url),
                                 params=params,
                                 timeout=_head_fb_to,
                                 proxies=proxies,
@@ -2813,6 +2906,10 @@ def _fetch_httpx_response(
 
     def _do_once(sc: httpx.Client, target_url: str) -> tuple[httpx.Response | None, str]:
         req_headers = _inject_trace_headers(headers)
+        req_headers = _strip_sensitive_headers_for_cross_origin(
+            req_headers, original_url=url, target_url=target_url
+        )
+        req_cookies = _cookies_for_hop(cookies, original_url=url, target_url=target_url)
         # Parity with simple fetch: drop 'zstd' from Accept-Encoding for httpx
         with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
             req_headers = _sanitize_accept_encoding_for_backend(req_headers, "httpx")
@@ -2833,7 +2930,7 @@ def _fetch_httpx_response(
                 method=method_upper,
                 url=target_url,
                 headers=req_headers,
-                cookies=cookies,
+                cookies=req_cookies,
                 params=params,
                 json=json,
                 data=data,
@@ -2891,6 +2988,9 @@ def _fetch_httpx_response(
                                 _head_get_range_tried = True
                                 try:
                                     req_headers = _inject_trace_headers(headers)
+                                    req_headers = _strip_sensitive_headers_for_cross_origin(
+                                        req_headers, original_url=url, target_url=cur_url
+                                    )
                                     with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                                         req_headers = _sanitize_accept_encoding_for_backend(req_headers, "httpx")
                                     req_headers.setdefault("Range", "bytes=0-0")
@@ -2904,7 +3004,7 @@ def _fetch_httpx_response(
                                         method="GET",
                                         url=cur_url,
                                         headers=req_headers,
-                                        cookies=cookies,
+                                        cookies=_cookies_for_hop(cookies, original_url=url, target_url=cur_url),
                                         params=params,
                                         json=json,
                                         data=data,
