@@ -28,6 +28,8 @@ No `.gitignore` change was needed because `.gitignore` already contains `/apps/*
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Removed the tracked node_modules symlink entries only. Verification: git ls-files -s -- ':(glob)**/node_modules/**' returned no output. Bandit skipped because this was non-code dependency artifact cleanup.
+
+PR: https://github.com/rmusser01/tldw_server/pull/2624
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
