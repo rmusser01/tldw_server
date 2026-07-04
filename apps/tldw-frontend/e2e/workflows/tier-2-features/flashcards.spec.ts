@@ -131,7 +131,7 @@ async function cleanupFlashcardDeck(deck: SeededDeck): Promise<void> {
 
 function flashcardsRunIdForTest(testInfo: TestInfo): string {
   const maybeTitlePath = (
-    testInfo as TestInfo & { titlePath?: string[] | (() => string[]) }
+    testInfo as unknown as { titlePath?: string[] | (() => string[]) }
   ).titlePath;
   const titlePath = Array.isArray(maybeTitlePath)
     ? maybeTitlePath

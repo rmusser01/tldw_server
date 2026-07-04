@@ -4,7 +4,7 @@ title: Implement WebUI setup choice for API server setup handoff
 status: Done
 assignee: []
 created_date: '2026-07-03 22:59'
-updated_date: '2026-07-04 01:21'
+updated_date: '2026-07-04 01:37'
 labels:
   - webui
   - setup
@@ -53,14 +53,20 @@ Task 4 complete: Playwright /setup desktop/mobile smoke coverage and /setup-to-f
 Verification for Task 4: Playwright unified-first-run-onboarding passed 6/6; focused Vitest passed 5 files / 53 tests; git diff --check passed for changed files. bun run typecheck still fails on pre-existing unrelated baseline files: AudioStudio/TimelineEditor.tsx, ScheduledTasks/ScheduledTaskAutomationDefinitionEditor.tsx, Skills/Manager.tsx, scheduled-tasks-control-plane.ts, tldw/mcp-hub.ts, voice-cloning.ts, e2e/fixtures/knowledge-qa-live.ts, and e2e/workflows/tier-2-features/flashcards.spec.ts. No errors referenced the changed files. Bandit skipped because only TypeScript/Playwright/Markdown task files changed.
 
 Spec/code review note: the Task 4 review-agent attempt failed due the account usage limit, so the final Task 4 review was completed locally against the changed files and verification output; no task-specific follow-up issues were found.
+
+User requested fixing the typecheck baseline as part of the current task. Reopening TASK-12133 to include the TypeScript errors reported by apps/tldw-frontend bun run typecheck while leaving unrelated generated dirty files unstaged.
+
+Typecheck repair complete. Fixed the TypeScript baseline errors in AudioStudio, ScheduledTasks editor/control-plane, Skills manager, MCP hub readiness path typing, voice-cloning ArrayBuffer conversion, and two E2E fixture/spec narrowing sites.
+
+Verification after repair: bun run typecheck passed from apps/tldw-frontend; focused setup Vitest passed 5 files / 53 tests; ScheduledTaskAutomationDefinitionEditor Vitest passed 9 tests; Playwright unified-first-run-onboarding passed 6/6; git diff --check passed. Extra broad ScheduledTasksPage Vitest run has 3 unrelated existing failures where tests expect raw endpoint strings but UI now shows sanitized diagnostics; left out of this typecheck repair.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented the WebUI /setup choice handoff for incomplete backend setup. The flow now presents a pre-wizard choice explaining WebUI setup vs API server setup, links API server /setup separately when browser-openable, keeps blocked state out of the normal WebUI wizard, and preserves manual recovery when setup state/metadata is unavailable.
+Implemented the WebUI /setup choice handoff for incomplete backend setup and fixed the TypeScript baseline that blocked finalization. The flow presents a pre-wizard choice explaining WebUI setup vs API server setup, links API server /setup separately when browser-openable, keeps blocked state out of the normal WebUI wizard, preserves manual recovery when setup state/metadata is unavailable, and now passes the frontend typecheck.
 
-Verification: focused Vitest passed 5 files / 53 tests; Playwright unified-first-run-onboarding passed 6/6; git diff --check passed. Typecheck remains blocked by pre-existing unrelated baseline errors outside the changed files. Bandit skipped because this implementation touched TypeScript/Playwright/Markdown tracking only.
+Verification: focused setup Vitest passed 5 files / 53 tests; ScheduledTaskAutomationDefinitionEditor Vitest passed 9 tests; Playwright unified-first-run-onboarding passed 6/6; bun run typecheck passed; git diff --check passed. Bandit skipped because this implementation touched TypeScript/Playwright/Markdown tracking only. Extra broad ScheduledTasksPage Vitest run still has unrelated diagnostics-copy expectation failures.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
