@@ -77,6 +77,12 @@ Key regression tests cover:
 - Playwright guard fallback to `trafilatura`.
 - Cookie injection using name/value dicts.
 
+### Phase 1 Contracts
+
+Phase 1 adds internal Web_Scraping contracts under `tldw_Server_API/app/core/Web_Scraping/contracts/` and compatibility tests for legacy wrapper imports and dict-shaped results. These contracts are additive, stdlib-only, and not wired into runtime behavior yet; later phases should depend on these contracts before moving behavior out of `Article_Extractor_Lib.py`, `enhanced_web_scraping.py`, or `WebSearch_APIs.py`.
+
+Implementation plan: `Docs/superpowers/plans/2026-07-04-web-scraping-phase-1-contracts-compatibility.md`
+
 ## References
 - `Docs/Design/WebScraping_Refactor_Import_Inventory.md` records the current compatibility import surface for the modular refactor. Update it with `Helper_Scripts/web_scraping_refactor_inventory.py` whenever Web_Scraping compatibility imports are added, removed, or migrated.
 - https://github.com/scrapinghub/article-extraction-benchmark
