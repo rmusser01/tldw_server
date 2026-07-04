@@ -47,6 +47,7 @@ class MacroStep(_StrictModel):
     output: str | None = Field(default=None, min_length=1, max_length=128)
     consumes: list[str] = Field(default_factory=list)
     prompt: str | None = None
+    branch_strategy: Literal["auto", "chat_native", "acp_fork"] | None = None
 
     @model_validator(mode="after")
     def _requires_output_for_producers(self) -> "MacroStep":

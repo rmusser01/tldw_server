@@ -80,9 +80,12 @@ def render_output_profile(
     outputs: Mapping[str, str],
     *,
     failed_branches: Sequence[Mapping[str, Any]] | None = None,
+    branch_outputs: Sequence[Mapping[str, Any]] | None = None,
 ) -> str:
     if profile.format == "single_response":
-        return "\n\n".join(str(outputs.get(section, "")).strip() for section in profile.sections).strip()
+        rendered = "\n\n".join(str(outputs.get(section, "")).strip() for section in profile.sections).strip()
+        appendix = _format_branch_outputs(branch_outputs or []) if profile.include_branch_outputs else ""
+        return "\n\n".join(part for part in (rendered, appendix) if part).strip()
 
     blocks: list[str] = []
     for section in profile.sections:
@@ -92,6 +95,10 @@ def render_output_profile(
             body = str(outputs.get(section, "")).strip()
         if body:
             blocks.append(f"## {_title(section)}\n\n{body}")
+    if profile.include_branch_outputs:
+        appendix = _format_branch_outputs(branch_outputs or [])
+        if appendix:
+            blocks.append(appendix)
     return "\n\n".join(blocks).strip()
 
 
@@ -114,3 +121,16 @@ def _format_failed_branches(failed_branches: Sequence[Mapping[str, Any]]) -> str
         error = str(branch.get("error") or branch.get("error_message") or "failed")
         lines.append(f"- {label}: {error}")
     return "\n".join(lines)
+
+
+def _format_branch_outputs(branch_outputs: Sequence[Mapping[str, Any]]) -> str:
+    blocks: list[str] = []
+    for branch in branch_outputs:
+        text = str(branch.get("output_text") or branch.get("output") or "").strip()
+        if not text:
+            continue
+        label = str(branch.get("label") or branch.get("step_id") or "Branch")
+        blocks.append(f"### {label}\n\n{text}")
+    if not blocks:
+        return ""
+    return "## Branch Outputs\n\n" + "\n\n".join(blocks)

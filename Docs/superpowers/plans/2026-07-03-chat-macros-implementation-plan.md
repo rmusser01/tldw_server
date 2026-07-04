@@ -544,13 +544,16 @@ git commit -m "feat: route chat macro slash commands"
 
 **Files:**
 - Create: `tldw_Server_API/app/core/Chat_Macros/context_snapshot.py`
+- Create: `tldw_Server_API/app/core/Chat_Macros/acp_adapter.py`
 - Create: `tldw_Server_API/app/core/Chat_Macros/branch_runner.py`
 - Create: `tldw_Server_API/app/core/Chat_Macros/executor.py`
+- Modify: `tldw_Server_API/app/core/Chat_Macros/models.py`
 - Modify: `tldw_Server_API/app/core/Chat_Macros/output_profiles.py`
+- Modify: `tldw_Server_API/app/core/Chat_Macros/builtin/wrapup/MACRO.yaml`
 - Test: `tldw_Server_API/tests/Chat_Macros/unit/test_macro_executor.py`
 - Test: `tldw_Server_API/tests/Chat_Macros/unit/test_acp_adapter.py`
 
-- [ ] **Step 1: Write failing executor tests**
+- [x] **Step 1: Write failing executor tests**
 
 Use fake branch and merge callables. Cover:
 
@@ -568,7 +571,7 @@ Use fake branch and merge callables. Cover:
 - Final output is stored before post-back.
 - ACP adapter records forkability metadata, falls back to chat-native execution when ACP is unavailable, and marks `acp_fork` required branches as failed according to policy.
 
-- [ ] **Step 2: Run executor tests and verify failure**
+- [x] **Step 2: Run executor tests and verify failure**
 
 Run:
 
@@ -579,7 +582,7 @@ python -m pytest tldw_Server_API/tests/Chat_Macros/unit/test_macro_executor.py -
 
 Expected: import errors.
 
-- [ ] **Step 3: Implement context snapshot builder**
+- [x] **Step 3: Implement context snapshot builder**
 
 Implement a bounded builder that accepts:
 
@@ -593,7 +596,7 @@ Implement a bounded builder that accepts:
 
 Return JSON-safe snapshot data. Never include secrets or raw provider keys.
 
-- [ ] **Step 4: Implement ACP adapter metadata seam**
+- [x] **Step 4: Implement ACP adapter metadata seam**
 
 Create `acp_adapter.py` with:
 
@@ -604,7 +607,7 @@ Create `acp_adapter.py` with:
 
 V1 does not need full retained-fork UI before chat-native execution works, but it must preserve explicit ACP capability/fallback metadata in run and branch records.
 
-- [ ] **Step 5: Implement branch runner seams**
+- [x] **Step 5: Implement branch runner seams**
 
 Define a protocol-like callable:
 
@@ -615,7 +618,7 @@ class BranchPromptRunner(Protocol):
 
 The production runner can initially call the existing chat completion/orchestrator seam with fakeable dependencies. Tests should use a fake runner and not call external providers.
 
-- [ ] **Step 6: Implement executor**
+- [x] **Step 6: Implement executor**
 
 Executor responsibilities:
 
@@ -633,7 +636,7 @@ Executor responsibilities:
 - Store final output before post-back.
 - Respect `cancel_requested_at` before starting new branches.
 
-- [ ] **Step 7: Run executor tests**
+- [x] **Step 7: Run executor tests**
 
 Run:
 
@@ -647,12 +650,19 @@ python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/Chat_Macros/context_snapshot.py tldw_Server_API/app/core/Chat_Macros/acp_adapter.py tldw_Server_API/app/core/Chat_Macros/branch_runner.py tldw_Server_API/app/core/Chat_Macros/executor.py tldw_Server_API/app/core/Chat_Macros/output_profiles.py tldw_Server_API/tests/Chat_Macros/unit/test_macro_executor.py tldw_Server_API/tests/Chat_Macros/unit/test_acp_adapter.py
 git commit -m "feat: execute chat macro branches"
 ```
+
+**Task 6 verification notes (2026-07-03):**
+- Reviewer re-review: no findings. Residual risk remains for real Jobs/LLM/post-back integration in later slices.
+- Focused executor/ACP suite: `29 passed, 3 warnings`.
+- Full Chat_Macros suite: `72 passed, 4 warnings`.
+- Command/chat regression slice: `50 passed, 9 skipped, 5 warnings`.
+- Static/security: `compileall` exit 0, `git diff --check` exit 0, Bandit report `/tmp/bandit_chat_macros_task6_final.json` had empty `errors` and `results`.
 
 ## Task 7: Jobs Worker, Cancellation, And Idempotent Post-Back
 
