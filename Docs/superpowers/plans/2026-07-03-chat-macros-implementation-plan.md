@@ -188,7 +188,7 @@ git commit -m "feat: add chat macro definition parser"
 - Create: `tldw_Server_API/app/core/Chat_Macros/repository.py`
 - Test: `tldw_Server_API/tests/Chat_Macros/unit/test_macro_repository.py`
 
-- [ ] **Step 1: Write failing repository tests**
+- [x] **Step 1: Write failing repository tests**
 
 Add tests that create a temporary `CharactersRAGDB` and assert:
 
@@ -207,7 +207,7 @@ assert repo.list_branches(run.run_id)[0].output_text == "S"
 
 Also test that `post_idempotency_key` is unique per run/post target and that cancellation stores `cancel_requested_at`.
 
-- [ ] **Step 2: Run repository tests and verify failure**
+- [x] **Step 2: Run repository tests and verify failure**
 
 Run:
 
@@ -218,7 +218,7 @@ python -m pytest tldw_Server_API/tests/Chat_Macros/unit/test_macro_repository.py
 
 Expected: import errors or missing table errors.
 
-- [ ] **Step 3: Add schema migration**
+- [x] **Step 3: Add schema migration**
 
 In `ChaChaNotes_DB.py`:
 
@@ -232,7 +232,7 @@ In `ChaChaNotes_DB.py`:
 - Add indexes on `(user_id, command)`, `(user_id, status, created_at)`, `(run_id, step_id)`, and unique `(run_id, post_idempotency_key)` where possible.
 - Keep fields JSON-compatible as `TEXT` columns containing canonical JSON where existing DB conventions do that.
 
-- [ ] **Step 4: Implement `ChatMacroRepository`**
+- [x] **Step 4: Implement `ChatMacroRepository`**
 
 Implement methods:
 
@@ -252,7 +252,7 @@ Implement methods:
 
 Use parameterized SQL only. Do not expose raw connection usage outside this repository.
 
-- [ ] **Step 5: Run repository tests**
+- [x] **Step 5: Run repository tests**
 
 Run:
 
@@ -263,7 +263,7 @@ python -m pytest tldw_Server_API/tests/Chat_Macros/unit/test_macro_repository.py
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py tldw_Server_API/app/core/Chat_Macros/repository.py tldw_Server_API/tests/Chat_Macros/unit/test_macro_repository.py

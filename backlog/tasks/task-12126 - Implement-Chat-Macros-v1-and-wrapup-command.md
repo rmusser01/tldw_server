@@ -27,6 +27,18 @@ Implement the approved Chat Macros v1 system and built-in /wrapup command accord
 - [ ] #4 Focused backend/frontend tests pass and Bandit is run on touched backend scope.
 <!-- AC:END -->
 
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Implementation should follow Docs/superpowers/plans/2026-07-03-chat-macros-implementation-plan.md. The plan was produced from the approved design spec and reviewed in three subagent passes; blocking review comments were folded into the plan. Start implementation with the plan Task 1 and keep commits task-sized.
+
+Implementation started in worktree .worktrees/chat-macros-v1 on branch codex/chat-macros-v1.
+
+Task 1 complete: added Chat_Macros parser/model foundation, built-in /wrapup MACRO.yaml, README, and parser tests. Commits: 331e6276fb (initial parser), 8dc047de8b (skill permission test), c1f4e6eb95 (parser hardening). Verification: clean baseline command-router suite passed before implementation (26 passed); focused parser tests passed at Task 1 HEAD (11 passed, 3 warnings); Bandit on tldw_Server_API/app/core/Chat_Macros reported no findings. Reviews: spec compliance passed after adding skills permission test; code-quality review passed after hardening defaults, alias collisions, duplicate non-repeated args, and prompt step support. Minor non-blocking note: parse_macro_args still trusts directly supplied hand-built arg_specs for alias uniqueness; intended call path uses validated MacroDefinition args.
+
+Task 2 complete: added ChaChaNotes v52 chat macro tables/repository in commits 6ea0ac7e2d and hardening follow-ups a4feb40ee8, 7f7820395d. Review cycle found and fixed run-scoped idempotency, guarded status/final-post updates, PostgreSQL v52 drift repair, datetime row mapping, and malformed JSON wrapping. Verification: repository tests 15 passed; parser tests 11 passed; git diff --check clean; Bandit /tmp/bandit_chat_macros_task2_fix2.json results empty. Spec re-review and final code-quality re-review found no Task 2 blockers.
+<!-- SECTION:PLAN:END -->
+
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
