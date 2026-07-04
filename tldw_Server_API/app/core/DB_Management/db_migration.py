@@ -110,7 +110,8 @@ class DatabaseMigrator:
         re.IGNORECASE,
     )
     _FOREIGN_KEYS_PRAGMA_RE = re.compile(
-        r"^\s*PRAGMA\s+foreign_keys\s*=\s*(?:ON|OFF|0|1)\s*;?\s*$",
+        r"^\s*PRAGMA\s+foreign_keys\s*(?:=\s*(?:ON|OFF|0|1)|"
+        r"\(\s*(?:ON|OFF|0|1)\s*\))\s*;?\s*$",
         re.IGNORECASE,
     )
 
@@ -345,11 +346,12 @@ class DatabaseMigrator:
 
         for char in sql:
             buffer.append(char)
-            candidate = "".join(buffer).strip()
-            if candidate and sqlite3.complete_statement(candidate):
-                if cls._strip_sql_comments(candidate):
-                    statements.append(candidate)
-                buffer = []
+            if char == ";":
+                candidate = "".join(buffer).strip()
+                if candidate and sqlite3.complete_statement(candidate):
+                    if cls._strip_sql_comments(candidate):
+                        statements.append(candidate)
+                    buffer = []
 
         trailing = "".join(buffer).strip()
         if cls._strip_sql_comments(trailing):
