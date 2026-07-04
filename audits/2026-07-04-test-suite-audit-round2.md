@@ -3,26 +3,28 @@
 **Date:** 2026-07-04 (figures recounted after adversarial fact-check review, same date)
 **Scope:** Backend pytest suite (`tldw_Server_API/tests/`) + frontend Vitest/Playwright (`apps/tldw-frontend/`)
 **Method:** Escaped-defect analysis of git/issue history (April–July 2026) cross-referenced against test-suite design patterns; four parallel exploration passes (infra map, quality sampling across 8 modules, defect history, frontend infra), followed by an adversarial fact-check pass whose corrections are folded in.
-**Inclusion rule:** only defects merged/shipped/present on latest `dev` count toward the profile (verified per-commit with `git merge-base --is-ancestor <sha> origin/dev`). Bugs caught pre-merge on unmerged `codex/*` feature branches (chat-macro series, integrations egress hardening, ACP WS cleanup, audio-test repair) are excluded — they were stopped by review, not shipped.
+**Inclusion rule:** only defects present on latest `dev` count toward the profile. Two verification steps per case: (1) is the fix an ancestor of `origin/dev` (`git merge-base --is-ancestor`)? (2) if not, is the *defective code itself* on dev — i.e. the bug is live with the fix pending on an unmerged `codex/*` branch? Live-on-dev defects count regardless of where their fix sits. Only the chat-macro series is excluded: `app/core/Chat_Macros/` does not exist on dev, so those bugs were never on dev at all.
 **Relationship to prior audit:** Builds on `audits/2026-07-02-testing-implementation-audit.md` (F1–F10, remediated in PR #2579). This round asks a different question: *why did recently found bugs escape a suite of ~3,976 test files that was assumed to cover them?* Findings already resolved by round 1 (coverage-gate ratchet F1, un-hiding of `norecursedirs`-excluded dirs F3, skip-reason hygiene F9) are not re-reported.
 
 ---
 
-## 1. Defect Profile (April–July 2026, dev-merged only)
+## 1. Defect Profile (April–July 2026, present-on-dev only)
 
-11 defects present on `dev` (or open against it) that tests did not catch:
+13 product defects present on `dev` (fixed there, live-unfixed there, or open against it) that tests did not catch:
 
-| Category | Share | Severity | Cases (all verified ancestors of origin/dev, or open issues) |
+| Category | Share | Severity | Cases |
 |---|---|---|---|
-| **Missing input validation / contract enforcement** | ~36% (4) | mostly Medium | Jobs operation contracts allowing impossible states (a9b6a2c310); Jobs settings classification contract drift (d6319e9e16); setup-choice route edge cases (577d83482a); workspace ingest failure codes not exposed (c725caad5a) |
-| **State management / lifecycle** | ~27% (3) | **all High** | Service-layer singleton caches registered against the wrong DB — root cause per fix commit 4924719264 (#2580); `reload_app_main()` permanently swapping `sys.modules`, leaking stale drain state (#2585, **still open**); Embeddings/TTS drain-state corrupting subsequent suites (#2581, 254af77776) |
-| **Env/config-dependent behavior** | ~27% (3) | mostly High | Web shell auth lost on hard reload — no runtime-override fallback (#2590, 626447bd5c); UX smoke gate broken after credential hardening (e88c96500f); VZ host smoke runtime defaults needed hardening (93b7e21aaf) |
-| **Cross-module integration breaks** | ~9% (1) | High | Bit-rotted multiuser load-test helper signature (4924719264, same fix as #2580) |
+| **Missing input validation / contract enforcement** | ~38% (5) | mixed | Jobs operation contracts allowing impossible states (a9b6a2c310); Jobs settings classification contract drift (d6319e9e16); setup-choice route edge cases (577d83482a); workspace ingest failure codes not exposed (c725caad5a); **LIVE on dev:** Workflows research adapters + tokenizer_resolver make direct outbound `httpx` calls bypassing the central egress policy (4 direct calls in `app/core/Workflows/adapters/research/search.py`; fix 883b6c4dbd pending on unmerged `codex/*` branch) |
+| **State management / lifecycle** | ~31% (4) | **all High** | Service-layer singleton caches registered against the wrong DB — root cause per fix commit 4924719264 (#2580); `reload_app_main()` permanently swapping `sys.modules`, leaking stale drain state (#2585, **still open**); Embeddings/TTS drain-state corrupting subsequent suites (#2581, 254af77776); **LIVE on dev:** ACP WS reconnect broadcaster never cleaned up on disconnect (`agent_client_protocol.py` on dev has none of the cleanup; fix 790e3f3264 pending on unmerged branch) |
+| **Env/config-dependent behavior** | ~23% (3) | mostly High | Web shell auth lost on hard reload — no runtime-override fallback (#2590, 626447bd5c); UX smoke gate broken after credential hardening (e88c96500f); VZ host smoke runtime defaults needed hardening (93b7e21aaf) |
+| **Cross-module integration breaks** | ~8% (1) | High | Bit-rotted multiuser load-test helper signature (4924719264, same fix as #2580) |
 | **Serialization / round-trip** | (overlaps env) | High | Runtime auth credentials not durable across hard reloads (#2590 — dual-counted with env) |
 
-**Priority reading:** by count the classes are close, but by severity the ordering is clear — every state/lifecycle defect is High (and #2585 is still open), the env class is mostly High, while the validation class is mostly Medium. Remediation investment should follow that order.
+Plus one **test-suite defect live on dev** (counted under RA2, not the product table): `tests/MediaIngestion_NEW/unit/test_audio_download_limits.py` never invokes the downloader it claims to regression-test — the test-only fix (4b89ce40a2, +16 lines) sits unmerged on a `codex/*` branch while the tautological test runs green on dev.
 
-**Excluded but instructive:** the pre-merge `codex/*` finds (7 commits: chat-macro parser bounds/persistence/atomicity, egress-policy bypass, ACP WS cleanup) were caught by human review, not by tests — the same blind-spot classes, one gate earlier. Commit 4b89ce40a2 (also pre-merge) repaired a *regression test that never invoked the code it claimed to test* — direct evidence for the tautological-test class (§2.2).
+**Priority reading:** by count the classes are close, but by severity the ordering is clear — every state/lifecycle defect is High (one open issue, one live-unfixed), the env class is mostly High, while the validation class is mixed (the live egress bypass is the High outlier). Remediation investment should follow that order.
+
+**Excluded:** the chat-macro commits (parser bounds, persistence, atomicity — c1f4e6eb95 et al.) — `app/core/Chat_Macros/` exists only on the unmerged `codex/chat-macros-v1` branch, so those bugs were never on dev. Still instructive: same blind-spot classes, caught by review one gate earlier.
 
 **Recurring escape mechanism:** a refactor hardens one path (e.g. credential storage) but forgets the fallback/compat layer; tests pass in CI (where env vars are set, singletons are warm, and mocks stand in for the integrated system) but the deployment-shaped world differs.
 
@@ -41,7 +43,7 @@
 
 - `tldw_Server_API/tests/DB_Management/test_media_db_schema_bootstrap.py` — collects monkeypatched calls into a list and asserts the list (`assert calls == [db]` at :32, :49, :67; `assert coordinator_calls == [db]` at :131, :155). The real `initialize_sqlite_schema` never runs — the dispatch logic of `ensure_media_schema` is partially real, but the schema bootstrap itself is only ever the monkeypatch.
 - `tldw_Server_API/tests/AuthNZ/test_auth_dependency_contract.py:175–189` — `_FakeJwtService` asserts its own hardcoded token (`assert token == "jwt.header.signature"` at :180, :186) *inside the mock*; real token validation is never touched. Large stretches (:294–660) assert identity of imported names (`assert RequireRole is auth_deps.RequireRole`), testing wiring, not authorization logic.
-- The 4b89ce40a2 case above (a regression test that never called the downloader) is the same class caught in an earlier audit.
+- `tldw_Server_API/tests/MediaIngestion_NEW/unit/test_audio_download_limits.py` — **live on dev**: the regression test for oversized-audio download limits never invokes the downloader, so it can't catch the regression it exists for. The 16-line test-only fix (4b89ce40a2: inject a `fake_downloader`, assert it was called and no file was written) is authored but unmerged; port it if still unmerged when the exemplar-fix task runs.
 
 ### 2.3 Tolerated-failure assertions (RA3)
 
@@ -56,6 +58,7 @@ The state/lifecycle defect class (all High severity; #2585 still open) maps to p
 - Service-layer singleton caches registered against the wrong DB across tests (#2580, root cause per 4924719264).
 - `reload_app_main()` permanently swaps `sys.modules`, leaking stale drain state (#2585, open).
 - Embeddings suite drain-state corrupting subsequent suites (#2581).
+- ACP WS reconnect broadcaster never unregistered on disconnect — live on dev, fix (790e3f3264, with tests) pending on an unmerged branch.
 
 There is precedent for guard plugins of this shape: `tldw_Server_API/tests/_plugins/http_client_patch_guard.py` blocks tests at patch-time when they try to monkeypatch `requests`/`httpx`/`aiohttp` directly. No equivalent exists for singletons, module identity, or drain state. Test-order dependence is never exercised (no shuffle job).
 
@@ -109,13 +112,13 @@ Ordered by remediation priority under the dev-merged defect profile (state/lifec
 
 | ID | Finding | Importance (1–10) | Defect class addressed |
 |---|---|---|---|
-| RA5 | No singleton/lifecycle leak detection; no order-shuffle | **9** | state/lifecycle (~27%, all High, #2585 open) |
-| RA6 | No env-absent tests; no auth×DB matrix for risky modules; conftest force-sets env | **8** | env/config (~27%, mostly High) |
+| RA5 | No singleton/lifecycle leak detection; no order-shuffle | **9** | state/lifecycle (~31%, all High; #2585 open, ACP leak live) |
+| RA6 | No env-absent tests; no auth×DB matrix for risky modules; conftest force-sets env | **8** | env/config (~23%, mostly High) |
 | RA1 | Integration-marked tests stub the integration layer; endpoint tests smothered in mocks | **8** | integration + validation |
 | RF1 | Frontend API mocks unlinked to OpenAPI spec — drift ungated | **8** | env/config + integration (#2590) |
 | RA2 | Tautological / assertion-in-the-mock tests | **7** | all (false confidence) |
 | RA3 | Tolerated-failure and status-only assertions | **7** | all (false confidence) |
-| RA4 | Property tests not targeted at contract/bounds surfaces | **6** | validation (~36%, mostly Medium) |
+| RA4 | Property tests not targeted at contract/bounds surfaces | **6** | validation (~38%, mixed; egress bypass live) |
 | RA7 | No mechanized test-quality triage at ~4k-file scale | **6** | enabler for RA1–RA3 |
 | RF3 | Global Dexie mock; React Query inert-fallback mode can mask missing providers | **5** | integration |
 | RF2 | Real-backend e2e coverage narrow (chat-cockpit spec unwired; no media/KB/settings) | **4** | integration |
