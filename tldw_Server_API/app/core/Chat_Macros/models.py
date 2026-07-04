@@ -151,15 +151,33 @@ class MacroRunRecord(_StrictModel):
     user_id: str
     macro_name: str
     macro_command: str
+    macro_source: str | None = None
+    macro_version: int | None = None
+    macro_digest: str | None = None
     normalized_args: dict[str, Any] = Field(default_factory=dict)
     status: str = "pending"
+    surface: str | None = None
     source_surface: str | None = None
     conversation_id: str | None = None
     workspace_id: str | None = None
+    acp_session_id: str | None = None
     job_id: str | None = None
+    output_profile: str | None = None
+    context_snapshot: dict[str, Any] | None = None
+    model_selection: dict[str, Any] | None = None
+    status_message_id: str | None = None
+    final_message_id: str | None = None
     final_output: str | None = None
+    final_output_format: str | None = None
+    final_post_status: str | None = None
+    post_idempotency_key: str | None = None
+    cancel_requested_at: str | None = None
+    error_code: str | None = None
+    error_message: str | None = None
     error: str | None = None
     created_at: str | None = None
+    started_at: str | None = None
+    completed_at: str | None = None
     updated_at: str | None = None
 
 
@@ -167,11 +185,23 @@ class MacroBranchRecord(_StrictModel):
     branch_id: str
     run_id: str
     step_id: str
+    label: str | None = None
     output_name: str | None = None
     status: str = "pending"
+    attempt_count: int = 0
+    prompt_digest: str | None = None
     prompt: str | None = None
+    output_text: str | None = None
     output: str | None = None
+    citations: list[Any] = Field(default_factory=list)
+    usage: dict[str, Any] = Field(default_factory=dict)
+    acp_child_session_id: str | None = None
+    retained: bool = False
+    error_code: str | None = None
+    error_message: str | None = None
     error: str | None = None
+    created_at: str | None = None
+    completed_at: str | None = None
     started_at: str | None = None
     finished_at: str | None = None
 
