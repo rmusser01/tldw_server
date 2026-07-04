@@ -1,5 +1,8 @@
+"""Typed operation contracts for future Jobs backend extraction."""
+
 from __future__ import annotations
 
+import copy
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -8,6 +11,8 @@ from typing import Any
 
 
 class OperationOutcome(str, Enum):
+    """High-level result categories returned by backend operations."""
+
     APPLIED = "applied"
     NO_TRANSITION = "no_transition"
     ADMISSION_REJECTED = "admission_rejected"
@@ -17,6 +22,8 @@ class OperationOutcome(str, Enum):
 
 
 class NoTransitionReason(str, Enum):
+    """Reasons a lifecycle operation made no durable state transition."""
+
     MISSING = "missing"
     WRONG_STATUS = "wrong_status"
     STALE_LEASE = "stale_lease"
@@ -26,6 +33,8 @@ class NoTransitionReason(str, Enum):
 
 
 class AdmissionRejectionReason(str, Enum):
+    """Reasons a create/admission request can be rejected before insertion."""
+
     QUEUE_PAUSED = "queue_paused"
     QUEUE_DRAINING = "queue_draining"
     QUOTA_EXCEEDED = "quota_exceeded"
@@ -36,6 +45,8 @@ class AdmissionRejectionReason(str, Enum):
 
 @dataclass(frozen=True)
 class CreateJobCommand:
+    """Backend-neutral command payload for creating a Jobs row."""
+
     domain: str
     queue: str
     job_type: str
@@ -53,6 +64,8 @@ class CreateJobCommand:
 
 @dataclass(frozen=True)
 class AdmissionResult:
+    """Result facts produced by a create/admission operation."""
+
     outcome: OperationOutcome
     row: dict[str, Any] | None = None
     was_inserted: bool = False
@@ -62,6 +75,8 @@ class AdmissionResult:
     message: str | None = None
 
     def __post_init__(self) -> None:
+        """Validate admission invariants and freeze mutable facts."""
+
         if self.outcome is OperationOutcome.APPLIED and not self.was_inserted:
             raise ValueError("applied admission results must mark was_inserted")
         if self.outcome is OperationOutcome.APPLIED and self.row is None:
@@ -78,15 +93,19 @@ class AdmissionResult:
             raise ValueError("only rejected admission results may include a rejection reason")
         if self.outcome is not OperationOutcome.APPLIED and self.durable_events:
             raise ValueError("only applied admission results may include durable events")
-        object.__setattr__(self, "row", dict(self.row) if self.row is not None else None)
-        object.__setattr__(self, "durable_events", tuple(dict(event) for event in self.durable_events))
+        object.__setattr__(self, "row", copy.deepcopy(self.row) if self.row is not None else None)
+        object.__setattr__(self, "durable_events", tuple(copy.deepcopy(event) for event in self.durable_events))
 
     @property
     def inserted(self) -> bool:
+        """Return whether the admission inserted a new row."""
+
         return self.was_inserted
 
     @classmethod
     def applied(cls, *, row: dict[str, Any], durable_events: Sequence[dict[str, Any]] = ()) -> "AdmissionResult":
+        """Build an applied admission result for a newly inserted row."""
+
         return cls(
             outcome=OperationOutcome.APPLIED,
             row=row,
@@ -96,6 +115,8 @@ class AdmissionResult:
 
     @classmethod
     def existing(cls, *, row: dict[str, Any]) -> "AdmissionResult":
+        """Build a no-transition result for an idempotent existing row."""
+
         return cls(
             outcome=OperationOutcome.NO_TRANSITION,
             row=row,
@@ -105,6 +126,8 @@ class AdmissionResult:
 
     @classmethod
     def rejected(cls, reason: AdmissionRejectionReason, *, message: str | None = None) -> "AdmissionResult":
+        """Build an admission-rejected result with an explicit reason."""
+
         return cls(
             outcome=OperationOutcome.ADMISSION_REJECTED,
             admission_rejection_reason=reason,
@@ -114,6 +137,8 @@ class AdmissionResult:
 
 @dataclass(frozen=True)
 class LifecycleResult:
+    """Result facts produced by a Jobs lifecycle state transition."""
+
     outcome: OperationOutcome
     transition_applied: bool
     row: dict[str, Any] | None = None
@@ -122,6 +147,8 @@ class LifecycleResult:
     message: str | None = None
 
     def __post_init__(self) -> None:
+        """Validate lifecycle invariants and freeze mutable facts."""
+
         if self.outcome is OperationOutcome.APPLIED and not self.transition_applied:
             raise ValueError("applied lifecycle results must mark transition_applied")
         if self.outcome is OperationOutcome.APPLIED and self.row is None:
@@ -134,8 +161,8 @@ class LifecycleResult:
             raise ValueError("only no-transition lifecycle results may include a no-transition reason")
         if self.outcome is not OperationOutcome.APPLIED and self.durable_events:
             raise ValueError("only applied lifecycle results may include durable events")
-        object.__setattr__(self, "row", dict(self.row) if self.row is not None else None)
-        object.__setattr__(self, "durable_events", tuple(dict(event) for event in self.durable_events))
+        object.__setattr__(self, "row", copy.deepcopy(self.row) if self.row is not None else None)
+        object.__setattr__(self, "durable_events", tuple(copy.deepcopy(event) for event in self.durable_events))
 
     @classmethod
     def applied(
@@ -144,6 +171,8 @@ class LifecycleResult:
         row: dict[str, Any],
         durable_events: Sequence[dict[str, Any]] = (),
     ) -> "LifecycleResult":
+        """Build an applied lifecycle result for a successful transition."""
+
         return cls(
             outcome=OperationOutcome.APPLIED,
             transition_applied=True,
@@ -159,6 +188,8 @@ class LifecycleResult:
         row: dict[str, Any] | None = None,
         message: str | None = None,
     ) -> "LifecycleResult":
+        """Build a no-transition lifecycle result with a reason."""
+
         return cls(
             outcome=OperationOutcome.NO_TRANSITION,
             transition_applied=False,

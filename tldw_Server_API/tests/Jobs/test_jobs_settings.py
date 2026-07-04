@@ -1,7 +1,10 @@
+"""Contract tests for Jobs settings snapshot and classification behavior."""
+
 from __future__ import annotations
 
 import ast
 from pathlib import Path
+from typing import Mapping, cast
 
 import pytest
 
@@ -11,8 +14,16 @@ from tldw_Server_API.app.core.Jobs.settings import JobsSettingMode, JobsSettings
 pytestmark = pytest.mark.unit
 
 
+def _repo_root() -> Path:
+    """Return the repository root from this test module location."""
+
+    return Path(__file__).resolve().parents[3]
+
+
 def _literal_jobs_env_keys(path: Path) -> set[str]:
-    tree = ast.parse(path.read_text())
+    """Collect literal JOBS_* keys read by direct environment helpers."""
+
+    tree = ast.parse(path.read_text(encoding="utf-8"))
     keys: set[str] = set()
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
@@ -33,7 +44,9 @@ def _literal_jobs_env_keys(path: Path) -> set[str]:
 
 
 def _literal_jobs_quota_bases(path: Path) -> set[str]:
-    tree = ast.parse(path.read_text())
+    """Collect literal JOBS_* quota base keys read by quota helpers."""
+
+    tree = ast.parse(path.read_text(encoding="utf-8"))
     keys: set[str] = set()
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
@@ -49,6 +62,8 @@ def _literal_jobs_quota_bases(path: Path) -> set[str]:
 
 
 def test_jobs_settings_snapshots_construction_time_values() -> None:
+    """Verify settings snapshot construction-time values immediately."""
+
     env = {
         "JOBS_DB_URL": "postgresql://example/jobs",
         "JOBS_DB_PATH": "data/jobs-a.db",
@@ -70,6 +85,8 @@ def test_jobs_settings_snapshots_construction_time_values() -> None:
 
 
 def test_jobs_settings_refresh_reads_new_environment_values() -> None:
+    """Verify refresh reads updated snapshot-refreshable integer values."""
+
     env = {"JOBS_MAX_JSON_BYTES": "123", "JOBS_LEASE_MAX_SECONDS": "45"}
     settings = JobsSettings.from_env(env)
     env["JOBS_MAX_JSON_BYTES"] = "456"
@@ -82,6 +99,8 @@ def test_jobs_settings_refresh_reads_new_environment_values() -> None:
 
 
 def test_jobs_settings_refresh_preserves_construction_time_values() -> None:
+    """Verify refresh preserves DB settings that are construction-time only."""
+
     settings = JobsSettings.from_env(
         {
             "JOBS_DB_URL": "postgresql://example/original",
@@ -107,6 +126,8 @@ def test_jobs_settings_refresh_preserves_construction_time_values() -> None:
 
 
 def test_jobs_settings_refresh_reads_new_booleans_and_allowed_queues() -> None:
+    """Verify refresh reads updated booleans and queue allow-list extras."""
+
     settings = JobsSettings.from_env(
         {
             "JOBS_EVENTS_OUTBOX": "false",
@@ -132,6 +153,8 @@ def test_jobs_settings_refresh_reads_new_booleans_and_allowed_queues() -> None:
 
 
 def test_jobs_settings_allowed_queue_extras_are_domain_aware() -> None:
+    """Verify domain-specific queue extras extend global extras."""
+
     settings = JobsSettings.from_env(
         {
             "JOBS_ALLOWED_QUEUES": "default,low",
@@ -144,6 +167,8 @@ def test_jobs_settings_allowed_queue_extras_are_domain_aware() -> None:
 
 
 def test_jobs_settings_allowed_queue_extras_remove_duplicates() -> None:
+    """Verify queue extras preserve order while removing duplicates."""
+
     settings = JobsSettings.from_env(
         {
             "JOBS_ALLOWED_QUEUES": "default,low,default",
@@ -154,7 +179,19 @@ def test_jobs_settings_allowed_queue_extras_remove_duplicates() -> None:
     assert settings.allowed_queue_extras_for_domain("chatbooks") == ["default", "low", "export"]
 
 
+def test_jobs_settings_ignores_none_domain_queue_values() -> None:
+    """Verify null domain queue values do not become literal queue names."""
+
+    env = cast(Mapping[str, str], {"JOBS_ALLOWED_QUEUES_CHATBOOKS": None})
+
+    settings = JobsSettings.from_env(env)
+
+    assert settings.allowed_queue_extras_for_domain("chatbooks") == []
+
+
 def test_jobs_settings_classifies_known_keys() -> None:
+    """Verify known Jobs keys map to their expected consumption phase."""
+
     assert JobsSettings.setting_mode("JOBS_DB_URL") is JobsSettingMode.CONSTRUCTION_TIME
     assert JobsSettings.setting_mode("JOBS_DB_PATH") is JobsSettingMode.CONSTRUCTION_TIME
     assert JobsSettings.setting_mode("JOBS_TEST_NOW_EPOCH") is JobsSettingMode.CONSTRUCTION_TIME
@@ -174,10 +211,16 @@ def test_jobs_settings_classifies_known_keys() -> None:
 
 
 def test_jobs_settings_classifies_current_manager_and_admin_env_keys() -> None:
+    """Verify current Jobs runtime env reads are covered by classification."""
+
+    root = _repo_root()
     paths = [
-        Path("tldw_Server_API/app/core/Jobs/manager.py"),
-        Path("tldw_Server_API/app/api/v1/endpoints/jobs_admin.py"),
+        root / "tldw_Server_API/app/core/Jobs/manager.py",
+        root / "tldw_Server_API/app/api/v1/endpoints/jobs_admin.py",
     ]
+    for path in paths:
+        assert path.exists()
+
     keys = {key for path in paths for key in _literal_jobs_env_keys(path)}
     keys.update(key for path in paths for key in _literal_jobs_quota_bases(path))
     keys.update(

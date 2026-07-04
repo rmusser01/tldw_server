@@ -1,3 +1,5 @@
+"""Jobs settings snapshot and classification contracts."""
+
 from __future__ import annotations
 
 import os
@@ -9,6 +11,8 @@ from tldw_Server_API.app.core.testing import is_truthy
 
 
 class JobsSettingMode(str, Enum):
+    """Classify when a Jobs environment setting is consumed."""
+
     CONSTRUCTION_TIME = "construction_time"
     SNAPSHOT_REFRESHABLE = "snapshot_refreshable"
     OPERATION_TIME = "operation_time"
@@ -16,6 +20,8 @@ class JobsSettingMode(str, Enum):
 
 
 def _env_value(env: Mapping[str, str], key: str, default: str | None = None) -> str | None:
+    """Read an environment value while preserving missing values as defaults."""
+
     value = env.get(key)
     if value is None:
         return default
@@ -23,6 +29,8 @@ def _env_value(env: Mapping[str, str], key: str, default: str | None = None) -> 
 
 
 def _env_int(env: Mapping[str, str], key: str, default: int) -> int:
+    """Read an integer environment value with a default for missing blanks."""
+
     raw = _env_value(env, key)
     if raw is None or raw == "":
         return default
@@ -30,6 +38,8 @@ def _env_int(env: Mapping[str, str], key: str, default: int) -> int:
 
 
 def _env_bool(env: Mapping[str, str], key: str, default: bool = False) -> bool:
+    """Read a boolean environment value using project truthiness rules."""
+
     raw = _env_value(env, key)
     if raw is None:
         return default
@@ -37,6 +47,8 @@ def _env_bool(env: Mapping[str, str], key: str, default: bool = False) -> bool:
 
 
 def _split_csv(value: str | None) -> tuple[str, ...]:
+    """Split a comma-delimited setting into trimmed non-empty tokens."""
+
     if not value:
         return ()
     return tuple(item.strip() for item in value.split(",") if item.strip())
@@ -44,6 +56,8 @@ def _split_csv(value: str | None) -> tuple[str, ...]:
 
 @dataclass(frozen=True)
 class JobsSettings:
+    """Immutable snapshot of Jobs settings that are safe to pass to backends."""
+
     db_url: str | None = None
     db_path: str | None = None
     max_json_bytes: int = 1_048_576
@@ -138,13 +152,15 @@ class JobsSettings:
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "JobsSettings":
+        """Create a settings snapshot from the supplied environment mapping."""
+
         source = os.environ if env is None else env
         domain_queues = []
         for key, value in source.items():
             if key.startswith("JOBS_ALLOWED_QUEUES_"):
                 domain = key.removeprefix("JOBS_ALLOWED_QUEUES_").strip().lower()
                 if domain:
-                    domain_queues.append((domain, _split_csv(str(value))))
+                    domain_queues.append((domain, _split_csv(value if value is not None else None)))
         domain_queues.sort(key=lambda item: item[0])
 
         return cls(
@@ -159,10 +175,14 @@ class JobsSettings:
         )
 
     def refresh(self, env: Mapping[str, str] | None = None) -> "JobsSettings":
+        """Refresh snapshot-scoped values while preserving construction-time DB settings."""
+
         refreshed = type(self).from_env(env)
         return replace(refreshed, db_url=self.db_url, db_path=self.db_path)
 
     def allowed_queue_extras_for_domain(self, domain: str | None) -> list[str]:
+        """Return global and domain-specific queue extras without duplicates."""
+
         values = list(self.allowed_queue_extras)
         normalized_domain = str(domain or "").strip().lower()
         if normalized_domain:
@@ -182,6 +202,8 @@ class JobsSettings:
 
     @classmethod
     def setting_mode(cls, key: str) -> JobsSettingMode:
+        """Classify a Jobs environment key by when runtime code consumes it."""
+
         normalized = str(key or "").strip().upper()
         if normalized in cls.CONSTRUCTION_TIME_KEYS:
             return JobsSettingMode.CONSTRUCTION_TIME

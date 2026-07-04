@@ -1,3 +1,5 @@
+"""Shared Jobs parity scenarios for SQLite and Postgres backends."""
+
 from __future__ import annotations
 
 from collections import Counter
@@ -9,6 +11,8 @@ ManagerFactory = Callable[[], JobManager]
 
 
 def run_idempotent_create_scope_scenario(make_manager: ManagerFactory) -> None:
+    """Verify idempotency is scoped by domain, queue, type, and owner."""
+
     jm = make_manager()
     key = "idem-key-123"
 
@@ -61,6 +65,8 @@ def run_idempotent_create_scope_scenario(make_manager: ManagerFactory) -> None:
 
 
 def run_idempotent_create_preserves_original_request_ids_scenario(make_manager: ManagerFactory) -> None:
+    """Verify idempotent replay preserves the original request and trace ids."""
+
     jm = make_manager()
     key = "idem-request-id-key"
 
@@ -93,6 +99,8 @@ def run_idempotent_create_preserves_original_request_ids_scenario(make_manager: 
 
 
 def run_acquire_complete_lifecycle_scenario(make_manager: ManagerFactory) -> None:
+    """Verify the acquire-to-complete lifecycle shape remains backend-neutral."""
+
     jm = make_manager()
     job = jm.create_job(
         domain="parity",
@@ -131,6 +139,8 @@ def run_acquire_complete_lifecycle_scenario(make_manager: ManagerFactory) -> Non
 
 
 def run_complete_idempotency_scenario(make_manager: ManagerFactory) -> None:
+    """Verify completion retries are idempotent only with the same token."""
+
     jm = make_manager()
     job = jm.create_job(domain="test", queue="default", job_type="t", payload={}, owner_user_id="u")
     acquired = jm.acquire_next_job(domain="test", queue="default", lease_seconds=10, worker_id="w1")
@@ -145,6 +155,8 @@ def run_complete_idempotency_scenario(make_manager: ManagerFactory) -> None:
 
 
 def run_renew_stale_lease_noop_scenario(make_manager: ManagerFactory) -> None:
+    """Verify stale lease renewal attempts leave the current lease untouched."""
+
     jm = make_manager()
     job = jm.create_job(domain="parity", queue="default", job_type="renew", payload={}, owner_user_id="owner-1")
     acquired = jm.acquire_next_job(domain="parity", queue="default", lease_seconds=10, worker_id="worker-1")
@@ -178,6 +190,8 @@ def run_renew_stale_lease_noop_scenario(make_manager: ManagerFactory) -> None:
 
 
 def run_cancel_terminal_noop_scenario(make_manager: ManagerFactory) -> None:
+    """Verify repeated cancellation is a no-op once the job is terminal."""
+
     jm = make_manager()
     job = jm.create_job(domain="parity", queue="default", job_type="cancel", payload={}, owner_user_id="owner-1")
 
@@ -193,6 +207,8 @@ def run_cancel_terminal_noop_scenario(make_manager: ManagerFactory) -> None:
 
 
 def run_events_outbox_create_complete_scenario(make_manager: ManagerFactory) -> None:
+    """Verify create and complete emit exactly one durable outbox event each."""
+
     jm = make_manager()
     job = jm.create_job(domain="parity", queue="default", job_type="events", payload={}, owner_user_id="owner-1")
     acquired = jm.acquire_next_job(domain="parity", queue="default", lease_seconds=10, worker_id="worker-1")

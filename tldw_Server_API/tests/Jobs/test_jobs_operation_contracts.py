@@ -1,3 +1,5 @@
+"""Contract tests for Jobs operation result dataclasses."""
+
 from __future__ import annotations
 
 import ast
@@ -15,7 +17,9 @@ from tldw_Server_API.app.core.Jobs.operations.contracts import (
 )
 
 
-def test_create_job_command_carries_public_job_facts():
+def test_create_job_command_carries_public_job_facts() -> None:
+    """Verify create commands carry public job facts without transformation."""
+
     command = CreateJobCommand(
         domain="chatbooks",
         queue="default",
@@ -36,7 +40,9 @@ def test_create_job_command_carries_public_job_facts():
     assert command.trace_id == "trace-1"
 
 
-def test_admission_result_distinguishes_inserted_and_existing_rows():
+def test_admission_result_distinguishes_inserted_and_existing_rows() -> None:
+    """Verify admission results distinguish inserted, existing, and rejected states."""
+
     inserted = AdmissionResult.applied(
         row={"id": 1, "status": "queued"},
         durable_events=({"event_type": "job.created"},),
@@ -53,7 +59,9 @@ def test_admission_result_distinguishes_inserted_and_existing_rows():
     assert rejected.admission_rejection_reason is AdmissionRejectionReason.QUEUE_PAUSED
 
 
-def test_admission_result_rejects_inconsistent_states():
+def test_admission_result_rejects_inconsistent_states() -> None:
+    """Verify invalid admission result state combinations are rejected."""
+
     with pytest.raises(ValueError, match="applied admission"):
         AdmissionResult(outcome=OperationOutcome.APPLIED, was_inserted=False)
 
@@ -81,21 +89,27 @@ def test_admission_result_rejects_inconsistent_states():
         )
 
 
-def test_admission_result_shallow_copies_mutable_facts():
-    row = {"id": 1, "status": "queued"}
-    event = {"event_type": "job.created"}
+def test_admission_result_copies_mutable_facts() -> None:
+    """Verify admission results deep-copy nested mutable facts."""
+
+    row = {"id": 1, "status": "queued", "payload": {"topic": "original"}}
+    event = {"event_type": "job.created", "attrs": {"attempt": 1}}
     events = [event]
 
     result = AdmissionResult.applied(row=row, durable_events=events)
     row["status"] = "failed"
+    row["payload"]["topic"] = "mutated"
     event["event_type"] = "job.failed"
+    event["attrs"]["attempt"] = 2
     events.append({"event_type": "job.completed"})
 
-    assert result.row == {"id": 1, "status": "queued"}
-    assert result.durable_events == ({"event_type": "job.created"},)
+    assert result.row == {"id": 1, "status": "queued", "payload": {"topic": "original"}}
+    assert result.durable_events == ({"event_type": "job.created", "attrs": {"attempt": 1}},)
 
 
-def test_lifecycle_result_names_no_transition_reason():
+def test_lifecycle_result_names_no_transition_reason() -> None:
+    """Verify lifecycle no-transition results retain their reason."""
+
     result = LifecycleResult.no_transition(
         NoTransitionReason.STALE_LEASE,
         row={"id": 1, "status": "processing"},
@@ -106,7 +120,9 @@ def test_lifecycle_result_names_no_transition_reason():
     assert result.transition_applied is False
 
 
-def test_lifecycle_result_rejects_inconsistent_states():
+def test_lifecycle_result_rejects_inconsistent_states() -> None:
+    """Verify invalid lifecycle result state combinations are rejected."""
+
     with pytest.raises(ValueError, match="applied lifecycle"):
         LifecycleResult(outcome=OperationOutcome.APPLIED, transition_applied=False)
 
@@ -132,26 +148,35 @@ def test_lifecycle_result_rejects_inconsistent_states():
         )
 
 
-def test_lifecycle_result_shallow_copies_mutable_facts():
-    row = {"id": 1, "status": "processing"}
-    event = {"event_type": "job.completed"}
+def test_lifecycle_result_copies_mutable_facts() -> None:
+    """Verify lifecycle results deep-copy nested mutable facts."""
+
+    row = {"id": 1, "status": "processing", "result": {"ok": True}}
+    event = {"event_type": "job.completed", "attrs": {"attempt": 1}}
     events = [event]
 
     result = LifecycleResult.applied(row=row, durable_events=events)
     row["status"] = "failed"
+    row["result"]["ok"] = False
     event["event_type"] = "job.failed"
+    event["attrs"]["attempt"] = 2
     events.append({"event_type": "job.cancelled"})
 
-    assert result.row == {"id": 1, "status": "processing"}
-    assert result.durable_events == ({"event_type": "job.completed"},)
+    assert result.row == {"id": 1, "status": "processing", "result": {"ok": True}}
+    assert result.durable_events == ({"event_type": "job.completed", "attrs": {"attempt": 1}},)
 
 
-def test_operation_contracts_do_not_import_job_manager():
-    operations_dir = Path("tldw_Server_API/app/core/Jobs/operations")
+def test_operation_contracts_do_not_import_job_manager() -> None:
+    """Verify operation contracts do not depend on the JobManager facade."""
+
+    operations_dir = Path(__file__).resolve().parents[3] / "tldw_Server_API/app/core/Jobs/operations"
+    assert operations_dir.exists()
     forbidden_refs: list[str] = []
+    scanned_files = 0
 
     for path in operations_dir.rglob("*.py"):
-        tree = ast.parse(path.read_text())
+        scanned_files += 1
+        tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 for alias in node.names:
@@ -174,4 +199,5 @@ def test_operation_contracts_do_not_import_job_manager():
                 if node.attr in {"manager", "JobManager"}:
                     forbidden_refs.append(f"{path}:{node.attr}")
 
+    assert scanned_files > 0
     assert forbidden_refs == []

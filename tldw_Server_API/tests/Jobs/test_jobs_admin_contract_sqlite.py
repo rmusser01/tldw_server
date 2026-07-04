@@ -1,7 +1,10 @@
+"""SQLite admin API contract tests for Jobs endpoints."""
+
 from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -13,7 +16,9 @@ from tldw_Server_API.app.core.Jobs.migrations import ensure_jobs_tables
 pytestmark = pytest.mark.jobs
 
 
-def _setup_env(monkeypatch, tmp_path: Path) -> None:
+def _setup_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Configure an isolated SQLite Jobs environment for the admin API."""
+
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("TEST_MODE", "true")
     monkeypatch.setenv("AUTH_MODE", "single_user")
@@ -26,10 +31,14 @@ def _setup_env(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("JOBS_METRICS_RECONCILE_ENABLE", "false")
     monkeypatch.setenv("JOBS_WEBHOOKS_ENABLED", "false")
     monkeypatch.delenv("JOBS_DB_URL", raising=False)
-    monkeypatch.setenv("JOBS_DB_PATH", os.path.join(os.getcwd(), "Databases", "jobs.db"))
+    db_path = Path(os.getcwd()) / "Databases" / "jobs.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("JOBS_DB_PATH", str(db_path))
 
 
-def _client_headers():
+def _client_headers() -> tuple[Any, dict[str, str]]:
+    """Return the FastAPI app and single-user auth headers for admin requests."""
+
     from tldw_Server_API.app.core.AuthNZ.settings import get_settings, reset_settings
 
     reset_settings()
@@ -39,7 +48,12 @@ def _client_headers():
     return app, {"X-API-KEY": get_settings().SINGLE_USER_API_KEY}
 
 
-def test_jobs_admin_list_and_detail_public_field_contract_sqlite(monkeypatch, tmp_path):
+def test_jobs_admin_list_and_detail_public_field_contract_sqlite(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Verify public fields for Jobs list and detail admin endpoints."""
+
     _setup_env(monkeypatch, tmp_path)
     ensure_jobs_tables(Path(os.environ["JOBS_DB_PATH"]))
     app, headers = _client_headers()
