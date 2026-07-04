@@ -555,6 +555,14 @@ async def verify_jwt_and_fetch_user(request: Request, token: str = Depends(oauth
         token_team_ids = _coerce_int_list(payload.get("team_ids"))
         token_active_org_id = payload.get("active_org_id")
         token_active_team_id = payload.get("active_team_id")
+        token_is_impersonation = payload.get("impersonation") is True
+        token_impersonated_by: Optional[int] = None
+        raw_impersonated_by = payload.get("impersonated_by") if token_is_impersonation else None
+        if raw_impersonated_by is not None:
+            try:
+                token_impersonated_by = int(raw_impersonated_by)
+            except (TypeError, ValueError):
+                token_impersonated_by = None
     except (InvalidTokenError, TokenExpiredError) as e:
         logger.warning(f"Token validation failed: {e}")
         raise credentials_exception from e
@@ -864,6 +872,8 @@ async def verify_jwt_and_fetch_user(request: Request, token: str = Depends(oauth
         request.state.org_ids = org_ids
         request.state.active_team_id = active_team_id
         request.state.active_org_id = active_org_id
+        request.state.is_impersonation = token_is_impersonation
+        request.state.impersonated_by = token_impersonated_by
     except _USER_DB_NONCRITICAL_EXCEPTIONS:
         pass
 
@@ -892,7 +902,9 @@ async def verify_jwt_and_fetch_user(request: Request, token: str = Depends(oauth
             email=getattr(user, "email", None),
             subject=None,
             token_type="access",
-            jti=None,
+            jti=str(payload.get("jti")) if payload.get("jti") is not None else None,
+            is_impersonation=token_is_impersonation,
+            impersonated_by=token_impersonated_by,
             roles=list(user.roles or []),
             permissions=list(user.permissions or []),
             is_admin=bool(user.is_admin),

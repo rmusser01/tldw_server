@@ -43,6 +43,24 @@ class TestJWTServiceUnit:
         assert "iat" in payload
         assert "jti" in payload
 
+    def test_create_access_token_accepts_explicit_ttl(self, jwt_service):
+
+        """Access token callers can request a shorter TTL for privileged flows."""
+        token = jwt_service.create_access_token(
+            user_id=42,
+            username="targetuser",
+            role="user",
+            expires_in_minutes=15,
+            additional_claims={"impersonation": True, "impersonated_by": 1},
+        )
+
+        payload = jwt_service.decode_access_token(token)
+
+        assert payload["sub"] == "42"
+        assert payload["impersonation"] is True
+        assert payload["impersonated_by"] == 1
+        assert payload["exp"] - payload["iat"] == 15 * 60
+
     def test_create_refresh_token(self, jwt_service):
 
         """Test creating a refresh token."""

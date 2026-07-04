@@ -8,17 +8,30 @@ audit traceability.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from loguru import logger
 from pydantic import BaseModel
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
+from tldw_Server_API.app.core.Audit.unified_audit_service import AuditEventCategory, AuditEventType
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.services.admin_audit_service import (
+    emit_admin_account_audit_event as _emit_admin_account_audit_event,
+)
 
 router = APIRouter(prefix="/impersonate", tags=["admin-impersonation"])
 
 # Default impersonation token TTL in minutes
 _IMPERSONATION_TTL_MINUTES = 15
+
+
+def _row_value(row: Any, key: str, index: int) -> Any:
+    if isinstance(row, Mapping):
+        return row.get(key, row.get(str(index)))
+    return row[index]
 
 
 # ---------------------------------------------------------------------------
@@ -57,13 +70,10 @@ async def create_impersonation_token(
 
         pool = await get_db_pool()
 
-        # Verify the target user exists
-        async with pool.acquire() as conn:
-            cur = await conn.execute(
-                "SELECT id, username, is_active FROM users WHERE id = ?",
-                (user_id,),
-            )
-            row = await cur.fetchone()
+        row = await pool.fetchone(
+            "SELECT id, username, is_active FROM users WHERE id = ?",
+            (user_id,),
+        )
 
         if not row:
             raise HTTPException(
@@ -71,9 +81,9 @@ async def create_impersonation_token(
                 detail=f"User {user_id} not found",
             )
 
-        target_user_id = row[0]
-        target_username = row[1]
-        target_is_active = row[2]
+        target_user_id = _row_value(row, "id", 0)
+        target_username = _row_value(row, "username", 1)
+        target_is_active = _row_value(row, "is_active", 2)
 
         if not target_is_active:
             raise HTTPException(
@@ -81,14 +91,11 @@ async def create_impersonation_token(
                 detail=f"User {user_id} is not active",
             )
 
-        # Determine the target user's role
-        async with pool.acquire() as conn:
-            cur = await conn.execute(
-                "SELECT role FROM user_roles WHERE user_id = ? LIMIT 1",
-                (user_id,),
-            )
-            role_row = await cur.fetchone()
-        target_role = role_row[0] if role_row else "user"
+        role_row = await pool.fetchone(
+            "SELECT role FROM user_roles WHERE user_id = ? LIMIT 1",
+            (user_id,),
+        )
+        target_role = _row_value(role_row, "role", 0) if role_row else "user"
 
         # Generate a short-lived access token with impersonation claim
         from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service
@@ -98,9 +105,26 @@ async def create_impersonation_token(
             user_id=target_user_id,
             username=target_username,
             role=target_role,
+            expires_in_minutes=_IMPERSONATION_TTL_MINUTES,
             additional_claims={
                 "impersonated_by": principal.user_id,
                 "impersonation": True,
+            },
+        )
+
+        await _emit_admin_account_audit_event(
+            actor_id=principal.user_id,
+            target_user_id=target_user_id,
+            event_type=AuditEventType.AUTH_TOKEN_CREATED,
+            category=AuditEventCategory.AUTHENTICATION,
+            resource_type="impersonation_token",
+            resource_id=str(target_user_id),
+            action="admin.impersonation.token.create",
+            metadata={
+                "impersonation": True,
+                "impersonated_by": principal.user_id,
+                "impersonated_user_id": target_user_id,
+                "impersonation_ttl_minutes": _IMPERSONATION_TTL_MINUTES,
             },
         )
 

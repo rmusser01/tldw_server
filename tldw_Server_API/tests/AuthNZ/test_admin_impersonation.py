@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import HTTPException
 
+from tldw_Server_API.app.core.Audit.unified_audit_service import AuditEventCategory, AuditEventType
 from tldw_Server_API.app.api.v1.endpoints.admin.admin_impersonation import (
     ImpersonationTokenResponse,
     create_impersonation_token,
@@ -49,22 +50,69 @@ class TestCreateImpersonationToken:
     async def test_success(self):
         principal = _admin_principal()
 
-        # Mock cursor for user lookup
-        mock_cursor_user = AsyncMock()
-        mock_cursor_user.fetchone = AsyncMock(return_value=(42, "targetuser", 1))
+        mock_pool = MagicMock()
+        mock_pool.fetchone = AsyncMock(
+            side_effect=[
+                (42, "targetuser", 1),
+                ("user",),
+            ],
+        )
 
-        # Mock cursor for role lookup
-        mock_cursor_role = AsyncMock()
-        mock_cursor_role.fetchone = AsyncMock(return_value=("user",))
+        mock_jwt_svc = MagicMock()
+        mock_jwt_svc.create_access_token = MagicMock(return_value="mock.jwt.token")
+        mock_audit = AsyncMock()
 
-        mock_conn = AsyncMock()
-        # First call returns user info, second returns role
-        mock_conn.execute = AsyncMock(side_effect=[mock_cursor_user, mock_cursor_role])
-        mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_conn.__aexit__ = AsyncMock(return_value=False)
+        with (
+            patch(
+                "tldw_Server_API.app.core.AuthNZ.database.get_db_pool",
+                new_callable=AsyncMock,
+                return_value=mock_pool,
+            ),
+            patch(
+                "tldw_Server_API.app.core.AuthNZ.jwt_service.get_jwt_service",
+                return_value=mock_jwt_svc,
+            ),
+            patch(
+                "tldw_Server_API.app.api.v1.endpoints.admin.admin_impersonation._emit_admin_account_audit_event",
+                new=mock_audit,
+                create=True,
+            ),
+        ):
+            result = await create_impersonation_token(42, principal)
+
+        assert result.token == "mock.jwt.token"
+        assert result.impersonated_user_id == 42
+        assert result.impersonated_by == 1
+
+        # Verify JWT was created with impersonation claims
+        mock_jwt_svc.create_access_token.assert_called_once()
+        call_kwargs = mock_jwt_svc.create_access_token.call_args
+        assert call_kwargs.kwargs["expires_in_minutes"] == 15
+        additional = call_kwargs.kwargs.get("additional_claims") or call_kwargs[1].get("additional_claims")
+        assert additional["impersonated_by"] == 1
+        assert additional["impersonation"] is True
+        mock_audit.assert_awaited_once()
+        audit_kwargs = mock_audit.await_args.kwargs
+        assert audit_kwargs["actor_id"] == 1
+        assert audit_kwargs["target_user_id"] == 42
+        assert audit_kwargs["event_type"] is AuditEventType.AUTH_TOKEN_CREATED
+        assert audit_kwargs["category"] is AuditEventCategory.AUTHENTICATION
+        assert audit_kwargs["action"] == "admin.impersonation.token.create"
+        assert audit_kwargs["metadata"]["impersonation"] is True
+        assert audit_kwargs["metadata"]["impersonation_ttl_minutes"] == 15
+
+    @pytest.mark.asyncio
+    async def test_uses_backend_neutral_fetchone_for_user_and_role_lookups(self):
+        principal = _admin_principal()
 
         mock_pool = MagicMock()
-        mock_pool.acquire = MagicMock(return_value=mock_conn)
+        mock_pool.fetchone = AsyncMock(
+            side_effect=[
+                (42, "targetuser", 1),
+                ("user",),
+            ],
+        )
+        mock_pool.acquire = MagicMock(side_effect=AssertionError("raw connection lookup should not run"))
 
         mock_jwt_svc = MagicMock()
         mock_jwt_svc.create_access_token = MagicMock(return_value="mock.jwt.token")
@@ -79,34 +127,24 @@ class TestCreateImpersonationToken:
                 "tldw_Server_API.app.core.AuthNZ.jwt_service.get_jwt_service",
                 return_value=mock_jwt_svc,
             ),
+            patch(
+                "tldw_Server_API.app.api.v1.endpoints.admin.admin_impersonation._emit_admin_account_audit_event",
+                new_callable=AsyncMock,
+                create=True,
+            ),
         ):
             result = await create_impersonation_token(42, principal)
 
-        assert result.token == "mock.jwt.token"
         assert result.impersonated_user_id == 42
-        assert result.impersonated_by == 1
-
-        # Verify JWT was created with impersonation claims
-        mock_jwt_svc.create_access_token.assert_called_once()
-        call_kwargs = mock_jwt_svc.create_access_token.call_args
-        additional = call_kwargs.kwargs.get("additional_claims") or call_kwargs[1].get("additional_claims")
-        assert additional["impersonated_by"] == 1
-        assert additional["impersonation"] is True
+        assert mock_pool.fetchone.await_count == 2
+        mock_pool.acquire.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_user_not_found(self):
         principal = _admin_principal()
 
-        mock_cursor = AsyncMock()
-        mock_cursor.fetchone = AsyncMock(return_value=None)
-
-        mock_conn = AsyncMock()
-        mock_conn.execute = AsyncMock(return_value=mock_cursor)
-        mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_conn.__aexit__ = AsyncMock(return_value=False)
-
         mock_pool = MagicMock()
-        mock_pool.acquire = MagicMock(return_value=mock_conn)
+        mock_pool.fetchone = AsyncMock(return_value=None)
 
         from fastapi import HTTPException
 
@@ -123,16 +161,8 @@ class TestCreateImpersonationToken:
     async def test_inactive_user_rejected(self):
         principal = _admin_principal()
 
-        mock_cursor = AsyncMock()
-        mock_cursor.fetchone = AsyncMock(return_value=(42, "inactive", 0))  # is_active=0
-
-        mock_conn = AsyncMock()
-        mock_conn.execute = AsyncMock(return_value=mock_cursor)
-        mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_conn.__aexit__ = AsyncMock(return_value=False)
-
         mock_pool = MagicMock()
-        mock_pool.acquire = MagicMock(return_value=mock_conn)
+        mock_pool.fetchone = AsyncMock(return_value=(42, "inactive", 0))  # is_active=0
 
         from fastapi import HTTPException
 

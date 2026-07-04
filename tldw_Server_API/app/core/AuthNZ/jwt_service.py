@@ -176,7 +176,8 @@ class JWTService:
         user_id: int,
         username: str,
         role: str,
-        additional_claims: Optional[dict[str, Any]] = None
+        additional_claims: Optional[dict[str, Any]] = None,
+        expires_in_minutes: Optional[int] = None,
     ) -> str:
         """
         Create an access token for a user
@@ -186,12 +187,19 @@ class JWTService:
             username: User's username
             role: User's role
             additional_claims: Additional claims to include in token
+            expires_in_minutes: Optional TTL override for short-lived privileged tokens
 
         Returns:
             Encoded JWT access token
         """
         # Calculate expiration dynamically from settings
-        expire = datetime.now(timezone.utc) + timedelta(minutes=self.settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+        issued_at = datetime.now(timezone.utc)
+        ttl_minutes = (
+            self.settings.ACCESS_TOKEN_EXPIRE_MINUTES
+            if expires_in_minutes is None
+            else int(expires_in_minutes)
+        )
+        expire = issued_at + timedelta(minutes=ttl_minutes)
 
         # Build token payload
         payload = {
@@ -199,7 +207,7 @@ class JWTService:
             "username": username,
             "role": role,
             "exp": expire,
-            "iat": datetime.now(timezone.utc),
+            "iat": issued_at,
             "jti": str(uuid4()),  # JWT ID for tracking
             "type": "access"
         }
