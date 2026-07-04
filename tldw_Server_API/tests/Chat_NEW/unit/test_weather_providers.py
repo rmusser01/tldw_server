@@ -1,6 +1,7 @@
 import httpx
 import pytest
 
+from tldw_Server_API.app.core.exceptions import EgressPolicyError
 from tldw_Server_API.app.core.Integrations import weather_providers
 
 
@@ -39,21 +40,10 @@ def test_openweather_http_error_response(monkeypatch):
         def json():
             return {}
 
-    class FakeClient:
-        def __init__(self, *args, **kwargs):
-            pass
+    def fake_fetch(**kwargs):
+        return FakeResponse()
 
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, tb):
-            return False
-
-        @staticmethod
-        def get(*args, **kwargs):
-            return FakeResponse()
-
-    monkeypatch.setattr(weather_providers, "http_client_factory", FakeClient)
+    monkeypatch.setattr(weather_providers, "fetch", fake_fetch)
 
     result = client.get_current(location="Boston")
     assert not result.ok
@@ -65,21 +55,10 @@ def test_openweather_http_error_response(monkeypatch):
 def test_openweather_exception_path(monkeypatch):
     client = weather_providers.OpenWeatherClient(api_key="k")
 
-    class RaisingClient:
-        def __init__(self, *args, **kwargs):
-            pass
+    def fake_fetch(**kwargs):
+        raise httpx.ReadTimeout("timed out")
 
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, tb):
-            return False
-
-        @staticmethod
-        def get(*args, **kwargs):
-            raise httpx.ReadTimeout("timed out")
-
-    monkeypatch.setattr(weather_providers, "http_client_factory", RaisingClient)
+    monkeypatch.setattr(weather_providers, "fetch", fake_fetch)
 
     result = client.get_current(location="Boston")
     assert not result.ok
@@ -91,21 +70,10 @@ def test_openweather_exception_path(monkeypatch):
 def test_openweather_exception_metadata_does_not_expose_raw_details(monkeypatch):
     client = weather_providers.OpenWeatherClient(api_key="secret-key")
 
-    class RaisingClient:
-        def __init__(self, *args, **kwargs):
-            pass
+    def fake_fetch(**kwargs):
+        raise httpx.RequestError("failed with appid=secret-key")
 
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, tb):
-            return False
-
-        @staticmethod
-        def get(*args, **kwargs):
-            raise httpx.RequestError("failed with appid=secret-key")
-
-    monkeypatch.setattr(weather_providers, "http_client_factory", RaisingClient)
+    monkeypatch.setattr(weather_providers, "fetch", fake_fetch)
 
     result = client.get_current(location="Boston")
     combined = f"{result.summary} {result.metadata}"
@@ -117,14 +85,71 @@ def test_openweather_exception_metadata_does_not_expose_raw_details(monkeypatch)
 
 
 @pytest.mark.unit
+def test_openweather_central_policy_denial_returns_sanitized_error(monkeypatch):
+    client = weather_providers.OpenWeatherClient(api_key="secret-key")
+
+    def fake_fetch(**kwargs):
+        raise EgressPolicyError("blocked appid=secret-key")
+
+    monkeypatch.setattr(weather_providers, "fetch", fake_fetch)
+
+    result = client.get_current(location="Boston")
+    combined = f"{result.summary} {result.metadata}"
+    assert not result.ok
+    assert result.metadata.get("error") == "exception"
+    assert result.metadata.get("exception_type") == "EgressPolicyError"
+    assert "details" not in result.metadata
+    assert "secret-key" not in combined
+
+
+@pytest.mark.unit
+def test_openweather_uses_central_http_fetch_for_requests(monkeypatch):
+    client = weather_providers.OpenWeatherClient(api_key="k", units="metric")
+    calls = []
+
+    class FakeResponse:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {
+                "name": "Boston",
+                "sys": {"country": "US"},
+                "main": {"temp": 12.6},
+                "weather": [{"description": "clear sky"}],
+            }
+
+    def fake_fetch(**kwargs):
+        calls.append(kwargs)
+        return FakeResponse()
+
+    monkeypatch.setattr(weather_providers, "fetch", fake_fetch, raising=False)
+
+    result = client.get_current(location="Boston")
+
+    assert result.ok
+    assert len(calls) == 1
+    call = calls[0]
+    assert call["method"] == "GET"
+    assert call["url"] == weather_providers.OpenWeatherClient._BASE_URL
+    assert call["params"] == {
+        "appid": "k",
+        "units": "metric",
+        "lang": "en",
+        "q": "Boston",
+    }
+    assert call["timeout"] == client.timeout_seconds
+    assert call["retry"].attempts == 1
+
+
+@pytest.mark.unit
 def test_openweather_rejects_oversized_location_before_network(monkeypatch):
     client = weather_providers.OpenWeatherClient(api_key="k")
 
-    class FailingClient:
-        def __init__(self, *args, **kwargs):
-            raise RuntimeError("network should not be used for invalid input")
+    def failing_fetch(**kwargs):
+        raise AssertionError("network should not be used for invalid input")
 
-    monkeypatch.setattr(weather_providers, "http_client_factory", FailingClient)
+    monkeypatch.setattr(weather_providers, "fetch", failing_fetch)
 
     result = client.get_current(location="x" * 300)
     assert not result.ok
@@ -135,11 +160,10 @@ def test_openweather_rejects_oversized_location_before_network(monkeypatch):
 def test_openweather_rejects_out_of_range_coordinates_before_network(monkeypatch):
     client = weather_providers.OpenWeatherClient(api_key="k")
 
-    class FailingClient:
-        def __init__(self, *args, **kwargs):
-            raise RuntimeError("network should not be used for invalid input")
+    def failing_fetch(**kwargs):
+        raise AssertionError("network should not be used for invalid input")
 
-    monkeypatch.setattr(weather_providers, "http_client_factory", FailingClient)
+    monkeypatch.setattr(weather_providers, "fetch", failing_fetch)
 
     result = client.get_current(lat=95.0, lon=0.0)
     assert not result.ok
@@ -162,21 +186,10 @@ def test_openweather_success_response(monkeypatch):
                 "weather": [{"description": "clear sky"}],
             }
 
-    class FakeClient:
-        def __init__(self, *args, **kwargs):
-            pass
+    def fake_fetch(**kwargs):
+        return FakeResponse()
 
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, tb):
-            return False
-
-        @staticmethod
-        def get(*args, **kwargs):
-            return FakeResponse()
-
-    monkeypatch.setattr(weather_providers, "http_client_factory", FakeClient)
+    monkeypatch.setattr(weather_providers, "fetch", fake_fetch)
 
     result = client.get_current(location="Boston")
     assert result.ok
