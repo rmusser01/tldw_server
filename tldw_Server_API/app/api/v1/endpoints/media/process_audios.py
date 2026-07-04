@@ -26,6 +26,7 @@ from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.media_processing_deps import (
     get_process_audios_form,
 )
+from tldw_Server_API.app.api.v1.API_Deps.media_route_deps import media_create_dependencies
 from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import (
     UsageEventLogger,
     get_usage_event_logger,
@@ -64,6 +65,7 @@ _propagate_billing_headers = propagate_billing_headers
     summary="Transcribe / chunk / analyse audio and return full artefacts (no DB write)",
     tags=["Media Processing (No DB)"],
     dependencies=[
+        *media_create_dependencies(),
         Depends(guard_storage_quota),
         Depends(require_within_limit(LimitCategory.STORAGE_MB, 1)),
         Depends(require_within_limit(LimitCategory.API_CALLS_DAY, 1)),

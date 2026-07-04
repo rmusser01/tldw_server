@@ -17,6 +17,7 @@ from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.media_processing_deps import (
     get_process_documents_form,
 )
+from tldw_Server_API.app.api.v1.API_Deps.media_route_deps import media_create_dependencies
 from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import (
     UsageEventLogger,
     get_usage_event_logger,
@@ -73,6 +74,7 @@ ALLOWED_DOC_EXTENSIONS = [
     summary="Extract, chunk, analyse Documents (NO DB Persistence)",
     tags=["Media Processing (No DB)"],
     dependencies=[
+        *media_create_dependencies(),
         Depends(guard_storage_quota),
         Depends(require_within_limit(LimitCategory.STORAGE_MB, 1)),
         Depends(require_within_limit(LimitCategory.API_CALLS_DAY, 1)),
