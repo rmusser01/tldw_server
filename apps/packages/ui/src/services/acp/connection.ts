@@ -1,4 +1,5 @@
 import type { TldwConfig } from "@/services/tldw/TldwApiClient"
+import { getRuntimeSingleUserApiKeyOverride } from "@/services/tldw/runtime-auth-override"
 
 import type { ACPClientConfig } from "./client"
 
@@ -8,6 +9,14 @@ export const resolveACPServerUrl = (config: TldwConfig | null | undefined): stri
   typeof config?.serverUrl === "string" && config.serverUrl.trim().length > 0
     ? config.serverUrl
     : DEFAULT_ACP_SERVER_URL
+
+const resolveSingleUserApiKey = (
+  config: TldwConfig | null | undefined
+): string | null => {
+  if (config?.authMode !== "single-user") return null
+  if (config.apiKey) return config.apiKey
+  return getRuntimeSingleUserApiKeyOverride()
+}
 
 export const buildACPAuthHeaders = (
   config: TldwConfig | null | undefined,
@@ -19,8 +28,10 @@ export const buildACPAuthHeaders = (
     headers["Content-Type"] = "application/json"
   }
 
-  if (config?.authMode === "single-user" && config.apiKey) {
-    headers["X-API-KEY"] = config.apiKey
+  const singleUserApiKey = resolveSingleUserApiKey(config)
+
+  if (singleUserApiKey) {
+    headers["X-API-KEY"] = singleUserApiKey
   } else if (config?.authMode === "multi-user" && config.accessToken) {
     headers.Authorization = `Bearer ${config.accessToken}`
   }
@@ -34,16 +45,17 @@ export const buildACPAuthHeaders = (
 
 export const buildACPAuthParams = (
   config: TldwConfig | null | undefined
-): { token?: string; api_key?: string } => ({
-  token:
-    config?.authMode === "multi-user" && config.accessToken
-      ? config.accessToken
-      : undefined,
-  api_key:
-    config?.authMode === "single-user" && config.apiKey
-      ? config.apiKey
-      : undefined,
-})
+): { token?: string; api_key?: string } => {
+  const singleUserApiKey = resolveSingleUserApiKey(config)
+
+  return {
+    token:
+      config?.authMode === "multi-user" && config.accessToken
+        ? config.accessToken
+        : undefined,
+    api_key: singleUserApiKey || undefined,
+  }
+}
 
 export const buildACPClientConfig = (
   config: TldwConfig | null | undefined
