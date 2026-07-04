@@ -40,3 +40,9 @@ Execute the reviewed first-run MCP tool packs implementation plan using subagent
 - [ ] #5 Final summary added
 - [ ] #6 Known skips or blockers documented
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Task 1 backend catalog/policy slice: created tldw_Server_API/app/core/Setup/first_run_mcp_tools.py and tldw_Server_API/tests/Setup/test_first_run_mcp_tools_catalog.py. Red check confirmed ModuleNotFoundError before implementation. Verification: python -m pytest tldw_Server_API/tests/Setup/test_first_run_mcp_tools_catalog.py -v -> 14 passed; python -m bandit -r tldw_Server_API/app/core/Setup/first_run_mcp_tools.py -f json -o /tmp/bandit_first_run_mcp_tools.json -> 0 findings; git diff --check -> clean.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
