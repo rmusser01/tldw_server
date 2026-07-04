@@ -10,7 +10,7 @@ import pytest
 
 from tldw_Server_API.tests.helpers.pg_env import get_pg_env
 
-pytest_plugins = ["tldw_Server_API.tests.AuthNZ.conftest"]
+pytest_plugins = ["tldw_Server_API.tests._plugins.authnz_full_fixtures"]
 pytestmark = [pytest.mark.integration, pytest.mark.postgres]
 
 _pg = get_pg_env()

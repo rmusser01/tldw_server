@@ -10,7 +10,7 @@ from tldw_Server_API.cli.wizard.cli import app
 from tldw_Server_API.tests.wizard.helpers import assert_action_field, assert_wizard_json
 
 # Reuse Postgres AuthNZ fixtures (isolated_test_environment) as a plugin.
-pytest_plugins = ["tldw_Server_API.tests.AuthNZ.conftest"]
+pytest_plugins = ["tldw_Server_API.tests._plugins.authnz_full_fixtures"]
 
 runner = CliRunner()
 

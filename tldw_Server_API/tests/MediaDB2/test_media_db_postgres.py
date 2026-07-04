@@ -11,7 +11,7 @@ import pytest
 # environment, e.g., PYTEST_DISABLE_PLUGIN_AUTOLOAD=1). Declaring the plugin
 # here keeps this test hermetic and consistently runnable in CI and locally
 # without relying on a root conftest.
-pytest_plugins = ["tldw_Server_API.tests.AuthNZ.conftest"]
+pytest_plugins = ["tldw_Server_API.tests._plugins.authnz_full_fixtures"]
 
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseConfig

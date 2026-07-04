@@ -632,9 +632,10 @@ plugins = [
     "tldw_Server_API.tests._plugins.e2e_state_fixtures",
     "tldw_Server_API.tests._plugins.media_fixtures",
     # AuthNZ fixtures used across Resource_Governance and other suites
-    "tldw_Server_API.tests.AuthNZ.conftest",
+    "tldw_Server_API.tests._plugins.authnz_full_fixtures",
 ]
 addopts = [
+    "--import-mode=importlib",
     "--strict-markers",
     "--verbose",
     "--tb=short",
@@ -643,7 +644,6 @@ addopts = [
 ]
 timeout = 300
 timeout_method = "thread"
-import_mode = "importlib"
 
 ###########################
 # Tools - Code Quality
