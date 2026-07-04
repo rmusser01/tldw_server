@@ -18,6 +18,7 @@ import { seedAuth, TEST_CONFIG } from "../../utils/helpers"
 import {
   forceSkillsConnectionState,
   mockSkillsBeginnerApi,
+  mockPowerUserSkillsLibrary,
 } from "../../utils/skills-fixtures"
 
 test.describe("Skills beginner journey (mocked)", () => {
@@ -142,6 +143,58 @@ test.describe("Skills beginner journey (mocked)", () => {
     await drawer.getByRole("button", { name: "Cancel" }).focus()
     await page.keyboard.press("Enter")
     await expect(newSkillButton).toBeFocused()
+
+    await assertNoCriticalErrors(diagnostics)
+  })
+})
+
+test.describe("Skills power-user journey (mocked)", () => {
+  test("finds a skill outside page one and opens bulk delete confirmation", async ({
+    page,
+    diagnostics,
+  }) => {
+    const api = await mockPowerUserSkillsLibrary(page)
+    await seedAuth(page, {
+      serverUrl: TEST_CONFIG.serverUrl,
+      allowOffline: true,
+    })
+
+    await page.goto("/skills", { waitUntil: "domcontentloaded" })
+    await forceSkillsConnectionState(page)
+
+    const searchInput = page.getByPlaceholder("Search skills...")
+    await searchInput.fill("target-research-formatter")
+    await expect(page.getByText("Target research formatter")).toBeVisible()
+    await expect
+      .poll(() => api.lastListUrl()?.searchParams.get("q"))
+      .toBe("target-research-formatter")
+
+    await searchInput.fill("")
+    await page.getByRole("button", { name: "Fork" }).click()
+    await page.getByRole("button", { name: "Has tools" }).click()
+    await expect(page.getByText("Batch cleanup helper")).toBeVisible()
+    await expect(page.getByText("Target research formatter")).toBeVisible()
+    await expect
+      .poll(() => api.lastListUrl()?.searchParams.get("context"))
+      .toBe("fork")
+    await expect
+      .poll(() => api.lastListUrl()?.searchParams.get("has_tools"))
+      .toBe("true")
+
+    await page.getByRole("columnheader", { name: "Name" }).click()
+    await expect
+      .poll(() => api.lastListUrl()?.searchParams.get("sort"))
+      .toBe("name")
+
+    await page.getByLabel("Select target-research-formatter").check()
+    await page.getByLabel("Select batch-cleanup-helper").check()
+    await expect(page.getByText("2 selected")).toBeVisible()
+
+    await page.getByRole("button", { name: "Delete selected" }).click()
+    await expect(
+      page.getByRole("dialog", { name: "Delete selected skills?" })
+    ).toBeVisible()
+    expect(api.deleteRequests).toHaveLength(0)
 
     await assertNoCriticalErrors(diagnostics)
   })
