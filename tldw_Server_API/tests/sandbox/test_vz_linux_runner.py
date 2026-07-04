@@ -459,6 +459,90 @@ def test_vz_linux_session_create_vm_readiness_failure_does_not_persist_reuse_sta
             VZLinuxRunner._active_run_dir.pop(run_id, None)  # type: ignore[attr-defined]
 
 
+@pytest.mark.unit
+def test_vz_linux_session_create_vm_guest_agent_mismatch_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Reject a newly-created session VM when helper metadata reports mismatch."""
+
+    monkeypatch.delenv("TLDW_SANDBOX_VZ_LINUX_FAKE_EXEC", raising=False)
+    calls: list[str] = []
+    stored: list[dict[str, object]] = []
+    terminated: list[str] = []
+
+    class _Store:
+        """Minimal session-control store for mismatch assertions."""
+
+        def get_vz_session_control(self, session_id: str) -> None:
+            """Return no reusable VM for the tested session."""
+            assert session_id == "sess-new-guest-agent-mismatch"
+            return None
+
+        def put_vz_session_control(self, **kwargs: object) -> None:
+            """Record unexpected session-control persistence."""
+            stored.append(dict(kwargs))
+
+    class _FakeHelper:
+        """Helper double that creates a VM with mismatched guest metadata."""
+
+        def validate_template(self, request: dict[str, object]) -> dict[str, object]:
+            """Pretend the image template is valid."""
+            calls.append("validate_template")
+            return {
+                "template_id": "vz_linux:new-template",
+                "ready": True,
+                "reasons": [],
+            }
+
+        def create_vm(self, request: dict[str, object]) -> HelperVMReply:
+            """Return a created VM whose guest metadata explicitly mismatches."""
+            calls.append("create_vm")
+            assert request["session_id"] == "sess-new-guest-agent-mismatch"
+            assert request["session_mode"] is True
+            return HelperVMReply(
+                vm_id="vm-new-guest-agent-mismatch",
+                state="created",
+                details={
+                    "guest_version": "0.9.0",
+                    "guest_workspace_root": "/var/empty",
+                    "guest_capabilities_known": "true",
+                    "guest_capabilities": "output_cap_v1",
+                },
+            )
+
+        def exec_guest(self, *, vm_id: str, request: dict[str, object]) -> HelperExecReply:
+            """Fail the call-order assertion if the runner reaches guest execution."""
+            calls.append("exec_guest")
+            return HelperExecReply(exit_code=0, stdout=b"should-not-run\n")
+
+        def terminate_vm(self, vm_id: str) -> bool:
+            """Record cleanup of the rejected VM."""
+            calls.append("terminate_vm")
+            terminated.append(vm_id)
+            return True
+
+    monkeypatch.setattr(vz_linux_module.VZLinuxRunner, "helper_client_cls", _FakeHelper)
+
+    status = VZLinuxRunner(session_control_store=_Store()).start_run(
+        run_id="vz-run-new-guest-agent-mismatch",
+        spec=RunSpec(
+            session_id="sess-new-guest-agent-mismatch",
+            runtime=RuntimeType.vz_linux,
+            base_image="ubuntu-24.04",
+            command=["/bin/echo", "ok"],
+            network_policy="deny_all",
+        ),
+        session_workspace=str(tmp_path),
+    )
+
+    assert status.phase == RunPhase.failed
+    assert "vz_linux_guest_agent_workspace_mismatch" in status.message
+    assert calls == ["validate_template", "create_vm", "terminate_vm"]
+    assert stored == []
+    assert terminated == ["vm-new-guest-agent-mismatch"]
+
+
 def test_vz_linux_raw_template_path_ignores_unavailable_image_store(monkeypatch, tmp_path) -> None:
     monkeypatch.delenv("TLDW_SANDBOX_VZ_LINUX_FAKE_EXEC", raising=False)
     broken_store_root = tmp_path / "not-a-directory"
