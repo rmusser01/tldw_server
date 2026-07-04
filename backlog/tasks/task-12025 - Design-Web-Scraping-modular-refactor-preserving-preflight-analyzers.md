@@ -14,7 +14,7 @@ references:
 - /Users/appledev/Documents/GitHub/tldw_server/Docs/superpowers/specs/2026-06-26-web-scraping-hardening-design.md
 modified_files:
 - Docs/superpowers/specs/2026-07-03-web-scraping-refactor-design.md
-updated_date: 2026-07-04 00:01
+updated_date: 2026-07-04 00:04
 ---
 
 ## Description
@@ -42,12 +42,14 @@ Write a design spec for the larger Web_Scraping modular refactor. The design mus
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-07-03: Created after user selected the full module architecture approach and approved the revised compatibility-facade design direction.
 2026-07-03: Wrote the design spec at Docs/superpowers/specs/2026-07-03-web-scraping-refactor-design.md. Self-review checks completed: non-ASCII scan passed after cleanup, scoped whitespace check passed, and placeholder scan only matched the self-review statement itself. Bandit is not applicable because this task changed documentation and Backlog metadata only.
+2026-07-03: Reopened for a follow-up design review before implementation planning. The review found the spec should explicitly cover import inventory, broader compatibility APIs, resource-governance/rate-limit/dedup responsibilities, source import helpers, and guardrails against new code depending on legacy wrappers.
+2026-07-03: Applied follow-up review amendments to the spec. Added routing/content/sources package homes, runtime rate-limit and resource-governance ownership, Phase 0 import inventory and dependency guardrails, broader compatibility entry points, and open decisions for duplicate WebSearch path/source helper placement. Verification after amendment: non-ASCII scan found no matches, placeholder/TODO scan found no matches, and scoped git diff whitespace check passed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Created the Web_Scraping modular refactor design spec. The design uses a compatibility-facade migration, preserves governed preflight analyzer behavior, keeps existing public dict-shaped contracts during migration, and phases implementation across contracts, runtime/policy, preflight, extraction, crawl/jobs, search providers, and wrapper cleanup.
+Created and amended the Web_Scraping modular refactor design spec. The final design uses a compatibility-facade migration, preserves governed preflight analyzer behavior, keeps existing public dict-shaped contracts during migration, adds an import-inventory guardrail phase, and explicitly covers runtime, routing, content, source import, resource-governance, extraction, crawl/jobs, search provider, and wrapper cleanup responsibilities.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

@@ -64,9 +64,27 @@ tldw_Server_API/app/core/Web_Scraping/
     fetch.py
     browser.py
     sessions.py
+    rate_limits.py
+    resource_governance.py
     timeouts.py
     cancellation.py
     observability.py
+
+  routing/
+    backend_router.py
+    handlers.py
+    url_utils.py
+    ua_profiles.py
+
+  content/
+    metadata.py
+    markdown.py
+    deduplication.py
+
+  sources/
+    bookmarks.py
+    csv_urls.py
+    url_files.py
 
   preflight/
     context.py
@@ -146,10 +164,11 @@ Foundational modules:
 - `config` normalizes web-scraping settings.
 - `policy` wraps outbound policy and robots decisions.
 - `runtime` owns fetch/browser/session/timeout/cancellation primitives.
+- `routing`, `content`, and `sources` hold shared helpers that are currently mixed into the large legacy files.
 
 Feature modules:
 
-- `preflight`, `extraction`, `crawl`, `search`, `search_providers`, and `cookies` depend on `contracts`, `config`, and selected `policy` or `runtime` interfaces.
+- `preflight`, `extraction`, `crawl`, `search`, `search_providers`, `cookies`, `routing`, `content`, and `sources` depend on `contracts`, `config`, and selected `policy` or `runtime` interfaces.
 - `runtime` must not directly import `policy`. Runtime helpers accept policy checkers, request contexts, or route guards from callers.
 - `preflight` must not perform article extraction.
 - `extraction` must not know analyzer internals.
@@ -163,7 +182,7 @@ The intended direction is:
 ```text
 contracts/config
   -> policy and runtime interfaces
-  -> preflight / extraction / crawl / cookies / search_providers
+  -> routing / content / sources / preflight / extraction / crawl / cookies / search_providers
   -> orchestration / search
   -> services and compatibility wrappers
 ```
@@ -290,6 +309,8 @@ Runtime should provide interfaces for:
 - Blocking fetch when needed by compatibility wrappers.
 - Browser launch and page/context lifecycle.
 - Sandboxed Playwright launch arguments.
+- Rate-limit enforcement primitives.
+- Resource-governance hooks currently used by enhanced scraping.
 - Per-request timeout helpers.
 - Cancellation-safe cleanup.
 - Session reuse.
@@ -305,6 +326,30 @@ Shared request context should allow safe reuse of:
 - Preflight results and backend advice.
 
 Fetch/body reuse must be conservative. It should only happen when the same URL, headers, cookies, policy mode, and caller context are compatible.
+
+## Routing, Content, And Sources
+
+Several helpers are currently embedded in the large files but do not belong to extraction, preflight, or search.
+
+`routing` should own:
+
+- Backend routing and handler resolution.
+- User-agent profiles and browser-like headers.
+- URL normalization helpers used by crawl, collections, dedupe, and services.
+
+`content` should own:
+
+- Markdown conversion.
+- Content metadata extraction.
+- Content deduplication and hash helpers.
+
+`sources` should own:
+
+- Chromium and Firefox bookmark parsing.
+- CSV and file-based URL collection.
+- Helpers that turn imported source lists into scrape or crawl requests.
+
+These modules are shared utilities, not orchestration layers. They should not import services, API endpoints, or legacy wrapper modules.
 
 ## Extraction
 
@@ -425,11 +470,37 @@ These entry points stay importable during migration:
 - `WebSearch_APIs.generate_and_search`
 - `WebSearch_APIs.analyze_and_aggregate`
 - `WebSearch_APIs.perform_websearch`
+- `WebSearch_APIs.search_discussions`
+- `WebSearch_APIs.review_and_select_results`
+- `WebSearch_APIs.process_web_search_results`
+- `WebSearch_APIs.summarize`
 - Existing provider functions and parser names that tests or callers currently import.
+- `Article_Extractor_Lib.convert_html_to_markdown`
+- `Article_Extractor_Lib.is_content_page`
+- `Article_Extractor_Lib.collect_bookmarks`
+- `Article_Extractor_Lib.collect_urls_from_file`
+- `Article_Extractor_Lib.ContentMetadataHandler`
+- Existing enrichment helpers such as regex, JSON-LD, cluster, schema, and LLM extraction functions that tests or callers currently import.
+- `enhanced_web_scraping.RateLimiter`
+- `enhanced_web_scraping.ContentDeduplicator`
+- `enhanced_web_scraping.ScrapingJobQueue`
 
 Compatibility tests should lock these public contracts before moving implementation.
 
+The current import surface extends beyond Web_Scraping tests. RAG, MCP, Workflows, Watchlists, Collections, Research providers, DB import checks, and services import these modules directly. The implementation plan must inventory those imports before moving code.
+
 ## Migration Phases
+
+### Phase 0: Import Inventory And Guardrails
+
+Create an import inventory and compatibility map before moving behavior.
+
+Success criteria:
+
+- Current imports from application code and tests are listed for `Article_Extractor_Lib.py`, `enhanced_web_scraping.py`, `WebSearch_APIs.py`, `scraper_analyzers`, `url_utils.py`, `ua_profiles.py`, `handlers.py`, `scraper_router.py`, and `scoring.py`.
+- Public compatibility wrappers are selected from actual imports and tests, not guesses.
+- A lightweight guardrail test or static check prevents new internal modules from importing legacy wrapper files.
+- The implementation plan names which compatibility tests protect each moved responsibility.
 
 ### Phase 1: Contracts And Compatibility Tests
 
@@ -523,6 +594,7 @@ No phase should require real network or real browser execution for its regressio
 ## Rollout And Risk Controls
 
 - Keep wrappers in place until all direct imports are known and migrated.
+- Start with an import inventory and wrapper compatibility map.
 - Move one responsibility per phase.
 - Do not change public API shape and internal module boundaries in the same commit when avoidable.
 - Keep config keys stable.
@@ -536,12 +608,15 @@ No phase should require real network or real browser execution for its regressio
 - Whether search page-content retrieval should call compatibility wrappers during early phases or a new orchestration API immediately.
 - Which existing `WebSearch_APIs.py` provider/demo functions are truly public by import usage and tests.
 - Whether job state should remain in the service layer or move into `Web_Scraping/jobs`.
+- Whether the duplicate `app/core/WebSearch/Web_Search.py` path should remain as a compatibility shim or be consolidated during the search-provider split.
+- Whether source import helpers should remain under `sources` or move closer to Collections after compatibility wrappers are stable.
 
 These are implementation-plan decisions, not blockers for the architecture.
 
 ## Spec Self-Review
 
-- Placeholder scan: no placeholder markers, TBDs, or incomplete sections remain.
+- Placeholder scan: no placeholder markers or incomplete sections remain.
 - Consistency check: package boundaries, dependency rules, and migration phases all keep preflight advisory and governed.
 - Scope check: design covers the full end-state but phases implementation to avoid a high-risk rewrite.
-- Ambiguity check: compatibility wrappers, dict-shaped public contracts, cancellation handling, runtime-policy separation, and preflight preservation are explicit.
+- Ambiguity check: compatibility wrappers, dict-shaped public contracts, cancellation handling, runtime-policy separation, import inventory, and preflight preservation are explicit.
+- Follow-up review amendment: explicit homes were added for rate limits, resource governance, routing helpers, source import helpers, content metadata, markdown conversion, and deduplication. The compatibility surface now calls out RAG, MCP, Workflows, Watchlists, Collections, Research providers, DB import checks, and service callers.
