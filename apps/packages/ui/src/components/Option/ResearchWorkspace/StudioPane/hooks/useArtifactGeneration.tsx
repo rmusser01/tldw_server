@@ -94,6 +94,7 @@ const GENERATED_ARTIFACT_PLACEHOLDER_TEXTS = new Set([
   "slide goes here",
   "slides go here",
   "content goes here",
+  "this is a test",
   "output goes here",
   "text goes here",
   "title goes here",

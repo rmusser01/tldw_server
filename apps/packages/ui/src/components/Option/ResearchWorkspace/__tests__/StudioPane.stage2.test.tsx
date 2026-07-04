@@ -1877,6 +1877,49 @@ describe("StudioPane Stage 2 workflows", () => {
     expect(mockMessageSuccess).not.toHaveBeenCalled()
   }, 15000)
 
+  it("fails data table artifacts when every parsed cell is a test-placeholder", async () => {
+    mockGetMediaDetails.mockResolvedValue({
+      source: { title: "DSPy Prompting Talk" },
+      content: {
+        text: "DSPy helps optimize prompting workflows and compound AI pipelines."
+      }
+    })
+    mockCreateChatCompletion.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: "| Field | Value |\n|---|---|\n| this is a test | this is a test |"
+              }
+            }
+          ]
+        }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        }
+      )
+    )
+
+    renderStudioPane()
+    expandMoreOutputsSection()
+
+    fireEvent.click(screen.getByRole("button", { name: "Data Table" }))
+
+    await waitFor(() => {
+      expect(mockUpdateArtifactStatus).toHaveBeenCalledWith(
+        expect.stringMatching(/^artifact-/),
+        "failed",
+        expect.objectContaining({
+          errorMessage: expect.stringContaining("usable data table")
+        })
+      )
+    })
+
+    expect(mockMessageSuccess).not.toHaveBeenCalled()
+  }, 15000)
+
   it("gates data tables when no chat model is selected", () => {
     messageOptionStoreState.selectedModel = null
     mockGetChatModels.mockResolvedValue([
