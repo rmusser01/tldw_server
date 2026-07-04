@@ -4,7 +4,7 @@ title: Fix GitHub Pages docs deployment artifact path
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-07-04 06:50'
+updated_date: '2026-07-04 07:16'
 labels:
   - docs
   - deployment
@@ -33,12 +33,14 @@ GitHub Pages was enabled via the GitHub API with build_type=workflow. Fixed .git
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 Bandit skipped: touched files are a GitHub Actions workflow YAML and Backlog task metadata only.
+
+Review follow-up: kept dev in the workflow trigger for build verification only, added a deploy job branch guard for main/PG-Backend, and moved the Pages concurrency group from workflow scope to deploy-job scope so dev builds cannot cancel stable deploy runs.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Enabled the GitHub Pages workflow source, corrected the MkDocs workflow artifact path to Docs/site, added dev as a docs deploy trigger, and produced a verified local docs archive for copying to tldwproject.com/server/docs.
+Enabled the GitHub Pages workflow source, corrected the MkDocs workflow artifact path to Docs/site, kept dev pushes as build-only verification, guarded Pages deployment to main/PG-Backend, and produced a verified local docs archive for copying to tldwproject.com/server/docs.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
