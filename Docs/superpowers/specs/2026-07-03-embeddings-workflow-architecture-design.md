@@ -63,6 +63,7 @@ The shared definition includes:
 - Safe metadata fields.
 - Error categories.
 - Runner interface contracts.
+- Trace collector contracts.
 
 Runners are responsible for mode-specific behavior:
 
@@ -82,6 +83,8 @@ Boundary ownership stays explicit:
 ## State Model
 
 The canonical state model is request-level with item sub-states. One workflow represents one logical embedding request or job. It tracks request-level decisions and item-level progress by stable item index.
+
+Workflow identity is safe metadata. Inline API workflows use the request id when one exists or a generated workflow id otherwise. Durable workflows use persisted workflow ids. Item identity is stable within a workflow and starts with `item_index`; durable slices can add item ids, source references, and attempt ids later.
 
 Request phase values:
 
@@ -116,6 +119,8 @@ Initial item state values:
 
 Slice one does not persist these states. It derives coarse workflow trace events from `PreparedEmbeddingRequest` and `EmbeddingExecutionResult`.
 
+The full phase vocabulary is intentionally larger than slice one. Slice one should emit only phases it can represent truthfully around the current wrapped orchestrator. More granular cache, provider, postprocessing, and persistence phases become mandatory when those behaviors move into workflow-owned steps.
+
 Item events carry stable `item_index`, provider/model/backend identity when relevant, adapter-vs-legacy execution path, fallback source if used, and redacted error codes. They do not carry raw text, token arrays, API keys, auth headers, or provider response bodies.
 
 Later durable slices add persisted workflow ids, item ids, attempt ids, source references, resume cursors, cache write status, vector-store write status, and redacted failure categories.
@@ -144,6 +149,7 @@ Constraints:
 - No DB, Redis, provider client, or endpoint schema imports.
 - No raw input, token arrays, API keys, auth headers, nonce values, or provider body fields.
 - Metadata values are restricted to safe scalar values, small lists of safe scalar values, or redacted mappings.
+- In-memory traces are bounded. The first implementation should choose an explicit default event cap and fail closed when a caller-supplied collector would exceed that cap, rather than silently dropping events.
 
 ### `workflow_runner.py`
 
@@ -224,6 +230,7 @@ Trace metadata must be safe by construction:
 - Use error codes and classes, not exception reprs.
 - Use response header names, not arbitrary header values.
 - Bound collection size to prevent unbounded memory growth in tests or future callers.
+- Fail closed on trace metadata validation errors. Bad trace metadata should fail isolated workflow tests and future debug callers, not become production logs.
 
 Forbidden trace fields:
 
@@ -248,6 +255,7 @@ The target durable ownership model is:
 - Jobs is the root user-visible record.
 - Jobs owns status display, retry/admin controls, pause, drain, cancellation, quotas, and operational auditability.
 - Embeddings workflow tables own detailed request/item state, attempts, cache/vector-store output status, source references, resume cursors, and redacted failure categories.
+- RG/billing remains a boundary concern in durable mode too. Jobs or the entrypoint runner owns durable reserve/commit/rollback decisions; the workflow exposes normalized token counts, item counts, provider outcomes, and terminal status metadata for accounting.
 
 Durable state should not store raw text by default. It should store stable source references such as media id, chunk id, vector-store batch file id, input payload handle, or a temporary encrypted payload reference when unavoidable.
 
@@ -300,6 +308,7 @@ Endpoint tests:
 - Add a narrow assertion that the feature-flagged endpoint still returns the same response shape when the runner is used.
 - Keep existing orchestrator characterization and parity tests unchanged.
 - Do not expose trace data through public or private endpoint seams.
+- Endpoint tests may monkeypatch internal runner construction to prove integration, but they must not require an endpoint-owned trace retrieval hook.
 
 Verification:
 
