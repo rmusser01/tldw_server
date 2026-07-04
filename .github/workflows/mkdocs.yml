@@ -3,6 +3,7 @@ name: Deploy MkDocs to GitHub Pages
 on:
   push:
     branches:
+      - dev
       - main
       - PG-Backend
   workflow_dispatch:
@@ -69,7 +70,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v4
         with:
-          path: site
+          path: Docs/site
 
   deploy:
     needs: build
