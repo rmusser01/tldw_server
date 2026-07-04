@@ -12,6 +12,7 @@ from fastapi import status
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import DEFAULT_CHARACTER_NAME
+from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import try_get_job_manager
 from tldw_Server_API.app.core.Chat_Macros.repository import ChatMacroRepository
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
@@ -36,6 +37,15 @@ def _message_text(message: dict) -> str:
             if isinstance(part, dict) and part.get("type") == "text"
         )
     return ""
+
+
+class FakeJobManager:
+    def __init__(self) -> None:
+        self.created: list[dict] = []
+
+    def create_job(self, **kwargs):
+        self.created.append(kwargs)
+        return {"id": len(self.created), **kwargs}
 
 # ========================================================================
 # Basic Endpoint Tests
@@ -168,6 +178,8 @@ class TestChatCompletionsEndpoint:
     def test_wrapup_macro_short_circuits_provider(self, monkeypatch, test_client, auth_headers, tmp_path):
         monkeypatch.setenv("CHAT_COMMANDS_ENABLED", "1")
         db = _install_isolated_chat_db(test_client, tmp_path, monkeypatch)
+        job_manager = FakeJobManager()
+        test_client.app.dependency_overrides[try_get_job_manager] = lambda: job_manager
 
         from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
 
@@ -200,8 +212,15 @@ class TestChatCompletionsEndpoint:
             assert run is not None
             assert run.macro_command == "wrapup"
             assert run.normalized_args["question"] == ["What changed?"]
+            assert len(job_manager.created) == 1
+            queued = job_manager.created[0]
+            assert queued["domain"] == "chat_macros"
+            assert queued["job_type"] == "chat_macro_run"
+            assert queued["payload"]["macro_run_id"] == macro_meta["run_id"]
+            assert queued["payload"]["normalized_args"]["question"] == ["What changed?"]
         finally:
             test_client.app.dependency_overrides.pop(get_chacha_db_for_user, None)
+            test_client.app.dependency_overrides.pop(try_get_job_manager, None)
             db.close_all_connections()
 
     @pytest.mark.integration
@@ -214,6 +233,8 @@ class TestChatCompletionsEndpoint:
     ):
         monkeypatch.setenv("CHAT_COMMANDS_ENABLED", "1")
         db = _install_isolated_chat_db(test_client, tmp_path, monkeypatch)
+        job_manager = FakeJobManager()
+        test_client.app.dependency_overrides[try_get_job_manager] = lambda: job_manager
 
         from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
 
@@ -240,8 +261,52 @@ class TestChatCompletionsEndpoint:
             macro_meta = body["choices"][0]["message"]["metadata"]["chat_macro"]
             assert macro_meta["command"] == "wrapup"
             assert macro_meta["status"] == "pending"
+            assert len(job_manager.created) == 1
+            assert job_manager.created[0]["payload"]["macro_run_id"] == macro_meta["run_id"]
         finally:
             test_client.app.dependency_overrides.pop(get_chacha_db_for_user, None)
+            test_client.app.dependency_overrides.pop(try_get_job_manager, None)
+            db.close_all_connections()
+
+    @pytest.mark.integration
+    def test_wrapup_macro_jobs_unavailable_returns_chat_visible_error(
+        self,
+        monkeypatch,
+        test_client,
+        auth_headers,
+        tmp_path,
+    ):
+        monkeypatch.setenv("CHAT_COMMANDS_ENABLED", "1")
+        db = _install_isolated_chat_db(test_client, tmp_path, monkeypatch)
+        test_client.app.dependency_overrides[try_get_job_manager] = lambda: None
+
+        from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
+
+        def fail_call(**_kwargs):
+            raise AssertionError("provider path should not receive failed macro invocations")
+
+        monkeypatch.setattr(chat_endpoint, "perform_chat_api_call", fail_call)
+
+        try:
+            response = test_client.post(
+                "/api/v1/chat/completions",
+                json={
+                    "model": "openai/gpt-4o-mini",
+                    "messages": [{"role": "user", "content": "/wrapup"}],
+                    "stream": False,
+                },
+                headers=auth_headers,
+            )
+
+            assert response.status_code == status.HTTP_200_OK, response.text
+            message = response.json()["choices"][0]["message"]
+            macro_meta = message["metadata"]["chat_macro"]
+            assert "Could not run /wrapup: Macro storage is unavailable." in message["content"]
+            assert macro_meta["status"] == "error"
+            assert macro_meta["error_code"] == "storage_error"
+        finally:
+            test_client.app.dependency_overrides.pop(get_chacha_db_for_user, None)
+            test_client.app.dependency_overrides.pop(try_get_job_manager, None)
             db.close_all_connections()
 
     @pytest.mark.integration

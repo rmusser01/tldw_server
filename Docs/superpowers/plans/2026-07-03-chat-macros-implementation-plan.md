@@ -673,7 +673,7 @@ git commit -m "feat: execute chat macro branches"
 - Test: `tldw_Server_API/tests/Chat_Macros/unit/test_macro_jobs.py`
 - Test: `tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py`
 
-- [ ] **Step 1: Write failing Jobs tests**
+- [x] **Step 1: Write failing Jobs tests**
 
 Cover:
 
@@ -684,7 +684,7 @@ Cover:
 - Successful post-back persists a visible assistant message through the normal chat message path with macro metadata.
 - Duplicate post-back uses the existing visible assistant message for the same `post_idempotency_key` instead of creating a second message.
 
-- [ ] **Step 2: Run Jobs tests and verify failure**
+- [x] **Step 2: Run Jobs tests and verify failure**
 
 Run:
 
@@ -698,7 +698,7 @@ python -m pytest \
 
 Expected: import errors.
 
-- [ ] **Step 3: Implement enqueue and handler**
+- [x] **Step 3: Implement enqueue and handler**
 
 In `jobs.py`:
 
@@ -708,7 +708,7 @@ In `jobs.py`:
 - `handle_chat_macro_job(job: dict[str, Any])`.
 - `should_cancel_chat_macro_job(...)`.
 
-- [ ] **Step 4: Implement worker**
+- [x] **Step 4: Implement worker**
 
 Follow `study_pack_jobs_worker.py`:
 
@@ -717,7 +717,7 @@ Follow `study_pack_jobs_worker.py`:
 - Fetch per-user ChaChaNotes DB with `get_chacha_db_for_user_id`.
 - Close DB handles in `finally`.
 
-- [ ] **Step 5: Register startup worker**
+- [x] **Step 5: Register startup worker**
 
 In `startup_content_jobs_pollers.py`:
 
@@ -725,7 +725,7 @@ In `startup_content_jobs_pollers.py`:
 - Add a `stop_event_worker_spec` gated by `CHAT_MACROS_JOBS_WORKER_ENABLED` and route key `chat-macros`.
 - Add `_run_chat_macros_jobs_worker_service`.
 
-- [ ] **Step 6: Run Jobs tests**
+- [x] **Step 6: Run Jobs tests**
 
 Run:
 
@@ -739,7 +739,17 @@ python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+**Task 7 verification notes (2026-07-03/04):**
+- Initial RED checks failed on missing `Chat_Macros.jobs`, missing `chat_macros_jobs_worker`, missing startup registration, and later on missing enqueue from `/api/v1/chat/macros/run` plus `/wrapup`.
+- Added failing hardening tests for missing Jobs manager and malformed cancellation payload; verified all failed before implementation.
+- Focused enqueue regression: `2 passed, 5 warnings`.
+- New hardening regression: `3 passed, 5 warnings`.
+- Full Chat_Macros plus `/wrapup` Chat_NEW slice: `85 passed, 5 warnings`.
+- Startup/service worker suite: `37 passed, 3 warnings`.
+- Static/security: `compileall` exit 0, `git diff --check` exit 0, Bandit report `/tmp/bandit_chat_macros_task7.json` had empty `errors` and `results`.
+- Residual risk: the worker currently uses a conservative unavailable branch runner until the real LLM/ACP branch execution adapter is wired into the Jobs runtime.
+
+- [x] **Step 7: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/Chat_Macros/jobs.py tldw_Server_API/app/services/chat_macros_jobs_worker.py tldw_Server_API/app/services/startup_content_jobs_pollers.py tldw_Server_API/tests/Chat_Macros/unit/test_macro_jobs.py tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py

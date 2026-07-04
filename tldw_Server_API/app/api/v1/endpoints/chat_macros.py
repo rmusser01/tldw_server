@@ -34,6 +34,7 @@ from tldw_Server_API.app.core.Chat_Macros.exceptions import (
     MacroStorageError,
     MacroValidationError,
 )
+from tldw_Server_API.app.core.Chat_Macros.jobs import enqueue_chat_macro_run_job
 from tldw_Server_API.app.core.Chat_Macros.models import MacroArgSpec, MacroBranchRecord, MacroDefinition, MacroRunRecord
 from tldw_Server_API.app.core.Chat_Macros.service import ChatMacroCatalogItem, ChatMacrosService
 
@@ -292,6 +293,11 @@ async def create_chat_macro_run(
         resolved_profile = service.resolve_output_profile(output_profile)
         output_profile = resolved_profile.name
         normalized_args["output_profile"] = output_profile
+        if job_manager is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Jobs manager unavailable.",
+            )
         run = service.repository.create_run(
             user_id=service.user_id,
             macro_name=item.name,
@@ -309,8 +315,27 @@ async def create_chat_macro_run(
             context_snapshot=request.context_snapshot,
             model_selection=request.model_selection,
         )
-        if job_manager is None:
-            return _run_response(run)
+        if job_manager is not None:
+            try:
+                enqueue_chat_macro_run_job(
+                    macro_run_id=run.run_id,
+                    user_id=service.user_id,
+                    macro_digest=item.digest,
+                    normalized_args=normalized_args,
+                    job_manager=job_manager,
+                )
+            except (MacroStorageError, TypeError, ValueError, RuntimeError) as exc:
+                service.repository.update_run_status(
+                    run.run_id,
+                    status="failed",
+                    error_code="job_enqueue_failed",
+                    error_message="Failed to enqueue macro run.",
+                )
+                logger.warning("Failed to enqueue chat macro run {}: {}", run.run_id, type(exc).__name__)
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Failed to enqueue macro run.",
+                ) from exc
         return _run_response(run)
     except (MacroNotFoundError, MacroStorageError, MacroValidationError) as exc:
         _raise_macro_http(exc)

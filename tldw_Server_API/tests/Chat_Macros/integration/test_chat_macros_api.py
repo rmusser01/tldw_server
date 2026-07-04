@@ -19,6 +19,7 @@ os.environ["ROUTES_DISABLE"] = ",".join(sorted(_routes_disable))
 
 from tldw_Server_API.app.api.v1.API_Deps import auth_deps
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import try_get_job_manager
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
 from tldw_Server_API.app.core.Chat_Macros.repository import ChatMacroRepository
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
@@ -34,6 +35,15 @@ TEST_USER_ID = 4242
 class MacroApiClient:
     client: TestClient
     db: CharactersRAGDB
+
+
+class FakeJobManager:
+    def __init__(self) -> None:
+        self.created: list[dict] = []
+
+    def create_job(self, **kwargs):
+        self.created.append(kwargs)
+        return {"id": len(self.created), **kwargs}
 
 
 @pytest.fixture()
@@ -233,3 +243,69 @@ def test_run_detail_and_cancel(api_client: MacroApiClient):
     assert cancelled.status_code == 200, cancelled.text
     assert cancelled.json()["status"] == "cancel_requested"
     assert cancelled.json()["cancel_requested_at"]
+
+
+def test_run_endpoint_enqueues_background_job(api_client: MacroApiClient):
+    from tldw_Server_API.app.main import app as fastapi_app
+
+    job_manager = FakeJobManager()
+    fastapi_app.dependency_overrides[try_get_job_manager] = lambda: job_manager
+    try:
+        created = api_client.client.post(
+            f"{PREFIX}/run",
+            json={
+                "macro_name": "wrapup",
+                "args": {"question": ["Check blockers"]},
+                "mode": "background",
+                "surface": "chat",
+                "conversation_id": "conv-1",
+                "output_profile": "default",
+                "context_snapshot": {"message_count": 3},
+            },
+        )
+    finally:
+        fastapi_app.dependency_overrides.pop(try_get_job_manager, None)
+
+    assert created.status_code == 202, created.text
+    run = created.json()
+    assert len(job_manager.created) == 1
+    queued = job_manager.created[0]
+    assert queued["domain"] == "chat_macros"
+    assert queued["queue"] == "default"
+    assert queued["job_type"] == "chat_macro_run"
+    assert queued["owner_user_id"] == str(TEST_USER_ID)
+    assert queued["payload"]["macro_run_id"] == run["run_id"]
+    assert queued["payload"]["user_id"] == str(TEST_USER_ID)
+    assert queued["payload"]["macro_digest"]
+    assert queued["payload"]["normalized_args"] == {
+        "preset": "general",
+        "keep_forks": False,
+        "mode": "background",
+        "output_profile": "default",
+        "sync": False,
+        "include_branches": False,
+        "question": ["Check blockers"],
+    }
+
+
+def test_run_endpoint_returns_503_when_jobs_manager_is_unavailable(api_client: MacroApiClient):
+    from tldw_Server_API.app.main import app as fastapi_app
+
+    fastapi_app.dependency_overrides[try_get_job_manager] = lambda: None
+    try:
+        created = api_client.client.post(
+            f"{PREFIX}/run",
+            json={
+                "macro_name": "wrapup",
+                "args": {"question": ["Check blockers"]},
+                "mode": "background",
+                "surface": "chat",
+                "conversation_id": "conv-1",
+                "output_profile": "default",
+            },
+        )
+    finally:
+        fastapi_app.dependency_overrides.pop(try_get_job_manager, None)
+
+    assert created.status_code == 503, created.text
+    assert created.json()["detail"] == "Jobs manager unavailable."
