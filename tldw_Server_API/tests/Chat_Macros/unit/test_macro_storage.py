@@ -100,3 +100,23 @@ def test_failed_update_keeps_existing_macro_yaml(tmp_path, monkeypatch):
         storage.update("daily_digest", _macro_yaml("daily_digest", "team_digest"))
 
     assert storage.read("daily_digest").definition.command == "daily_digest"
+
+
+def test_failed_supporting_file_update_keeps_existing_macro(tmp_path, monkeypatch):
+    storage = ChatMacroStorage(tmp_path)
+    storage.create("daily_digest", _macro_yaml(), {"notes.txt": "alpha"})
+    original_replace = storage_module.os.replace
+
+    def fail_supporting_file_replace(src, dst):
+        if os.fspath(dst).endswith("notes.txt"):
+            raise OSError("disk full")
+        return original_replace(src, dst)
+
+    monkeypatch.setattr(storage_module.os, "replace", fail_supporting_file_replace)
+
+    with pytest.raises(MacroStorageError, match="failed to write"):
+        storage.update("daily_digest", _macro_yaml("daily_digest", "team_digest"), {"notes.txt": "beta"})
+
+    stored = storage.read("daily_digest")
+    assert stored.definition.command == "daily_digest"
+    assert stored.supporting_files == {"notes.txt": "alpha"}
