@@ -4,7 +4,7 @@ title: Improve user-facing API module documentation
 status: Done
 assignee: []
 created_date: '2026-07-04 22:25'
-updated_date: '2026-07-04 23:25'
+updated_date: '2026-07-04 23:33'
 labels:
   - docs
   - api
@@ -38,6 +38,8 @@ Improve the user-facing documentation that explains what each API module can do.
 
 <!-- SECTION:NOTES:BEGIN -->
 Design review before implementation identified two scope controls: keep the guide comprehensive at the module/tag level rather than documenting every endpoint, and avoid letting main.py become a full API manual. OpenAPI metadata should summarize discoverability, while detailed usage stays in markdown docs. Verification update: Docs/Published/API-related/API_Tags_Index.md is generated output and is intentionally left unchanged; fresh verification confirmed no Published branch diff, source markdown links resolve, main.py py_compile passes, OpenAPI schema smoke reports openapi tags=170 groups=10, and Bandit reports errors=0 results=0 in /tmp/bandit_api_module_docs.json.
+
+PR: https://github.com/rmusser01/tldw_server/pull/2637
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
