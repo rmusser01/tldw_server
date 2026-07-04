@@ -209,6 +209,7 @@ const RUNTIME_CONFIG_ENDPOINT = "/api/_tldw-webui/runtime-config"
 const RUNTIME_AUTH_METADATA_KEY = "tldwRuntimeAuthMetadata"
 const RUNTIME_AUTH_METADATA_VERSION = 1
 const RUNTIME_ENV_AUTH_OPT_OUT_KEY = "tldwRuntimeEnvAuthOptOut"
+const RUNTIME_SESSION_SINGLE_USER_API_KEY = "tldwRuntimeSessionSingleUserApiKey"
 const PLACEHOLDER_API_KEYS = new Set([
   "change-me",
   "changeme",
@@ -332,6 +333,58 @@ const isPlaceholderApiKey = (value: string): boolean => {
   if (normalized.startsWith("change_me")) return true
 
   return PLACEHOLDER_API_KEYS.has(normalized)
+}
+
+const readRuntimeSessionApiKey = (): string | null => {
+  if (typeof window === "undefined") return null
+  try {
+    const key = normalizeApiKey(
+      window.sessionStorage.getItem(RUNTIME_SESSION_SINGLE_USER_API_KEY)
+    )
+    return key && !isPlaceholderApiKey(key) ? key : null
+  } catch (error) {
+    console.warn("[runtime-bootstrap] Failed to read session auth key", error)
+    return null
+  }
+}
+
+const writeRuntimeSessionApiKey = (value?: string | null): void => {
+  if (typeof window === "undefined") return
+  const key = normalizeApiKey(value)
+  try {
+    if (key && !isPlaceholderApiKey(key)) {
+      // codeql[js/clear-text-storage-of-sensitive-data]: sessionStorage keeps a user-entered single-user key only for the current browser session after localStorage tldwConfig is scrubbed.
+      window.sessionStorage.setItem(RUNTIME_SESSION_SINGLE_USER_API_KEY, key)
+    } else {
+      window.sessionStorage.removeItem(RUNTIME_SESSION_SINGLE_USER_API_KEY)
+    }
+  } catch (error) {
+    // Best-effort only; runtime auth still works for the current load.
+    console.warn("[runtime-bootstrap] Failed to write session auth key", error)
+  }
+}
+
+const deriveStoredSingleUserAuth = (
+  existing: TldwConfig | null
+): { authMode: string; manualKey: string | null } => {
+  const authMode = existing?.authMode || "single-user"
+  const rawSingleUserKey =
+    authMode === "single-user" && typeof existing?.apiKey === "string"
+      ? normalizeApiKey(existing.apiKey)
+      : null
+  const configKey =
+    rawSingleUserKey && !isPlaceholderApiKey(rawSingleUserKey)
+      ? rawSingleUserKey
+      : null
+  const sessionKey =
+    existing && authMode === "single-user" && !configKey
+      ? readRuntimeSessionApiKey()
+      : null
+
+  return {
+    authMode,
+    manualKey: configKey || sessionKey
+  }
 }
 
 const shouldRecordRuntimeMetadata = async ({
@@ -494,6 +547,7 @@ const seedTldwConfigFromEnv = async (): Promise<void> => {
   if (envAuthOptedOut) {
     setRuntimeApiKey(null)
     setRuntimeSingleUserApiKeyOverride(null)
+    writeRuntimeSessionApiKey(null)
   } else if (apiKey && !getRuntimeSingleUserApiKeyOverride()) {
     setRuntimeApiKey(apiKey)
     setRuntimeSingleUserApiKeyOverride(apiKey)
@@ -513,20 +567,20 @@ const seedTldwConfigFromEnv = async (): Promise<void> => {
     const existing = (await storage.get<TldwConfig>("tldwConfig").catch(() => null)) || null
     const storedServerUrl =
       (await storage.get<string>("tldwServerUrl").catch(() => null)) || null
-    const existingSingleUserKey =
-      existing?.authMode === "single-user" && typeof existing.apiKey === "string"
-        ? normalizeApiKey(existing.apiKey)
-        : null
+    const { authMode: existingAuthMode, manualKey: manualSingleUserKey } =
+      deriveStoredSingleUserAuth(existing)
     if (
       !envAuthOptedOut &&
       !apiKey &&
       !apiBearer &&
-      existingSingleUserKey &&
-      !isPlaceholderApiKey(existingSingleUserKey) &&
+      manualSingleUserKey &&
       !getRuntimeSingleUserApiKeyOverride()
     ) {
-      setRuntimeApiKey(existingSingleUserKey)
-      setRuntimeSingleUserApiKeyOverride(existingSingleUserKey)
+      setRuntimeApiKey(manualSingleUserKey)
+      setRuntimeSingleUserApiKeyOverride(manualSingleUserKey)
+      writeRuntimeSessionApiKey(manualSingleUserKey)
+    } else if (existing && existingAuthMode !== "single-user") {
+      writeRuntimeSessionApiKey(null)
     }
     const quickstartWebUiServerUrl = getQuickstartWebUiServerUrl()
     const effectiveExplicitWebHost =
