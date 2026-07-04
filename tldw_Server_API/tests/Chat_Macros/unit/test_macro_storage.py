@@ -87,6 +87,22 @@ def test_storage_rejects_symlinked_supporting_files(tmp_path):
         storage.read("daily_digest")
 
 
+def test_update_rejects_existing_symlinked_supporting_file(tmp_path):
+    storage = ChatMacroStorage(tmp_path)
+    storage.create("daily_digest", _macro_yaml(), {"notes.txt": "alpha"})
+    notes = tmp_path / "macros" / "daily_digest" / "notes.txt"
+    notes.unlink()
+    outside = tmp_path / "outside.txt"
+    outside.write_text("secret", encoding="utf-8")
+    os.symlink(outside, notes)
+
+    with pytest.raises(MacroStorageError, match="symlink"):
+        storage.update("daily_digest", _macro_yaml("daily_digest", "team_digest"), {"notes.txt": "beta"})
+
+    assert notes.is_symlink()
+    assert (tmp_path / "macros" / "daily_digest" / "MACRO.yaml").read_text(encoding="utf-8") == _macro_yaml()
+
+
 def test_failed_update_keeps_existing_macro_yaml(tmp_path, monkeypatch):
     storage = ChatMacroStorage(tmp_path)
     storage.create("daily_digest", _macro_yaml())
