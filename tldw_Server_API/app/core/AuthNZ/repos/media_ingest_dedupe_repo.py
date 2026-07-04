@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -37,6 +38,7 @@ class MediaIngestDedupeRepo:
                         source_media_id BIGINT NOT NULL,
                         source_url TEXT NULL,
                         source_hash TEXT NULL,
+                        source_db_path TEXT NULL,
                         created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
                         updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
                     )
@@ -47,6 +49,9 @@ class MediaIngestDedupeRepo:
                     CREATE INDEX IF NOT EXISTS idx_media_ingest_dedupe_media_type
                     ON media_ingest_dedupe_entries (media_type, updated_at DESC)
                     """
+                )
+                await self.db_pool.execute(
+                    "ALTER TABLE media_ingest_dedupe_entries ADD COLUMN IF NOT EXISTS source_db_path TEXT NULL"
                 )
                 return
 
@@ -60,6 +65,7 @@ class MediaIngestDedupeRepo:
                     source_media_id INTEGER NOT NULL,
                     source_url TEXT NULL,
                     source_hash TEXT NULL,
+                    source_db_path TEXT NULL,
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )
@@ -71,6 +77,18 @@ class MediaIngestDedupeRepo:
                 ON media_ingest_dedupe_entries (media_type, updated_at DESC)
                 """
             )
+            rows = await self.db_pool.fetchall("PRAGMA table_info(media_ingest_dedupe_entries)")
+            column_names = set()
+            for row in rows:
+                try:
+                    column_names.add(str(row["name"]).lower())
+                except Exception:
+                    with contextlib.suppress(Exception):
+                        column_names.add(str(row[1]).lower())
+            if "source_db_path" not in column_names:
+                await self.db_pool.execute(
+                    "ALTER TABLE media_ingest_dedupe_entries ADD COLUMN source_db_path TEXT NULL"
+                )
         except Exception as exc:
             logger.error("MediaIngestDedupeRepo.ensure_tables failed: {}", exc)
             raise
@@ -111,7 +129,7 @@ class MediaIngestDedupeRepo:
                 placeholders, params = build_postgres_in_clause(keys, start_param=2)
                 query = f"""
                     SELECT dedupe_key, key_type, media_type, source_user_id, source_media_id,
-                           source_url, source_hash, created_at, updated_at
+                           source_url, source_hash, source_db_path, created_at, updated_at
                     FROM media_ingest_dedupe_entries
                     WHERE media_type = $1
                       AND dedupe_key IN ({placeholders})
@@ -124,7 +142,7 @@ class MediaIngestDedupeRepo:
             placeholders, params = build_sqlite_in_clause(keys)
             query = f"""
                 SELECT dedupe_key, key_type, media_type, source_user_id, source_media_id,
-                       source_url, source_hash, created_at, updated_at
+                       source_url, source_hash, source_db_path, created_at, updated_at
                 FROM media_ingest_dedupe_entries
                 WHERE media_type = ?
                   AND dedupe_key IN ({placeholders})
@@ -147,6 +165,7 @@ class MediaIngestDedupeRepo:
         source_media_id: int,
         source_url: str | None = None,
         source_hash: str | None = None,
+        source_db_path: str | None = None,
     ) -> None:
         now = datetime.now(timezone.utc)
         dedupe_key_value = str(dedupe_key or "").strip()
@@ -165,8 +184,8 @@ class MediaIngestDedupeRepo:
                     """
                     INSERT INTO media_ingest_dedupe_entries (
                         dedupe_key, key_type, media_type, source_user_id, source_media_id,
-                        source_url, source_hash, created_at, updated_at
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8)
+                        source_url, source_hash, source_db_path, created_at, updated_at
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9)
                     ON CONFLICT (dedupe_key) DO UPDATE SET
                         key_type = EXCLUDED.key_type,
                         media_type = EXCLUDED.media_type,
@@ -174,6 +193,7 @@ class MediaIngestDedupeRepo:
                         source_media_id = EXCLUDED.source_media_id,
                         source_url = EXCLUDED.source_url,
                         source_hash = EXCLUDED.source_hash,
+                        source_db_path = EXCLUDED.source_db_path,
                         updated_at = EXCLUDED.updated_at
                     """,
                     dedupe_key_value,
@@ -183,6 +203,7 @@ class MediaIngestDedupeRepo:
                     int(source_media_id),
                     _normalize_optional_text(source_url),
                     _normalize_optional_text(source_hash),
+                    _normalize_optional_text(source_db_path),
                     self._normalize_datetime_for_postgres(now),
                 )
                 return
@@ -191,8 +212,8 @@ class MediaIngestDedupeRepo:
                 """
                 INSERT INTO media_ingest_dedupe_entries (
                     dedupe_key, key_type, media_type, source_user_id, source_media_id,
-                    source_url, source_hash, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    source_url, source_hash, source_db_path, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(dedupe_key) DO UPDATE SET
                     key_type = excluded.key_type,
                     media_type = excluded.media_type,
@@ -200,6 +221,7 @@ class MediaIngestDedupeRepo:
                     source_media_id = excluded.source_media_id,
                     source_url = excluded.source_url,
                     source_hash = excluded.source_hash,
+                    source_db_path = excluded.source_db_path,
                     updated_at = excluded.updated_at
                 """,
                 (
@@ -210,6 +232,7 @@ class MediaIngestDedupeRepo:
                     int(source_media_id),
                     _normalize_optional_text(source_url),
                     _normalize_optional_text(source_hash),
+                    _normalize_optional_text(source_db_path),
                     now.isoformat(),
                     now.isoformat(),
                 ),

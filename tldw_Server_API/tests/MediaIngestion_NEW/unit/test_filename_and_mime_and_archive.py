@@ -102,7 +102,7 @@ def test_file_validator_skips_python_magic_import_on_windows(monkeypatch):
     monkeypatch.setattr(sink, "puremagic", None, raising=False)
     monkeypatch.setattr(sink, "_python_magic", None, raising=False)
     monkeypatch.setattr(sink, "_python_magic_loaded", False, raising=False)
-    monkeypatch.setattr(sink.os, "name", "nt", raising=False)
+    monkeypatch.setattr(sink, "_is_windows_platform", lambda: True)
 
     def _unexpected_import(_name: str):
         raise AssertionError("python-magic should not be imported on Windows")

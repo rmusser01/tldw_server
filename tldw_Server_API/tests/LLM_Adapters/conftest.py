@@ -25,7 +25,16 @@ from tldw_Server_API.tests._plugins.authnz_fixtures import authnz_schema_ready_s
 from tldw_Server_API.tests.helpers.app_main_state import restore_app_main, set_app_main, snapshot_app_main
 
 
-def _merge_csv_env(name: str, values: list[str]) -> None:
+_DISABLED_ROUTE_KEYS_FOR_ADAPTER_TESTS = [
+    "media",
+    "media-embeddings",
+    "audio",
+    "audio-websocket",
+    "audio-jobs",
+]
+
+
+def _merged_csv_env_value(name: str, values: list[str]) -> str:
     existing_raw = str(os.getenv(name, "") or "")
     parts = [p.strip() for p in existing_raw.replace(" ", ",").split(",") if p.strip()]
     lowered = {p.lower() for p in parts}
@@ -34,21 +43,13 @@ def _merge_csv_env(name: str, values: list[str]) -> None:
         if normalized and normalized.lower() not in lowered:
             parts.append(normalized)
             lowered.add(normalized.lower())
-    os.environ[name] = ",".join(parts)
+    return ",".join(parts)
 
 
 # Keep LLM adapter integration tests isolated from heavy media/audio route imports
 # that pull native STT/ML stacks during app startup in constrained environments.
-_merge_csv_env(
-    "ROUTES_DISABLE",
-    [
-        "media",
-        "media-embeddings",
-        "audio",
-        "audio-websocket",
-        "audio-jobs",
-    ],
-)
+# Scope this to adapter tests only; setting it during collection leaks into
+# later packages that need media routes from the shared FastAPI app.
 
 # Adapter integration tests exercise request/response behavior and provider
 # shims, not provider inventory enforcement. Keep strict model selection off by
@@ -102,7 +103,11 @@ def _resolve_app_for_fallback_client():
 
 
 @pytest.fixture(autouse=True)
-def _preserve_app_main_state():
+def _preserve_app_main_state(monkeypatch):
+    monkeypatch.setenv(
+        "ROUTES_DISABLE",
+        _merged_csv_env_value("ROUTES_DISABLE", _DISABLED_ROUTE_KEYS_FOR_ADAPTER_TESTS),
+    )
     previous_main = snapshot_app_main()
     yield
     restore_app_main(previous_main)

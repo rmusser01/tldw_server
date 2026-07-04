@@ -388,6 +388,117 @@ async def test_media_ingest_cross_user_dedupe_reuses_transcript_without_reproces
 
 
 @pytest.mark.asyncio
+async def test_media_ingest_dedupe_skips_missing_source_db_path(
+    monkeypatch,
+    tmp_path,
+):
+    from tldw_Server_API.app.api.v1.schemas.media_request_models import AddMediaForm
+    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
+    from tldw_Server_API.app.core.Ingestion_Media_Processing import persistence
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+    import tldw_Server_API.app.services.media_ingest_jobs_worker as worker
+
+    _set_jobs_db(monkeypatch, tmp_path)
+    _allow_url_policy(monkeypatch)
+    monkeypatch.setenv("PRIVILEGE_METADATA_VALIDATE_ON_STARTUP", "0")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'users.db'}")
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "user_databases"))
+    await reset_db_pool()
+
+    source_url = "https://www.youtube.com/watch?v=missing-source-db"
+    missing_source_dir = tmp_path / "missing-source"
+    missing_source_dir.mkdir()
+    missing_source_db = missing_source_dir / "Media_DB_v2.db"
+    processor_calls: list[str] = []
+
+    seed_form = AddMediaForm(
+        media_type="video",
+        transcription_model="whisper-test",
+        perform_analysis=False,
+        perform_chunking=False,
+    )
+    repo = await persistence._get_media_ingest_dedupe_repo()
+    for key_type, key_value in persistence._shared_transcript_dedupe_candidates(
+        source_path_or_url=source_url,
+        source_hash=None,
+        form_data=seed_form,
+    ):
+        await repo.upsert_source(
+            dedupe_key=f"{key_type}:{key_value}",
+            key_type=key_type,
+            media_type="video",
+            source_user_id=99,
+            source_media_id=123,
+            source_url=source_url,
+            source_db_path=str(missing_source_db),
+        )
+
+    async def _fake_process_videos(**kwargs):
+        processor_calls.extend(kwargs.get("inputs") or [])
+        return {
+            "results": [
+                {
+                    "status": "Success",
+                    "input_ref": source_url,
+                    "processing_source": source_url,
+                    "media_type": "video",
+                    "content": "Fresh transcript after stale registry hit.",
+                    "segments": [],
+                    "summary": "Fresh summary.",
+                    "metadata": {
+                        "title": "Missing Source DB Video",
+                        "author": "Test Author",
+                        "source_url": source_url,
+                        "url": source_url,
+                        "model": "whisper-test",
+                        "provider": "whisper",
+                    },
+                    "warnings": None,
+                }
+            ],
+            "errors_count": 0,
+            "errors": [],
+        }
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Ingestion_Media_Processing.Video.Video_DL_Ingestion_Lib.process_videos",
+        _fake_process_videos,
+        raising=True,
+    )
+
+    job_manager = JobManager()
+    try:
+        row = job_manager.create_job(
+            domain="media_ingest",
+            queue="default",
+            job_type="media_ingest_item",
+            payload={
+                "batch_id": "batch-missing-source-db",
+                "media_type": "video",
+                "source": source_url,
+                "source_kind": "url",
+                "input_ref": source_url,
+                "options": {
+                    "media_type": "video",
+                    "transcription_model": "whisper-test",
+                    "perform_analysis": False,
+                    "perform_chunking": False,
+                },
+            },
+            owner_user_id="1",
+        )
+        job = job_manager.get_job(int(row.get("id")))
+        assert job is not None
+        result = await worker._handle_job(job, job_manager, worker._ProgressState())
+
+        assert result.get("media_id")
+        assert processor_calls == [source_url]
+        assert not missing_source_db.exists()
+    finally:
+        await reset_db_pool()
+
+
+@pytest.mark.asyncio
 async def test_media_ingest_cross_user_dedupe_prefers_transcript_artifact_over_media_content(
     monkeypatch,
     tmp_path,
