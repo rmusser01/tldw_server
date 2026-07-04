@@ -15,7 +15,7 @@ from .output_profiles import MacroOutputProfile, merge_output_profile, normalize
 from .parser import load_macro_definition
 from .repository import ChatMacroRepository
 from .settings import normalize_settings
-from .storage import ChatMacroStorage, StoredMacro
+from .storage import MACRO_NAME_RE, ChatMacroStorage, StoredMacro
 
 
 @dataclass(slots=True)
@@ -46,10 +46,10 @@ class ChatMacrosService:
         self.core_commands = {command.lower() for command in (core_commands or _default_core_commands())}
 
     def list_macros(self) -> list[ChatMacroCatalogItem]:
-        items = self._builtin_items() + [self._user_item(stored) for stored in self.storage.list()]
+        items = self._catalog_items()
         for item in items:
             self._reject_core_collision(item.definition)
-            self._sync_registry(item)
+        self._sync_registry_catalog(items)
         return sorted(items, key=lambda item: (item.command, item.source))
 
     def get_macro(self, name: str) -> ChatMacroCatalogItem:
@@ -65,6 +65,7 @@ class ChatMacrosService:
 
     def validate_macro(self, raw: str) -> MacroDefinition:
         definition = load_macro_definition(raw)
+        self._validate_macro_name(definition.name)
         self._validate_future_permissions(definition)
         self._reject_core_collision(definition)
         return definition
@@ -79,7 +80,7 @@ class ChatMacrosService:
         self._reject_macro_collision(definition, exclude_name=name)
         stored = self.storage.create(name, raw, supporting_files)
         item = self._user_item(stored)
-        self._sync_registry(item)
+        self._sync_registry_catalog(self._catalog_items())
         return item
 
     def update_macro(
@@ -94,13 +95,14 @@ class ChatMacrosService:
         self._reject_macro_collision(definition, exclude_name=name)
         stored = self.storage.update(name, raw, supporting_files)
         item = self._user_item(stored)
-        self._sync_registry(item)
+        self._sync_registry_catalog(self._catalog_items())
         return item
 
     def delete_macro(self, name: str) -> None:
         if self._builtin_item(name) is not None:
             raise MacroStorageError("built-in macros are immutable")
         self.storage.delete(name)
+        self._sync_registry_catalog(self._catalog_items())
 
     def set_builtin_enabled(self, name: str, enabled: bool) -> ChatMacroCatalogItem:
         if self._load_builtin(name) is None:
@@ -157,6 +159,9 @@ class ChatMacrosService:
             if item is not None
         ]
 
+    def _catalog_items(self) -> list[ChatMacroCatalogItem]:
+        return self._builtin_items() + [self._user_item(stored) for stored in self.storage.list()]
+
     def _builtin_item(self, name: str) -> ChatMacroCatalogItem | None:
         loaded = self._load_builtin(name)
         if loaded is None:
@@ -205,6 +210,8 @@ class ChatMacrosService:
         for item in self.list_macros():
             if item.name == exclude_name and item.source == "user":
                 continue
+            if item.name == definition.name:
+                raise MacroValidationError("macro name conflicts with another macro")
             if item.command == definition.command:
                 raise MacroValidationError("macro command conflicts with another macro")
 
@@ -229,6 +236,19 @@ class ChatMacrosService:
             validation_status="valid",
             validation_error=None,
         )
+
+    def _sync_registry_catalog(self, items: list[ChatMacroCatalogItem]) -> None:
+        for item in items:
+            self._sync_registry(item)
+        self.repository.mark_registry_entries_deleted_except(
+            self.user_id,
+            {item.command for item in items},
+        )
+
+    @staticmethod
+    def _validate_macro_name(name: str) -> None:
+        if not MACRO_NAME_RE.fullmatch(name or ""):
+            raise MacroValidationError("invalid macro name")
 
 
 def _builtin_root() -> Path:

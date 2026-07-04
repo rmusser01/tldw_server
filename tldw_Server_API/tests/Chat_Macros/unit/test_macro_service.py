@@ -5,6 +5,7 @@ import pytest
 from tldw_Server_API.app.core.Chat_Macros.exceptions import MacroStorageError, MacroValidationError
 from tldw_Server_API.app.core.Chat_Macros.output_profiles import (
     DEFAULT_OUTPUT_PROFILE,
+    normalize_output_profile,
     render_output_profile,
 )
 from tldw_Server_API.app.core.Chat_Macros.repository import ChatMacroRepository
@@ -80,6 +81,9 @@ def test_create_update_delete_user_macro_and_validate_without_saving(service):
     assert validated.command == "daily_digest"
     assert service.storage.list() == []
 
+    with pytest.raises(MacroValidationError, match="macro name"):
+        service.validate_macro(_user_macro_yaml("BadName", "bad_name"))
+
     created = service.create_macro("daily_digest", _user_macro_yaml())
     assert created.source == "user"
 
@@ -87,12 +91,19 @@ def test_create_update_delete_user_macro_and_validate_without_saving(service):
         service.create_macro("bad_weather", _user_macro_yaml("bad_weather", "weather"))
     with pytest.raises(MacroValidationError, match="another macro"):
         service.create_macro("wrapup", _user_macro_yaml("wrapup", "wrapup"))
+    with pytest.raises(MacroValidationError, match="macro name"):
+        service.create_macro("wrapup", _user_macro_yaml("wrapup", "my_wrapup"))
 
     updated = service.update_macro("daily_digest", _user_macro_yaml("daily_digest", "team_digest"))
     assert updated.command == "team_digest"
+    registry_commands = {row["command"] for row in service.repository.list_registry_entries("1")}
+    assert "team_digest" in registry_commands
+    assert "daily_digest" not in registry_commands
 
     service.delete_macro("daily_digest")
     assert service.storage.list() == []
+    registry_commands = {row["command"] for row in service.repository.list_registry_entries("1")}
+    assert registry_commands == {"wrapup"}
 
 
 def test_service_rejects_non_empty_future_permissions(service):
@@ -153,3 +164,6 @@ def test_output_profiles_resolve_from_settings_and_render_default_order(service)
 def test_output_profile_local_overrides_are_bounded(service):
     with pytest.raises(MacroValidationError, match="too many sections"):
         service.resolve_output_profile("default", local_overrides={"sections": [f"s{i}" for i in range(20)]})
+
+    with pytest.raises(MacroValidationError, match="invalid output profile format"):
+        normalize_output_profile("bad", {"format": "multiple_messages"})

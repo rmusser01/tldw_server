@@ -5,6 +5,7 @@ import os
 import pytest
 
 from tldw_Server_API.app.core.Chat_Macros.exceptions import MacroStorageError, MacroValidationError
+from tldw_Server_API.app.core.Chat_Macros import storage as storage_module
 from tldw_Server_API.app.core.Chat_Macros.storage import ChatMacroStorage
 
 
@@ -84,3 +85,18 @@ def test_storage_rejects_symlinked_supporting_files(tmp_path):
 
     with pytest.raises(MacroStorageError, match="symlink"):
         storage.read("daily_digest")
+
+
+def test_failed_update_keeps_existing_macro_yaml(tmp_path, monkeypatch):
+    storage = ChatMacroStorage(tmp_path)
+    storage.create("daily_digest", _macro_yaml())
+
+    def fail_replace(*args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(storage_module.os, "replace", fail_replace)
+
+    with pytest.raises(MacroStorageError, match="failed to write"):
+        storage.update("daily_digest", _macro_yaml("daily_digest", "team_digest"))
+
+    assert storage.read("daily_digest").definition.command == "daily_digest"

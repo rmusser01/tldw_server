@@ -17,7 +17,7 @@ DEFAULT_PROFILE_SECTIONS = [
 ]
 MAX_PROFILE_SECTIONS = 10
 MAX_SECTION_NAME_LENGTH = 64
-VALID_PROFILE_FORMATS = {"structured_sections", "single_response", "multiple_messages"}
+VALID_PROFILE_FORMATS = {"structured_sections", "single_response"}
 
 
 @dataclass(slots=True)

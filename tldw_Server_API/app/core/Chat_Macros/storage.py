@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import stat
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -51,9 +52,9 @@ class ChatMacroStorage:
         if macro_dir.exists() or macro_dir.is_symlink():
             raise MacroStorageError(f"macro already exists: {name}")
         macro_dir.mkdir(parents=False)
-        self._write_regular_file_no_follow(macro_dir / MACRO_FILENAME, raw_bytes)
+        self._replace_regular_file_no_follow(macro_dir / MACRO_FILENAME, raw_bytes)
         for filename, content in file_bytes.items():
-            self._write_regular_file_no_follow(macro_dir / filename, content)
+            self._replace_regular_file_no_follow(macro_dir / filename, content)
         return self._stored(name, definition, raw, file_bytes)
 
     def update(
@@ -66,17 +67,19 @@ class ChatMacroStorage:
         macro_dir = self._existing_macro_dir(name)
         definition, raw_bytes, file_bytes = self._validate_payload(name, raw, supporting_files)
 
-        self._write_regular_file_no_follow(macro_dir / MACRO_FILENAME, raw_bytes)
+        self._replace_regular_file_no_follow(macro_dir / MACRO_FILENAME, raw_bytes)
         if supporting_files is not None:
-            for path in macro_dir.iterdir():
+            for filename, content in file_bytes.items():
+                self._replace_regular_file_no_follow(macro_dir / filename, content)
+            for path in list(macro_dir.iterdir()):
                 if path.name != MACRO_FILENAME:
+                    if path.name in file_bytes:
+                        continue
                     if stat.S_ISLNK(path.lstat().st_mode):
                         raise MacroStorageError(f"symlinked macro file is not allowed: {path}")
                     if not path.is_file():
                         raise MacroStorageError(f"supporting macro path is not a regular file: {path}")
                     path.unlink()
-            for filename, content in file_bytes.items():
-                self._write_regular_file_no_follow(macro_dir / filename, content)
         else:
             file_bytes = self._read_supporting_file_bytes(macro_dir)
         return self._stored(name, definition, raw, file_bytes)
@@ -236,23 +239,29 @@ class ChatMacroStorage:
                 os.close(fd)
 
     @staticmethod
-    def _write_regular_file_no_follow(path: Path, data: bytes) -> None:
+    def _replace_regular_file_no_follow(path: Path, data: bytes) -> None:
         if path.exists() or path.is_symlink():
             entry = path.lstat()
             if stat.S_ISLNK(entry.st_mode):
                 raise MacroStorageError(f"symlinked macro file is not allowed: {path}")
             if not stat.S_ISREG(entry.st_mode):
                 raise MacroStorageError(f"macro file is not a regular file: {path}")
-        flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_BINARY", 0)
-        flags |= getattr(os, "O_NOFOLLOW", 0)
-        fd = os.open(path, flags, 0o600)
+        fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+        tmp_path = Path(tmp_name)
         try:
             with os.fdopen(fd, "wb", closefd=True) as file_obj:
                 fd = -1
                 file_obj.write(data)
+                file_obj.flush()
+                os.fsync(file_obj.fileno())
+            os.replace(tmp_path, path)
+        except OSError as exc:
+            raise MacroStorageError(f"failed to write macro file: {path}") from exc
         finally:
             if fd >= 0:
                 os.close(fd)
+            if tmp_path.exists():
+                tmp_path.unlink()
 
 
 def _same_file_identity(left: os.stat_result, right: os.stat_result) -> bool:

@@ -138,6 +138,35 @@ class ChatMacroRepository:
             ).fetchall()
         return [_row_to_dict(row) for row in rows]
 
+    def mark_registry_entries_deleted_except(self, user_id: str, active_commands: set[str]) -> None:
+        """Soft-delete active registry entries that are no longer present."""
+        with self.db.transaction() as conn:
+            if not active_commands:
+                conn.execute(
+                    """
+                    UPDATE chat_macro_registry
+                       SET deleted_at = CURRENT_TIMESTAMP,
+                           updated_at = CURRENT_TIMESTAMP
+                     WHERE user_id = ?
+                       AND deleted_at IS NULL
+                    """,
+                    (user_id,),
+                )
+                return
+
+            placeholders = ", ".join("?" for _ in active_commands)
+            conn.execute(
+                f"""
+                UPDATE chat_macro_registry
+                   SET deleted_at = CURRENT_TIMESTAMP,
+                       updated_at = CURRENT_TIMESTAMP
+                 WHERE user_id = ?
+                   AND deleted_at IS NULL
+                   AND command NOT IN ({placeholders})
+                """,  # nosec B608
+                (user_id, *sorted(active_commands)),
+            )
+
     def get_settings(self, user_id: str) -> dict[str, Any]:
         """Return stored macro settings for a user, or an empty dict."""
         with self.db.transaction() as conn:
