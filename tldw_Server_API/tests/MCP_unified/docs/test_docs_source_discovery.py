@@ -1,9 +1,12 @@
+"""Tests for bounded standalone MCP docs source discovery."""
+
 from __future__ import annotations
 
 import importlib
 import json
 from pathlib import Path
 
+from defusedxml.common import DefusedXmlException
 import pytest
 
 from mcp_unified.docs.acquisition.models import FetchResponse
@@ -54,7 +57,7 @@ def test_extract_page_links_prefers_beautifulsoup_when_available(monkeypatch: py
     seen: list[str] = []
     original_import = importlib.import_module
 
-    def fake_import(name: str, package: str | None = None):
+    def fake_import(name: str, package: str | None = None) -> object:
         if name == "bs4":
             seen.append(name)
         return original_import(name, package)
@@ -86,6 +89,19 @@ def test_public_candidate_redacts_query_bearing_url() -> None:
     assert "token=secret" not in serialized  # nosec B101
     assert "https://example.com/page" in serialized  # nosec B101
     assert "hash" in serialized  # nosec B101
+
+
+def test_parse_sitemap_urlset_handles_defusedxml_exception(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail_parse(_: bytes) -> object:
+        raise DefusedXmlException("blocked")
+
+    monkeypatch.setattr("mcp_unified.docs.discovery.ElementTree.fromstring", fail_parse)
+
+    result = parse_sitemap_urlset(b"<urlset />", max_pages=10)
+
+    assert result.status == "denied"  # nosec B101
+    assert result.reason_code == "sitemap_parse_failed"  # nosec B101
+    assert result.candidates == []  # nosec B101
 
 
 def _store(tmp_path: Path) -> DocsCatalogStore:
@@ -160,6 +176,26 @@ def test_discover_sitemap_dry_run_returns_candidates_without_mutation(tmp_path: 
     assert store.list_sources(scope=AccessScope()) == []  # nosec B101
 
 
+def test_discover_sitemap_parse_failure_propagates_status(tmp_path: Path) -> None:
+    service = DocsSourceDiscoveryService(
+        settings=_settings(tmp_path),
+        store=_store(tmp_path),
+        resolver=FakeResolver({"example.com": ["93.184.216.34"]}),
+        transport=FakeTransport(
+            [FetchResponse(status_code=200, headers={"content-type": "application/xml"}, body_chunks=[b"<urlset>"])]
+        ),
+    )
+
+    result = service.discover_source(
+        scope=AccessScope(),
+        request=DiscoverSourceRequest(url="https://example.com/sitemap.xml", kind="sitemap"),
+    )
+
+    assert result["status"] == "failed"  # nosec B101
+    assert result["reason_code"] == "sitemap_parse_failed"  # nosec B101
+    assert result["candidates"] == []  # nosec B101
+
+
 def test_discover_source_approval_required_does_not_resolve_or_fetch(tmp_path: Path) -> None:
     settings = _settings(
         tmp_path,
@@ -216,6 +252,35 @@ def test_discover_sitemap_filters_scope_duplicates_and_query_leaks(tmp_path: Pat
     assert "?token" not in serialized  # nosec B101
 
 
+def test_discover_sitemap_treats_default_https_port_as_same_origin(tmp_path: Path) -> None:
+    settings = _settings(
+        tmp_path,
+        allowed_url_prefixes=("https://example.com/sitemap.xml", "https://example.com:443/docs/"),
+    )
+    service = DocsSourceDiscoveryService(
+        settings=settings,
+        store=_store(tmp_path),
+        resolver=FakeResolver({"example.com": ["93.184.216.34"]}),
+        transport=FakeTransport(
+            [
+                FetchResponse(
+                    status_code=200,
+                    headers={"content-type": "application/xml"},
+                    body_chunks=[b"<urlset><url><loc>https://example.com:443/docs/a</loc></url></urlset>"],
+                )
+            ]
+        ),
+    )
+
+    result = service.discover_source(
+        scope=AccessScope(),
+        request=DiscoverSourceRequest(url="https://example.com/sitemap.xml", kind="sitemap"),
+    )
+
+    assert result["counts"]["accepted"] == 1  # nosec B101
+    assert result["candidates"][0]["reason_code"] == "ok"  # nosec B101
+
+
 def test_discover_sitemap_same_origin_setting_is_strict(tmp_path: Path) -> None:
     body = b"<urlset><url><loc>https://docs.example.net/guide</loc></url></urlset>"
     resolver = FakeResolver({"example.com": ["93.184.216.34"]})
@@ -255,6 +320,94 @@ def test_discover_sitemap_same_origin_setting_is_strict(tmp_path: Path) -> None:
     )
 
     assert loose_result["counts"]["accepted"] == 1  # nosec B101
+
+
+def test_discover_sitemap_register_denies_query_seed_when_queries_not_persisted(tmp_path: Path) -> None:
+    transport = FakeTransport([FetchResponse(status_code=200, headers={"content-type": "application/xml"})])
+    service = DocsSourceDiscoveryService(
+        settings=_settings(
+            tmp_path,
+            allowed_url_prefixes=("https://example.com/sitemap.xml?token=secret",),
+            persist_url_query_strings=False,
+        ),
+        store=_store(tmp_path),
+        resolver=FakeResolver({"example.com": ["93.184.216.34"]}),
+        transport=transport,
+    )
+
+    result = service.discover_source(
+        scope=AccessScope(),
+        request=DiscoverSourceRequest(
+            url="https://example.com/sitemap.xml?token=secret",
+            kind="sitemap",
+            mode="apply",
+            apply_action="register",
+        ),
+    )
+
+    assert result["status"] == "denied"  # nosec B101
+    assert result["reason_code"] == "candidate_query_not_persisted"  # nosec B101
+    assert transport.calls == []  # nosec B101
+
+
+def test_discover_page_links_include_seed_when_requested(tmp_path: Path) -> None:
+    service = DocsSourceDiscoveryService(
+        settings=_settings(tmp_path, allowed_url_prefixes=("https://example.com/docs/",)),
+        store=_store(tmp_path),
+        resolver=FakeResolver({"example.com": ["93.184.216.34"]}),
+        transport=FakeTransport(
+            [
+                FetchResponse(
+                    status_code=200,
+                    headers={"content-type": "text/html"},
+                    body_chunks=[b'<a href="/docs/a">A</a>'],
+                )
+            ]
+        ),
+    )
+
+    result = service.discover_source(
+        scope=AccessScope(),
+        request=DiscoverSourceRequest(
+            url="https://example.com/docs/index.html",
+            kind="page_links",
+            include_seed=True,
+        ),
+    )
+
+    assert [item["url"] for item in result["candidates"]] == [  # nosec B101
+        "https://example.com/docs/index.html",
+        "https://example.com/docs/a",
+    ]
+
+
+def test_discover_source_allows_depth_below_configured_cap(tmp_path: Path) -> None:
+    service = DocsSourceDiscoveryService(
+        settings=_settings(tmp_path, max_discovery_depth=2),
+        store=_store(tmp_path),
+        resolver=FakeResolver({"example.com": ["93.184.216.34"]}),
+        transport=FakeTransport(
+            [
+                FetchResponse(
+                    status_code=200,
+                    headers={"content-type": "application/xml"},
+                    body_chunks=[b"<urlset><url><loc>https://example.com/docs/a</loc></url></urlset>"],
+                )
+            ]
+        ),
+    )
+
+    result = service.discover_source(
+        scope=AccessScope(),
+        request=DiscoverSourceRequest(
+            url="https://example.com/sitemap.xml",
+            kind="sitemap",
+            max_depth=1,
+        ),
+    )
+
+    assert result["status"] == "completed"  # nosec B101
+    assert result["counts"]["accepted"] == 1  # nosec B101
 
 
 def test_discover_sitemap_apply_register_creates_source_without_documents(tmp_path: Path) -> None:

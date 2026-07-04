@@ -124,6 +124,8 @@ def _coerce_stale_policy(value: object, field_name: str) -> StalePolicy:
 
 
 def _coerce_discovery_apply_default(value: object, field_name: str) -> DiscoveryApplyDefault:
+    """Coerce the default discovery apply action from config."""
+
     text = "register" if value is None else str(value).strip().lower()
     if text not in {"register", "ingest", "register_and_ingest"}:
         raise ValueError(f"{field_name} must be register, ingest, or register_and_ingest")

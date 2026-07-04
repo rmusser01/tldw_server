@@ -706,6 +706,54 @@ def test_url_sitemap_sync_dry_run_does_not_mutate(tmp_path: Path) -> None:
     assert store.status()["counts"]["sync_runs"] == 0  # nosec B101
 
 
+def test_url_sitemap_sync_preserves_skipped_candidate_reason(tmp_path: Path) -> None:
+    store = DocsCatalogStore(tmp_path / "docs.db")
+    store.migrate()
+    scope = AccessScope()
+    source_id = store.upsert_source(
+        scope=scope,
+        source_type="url_sitemap",
+        canonical_uri="https://example.com/sitemap.xml",
+        display_name="Example sitemap",
+        source_path=None,
+        source_url="https://example.com/sitemap.xml",
+        redacted_source_url="https://example.com/sitemap.xml",
+        policy_profile="locked_down",
+        sync_enabled=True,
+        metadata={},
+    )
+    settings = DocsSettings.from_mapping(
+        {
+            "db_path": str(tmp_path / "docs.db"),
+            "enable_web_acquisition": True,
+            "sitemap_sync_enabled": True,
+            "web_source_profile": "locked_down",
+            "allowed_url_prefixes": ("https://example.com/sitemap.xml", "https://example.com/docs/"),
+            "persist_url_query_strings": False,
+        }
+    )
+    service = DocsSourceSyncService(
+        settings=settings,
+        store=store,
+        resolver=FakeResolver({"example.com": ["93.184.216.34"]}),
+        transport=FakeTransport(
+            [
+                FetchResponse(
+                    status_code=200,
+                    headers={"content-type": "application/xml"},
+                    body_chunks=[b"<urlset><url><loc>https://example.com/docs/a?token=secret</loc></url></urlset>"],
+                )
+            ]
+        ),
+    )
+
+    result = service.sync_source(scope=scope, request=SyncSourceRequest(source_id=source_id, mode="dry_run"))
+
+    assert result["counts"]["skipped"] == 1  # nosec B101
+    assert result["items"][0]["status"] == "skipped"  # nosec B101
+    assert result["items"][0]["reason_code"] == "candidate_query_not_persisted"  # nosec B101
+
+
 def test_url_sitemap_sync_tombstones_missing_links_only_in_apply_mode(tmp_path: Path) -> None:
     store = DocsCatalogStore(tmp_path / "docs.db")
     store.migrate()

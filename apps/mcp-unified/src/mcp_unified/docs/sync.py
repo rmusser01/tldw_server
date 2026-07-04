@@ -593,7 +593,7 @@ class DocsSourceSyncService:
         for candidate in candidates:
             if candidate.status != "accepted":
                 counts["skipped"] += 1
-                items.append(_sitemap_candidate_item(candidate, status="skipped"))
+                items.append(_sitemap_candidate_item(candidate, status="skipped", reason_code=candidate.reason_code))
                 continue
             link = links_by_uri.get(candidate.url)
             if mode == "apply":
@@ -705,13 +705,14 @@ class DocsSourceSyncService:
             )
 
         stored_document = self.store.get_document(scope, document_id, mode="metadata")
+        last_hash = str(stored_document.get("content_hash") or "") if stored_document else ""
         self.store.link_source_document(
             scope=scope,
             source_id=source_id,
             document_id=document_id,
             source_item_uri=candidate.url,
             status="active",
-            last_hash=str(stored_document.get("content_hash") or ""),
+            last_hash=last_hash,
             metadata={"importer": "url_sitemap"},
         )
         item_status = str(result.get("status") or "updated")

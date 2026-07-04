@@ -1,3 +1,5 @@
+"""Bounded source discovery for the standalone docs MCP corpus."""
+
 from __future__ import annotations
 
 import importlib
@@ -8,6 +10,7 @@ from typing import Any, Literal
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
 from defusedxml import ElementTree
+from defusedxml.common import DefusedXmlException
 from .acquisition.fetcher import URLFetcher
 from .acquisition.service import DocsAcquisitionService
 from .acquisition.policy import safe_argument_hash
@@ -23,6 +26,8 @@ _SITEMAP_CONTENT_TYPES = ("application/xml", "text/xml", "application/xhtml+xml"
 
 @dataclass(frozen=True)
 class DiscoveredURLCandidate:
+    """A discovered URL plus public-safe display metadata and status."""
+
     url: str
     display_url: str
     status: CandidateStatus
@@ -36,6 +41,8 @@ class DiscoveredURLCandidate:
 
 @dataclass(frozen=True)
 class SitemapParseResult:
+    """Result of parsing a sitemap urlset into candidate URLs."""
+
     status: str
     reason_code: str
     candidates: list[DiscoveredURLCandidate]
@@ -43,6 +50,8 @@ class SitemapParseResult:
 
 
 class DocsSourceDiscoveryService:
+    """Discover, register, and optionally ingest bounded documentation sources."""
+
     def __init__(
         self,
         *,
@@ -68,6 +77,8 @@ class DocsSourceDiscoveryService:
         self.acquisition = DocsAcquisitionService(settings=settings, store=store, resolver=resolver, transport=transport)
 
     def discover_source(self, *, scope: AccessScope, request: DiscoverSourceRequest) -> dict[str, Any]:
+        """Discover candidates for one sitemap or seed page request."""
+
         if not self.settings.enable_source_discovery:
             return _discovery_response(
                 status="denied",
@@ -104,7 +115,20 @@ class DocsSourceDiscoveryService:
             )
 
         kind = _resolve_kind(request.kind, request.url, fetched.headers)
-        candidates, warnings = self._candidates_for_fetched(kind=kind, request=request, fetched_body=fetched.body)
+        candidates, warnings, candidate_status = self._candidates_for_fetched(
+            kind=kind,
+            request=request,
+            fetched_body=fetched.body,
+        )
+        if candidate_status["reason_code"] != "ok":
+            return _discovery_response(
+                status=candidate_status["status"],
+                reason_code=candidate_status["reason_code"],
+                request=request,
+                candidates=candidates,
+                warnings=warnings,
+                source=None,
+            )
         candidates, filter_warnings = _filter_candidates(
             candidates,
             seed_url=fetched.canonical_url or request.url,
@@ -137,6 +161,8 @@ class DocsSourceDiscoveryService:
         url: str,
         max_pages: int,
     ) -> tuple[list[DiscoveredURLCandidate], list[str], dict[str, Any]]:
+        """Discover current candidates for a registered sitemap source."""
+
         fetched = self.fetcher.fetch(url)
         if fetched.status != "fetched":
             return [], [str(fetched.reason or "sitemap_fetch_failed")], {
@@ -171,7 +197,7 @@ class DocsSourceDiscoveryService:
         kind: str,
         request: DiscoverSourceRequest,
         fetched_body: bytes,
-    ) -> tuple[list[DiscoveredURLCandidate], list[str]]:
+    ) -> tuple[list[DiscoveredURLCandidate], list[str], dict[str, str]]:
         if kind == "sitemap":
             parsed = parse_sitemap_urlset(
                 fetched_body,
@@ -181,9 +207,15 @@ class DocsSourceDiscoveryService:
             warnings = [] if parsed.reason_code == "ok" else [parsed.reason_code]
             if parsed.skipped:
                 warnings.append("source_discovery_limit_exceeded")
-            return parsed.candidates, warnings
+            if parsed.reason_code != "ok":
+                return parsed.candidates, warnings, {"status": parsed.status, "reason_code": parsed.reason_code}
+            return parsed.candidates, warnings, {"status": "completed", "reason_code": "ok"}
         if kind == "page_links":
             parent_display = redacted_url_for_display(request.url)
+            discovered_urls: list[str] = []
+            if request.include_seed:
+                discovered_urls.append(request.url)
+            discovered_urls.extend(extract_page_links(request.url, fetched_body))
             candidates = [
                 DiscoveredURLCandidate(
                     url=url,
@@ -195,10 +227,13 @@ class DocsSourceDiscoveryService:
                     parent_display_url=parent_display,
                     safe_argument_hash=safe_argument_hash(url),
                 )
-                for url in extract_page_links(request.url, fetched_body)
+                for url in discovered_urls
             ]
-            return candidates, []
-        return [], ["source_discovery_kind_unsupported"]
+            return candidates, [], {"status": "completed", "reason_code": "ok"}
+        return [], ["source_discovery_kind_unsupported"], {
+            "status": "denied",
+            "reason_code": "source_discovery_kind_unsupported",
+        }
 
     def _apply_discovery(
         self,
@@ -283,13 +318,14 @@ class DocsSourceDiscoveryService:
             if result.get("reason_code") == "ok" and document_id is not None:
                 if source is not None:
                     stored_document = self.store.get_document(scope, document_id, mode="metadata")
+                    last_hash = str(stored_document.get("content_hash") or "") if stored_document else ""
                     self.store.link_source_document(
                         scope=scope,
                         source_id=int(source["id"]),
                         document_id=document_id,
                         source_item_uri=candidate.url,
                         status="active",
-                        last_hash=str(stored_document.get("content_hash") or ""),
+                        last_hash=last_hash,
                         metadata={"importer": "url_sitemap"},
                     )
                 ingested.append(
@@ -316,6 +352,8 @@ class DocsSourceDiscoveryService:
 
 
 class _LinkHTMLParser(HTMLParser):
+    """Small fallback link extractor used when BeautifulSoup is unavailable."""
+
     def __init__(self, base_url: str) -> None:
         super().__init__(convert_charrefs=True)
         self.base_url = base_url
@@ -337,6 +375,8 @@ class _LinkHTMLParser(HTMLParser):
 
 
 def parse_sitemap_urlset(body: bytes, *, max_pages: int, parent_url: str = "") -> SitemapParseResult:
+    """Parse a sitemap urlset without following sitemap indexes or external entities."""
+
     upper = body[:4096].upper()
     if b"<!DOCTYPE" in upper:
         return SitemapParseResult(status="denied", reason_code="sitemap_xml_forbidden_doctype", candidates=[])
@@ -344,6 +384,8 @@ def parse_sitemap_urlset(body: bytes, *, max_pages: int, parent_url: str = "") -
         return SitemapParseResult(status="denied", reason_code="sitemap_xml_forbidden_entity", candidates=[])
     try:
         root = ElementTree.fromstring(body)
+    except DefusedXmlException:
+        return SitemapParseResult(status="denied", reason_code="sitemap_parse_failed", candidates=[])
     except ElementTree.ParseError:
         return SitemapParseResult(status="failed", reason_code="sitemap_parse_failed", candidates=[])
 
@@ -384,6 +426,8 @@ def parse_sitemap_urlset(body: bytes, *, max_pages: int, parent_url: str = "") -
 
 
 def extract_page_links(base_url: str, body: bytes) -> list[str]:
+    """Extract unique HTTP(S) links from one HTML page body."""
+
     text = body.decode("utf-8", errors="replace")
     links = _extract_links_with_beautifulsoup(base_url, text)
     if links is None:
@@ -394,6 +438,8 @@ def extract_page_links(base_url: str, body: bytes) -> list[str]:
 
 
 def public_candidate(candidate: DiscoveredURLCandidate) -> dict[str, Any]:
+    """Return a candidate response with raw query-bearing URLs redacted."""
+
     public = {
         "url": candidate.display_url,
         "status": candidate.status,
@@ -443,13 +489,29 @@ def _validate_discovery_request(
             candidates=[],
             warnings=["max_pages must be positive"],
         )
-    if request.max_depth is not None and request.max_depth != settings.max_discovery_depth:
+    if request.max_depth is not None and (
+        request.max_depth > settings.max_discovery_depth or request.max_depth > 1
+    ):
         return _discovery_response(
             status="denied",
             reason_code="source_discovery_request_invalid",
             request=request,
             candidates=[],
             warnings=["max_depth_unsupported"],
+        )
+    apply_action = request.apply_action or settings.discovery_apply_default
+    if (
+        request.mode == "apply"
+        and apply_action in {"register", "register_and_ingest"}
+        and url_has_query(request.url)
+        and not settings.persist_url_query_strings
+    ):
+        return _discovery_response(
+            status="denied",
+            reason_code="candidate_query_not_persisted",
+            request=request,
+            candidates=[],
+            warnings=["source_url_query_not_persisted"],
         )
     return None
 
@@ -594,7 +656,14 @@ def _public_source_for_response(source: dict[str, Any] | None) -> dict[str, Any]
 
 def _origin(url: str) -> tuple[str, str, int | None]:
     parts = urlsplit(url)
-    return parts.scheme.lower(), (parts.hostname or "").lower(), parts.port
+    scheme = parts.scheme.lower()
+    try:
+        port = parts.port
+    except ValueError:
+        port = None
+    if (scheme == "http" and port == 80) or (scheme == "https" and port == 443):
+        port = None
+    return scheme, (parts.hostname or "").lower(), port
 
 
 def _merged_content_types(existing: tuple[str, ...], additions: tuple[str, ...]) -> tuple[str, ...]:
@@ -652,5 +721,7 @@ def _strip_fragment(url: str) -> str:
     return urlunsplit((parts.scheme, parts.netloc, parts.path or "/", parts.query, ""))
 
 
-def _local_name(tag: str) -> str:
+def _local_name(tag: Any) -> str:
+    if not isinstance(tag, str):
+        return ""
     return tag.rsplit("}", 1)[-1]

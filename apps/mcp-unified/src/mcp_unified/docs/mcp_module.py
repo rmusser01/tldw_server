@@ -8,7 +8,14 @@ from .acquisition.extract import available_extractors
 from .acquisition.service import DocsAcquisitionService
 from .discovery import DocsSourceDiscoveryService
 from .importers.local import DocsImportService
-from .models import AccessScope, ContextRequest, DiscoverSourceRequest, SearchFilters, SearchRequest, SyncSourceRequest
+from .models import (
+    AccessScope,
+    ContextRequest,
+    DiscoverSourceRequest,
+    SearchFilters,
+    SearchRequest,
+    SyncSourceRequest,
+)
 from .retrieval.aliases import DocsAliasResolver
 from .retrieval.context import DocsContextBuilder
 from .retrieval.search import DocsRetrievalService
@@ -62,6 +69,8 @@ def _source_sync_status(settings: DocsSettings) -> dict[str, Any]:
 
 
 def _source_discovery_status(settings: DocsSettings) -> dict[str, Any]:
+    """Report source discovery availability and configured bounds."""
+
     enabled = settings.enable_source_discovery
     available = enabled and settings.enable_web_acquisition
     disabled_reason = None if available else (
@@ -73,7 +82,7 @@ def _source_discovery_status(settings: DocsSettings) -> dict[str, Any]:
         "disabled_reason": disabled_reason,
         "supported_kinds": ["sitemap", "page_links"],
         "max_discovery_pages": settings.max_discovery_pages,
-        "max_discovery_depth": settings.max_discovery_depth,
+        "max_discovery_depth": min(settings.max_discovery_depth, 1),
         "max_discovery_sitemaps": settings.max_discovery_sitemaps,
         "discovery_apply_default": settings.discovery_apply_default,
         "discovery_same_origin_only": settings.discovery_same_origin_only,

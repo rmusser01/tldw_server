@@ -97,6 +97,8 @@ class SyncSourceRequest:
 
 @dataclass(frozen=True)
 class DiscoverSourceRequest:
+    """Request one bounded sitemap or page-link discovery run."""
+
     url: str
     kind: DiscoveryKind = "auto"
     mode: DiscoveryMode = "dry_run"
