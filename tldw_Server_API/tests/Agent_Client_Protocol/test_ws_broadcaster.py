@@ -57,6 +57,27 @@ async def test_ws_broadcaster_delivers_events_full_verbosity():
 
 
 @pytest.mark.asyncio
+async def test_ws_broadcaster_allows_unique_consumer_ids():
+    """Distinct broadcasters should not overwrite each other's bus subscription."""
+    bus = SessionEventBus(session_id="sess-unique-consumers")
+    first = WSBroadcaster(consumer_id="ws_broadcaster:conn-1")
+    second = WSBroadcaster(consumer_id="ws_broadcaster:conn-2")
+
+    try:
+        await first.start(bus)
+        await second.start(bus)
+
+        assert set(bus._subscribers) == {
+            "ws_broadcaster:conn-1",
+            "ws_broadcaster:conn-2",
+        }
+    finally:
+        await first.stop()
+        await second.stop()
+    assert bus._subscribers == {}
+
+
+@pytest.mark.asyncio
 async def test_ws_broadcaster_summary_filters_thinking():
     """Summary verbosity should drop thinking/tool_call/etc., keep completion."""
     bus = SessionEventBus(session_id="sess-1")
