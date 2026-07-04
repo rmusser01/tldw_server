@@ -90,8 +90,8 @@ Allowed persisted fields for the `mcp_tools` step:
 - `confirmed_addon_ids`: list of strings
 - `confirmation_version`: string or null
 - `validation_state`: one of the states listed above
-- `profile_id`: integer or null
-- `assignment_id`: integer or null
+- `profile_id`: string or null
+- `assignment_id`: string or null
 - `catalog_version`: string
 - `effective_tool_count`: integer
 - `validated_at`: ISO timestamp string or null
@@ -130,13 +130,15 @@ Initial v1 pack ids and defaults:
 
 | Pack id | Label | Default | Server-native module targets | Initial read-only tool patterns |
 | --- | --- | --- | --- | --- |
-| `research` | Research | selected | `knowledge`, `media`, `prompts`, `mcp_discovery` | `knowledge.search*`, `knowledge.get*`, `media.search*`, `media.get*`, `prompts.list*`, `prompts.get*`, `mcp.discovery*` |
-| `learning` | Learning | selected | `quizzes`, `flashcards`, `media` | `quizzes.list*`, `quizzes.get*`, `flashcards.list*`, `flashcards.get*`, `media.search*`, `media.get*` |
-| `writing` | Writing | selected | `prompts`, `notes` | `prompts.list*`, `prompts.get*`, `notes.list*`, `notes.get*` |
-| `media_library` | Media Library | selected | `media` | `media.list*`, `media.search*`, `media.get*` |
-| `personal_knowledge` | Personal Knowledge | selected | `notes`, `prompts`, `knowledge` | `notes.list*`, `notes.get*`, `prompts.list*`, `prompts.get*`, `knowledge.search*`, `knowledge.get*` |
+| `research` | Research | selected | `knowledge`, `media`, `prompts`, `mcp_discovery` | `knowledge.search`, `knowledge.get`, `media.search`, `media.get`, `prompts.search`, `prompts.get`, `mcp.catalogs.list`, `mcp.modules.list`, `mcp.tools.list` |
+| `learning` | Learning | selected | `quizzes`, `flashcards`, `media` | `quizzes.list`, `quizzes.get`, `quizzes.questions.list`, `quizzes.attempts.list`, `quizzes.attempts.get`, `flashcards.decks.list`, `flashcards.decks.get`, `flashcards.list`, `flashcards.get`, `flashcards.tags.get`, `media.search`, `media.get` |
+| `writing` | Writing | selected | `prompts`, `notes` | `prompts.search`, `prompts.get`, `notes.search`, `notes.get`, `notes.tags.list`, `notes.tasks.list`, `notes.tasks.get` |
+| `media_library` | Media Library | selected | `media` | `media.search`, `media.get` |
+| `personal_knowledge` | Personal Knowledge | selected | `notes`, `prompts`, `knowledge` | `notes.search`, `notes.get`, `notes.tags.list`, `prompts.search`, `prompts.get`, `knowledge.search`, `knowledge.get` |
 
 These patterns define the intended v1 behavior, not a permission bypass. Implementation planning must bind them to the actual registered tool names in the current registry and keep the registry risk metadata authoritative. If a target module lacks a matching read-only tool, the catalog should show the pack with fewer available tools instead of widening the policy.
+
+Default generated policy must use explicit read-only `allowed_tools` or narrow `tool_patterns` for modules that also contain write-capable tools. Do not grant `module_patterns` for mixed-risk modules such as `notes`, `quizzes`, `flashcards`, or `slides` in the first-run default profile.
 
 Initial disabled add-ons:
 
@@ -164,6 +166,8 @@ Saving packs upserts one MCP Hub permission profile:
 The profile is assigned visibly through MCP Hub so users can inspect or replace it later.
 
 Do not locate the profile by display name alone. Use the stable metadata marker and setup id.
+
+For single-user v1, upsert the profile as the visible default assignment (`is_default = true`) unless implementation planning finds an existing app-specific assignment target that is already used by MCP Hub. First-run setup should not ask the user to choose a principal or workspace.
 
 ### Manual Edit Protection
 
@@ -271,6 +275,7 @@ Backend unit tests:
 - default low-risk read-only selection
 - local file read excluded by default
 - risky add-ons excluded until opt-in
+- default policy does not grant module-wide access for mixed-risk modules
 - generated policy from selected packs and add-ons
 - stable profile upsert by metadata marker
 - duplicate save and retry idempotency
