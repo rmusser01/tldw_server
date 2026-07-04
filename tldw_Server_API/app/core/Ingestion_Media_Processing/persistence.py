@@ -3320,15 +3320,35 @@ async def add_media_orchestrate(
                                     logger.debug("Failed to close original file handle for {}", source_file)
 
                             # Insert database record
-                            db.insert_media_file(
-                                media_id=media_id,
-                                file_type="original",
-                                storage_path=storage_path,
-                                original_filename=original_filename,
-                                file_size=file_size,
-                                mime_type=mime_type,
-                                checksum=checksum,
-                            )
+                            try:
+                                db.insert_media_file(
+                                    media_id=media_id,
+                                    file_type="original",
+                                    storage_path=storage_path,
+                                    original_filename=original_filename,
+                                    file_size=file_size,
+                                    mime_type=mime_type,
+                                    checksum=checksum,
+                                )
+                            except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
+                                try:
+                                    deleted = await storage.delete(storage_path)
+                                    if not deleted:
+                                        logger.warning(
+                                            "Stored original file {} was not deleted after registration failure "
+                                            "for media_id={}",
+                                            storage_path,
+                                            media_id,
+                                        )
+                                except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as cleanup_err:
+                                    logger.warning(
+                                        "Failed to delete stored original file {} after registration failure "
+                                        "for media_id={}: {}",
+                                        storage_path,
+                                        media_id,
+                                        cleanup_err,
+                                    )
+                                raise
 
                             logger.info(f"Stored original file for media_id={media_id}: {storage_path}")
                             result["original_file_stored"] = True
