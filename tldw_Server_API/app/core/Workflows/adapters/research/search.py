@@ -33,7 +33,9 @@ from tldw_Server_API.app.core.Workflows.adapters.research._config import (
 )
 
 
-async def _managed_afetch(**kwargs: Any) -> Any:
+async def _managed_afetch(client: Any | None = None, **kwargs: Any) -> Any:
+    if client is not None:
+        return await afetch(client=client, **kwargs)
     timeout = kwargs.get("timeout")
     async with create_async_client(timeout=timeout) as client:
         return await afetch(client=client, **kwargs)
@@ -274,30 +276,43 @@ async def run_pubmed_search_adapter(config: dict[str, Any], context: dict[str, A
         # Use NCBI E-utilities
         base_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 
-        # Search for IDs
-        search_url = f"{base_url}/esearch.fcgi"
-        search_params = {
-            "db": "pubmed",
-            "term": query,
-            "retmax": max_results,
-            "retmode": "json",
-        }
-        search_response = await _managed_afetch(method="GET", url=search_url, params=search_params, timeout=30)
-        search_data = search_response.json()
+        async with create_async_client(timeout=30) as client:
+            # Search for IDs
+            search_url = f"{base_url}/esearch.fcgi"
+            search_params = {
+                "db": "pubmed",
+                "term": query,
+                "retmax": max_results,
+                "retmode": "json",
+            }
+            search_response = await _managed_afetch(
+                client=client,
+                method="GET",
+                url=search_url,
+                params=search_params,
+                timeout=30,
+            )
+            search_data = search_response.json()
 
-        id_list = search_data.get("esearchresult", {}).get("idlist", [])
-        if not id_list:
-            return {"papers": [], "total_results": 0, "query": query}
+            id_list = search_data.get("esearchresult", {}).get("idlist", [])
+            if not id_list:
+                return {"papers": [], "total_results": 0, "query": query}
 
-        # Fetch details
-        fetch_url = f"{base_url}/esummary.fcgi"
-        fetch_params = {
-            "db": "pubmed",
-            "id": ",".join(id_list),
-            "retmode": "json",
-        }
-        fetch_response = await _managed_afetch(method="GET", url=fetch_url, params=fetch_params, timeout=30)
-        fetch_data = fetch_response.json()
+            # Fetch details
+            fetch_url = f"{base_url}/esummary.fcgi"
+            fetch_params = {
+                "db": "pubmed",
+                "id": ",".join(id_list),
+                "retmode": "json",
+            }
+            fetch_response = await _managed_afetch(
+                client=client,
+                method="GET",
+                url=fetch_url,
+                params=fetch_params,
+                timeout=30,
+            )
+            fetch_data = fetch_response.json()
 
         papers = []
         result_data = fetch_data.get("result", {})

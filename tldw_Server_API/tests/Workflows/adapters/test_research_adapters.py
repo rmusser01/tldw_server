@@ -1426,6 +1426,83 @@ async def test_pubmed_search_adapter_with_template(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_pubmed_search_adapter_reuses_central_http_client(monkeypatch):
+    """PubMed search and summary requests should share one central async client."""
+    monkeypatch.setenv("TEST_MODE", "0")
+    monkeypatch.setenv("TLDW_TEST_MODE", "0")
+
+    from tldw_Server_API.app.core.Workflows.adapters.research import (
+        run_pubmed_search_adapter,
+        search as search_module,
+    )
+
+    shared_client = object()
+    client_contexts: list[dict[str, object]] = []
+    fetch_calls: list[dict[str, object]] = []
+
+    class _FakeClientContext:
+        async def __aenter__(self):
+            client_contexts.append({"event": "enter"})
+            return shared_client
+
+        async def __aexit__(self, exc_type, exc, tb):
+            client_contexts.append({"event": "exit"})
+            return False
+
+    class _SearchResponse:
+        @staticmethod
+        def json():
+            return {"esearchresult": {"idlist": ["123", "456"]}}
+
+    class _SummaryResponse:
+        @staticmethod
+        def json():
+            return {
+                "result": {
+                    "123": {
+                        "title": "First",
+                        "authors": [{"name": "A. Author"}],
+                        "source": "Journal",
+                        "pubdate": "2024",
+                        "elocationid": "10.1/example",
+                    },
+                    "456": {
+                        "title": "Second",
+                        "authors": [{"name": "B. Author"}],
+                        "source": "Journal",
+                        "pubdate": "2025",
+                        "elocationid": "10.2/example",
+                    },
+                }
+            }
+
+    def _fake_create_async_client(**kwargs):
+        client_contexts.append({"event": "create", **kwargs})
+        return _FakeClientContext()
+
+    async def _fake_afetch(**kwargs):
+        fetch_calls.append(dict(kwargs))
+        if str(kwargs["url"]).endswith("/esearch.fcgi"):
+            return _SearchResponse()
+        return _SummaryResponse()
+
+    monkeypatch.setattr(search_module, "create_async_client", _fake_create_async_client)
+    monkeypatch.setattr(search_module, "afetch", _fake_afetch, raising=False)
+
+    result = await run_pubmed_search_adapter({"query": "cancer", "max_results": 2}, {})
+
+    assert [event["event"] for event in client_contexts] == ["create", "enter", "exit"]
+    assert client_contexts[0]["timeout"] == 30
+    assert len(fetch_calls) == 2
+    assert fetch_calls[0]["client"] is shared_client
+    assert fetch_calls[1]["client"] is shared_client
+    assert fetch_calls[0]["url"].endswith("/esearch.fcgi")
+    assert fetch_calls[1]["url"].endswith("/esummary.fcgi")
+    assert result["total_results"] == 2
+    assert [paper["pmid"] for paper in result["papers"]] == ["123", "456"]
+
+
+@pytest.mark.asyncio
 async def test_pubmed_search_adapter_cancelled(monkeypatch):
     """Test PubMed search respects cancellation."""
     monkeypatch.setenv("TEST_MODE", "1")
