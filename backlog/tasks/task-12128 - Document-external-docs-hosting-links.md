@@ -4,7 +4,7 @@ title: Document external docs hosting links
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-07-04 05:38'
+updated_date: '2026-07-04 06:04'
 labels:
   - docs
 dependencies: []
@@ -52,6 +52,8 @@ Bandit skipped: touched implementation files are Markdown, static HTML links, an
 Known skip: broad Docs/Published refresh drift was not committed; CI and external deploy docs still run the refresh before building.
 
 PR: https://github.com/rmusser01/tldw_server/pull/2616
+
+Review follow-up: rebased branch onto origin/dev; fixed Qodo comments by qualifying MkDocs serve/build commands with -f Docs/mkdocs.yml and replacing stale GitHub Pages public links with relative docs links or the tldwproject.com canonical URL. Verification: refresh_docs_published.sh exited 0; python3 -m mkdocs build -f Docs/mkdocs.yml exited 0 with existing baseline warnings; stale GitHub Pages URL grep returned no matches outside ignored Docs/site; unqualified MkDocs command grep returned no matches.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

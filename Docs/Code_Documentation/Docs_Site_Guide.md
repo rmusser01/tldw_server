@@ -76,20 +76,20 @@ pip install mkdocs mkdocs-material mkdocs-git-revision-date-localized-plugin
 Serve locally (auto-reloads on file changes):
 
 ```
-mkdocs serve
+mkdocs serve -f Docs/mkdocs.yml
 ```
 
-Build static site (outputs to `site/`):
+Build static site (outputs to `Docs/site/`):
 
 ```
-mkdocs build
+mkdocs build -f Docs/mkdocs.yml
 ```
 
 ## "Last updated" Dates
 
 - The site shows per-page "Last updated" timestamps via the `git-revision-date-localized` plugin, using relative time ("time ago").
 - Accurate dates require git history. Locally, ensure your repo has the relevant commits. In CI, we fetch full history (`fetch-depth: 0`).
-- Configuration lives in `mkdocs.yml` under `plugins.git-revision-date-localized` (with `type: timeago`).
+- Configuration lives in `Docs/mkdocs.yml` under `plugins.git-revision-date-localized` (with `type: timeago`).
 - If a page has no history (e.g., new file), the plugin falls back to the current build time.
 
 ## Theme and Assets
@@ -104,7 +104,7 @@ To change the logo: replace `Docs/Logo.png` and run the refresh script.
 ## Navigation
 
 - The sidebar and ordering are defined explicitly in `mkdocs.yml` under `nav:`
-- When adding a new page you want visible in the sidebar, add a new entry under the appropriate section in `mkdocs.yml`
+- When adding a new page you want visible in the sidebar, add a new entry under the appropriate section in `Docs/mkdocs.yml`
 - The nav uses paths relative to `Docs/Published/`
 - Keep the top-level navigation audience-first: `Home`, `User Wiki`, `Developer Wiki`, and shared reference links.
 - User-facing workflow docs belong under the `User Wiki` nav tree.
@@ -123,8 +123,8 @@ Tip: keep titles short and parallel (e.g., "Guide", "Reference", "Checklist").
 
 1. Edit or add Markdown files under the appropriate source folder in `Docs/`
 2. Run `bash Helper_Scripts/refresh_docs_published.sh` to re-sync curated content
-3. If the new page should appear in the sidebar, update `mkdocs.yml` `nav:` accordingly
-4. Preview with `mkdocs serve`
+3. If the new page should appear in the sidebar, update `Docs/mkdocs.yml` `nav:` accordingly
+4. Preview with `mkdocs serve -f Docs/mkdocs.yml`
 5. Commit and push; CI will refresh, build, and deploy the GitHub Pages mirror
 
 Notes:
@@ -158,7 +158,7 @@ If an external deploy fails:
 - Confirm `Docs/mkdocs.yml` has `site_url: https://tldwproject.com/server/docs/`
 - Check the external host logs for copy/job failures
 - Check GitHub workflow logs for mirror build errors (usually missing files/links)
-- Re-run the refresh script locally and build with `mkdocs build` to reproduce
+- Re-run the refresh script locally and build with `mkdocs build -f Docs/mkdocs.yml` to reproduce
 
 ## GitHub Pages Mirror
 
