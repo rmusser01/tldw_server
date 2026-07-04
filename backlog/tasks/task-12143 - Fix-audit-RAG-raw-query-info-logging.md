@@ -1,8 +1,8 @@
 ---
-id: TASK-12141
+id: TASK-12143
 title: Fix audit RAG raw query info logging
 status: Done
-created_date: 2026-07-04 03:25
+created_date: 2026-07-04 18:20
 labels:
 - audit
 - remediation
@@ -12,13 +12,14 @@ labels:
 priority: medium
 references:
 - AUDIT-2026-06-27-CHAT-002
+- https://github.com/rmusser01/tldw_server/pull/2614
 documentation:
 - Docs/superpowers/reviews/2026-06-27-repo-audit/domains/chat-rag-llm.md
 - Docs/superpowers/reviews/2026-06-27-repo-audit/remediation-backlog-draft.md
 modified_files:
 - tldw_Server_API/app/api/v1/endpoints/rag_unified.py
 - tldw_Server_API/tests/RAG/test_rag_query_logging.py
-updated_date: 2026-07-04 03:29
+updated_date: 2026-07-04 18:23
 ---
 
 ## Description
@@ -42,6 +43,9 @@ Remediate AUDIT-2026-06-27-CHAT-002 by replacing info-level RAG logs that includ
 - Replaced raw info-level query logging in unified and advanced RAG search paths; simple search now reuses the same helper.
 - Added focused unit coverage asserting sensitive query fragments and private paths are absent from rendered info logs while hash/length metadata remains present.
 - Verification: `python -m pytest tldw_Server_API/tests/RAG/test_rag_query_logging.py -q` passed with 2 tests; Bandit over `tldw_Server_API/app/api/v1/endpoints/rag_unified.py` reported 0 findings; `git diff --check` passed; targeted source scan found no old unified/advanced raw-query info log patterns.
+- 2026-07-04 latest-dev refresh: rebased `codex/audit-rag-query-logging-2026-07-04` onto `origin/dev` `fd5c152b065c408e4e8ee5f08da41589f21cb7f5`; merge-base matches `origin/dev`.
+- Latest-dev validation: `.venv/bin/python -m pytest tldw_Server_API/tests/RAG/test_rag_query_logging.py -q` passed with 2 tests; `.venv/bin/python -m bandit -r tldw_Server_API/app/api/v1/endpoints/rag_unified.py -f json -o /tmp/bandit_rag_query_logging_latest.json` reported 0 findings; `git diff --check` passed; targeted raw-query logger scan found no old unified/advanced/simple raw-query info log patterns.
+- Tracking hygiene: moved this RAG audit record from duplicate `TASK-12141` to `TASK-12143` so it does not collide with another active audit PR.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
