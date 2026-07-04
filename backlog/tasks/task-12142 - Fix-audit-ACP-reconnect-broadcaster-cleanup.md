@@ -2,7 +2,9 @@
 id: TASK-12142
 title: Fix audit ACP reconnect broadcaster cleanup
 status: Done
+assignee: []
 created_date: 2026-07-04 06:55
+updated_date: 2026-07-04 18:59
 labels:
 - audit
 - remediation
@@ -10,19 +12,19 @@ labels:
 - acp
 - websocket
 - reliability
-priority: low
+dependencies: []
 references:
 - AUDIT-2026-06-27-MCP-002
 - https://github.com/rmusser01/tldw_server/pull/2619
 documentation:
 - Docs/superpowers/reviews/2026-06-27-repo-audit/domains/mcp-sandbox-agent-protocol.md
 - Docs/superpowers/reviews/2026-06-27-repo-audit/specialists/reliability-lifecycle.md
+priority: low
 modified_files:
 - tldw_Server_API/app/api/v1/endpoints/agent_client_protocol.py
 - tldw_Server_API/app/core/Agent_Client_Protocol/consumers/ws_broadcaster.py
 - tldw_Server_API/tests/Agent_Client_Protocol/test_acp_websocket.py
 - tldw_Server_API/tests/Agent_Client_Protocol/test_ws_broadcaster.py
-updated_date: 2026-07-04 07:01
 ---
 
 ## Description
@@ -51,27 +53,30 @@ Address audit finding MCP-002: ACP reconnect WebSocket replay creates a temporar
 
 ## Implementation Notes
 
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+<!-- SECTION:NOTES:BEGIN -->
 Validation notes:
-- Confirmed worktree was fetched from and equal to latest origin/dev commit 06674d8931b5bfff28414300dbc333eacd669484 before edits.
-- Red check failed as expected: reconnect endpoint left `ws_broadcaster` in the session event bus and WSBroadcaster did not accept a custom `consumer_id`.
-- Targeted regression command passed after implementation: `python -m pytest tldw_Server_API/tests/Agent_Client_Protocol/test_acp_websocket.py::test_acp_session_stream_reconnect_cleans_up_replay_broadcaster tldw_Server_API/tests/Agent_Client_Protocol/test_ws_broadcaster.py::test_ws_broadcaster_allows_unique_consumer_ids -q`.
-- Broader file command found a pre-existing latest-dev failure unrelated to this remediation: `test_acp_websocket.py::TestACPRunnerClientPermissions::test_determine_permission_tier_batch` expects `fs.write` to be `batch`, but current dev returns `individual`; the test also fails when run alone.
+- Original PR branch was stale after latest dev advanced; fetched origin/dev and rebased cleanly onto fd5c152b065c408e4e8ee5f08da41589f21cb7f5. Post-rebase merge-base matched origin/dev before validation.
+- Red check failed as expected before the original implementation: reconnect endpoint left `ws_broadcaster` in the session event bus and WSBroadcaster did not accept a custom `consumer_id`.
+- Reviewed Gemini feedback on PR #2619. The `nonlocal` suggestion is technically invalid for the current code because `reconnect_broadcaster` and `reconnect_conn_id` are assigned in the `acp_session_stream` function scope, not inside `_send_callback`. No endpoint code change was made for that suggestion.
+- Strengthened the endpoint reconnect regression so it preloads the session event bus with a buffered completion event and asserts the reconnect stream receives the replayed payload before verifying cleanup. This prevents the test from passing trivially when the reconnect broadcaster path is not exercised.
+- Targeted regression command passed after rebase and review follow-up: `.venv/bin/python -m pytest tldw_Server_API/tests/Agent_Client_Protocol/test_acp_websocket.py::test_acp_session_stream_reconnect_cleans_up_replay_broadcaster tldw_Server_API/tests/Agent_Client_Protocol/test_ws_broadcaster.py::test_ws_broadcaster_allows_unique_consumer_ids -q` (2 passed).
+- Bandit passed with 0 findings: `.venv/bin/python -m bandit -r tldw_Server_API/app/api/v1/endpoints/agent_client_protocol.py tldw_Server_API/app/core/Agent_Client_Protocol/consumers/ws_broadcaster.py -f json -o /tmp/bandit_acp_reconnect_cleanup_latest_dev.json`.
+- `git diff --check` passed.
+- Broader file command on latest dev still has one unrelated baseline failure: `test_acp_websocket.py::TestACPRunnerClientPermissions::test_determine_permission_tier_batch` expects `fs.write` to be `batch`, but current dev returns `individual`; the focused ACP reconnect and broadcaster regressions pass.
 PR opened: https://github.com/rmusser01/tldw_server/pull/2619 (draft against dev). Draft status is intentional until the human-authored Change summary required by project policy is added.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
+<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented MCP-002 remediation for ACP reconnect replay cleanup. `acp_session_stream` now retains the temporary replay broadcaster and connection id, uses a per-connection WSBroadcaster consumer id, removes the replay connection, and stops the broadcaster in the endpoint finalizer. `WSBroadcaster` now accepts an optional consumer id while preserving the existing default for existing callers. Added focused regressions for endpoint reconnect cleanup and distinct broadcaster subscriptions.
+Implemented MCP-002 remediation for ACP reconnect replay cleanup and refreshed it against latest dev. `acp_session_stream` retains the temporary replay broadcaster and connection id, uses a per-connection WSBroadcaster consumer id, removes the replay connection, and stops the broadcaster in the endpoint finalizer. `WSBroadcaster` accepts an optional consumer id while preserving the existing default. The endpoint regression now proves the reconnect broadcaster path by replaying a buffered completion event and asserting the stream receives it before disconnect cleanup.
 
-Verification:
-- Latest dev checked before edits and before commit prep: origin/dev and merge-base both `06674d8931b5bfff28414300dbc333eacd669484`.
-- Red checks failed before implementation for the expected leak and fixed consumer-id limitation.
-- Passed: `python -m pytest tldw_Server_API/tests/Agent_Client_Protocol/test_acp_websocket.py::test_acp_session_stream_reconnect_cleans_up_replay_broadcaster tldw_Server_API/tests/Agent_Client_Protocol/test_ws_broadcaster.py::test_ws_broadcaster_allows_unique_consumer_ids -q`.
-- Passed: `python -m bandit -r tldw_Server_API/app/api/v1/endpoints/agent_client_protocol.py tldw_Server_API/app/core/Agent_Client_Protocol/consumers/ws_broadcaster.py -f json -o /tmp/bandit_acp_reconnect_cleanup.json` with 0 findings.
+Verification on latest dev fd5c152b065c408e4e8ee5f08da41589f21cb7f5:
+- Merge-base matched origin/dev after rebase.
+- Passed: `.venv/bin/python -m pytest tldw_Server_API/tests/Agent_Client_Protocol/test_acp_websocket.py::test_acp_session_stream_reconnect_cleans_up_replay_broadcaster tldw_Server_API/tests/Agent_Client_Protocol/test_ws_broadcaster.py::test_ws_broadcaster_allows_unique_consumer_ids -q` (2 passed).
+- Passed: `.venv/bin/python -m bandit -r tldw_Server_API/app/api/v1/endpoints/agent_client_protocol.py tldw_Server_API/app/core/Agent_Client_Protocol/consumers/ws_broadcaster.py -f json -o /tmp/bandit_acp_reconnect_cleanup_latest_dev.json` with 0 findings.
 - Passed: `git diff --check`.
-- Broader run note: `test_acp_websocket.py test_ws_broadcaster.py -q` has one pre-existing latest-dev failure unrelated to this fix: `TestACPRunnerClientPermissions::test_determine_permission_tier_batch`.
+- Broader run note: `test_acp_websocket.py test_ws_broadcaster.py -q` has one unrelated current-dev failure in `TestACPRunnerClientPermissions::test_determine_permission_tier_batch`.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

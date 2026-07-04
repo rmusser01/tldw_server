@@ -25,6 +25,7 @@ from tldw_Server_API.app.core.Agent_Client_Protocol.runner_client import (
     SessionWebSocketRegistry,
 )
 from tldw_Server_API.app.core.Agent_Client_Protocol.event_bus import SessionEventBus
+from tldw_Server_API.app.core.Agent_Client_Protocol.events import AgentEvent, AgentEventKind
 from tldw_Server_API.app.core.Agent_Client_Protocol.stdio_client import ACPMessage
 from tldw_Server_API.app.services.acp_runtime_policy_service import (
     ACPRuntimePolicySnapshot,
@@ -297,6 +298,13 @@ async def test_acp_session_stream_reconnect_cleans_up_replay_broadcaster(monkeyp
 
     session_id = "session-reconnect-cleanup"
     bus = SessionEventBus(session_id=session_id)
+    await bus.publish(
+        AgentEvent(
+            session_id=session_id,
+            kind=AgentEventKind.COMPLETION,
+            payload={"detail": "replay-me"},
+        )
+    )
     stub_client = MockRunnerClient()
     release_calls: list[str] = []
     streams: list[Any] = []
@@ -357,6 +365,15 @@ async def test_acp_session_stream_reconnect_cleans_up_replay_broadcaster(monkeyp
     assert not stub_client.has_websocket_connections(session_id)
     assert release_calls == ["quota-token"]
     assert streams and streams[0].stop_calls == 1
+    replayed_payloads = [
+        payload
+        for payload in streams[0].sent_payloads
+        if payload.get("kind") == AgentEventKind.COMPLETION.value
+    ]
+    assert len(replayed_payloads) == 1
+    assert replayed_payloads[0]["session_id"] == session_id
+    assert replayed_payloads[0]["sequence"] == 1
+    assert replayed_payloads[0]["payload"] == {"detail": "replay-me"}
 
 
 class TestACPWebSocketConnection:
