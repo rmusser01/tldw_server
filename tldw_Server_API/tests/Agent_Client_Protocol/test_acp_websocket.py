@@ -283,7 +283,11 @@ async def test_acp_session_stream_start_failure_skips_unset_callback_cleanup(mon
     monkeypatch.setattr(acp_endpoints, "get_runner_client", _fake_get_runner_client)
     monkeypatch.setattr(acp_endpoints, "WebSocketStream", _FailingStream)
 
-    await acp_endpoints.acp_session_stream(_FakeWebSocket(), "session-start-failure", token="valid-token")
+    await acp_endpoints.acp_session_stream(
+        _FakeWebSocket(),
+        "session-start-failure",
+        token="valid-token",  # nosec B106
+    )
 
     if stub_client.unregister_calls:
         pytest.fail("Expected no unregister call when stream start fails before callback assignment")
@@ -983,8 +987,10 @@ class TestACPRunnerClientPermissions:
 
         # Destructive operations should be individual
         assert client._determine_permission_tier("fs.delete") == "individual"
+        assert client._determine_permission_tier("fs.write") == "individual"
         assert client._determine_permission_tier("exec.run") == "individual"
         assert client._determine_permission_tier("git.push") == "individual"
+        assert client._determine_permission_tier("modify_file") == "individual"
         assert client._determine_permission_tier("terminal.execute") == "individual"
 
     @pytest.mark.asyncio
