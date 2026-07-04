@@ -1457,6 +1457,7 @@ Run locally
 <summary>Documentation and resources</summary>
 
 **Getting Started Guides:**
+- [Public documentation site](https://tldwproject.com/server/docs/) - canonical docs hosted on tldwproject.com
 - [User Wiki](Docs/Wiki/User_Wiki.md) - install, run, configure, and use tldw_server
 - [Developer Wiki](Docs/Wiki/Developer_Wiki.md) - contribute to, test, package, and understand the codebase
 - [User Guides Documentation Map](Docs/User_Guides/index.md) - task-oriented map for setup, WebUI, extension, API, and admin workflows

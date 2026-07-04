@@ -59,7 +59,7 @@ The implementation should distinguish source-file links from published-site link
 
 - Repository Markdown, such as `README.md`, can link to `Docs/User_Guides/index.md`.
 - MkDocs nav entries must use paths relative to `Docs/Published/`, such as `User_Guides/index.md`.
-- Extension VitePress pages should not use fragile relative links that walk out of the extension docs root. They should link to the public MkDocs URL for the canonical hub, currently `https://rmusser01.github.io/tldw_server/User_Guides/`, or to a GitHub source URL if a public docs URL is not available in the target environment.
+- Extension VitePress pages should not use fragile relative links that walk out of the extension docs root. They should link to the public MkDocs URL for the canonical hub, currently `https://tldwproject.com/server/docs/User_Guides/`, or to a GitHub source URL if a public docs URL is not available in the target environment.
 - The public MkDocs hub should prefer links to content that is included in the published docs set. If a useful extension-only page exists only under `apps/extension/docs`, link to a GitHub source page or defer that link until the page has a public docs home.
 
 ## Information Architecture

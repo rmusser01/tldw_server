@@ -55,7 +55,7 @@ Common workflows:
 - **Create and manage knowledge artifacts**: use [Chatbook user guide](WebUI_Extension/Chatbook_User_Guide.md) for OpenWebUI chat JSON and database import with post-import attachment hydration, [Prompt Studio API](../API-related/Prompt_Studio_API.md), and [Reading list API](../API-related/Reading_List_API.md).
 - **Automate and integrate**: use [Workflows examples](WebUI_Extension/Workflows_Examples.md), [Collections feeds API](../API-related/Collections_Feeds_API.md), and [Getting started with ACP](Integrations_Experiments/Getting_Started_with_ACP.md).
 - **Prototype workspace flows**: use [Prototype Workspaces User Guide](Prototype_Workspaces.md) to run isolated workspace experiments.
-- **Administer a shared server**: use [Organizations and sharing](Server/Organizations_and_Sharing.md), [BYOK user guide](Server/BYOK_User_Guide.md), [Usage module](Server/Usage_Module.md), and [Metrics cheatsheet](https://rmusser01.github.io/tldw_server/Monitoring/Metrics_Cheatsheet/).
+- **Administer a shared server**: use [Organizations and sharing](Server/Organizations_and_Sharing.md), [BYOK user guide](Server/BYOK_User_Guide.md), [Usage module](Server/Usage_Module.md), and [Metrics cheatsheet](../Monitoring/Metrics_Cheatsheet.md).
 
 ## Troubleshooting
 

@@ -8,9 +8,11 @@ This document explains how the tldw_Server documentation site is organized, buil
 - Published scope: Only a curated subset of the `Docs/` tree
 - Source of truth: Update files under `Docs/`, not `Docs/Published/`
 - Build root: `Docs/Published/` (MkDocs `docs_dir`)
-- Deployment: GitHub Pages via GitHub Actions
+- Canonical public URL: `https://tldwproject.com/server/docs/`
+- Production deployment: external tldwproject.com host at `/server/docs/`
+- Mirror deployment: GitHub Pages via GitHub Actions
 
-The public docs site is for OSS, self-host, and developer documentation. Hosted/commercial docs are excluded from the published site and should live in the private repo instead of this public docs pipeline.
+The public docs site is for OSS, self-host, and developer documentation. Hosted/commercial docs are excluded from the published site and should live in the private repo instead of this public docs pipeline. GitHub Pages is a mirror of the same MkDocs output; `tldwproject.com/server/docs/` is the canonical URL and the MkDocs `site_url`.
 
 The published site is audience-first:
 
@@ -74,20 +76,20 @@ pip install mkdocs mkdocs-material mkdocs-git-revision-date-localized-plugin
 Serve locally (auto-reloads on file changes):
 
 ```
-mkdocs serve
+mkdocs serve -f Docs/mkdocs.yml
 ```
 
-Build static site (outputs to `site/`):
+Build static site (outputs to `Docs/site/`):
 
 ```
-mkdocs build
+mkdocs build -f Docs/mkdocs.yml
 ```
 
 ## "Last updated" Dates
 
 - The site shows per-page "Last updated" timestamps via the `git-revision-date-localized` plugin, using relative time ("time ago").
 - Accurate dates require git history. Locally, ensure your repo has the relevant commits. In CI, we fetch full history (`fetch-depth: 0`).
-- Configuration lives in `mkdocs.yml` under `plugins.git-revision-date-localized` (with `type: timeago`).
+- Configuration lives in `Docs/mkdocs.yml` under `plugins.git-revision-date-localized` (with `type: timeago`).
 - If a page has no history (e.g., new file), the plugin falls back to the current build time.
 
 ## Theme and Assets
@@ -102,7 +104,7 @@ To change the logo: replace `Docs/Logo.png` and run the refresh script.
 ## Navigation
 
 - The sidebar and ordering are defined explicitly in `mkdocs.yml` under `nav:`
-- When adding a new page you want visible in the sidebar, add a new entry under the appropriate section in `mkdocs.yml`
+- When adding a new page you want visible in the sidebar, add a new entry under the appropriate section in `Docs/mkdocs.yml`
 - The nav uses paths relative to `Docs/Published/`
 - Keep the top-level navigation audience-first: `Home`, `User Wiki`, `Developer Wiki`, and shared reference links.
 - User-facing workflow docs belong under the `User Wiki` nav tree.
@@ -121,9 +123,9 @@ Tip: keep titles short and parallel (e.g., "Guide", "Reference", "Checklist").
 
 1. Edit or add Markdown files under the appropriate source folder in `Docs/`
 2. Run `bash Helper_Scripts/refresh_docs_published.sh` to re-sync curated content
-3. If the new page should appear in the sidebar, update `mkdocs.yml` `nav:` accordingly
-4. Preview with `mkdocs serve`
-5. Commit and push; CI will refresh, build, and deploy the site
+3. If the new page should appear in the sidebar, update `Docs/mkdocs.yml` `nav:` accordingly
+4. Preview with `mkdocs serve -f Docs/mkdocs.yml`
+5. Commit and push; CI will refresh, build, and deploy the GitHub Pages mirror
 
 Notes:
 - Put audience chooser pages in `Docs/Wiki/`
@@ -135,16 +137,37 @@ Notes:
 - Prefer images stored under `Docs/assets/` or section subfolders; the refresh script copies section contents
 - Avoid linking to hosted/private docs from public pages; those references belong in the private repo
 
-## Deployment
+## External Deployment
+
+The production docs live on the external tldwproject.com host at `/server/docs/`.
+
+Manual external deploy:
+
+1. Run `bash Helper_Scripts/refresh_docs_published.sh`
+2. Run `mkdocs build -f Docs/mkdocs.yml`
+3. Copy the generated static site output to the external host under `/server/docs/`
+
+Optional site-side automation:
+
+1. Clone or pull this repository on the external host
+2. Detect a new version or commit
+3. Run the refresh and build commands
+4. Replace the served `/server/docs/` files atomically if the build succeeds
+
+If an external deploy fails:
+- Confirm `Docs/mkdocs.yml` has `site_url: https://tldwproject.com/server/docs/`
+- Check the external host logs for copy/job failures
+- Check GitHub workflow logs for mirror build errors (usually missing files/links)
+- Re-run the refresh script locally and build with `mkdocs build -f Docs/mkdocs.yml` to reproduce
+
+## GitHub Pages Mirror
 
 - Workflow file: `.github/workflows/mkdocs.yml`
 - Triggers: pushes to `main` and `PG-Backend`, and manual runs
-- Steps: checkout → install → refresh curated docs → build → deploy to GitHub Pages
-- Repository Settings → Pages: set Source = GitHub Actions
+- Steps: checkout -> install -> refresh curated docs -> build -> deploy to GitHub Pages
+- Repository Settings -> Pages: set Source = GitHub Actions
 
-If a deploy fails:
-- Check the workflow logs for build errors (usually missing files/links)
-- Re-run the refresh script locally and build with `mkdocs build` to reproduce
+The GitHub Pages site is a mirror. It intentionally builds from the same MkDocs source while using canonical links from `site_url`, so generated canonical URLs point to `https://tldwproject.com/server/docs/`.
 
 ## Advanced (Optional)
 
@@ -157,5 +180,6 @@ If a deploy fails:
 - Author docs in `Docs/` (not `Docs/Published/`)
 - Use the refresh script to curate and sync
 - Keep `mkdocs.yml` `nav:` updated for sidebar visibility and order
-- CI builds and deploys automatically to GitHub Pages
+- Deploy the built site to `https://tldwproject.com/server/docs/`
+- CI builds and deploys a GitHub Pages mirror
 - Hosted/commercial docs are excluded from the public docs site and belong in the private repo
