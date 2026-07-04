@@ -7,21 +7,22 @@
 
 ## Summary
 
-- **3,980** test files scanned; **733** flagged; **888** (file, flag) offenses in the ratchet baseline (`Helper_Scripts/ci/test_quality_baseline.txt`).
-- Flag totals: ambiguous_accept=112, mock_density=173, skip_stale=440, status_only=696, stub_injection=499, tautology_suspect=477.
-- Report-only for now: the script exits 0 by default; `--enforce` (ratchet vs. baseline) is available once the team opts in — the intended promotion path is a CI step after the Task 2 exemplar fixes shrink the baseline.
+- **3,980** test files scanned; **734** flagged; **745** enforceable (file, flag) offenses in the ratchet baseline (`Helper_Scripts/ci/test_quality_baseline.txt`, `path::flag=count` format).
+- Flag totals: ambiguous_accept=112, mock_density=178, skip_stale=440 (informational), status_only=696, stub_injection=499, tautology_suspect=477.
+- Report-only for now: the script exits 0 by default; `--enforce` fails on a NEW offense **or a count increase** vs. the baseline (informational flags never gate) — the intended promotion path is a CI step after the Task 2 exemplar fixes shrink the baseline.
 
 ## Validation
 
 - **Determinism:** two consecutive runs produce byte-identical output.
 - **Known offenders:** all 4 audit exemplars flagged (`RAG/test_dual_backend_end_to_end.py` stub_injection, `Media/test_media_navigation.py` stub_injection, `DB_Management/test_media_db_schema_bootstrap.py` tautology_suspect, `Character_Chat/test_complete_v2_streaming_with_mock_openai.py` ambiguous_accept).
 - **Precision:** 10 flagged files sampled across the score range, 14 (file, flag) pairs hand-verified — **14/14 definitional true-positives**. Two definition-level tunings were applied as a result: tautology_suspect's collector shape only fires when the collector comparisons are the test's *only* asserts (legitimate interaction tests also assert real outputs), and skip_stale excludes dependency/env availability gates.
+- **Ratchet:** verified red on a synthetic count regression (baseline count decremented → exit 1 naming the offense) and green against the committed baseline.
 
 ## Reading the flags
 
-- `ambiguous_accept` and `tautology_suspect` are the highest-signal flags (a test that cannot fail, or that verifies its own stub).
+- `parse_error`, `ambiguous_accept` and `tautology_suspect` are the highest-signal flags (unanalyzable file, a test that cannot fail, or one that verifies its own stub).
 - `stub_injection`'s `dependency_overrides` arm fires on the standard FastAPI TestClient wiring idiom — treat as a ranking input for over-mocked endpoint tests, not a per-instance verdict.
-- `skip_stale` is informational (round-1 F9 already enforces reasons exist).
+- `skip_stale` is informational and never gates `--enforce` (round-1 F9 already enforces reasons exist).
 
 ## Top 50 by score
 

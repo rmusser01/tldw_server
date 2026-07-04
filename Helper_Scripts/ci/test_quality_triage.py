@@ -36,9 +36,10 @@ Modes (mirrors ``check_shard_coverage.py`` ratchet mechanics):
     python Helper_Scripts/ci/test_quality_triage.py
     # machine-readable:
     python Helper_Scripts/ci/test_quality_triage.py --json out.json
-    # snapshot today's offenses so the ratchet can fail on NEW ones later:
+    # snapshot today's offenses (path::flag=count) for the ratchet:
     python Helper_Scripts/ci/test_quality_triage.py --write-baseline
-    # ratchet mode (future CI gate): fail on offenses not in the baseline:
+    # ratchet mode (future CI gate): fail on NEW offenses or count INCREASES
+    # (informational flags like skip_stale never gate):
     python Helper_Scripts/ci/test_quality_triage.py --enforce
 
 Determinism: output is sorted (score desc, then path) and carries no
@@ -68,6 +69,7 @@ _STATUS_ATTRS = {"status_code", "status"}
 
 # Weights for the ranking score (severity-ordered; skip_stale is informational).
 _FLAG_WEIGHTS = {
+    "parse_error": 8,
     "ambiguous_accept": 5,
     "tautology_suspect": 5,
     "mock_density": 3,
@@ -75,6 +77,10 @@ _FLAG_WEIGHTS = {
     "status_only": 2,
     "skip_stale": 0,
 }
+
+# Flags the --enforce ratchet gates on. Informational (zero-weight) flags are
+# reported but never fail CI.
+_ENFORCEABLE_FLAGS = frozenset(flag for flag, weight in _FLAG_WEIGHTS.items() if weight > 0)
 
 _ISSUE_REF_TOKENS = ("#", "issue", "http://", "https://", "pr ", "pr-", "jira", "task-")
 
@@ -124,15 +130,21 @@ def _call_name(node: ast.Call) -> str:
 
 
 def _is_mockish_call(node: ast.Call) -> bool:
-    """True for patch/monkeypatch/Mock-constructor style calls."""
+    """True for patch/monkeypatch/Mock-constructor style calls.
+
+    Matches any dotted segment against the patch roots so fully-qualified
+    forms (``unittest.mock.patch``, ``mock.patch.object``) count too.
+    """
     name = _call_name(node)
     if not name:
         return False
-    head = name.split(".")[0]
-    tail = name.split(".")[-1]
+    segments = name.split(".")
+    tail = segments[-1]
     if tail in _MOCK_CALL_NAMES:
         return True
-    if head in _PATCH_ROOTS and (tail in _PATCH_ATTRS or tail == head):
+    if any(seg in _PATCH_ROOTS for seg in segments) and (
+        tail in _PATCH_ATTRS or tail in _PATCH_ROOTS
+    ):
         return True
     return name in {"patch", "patch.object", "patch.dict", "patch.multiple"}
 
@@ -169,8 +181,20 @@ def _nested_fake_classes(fn: ast.AST) -> set[str]:
 
 
 def _file_is_integration_marked(tree: ast.Module, source: str) -> bool:
-    """Detect pytest.mark.integration on the module or any decorator."""
-    return "mark.integration" in source
+    """Detect pytest.mark.integration via the AST (decorators or pytestmark).
+
+    Substring matching would false-positive on comments/docstrings; instead
+    look for any ``<...>.mark.integration`` attribute chain.
+    """
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Attribute)
+            and node.attr == "integration"
+            and isinstance(node.value, ast.Attribute)
+            and node.value.attr == "mark"
+        ):
+            return True
+    return False
 
 
 def _assert_attr_names(assert_node: ast.Assert) -> set[str]:
@@ -372,7 +396,7 @@ def analyze_file(path: Path, repo_root: Path) -> FileReport | None:
         tree = ast.parse(source)
     except SyntaxError as exc:
         report = FileReport(path=rel)
-        report.add("skip_stale", f"unparseable: {exc.msg} at line {exc.lineno}")
+        report.add("parse_error", f"unparseable: {exc.msg} at line {exc.lineno}")
         return report
 
     report = FileReport(path=rel)
@@ -401,19 +425,42 @@ def collect_test_files(tests_root: Path) -> list[Path]:
     return sorted(files)
 
 
-def offense_tokens(reports: list[FileReport]) -> set[str]:
-    """'path::flag' tokens for ratchet comparison (counts intentionally ignored)."""
-    return {f"{r.path}::{flag}" for r in reports for flag in r.flags}
+def offense_counts(reports: list[FileReport], *, enforceable_only: bool = False) -> dict[str, int]:
+    """Map of ``path::flag`` -> occurrence count for ratchet comparison."""
+    out: dict[str, int] = {}
+    for r in reports:
+        for flag, count in r.flags.items():
+            if enforceable_only and flag not in _ENFORCEABLE_FLAGS:
+                continue
+            out[f"{r.path}::{flag}"] = count
+    return out
 
 
-def load_baseline(path: Path) -> set[str]:
+def load_baseline(path: Path) -> dict[str, int]:
+    """Parse ``path::flag=count`` baseline lines (count defaults to a large
+    sentinel for legacy count-less lines, i.e. existence-only)."""
     if not path.exists():
-        return set()
-    return {
-        line.strip()
-        for line in path.read_text(encoding="utf-8").splitlines()
-        if line.strip() and not line.strip().startswith("#")
-    }
+        return {}
+    out: dict[str, int] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        token, sep, count = line.partition("=")
+        out[token.strip()] = int(count) if sep and count.strip().isdigit() else 10**9
+    return out
+
+
+def new_offenses(current: dict[str, int], baseline: dict[str, int]) -> list[str]:
+    """Offenses that are new or worse than the baseline (the ratchet)."""
+    out: list[str] = []
+    for token, count in sorted(current.items()):
+        allowed = baseline.get(token)
+        if allowed is None:
+            out.append(f"{token}={count} (new)")
+        elif count > allowed:
+            out.append(f"{token}={count} (baseline {allowed})")
+    return out
 
 
 def main(argv: list[str]) -> int:
@@ -458,16 +505,18 @@ def main(argv: list[str]) -> int:
     )
 
     if args.write_baseline:
-        tokens = sorted(offense_tokens(reports))
+        counts = offense_counts(reports, enforceable_only=True)
+        lines = [f"{token}={count}" for token, count in sorted(counts.items())]
         out_path = repo_root / args.baseline_file
         header = (
-            "# test_quality_baseline.txt — known offenses (path::flag) at triage\n"
-            "# introduction. With --enforce the triage stays green on these but\n"
-            "# fails on a NEW offense. Shrink this list by fixing tests.\n"
+            "# test_quality_baseline.txt — known offenses (path::flag=count) at\n"
+            "# triage introduction. With --enforce the triage stays green on these\n"
+            "# but fails on a NEW offense or a count INCREASE. Informational flags\n"
+            "# (skip_stale) are excluded. Shrink this list by fixing tests.\n"
             "# Regenerate with: python Helper_Scripts/ci/test_quality_triage.py --write-baseline\n"
         )
-        out_path.write_text(header + "\n".join(tokens) + ("\n" if tokens else ""), encoding="utf-8")
-        print(f"[test-triage] wrote baseline with {len(tokens)} offenses -> {out_path}")
+        out_path.write_text(header + "\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+        print(f"[test-triage] wrote baseline with {len(lines)} offenses -> {out_path}")
         return 0
 
     if args.json:
@@ -485,13 +534,15 @@ def main(argv: list[str]) -> int:
 
     if args.enforce:
         baseline = load_baseline(repo_root / args.baseline_file)
-        new = sorted(offense_tokens(reports) - baseline)
-        if new:
+        current = offense_counts(reports, enforceable_only=True)
+        regressions = new_offenses(current, baseline)
+        if regressions:
             print(
-                f"[test-triage] FAIL — {len(new)} offense(s) not in baseline:",
+                f"[test-triage] FAIL — {len(regressions)} offense(s) new or worse "
+                "than the baseline:",
                 file=sys.stderr,
             )
-            for token in new:
+            for token in regressions:
                 print(f"  {token}", file=sys.stderr)
             return 1
         print("[test-triage] OK — no offenses beyond the baseline.")
