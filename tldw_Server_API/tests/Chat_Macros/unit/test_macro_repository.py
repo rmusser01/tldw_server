@@ -231,6 +231,18 @@ def test_cancel_requested_run_cannot_be_started_or_completed(repo):
     assert repo.update_run_status(run.run_id, status="cancelled").status == "cancelled"
 
 
+def test_repository_uses_guarded_updates_for_race_sensitive_fields():
+    status_source = inspect.getsource(ChatMacroRepository.update_run_status)
+    cancel_source = inspect.getsource(ChatMacroRepository.request_cancel)
+    post_source = inspect.getsource(ChatMacroRepository.mark_final_posted)
+
+    assert "status NOT IN ('completed', 'failed', 'cancelled')" in status_source
+    assert "status != 'cancel_requested' OR ? IN ('cancelled', 'failed')" in status_source
+    assert "status NOT IN ('completed', 'failed', 'cancelled')" in cancel_source
+    assert "final_message_id IS NULL" in post_source
+    assert "post_idempotency_key IS NULL" in post_source
+
+
 def test_registry_settings_and_status_methods(repo):
     repo.ensure_ready()
 
@@ -332,6 +344,10 @@ def test_postgres_v51_migration_script_contract_and_routing():
     postgres_initializer = inspect.getsource(CharactersRAGDB._initialize_schema_postgres)
     assert "_MIGRATION_SQL_V51_TO_V52_POSTGRES" in postgres_initializer
     assert "expected_version=52" in postgres_initializer
+    assert "_ensure_chat_macros_schema_postgres" in postgres_initializer
+
+    postgres_ensure = inspect.getsource(CharactersRAGDB._ensure_chat_macros_schema_postgres)
+    assert 'partition("UPDATE db_schema_version")' in postgres_ensure
 
 
 def test_row_mapping_normalizes_datetime_timestamps():

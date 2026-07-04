@@ -15024,6 +15024,15 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:
             raise SchemaError(f"Failed ensuring PostgreSQL source review schema: {exc}") from exc  # noqa: TRY003
 
+    def _ensure_chat_macros_schema_postgres(self, conn: Any) -> None:
+        """Ensure chat macro storage tables and indexes exist for PostgreSQL."""
+        try:
+            ddl, _, _version_update = self._MIGRATION_SQL_V51_TO_V52_POSTGRES.partition("UPDATE db_schema_version")
+            for statement in self._convert_sqlite_schema_to_postgres_statements(ddl):
+                self.backend.execute(statement, connection=conn)
+        except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:
+            raise SchemaError(f"Failed ensuring PostgreSQL chat macro schema: {exc}") from exc  # noqa: TRY003
+
     def _ensure_workspace_assistant_defaults_schema_sqlite(self, conn: sqlite3.Connection) -> None:
         """Ensure Workspace Assistant Defaults storage exists for SQLite."""
         try:
@@ -20422,6 +20431,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             self._ensure_workspace_subresource_schema_postgres(conn)
             self._ensure_workspace_file_inventory_schema_postgres(conn)
             self._ensure_workspace_migration_schema_postgres(conn)
+            self._ensure_chat_macros_schema_postgres(conn)
             self._ensure_manuscript_phase2_sync_triggers_postgres(conn)
             self._ensure_chacha_rls_postgres(conn)
 

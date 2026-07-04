@@ -244,22 +244,7 @@ class ChatMacroRepository:
     ) -> MacroRunRecord:
         """Update run status and return the saved row."""
         with self.db.transaction() as conn:
-            row = conn.execute(
-                "SELECT * FROM chat_macro_runs WHERE run_id = ?",
-                (run_id,),
-            ).fetchone()
-            if row is None:
-                raise MacroStorageError(f"macro run not found: {run_id}")
-
-            current = str(row["status"])
-            if current in _TERMINAL_RUN_STATUSES:
-                return self._map_run(row)
-            if status == "running" and current == "cancel_requested":
-                return self._map_run(row)
-            if current == "cancel_requested" and status not in {"cancelled", "failed"}:
-                return self._map_run(row)
-
-            cursor = conn.execute(
+            conn.execute(
                 """
                 UPDATE chat_macro_runs
                    SET status = ?,
@@ -275,6 +260,8 @@ class ChatMacroRepository:
                            ELSE completed_at
                        END
                  WHERE run_id = ?
+                   AND status NOT IN ('completed', 'failed', 'cancelled')
+                   AND (status != 'cancel_requested' OR ? IN ('cancelled', 'failed'))
                 """,
                 (
                     status,
@@ -284,10 +271,9 @@ class ChatMacroRepository:
                     status,
                     status,
                     run_id,
+                    status,
                 ),
             )
-            if cursor.rowcount == 0:
-                raise MacroStorageError(f"macro run not found: {run_id}")
             row = conn.execute(
                 "SELECT * FROM chat_macro_runs WHERE run_id = ?",
                 (run_id,),
@@ -299,26 +285,16 @@ class ChatMacroRepository:
     def request_cancel(self, run_id: str) -> MacroRunRecord:
         """Mark a run as cancel-requested."""
         with self.db.transaction() as conn:
-            row = conn.execute(
-                "SELECT * FROM chat_macro_runs WHERE run_id = ?",
-                (run_id,),
-            ).fetchone()
-            if row is None:
-                raise MacroStorageError(f"macro run not found: {run_id}")
-            if str(row["status"]) in _TERMINAL_RUN_STATUSES:
-                return self._map_run(row)
-
-            cursor = conn.execute(
+            conn.execute(
                 """
                 UPDATE chat_macro_runs
                    SET status = 'cancel_requested',
                        cancel_requested_at = COALESCE(cancel_requested_at, CURRENT_TIMESTAMP)
                  WHERE run_id = ?
+                   AND status NOT IN ('completed', 'failed', 'cancelled')
                 """,
                 (run_id,),
             )
-            if cursor.rowcount == 0:
-                raise MacroStorageError(f"macro run not found: {run_id}")
             row = conn.execute(
                 "SELECT * FROM chat_macro_runs WHERE run_id = ?",
                 (run_id,),
@@ -452,24 +428,6 @@ class ChatMacroRepository:
     ) -> MacroRunRecord:
         """Record the final chat message created for a macro run."""
         with self.db.transaction() as conn:
-            row = conn.execute(
-                "SELECT * FROM chat_macro_runs WHERE run_id = ?",
-                (run_id,),
-            ).fetchone()
-            if row is None:
-                raise MacroStorageError(f"macro run not found: {run_id}")
-
-            existing_message_id = row["final_message_id"]
-            existing_key = row["post_idempotency_key"]
-            if existing_message_id is not None or existing_key is not None:
-                if existing_key == post_idempotency_key and existing_message_id == final_message_id:
-                    return self._map_run(row)
-                if existing_key == post_idempotency_key:
-                    raise MacroStorageError(
-                        "post idempotency key is already linked to a different final_message_id"
-                    )
-                raise MacroStorageError("macro run already posted with a different idempotency key")
-
             cursor = conn.execute(
                 """
                 UPDATE chat_macro_runs
@@ -477,17 +435,27 @@ class ChatMacroRepository:
                        final_post_status = 'posted',
                        post_idempotency_key = ?
                  WHERE run_id = ?
+                   AND final_message_id IS NULL
+                   AND post_idempotency_key IS NULL
                 """,
                 (final_message_id, post_idempotency_key, run_id),
             )
-            if cursor.rowcount == 0:
-                raise MacroStorageError(f"macro run not found: {run_id}")
             row = conn.execute(
                 "SELECT * FROM chat_macro_runs WHERE run_id = ?",
                 (run_id,),
             ).fetchone()
         if row is None:
             raise MacroStorageError(f"macro run not found: {run_id}")
+        if cursor.rowcount == 0:
+            existing_message_id = row["final_message_id"]
+            existing_key = row["post_idempotency_key"]
+            if existing_key == post_idempotency_key and existing_message_id == final_message_id:
+                return self._map_run(row)
+            if existing_key == post_idempotency_key:
+                raise MacroStorageError(
+                    "post idempotency key is already linked to a different final_message_id"
+                )
+            raise MacroStorageError("macro run already posted with a different idempotency key")
         return self._map_run(row)
 
     @staticmethod
