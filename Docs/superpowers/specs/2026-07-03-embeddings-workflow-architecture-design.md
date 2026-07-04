@@ -159,8 +159,10 @@ Responsibilities:
 
 - Accept an `EmbeddingRequestOrchestrator`.
 - Accept an optional trace collector. Default is a no-op collector.
+- Accept an optional async pre-execute hook. The endpoint uses this hook for boundary work that must happen after `prepare()` derives token counts and before `execute()` can read cache or call providers, such as ResourceGovernor reservation.
 - Emit `workflow_started`, phase changes, derived prepare metadata, aggregate execution metadata, failure events, and `workflow_completed`.
 - Call `orchestrator.prepare(raw_input, context)`.
+- Await the pre-execute hook, if provided.
 - Call `orchestrator.execute(prepared)`.
 - Return the existing `EmbeddingExecutionResult`.
 - Re-raise domain and unexpected exceptions unchanged after recording safe failure metadata.
@@ -184,14 +186,15 @@ Non-responsibilities:
 2. Endpoint performs the same AuthNZ, RBAC, body parsing, RG/billing setup, and feature-flag routing as today.
 3. If `EMBEDDINGS_ORCHESTRATOR_ENABLED` is false, the legacy path runs unchanged.
 4. If `EMBEDDINGS_ORCHESTRATOR_ENABLED` is true, endpoint builds `EmbeddingRequestContext` and the current `EmbeddingRequestOrchestrator`.
-5. Endpoint wraps the orchestrator in `EmbeddingInlineWorkflowRunner` with the default no-op trace collector.
+5. Endpoint wraps the orchestrator in `EmbeddingInlineWorkflowRunner` with the default no-op trace collector and a pre-execute hook for ResourceGovernor reservation.
 6. Runner emits `workflow_started` to the collector.
 7. Runner sets phase `normalizing` and calls `orchestrator.prepare(raw_input, context)`.
 8. On prepare success, runner derives safe metadata from `PreparedEmbeddingRequest`: item count, token count, resolved provider/model, dimensions, fallback allowed, fallback chain length, execution path, and cache namespace.
-9. Runner sets phase `executing` and calls `orchestrator.execute(prepared)`.
-10. On execute success, runner derives aggregate metadata from `EmbeddingExecutionResult`: vector count, cache hit/miss totals, provider actually used, fallback source, adapter flag, and response header names.
-11. Runner emits `workflow_completed` and returns `EmbeddingExecutionResult`.
-12. Endpoint applies response headers, metrics, audit/usage behavior, and OpenAI-compatible response formatting exactly as today.
+9. Runner awaits the endpoint-owned pre-execute hook. In slice one this preserves the current RG reservation order: reserve after prepare/token counting and before cache/provider execution.
+10. Runner sets phase `executing` and calls `orchestrator.execute(prepared)`.
+11. On execute success, runner derives aggregate metadata from `EmbeddingExecutionResult`: vector count, cache hit/miss totals, provider actually used, fallback source, adapter flag, and response header names.
+12. Runner emits `workflow_completed` and returns `EmbeddingExecutionResult`.
+13. Endpoint applies response headers, metrics, audit/usage behavior, RG actual-unit accounting, and OpenAI-compatible response formatting exactly as today.
 
 The runner does not emit exact per-item cache source in slice one because the current result contract provides aggregate cache hit/miss counts, not item-level cache provenance. Later slices can add item-level events when cache serving moves into workflow steps or the result contract grows safe item provenance.
 
