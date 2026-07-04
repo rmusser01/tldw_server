@@ -428,12 +428,19 @@ async function completeMockedFirstChatSetup(page: Page): Promise<Record<string, 
 async function waitForFirstSourceMilestone(page: Page): Promise<void> {
   const milestone = page.getByRole('heading', { name: /add your first source/i });
   const recovery = page.getByRole('heading', { name: /restore media access/i });
+  const milestoneVisible = await milestone
+    .waitFor({ state: 'visible', timeout: 5_000 })
+    .then(() => true, () => false);
 
-  if (await milestone.isVisible({ timeout: 5_000 }).catch(() => false)) {
+  if (milestoneVisible) {
     return;
   }
 
-  if (await recovery.isVisible({ timeout: 5_000 }).catch(() => false)) {
+  const recoveryVisible = await recovery
+    .waitFor({ state: 'visible', timeout: 5_000 })
+    .then(() => true, () => false);
+
+  if (recoveryVisible) {
     await page.getByRole('textbox', { name: /single-user api key/i }).fill(E2E_SINGLE_USER_API_KEY);
     await page.getByRole('button', { name: /save api key/i }).click();
   }

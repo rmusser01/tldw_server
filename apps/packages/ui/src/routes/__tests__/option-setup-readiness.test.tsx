@@ -104,15 +104,18 @@ const firstRunMetadata = () => ({
 const setupReturn = ({
   state = firstRunState("completed"),
   metadata = null,
-  loading = false
+  loading = false,
+  error = null
 }: {
   state?: ReturnType<typeof firstRunState> | null
   metadata?: ReturnType<typeof firstRunMetadata> | null
   loading?: boolean
+  error?: Error | null
 } = {}) => ({
   state,
   metadata,
   loading,
+  error,
   refresh: mocks.refresh,
   adoptState: mocks.adoptState
 })
@@ -168,6 +171,7 @@ describe("OptionSetup readiness route", () => {
     fireEvent.click(screen.getByRole("button", { name: "Set up in WebUI" }))
 
     expect(screen.getByTestId("unified-setup-shell")).toBeInTheDocument()
+    expect(screen.queryByTestId("setup-required-panel")).not.toBeInTheDocument()
   })
 
   it.each(["in_progress", "first_chat_complete"])(
@@ -239,6 +243,7 @@ describe("OptionSetup readiness route", () => {
     fireEvent.click(screen.getByRole("button", { name: "Set up in WebUI" }))
 
     expect(screen.getByTestId("unified-setup-shell")).toBeInTheDocument()
+    expect(screen.queryByTestId("setup-required-panel")).not.toBeInTheDocument()
     let headings = screen.getAllByRole("heading", { level: 1 })
     expect(headings).toHaveLength(1)
     expect(headings[0]).toHaveTextContent("First-time setup")
@@ -280,9 +285,47 @@ describe("OptionSetup readiness route", () => {
         name: /open api server setup.*opens in a new tab/i
       })
     )
-    fireEvent.click(screen.getByRole("button", { name: "I finished API server setup" }))
+    fireEvent.click(
+      screen.getByRole("button", { name: "I finished API server setup" })
+    )
 
     expect(mocks.refresh).toHaveBeenCalledTimes(1)
+  })
+
+  it("surfaces setup refresh errors after API setup handoff", async () => {
+    const refreshError = new Error("Refresh failed")
+    mocks.refresh.mockRejectedValueOnce(refreshError)
+    mocks.useSetupOnboarding.mockReturnValue(
+      setupReturn({
+        state: firstRunState("not_started"),
+        metadata: firstRunMetadata()
+      })
+    )
+    const view = renderRoute()
+
+    fireEvent.click(
+      screen.getByRole("link", {
+        name: /open api server setup.*opens in a new tab/i
+      })
+    )
+    fireEvent.click(screen.getByRole("button", { name: "I finished API server setup" }))
+
+    await waitFor(() => expect(mocks.refresh).toHaveBeenCalledTimes(1))
+
+    mocks.useSetupOnboarding.mockReturnValue(
+      setupReturn({
+        state: firstRunState("not_started"),
+        metadata: firstRunMetadata(),
+        error: refreshError
+      })
+    )
+    view.rerender(
+      <MemoryRouter>
+        <OptionSetup />
+      </MemoryRouter>
+    )
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Refresh failed")
   })
 
   it("returns to the recovery choice if refreshed state becomes blocked after WebUI mode was selected", () => {

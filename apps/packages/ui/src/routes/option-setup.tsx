@@ -23,7 +23,14 @@ const ASSISTANT_SETUP_DISMISSED_KEY = "assistant_setup_dismissed"
 const OptionSetup = () => {
   const navigate = useNavigate()
   const { t } = useTranslation("option")
-  const { state, metadata, loading, refresh, adoptState } = useSetupOnboarding()
+  const {
+    state,
+    metadata,
+    loading,
+    error: setupError,
+    refresh,
+    adoptState
+  } = useSetupOnboarding()
   const { serverUrl: configuredServerUrl } = useConnectionState()
   const { setConfigPartial, testConnectionFromOnboarding } =
     useConnectionActions()
@@ -41,6 +48,15 @@ const OptionSetup = () => {
   const showLoader = loading && !state
   const showRouteHeading = showLoader || (!shouldShowChoice && !showWizard)
   const routeHeading = t("setupRoute.heading", "Setup")
+  const setupErrorMessage = setupError
+    ? sanitizeServerErrorMessage(
+        setupError,
+        t(
+          "setupRoute.setupRefreshFailed",
+          "Setup state refresh failed. Check the API server and try again."
+        )
+      )
+    : null
 
   return (
     <OptionLayout hideHeader hideSidebar>
@@ -52,13 +68,25 @@ const OptionSetup = () => {
             metadata={metadata}
             configuredServerUrl={configuredServerUrl}
             onStartWebUiSetup={() => setSetupEntryMode("webui")}
-            onRefreshSetupState={() => {
-              void Promise.resolve(refresh()).catch(() => undefined)
+            onRefreshSetupState={async () => {
+              try {
+                await refresh()
+              } catch {
+                // The hook exposes the failure through setupErrorMessage below.
+              }
             }}
           />
         </div>
       ) : null}
-      {!shouldShowChoice ? (
+      {setupErrorMessage ? (
+        <p
+          className="mx-auto mb-4 w-full max-w-3xl rounded-md border border-danger/40 bg-danger/10 p-3 text-sm text-danger"
+          role="alert"
+        >
+          {setupErrorMessage}
+        </p>
+      ) : null}
+      {!shouldShowChoice && !showWizard ? (
         <section className="mx-auto mb-4 w-full max-w-3xl rounded-lg border border-border bg-surface p-4 text-text shadow-sm">
           <div className="flex flex-col gap-4">
             <div>
@@ -185,7 +213,7 @@ const OptionSetup = () => {
           </div>
         </section>
       ) : null}
-      {!shouldShowChoice ? (
+      {!shouldShowChoice && !showWizard ? (
         <SetupRequiredPanel
           className="mx-auto mb-4 w-full max-w-3xl"
           title={t("setupRoute.recoveryTitle", "Setup operator recovery")}
@@ -195,21 +223,9 @@ const OptionSetup = () => {
             "Use this surface when first-run setup needs local operator recovery."
           )}
           primaryAction={{
-            label: showWizard
-              ? t("setupRoute.continueAction", "Continue setup")
-              : t("setupRoute.returnHomeAction", "Return home"),
+            label: t("setupRoute.returnHomeAction", "Return home"),
             onClick: () => {
-              if (!showWizard) {
-                navigate("/")
-                return
-              }
-              const setupShell = document.querySelector<HTMLElement>(
-                "[data-testid='unified-setup-shell']"
-              )
-              const fallbackButton =
-                document.querySelector<HTMLElement>("button")
-              const focusTarget = setupShell ?? fallbackButton
-              focusTarget?.focus()
+              navigate("/")
             }
           }}
         />

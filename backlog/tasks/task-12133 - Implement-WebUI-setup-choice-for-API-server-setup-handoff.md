@@ -3,17 +3,17 @@ id: TASK-12133
 title: Implement WebUI setup choice for API server setup handoff
 status: Done
 assignee: []
-created_date: '2026-07-03 22:59'
-updated_date: '2026-07-04 01:55'
+created_date: 2026-07-03 22:59
+updated_date: 2026-07-04 01:55
 labels:
-  - webui
-  - setup
-  - onboarding
+- webui
+- setup
+- onboarding
 dependencies:
-  - TASK-12123
+- TASK-12123
 references:
-  - Docs/superpowers/specs/2026-07-03-webui-setup-choice-design.md
-  - Docs/superpowers/plans/2026-07-03-webui-setup-choice-implementation-plan.md
+- Docs/superpowers/specs/2026-07-03-webui-setup-choice-design.md
+- Docs/superpowers/plans/2026-07-03-webui-setup-choice-implementation-plan.md
 ---
 
 ## Description
@@ -68,9 +68,7 @@ ScheduledTasksPage diagnostics-copy failures fixed. The tests now assert the san
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented the WebUI /setup choice handoff, fixed the TypeScript baseline, and repaired the ScheduledTasksPage diagnostics-copy tests. Diagnostics assertions now match the existing sanitized recovery-detail contract instead of expecting raw API paths.
-
-Verification: focused setup Vitest passed 5 files / 53 tests; ScheduledTaskAutomationDefinitionEditor Vitest passed 9 tests; ScheduledTasksPage Vitest passed 48 tests; Playwright unified-first-run-onboarding passed 6/6; bun run typecheck passed; git diff --check passed. Bandit skipped because this implementation touched TypeScript/Playwright/Markdown tracking only.
+Rebased PR #2615 onto latest origin/dev and addressed the actionable PR review comments. Verification: setup/onboarding Vitest slice passed 5 files / 70 tests; ScheduledTaskAutomationDefinitionEditor Vitest passed 9 tests; ScheduledTasksPage Vitest passed 48 tests; bun run typecheck passed; Playwright unified-first-run-onboarding passed 6/6 after escalating local server binding; git diff --check passed. Bandit skipped because the follow-up touched only TypeScript/Playwright/Markdown files.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
@@ -82,3 +80,9 @@ Verification: focused setup Vitest passed 5 files / 53 tests; ScheduledTaskAutom
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+PR #2615 follow-up complete after rebase onto latest origin/dev. Addressed still-valid review comments by preserving API setup base paths, adding optional metadata connection guards, covering public dotted hostnames, link-local IPv4, and IPv6 API origins, making the /setup wizard exclusive from manual recovery panels, surfacing setup refresh errors, replacing the direct DOM focus query by deleting the now-unneeded co-rendered recovery action, and switching the Playwright milestone helper to real waitFor visibility checks. The Gemini voice-cloning comment was already addressed by the rebased dev implementation using exact-byte copyBytes instead of Uint8Array.from. Also fixed the post-rebase scheduled-task editor type regression by keeping ScheduledTaskDefinitionResponse for the save result.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->

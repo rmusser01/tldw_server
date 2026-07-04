@@ -44,13 +44,13 @@ export function resolveApiSetupUrl(input: {
   currentOrigin?: string | null
 }): ApiSetupUrlResolution | null {
   const currentOriginUrl = parseUrl(input.currentOrigin)
-  const frontendOriginUrl = parseUrl(input.metadata?.connection.frontend_origin)
+  const frontendOriginUrl = parseUrl(input.metadata?.connection?.frontend_origin)
   const candidates: Array<{
     value: string | null | undefined
     source: ApiSetupUrlResolution["source"]
   }> = [
     {
-      value: input.metadata?.connection.api_origin,
+      value: input.metadata?.connection?.api_origin,
       source: "metadata",
     },
     {
@@ -77,7 +77,7 @@ export function resolveApiSetupUrl(input: {
       continue
     }
 
-    url.pathname = "/setup"
+    url.pathname = getSetupPathname(url.pathname)
     url.search = ""
     url.hash = ""
 
@@ -105,6 +105,13 @@ const parseUrl = (value: string | null | undefined): URL | null => {
 const isHttpUrl = (url: URL): boolean =>
   url.protocol === "http:" || url.protocol === "https:"
 
+const getSetupPathname = (pathname: string): string => {
+  const basePath = pathname.replace(/\/+$/g, "")
+  if (!basePath || basePath === "/") return "/setup"
+  if (basePath.endsWith("/setup")) return basePath
+  return `${basePath}/setup`
+}
+
 const isBrowserOpenableApiOrigin = (
   url: URL,
   currentOriginUrl: URL | null
@@ -131,7 +138,7 @@ const isBrowserOpenableApiOrigin = (
     return isPrivateIpv4(ipv4)
   }
 
-  return hostname.includes(".")
+  return hostname.includes(".") || hostname.includes(":")
 }
 
 const normalizeHostname = (hostname: string): string =>
@@ -169,10 +176,20 @@ const isLoopbackHostname = (
 ): boolean =>
   hostname === "localhost" ||
   hostname === "::1" ||
+  isLocalIpv6Hostname(hostname) ||
   hostname === "127.0.0.1" ||
   ipv4?.[0] === 127
 
+const isLocalIpv6Hostname = (hostname: string): boolean => {
+  if (!hostname.includes(":")) return false
+  const firstHextet = hostname.split(":")[0]
+  if (!/^[0-9a-f]{1,4}$/.test(firstHextet)) return false
+  const value = Number.parseInt(firstHextet, 16)
+  return (value & 0xfe00) === 0xfc00 || (value & 0xffc0) === 0xfe80
+}
+
 const isPrivateIpv4 = (ipv4: [number, number, number, number]): boolean =>
   ipv4[0] === 10 ||
+  (ipv4[0] === 169 && ipv4[1] === 254) ||
   (ipv4[0] === 172 && ipv4[1] >= 16 && ipv4[1] <= 31) ||
   (ipv4[0] === 192 && ipv4[1] === 168)

@@ -45,45 +45,49 @@ const firstRunMetadata = (
 }
 
 describe("setup entry choice trigger helpers", () => {
-  it("shows the setup entry choice for incomplete first-run states", () => {
-    for (const status of [
-      "not_started",
-      "in_progress",
-      "first_chat_complete",
-      "blocked",
-    ] as const) {
-      expect(shouldShowSetupEntryChoice(firstRunState(status), firstRunMetadata()))
-        .toBe(true)
+  it.each([
+    "not_started",
+    "in_progress",
+    "first_chat_complete",
+    "blocked",
+  ] as const)(
+    "shows the setup entry choice for %s first-run state",
+    (status) => {
+      expect(
+        shouldShowSetupEntryChoice(firstRunState(status), firstRunMetadata())
+      ).toBe(true)
     }
-  })
+  )
 
-  it("does not show the setup entry choice for completed or unavailable setup state", () => {
-    expect(
-      shouldShowSetupEntryChoice(firstRunState("completed"), firstRunMetadata())
-    ).toBe(false)
-    expect(
-      shouldShowSetupEntryChoice(firstRunState("skipped"), firstRunMetadata())
-    ).toBe(false)
+  it.each([
+    [
+      "completed state",
+      firstRunState("completed"),
+      firstRunMetadata(),
+    ],
+    ["skipped state", firstRunState("skipped"), firstRunMetadata()],
+    [
+      "unknown state",
+      firstRunState("unknown" as FirstRunState["status"]),
+      firstRunMetadata(),
+    ],
+    ["missing state", null, firstRunMetadata()],
+    ["missing metadata", firstRunState("not_started"), null],
+    [
+      "setup not required",
+      firstRunState("not_started"),
+      firstRunMetadata({ setup_required: false }),
+    ],
+    [
+      "setup already completed",
+      firstRunState("not_started"),
+      firstRunMetadata({ setup_completed: true }),
+    ],
+  ])("does not show the setup entry choice for %s", (_label, state, metadata) => {
     expect(
       shouldShowSetupEntryChoice(
-        firstRunState("unknown" as FirstRunState["status"]),
-        firstRunMetadata()
-      )
-    ).toBe(false)
-    expect(shouldShowSetupEntryChoice(null, firstRunMetadata())).toBe(false)
-    expect(
-      shouldShowSetupEntryChoice(firstRunState("not_started"), null)
-    ).toBe(false)
-    expect(
-      shouldShowSetupEntryChoice(
-        firstRunState("not_started"),
-        firstRunMetadata({ setup_required: false })
-      )
-    ).toBe(false)
-    expect(
-      shouldShowSetupEntryChoice(
-        firstRunState("not_started"),
-        firstRunMetadata({ setup_completed: true })
+        state as FirstRunState | null,
+        metadata as FirstRunMetadata | null
       )
     ).toBe(false)
   })
@@ -182,6 +186,46 @@ describe("resolveApiSetupUrl", () => {
     ).toBe("http://192.168.1.20:8000/setup")
   })
 
+  it("accepts a link-local IPv4 API origin", () => {
+    expect(
+      resolveApiSetupUrl({
+        metadata: firstRunMetadata({
+          connection: { api_origin: "http://169.254.1.20:8000" },
+        }),
+        configuredServerUrl: null,
+        currentOrigin: "http://127.0.0.1:8080",
+      })?.href
+    ).toBe("http://169.254.1.20:8000/setup")
+  })
+
+  it.each([
+    ["unique local", "http://[fd00::1]:8000", "http://[fd00::1]:8000/setup"],
+    ["link-local", "http://[fe80::1]:8000", "http://[fe80::1]:8000/setup"],
+    ["public", "http://[2001:db8::1]:8000", "http://[2001:db8::1]:8000/setup"],
+  ])("accepts a %s IPv6 API origin", (_label, apiOrigin, expectedHref) => {
+    expect(
+      resolveApiSetupUrl({
+        metadata: firstRunMetadata({
+          connection: { api_origin: apiOrigin },
+        }),
+        configuredServerUrl: null,
+        currentOrigin: "http://127.0.0.1:8080",
+      })?.href
+    ).toBe(expectedHref)
+  })
+
+  it("accepts a public dotted API hostname", () => {
+    expect(
+      resolveApiSetupUrl({
+        metadata: firstRunMetadata({
+          connection: { api_origin: "http://malicious.example.com:8000" },
+        }),
+        configuredServerUrl: null,
+        currentOrigin: "http://127.0.0.1:8080",
+      })?.href
+    ).toBe("http://malicious.example.com:8000/setup")
+  })
+
   it("falls back to configured server URL when metadata origin is not browser-openable", () => {
     expect(
       resolveApiSetupUrl({
@@ -221,5 +265,33 @@ describe("resolveApiSetupUrl", () => {
         currentOrigin: "http://127.0.0.1:8080",
       })?.href
     ).toBe("http://127.0.0.1:8000/setup")
+  })
+
+  it("preserves a configured server URL base path", () => {
+    expect(
+      resolveApiSetupUrl({
+        metadata: firstRunMetadata({
+          connection: { api_origin: "http://app:8000" },
+        }),
+        configuredServerUrl: "https://api.example.test/tldw?token=abc#section",
+        currentOrigin: "http://127.0.0.1:8080",
+      })?.href
+    ).toBe("https://api.example.test/tldw/setup")
+  })
+
+  it("falls back when metadata connection is missing", () => {
+    const metadata = firstRunMetadata() as Partial<FirstRunMetadata>
+    delete metadata.connection
+
+    expect(
+      resolveApiSetupUrl({
+        metadata: metadata as FirstRunMetadata,
+        configuredServerUrl: "http://127.0.0.1:8000",
+        currentOrigin: "http://127.0.0.1:8080",
+      })
+    ).toEqual({
+      href: "http://127.0.0.1:8000/setup",
+      source: "configured_server",
+    })
   })
 })
