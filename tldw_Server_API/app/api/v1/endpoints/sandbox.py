@@ -33,7 +33,12 @@ from fastapi.routing import APIRoute
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import get_audit_service_for_user
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequireRole, User, get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    RequireRole,
+    User,
+    enforce_websocket_token_scope,
+    get_request_user,
+)
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.endpoints.sandbox_service import sandbox_service
 from tldw_Server_API.app.api.v1.schemas.sandbox_schemas import (
@@ -482,6 +487,15 @@ async def _resolve_sandbox_ws_user_id(
             raise HTTPException(status_code=401, detail="invalid_token") from None
         except _SANDBOX_NONCRITICAL_EXCEPTIONS:
             raise HTTPException(status_code=401, detail="invalid_token") from None
+
+        await enforce_websocket_token_scope(
+            websocket=websocket,
+            token=token,
+            required_scope="read",
+            endpoint_id="sandbox.runs.stream",
+            method="GET",
+            count_as="call",
+        )
 
         sub = payload.get("user_id") or payload.get("sub")
         if sub is None:

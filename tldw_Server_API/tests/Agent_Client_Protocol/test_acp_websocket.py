@@ -233,6 +233,17 @@ def mock_jwt_manager(monkeypatch):
     return mock_manager
 
 
+class _ScopedJWTManager:
+    """JWT manager stub that authenticates a scoped bearer token subject."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    async def verify_token(self, token: str):
+        self.calls.append(token)
+        return types.SimpleNamespace(user_id=1)
+
+
 @pytest.mark.asyncio
 async def test_acp_session_stream_start_failure_skips_unset_callback_cleanup(monkeypatch):
     """Startup failures before callback assignment must still execute deterministic cleanup."""
@@ -272,7 +283,7 @@ async def test_acp_session_stream_start_failure_skips_unset_callback_cleanup(mon
         async def close(self, code: int = 1000) -> None:
             return None
 
-    async def _fake_authenticate_ws(websocket, token=None, api_key=None, required_scope="read"):
+    async def _fake_authenticate_ws(websocket, token=None, api_key=None, required_scope="read", **_kwargs):
         return 1
 
     async def _fake_get_runner_client():
@@ -433,6 +444,62 @@ class TestACPWebSocketConnection:
                 pass
 
         assert seen_required_scopes == ["write"]
+
+    def test_websocket_stream_rejects_scoped_jwt_without_acp_endpoint_permission(
+        self, client_user_only, mock_get_runner_client, monkeypatch
+    ):
+        """ACP control stream must enforce scoped JWT endpoint restrictions."""
+        from fastapi import HTTPException
+
+        import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
+
+        guard_calls: list[dict[str, object]] = []
+
+        async def _deny_scope(**kwargs):
+            guard_calls.append(kwargs)
+            raise HTTPException(status_code=403, detail="Forbidden: endpoint not permitted for token")
+
+        monkeypatch.setattr(acp_endpoints, "get_jwt_manager", lambda: _ScopedJWTManager())
+        monkeypatch.setattr(acp_endpoints, "enforce_websocket_token_scope", _deny_scope, raising=False)
+
+        with pytest.raises(Exception):
+            with client_user_only.websocket_connect(
+                "/api/v1/acp/sessions/test-session/stream?token=scoped.jwt.token"
+            ):
+                pass
+
+        assert guard_calls
+        assert guard_calls[0]["required_scope"] == "write"
+        assert guard_calls[0]["endpoint_id"] == "acp.sessions.stream"
+        assert guard_calls[0]["count_as"] == "call"
+
+    def test_websocket_ssh_rejects_scoped_jwt_without_acp_endpoint_permission(
+        self, client_user_only, monkeypatch
+    ):
+        """ACP SSH socket must enforce scoped JWT endpoint restrictions."""
+        from fastapi import HTTPException
+
+        import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
+
+        guard_calls: list[dict[str, object]] = []
+
+        async def _deny_scope(**kwargs):
+            guard_calls.append(kwargs)
+            raise HTTPException(status_code=403, detail="Forbidden: endpoint not permitted for token")
+
+        monkeypatch.setattr(acp_endpoints, "get_jwt_manager", lambda: _ScopedJWTManager())
+        monkeypatch.setattr(acp_endpoints, "enforce_websocket_token_scope", _deny_scope, raising=False)
+
+        with pytest.raises(Exception):
+            with client_user_only.websocket_connect(
+                "/api/v1/acp/sessions/test-session/ssh?token=scoped.jwt.token"
+            ):
+                pass
+
+        assert guard_calls
+        assert guard_calls[0]["required_scope"] == "write"
+        assert guard_calls[0]["endpoint_id"] == "acp.sessions.ssh"
+        assert guard_calls[0]["count_as"] == "call"
 
     def test_websocket_connect_with_api_key_uses_configured_fixed_id(
         self, client_user_only, mock_get_runner_client, monkeypatch

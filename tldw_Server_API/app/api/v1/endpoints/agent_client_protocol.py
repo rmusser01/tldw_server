@@ -17,7 +17,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket
 from fastapi.responses import StreamingResponse
 from loguru import logger
 from pydantic import ValidationError
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, TokenScopeGuard, User
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    TokenScopeGuard,
+    User,
+    enforce_websocket_token_scope,
+    get_request_user,
+)
 
 from tldw_Server_API.app.api.v1.endpoints._in_memory_limits import SlidingWindowLimiter
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
@@ -950,6 +955,8 @@ async def _authenticate_ws(
     token: str | None = None,
     api_key: str | None = None,
     required_scope: str = "read",
+    endpoint_id: str | None = None,
+    count_as: str | None = None,
 ) -> int | None:
     """Authenticate a WebSocket connection. Returns user_id or None."""
     # Try JWT token first
@@ -960,6 +967,15 @@ async def _authenticate_ws(
             if inspect.isawaitable(token_data):
                 token_data = await token_data
             if token_data and getattr(token_data, "user_id", None):
+                if endpoint_id:
+                    await enforce_websocket_token_scope(
+                        websocket=websocket,
+                        token=token,
+                        required_scope=required_scope,
+                        endpoint_id=endpoint_id,
+                        method="POST" if required_scope == "write" else "GET",
+                        count_as=count_as,
+                    )
                 return int(token_data.user_id)
         except _ACP_ENDPOINT_NONCRITICAL_EXCEPTIONS as e:
             logger.debug("JWT auth failed for WebSocket: {}", e)
@@ -1001,9 +1017,21 @@ async def _authenticate_ws(
     auth_header = websocket.headers.get("authorization") or websocket.headers.get("Authorization")
     if auth_header:
         if auth_header.lower().startswith("bearer "):
-            return await _authenticate_ws(websocket, token=auth_header[7:].strip(), required_scope=required_scope)
+            return await _authenticate_ws(
+                websocket,
+                token=auth_header[7:].strip(),
+                required_scope=required_scope,
+                endpoint_id=endpoint_id,
+                count_as=count_as,
+            )
         elif auth_header.lower().startswith("x-api-key "):
-            return await _authenticate_ws(websocket, api_key=auth_header[10:].strip(), required_scope=required_scope)
+            return await _authenticate_ws(
+                websocket,
+                api_key=auth_header[10:].strip(),
+                required_scope=required_scope,
+                endpoint_id=endpoint_id,
+                count_as=count_as,
+            )
 
     # Try Sec-WebSocket-Protocol: bearer,<token> or x-api-key,<key>
     proto_header = websocket.headers.get("sec-websocket-protocol") or websocket.headers.get("Sec-WebSocket-Protocol")
@@ -1013,9 +1041,21 @@ async def _authenticate_ws(
             scheme = parts[idx].lower()
             value = parts[idx + 1]
             if scheme == "bearer" and value:
-                return await _authenticate_ws(websocket, token=value, required_scope=required_scope)
+                return await _authenticate_ws(
+                    websocket,
+                    token=value,
+                    required_scope=required_scope,
+                    endpoint_id=endpoint_id,
+                    count_as=count_as,
+                )
             if scheme in {"x-api-key", "api-key"} and value:
-                return await _authenticate_ws(websocket, api_key=value, required_scope=required_scope)
+                return await _authenticate_ws(
+                    websocket,
+                    api_key=value,
+                    required_scope=required_scope,
+                    endpoint_id=endpoint_id,
+                    count_as=count_as,
+                )
 
     return None
 
@@ -1217,7 +1257,14 @@ async def acp_session_stream(
     - Or via Authorization header: Bearer <token>
     """
     # Authenticate
-    user_id = await _authenticate_ws(websocket, token=token, api_key=api_key, required_scope="write")
+    user_id = await _authenticate_ws(
+        websocket,
+        token=token,
+        api_key=api_key,
+        required_scope="write",
+        endpoint_id="acp.sessions.stream",
+        count_as="call",
+    )
     if user_id is None:
         with contextlib.suppress(_ACP_ENDPOINT_NONCRITICAL_EXCEPTIONS):
             await websocket.close(code=4401)
@@ -1351,7 +1398,14 @@ async def acp_session_ssh(
     api_key: str | None = Query(None),
 ) -> None:
     """WebSocket SSH proxy for an ACP sandbox session."""
-    user_id = await _authenticate_ws(websocket, token=token, api_key=api_key, required_scope="write")
+    user_id = await _authenticate_ws(
+        websocket,
+        token=token,
+        api_key=api_key,
+        required_scope="write",
+        endpoint_id="acp.sessions.ssh",
+        count_as="call",
+    )
     if user_id is None:
         with contextlib.suppress(_ACP_ENDPOINT_NONCRITICAL_EXCEPTIONS):
             await websocket.close(code=4401)

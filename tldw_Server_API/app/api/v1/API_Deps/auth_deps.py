@@ -10,12 +10,13 @@ import time
 from collections import deque
 from collections.abc import AsyncGenerator, Awaitable, Mapping
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from typing import Annotated, Any, Callable, Optional
 from weakref import WeakKeyDictionary
 
 #
 # 3rd-party imports
-from fastapi import Depends, Header, HTTPException, Request, Response, status
+from fastapi import Depends, Header, HTTPException, Request, Response, WebSocket, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from loguru import logger
 
@@ -2509,6 +2510,54 @@ def require_token_scope(
         )
 
     return _checker
+
+
+async def enforce_websocket_token_scope(
+    websocket: WebSocket,
+    *,
+    token: str,
+    required_scope: str,
+    endpoint_id: str,
+    method: str = "GET",
+    count_as: Optional[str] = None,
+    require_schedule_match: bool = True,
+) -> None:
+    """Apply the HTTP scoped-token guard to a WebSocket bearer-token handshake."""
+    scope = dict(getattr(websocket, "scope", {}) or {})
+    path = (
+        getattr(getattr(websocket, "url", None), "path", None)
+        or scope.get("path")
+        or ""
+    )
+    if path:
+        scope["path"] = str(path)
+
+    request_like = SimpleNamespace(
+        app=getattr(websocket, "app", None),
+        client=getattr(websocket, "client", None),
+        headers=getattr(websocket, "headers", {}),
+        method=str(method or "GET").upper(),
+        path_params=getattr(websocket, "path_params", None) or scope.get("path_params", {}),
+        query_params=getattr(websocket, "query_params", {}),
+        scope=scope,
+        state=getattr(websocket, "state", SimpleNamespace()),
+        url=getattr(websocket, "url", None),
+    )
+    credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+    checker = require_token_scope(
+        required_scope,
+        require_if_present=True,
+        require_schedule_match=require_schedule_match,
+        allow_admin_bypass=False,
+        endpoint_id=endpoint_id,
+        count_as=count_as,
+    )
+    await checker(
+        request_like,
+        credentials=credentials,
+        jwt_service=get_jwt_service(),
+        db_pool=await get_db_pool(),
+    )
 
 
 #######################################################################################################################
