@@ -65,7 +65,21 @@ FORBIDDEN_METADATA_FIELDS = frozenset(
     }
 )
 FORBIDDEN_FIELD_SUBSTRINGS = ("secret", "password")
+FORBIDDEN_METADATA_FIELD_FRAGMENTS = frozenset(
+    {
+        "raw_input",
+        "token_arrays",
+        "api_key",
+        "authorization",
+        "cookie",
+        "nonce",
+        "provider_response",
+        "provider_body",
+    }
+)
 SAFE_TOKEN_COUNT_FIELDS = frozenset({"token_count", "token_counts", "total_tokens", "prompt_tokens"})
+MAX_METADATA_LIST_ITEMS = 128
+MAX_METADATA_STRING_LENGTH = 4096
 
 
 class EmbeddingWorkflowTraceError(ValueError):
@@ -76,17 +90,29 @@ def _validate_metadata_name(name: str) -> None:
     normalized = name.strip().lower()
     if normalized in FORBIDDEN_METADATA_FIELDS:
         raise EmbeddingWorkflowTraceError(f"Unsafe workflow metadata field: {name}")
+    if any(fragment in normalized for fragment in FORBIDDEN_METADATA_FIELD_FRAGMENTS):
+        raise EmbeddingWorkflowTraceError(f"Unsafe workflow metadata field: {name}")
     if "token" in normalized and normalized not in SAFE_TOKEN_COUNT_FIELDS:
         raise EmbeddingWorkflowTraceError(f"Unsafe workflow metadata field: {name}")
     if any(part in normalized for part in FORBIDDEN_FIELD_SUBSTRINGS):
         raise EmbeddingWorkflowTraceError(f"Unsafe workflow metadata field: {name}")
 
 
-def _safe_metadata_value(value: object) -> SafeWorkflowMetadataValue:
+def _safe_metadata_scalar(value: object) -> SafeWorkflowScalar:
+    if isinstance(value, str) and len(value) > MAX_METADATA_STRING_LENGTH:
+        raise EmbeddingWorkflowTraceError("Workflow metadata string value exceeds maximum length")
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
-    if isinstance(value, list) and all(item is None or isinstance(item, (str, int, float, bool)) for item in value):
-        return value
+    raise EmbeddingWorkflowTraceError("Workflow metadata values must be safe scalars or lists of safe scalars")
+
+
+def _safe_metadata_value(value: object) -> SafeWorkflowMetadataValue:
+    if isinstance(value, list):
+        if len(value) > MAX_METADATA_LIST_ITEMS:
+            raise EmbeddingWorkflowTraceError("Workflow metadata list value exceeds maximum item count")
+        return [_safe_metadata_scalar(item) for item in value]
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return _safe_metadata_scalar(value)
     raise EmbeddingWorkflowTraceError("Workflow metadata values must be safe scalars or lists of safe scalars")
 
 
@@ -181,6 +207,8 @@ __all__ = [
     "EmbeddingWorkflowTraceError",
     "FORBIDDEN_FIELD_SUBSTRINGS",
     "FORBIDDEN_METADATA_FIELDS",
+    "MAX_METADATA_LIST_ITEMS",
+    "MAX_METADATA_STRING_LENGTH",
     "SAFE_TOKEN_COUNT_FIELDS",
     "SafeWorkflowMetadataValue",
     "SafeWorkflowScalar",

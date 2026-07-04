@@ -20,6 +20,8 @@ def test_workflow_types_public_exports_include_safety_constants():
     assert "FORBIDDEN_METADATA_FIELDS" in workflow_types.__all__
     assert "FORBIDDEN_FIELD_SUBSTRINGS" in workflow_types.__all__
     assert "SAFE_TOKEN_COUNT_FIELDS" in workflow_types.__all__
+    assert "MAX_METADATA_LIST_ITEMS" in workflow_types.__all__
+    assert "MAX_METADATA_STRING_LENGTH" in workflow_types.__all__
 
 
 def test_workflow_context_uses_request_id_as_safe_workflow_id():
@@ -50,6 +52,17 @@ def test_safe_workflow_metadata_rejects_raw_input_and_secret_fields():
         safe_workflow_metadata({"authorization": "Bearer token"})
 
 
+def test_safe_workflow_metadata_rejects_sensitive_field_name_fragments():
+    with pytest.raises(EmbeddingWorkflowTraceError):
+        safe_workflow_metadata({"openai_api_key": "do not store"})
+
+    with pytest.raises(EmbeddingWorkflowTraceError):
+        safe_workflow_metadata({"request_authorization": "Bearer token"})
+
+    with pytest.raises(EmbeddingWorkflowTraceError):
+        safe_workflow_metadata({"provider_body_sample": "raw provider body"})
+
+
 def test_safe_workflow_metadata_allows_token_count_fields():
     metadata = safe_workflow_metadata(
         {
@@ -68,6 +81,46 @@ def test_safe_workflow_metadata_allows_token_count_fields():
         "prompt_tokens": 3,
         "provider": "huggingface",
     }
+
+
+def test_safe_workflow_metadata_rejects_oversized_lists():
+    max_items = getattr(workflow_types, "MAX_METADATA_LIST_ITEMS", 256)
+
+    with pytest.raises(EmbeddingWorkflowTraceError):
+        safe_workflow_metadata({"attempts": ["retry"] * (max_items + 1)})
+
+
+def test_safe_workflow_metadata_rejects_oversized_strings():
+    max_length = getattr(workflow_types, "MAX_METADATA_STRING_LENGTH", 4096)
+
+    with pytest.raises(EmbeddingWorkflowTraceError):
+        safe_workflow_metadata({"provider": "a" * (max_length + 1)})
+
+    with pytest.raises(EmbeddingWorkflowTraceError):
+        safe_workflow_metadata({"provider_chain": ["huggingface", "b" * (max_length + 1)]})
+
+
+def test_safe_workflow_metadata_copies_accepted_lists():
+    providers = ["huggingface"]
+    metadata = safe_workflow_metadata({"provider_chain": providers})
+
+    providers.append("mutated")
+
+    assert metadata["provider_chain"] == ["huggingface"]
+
+
+def test_event_metadata_list_is_not_affected_by_later_caller_mutation():
+    providers = ["huggingface"]
+    event = EmbeddingWorkflowEvent(
+        event_type="workflow_started",
+        workflow_id="wf-1",
+        status="running",
+        metadata={"provider_chain": providers},
+    )
+
+    providers.append("mutated")
+
+    assert event.metadata["provider_chain"] == ["huggingface"]
 
 
 def test_event_metadata_is_sanitized_on_construction():
