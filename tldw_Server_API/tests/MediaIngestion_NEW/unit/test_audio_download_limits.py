@@ -67,7 +67,9 @@ def test_download_audio_rejects_when_content_length_exceeds_limit(monkeypatch, t
 
     expected_path = tmp_path / "file_abcdef12.mp3"
     assert not expected_path.exists()
-    assert len(calls) == 1
+    assert calls == [
+        (("https://example.com/file.mp3",), {"headers": {}, "stream": True, "timeout": 30})
+    ]
 
 
 @pytest.mark.unit
