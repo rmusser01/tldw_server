@@ -66,6 +66,22 @@ class TestOriginHelpers:
         assert _is_cross_origin("https://a.example", "not a url")
         assert _is_cross_origin("", "https://a.example")
 
+    def test_invalid_ports_and_malformed_hosts_fail_closed(self) -> None:
+        # urlparse raises ValueError lazily when .port is accessed on these;
+        # _url_origin must swallow that and report None -> cross-origin.
+        assert _url_origin("http://a.example:invalid-port/") is None
+        assert _is_cross_origin("http://a.example:invalid-port/", "http://a.example/")
+        assert _is_cross_origin("http://a.example/", "http://a.example:99999/")
+        # malformed IPv6 bracket
+        assert _is_cross_origin("http://a.example/", "http://[::1/x")
+        # sensitive headers must be stripped for such targets, not sent
+        result = _strip_sensitive_headers_for_cross_origin(
+            dict(SECRET_HEADERS),
+            original_url="http://a.example/",
+            target_url="http://a.example:invalid-port/",
+        )
+        assert result == {"X-Custom": "keep-me"}
+
     @hyp_settings(max_examples=50, deadline=None)
     @given(
         scheme=st.sampled_from(["http", "https"]),

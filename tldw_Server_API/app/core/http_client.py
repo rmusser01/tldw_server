@@ -1174,8 +1174,14 @@ def _strip_sensitive_headers_for_cross_origin(
     """
     if not headers or not _is_cross_origin(original_url, target_url):
         return headers
-    kept = {k: v for k, v in headers.items() if k.lower() not in SENSITIVE_REDIRECT_HEADERS}
-    dropped = sorted(k for k in headers if k.lower() in SENSITIVE_REDIRECT_HEADERS)
+    kept: dict[str, str] = {}
+    dropped: list[str] = []
+    for key, value in headers.items():
+        if key.lower() in SENSITIVE_REDIRECT_HEADERS:
+            dropped.append(key)
+        else:
+            kept[key] = value
+    dropped.sort()
     if dropped:
         logger.bind(target_host=_parse_host_from_url(target_url)).debug(
             "Stripped sensitive headers on cross-origin redirect: {}", ", ".join(dropped)
