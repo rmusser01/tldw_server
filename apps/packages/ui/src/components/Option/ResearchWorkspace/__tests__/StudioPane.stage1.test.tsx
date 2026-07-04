@@ -1410,7 +1410,7 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
     expect(mockRagSearch).not.toHaveBeenCalled()
   })
 
-  it("uses selected source content directly for slides fallback generation", async () => {
+  it("does not complete slides artifacts from markdown fallback text", async () => {
     mockGenerateSlidesFromMedia.mockRejectedValue(new Error("Slides API unavailable"))
     mockGetMediaDetails.mockResolvedValue({
       source: { title: "DSPy Prompting Talk" },
@@ -1442,6 +1442,20 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
     expect(slidesRequest.messages?.[1]?.content).toContain("Project Falcon")
     expect(slidesRequest.messages?.[1]?.content).toContain("March 2026")
     expect(mockRagSearch).not.toHaveBeenCalled()
+    await waitFor(() => {
+      expect(mockUpdateArtifactStatus).toHaveBeenCalledWith(
+        expect.stringMatching(/^artifact-/),
+        "failed",
+        expect.objectContaining({
+          errorMessage: expect.stringContaining("usable presentation")
+        })
+      )
+    })
+    expect(mockUpdateArtifactStatus).not.toHaveBeenCalledWith(
+      expect.any(String),
+      "completed",
+      expect.objectContaining({ content: expect.stringContaining("# Project Falcon") })
+    )
   })
 
   it("falls back to the default summary instruction when no custom prompt is set", async () => {

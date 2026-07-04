@@ -86,6 +86,43 @@ const TEXT_FAILURE_SENTINELS: Partial<Record<ArtifactType, string[]>> = {
   data_table: ["Data table generation failed"]
 }
 
+const SLIDES_UNUSABLE_PRESENTATION_MESSAGE =
+  "Slides generation failed because the Slides API did not return a usable presentation."
+
+const SLIDE_PLACEHOLDER_TEXTS = new Set([
+  "invalid",
+  "slide goes here",
+  "slides go here",
+  "content goes here",
+  "todo",
+  "tbd"
+])
+
+const isPlaceholderSlideText = (value: unknown): boolean => {
+  if (typeof value !== "string") return true
+  const normalized = value.trim().toLowerCase().replace(/\s+/g, " ")
+  return !normalized || SLIDE_PLACEHOLDER_TEXTS.has(normalized)
+}
+
+const isUsableGeneratedSlide = (slide: unknown): boolean => {
+  if (!isRecord(slide)) return false
+  const layout = typeof slide.layout === "string" ? slide.layout.toLowerCase() : ""
+  const titleOk = !isPlaceholderSlideText(slide.title)
+  const contentOk = !isPlaceholderSlideText(slide.content)
+  const notesOk = !isPlaceholderSlideText(slide.speaker_notes)
+  return layout === "title" ? titleOk || contentOk || notesOk : contentOk || notesOk
+}
+
+const requireUsableSlidesPresentation = (presentation: unknown): void => {
+  const slides =
+    isRecord(presentation) && Array.isArray(presentation.slides)
+      ? presentation.slides
+      : []
+  if (slides.length === 0 || !slides.every(isUsableGeneratedSlide)) {
+    throw new Error(SLIDES_UNUSABLE_PRESENTATION_MESSAGE)
+  }
+}
+
 const normalizeStudioChatModelId = (value: unknown): string => {
   if (typeof value !== "string") return ""
   const trimmed = value.trim()
@@ -1012,11 +1049,13 @@ const finalizeGenerationResult = (
       }
       return normalized
     }
-    case "slides":
-      if (result.presentationId) {
-        return result
+    case "slides": {
+      const normalized = requireUsableTextResult(type, result, "slide")
+      if (!normalized.presentationId) {
+        throw new Error(SLIDES_UNUSABLE_PRESENTATION_MESSAGE)
       }
-      return requireUsableTextResult(type, result, "slide")
+      return normalized
+    }
     case "audio_overview": {
       const normalized = requireUsableTextResult(type, result, "audio")
       if (options?.audioProvider === "browser") {
@@ -2004,6 +2043,7 @@ async function generateSlidesFromApi(
       model: fallbackOptions.model,
       temperature: fallbackOptions.temperature
     })
+    requireUsableSlidesPresentation(presentation)
     const usage = extractUsageMetrics(presentation)
 
     // Format slides as readable content
@@ -2032,6 +2072,9 @@ async function generateSlidesFromApi(
     }
   } catch (error) {
     if (isAbortLikeError(error)) {
+      throw error
+    }
+    if (error instanceof Error && error.message === SLIDES_UNUSABLE_PRESENTATION_MESSAGE) {
       throw error
     }
     // Fallback to RAG-based generation if API fails

@@ -512,7 +512,22 @@ describe("StudioPane Stage 3 information architecture and UX polish", () => {
       id: "presentation-1",
       title: "Slides",
       theme: "default",
-      slides: [],
+      slides: [
+        {
+          order: 0,
+          layout: "title",
+          title: "ATP Overview",
+          content: "Cellular respiration depends on ATP transfer.",
+          speaker_notes: "Introduce ATP as the energy currency of the cell."
+        },
+        {
+          order: 1,
+          layout: "content",
+          title: "Key Mechanism",
+          content: "Mitochondria convert chemical energy into ATP through respiration.",
+          speaker_notes: "Connect the mechanism back to the selected source."
+        }
+      ],
       version: 1,
       created_at: "2026-02-18T00:00:00.000Z"
     })
@@ -806,10 +821,49 @@ describe("StudioPane Stage 3 information architecture and UX polish", () => {
         expect.objectContaining({
           presentationId: "presentation-1",
           presentationVersion: 1,
-          content: expect.stringContaining("# Slides")
+          content: expect.stringContaining("## Slide 1: ATP Overview")
         })
       )
     })
+  })
+
+  it("fails slides artifacts when the API returns placeholder slide content", async () => {
+    mockGenerateSlidesFromMedia.mockResolvedValueOnce({
+      id: "presentation-placeholder",
+      title: "Slides",
+      theme: "default",
+      slides: [
+        {
+          order: 0,
+          layout: "content",
+          title: "Invalid",
+          content: "slides go here",
+          speaker_notes: "invalid"
+        }
+      ],
+      version: 1,
+      created_at: "2026-02-18T00:00:00.000Z"
+    })
+
+    renderExpandedStudioPane()
+
+    fireEvent.click(screen.getByRole("button", { name: /More outputs/ }))
+    fireEvent.click(screen.getByRole("button", { name: "Slides" }))
+
+    await waitFor(() => {
+      expect(mockUpdateArtifactStatus).toHaveBeenCalledWith(
+        expect.stringMatching(/^artifact-/),
+        "failed",
+        expect.objectContaining({
+          errorMessage: expect.stringContaining("usable presentation")
+        })
+      )
+    })
+    expect(mockUpdateArtifactStatus).not.toHaveBeenCalledWith(
+      expect.any(String),
+      "completed",
+      expect.objectContaining({ presentationId: "presentation-placeholder" })
+    )
   })
 
   it("disables blocked artifact outputs from capability health", () => {

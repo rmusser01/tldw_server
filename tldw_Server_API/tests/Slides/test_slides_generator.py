@@ -225,6 +225,46 @@ def test_generate_handles_invalid_json(monkeypatch):
         )
 
 
+def test_generate_rejects_placeholder_slide_content(monkeypatch):
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Slides.slides_generator.is_test_mode",
+        lambda: False,
+    )
+
+    payload = {
+        "title": "Deck",
+        "slides": [
+            {
+                "layout": "content",
+                "title": "Invalid",
+                "content": "slides go here",
+                "order": 0,
+                "speaker_notes": "invalid",
+            }
+        ],
+    }
+
+    def placeholder_llm_call(**_kwargs):
+        return {"choices": [{"message": {"content": json.dumps(payload)}}]}
+
+    generator = SlidesGenerator(llm_call=placeholder_llm_call)
+    with pytest.raises(SlidesGenerationOutputError, match="slide_content_missing"):
+        generator.generate_from_text(
+            source_text="Content",
+            title_hint=None,
+            provider="openai",
+            model=None,
+            api_key=None,
+            temperature=None,
+            max_tokens=None,
+            max_source_tokens=None,
+            max_source_chars=None,
+            enable_chunking=False,
+            chunk_size_tokens=None,
+            summary_tokens=None,
+        )
+
+
 def test_timeline_style_generates_visual_block_and_text_fallback(monkeypatch):
     monkeypatch.setattr(
         "tldw_Server_API.app.core.Slides.slides_generator.is_test_mode",
