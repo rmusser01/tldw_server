@@ -110,6 +110,41 @@ async def test_update_share(repo):
 
 
 @pytest.mark.asyncio
+async def test_update_share_does_not_overwrite_interleaved_clone_change(repo, fake_pool):
+    share = await repo.create_share(
+        workspace_id="ws-6b",
+        owner_user_id=1,
+        share_scope_type="team",
+        share_scope_id=10,
+        access_level="view_chat",
+        allow_clone=True,
+        created_by=1,
+    )
+
+    original_execute = fake_pool.execute
+    injected = False
+
+    async def interleaving_execute(sql: str, params: tuple = ()) -> None:
+        nonlocal injected
+        normalized_sql = " ".join(sql.upper().split())
+        if not injected and normalized_sql.startswith("UPDATE SHARED_WORKSPACES SET"):
+            injected = True
+            await original_execute(
+                "UPDATE shared_workspaces SET allow_clone = ? WHERE id = ?",
+                (0, share["id"]),
+            )
+        await original_execute(sql, params)
+
+    fake_pool.execute = interleaving_execute
+
+    updated = await repo.update_share(share["id"], access_level="full_edit")
+
+    assert updated is not None
+    assert updated["access_level"] == "full_edit"
+    assert updated["allow_clone"] is False
+
+
+@pytest.mark.asyncio
 async def test_update_share_not_found(repo):
     result = await repo.update_share(9999, access_level="full_edit")
     assert result is None
