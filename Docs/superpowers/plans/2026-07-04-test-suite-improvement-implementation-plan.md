@@ -84,7 +84,7 @@
 
 - [ ] **Step 1:** Reset fixtures for top-10 inventory offenders; drive guard warnings on those lanes to zero.
 - [ ] **Step 2:** Meta-tests reproducing (minimized) #2580 (singleton cache re-registered against second DB), #2581 (drain state across suites), #2585 (`reload_app_main()` sys.modules identity) — each must fail without its fix/reset. #2585 is still open: its meta-test lands xfail-with-issue-link until the fix ships, then flips. (The fourth lifecycle case — the ACP WS broadcaster leak — merged with its regression tests via PR #2619 on 2026-07-04; nothing to do here.)
-- [ ] **Step 3:** Nightly `pytest-randomly` (new dev-dep; works under `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` with explicit `-p randomly`, consistent with CI's existing `-p pytest_cov -p pytest_asyncio.plugin` usage) on 2–3 high-risk shards; not PR-blocking; promote only after 5 consecutive green runs.
+- [ ] **Step 3:** Nightly `pytest-randomly` (new dev-dep; works under `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` with explicit `-p pytest_randomly` — use the full module name, not the `randomly` entry-point alias, which is less reliably resolved when autoload is disabled; consistent with CI's existing `-p pytest_cov -p pytest_asyncio.plugin` usage) on 2–3 high-risk shards; not PR-blocking; promote only after 5 consecutive green runs.
 
 ### Task 5 (PR 6): Env-matrix coverage — RA6
 
@@ -171,6 +171,10 @@
 - [ ] **Step 3:** Verify: full `bun run test:run` green; skip count (`assert-playwright-no-skips.mjs`) not increased.
 
 ---
+
+## Tracked Follow-Ups (outside the 10 tasks)
+
+- **Central redirect header hardening** (from PR #2604 review, qodo "Option B"): the response-based `fetch`/`afetch` redirect loops in `tldw_Server_API/app/core/http_client.py` reuse the caller's headers across hops without stripping credentials on cross-origin redirects. PR #2634 applied the per-caller mitigation (`allow_redirects=False` in `tokenizer_resolver._http_post`); the central fix — strip/partition sensitive headers (`Authorization`, `x-api-key`, cookies) when a redirect changes origin, or fail closed unless the caller opts in — protects every other caller and deserves its own PR with property/unit tests for the origin-comparison logic.
 
 ## Program-Level Verification
 
