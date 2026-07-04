@@ -204,7 +204,7 @@ Likely frontend edits:
 
 **Tests:** Focused pytest, focused Vitest, `git diff --check`, Bandit on touched backend paths.
 
-**Status:** In Progress
+**Status:** Complete
 
 - [x] Run focused Claims tests.
 - [x] Run focused quiz, flashcard, slides, data-table, and Research Workspace backend tests.
@@ -214,9 +214,9 @@ Likely frontend edits:
 - [x] Run Bandit on touched backend paths through the project virtual environment.
 - [x] Run `git diff --check`.
 - [x] Update Backlog task `TASK-12146` with touched files, verification results, blockers, and PR link.
-- [ ] Commit the plan and implementation work in logical increments.
-- [ ] Push branch `codex/issue-2605-research-workspace-uat`.
-- [ ] Update PR #2633 with a human-owned change summary requirement note.
+- [x] Commit the plan and implementation work in logical increments.
+- [x] Push branch `codex/issue-2605-research-workspace-uat`.
+- [x] Verify PR #2633 is open against `dev` and record the human-owned change summary requirement note.
 
 Latest verification evidence:
 

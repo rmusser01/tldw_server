@@ -1,7 +1,7 @@
 ---
 id: TASK-12146
 title: Plan Research Workspace artifact claim verification
-status: In Progress
+status: Done
 labels:
 - research-workspace
 - claims
@@ -86,6 +86,7 @@ Fresh verification:
 - `python -m bandit -r <touched backend source paths> -f json -o /tmp/bandit_research_workspace_claims.json` -> 0 results.
 
 PR: #2633 against `dev`. Note: user-owned Change summary is still required by the AI-generated PR merge gate.
+Closeout update: pushed `f95564bf22c4af90c84879ef373525eaad7adf52` to `codex/issue-2605-research-workspace-uat`; verified PR #2633 is open against `dev` with that head commit. The remaining merge-gate action is still the required human-owned Change summary on the PR.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
