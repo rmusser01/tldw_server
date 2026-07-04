@@ -349,16 +349,35 @@ def _flatten_slides_text(slides: list[Slide]) -> str:
     return "\n".join(parts)
 
 
+def _slide_claim_lines(value: str | None) -> list[str]:
+    claims: list[str] = []
+    for raw_line in str(value or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        line = re.sub(r"^\s*(?:[-*+]\s+|\d+[.)]\s+|#{1,6}\s+|>\s*)", "", line).strip()
+        if line:
+            claims.append(line)
+    return claims
+
+
 def _build_slide_verification_units(slides: list[Slide]) -> list[ArtifactVerificationUnit]:
     units: list[ArtifactVerificationUnit] = []
     for slide in slides:
         parts: list[str] = []
+        claims: list[str] = []
+        layout_value = str(slide.layout.value if hasattr(slide.layout, "value") else slide.layout)
+        is_title_slide = layout_value == "title"
         if slide.title:
             parts.append(f"Title: {slide.title}")
         if slide.content:
             parts.append(slide.content)
+            if not is_title_slide:
+                claims.extend(_slide_claim_lines(slide.content))
         if slide.speaker_notes:
             parts.append(f"Speaker notes: {slide.speaker_notes}")
+            if not is_title_slide:
+                claims.extend(_slide_claim_lines(slide.speaker_notes))
         text = "\n".join(parts).strip()
         if not text:
             continue
@@ -366,9 +385,10 @@ def _build_slide_verification_units(slides: list[Slide]) -> list[ArtifactVerific
             ArtifactVerificationUnit(
                 unit_id=f"slide:{slide.order}",
                 text=text,
+                claims=claims,
                 metadata={
                     "slide_order": slide.order,
-                    "layout": str(slide.layout.value if hasattr(slide.layout, "value") else slide.layout),
+                    "layout": layout_value,
                 },
             )
         )

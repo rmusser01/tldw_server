@@ -2263,6 +2263,48 @@ def test_slides_generate_from_media_stores_grounded_claim_verification(
     assert data["studio_data"]["claimVerification"]["metadata"]["verification_model"] == "claims-model"
 
 
+def test_slide_verification_units_use_explicit_visible_claims() -> None:
+    slide = slides_ep._slide_from_obj(
+        {
+            "order": 1,
+            "layout": "content",
+            "title": "Trial Overview",
+            "content": "- **Start Date:** March 3, 2026\n- **Lead Researcher:** Dr. Mira Patel",
+            "speaker_notes": "The trial was led by Dr. Mira Patel and enrolled 42 participants.",
+            "metadata": {},
+        }
+    )
+
+    units = slides_ep._build_slide_verification_units([slide])
+
+    assert len(units) == 1
+    assert units[0].claims == [
+        "**Start Date:** March 3, 2026",
+        "**Lead Researcher:** Dr. Mira Patel",
+        "The trial was led by Dr. Mira Patel and enrolled 42 participants.",
+    ]
+    assert all("Dr." in claim or not claim.endswith("Dr.") for claim in units[0].claims)
+
+
+def test_title_slide_cover_text_is_not_treated_as_claim() -> None:
+    slide = slides_ep._slide_from_obj(
+        {
+            "order": 0,
+            "layout": "title",
+            "title": "Artemis Greenhouse Trial",
+            "content": "Trial Overview and Results",
+            "speaker_notes": "This presentation covers the Artemis greenhouse trial.",
+            "metadata": {},
+        }
+    )
+
+    units = slides_ep._build_slide_verification_units([slide])
+
+    assert len(units) == 1
+    assert units[0].claims == []
+    assert "Trial Overview and Results" in units[0].text
+
+
 def test_slides_generate_from_media_rejects_needs_revision_before_persist(
     slides_client_with_sources,
     monkeypatch,
