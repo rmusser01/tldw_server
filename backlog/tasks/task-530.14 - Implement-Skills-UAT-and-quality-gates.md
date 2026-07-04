@@ -10,6 +10,8 @@ priority: High
 parent_task_id: TASK-530
 documentation:
 - Docs/superpowers/specs/2026-06-30-skills-uat-quality-gates-design.md
+- Docs/superpowers/plans/2026-07-04-skills-uat-quality-gates.md
+- Docs/Reviews/skills-page-uat.md
 ---
 
 ## Description
@@ -35,6 +37,8 @@ Docs/superpowers/plans/2026-07-04-skills-uat-quality-gates.md
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+- 2026-07-04: Added the implementation plan at `Docs/superpowers/plans/2026-07-04-skills-uat-quality-gates.md`.
+- 2026-07-04: Added manual `/skills` UAT scenarios and non-telemetry success metrics at `Docs/Reviews/skills-page-uat.md`.
 
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 

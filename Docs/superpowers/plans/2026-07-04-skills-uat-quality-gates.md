@@ -224,11 +224,13 @@ git commit -m "test: add skills failure uat"
 
 ## Task 4: Add Manual UAT Checklist And Metrics
 
+**Status:** Complete.
+
 **Files:**
 - Create: `Docs/Reviews/skills-page-uat.md`
 - Modify: `backlog/tasks/task-530.14 - Implement-Skills-UAT-and-quality-gates.md`
 
-- [ ] **Step 1: Create the checklist doc**
+- [x] **Step 1: Create the checklist doc**
 
 Include sections:
 
@@ -249,7 +251,7 @@ Use a compact table with columns:
 | --- | --- | --- | --- | --- |
 ```
 
-- [ ] **Step 2: Add metrics without telemetry**
+- [x] **Step 2: Add metrics without telemetry**
 
 Document:
 
@@ -262,14 +264,14 @@ Document:
 
 State explicitly that telemetry is not enabled by this task.
 
-- [ ] **Step 3: Link docs in Backlog**
+- [x] **Step 3: Link docs in Backlog**
 
 Use Backlog MCP to add:
 
 - `Docs/superpowers/plans/2026-07-04-skills-uat-quality-gates.md`
 - `Docs/Reviews/skills-page-uat.md`
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add Docs/Reviews/skills-page-uat.md "backlog/tasks/task-530.14 - Implement-Skills-UAT-and-quality-gates.md"
