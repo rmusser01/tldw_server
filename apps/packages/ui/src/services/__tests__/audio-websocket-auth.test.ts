@@ -59,11 +59,27 @@ describe("speech TTS websocket contract", () => {
     expect(source).not.toContain("/api/v1/audio/stream/tts?token=")
     expect(source).not.toContain("encodeURIComponent(token)")
 
-    const authFrameIndex = source.indexOf("sendAudioWebSocketAuthFrame(ws, token)")
-    const promptFrameIndex = source.indexOf('type: "prompt"')
+    const indexOfMatch = (regex: RegExp) => {
+      const match = source.match(regex)
+      expect(match).not.toBeNull()
+      return match?.index ?? -1
+    }
 
-    expect(authFrameIndex).toBeGreaterThan(-1)
-    expect(promptFrameIndex).toBeGreaterThan(-1)
+    const authFrameIndex = indexOfMatch(
+      /sendAudioWebSocketAuthFrame\s*\(\s*ws\s*,\s*token\s*\)/
+    )
+    const promptFrameIndex = indexOfMatch(/type\s*:\s*["']prompt["']/)
+    const authFailureHandlerIndex = indexOfMatch(
+      new RegExp(
+        [
+          String.raw`try\s*\{\s*sendAudioWebSocketAuthFrame\s*\(\s*ws\s*,\s*token\s*\)`,
+          String.raw`[\s\S]*?\}\s*catch\s*\([^)]*\)\s*\{`,
+          String.raw`[\s\S]*?ws\.close\s*\(\s*\)`
+        ].join("")
+      )
+    )
+
     expect(authFrameIndex).toBeLessThan(promptFrameIndex)
+    expect(authFailureHandlerIndex).toBeLessThan(promptFrameIndex)
   })
 })
