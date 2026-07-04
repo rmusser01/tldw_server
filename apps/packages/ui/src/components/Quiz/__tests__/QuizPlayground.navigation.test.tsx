@@ -72,6 +72,7 @@ vi.mock("../tabs/TakeQuizTab", () => ({
   TakeQuizTab: ({
     startQuizId,
     highlightQuizId,
+    forceShowWorkspaceItems,
     navigationSource,
     assignmentMode,
     assignmentDueAt,
@@ -90,6 +91,9 @@ vi.mock("../tabs/TakeQuizTab", () => ({
         assignedByRole,
         externalSearchQuery
       })}
+      <span data-testid="take-force-show-workspace-items">
+        {String(forceShowWorkspaceItems ?? false)}
+      </span>
     </div>
   )
 }))
@@ -509,6 +513,31 @@ describe("QuizPlayground navigation intents", () => {
         externalSearchQuery: null
       })
     )
+
+    window.history.replaceState({}, "", originalUrl)
+  })
+
+  it("hydrates flashcards-origin URL params into Take tab intent with workspace visibility", async () => {
+    const originalUrl = window.location.href
+    window.history.replaceState(
+      {},
+      "",
+      "/quiz?tab=take&source=flashcards&start_quiz_id=19&highlight_quiz_id=20&deck_id=44&deck_name=Biology&source_attempt_id=101&include_workspace_items=1"
+    )
+
+    render(<QuizPlayground />)
+
+    expect(screen.getByTestId("take-intent").textContent).toContain(
+      '"navigationSource":"flashcards"'
+    )
+    expect(screen.getByTestId("take-force-show-workspace-items")).toHaveTextContent(
+      "true"
+    )
+    await waitFor(() => {
+      expect(screen.getByTestId("take-intent").textContent).toContain(
+        '"externalSearchQuery":"Biology"'
+      )
+    })
 
     window.history.replaceState({}, "", originalUrl)
   })

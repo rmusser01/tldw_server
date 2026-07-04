@@ -144,4 +144,55 @@ describe("quiz/flashcards cross-navigation handoff helpers", () => {
       forceShowWorkspaceItems: false
     })
   })
+
+  it("round-trips generated flashcards study routes across positive ids", () => {
+    const cases = Array.from({ length: 24 }, (_, index) => ({
+      quizId: index + 1,
+      attemptId: index % 3 === 0 ? 200 + index : undefined,
+      deckId: index % 2 === 0 ? 400 + index : undefined,
+      forceShowWorkspaceItems: index % 5 === 0
+    }))
+
+    for (const intent of cases) {
+      const route = buildFlashcardsStudyRouteFromQuiz(intent)
+      const parsed = parseFlashcardsStudyIntentFromSearch(
+        route.slice(route.indexOf("?"))
+      )
+
+      expect(parsed).toMatchObject({
+        quizId: intent.quizId,
+        attemptId: intent.attemptId,
+        deckId: intent.deckId,
+        forceShowWorkspaceItems:
+          Boolean(intent.forceShowWorkspaceItems) || intent.deckId != null
+      })
+    }
+  })
+
+  it("round-trips generated quiz assessment routes across ids and visibility flags", () => {
+    const cases = Array.from({ length: 24 }, (_, index) => ({
+      startQuizId: index + 11,
+      highlightQuizId: index % 4 === 0 ? 100 + index : undefined,
+      deckId: index % 2 === 0 ? 500 + index : undefined,
+      deckName: index % 3 === 0 ? `Deck ${index}` : undefined,
+      sourceAttemptId: index % 5 === 0 ? 700 + index : undefined,
+      forceShowWorkspaceItems: index % 2 === 0
+    }))
+
+    for (const intent of cases) {
+      const route = buildQuizAssessmentRouteFromFlashcards(intent)
+      const parsed = parseQuizAssessmentIntentFromSearch(
+        route.slice(route.indexOf("?"))
+      )
+
+      expect(parsed).toMatchObject({
+        startQuizId: intent.startQuizId,
+        highlightQuizId: intent.highlightQuizId ?? intent.startQuizId,
+        deckId: intent.deckId,
+        deckName: intent.deckName,
+        sourceAttemptId: intent.sourceAttemptId,
+        forceShowWorkspaceItems: intent.forceShowWorkspaceItems
+      })
+    }
+  })
 })
