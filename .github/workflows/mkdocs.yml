@@ -3,6 +3,7 @@ name: Deploy MkDocs to GitHub Pages
 on:
   push:
     branches:
+      - dev
       - main
       - PG-Backend
   workflow_dispatch:
@@ -11,10 +12,6 @@ permissions:
   contents: read
   pages: write
   id-token: write
-
-concurrency:
-  group: "pages"
-  cancel-in-progress: true
 
 jobs:
   build:
@@ -69,12 +66,16 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v4
         with:
-          path: site
+          path: Docs/site
 
   deploy:
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/PG-Backend'
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    concurrency:
+      group: "pages"
+      cancel-in-progress: true
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
