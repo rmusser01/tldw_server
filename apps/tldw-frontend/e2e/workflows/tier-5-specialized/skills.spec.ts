@@ -19,6 +19,10 @@ import {
   forceSkillsConnectionState,
   mockSkillsBeginnerApi,
   mockPowerUserSkillsLibrary,
+  mockSkillsExecutionFailure,
+  mockSkillsImportValidationFailure,
+  mockSkillsSlowList,
+  mockSkillsStaleVersionConflict,
 } from "../../utils/skills-fixtures"
 
 test.describe("Skills beginner journey (mocked)", () => {
@@ -195,6 +199,106 @@ test.describe("Skills power-user journey (mocked)", () => {
       page.getByRole("dialog", { name: "Delete selected skills?" })
     ).toBeVisible()
     expect(api.deleteRequests).toHaveLength(0)
+
+    await assertNoCriticalErrors(diagnostics)
+  })
+})
+
+test.describe("Skills failure states (mocked)", () => {
+  test("shows invalid import feedback without importing", async ({
+    page,
+    diagnostics,
+  }) => {
+    const api = await mockSkillsImportValidationFailure(page)
+    await seedAuth(page, {
+      serverUrl: TEST_CONFIG.serverUrl,
+      allowOffline: true,
+    })
+
+    await page.goto("/skills", { waitUntil: "domcontentloaded" })
+    await forceSkillsConnectionState(page)
+
+    await page.getByRole("button", { name: "Import", exact: true }).click()
+    await page.getByRole("menuitem", { name: "Import Text" }).click()
+    const dialog = page.getByRole("dialog", { name: "Import Skill from Text" })
+    await expect(dialog).toBeVisible()
+    await dialog.getByLabel("SKILL.md Content").fill("not a valid skill")
+    await dialog.getByRole("button", { name: "Review import" }).click()
+
+    await expect(dialog.getByText("Fix these issues before importing.")).toBeVisible()
+    await expect(dialog.getByText("Missing skill description")).toBeVisible()
+    expect(api.importRequests).toHaveLength(0)
+
+    await assertNoCriticalErrors(diagnostics)
+  })
+
+  test("shows execution failure details from a test run", async ({
+    page,
+    diagnostics,
+  }) => {
+    await mockSkillsExecutionFailure(page)
+    await seedAuth(page, {
+      serverUrl: TEST_CONFIG.serverUrl,
+      allowOffline: true,
+    })
+
+    await page.goto("/skills", { waitUntil: "domcontentloaded" })
+    await forceSkillsConnectionState(page)
+
+    await page.getByRole("button", { name: "Test run summarize" }).click()
+    const previewDialog = page.getByRole("dialog", { name: "Test run" })
+    await previewDialog.getByPlaceholder("Enter test arguments...").fill("failure test")
+    await previewDialog.getByRole("button", { name: "Run test" }).click()
+
+    await expect(previewDialog.getByRole("alert")).toContainText("Model unavailable")
+
+    await assertNoCriticalErrors(diagnostics)
+  })
+
+  test("tells users to reload before retrying a stale delete", async ({
+    page,
+    diagnostics,
+  }) => {
+    await mockSkillsStaleVersionConflict(page)
+    await seedAuth(page, {
+      serverUrl: TEST_CONFIG.serverUrl,
+      allowOffline: true,
+    })
+
+    await page.goto("/skills", { waitUntil: "domcontentloaded" })
+    await forceSkillsConnectionState(page)
+
+    await page.getByRole("button", { name: "Delete summarize" }).click()
+    const confirmDialog = page.getByRole("dialog", { name: "Delete skill?" })
+    await expect(confirmDialog).toBeVisible()
+    await confirmDialog.getByRole("button", { name: "Delete" }).click()
+
+    await expect(page.getByText("Skill changed elsewhere")).toBeVisible()
+    await expect(page.getByText("Reload skills before deleting this version.")).toBeVisible()
+
+    await assertNoCriticalErrors(diagnostics)
+  })
+
+  test("announces slow list loading until the response resolves", async ({
+    page,
+    diagnostics,
+  }) => {
+    const api = await mockSkillsSlowList(page)
+    await seedAuth(page, {
+      serverUrl: TEST_CONFIG.serverUrl,
+      allowOffline: true,
+    })
+
+    await page.goto("/skills", { waitUntil: "domcontentloaded" })
+    await forceSkillsConnectionState(page)
+
+    await expect.poll(() => api.listRequests()).toBe(1)
+    await expect(
+      page.locator('div[role="status"]').filter({ hasText: "Loading skills" })
+    ).toHaveText("Loading skills")
+
+    api.resolveList()
+    await expect(page.getByText("Summarize source material")).toBeVisible()
 
     await assertNoCriticalErrors(diagnostics)
   })

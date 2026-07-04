@@ -288,6 +288,165 @@ export async function mockPowerUserSkillsLibrary(page: Page) {
   }
 }
 
+async function mockSingleSkillLibrary(
+  page: Page,
+  options: {
+    executeStatus?: number
+    executePayload?: unknown
+    deleteStatus?: number
+    deletePayload?: unknown
+  } = {}
+) {
+  await mockSkillsCapabilityRoutes(page)
+
+  await page.route(/\/api\/v1\/skills(?:\/)?(?:\?.*)?$/, async (route) => {
+    await fulfillJson(route, {
+      skills: [seededSkillSummary],
+      count: 1,
+      total: 1,
+      limit: 10,
+      offset: 0,
+    })
+  })
+
+  await page.route(/\/api\/v1\/skills\/context(?:\/)?(?:\?.*)?$/, async (route) => {
+    await fulfillJson(route, {
+      available_skills: [seededSkillSummary],
+      context_text: "/skill summarize [text]",
+    })
+  })
+
+  await page.route(/\/api\/v1\/skills\/summarize(?:\/)?(?:\?.*)?$/, async (route) => {
+    if (route.request().method() === "DELETE") {
+      await fulfillJson(
+        route,
+        options.deletePayload ?? { detail: "Version conflict" },
+        options.deleteStatus ?? 200
+      )
+      return
+    }
+    await fulfillJson(route, seededSkillResponse)
+  })
+
+  await page.route(
+    /\/api\/v1\/skills\/summarize\/execute(?:\/)?(?:\?.*)?$/,
+    async (route) => {
+      const status = options.executeStatus ?? 200
+      if (status >= 400) {
+        await fulfillJson(
+          route,
+          options.executePayload ?? { detail: "Model unavailable" },
+          status
+        )
+        return
+      }
+      await fulfillJson(route, {
+        skill_name: "summarize",
+        rendered_prompt: "Summarize this source: failure test",
+        allowed_tools: null,
+        model_override: null,
+        execution_mode: "inline",
+        fork_output: null,
+        dry_run: false,
+      })
+    }
+  )
+}
+
+export async function mockSkillsExecutionFailure(page: Page) {
+  await mockSingleSkillLibrary(page, {
+    executeStatus: 500,
+    executePayload: { detail: "Model unavailable" },
+  })
+}
+
+export async function mockSkillsStaleVersionConflict(page: Page) {
+  await mockSingleSkillLibrary(page, {
+    deleteStatus: 409,
+    deletePayload: { detail: "Version conflict" },
+  })
+}
+
+export async function mockSkillsImportValidationFailure(page: Page) {
+  const importRequests: unknown[] = []
+
+  await mockSkillsCapabilityRoutes(page)
+
+  await page.route(/\/api\/v1\/skills(?:\/)?(?:\?.*)?$/, async (route) => {
+    await fulfillJson(route, {
+      skills: [],
+      count: 0,
+      total: 0,
+      limit: 10,
+      offset: 0,
+    })
+  })
+
+  await page.route(/\/api\/v1\/skills\/context(?:\/)?(?:\?.*)?$/, async (route) => {
+    await fulfillJson(route, {
+      available_skills: [],
+      context_text: "",
+    })
+  })
+
+  await page.route(/\/api\/v1\/skills\/import\/preview(?:\/)?(?:\?.*)?$/, async (route) => {
+    await fulfillJson(route, {
+      valid: false,
+      errors: ["Missing skill description"],
+      name: null,
+      description: null,
+      argument_hint: null,
+      context: "inline",
+      conflict: false,
+      existing_version: null,
+      supporting_file_count: 0,
+      model: null,
+      allowed_tools: null,
+    })
+  })
+
+  await page.route(/\/api\/v1\/skills\/import(?:\/)?(?:\?.*)?$/, async (route) => {
+    importRequests.push(route.request().postDataJSON())
+    await fulfillJson(route, { detail: "Import should not be called" }, 500)
+  })
+
+  return { importRequests }
+}
+
+export async function mockSkillsSlowList(page: Page) {
+  let resolveList: () => void = () => {}
+  const listReleased = new Promise<void>((resolve) => {
+    resolveList = resolve
+  })
+  let listRequests = 0
+
+  await mockSkillsCapabilityRoutes(page)
+
+  await page.route(/\/api\/v1\/skills(?:\/)?(?:\?.*)?$/, async (route) => {
+    listRequests += 1
+    await listReleased
+    await fulfillJson(route, {
+      skills: [seededSkillSummary],
+      count: 1,
+      total: 1,
+      limit: 10,
+      offset: 0,
+    })
+  })
+
+  await page.route(/\/api\/v1\/skills\/context(?:\/)?(?:\?.*)?$/, async (route) => {
+    await fulfillJson(route, {
+      available_skills: [seededSkillSummary],
+      context_text: "/skill summarize [text]",
+    })
+  })
+
+  return {
+    listRequests: () => listRequests,
+    resolveList,
+  }
+}
+
 export async function forceSkillsConnectionState(page: Page) {
   await page.waitForFunction(
     () =>
