@@ -28,7 +28,7 @@
 - Read: `tldw_Server_API/app/api/v1/router_groups/minimal.py`
 - Read: `tldw_Server_API/app/main.py`
 
-- [ ] **Step 1: Generate the router tag inventory**
+- [x] **Step 1: Generate the router tag inventory**
 
 Run:
 
@@ -62,7 +62,7 @@ PY
 
 Expected: a sorted list of router tags and a count near `100`. Use this list as the source of truth for the module guide.
 
-- [ ] **Step 2: Generate the curated OpenAPI tag inventory**
+- [x] **Step 2: Generate the curated OpenAPI tag inventory**
 
 Run:
 
@@ -97,7 +97,7 @@ PY
 
 Expected: a sorted-by-file-order list of curated OpenAPI tags. Compare it to the router tag inventory to decide which missing tags need curated descriptions.
 
-- [ ] **Step 3: Inspect existing docs links**
+- [x] **Step 3: Inspect existing docs links**
 
 Run:
 
@@ -113,7 +113,7 @@ Expected: existing API docs such as `Docs/API-related/Chat_API_Documentation.md`
 - Modify: `Docs/API-related/API_Tags_Index.md:1-40`
 - Modify: `Docs/Published/API-related/API_Tags_Index.md:1-40`
 
-- [ ] **Step 1: Replace the source guide content**
+- [x] **Step 1: Replace the source guide content**
 
 Edit `Docs/API-related/API_Tags_Index.md` so it starts with this structure:
 
@@ -156,7 +156,7 @@ Each section should use this table shape:
 | `chat` | Run OpenAI-compatible chat completions and manage conversations. | Build chat clients, provider-backed assistants, and conversation workflows. | [Chat API](Chat_API_Documentation.md) |
 ```
 
-- [ ] **Step 2: Cover all primary router tags**
+- [x] **Step 2: Cover all primary router tags**
 
 Include at least these module rows in the source guide:
 
@@ -166,7 +166,7 @@ health, setup, authentication, users, user keys via users, organizations, invite
 
 Expected: tags without dedicated docs still have a useful capability explanation and a docs note such as `Live OpenAPI only` or `Covered by [API examples](../API/api-examples.md)`.
 
-- [ ] **Step 3: Use local links that resolve from `Docs/API-related`**
+- [x] **Step 3: Use local links that resolve from `Docs/API-related`**
 
 Use relative links like:
 
@@ -179,7 +179,7 @@ Use relative links like:
 
 Expected: links resolve from `Docs/API-related/API_Tags_Index.md`.
 
-- [ ] **Step 4: Mirror the source guide to Published**
+- [x] **Step 4: Mirror the source guide to Published**
 
 Run:
 
@@ -189,7 +189,7 @@ cp Docs/API-related/API_Tags_Index.md Docs/Published/API-related/API_Tags_Index.
 
 Expected: `cmp Docs/API-related/API_Tags_Index.md Docs/Published/API-related/API_Tags_Index.md` exits with status `0`.
 
-- [ ] **Step 5: Commit the guide**
+- [x] **Step 5: Commit the guide**
 
 Run:
 
@@ -206,7 +206,7 @@ Expected: commit succeeds with only the two tag index docs staged for this task.
 - Modify: `tldw_Server_API/app/main.py:1300-1585`
 - Modify: `tldw_Server_API/app/main.py:2038-2077`
 
-- [ ] **Step 1: Update concise tag descriptions**
+- [x] **Step 1: Update concise tag descriptions**
 
 Edit `OPENAPI_TAGS` in `tldw_Server_API/app/main.py` so the curated tags use user-facing descriptions. Keep entries as dictionaries in the existing list. Examples of the target tone:
 
@@ -219,7 +219,7 @@ Edit `OPENAPI_TAGS` in `tldw_Server_API/app/main.py` so the curated tags use use
 
 Expected: descriptions answer what users can do, not just what implementation component exists.
 
-- [ ] **Step 2: Add curated metadata for important missing tags**
+- [x] **Step 2: Add curated metadata for important missing tags**
 
 Add concise entries for common router tags currently auto-filled without descriptions. Include at least:
 
@@ -240,7 +240,7 @@ Add concise entries for common router tags currently auto-filled without descrip
 
 Expected: the most visible modules in the guide also have descriptions in `/docs` and `/redoc`.
 
-- [ ] **Step 3: Update ReDoc tag groups**
+- [x] **Step 3: Update ReDoc tag groups**
 
 Replace the existing `x-tagGroups` categories with groups that mirror the guide:
 
@@ -287,7 +287,7 @@ openapi_schema["x-tagGroups"] = [
 
 Expected: ReDoc navigation follows the guide's user-facing categories.
 
-- [ ] **Step 4: Commit OpenAPI metadata**
+- [x] **Step 4: Commit OpenAPI metadata**
 
 Run:
 
@@ -305,7 +305,7 @@ Expected: commit succeeds with only `main.py` staged.
 - Read: `Docs/Published/API-related/API_Tags_Index.md`
 - Read: `tldw_Server_API/app/main.py`
 
-- [ ] **Step 1: Confirm the published mirror matches**
+- [x] **Step 1: Confirm the published mirror matches**
 
 Run:
 
@@ -315,7 +315,7 @@ cmp Docs/API-related/API_Tags_Index.md Docs/Published/API-related/API_Tags_Index
 
 Expected: no output and exit status `0`.
 
-- [ ] **Step 2: Run markdown link sanity for local links**
+- [x] **Step 2: Run markdown link sanity for local links**
 
 Run:
 
@@ -352,7 +352,7 @@ PY
 
 Expected: `local markdown links resolve`.
 
-- [ ] **Step 3: Run OpenAPI import/schema smoke check**
+- [x] **Step 3: Run OpenAPI import/schema smoke check**
 
 Run:
 
@@ -392,7 +392,7 @@ PY
 
 Expected: prints tag and group counts; no exception.
 
-- [ ] **Step 4: Run Bandit on touched Python**
+- [x] **Step 4: Run Bandit on touched Python**
 
 Run:
 
@@ -403,7 +403,7 @@ python -m bandit -r tldw_Server_API/app/main.py -f json -o /tmp/bandit_api_modul
 
 Expected: Bandit completes. Review `/tmp/bandit_api_module_docs.json`; if it reports only pre-existing unrelated findings, record that. Fix any new findings caused by this task.
 
-- [ ] **Step 5: Commit verification notes if task record is updated**
+- [x] **Step 5: Commit verification notes if task record is updated**
 
 Use Backlog.md MCP or CLI to add verification notes to `TASK-12027`. If the available MCP surface does not expose task editing, use:
 
@@ -418,7 +418,7 @@ Expected: the task records the verification results.
 **Files:**
 - Modify: `backlog/tasks/task-12027 - Improve-user-facing-API-module-documentation.md`
 
-- [ ] **Step 1: Review final diff**
+- [x] **Step 1: Review final diff**
 
 Run:
 
@@ -430,7 +430,7 @@ git diff -- Docs/API-related/API_Tags_Index.md Docs/Published/API-related/API_Ta
 
 Expected: diff contains only documentation guide changes and OpenAPI metadata descriptions/grouping.
 
-- [ ] **Step 2: Update Backlog final summary**
+- [x] **Step 2: Update Backlog final summary**
 
 Use Backlog.md MCP or CLI to mark acceptance criteria and add a final summary. If using CLI:
 
@@ -440,7 +440,7 @@ backlog task edit TASK-12027 --check-ac 1 --check-ac 2 --check-ac 3 --check-ac 4
 
 Expected: task file records completed acceptance criteria and final summary.
 
-- [ ] **Step 3: Commit task finalization**
+- [x] **Step 3: Commit task finalization**
 
 Run:
 
