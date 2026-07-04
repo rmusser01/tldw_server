@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -192,3 +193,34 @@ def test_new_internal_packages_constant_excludes_legacy_wrappers() -> None:
     assert "enhanced_web_scraping" not in NEW_INTERNAL_PACKAGES
     assert "WebSearch_APIs" not in NEW_INTERNAL_PACKAGES
     assert "tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib" in LEGACY_WRAPPER_MODULES
+
+
+@pytest.mark.unit
+def test_import_inventory_artifact_matches_current_import_surface() -> None:
+    assert INVENTORY_JSON.exists(), "Run Helper_Scripts/web_scraping_refactor_inventory.py to create the inventory artifact"
+
+    expected = json.loads(INVENTORY_JSON.read_text(encoding="utf-8"))
+    current = inventory_for_roots(
+        REPO_ROOT,
+        [
+            REPO_ROOT / "tldw_Server_API/app",
+            REPO_ROOT / "tldw_Server_API/tests",
+        ],
+        targets=TARGET_MODULES,
+    )
+    current_records = {
+        target: [
+            {
+                "import_kind": record.import_kind,
+                "imported_name": record.imported_name,
+                "line": record.line,
+                "module": record.module,
+                "path": record.path,
+                "target_name": record.target_name,
+            }
+            for record in records
+        ]
+        for target, records in sorted(current.items())
+    }
+
+    assert expected["records"] == current_records
