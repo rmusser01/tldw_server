@@ -123,6 +123,8 @@ CREATE VIRTUAL TABLE IF NOT EXISTS content_items_fts USING fts5(
 );
 """
 
+MIN_SUPPORTED_SQLITE_MEDIA_DB_MIGRATION_VERSION = 22
+
 
 class _SupportsExecutescript(Protocol):
     def executescript(self, script: str) -> Any: ...
@@ -212,6 +214,19 @@ def bootstrap_sqlite_schema(db: SupportsSqlitePostCoreStructures) -> None:
                     apply_sqlite_core_media_schema(db, conn)
                     ensure_sqlite_post_core_structures(db, conn)
                 else:
+                    if (
+                        current_db_version
+                        < MIN_SUPPORTED_SQLITE_MEDIA_DB_MIGRATION_VERSION
+                    ):
+                        raise SchemaError(
+                            "unsupported legacy Media DB schema version "
+                            f"{current_db_version}; minimum supported automatic "
+                            "upgrade version is "
+                            f"{MIN_SUPPORTED_SQLITE_MEDIA_DB_MIGRATION_VERSION}. "
+                            "Create a backup and use the documented export/rebuild "
+                            "recovery workflow before starting this server version."
+                        )
+
                     conn.close()
 
                     migrations_dir = None

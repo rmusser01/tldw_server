@@ -102,6 +102,17 @@ class DatabaseMigrator:
         r"^\s*ALTER\s+TABLE\s+(?P<table>[A-Za-z0-9_]+)\s+ADD\s+COLUMN\s+(?P<column>[A-Za-z0-9_]+)\b",
         re.IGNORECASE,
     )
+    _TRANSACTION_CONTROL_RE = re.compile(
+        r"^\s*(?:BEGIN(?:\s+(?:DEFERRED|IMMEDIATE|EXCLUSIVE))?(?:\s+TRANSACTION)?|"
+        r"COMMIT(?:\s+TRANSACTION)?|END(?:\s+TRANSACTION)?|"
+        r"ROLLBACK(?:\s+TRANSACTION)?|SAVEPOINT\s+\S+|"
+        r"RELEASE(?:\s+SAVEPOINT)?\s+\S+)\s*;?\s*$",
+        re.IGNORECASE,
+    )
+    _FOREIGN_KEYS_PRAGMA_RE = re.compile(
+        r"^\s*PRAGMA\s+foreign_keys\s*=\s*(?:ON|OFF|0|1)\s*;?\s*$",
+        re.IGNORECASE,
+    )
 
     def __init__(self, db_path: str, migrations_dir: Optional[str] = None):
         if self._is_memory_db_path(db_path):
@@ -146,6 +157,17 @@ class DatabaseMigrator:
             if name and str(name).lower() == column.lower():
                 return True
         return False
+
+    @staticmethod
+    def _sqlite_table_exists(conn: sqlite3.Connection, table: str) -> bool:
+        try:
+            row = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+                (table,),
+            ).fetchone()
+        except sqlite3.Error:
+            return False
+        return row is not None
 
     @staticmethod
     def _is_memory_db_path(db_path: str) -> bool:
@@ -316,6 +338,87 @@ class DatabaseMigrator:
             lines.append(line)
         return "\n".join(lines).strip()
 
+    @classmethod
+    def _split_sql_statements(cls, sql: str) -> list[str]:
+        statements: list[str] = []
+        buffer: list[str] = []
+
+        for char in sql:
+            buffer.append(char)
+            candidate = "".join(buffer).strip()
+            if candidate and sqlite3.complete_statement(candidate):
+                if cls._strip_sql_comments(candidate):
+                    statements.append(candidate)
+                buffer = []
+
+        trailing = "".join(buffer).strip()
+        if cls._strip_sql_comments(trailing):
+            statements.append(trailing)
+
+        return statements
+
+    @classmethod
+    def _prepare_migration_statements(
+        cls,
+        sql: str,
+    ) -> tuple[list[str], list[str], list[str]]:
+        statements = cls._split_sql_statements(sql)
+        pre_transaction: list[str] = []
+        post_transaction: list[str] = []
+
+        while statements:
+            normalized = cls._strip_sql_comments(statements[0])
+            if not cls._FOREIGN_KEYS_PRAGMA_RE.match(normalized):
+                break
+            pre_transaction.append(statements.pop(0))
+
+        while statements:
+            normalized = cls._strip_sql_comments(statements[-1])
+            if not cls._FOREIGN_KEYS_PRAGMA_RE.match(normalized):
+                break
+            post_transaction.insert(0, statements.pop())
+
+        for statement in statements:
+            normalized = cls._strip_sql_comments(statement)
+            if cls._TRANSACTION_CONTROL_RE.match(normalized):
+                raise MigrationError(
+                    "Migration SQL must not include transaction control statements; "
+                    "DatabaseMigrator manages migration transactions."
+                )
+            if cls._FOREIGN_KEYS_PRAGMA_RE.match(normalized):
+                raise MigrationError(
+                    "PRAGMA foreign_keys statements must appear before or after "
+                    "the migration body."
+                )
+
+        return pre_transaction, statements, post_transaction
+
+    def _execute_migration_statements(
+        self,
+        conn: sqlite3.Connection,
+        migration: Migration,
+        direction: str,
+        statements: list[str],
+    ) -> None:
+        for statement in statements:
+            executable_statement = self._strip_sql_comments(statement)
+            if not executable_statement:
+                continue
+            if direction == "up" and migration.idempotent:
+                match = self._ADD_COLUMN_RE.match(executable_statement)
+                if match:
+                    table = match.group("table")
+                    column = match.group("column")
+                    if self._sqlite_column_exists(conn, table, column):
+                        logger.info(
+                            "Skipping duplicate column {}.{} for migration {}",
+                            table,
+                            column,
+                            migration.name,
+                        )
+                        continue
+            conn.execute(statement)
+
     @staticmethod
     def _extract_version_from_sql(filepath: Path, sql: str) -> int:
         match = re.match(r"(\d+)", filepath.stem)
@@ -426,43 +529,25 @@ class DatabaseMigrator:
                 f"Migration {migration.name} (v{migration.version}) does not define executable SQL."
             )
         start_time = datetime.now(timezone.utc)
+        post_transaction: list[str] = []
 
         with self._get_connection() as conn:
             try:
-                # Clean up any prior failed attempt for this version so retries work
+                pre_transaction, statements, post_transaction = self._prepare_migration_statements(sql)
+
+                for statement in pre_transaction:
+                    conn.execute(statement)
+
+                conn.execute("BEGIN IMMEDIATE")
+
                 if direction == "up":
+                    # Clean up any prior failed attempt for this version so retries work
                     conn.execute(
                         "DELETE FROM schema_migrations WHERE version = ? AND success = 0",
                         (migration.version,),
                     )
-                    conn.commit()
 
-                # Execute migration SQL
-                if direction == "up" and migration.idempotent:
-                    statements = [stmt.strip() for stmt in sql.split(";") if stmt.strip()]
-                    for statement in statements:
-                        match = self._ADD_COLUMN_RE.match(statement)
-                        if match:
-                            table = match.group("table")
-                            column = match.group("column")
-                            if self._sqlite_column_exists(conn, table, column):
-                                logger.info(
-                                    "Skipping duplicate column {}.{} for migration {}",
-                                    table,
-                                    column,
-                                    migration.name,
-                                )
-                                continue
-                        conn.execute(statement)
-                else:
-                    if ";" in sql:
-                        # Multiple statements
-                        conn.executescript(sql)
-                    else:
-                        # Single statement
-                        conn.execute(sql)
-
-                conn.commit()
+                self._execute_migration_statements(conn, migration, direction, statements)
 
                 execution_time = (datetime.now(timezone.utc) - start_time).total_seconds()
 
@@ -485,19 +570,26 @@ class DatabaseMigrator:
                         DELETE FROM schema_migrations WHERE version = ?
                     """, (migration.version,))
 
-                conn.commit()
-
                 # Update schema_version table if it exists (for compatibility with MediaDB)
-                try:
+                if self._sqlite_table_exists(conn, "schema_version"):
                     if direction == "up":
                         conn.execute("UPDATE schema_version SET version = ? WHERE 1=1", (migration.version,))
                     else:
                         # On downgrade, set to previous version
                         conn.execute("UPDATE schema_version SET version = ? WHERE 1=1", (migration.version - 1,))
+
+                conn.commit()
+
+                for statement in post_transaction:
+                    try:
+                        conn.execute(statement)
+                    except sqlite3.Error as pragma_err:
+                        logger.debug(
+                            "Failed to restore migration connection PRAGMA after success: {}",
+                            pragma_err,
+                        )
+                if post_transaction:
                     conn.commit()
-                except sqlite3.OperationalError:
-                    # Table doesn't exist, that's fine
-                    pass
 
                 logger.info(
                     f"Executed migration {migration.name} ({direction}) "
@@ -508,6 +600,15 @@ class DatabaseMigrator:
 
             except Exception as e:
                 conn.rollback()
+                for statement in post_transaction:
+                    try:
+                        conn.execute(statement)
+                        conn.commit()
+                    except sqlite3.Error as pragma_err:
+                        logger.debug(
+                            "Failed to restore migration connection PRAGMA after error: {}",
+                            pragma_err,
+                        )
 
                 # Record failed migration
                 if direction == "up":
