@@ -11,7 +11,6 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user, rbac_rate_limit
@@ -52,7 +51,10 @@ from tldw_Server_API.app.core.Visual_Identities.expression_slots import (
     normalize_expression_key,
 )
 from tldw_Server_API.app.core.Visual_Identities.jobs import create_visual_identity_import_zip_job
-from tldw_Server_API.app.core.Visual_Identities.service import VisualIdentityService
+from tldw_Server_API.app.core.Visual_Identities.service import (
+    VisualIdentityService,
+    VisualIdentityServiceError,
+)
 from tldw_Server_API.app.core.Visual_Identities.source_context import canonicalize_source_context
 from tldw_Server_API.app.core.Visual_Identities.storage import (
     copy_generated_file_record_to_expression_asset,
@@ -244,6 +246,22 @@ def _idempotency_conflict(*, scope: str, resource_id: str) -> HTTPException:
     )
 
 
+def _handle_idempotency_service_error(
+    exc: VisualIdentityServiceError,
+    *,
+    scope: str,
+    resource_id: str,
+) -> HTTPException:
+    detail = str(exc) or "invalid_request"
+    if detail == "idempotency_key_conflict":
+        return _idempotency_conflict(scope=scope, resource_id=resource_id)
+    if detail == "idempotency_key_in_progress":
+        return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
+    if detail == "idempotency_response_invalid":
+        return HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=detail)
+    return _handle_value_error(ValueError(detail))
+
+
 def _require_idempotency_key(idempotency_key: str | None) -> str:
     """Return a trimmed idempotency key or reject the request."""
     normalized = str(idempotency_key or "").strip()
@@ -269,75 +287,6 @@ def _sha256_file(path: Path) -> str:
         for chunk in iter(lambda: file_obj.read(_UPLOAD_CHUNK_SIZE_BYTES), b""):
             digest.update(chunk)
     return digest.hexdigest()
-
-
-def _claim_or_replay_idempotency(
-    service: VisualIdentityService,
-    *,
-    scope: str,
-    resource_id: str,
-    idempotency_key: str,
-    payload_hash: str,
-    response_model: type[BaseModel],
-) -> tuple[BaseModel | None, str | None]:
-    try:
-        record, claimed = _repo(service).claim_idempotency_record(
-            owner_user_id=service.owner_user_id,
-            scope=scope,
-            resource_id=resource_id,
-            idempotency_key=idempotency_key,
-            payload_hash=payload_hash,
-        )
-    except ValueError as exc:
-        if str(exc) == "idempotency_key_conflict":
-            raise _idempotency_conflict(scope=scope, resource_id=resource_id) from exc
-        raise
-    if claimed:
-        return None, str(record["claim_token"])
-    if str(record.get("status") or "") != "completed":
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="idempotency_key_in_progress",
-        )
-    return response_model.model_validate(json.loads(str(record["response_json"]))), None
-
-
-def _record_idempotency_response(
-    service: VisualIdentityService,
-    *,
-    scope: str,
-    resource_id: str,
-    idempotency_key: str,
-    payload_hash: str,
-    response: BaseModel,
-    claim_token: str,
-) -> None:
-    _repo(service).complete_idempotency_record(
-        owner_user_id=service.owner_user_id,
-        scope=scope,
-        resource_id=resource_id,
-        idempotency_key=idempotency_key,
-        payload_hash=payload_hash,
-        response=response.model_dump(mode="json"),
-        claim_token=claim_token,
-    )
-
-
-def _release_idempotency_claim(
-    service: VisualIdentityService,
-    *,
-    scope: str,
-    resource_id: str,
-    idempotency_key: str,
-    claim_token: str,
-) -> None:
-    _repo(service).release_idempotency_claim(
-        owner_user_id=service.owner_user_id,
-        scope=scope,
-        resource_id=resource_id,
-        idempotency_key=idempotency_key,
-        claim_token=claim_token,
-    )
 
 
 def _asset_content_url(*, pack_id: int, asset_id: int) -> str:
@@ -691,16 +640,18 @@ async def create_visual_identity_asset_from_generated_file(
             "source_context": idempotency_source_context,
         }
     )
-    replay, claim_token = _claim_or_replay_idempotency(
-        service,
-        scope=scope,
-        resource_id=resource_id,
-        idempotency_key=request.idempotency_key,
-        payload_hash=payload_hash,
-        response_model=VisualIdentityAssetResponse,
-    )
-    if replay is not None:
-        return replay  # type: ignore[return-value]
+    try:
+        idempotency_claim = service.claim_or_replay_idempotency(
+            scope=scope,
+            resource_id=resource_id,
+            idempotency_key=request.idempotency_key,
+            payload_hash=payload_hash,
+        )
+    except VisualIdentityServiceError as exc:
+        raise _handle_idempotency_service_error(exc, scope=scope, resource_id=resource_id) from exc
+    if idempotency_claim.replay_response is not None:
+        return VisualIdentityAssetResponse.model_validate(idempotency_claim.replay_response)
+    claim_token = idempotency_claim.claim_token
     if claim_token is None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="idempotency_claim_missing")
 
@@ -748,8 +699,7 @@ async def create_visual_identity_asset_from_generated_file(
             source_context=canonical_context,
         )
     except ValueError as exc:
-        _release_idempotency_claim(
-            service,
+        service.release_idempotency_claim(
             scope=scope,
             resource_id=resource_id,
             idempotency_key=request.idempotency_key,
@@ -757,8 +707,7 @@ async def create_visual_identity_asset_from_generated_file(
         )
         raise _handle_value_error(exc) from exc
     except HTTPException:
-        _release_idempotency_claim(
-            service,
+        service.release_idempotency_claim(
             scope=scope,
             resource_id=resource_id,
             idempotency_key=request.idempotency_key,
@@ -766,23 +715,24 @@ async def create_visual_identity_asset_from_generated_file(
         )
         raise
     except Exception:
-        _release_idempotency_claim(
-            service,
+        service.release_idempotency_claim(
             scope=scope,
             resource_id=resource_id,
             idempotency_key=request.idempotency_key,
             claim_token=claim_token,
         )
         raise
-    _record_idempotency_response(
-        service,
-        scope=scope,
-        resource_id=resource_id,
-        idempotency_key=request.idempotency_key,
-        payload_hash=payload_hash,
-        response=response,
-        claim_token=claim_token,
-    )
+    try:
+        service.record_idempotency_response(
+            scope=scope,
+            resource_id=resource_id,
+            idempotency_key=request.idempotency_key,
+            payload_hash=payload_hash,
+            response=response.model_dump(mode="json"),
+            claim_token=claim_token,
+        )
+    except VisualIdentityServiceError as exc:
+        raise _handle_idempotency_service_error(exc, scope=scope, resource_id=resource_id) from exc
     return response
 
 
@@ -897,19 +847,23 @@ async def start_visual_identity_zip_import(
         }
     )
     try:
-        replay, claim_token = _claim_or_replay_idempotency(
-            service,
+        idempotency_claim = service.claim_or_replay_idempotency(
             scope=scope,
             resource_id=resource_id,
             idempotency_key=operation_idempotency_key,
             payload_hash=payload_hash,
-            response_model=VisualIdentityImportZipStartResponse,
         )
-        if replay is not None:
+        if idempotency_claim.replay_response is not None:
             temp_path.unlink(missing_ok=True)
-            return replay  # type: ignore[return-value]
+            return VisualIdentityImportZipStartResponse.model_validate(
+                idempotency_claim.replay_response
+            )
+        claim_token = idempotency_claim.claim_token
         if claim_token is None:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="idempotency_claim_missing")
+    except VisualIdentityServiceError as exc:
+        temp_path.unlink(missing_ok=True)
+        raise _handle_idempotency_service_error(exc, scope=scope, resource_id=resource_id) from exc
     except Exception:
         temp_path.unlink(missing_ok=True)
         raise
@@ -950,8 +904,7 @@ async def start_visual_identity_zip_import(
             import_job_id=str(job_id) if job_id is not None else None,
         )
     except ValueError as exc:
-        _release_idempotency_claim(
-            service,
+        service.release_idempotency_claim(
             scope=scope,
             resource_id=resource_id,
             idempotency_key=operation_idempotency_key,
@@ -962,8 +915,7 @@ async def start_visual_identity_zip_import(
             upload_path.unlink(missing_ok=True)
         raise _handle_value_error(exc) from exc
     except Exception:
-        _release_idempotency_claim(
-            service,
+        service.release_idempotency_claim(
             scope=scope,
             resource_id=resource_id,
             idempotency_key=operation_idempotency_key,
@@ -973,15 +925,17 @@ async def start_visual_identity_zip_import(
         if upload_path is not None:
             upload_path.unlink(missing_ok=True)
         raise
-    _record_idempotency_response(
-        service,
-        scope=scope,
-        resource_id=resource_id,
-        idempotency_key=operation_idempotency_key,
-        payload_hash=payload_hash,
-        response=response,
-        claim_token=claim_token,
-    )
+    try:
+        service.record_idempotency_response(
+            scope=scope,
+            resource_id=resource_id,
+            idempotency_key=operation_idempotency_key,
+            payload_hash=payload_hash,
+            response=response.model_dump(mode="json"),
+            claim_token=claim_token,
+        )
+    except VisualIdentityServiceError as exc:
+        raise _handle_idempotency_service_error(exc, scope=scope, resource_id=resource_id) from exc
     return response
 
 

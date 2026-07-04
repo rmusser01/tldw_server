@@ -4,7 +4,7 @@ title: Fix PR 2571 release CI failures
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-07-04 19:07'
+updated_date: '2026-07-04 19:16'
 labels:
   - ci
   - release
@@ -65,6 +65,10 @@ CI follow-up: New failures 85138952365 (Ubuntu 3.12 platform-services-startup) a
 CI follow-up: After confirming only aggregate Full Suite gate jobs remained queued (85151468248, 85154875826, 85154992670), canceled workflow run 28695960984. Normal cancel was accepted but did not clear the queued gates, so force-cancel was used. PR checks now show cancel=3, fail=13, pass=762, skipping=4; the canceled jobs were aggregate gates only, not test shards.
 
 Release prep follow-up: updated FastAPI app metadata version in tldw_Server_API/app/main.py from 0.1.0 to the canonical 0.1.35 so generated OpenAPI/app metadata matches the release package version. Validation: py_compile main.py and git diff --check passed.
+
+Review follow-up: verified visual identity idempotency workflow decisions still lived in the endpoint helpers. Added a red service-layer regression test for claim/replay/conflict/release ownership before moving the logic into VisualIdentityService.
+
+Implemented review follow-up: moved visual identity idempotency claim/replay/record/release decisions into VisualIdentityService. Endpoint now calls service methods and only maps service errors to HTTP responses/model validation. Added service regression coverage. Validation: new red test failed before service API existed; focused idempotency tests passed 5; full visual identity service + API files passed 49; py_compile for endpoint/service passed; git diff --check passed; Bandit on endpoint/service reported zero findings; endpoint grep shows no direct repository idempotency calls.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

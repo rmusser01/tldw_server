@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+import json
 from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
@@ -51,6 +52,14 @@ class VisualIdentityResolvedAsset:
     resolution_source: str = "binding"
 
 
+@dataclass(frozen=True)
+class VisualIdentityIdempotencyClaim:
+    """Result of claiming or replaying a visual identity idempotency record."""
+
+    replay_response: dict[str, Any] | None = None
+    claim_token: str | None = None
+
+
 class VisualIdentityService:
     """Coordinate visual identity pack activation and expression resolution."""
 
@@ -85,6 +94,82 @@ class VisualIdentityService:
             default_expression_key=normalized_default,
             source_kind=source_kind,
             source_context=source_context,
+        )
+
+    def claim_or_replay_idempotency(
+        self,
+        *,
+        scope: str,
+        resource_id: str,
+        idempotency_key: str,
+        payload_hash: str,
+    ) -> VisualIdentityIdempotencyClaim:
+        """Claim a new idempotency record or return a completed replay payload."""
+        try:
+            record, claimed = self.repository.claim_idempotency_record(
+                owner_user_id=self.owner_user_id,
+                scope=scope,
+                resource_id=resource_id,
+                idempotency_key=idempotency_key,
+                payload_hash=payload_hash,
+            )
+        except ValueError as exc:
+            if str(exc) == "idempotency_key_conflict":
+                raise VisualIdentityServiceError("idempotency_key_conflict") from exc
+            raise
+        if claimed:
+            return VisualIdentityIdempotencyClaim(claim_token=str(record["claim_token"]))
+        if str(record.get("status") or "") != "completed":
+            raise VisualIdentityServiceError("idempotency_key_in_progress")
+        try:
+            replay_response = json.loads(str(record["response_json"]))
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise VisualIdentityServiceError("idempotency_response_invalid") from exc
+        if not isinstance(replay_response, dict):
+            raise VisualIdentityServiceError("idempotency_response_invalid")
+        return VisualIdentityIdempotencyClaim(replay_response=replay_response)
+
+    def record_idempotency_response(
+        self,
+        *,
+        scope: str,
+        resource_id: str,
+        idempotency_key: str,
+        payload_hash: str,
+        response: dict[str, Any],
+        claim_token: str,
+    ) -> None:
+        """Persist the completed response for an idempotent visual identity operation."""
+        try:
+            self.repository.complete_idempotency_record(
+                owner_user_id=self.owner_user_id,
+                scope=scope,
+                resource_id=resource_id,
+                idempotency_key=idempotency_key,
+                payload_hash=payload_hash,
+                response=response,
+                claim_token=claim_token,
+            )
+        except ValueError as exc:
+            if str(exc) == "idempotency_key_conflict":
+                raise VisualIdentityServiceError("idempotency_key_conflict") from exc
+            raise
+
+    def release_idempotency_claim(
+        self,
+        *,
+        scope: str,
+        resource_id: str,
+        idempotency_key: str,
+        claim_token: str | None,
+    ) -> None:
+        """Release an in-progress visual identity idempotency claim after failure."""
+        self.repository.release_idempotency_claim(
+            owner_user_id=self.owner_user_id,
+            scope=scope,
+            resource_id=resource_id,
+            idempotency_key=idempotency_key,
+            claim_token=claim_token,
         )
 
     def activate_draft(
