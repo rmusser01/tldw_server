@@ -697,6 +697,56 @@ describe("StudioPane Stage 2 workflows", () => {
     )
   })
 
+  it("fails quiz artifacts when generated questions are placeholder-only", async () => {
+    mockGetMediaDetails.mockResolvedValue({
+      source: { title: "DSPy Prompting Talk" },
+      content: {
+        text: "Project Falcon improved retention from 64 percent to 82 percent."
+      }
+    })
+    mockCreateChatCompletion.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  title: "Workspace Quiz",
+                  questions: [
+                    {
+                      question_type: "multiple_choice",
+                      question_text: "question goes here",
+                      options: ["Option A", "Option B"],
+                      correct_answer: "Option A"
+                    }
+                  ]
+                })
+              }
+            }
+          ]
+        })
+      )
+    )
+
+    renderStudioPane()
+
+    fireEvent.click(screen.getByRole("button", { name: "Quiz" }))
+
+    await waitFor(() => {
+      expect(mockUpdateArtifactStatus).toHaveBeenCalledWith(
+        expect.stringMatching(/^artifact-/),
+        "failed",
+        expect.objectContaining({
+          errorMessage: expect.stringContaining("usable questions")
+        })
+      )
+    })
+
+    expect(mockCreateQuiz).not.toHaveBeenCalled()
+    expect(mockCreateQuestion).not.toHaveBeenCalled()
+    expect(mockMessageSuccess).not.toHaveBeenCalled()
+  })
+
   it("keeps quiz ownership general when studyMaterialsPolicy is null", async () => {
     workspaceStoreState.selectedSourceIds = ["source-1"]
     workspaceStoreState.getSelectedMediaIds = () => [101]
@@ -1168,6 +1218,34 @@ describe("StudioPane Stage 2 workflows", () => {
     )
   }, 15000)
 
+  it("fails flashcard artifacts when generated cards are placeholder-only", async () => {
+    mockGetMediaDetails.mockResolvedValue({
+      content: "ATP powers cellular respiration in cells."
+    })
+    mockGenerateFlashcardsService.mockResolvedValue({
+      flashcards: [{ front: "front goes here", back: "back goes here" }],
+      count: 1
+    })
+
+    renderStudioPane()
+
+    fireEvent.click(screen.getByRole("button", { name: "Flashcards" }))
+
+    await waitFor(() => {
+      expect(mockUpdateArtifactStatus).toHaveBeenCalledWith(
+        expect.stringMatching(/^artifact-/),
+        "failed",
+        expect.objectContaining({
+          errorMessage: expect.stringContaining("usable cards")
+        })
+      )
+    })
+
+    expect(mockCreateDeck).not.toHaveBeenCalled()
+    expect(mockCreateFlashcardsBulk).not.toHaveBeenCalled()
+    expect(mockMessageSuccess).not.toHaveBeenCalled()
+  }, 15000)
+
   it("creates a fresh general deck for auto flashcard generation", async () => {
     workspaceStoreState.studyMaterialsPolicy = null
     mockListDecks.mockResolvedValue([
@@ -1618,6 +1696,46 @@ describe("StudioPane Stage 2 workflows", () => {
     expect(mockMessageError).toHaveBeenCalled()
   }, 15000)
 
+  it("fails audio overview artifacts when the script is placeholder-only", async () => {
+    mockGetMediaDetails.mockResolvedValue({
+      source: { title: "DSPy Prompting Talk" },
+      content: {
+        text: "DSPy helps optimize prompting workflows and compound AI pipelines."
+      }
+    })
+    mockCreateChatCompletion.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: "script goes here"
+              }
+            }
+          ]
+        })
+      )
+    )
+
+    renderStudioPane()
+    expandMoreOutputsSection()
+
+    fireEvent.click(screen.getByRole("button", { name: "Audio Summary" }))
+
+    await waitFor(() => {
+      expect(mockUpdateArtifactStatus).toHaveBeenCalledWith(
+        expect.stringMatching(/^artifact-/),
+        "failed",
+        expect.objectContaining({
+          errorMessage: expect.stringContaining("usable audio")
+        })
+      )
+    })
+
+    expect(mockSynthesizeSpeech).not.toHaveBeenCalled()
+    expect(mockMessageSuccess).not.toHaveBeenCalled()
+  }, 15000)
+
   it("generates data table output from selected source content via chat completion", async () => {
     workspaceStoreState.selectedSourceIds = ["source-1", "source-2"]
     workspaceStoreState.getSelectedMediaIds = () => [101, 202]
@@ -1714,6 +1832,49 @@ describe("StudioPane Stage 2 workflows", () => {
         })
       )
     })
+  }, 15000)
+
+  it("fails data table artifacts when every parsed cell is placeholder-only", async () => {
+    mockGetMediaDetails.mockResolvedValue({
+      source: { title: "DSPy Prompting Talk" },
+      content: {
+        text: "DSPy helps optimize prompting workflows and compound AI pipelines."
+      }
+    })
+    mockCreateChatCompletion.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: "| Field | Value |\n|---|---|\n| invalid | invalid |"
+              }
+            }
+          ]
+        }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        }
+      )
+    )
+
+    renderStudioPane()
+    expandMoreOutputsSection()
+
+    fireEvent.click(screen.getByRole("button", { name: "Data Table" }))
+
+    await waitFor(() => {
+      expect(mockUpdateArtifactStatus).toHaveBeenCalledWith(
+        expect.stringMatching(/^artifact-/),
+        "failed",
+        expect.objectContaining({
+          errorMessage: expect.stringContaining("usable data table")
+        })
+      )
+    })
+
+    expect(mockMessageSuccess).not.toHaveBeenCalled()
   }, 15000)
 
   it("gates data tables when no chat model is selected", () => {

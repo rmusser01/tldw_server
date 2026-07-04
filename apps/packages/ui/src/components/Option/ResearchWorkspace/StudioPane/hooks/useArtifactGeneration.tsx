@@ -89,27 +89,52 @@ const TEXT_FAILURE_SENTINELS: Partial<Record<ArtifactType, string[]>> = {
 const SLIDES_UNUSABLE_PRESENTATION_MESSAGE =
   "Slides generation failed because the Slides API did not return a usable presentation."
 
-const SLIDE_PLACEHOLDER_TEXTS = new Set([
+const GENERATED_ARTIFACT_PLACEHOLDER_TEXTS = new Set([
   "invalid",
   "slide goes here",
   "slides go here",
   "content goes here",
+  "output goes here",
+  "text goes here",
+  "title goes here",
+  "summary goes here",
+  "report goes here",
+  "question goes here",
+  "answer goes here",
+  "front goes here",
+  "back goes here",
+  "term goes here",
+  "definition goes here",
+  "flashcard goes here",
+  "quiz goes here",
+  "option a",
+  "option b",
+  "option c",
+  "option d",
+  "choice a",
+  "choice b",
+  "choice c",
+  "choice d",
+  "table goes here",
+  "data goes here",
+  "script goes here",
+  "audio goes here",
   "todo",
   "tbd"
 ])
 
-const isPlaceholderSlideText = (value: unknown): boolean => {
+const isPlaceholderGeneratedText = (value: unknown): boolean => {
   if (typeof value !== "string") return true
   const normalized = value.trim().toLowerCase().replace(/\s+/g, " ")
-  return !normalized || SLIDE_PLACEHOLDER_TEXTS.has(normalized)
+  return !normalized || GENERATED_ARTIFACT_PLACEHOLDER_TEXTS.has(normalized)
 }
 
 const isUsableGeneratedSlide = (slide: unknown): boolean => {
   if (!isRecord(slide)) return false
   const layout = typeof slide.layout === "string" ? slide.layout.toLowerCase() : ""
-  const titleOk = !isPlaceholderSlideText(slide.title)
-  const contentOk = !isPlaceholderSlideText(slide.content)
-  const notesOk = !isPlaceholderSlideText(slide.speaker_notes)
+  const titleOk = !isPlaceholderGeneratedText(slide.title)
+  const contentOk = !isPlaceholderGeneratedText(slide.content)
+  const notesOk = !isPlaceholderGeneratedText(slide.speaker_notes)
   return layout === "title" ? titleOk || contentOk || notesOk : contentOk || notesOk
 }
 
@@ -423,13 +448,15 @@ const normalizeGeneratedQuizQuestions = (
       const requestedType =
         normalizeQuizQuestionType(candidate.question_type) ||
         normalizeQuizQuestionType(candidate.type)
-      const rawOptions = normalizeQuizOptionList(candidate.options)
+      const rawOptions = normalizeQuizOptionList(candidate.options).filter(
+        (option) => !isPlaceholderGeneratedText(option)
+      )
       const explanation =
         typeof candidate.explanation === "string" && candidate.explanation.trim()
           ? candidate.explanation.trim()
           : undefined
 
-      if (!questionText) {
+      if (isPlaceholderGeneratedText(questionText)) {
         return null
       }
 
@@ -456,7 +483,7 @@ const normalizeGeneratedQuizQuestions = (
       }
 
       const correctAnswer = resolveQuizCorrectAnswer(candidate.correct_answer, options)
-      if (!options.includes(correctAnswer)) {
+      if (!options.includes(correctAnswer) || isPlaceholderGeneratedText(correctAnswer)) {
         return null
       }
 
@@ -982,6 +1009,7 @@ const requireUsableTextResult = (
 
   if (
     !content ||
+    isPlaceholderGeneratedText(content) ||
     sentinels.includes(content) ||
     KNOWN_ERROR_RESPONSE_TEXTS.has(normalizedContent)
   ) {
@@ -1043,8 +1071,10 @@ const finalizeGenerationResult = (
     case "data_table": {
       const normalized = requireUsableTextResult(type, result, "data table")
       const table =
-        isRecord(normalized.data) && normalized.data.table ? normalized.data.table : null
-      if (!table) {
+        isRecord(normalized.data) && isMarkdownTableData(normalized.data.table)
+          ? normalized.data.table
+          : null
+      if (!table || !hasUsableTableData(table)) {
         throw buildMissingContentError("data table")
       }
       return normalized
@@ -1053,6 +1083,28 @@ const finalizeGenerationResult = (
       const normalized = requireUsableTextResult(type, result, "slide")
       if (!normalized.presentationId) {
         throw new Error(SLIDES_UNUSABLE_PRESENTATION_MESSAGE)
+      }
+      return normalized
+    }
+    case "quiz": {
+      const normalized = requireUsableTextResult(type, result, "quiz")
+      const questions =
+        isRecord(normalized.data) && Array.isArray(normalized.data.questions)
+          ? normalized.data.questions
+          : []
+      if (questions.length === 0) {
+        throw buildMissingContentError("quiz questions")
+      }
+      return normalized
+    }
+    case "flashcards": {
+      const normalized = requireUsableTextResult(type, result, "flashcard")
+      const flashcards =
+        isRecord(normalized.data) && Array.isArray(normalized.data.flashcards)
+          ? normalized.data.flashcards
+          : []
+      if (flashcards.length === 0) {
+        throw buildMissingContentError("flashcard")
       }
       return normalized
     }
@@ -1775,6 +1827,11 @@ async function generateFlashcards(
       }
     })
     .filter((card) => card.front && card.back)
+    .filter(
+      (card) =>
+        !isPlaceholderGeneratedText(card.front) &&
+        !isPlaceholderGeneratedText(card.back)
+    )
 
   let generated = await generateFlashcardDrafts(generationRequest)
   let flashcards = normalizeGeneratedFlashcards(generated.flashcards)
@@ -1971,8 +2028,8 @@ ${sourceText}`
   const { content: rawScript, usage } = await readChatCompletionResponsePayload(response)
   const script = rawScript.trim()
 
-  if (!script.trim()) {
-    throw new Error("Failed to generate audio script")
+  if (isPlaceholderGeneratedText(script)) {
+    throw buildMissingContentError("audio")
   }
 
   // Use browser TTS if selected
@@ -1993,6 +2050,9 @@ ${sourceText}`
       speed: options.audioSettings.speed,
       signal: options.abortSignal
     })
+    if (!(audioBuffer instanceof ArrayBuffer) || audioBuffer.byteLength === 0) {
+      throw new Error("Audio generation failed because speech synthesis did not return audio.")
+    }
 
     // Determine MIME type based on format
     const mimeTypes: Record<string, string> = {
@@ -2566,6 +2626,14 @@ export function parseMarkdownTable(content: string): MarkdownTableData | null {
   if (rows.length === 0) return null
   return { headers, rows }
 }
+
+const isMarkdownTableData = (value: unknown): value is MarkdownTableData =>
+  isRecord(value) && Array.isArray(value.headers) && Array.isArray(value.rows)
+
+const hasUsableTableData = (table: MarkdownTableData): boolean =>
+  table.rows
+    .flat()
+    .some((cell) => typeof cell === "string" && !isPlaceholderGeneratedText(cell))
 
 export function markdownTableToCsv(table: MarkdownTableData): string {
   const escapeCsv = (value: string) => {
