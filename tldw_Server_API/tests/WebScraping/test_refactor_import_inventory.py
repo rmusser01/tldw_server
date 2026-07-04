@@ -224,3 +224,40 @@ def test_import_inventory_artifact_matches_current_import_surface() -> None:
     }
 
     assert expected["records"] == current_records
+
+
+def _new_internal_package_files() -> list[Path]:
+    files: list[Path] = []
+    for package_name in sorted(NEW_INTERNAL_PACKAGES):
+        package_root = NEW_PACKAGE_ROOT / package_name
+        if not package_root.exists():
+            continue
+        files.extend(sorted(package_root.rglob("*.py")))
+    return files
+
+
+@pytest.mark.unit
+def test_guardrail_detects_legacy_wrapper_imports_in_new_internal_package(tmp_path: Path) -> None:
+    package_root = tmp_path / "tldw_Server_API/app/core/Web_Scraping/runtime"
+    package_root.mkdir(parents=True)
+    module = package_root / "fetch.py"
+    module.write_text(
+        "from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import scrape_article\n",
+        encoding="utf-8",
+    )
+
+    records = scan_file(module, project_root=tmp_path, targets={name: name for name in LEGACY_WRAPPER_MODULES})
+
+    assert len(records) == 1  # nosec B101
+    assert records[0].target_name == "tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib"  # nosec B101
+
+
+@pytest.mark.unit
+def test_new_internal_web_scraping_packages_do_not_import_legacy_wrappers() -> None:
+    violations: list[str] = []
+    targets = {name: name for name in LEGACY_WRAPPER_MODULES}
+    for path in _new_internal_package_files():
+        for record in scan_file(path, project_root=REPO_ROOT, targets=targets):
+            violations.append(f"{record.path}:{record.line} imports {record.module}")
+
+    assert violations == []  # nosec B101
