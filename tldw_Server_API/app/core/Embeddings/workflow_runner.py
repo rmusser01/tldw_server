@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Any, Protocol
 from tldw_Server_API.app.core.Embeddings.request_types import (
     EmbeddingDomainError,
     EmbeddingExecutionResult,
-    EmbeddingProviderError,
     EmbeddingRequestContext,
 )
 from tldw_Server_API.app.core.Embeddings.workflow_types import (
@@ -82,6 +81,7 @@ class EmbeddingInlineWorkflowRunner:
             )
 
             if self._pre_execute is not None:
+                phase = "planning"
                 await self._pre_execute(prepared)
 
             phase = "executing"
@@ -96,8 +96,8 @@ class EmbeddingInlineWorkflowRunner:
             )
             self._record(workflow_context, "workflow_completed", phase="finalizing", status="completed")
             return result
-        except (EmbeddingDomainError, EmbeddingProviderError) as exc:
-            self._record(
+        except EmbeddingDomainError as exc:
+            self._record_failure(
                 workflow_context,
                 "workflow_failed",
                 phase=phase,
@@ -106,7 +106,7 @@ class EmbeddingInlineWorkflowRunner:
             )
             raise
         except Exception as exc:
-            self._record(
+            self._record_failure(
                 workflow_context,
                 "workflow_failed",
                 phase=phase,
@@ -117,6 +117,26 @@ class EmbeddingInlineWorkflowRunner:
                 },
             )
             raise
+
+    def _record_failure(
+        self,
+        workflow_context: EmbeddingWorkflowContext,
+        event_type: str,
+        *,
+        phase: EmbeddingWorkflowPhase | None,
+        status: str,
+        metadata: dict[str, object],
+    ) -> None:
+        try:
+            self._record(
+                workflow_context,
+                event_type,
+                phase=phase,
+                status=status,
+                metadata=metadata,
+            )
+        except Exception as trace_error:
+            del trace_error
 
     def _record(
         self,

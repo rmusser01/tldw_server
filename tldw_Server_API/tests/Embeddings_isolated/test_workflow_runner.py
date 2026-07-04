@@ -103,6 +103,13 @@ class FakeOrchestrator:
         return self.result
 
 
+class FailingFailureCollector(EmbeddingInMemoryWorkflowTraceCollector):
+    def record(self, event):
+        if event.event_type == "workflow_failed":
+            raise RuntimeError("collector failure")
+        super().record(event)
+
+
 @pytest.mark.asyncio
 async def test_runner_returns_orchestrator_result_and_records_safe_success_events():
     raw_input = {"input": ["one", "two"], "api_key": "sk-secret"}
@@ -292,6 +299,54 @@ async def test_unexpected_exceptions_trace_cause_class_and_phase_only_then_rerai
     }
     assert "sk-secret" not in repr(collector.events)
     assert "raw provider body" not in repr(collector.events)
+
+
+@pytest.mark.asyncio
+async def test_failure_collector_errors_do_not_replace_original_execute_exception():
+    original = RuntimeError("original")
+    collector = FailingFailureCollector()
+    runner = EmbeddingInlineWorkflowRunner(
+        FakeOrchestrator(execute_error=original),
+        trace_collector=collector,
+    )
+
+    with pytest.raises(RuntimeError) as exc_info:
+        await runner.run(["one"], _request_context())
+
+    assert exc_info.value is original
+    assert [event.event_type for event in collector.events] == [
+        "workflow_started",
+        "phase_changed",
+        "prepare_completed",
+        "phase_changed",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_pre_execute_failure_is_traced_in_planning_phase_and_reraised_unchanged():
+    original = RuntimeError("reservation failed")
+    collector = EmbeddingInMemoryWorkflowTraceCollector()
+
+    async def pre_execute(_prepared):
+        raise original
+
+    runner = EmbeddingInlineWorkflowRunner(
+        FakeOrchestrator(),
+        trace_collector=collector,
+        pre_execute=pre_execute,
+    )
+
+    with pytest.raises(RuntimeError) as exc_info:
+        await runner.run(["one"], _request_context())
+
+    assert exc_info.value is original
+    failed = collector.events[-1]
+    assert failed.event_type == "workflow_failed"
+    assert failed.phase == "planning"
+    assert failed.metadata == {
+        "cause_class": "RuntimeError",
+        "phase": "planning",
+    }
 
 
 @pytest.mark.asyncio
