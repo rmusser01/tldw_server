@@ -13,6 +13,7 @@ labels:
 priority: low
 references:
 - AUDIT-2026-06-27-MCP-002
+- https://github.com/rmusser01/tldw_server/pull/2619
 documentation:
 - Docs/superpowers/reviews/2026-06-27-repo-audit/domains/mcp-sandbox-agent-protocol.md
 - Docs/superpowers/reviews/2026-06-27-repo-audit/specialists/reliability-lifecycle.md
@@ -21,7 +22,7 @@ modified_files:
 - tldw_Server_API/app/core/Agent_Client_Protocol/consumers/ws_broadcaster.py
 - tldw_Server_API/tests/Agent_Client_Protocol/test_acp_websocket.py
 - tldw_Server_API/tests/Agent_Client_Protocol/test_ws_broadcaster.py
-updated_date: 2026-07-04 07:00
+updated_date: 2026-07-04 07:01
 ---
 
 ## Description
@@ -56,6 +57,7 @@ Validation notes:
 - Red check failed as expected: reconnect endpoint left `ws_broadcaster` in the session event bus and WSBroadcaster did not accept a custom `consumer_id`.
 - Targeted regression command passed after implementation: `python -m pytest tldw_Server_API/tests/Agent_Client_Protocol/test_acp_websocket.py::test_acp_session_stream_reconnect_cleans_up_replay_broadcaster tldw_Server_API/tests/Agent_Client_Protocol/test_ws_broadcaster.py::test_ws_broadcaster_allows_unique_consumer_ids -q`.
 - Broader file command found a pre-existing latest-dev failure unrelated to this remediation: `test_acp_websocket.py::TestACPRunnerClientPermissions::test_determine_permission_tier_batch` expects `fs.write` to be `batch`, but current dev returns `individual`; the test also fails when run alone.
+PR opened: https://github.com/rmusser01/tldw_server/pull/2619 (draft against dev). Draft status is intentional until the human-authored Change summary required by project policy is added.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
