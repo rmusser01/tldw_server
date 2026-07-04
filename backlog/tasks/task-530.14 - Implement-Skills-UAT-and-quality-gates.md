@@ -26,6 +26,12 @@ Implement the full /skills UAT quality-gates bundle: deterministic workflow-leve
 - [ ] #4 The task record links the spec and implementation plan artifacts as they are produced.
 <!-- AC:END -->
 
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Docs/superpowers/plans/2026-07-04-skills-uat-quality-gates.md
+<!-- SECTION:PLAN:END -->
+
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
