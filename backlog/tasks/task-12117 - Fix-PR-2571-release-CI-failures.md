@@ -4,7 +4,7 @@ title: Fix PR 2571 release CI failures
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-07-04 18:57'
+updated_date: '2026-07-04 19:07'
 labels:
   - ci
   - release
@@ -63,6 +63,8 @@ Investigated new PR #2596 failure `platform-sandbox-state-store` job 85138950714
 CI follow-up: New failures 85138952365 (Ubuntu 3.12 platform-services-startup) and 85149091720 (macOS 3.12 Full Suite aggregate) were investigated. The startup shard has the same stale expected worker-spec assertion for visual_identity_jobs_task and is covered by the existing test_startup_worker_groups.py expected-set fix; local startup worker tests pass. The macOS Full Suite job contains only the aggregate gate failure message and points back to failed child shards, so no separate code change is needed for that job.
 
 CI follow-up: After confirming only aggregate Full Suite gate jobs remained queued (85151468248, 85154875826, 85154992670), canceled workflow run 28695960984. Normal cancel was accepted but did not clear the queued gates, so force-cancel was used. PR checks now show cancel=3, fail=13, pass=762, skipping=4; the canceled jobs were aggregate gates only, not test shards.
+
+Release prep follow-up: updated FastAPI app metadata version in tldw_Server_API/app/main.py from 0.1.0 to the canonical 0.1.35 so generated OpenAPI/app metadata matches the release package version. Validation: py_compile main.py and git diff --check passed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
