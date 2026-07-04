@@ -5,6 +5,10 @@ import { tldwClient } from "@/services/tldw/TldwApiClient";
 import { tldwAuth } from "@/services/tldw/TldwAuth";
 import { tldwModels } from "@/services/tldw";
 import { apiSend } from "@/services/api-send";
+import {
+  buildAudioWebSocketUrl,
+  sendAudioWebSocketAuthFrame,
+} from "@/services/tldw/audio-websocket-auth";
 import { tldwRequest } from "@/services/tldw/request-core";
 import {
   getProcessPathForType,
@@ -3379,9 +3383,6 @@ export default defineBackground({
               const cfg = await storage.get<any>("tldwConfig");
               if (!cfg?.serverUrl)
                 throw new Error("tldw server not configured");
-              const base = cfg.serverUrl
-                .replace(/^http/, "ws")
-                .replace(/\/$/, "");
               const rawToken =
                 cfg.authMode === "single-user" ? cfg.apiKey : cfg.accessToken;
               const token = String(rawToken || "").trim();
@@ -3394,7 +3395,10 @@ export default defineBackground({
               // access/proxy logs and history). The transcribe WS authenticates
               // from an {type:"auth", token} first frame sent below on open
               // (streaming_service.py:641-647 multi-user / 720-723 single-user).
-              const url = `${base}/api/v1/audio/stream/transcribe`;
+              const url = buildAudioWebSocketUrl(
+                cfg.serverUrl,
+                "/api/v1/audio/stream/transcribe",
+              );
               ws = new WebSocket(url);
               ws.binaryType = "arraybuffer";
               connectTimer = setTimeout(() => {
@@ -3420,9 +3424,19 @@ export default defineBackground({
                 // Send auth as the first frame, before the content script starts
                 // streaming audio (it only sends audio after the "open" event).
                 try {
-                  ws?.send(JSON.stringify({ type: "auth", token }));
+                  if (!ws) return;
+                  sendAudioWebSocketAuthFrame(ws, token);
                 } catch (error) {
-                  logBackgroundError("stt websocket send auth", error);
+                  safePost({
+                    event: "error",
+                    message: formatErrorMessage(error),
+                  });
+                  try {
+                    ws?.close();
+                  } catch (closeError) {
+                    logBackgroundError("stt websocket close (auth)", closeError);
+                  }
+                  return;
                 }
                 safePost({ event: "open" });
               };
