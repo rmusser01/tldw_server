@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 COMMAND_PATTERN = r"^[a-z][a-z0-9_]{0,63}$"
+ARG_NAME_PATTERN = r"^[a-z][a-z0-9_]{0,63}$"
+ARG_OPTION_PATTERN = r"^[a-z][a-z0-9_-]{0,63}$"
+_ARG_NAME_RE = re.compile(ARG_NAME_PATTERN)
+_ARG_OPTION_RE = re.compile(ARG_OPTION_PATTERN)
 
 
 class _StrictModel(BaseModel):
@@ -19,10 +24,25 @@ class MacroArgSpec(_StrictModel):
     repeated: bool = False
     aliases: list[str] = Field(default_factory=list)
 
+    @model_validator(mode="after")
+    def _validate_default_type(self) -> "MacroArgSpec":
+        if self.default is None:
+            return self
+        if self.repeated:
+            if not isinstance(self.default, list):
+                raise ValueError("repeated arg default must be a list")
+            for item in self.default:
+                if not _matches_arg_type(item, self.type):
+                    raise ValueError(f"default item does not match arg type: {self.type}")
+            return self
+        if not _matches_arg_type(self.default, self.type):
+            raise ValueError(f"default does not match arg type: {self.type}")
+        return self
+
 
 class MacroStep(_StrictModel):
     id: str = Field(min_length=1, max_length=128)
-    type: Literal["branch_prompt", "merge", "post_result"]
+    type: Literal["prompt", "branch_prompt", "merge", "post_result"]
     label: str | None = Field(default=None, max_length=128)
     output: str | None = Field(default=None, min_length=1, max_length=128)
     consumes: list[str] = Field(default_factory=list)
@@ -30,7 +50,7 @@ class MacroStep(_StrictModel):
 
     @model_validator(mode="after")
     def _requires_output_for_producers(self) -> "MacroStep":
-        if self.type in {"branch_prompt", "merge"} and not self.output:
+        if self.type in {"prompt", "branch_prompt", "merge"} and not self.output:
             raise ValueError(f"{self.type} step requires output")
         return self
 
@@ -89,6 +109,31 @@ class MacroDefinition(_StrictModel):
     permissions: MacroPermissions = Field(default_factory=MacroPermissions)
 
     @model_validator(mode="after")
+    def _validate_arg_options(self) -> "MacroDefinition":
+        seen: dict[str, str] = {}
+        for name, spec in self.args.items():
+            if not _ARG_NAME_RE.fullmatch(name):
+                raise ValueError(f"invalid arg name: {name}")
+
+            exposed = [name]
+            hyphenated_name = name.replace("_", "-")
+            if hyphenated_name != name:
+                exposed.append(hyphenated_name)
+            exposed.extend(spec.aliases)
+
+            for option in exposed:
+                if not _ARG_OPTION_RE.fullmatch(option):
+                    raise ValueError(f"invalid arg alias: {option}")
+
+                previous_name = seen.get(option)
+                if previous_name is not None:
+                    if previous_name == name:
+                        continue
+                    raise ValueError(f"duplicate arg option {option} for {previous_name} and {name}")
+                seen[option] = name
+        return self
+
+    @model_validator(mode="after")
     def _validate_step_consumes(self) -> "MacroDefinition":
         previous_outputs: set[str] = set()
         for step in self.steps:
@@ -129,3 +174,15 @@ class MacroBranchRecord(_StrictModel):
     error: str | None = None
     started_at: str | None = None
     finished_at: str | None = None
+
+
+def _matches_arg_type(value: Any, arg_type: str) -> bool:
+    if arg_type == "string":
+        return isinstance(value, str)
+    if arg_type == "boolean":
+        return isinstance(value, bool)
+    if arg_type == "integer":
+        return isinstance(value, int) and not isinstance(value, bool)
+    if arg_type == "number":
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+    return False

@@ -65,6 +65,54 @@ def test_non_empty_skill_permissions_rejected():
         load_macro_definition(raw)
 
 
+def test_repeated_arg_default_must_be_list():
+    raw = (
+        "schema_version: 1\n"
+        "name: bad\n"
+        "command: bad\n"
+        "args:\n"
+        "  question:\n"
+        "    type: string\n"
+        "    repeated: true\n"
+        "    default: nope\n"
+        "steps: []\n"
+    )
+    with pytest.raises(MacroValidationError, match="default"):
+        load_macro_definition(raw)
+
+
+def test_arg_default_must_match_declared_scalar_type():
+    raw = (
+        "schema_version: 1\n"
+        "name: bad\n"
+        "command: bad\n"
+        "args:\n"
+        "  keep_forks:\n"
+        "    type: boolean\n"
+        "    default: maybe\n"
+        "steps: []\n"
+    )
+    with pytest.raises(MacroValidationError, match="default"):
+        load_macro_definition(raw)
+
+
+def test_arg_alias_collision_rejected():
+    raw = (
+        "schema_version: 1\n"
+        "name: bad\n"
+        "command: bad\n"
+        "args:\n"
+        "  output_profile:\n"
+        "    type: string\n"
+        "    aliases: [mode]\n"
+        "  mode:\n"
+        "    type: string\n"
+        "steps: []\n"
+    )
+    with pytest.raises(MacroValidationError, match="duplicate"):
+        load_macro_definition(raw)
+
+
 def test_parse_slash_args_normalizes_aliases_and_repeated_questions():
     spec = WrapupArgsSpec()
     args = parse_macro_args(
@@ -75,6 +123,18 @@ def test_parse_slash_args_normalizes_aliases_and_repeated_questions():
     assert args["keep_forks"] is True
     assert args["output_profile"] == "compact"
     assert args["question"] == ["What changed?", "What is next?"]
+
+
+def test_parse_slash_args_rejects_duplicate_non_repeated_arg():
+    spec = WrapupArgsSpec()
+    with pytest.raises(MacroValidationError, match="duplicate"):
+        parse_macro_args("--mode foreground --mode background", spec)
+
+
+def test_parse_slash_args_rejects_duplicate_alias_and_canonical_arg():
+    spec = WrapupArgsSpec()
+    with pytest.raises(MacroValidationError, match="duplicate"):
+        parse_macro_args("--output-profile compact --output_profile full", spec)
 
 
 def test_merge_and_post_result_consumes_must_reference_previous_outputs():
@@ -93,3 +153,21 @@ def test_merge_and_post_result_consumes_must_reference_previous_outputs():
     )
     with pytest.raises(MacroValidationError, match="missing"):
         load_macro_definition(raw)
+
+
+def test_prompt_step_output_can_be_consumed_by_post_result():
+    raw = (
+        "schema_version: 1\n"
+        "name: ok\n"
+        "command: ok\n"
+        "steps:\n"
+        "  - id: prompt\n"
+        "    type: prompt\n"
+        "    output: answer\n"
+        "    prompt: Say hi.\n"
+        "  - id: post\n"
+        "    type: post_result\n"
+        "    consumes: [answer]\n"
+    )
+    macro = load_macro_definition(raw)
+    assert macro.steps[0].type == "prompt"

@@ -45,6 +45,7 @@ def parse_macro_args(
         raise MacroValidationError(f"invalid macro arguments: {exc}") from exc
 
     index = 0
+    seen_names: set[str] = set()
     while index < len(tokens):
         token = tokens[index]
         if not token.startswith("--"):
@@ -56,6 +57,9 @@ def parse_macro_args(
             raise MacroValidationError(f"unknown macro argument: {option}")
 
         spec = arg_specs[name]
+        if not spec.repeated and name in seen_names:
+            raise MacroValidationError(f"duplicate macro argument: {option}")
+
         if spec.type == "boolean" and not has_inline_value:
             value: Any = True
         else:
@@ -75,6 +79,7 @@ def parse_macro_args(
                 raise MacroValidationError(f"too many question arguments; max is {max_questions}")
         else:
             values[name] = value
+            seen_names.add(name)
         index += 1
 
     return values
