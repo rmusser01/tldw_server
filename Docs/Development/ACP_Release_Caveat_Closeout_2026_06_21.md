@@ -57,5 +57,5 @@ Closeout validation for this reconciliation slice:
 - Focused registry metadata tests passed for the shipped `agents.yaml` parser
   path.
 - Bandit was run on the touched pytest file and reported the existing test-file
-  `B101` assertion baseline only. The new metadata checks use explicit helper
-  failures rather than adding new `assert` statements.
+  `B101` assertion baseline only. The metadata checks use ordinary pytest
+  assertions and avoid pinning the workspace-live evidence to one exact commit.

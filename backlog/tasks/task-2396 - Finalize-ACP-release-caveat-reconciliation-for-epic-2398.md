@@ -23,8 +23,9 @@ documentation:
   artifact sandbox reviewer-loop and failure-diagnostic caveats remain.'
 - Verification - registry pytest passed; git diff check passed; targeted stale wording
   search passed with the old non-empty MCP caveat only on Codex as expected; Bandit
-  was run on the touched pytest file and reported the existing B101 test assert baseline
-  only with no new assert statements added.
+  was run on the touched pytest file and reported the existing B101 test assert baseline.
+- Review follow-up - removed custom assertion helpers and exact workspace-live commit
+  hash checks from the registry tests.
 - PR - https://github.com/rmusser01/tldw_server/pull/2422
 ---
 

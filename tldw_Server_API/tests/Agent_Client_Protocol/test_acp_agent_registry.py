@@ -10,16 +10,6 @@ import yaml
 pytestmark = pytest.mark.unit
 
 
-def _require_note_contains(notes: str, phrase: str) -> None:
-    if phrase not in notes:
-        raise AssertionError(f"Expected compatibility note to contain {phrase!r}")
-
-
-def _require_note_not_contains(notes: str, phrase: str) -> None:
-    if phrase in notes:
-        raise AssertionError(f"Expected compatibility note to omit {phrase!r}")
-
-
 SAMPLE_REGISTRY = """
 agents:
   - type: claude_code
@@ -348,13 +338,9 @@ def test_default_agents_yaml_includes_hermes_native_acp_entrypoint() -> None:
     assert entry.acp_args == ["acp", "--accept-hooks"]
     assert entry.support_state == "supported_with_caveats"
     assert entry.verification_level == "live_e2e_tested"
-    _require_note_contains(entry.compatibility_notes, "workspace-live-e2e")
-    _require_note_contains(entry.compatibility_notes, "commit ac93d96d9c")
-    _require_note_contains(entry.compatibility_notes, "non-empty MCP server injection")
-    _require_note_not_contains(
-        entry.compatibility_notes,
-        "non-empty MCP injection, artifact-producing workflows",
-    )
+    assert "workspace-live-e2e" in entry.compatibility_notes
+    assert "non-empty MCP server injection" in entry.compatibility_notes
+    assert "non-empty MCP injection, artifact-producing workflows" not in entry.compatibility_notes
 
 
 def test_default_agents_yaml_includes_goose_backend_live_e2e_metadata() -> None:
@@ -379,13 +365,9 @@ def test_default_agents_yaml_includes_goose_backend_live_e2e_metadata() -> None:
     assert entry.verification_level == "live_e2e_tested"
     assert "backend live E2E" in entry.compatibility_notes
     assert "commit f9ff03f88" in entry.compatibility_notes
-    _require_note_contains(entry.compatibility_notes, "workspace-live-e2e")
-    _require_note_contains(entry.compatibility_notes, "commit ac93d96d9c")
-    _require_note_contains(entry.compatibility_notes, "non-empty MCP server injection")
-    _require_note_not_contains(
-        entry.compatibility_notes,
-        "non-empty MCP injection, artifact-producing workflows",
-    )
+    assert "workspace-live-e2e" in entry.compatibility_notes
+    assert "non-empty MCP server injection" in entry.compatibility_notes
+    assert "non-empty MCP injection, artifact-producing workflows" not in entry.compatibility_notes
 
 
 def test_default_agents_yaml_includes_opencode_backend_live_e2e_metadata() -> None:
@@ -411,13 +393,9 @@ def test_default_agents_yaml_includes_opencode_backend_live_e2e_metadata() -> No
     assert "backend live E2E" in entry.compatibility_notes
     assert "local llama.cpp" in entry.compatibility_notes
     assert "commit 53c018269" in entry.compatibility_notes
-    _require_note_contains(entry.compatibility_notes, "workspace-live-e2e")
-    _require_note_contains(entry.compatibility_notes, "commit ac93d96d9c")
-    _require_note_contains(entry.compatibility_notes, "non-empty MCP server injection")
-    _require_note_not_contains(
-        entry.compatibility_notes,
-        "non-empty MCP injection, artifact-producing workflows",
-    )
+    assert "workspace-live-e2e" in entry.compatibility_notes
+    assert "non-empty MCP server injection" in entry.compatibility_notes
+    assert "non-empty MCP injection, artifact-producing workflows" not in entry.compatibility_notes
 
 
 def test_default_agents_yaml_includes_codex_backend_live_e2e_metadata() -> None:
