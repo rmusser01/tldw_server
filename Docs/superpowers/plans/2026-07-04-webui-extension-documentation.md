@@ -40,7 +40,7 @@
 - Read: `apps/extension/docs/sidebar/index.md`
 - Read: `apps/extension/docs/shortcuts.md`
 
-- [ ] **Step 1: List WebUI pages**
+- [x] **Step 1: List WebUI pages**
 
 Run:
 
@@ -50,7 +50,7 @@ find apps/tldw-frontend/pages -maxdepth 4 -type f \( -name '*.tsx' -o -name '*.t
 
 Expected: routes include `/chat`, `/knowledge`, `/media`, `/settings`, `/admin`, `/tts`, `/stt`, `/flashcards`, `/vn-assets`, `/vn-play`, and debug/internal pages.
 
-- [ ] **Step 2: List shared route metadata labels**
+- [x] **Step 2: List shared route metadata labels**
 
 Run:
 
@@ -60,7 +60,7 @@ rg -n "path:|label:|group:|surface:|availability:|rationale:" apps/packages/ui/s
 
 Expected: output includes route groups `start`, `chat`, `knowledge`, `media_library`, `settings`, `operations`, `workspace`, `audio`, `study`, `safety`, `specialized`, `documentation`, `account`, and `extension`.
 
-- [ ] **Step 3: List extension sidepanel routes**
+- [x] **Step 3: List extension sidepanel routes**
 
 Run:
 
@@ -70,7 +70,7 @@ sed -n '1,220p' apps/packages/ui/src/routes/sidepanel-route-registry.tsx
 
 Expected: sidepanel routes include `/`, `/chat`, `/agent`, `/companion`, `/companion/conversation`, `/clipper`, `/persona`, `/flashcards`, `/settings`, and `/error-boundary-test`.
 
-- [ ] **Step 4: Confirm stable docs to link**
+- [x] **Step 4: Confirm stable docs to link**
 
 Run:
 
@@ -86,7 +86,7 @@ Expected: stable docs include WebUI extension user guides, Knowledge QA, chat pa
 - Create: `Docs/User_Guides/WebUI/index.md`
 - Create: `Docs/User_Guides/WebUI/Page_Feature_Index.md`
 
-- [ ] **Step 1: Create the landing page**
+- [x] **Step 1: Create the landing page**
 
 Create `Docs/User_Guides/WebUI/index.md` with:
 
@@ -134,7 +134,7 @@ This section explains what the WebUI and browser extension let you do. Use it to
 
 Expected: file introduces the new section and links every new feature-set page.
 
-- [ ] **Step 2: Create the page and feature index**
+- [x] **Step 2: Create the page and feature index**
 
 Create `Docs/User_Guides/WebUI/Page_Feature_Index.md` with grouped tables for:
 
@@ -158,7 +158,9 @@ Each table must use:
 
 Expected: the index covers at least the audited root routes from `ROUTE_METADATA` and labels hidden/gated routes clearly.
 
-- [ ] **Step 3: Commit landing and index**
+- [x] **Step 3: Commit landing and index**
+
+Execution note: the landing page and index link to feature-set pages, so this commit is intentionally delayed until the feature-set pages exist and local links resolve.
 
 Run:
 
@@ -177,7 +179,7 @@ Expected: commit succeeds with only the two new WebUI index docs staged.
 - Create: `Docs/User_Guides/WebUI/Knowledge_Media_Sources.md`
 - Create: `Docs/User_Guides/WebUI/Audio_Speech_Audiobooks.md`
 
-- [ ] **Step 1: Create Start, Account, And Settings**
+- [x] **Step 1: Create Start, Account, And Settings**
 
 Cover:
 
@@ -192,7 +194,7 @@ Cover:
 
 Expected: explain setup/readiness, auth modes, profiles, health diagnostics, provider/model settings, quick ingest settings, and hosted-only account/billing routes.
 
-- [ ] **Step 2: Create Chat, Characters, And Assistants**
+- [x] **Step 2: Create Chat, Characters, And Assistants**
 
 Cover:
 
@@ -206,7 +208,7 @@ Cover:
 
 Expected: explain normal chat, character/persona workflows, companion/agent routes, chat dictionaries, world books, chat workflows, and workspace chat.
 
-- [ ] **Step 3: Create Knowledge, Media, And Sources**
+- [x] **Step 3: Create Knowledge, Media, And Sources**
 
 Cover:
 
@@ -221,7 +223,7 @@ Cover:
 
 Expected: explain media library, source intake, RAG/Knowledge QA, research workspaces, document workspaces, reading/collections, notes, sharing, and connector status.
 
-- [ ] **Step 4: Create Audio, Speech, And Audiobooks**
+- [x] **Step 4: Create Audio, Speech, And Audiobooks**
 
 Cover:
 
@@ -231,7 +233,7 @@ Cover:
 
 Expected: explain speech overview, transcription, TTS, legacy audio alias, voice/provider readiness, and audiobook production.
 
-- [ ] **Step 5: Commit core feature-set pages**
+- [x] **Step 5: Commit core feature-set pages**
 
 Run:
 
@@ -250,7 +252,7 @@ Expected: commit succeeds with only those four feature-set docs staged.
 - Create: `Docs/User_Guides/WebUI/Extension_Sidepanel.md`
 - Create: `Docs/User_Guides/WebUI/Experimental_And_Specialized.md`
 
-- [ ] **Step 1: Create Study, Writing, And Artifacts**
+- [x] **Step 1: Create Study, Writing, And Artifacts**
 
 Cover:
 
@@ -264,7 +266,7 @@ Cover:
 
 Expected: explain study workflows, prompt library/studio, chatbooks, writing, slides, data tables, kanban, repo2txt, and content review.
 
-- [ ] **Step 2: Create Automation, Admin, And Operations**
+- [x] **Step 2: Create Automation, Admin, And Operations**
 
 Cover:
 
@@ -283,7 +285,7 @@ Cover:
 
 Expected: explain automation/integration pages, MCP/ACP, moderation/claims, notifications, and admin/operator surfaces.
 
-- [ ] **Step 3: Create Extension Sidepanel**
+- [x] **Step 3: Create Extension Sidepanel**
 
 Cover:
 
@@ -296,7 +298,7 @@ copilot popup, web clipper content script, HF pull content script
 
 Expected: explain what is extension-specific, which workflows are compact sidepanel versions of shared WebUI routes, and what setup failures are extension-specific.
 
-- [ ] **Step 4: Create Experimental And Specialized**
+- [x] **Step 4: Create Experimental And Specialized**
 
 Cover:
 
@@ -311,7 +313,7 @@ hosted-only account/billing routes, legacy aliases /audio, /search,
 
 Expected: explain that these routes can be beta, deployment-gated, compatibility aliases, or internal QA/debug routes.
 
-- [ ] **Step 5: Commit remaining feature pages**
+- [x] **Step 5: Commit remaining feature pages**
 
 Run:
 
