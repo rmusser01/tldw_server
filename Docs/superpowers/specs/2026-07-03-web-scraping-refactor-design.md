@@ -502,6 +502,8 @@ Success criteria:
 - A lightweight guardrail test or static check prevents new internal modules from importing legacy wrapper files.
 - The implementation plan names which compatibility tests protect each moved responsibility.
 
+The Phase 0 implementation should produce `Docs/Design/WebScraping_Refactor_Import_Inventory.md` and `Docs/Design/web_scraping_refactor_import_inventory.json`, with tests that fail when the inventory no longer matches current imports.
+
 ### Phase 1: Contracts And Compatibility Tests
 
 Add internal dataclasses, status enums, conversion helpers, and contract tests for public entry points.

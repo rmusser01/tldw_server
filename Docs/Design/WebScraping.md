@@ -78,6 +78,7 @@ Key regression tests cover:
 - Cookie injection using name/value dicts.
 
 ## References
+- `Docs/Design/WebScraping_Refactor_Import_Inventory.md` records the current compatibility import surface for the modular refactor. Update it with `Helper_Scripts/web_scraping_refactor_inventory.py` whenever Web_Scraping compatibility imports are added, removed, or migrated.
 - https://github.com/scrapinghub/article-extraction-benchmark
 - https://github.com/D4Vinci/Scrapling
 - https://github.com/rmusser01/nicar-2025-scraping
