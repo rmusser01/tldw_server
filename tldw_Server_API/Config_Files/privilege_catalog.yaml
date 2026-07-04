@@ -266,6 +266,21 @@ scopes:
     ownership_predicates:
       - same_org
     doc_url: https://docs.example.com/privileges/chat-completions
+  - id: embeddings
+    description: Invoke embedding generation endpoints.
+    resource_tags:
+      - embeddings
+      - llm
+    sensitivity_tier: high
+    rate_limit_class: elevated
+    default_roles:
+      - admin
+      - analyst
+      - developer
+    feature_flag_id: null
+    ownership_predicates:
+      - same_org
+    doc_url: https://docs.example.com/privileges/embeddings
   - id: chat.commands.list
     description: List available chat slash commands and brief descriptions.
     resource_tags:

@@ -683,7 +683,12 @@ class AblationRequest(BaseModel):  # type: ignore[misc]
     "/ablate",
     summary="Run RAG ablations (baseline, +rerank, +agentic, +agentic strict)",
     description="Compare retrieval/generation across baseline vs reranked vs agentic vs agentic(stricter extractive).",
-    dependencies=[Depends(check_rate_limit)]
+    dependencies=[
+        Depends(check_rate_limit),
+        Depends(rbac_rate_limit("rag.search")),
+        Depends(RequirePermission(MEDIA_READ)),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="rag.search", count_as="call")),
+    ],
 )
 async def rag_ablate(
     request: AblationRequest,
@@ -1481,7 +1486,9 @@ async def rag_implicit_feedback(
     response_description="Batch processing results",
     dependencies=[
         Depends(check_rate_limit),
+        Depends(rbac_rate_limit("rag.search")),
         Depends(RequirePermission(MEDIA_READ)),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="rag.search", count_as="call")),
     ]
 )
 async def unified_batch_endpoint(
@@ -1685,7 +1692,9 @@ async def unified_batch_endpoint(
     response_description="Search results",
     dependencies=[
         Depends(check_rate_limit),
+        Depends(rbac_rate_limit("rag.search")),
         Depends(RequirePermission(MEDIA_READ)),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="rag.search", count_as="call")),
         Depends(require_within_limit(LimitCategory.RAG_QUERIES_DAY, 1)),
     ]
 )
@@ -1778,7 +1787,9 @@ async def simple_search_endpoint(
     description="Resume a batch RAG operation from a checkpoint.",
     dependencies=[
         Depends(check_rate_limit),
+        Depends(rbac_rate_limit("rag.search")),
         Depends(RequirePermission(MEDIA_READ)),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="rag.search", count_as="call")),
     ],
 )
 async def resume_batch_endpoint(
@@ -1978,7 +1989,9 @@ async def resume_batch_endpoint(
     description="Stream generated answer chunks with optional incremental claim overlay events (NDJSON)",
     dependencies=[
         Depends(check_rate_limit),
+        Depends(rbac_rate_limit("rag.search")),
         Depends(RequirePermission(MEDIA_READ)),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="rag.search", count_as="call")),
         Depends(require_within_limit(LimitCategory.RAG_QUERIES_DAY, 1)),
     ],
     response_class=StreamingResponse,
@@ -2079,7 +2092,12 @@ async def unified_search_stream_endpoint(
     - Performance analysis
     """,
     response_description="Full search results with analysis",
-    dependencies=[Depends(check_rate_limit), Depends(RequirePermission(MEDIA_READ))]
+    dependencies=[
+        Depends(check_rate_limit),
+        Depends(rbac_rate_limit("rag.search")),
+        Depends(RequirePermission(MEDIA_READ)),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="rag.search", count_as="call")),
+    ],
 )
 async def advanced_search_endpoint(
     request: Request,

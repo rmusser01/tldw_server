@@ -13,7 +13,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from loguru import logger
 from starlette.responses import StreamingResponse
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    get_auth_principal,
+    TokenScopeGuard,
+)
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.chat_documents_deps import get_document_generator_service
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
@@ -96,6 +99,9 @@ _CHAT_DOCS_NONCRITICAL_EXCEPTIONS = (
     summary="Generate a document from conversation",
     description="Generate a document using conversation content and a template. May return async job metadata.",
     tags=["chat-documents"],
+    dependencies=[
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="chat.completions", count_as="call")),
+    ],
 )
 async def generate_document(
     request: GenerateDocumentRequest,
@@ -800,6 +806,9 @@ async def get_prompt_config(
     summary="Bulk generate documents",
     description="Submit multiple document generations in one request. May return async job IDs.",
     tags=["chat-documents"],
+    dependencies=[
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="chat.completions", count_as="call")),
+    ],
 )
 async def bulk_generate_documents(
     request: BulkGenerateRequest,

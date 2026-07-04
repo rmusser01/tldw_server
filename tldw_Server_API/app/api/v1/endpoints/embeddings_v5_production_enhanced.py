@@ -47,7 +47,15 @@ from prometheus_client import REGISTRY, Counter, Gauge, Histogram
 from pydantic import BaseModel, Field
 
 from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import get_audit_service_for_user
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, rbac_rate_limit, RequirePermission, RequireRole, resolve_user_id_for_request, User
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    get_request_user,
+    rbac_rate_limit,
+    RequirePermission,
+    RequireRole,
+    resolve_user_id_for_request,
+    TokenScopeGuard,
+    User,
+)
 from tldw_Server_API.app.api.v1.API_Deps.billing_deps import require_within_limit
 from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
 
@@ -3102,6 +3110,7 @@ def _format_embedding_result_data(
     summary="Create embeddings (enhanced with circuit breaker)",
     dependencies=[
         Depends(rbac_rate_limit("embeddings.create")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="embeddings", count_as="call")),
         Depends(require_within_limit(LimitCategory.API_CALLS_DAY, 1)),
     ],
     responses={
@@ -3943,6 +3952,7 @@ class EmbeddingsBatchResponse(BaseModel):
     summary="Create embeddings for a batch of texts",
     dependencies=[
         Depends(rbac_rate_limit("embeddings.create")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="embeddings", count_as="call")),
         Depends(require_within_limit(LimitCategory.API_CALLS_DAY, 1)),
     ],
     responses={

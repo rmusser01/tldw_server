@@ -91,7 +91,11 @@ from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
     record_byok_missing_credentials,
     resolve_byok_credentials,
 )
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    get_request_user,
+    TokenScopeGuard,
+    User,
+)
 
 # Character chat helpers
 from tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib_facade import (
@@ -4489,6 +4493,9 @@ async def get_chat_context(
         "DEPRECATED: The request body for this endpoint is ignored and will be rejected in a future release. "
         "Call this endpoint without a body. Prefer /{chat_id}/completions or /{chat_id}/complete-v2."
     ),
+    dependencies=[
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="chat.completions", count_as="call")),
+    ],
 )
 async def complete_chat_legacy(
     chat_id: str = Path(..., description="Chat session ID"),
@@ -4561,8 +4568,15 @@ async def complete_chat_legacy(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An unexpected error occurred during completion") from e
 
 
-@router.post("/{chat_id}/completions", response_model=CharacterChatCompletionPrepResponse,
-             summary="Prepare messages for chat completion (rate-limited)", tags=["Chat Sessions"])
+@router.post(
+    "/{chat_id}/completions",
+    response_model=CharacterChatCompletionPrepResponse,
+    summary="Prepare messages for chat completion (rate-limited)",
+    tags=["Chat Sessions"],
+    dependencies=[
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="chat.completions", count_as="call")),
+    ],
+)
 async def prepare_chat_completion(
     chat_id: str = Path(..., description="Chat session ID"),
     body: CharacterChatCompletionPrepRequest = None,
@@ -5294,6 +5308,9 @@ async def prompt_assembly_preview(
         },
     },
     tags=["Chat Sessions"],
+    dependencies=[
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="chat.completions", count_as="call")),
+    ],
 )
 async def character_chat_completion(
     chat_id: str = Path(..., description="Chat session ID"),
