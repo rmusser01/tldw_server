@@ -464,7 +464,7 @@ Committed as `874ef6112d`.
 - Test: `tldw_Server_API/tests/Chat_NEW/unit/test_command_router.py`
 - Test: `tldw_Server_API/tests/Chat_NEW/integration/test_chat_completions_api.py`
 
-- [ ] **Step 1: Write failing command-router tests**
+- [x] **Step 1: Write failing command-router tests**
 
 Add tests for:
 
@@ -477,7 +477,7 @@ def test_core_parse_still_only_returns_registered_core_commands():
     assert command_router.parse_slash_command("/wrapup") is None
 ```
 
-- [ ] **Step 2: Write failing chat endpoint macro tests**
+- [x] **Step 2: Write failing chat endpoint macro tests**
 
 Add integration tests with a fake `ChatMacrosService` seam asserting:
 
@@ -486,7 +486,7 @@ Add integration tests with a fake `ChatMacrosService` seam asserting:
 - Unknown `/not_a_macro` preserves current behavior.
 - Macro invalid args return a chat-visible error without creating a run.
 
-- [ ] **Step 3: Run tests and verify failure**
+- [x] **Step 3: Run tests and verify failure**
 
 Run:
 
@@ -500,7 +500,7 @@ python -m pytest \
 
 Expected: missing `extract_slash_candidate` and missing macro short-circuit.
 
-- [ ] **Step 4: Add slash candidate parsing**
+- [x] **Step 4: Add slash candidate parsing**
 
 In `command_router.py`:
 
@@ -508,7 +508,7 @@ In `command_router.py`:
 - Keep `parse_slash_command` unchanged for registered core commands.
 - Add a small helper exposing reserved core command names for collision checks.
 
-- [ ] **Step 5: Add chat endpoint macro short-circuit**
+- [x] **Step 5: Add chat endpoint macro short-circuit**
 
 In `chat.py`, after finding the latest user message:
 
@@ -519,7 +519,7 @@ In `chat.py`, after finding the latest user message:
 5. Do not pass macro output into `build_injection_text`.
 6. If the incoming request is streaming, return a safe non-streaming macro response or a small SSE completion compatible with existing client expectations; cover whichever behavior is chosen in tests.
 
-- [ ] **Step 6: Run command/chat tests**
+- [x] **Step 6: Run command/chat tests**
 
 Run:
 
@@ -533,7 +533,7 @@ python -m pytest \
 
 Expected: PASS for touched command and chat completion tests.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/Chat/command_router.py tldw_Server_API/app/api/v1/endpoints/chat.py tldw_Server_API/tests/Chat_NEW/unit/test_command_router.py tldw_Server_API/tests/Chat_NEW/integration/test_chat_completions_api.py

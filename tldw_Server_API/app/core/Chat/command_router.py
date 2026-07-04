@@ -358,6 +358,23 @@ def list_commands() -> list[dict[str, Any]]:
     ]
 
 
+def reserved_core_command_names() -> set[str]:
+    """Return names reserved by the built-in slash command registry."""
+    return set(_registry)
+
+
+def extract_slash_candidate(message: str) -> tuple[str, str | None] | None:
+    """Parse any slash-shaped message without requiring a registered command."""
+    if not isinstance(message, str):
+        return None
+    m = SLASH_RE.match(message.strip())
+    if not m:
+        return None
+    cmd = (m.group(1) or "").lower()
+    args = (m.group(2) or "").strip() or None
+    return cmd, args
+
+
 def parse_slash_command(message: str) -> tuple[str, str | None] | None:
     if not isinstance(message, str):
         return None

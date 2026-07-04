@@ -10,7 +10,32 @@ import os
 import pytest
 from fastapi import status
 
+from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import DEFAULT_CHARACTER_NAME
+from tldw_Server_API.app.core.Chat_Macros.repository import ChatMacroRepository
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+
+
+def _install_isolated_chat_db(test_client, tmp_path, monkeypatch):
+    user_base = tmp_path / "user_databases" / "1"
+    user_base.mkdir(parents=True)
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "user_databases"))
+    db = CharactersRAGDB(db_path=user_base / "ChaChaNotes.db", client_id="chat_macros_chat_test")
+    test_client.app.dependency_overrides[get_chacha_db_for_user] = lambda: db
+    return db
+
+
+def _message_text(message: dict) -> str:
+    content = message.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(
+            str(part.get("text") or "")
+            for part in content
+            if isinstance(part, dict) and part.get("type") == "text"
+        )
+    return ""
 
 # ========================================================================
 # Basic Endpoint Tests
@@ -108,6 +133,268 @@ class TestChatCompletionsEndpoint:
         )
 
         assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+
+    @pytest.mark.integration
+    def test_time_slash_command_still_injects_and_calls_provider(self, monkeypatch, test_client, auth_headers):
+        monkeypatch.setenv("CHAT_COMMANDS_ENABLED", "1")
+        monkeypatch.setenv("CHAT_COMMAND_INJECTION_MODE", "system")
+
+        from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
+
+        captured = {"messages": None, "kwargs": None}
+
+        def fake_call(**kwargs):
+            captured["kwargs"] = kwargs
+            captured["messages"] = kwargs.get("messages_payload")
+            return {"choices": [{"message": {"role": "assistant", "content": "provider ok"}}]}
+
+        monkeypatch.setattr(chat_endpoint, "perform_chat_api_call", fake_call)
+
+        response = test_client.post(
+            "/api/v1/chat/completions",
+            json={"model": "openai/gpt-4o-mini", "messages": [{"role": "user", "content": "/time"}]},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == status.HTTP_200_OK, response.text
+        messages = captured["messages"] or []
+        system_text = "\n".join(
+            [_message_text(message) for message in messages if message.get("role") == "system"]
+            + [str((captured["kwargs"] or {}).get("system_message") or "")]
+        )
+        assert "[/time]" in system_text
+
+    @pytest.mark.integration
+    def test_wrapup_macro_short_circuits_provider(self, monkeypatch, test_client, auth_headers, tmp_path):
+        monkeypatch.setenv("CHAT_COMMANDS_ENABLED", "1")
+        db = _install_isolated_chat_db(test_client, tmp_path, monkeypatch)
+
+        from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
+
+        def fail_call(**_kwargs):
+            raise AssertionError("provider path should not be called for chat macros")
+
+        monkeypatch.setattr(chat_endpoint, "perform_chat_api_call", fail_call)
+
+        try:
+            response = test_client.post(
+                "/api/v1/chat/completions",
+                json={
+                    "model": "openai/gpt-4o-mini",
+                    "messages": [{"role": "user", "content": '/wrapup --question "What changed?"'}],
+                    "stream": False,
+                },
+                headers=auth_headers,
+            )
+
+            assert response.status_code == status.HTTP_200_OK, response.text
+            body = response.json()
+            message = body["choices"][0]["message"]
+            macro_meta = message["metadata"]["chat_macro"]
+            assert message["role"] == "assistant"
+            assert macro_meta["command"] == "wrapup"
+            assert macro_meta["status"] == "pending"
+            assert macro_meta["detail_url"].endswith(f"/runs/{macro_meta['run_id']}")
+
+            run = ChatMacroRepository(db).get_run(macro_meta["run_id"])
+            assert run is not None
+            assert run.macro_command == "wrapup"
+            assert run.normalized_args["question"] == ["What changed?"]
+        finally:
+            test_client.app.dependency_overrides.pop(get_chacha_db_for_user, None)
+            db.close_all_connections()
+
+    @pytest.mark.integration
+    def test_wrapup_macro_stream_request_returns_json_status(
+        self,
+        monkeypatch,
+        test_client,
+        auth_headers,
+        tmp_path,
+    ):
+        monkeypatch.setenv("CHAT_COMMANDS_ENABLED", "1")
+        db = _install_isolated_chat_db(test_client, tmp_path, monkeypatch)
+
+        from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
+
+        def fail_call(**_kwargs):
+            raise AssertionError("provider path should not be called for streaming chat macros")
+
+        monkeypatch.setattr(chat_endpoint, "perform_chat_api_call", fail_call)
+
+        try:
+            response = test_client.post(
+                "/api/v1/chat/completions",
+                json={
+                    "model": "openai/gpt-4o-mini",
+                    "messages": [{"role": "user", "content": "/wrapup"}],
+                    "stream": True,
+                },
+                headers=auth_headers,
+            )
+
+            assert response.status_code == status.HTTP_200_OK, response.text
+            assert response.headers["content-type"].startswith("application/json")
+            body = response.json()
+            assert body["object"] == "chat.completion"
+            macro_meta = body["choices"][0]["message"]["metadata"]["chat_macro"]
+            assert macro_meta["command"] == "wrapup"
+            assert macro_meta["status"] == "pending"
+        finally:
+            test_client.app.dependency_overrides.pop(get_chacha_db_for_user, None)
+            db.close_all_connections()
+
+    @pytest.mark.integration
+    def test_wrapup_macro_discovery_failure_does_not_fall_through_to_provider(
+        self,
+        monkeypatch,
+        test_client,
+        auth_headers,
+        tmp_path,
+    ):
+        monkeypatch.setenv("CHAT_COMMANDS_ENABLED", "1")
+        db = _install_isolated_chat_db(test_client, tmp_path, monkeypatch)
+
+        from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
+
+        def fail_call(**_kwargs):
+            raise AssertionError("provider path should not receive failed macro invocations")
+
+        def fail_list(_service):
+            raise RuntimeError("api_key=secret should not leak")
+
+        monkeypatch.setattr(chat_endpoint, "perform_chat_api_call", fail_call)
+        monkeypatch.setattr(chat_endpoint.ChatMacrosService, "list_macros", fail_list)
+
+        try:
+            response = test_client.post(
+                "/api/v1/chat/completions",
+                json={
+                    "model": "openai/gpt-4o-mini",
+                    "messages": [{"role": "user", "content": "/wrapup"}],
+                    "stream": False,
+                },
+                headers=auth_headers,
+            )
+
+            assert response.status_code == status.HTTP_200_OK, response.text
+            message = response.json()["choices"][0]["message"]
+            macro_meta = message["metadata"]["chat_macro"]
+            assert "Could not run /wrapup: Macro storage is unavailable." in message["content"]
+            assert "secret" not in message["content"]
+            assert macro_meta["status"] == "error"
+            assert macro_meta["error_code"] == "storage_error"
+        finally:
+            test_client.app.dependency_overrides.pop(get_chacha_db_for_user, None)
+            db.close_all_connections()
+
+    @pytest.mark.integration
+    def test_wrapup_macro_rate_limit_denial_does_not_create_run(
+        self,
+        monkeypatch,
+        test_client,
+        auth_headers,
+        tmp_path,
+    ):
+        monkeypatch.setenv("CHAT_COMMANDS_ENABLED", "1")
+        db = _install_isolated_chat_db(test_client, tmp_path, monkeypatch)
+
+        from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
+
+        class DenyLimiter:
+            config = type("Config", (), {"per_user_rpm": 1})()
+
+            async def check_rate_limit(self, **_kwargs):
+                return False, "macro test limit"
+
+        def fail_call(**_kwargs):
+            raise AssertionError("provider path should not be called when macro start is rate-limited")
+
+        monkeypatch.setattr(chat_endpoint, "perform_chat_api_call", fail_call)
+        monkeypatch.setattr(chat_endpoint, "get_rate_limiter", lambda: DenyLimiter())
+
+        try:
+            response = test_client.post(
+                "/api/v1/chat/completions",
+                json={
+                    "model": "openai/gpt-4o-mini",
+                    "messages": [{"role": "user", "content": "/wrapup"}],
+                    "stream": False,
+                },
+                headers=auth_headers,
+            )
+
+            assert response.status_code == status.HTTP_429_TOO_MANY_REQUESTS, response.text
+            with db.transaction() as conn:
+                count = conn.execute("SELECT COUNT(*) FROM chat_macro_runs").fetchone()[0]
+            assert count == 0
+        finally:
+            test_client.app.dependency_overrides.pop(get_chacha_db_for_user, None)
+            db.close_all_connections()
+
+    @pytest.mark.integration
+    def test_wrapup_macro_invalid_args_returns_chat_visible_error(
+        self,
+        monkeypatch,
+        test_client,
+        auth_headers,
+        tmp_path,
+    ):
+        monkeypatch.setenv("CHAT_COMMANDS_ENABLED", "1")
+        db = _install_isolated_chat_db(test_client, tmp_path, monkeypatch)
+
+        from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
+
+        def fail_call(**_kwargs):
+            raise AssertionError("provider path should not be called for invalid chat macros")
+
+        monkeypatch.setattr(chat_endpoint, "perform_chat_api_call", fail_call)
+
+        try:
+            response = test_client.post(
+                "/api/v1/chat/completions",
+                json={
+                    "model": "openai/gpt-4o-mini",
+                    "messages": [{"role": "user", "content": "/wrapup --not-a-real-arg value"}],
+                    "stream": False,
+                },
+                headers=auth_headers,
+            )
+
+            assert response.status_code == status.HTTP_200_OK, response.text
+            message = response.json()["choices"][0]["message"]
+            macro_meta = message["metadata"]["chat_macro"]
+            assert "Could not run /wrapup" in message["content"]
+            assert macro_meta["status"] == "error"
+            assert macro_meta["error_code"] == "validation_error"
+            assert "run_id" not in macro_meta
+        finally:
+            test_client.app.dependency_overrides.pop(get_chacha_db_for_user, None)
+            db.close_all_connections()
+
+    @pytest.mark.integration
+    def test_unknown_slash_candidate_preserves_provider_flow(self, monkeypatch, test_client, auth_headers):
+        monkeypatch.setenv("CHAT_COMMANDS_ENABLED", "1")
+
+        from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
+
+        calls = []
+
+        def fake_call(**kwargs):
+            calls.append(kwargs)
+            return {"choices": [{"message": {"role": "assistant", "content": "provider fallback"}}]}
+
+        monkeypatch.setattr(chat_endpoint, "perform_chat_api_call", fake_call)
+
+        response = test_client.post(
+            "/api/v1/chat/completions",
+            json={"model": "openai/gpt-4o-mini", "messages": [{"role": "user", "content": "/not_a_macro"}]},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == status.HTTP_200_OK, response.text
+        assert calls
+        assert response.json()["choices"][0]["message"]["content"] == "provider fallback"
 
 # ========================================================================
 # Provider Routing Tests
