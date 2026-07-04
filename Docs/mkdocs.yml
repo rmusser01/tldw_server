@@ -68,6 +68,17 @@ copyright: |
 
 nav:
   - Home: Wiki/index.md
+  - WebUI & Extension:
+      - Overview: User_Guides/WebUI/index.md
+      - Page And Feature Index: User_Guides/WebUI/Page_Feature_Index.md
+      - Start, Account, And Settings: User_Guides/WebUI/Start_Account_Settings.md
+      - Chat, Characters, And Assistants: User_Guides/WebUI/Chat_Characters_Assistants.md
+      - Knowledge, Media, And Sources: User_Guides/WebUI/Knowledge_Media_Sources.md
+      - Audio, Speech, And Audiobooks: User_Guides/WebUI/Audio_Speech_Audiobooks.md
+      - Study, Writing, And Artifacts: User_Guides/WebUI/Study_Writing_Artifacts.md
+      - Automation, Admin, And Operations: User_Guides/WebUI/Automation_Admin_Operations.md
+      - Extension Sidepanel: User_Guides/WebUI/Extension_Sidepanel.md
+      - Experimental And Specialized: User_Guides/WebUI/Experimental_And_Specialized.md
   - User Wiki:
       - Start Here: Wiki/User_Wiki.md
       - Getting Started:

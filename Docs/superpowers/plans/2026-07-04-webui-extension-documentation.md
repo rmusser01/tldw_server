@@ -330,13 +330,13 @@ Expected: commit succeeds with only those four docs staged.
 - Modify: `Docs/User_Guides/index.md`
 - Modify: `Docs/mkdocs.yml`
 
-- [ ] **Step 1: Update User Guides index**
+- [x] **Step 1: Update User Guides index**
 
 In `Docs/User_Guides/index.md`, update the "Choose Your Surface" table so the WebUI row points to `WebUI/index.md` and mentions browser extension sidepanel coverage. Add a common workflow link to `WebUI/Page_Feature_Index.md`.
 
 Expected: users starting from the user guide map can find the new section.
 
-- [ ] **Step 2: Update MkDocs navigation**
+- [x] **Step 2: Update MkDocs navigation**
 
 In `Docs/mkdocs.yml`, add a top-level nav section after `Getting Started`:
 
