@@ -397,7 +397,7 @@ class TestTextProcessing:
         )
 
         iterations = 20
-        deterministic_rng = random.Random(0)
+        deterministic_rng = random.Random(0)  # nosec B311
 
         replacements = 0
         with patch(
@@ -595,13 +595,11 @@ class TestImportExport:
     def test_import_from_markdown_string_does_not_open_file(self, chat_dictionary_service, monkeypatch):
         """Ensure string inputs are treated as content, not file paths."""
         from tldw_Server_API.app.core.Character_Chat import chat_dictionary as cd
-        import builtins
 
         def _fail_open(*_args, **_kwargs):
-
             raise AssertionError("open should not be called for string content")
 
-        monkeypatch.setattr(builtins, "open", _fail_open)
+        monkeypatch.setattr(cd, "open", _fail_open, raising=False)
 
         service = chat_dictionary_service
         dict_id = service.import_from_markdown("not_a_path", "String Content")
