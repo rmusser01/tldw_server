@@ -3,8 +3,11 @@ package guest
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"io"
 	"net"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 )
@@ -104,7 +107,7 @@ func TestGuestVSockClientSendsHandshakeAndReady(t *testing.T) {
 		done <- nil
 	}()
 
-	if err := client.primeConnection(context.Background(), guestConn, server, false); err != nil {
+	if _, err := client.primeConnection(context.Background(), guestConn, server, false); err != nil {
 		t.Fatalf("primeConnection() error = %v", err)
 	}
 	if err := <-done; err != nil {
@@ -204,18 +207,95 @@ func TestGuestVSockClientReconnectsWithSameVMIDAndToken(t *testing.T) {
 	go assertHello(firstHelperConn, "handshake", firstDone)
 	go assertHello(secondHelperConn, "reconnect", secondDone)
 
-	if err := client.primeConnection(context.Background(), firstGuestConn, server, false); err != nil {
+	if _, err := client.primeConnection(context.Background(), firstGuestConn, server, false); err != nil {
 		t.Fatalf("primeConnection(first) error = %v", err)
 	}
 	if err := <-firstDone; err != nil {
 		t.Fatalf("first helper side error = %v", err)
 	}
 
-	if err := client.primeConnection(context.Background(), secondGuestConn, server, true); err != nil {
+	if _, err := client.primeConnection(context.Background(), secondGuestConn, server, true); err != nil {
 		t.Fatalf("primeConnection(second) error = %v", err)
 	}
 	if err := <-secondDone; err != nil {
 		t.Fatalf("second helper side error = %v", err)
+	}
+}
+
+func TestGuestVSockClientRunPreservesExecBufferedAfterReady(t *testing.T) {
+	root := t.TempDir()
+	server, err := NewServer(root)
+	if err != nil {
+		t.Fatalf("NewServer() error = %v", err)
+	}
+
+	guestConn, helperConn := net.Pipe()
+	client := &VSockClient{
+		cfg: VSockClientConfig{
+			VMID:            "vm-buffered-exec",
+			ConnectionToken: "token-buffered-exec",
+			HostPort:        4242,
+			WorkspaceRoot:   root,
+			GuestVersion:    "1.0.0",
+		},
+		dialer: &recordingDialer{conns: []io.ReadWriteCloser{guestConn}},
+	}
+
+	helperDone := make(chan error, 1)
+	go func() {
+		defer helperConn.Close()
+		reader := bufio.NewReader(helperConn)
+
+		var handshake HandshakeRequest
+		if err := decodeLine(reader, &handshake); err != nil {
+			helperDone <- err
+			return
+		}
+		if err := writeJSONLine(helperConn, HandshakeAck{
+			ProtocolVersion: ProtocolVersion,
+			RequestID:       handshake.RequestID,
+			Type:            "handshake_ack",
+			Status:          "accepted",
+			VMID:            handshake.VMID,
+		}); err != nil {
+			helperDone <- err
+			return
+		}
+
+		var ready ReadyRequest
+		if err := decodeLine(reader, &ready); err != nil {
+			helperDone <- err
+			return
+		}
+		readyPayload, err := json.Marshal(ReadyResponse{
+			ProtocolVersion: ProtocolVersion,
+			RequestID:       ready.RequestID,
+			Status:          "ready",
+			WorkspaceRoot:   root,
+		})
+		if err != nil {
+			helperDone <- err
+			return
+		}
+
+		execPayload := []byte(`{"protocol_version":"1","request_id":"req-buffered-exec","type":"exec","argv":["/bin/sh","-c","printf preserved > buffered-exec.txt"],"cwd":"."}`)
+		payload := append(append(readyPayload, '\n'), execPayload...)
+		payload = append(payload, '\n')
+		_, err = helperConn.Write(payload)
+		helperDone <- err
+	}()
+
+	_ = client.Run(context.Background(), server)
+	if err := <-helperDone; err != nil {
+		t.Fatalf("helper side error = %v", err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(root, "buffered-exec.txt"))
+	if err != nil {
+		t.Fatalf("expected buffered exec request to run: %v", err)
+	}
+	if string(got) != "preserved" {
+		t.Fatalf("expected buffered exec output file %q, got %q", "preserved", string(got))
 	}
 }
 
