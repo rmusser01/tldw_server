@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from tldw_Server_API.app.core.Embeddings import workflow_types
 from tldw_Server_API.app.core.Embeddings.workflow_types import (
     EmbeddingInMemoryWorkflowTraceCollector,
     EmbeddingNoopWorkflowTraceCollector,
@@ -13,6 +14,12 @@ from tldw_Server_API.app.core.Embeddings.workflow_types import (
 
 
 pytestmark = pytest.mark.unit
+
+
+def test_workflow_types_public_exports_include_safety_constants():
+    assert "FORBIDDEN_METADATA_FIELDS" in workflow_types.__all__
+    assert "FORBIDDEN_FIELD_SUBSTRINGS" in workflow_types.__all__
+    assert "SAFE_TOKEN_COUNT_FIELDS" in workflow_types.__all__
 
 
 def test_workflow_context_uses_request_id_as_safe_workflow_id():
@@ -128,3 +135,4 @@ def test_noop_collector_is_disabled_and_retains_no_events():
     collector.record(event)
 
     assert collector.enabled is False
+    assert not hasattr(collector, "events")
