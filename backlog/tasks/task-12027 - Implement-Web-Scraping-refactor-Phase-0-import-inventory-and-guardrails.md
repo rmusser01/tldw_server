@@ -19,7 +19,7 @@ modified_files:
 - Docs/Design/WebScraping.md
 - Docs/superpowers/specs/2026-07-03-web-scraping-refactor-design.md
 - backlog/tasks/task-12027 - Implement-Web-Scraping-refactor-Phase-0-import-inventory-and-guardrails.md
-updated_date: 2026-07-04 01:11
+updated_date: 2026-07-04 01:29
 ---
 
 ## Description
@@ -53,6 +53,7 @@ Execute the tasks in Docs/superpowers/plans/2026-07-03-web-scraping-phase-0-impo
 2026-07-03: Task 4 complete. Linked generated import inventory artifacts from `Docs/Design/WebScraping.md` and the refactor design spec in commit `83378d5926`. Verification: documentation grep found both artifact references, scoped whitespace check passed, and both spec and code-quality reviews approved with no findings.
 2026-07-03: Task 5 final verification complete. Focused tests: `/Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest tldw_Server_API/tests/WebScraping/test_refactor_import_inventory.py -q` returned 10 passed, 32 warnings. Compile check: `/Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m py_compile Helper_Scripts/web_scraping_refactor_inventory.py` exited 0. Bandit: `/Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m bandit Helper_Scripts/web_scraping_refactor_inventory.py -f json -o /tmp/bandit_web_scraping_phase0_inventory.json` exited 0 with 0 errors and 0 results. Scoped whitespace check over touched files exited 0. Worktree had only the Backlog task file untracked after final verification.
 2026-07-03: Final whole-branch review found a Phase 0 freshness gap: the guard compared only the inventory JSON `records` field and did not protect JSON metadata or the Markdown artifact. Fixed in commit `ee8e53af83` by regenerating both artifacts in the freshness test and comparing the full JSON payload plus tracked Markdown content. Fresh verification after the fix: focused pytest returned 10 passed, 32 warnings; helper py_compile exited 0; Bandit on `Helper_Scripts/web_scraping_refactor_inventory.py` exited 0 with 0 errors and 0 results; scoped whitespace check over touched files exited 0.
+2026-07-03: Rebased the web-scraping sequence onto fetched `origin/dev` (`0bb823583e`). A normal rebase onto FETCH_HEAD attempted to replay unrelated local-dev history, so it was aborted and the web-scraping sequence starting at `47ba13d538` was transplanted with `git rebase --onto FETCH_HEAD ecb5d12b7345`. The freshness test then failed as expected because upstream changed the current import surface; regenerated JSON and Markdown inventory artifacts. Fresh focused verification after regeneration: `test_refactor_import_inventory.py` returned 10 passed, 27 warnings; helper py_compile exited 0; Bandit on helper exited 0 with 0 errors and 0 results; scoped whitespace check exited 0. Rebased inventory now records 243 imports across 9 targets.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
