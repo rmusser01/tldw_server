@@ -4,7 +4,7 @@ title: Implement WebUI setup choice for API server setup handoff
 status: Done
 assignee: []
 created_date: '2026-07-03 22:59'
-updated_date: '2026-07-04 01:37'
+updated_date: '2026-07-04 01:55'
 labels:
   - webui
   - setup
@@ -59,14 +59,18 @@ User requested fixing the typecheck baseline as part of the current task. Reopen
 Typecheck repair complete. Fixed the TypeScript baseline errors in AudioStudio, ScheduledTasks editor/control-plane, Skills manager, MCP hub readiness path typing, voice-cloning ArrayBuffer conversion, and two E2E fixture/spec narrowing sites.
 
 Verification after repair: bun run typecheck passed from apps/tldw-frontend; focused setup Vitest passed 5 files / 53 tests; ScheduledTaskAutomationDefinitionEditor Vitest passed 9 tests; Playwright unified-first-run-onboarding passed 6/6; git diff --check passed. Extra broad ScheduledTasksPage Vitest run has 3 unrelated existing failures where tests expect raw endpoint strings but UI now shows sanitized diagnostics; left out of this typecheck repair.
+
+User requested investigation of the remaining ScheduledTasksPage diagnostics-copy expectation failures. Root cause: ScheduledTasksPage tests still assert raw API paths, while shared buildCapabilityState intentionally sanitizes diagnostic values to [server-endpoint]/[server-url] and has unit coverage for that behavior.
+
+ScheduledTasksPage diagnostics-copy failures fixed. The tests now assert the sanitized diagnostic copy produced by buildCapabilityState: [server-endpoint] and messages containing [server-endpoint], matching the existing capability-state sanitizer contract. Verification: ScheduledTasksPage Vitest passed 48/48; bun run typecheck passed; git diff --check passed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented the WebUI /setup choice handoff for incomplete backend setup and fixed the TypeScript baseline that blocked finalization. The flow presents a pre-wizard choice explaining WebUI setup vs API server setup, links API server /setup separately when browser-openable, keeps blocked state out of the normal WebUI wizard, preserves manual recovery when setup state/metadata is unavailable, and now passes the frontend typecheck.
+Implemented the WebUI /setup choice handoff, fixed the TypeScript baseline, and repaired the ScheduledTasksPage diagnostics-copy tests. Diagnostics assertions now match the existing sanitized recovery-detail contract instead of expecting raw API paths.
 
-Verification: focused setup Vitest passed 5 files / 53 tests; ScheduledTaskAutomationDefinitionEditor Vitest passed 9 tests; Playwright unified-first-run-onboarding passed 6/6; bun run typecheck passed; git diff --check passed. Bandit skipped because this implementation touched TypeScript/Playwright/Markdown tracking only. Extra broad ScheduledTasksPage Vitest run still has unrelated diagnostics-copy expectation failures.
+Verification: focused setup Vitest passed 5 files / 53 tests; ScheduledTaskAutomationDefinitionEditor Vitest passed 9 tests; ScheduledTasksPage Vitest passed 48 tests; Playwright unified-first-run-onboarding passed 6/6; bun run typecheck passed; git diff --check passed. Bandit skipped because this implementation touched TypeScript/Playwright/Markdown tracking only.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
