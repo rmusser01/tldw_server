@@ -90,3 +90,10 @@ Release changelog update: expanded the 0.1.34 entry to cover PRs #2570, #2573, #
 - [x] #5 Final summary added
 - [ ] #6 Known skips or blockers documented
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+PR #2596 review pass: verified unresolved threads. Stale/already-fixed: access-log redaction import is module-level in main.py, PyPI publish has test-suite gate, visualIsAnimated is persisted/hydrated through chat metadata. Still-valid minimal fixes: PyPI lookup should catch TimeoutError/JSONDecodeError, mobile cockpit rail toggles need ARIA state, visual identity preview FileResponse should be inline, resolver refresh should clear in-flight maps, and expression availability should avoid parallel resolve fanout.
+PR #2596 review comments addressed. Fixed still-valid findings: publish-pypi detect-version catches TimeoutError and json.JSONDecodeError during retry fallback; visual identity previews set content_disposition_type=inline; resolver refresh clears per-key in-flight requests; expression availability resolves sequentially instead of Promise.all fanout; mobile cockpit rail buttons expose aria-pressed and aria-controls. Added regression tests for each fixed behavior. Skipped/resolved as stale after verification: access-log redaction import is already module-level, publish workflow already has a test-suite gate, and visualIsAnimated already persists to metadata_extra and hydrates in useServerChatLoader. Validation: UI Vitest files passed 30 tests; Python workflow/API files passed 25 tests; py_compile visual_identities.py passed; Bandit on visual_identities.py reported zero findings; git diff --check passed.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->

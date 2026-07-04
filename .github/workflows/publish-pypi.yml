@@ -90,7 +90,7 @@ jobs:
                           payload = {"releases": {}}
                           break
                       last_error = exc
-                  except urllib.error.URLError as exc:
+                  except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
                       last_error = exc
                   if attempt < 2:
                       time.sleep(2 ** attempt)

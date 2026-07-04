@@ -11,6 +11,7 @@ import {
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Playground } from "../Playground";
+import { PlaygroundCockpitShell } from "../PlaygroundCockpitShell";
 import { getPromptById } from "@/db/dexie/helpers";
 import { useMcpToolsStore } from "@/store/mcp-tools";
 import {
@@ -1436,5 +1437,29 @@ describe("Playground cockpit controls", () => {
     expect(
       screen.queryByRole("status", { name: "Chat status" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("exposes mobile rail visibility state on collapse controls", () => {
+    render(
+      <PlaygroundCockpitShell
+        mode="cockpit"
+        leftRail={<div>Context panel</div>}
+        rightRail={<div>Runtime panel</div>}
+      >
+        <div>Chat area</div>
+      </PlaygroundCockpitShell>,
+    );
+
+    const contextToggle = screen.getByRole("button", {
+      name: "Hide context rail",
+    });
+    const runtimeToggle = screen.getByRole("button", {
+      name: "Hide runtime rail",
+    });
+
+    expect(contextToggle).toHaveAttribute("aria-pressed", "true");
+    expect(contextToggle).toHaveAttribute("aria-controls");
+    expect(runtimeToggle).toHaveAttribute("aria-pressed", "true");
+    expect(runtimeToggle).toHaveAttribute("aria-controls");
   });
 });

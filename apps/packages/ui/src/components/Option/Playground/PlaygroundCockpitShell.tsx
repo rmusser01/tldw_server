@@ -313,6 +313,8 @@ export const PlaygroundCockpitShell = ({
           <div className="grid grid-cols-2 gap-1">
             <button
               type="button"
+              aria-pressed={leftRailVisible}
+              aria-controls={mobileContextPanelId}
               onClick={() => {
                 onLeftRailVisibleChange?.(!leftRailVisible);
                 if (leftRailVisible && visibleMobilePanel === "context") {
@@ -327,6 +329,8 @@ export const PlaygroundCockpitShell = ({
             </button>
             <button
               type="button"
+              aria-pressed={rightRailVisible}
+              aria-controls={mobileRuntimePanelId}
               onClick={() => {
                 onRightRailVisibleChange?.(!rightRailVisible);
                 if (rightRailVisible && visibleMobilePanel === "runtime") {

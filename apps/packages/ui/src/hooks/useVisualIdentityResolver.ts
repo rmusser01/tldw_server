@@ -280,6 +280,7 @@ export const useVisualIdentityResolver = ({
   const refresh = React.useCallback(() => {
     if (cacheKey) {
       resolutionCache.delete(cacheKey)
+      resolutionInFlight.delete(cacheKey)
     }
     setRevision((value) => value + 1)
   }, [cacheKey])
@@ -374,24 +375,26 @@ export const useVisualIdentityExpressionAvailability = ({
     let request = availabilityInFlight.get(cacheKey)
     if (!request) {
       const generation = cacheGeneration
-      request = Promise.all(
-        expressionKeys.map(async (expressionKey) => {
+      request = (async () => {
+        const entries: Array<readonly [string, boolean, unknown]> = []
+        for (const expressionKey of expressionKeys) {
           try {
             const resolved = await client.resolveVisualIdentityBinding({
               actor_kind: actorKind,
               actor_id: normalizedActorId,
               expression_key: expressionKey
             })
-            return [
+            entries.push([
               expressionKey,
               Boolean(resolved.asset_id && resolved.expression_key === expressionKey),
               null
-            ] as const
+            ] as const)
           } catch (nextError) {
-            return [expressionKey, false, nextError] as const
+            entries.push([expressionKey, false, nextError] as const)
           }
-        })
-      )
+        }
+        return entries
+      })()
       .then((entries) => {
         const nextAvailability: Record<string, boolean> = {}
         let nextError: unknown = null
@@ -446,6 +449,7 @@ export const useVisualIdentityExpressionAvailability = ({
   const refresh = React.useCallback(() => {
     if (cacheKey) {
       availabilityCache.delete(cacheKey)
+      availabilityInFlight.delete(cacheKey)
     }
     setRevision((value) => value + 1)
   }, [cacheKey])

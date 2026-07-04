@@ -1,4 +1,4 @@
-import { renderHook, waitFor } from "@testing-library/react"
+import { act, renderHook, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import {
@@ -7,9 +7,48 @@ import {
   useVisualIdentityResolver
 } from "../useVisualIdentityResolver"
 
+const deferred = <T,>() => {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((nextResolve) => {
+    resolve = nextResolve
+  })
+  return { promise, resolve }
+}
+
+const visualIdentityResolution = ({
+  actorId = 42,
+  expressionKey = "happy",
+  requestedExpressionKey = expressionKey,
+  assetId = 9,
+  assetUrl = `/${expressionKey}.webp`,
+  fallbackReason = null
+}: {
+  actorId?: number
+  expressionKey?: string
+  requestedExpressionKey?: string
+  assetId?: number
+  assetUrl?: string
+  fallbackReason?: string | null
+} = {}) => ({
+  actor_kind: "character" as const,
+  actor_id: actorId,
+  pack_id: 1,
+  pack_version_id: 2,
+  expression_key: expressionKey,
+  requested_expression_key: requestedExpressionKey,
+  asset_id: assetId,
+  storage_relpath: `visual_identities/${expressionKey}.webp`,
+  fallback_reason: fallbackReason,
+  is_animated: false,
+  content_type: "image/webp",
+  asset_url: assetUrl,
+  preview_url: null
+})
+
 describe("useVisualIdentityResolver", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    clearVisualIdentityResolverCaches()
   })
 
   it("resolves the active actor expression through the client", async () => {
@@ -279,5 +318,127 @@ describe("useVisualIdentityResolver", () => {
       expect(second.result.current.resolution?.asset_id).toBe(9)
     })
     expect(resolveVisualIdentityBinding).toHaveBeenCalledTimes(1)
+  })
+
+  it("refresh starts a new resolver request even while the previous request is pending", async () => {
+    const first = deferred<any>()
+    const second = deferred<any>()
+    const resolveVisualIdentityBinding = vi
+      .fn()
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise)
+
+    const { result } = renderHook(() =>
+      useVisualIdentityResolver({
+        actorKind: "character",
+        actorId: 42,
+        expressionKey: "happy",
+        client: { resolveVisualIdentityBinding }
+      })
+    )
+
+    await waitFor(() => {
+      expect(resolveVisualIdentityBinding).toHaveBeenCalledTimes(1)
+    })
+    act(() => {
+      result.current.refresh()
+    })
+
+    await waitFor(() => {
+      expect(resolveVisualIdentityBinding).toHaveBeenCalledTimes(2)
+    })
+
+    first.resolve(visualIdentityResolution({ assetId: 9, assetUrl: "/old.webp" }))
+    second.resolve(visualIdentityResolution({ assetId: 10, assetUrl: "/new.webp" }))
+    await waitFor(() => {
+      expect(result.current.resolution?.asset_id).toBe(10)
+    })
+  })
+
+  it("checks expression availability sequentially", async () => {
+    const first = deferred<any>()
+    const second = deferred<any>()
+    const resolveVisualIdentityBinding = vi
+      .fn()
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise)
+
+    const { result } = renderHook(() =>
+      useVisualIdentityExpressionAvailability({
+        actorKind: "character",
+        actorId: 99,
+        expressions: ["happy", "sad"],
+        client: { resolveVisualIdentityBinding }
+      })
+    )
+
+    await waitFor(() => {
+      expect(resolveVisualIdentityBinding).toHaveBeenCalledTimes(1)
+    })
+    first.resolve(visualIdentityResolution({ actorId: 99 }))
+    await waitFor(() => {
+      expect(resolveVisualIdentityBinding).toHaveBeenCalledTimes(2)
+    })
+    second.resolve(
+      visualIdentityResolution({
+        actorId: 99,
+        expressionKey: "neutral",
+        requestedExpressionKey: "sad",
+        assetId: 1,
+        assetUrl: "/neutral.webp",
+        fallbackReason: "default"
+      })
+    )
+
+    await waitFor(() => {
+      expect(result.current.availability).toEqual({
+        happy: true,
+        sad: false
+      })
+    })
+  })
+
+  it("refresh starts a new availability request while the previous request is pending", async () => {
+    const first = deferred<any>()
+    const second = deferred<any>()
+    const resolveVisualIdentityBinding = vi
+      .fn()
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise)
+
+    const { result } = renderHook(() =>
+      useVisualIdentityExpressionAvailability({
+        actorKind: "character",
+        actorId: 99,
+        expressions: ["happy"],
+        client: { resolveVisualIdentityBinding }
+      })
+    )
+
+    await waitFor(() => {
+      expect(resolveVisualIdentityBinding).toHaveBeenCalledTimes(1)
+    })
+    act(() => {
+      result.current.refresh()
+    })
+
+    await waitFor(() => {
+      expect(resolveVisualIdentityBinding).toHaveBeenCalledTimes(2)
+    })
+
+    first.resolve(
+      visualIdentityResolution({
+        actorId: 99,
+        expressionKey: "neutral",
+        requestedExpressionKey: "happy",
+        assetId: 1,
+        assetUrl: "/old.webp",
+        fallbackReason: "default"
+      })
+    )
+    second.resolve(visualIdentityResolution({ actorId: 99, assetUrl: "/new.webp" }))
+    await waitFor(() => {
+      expect(result.current.availability).toEqual({ happy: true })
+    })
   })
 })

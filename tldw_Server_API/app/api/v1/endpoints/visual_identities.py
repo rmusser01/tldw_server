@@ -806,6 +806,7 @@ async def get_visual_identity_asset_preview(
         preview_path,
         media_type="image/png",
         filename=preview_path.name,
+        content_disposition_type="inline",
         headers={"Cache-Control": _IMMUTABLE_ASSET_CACHE_CONTROL},
     )
 
