@@ -59,6 +59,19 @@ def test_admission_result_distinguishes_inserted_and_existing_rows() -> None:
     assert rejected.admission_rejection_reason is AdmissionRejectionReason.QUEUE_PAUSED
 
 
+def test_admission_existing_can_report_idempotent_durable_event() -> None:
+    """Verify idempotent create replays can report the persisted replay event."""
+
+    result = AdmissionResult.existing(
+        row={"id": 1, "status": "queued"},
+        durable_events=({"event_type": "job.created", "attrs": {"idempotent": True}},),
+    )
+
+    assert result.outcome is OperationOutcome.NO_TRANSITION
+    assert result.no_transition_reason is NoTransitionReason.IDEMPOTENT_EXISTING
+    assert result.durable_events == ({"event_type": "job.created", "attrs": {"idempotent": True}},)
+
+
 def test_admission_result_rejects_inconsistent_states() -> None:
     """Verify invalid admission result state combinations are rejected."""
 
@@ -81,10 +94,10 @@ def test_admission_result_rejects_inconsistent_states() -> None:
             no_transition_reason=NoTransitionReason.IDEMPOTENT_EXISTING,
         )
 
-    with pytest.raises(ValueError, match="only applied admission"):
+    with pytest.raises(ValueError, match="durable events"):
         AdmissionResult(
             outcome=OperationOutcome.NO_TRANSITION,
-            no_transition_reason=NoTransitionReason.IDEMPOTENT_EXISTING,
+            no_transition_reason=NoTransitionReason.MISSING,
             durable_events=({"event_type": "job.noop"},),
         )
 
