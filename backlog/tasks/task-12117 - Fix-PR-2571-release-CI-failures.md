@@ -4,7 +4,7 @@ title: Fix PR 2571 release CI failures
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-07-03 14:58'
+updated_date: '2026-07-04 05:15'
 labels:
   - ci
   - release
@@ -45,6 +45,10 @@ After push, the GitHub code scanning alert gate still surfaced 95 open CodeQL al
 Follow-up resolution (fix/ux-smoke-theme-toggle-route): the `/chat` retarget could never pass (the cockpit layout suppresses the classic header entirely); the real regression was `_app.tsx` treating sessions as unauthenticated after the runtime bootstrap moved the stored API key into the in-memory runtime override, which hid the header shell on every route. Fixed `_app.tsx` to count runtime auth material as authenticated and moved the theme-toggle smoke check back to `/` (verified green locally with the full stage6 pair).
 
 Updated CHANGELOG.md release entry for 0.1.34 to cover work that landed after the release metadata push: PRs #2570, #2573, #2575, #2576, #2565, #2578, #2316, #2579, and PR #2571 release-stabilization/CodeQL follow-ups. No version bump was made because pyproject.toml is already prepped as 0.1.34 for this release.
+
+PR #2596 confirmed failures: shard coverage/gap-verified-7/gap-verified-12 are stale CI shard mappings for tldw_Server_API/tests/Character_Chat/test_visual_identity_expression_metadata.py. UX Smoke Gate is stale e2e expectations for the removed cockpit status strip; unit tests assert the strip is absent, while the e2e spec still queries role=status name='Chat status'.
+
+Applied PR #2596 fixes for confirmed failures: added test_visual_identity_expression_metadata.py to chat-character-legacy-core across full-suite matrices, added Visual_Identities to chat-character-property coverage, and updated chat-cockpit real-server e2e expectations to stop depending on the removed cockpit status strip. Validation: test_full_suite_splits_slow_chat_and_retrieval_shards passed; Helper_Scripts/ci/check_shard_coverage.py passed with new_uncovered=0; git diff --check passed; bunx eslint e2e/workflows/chat-cockpit.real-server.spec.ts returned 0 errors with pre-existing any warnings. bun run typecheck still fails on unrelated existing files e2e/fixtures/knowledge-qa-live.ts and e2e/workflows/tier-2-features/flashcards.spec.ts.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

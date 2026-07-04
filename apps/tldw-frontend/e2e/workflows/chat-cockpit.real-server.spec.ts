@@ -1475,12 +1475,6 @@ test.describe('/chat cockpit real-server parity', () => {
     await expect(page.getByTestId('playground-cockpit-right-rail')).toBeVisible();
     const modeSummary = page.getByTestId('playground-cockpit-mode-summary');
     await expect(modeSummary).toHaveText('Context and runtime rails visible.');
-    const cockpitStatus = page.getByRole('status', { name: 'Chat status' });
-    await expect(cockpitStatus).toBeVisible();
-    if (health.body?.status === 'degraded') {
-      await expect(cockpitStatus).toContainText('Degraded');
-      await expect(cockpitStatus).toContainText('Chat remains available.');
-    }
     await expect(getDesktopCompositionPreview(page)).toContainText(
       `Scope: ${chatModelSelection.key}`
     );
@@ -1520,8 +1514,7 @@ test.describe('/chat cockpit real-server parity', () => {
     await page.getByRole('button', { name: 'Hide runtime rail' }).click();
     await expect(page.getByTestId('playground-cockpit-left-rail')).toHaveCount(0);
     await expect(page.getByTestId('playground-cockpit-right-rail')).toHaveCount(0);
-    await expect(modeSummary).toHaveText('Cockpit rails hidden. Status remains visible.');
-    await expect(cockpitStatus).toBeVisible();
+    await expect(modeSummary).toHaveText('Cockpit rails hidden. Chat and composer remain active.');
     await page.getByRole('button', { name: 'Show context rail' }).click();
     await expect(page.getByTestId('playground-cockpit-left-rail')).toBeVisible();
     await expect(page.getByTestId('playground-cockpit-right-rail')).toHaveCount(0);
@@ -1548,16 +1541,10 @@ test.describe('/chat cockpit real-server parity', () => {
     await webSearchControl.click();
     const toggledWebSearchState = initialWebSearchState === 'true' ? 'false' : 'true';
     await expect(webSearchControl).toHaveAttribute('aria-pressed', toggledWebSearchState);
-    if (toggledWebSearchState === 'true') {
-      await expect(cockpitStatus).toContainText('Web search on');
-    } else {
-      await expect(cockpitStatus).not.toContainText('Web search on');
-    }
     if (toggledWebSearchState !== 'true') {
       await webSearchControl.click();
       await expect(webSearchControl).toHaveAttribute('aria-pressed', 'true');
     }
-    await expect(cockpitStatus).toContainText('Web search on');
     const sourceInventory = contextRail.getByRole('list', { name: 'Context sources' });
     await expect(sourceInventory).toBeVisible();
     await expect(
@@ -1674,7 +1661,6 @@ test.describe('/chat cockpit real-server parity', () => {
       path: testInfo.outputPath('chat-cockpit-desktop-conversation.png'),
       fullPage: true,
     });
-    await expect(cockpitStatus).not.toContainText('0 messages');
 
     const failingApiHits = apiTracker.hits.filter((hit) => hit.status >= 400);
     expect(failingApiHits).toEqual([]);
@@ -2667,13 +2653,9 @@ test.describe('/chat cockpit real-server parity', () => {
     const completionResponse = await completionAttempt;
     expect(completionResponse).toBeTruthy();
 
-    const statusStripStop = page
-      .getByRole('status', { name: 'Chat status' })
-      .getByRole('button', { name: 'Stop generation' });
     const runtimeStop = runtimeInspector.getByRole('button', { name: 'Stop generation' });
     const messageStop = page.getByRole('button', { name: /Stop streaming response/i }).first();
     const stopCandidates = [
-      { label: 'status strip stop', locator: statusStripStop },
       { label: 'runtime rail stop', locator: runtimeStop, requireEnabled: true },
       { label: 'message stop', locator: messageStop },
     ];
@@ -2703,11 +2685,22 @@ test.describe('/chat cockpit real-server parity', () => {
         fullPage: true,
       });
       await expect(runtimeStop).toBeDisabled({ timeout: 30_000 });
-      await expect(statusStripStop).toHaveCount(0);
     }
 
     if (completionResponse) {
       await assertProviderQualifiedPayload(page, completionResponse);
+    }
+
+    if (!(await regenerateControl.isEnabled())) {
+      const followUpAttempt = waitForChatCompletionAttempt(page, 90_000).catch(() => null);
+      await page.getByTestId('chat-input').fill('Reply with one short sentence.');
+      await page.getByRole('button', { name: /send message/i }).click();
+      const followUpResponse = await followUpAttempt;
+      expect(followUpResponse).toBeTruthy();
+      await assertChatCompletionRenderedOrRecoverable(page, followUpResponse);
+      if (followUpResponse) {
+        await assertProviderQualifiedPayload(page, followUpResponse);
+      }
     }
 
     await expect(regenerateControl).toBeEnabled({ timeout: 30_000 });
