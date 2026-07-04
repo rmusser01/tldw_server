@@ -14,17 +14,17 @@
 
 | Category | Share | Severity | Cases |
 |---|---|---|---|
-| **Missing input validation / contract enforcement** | ~38% (5) | mixed | Jobs operation contracts allowing impossible states (a9b6a2c310); Jobs settings classification contract drift (d6319e9e16); setup-choice route edge cases (577d83482a); workspace ingest failure codes not exposed (c725caad5a); **LIVE on dev:** Workflows research adapters + tokenizer_resolver make direct outbound `httpx` calls bypassing the central egress policy (4 direct calls in `app/core/Workflows/adapters/research/search.py`; fix 883b6c4dbd pending on unmerged `codex/*` branch) |
-| **State management / lifecycle** | ~31% (4) | **all High** | Service-layer singleton caches registered against the wrong DB — root cause per fix commit 4924719264 (#2580); `reload_app_main()` permanently swapping `sys.modules`, leaking stale drain state (#2585, **still open**); Embeddings/TTS drain-state corrupting subsequent suites (#2581, 254af77776); **LIVE on dev:** ACP WS reconnect broadcaster never cleaned up on disconnect (`agent_client_protocol.py` on dev has none of the cleanup; fix 790e3f3264 pending on unmerged branch) |
+| **Missing input validation / contract enforcement** | ~38% (5) | mixed | Jobs operation contracts allowing impossible states (a9b6a2c310); Jobs settings classification contract drift (d6319e9e16); setup-choice route edge cases (577d83482a); workspace ingest failure codes not exposed (c725caad5a); Workflows research adapters + tokenizer_resolver made direct outbound `httpx` calls bypassing the central egress policy — was live-unfixed on dev during this audit, fix 883b6c4dbd merged via **PR #2604 on 2026-07-04** |
+| **State management / lifecycle** | ~31% (4) | **all High** | Service-layer singleton caches registered against the wrong DB — root cause per fix commit 4924719264 (#2580); `reload_app_main()` permanently swapping `sys.modules`, leaking stale drain state (#2585, **still open**); Embeddings/TTS drain-state corrupting subsequent suites (#2581, 254af77776); ACP WS reconnect broadcaster never cleaned up on disconnect — was live-unfixed on dev during this audit, fix 790e3f3264 merged via **PR #2619 on 2026-07-04** |
 | **Env/config-dependent behavior** | ~23% (3) | mostly High | Web shell auth lost on hard reload — no runtime-override fallback (#2590, 626447bd5c); UX smoke gate broken after credential hardening (e88c96500f); VZ host smoke runtime defaults needed hardening (93b7e21aaf) |
 | **Cross-module integration breaks** | ~8% (1) | High | Bit-rotted multiuser load-test helper signature (4924719264, same fix as #2580) |
 | **Serialization / round-trip** | (overlaps env) | High | Runtime auth credentials not durable across hard reloads (#2590 — dual-counted with env) |
 
 Plus one **test-suite defect live on dev** (counted under RA2, not the product table): `tests/MediaIngestion_NEW/unit/test_audio_download_limits.py` never invokes the downloader it claims to regression-test — the test-only fix (4b89ce40a2, +16 lines) sits unmerged on a `codex/*` branch while the tautological test runs green on dev.
 
-**Priority reading:** by count the classes are close, but by severity the ordering is clear — every state/lifecycle defect is High (one open issue, one live-unfixed), the env class is mostly High, while the validation class is mixed (the live egress bypass is the High outlier). Remediation investment should follow that order.
+**Priority reading:** by count the classes are close, but by severity the ordering is clear — every state/lifecycle defect is High (#2585 still open; two others discovered live-unfixed during this audit and merged same-day), the env class is mostly High, while the validation class is mixed. Remediation investment should follow that order.
 
-**Excluded:** the chat-macro commits (parser bounds, persistence, atomicity — c1f4e6eb95 et al.) — `app/core/Chat_Macros/` exists only on the unmerged `codex/chat-macros-v1` branch, so those bugs were never on dev. Still instructive: same blind-spot classes, caught by review one gate earlier.
+**Pending merge (prep landed):** the chat-macro defects (parser bounds, persistence, atomicity — c1f4e6eb95 et al.) live on `codex/chat-macros-v1` (PR #2618), whose merge is planned. In preparation, parser-bounds property tests are already checked in at `tldw_Server_API/tests/Chat_Macros/property/test_macro_parser_properties.py` — `importorskip`-guarded, so they skip on today's dev and activate automatically when the module lands (validated against the branch: 10/10 pass).
 
 **Recurring escape mechanism:** a refactor hardens one path (e.g. credential storage) but forgets the fallback/compat layer; tests pass in CI (where env vars are set, singletons are warm, and mocks stand in for the integrated system) but the deployment-shaped world differs.
 
@@ -58,7 +58,7 @@ The state/lifecycle defect class (all High severity; #2585 still open) maps to p
 - Service-layer singleton caches registered against the wrong DB across tests (#2580, root cause per 4924719264).
 - `reload_app_main()` permanently swaps `sys.modules`, leaking stale drain state (#2585, open).
 - Embeddings suite drain-state corrupting subsequent suites (#2581).
-- ACP WS reconnect broadcaster never unregistered on disconnect — live on dev, fix (790e3f3264, with tests) pending on an unmerged branch.
+- ACP WS reconnect broadcaster never unregistered on disconnect — found live-unfixed during this audit; fix + regression tests (790e3f3264) merged via PR #2619 on 2026-07-04.
 
 There is precedent for guard plugins of this shape: `tldw_Server_API/tests/_plugins/http_client_patch_guard.py` blocks tests at patch-time when they try to monkeypatch `requests`/`httpx`/`aiohttp` directly. No equivalent exists for singletons, module identity, or drain state. Test-order dependence is never exercised (no shuffle job).
 
@@ -76,7 +76,7 @@ The env/config defect class (mostly High severity) escapes because CI always run
 2. `app/core/config_sections/*.py` (e.g. `chunking.py` `_parse_bool`/`_parse_int` at :41/:31) — never raise on arbitrary input; default on garbage; idempotent.
 3. `app/core/Chunking/chunker.py` — reconstruction (concat of chunks minus overlap == source), monotone offsets, overlap ≤ chunk size. Property files exist (`tests/Chunking/test_chunking_offsets_property.py`, `test_chunking_overlap_properties.py`, `test_sentence_spans_properties.py`) — extend, don't duplicate.
 4. `app/core/Notes_Tasks/markdown_parser.py` — parse-only (`parse_note_checklists`): never raises on arbitrary input, spans stay within source, hierarchy monotonicity, re-parse idempotence.
-5. Jobs operation-contract invariants (the a9b6a2c310 class — generated operation sequences never reach impossible states), pagination invariants (non-overlap, completeness), JSON fence extraction (output always parseable), chatbook export/import round-trip. Chat-macro parser bounds becomes a candidate **only if/when `codex/chat-macros-v1` merges** — the module does not exist on dev.
+5. Jobs operation-contract invariants (the a9b6a2c310 class — generated operation sequences never reach impossible states), pagination invariants (non-overlap, completeness), JSON fence extraction (output always parseable), chatbook export/import round-trip. Chat-macro parser bounds: **prep landed** — `tests/Chat_Macros/property/test_macro_parser_properties.py` is importorskip-guarded and activates when `codex/chat-macros-v1` (PR #2618) merges.
 
 ### 2.7 Scale requires mechanized triage (RA7)
 
@@ -112,13 +112,13 @@ Ordered by remediation priority under the dev-merged defect profile (state/lifec
 
 | ID | Finding | Importance (1–10) | Defect class addressed |
 |---|---|---|---|
-| RA5 | No singleton/lifecycle leak detection; no order-shuffle | **9** | state/lifecycle (~31%, all High; #2585 open, ACP leak live) |
+| RA5 | No singleton/lifecycle leak detection; no order-shuffle | **9** | state/lifecycle (~31%, all High; #2585 open) |
 | RA6 | No env-absent tests; no auth×DB matrix for risky modules; conftest force-sets env | **8** | env/config (~23%, mostly High) |
 | RA1 | Integration-marked tests stub the integration layer; endpoint tests smothered in mocks | **8** | integration + validation |
 | RF1 | Frontend API mocks unlinked to OpenAPI spec — drift ungated | **8** | env/config + integration (#2590) |
 | RA2 | Tautological / assertion-in-the-mock tests | **7** | all (false confidence) |
 | RA3 | Tolerated-failure and status-only assertions | **7** | all (false confidence) |
-| RA4 | Property tests not targeted at contract/bounds surfaces | **6** | validation (~38%, mixed; egress bypass live) |
+| RA4 | Property tests not targeted at contract/bounds surfaces | **6** | validation (~38%, mixed) |
 | RA7 | No mechanized test-quality triage at ~4k-file scale | **6** | enabler for RA1–RA3 |
 | RF3 | Global Dexie mock; React Query inert-fallback mode can mask missing providers | **5** | integration |
 | RF2 | Real-backend e2e coverage narrow (chat-cockpit spec unwired; no media/KB/settings) | **4** | integration |
