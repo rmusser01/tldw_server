@@ -33,7 +33,6 @@ theme:
       accent: indigo
 
 plugins:
-  - search
   - git-revision-date-localized:
       enable_git_follow: false
       strict: false
