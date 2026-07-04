@@ -3330,7 +3330,7 @@ async def add_media_orchestrate(
                                     mime_type=mime_type,
                                     checksum=checksum,
                                 )
-                            except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
+                            except Exception:  # noqa: BLE001 - cleanup must run for any registration failure
                                 try:
                                     deleted = await storage.delete(storage_path)
                                     if not deleted:
@@ -3340,7 +3340,7 @@ async def add_media_orchestrate(
                                             storage_path,
                                             media_id,
                                         )
-                                except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as cleanup_err:
+                                except Exception as cleanup_err:  # noqa: BLE001 - cleanup failure must not mask registration error
                                     logger.warning(
                                         "Failed to delete stored original file {} after registration failure "
                                         "for media_id={}: {}",
