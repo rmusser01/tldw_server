@@ -260,6 +260,102 @@ def test_claims_verification_provider_override_is_used_and_marked_non_default(
     asyncio.run(_run())
 
 
+def test_claims_verification_config_default_is_used_when_request_omits_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.Claims_Extraction.artifact_verification import (
+        ArtifactVerificationUnit,
+        verify_generated_artifact_against_sources,
+    )
+    from tldw_Server_API.app.core.config import settings
+
+    calls: list[dict[str, Any]] = []
+    keys = ["CLAIMS_VERIFICATION_PROVIDER", "CLAIMS_VERIFICATION_MODEL"]
+    snapshot = {key: settings.get(key) for key in keys}
+
+    def _capture_analyze(
+        api_endpoint: str | None,
+        input_data: Any,
+        prompt: str | None,
+        api_key: str | None,
+        system_message: str | None,
+        **kwargs: Any,
+    ) -> str:
+        calls.append({"api_endpoint": api_endpoint, "model_override": kwargs.get("model_override")})
+        return '{"claims": []}'
+
+    _patch_engine(monkeypatch, [VerificationStatus.VERIFIED])
+
+    async def _run() -> None:
+        settings["CLAIMS_VERIFICATION_PROVIDER"] = "openrouter"
+        settings["CLAIMS_VERIFICATION_MODEL"] = "claims-default-model"
+        try:
+            result = await verify_generated_artifact_against_sources(
+                artifact_type="flashcards",
+                units=[
+                    ArtifactVerificationUnit(
+                        unit_id="flashcard:7:back",
+                        text="The trial enrolled 42 participants.",
+                        claims=["The trial enrolled 42 participants."],
+                    )
+                ],
+                source_documents=[
+                    Document(
+                        id="study",
+                        content="The trial enrolled 42 participants.",
+                        metadata={"title": "Study"},
+                    )
+                ],
+                generation_provider="llamacpp",
+                generation_model="generation-model",
+                analyze_fn=_capture_analyze,
+            )
+
+            assert calls[-1] == {
+                "api_endpoint": "openrouter",
+                "model_override": "claims-default-model",
+            }
+            assert result.metadata["verification_provider"] == "openrouter"
+            assert result.metadata["verification_model"] == "claims-default-model"
+            assert result.metadata["verification_llm_source"] == "config"
+
+            override = await verify_generated_artifact_against_sources(
+                artifact_type="flashcards",
+                units=[
+                    ArtifactVerificationUnit(
+                        unit_id="flashcard:8:back",
+                        text="The trial enrolled 42 participants.",
+                        claims=["The trial enrolled 42 participants."],
+                    )
+                ],
+                source_documents=[
+                    Document(
+                        id="study",
+                        content="The trial enrolled 42 participants.",
+                        metadata={"title": "Study"},
+                    )
+                ],
+                generation_provider="llamacpp",
+                generation_model="generation-model",
+                verification_provider="request-provider",
+                verification_model="request-model",
+                analyze_fn=_capture_analyze,
+            )
+            assert calls[-1] == {
+                "api_endpoint": "request-provider",
+                "model_override": "request-model",
+            }
+            assert override.metadata["verification_llm_source"] == "request"
+        finally:
+            for key, value in snapshot.items():
+                if value is None:
+                    settings.pop(key, None)
+                else:
+                    settings[key] = value
+
+    asyncio.run(_run())
+
+
 def test_text_cap_prevents_grounded_result(monkeypatch: pytest.MonkeyPatch) -> None:
     from tldw_Server_API.app.core.Claims_Extraction import artifact_verification
     from tldw_Server_API.app.core.Claims_Extraction.artifact_verification import (

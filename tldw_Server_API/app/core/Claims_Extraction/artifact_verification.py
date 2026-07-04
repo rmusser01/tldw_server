@@ -11,6 +11,9 @@ from tldw_Server_API.app.core.Claims_Extraction.claims_engine import (
     ClaimsEngine,
     classify_claim_type,
 )
+from tldw_Server_API.app.core.Claims_Extraction.runtime_config import (
+    resolve_claims_verification_llm_config,
+)
 from tldw_Server_API.app.core.Claims_Extraction.verification_report import generate_verification_report
 from tldw_Server_API.app.core.RAG.rag_service.types import Document, VerificationStatus
 
@@ -298,10 +301,20 @@ async def verify_generated_artifact_against_sources(
     """Verify generated artifact units against explicit source documents."""
     generation_provider = _clean(generation_provider)
     generation_model = _clean(generation_model)
-    configured_verification_provider = _clean(verification_provider)
-    configured_verification_model = _clean(verification_model)
+    request_verification_provider = _clean(verification_provider)
+    request_verification_model = _clean(verification_model)
+    config_verification_provider, config_verification_model = resolve_claims_verification_llm_config()
+    configured_verification_provider = request_verification_provider or config_verification_provider
+    configured_verification_model = request_verification_model or config_verification_model
     effective_verification_provider = configured_verification_provider or generation_provider
     effective_verification_model = configured_verification_model or generation_model
+    verification_source = (
+        "request"
+        if request_verification_provider or request_verification_model
+        else "config"
+        if config_verification_provider or config_verification_model
+        else "generation"
+    )
     differs_from_generation = (
         effective_verification_provider != generation_provider
         or effective_verification_model != generation_model
@@ -314,6 +327,7 @@ async def verify_generated_artifact_against_sources(
         "verification_model": effective_verification_model,
         "verification_provider_configured": configured_verification_provider is not None,
         "verification_model_configured": configured_verification_model is not None,
+        "verification_llm_source": verification_source,
         "verification_llm_is_default": not differs_from_generation,
         "verification_llm_differs_from_generation": differs_from_generation,
     }

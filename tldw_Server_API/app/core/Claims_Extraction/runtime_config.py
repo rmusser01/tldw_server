@@ -137,6 +137,16 @@ def resolve_claims_llm_config(
     return provider or default_provider, model_override, temperature
 
 
+def resolve_claims_verification_llm_config(
+    settings_obj: Mapping[str, Any] | None = None,
+) -> tuple[str | None, str | None]:
+    settings_map = _resolve_settings(settings_obj)
+    return (
+        _get_str(settings_map, "CLAIMS_VERIFICATION_PROVIDER", default=None),
+        _get_str(settings_map, "CLAIMS_VERIFICATION_MODEL", default=None),
+    )
+
+
 def resolve_claims_json_parse_mode(
     settings_obj: Mapping[str, Any] | None = None,
     *,
@@ -265,5 +275,6 @@ __all__ = [
     "resolve_claims_extraction_passes",
     "resolve_claims_json_parse_mode",
     "resolve_claims_llm_config",
+    "resolve_claims_verification_llm_config",
     "resolve_claims_prompt_validation_config",
 ]

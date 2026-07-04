@@ -590,7 +590,7 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
     expect(within(modelRuntime).getByLabelText("Claims verifier model")).toBeInTheDocument()
     expect(
       within(modelRuntime).getByText(
-        "Claims verification uses the Studio generation model unless you choose a verifier."
+        "Claims verification uses the Studio generation model unless you choose a verifier or the server config sets one."
       )
     ).toBeInTheDocument()
     expect(

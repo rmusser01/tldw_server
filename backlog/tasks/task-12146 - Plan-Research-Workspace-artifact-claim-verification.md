@@ -28,6 +28,7 @@ modified_files:
 - apps/packages/ui/src/services/tldw/domains/presentations.ts
 - apps/packages/ui/src/services/tldw/openapi-guard.ts
 - apps/packages/ui/src/types/workspace.ts
+- tldw_Server_API/Config_Files/config.txt
 - tldw_Server_API/app/api/v1/endpoints/flashcards.py
 - tldw_Server_API/app/api/v1/endpoints/quizzes.py
 - tldw_Server_API/app/api/v1/endpoints/research_workspace.py
@@ -37,7 +38,9 @@ modified_files:
 - tldw_Server_API/app/api/v1/schemas/research_workspace_artifacts.py
 - tldw_Server_API/app/api/v1/schemas/slides_schemas.py
 - tldw_Server_API/app/core/Claims_Extraction/artifact_verification.py
+- tldw_Server_API/app/core/Claims_Extraction/runtime_config.py
 - tldw_Server_API/app/core/Research_Workspace/artifact_generation.py
+- tldw_Server_API/app/core/config.py
 - tldw_Server_API/app/services/quiz_generator.py
 - tldw_Server_API/tests/Claims/test_artifact_verification.py
 - tldw_Server_API/tests/Claims/test_artifact_verification_properties.py
@@ -87,6 +90,14 @@ Fresh verification:
 
 PR: #2633 against `dev`. Note: user-owned Change summary is still required by the AI-generated PR merge gate.
 Closeout update: pushed `f95564bf22c4af90c84879ef373525eaad7adf52` to `codex/issue-2605-research-workspace-uat`; verified PR #2633 is open against `dev` with that head commit. The remaining merge-gate action is still the required human-owned Change summary on the PR.
+Follow-up requested: add config-file defaults for the claims verification provider/model, while keeping per-request verifier fields as overrides. Also clarify validation scope: existing validation is automated backend/UI path validation with mocked/internal Claims verdicts, not a full live llama.cpp manual generation run for each artifact.
+Follow-up complete: added `[Claims]` config-file defaults `CLAIMS_VERIFICATION_PROVIDER` and `CLAIMS_VERIFICATION_MODEL`, loaded them through `config.py` with env override support, and made the shared artifact verifier use request override > config default > generation LLM. Updated Studio copy so users know server config may also select the verifier. Validation scope remains automated path validation: tests verify generated-artifact paths call internal Claims verification and reject non-grounded outputs; no live full-app llama.cpp generation-and-claims-validation pass has been run yet.
+
+Fresh follow-up verification:
+- `python -m pytest tldw_Server_API/tests/Claims/test_artifact_verification.py -q` -> 15 passed.
+- `bunx vitest run ../packages/ui/src/components/Option/ResearchWorkspace/__tests__/StudioPane.stage1.test.tsx -t "exposes accessible names for studio option controls" --reporter=dot` -> 1 passed, 46 skipped.
+- `git diff --check` -> passed.
+- `python -m bandit -r tldw_Server_API/app/core/Claims_Extraction/artifact_verification.py tldw_Server_API/app/core/Claims_Extraction/runtime_config.py tldw_Server_API/app/core/config.py -f json -o /tmp/bandit_research_workspace_claims_config.json` -> 0 results.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

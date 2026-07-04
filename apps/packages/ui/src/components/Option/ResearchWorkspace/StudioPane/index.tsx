@@ -1155,7 +1155,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
       })
     : t(
         "playground:studio.claimsVerificationDefaultNotice",
-        "Claims verification uses the Studio generation model unless you choose a verifier."
+        "Claims verification uses the Studio generation model unless you choose a verifier or the server config sets one."
       )
 
   const selectedModelMatchesChatCatalog =

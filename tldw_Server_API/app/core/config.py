@@ -1696,6 +1696,16 @@ def load_settings():
                                 float(_cp.get('Claims', 'CLAIMS_LLM_TEMPERATURE', fallback='0.1')) if _cp else 0.1
                             ))
                         ),
+                        "CLAIMS_VERIFICATION_PROVIDER": (
+                            _env.get("CLAIMS_VERIFICATION_PROVIDER") if _env.get("CLAIMS_VERIFICATION_PROVIDER") is not None else (
+                                _cp.get('Claims', 'CLAIMS_VERIFICATION_PROVIDER', fallback='') if _cp else ''
+                            )
+                        ),
+                        "CLAIMS_VERIFICATION_MODEL": (
+                            _env.get("CLAIMS_VERIFICATION_MODEL") if _env.get("CLAIMS_VERIFICATION_MODEL") is not None else (
+                                _cp.get('Claims', 'CLAIMS_VERIFICATION_MODEL', fallback='') if _cp else ''
+                            )
+                        ),
                         "CLAIMS_JOB_BUDGET_ENABLED": (
                             (_env.get("CLAIMS_JOB_BUDGET_ENABLED").lower() == "true") if _env.get("CLAIMS_JOB_BUDGET_ENABLED") is not None else (
                                 _cp.getboolean('Claims', 'CLAIMS_JOB_BUDGET_ENABLED', fallback=False) if _cp else False
