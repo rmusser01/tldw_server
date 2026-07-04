@@ -259,6 +259,11 @@ class ToolExecutionRuntime:
                         with contextlib.suppress(self._noncritical_exceptions):
                             self.metrics.record_tool_invalid_params(getattr(module, "name", "unknown"), str(tool_name))
                         raise InvalidParamsException(str(_tool_e)) from _tool_e
+                    except PermissionError as _tool_e:
+                        span.set_attribute("mcp.status", "failure")
+                        span.set_attribute("mcp.error_type", _tool_e.__class__.__name__)
+                        span.set_attribute("mcp.error_message", str(_tool_e)[:200])
+                        raise
                     except self._noncritical_exceptions as _tool_e:
                         sanitized_tool_error = self._generic_exception_like(
                             _tool_e,

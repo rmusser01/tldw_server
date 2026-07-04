@@ -1,0 +1,15 @@
+from __future__ import annotations
+
+RPG_ADAPTER_DND5E_SRD = "dnd5e_srd"
+RPG_ADAPTER_FATE = "fate"
+RPG_ADAPTER_PF2E = "pf2e"
+RPG_ADAPTER_VERSION_V1 = "1.0.0"
+
+RPG_EVENT_SCHEMA_VERSION = "1.0.0"
+RPG_SNAPSHOT_SCHEMA_VERSION = "1.0.0"
+RPG_REDUCER_VERSION = "1.0.0"
+
+RPG_SOURCE_TYPES = frozenset({"user", "system", "mcp", "model", "import"})
+
+MAX_RPG_EVENT_PAYLOAD_BYTES = 64 * 1024
+MAX_RPG_CONTEXT_CHARS = 24_000
