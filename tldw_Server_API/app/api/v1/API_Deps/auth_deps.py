@@ -1046,6 +1046,8 @@ def _mapping_from_user_like(user_obj: Any) -> dict[str, Any]:
         "subject": getattr(user_obj, "subject", None),
         "token_type": getattr(user_obj, "token_type", None),
         "jti": getattr(user_obj, "jti", None),
+        "impersonation": getattr(user_obj, "impersonation", False),
+        "impersonated_by": getattr(user_obj, "impersonated_by", None),
     }
 
 
@@ -1094,6 +1096,8 @@ def _principal_from_legacy_active_user_override(
     subject = data.get("subject")
     token_type = data.get("token_type")
     jti = data.get("jti")
+    impersonation = bool(data.get("impersonation"))
+    impersonated_by = _coerce_optional_int(data.get("impersonated_by"))
 
     return AuthPrincipal(
         kind="user",
@@ -1104,6 +1108,8 @@ def _principal_from_legacy_active_user_override(
         subject=str(subject) if subject else None,
         token_type=str(token_type) if token_type else "access",
         jti=str(jti) if jti else None,
+        impersonation=impersonation,
+        impersonated_by=impersonated_by,
         roles=roles,
         permissions=permissions,
         is_admin=is_admin,

@@ -11,6 +11,7 @@ from tldw_Server_API.app.core.Audit.unified_audit_service import (
     AuditContext,
     AuditEventCategory,
     AuditEventType,
+    MandatoryAuditWriteError,
 )
 
 
@@ -24,6 +25,7 @@ async def emit_admin_account_audit_event(
     resource_id: str,
     action: str,
     metadata: dict[str, Any] | None = None,
+    raise_on_failure: bool = False,
 ) -> None:
     """Persist a durable audit event for privileged admin account mutations."""
     try:
@@ -49,6 +51,10 @@ async def emit_admin_account_audit_event(
                 **(metadata or {}),
             },
         )
-        await svc.flush(raise_on_failure=False)
+        await svc.flush(raise_on_failure=raise_on_failure)
+    except MandatoryAuditWriteError:
+        raise
     except Exception as exc:
+        if raise_on_failure:
+            raise MandatoryAuditWriteError("Mandatory audit persistence unavailable") from exc
         logger.warning("Admin audit emission failed for action={}: {}", action, exc)
