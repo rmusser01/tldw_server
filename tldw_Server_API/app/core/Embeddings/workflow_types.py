@@ -68,6 +68,8 @@ FORBIDDEN_FIELD_SUBSTRINGS = ("secret", "password")
 FORBIDDEN_METADATA_FIELD_FRAGMENTS = frozenset(
     {
         "raw_input",
+        "input",
+        "texts",
         "token_arrays",
         "api_key",
         "authorization",

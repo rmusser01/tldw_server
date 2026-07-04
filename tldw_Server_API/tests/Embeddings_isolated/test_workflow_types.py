@@ -54,6 +54,12 @@ def test_safe_workflow_metadata_rejects_raw_input_and_secret_fields():
 
 def test_safe_workflow_metadata_rejects_sensitive_field_name_fragments():
     with pytest.raises(EmbeddingWorkflowTraceError):
+        safe_workflow_metadata({"input_texts": "do not store"})
+
+    with pytest.raises(EmbeddingWorkflowTraceError):
+        safe_workflow_metadata({"normalized_texts": 2})
+
+    with pytest.raises(EmbeddingWorkflowTraceError):
         safe_workflow_metadata({"openai_api_key": "do not store"})
 
     with pytest.raises(EmbeddingWorkflowTraceError):
