@@ -557,7 +557,13 @@ async def verify_jwt_and_fetch_user(request: Request, token: str = Depends(oauth
         token_active_team_id = payload.get("active_team_id")
         token_impersonation = bool(payload.get("impersonation"))
         token_impersonated_by = None
-        if payload.get("impersonated_by") is not None:
+        if token_impersonation:
+            try:
+                token_impersonated_by = int(payload["impersonated_by"])
+            except (KeyError, TypeError, ValueError) as exc:
+                logger.warning("Impersonation token missing or invalid impersonated_by claim")
+                raise credentials_exception from exc
+        elif payload.get("impersonated_by") is not None:
             try:
                 token_impersonated_by = int(payload["impersonated_by"])
             except (TypeError, ValueError):
@@ -898,7 +904,7 @@ async def verify_jwt_and_fetch_user(request: Request, token: str = Depends(oauth
             username=getattr(user, "username", None),
             email=getattr(user, "email", None),
             subject=None,
-            token_type="access",
+            token_type="access",  # nosec B106
             jti=None,
             impersonation=token_impersonation,
             impersonated_by=token_impersonated_by,
@@ -1006,7 +1012,7 @@ async def authenticate_api_key_user(request: Request, api_key: str) -> User:
                         username=getattr(user, "username", None),
                         email=getattr(user, "email", None),
                         subject="single_user",
-                        token_type="api_key",
+                        token_type="api_key",  # nosec B106
                         jti=None,
                         roles=list(user.roles or []),
                         permissions=list(user.permissions or []),
@@ -1334,7 +1340,7 @@ async def authenticate_api_key_user(request: Request, api_key: str) -> User:
                 username=getattr(user_obj, "username", None),
                 email=getattr(user_obj, "email", None),
                 subject=subject_val,
-                token_type="api_key",
+                token_type="api_key",  # nosec B106
                 jti=None,
                 roles=list(user_obj.roles or []),
                 permissions=list(user_obj.permissions or []),

@@ -144,6 +144,61 @@ class TestCreateImpersonationToken:
         ]
 
     @pytest.mark.asyncio
+    async def test_success_accepts_user_model_object(self, monkeypatch):
+        from tldw_Server_API.app.api.v1.endpoints.admin import admin_impersonation
+
+        principal = _admin_principal()
+        audit_calls: list[dict[str, Any]] = []
+
+        class _StubRepo:
+            async def get_user_by_id(self, user_id: int) -> SimpleNamespace | None:
+                assert user_id == 42
+                return SimpleNamespace(
+                    id=42,
+                    username="targetuser",
+                    role="researcher",
+                    is_active=True,
+                )
+
+        async def _fake_from_pool() -> _StubRepo:
+            return _StubRepo()
+
+        class _StubJWTService:
+            def __init__(self) -> None:
+                self.calls: list[dict[str, Any]] = []
+
+            def create_access_token(self, **kwargs: Any) -> str:
+                self.calls.append(kwargs)
+                return "mock.jwt.token"
+
+        jwt_svc = _StubJWTService()
+
+        async def _fake_emit_admin_account_audit_event(**kwargs: Any) -> None:
+            audit_calls.append(kwargs)
+
+        monkeypatch.setattr(
+            admin_impersonation,
+            "AuthnzUsersRepo",
+            SimpleNamespace(from_pool=_fake_from_pool),
+            raising=False,
+        )
+        monkeypatch.setattr(admin_impersonation, "get_jwt_service", lambda: jwt_svc, raising=False)
+        monkeypatch.setattr(
+            admin_impersonation,
+            "_emit_admin_account_audit_event",
+            _fake_emit_admin_account_audit_event,
+            raising=False,
+        )
+
+        result = await create_impersonation_token(42, principal)
+
+        assert result.impersonated_user_id == 42
+        assert jwt_svc.calls[0]["user_id"] == 42
+        assert jwt_svc.calls[0]["username"] == "targetuser"
+        assert jwt_svc.calls[0]["role"] == "researcher"
+        assert audit_calls[0]["target_user_id"] == 42
+
+    @pytest.mark.asyncio
     async def test_user_not_found(self, monkeypatch):
         from tldw_Server_API.app.api.v1.endpoints.admin import admin_impersonation
 

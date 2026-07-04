@@ -74,17 +74,22 @@ async def create_impersonation_token(
                 detail=f"User {user_id} not found",
             )
 
-        target_user_id = int(target_user["id"])
-        target_username = str(target_user["username"])
-        target_is_active = bool(target_user.get("is_active", True))
+        if isinstance(target_user, dict):
+            target_user_id = int(target_user["id"])
+            target_username = str(target_user["username"])
+            target_is_active = bool(target_user.get("is_active", True))
+            target_role = str(target_user.get("role") or "user")
+        else:
+            target_user_id = int(target_user.id)
+            target_username = str(target_user.username)
+            target_is_active = bool(getattr(target_user, "is_active", True))
+            target_role = str(getattr(target_user, "role", None) or "user")
 
         if not target_is_active:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"User {user_id} is not active",
             )
-
-        target_role = str(target_user.get("role") or "user")
 
         # Generate a short-lived access token with impersonation claim
         jwt_svc = get_jwt_service()
