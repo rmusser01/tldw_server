@@ -97,6 +97,27 @@ _RAG_STREAM_DIAGNOSTIC_KEYS = frozenset({"error", "errors", "exception", "traceb
 _PUBLIC_RAG_STREAM_DIAGNOSTIC = "RAG processing diagnostic omitted"
 
 
+def _log_rag_search_request(label: str, query: str | None, **metadata: Any) -> None:
+    query_text = query or ""
+    query_hash = hashlib.md5(
+        query_text.encode("utf-8"),
+        usedforsecurity=False,
+    ).hexdigest()[:8]
+    metadata_text = " ".join(
+        f"{key}={value}" for key, value in metadata.items() if value is not None
+    )
+    if metadata_text:
+        logger.info(
+            "{}: query_hash={} len={} {}",
+            label,
+            query_hash,
+            len(query_text),
+            metadata_text,
+        )
+    else:
+        logger.info("{}: query_hash={} len={}", label, query_hash, len(query_text))
+
+
 def _copy_rag_request_with_updates(
     request: UnifiedRAGRequest,
     updates: dict[str, Any],
@@ -1113,7 +1134,11 @@ async def unified_search_endpoint(
     """
     try:
         request = _apply_media_collection_scope(request, collections_db)
-        logger.info(f"Unified RAG search: query='{request.query}', user={current_user.username if current_user else 'anonymous'}")
+        _log_rag_search_request(
+            "Unified RAG search",
+            request.query,
+            user=current_user.username if current_user else "anonymous",
+        )
         # Topic monitoring (non-blocking) for query text
         try:
             from tldw_Server_API.app.core.Monitoring.topic_monitoring_service import get_topic_monitoring_service
@@ -1547,8 +1572,7 @@ async def simple_search_endpoint(
     """
     try:
         try:
-            _qh = hashlib.md5((query or "").encode("utf-8"), usedforsecurity=False).hexdigest()[:8]
-            logger.info(f"Simple search: query_hash={_qh} len={len(query or '')}")
+            _log_rag_search_request("Simple search", query)
         except (AttributeError, TypeError, ValueError):
             logger.info("Simple search request received")
         # Topic monitoring (non-blocking)
@@ -1938,7 +1962,7 @@ async def advanced_search_endpoint(
     Advanced search with common features enabled.
     """
     try:
-        logger.info(f"Advanced search: query='{query}'")
+        _log_rag_search_request("Advanced search", query)
         # Topic monitoring (non-blocking)
         try:
             from tldw_Server_API.app.core.Monitoring.topic_monitoring_service import get_topic_monitoring_service
