@@ -1255,6 +1255,8 @@ async def acp_session_stream(
         labels={"component": "acp", "endpoint": "acp_session_stream"},
     )
     send_callback: Any | None = None
+    reconnect_broadcaster: Any | None = None
+    reconnect_conn_id: str | None = None
 
     try:
         await stream.start()
@@ -1276,14 +1278,15 @@ async def acp_session_stream(
         if bus is not None and last_sequence > 0:
             from tldw_Server_API.app.core.Agent_Client_Protocol.consumers.ws_broadcaster import WSBroadcaster
 
-            broadcaster = WSBroadcaster()
-            await broadcaster.start(bus)
+            reconnect_conn_id = f"ws-{session_id}-{id(stream)}"
+            reconnect_broadcaster = WSBroadcaster(consumer_id=f"ws_broadcaster:{reconnect_conn_id}")
+            await reconnect_broadcaster.start(bus)
 
             async def _ws_send_str(msg: str) -> None:
                 await stream.send_json(json.loads(msg))
 
-            await broadcaster.add_connection(
-                conn_id=f"ws-{session_id}-{id(stream)}",
+            await reconnect_broadcaster.add_connection(
+                conn_id=reconnect_conn_id,
                 send_callback=_ws_send_str,
                 from_sequence=last_sequence,
             )
@@ -1332,6 +1335,12 @@ async def acp_session_stream(
     except _ACP_ENDPOINT_NONCRITICAL_EXCEPTIONS:
         logger.exception("WebSocket error for ACP session {}", session_id)
     finally:
+        if reconnect_broadcaster is not None:
+            if reconnect_conn_id is not None:
+                with contextlib.suppress(_ACP_ENDPOINT_NONCRITICAL_EXCEPTIONS):
+                    reconnect_broadcaster.remove_connection(reconnect_conn_id)
+            with contextlib.suppress(_ACP_ENDPOINT_NONCRITICAL_EXCEPTIONS):
+                await reconnect_broadcaster.stop()
         # Unregister WebSocket
         if send_callback is not None:
             try:

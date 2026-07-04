@@ -56,7 +56,8 @@ class WSBroadcaster(EventConsumer):
 
     consumer_id: str = "ws_broadcaster"
 
-    def __init__(self) -> None:
+    def __init__(self, consumer_id: str | None = None) -> None:
+        self.consumer_id = consumer_id or self.consumer_id
         self._connections: dict[str, _ConnectionInfo] = {}
         self._bus: SessionEventBus | None = None
         self._queue: asyncio.Queue[AgentEvent] | None = None
