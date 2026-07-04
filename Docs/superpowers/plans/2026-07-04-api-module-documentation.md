@@ -13,7 +13,7 @@
 ## File Structure
 
 - `Docs/API-related/API_Tags_Index.md`: source module capability guide for API users.
-- `Docs/Published/API-related/API_Tags_Index.md`: published mirror of the same guide.
+- `Docs/Published/API-related/API_Tags_Index.md`: generated published output; this plan verifies it is not manually changed.
 - `tldw_Server_API/app/main.py`: concise OpenAPI tag descriptions and ReDoc tag groups.
 - `Docs/superpowers/specs/2026-07-04-api-module-documentation-design.md`: approved design spec.
 - `Docs/superpowers/plans/2026-07-04-api-module-documentation.md`: this implementation plan.
@@ -111,7 +111,6 @@ Expected: existing API docs such as `Docs/API-related/Chat_API_Documentation.md`
 
 **Files:**
 - Modify: `Docs/API-related/API_Tags_Index.md:1-40`
-- Modify: `Docs/Published/API-related/API_Tags_Index.md:1-40`
 
 - [x] **Step 1: Replace the source guide content**
 
@@ -179,26 +178,26 @@ Use relative links like:
 
 Expected: links resolve from `Docs/API-related/API_Tags_Index.md`.
 
-- [x] **Step 4: Mirror the source guide to Published**
+- [x] **Step 4: Leave generated Published docs untouched**
 
 Run:
 
 ```bash
-cp Docs/API-related/API_Tags_Index.md Docs/Published/API-related/API_Tags_Index.md
+git diff --quiet dev -- Docs/Published/API-related/API_Tags_Index.md
 ```
 
-Expected: `cmp Docs/API-related/API_Tags_Index.md Docs/Published/API-related/API_Tags_Index.md` exits with status `0`.
+Expected: exit status `0`, because `Docs/Published` is generated output and should not be edited manually.
 
 - [x] **Step 5: Commit the guide**
 
 Run:
 
 ```bash
-git add Docs/API-related/API_Tags_Index.md Docs/Published/API-related/API_Tags_Index.md
+git add Docs/API-related/API_Tags_Index.md
 git commit -m "docs: expand API module capability guide"
 ```
 
-Expected: commit succeeds with only the two tag index docs staged for this task.
+Expected: commit succeeds with only the source tag index doc staged for this task.
 
 ## Task 3: Align OpenAPI Tag Metadata
 
@@ -302,18 +301,17 @@ Expected: commit succeeds with only `main.py` staged.
 
 **Files:**
 - Read: `Docs/API-related/API_Tags_Index.md`
-- Read: `Docs/Published/API-related/API_Tags_Index.md`
 - Read: `tldw_Server_API/app/main.py`
 
-- [x] **Step 1: Confirm the published mirror matches**
+- [x] **Step 1: Confirm generated Published docs are unchanged**
 
 Run:
 
 ```bash
-cmp Docs/API-related/API_Tags_Index.md Docs/Published/API-related/API_Tags_Index.md
+git diff --quiet dev -- Docs/Published/API-related/API_Tags_Index.md
 ```
 
-Expected: no output and exit status `0`.
+Expected: no output and exit status `0`, confirming the generated published mirror is left to the docs publishing process.
 
 - [x] **Step 2: Run markdown link sanity for local links**
 
@@ -327,7 +325,6 @@ from pathlib import Path
 
 paths = [
     Path("Docs/API-related/API_Tags_Index.md"),
-    Path("Docs/Published/API-related/API_Tags_Index.md"),
 ]
 pattern = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
 missing: list[str] = []
@@ -408,7 +405,7 @@ Expected: Bandit completes. Review `/tmp/bandit_api_module_docs.json`; if it rep
 Use Backlog.md MCP or CLI to add verification notes to `TASK-12027`. If the available MCP surface does not expose task editing, use:
 
 ```bash
-backlog task edit TASK-12027 --notes "Verification: cmp mirror passed; markdown local links resolve; OpenAPI schema smoke passed; Bandit run recorded at /tmp/bandit_api_module_docs.json."
+backlog task edit TASK-12027 --notes "Verification: generated Published docs unchanged; markdown local links resolve; OpenAPI schema smoke passed; Bandit run recorded at /tmp/bandit_api_module_docs.json."
 ```
 
 Expected: the task records the verification results.
@@ -425,17 +422,18 @@ Run:
 ```bash
 git status --short
 git diff --stat HEAD~2..HEAD
-git diff -- Docs/API-related/API_Tags_Index.md Docs/Published/API-related/API_Tags_Index.md tldw_Server_API/app/main.py
+git diff -- Docs/API-related/API_Tags_Index.md tldw_Server_API/app/main.py
+git diff --quiet dev -- Docs/Published/API-related/API_Tags_Index.md
 ```
 
-Expected: diff contains only documentation guide changes and OpenAPI metadata descriptions/grouping.
+Expected: diff contains only source documentation guide changes and OpenAPI metadata descriptions/grouping; generated Published docs have no branch diff.
 
 - [x] **Step 2: Update Backlog final summary**
 
 Use Backlog.md MCP or CLI to mark acceptance criteria and add a final summary. If using CLI:
 
 ```bash
-backlog task edit TASK-12027 --check-ac 1 --check-ac 2 --check-ac 3 --check-ac 4 --check-ac 5 --check-dod 1 --check-dod 2 --check-dod 3 --check-dod 4 --check-dod 5 --final-summary "Expanded the API tag index into a grouped module capability guide and aligned OpenAPI tag descriptions/ReDoc groups so users can browse by goal. Endpoint behavior was unchanged."
+backlog task edit TASK-12027 --check-ac 1 --check-ac 2 --check-ac 3 --check-ac 4 --check-ac 5 --check-dod 1 --check-dod 2 --check-dod 3 --check-dod 4 --check-dod 5 --final-summary "Expanded the source API tag index into a grouped module capability guide and aligned OpenAPI tag descriptions/ReDoc groups so users can browse by goal. Generated Published docs were left unchanged for the publishing process. Endpoint behavior was unchanged."
 ```
 
 Expected: task file records completed acceptance criteria and final summary.

@@ -13,7 +13,7 @@ The work has two deliverables:
 1. Expand `Docs/API-related/API_Tags_Index.md` into a grouped capability guide.
 2. Align OpenAPI tag metadata and ReDoc grouping in `tldw_Server_API/app/main.py` with the same user-facing organization.
 
-The published mirror at `Docs/Published/API-related/API_Tags_Index.md` should be updated with the same content when the source guide changes.
+`Docs/Published` is generated output and should not be edited manually in this task. The publishing process is responsible for regenerating the published mirror from the source guide.
 
 ## User-Facing Structure
 
@@ -50,8 +50,9 @@ The `x-tagGroups` list should match the guide's high-level categories so ReDoc u
 Verification should include:
 
 - OpenAPI schema generation or import smoke check after `main.py` changes.
-- Markdown sanity check for the edited API tag index files.
+- Markdown sanity check for the edited source API tag index file.
 - Link existence check for local markdown links added or retained in the edited guide.
+- No branch diff for `Docs/Published/API-related/API_Tags_Index.md`, because Published docs are generated.
 - Bandit against `tldw_Server_API/app/main.py` if that Python file is changed.
 
 ## Non-Goals
