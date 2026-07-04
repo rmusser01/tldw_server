@@ -3,10 +3,14 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.migrations import ensure_jobs_tables
+
+
+pytestmark = pytest.mark.jobs
 
 
 def _setup_env(monkeypatch, tmp_path: Path) -> None:

@@ -14,6 +14,9 @@ from tldw_Server_API.tests.Jobs.parity.scenarios import (
 )
 
 
+pytestmark = pytest.mark.jobs
+
+
 @pytest.fixture()
 def sqlite_manager_factory(tmp_path, monkeypatch):
     db_path = tmp_path / "jobs.db"

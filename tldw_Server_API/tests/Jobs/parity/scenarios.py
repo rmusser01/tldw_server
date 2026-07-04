@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Callable
 
 from tldw_Server_API.app.core.Jobs.manager import JobManager
@@ -201,8 +202,9 @@ def run_events_outbox_create_complete_scenario(make_manager: ManagerFactory) -> 
 
     events = jm.list_job_events_after(after_id=0, domain="parity", queue="default", job_type="events", limit=20)
     event_types = [str(row.get("event_type")) for row in events]
-    assert "job.created" in event_types
-    assert "job.completed" in event_types
+    event_type_counts = Counter(event_types)
+    assert event_type_counts["job.created"] == 1
+    assert event_type_counts["job.completed"] == 1
 
     for event in events:
         assert event.get("attrs_json") is not None
