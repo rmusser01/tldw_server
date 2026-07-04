@@ -1485,6 +1485,13 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "chat-character-legacy-files",
             "chat-character-legacy-worldbook",
         }
+        visual_identity_character_file = (
+            "tldw_Server_API/tests/Character_Chat/test_visual_identity_expression_metadata.py"
+        )
+        assert shard_path_sets["visual-identities"] == {
+            visual_identity_character_file,
+            "tldw_Server_API/tests/Visual_Identities",
+        }
         # test_character_rate_limiter_429.py lives outside Character_Chat but
         # is bundled with the legacy character rate-limit tests it mirrors.
         legacy_character_extra_files = {
@@ -1495,8 +1502,10 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             for path in Path("tldw_Server_API/tests/Character_Chat").glob("**/test*.py")
         } | legacy_character_extra_files
         covered_legacy_character_files: dict[str, str] = {}
-        for shard_name in legacy_character_shards:
+        for shard_name in legacy_character_shards | {"visual-identities"}:
             for pattern in shard_path_sets[shard_name]:
+                if shard_name == "visual-identities" and pattern != visual_identity_character_file:
+                    continue
                 assert (
                     pattern.startswith("tldw_Server_API/tests/Character_Chat/")
                     or pattern in legacy_character_extra_files
