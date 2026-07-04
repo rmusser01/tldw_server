@@ -1,7 +1,7 @@
 ---
 id: TASK-12143
 title: Harden audit admin impersonation boundary
-status: In Progress
+status: Done
 created_date: 2026-07-04 07:05
 labels:
 - audit
@@ -28,7 +28,7 @@ modified_files:
 - tldw_Server_API/tests/AuthNZ/test_admin_impersonation.py
 - tldw_Server_API/tests/AuthNZ/unit/test_jwt_service.py
 - tldw_Server_API/tests/AuthNZ/unit/test_user_db_handling_jwt_membership.py
-updated_date: 2026-07-04 17:00
+updated_date: 2026-07-04 17:01
 ---
 
 ## Description
@@ -60,12 +60,13 @@ Address the high-priority AuthNZ audit slice for admin impersonation: issued tok
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-07-04: Refreshed worktree to latest origin/dev before validation. Current base HEAD/origin/dev/merge-base: fd5c152b065c408e4e8ee5f08da41589f21cb7f5. Expanded related suite passed on that base: /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest tldw_Server_API/tests/AuthNZ/test_admin_impersonation.py tldw_Server_API/tests/AuthNZ/unit/test_user_db_handling_jwt_membership.py tldw_Server_API/tests/AuthNZ/unit/test_jwt_service.py tldw_Server_API/tests/Admin/test_admin_account_audit_events.py -q => 40 passed, 145 warnings.
 2026-07-04: Final validation on latest origin/dev fd5c152b065c408e4e8ee5f08da41589f21cb7f5: related suite passed with 41 passed, 149 warnings; git diff --check passed. Bandit over touched production files wrote /tmp/bandit_admin_impersonation.json and exited nonzero due to pre-existing low-severity B106 token-type literal findings. Comparison against clean dev report /tmp/bandit_admin_impersonation_base_fd5c.json: base_total=13, patch_total=13, added=[], removed=[].
+2026-07-04: Draft PR opened against dev: https://github.com/rmusser01/tldw_server/pull/2622. PR remains draft because AI-authored PRs require a human-written Change summary before merge.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Implemented the high-priority admin impersonation remediation on latest dev fd5c152b065c408e4e8ee5f08da41589f21cb7f5. The endpoint now uses the AuthNZ users repository instead of raw SQLite-style SQL, issues a 15-minute token via an explicit JWT lifetime override, emits mandatory durable audit metadata with actor and impersonated subject ids, and preserves impersonation claims on AuthPrincipal for downstream audit consumers. Added focused endpoint, JWT, audit-service, and auth-context regression coverage. Draft PR: https://github.com/rmusser01/tldw_server/pull/2622
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
@@ -73,5 +74,5 @@ Address the high-priority AuthNZ audit slice for admin impersonation: issued tok
 - [x] #1 Focused AuthNZ impersonation tests pass.
 - [x] #2 Bandit over touched production files reports no new issues.
 - [x] #3 git diff --check passes.
-- [ ] #4 Backlog task contains latest-dev base, verification evidence, final summary, and PR link if opened.
+- [x] #4 Backlog task contains latest-dev base, verification evidence, final summary, and PR link if opened.
 <!-- DOD:END -->
