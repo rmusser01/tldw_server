@@ -912,7 +912,7 @@ git commit -m "feat: add chat macro frontend controls"
 - Optionally modify: `Docs/Development/` or relevant chat docs if a chat command doc already exists.
 - Backlog: update implementation task with commands and results.
 
-- [ ] **Step 1: Run focused backend suite**
+- [x] **Step 1: Run focused backend suite**
 
 Run:
 
@@ -928,7 +928,7 @@ python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 2: Run focused frontend suite**
+- [x] **Step 2: Run focused frontend suite**
 
 Run:
 
@@ -944,7 +944,7 @@ bunx vitest run \
 
 Expected: PASS.
 
-- [ ] **Step 3: Run Bandit on touched backend scope**
+- [x] **Step 3: Run Bandit on touched backend scope**
 
 Run:
 
@@ -961,7 +961,7 @@ python -m bandit -r \
 
 Expected: no new findings in touched code. Fix new findings before continuing.
 
-- [ ] **Step 4: Run OpenAPI/router smoke if backend routes changed**
+- [x] **Step 4: Run OpenAPI/router smoke if backend routes changed**
 
 Run:
 
@@ -988,7 +988,12 @@ In another terminal, send a normal chat command and a macro command against a lo
 - Cancelling a running run transitions run and job status.
 - Re-running post-back for the same run does not create duplicate final messages.
 
-- [ ] **Step 6: Update README/docs**
+Not run in this slice: the automated TestClient, executor, Jobs, OpenAPI, and
+frontend suites cover the implemented contract. A meaningful manual server smoke
+requires a configured Jobs manager plus a real LLM/ACP branch runner; the branch
+currently documents and tests the conservative unavailable branch runner.
+
+- [x] **Step 6: Update README/docs**
 
 Document:
 
@@ -997,7 +1002,7 @@ Document:
 - v1 rejects tools/skills permissions.
 - Background mode requires macro Jobs worker for async processing.
 
-- [ ] **Step 7: Final commit**
+- [x] **Step 7: Final commit**
 
 ```bash
 git add tldw_Server_API/app/core/Chat_Macros/README.md Docs/Development
@@ -1005,6 +1010,17 @@ git commit -m "docs: document chat macros v1"
 ```
 
 Only include docs paths that actually changed.
+
+**Task 9 verification notes (2026-07-03/04):**
+
+- Updated `tldw_Server_API/app/core/Chat_Macros/README.md` for current v1 definition, `/wrapup`, API/settings, Jobs execution, UI, and security behavior.
+- Final backend focused suite passed: `133 passed, 9 skipped, 5 warnings`.
+- Final frontend macro/nav suite passed: `6 passed` test files, `44 passed` tests.
+- OpenAPI/config smoke passed: `4 passed, 3 warnings`.
+- UI OpenAPI path verifier passed with the existing reviewed exception list only.
+- `compileall` passed for the touched backend Chat_Macros/API/jobs scope.
+- `git diff --check` passed.
+- Bandit `/tmp/bandit_chat_macros.json` had `errors: []` and `results: []`.
 
 ## Implementation Notes
 
@@ -1017,9 +1033,9 @@ Only include docs paths that actually changed.
 
 ## Final Verification Checklist
 
-- [ ] `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Chat_Macros -v`
-- [ ] `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Chat_NEW/unit/test_command_router.py -v`
-- [ ] `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Chat_NEW/integration/test_chat_completions_api.py -v`
-- [ ] `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py -v`
-- [ ] `cd apps/packages/ui && bunx vitest run src/services/__tests__/chat-macros.test.ts src/components/Option/Settings/__tests__/ChatMacrosSettings.test.tsx src/components/Option/ChatWorkspace/__tests__/MacroStatusCard.test.tsx src/components/Option/ChatWorkspace/__tests__/MacroRunDetailDrawer.test.tsx src/components/Option/ChatWorkspace/__tests__/WorkspaceChatPanel.test.tsx`
-- [ ] `source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/Chat_Macros tldw_Server_API/app/api/v1/endpoints/chat_macros.py tldw_Server_API/app/api/v1/schemas/chat_macros.py tldw_Server_API/app/api/v1/API_Deps/Chat_Macros_Deps.py tldw_Server_API/app/services/chat_macros_jobs_worker.py -f json -o /tmp/bandit_chat_macros.json`
+- [x] `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Chat_Macros -v`
+- [x] `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Chat_NEW/unit/test_command_router.py -v`
+- [x] `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Chat_NEW/integration/test_chat_completions_api.py -v`
+- [x] `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py -v`
+- [x] `cd apps/packages/ui && bunx vitest run src/services/__tests__/chat-macros.test.ts src/components/Option/Settings/__tests__/ChatMacrosSettings.test.tsx src/components/Option/ChatWorkspace/__tests__/MacroStatusCard.test.tsx src/components/Option/ChatWorkspace/__tests__/MacroRunDetailDrawer.test.tsx src/components/Option/ChatWorkspace/__tests__/WorkspaceChatPanel.test.tsx`
+- [x] `source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/Chat_Macros tldw_Server_API/app/api/v1/endpoints/chat_macros.py tldw_Server_API/app/api/v1/schemas/chat_macros.py tldw_Server_API/app/api/v1/API_Deps/Chat_Macros_Deps.py tldw_Server_API/app/services/chat_macros_jobs_worker.py -f json -o /tmp/bandit_chat_macros.json`
