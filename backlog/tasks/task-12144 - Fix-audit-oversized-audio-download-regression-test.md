@@ -1,8 +1,8 @@
 ---
-id: TASK-12140
+id: TASK-12144
 title: Fix audit oversized audio download regression test
 status: Done
-created_date: 2026-07-04 02:01
+created_date: 2026-07-04 18:30
 labels:
 - audit
 - remediation
@@ -11,12 +11,13 @@ labels:
 priority: low
 references:
 - AUDIT-2026-06-27-MEDIA-004
+- https://github.com/rmusser01/tldw_server/pull/2613
 documentation:
 - Docs/superpowers/reviews/2026-06-27-repo-audit/domains/media-ingestion-storage.md
 - Docs/superpowers/reviews/2026-06-27-repo-audit/remediation-backlog-draft.md
 modified_files:
 - tldw_Server_API/tests/MediaIngestion_NEW/unit/test_audio_download_limits.py
-updated_date: 2026-07-04 02:04
+updated_date: 2026-07-04 18:32
 ---
 
 ## Description
@@ -39,6 +40,9 @@ Remediate AUDIT-2026-06-27-MEDIA-004 by making the header-declared oversized aud
 - The test now asserts `AudioFileSizeError`, verifies the deterministic target path is not created, and confirms the faux downloader was called once.
 - No production code was touched; Bandit has no touched production scope for this test-only task.
 - Verification: `python -m pytest tldw_Server_API/tests/MediaIngestion_NEW/unit/test_audio_download_limits.py -q` passed with 3 tests; `git diff --check` passed.
+- 2026-07-04 latest-dev refresh: rebased `codex/audit-audio-size-test-2026-07-04` onto `origin/dev` `fd5c152b065c408e4e8ee5f08da41589f21cb7f5`; merge-base matches `origin/dev`.
+- Tracking hygiene: moved this audio-size audit record from duplicate `TASK-12140` to `TASK-12144` because latest dev already contains a different `TASK-12140`.
+- Latest-dev validation: `.venv/bin/python -m pytest tldw_Server_API/tests/MediaIngestion_NEW/unit/test_audio_download_limits.py -q` passed with 3 tests; `git diff --check` passed; `.venv/bin/python -m bandit -r tldw_Server_API/tests/MediaIngestion_NEW/unit/test_audio_download_limits.py -f json -o /tmp/bandit_audio_size_test_latest.json` reported 4 LOW B101 findings on pytest `assert` statements in test code only. No production code changed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
