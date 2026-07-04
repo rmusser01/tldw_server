@@ -14,6 +14,8 @@ const originalApiUrl = process.env.NEXT_PUBLIC_API_URL
 const originalDeploymentMode = process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
 const originalXApiKey = process.env.NEXT_PUBLIC_X_API_KEY
 const originalWindowLocation = window.location
+const RUNTIME_SESSION_SINGLE_USER_API_KEY =
+  "tldwRuntimeSessionSingleUserApiKey"
 
 const setWindowLocation = (href: string) => {
   Object.defineProperty(window, "location", {
@@ -112,6 +114,7 @@ describe("runtime-bootstrap chrome shim", () => {
     })
     vi.unstubAllGlobals()
     localStorage.clear()
+    sessionStorage.clear()
   })
 
   it("creates browser/chrome shims when globals are absent", async () => {
@@ -313,6 +316,107 @@ describe("runtime-bootstrap chrome shim", () => {
       expect(nextConfig.apiKey).toBeUndefined()
       expect(localStorage.getItem("tldwConfig")).not.toContain("manual-user-key")
     })
+  })
+
+  it("keeps a manual single-user key available after a second hard reload in the same browser session", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "advanced"
+    process.env.NEXT_PUBLIC_API_URL = "http://127.0.0.1:8000"
+    delete process.env.NEXT_PUBLIC_X_API_KEY
+    localStorage.setItem(
+      "tldwConfig",
+      JSON.stringify({
+        authMode: "single-user",
+        apiKey: "manual-user-key",
+        serverUrl: "http://127.0.0.1:8000"
+      })
+    )
+
+    await importAndAwaitBootstrap()
+    let runtimeAuth = await import("@/services/tldw/runtime-auth-override")
+
+    expect(runtimeAuth.getRuntimeSingleUserApiKeyOverride()).toBe(
+      "manual-user-key"
+    )
+    expect(localStorage.getItem("tldwConfig")).not.toContain("manual-user-key")
+
+    vi.resetModules()
+    await importAndAwaitBootstrap()
+    runtimeAuth = await import("@/services/tldw/runtime-auth-override")
+
+    expect(runtimeAuth.getRuntimeSingleUserApiKeyOverride()).toBe(
+      "manual-user-key"
+    )
+    expect(localStorage.getItem("tldwConfig")).not.toContain("manual-user-key")
+  })
+
+  it("rehydrates the session key when stored single-user config has a blank apiKey", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "advanced"
+    process.env.NEXT_PUBLIC_API_URL = "http://127.0.0.1:8000"
+    delete process.env.NEXT_PUBLIC_X_API_KEY
+    localStorage.setItem(
+      "tldwConfig",
+      JSON.stringify({
+        authMode: "single-user",
+        apiKey: "manual-user-key",
+        serverUrl: "http://127.0.0.1:8000"
+      })
+    )
+
+    await importAndAwaitBootstrap()
+    expect(localStorage.getItem("tldwConfig")).not.toContain("manual-user-key")
+
+    localStorage.setItem(
+      "tldwConfig",
+      JSON.stringify({
+        authMode: "single-user",
+        apiKey: "",
+        serverUrl: "http://127.0.0.1:8000"
+      })
+    )
+
+    vi.resetModules()
+    await importAndAwaitBootstrap()
+    const runtimeAuth = await import("@/services/tldw/runtime-auth-override")
+
+    expect(runtimeAuth.getRuntimeSingleUserApiKeyOverride()).toBe(
+      "manual-user-key"
+    )
+    expect(localStorage.getItem("tldwConfig")).not.toContain("manual-user-key")
+  })
+
+  it("clears the session key when stored config switches away from single-user auth", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "advanced"
+    process.env.NEXT_PUBLIC_API_URL = "http://127.0.0.1:8000"
+    delete process.env.NEXT_PUBLIC_X_API_KEY
+    localStorage.setItem(
+      "tldwConfig",
+      JSON.stringify({
+        authMode: "single-user",
+        apiKey: "manual-user-key",
+        serverUrl: "http://127.0.0.1:8000"
+      })
+    )
+
+    await importAndAwaitBootstrap()
+    expect(sessionStorage.getItem(RUNTIME_SESSION_SINGLE_USER_API_KEY)).toBe(
+      "manual-user-key"
+    )
+
+    localStorage.setItem(
+      "tldwConfig",
+      JSON.stringify({
+        authMode: "multi-user",
+        accessToken: "user-token",
+        serverUrl: "http://127.0.0.1:8000"
+      })
+    )
+
+    vi.resetModules()
+    await importAndAwaitBootstrap()
+    const runtimeAuth = await import("@/services/tldw/runtime-auth-override")
+
+    expect(sessionStorage.getItem(RUNTIME_SESSION_SINGLE_USER_API_KEY)).toBeNull()
+    expect(runtimeAuth.getRuntimeSingleUserApiKeyOverride()).toBeNull()
   })
 
   it("repairs a stale env LAN host to the current browser host during bootstrap", async () => {
