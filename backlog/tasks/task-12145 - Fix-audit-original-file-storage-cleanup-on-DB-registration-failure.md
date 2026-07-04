@@ -18,7 +18,7 @@ documentation:
 modified_files:
 - tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py
 - tldw_Server_API/tests/MediaIngestion_NEW/unit/test_persistence_original_storage.py
-updated_date: 2026-07-04 18:41
+updated_date: 2026-07-05 00:25
 ---
 
 ## Description
@@ -42,16 +42,18 @@ Remediate AUDIT-2026-06-27-MEDIA-003 by adding compensating cleanup when permane
 - The cleanup path calls `await storage.delete(storage_path)` before re-raising to the existing non-fatal storage failure handler, so the response still marks `original_file_stored` as false.
 - Cleanup failures are logged for both exception and false-return storage backend behavior without masking the original registration failure.
 - Added focused tests for registration failure cleanup and cleanup-failure logging.
-- Verification: `python -m pytest tldw_Server_API/tests/MediaIngestion_NEW/unit/test_persistence_original_storage.py -q` passed with 15 tests; Bandit over `tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py` reported 0 findings; `git diff --check` passed.
-- 2026-07-04 latest-dev refresh: rebased `codex/audit-media-original-cleanup-2026-07-04` onto `origin/dev` `fd5c152b065c408e4e8ee5f08da41589f21cb7f5`; merge-base matches `origin/dev`.
 - Tracking hygiene: moved this media cleanup audit record from colliding `TASK-12138` to `TASK-12145` because latest dev already contains other `TASK-12138` records.
-- Latest-dev validation: `.venv/bin/python -m pytest tldw_Server_API/tests/MediaIngestion_NEW/unit/test_persistence_original_storage.py -q` passed with 15 tests; `.venv/bin/python -m bandit -r tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py -f json -o /tmp/bandit_media_original_cleanup_latest.json` reported 0 findings; `git diff --check` passed.
+- Review follow-up: widened the registration-failure cleanup path to catch ordinary `Exception` from `db.insert_media_file` and from `storage.delete`, while still re-raising the original registration error. This ensures cleanup is attempted for non-tuple database/library exceptions and cleanup failures do not mask the original registration failure.
+- Final lint note: full-file Ruff still reports pre-existing import/type/name issues in the touched files; the new broad cleanup catches are covered by targeted `# noqa: BLE001` comments and `.venv/bin/python -m ruff check --select BLE001 tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py tldw_Server_API/tests/MediaIngestion_NEW/unit/test_persistence_original_storage.py` passed before this current-dev refresh.
+- Current-dev refresh: rebased `codex/audit-media-original-cleanup-2026-07-04` onto `origin/dev` `09d9ec901e1d4548f7924f1c6bcefa963fadd9bd`; merge-base matches `origin/dev`.
+- Current-dev validation: `/Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest tldw_Server_API/tests/MediaIngestion_NEW/unit/test_persistence_original_storage.py -q` passed with 16 tests; `/Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m bandit -r tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py -f json -o /tmp/bandit_media_original_cleanup_origin_dev_09d9ec.json` reported 0 findings over 5627 LOC; `git diff --check HEAD~1..HEAD` passed.
+2026-07-04 latest-dev refresh: rebased and validated PR #2612 on origin/dev 6b727b221e55646eba663a03571e38302f7fafc2. Tested head ab46b4e66ba1. Verification: python -m pytest tldw_Server_API/tests/MediaIngestion_NEW/unit/test_persistence_original_storage.py -q => 16 passed, 41 warnings; bandit -r tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py => 0 findings over 5627 LOC; git diff --check HEAD~1..HEAD => clean.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Fixed AUDIT-2026-06-27-MEDIA-003 by deleting permanently stored original-file blobs when MediaFiles registration fails after storage succeeds. The existing non-fatal ingestion behavior is preserved while preventing untracked permanent files, and tests now cover successful cleanup plus cleanup failure logging.
+Hardened media original-file cleanup behavior and storage edge-case coverage. Final refresh validated against origin/dev 6b727b221e55646eba663a03571e38302f7fafc2 with focused tests passing, Bandit clean on touched production scope, and whitespace check clean.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
