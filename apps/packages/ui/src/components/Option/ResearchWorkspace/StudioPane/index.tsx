@@ -283,6 +283,8 @@ const PRIMARY_OUTPUT_TYPES = new Set<ArtifactType>([
   "quiz"
 ])
 
+const DEFAULT_CLAIMS_VERIFICATION_PROVIDER_VALUE = "__default__"
+
 const getStudioWorkspaceSourceStatus = (source: WorkspaceSource) =>
   source.status || "ready"
 
@@ -846,6 +848,12 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
   const [selectedWorkProductTemplateId, setSelectedWorkProductTemplateId] =
     useState<WorkProductTemplateId>(DEFAULT_WORK_PRODUCT_TEMPLATE_ID)
   const [selectedFlashcardDeck, setSelectedFlashcardDeck] = useState<"auto" | number>("auto")
+  const [claimsVerificationProvider, setClaimsVerificationProvider] = useState(
+    DEFAULT_CLAIMS_VERIFICATION_PROVIDER_VALUE
+  )
+  const [claimsVerificationModel, setClaimsVerificationModel] = useState<
+    string | undefined
+  >(undefined)
   const [activeOutputType, setActiveOutputType] = useState<ArtifactType | null>(null)
   const [moreOutputsExpanded, setMoreOutputsExpanded] = useState(false)
   const [generationElapsedSeconds, setGenerationElapsedSeconds] = useState(0)
@@ -1041,6 +1049,15 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
   const mobileSliderClassName = isMobile
     ? "[&_.ant-slider-rail]:!h-2 [&_.ant-slider-track]:!h-2 [&_.ant-slider-handle]:!h-5 [&_.ant-slider-handle]:!w-5"
     : undefined
+  const claimsVerificationProviderForRequest =
+    claimsVerificationProvider === DEFAULT_CLAIMS_VERIFICATION_PROVIDER_VALUE
+      ? undefined
+      : claimsVerificationProvider
+  const claimsVerificationModelForRequest =
+    typeof claimsVerificationModel === "string" &&
+    claimsVerificationModel.trim().length > 0
+      ? claimsVerificationModel.trim()
+      : undefined
 
   // ── Hooks ──
 
@@ -1061,6 +1078,8 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
     setIsGeneratingOutput,
     selectedModel,
     normalizedApiProvider,
+    claimsVerificationProvider: claimsVerificationProviderForRequest,
+    claimsVerificationModel: claimsVerificationModelForRequest,
     resolvedTemperature,
     resolvedTopP,
     resolvedNumPredict,
@@ -1096,6 +1115,48 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
     handleCancelGeneration,
     loadFlashcardDecks,
   } = artifactGeneration
+
+  const claimsVerificationModelOptions = React.useMemo(() => {
+    if (!claimsVerificationProviderForRequest) {
+      return []
+    }
+    const options = _chatModels
+      .filter((model) => {
+        const provider = String(
+          model.chatProvider || model.provider || ""
+        ).trim().toLowerCase()
+        return provider === claimsVerificationProviderForRequest
+      })
+      .map((model) => ({
+        value: model.id,
+        label: model.name || model.id
+      }))
+    if (
+      claimsVerificationModelForRequest &&
+      !options.some((option) => option.value === claimsVerificationModelForRequest)
+    ) {
+      options.push({
+        value: claimsVerificationModelForRequest,
+        label: claimsVerificationModelForRequest
+      })
+    }
+    return options
+  }, [
+    _chatModels,
+    claimsVerificationModelForRequest,
+    claimsVerificationProviderForRequest
+  ])
+  const claimsVerificationNotice = claimsVerificationProviderForRequest
+    ? t("playground:studio.claimsVerificationOverrideNotice", {
+        provider: claimsVerificationProviderForRequest,
+        model: claimsVerificationModelForRequest || "provider default",
+        defaultValue:
+          "Claims verification override active: {{provider}} / {{model}} will verify grounded outputs instead of the generation model."
+      })
+    : t(
+        "playground:studio.claimsVerificationDefaultNotice",
+        "Claims verification uses the Studio generation model unless you choose a verifier."
+      )
 
   const selectedModelMatchesChatCatalog =
     selectedModelCatalogKey.length > 0 &&
@@ -1696,6 +1757,67 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
                     )}
                   />
                 </div>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-text-muted">
+                      {t(
+                        "playground:studio.claimsVerifierProvider",
+                        "Claims verifier provider"
+                      )}
+                    </label>
+                    <Select
+                      aria-label={t(
+                        "playground:studio.claimsVerifierProvider",
+                        "Claims verifier provider"
+                      )}
+                      size={studioControlSize}
+                      className="w-full"
+                      value={claimsVerificationProvider}
+                      onChange={(value) => {
+                        setClaimsVerificationProvider(String(value))
+                        setClaimsVerificationModel(undefined)
+                      }}
+                      options={[
+                        {
+                          value: DEFAULT_CLAIMS_VERIFICATION_PROVIDER_VALUE,
+                          label: t(
+                            "playground:studio.claimsVerifierDefaultProvider",
+                            "Default"
+                          )
+                        },
+                        ...providerOptions
+                      ]}
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-text-muted">
+                      {t(
+                        "playground:studio.claimsVerifierModel",
+                        "Claims verifier model"
+                      )}
+                    </label>
+                    <Select
+                      aria-label={t(
+                        "playground:studio.claimsVerifierModel",
+                        "Claims verifier model"
+                      )}
+                      size={studioControlSize}
+                      className="w-full"
+                      value={claimsVerificationModelForRequest}
+                      disabled={!claimsVerificationProviderForRequest}
+                      onChange={(value) => setClaimsVerificationModel(String(value))}
+                      options={claimsVerificationModelOptions}
+                      loading={loadingChatModels}
+                      placeholder={t(
+                        "playground:studio.claimsVerifierModelPlaceholder",
+                        "Provider default"
+                      )}
+                    />
+                  </div>
+                </div>
+                <p className="rounded border border-border bg-surface px-2 py-1 text-[11px] text-text-muted">
+                  {claimsVerificationNotice}
+                </p>
                 <div>
                   <div className="mb-1 flex items-center justify-between text-xs text-text-muted">
                     <label className="font-medium">

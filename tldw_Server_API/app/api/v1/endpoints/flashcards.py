@@ -73,6 +73,10 @@ from tldw_Server_API.app.api.v1.schemas.study_packs import (
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.core.AuthNZ.permissions import FLASHCARDS_ADMIN
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.core.Claims_Extraction.artifact_verification import (
+    ArtifactVerificationUnit,
+    verify_generated_artifact_against_sources,
+)
 from tldw_Server_API.app.core.config import loaded_config_data
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
@@ -113,6 +117,7 @@ from tldw_Server_API.app.core.Flashcards.study_assistant import (
     generate_study_assistant_reply,
 )
 from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.RAG.rag_service.types import Document
 from tldw_Server_API.app.core.StudyPacks.jobs import (
     STUDY_PACKS_DOMAIN,
     STUDY_PACKS_JOB_TYPE,
@@ -164,6 +169,89 @@ def _parse_scheduler_settings_envelope(raw: Any) -> dict[str, Any]:
     if isinstance(raw, dict):
         return raw
     return {}
+
+
+def _truncate_test_mode_flashcard_text(text: str, limit: int = 220) -> str:
+    normalized = " ".join(str(text or "").split()).strip()
+    if len(normalized) <= limit:
+        return normalized
+    return f"{normalized[: limit - 1].rstrip()}…"
+
+
+def _build_test_mode_flashcards(payload: FlashcardGenerateRequest) -> list[dict[str, Any]]:
+    normalized_text = _truncate_test_mode_flashcard_text(payload.text) or "Workspace study aid coverage."
+    card_type = str(payload.card_type or "basic").strip().lower() or "basic"
+    if card_type not in ("basic", "basic_reverse", "cloze"):
+        card_type = "basic"
+
+    tags = [str(topic).strip() for topic in (payload.focus_topics or []) if str(topic).strip()]
+    if not tags:
+        tags = ["workspace", "study"]
+
+    cards: list[dict[str, Any]] = []
+    for index in range(max(1, int(payload.num_cards or 1))):
+        if card_type == "cloze":
+            front = f"{{{{c1::Study point {index + 1}}}}}: {normalized_text}"
+            back = f"Study point {index + 1}"
+        else:
+            front = f"What study point {index + 1} should you remember?"
+            back = normalized_text
+
+        cards.append(
+            {
+                "front": front,
+                "back": back,
+                "tags": tags,
+                "model_type": card_type,
+                "notes": "Deterministic test-mode flashcard.",
+            }
+        )
+    return cards
+
+
+def _build_flashcard_verification_units(cards: list[dict[str, Any]]) -> list[ArtifactVerificationUnit]:
+    units: list[ArtifactVerificationUnit] = []
+    for index, card in enumerate(cards, start=1):
+        model_type = str(card.get("model_type") or "basic").lower()
+        front = str(card.get("front") or "").strip()
+        back = str(card.get("back") or "").strip()
+        notes = str(card.get("notes") or "").strip()
+        extra = str(card.get("extra") or "").strip()
+
+        # Questions are prompts, not claims. Cloze fronts are factual statements.
+        if front and (model_type == "cloze" or not front.endswith("?")):
+            units.append(
+                ArtifactVerificationUnit(
+                    unit_id=f"flashcard:{index}:front",
+                    text=front,
+                    claims=[front],
+                )
+            )
+        if back:
+            units.append(
+                ArtifactVerificationUnit(
+                    unit_id=f"flashcard:{index}:back",
+                    text=back,
+                    claims=[back],
+                )
+            )
+        if notes:
+            units.append(
+                ArtifactVerificationUnit(
+                    unit_id=f"flashcard:{index}:notes",
+                    text=notes,
+                    claims=[notes],
+                )
+            )
+        if extra:
+            units.append(
+                ArtifactVerificationUnit(
+                    unit_id=f"flashcard:{index}:extra",
+                    text=extra,
+                    claims=[extra],
+                )
+            )
+    return units
 
 
 def _should_return_test_mode_flashcards(error: object) -> bool:
@@ -2546,9 +2634,36 @@ async def generate_flashcards(payload: FlashcardGenerateRequest):
             generated_cards = _normalize_generated_flashcards(raw_flashcards, payload)
         except FlashcardGenerationPlanError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        claim_verification = await verify_generated_artifact_against_sources(
+            artifact_type="flashcards",
+            units=_build_flashcard_verification_units(generated_cards),
+            source_documents=[
+                Document(
+                    id="flashcards-source",
+                    content=payload.text,
+                    metadata={"title": "Flashcard generation source"},
+                )
+            ],
+            generation_provider=provider,
+            generation_model=payload.model,
+            verification_provider=payload.claims_verification_provider,
+            verification_model=payload.claims_verification_model,
+        )
+        claim_verification_payload = claim_verification.to_dict()
+        if claim_verification.verdict != "grounded":
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "claim_verification_failed",
+                    "claimVerification": claim_verification_payload,
+                },
+            )
+
         return {
             "flashcards": generated_cards,
             "count": len(generated_cards),
+            "claim_verification": claim_verification_payload,
         }
     except HTTPException:
         raise

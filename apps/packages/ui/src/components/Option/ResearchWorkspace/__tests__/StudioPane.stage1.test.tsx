@@ -25,6 +25,7 @@ const {
   mockCreateChatCompletion,
   mockGetMediaDetails,
   mockUpsertWorkspace,
+  mockGenerateResearchWorkspaceArtifact,
   mockGetChatModels,
   mockGetModel,
   messageOptionStoreState,
@@ -51,6 +52,7 @@ const {
   const createChatCompletion = vi.fn()
   const getMediaDetails = vi.fn()
   const upsertWorkspace = vi.fn()
+  const generateResearchWorkspaceArtifact = vi.fn()
   const getChatModels = vi.fn()
   const getModel = vi.fn()
   const defaultAudioSettings: AudioGenerationSettings = {
@@ -143,6 +145,7 @@ const {
     mockCreateChatCompletion: createChatCompletion,
     mockGetMediaDetails: getMediaDetails,
     mockUpsertWorkspace: upsertWorkspace,
+    mockGenerateResearchWorkspaceArtifact: generateResearchWorkspaceArtifact,
     mockGetChatModels: getChatModels,
     mockGetModel: getModel,
     messageOptionStoreState: messageOptionState,
@@ -205,6 +208,10 @@ vi.mock("@/services/flashcards", () => ({
   createFlashcardsBulk: mockCreateFlashcardsBulk.mockResolvedValue({
     cards: [{ uuid: "card-1" }]
   })
+}))
+
+vi.mock("@/services/researchWorkspaceArtifacts", () => ({
+  generateResearchWorkspaceArtifact: mockGenerateResearchWorkspaceArtifact
 }))
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
@@ -427,6 +434,21 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
       flashcards: [{ front: "Term", back: "Definition" }],
       count: 1
     })
+    mockGenerateResearchWorkspaceArtifact.mockResolvedValue({
+      artifact_type: "audio_overview",
+      content: "Audio script",
+      data: {},
+      claim_verification: {
+        verdict: "grounded",
+        metadata: {
+          generation_provider: "openai",
+          generation_model: "gpt-4o-mini",
+          verification_provider: "openai",
+          verification_model: "gpt-4o-mini",
+          verification_llm_is_default: true
+        }
+      }
+    })
     mockSynthesizeSpeech.mockResolvedValue(new ArrayBuffer(8))
     mockGenerateSlidesFromMedia.mockResolvedValue({
       id: "presentation-1",
@@ -564,6 +586,13 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
     const modelRuntime = screen.getByRole("region", { name: "Model Runtime" })
     expect(within(modelRuntime).getByLabelText("API Provider")).toBeInTheDocument()
     expect(within(modelRuntime).getByLabelText("Model")).toBeInTheDocument()
+    expect(within(modelRuntime).getByLabelText("Claims verifier provider")).toBeInTheDocument()
+    expect(within(modelRuntime).getByLabelText("Claims verifier model")).toBeInTheDocument()
+    expect(
+      within(modelRuntime).getByText(
+        "Claims verification uses the Studio generation model unless you choose a verifier."
+      )
+    ).toBeInTheDocument()
     expect(
       within(modelRuntime).getByRole("slider", { name: "Temperature" })
     ).toBeInTheDocument()
@@ -1828,22 +1857,28 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
       ...baseAudioSettings,
       provider: "browser"
     }
-    mockGetMediaDetails.mockResolvedValue({
-      source: { title: "DSPy Prompting Talk" },
-      content: {
-        text: "Project Falcon improved retention by 18 percent after the March 2026 onboarding update."
+    mockGenerateResearchWorkspaceArtifact.mockResolvedValue({
+      artifact_type: "audio_overview",
+      content: "Audio script",
+      data: {},
+      claim_verification: {
+        verdict: "grounded",
+        metadata: {
+          generation_provider: "openai",
+          generation_model: "gpt-4o-mini",
+          verification_provider: "openai",
+          verification_model: "gpt-4o-mini",
+          verification_llm_is_default: true
+        }
       }
     })
-    mockCreateChatCompletion.mockResolvedValue(
-      createChatCompletionResponse("Audio script")
-    )
 
     renderStudioPane()
 
     fireEvent.click(screen.getByRole("button", { name: "Audio Summary" }))
 
     await waitFor(() => {
-      expect(mockCreateChatCompletion).toHaveBeenCalled()
+      expect(mockGenerateResearchWorkspaceArtifact).toHaveBeenCalled()
     })
 
     await waitFor(() => {
@@ -1857,12 +1892,14 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
       )
     })
 
-    const audioRequest = mockCreateChatCompletion.mock.calls[0]?.[0]
-    expect(audioRequest.messages?.[0]?.content).toContain(
-      "source-grounded audio script writer"
+    expect(mockGenerateResearchWorkspaceArtifact).toHaveBeenCalledWith(
+      expect.objectContaining({
+        artifact_type: "audio_overview",
+        media_ids: [101],
+        model: "gpt-4o-mini"
+      }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
     )
-    expect(audioRequest.messages?.[1]?.content).toContain("DSPy Prompting Talk")
-    expect(audioRequest.messages?.[1]?.content).toContain("March 2026 onboarding")
     expect(mockRagSearch).not.toHaveBeenCalled()
     expect(mockSynthesizeSpeech).not.toHaveBeenCalled()
   })
@@ -1905,17 +1942,15 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
       provider: "tldw",
       model: "kokoro"
     }
-    mockGetMediaDetails.mockResolvedValue({
-      source: { title: "DSPy Prompting Talk" },
-      content: {
-        text: "Project Falcon improved retention by 18 percent after the March 2026 onboarding update."
+    mockGenerateResearchWorkspaceArtifact.mockResolvedValue({
+      artifact_type: "audio_overview",
+      content: "Sorry, I encountered an error. Please try again.",
+      data: {},
+      claim_verification: {
+        verdict: "grounded",
+        metadata: {}
       }
     })
-    mockCreateChatCompletion.mockResolvedValue(
-      createChatCompletionResponse(
-        "Sorry, I encountered an error. Please try again."
-      )
-    )
     mockSynthesizeSpeech.mockResolvedValue(new ArrayBuffer(8))
 
     renderStudioPane()

@@ -9,9 +9,9 @@ import { tldwModels, type ModelInfo } from "@/services/tldw"
 import { trackResearchWorkspaceTelemetry } from "@/utils/research-workspace-telemetry"
 import { parseProviderQualifiedModelSelection } from "@/utils/resolve-api-provider"
 import {
-  createQuestion,
-  createQuiz,
+  generateQuiz as generateQuizDrafts,
   type QuestionType,
+  type QuestionAdmin,
   type QuizGenerateSource
 } from "@/services/quizzes"
 import {
@@ -23,6 +23,10 @@ import {
   type FlashcardCreate,
   type FlashcardsGenerateRequest
 } from "@/services/flashcards"
+import {
+  generateResearchWorkspaceArtifact,
+  type ResearchWorkspaceArtifactType
+} from "@/services/researchWorkspaceArtifacts"
 import type { TFunction } from "i18next"
 import type {
   ArtifactReviewChecklistItem,
@@ -268,6 +272,7 @@ type GenerationResult = {
   totalTokens?: number
   totalCostUsd?: number
   data?: Record<string, unknown>
+  producerMetadata?: GeneratedArtifact["producerMetadata"]
   sourceCoverage?: ArtifactSourceCoverage
 }
 
@@ -499,6 +504,48 @@ const normalizeGeneratedQuizQuestions = (
     .filter((question): question is GeneratedQuizQuestionDraft => question !== null)
 }
 
+const normalizeQuizQuestionOptions = (question: QuestionAdmin): string[] => {
+  const options = normalizeQuizOptionList(question.options)
+  if (question.question_type === "true_false" && options.length === 0) {
+    return ["True", "False"]
+  }
+  return options
+}
+
+const normalizeQuizQuestionAnswer = (question: QuestionAdmin): string => {
+  const options = normalizeQuizQuestionOptions(question)
+  const answer = resolveQuizCorrectAnswer(question.correct_answer, options)
+  if (answer) return answer
+  return typeof question.correct_answer === "string"
+    ? question.correct_answer.trim()
+    : String(question.correct_answer ?? "").trim()
+}
+
+const resolveQuizQuestionSourceMediaId = (
+  question: QuestionAdmin | undefined,
+  fallbackMediaIds: number[]
+): number | undefined => {
+  const citations = Array.isArray(question?.source_citations)
+    ? question.source_citations
+    : []
+  for (const citation of citations) {
+    if (
+      typeof citation.media_id === "number" &&
+      Number.isFinite(citation.media_id) &&
+      citation.media_id > 0
+    ) {
+      return citation.media_id
+    }
+    if (citation.source_type === "media") {
+      const parsed = Number(citation.source_id)
+      if (Number.isFinite(parsed) && parsed > 0) {
+        return parsed
+      }
+    }
+  }
+  return fallbackMediaIds.length === 1 ? fallbackMediaIds[0] : undefined
+}
+
 const buildFlashcardDeckName = (
   workspaceName: string | undefined,
   selectedSources: WorkspaceSource[]
@@ -546,6 +593,13 @@ type FlashcardsGenerationOptions = SourceContentGenerationOptions & {
   workspaceName?: string
   workspaceTag?: string
   studyMaterialsPolicy?: WorkspaceStudyMaterialsMode
+  claimsVerificationProvider?: string
+  claimsVerificationModel?: string
+}
+
+type VerifiedWorkspaceArtifactOptions = SourceContentGenerationOptions & {
+  claimsVerificationProvider?: string
+  claimsVerificationModel?: string
 }
 
 type StudioRagGenerationRequest = {
@@ -563,6 +617,43 @@ type StudioRagGenerationRequest = {
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null
+
+const readNonEmptyString = (value: unknown): string | undefined => {
+  if (typeof value !== "string") return undefined
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : undefined
+}
+
+const buildClaimVerificationProducerMetadata = (
+  claimVerification: unknown
+): GeneratedArtifact["producerMetadata"] | undefined => {
+  if (!isRecord(claimVerification)) return undefined
+  const metadata = isRecord(claimVerification.metadata)
+    ? claimVerification.metadata
+    : {}
+  const verificationProvider = readNonEmptyString(
+    metadata.verification_provider
+  )
+  const verificationModel = readNonEmptyString(metadata.verification_model)
+  if (!verificationProvider && !verificationModel) return undefined
+
+  return {
+    producerType: "research_workspace_claim_verification",
+    provider: readNonEmptyString(metadata.generation_provider),
+    model: readNonEmptyString(metadata.generation_model),
+    claimsVerificationProvider: verificationProvider,
+    claimsVerificationModel: verificationModel,
+    claimsVerificationUsesDefault:
+      typeof metadata.verification_llm_is_default === "boolean"
+        ? metadata.verification_llm_is_default
+        : undefined,
+    claimsVerificationDiffersFromGeneration:
+      typeof metadata.verification_llm_differs_from_generation === "boolean"
+        ? metadata.verification_llm_differs_from_generation
+        : undefined,
+    claimsVerificationVerdict: readNonEmptyString(claimVerification.verdict)
+  }
+}
 
 export const isAbortLikeError = (error: unknown): boolean => {
   const candidate = (error as {
@@ -1563,6 +1654,8 @@ async function generateQuizFromMedia(
   options: SourceContentGenerationOptions & {
     model?: string
     apiProvider?: string
+    claimsVerificationProvider?: string
+    claimsVerificationModel?: string
     workspaceId?: string
     workspaceName?: string
     workspaceTag?: string
@@ -1591,62 +1684,24 @@ async function generateQuizFromMedia(
     workspaceOwnershipId ?? undefined,
     options.studyMaterialsPolicy
   )
-  const sourceContexts = await loadStudioSourceContexts(options)
-  const sourceText = formatStudioSourceContexts(sourceContexts)
-  if (!sourceText) {
-    throw new Error("No usable quiz source content was found.")
-  }
 
   const requestedQuestionCount = buildBundledQuizQuestionCount(uniqueMediaIds.length)
-  const quizMaxTokens = Math.max(
-    estimateGenerationTokens("quiz", uniqueMediaIds.length),
-    typeof options.maxTokens === "number" ? options.maxTokens : 0,
-    1400
-  )
-  const response = await tldwClient.createChatCompletion(
+  const generatedQuiz = await generateQuizDrafts(
     {
+      num_questions: requestedQuestionCount,
+      question_types: ["multiple_choice", "true_false"],
+      difficulty: "mixed",
       model,
       api_provider: options.apiProvider,
-      response_format: { type: "json_object" },
-      messages: [
-        {
-          role: "system",
-          content:
-            "You are a source-grounded quiz writer. Use only the provided source content. Return strict JSON only. Do not invent facts. Every question must be answerable from the sources."
-        },
-        {
-          role: "user",
-          content: `Create ${requestedQuestionCount} quiz questions using only these question types: multiple_choice and true_false.
-
-Return a JSON object with this shape:
-{
-  "title": "Short quiz title",
-  "description": "One sentence description",
-  "questions": [
-    {
-      "question_type": "multiple_choice" | "true_false",
-      "question_text": "Question text",
-      "options": ["Option A", "Option B"],
-      "correct_answer": "Exact matching option text",
-      "explanation": "Short explanation"
-    }
-  ]
-}
-
-Rules:
-- Keep questions grounded in the sources below.
-- For true_false questions, options must be ["True", "False"] and correct_answer must be either "True" or "False".
-- For multiple_choice questions, provide 3-4 options and make correct_answer exactly match one option.
-- Keep explanations brief and factual.
-- Do not include markdown fences or commentary outside the JSON object.
-
-Selected sources:
-${sourceText}`
-        }
-      ],
-      temperature: options.temperature,
-      top_p: options.topP,
-      max_tokens: quizMaxTokens
+      claims_verification_provider: options.claimsVerificationProvider,
+      claims_verification_model: options.claimsVerificationModel,
+      sources: sourceBundle,
+      ...(useWorkspaceOwnership && workspaceOwnershipId
+        ? { workspace_id: workspaceOwnershipId }
+        : {}),
+      ...(useWorkspaceOwnership && options.workspaceTag
+        ? { workspace_tag: options.workspaceTag }
+        : {})
     },
     {
       signal: options.abortSignal,
@@ -1654,63 +1709,28 @@ ${sourceText}`
     }
   )
 
-  const { content: rawContent, usage } = await readChatCompletionResponsePayload(response)
-  let parsedPayload: Record<string, unknown>
-  try {
-    parsedPayload = JSON.parse(extractJsonPayloadText(rawContent || ""))
-  } catch (error) {
-    throw new Error(
-      `Failed to parse quiz JSON from chat response: ${
-        error instanceof Error ? error.message : String(error)
-      }`
-    )
-  }
-  const quizTitle =
-    typeof parsedPayload?.title === "string" && parsedPayload.title.trim()
-      ? parsedPayload.title.trim()
-      : "Workspace Quiz"
-  const quizDescription =
-    typeof parsedPayload?.description === "string" && parsedPayload.description.trim()
-      ? parsedPayload.description.trim()
-      : undefined
-  const questions = normalizeGeneratedQuizQuestions(parsedPayload?.questions).slice(0, 20)
+  const questions = normalizeGeneratedQuizQuestions(
+    generatedQuiz.questions.map((question) => ({
+      question_type: question.question_type,
+      question_text: question.question_text,
+      options: normalizeQuizQuestionOptions(question),
+      correct_answer: normalizeQuizQuestionAnswer(question),
+      explanation: question.explanation
+    }))
+  ).slice(0, 20)
   if (!questions.length) {
     throw new Error("Quiz generation returned no usable questions")
   }
 
-  const createdQuiz = await createQuiz({
-    name: quizTitle,
-    description: quizDescription,
-    ...(useWorkspaceOwnership && workspaceOwnershipId
-      ? { workspace_id: workspaceOwnershipId }
-      : {}),
-    ...(useWorkspaceOwnership && options.workspaceTag
-      ? { workspace_tag: options.workspaceTag }
-      : {}),
-    media_id: uniqueMediaIds[0],
-    source_bundle_json: sourceBundle
-  })
-
-  await Promise.all(
-    questions.map((question, index) =>
-      createQuestion(createdQuiz.id, {
-        question_type: question.questionType,
-        question_text: question.questionText,
-        options: question.options,
-        correct_answer: question.correctAnswer,
-        explanation: question.explanation,
-        order_index: index
-      })
-    )
-  )
-
-  const limitedQuestions = questions.map((question) => ({
+  const limitedQuestions = questions.map((question, index) => ({
     question: question.questionText,
     options: question.options,
     answer: question.correctAnswer,
     explanation: question.explanation,
-    sourceMediaId:
-      uniqueMediaIds.length === 1 ? uniqueMediaIds[0] : undefined
+    sourceMediaId: resolveQuizQuestionSourceMediaId(
+      generatedQuiz.questions[index],
+      uniqueMediaIds
+    )
   }))
   const content = formatQuizQuestionsContent(
     limitedQuestions.map((question) => ({
@@ -1719,24 +1739,68 @@ ${sourceText}`
       answer: question.answer,
       explanation: question.explanation
     })),
-    createdQuiz.name || "Workspace Quiz"
+    generatedQuiz.quiz.name || "Workspace Quiz"
   )
+  const claimVerification = isRecord(generatedQuiz.claim_verification)
+    ? generatedQuiz.claim_verification
+    : null
 
   return {
-    serverId: createdQuiz.id,
+    serverId: generatedQuiz.quiz.id,
     content,
-    totalTokens: usage.totalTokens,
-    totalCostUsd:
-      typeof usage.totalCostUsd === "number"
-        ? Number(usage.totalCostUsd.toFixed(4))
-        : undefined,
+    producerMetadata: buildClaimVerificationProducerMetadata(claimVerification),
     data: {
-      quizId: createdQuiz.id,
+      quizId: generatedQuiz.quiz.id,
       questions: limitedQuestions,
       sourceBundle,
       sourceMediaIds: uniqueMediaIds,
-      workspaceId: useWorkspaceOwnership ? workspaceOwnershipId : null
+      workspaceId: useWorkspaceOwnership ? workspaceOwnershipId : null,
+      claimVerification
     }
+  }
+}
+
+async function generateVerifiedWorkspaceDraft(
+  artifactType: ResearchWorkspaceArtifactType,
+  options: VerifiedWorkspaceArtifactOptions
+): Promise<GenerationResult> {
+  const uniqueMediaIds = Array.from(new Set(options.mediaIds))
+  if (uniqueMediaIds.length === 0) {
+    throw buildMissingContentError(artifactType)
+  }
+  const model = typeof options.model === "string" ? options.model.trim() : ""
+  if (!model) {
+    throw new Error(`No model available for ${artifactType} generation`)
+  }
+
+  const generated = await generateResearchWorkspaceArtifact(
+    {
+      artifact_type: artifactType,
+      media_ids: uniqueMediaIds,
+      model,
+      api_provider: options.apiProvider,
+      claims_verification_provider: options.claimsVerificationProvider,
+      claims_verification_model: options.claimsVerificationModel,
+      temperature: options.temperature,
+      top_p: options.topP,
+      max_tokens: options.maxTokens
+    },
+    {
+      signal: options.abortSignal,
+      timeoutMs: STUDIO_GENERATION_CHAT_TIMEOUT_MS
+    }
+  )
+  const claimVerification = isRecord(generated.claim_verification)
+    ? generated.claim_verification
+    : null
+  return {
+    content: String(generated.content || "").trim(),
+    data: {
+      ...(isRecord(generated.data) ? generated.data : {}),
+      sourceMediaIds: uniqueMediaIds,
+      claimVerification
+    },
+    producerMetadata: buildClaimVerificationProducerMetadata(claimVerification)
   }
 }
 
@@ -1803,7 +1867,9 @@ async function generateFlashcards(
     model:
       typeof options.model === "string" && options.model.trim().length > 0
         ? options.model.trim()
-        : undefined
+        : undefined,
+    claims_verification_provider: options.claimsVerificationProvider,
+    claims_verification_model: options.claimsVerificationModel
   }
   const normalizeGeneratedFlashcards = (
     drafts: unknown
@@ -1847,6 +1913,9 @@ async function generateFlashcards(
   if (!flashcards.length) {
     throw new Error("Flashcard generation returned no usable cards")
   }
+  const claimVerification = isRecord(generated.claim_verification)
+    ? generated.claim_verification
+    : null
 
   const decks = await listDecks({ signal: options.abortSignal })
   let deckId: number | undefined
@@ -1910,6 +1979,7 @@ async function generateFlashcards(
   return {
     serverId: deckId,
     content: `${summaryLine}\n\n${content}`,
+    producerMetadata: buildClaimVerificationProducerMetadata(claimVerification),
     data: {
       flashcards: flashcards.map((card) => ({
         front: card.front,
@@ -1917,117 +1987,41 @@ async function generateFlashcards(
       })),
       deckId,
       sourceMediaIds: options.mediaIds,
+      claimVerification,
       workspaceId: useWorkspaceOwnership ? workspaceOwnershipId : null
     }
   }
 }
 
 async function generateMindMap(
-  options: SourceContentGenerationOptions
+  options: VerifiedWorkspaceArtifactOptions
 ): Promise<GenerationResult> {
-  const model = typeof options.model === "string" ? options.model.trim() : ""
-  if (!model) {
-    throw new Error("Select a chat model before generating a mind map.")
-  }
-
-  const sourceContexts = await loadStudioSourceContexts(options)
-  if (sourceContexts.length === 0) {
-    throw buildMissingContentError("mind map")
-  }
-
-  const response = await tldwClient.createChatCompletion({
-    model,
-    api_provider: options.apiProvider,
-    messages: [
-      {
-        role: "system",
-        content:
-          "You are a mind map generator. Return ONLY Mermaid mindmap syntax. You may wrap the result in a ```mermaid code fence, but do not include commentary, explanations, or prose outside the diagram."
-      },
-      {
-        role: "user",
-        content: `Analyze the provided sources and create a Mermaid mindmap that captures the central theme, 3-5 major branches, and the most important subtopics.
-
-Sources:
-${sourceContexts
-  .map(
-    (source, index) =>
-      `Source ${index + 1}: ${source.title}\n${source.text}`
-  )
-  .join("\n\n")}`
-      }
-    ],
-    temperature: options.temperature,
-    top_p: options.topP,
-    max_tokens: options.maxTokens
-  }, {
-    signal: options.abortSignal,
-    timeoutMs: STUDIO_GENERATION_CHAT_TIMEOUT_MS
-  })
-
-  const content = (await readChatCompletionResponseText(response)).trim()
+  const result = await generateVerifiedWorkspaceDraft("mindmap", options)
+  const content = String(result.content || "").trim()
   if (!content) {
     throw buildMissingContentError("mind map")
   }
 
   return {
+    ...result,
     content,
     data: {
-      mermaid: extractMermaidCode(content)
+      ...(result.data || {}),
+      mermaid:
+        typeof result.data?.mermaid === "string"
+          ? result.data.mermaid
+          : extractMermaidCode(content)
     }
   }
 }
 
 async function generateAudioOverview(
-  options: SourceContentGenerationOptions & {
+  options: VerifiedWorkspaceArtifactOptions & {
     audioSettings: AudioGenerationSettings
   }
 ): Promise<GenerationResult> {
-  const model = typeof options.model === "string" ? options.model.trim() : ""
-  if (!model) {
-    throw new Error("No model available for audio summary generation")
-  }
-
-  const sourceContexts = await loadStudioSourceContexts(options)
-  const sourceText = formatStudioSourceContexts(sourceContexts)
-  if (!sourceText) {
-    throw new Error("No usable audio source content was found.")
-  }
-
-  const response = await tldwClient.createChatCompletion(
-    {
-      model,
-      api_provider: options.apiProvider,
-      messages: [
-        {
-          role: "system",
-          content:
-            "You are a source-grounded audio script writer. Use only the provided source content. Do not invent facts. Write plain spoken prose without speaker labels, bullets, or stage directions."
-        },
-        {
-          role: "user",
-          content: `Create a spoken overview script (2-3 minutes when read aloud) that:
-1. Introduces the topic
-2. Covers the main points
-3. Concludes with key takeaways
-
-Write in a conversational, easy-to-listen style. Do not include any stage directions, speaker labels, or formatting - just the spoken text.
-
-Selected sources:
-${sourceText}`
-        }
-      ],
-      temperature: options.temperature,
-      top_p: options.topP,
-      max_tokens: options.maxTokens
-    },
-    {
-      signal: options.abortSignal,
-      timeoutMs: STUDIO_GENERATION_CHAT_TIMEOUT_MS
-    }
-  )
-  const { content: rawScript, usage } = await readChatCompletionResponsePayload(response)
-  const script = rawScript.trim()
+  const verifiedScript = await generateVerifiedWorkspaceDraft("audio_overview", options)
+  const script = String(verifiedScript.content || "").trim()
 
   if (isPlaceholderGeneratedText(script)) {
     throw buildMissingContentError("audio")
@@ -2036,9 +2030,9 @@ ${sourceText}`
   // Use browser TTS if selected
   if (options.audioSettings.provider === "browser") {
     return {
+      ...verifiedScript,
       content: script,
-      audioFormat: "browser",
-      ...usage
+      audioFormat: "browser"
     }
   }
 
@@ -2071,10 +2065,10 @@ ${sourceText}`
     const audioUrl = URL.createObjectURL(audioBlob)
 
     return {
+      ...verifiedScript,
       content: script,
       audioUrl,
-      audioFormat: options.audioSettings.format,
-      ...usage
+      audioFormat: options.audioSettings.format
     }
   } catch (ttsError) {
     if (isAbortLikeError(ttsError)) {
@@ -2092,6 +2086,8 @@ async function generateSlidesFromApi(
     abortSignal?: AbortSignal
     visualStyleId?: string | null
     visualStyleScope?: string | null
+    claimsVerificationProvider?: string
+    claimsVerificationModel?: string
   }
 ): Promise<GenerationResult> {
   try {
@@ -2102,10 +2098,18 @@ async function generateSlidesFromApi(
       visualStyleScope: options?.visualStyleScope ?? undefined,
       provider: fallbackOptions.apiProvider,
       model: fallbackOptions.model,
+      claimsVerificationProvider: options?.claimsVerificationProvider,
+      claimsVerificationModel: options?.claimsVerificationModel,
       temperature: fallbackOptions.temperature
     })
     requireUsableSlidesPresentation(presentation)
     const usage = extractUsageMetrics(presentation)
+    const studioData = isRecord(presentation.studio_data)
+      ? presentation.studio_data
+      : null
+    const claimVerification = isRecord(studioData?.claimVerification)
+      ? studioData.claimVerification
+      : null
 
     // Format slides as readable content
     let content = `# ${presentation.title}\n\n`
@@ -2129,6 +2133,12 @@ async function generateSlidesFromApi(
       content,
       presentationId: presentation.id,
       presentationVersion: presentation.version,
+      data: claimVerification
+        ? {
+            claimVerification
+          }
+        : undefined,
+      producerMetadata: buildClaimVerificationProducerMetadata(claimVerification),
       ...usage
     }
   } catch (error) {
@@ -2521,61 +2531,22 @@ async function generateResearchProposalPack(
 }
 
 async function generateDataTable(
-  options: SourceContentGenerationOptions
+  options: VerifiedWorkspaceArtifactOptions
 ): Promise<GenerationResult> {
-  const model = typeof options.model === "string" ? options.model.trim() : ""
-  if (!model) {
-    throw new Error("Select a chat model before generating a data table.")
-  }
-  const sourceContexts = await loadStudioSourceContexts(options)
-  if (sourceContexts.length === 0) {
-    throw buildMissingContentError("data table")
-  }
-
-  const response = await tldwClient.createChatCompletion({
-    model,
-    api_provider: options.apiProvider,
-    messages: [
-      {
-        role: "system",
-        content:
-          "You are a data table generator. Return ONLY a markdown table with pipe delimiters, a header row, and a separator row. Do not include commentary or code fences."
-      },
-      {
-        role: "user",
-        content: `Extract structured data from the provided sources and format it as a markdown table.
-
-Include:
-- Key entities, people, organizations, places, or products when present
-- Important attributes and values
-- Relationships or comparisons when they are supported by the source text
-
-Sources:
-${sourceContexts
-  .map(
-    (source, index) =>
-      `Source ${index + 1}: ${source.title}\n${source.text}`
-  )
-  .join("\n\n")}`
-      }
-    ],
-    temperature: options.temperature,
-    top_p: options.topP,
-    max_tokens: options.maxTokens
-  }, {
-    signal: options.abortSignal,
-    timeoutMs: STUDIO_GENERATION_CHAT_TIMEOUT_MS
-  })
-
-  const content = (await readChatCompletionResponseText(response)).trim()
+  const result = await generateVerifiedWorkspaceDraft("data_table", options)
+  const content = String(result.content || "").trim()
   if (!content) {
     throw buildMissingContentError("data table")
   }
   const parsedTable = parseMarkdownTable(content)
 
   return {
+    ...result,
     content,
-    data: parsedTable ? { table: parsedTable } : undefined
+    data: {
+      ...(result.data || {}),
+      ...(parsedTable ? { table: parsedTable } : {})
+    }
   }
 }
 
@@ -2718,6 +2689,8 @@ export interface UseArtifactGenerationDeps {
   // Model settings
   selectedModel: string | null
   normalizedApiProvider: string
+  claimsVerificationProvider?: string
+  claimsVerificationModel?: string
   resolvedTemperature: number
   resolvedTopP: number
   resolvedNumPredict: number
@@ -2753,6 +2726,8 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
     setIsGeneratingOutput,
     selectedModel,
     normalizedApiProvider,
+    claimsVerificationProvider,
+    claimsVerificationModel,
     resolvedTemperature,
     resolvedTopP,
     resolvedNumPredict,
@@ -3331,6 +3306,8 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
                 selectedSources,
                 model: quizRuntime.model,
                 apiProvider: quizRuntime.provider,
+                claimsVerificationProvider,
+                claimsVerificationModel,
                 workspaceId,
                 workspaceName,
                 workspaceTag,
@@ -3354,6 +3331,8 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
               studyMaterialsPolicy,
               model: flashcardRuntime.model,
               apiProvider: flashcardRuntime.provider,
+              claimsVerificationProvider,
+              claimsVerificationModel,
               temperature: resolvedTemperature,
               topP: resolvedTopP,
               maxTokens: resolvedNumPredict,
@@ -3363,30 +3342,31 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
             })
             break
           }
-          case "mindmap":
+          case "mindmap": {
+            const mindmapRuntime = await resolveStudioChatRuntime()
             result = await generateMindMap({
               mediaIds,
               selectedSources,
-              model: await resolveStudioChatModel(),
-              apiProvider:
-                normalizedApiProvider !== "__auto__"
-                  ? normalizeStudioApiProviderForRequest(normalizedApiProvider)
-                  : undefined,
+              model: mindmapRuntime.model,
+              apiProvider: mindmapRuntime.provider,
+              claimsVerificationProvider,
+              claimsVerificationModel,
               temperature: resolvedTemperature,
               topP: resolvedTopP,
               maxTokens: resolvedNumPredict,
               abortSignal: activeAbort.signal
             })
             break
-          case "audio_overview":
+          }
+          case "audio_overview": {
+            const audioRuntime = await resolveStudioChatRuntime()
             result = await generateAudioOverview({
               mediaIds,
               selectedSources,
-              model: await resolveStudioChatModel(),
-              apiProvider:
-                normalizedApiProvider !== "__auto__"
-                  ? normalizeStudioApiProviderForRequest(normalizedApiProvider)
-                  : undefined,
+              model: audioRuntime.model,
+              apiProvider: audioRuntime.provider,
+              claimsVerificationProvider,
+              claimsVerificationModel,
               temperature: resolvedTemperature,
               topP: resolvedTopP,
               maxTokens: resolvedNumPredict,
@@ -3445,7 +3425,9 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
               {
                 abortSignal: activeAbort.signal,
                 visualStyleId,
-                visualStyleScope
+                visualStyleScope,
+                claimsVerificationProvider,
+                claimsVerificationModel
               }
             )
             break
@@ -3479,14 +3461,14 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
                 generatedArtifacts
               })
             } else {
+              const dataTableRuntime = await resolveStudioChatRuntime()
               result = await generateDataTable({
                 mediaIds,
                 selectedSources,
-                model: await resolveStudioChatModel(),
-                apiProvider:
-                  normalizedApiProvider !== "__auto__"
-                    ? normalizeStudioApiProviderForRequest(normalizedApiProvider)
-                    : undefined,
+                model: dataTableRuntime.model,
+                apiProvider: dataTableRuntime.provider,
+                claimsVerificationProvider,
+                claimsVerificationModel,
                 temperature: resolvedTemperature,
                 topP: resolvedTopP,
                 maxTokens: resolvedNumPredict,
@@ -3540,6 +3522,11 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
                   : estimatedTokens)
             ),
           data: result.data,
+          ...(result.producerMetadata
+            ? {
+                producerMetadata: result.producerMetadata
+              }
+            : {}),
           ...(workProductTemplate
             ? {
                 ...templateMetadata,
@@ -3595,6 +3582,8 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
       addArtifact,
       audioSettings,
       effectiveSlidesVisualStyleValue,
+      claimsVerificationModel,
+      claimsVerificationProvider,
       generatedArtifacts,
       hasSelectedSources,
       messageApi,

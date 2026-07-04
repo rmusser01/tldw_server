@@ -1,3 +1,4 @@
+import asyncio
 import io
 import json
 import zipfile
@@ -380,14 +381,16 @@ def test_generate_presentation_sanitizes_generation_error(monkeypatch):
     )
 
     with pytest.raises(HTTPException) as exc_info:
-        slides_ep._generate_presentation(
-            response=Response(),
-            db=SimpleNamespace(client_id="1"),
-            request=request,
-            source_text="Source text",
-            source_type="prompt",
-            source_ref=None,
-            source_query=None,
+        asyncio.run(
+            slides_ep._generate_presentation(
+                response=Response(),
+                db=SimpleNamespace(client_id="1"),
+                request=request,
+                source_text="Source text",
+                source_type="prompt",
+                source_ref=None,
+                source_query=None,
+            )
         )
 
     assert exc_info.value.status_code == 500
@@ -2189,6 +2192,127 @@ def test_slides_generate_from_media_uses_stubbed_llm(slides_client_with_sources,
     assert data["title"] == "Media Deck"
     assert data["source_type"] == "media"
     assert data["source_ref"] == 1
+
+
+def test_slides_generate_from_media_stores_grounded_claim_verification(
+    slides_client_with_sources,
+    monkeypatch,
+):
+    from tldw_Server_API.app.core.Claims_Extraction.artifact_verification import (
+        ArtifactVerificationResult,
+    )
+
+    client, _, _ = slides_client_with_sources
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.endpoints.slides.get_latest_transcription",
+        lambda _db, _media_id: "Project Falcon improved retention to 82 percent.",
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Slides.slides_generator.perform_chat_api_call",
+        _build_llm_stub("Media Deck"),
+    )
+
+    async def fake_verify(**kwargs):
+        captured.update(kwargs)
+        return ArtifactVerificationResult(
+            verdict="grounded",
+            report={"total_claims": 1, "claims": [{"status": "verified"}]},
+            unit_results=[],
+            metadata={
+                "generation_provider": kwargs["generation_provider"],
+                "generation_model": kwargs["generation_model"],
+                "verification_provider": kwargs["verification_provider"],
+                "verification_model": kwargs["verification_model"],
+                "verification_llm_is_default": False,
+                "verification_llm_differs_from_generation": True,
+            },
+        )
+
+    monkeypatch.setattr(
+        slides_ep,
+        "_verify_slides_against_source",
+        fake_verify,
+        raising=False,
+    )
+
+    resp = client.post(
+        "/api/v1/slides/generate/from-media",
+        json={
+            "media_id": 1,
+            "title_hint": "Media Deck",
+            "theme": "black",
+            "provider": "llamacpp",
+            "model": "slide-model",
+            "claims_verification_provider": "openrouter",
+            "claims_verification_model": "claims-model",
+        },
+    )
+
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert captured["source_type"] == "media"
+    assert "Project Falcon improved retention" in str(captured["source_text"])
+    assert captured["slides"]
+    assert captured["generation_provider"] == "llamacpp"
+    assert captured["generation_model"] == "slide-model"
+    assert captured["verification_provider"] == "openrouter"
+    assert captured["verification_model"] == "claims-model"
+    assert data["studio_data"]["claimVerification"]["metadata"]["verification_provider"] == "openrouter"
+    assert data["studio_data"]["claimVerification"]["metadata"]["verification_model"] == "claims-model"
+
+
+def test_slides_generate_from_media_rejects_needs_revision_before_persist(
+    slides_client_with_sources,
+    monkeypatch,
+):
+    from tldw_Server_API.app.core.Claims_Extraction.artifact_verification import (
+        ArtifactVerificationResult,
+    )
+
+    client, _, _ = slides_client_with_sources
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.endpoints.slides.get_latest_transcription",
+        lambda _db, _media_id: "Project Falcon improved retention to 82 percent.",
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Slides.slides_generator.perform_chat_api_call",
+        _build_llm_stub("Media Deck"),
+    )
+
+    async def fake_verify(**_kwargs):
+        return ArtifactVerificationResult(
+            verdict="needs_revision",
+            report={"total_claims": 1, "claims": [{"status": "unverified"}]},
+            unit_results=[],
+            metadata={"reason": "no_claims"},
+        )
+
+    monkeypatch.setattr(
+        slides_ep,
+        "_verify_slides_against_source",
+        fake_verify,
+        raising=False,
+    )
+
+    resp = client.post(
+        "/api/v1/slides/generate/from-media",
+        json={
+            "media_id": 1,
+            "title_hint": "Media Deck",
+            "theme": "black",
+        },
+    )
+
+    assert resp.status_code == 422
+    detail = resp.json()["detail"]
+    assert detail["code"] == "claim_verification_failed"
+    assert detail["claimVerification"]["verdict"] == "needs_revision"
+
+    list_resp = client.get("/api/v1/slides/presentations")
+    assert list_resp.status_code == 200, list_resp.text
+    assert len(list_resp.json()["presentations"]) == 0
 
 
 def test_slides_generate_from_document_media_uses_document_content(

@@ -14,6 +14,7 @@ const {
   mockGetWorkspaceOutputStatus,
   mockDownloadOutput,
   mockGenerateFlashcardsService,
+  mockGenerateResearchWorkspaceArtifact,
   mockListVisualStyles,
   mockAddArtifact,
   mockUpdateArtifactStatus,
@@ -53,6 +54,7 @@ const {
   const getWorkspaceOutputStatus = vi.fn()
   const downloadOutput = vi.fn()
   const generateFlashcardsService = vi.fn()
+  const generateResearchWorkspaceArtifact = vi.fn()
   const listVisualStyles = vi.fn()
   const addArtifact = vi.fn()
   const updateArtifactStatus = vi.fn()
@@ -203,6 +205,7 @@ const {
     mockGetWorkspaceOutputStatus: getWorkspaceOutputStatus,
     mockDownloadOutput: downloadOutput,
     mockGenerateFlashcardsService: generateFlashcardsService,
+    mockGenerateResearchWorkspaceArtifact: generateResearchWorkspaceArtifact,
     mockListVisualStyles: listVisualStyles,
     mockAddArtifact: addArtifact,
     mockUpdateArtifactStatus: updateArtifactStatus,
@@ -298,6 +301,10 @@ vi.mock("@/services/flashcards", () => ({
   createDeck: mockCreateDeck,
   createFlashcard: mockCreateFlashcard,
   createFlashcardsBulk: mockCreateFlashcardsBulk
+}))
+
+vi.mock("@/services/researchWorkspaceArtifacts", () => ({
+  generateResearchWorkspaceArtifact: mockGenerateResearchWorkspaceArtifact
 }))
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
@@ -507,6 +514,21 @@ describe("StudioPane Stage 3 information architecture and UX polish", () => {
       { id: "llama-3.1-8b", name: "Llama 3.1 8B", provider: "ollama", type: "chat" }
     ])
     mockRagSearch.mockResolvedValue({ generation: "summary" })
+    mockGenerateResearchWorkspaceArtifact.mockResolvedValue({
+      artifact_type: "audio_overview",
+      content: "Audio script",
+      data: {},
+      claim_verification: {
+        verdict: "grounded",
+        metadata: {
+          generation_provider: "openai",
+          generation_model: "gpt-4o-mini",
+          verification_provider: "openai",
+          verification_model: "gpt-4o-mini",
+          verification_llm_is_default: true
+        }
+      }
+    })
     mockSynthesizeSpeech.mockResolvedValue(new ArrayBuffer(8))
     mockGenerateSlidesFromMedia.mockResolvedValue({
       id: "presentation-1",

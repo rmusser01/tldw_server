@@ -359,6 +359,7 @@ export interface WorkspaceStudyArtifactData {
   workspaceId?: string | null
   sourceMediaIds?: number[]
   sourceBundle?: WorkspaceStudyArtifactSource[]
+  claimVerification?: Record<string, unknown> | null
   questions?: Array<{
     question?: string
     question_text?: string

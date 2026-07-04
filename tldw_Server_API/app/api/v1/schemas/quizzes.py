@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -390,6 +390,8 @@ class QuizGenerateRequest(BaseModel):
     focus_topics: Optional[list[str]] = None
     model: Optional[str] = None
     api_provider: Optional[str] = None
+    claims_verification_provider: Optional[str] = Field(None, description="Optional Claims verification LLM provider override")
+    claims_verification_model: Optional[str] = Field(None, description="Optional Claims verification LLM model override")
     workspace_id: Optional[str] = Field(None, description="Canonical owning workspace ID; null means general scope")
     workspace_tag: Optional[str] = Field(None, description="Optional workspace tag (e.g., 'workspace:<slug-or-id>')")
 
@@ -425,6 +427,7 @@ class QuizGenerateRequest(BaseModel):
 class QuizGenerateResponse(BaseModel):
     quiz: QuizResponse
     questions: list[QuestionAdminResponse]
+    claim_verification: Optional[dict[str, Any]] = None
 
 
 class QuizImportQuestion(BaseModel):

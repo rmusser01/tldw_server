@@ -3,6 +3,7 @@ from unittest.mock import Mock
 
 import pytest
 
+from tldw_Server_API.app.core.Claims_Extraction.artifact_verification import ArtifactVerificationResult
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 from tldw_Server_API.app.services import quiz_generator
@@ -666,6 +667,183 @@ async def test_generate_quiz_does_not_persist_emq_invalidated_after_limiting(
         )
 
     persistence.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_generate_quiz_from_sources_rejects_failed_claim_verification_before_persist(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        quiz_generator,
+        "resolve_quiz_sources",
+        lambda *_args, **_kwargs: [
+            {
+                "source_type": "note",
+                "source_id": "note-verified",
+                "text": "The trial enrolled 42 participants.",
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        quiz_generator,
+        "_resolve_generated_quiz_metadata",
+        lambda **_kwargs: ("Trial Quiz", "Generated from selected evidence."),
+    )
+
+    async def fake_generate_llm(
+        *,
+        prompt: str,
+        model: str | None = None,
+        api_provider: str | None = None,
+    ) -> dict[str, object]:
+        return {
+            "questions": [
+                {
+                    "question_type": "multiple_choice",
+                    "question_text": "How many participants did the trial enroll?",
+                    "options": ["41", "43", "44", "45"],
+                    "correct_answer": 1,
+                    "explanation": "The trial enrolled 43 participants.",
+                    "source_citations": [
+                        {
+                            "source_type": "note",
+                            "source_id": "note-verified",
+                            "quote": "The trial enrolled 42 participants.",
+                        }
+                    ],
+                    "points": 1,
+                }
+            ]
+        }
+
+    async def fake_verify(**kwargs):
+        captured.update(kwargs)
+        return ArtifactVerificationResult(
+            verdict="failed",
+            report={"total_claims": 1, "claims": [{"status": "numerical_error"}]},
+            unit_results=[],
+            metadata={
+                "generation_provider": "llamacpp",
+                "generation_model": "generation-model",
+                "verification_provider": "openrouter",
+                "verification_model": "claims-model",
+                "verification_llm_is_default": False,
+            },
+        )
+
+    def fail_persist(**_kwargs):
+        raise AssertionError("quiz should not be persisted after failed claim verification")
+
+    monkeypatch.setattr(quiz_generator, "_call_quiz_generation_llm", fake_generate_llm)
+    monkeypatch.setattr(
+        quiz_generator,
+        "_verify_quiz_questions_against_sources",
+        fake_verify,
+        raising=False,
+    )
+    monkeypatch.setattr(quiz_generator, "_persist_generated_quiz", fail_persist)
+
+    with pytest.raises(QuizClaimVerificationError) as exc_info:
+        await generate_quiz_from_sources(
+            db=Mock(),
+            media_db=Mock(),
+            sources=[{"source_type": "note", "source_id": "note-verified"}],
+            num_questions=1,
+            question_types=["multiple_choice"],
+            model="generation-model",
+            api_provider="llamacpp",
+            claims_verification_provider="openrouter",
+            claims_verification_model="claims-model",
+        )
+
+    assert captured["generation_provider"] == "llamacpp"
+    assert captured["generation_model"] == "generation-model"
+    assert captured["verification_provider"] == "openrouter"
+    assert captured["verification_model"] == "claims-model"
+    assert exc_info.value.claim_verification["verdict"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_generate_quiz_from_sources_rejects_needs_revision_claim_verification_before_persist(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        quiz_generator,
+        "resolve_quiz_sources",
+        lambda *_args, **_kwargs: [
+            {
+                "source_type": "note",
+                "source_id": "note-verified",
+                "text": "The trial enrolled 42 participants.",
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        quiz_generator,
+        "_resolve_generated_quiz_metadata",
+        lambda **_kwargs: ("Trial Quiz", "Generated from selected evidence."),
+    )
+
+    async def fake_generate_llm(
+        *,
+        prompt: str,
+        model: str | None = None,
+        api_provider: str | None = None,
+    ) -> dict[str, object]:
+        return {
+            "questions": [
+                {
+                    "question_type": "multiple_choice",
+                    "question_text": "How many participants did the trial enroll?",
+                    "options": ["41", "42", "43", "44"],
+                    "correct_answer": 1,
+                    "explanation": "The trial enrolled 42 participants.",
+                    "source_citations": [
+                        {
+                            "source_type": "note",
+                            "source_id": "note-verified",
+                            "quote": "The trial enrolled 42 participants.",
+                        }
+                    ],
+                    "points": 1,
+                }
+            ]
+        }
+
+    async def fake_verify(**_kwargs):
+        return ArtifactVerificationResult(
+            verdict="needs_revision",
+            report={"total_claims": 1, "claims": [{"status": "unverified"}]},
+            unit_results=[],
+            metadata={"reason": "no_claims"},
+        )
+
+    def fail_persist(**_kwargs):
+        raise AssertionError("quiz should not be persisted after needs_revision claim verification")
+
+    monkeypatch.setattr(quiz_generator, "_call_quiz_generation_llm", fake_generate_llm)
+    monkeypatch.setattr(
+        quiz_generator,
+        "_verify_quiz_questions_against_sources",
+        fake_verify,
+        raising=False,
+    )
+    monkeypatch.setattr(quiz_generator, "_persist_generated_quiz", fail_persist)
+
+    with pytest.raises(QuizClaimVerificationError) as exc_info:
+        await generate_quiz_from_sources(
+            db=Mock(),
+            media_db=Mock(),
+            sources=[{"source_type": "note", "source_id": "note-verified"}],
+            num_questions=1,
+            question_types=["multiple_choice"],
+            model="generation-model",
+            api_provider="llamacpp",
+        )
+
+    assert exc_info.value.claim_verification["verdict"] == "needs_revision"
 
 
 @pytest.mark.asyncio
