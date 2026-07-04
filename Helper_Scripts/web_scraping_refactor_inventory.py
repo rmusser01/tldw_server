@@ -3,10 +3,9 @@ from __future__ import annotations
 import argparse
 import ast
 import json
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Iterable
-
 
 TARGET_MODULES: dict[str, str] = {
     "Article_Extractor_Lib": "tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib",
@@ -56,7 +55,7 @@ SKIP_DIR_NAMES: set[str] = {
 }
 
 
-@dataclass(frozen=True, order=True)
+@dataclass(frozen=True)
 class ImportRecord:
     target_name: str
     module: str
@@ -68,6 +67,47 @@ class ImportRecord:
 
 def _relpath(path: Path, project_root: Path) -> str:
     return path.resolve().relative_to(project_root.resolve()).as_posix()
+
+
+def _record_sort_key(record: ImportRecord) -> tuple[str, int, str, str, str, str]:
+    return (
+        record.path,
+        record.line,
+        record.import_kind,
+        record.target_name,
+        record.module,
+        record.imported_name or "",
+    )
+
+
+def _module_name_for_path(path: Path, project_root: Path) -> str:
+    module_path = path.resolve().relative_to(project_root.resolve()).with_suffix("")
+    parts = list(module_path.parts)
+    if parts and parts[-1] == "__init__":
+        parts.pop()
+    return ".".join(parts)
+
+
+def _resolve_from_import_module(path: Path, project_root: Path, node: ast.ImportFrom) -> str | None:
+    if node.level == 0:
+        return node.module
+
+    current_module = _module_name_for_path(path, project_root)
+    if not current_module:
+        return node.module
+
+    current_parts = current_module.split(".")
+    package_parts = current_parts if path.name == "__init__.py" else current_parts[:-1]
+    if node.level > 1:
+        levels_up = node.level - 1
+        if levels_up > len(package_parts):
+            return node.module
+        package_parts = package_parts[:-levels_up]
+
+    module_parts = package_parts
+    if node.module:
+        module_parts = [*module_parts, *node.module.split(".")]
+    return ".".join(module_parts)
 
 
 def _module_matches(module_name: str, target_module: str) -> bool:
@@ -118,22 +158,23 @@ def scan_file(path: Path, *, project_root: Path, targets: dict[str, str]) -> lis
                             )
                         )
         elif isinstance(node, ast.ImportFrom):
-            if node.module is None:
+            module_name = _resolve_from_import_module(path, project_root, node)
+            if module_name is None:
                 continue
             for alias in node.names:
                 for target_name, target_module in targets.items():
-                    if _from_import_matches(node.module, alias.name, target_module):
+                    if _from_import_matches(module_name, alias.name, target_module):
                         records.append(
                             ImportRecord(
                                 target_name=target_name,
-                                module=node.module,
+                                module=module_name,
                                 imported_name=alias.name,
                                 path=relative_path,
                                 line=node.lineno,
                                 import_kind="from",
                             )
                         )
-    return sorted(records)
+    return sorted(records, key=_record_sort_key)
 
 
 def inventory_for_roots(project_root: Path, roots: Iterable[Path], *, targets: dict[str, str]) -> dict[str, list[ImportRecord]]:
@@ -141,7 +182,7 @@ def inventory_for_roots(project_root: Path, roots: Iterable[Path], *, targets: d
     for path in discover_python_files(roots):
         for record in scan_file(path, project_root=project_root, targets=targets):
             inventory[record.target_name].append(record)
-    return {target: sorted(records) for target, records in inventory.items()}
+    return {target: sorted(records, key=_record_sort_key) for target, records in inventory.items()}
 
 
 def _records_for_json(inventory: dict[str, list[ImportRecord]]) -> dict[str, list[dict[str, object]]]:
@@ -201,6 +242,18 @@ def default_scan_roots(project_root: Path) -> list[Path]:
     ]
 
 
+def _resolve_output_path(raw_path: str, project_root: Path) -> Path:
+    path = Path(raw_path).expanduser()
+    if not path.is_absolute():
+        path = project_root / path
+    resolved_path = path.resolve()
+    try:
+        resolved_path.relative_to(project_root)
+    except ValueError as exc:
+        raise ValueError(f"Output path must be under project root: {resolved_path}") from exc
+    return resolved_path
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate Web_Scraping refactor import inventory artifacts.")
     parser.add_argument("--root", default=".", help="Repository root path.")
@@ -212,10 +265,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     project_root = Path(args.root).resolve()
+    json_path = _resolve_output_path(args.json, project_root)
+    markdown_path = _resolve_output_path(args.markdown, project_root)
     roots = default_scan_roots(project_root)
     inventory = inventory_for_roots(project_root, roots, targets=TARGET_MODULES)
-    write_json_inventory(Path(args.json), inventory, roots=[_relpath(root, project_root) for root in roots])
-    write_markdown_inventory(Path(args.markdown), inventory, json_path=_relpath(Path(args.json), project_root))
+    write_json_inventory(json_path, inventory, roots=[_relpath(root, project_root) for root in roots])
+    write_markdown_inventory(markdown_path, inventory, json_path=_relpath(json_path, project_root))
     return 0
 
 
