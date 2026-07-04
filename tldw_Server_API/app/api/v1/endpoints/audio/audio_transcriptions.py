@@ -159,6 +159,16 @@ def _sniff_audio_upload_suffix(sample: bytes) -> str:
     return ""
 
 
+def _has_wav_container_header(path: PathLib) -> bool:
+    """Return True when a file starts with a RIFF/WAVE container header."""
+    try:
+        with path.open("rb") as handle:
+            header = handle.read(12)
+    except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS:
+        return False
+    return len(header) >= 12 and header.startswith(b"RIFF") and header[8:12] == b"WAVE"
+
+
 def _resolve_audio_upload_suffix(
     filename: str | None,
     content_type: str | None,
@@ -704,6 +714,20 @@ async def create_transcription(
             temp_audio_path = tmp_file.name
 
         # Convert to canonical 16k mono WAV for consistent processing; base_dir constrains output location.
+        def _raise_invalid_audio(cause: Exception | None = None) -> None:
+            """Raise the canonical invalid_audio response for failed WAV preparation."""
+            exc = HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=_dictation_error_detail(
+                    http_status=status.HTTP_400_BAD_REQUEST,
+                    detail_status="invalid_audio",
+                    message="Audio file could not be converted to canonical WAV.",
+                ),
+            )
+            if cause is not None:
+                raise exc from cause
+            raise exc
+
         try:
             from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib import (
                 ConversionError,
@@ -713,31 +737,51 @@ async def create_transcription(
             )
         except ImportError as e:
             logger.debug(
-                'convert_to_wav import failed; using original temp file: path={}, error={}',
+                'convert_to_wav import failed; rejecting audio upload: path={}, error={}',
                 temp_audio_path,
                 e,
             )
-            canonical_path = temp_audio_path
+            _raise_invalid_audio(cause=e)
         else:
             try:
                 canonical_path = _convert_to_wav(
                     temp_audio_path,
                     offset=0,
-                    overwrite=False,
+                    overwrite=True,
                     base_dir=PathLib(temp_audio_path).parent,
                 )
             except (ConversionError, OSError, RuntimeError, ValueError) as e:
                 logger.debug(
-                    'convert_to_wav failed; using original temp file: path={}, error={}',
+                    'convert_to_wav failed; rejecting audio upload: path={}, error={}',
                     temp_audio_path,
                     e,
                 )
-                canonical_path = temp_audio_path
+                _raise_invalid_audio(cause=e)
+
+        if not canonical_path:
+            logger.debug(
+                'convert_to_wav returned empty output; rejecting audio upload: input_path={}',
+                temp_audio_path,
+            )
+            _raise_invalid_audio()
+
+        canonical_path_obj = PathLib(canonical_path)
+        if (
+            canonical_path_obj.suffix.lower() != ".wav"
+            or not canonical_path_obj.exists()
+            or not _has_wav_container_header(canonical_path_obj)
+        ):
+            logger.debug(
+                'convert_to_wav returned unusable output; rejecting audio upload: input_path={}, output_path={}',
+                temp_audio_path,
+                canonical_path,
+            )
+            _raise_invalid_audio()
 
         if is_test_mode():
             logger.debug("TEST_MODE: canonical audio path resolved")
 
-        base_dir = PathLib(canonical_path).parent
+        base_dir = canonical_path_obj.parent
 
         sf_mod = _audio_shim_attr("sf")
         duration_seconds = 0.0
