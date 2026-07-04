@@ -289,7 +289,7 @@ def create_job_admission(
                 cur,
                 row=row,
                 idempotent=False,
-                request_id=row.get("request_id"),
-                trace_id=row.get("trace_id"),
+                request_id=command.request_id,
+                trace_id=command.trace_id,
             )
             return AdmissionResult.applied(row=row, durable_events=(event,))

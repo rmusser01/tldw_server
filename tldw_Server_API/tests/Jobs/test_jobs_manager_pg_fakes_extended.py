@@ -278,6 +278,34 @@ def test_pg_idempotent_create_uses_current_request_context_for_job_created_event
 
 
 @pytest.mark.unit
+def test_pg_non_idempotent_create_uses_command_context_for_job_created_event(monkeypatch, tmp_path):
+    monkeypatch.setenv("JOBS_DB_URL", "postgresql://fake")
+    jm = JobManager(db_path=tmp_path / "dummy.db")
+    jm.backend = "postgres"
+
+    jobs = {}
+    cursor = FakePGCursor(jobs)
+    monkeypatch.setattr(jm, "_connect", lambda: FakePGConn())
+    monkeypatch.setattr(jm, "_pg_cursor", lambda conn: cursor)
+
+    row = jm.create_job(
+        domain="pg",
+        queue="default",
+        job_type="x",
+        payload={},
+        owner_user_id=None,
+        request_id="request-current",
+        trace_id="trace-current",
+    )
+
+    assert row["status"] == "queued"
+    assert cursor.job_event_inserts
+    event_params = cursor.job_event_inserts[-1]
+    assert event_params[7] == "request-current"
+    assert event_params[8] == "trace-current"
+
+
+@pytest.mark.unit
 def test_pg_batch_complete_encrypts_results(monkeypatch, tmp_path):
      # Enable encryption for domain SECURE and provide AES key
     monkeypatch.setenv("JOBS_ENCRYPT_SECURE", "true")

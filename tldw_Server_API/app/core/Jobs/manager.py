@@ -1190,7 +1190,11 @@ class JobManager:
                             )
                     else:
                         with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
-                            emit_job_event("job.created", job=row, attrs=attrs)
+                            emit_job_event(
+                                "job.created",
+                                job={**row, "request_id": request_id, "trace_id": trace_id},
+                                attrs=attrs,
+                            )
                     continue
 
                 emitted_job = {**row, "request_id": request_id, "trace_id": trace_id}
