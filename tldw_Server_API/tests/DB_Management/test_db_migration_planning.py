@@ -67,6 +67,48 @@ def test_execute_migration_rolls_back_failed_multi_statement_script(tmp_path: Pa
     assert version == 0
 
 
+def test_prepare_migration_statements_extracts_function_style_foreign_key_pragmas() -> None:
+    pre, main, post = DatabaseMigrator._prepare_migration_statements(
+        """
+        PRAGMA foreign_keys(OFF);
+        CREATE TABLE parent (id INTEGER PRIMARY KEY);
+        PRAGMA foreign_keys(ON);
+        """
+    )
+
+    assert [statement.strip() for statement in pre] == ["PRAGMA foreign_keys(OFF);"]
+    assert [statement.strip() for statement in main] == [
+        "CREATE TABLE parent (id INTEGER PRIMARY KEY);"
+    ]
+    assert [statement.strip() for statement in post] == ["PRAGMA foreign_keys(ON);"]
+
+
+def test_split_sql_statements_checks_completeness_only_at_statement_boundaries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    def _complete_statement(candidate: str) -> bool:
+        calls.append(candidate)
+        return candidate.endswith(";")
+
+    monkeypatch.setattr(db_migration_module.sqlite3, "complete_statement", _complete_statement)
+
+    sql = """
+    -- comment without semicolon
+    CREATE TABLE first (id INTEGER);
+    INSERT INTO first VALUES (1);
+    """
+
+    statements = DatabaseMigrator._split_sql_statements(sql)
+
+    assert [statement.strip() for statement in statements] == [
+        "-- comment without semicolon\n    CREATE TABLE first (id INTEGER);",
+        "INSERT INTO first VALUES (1);",
+    ]
+    assert len(calls) == sql.count(";")
+
+
 def test_migrate_to_version_rejects_rollback_without_down_sql(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
