@@ -90,8 +90,8 @@ Allowed persisted fields for the `mcp_tools` step:
 - `confirmed_addon_ids`: list of strings
 - `confirmation_version`: string or null
 - `validation_state`: one of the states listed above
-- `profile_id`: string or null
-- `assignment_id`: string or null
+- `profile_id`: integer or null
+- `assignment_id`: integer or null
 - `catalog_version`: string
 - `effective_tool_count`: integer
 - `validated_at`: ISO timestamp string or null
@@ -109,6 +109,8 @@ Minimal endpoints:
 - `POST /api/v1/setup/first-run/mcp-tools/validate`
 
 The catalog response may also include current saved state so the frontend can resume accurately. If this grows too large, add `GET /api/v1/setup/first-run/mcp-tools/state`.
+
+These identifiers are the numeric database IDs returned by the existing TLDW MCP Hub management service. Standalone MCP gateway string profile IDs are a separate implementation boundary and are out of scope for first-run setup v1 unless a deliberate adapter is added later.
 
 ### Pack Catalog
 
@@ -159,8 +161,8 @@ For add-ons with strong confirmation, the apply endpoint must require the add-on
 Saving packs upserts one MCP Hub permission profile:
 
 - Display name: `First-run default`
-- Stable marker: `metadata.setup_origin = "first_run_mcp_tools"`
-- Stable setup id: `metadata.setup_instance_id`
+- Stable marker: `policy_document.first_run_mcp_tools.setup_origin = "first_run_mcp_tools"`
+- Stable setup id: `policy_document.first_run_mcp_tools.setup_instance_id`
 - Generated policy provenance: selected pack ids, selected add-on ids, catalog version, generated policy hash, and last generated hash
 
 The profile is assigned visibly through MCP Hub so users can inspect or replace it later.
@@ -180,7 +182,7 @@ Store `last_generated_hash` for the generated policy. On re-apply:
 - `Keep existing` records the current profile and continues without overwriting.
 - `Replace generated profile` explicitly overwrites the generated profile and stores a new hash.
 
-The hash covers only the generated policy section plus selected pack ids, selected add-on ids, and catalog version. It must not cover user-owned profile metadata outside `metadata.first_run_mcp_tools`, display name changes, or MCP Hub annotations.
+The hash covers only the generated policy section plus selected pack ids, selected add-on ids, and catalog version. It must not cover user-owned profile fields outside `policy_document.first_run_mcp_tools`, display name changes, or MCP Hub annotations.
 
 ### Authorization And Setup Boundary
 
