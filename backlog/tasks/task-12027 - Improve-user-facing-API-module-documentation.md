@@ -1,14 +1,14 @@
 ---
 id: TASK-12027
 title: Improve user-facing API module documentation
-status: Done
+status: In Progress
 assignee: []
-created_date: '2026-07-04 22:25'
-updated_date: '2026-07-04 23:33'
+created_date: 2026-07-04 22:25
+updated_date: 2026-07-05 03:04
 labels:
-  - docs
-  - api
-  - openapi
+- docs
+- api
+- openapi
 dependencies: []
 priority: medium
 ---
@@ -59,3 +59,9 @@ Expanded the source API tag index into a grouped module capability guide and ali
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Reopened for PR follow-up: rebase PR #2637 on latest dev and evaluate/address review comments and checks before pushing an updated branch.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
