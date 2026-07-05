@@ -17,6 +17,35 @@ and this project adheres to Some kind of Versioning
 ### Removed
 
 
+## [0.1.36] - 2026-07-05
+
+> Corrective release: this patch supersedes `0.1.35` after the release merge
+> landed on `main` before the branch topology was synced back. It keeps `main`
+> as the release branch, keeps `dev` as the forward working branch, and includes
+> PR #2653 plus the dev/main sync repair.
+
+### Added
+
+- **MCP External Resource Parity** — Added external MCP resource discovery and
+  read parity through redacted `external://` resource URIs, profile-aware grant
+  checks, stdio/websocket resource list/read support, and gateway bootstrap
+  wiring for external runtime resource access.
+
+### Changed
+
+- **Corrective Release Metadata** — Bumped package, FastAPI, README, and MkDocs
+  metadata to `0.1.36` so PyPI/main-branch publishing can produce a clean patch
+  release after the `0.1.35` branch mistake.
+
+### Fixed
+
+- **Branch Topology Repair** — Synced the `0.1.35` main release merge back into
+  `dev`, preserving the dev-only MCP resource work while making `main` an
+  ancestor of `dev` again.
+
+### Removed
+
+
 ## [0.1.35] - 2026-07-03
 
 > Rollup coverage: this entry covers current `dev` work that landed after the
