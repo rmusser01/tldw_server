@@ -103,3 +103,90 @@ def test_default_fetch_client_measures_elapsed_with_monotonic_clock(monkeypatch)
 def test_default_fetch_client_rejects_non_get_method() -> None:
     with pytest.raises(ValueError, match="only supports GET"):
         DefaultFetchClient().fetch(FetchRequest(url="https://example.com/article", method="POST"))
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_default_policy_checker_delegates_to_existing_outbound_policy(monkeypatch) -> None:
+    import tldw_Server_API.app.core.Web_Scraping.policy.adapters as policy_adapters
+    from tldw_Server_API.app.core.Web_Scraping.policy import DefaultWebOutboundPolicyChecker
+    from tldw_Server_API.app.core.Web_Scraping.runtime import RuntimeRequestContext
+
+    calls: dict[str, object] = {}
+
+    async def fake_decide_web_outbound_policy(url, **kwargs):
+        calls["url"] = url
+        calls["kwargs"] = kwargs
+        return SimpleNamespace(
+            allowed=False,
+            mode="strict",
+            reason="robots_disallowed",
+            stage="pre_fetch",
+            source="article_extract",
+            details={"policy": "test"},
+        )
+
+    monkeypatch.setattr(
+        policy_adapters,
+        "decide_web_outbound_policy",
+        fake_decide_web_outbound_policy,
+    )
+
+    decision = await DefaultWebOutboundPolicyChecker().decide(
+        "https://example.com/article",
+        respect_robots=True,
+        user_agent="UA",
+        context=RuntimeRequestContext(source="article_extract", stage="pre_fetch"),
+        config={"web_scraper": {"web_outbound_policy_mode": "strict"}},
+    )
+
+    assert calls["url"] == "https://example.com/article"
+    assert calls["kwargs"] == {
+        "respect_robots": True,
+        "user_agent": "UA",
+        "source": "article_extract",
+        "stage": "pre_fetch",
+        "config": {"web_scraper": {"web_outbound_policy_mode": "strict"}},
+    }
+    assert decision.allowed is False
+    assert decision.mode == "strict"
+    assert decision.reason == "robots_disallowed"
+    assert decision.stage == "pre_fetch"
+    assert decision.source == "article_extract"
+    assert decision.details == {"policy": "test"}
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_default_policy_checker_defaults_context_source_and_stage(monkeypatch) -> None:
+    import tldw_Server_API.app.core.Web_Scraping.policy.adapters as policy_adapters
+    from tldw_Server_API.app.core.Web_Scraping.policy import DefaultWebOutboundPolicyChecker
+    from tldw_Server_API.app.core.Web_Scraping.runtime import RuntimeRequestContext
+
+    async def fake_decide_web_outbound_policy(url, **kwargs):
+        return SimpleNamespace(
+            allowed=True,
+            mode="compat",
+            reason="allowed",
+            stage=kwargs["stage"],
+            source=kwargs["source"],
+            details=None,
+        )
+
+    monkeypatch.setattr(
+        policy_adapters,
+        "decide_web_outbound_policy",
+        fake_decide_web_outbound_policy,
+    )
+
+    decision = await DefaultWebOutboundPolicyChecker().decide(
+        "https://example.com/article",
+        respect_robots=False,
+        user_agent=None,
+        context=RuntimeRequestContext(),
+        config=None,
+    )
+
+    assert decision.allowed is True
+    assert decision.stage == "runtime"
+    assert decision.source == "web_scraping"
