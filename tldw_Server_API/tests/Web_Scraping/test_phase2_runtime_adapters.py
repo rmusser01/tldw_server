@@ -10,7 +10,7 @@ from tldw_Server_API.app.core.Web_Scraping.runtime.fetch import DefaultFetchClie
 
 
 @pytest.mark.unit
-def test_default_fetch_client_uses_simplified_get_path_without_method(monkeypatch) -> None:
+def test_default_fetch_client_uses_simplified_get_path_without_method_for_curl(monkeypatch) -> None:
     calls: dict[str, object] = {}
 
     def fake_fetch(url, **kwargs):
@@ -55,8 +55,12 @@ def test_default_fetch_client_uses_simplified_get_path_without_method(monkeypatc
 
 
 @pytest.mark.unit
-def test_default_fetch_client_normalizes_object_like_response(monkeypatch) -> None:
-    def fake_fetch(url, **kwargs):
+def test_default_fetch_client_uses_response_mode_for_httpx_security(monkeypatch) -> None:
+    calls: dict[str, object] = {}
+
+    def fake_fetch(*args, **kwargs):
+        calls["args"] = args
+        calls["kwargs"] = kwargs
         return SimpleNamespace(
             status_code=201,
             headers={"X-Test": "true"},
@@ -67,9 +71,28 @@ def test_default_fetch_client_normalizes_object_like_response(monkeypatch) -> No
     monkeypatch.setattr(runtime_fetch, "http_fetch", fake_fetch)
 
     response = DefaultFetchClient().fetch(
-        FetchRequest(url="https://example.com/article", backend="httpx", timeout=15.0)
+        FetchRequest(
+            url="https://example.com/article",
+            headers={"User-Agent": "UA"},
+            cookies={"session": "abc"},
+            backend="httpx",
+            timeout=15.0,
+            allow_redirects=True,
+            proxies={"https": "http://proxy.example:8080"},
+        )
     )
 
+    assert calls["args"] == ()
+    kwargs = calls["kwargs"]
+    assert isinstance(kwargs, dict)
+    assert kwargs["method"] == "GET"
+    assert kwargs["url"] == "https://example.com/article"
+    assert kwargs["allow_redirects"] is True
+    assert kwargs["headers"] == {"User-Agent": "UA"}
+    assert kwargs["cookies"] == {"session": "abc"}
+    assert kwargs["proxies"] == {"https": "http://proxy.example:8080"}
+    assert "backend" not in kwargs
+    assert "follow_redirects" not in kwargs
     assert response.status == 201
     assert response.headers["X-Test"] == "true"
     assert response.text == "<html>created</html>"

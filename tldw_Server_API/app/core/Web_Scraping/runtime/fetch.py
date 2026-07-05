@@ -41,20 +41,33 @@ class DefaultFetchClient:
             raise ValueError("DefaultFetchClient only supports GET requests in Phase 2")
 
         started = time.monotonic()
-        raw = http_fetch(
-            request.url,
-            headers=_mutable_mapping_or_none(request.headers),
-            cookies=_mutable_mapping_or_none(request.cookies),
-            timeout=request.timeout,
-            backend=request.backend,
-            follow_redirects=request.allow_redirects,
-            impersonate=request.impersonate,
-            proxies=_mutable_proxies(request.proxies),
-        )
+        if request.backend == "curl":
+            raw = http_fetch(
+                request.url,
+                headers=_mutable_mapping_or_none(request.headers),
+                cookies=_mutable_mapping_or_none(request.cookies),
+                timeout=request.timeout,
+                backend=request.backend,
+                follow_redirects=request.allow_redirects,
+                impersonate=request.impersonate,
+                proxies=_mutable_proxies(request.proxies),
+            )
+            fallback_backend = "curl"
+        else:
+            raw = http_fetch(
+                method=request.method,
+                url=request.url,
+                headers=_mutable_mapping_or_none(request.headers),
+                cookies=_mutable_mapping_or_none(request.cookies),
+                timeout=request.timeout,
+                allow_redirects=request.allow_redirects,
+                proxies=_mutable_proxies(request.proxies),
+            )
+            fallback_backend = "httpx"
         elapsed = max(0.0, time.monotonic() - started)
         return FetchResponse.from_raw(
             raw,
             fallback_url=request.url,
-            fallback_backend=request.backend,
+            fallback_backend=fallback_backend,
             elapsed_seconds=elapsed,
         )
