@@ -150,20 +150,32 @@ def build_research_workspace_output_source_context(
             truncated = True
             continue
 
-        raw_part = f"# {title}\n\n{content_excerpt}"
-        part = raw_part[:available_chars].rstrip()
-        if not part:
+        if available_chars < len("# a\n\nb"):
             skipped_source_ids.append(source_id)
             truncated = True
             continue
 
+        body_budget = min(len(content_excerpt), max(1, available_chars // 2))
+        title_budget = available_chars - len("# \n\n") - body_budget
+        if title_budget < 1:
+            title_budget = 1
+            body_budget = available_chars - len("# \n\n") - title_budget
+        if body_budget < 1:
+            skipped_source_ids.append(source_id)
+            truncated = True
+            continue
+
+        title_excerpt = title[:title_budget].rstrip() or title[:1]
+        body_excerpt = content_excerpt[:body_budget].rstrip() or content_excerpt[:1]
+        part = f"# {title_excerpt}\n\n{body_excerpt}"
         parts.append(part)
         usable_source_ids.append(source_id)
         media_ids.append(media_id)
         remaining_chars -= separator_chars + len(part)
         truncated = (
             truncated
-            or len(raw_part) > len(part)
+            or len(title) > len(title_excerpt)
+            or len(content_excerpt) > len(body_excerpt)
             or len(content) > len(content_excerpt)
         )
 

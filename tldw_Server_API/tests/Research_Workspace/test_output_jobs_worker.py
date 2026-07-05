@@ -126,6 +126,9 @@ def test_build_source_context_caps_title_and_content_text() -> None:
     )
 
     assert len(context.text) <= 40
+    assert context.text.startswith("# ")
+    assert "\n\n" in context.text
+    assert context.text.split("\n\n", 1)[1].strip()
     assert context.source_lineage["context_truncated"] is True
 
 
