@@ -619,7 +619,12 @@ describe("StudioPane Stage 3 information architecture and UX polish", () => {
         total_tokens: 321,
         total_cost_usd: 0.045,
         producer_metadata: { backend: "image" },
-        source_lineage: [{ sourceId: "source-1", title: "DSPy Prompting Talk" }],
+        source_lineage: {
+          selected_source_ids: ["source-1"],
+          usable_source_ids: ["source-1"],
+          skipped_source_ids: [],
+          media_ids: [101]
+        },
         export_refs: [
           {
             id: "output-artifact-123",
@@ -666,6 +671,12 @@ describe("StudioPane Stage 3 information architecture and UX polish", () => {
         totalTokens: 321,
         totalCostUsd: 0.045,
         version: 2,
+        sourceLineage: [
+          expect.objectContaining({
+            sourceId: "source-1",
+            mediaId: 101
+          })
+        ],
         exportRefs: [
           expect.objectContaining({
             fileId: "output-file-123",
@@ -714,9 +725,12 @@ describe("StudioPane Stage 3 information architecture and UX polish", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "View" }))
 
+    await waitFor(() => {
+      expect(mockDownloadOutput).toHaveBeenCalledWith("output-file-123", "png")
+    })
     expect(
       await screen.findByRole("img", { name: "Infographic" })
-    ).toHaveAttribute("src", "/api/v1/outputs/output-file-123/download")
+    ).toHaveAttribute("src", "blob:infographic")
 
     fireEvent.click(screen.getByRole("button", { name: "Download" }))
 

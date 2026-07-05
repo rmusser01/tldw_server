@@ -46,6 +46,7 @@ from tldw_Server_API.app.core.Slides.slides_generator import (
     SlidesGenerator,
     SlidesSourceTooLargeError,
 )
+from tldw_Server_API.app.core.Slides.visual_style_resolver import resolve_builtin_visual_style
 from tldw_Server_API.app.core.TTS.tts_exceptions import TTSError, is_retryable_error
 from tldw_Server_API.app.core.TTS.tts_request_resolution import resolve_tts_request_defaults
 from tldw_Server_API.app.core.TTS.tts_service_v2 import get_tts_service_v2
@@ -483,6 +484,8 @@ async def _process_infographic_output_payload(
         if str(source_id).strip()
     ]
     title = settings.title_hint or "Infographic"
+    created_outputs: list[ResearchWorkspacePersistedOutput] = []
+    created_storage_paths: list[str] = []
 
     try:
         source_context = build_research_workspace_output_source_context(
@@ -525,6 +528,7 @@ async def _process_infographic_output_payload(
                 workspace_artifact_id=artifact_id,
                 metadata={"image_backend": structured.get("backend")},
             )
+            created_outputs.append(persisted)
     except ResearchWorkspaceOutputJobError as exc:
         _try_mark_workspace_output_artifact_failed(
             workspace_db=workspace_db,
@@ -567,26 +571,42 @@ async def _process_infographic_output_payload(
         "content_type": persisted.content_type,
         "bytes": persisted.byte_size,
     }
-    _update_workspace_output_artifact(
-        workspace_db=workspace_db,
-        workspace_id=workspace_id,
-        artifact_id=artifact_id,
-        updates={
-            "status": "complete",
-            "content_type": "image/png",
-            "preview_text": source_context.preview_text,
-            "summary": "Generated infographic",
-            "source_lineage": source_context.source_lineage,
-            "producer_metadata": {
-                "origin": "research_workspace_output_job",
-                "job_id": job_id,
-                "artifact_type": "infographic",
-                "backend": structured.get("backend"),
+    try:
+        _update_workspace_output_artifact(
+            workspace_db=workspace_db,
+            workspace_id=workspace_id,
+            artifact_id=artifact_id,
+            updates={
+                "status": "complete",
+                "content_type": "image/png",
+                "preview_text": source_context.preview_text,
+                "summary": "Generated infographic",
+                "source_lineage": source_context.source_lineage,
+                "producer_metadata": {
+                    "origin": "research_workspace_output_job",
+                    "job_id": job_id,
+                    "artifact_type": "infographic",
+                    "backend": structured.get("backend"),
+                },
+                "export_refs": [export_ref],
+                "completed_at": _utc_now_iso(),
             },
-            "export_refs": [export_ref],
-            "completed_at": _utc_now_iso(),
-        },
-    )
+        )
+    except ResearchWorkspaceOutputJobError as exc:
+        _cleanup_research_workspace_created_outputs_for_user(
+            user_id=user_id,
+            outputs=created_outputs,
+            storage_paths=created_storage_paths,
+        )
+        _try_mark_workspace_output_artifact_failed(
+            workspace_db=workspace_db,
+            workspace_id=workspace_id,
+            artifact_id=artifact_id,
+            artifact_type="infographic",
+            job_id=job_id,
+            error_code=exc.public_code,
+        )
+        raise
     return {
         "workspace_id": workspace_id,
         "artifact_id": artifact_id,
@@ -612,6 +632,24 @@ def _tts_generation_job_error(exc: TTSError) -> ResearchWorkspaceOutputJobError:
         "tts_generation_failed",
         retryable=is_retryable_error(exc),
     )
+
+
+def _resolve_research_workspace_slides_visual_style(
+    settings: ResearchWorkspaceOutputSettings,
+) -> dict[str, Any] | None:
+    style_id = str(settings.slides_visual_style_id or "").strip()
+    if not style_id:
+        return None
+    resolved = resolve_builtin_visual_style(style_id)
+    if resolved is None:
+        raise ResearchWorkspaceOutputJobError("visual_style_not_found", status_code=404)
+    return {
+        "id": resolved.definition.style_id,
+        "scope": "builtin",
+        "name": resolved.definition.name,
+        "version": resolved.definition.version,
+        "snapshot": resolved.snapshot,
+    }
 
 
 async def _process_video_overview_output_payload(
@@ -642,6 +680,11 @@ async def _process_video_overview_output_payload(
     tts_model = tts_defaults.model
     tts_voice = tts_defaults.voice
     title = settings.title_hint or "Video Overview"
+    visual_style = _resolve_research_workspace_slides_visual_style(settings)
+    visual_style_snapshot = visual_style["snapshot"] if visual_style else None
+    visual_style_snapshot_json = (
+        json.dumps(visual_style_snapshot, ensure_ascii=True) if visual_style_snapshot else None
+    )
     created_outputs: list[ResearchWorkspacePersistedOutput] = []
     created_storage_paths: list[str] = []
 
@@ -668,7 +711,7 @@ async def _process_video_overview_output_payload(
                 enable_chunking=True,
                 chunk_size_tokens=None,
                 summary_tokens=None,
-                visual_style_snapshot=None,
+                visual_style_snapshot=visual_style_snapshot,
             )
         except SlidesGenerationError as exc:
             raise _slides_generation_job_error(exc) from exc
@@ -725,11 +768,11 @@ async def _process_video_overview_output_payload(
                     theme="black",
                     marp_theme=None,
                     template_id=None,
-                    visual_style_id=None,
-                    visual_style_scope=None,
-                    visual_style_name=None,
-                    visual_style_version=None,
-                    visual_style_snapshot=None,
+                    visual_style_id=visual_style["id"] if visual_style else None,
+                    visual_style_scope=visual_style["scope"] if visual_style else None,
+                    visual_style_name=visual_style["name"] if visual_style else None,
+                    visual_style_version=visual_style["version"] if visual_style else None,
+                    visual_style_snapshot=visual_style_snapshot_json,
                     settings=json.dumps({"origin": "research_workspace"}, ensure_ascii=False),
                     studio_data=None,
                     slides=json.dumps(slides, ensure_ascii=False),

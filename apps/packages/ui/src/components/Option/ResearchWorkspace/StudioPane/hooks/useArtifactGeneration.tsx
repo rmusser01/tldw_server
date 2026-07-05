@@ -1094,6 +1094,33 @@ const normalizeWorkspaceArtifactSourceLineage = (
   if (isRecord(value) && Array.isArray(value.sources)) {
     return value.sources as GeneratedArtifact["sourceLineage"]
   }
+  if (isRecord(value) && Array.isArray(value.source_refs)) {
+    return value.source_refs as GeneratedArtifact["sourceLineage"]
+  }
+  if (isRecord(value)) {
+    const sourceIds = (
+      Array.isArray(value.usable_source_ids)
+        ? value.usable_source_ids
+        : Array.isArray(value.selected_source_ids)
+          ? value.selected_source_ids
+          : []
+    )
+      .map((sourceId) => String(sourceId || "").trim())
+      .filter(Boolean)
+    if (sourceIds.length > 0) {
+      const mediaIds = Array.isArray(value.media_ids) ? value.media_ids : []
+      return sourceIds.map((sourceId, index) => {
+        const rawMediaId = mediaIds[index]
+        const mediaId =
+          typeof rawMediaId === "number" && Number.isFinite(rawMediaId)
+            ? rawMediaId
+            : typeof rawMediaId === "string" && Number.isFinite(Number(rawMediaId))
+              ? Number(rawMediaId)
+              : undefined
+        return mediaId === undefined ? { sourceId } : { sourceId, mediaId }
+      })
+    }
+  }
   return undefined
 }
 

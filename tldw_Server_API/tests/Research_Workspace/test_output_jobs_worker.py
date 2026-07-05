@@ -143,6 +143,8 @@ def _install_video_overview_success_doubles(
     generated_slides = slides or [_video_slide()]
     render_calls: list[dict[str, Any]] = []
     tts_calls: list[dict[str, Any]] = []
+    generator_calls: list[dict[str, Any]] = []
+    presentation_calls: list[dict[str, Any]] = []
 
     class _CollectionsDB:
         instances: list[Any] = []
@@ -180,6 +182,7 @@ def _install_video_overview_success_doubles(
     class _SlidesGenerator:
         def generate_from_text(self, **kwargs: object) -> dict[str, Any]:
             assert kwargs["source_text"] == "source facts"
+            generator_calls.append(kwargs)
             return {"title": "Video Brief", "slides": generated_slides}
 
     class _SlidesDatabase:
@@ -192,6 +195,7 @@ def _install_video_overview_success_doubles(
             self.__class__.instances.append(self)
 
         def create_presentation(self, **kwargs: object) -> SimpleNamespace:
+            presentation_calls.append(kwargs)
             self.slides = json.loads(str(kwargs["slides"]))
             return SimpleNamespace(id="presentation-1", title=kwargs["title"], version=1)
 
@@ -237,6 +241,8 @@ def _install_video_overview_success_doubles(
         "slides_db_cls": _SlidesDatabase,
         "render_calls": render_calls,
         "tts_calls": tts_calls,
+        "generator_calls": generator_calls,
+        "presentation_calls": presentation_calls,
     }
 
 
@@ -677,6 +683,131 @@ async def test_infographic_worker_generates_image_and_updates_workspace_artifact
 
 
 @pytest.mark.asyncio
+async def test_infographic_worker_cleans_output_when_final_workspace_update_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Any,
+) -> None:
+    output_jobs = _output_jobs_module()
+    fake_image_bytes = b"\x89PNG\r\n\x1a\nfake-adapter-png"
+
+    class _WorkspaceDB:
+        def __init__(self) -> None:
+            self.artifact = {"id": "infographic-1", "version": 3, "export_refs": []}
+            self.updates: list[dict[str, Any]] = []
+
+        def get_workspace_artifact(self, workspace_id: str, artifact_id: str) -> dict[str, Any] | None:
+            assert workspace_id == "ws-1"
+            assert artifact_id == "infographic-1"
+            return dict(self.artifact)
+
+        def update_workspace_artifact(
+            self,
+            workspace_id: str,
+            artifact_id: str,
+            updates: dict[str, Any],
+            *,
+            expected_version: int,
+        ) -> dict[str, Any]:
+            assert workspace_id == "ws-1"
+            assert artifact_id == "infographic-1"
+            assert expected_version == self.artifact["version"]
+            if updates.get("status") == "complete":
+                raise RuntimeError("stale workspace artifact version")
+            self.updates.append(updates)
+            self.artifact.update(updates)
+            self.artifact["version"] = expected_version + 1
+            return dict(self.artifact)
+
+    class _CollectionsDB:
+        instances: list[Any] = []
+
+        def __init__(self) -> None:
+            self.user_id = 42
+            self.created: list[dict[str, object]] = []
+            self.deleted: list[dict[str, object]] = []
+            self.__class__.instances.append(self)
+
+        @classmethod
+        def for_user(cls, user_id: str) -> Any:
+            assert user_id == "42"
+            return cls()
+
+        def __enter__(self) -> "_CollectionsDB":
+            return self
+
+        def __exit__(self, *exc_info: object) -> None:
+            return None
+
+        def resolve_output_storage_path(self, path_value: str) -> str:
+            return path_value
+
+        def create_output_artifact(self, **kwargs: object) -> SimpleNamespace:
+            output_id = 123 + len(self.created)
+            row = {**kwargs, "id": output_id}
+            self.created.append(row)
+            return SimpleNamespace(id=output_id)
+
+        def delete_output_artifact(self, output_id: int, *, hard: bool = False) -> bool:
+            self.deleted.append({"output_id": output_id, "hard": hard})
+            return True
+
+    class _ImageAdapter:
+        def normalize(self, payload: dict[str, Any]) -> dict[str, Any]:
+            return {"backend": payload["backend"], "prompt": payload["prompt"]}
+
+        def validate(self, structured: dict[str, Any]) -> list[object]:
+            return []
+
+        def export(self, structured: dict[str, Any], *, format: str) -> SimpleNamespace:
+            assert format == "png"
+            return SimpleNamespace(content=fake_image_bytes, content_type="image/png")
+
+    context = output_jobs.ResearchWorkspaceOutputSourceContext(
+        text="source facts",
+        preview_text="source preview",
+        source_lineage={"selected_source_ids": ["src-1"], "usable_source_ids": ["src-1"]},
+    )
+    workspace_db = _WorkspaceDB()
+
+    monkeypatch.setattr(output_jobs, "build_research_workspace_output_source_context", lambda **_: context)
+    monkeypatch.setattr(output_jobs, "generate_infographic_prompt", lambda **_: "fake prompt", raising=False)
+    monkeypatch.setattr(output_jobs, "ImageAdapter", _ImageAdapter, raising=False)
+    monkeypatch.setattr(output_jobs, "CollectionsDatabase", _CollectionsDB)
+    monkeypatch.setattr(DatabasePaths, "get_user_outputs_dir", lambda _user_id: tmp_path)
+
+    with pytest.raises(output_jobs.ResearchWorkspaceOutputJobError) as excinfo:
+        await output_jobs.process_research_workspace_output_payload(
+            job={"id": 7, "owner_user_id": "42"},
+            payload={
+                "workspace_id": "ws-1",
+                "artifact_id": "infographic-1",
+                "artifact_type": "infographic",
+                "source_ids": ["src-1"],
+                "settings": {"image_backend": "fake-image"},
+                "user_id": "42",
+            },
+            workspace_db=workspace_db,
+            media_db=object(),
+            user_id=42,
+            job_manager=object(),
+        )
+
+    assert excinfo.value.public_code == "workspace_artifact_update_failed"
+    created_rows = _CollectionsDB.instances[0].created
+    deleted = [
+        item
+        for instance in _CollectionsDB.instances
+        for item in instance.deleted
+    ]
+    assert {item["output_id"] for item in deleted} == {row["id"] for row in created_rows}
+    assert all(item["hard"] is True for item in deleted)
+    for row in created_rows:
+        assert not (tmp_path / str(row["storage_path"])).exists()
+    assert workspace_db.updates[-1]["status"] == "failed"
+    assert workspace_db.updates[-1]["producer_metadata"]["error"] == "workspace_artifact_update_failed"
+
+
+@pytest.mark.asyncio
 async def test_video_overview_worker_generates_narrated_slideshow_mp4(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Any,
@@ -880,6 +1011,43 @@ async def test_video_overview_worker_uses_provider_specific_tts_defaults(
     assert final_metadata["tts_provider"] == "openai"
     assert final_metadata["tts_model"] == "tts-1"
     assert final_metadata["tts_voice"] == "alloy"
+
+
+@pytest.mark.asyncio
+async def test_video_overview_worker_applies_builtin_visual_style(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Any,
+) -> None:
+    output_jobs = _output_jobs_module()
+    workspace_db = _VideoWorkspaceDB()
+    captures = _install_video_overview_success_doubles(monkeypatch, tmp_path, output_jobs)
+
+    await output_jobs.process_research_workspace_output_payload(
+        job={"id": 7, "owner_user_id": "42"},
+        payload=_video_payload(
+            settings={
+                "title_hint": "Video Brief",
+                "slides_visual_style_id": "notebooklm-blueprint",
+            }
+        ),
+        workspace_db=workspace_db,
+        media_db=object(),
+        user_id=42,
+        job_manager=object(),
+    )
+
+    generator_snapshot = captures["generator_calls"][0]["visual_style_snapshot"]
+    assert generator_snapshot["id"] == "notebooklm-blueprint"
+    assert generator_snapshot["scope"] == "builtin"
+
+    presentation_kwargs = captures["presentation_calls"][0]
+    assert presentation_kwargs["visual_style_id"] == "notebooklm-blueprint"
+    assert presentation_kwargs["visual_style_scope"] == "builtin"
+    assert presentation_kwargs["visual_style_name"] == "Blueprint"
+    assert presentation_kwargs["visual_style_version"] == 1
+    persisted_snapshot = json.loads(str(presentation_kwargs["visual_style_snapshot"]))
+    assert persisted_snapshot["id"] == "notebooklm-blueprint"
+    assert persisted_snapshot["scope"] == "builtin"
 
 
 @pytest.mark.asyncio

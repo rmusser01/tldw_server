@@ -5,6 +5,7 @@ import { Plus, Save, Search } from "lucide-react"
 
 import { MermaidDiagramBlock } from "@/components/Common/MermaidDiagramBlock"
 import { MarkdownPreview } from "@/components/Common/MarkdownPreview"
+import { tldwClient } from "@/services/tldw/TldwApiClient"
 import type { GeneratedArtifact } from "@/types/workspace"
 
 import {
@@ -160,7 +161,7 @@ export const DataTableArtifactViewer: React.FC<{
   )
 }
 
-const getArtifactPreviewUrl = (
+const getArtifactPreviewRef = (
   artifact: GeneratedArtifact,
   formats: string[]
 ) => {
@@ -170,24 +171,94 @@ const getArtifactPreviewUrl = (
   const ref = artifact.exportRefs?.find((entry) => {
     const format = String(entry.format || "").trim().toLowerCase()
     const status = String(entry.status || "ready").trim().toLowerCase()
-    return (
-      normalizedFormats.has(format) &&
-      status !== "failed" &&
-      typeof entry.url === "string" &&
-      entry.url.trim().length > 0
-    )
+    return normalizedFormats.has(format) && status !== "failed"
   })
-  return typeof ref?.url === "string" ? ref.url : null
+  return ref || null
+}
+
+const getPreviewOutputId = (
+  artifact: GeneratedArtifact,
+  ref: ReturnType<typeof getArtifactPreviewRef>
+) => {
+  const outputId = ref?.fileId ?? ref?.id ?? artifact.serverId
+  if (typeof outputId === "number") return String(outputId)
+  if (typeof outputId === "string" && outputId.trim()) return outputId.trim()
+  return null
+}
+
+const useArtifactPreviewObjectUrl = (
+  artifact: GeneratedArtifact,
+  formats: string[]
+) => {
+  const [previewUrl, setPreviewUrl] = React.useState<string | null>(null)
+  const [isLoading, setIsLoading] = React.useState(false)
+  const [hasError, setHasError] = React.useState(false)
+
+  React.useEffect(() => {
+    const ref = getArtifactPreviewRef(artifact, formats)
+    const outputId = getPreviewOutputId(artifact, ref)
+    const format = String(ref?.format || formats[0] || "").trim().toLowerCase()
+    if (!outputId) {
+      setPreviewUrl(null)
+      setIsLoading(false)
+      setHasError(false)
+      return
+    }
+
+    let cancelled = false
+    let objectUrl: string | null = null
+    setIsLoading(true)
+    setHasError(false)
+    setPreviewUrl(null)
+
+    tldwClient
+      .downloadOutput(outputId, format || undefined)
+      .then((blob) => {
+        if (cancelled) return
+        objectUrl = URL.createObjectURL(blob)
+        setPreviewUrl(objectUrl)
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setHasError(true)
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsLoading(false)
+        }
+      })
+
+    return () => {
+      cancelled = true
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl)
+      }
+    }
+  }, [artifact])
+
+  return { previewUrl, isLoading, hasError }
 }
 
 export const VideoOverviewArtifactViewer: React.FC<{
   artifact: GeneratedArtifact
 }> = ({ artifact }) => {
-  const src = getArtifactPreviewUrl(artifact, ["mp4"])
-  if (!src) {
+  const preview = useArtifactPreviewObjectUrl(artifact, ["mp4"])
+  if (!preview.previewUrl) {
+    if (preview.isLoading) {
+      return (
+        <div className="rounded border border-border bg-surface p-4 text-sm text-text-muted">
+          Loading video preview...
+        </div>
+      )
+    }
     return (
       <MarkdownPreview
-        content={artifact.previewText || artifact.summary || ""}
+        content={
+          preview.hasError
+            ? artifact.summary || artifact.previewText || "Unable to load video preview."
+            : artifact.previewText || artifact.summary || ""
+        }
         size="sm"
       />
     )
@@ -200,7 +271,7 @@ export const VideoOverviewArtifactViewer: React.FC<{
         controls
         preload="metadata"
       >
-        <source src={src} type={artifact.contentType || "video/mp4"} />
+        <source src={preview.previewUrl} type={artifact.contentType || "video/mp4"} />
         Your browser does not support the video element.
       </video>
     </div>
@@ -210,11 +281,22 @@ export const VideoOverviewArtifactViewer: React.FC<{
 export const InfographicArtifactViewer: React.FC<{
   artifact: GeneratedArtifact
 }> = ({ artifact }) => {
-  const src = getArtifactPreviewUrl(artifact, ["png"])
-  if (!src) {
+  const preview = useArtifactPreviewObjectUrl(artifact, ["png"])
+  if (!preview.previewUrl) {
+    if (preview.isLoading) {
+      return (
+        <div className="rounded border border-border bg-surface p-4 text-sm text-text-muted">
+          Loading infographic preview...
+        </div>
+      )
+    }
     return (
       <MarkdownPreview
-        content={artifact.previewText || artifact.summary || ""}
+        content={
+          preview.hasError
+            ? artifact.summary || artifact.previewText || "Unable to load infographic preview."
+            : artifact.previewText || artifact.summary || ""
+        }
         size="sm"
       />
     )
@@ -223,7 +305,7 @@ export const InfographicArtifactViewer: React.FC<{
   return (
     <div className="max-h-[70vh] overflow-auto">
       <img
-        src={src}
+        src={preview.previewUrl}
         alt={artifact.title || "Infographic"}
         className="mx-auto max-h-[64vh] max-w-full rounded border border-border object-contain"
       />
