@@ -297,6 +297,7 @@ def test_persist_output_bytes_keeps_required_metadata_and_drops_paths(
             "byte_size": 999,
             "storage_path": "/tmp/secret.png",
             "note": "/private/tmp/secret.png",
+            "plain_note": "report.pdf",
             "relative_file": "tmp/render.png",
             "relative_note": "rendered from outputs/foo.png",
             "safe_note": "kept",
@@ -310,6 +311,7 @@ def test_persist_output_bytes_keeps_required_metadata_and_drops_paths(
     assert metadata["content_type"] == "image/png"
     assert metadata["byte_size"] == len(b"png-bytes")
     assert metadata["safe_note"] == "kept"
+    assert "plain_note" not in metadata
     assert "storage_path" not in metadata
     assert "relative_file" not in metadata
     assert "relative_note" not in metadata
@@ -345,6 +347,7 @@ def test_persist_output_bytes_sanitizes_nested_metadata_paths(
                 "encoded_note": '{"path":"report.pdf"}',
                 "jsonish": '{"path":"/private/tmp/source.png"}',
                 "localPath": "report.pdf",
+                "plain": "render.png",
                 "relative_file": "tmp/render.png",
                 "relative_note": "rendered from outputs/foo.png",
                 "sourcePath": "report.pdf",
@@ -354,6 +357,7 @@ def test_persist_output_bytes_sanitizes_nested_metadata_paths(
             },
             "items": [
                 "kept",
+                "audio.mp3",
                 "/tmp/list-secret.png",
                 "outputs/foo.png",
                 {"inner": "safe", "home": "~/secret.png", "asset_path": "relative"},
@@ -374,6 +378,8 @@ def test_persist_output_bytes_sanitizes_nested_metadata_paths(
     assert "encoded_note" not in raw_metadata
     assert "localPath" not in raw_metadata
     assert "report.pdf" not in raw_metadata
+    assert "render.png" not in raw_metadata
+    assert "audio.mp3" not in raw_metadata
     assert "relative_file" not in raw_metadata
     assert "relative_note" not in raw_metadata
     assert "sourcePath" not in raw_metadata

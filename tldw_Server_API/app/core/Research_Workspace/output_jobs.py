@@ -497,10 +497,16 @@ def _is_unsafe_output_metadata_key(key_text: str) -> bool:
 
 def _looks_fileish_or_pathish_text(value: str) -> bool:
     text = value.strip()
-    return _looks_absolute_path_like(text) or re.search(
-        r"(^|[^\w])(?:[A-Za-z0-9_.-]+/)+[A-Za-z0-9_.-]+(?:\.[A-Za-z0-9]{1,12})?(?=$|[^\w])",
-        text,
-    ) is not None
+    return (
+        _looks_absolute_path_like(text)
+        or re.search(
+            r"(^|[^\w])(?:[A-Za-z0-9_.-]+/)+[A-Za-z0-9_.-]+(?:\.[A-Za-z0-9]{1,12})?(?=$|[^\w])",
+            text,
+        )
+        is not None
+        or re.search(r"(?i)(^|[^\w])[A-Za-z0-9_.-]+\.[a-z][a-z0-9]{0,11}(?=$|[^\w])", text)
+        is not None
+    )
 
 
 def _looks_absolute_path_like(value: str) -> bool:

@@ -4,7 +4,7 @@ title: Implement Research Workspace NotebookLM media outputs WP2
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: 2026-07-05 05:57
+updated_date: 2026-07-05 09:00
 labels: []
 dependencies: []
 references:
@@ -85,4 +85,5 @@ Task 4 metadata delimiter follow-up complete: output metadata sanitization now r
 Task 4 source-context shape follow-up complete: source context bounding now budgets title and body separately so usable blocks preserve '# {title}\n\n{excerpt}' shape with a non-empty excerpt, and tiny limits skip the source rather than returning header-only context. Verification: red single regression pytest failed on missing blank-line separator/body for long title with max_chars=40; green focused pytest tldw_Server_API/tests/Research_Workspace/test_output_jobs_worker.py -v passed 10 tests; git diff --check passed; Bandit on output_jobs.py passed with 0 results.
 Task 4 persistence hardening follow-up complete: persist_research_workspace_output_bytes now fails closed on collections_db/user_id mismatch, removes written bytes if output artifact row creation fails, and recursively drops caller metadata keys/values that look file/path-like including relative local paths. Verification: red focused pytest failed on user mismatch acceptance, row-failure file leak, and relative metadata path leakage; green focused pytest tldw_Server_API/tests/Research_Workspace/test_output_jobs_worker.py -v passed 12 tests; git diff --check passed; Bandit on output_jobs.py passed with 0 results. Real CollectionsDatabase integration-style test skipped to avoid broader DB backend/schema setup churn in this focused follow-up.
 Task 4 encoded metadata sanitizer follow-up complete: caller metadata key filtering now rejects case-insensitive path substrings such as sourcePath/localPath, and JSON-looking string values are parsed and recursively sanitized so encoded path-only objects are dropped. Verification: red single regression pytest failed on sourcePath/localPath and encoded {"path":"report.pdf"} leaking; green focused pytest tldw_Server_API/tests/Research_Workspace/test_output_jobs_worker.py -v passed 12 tests; git diff --check passed; Bandit on output_jobs.py passed with 0 results.
+Task 4 filename metadata sanitizer follow-up complete: caller metadata sanitization now drops bare extension-like filenames such as report.pdf, render.png, and audio.mp3 under neutral top-level, nested, and list values while preserving safe prose strings. Verification: red focused pytest failed on plain_note/report.pdf and nested/list filename values leaking; green focused pytest tldw_Server_API/tests/Research_Workspace/test_output_jobs_worker.py -v passed 12 tests; git diff --check passed; Bandit on output_jobs.py passed with 0 findings.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
