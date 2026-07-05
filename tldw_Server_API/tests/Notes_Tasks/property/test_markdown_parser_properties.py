@@ -35,6 +35,7 @@ _content = st.lists(_line, max_size=30).map(lambda lines: "\n".join(lines))
 @_COMMON
 @given(content=_content)
 def test_parser_is_total(content: str) -> None:
+    """The parser never raises on arbitrary content and returns a result list."""
     result = parse_note_checklists(note_id="n1", note_version=1, content=content)
     assert result is not None
     assert isinstance(result.items, list)
@@ -43,15 +44,16 @@ def test_parser_is_total(content: str) -> None:
 @_COMMON
 @given(content=_content)
 def test_parser_is_deterministic(content: str) -> None:
+    """Parsing the same content twice yields an identical result (all fields)."""
     a = parse_note_checklists(note_id="n1", note_version=1, content=content)
     b = parse_note_checklists(note_id="n1", note_version=1, content=content)
-    assert [i.locator for i in a.items] == [i.locator for i in b.items]
-    assert [i.text for i in a.items] == [i.text for i in b.items]
+    assert a == b
 
 
 @_COMMON
 @given(content=_content)
 def test_locator_offsets_stay_within_source_and_slice_the_raw_line(content: str) -> None:
+    """Each item's locator offsets are in-bounds and slice back to its raw line."""
     result = parse_note_checklists(note_id="n1", note_version=1, content=content)
     n = len(content)
     for item in result.items:
@@ -64,6 +66,7 @@ def test_locator_offsets_stay_within_source_and_slice_the_raw_line(content: str)
 @_COMMON
 @given(content=_content)
 def test_locators_are_strictly_increasing(content: str) -> None:
+    """Item locators are in ascending line/offset order, one item per line."""
     result = parse_note_checklists(note_id="n1", note_version=1, content=content)
     line_numbers = [i.locator.line_number for i in result.items]
     start_offsets = [i.locator.start_offset for i in result.items]
@@ -76,6 +79,7 @@ def test_locators_are_strictly_increasing(content: str) -> None:
 @_COMMON
 @given(content=_content)
 def test_occurrence_index_increments_per_normalized_text(content: str) -> None:
+    """occurrence_index counts 1,2,3… within each group of same-text items."""
     result = parse_note_checklists(note_id="n1", note_version=1, content=content)
     seen: dict[str, int] = {}
     for item in result.items:

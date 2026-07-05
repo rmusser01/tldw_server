@@ -8,6 +8,8 @@ from hypothesis import strategies as st
 from tldw_Server_API.app.core.Chunking.base import ChunkerConfig, ChunkingMethod
 from tldw_Server_API.app.core.Chunking.chunker import Chunker
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def testing_env():
@@ -61,7 +63,10 @@ def test_words_overlap_property(total_words, max_size, overlap):
 # chunk-size bound, and coverage. These complement the overlap-adjacency check
 # above; an off-by-one in the overlap stride breaks reconstruction.
 # --------------------------------------------------------------------------- #
-def _make_chunks(total_words, max_size, overlap):
+def _make_chunks(
+    total_words: int, max_size: int, overlap: int
+) -> tuple[list[str], list[str], int]:
+    """Chunk ``w0 w1 …`` by words; return ``(words, chunks, effective_overlap)``."""
     if overlap >= max_size:
         overlap = max(0, max_size - 1)
     words = [f"w{i}" for i in range(total_words)]
@@ -84,7 +89,7 @@ def _make_chunks(total_words, max_size, overlap):
     max_size=st.integers(min_value=1, max_value=40),
     overlap=st.integers(min_value=0, max_value=10),
 )
-def test_words_reconstruction_property(total_words, max_size, overlap):
+def test_words_reconstruction_property(total_words: int, max_size: int, overlap: int) -> None:
     """Streaming the chunk words in order and keeping each word's first
     occurrence must reconstruct the original sequence — no word is dropped or
     reordered. (A boundary chunk may legitimately repeat a word at very small
@@ -109,7 +114,7 @@ def test_words_reconstruction_property(total_words, max_size, overlap):
     max_size=st.integers(min_value=1, max_value=40),
     overlap=st.integers(min_value=0, max_value=10),
 )
-def test_words_chunk_size_bound(total_words, max_size, overlap):
+def test_words_chunk_size_bound(total_words: int, max_size: int, overlap: int) -> None:
     """No chunk exceeds max_size words, and every source word appears somewhere."""
     words, chunks, _overlap = _make_chunks(total_words, max_size, overlap)
     for chunk in chunks:
