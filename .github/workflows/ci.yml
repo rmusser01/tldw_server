@@ -1137,6 +1137,8 @@ jobs:
           - name: chat-character-legacy-core
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_character_chat_endpoints.py
+              tldw_Server_API/tests/Character_Chat/property/test_ccv3_parser_properties.py
+              tldw_Server_API/tests/Character_Chat/property/test_png_chara_embed_properties.py
               tldw_Server_API/tests/Character_Chat/test_chat_dictionary_legacy.py
               tldw_Server_API/tests/Character_Chat/test_chat_settings_endpoints.py
               tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_e2e_mock.py
@@ -2540,6 +2542,8 @@ jobs:
           - name: chat-character-legacy-core
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_character_chat_endpoints.py
+              tldw_Server_API/tests/Character_Chat/property/test_ccv3_parser_properties.py
+              tldw_Server_API/tests/Character_Chat/property/test_png_chara_embed_properties.py
               tldw_Server_API/tests/Character_Chat/test_chat_dictionary_legacy.py
               tldw_Server_API/tests/Character_Chat/test_chat_settings_endpoints.py
               tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_e2e_mock.py
@@ -3814,6 +3818,8 @@ jobs:
           - name: chat-character-legacy-core
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_character_chat_endpoints.py
+              tldw_Server_API/tests/Character_Chat/property/test_ccv3_parser_properties.py
+              tldw_Server_API/tests/Character_Chat/property/test_png_chara_embed_properties.py
               tldw_Server_API/tests/Character_Chat/test_chat_dictionary_legacy.py
               tldw_Server_API/tests/Character_Chat/test_chat_settings_endpoints.py
               tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_e2e_mock.py
@@ -5012,6 +5018,8 @@ jobs:
           - name: chat-character-legacy-core
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_character_chat_endpoints.py
+              tldw_Server_API/tests/Character_Chat/property/test_ccv3_parser_properties.py
+              tldw_Server_API/tests/Character_Chat/property/test_png_chara_embed_properties.py
               tldw_Server_API/tests/Character_Chat/test_chat_dictionary_legacy.py
               tldw_Server_API/tests/Character_Chat/test_chat_settings_endpoints.py
               tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_e2e_mock.py
@@ -6211,6 +6219,8 @@ jobs:
           - name: chat-character-legacy-core
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_character_chat_endpoints.py
+              tldw_Server_API/tests/Character_Chat/property/test_ccv3_parser_properties.py
+              tldw_Server_API/tests/Character_Chat/property/test_png_chara_embed_properties.py
               tldw_Server_API/tests/Character_Chat/test_chat_dictionary_legacy.py
               tldw_Server_API/tests/Character_Chat/test_chat_settings_endpoints.py
               tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_e2e_mock.py
