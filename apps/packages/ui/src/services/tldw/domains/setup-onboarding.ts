@@ -40,6 +40,44 @@ function redactApiKeyFields<T>(value: T): T {
   return value;
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value && typeof value === "object" && !Array.isArray(value));
+
+const isStringArray = (value: unknown): value is string[] =>
+  Array.isArray(value) && value.every((item) => typeof item === "string");
+
+function isMcpToolsApplyResponse(value: unknown): value is McpToolsApplyResponse {
+  if (!isRecord(value)) return false;
+  const conflict = value.conflict;
+  return (
+    typeof value.status === "string" &&
+    (typeof value.profile_id === "number" || value.profile_id === null) &&
+    (typeof value.assignment_id === "number" || value.assignment_id === null) &&
+    typeof value.catalog_version === "string" &&
+    isStringArray(value.selected_pack_ids) &&
+    isStringArray(value.selected_addon_ids) &&
+    typeof value.effective_tool_count === "number" &&
+    isStringArray(value.effective_tools) &&
+    isStringArray(value.disabled_addons) &&
+    typeof value.validation_state === "string" &&
+    (conflict == null ||
+      (isRecord(conflict) &&
+        typeof conflict.reason === "string" &&
+        typeof conflict.profile_id === "number"))
+  );
+}
+
+function extractMcpToolsApplyConflict(error: unknown): McpToolsApplyResponse {
+  const candidate = error as
+    | { status?: unknown; detail?: unknown; details?: { detail?: unknown } }
+    | null;
+  const detail = candidate?.details?.detail ?? candidate?.detail;
+  if (candidate?.status === 409 && isMcpToolsApplyResponse(detail)) {
+    return detail;
+  }
+  throw error;
+}
+
 export const setupOnboardingMethods = {
   async getFirstRunState(): Promise<FirstRunState> {
     return await bgRequest<FirstRunState>({
@@ -169,14 +207,18 @@ export const setupOnboardingMethods = {
   async applyMcpTools(
     payload: McpToolsApplyRequest,
   ): Promise<McpToolsApplyResponse> {
-    return await bgRequest<McpToolsApplyResponse>({
-      path: "/api/v1/setup/first-run/mcp-tools/apply",
-      method: "POST",
-      headers: jsonHeaders,
-      noAuth: true,
-      expectedStatuses: [409],
-      body: payload,
-    });
+    try {
+      return await bgRequest<McpToolsApplyResponse>({
+        path: "/api/v1/setup/first-run/mcp-tools/apply",
+        method: "POST",
+        headers: jsonHeaders,
+        noAuth: true,
+        expectedStatuses: [409],
+        body: payload,
+      });
+    } catch (error) {
+      return extractMcpToolsApplyConflict(error);
+    }
   },
 
   async validateMcpTools(

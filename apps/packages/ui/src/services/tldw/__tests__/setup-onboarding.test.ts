@@ -187,7 +187,7 @@ describe("setup onboarding API domain", () => {
   });
 
   it("returns typed first-run MCP tools conflict bodies", async () => {
-    vi.mocked(bgRequest).mockResolvedValueOnce({
+    const conflictBody = {
       status: "conflict",
       profile_id: 7,
       assignment_id: null,
@@ -204,7 +204,13 @@ describe("setup onboarding API domain", () => {
         current_hash: "changed",
         expected_hash: "expected",
       },
-    });
+    };
+    vi.mocked(bgRequest).mockRejectedValueOnce(
+      Object.assign(new Error("Conflict"), {
+        status: 409,
+        details: { detail: conflictBody },
+      }),
+    );
 
     const result = await setupOnboardingMethods.applyMcpTools.call(
       {},
@@ -213,6 +219,34 @@ describe("setup onboarding API domain", () => {
 
     expect(result.status).toBe("conflict");
     expect(result.conflict?.reason).toBe("profile_manually_changed");
+  });
+
+  it("rethrows non-conflict and malformed MCP tools apply errors", async () => {
+    const serverError = Object.assign(new Error("Server failed"), {
+      status: 500,
+    });
+    vi.mocked(bgRequest).mockRejectedValueOnce(serverError);
+
+    await expect(
+      setupOnboardingMethods.applyMcpTools.call(
+        {},
+        { selected_pack_ids: ["research"] },
+      ),
+    ).rejects.toBe(serverError);
+
+    vi.mocked(bgRequest).mockRejectedValueOnce(
+      Object.assign(new Error("Malformed conflict"), {
+        status: 409,
+        details: { detail: { status: "conflict" } },
+      }),
+    );
+
+    await expect(
+      setupOnboardingMethods.applyMcpTools.call(
+        {},
+        { selected_pack_ids: ["research"] },
+      ),
+    ).rejects.toThrow("Malformed conflict");
   });
 
   it("validates first-run MCP tools with an empty default payload", async () => {

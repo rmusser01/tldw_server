@@ -136,7 +136,7 @@ export type McpToolsApplyRequest = {
 
 export type McpToolsApplyConflict = {
   reason: string
-  profile_id: number | null
+  profile_id: number
   current_hash?: string | null
   expected_hash?: string | null
 }
