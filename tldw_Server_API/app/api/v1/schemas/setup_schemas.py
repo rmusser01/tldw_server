@@ -295,9 +295,6 @@ class McpToolsApplyResponse(BaseModel):
 class McpToolsValidateRequest(BaseModel):
     """Request to validate saved first-run MCP tool packs."""
 
-    profile_id: int | None = None
-    assignment_id: int | None = None
-
 
 class McpToolsValidateResponse(BaseModel):
     """Safe validation/status response for first-run MCP tool packs."""

@@ -1,4 +1,5 @@
 from configparser import ConfigParser
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -82,6 +83,23 @@ def _setup_needs_setup(monkeypatch):
     )
 
 
+def _setup_completed(monkeypatch):
+    monkeypatch.setattr(
+        setup_endpoint.setup_manager,
+        "get_status_snapshot",
+        lambda: {
+            "enabled": True,
+            "setup_completed": True,
+            "completed": True,
+            "needs_setup": False,
+            "auth_mode": "single_user",
+            "allow_remote_setup_access": False,
+            "remote_access_env_override": False,
+            "remote_access_active": False,
+        },
+    )
+
+
 class _FakeMcpToolRegistry:
     async def list_entries(self):
         return []
@@ -133,6 +151,10 @@ def _override_mcp_tools_service(monkeypatch, service: _FakeMcpToolsService) -> N
     factory = getattr(setup_endpoint, "get_setup_mcp_tools_service", None)
     if factory is not None:
         monkeypatch.setitem(app.dependency_overrides, factory, lambda: service)
+
+
+def _override_mcp_tools_admin_guard(monkeypatch) -> None:
+    monkeypatch.setitem(app.dependency_overrides, setup_endpoint._require_system_configure_access, lambda: None)
 
 
 def _fail_if_state_update_reaches_endpoint(*_args, **_kwargs):
@@ -299,6 +321,65 @@ def test_first_run_mcp_tools_apply_persists_numeric_profile_and_assignment(
     assert state.step_data["mcp_tools"]["assignment_id"] == 11
 
 
+def test_first_run_mcp_tools_apply_rejects_unsafe_selection_before_service_call(
+    setup_client,
+    monkeypatch,
+    tmp_path,
+):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_needs_setup(monkeypatch)
+    service = _FakeMcpToolsService()
+    _override_mcp_tools_service(monkeypatch, service)
+
+    response = setup_client.post(
+        "/api/v1/setup/first-run/mcp-tools/apply",
+        json={
+            "selected_pack_ids": ["research", "/Users/me/.env"],
+            "selected_addon_ids": ["hf_abcdef1234567890"],
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "unsupported_first_run_step_data"
+    assert service.apply_requests == []
+    assert "mcp_tools" not in FirstRunStateStore(state_path).load().step_data
+
+
+def test_first_run_mcp_tools_apply_after_completion_rejects_before_service_call(
+    setup_client,
+    monkeypatch,
+    tmp_path,
+):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_completed(monkeypatch)
+    store = FirstRunStateStore(state_path)
+    _persist_required_first_run_step_data(store)
+    store.record_first_chat_success(
+        provider="openai",
+        model="gpt-4.1-mini",
+        response_id="chatcmpl-test",
+    )
+    store.mark_completed()
+    service = _FakeMcpToolsService()
+    _override_mcp_tools_service(monkeypatch, service)
+
+    async def _admin_principal(_request):
+        return SimpleNamespace(is_admin=True, permissions=["system.configure"])
+
+    monkeypatch.setattr(setup_endpoint, "get_auth_principal", _admin_principal)
+
+    response = setup_client.post(
+        "/api/v1/setup/first-run/mcp-tools/apply",
+        json={"selected_pack_ids": ["research"], "selected_addon_ids": []},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "setup_already_completed"
+    assert service.apply_requests == []
+
+
 def test_first_run_mcp_tools_apply_returns_conflict_for_profile_conflict(
     setup_client,
     monkeypatch,
@@ -349,6 +430,100 @@ def test_first_run_mcp_tools_validate_rejects_before_packs_saved(
 
     assert response.status_code == 409
     assert response.json()["detail"] == "mcp_tools_selection_required"
+
+
+def test_first_run_mcp_tools_validate_request_has_no_ignored_fields():
+    assert setup_endpoint.McpToolsValidateRequest.model_fields == {}
+
+
+def test_first_run_mcp_tools_validate_after_completion_rejects_without_state_update(
+    setup_client,
+    monkeypatch,
+    tmp_path,
+):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_completed(monkeypatch)
+    store = FirstRunStateStore(state_path)
+    store.update_step(
+        "mcp_tools",
+        {
+            "acknowledged": True,
+            "selected_pack_ids": ["research"],
+            "selected_addon_ids": [],
+            "confirmed_addon_ids": [],
+            "confirmation_version": None,
+            "validation_state": "not_run",
+            "profile_id": 7,
+            "assignment_id": 11,
+            "catalog_version": "2026-07-04.v1",
+            "effective_tool_count": 3,
+        },
+    )
+    _persist_required_first_run_step_data(store)
+    store.record_first_chat_success(
+        provider="openai",
+        model="gpt-4.1-mini",
+        response_id="chatcmpl-test",
+    )
+    store.mark_completed()
+
+    response = setup_client.post("/api/v1/setup/first-run/mcp-tools/validate", json={})
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "setup_already_completed"
+    state = FirstRunStateStore(state_path).load()
+    assert state.status == FirstRunStatus.COMPLETED
+    assert state.step_data["mcp_tools"]["validation_state"] == "not_run"
+
+
+def test_admin_mcp_tools_status_and_validate_use_saved_state_without_reopening_first_run(
+    setup_client,
+    monkeypatch,
+    tmp_path,
+):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_completed(monkeypatch)
+    _override_mcp_tools_admin_guard(monkeypatch)
+    _override_mcp_tools_service(monkeypatch, _FakeMcpToolsService())
+    store = FirstRunStateStore(state_path)
+    store.update_step(
+        "mcp_tools",
+        {
+            "acknowledged": True,
+            "selected_pack_ids": ["research"],
+            "selected_addon_ids": [],
+            "confirmed_addon_ids": [],
+            "confirmation_version": None,
+            "validation_state": "not_run",
+            "profile_id": 7,
+            "assignment_id": 11,
+            "catalog_version": "2026-07-04.v1",
+            "effective_tool_count": 3,
+        },
+    )
+    _persist_required_first_run_step_data(store)
+    store.record_first_chat_success(
+        provider="openai",
+        model="gpt-4.1-mini",
+        response_id="chatcmpl-test",
+    )
+    store.mark_completed()
+
+    status_response = setup_client.get("/api/v1/setup/admin/mcp-tools/status")
+    validate_response = setup_client.post("/api/v1/setup/admin/mcp-tools/validate", json={})
+
+    assert status_response.status_code == 200
+    assert status_response.json()["status"] == "saved"
+    assert status_response.json()["validation_state"] == "not_run"
+    assert validate_response.status_code == 200
+    assert validate_response.json()["status"] == "skipped"
+    assert validate_response.json()["validation_state"] == "skipped"
+    assert validate_response.json()["validation_message"] == "MCP tool validation execution is deferred."
+    state = FirstRunStateStore(state_path).load()
+    assert state.status == FirstRunStatus.COMPLETED
+    assert state.step_data["mcp_tools"]["validation_state"] == "not_run"
 
 
 def test_first_run_provider_save_masks_key_and_writes_config(monkeypatch, tmp_path, setup_client):

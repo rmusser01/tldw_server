@@ -638,15 +638,16 @@ async def _require_setup_write_access(request: Request) -> None:
         )
 
 
-async def _require_first_run_write_access(request: Request) -> None:
-    await _require_setup_write_access(request)
-    state = await _run_first_run_store_call(lambda store: store.load())
-    terminal_details = {
+def _terminal_first_run_detail(state: FirstRunStateResponse) -> str | None:
+    return {
         FirstRunStatus.COMPLETED: "setup_already_completed",
         FirstRunStatus.SKIPPED: "state_skipped",
         FirstRunStatus.BLOCKED: "state_blocked",
-    }
-    terminal_detail = terminal_details.get(state.status)
+    }.get(state.status)
+
+
+def _raise_if_terminal_first_run_state(state: FirstRunStateResponse) -> None:
+    terminal_detail = _terminal_first_run_detail(state)
     if terminal_detail:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -654,16 +655,14 @@ async def _require_first_run_write_access(request: Request) -> None:
         )
 
 
-async def _require_mcp_tools_setup_or_admin_access(request: Request) -> None:
-    status_snapshot = setup_manager.get_status_snapshot()
-    if not bool(status_snapshot.get("setup_completed")):
-        await _require_first_run_write_access(request)
-        return
+async def _require_first_run_write_access(request: Request) -> None:
+    await _require_setup_write_access(request)
+    state = await _run_first_run_store_call(lambda store: store.load())
+    _raise_if_terminal_first_run_state(state)
 
-    principal = await get_auth_principal(request)
-    permissions = set(principal.permissions) if principal is not None else set()
-    if principal is None or not (principal.is_admin or SYSTEM_CONFIGURE in permissions or "*" in permissions):
-        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="system_configure_required")
+
+async def _require_mcp_tools_setup_or_admin_access(request: Request) -> None:
+    await _require_first_run_write_access(request)
 
 
 async def _require_mcp_tools_catalog_access(request: Request) -> None:
@@ -962,6 +961,23 @@ def _mcp_tools_apply_response(result: McpToolsApplyResult) -> McpToolsApplyRespo
 
 def _safe_mcp_tools_step_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return _validated_public_first_run_step_data("mcp_tools", payload)
+
+
+def _preflight_mcp_tools_apply_payload(payload: McpToolsApplyRequest) -> None:
+    _safe_mcp_tools_step_payload(
+        {
+            "acknowledged": True,
+            "selected_pack_ids": payload.selected_pack_ids,
+            "selected_addon_ids": payload.selected_addon_ids,
+            "confirmed_addon_ids": payload.confirmed_addon_ids,
+            "confirmation_version": payload.confirmation_version,
+            "validation_state": McpToolsValidationState.NOT_RUN.value,
+            "profile_id": payload.profile_id,
+            "assignment_id": None,
+            "catalog_version": None,
+            "effective_tool_count": 0,
+        }
+    )
 
 
 def _safe_int_or_none(value: object) -> int | None:
@@ -1270,6 +1286,8 @@ async def apply_first_run_mcp_tools(
     service: SetupMcpToolsService = Depends(get_setup_mcp_tools_service),
 ) -> McpToolsApplyResponse:
     state = await _run_first_run_store_call(lambda store: store.load())
+    _raise_if_terminal_first_run_state(state)
+    _preflight_mcp_tools_apply_payload(payload)
     try:
         result = await service.apply_selection(
             state=state,
@@ -1309,6 +1327,7 @@ async def validate_first_run_mcp_tools(
 ) -> McpToolsValidateResponse:
     del payload
     state = await _run_first_run_store_call(lambda store: store.load())
+    _raise_if_terminal_first_run_state(state)
     data = _require_saved_mcp_tools_selection(state)
     validation_payload = dict(data)
     validation_payload["validation_state"] = McpToolsValidationState.SKIPPED.value
