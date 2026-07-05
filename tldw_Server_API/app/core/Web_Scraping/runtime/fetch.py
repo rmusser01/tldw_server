@@ -40,7 +40,7 @@ class DefaultFetchClient:
         if request.method != "GET":
             raise ValueError("DefaultFetchClient only supports GET requests in Phase 2")
 
-        started = time.time()
+        started = time.monotonic()
         raw = http_fetch(
             request.url,
             headers=_mutable_mapping_or_none(request.headers),
@@ -51,7 +51,7 @@ class DefaultFetchClient:
             impersonate=request.impersonate,
             proxies=_mutable_proxies(request.proxies),
         )
-        elapsed = max(0.0, time.time() - started)
+        elapsed = max(0.0, time.monotonic() - started)
         return FetchResponse.from_raw(
             raw,
             fallback_url=request.url,

@@ -46,6 +46,7 @@ def test_default_fetch_client_uses_simplified_get_path_without_method(monkeypatc
     assert kwargs["backend"] == "curl"
     assert kwargs["follow_redirects"] is True
     assert kwargs["impersonate"] == "chrome120"
+    assert kwargs["timeout"] == 15.0
     assert kwargs["headers"] == {"User-Agent": "UA"}
     assert kwargs["cookies"] == {"session": "abc"}
     assert kwargs["proxies"] == {"https": "http://proxy.example:8080"}
@@ -74,6 +75,28 @@ def test_default_fetch_client_normalizes_object_like_response(monkeypatch) -> No
     assert response.text == "<html>created</html>"
     assert response.url == "https://example.com/final"
     assert response.backend == "httpx"
+
+
+@pytest.mark.unit
+def test_default_fetch_client_measures_elapsed_with_monotonic_clock(monkeypatch) -> None:
+    times = iter([10.0, 12.5])
+
+    def fake_fetch(url, **kwargs):
+        return {
+            "status": 200,
+            "headers": {},
+            "text": "<html>ok</html>",
+            "url": url,
+        }
+
+    monkeypatch.setattr(runtime_fetch, "http_fetch", fake_fetch)
+    monkeypatch.setattr(runtime_fetch.time, "monotonic", lambda: next(times))
+
+    response = DefaultFetchClient().fetch(
+        FetchRequest(url="https://example.com/article", backend="httpx", timeout=15.0)
+    )
+
+    assert response.elapsed_seconds == 2.5
 
 
 @pytest.mark.unit

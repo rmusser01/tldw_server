@@ -28,7 +28,7 @@ modified_files:
 - tldw_Server_API/tests/Web_Scraping/test_phase2_runtime_adapters.py
 - tldw_Server_API/tests/Web_Scraping/test_phase2_article_runtime_boundary.py
 - tldw_Server_API/tests/Web_Scraping/test_router_backend_selection.py
-updated_date: 2026-07-05 06:12
+updated_date: 2026-07-05 06:22
 ---
 
 ## Description
@@ -61,6 +61,8 @@ Follow Docs/superpowers/plans/2026-07-05-web-scraping-phase-2-runtime-policy-bou
 2026-07-05: Started Task 1 review-fix pass for explicit boolean normalization, stronger runtime import-boundary checks, and immutability assertions. Scope remains limited to requests.py, responses.py, and test_phase2_runtime_contracts.py.
 2026-07-05: Started Task 3 (default runtime fetch adapter). Scope limited to runtime/fetch.py, runtime/__init__.py, and test_phase2_runtime_adapters.py; Task 4 policy adapter and Task 5 Article_Extractor_Lib wiring intentionally left untouched.
 2026-07-05: Task 3 TDD verification completed. Red run: /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest -q --tb=short tldw_Server_API/tests/Web_Scraping/test_phase2_runtime_adapters.py failed during collection with ModuleNotFoundError for runtime.fetch. Green run: same focused adapter test -> 3 passed, 12 warnings. Import-boundary run: /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest -q --tb=short tldw_Server_API/tests/Web_Scraping/test_phase2_runtime_contracts.py::test_runtime_package_does_not_import_legacy_wrappers_or_policy_modules -> 1 passed, 8 warnings. Bandit full touched scope wrote /tmp/bandit_task3_fetch_adapter.json and reported only LOW B101 pytest assert findings in test_phase2_runtime_adapters.py; production runtime-only scan wrote /tmp/bandit_task3_fetch_adapter_runtime.json and had no results. git diff --check exited 0.
+2026-07-05: Started Task 3 review hardening follow-up. Scope limited to adding timeout forwarding assertion in test_phase2_runtime_adapters.py and switching runtime/fetch.py elapsed duration measurement from time.time() to time.monotonic().
+2026-07-05: Task 3 review hardening verification completed. Red run after adding monotonic elapsed test failed as expected: test_default_fetch_client_measures_elapsed_with_monotonic_clock expected 2.5 but saw a near-zero time.time() delta. Green run: /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest -q --tb=short tldw_Server_API/tests/Web_Scraping/test_phase2_runtime_adapters.py -> 4 passed, 14 warnings. Import-boundary run: /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest -q --tb=short tldw_Server_API/tests/Web_Scraping/test_phase2_runtime_contracts.py::test_runtime_package_does_not_import_legacy_wrappers_or_policy_modules -> 1 passed, 8 warnings. Bandit full touched scope wrote /tmp/bandit_task3_fetch_adapter_hardening.json and reported only LOW B101 pytest assert findings in test_phase2_runtime_adapters.py; production runtime-only scan wrote /tmp/bandit_task3_fetch_adapter_hardening_runtime.json and had no results. git diff --check exited 0.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
