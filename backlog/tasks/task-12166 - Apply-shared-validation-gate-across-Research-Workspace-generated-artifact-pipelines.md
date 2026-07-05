@@ -1,5 +1,5 @@
 ---
-id: TASK-12148
+id: TASK-12166
 title: >-
   Apply shared validation gate across Research Workspace generated artifact
   pipelines

@@ -10,7 +10,7 @@ modified_files:
 - tldw_Server_API/tests/Workflows/adapters/test_audio_adapters.py
 - tldw_Server_API/tests/Watchlists/test_audio_briefing_workflow.py
 references:
-- TASK-12148
+- TASK-12166
 ---
 
 ## Description
