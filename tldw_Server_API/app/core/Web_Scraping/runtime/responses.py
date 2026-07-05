@@ -8,6 +8,22 @@ from types import MappingProxyType
 from typing import Any
 
 
+_FALSE_STRINGS = frozenset({"false", "0", "no", "off"})
+_TRUE_STRINGS = frozenset({"true", "1", "yes", "on"})
+
+
+def _normalize_bool(value: Any, *, field_name: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in _TRUE_STRINGS:
+            return True
+        if normalized in _FALSE_STRINGS:
+            return False
+    raise ValueError(f"{field_name} must be a boolean or boolean-like string")
+
+
 def _freeze_value(value: Any) -> Any:
     if isinstance(value, Mapping):
         return _freeze_mapping(value)
@@ -85,7 +101,7 @@ class FetchResponse:
 class PolicyDecision:
     """Policy decision shape consumed by runtime-aware scrape code."""
 
-    allowed: bool
+    allowed: bool | str
     mode: str
     reason: str
     stage: str
@@ -93,7 +109,7 @@ class PolicyDecision:
     details: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "allowed", bool(self.allowed))
+        object.__setattr__(self, "allowed", _normalize_bool(self.allowed, field_name="allowed"))
         object.__setattr__(self, "mode", str(self.mode or "compat"))
         object.__setattr__(self, "reason", str(self.reason or "allowed"))
         object.__setattr__(self, "stage", str(self.stage or "runtime"))

@@ -16,7 +16,7 @@ from tldw_Server_API.app.core.Web_Scraping.runtime import (
 
 @pytest.mark.unit
 def test_runtime_request_context_freezes_metadata() -> None:
-    metadata = {"trace": {"id": "abc"}}
+    metadata = {"trace": {"id": "abc"}, "items": ["one", {"nested": ["two"]}]}
     context = RuntimeRequestContext(
         source="article_extract",
         stage="pre_fetch",
@@ -29,10 +29,13 @@ def test_runtime_request_context_freezes_metadata() -> None:
 
     assert isinstance(context.metadata, MappingProxyType)
     assert context.metadata["trace"]["id"] == "abc"
+    assert context.metadata["items"] == ("one", {"nested": ("two",)})
     assert context.source == "article_extract"
     assert context.stage == "pre_fetch"
     assert context.user_id == "123"
     assert context.request_id == "req-1"
+    with pytest.raises(TypeError):
+        context.metadata["new"] = "blocked"
 
 
 @pytest.mark.unit
@@ -65,6 +68,27 @@ def test_fetch_request_normalizes_fields_and_proxy_maps() -> None:
     assert request.allow_redirects is True
     assert request.impersonate == "chrome120"
     assert request.proxies["https"] == "http://proxy.example:8080"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("value", ["false", "0", "no", "off"])
+def test_fetch_request_normalizes_false_like_allow_redirects(value: str) -> None:
+    request = FetchRequest(
+        url="https://example.com/article",
+        allow_redirects=value,
+    )
+
+    assert request.allow_redirects is False
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("value", ["sometimes", "2", "", object()])
+def test_fetch_request_rejects_ambiguous_allow_redirects(value: object) -> None:
+    with pytest.raises(ValueError, match="allow_redirects"):
+        FetchRequest(
+            url="https://example.com/article",
+            allow_redirects=value,
+        )
 
 
 @pytest.mark.unit
@@ -126,7 +150,7 @@ def test_policy_decision_matches_legacy_policy_fields() -> None:
         reason="robots_disallowed",
         stage="pre_fetch",
         source="article_extract",
-        details={"sanitized": True},
+        details={"sanitized": True, "checks": ["robots", {"stages": ["pre_fetch"]}]},
     )
 
     assert decision.allowed is False
@@ -135,6 +159,36 @@ def test_policy_decision_matches_legacy_policy_fields() -> None:
     assert decision.stage == "pre_fetch"
     assert decision.source == "article_extract"
     assert decision.details["sanitized"] is True
+    assert decision.details["checks"] == ("robots", {"stages": ("pre_fetch",)})
+    with pytest.raises(TypeError):
+        decision.details["new"] = "blocked"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("value", ["false", "0", "no", "off"])
+def test_policy_decision_normalizes_false_like_allowed(value: str) -> None:
+    decision = PolicyDecision(
+        allowed=value,
+        mode="strict",
+        reason="robots_disallowed",
+        stage="pre_fetch",
+        source="article_extract",
+    )
+
+    assert decision.allowed is False
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("value", ["sometimes", "2", "", object()])
+def test_policy_decision_rejects_ambiguous_allowed(value: object) -> None:
+    with pytest.raises(ValueError, match="allowed"):
+        PolicyDecision(
+            allowed=value,
+            mode="strict",
+            reason="robots_disallowed",
+            stage="pre_fetch",
+            source="article_extract",
+        )
 
 
 @pytest.mark.unit
@@ -146,13 +200,34 @@ def test_runtime_package_does_not_import_legacy_wrappers_or_policy_modules() -> 
         "tldw_Server_API.app.core.Web_Scraping.outbound_policy",
         "tldw_Server_API.app.core.Security.egress",
     }
+    forbidden_package_aliases = {
+        "tldw_Server_API.app.core.Web_Scraping": {
+            "Article_Extractor_Lib",
+            "enhanced_web_scraping",
+            "WebSearch_APIs",
+            "outbound_policy",
+        },
+        "tldw_Server_API.app.core.Security": {"egress"},
+    }
     runtime_dir = Path("tldw_Server_API/app/core/Web_Scraping/runtime")
+
+    def is_forbidden_module(module: str) -> bool:
+        return any(module == root or module.startswith(f"{root}.") for root in forbidden_roots)
 
     for path in runtime_dir.glob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 imports = {alias.name for alias in node.names}
-                assert imports.isdisjoint(forbidden_roots), (path, imports & forbidden_roots)
+                forbidden_imports = {module for module in imports if is_forbidden_module(module)}
+                assert not forbidden_imports, (path, forbidden_imports)
             elif isinstance(node, ast.ImportFrom) and node.module:
-                assert node.module not in forbidden_roots, (path, node.module)
+                assert not is_forbidden_module(node.module), (path, node.module)
+                forbidden_aliases = forbidden_package_aliases.get(node.module)
+                if forbidden_aliases:
+                    imported_names = {alias.name for alias in node.names}
+                    assert imported_names.isdisjoint(forbidden_aliases), (
+                        path,
+                        node.module,
+                        imported_names & forbidden_aliases,
+                    )

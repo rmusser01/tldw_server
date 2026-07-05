@@ -8,6 +8,22 @@ from types import MappingProxyType
 from typing import Any
 
 
+_FALSE_STRINGS = frozenset({"false", "0", "no", "off"})
+_TRUE_STRINGS = frozenset({"true", "1", "yes", "on"})
+
+
+def _normalize_bool(value: Any, *, field_name: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in _TRUE_STRINGS:
+            return True
+        if normalized in _FALSE_STRINGS:
+            return False
+    raise ValueError(f"{field_name} must be a boolean or boolean-like string")
+
+
 def _freeze_value(value: Any) -> Any:
     if isinstance(value, Mapping):
         return _freeze_mapping(value)
@@ -58,7 +74,7 @@ class FetchRequest:
     cookies: Mapping[str, str] = field(default_factory=dict)
     timeout: float | None = None
     backend: str = "httpx"
-    allow_redirects: bool = True
+    allow_redirects: bool | str = True
     impersonate: str | None = None
     proxies: Mapping[str, str] | str | None = None
     context: RuntimeRequestContext = field(default_factory=RuntimeRequestContext)
@@ -74,7 +90,11 @@ class FetchRequest:
         if self.timeout is not None:
             object.__setattr__(self, "timeout", float(self.timeout))
         object.__setattr__(self, "backend", str(self.backend or "httpx").strip().lower() or "httpx")
-        object.__setattr__(self, "allow_redirects", bool(self.allow_redirects))
+        object.__setattr__(
+            self,
+            "allow_redirects",
+            _normalize_bool(self.allow_redirects, field_name="allow_redirects"),
+        )
         if self.impersonate is not None:
             object.__setattr__(self, "impersonate", str(self.impersonate))
         object.__setattr__(self, "proxies", _freeze_proxy_value(self.proxies))
