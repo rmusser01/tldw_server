@@ -472,6 +472,43 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
     )
   })
 
+  it("includes selected sources that are not yet usable in studio workspace task metadata", () => {
+    const onStartWorkspaceTask = vi.fn()
+    workspaceStoreState.sources = [
+      {
+        id: "source-ready",
+        mediaId: 101,
+        title: "Ready Transcript",
+        type: "video",
+        status: "ready",
+        addedAt: new Date("2026-02-18T00:00:00.000Z")
+      },
+      {
+        id: "source-processing",
+        mediaId: 202,
+        title: "Still Indexing Interview",
+        type: "audio",
+        status: "processing",
+        addedAt: new Date("2026-02-18T00:00:00.000Z")
+      }
+    ]
+    workspaceStoreState.selectedSourceIds = ["source-ready", "source-processing"]
+
+    renderStudioPane({ onStartWorkspaceTask })
+
+    fireEvent.click(screen.getByRole("button", { name: "Start workspace task" }))
+
+    expect(onStartWorkspaceTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        description: expect.stringContaining("Still Indexing Interview"),
+        metadata: expect.objectContaining({
+          selectedSourceIds: ["source-ready", "source-processing"],
+          selectedSourceTitles: ["Ready Transcript", "Still Indexing Interview"]
+        })
+      })
+    )
+  })
+
   it("exposes accessible names for studio option controls", () => {
     renderStudioPane()
 

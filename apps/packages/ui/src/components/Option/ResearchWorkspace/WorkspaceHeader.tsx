@@ -629,7 +629,6 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
     image: null
   }
   const sources = useWorkspaceStore((s) => s.sources)
-  const generatedArtifacts = useWorkspaceStore((s) => s.generatedArtifacts)
   const setWorkspaceName = useWorkspaceStore((s) => s.setWorkspaceName)
   const setWorkspaceBanner =
     useWorkspaceStore((s) => s.setWorkspaceBanner) || (() => undefined)
@@ -742,7 +741,8 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
   const handleSaveAcpRunArtifact = React.useCallback(
     (input: WorkspaceACPRunArtifactSaveInput) => {
       const rootArtifactId = `acp-run-${input.runId}`
-      const priorVersions = generatedArtifacts.filter(
+      const currentArtifacts = useWorkspaceStore.getState().generatedArtifacts
+      const priorVersions = currentArtifacts.filter(
         (artifact: GeneratedArtifact) =>
           artifact.rootArtifactId === rootArtifactId ||
           artifact.artifactVersionId?.startsWith(`${rootArtifactId}-v`)
@@ -814,7 +814,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
       )
       saveCurrentWorkspace()
     },
-    [addArtifact, generatedArtifacts, messageApi, saveCurrentWorkspace, t, workspaceId]
+    [addArtifact, messageApi, saveCurrentWorkspace, t, workspaceId]
   )
 
   const applyDefaultAssistantWorkspaceState = (

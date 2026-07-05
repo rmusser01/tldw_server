@@ -446,6 +446,26 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     )
   })
 
+  it("uses an unsent chat draft when starting a workspace agent task", () => {
+    const onStartWorkspaceTask = vi.fn()
+
+    renderChatPane({ onStartWorkspaceTask })
+
+    fireEvent.change(screen.getByLabelText("Chat message"), {
+      target: { value: "Use this draft as the task brief." }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Start workspace task" }))
+
+    expect(onStartWorkspaceTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        description: expect.stringContaining("Use this draft as the task brief."),
+        metadata: expect.objectContaining({
+          latestUserMessagePreview: "Use this draft as the task brief."
+        })
+      })
+    )
+  })
+
   it("submits the composer with Cmd/Ctrl+Enter", async () => {
     renderChatPane()
 

@@ -916,7 +916,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
     errorCount: selectedErrorSourceCount
   })
   const buildStudioWorkspaceTaskPrefill = React.useCallback((): WorkspaceAgentTaskPrefill => {
-    const selectedSourceTitles = selectedSources
+    const selectedSourceTitles = effectiveSelectedSources
       .slice(0, WORKSPACE_TASK_SOURCE_CONTEXT_LIMIT)
       .map((source) => source.title || source.id)
     const contextArtifacts = generatedArtifacts.slice(
@@ -962,13 +962,13 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
         entrypoint: "studio",
         workspaceId: workspaceId || null,
         workspaceTag: workspaceTag || null,
-        selectedSourceIds: selectedSources.map((source) => source.id),
+        selectedSourceIds: effectiveSelectedSources.map((source) => source.id),
         selectedSourceTitles,
         artifactIds: contextArtifacts.map((artifact) => artifact.id),
         artifactTitles
       }
     }
-  }, [generatedArtifacts, selectedSources, t, workspaceId, workspaceTag])
+  }, [effectiveSelectedSources, generatedArtifacts, t, workspaceId, workspaceTag])
   const handleStartWorkspaceTask = React.useCallback(() => {
     onStartWorkspaceTask?.(buildStudioWorkspaceTaskPrefill())
   }, [buildStudioWorkspaceTaskPrefill, onStartWorkspaceTask])

@@ -635,10 +635,10 @@ export const WorkspaceACPHistoryModal: React.FC<
                     className="mt-3 grid grid-cols-4 gap-2 text-xs text-muted-foreground"
                     aria-label={observableActivityLabel}
                   >
-                    <span>{artifactCount} artifacts</span>
-                    <span>{diagnosticCount} diagnostics</span>
-                    <span>{auditEventCount} audit</span>
-                    <span>{eventCount} events</span>
+                    <span>{artifactCount} artifact/file</span>
+                    <span>{diagnosticCount} diagnostics/warnings</span>
+                    <span>{auditEventCount} audit/approvals</span>
+                    <span>{eventCount} events/tool activity</span>
                   </div>
 
                   {failureMessage && (

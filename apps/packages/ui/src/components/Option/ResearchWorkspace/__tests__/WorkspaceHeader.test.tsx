@@ -2692,8 +2692,8 @@ describe("WorkspaceHeader workspace browser modal", () => {
       within(modal).getByText("Summarize workspace blockers")
     ).toBeInTheDocument()
     expect(within(modal).getByText("sess-alpha")).toBeInTheDocument()
-    expect(within(modal).getByText("1 artifacts")).toBeInTheDocument()
-    expect(within(modal).getByText("3 diagnostics")).toBeInTheDocument()
+    expect(within(modal).getByText("1 artifact/file")).toBeInTheDocument()
+    expect(within(modal).getByText("3 diagnostics/warnings")).toBeInTheDocument()
     expect(
       within(modal).getByText("Identified two release blockers.")
     ).toBeInTheDocument()
@@ -2885,6 +2885,136 @@ describe("WorkspaceHeader workspace browser modal", () => {
     expect(mockSaveCurrentWorkspace).toHaveBeenCalled()
     expect(mockMessageApi.success).toHaveBeenCalledWith(
       "Agent result saved to Studio outputs."
+    )
+  })
+
+  it("creates distinct ACP artifact versions when a completed run is saved repeatedly", async () => {
+    fetchMockState.fetch.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input)
+
+      if (url === ACP_SESSIONS_FOR_ALPHA_URL) {
+        return {
+          ok: true,
+          json: async () => ({ sessions: [], total: 0 })
+        } as Response
+      }
+
+      if (url === ACP_PROJECTS_FOR_ALPHA_URL) {
+        return {
+          ok: true,
+          json: async () => [
+            {
+              id: 68,
+              name: "Alpha versioned results",
+              canonical_workspace: {
+                canonical_workspace_id: "workspace-alpha",
+                link_status: "linked"
+              }
+            }
+          ]
+        } as Response
+      }
+
+      if (
+        url ===
+        "http://127.0.0.1:8000/api/v1/agent-orchestration/projects/68/tasks"
+      ) {
+        return {
+          ok: true,
+          json: async () => [
+            {
+              id: 79,
+              project_id: 68,
+              title: "Versioned synthesis",
+              status: "complete",
+              canonical_workspace: {
+                canonical_workspace_id: "workspace-alpha"
+              }
+            }
+          ]
+        } as Response
+      }
+
+      if (
+        url ===
+        "http://127.0.0.1:8000/api/v1/agent-orchestration/tasks/79"
+      ) {
+        return {
+          ok: true,
+          json: async () => ({
+            id: 79,
+            project_id: 68,
+            title: "Versioned synthesis",
+            status: "complete",
+            runs: [
+              {
+                id: 101,
+                task_id: 79,
+                status: "completed",
+                result_summary: "Completed versioned synthesis.",
+                completed_at: "2026-05-13T13:25:00.000Z",
+                session: {
+                  session_id: "sess-101",
+                  available: true
+                },
+                history: {
+                  event_count: 2
+                }
+              }
+            ]
+          })
+        } as Response
+      }
+
+      throw new Error(`unexpected fetch: ${url}`)
+    })
+    mockAddArtifact.mockImplementation((artifact) => {
+      const savedArtifact = {
+        ...artifact,
+        id: `artifact-${mockAddArtifact.mock.calls.length}`,
+        createdAt: new Date()
+      }
+      mockStoreState.generatedArtifacts = [
+        savedArtifact,
+        ...mockStoreState.generatedArtifacts
+      ]
+      return savedArtifact
+    })
+
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    fireEvent.click(await screen.findByText("ACP run history"))
+
+    const modal = await screen.findByRole("dialog", {
+      name: "ACP run history"
+    })
+    const saveButton = await within(modal).findByRole("button", {
+      name: "Save to Studio"
+    })
+
+    fireEvent.click(saveButton)
+    fireEvent.click(saveButton)
+
+    expect(mockAddArtifact).toHaveBeenCalledTimes(2)
+    expect(mockAddArtifact.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({
+        artifactVersionId: "acp-run-101-v1",
+        previousVersionId: undefined
+      })
+    )
+    expect(mockAddArtifact.mock.calls[1]?.[0]).toEqual(
+      expect.objectContaining({
+        artifactVersionId: "acp-run-101-v2",
+        previousVersionId: "acp-run-101-v1"
+      })
     )
   })
 

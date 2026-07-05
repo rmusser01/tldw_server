@@ -1190,6 +1190,7 @@ const SimpleChatInput: React.FC<{
   placeholder?: string
   seededValue?: string | null
   onSeedConsumed?: () => void
+  onDraftChange?: (value: string) => void
   slashCommands?: Array<{ name: string; description: string }>
 }> = ({
   onSubmit,
@@ -1205,6 +1206,7 @@ const SimpleChatInput: React.FC<{
   placeholder,
   seededValue,
   onSeedConsumed,
+  onDraftChange,
   slashCommands = []
 }) => {
   const { t } = useTranslation(["playground", "common"])
@@ -1212,15 +1214,22 @@ const SimpleChatInput: React.FC<{
   const [showSlashMenu, setShowSlashMenu] = React.useState(false)
   const [slashMenuIndex, setSlashMenuIndex] = React.useState(0)
   const inputRef = React.useRef<InputRef>(null)
+  const updateValue = React.useCallback(
+    (nextValue: string) => {
+      setValue(nextValue)
+      onDraftChange?.(nextValue)
+    },
+    [onDraftChange]
+  )
 
   React.useEffect(() => {
     if (typeof seededValue !== "string") return
-    setValue(seededValue)
+    updateValue(seededValue)
     window.setTimeout(() => {
       inputRef.current?.focus({ cursor: "end" })
     }, 0)
     onSeedConsumed?.()
-  }, [onSeedConsumed, seededValue])
+  }, [onSeedConsumed, seededValue, updateValue])
 
   // Slash command filtering
   const filteredSlashCommands = React.useMemo(() => {
@@ -1237,7 +1246,7 @@ const SimpleChatInput: React.FC<{
   }, [filteredSlashCommands.length, value])
 
   const selectSlashCommand = (cmd: { name: string }) => {
-    setValue(`/${cmd.name} `)
+    updateValue(`/${cmd.name} `)
     setShowSlashMenu(false)
   }
 
@@ -1262,15 +1271,15 @@ const SimpleChatInput: React.FC<{
     ) {
       return
     }
-    setValue("")
+    updateValue("")
     setShowSlashMenu(false)
     try {
       const result = await onSubmit(trimmed)
       if (!shouldClearSubmittedDraft(result)) {
-        setValue(submittedValue)
+        updateValue(submittedValue)
       }
     } catch (error) {
-      setValue(submittedValue)
+      updateValue(submittedValue)
       throw error
     }
   }
@@ -1367,7 +1376,7 @@ const SimpleChatInput: React.FC<{
             ref={inputRef}
             aria-label={t("playground:chat.messageInputLabel", "Chat message")}
             value={value}
-            onChange={(e) => setValue(e.target.value)}
+            onChange={(e) => updateValue(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder={
               isChatUnavailable
@@ -1609,6 +1618,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     React.useState<ChatResponseLength>("standard")
   const [dropZoneActive, setDropZoneActive] = React.useState(false)
   const [seededPrompt, setSeededPrompt] = React.useState<string | null>(null)
+  const [composerDraft, setComposerDraft] = React.useState("")
   const [highlightedChatMessageId, setHighlightedChatMessageId] = React.useState<
     string | null
   >(null)
@@ -1733,7 +1743,8 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
             typeof entry.message === "string" &&
             entry.message.trim()
         )?.message || ""
-    const latestUserMessagePreview = truncateWorkspaceTaskText(latestUserMessage)
+    const taskInstructionText = composerDraft.trim() || latestUserMessage
+    const latestUserMessagePreview = truncateWorkspaceTaskText(taskInstructionText)
     const descriptionLines = [
       t(
         "playground:chat.workspaceTaskDescriptionIntro",
@@ -1773,7 +1784,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         latestUserMessagePreview: latestUserMessagePreview || null
       }
     }
-  }, [messages, sourceScopeSources, t, workspaceId])
+  }, [composerDraft, messages, sourceScopeSources, t, workspaceId])
 
   const handleStartWorkspaceTask = React.useCallback(() => {
     onStartWorkspaceTask?.(buildChatWorkspaceTaskPrefill())
@@ -3768,6 +3779,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
             }
             seededValue={seededPrompt}
             onSeedConsumed={() => setSeededPrompt(null)}
+            onDraftChange={setComposerDraft}
             slashCommands={slashCommands}
             placeholder={
               hasQueryableSelectedSources
