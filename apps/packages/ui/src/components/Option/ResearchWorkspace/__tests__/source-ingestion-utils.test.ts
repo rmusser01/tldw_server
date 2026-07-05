@@ -60,8 +60,8 @@ describe("source-ingestion-utils", () => {
   })
 
   it("builds an upload accept string aligned with backend document support", () => {
-    expect(buildSourceUploadAccept()).toMatchInlineSnapshot(
-      `".pdf,.docx,.txt,.md,.markdown,.epub,.html,.htm,.xhtml,.xml,.json,.mp3,.wav,.m4a,.ogg,.flac,.mp4,.webm,.mkv,.avi,.mov"`
+    expect(buildSourceUploadAccept()).toBe(
+      ".pdf,.docx,.txt,.md,.markdown,.epub,.html,.htm,.xhtml,.xml,.json,.mp3,.wav,.m4a,.ogg,.flac,.mp4,.webm,.mkv,.avi,.mov"
     )
   })
 
