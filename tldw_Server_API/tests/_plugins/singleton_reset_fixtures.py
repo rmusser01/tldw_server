@@ -12,32 +12,47 @@ Promote to autouse only if the guard surfaces a real leak on a lane.
 """
 from __future__ import annotations
 
+import asyncio
+
 import pytest
+from loguru import logger
+
+# per-singleton await budget so a hung shutdown cannot stall the loop
+_SHUTDOWN_TIMEOUT_S = 5.0
 
 
 async def _reset_embeddings_singletons() -> None:
-    """Best-effort null of the Embeddings drain singletons."""
+    """Best-effort null of the Embeddings drain singletons.
+
+    Awaits the async shutdowns directly (never the atexit-oriented
+    ``_shutdown_async_embedding_service_sync`` helper, which blocks on
+    ``run_coroutine_threadsafe(...).result()`` and would stall a running event
+    loop). Failures are logged at debug, not silently swallowed.
+    """
     try:
         from tldw_Server_API.app.core.Embeddings import connection_pool as cp
 
-        await cp.cleanup_connection_pools()
-    except Exception:
-        pass
+        await asyncio.wait_for(cp.cleanup_connection_pools(), timeout=_SHUTDOWN_TIMEOUT_S)
+    except Exception as exc:
+        logger.debug(f"reset_embeddings_singletons: pool cleanup skipped: {exc!r}")
     try:
         from tldw_Server_API.app.core.Embeddings import async_embeddings as ae
 
-        ae._shutdown_async_embedding_service_sync()
-    except Exception:
-        pass
+        service = ae._async_service_fallback
+        if service is not None:
+            await asyncio.wait_for(service.shutdown(), timeout=_SHUTDOWN_TIMEOUT_S)
+        ae._async_service_fallback = None
+    except Exception as exc:
+        logger.debug(f"reset_embeddings_singletons: async service reset skipped: {exc!r}")
     try:
         from tldw_Server_API.app.core.Embeddings import request_batching as rb
 
         batcher = rb._batcher_fallback
         if batcher is not None:
-            await batcher.shutdown()
+            await asyncio.wait_for(batcher.shutdown(), timeout=_SHUTDOWN_TIMEOUT_S)
         rb._batcher_fallback = None
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug(f"reset_embeddings_singletons: batcher reset skipped: {exc!r}")
 
 
 @pytest.fixture
