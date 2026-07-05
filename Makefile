@@ -492,7 +492,7 @@ lint-changed:
 # -----------------------------------------------------------------------------
 # Local CI — reproduce the gating GitHub checks before pushing
 # -----------------------------------------------------------------------------
-.PHONY: ci-local ci-local-full ci-local-lane test-triage
+.PHONY: ci-local ci-local-full ci-local-lane test-triage minimal-env-smoke
 
 # Prefer the project venv python ($(VENV_PYTHON)); fall back to $(PYTHON).
 CI_LOCAL_PYTHON ?= $(shell [ -x "$(VENV_PYTHON)" ] && echo "$(VENV_PYTHON)" || echo "$(PYTHON)")
@@ -512,6 +512,9 @@ ci-local-lane:       ## One area: make ci-local-lane LANE=tldw_Server_API/tests/
 
 test-triage:         ## Ranked test-quality triage report (see audits/2026-07-04-test-suite-audit-round2.md)
 	$(CI_LOCAL_PYTHON) Helper_Scripts/ci/test_quality_triage.py $(CI_ARGS)
+
+minimal-env-smoke:   ## Boot the app in a scrubbed env and probe /health (#2590-class guard)
+	$(CI_LOCAL_PYTHON) Helper_Scripts/ci/minimal_env_smoke.py $(CI_ARGS)
 
 # -----------------------------------------------------------------------------
 # Chat Streaming Load Harness (Scenario A starter)
