@@ -30,7 +30,7 @@ const fingerprint = resolve(frontendRoot, "lib/api/openapi.fingerprint.json");
 
 mkdirSync(generatedDir, { recursive: true });
 
-const python = process.env.PYTHON || "python";
+const python = process.env.PYTHON || (process.platform === "win32" ? "python" : "python3");
 
 console.log("[generate-api-types] exporting canonical OpenAPI schema + fingerprint…");
 execFileSync(
@@ -46,7 +46,8 @@ execFileSync(
 );
 
 console.log("[generate-api-types] generating schema.d.ts via openapi-typescript…");
-execFileSync("bunx", ["openapi-typescript", openapiJson, "-o", schemaDts], {
+// `bun x` (not `bunx`) — the standalone `bunx` shim can ENOENT on Windows.
+execFileSync("bun", ["x", "openapi-typescript", openapiJson, "-o", schemaDts], {
   cwd: frontendRoot,
   stdio: "inherit",
 });

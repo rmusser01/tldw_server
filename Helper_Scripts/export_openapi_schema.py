@@ -57,6 +57,8 @@ _NORMALIZED_VERSION = "0.0.0-fingerprint"
 
 
 def _apply_canonical_env() -> None:
+    """Pin the canonical environment (unset minimizers, fix auth/profile) so the
+    exported schema is identical across machines."""
     for key, value in _CANONICAL_ENV.items():
         if value == "":
             os.environ.pop(key, None)
@@ -65,28 +67,43 @@ def _apply_canonical_env() -> None:
 
 
 def _load_schema() -> dict:
+    """Import the app under the pinned env and return its OpenAPI schema with a
+    normalized version field (so a package bump is not read as API drift)."""
     _apply_canonical_env()
     # Import only after the env is pinned.
     from tldw_Server_API.app.main import app
 
     schema = app.openapi()
-    # Normalize the version so a bump is not read as drift.
     if isinstance(schema.get("info"), dict):
         schema = {**schema, "info": {**schema["info"], "version": _NORMALIZED_VERSION}}
     return schema
 
 
 def _canonical_json(schema: dict) -> str:
+    """Deterministic (sorted, compact) JSON serialization used for hashing."""
     return json.dumps(schema, sort_keys=True, separators=(",", ":"))
 
 
+def _schema_counts(schema: dict) -> tuple[int, int]:
+    """Return ``(path_count, schema_count)``, tolerating None/non-dict sections."""
+    paths = schema.get("paths") or {}
+    components = schema.get("components")
+    schemas = components.get("schemas") if isinstance(components, dict) else None
+    return (
+        len(paths) if isinstance(paths, dict) else 0,
+        len(schemas) if isinstance(schemas, dict) else 0,
+    )
+
+
 def _fingerprint(schema: dict) -> dict:
+    """Build the small drift fingerprint (sha256 + counts) that is checked in."""
+    path_count, schema_count = _schema_counts(schema)
     canonical = _canonical_json(schema)
     return {
         "sha256": hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
         "openapi_version": schema.get("openapi"),
-        "path_count": len(schema.get("paths", {})),
-        "schema_count": len(schema.get("components", {}).get("schemas", {})),
+        "path_count": path_count,
+        "schema_count": schema_count,
         "note": (
             "Regenerate with `make openapi-fingerprint`. A change here means the "
             "backend API contract drifted; regenerate the frontend types "
@@ -109,17 +126,17 @@ def main(argv: list[str]) -> int:
     args = parser.parse_args(argv)
 
     schema = _load_schema()
+    fp = _fingerprint(schema)
+    fp_json = json.dumps(fp, indent=2, sort_keys=True) + "\n"
 
     if args.out:
         with open(args.out, "w", encoding="utf-8") as fh:
             json.dump(schema, fh, sort_keys=True, indent=2)
             fh.write("\n")
-        print(f"[openapi-export] wrote schema -> {args.out} "
-              f"({len(schema.get('paths', {}))} paths, "
-              f"{len(schema.get('components', {}).get('schemas', {}))} schemas)")
-
-    fp = _fingerprint(schema)
-    fp_json = json.dumps(fp, indent=2, sort_keys=True) + "\n"
+        print(
+            f"[openapi-export] wrote schema -> {args.out} "
+            f"({fp['path_count']} paths, {fp['schema_count']} schemas)"
+        )
 
     if args.fingerprint:
         with open(args.fingerprint, "w", encoding="utf-8") as fh:
@@ -130,8 +147,13 @@ def main(argv: list[str]) -> int:
         try:
             with open(args.check, encoding="utf-8") as fh:
                 checked_in = json.load(fh)
-        except (OSError, json.JSONDecodeError) as exc:
-            print(f"[openapi-export] FAIL — cannot read checked-in fingerprint {args.check}: {exc}", file=sys.stderr)
+            if not isinstance(checked_in, dict):
+                raise ValueError("fingerprint JSON must be an object")
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            print(
+                f"[openapi-export] FAIL — cannot read checked-in fingerprint {args.check}: {exc}",
+                file=sys.stderr,
+            )
             return 2
         if checked_in.get("sha256") != fp["sha256"]:
             print(
