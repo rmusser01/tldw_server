@@ -261,6 +261,8 @@ def test_persist_output_bytes_sanitizes_nested_metadata_paths(
             "nested": {
                 "safe": "kept",
                 "/tmp/key": "drop-key",
+                "description": "rendered from /private/tmp/source.png",
+                "windows_note": "loaded from C:\\Users\\secret\\source.png",
                 "source_path": "/tmp/secret.png",
                 "windows": "C:\\Users\\secret.png",
             },
@@ -276,9 +278,10 @@ def test_persist_output_bytes_sanitizes_nested_metadata_paths(
     metadata = json.loads(raw_metadata)
     assert metadata["nested"] == {"safe": "kept"}
     assert metadata["items"] == ["kept", {"inner": "safe"}]
+    assert "/private/tmp/source.png" not in raw_metadata
     assert "/tmp/" not in raw_metadata
     assert "~/" not in raw_metadata
-    assert "C:\\Users" not in raw_metadata
+    assert "C:\\\\Users" not in raw_metadata
     assert "/tmp/key" not in raw_metadata
     assert "source_path" not in raw_metadata
     assert "asset_path" not in raw_metadata

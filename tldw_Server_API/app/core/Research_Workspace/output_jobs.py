@@ -451,8 +451,8 @@ def _sanitize_output_metadata_value(value: Any) -> Any:
 def _looks_absolute_path_like(value: str) -> bool:
     text = value.strip()
     return (
-        text.startswith(("/", "\\", "~/"))
-        or re.match(r"^[A-Za-z]:[\\/]", text) is not None
+        re.search(r"(^|\s)(?:[/\\](?:\S|$)|~[/\\](?:\S|$)|[A-Za-z]:[/\\])", text)
+        is not None
     )
 
 
