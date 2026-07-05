@@ -224,29 +224,29 @@ const OUTPUT_GROUPS: Array<{
   types: ArtifactType[]
 }> = [
   {
-    id: "study-aids",
-    label: "Study Aids",
-    types: ["quiz", "flashcards"]
+    id: "notebook-basics",
+    label: "Notebook basics",
+    types: ["summary", "audio_overview", "mindmap", "flashcards", "quiz"]
   },
   {
-    id: "analysis",
-    label: "Analysis",
-    types: ["summary", "report", "compare_sources", "timeline", "data_table"]
+    id: "reports-and-tables",
+    label: "Reports and tables",
+    types: ["report", "slides", "data_table"]
   },
   {
-    id: "creative",
-    label: "Creative",
-    types: ["mindmap", "slides", "audio_overview"]
+    id: "evidence-analysis",
+    label: "Evidence analysis",
+    types: ["compare_sources", "timeline"]
   }
 ]
 
 // Primary output types shown by default; remaining are collapsed behind an expander
 const PRIMARY_OUTPUT_TYPES = new Set<ArtifactType>([
   "summary",
+  "audio_overview",
+  "mindmap",
   "flashcards",
-  "quiz",
-  "report",
-  "compare_sources"
+  "quiz"
 ])
 
 const getStudioWorkspaceSourceStatus = (source: WorkspaceSource) =>

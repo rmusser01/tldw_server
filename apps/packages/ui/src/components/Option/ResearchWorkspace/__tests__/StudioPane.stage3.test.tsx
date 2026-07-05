@@ -535,18 +535,37 @@ describe("StudioPane Stage 3 information architecture and UX polish", () => {
     renderExpandedStudioPane()
 
     expect(screen.getByRole("button", { name: "Summary" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Audio Summary" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Mind Map" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Flashcards" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Quiz" })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Report" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Report" })).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Compare Sources" })
+    ).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole("button", { name: /More outputs/ }))
-    expect(screen.getByRole("button", { name: "Audio Summary" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Report" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Slides" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Data Table" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Compare Sources" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Timeline" })).toBeInTheDocument()
 
     fireEvent.mouseEnter(screen.getByRole("button", { name: "Summary" }))
     expect(
       await screen.findByText("Create a concise summary of key points")
     ).toBeInTheDocument()
+  })
+
+  it("groups Notebook-style outputs before advanced analysis outputs", async () => {
+    renderExpandedStudioPane()
+
+    expect(await screen.findByText("Notebook basics")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Summary" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Audio Summary" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Mind Map" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Flashcards" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Quiz" })).toBeInTheDocument()
   })
 
   it("shows contextual audio settings when audio overview is selected", async () => {
