@@ -550,7 +550,9 @@ def test_first_run_mcp_tools_apply_returns_conflict_for_profile_conflict(
     )
 
     assert response.status_code == 409
-    assert response.json()["detail"]["reason"] == "profile_manually_changed"
+    detail = response.json()["detail"]
+    assert detail["status"] == "conflict"
+    assert detail["conflict"]["reason"] == "profile_manually_changed"
     assert "mcp_tools" not in FirstRunStateStore(state_path).load().step_data
 
 

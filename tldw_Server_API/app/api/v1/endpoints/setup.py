@@ -1355,7 +1355,7 @@ async def apply_first_run_mcp_tools(
     if result.status == "conflict":
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            detail=result.conflict or {"reason": "profile_manually_changed"},
+            detail=model_dump_compat(_mcp_tools_apply_response(result)),
         )
 
     try:
