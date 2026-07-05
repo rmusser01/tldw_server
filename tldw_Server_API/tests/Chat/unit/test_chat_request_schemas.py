@@ -107,6 +107,17 @@ def test_chat_completion_request_valid_api_provider():
 
 
 @pytest.mark.unit
+def test_chat_completion_request_normalizes_llama_provider_alias():
+    req = ChatCompletionRequest(
+        model="gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf",
+        messages=[ChatCompletionUserMessageParam(role="user", content="hi")],
+        api_provider="llama",
+    )
+
+    assert req.api_provider == "llama.cpp"
+
+
+@pytest.mark.unit
 def test_supported_api_endpoints_uses_python310_safe_runtime_validation():
     assert SUPPORTED_API_ENDPOINTS is str
 
