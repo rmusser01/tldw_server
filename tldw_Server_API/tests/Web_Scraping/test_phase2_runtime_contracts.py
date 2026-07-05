@@ -241,3 +241,48 @@ def test_runtime_package_does_not_import_legacy_wrappers_or_policy_modules() -> 
                         node.module,
                         imported_names & forbidden_aliases,
                     )
+
+
+from tldw_Server_API.app.core.Web_Scraping.runtime import (
+    BrowserLaunchOptions,
+    RuntimeCookie,
+    RuntimeSessionState,
+    RuntimeTimeouts,
+    is_cancellation,
+)
+
+
+@pytest.mark.unit
+def test_runtime_session_state_freezes_cookies_and_headers() -> None:
+    cookies = [RuntimeCookie(name="session", value="abc", domain="example.com")]
+    headers = {"User-Agent": "UA"}
+    state = RuntimeSessionState(cookies=cookies, headers=headers)
+
+    headers["User-Agent"] = "mutated"
+
+    assert state.cookies[0].name == "session"
+    assert state.cookies[0].value == "abc"
+    assert state.cookies[0].domain == "example.com"
+    assert state.headers["User-Agent"] == "UA"
+
+
+@pytest.mark.unit
+def test_runtime_timeout_contract_rejects_negative_values() -> None:
+    with pytest.raises(ValueError, match="fetch_timeout_s must be non-negative"):
+        RuntimeTimeouts(fetch_timeout_s=-1)
+
+
+@pytest.mark.unit
+def test_browser_launch_options_normalize_viewport() -> None:
+    options = BrowserLaunchOptions(headless=True, viewport_width=1280, viewport_height=720)
+
+    assert options.headless is True
+    assert options.viewport == {"width": 1280, "height": 720}
+
+
+@pytest.mark.unit
+def test_cancellation_helper_preserves_asyncio_cancelled_error() -> None:
+    import asyncio
+
+    assert is_cancellation(asyncio.CancelledError()) is True
+    assert is_cancellation(RuntimeError("not cancelled")) is False
