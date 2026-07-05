@@ -4,7 +4,7 @@ title: Implement Research Workspace NotebookLM Ultra agent-task WP4
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-07-05 18:08'
+updated_date: '2026-07-05 19:53'
 labels:
   - research-workspace
   - notebooklm
@@ -52,6 +52,11 @@ Verification:
 - bun run typecheck => passed.
 - git diff --check => passed.
 - Bandit: not run because touched scope is frontend TypeScript/TSX only and this worktree has no .venv; no backend Python touched.
+
+PR #2664 review pass after rebase:
+- Rebased codex/research-workspace-notebooklm-wp4 onto latest origin/dev.
+- Addressed Gemini/Qodo/CodeRabbit review comments: nullable truncation guard, bounded source IDs with full selectedSourceCount, draft-vs-latest-message labeling, safe draft restore, localized ACP activity labels, generatedArtifacts fallback, translated saved artifact title, task producerId provenance, version suffix parsing for artifacts without numeric version, and invalid completedAt fallback.
+- Verification after review fixes: focused Research Workspace vitest suite => 180 passed; bun run typecheck => passed; git diff --check => passed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
