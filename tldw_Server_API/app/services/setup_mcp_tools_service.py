@@ -333,6 +333,8 @@ class SetupMcpToolsService:
         if profile is None:
             return None
         policy_document = _dict(profile.get("policy_document"))
+        if _dict(policy_document.get("first_run_mcp_tools")).get("setup_origin") != SETUP_ORIGIN:
+            return None
         conflict = _profile_conflict(profile, policy_document)
         if conflict is None:
             return None

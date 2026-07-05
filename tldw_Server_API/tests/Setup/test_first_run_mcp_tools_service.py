@@ -545,6 +545,37 @@ async def test_recovery_status_reports_profile_manual_change_from_saved_profile_
 
 
 @pytest.mark.asyncio
+async def test_recovery_status_ignores_matching_normal_profile_without_first_run_provenance(
+    fake_hub: FakeMcpHub,
+    fake_registry: FakeToolRegistry,
+) -> None:
+    fake_hub.permission_profiles = [
+        _profile(
+            7,
+            {
+                "allowed_tools": ["notes.search"],
+                "capabilities": ["filesystem.read"],
+            },
+        )
+    ]
+    service = SetupMcpToolsService(hub=fake_hub, tool_registry=fake_registry)
+
+    result = await service.recovery_status(
+        saved_state={
+            "selected_pack_ids": ["research"],
+            "selected_addon_ids": [],
+            "validation_state": "not_run",
+            "profile_id": 7,
+            "assignment_id": 11,
+            "catalog_version": CATALOG_VERSION,
+            "effective_tool_count": 3,
+        }
+    )
+
+    assert result is None
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("conflict_resolution,profile_id", [("keep_existing", 2), ("replace_existing", None)])
 async def test_conflict_resolution_requires_matching_profile_id_before_mutating(
     conflict_resolution: str,
