@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime
 import json
 import os
 import re
 import uuid
 from typing import Any, cast
+
+from pydantic import ValidationError
 
 from tldw_Server_API.app.api.v1.schemas.research_workspace_outputs import (
     ResearchWorkspaceOutputArtifactType,
@@ -22,6 +26,7 @@ from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDat
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.media_db import api as media_db_api
 from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError as MediaDatabaseError
+from tldw_Server_API.app.core.File_Artifacts.adapters.image_adapter import ImageAdapter
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 
 RESEARCH_WORKSPACE_OUTPUT_JOB_DOMAIN = "research_workspace"
@@ -34,6 +39,7 @@ _PUBLIC_ERROR_CODE_RE = re.compile(r"^[a-z][a-z0-9_]{0,95}$")
 _SOURCE_CONTEXT_TOTAL_CHAR_LIMIT = 18_000
 _SOURCE_CONTEXT_PER_SOURCE_CHAR_LIMIT = 6_000
 _SOURCE_CONTEXT_PREVIEW_CHAR_LIMIT = 1_000
+_INFOGRAPHIC_PROMPT_SOURCE_CHAR_LIMIT = 8_000
 _SOURCE_CONTEXT_MEDIA_ERRORS = (
     AttributeError,
     MediaDatabaseError,
@@ -278,11 +284,172 @@ async def process_research_workspace_output_payload(
     job_manager: JobManager,
     progress: Any | None = None,
 ) -> dict[str, Any]:
-    raise ResearchWorkspaceOutputJobError(
-        "research_workspace_output_processing_not_implemented",
-        status_code=501,
-        retryable=False,
+    normalized_payload = normalize_research_workspace_output_payload(payload)
+    workspace_id = str(normalized_payload.get("workspace_id") or "").strip()
+    artifact_id = str(normalized_payload.get("artifact_id") or "").strip()
+    artifact_type = str(normalized_payload.get("artifact_type") or "").strip()
+    if not workspace_id or not artifact_id or artifact_type not in _OUTPUT_ARTIFACT_TYPES:
+        raise ResearchWorkspaceOutputJobError("job_payload_invalid", status_code=400)
+    if str(normalized_payload.get("user_id") or user_id) != str(user_id):
+        raise ResearchWorkspaceOutputJobError("owner_user_id_mismatch", status_code=403)
+    try:
+        settings = ResearchWorkspaceOutputSettings.model_validate(
+            _normalize_job_mapping(normalized_payload.get("settings"))
+        )
+    except ValidationError as exc:
+        raise ResearchWorkspaceOutputJobError("output_settings_invalid", status_code=400) from exc
+
+    if artifact_type == "video_overview":
+        raise ResearchWorkspaceOutputJobError(
+            "research_workspace_video_overview_not_implemented",
+            status_code=501,
+            retryable=False,
+        )
+    return await _process_infographic_output_payload(
+        job=job,
+        payload=normalized_payload,
+        workspace_db=workspace_db,
+        media_db=media_db,
+        user_id=user_id,
+        settings=settings,
     )
+
+
+def generate_infographic_prompt(
+    *,
+    source_context: ResearchWorkspaceOutputSourceContext,
+    settings: ResearchWorkspaceOutputSettings,
+) -> str:
+    title = f"Title: {settings.title_hint.strip()}\n" if settings.title_hint else ""
+    source_text = source_context.text[:_INFOGRAPHIC_PROMPT_SOURCE_CHAR_LIMIT].strip()
+    return (
+        "Create one clean, information-dense infographic image. "
+        "Use only facts from the source context. "
+        "Prefer labeled sections, concrete numbers, timelines, and comparisons where relevant. "
+        "Do not invent facts.\n\n"
+        f"{title}Source context:\n{source_text}"
+    ).strip()
+
+
+async def _process_infographic_output_payload(
+    *,
+    job: dict[str, Any],
+    payload: dict[str, Any],
+    workspace_db: Any,
+    media_db: Any,
+    user_id: int,
+    settings: ResearchWorkspaceOutputSettings,
+) -> dict[str, Any]:
+    workspace_id = str(payload["workspace_id"])
+    artifact_id = str(payload["artifact_id"])
+    source_ids = [
+        str(source_id).strip()
+        for source_id in payload.get("source_ids") or []
+        if str(source_id).strip()
+    ]
+    job_id = int(job.get("id") or 0)
+    title = settings.title_hint or "Infographic"
+
+    try:
+        source_context = build_research_workspace_output_source_context(
+            workspace_db=workspace_db,
+            media_db=media_db,
+            workspace_id=workspace_id,
+            source_ids=source_ids,
+        )
+        prompt = generate_infographic_prompt(source_context=source_context, settings=settings)
+        adapter = ImageAdapter()
+        structured = adapter.normalize(
+            {
+                "backend": settings.image_backend,
+                "prompt": prompt,
+                "width": settings.image_width or 1024,
+                "height": settings.image_height or 1024,
+                "model": settings.model,
+            }
+        )
+        issues = adapter.validate(structured)
+        if issues:
+            raise ResearchWorkspaceOutputJobError(str(issues[0].code), retryable=False)
+        export = await asyncio.to_thread(adapter.export, structured, format="png")
+        content = getattr(export, "content", None)
+        if not isinstance(content, bytes) or not content:
+            raise ResearchWorkspaceOutputJobError("empty_output", retryable=False)
+        with CollectionsDatabase.for_user(user_id=str(user_id)) as collections_db:
+            persisted = persist_research_workspace_output_bytes(
+                collections_db=collections_db,
+                user_id=user_id,
+                job_id=job_id,
+                artifact_type="infographic",
+                title=title,
+                content=content,
+                format_="png",
+                content_type="image/png",
+                workspace_id=workspace_id,
+                workspace_artifact_id=artifact_id,
+                metadata={"image_backend": structured.get("backend")},
+            )
+    except ResearchWorkspaceOutputJobError as exc:
+        _mark_workspace_output_artifact_failed(
+            workspace_db=workspace_db,
+            workspace_id=workspace_id,
+            artifact_id=artifact_id,
+            artifact_type="infographic",
+            job_id=job_id,
+            error_code=exc.public_code,
+        )
+        raise
+    except Exception as exc:
+        public_code = "infographic_generation_failed"
+        _mark_workspace_output_artifact_failed(
+            workspace_db=workspace_db,
+            workspace_id=workspace_id,
+            artifact_id=artifact_id,
+            artifact_type="infographic",
+            job_id=job_id,
+            error_code=public_code,
+        )
+        raise ResearchWorkspaceOutputJobError(public_code, retryable=False) from exc
+
+    export_ref = {
+        "id": persisted.output_id,
+        "fileId": persisted.output_id,
+        "format": persisted.format,
+        "url": persisted.download_url,
+        "status": "ready",
+        "content_type": persisted.content_type,
+        "bytes": persisted.byte_size,
+    }
+    _update_workspace_output_artifact(
+        workspace_db=workspace_db,
+        workspace_id=workspace_id,
+        artifact_id=artifact_id,
+        updates={
+            "status": "complete",
+            "content_type": "image/png",
+            "preview_text": source_context.preview_text,
+            "summary": "Generated infographic",
+            "source_lineage": source_context.source_lineage,
+            "producer_metadata": {
+                "origin": "research_workspace_output_job",
+                "job_id": job_id,
+                "artifact_type": "infographic",
+                "backend": structured.get("backend"),
+            },
+            "export_refs": [export_ref],
+            "completed_at": _utc_now_iso(),
+        },
+    )
+    return {
+        "workspace_id": workspace_id,
+        "artifact_id": artifact_id,
+        "artifact_type": "infographic",
+        "output_id": persisted.output_id,
+        "download_url": persisted.download_url,
+        "format": persisted.format,
+        "content_type": persisted.content_type,
+        "bytes": persisted.byte_size,
+    }
 
 
 def submit_research_workspace_output_job(
@@ -515,6 +682,66 @@ def _looks_absolute_path_like(value: str) -> bool:
         re.search(r"(^|[^\w])(?:[/\\](?:\S|$)|~[/\\](?:\S|$)|[A-Za-z]:[/\\])", text)
         is not None
     )
+
+
+def _update_workspace_output_artifact(
+    *,
+    workspace_db: Any,
+    workspace_id: str,
+    artifact_id: str,
+    updates: dict[str, Any],
+) -> dict[str, Any]:
+    existing = workspace_db.get_workspace_artifact(workspace_id, artifact_id)
+    if existing is None:
+        raise ResearchWorkspaceOutputJobError("workspace_artifact_not_found", status_code=404)
+    try:
+        expected_version = int(existing.get("version"))
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise ResearchWorkspaceOutputJobError("workspace_artifact_version_invalid", status_code=409) from exc
+    if expected_version < 1:
+        raise ResearchWorkspaceOutputJobError("workspace_artifact_version_invalid", status_code=409)
+    try:
+        return workspace_db.update_workspace_artifact(
+            workspace_id,
+            artifact_id,
+            updates,
+            expected_version=expected_version,
+        )
+    except ResearchWorkspaceOutputJobError:
+        raise
+    except Exception as exc:
+        raise ResearchWorkspaceOutputJobError("workspace_artifact_update_failed", status_code=409) from exc
+
+
+def _mark_workspace_output_artifact_failed(
+    *,
+    workspace_db: Any,
+    workspace_id: str,
+    artifact_id: str,
+    artifact_type: str,
+    job_id: int,
+    error_code: str,
+) -> None:
+    public_code = _safe_public_error_code(error_code)
+    _update_workspace_output_artifact(
+        workspace_db=workspace_db,
+        workspace_id=workspace_id,
+        artifact_id=artifact_id,
+        updates={
+            "status": "failed",
+            "content_type": "image/png" if artifact_type == "infographic" else "video/mp4",
+            "producer_metadata": {
+                "origin": "research_workspace_output_job",
+                "job_id": job_id,
+                "artifact_type": artifact_type,
+                "error": public_code,
+            },
+        },
+    )
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(UTC).isoformat()
 
 
 def _pending_artifact_payload(
