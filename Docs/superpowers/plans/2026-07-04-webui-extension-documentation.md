@@ -356,7 +356,7 @@ In `Docs/mkdocs.yml`, add a top-level nav section after `Getting Started`:
 
 Keep the existing `User Guides -> WebUI and Extension` subsection as a compact legacy/deep-links area unless the final docs make it redundant enough to simplify safely.
 
-- [ ] **Step 3: Commit navigation updates**
+- [x] **Step 3: Commit navigation updates**
 
 Run:
 
@@ -375,7 +375,7 @@ Expected: commit succeeds with only the user-guide map and MkDocs nav staged.
 - Read: `Docs/mkdocs.yml`
 - Read: `Docs/Published`
 
-- [ ] **Step 1: Run local markdown link check**
+- [x] **Step 1: Run local markdown link check**
 
 Run:
 
@@ -410,7 +410,7 @@ PY
 
 Expected: `local markdown links resolve`.
 
-- [ ] **Step 2: Run MkDocs navigation source-target check**
+- [x] **Step 2: Run MkDocs navigation source-target check**
 
 Run:
 
@@ -436,7 +436,7 @@ PY
 
 Expected: prints a target count and exits `0`.
 
-- [ ] **Step 3: Confirm generated Published docs are unchanged**
+- [x] **Step 3: Confirm generated Published docs are unchanged**
 
 Run:
 
@@ -446,7 +446,7 @@ git diff --quiet dev -- Docs/Published && printf 'Docs/Published unchanged again
 
 Expected: `Docs/Published unchanged against dev`.
 
-- [ ] **Step 4: Run whitespace check**
+- [x] **Step 4: Run whitespace check**
 
 Run:
 
@@ -456,7 +456,7 @@ git diff --check
 
 Expected: no output and exit status `0`.
 
-- [ ] **Step 5: Record Bandit skip**
+- [x] **Step 5: Record Bandit skip**
 
 No Python files should be changed in this task. Record in Backlog that Bandit is not applicable because the touched files are Markdown and MkDocs YAML only.
 
@@ -465,7 +465,7 @@ No Python files should be changed in this task. Record in Backlog that Bandit is
 **Files:**
 - Modify: `backlog/tasks/task-12028 - Improve-WebUI-and-extension-user-facing-documentation.md`
 
-- [ ] **Step 1: Update Backlog verification and acceptance criteria**
+- [x] **Step 1: Update Backlog verification and acceptance criteria**
 
 Use Backlog MCP:
 
@@ -479,7 +479,7 @@ task_edit TASK-12028:
 
 Expected: task shows completed acceptance criteria and a concise final summary.
 
-- [ ] **Step 2: Commit task finalization**
+- [x] **Step 2: Commit task finalization**
 
 Run:
 
