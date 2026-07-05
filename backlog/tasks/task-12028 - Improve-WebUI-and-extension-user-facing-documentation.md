@@ -1,7 +1,7 @@
 ---
 id: TASK-12028
 title: Improve WebUI and extension user-facing documentation
-status: Done
+status: In Progress
 created_date: 2026-07-04 23:49
 labels:
 - docs
@@ -11,7 +11,7 @@ priority: medium
 documentation:
 - Docs/superpowers/specs/2026-07-04-webui-extension-documentation-design.md
 - Docs/superpowers/plans/2026-07-04-webui-extension-documentation.md
-updated_date: 2026-07-05 00:47
+updated_date: 2026-07-05 01:49
 modified_files:
 - Docs/User_Guides/WebUI/index.md
 - Docs/User_Guides/WebUI/Page_Feature_Index.md
@@ -60,6 +60,7 @@ Design spec written at Docs/superpowers/specs/2026-07-04-webui-extension-documen
 Implementation plan written at Docs/superpowers/plans/2026-07-04-webui-extension-documentation.md. The plan decomposes route inventory, section landing/index docs, feature-set pages, MkDocs/User_Guides discovery updates, verification, and task finalization.
 Implemented the WebUI & Extension documentation section under Docs/User_Guides/WebUI and exposed it from Docs/User_Guides/index.md and Docs/mkdocs.yml. Final verification on 2026-07-04: local markdown links resolve across 11 files; new WebUI MkDocs nav targets exist for all 10 entries; Docs/Published is unchanged against dev; git diff --check dev...HEAD exits cleanly. Bandit is not applicable because the touched source files are Markdown, MkDocs YAML, Backlog task metadata, and documentation plan/spec files only; no Python files changed.
 Draft PR created for review: https://github.com/rmusser01/tldw_server/pull/2639. The PR intentionally leaves the human-authored Change summary as TODO because the repository merge gate requires the requester to write that rationale before merge.
+Reopened for PR follow-up: rebase PR #2639 on latest dev and address review comments/check issues before pushing an updated branch.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
