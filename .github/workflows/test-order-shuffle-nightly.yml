@@ -1,0 +1,86 @@
+name: Test Order Shuffle (Nightly)
+
+# Surfaces order-dependence / cross-test state leaks (the #2580/#2581/#2585
+# class) by running high-risk lanes in randomized order via pytest-randomly.
+# NOT PR-blocking — informational until it is green 5 consecutive runs, then it
+# may be promoted to a required check.
+
+on:
+  workflow_dispatch:
+    inputs:
+      seed:
+        description: "Fixed --randomly-seed (blank = random per run)"
+        required: false
+        default: ""
+  schedule:
+    - cron: '0 8 * * *'  # daily 08:00 UTC
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  shuffle:
+    name: Shuffled order — ${{ matrix.lane.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        lane:
+          - name: embeddings-isolated
+            path: tldw_Server_API/tests/Embeddings_isolated
+          - name: rag
+            path: tldw_Server_API/tests/RAG
+          - name: infrastructure
+            path: tldw_Server_API/tests/Infrastructure
+    env:
+      PYTHONPATH: .
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+      TEST_MODE: 'true'
+      DISABLE_HEAVY_STARTUP: '1'
+      # exercise the isolation guard while shuffling; warn (don't fail) so a
+      # leak surfaces as a diagnostic rather than a hard failure during rollout
+      TLDW_SINGLETON_GUARD: 'warn'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      - name: Setup Python and deps (with uv)
+        uses: ./.github/actions/setup-python-deps
+        with:
+          python-version: '3.12'
+          use-uv: 'true'
+          cache-dependency-path: |
+            pyproject.toml
+            uv.lock
+          extras: dev
+
+      - name: Ensure shuffle/asyncio plugins installed
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytest-asyncio pytest-randomly
+
+      - name: Verify pytest-randomly import (autoload disabled)
+        run: |
+          python - <<'PY'
+          import importlib
+          importlib.import_module('pytest_randomly')
+          print('pytest_randomly import OK')
+          PY
+
+      - name: Run lane in randomized order
+        run: |
+          SEED_ARG=""
+          if [ -n "${{ github.event.inputs.seed }}" ]; then
+            # plugin is already loaded via -p pytest_randomly below; only pin the seed
+            SEED_ARG="--randomly-seed=${{ github.event.inputs.seed }}"
+          fi
+          pytest -q --disable-warnings \
+            -p pytest_asyncio.plugin \
+            -p pytest_randomly \
+            $SEED_ARG \
+            "${{ matrix.lane.path }}"
