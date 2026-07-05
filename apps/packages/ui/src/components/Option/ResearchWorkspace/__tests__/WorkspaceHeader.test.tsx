@@ -505,6 +505,7 @@ const ensureLocalStorage = () => {
 describe("WorkspaceHeader workspace browser modal", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockAddArtifact.mockReset()
     translationMock.keys = []
     workspaceContextMocks.useActiveWorkspaceContext.mockReturnValue(
       makeActiveWorkspaceHookResult()
@@ -2692,7 +2693,7 @@ describe("WorkspaceHeader workspace browser modal", () => {
       within(modal).getByText("Summarize workspace blockers")
     ).toBeInTheDocument()
     expect(within(modal).getByText("sess-alpha")).toBeInTheDocument()
-    expect(within(modal).getByText("1 artifact/file")).toBeInTheDocument()
+    expect(within(modal).getByText("1 artifacts/files")).toBeInTheDocument()
     expect(within(modal).getByText("3 diagnostics/warnings")).toBeInTheDocument()
     expect(
       within(modal).getByText("Identified two release blockers.")
@@ -2847,7 +2848,7 @@ describe("WorkspaceHeader workspace browser modal", () => {
       expect.objectContaining({
         type: "report",
         status: "completed",
-        title: expect.stringContaining("Agent result"),
+        title: "Agent result: Synthesize the workspace",
         content: expect.stringContaining("Completed synthesis"),
         version: 2,
         artifactVersionId: "acp-run-99-v2",
@@ -2863,6 +2864,7 @@ describe("WorkspaceHeader workspace browser modal", () => {
           sessionId: "sess-99",
           taskId: "77",
           projectId: "66",
+          producerId: "77",
           links: expect.objectContaining({
             diagnostics: "/api/v1/acp/sessions/sess-99/diagnostics",
             artifacts: "/api/v1/acp/sessions/sess-99/artifacts",
@@ -2889,6 +2891,18 @@ describe("WorkspaceHeader workspace browser modal", () => {
   })
 
   it("creates distinct ACP artifact versions when a completed run is saved repeatedly", async () => {
+    mockStoreState.generatedArtifacts = [
+      {
+        id: "artifact-prior-v3",
+        type: "report",
+        title: "Agent result: Versioned synthesis",
+        status: "completed",
+        artifactVersionId: "acp-run-101-v3",
+        rootArtifactId: "acp-run-101",
+        content: "Earlier saved result.",
+        createdAt: new Date("2026-05-13T13:20:00.000Z")
+      }
+    ]
     fetchMockState.fetch.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input)
 
@@ -3006,19 +3020,20 @@ describe("WorkspaceHeader workspace browser modal", () => {
     expect(mockAddArtifact).toHaveBeenCalledTimes(2)
     expect(mockAddArtifact.mock.calls[0]?.[0]).toEqual(
       expect.objectContaining({
-        artifactVersionId: "acp-run-101-v1",
-        previousVersionId: undefined
+        artifactVersionId: "acp-run-101-v4",
+        previousVersionId: "acp-run-101-v3"
       })
     )
     expect(mockAddArtifact.mock.calls[1]?.[0]).toEqual(
       expect.objectContaining({
-        artifactVersionId: "acp-run-101-v2",
-        previousVersionId: "acp-run-101-v1"
+        artifactVersionId: "acp-run-101-v5",
+        previousVersionId: "acp-run-101-v4"
       })
     )
   })
 
   it("saves completed ACP run results even when the session is no longer retained", async () => {
+    mockStoreState.generatedArtifacts = undefined as any
     fetchMockState.fetch.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input)
 
@@ -3083,7 +3098,7 @@ describe("WorkspaceHeader workspace browser modal", () => {
                 session_id: null,
                 status: "completed",
                 result_summary: "Completed retained summary.",
-                completed_at: "2026-05-13T13:15:00.000Z",
+                completed_at: "not-a-date",
                 session: null,
                 history: {
                   audit_event_count: 0,
@@ -3132,6 +3147,9 @@ describe("WorkspaceHeader workspace browser modal", () => {
         })
       })
     )
+    const savedArtifact = mockAddArtifact.mock.calls[0]?.[0]
+    expect(savedArtifact.completedAt).toBeInstanceOf(Date)
+    expect(Number.isNaN(savedArtifact.completedAt.getTime())).toBe(false)
   })
 
   it("shows direct workspace ACP sessions when Agent Tasks history has no runs", async () => {

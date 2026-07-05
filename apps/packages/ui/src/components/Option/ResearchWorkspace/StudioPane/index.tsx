@@ -110,6 +110,7 @@ import {
 import { buildLiteratureDeepResearchLaunchPath } from "./literature-deep-research-launch"
 import { findProposalDeepResearchVerificationArtifact } from "./proposal-deep-research-verification"
 import type { WorkspaceAgentTaskPrefill } from "../WorkspaceAgentTaskHandoffModal"
+import { WORKSPACE_TASK_SOURCE_CONTEXT_LIMIT } from "../workspace-task-prefill"
 
 // Re-export for external consumers
 export { estimateGenerationSeconds, estimateGenerationTokens, estimateGenerationCostUsd } from "./hooks/useArtifactGeneration"
@@ -269,7 +270,6 @@ const OUTPUT_GROUPS: Array<{
     types: ["compare_sources", "timeline"]
   }
 ]
-const WORKSPACE_TASK_SOURCE_CONTEXT_LIMIT = 5
 const WORKSPACE_TASK_ARTIFACT_CONTEXT_LIMIT = 5
 
 // Primary output types shown by default; remaining are collapsed behind an expander
@@ -916,9 +916,13 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
     errorCount: selectedErrorSourceCount
   })
   const buildStudioWorkspaceTaskPrefill = React.useCallback((): WorkspaceAgentTaskPrefill => {
-    const selectedSourceTitles = effectiveSelectedSources
-      .slice(0, WORKSPACE_TASK_SOURCE_CONTEXT_LIMIT)
-      .map((source) => source.title || source.id)
+    const sourceContextSources = effectiveSelectedSources.slice(
+      0,
+      WORKSPACE_TASK_SOURCE_CONTEXT_LIMIT
+    )
+    const selectedSourceTitles = sourceContextSources.map(
+      (source) => source.title || source.id
+    )
     const contextArtifacts = generatedArtifacts.slice(
       0,
       WORKSPACE_TASK_ARTIFACT_CONTEXT_LIMIT
@@ -962,8 +966,9 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
         entrypoint: "studio",
         workspaceId: workspaceId || null,
         workspaceTag: workspaceTag || null,
-        selectedSourceIds: effectiveSelectedSources.map((source) => source.id),
+        selectedSourceIds: sourceContextSources.map((source) => source.id),
         selectedSourceTitles,
+        selectedSourceCount: effectiveSelectedSources.length,
         artifactIds: contextArtifacts.map((artifact) => artifact.id),
         artifactTitles
       }

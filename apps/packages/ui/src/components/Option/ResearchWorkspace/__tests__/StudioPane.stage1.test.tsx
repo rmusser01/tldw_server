@@ -509,6 +509,35 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
     )
   })
 
+  it("caps selected source ids in studio workspace task metadata", () => {
+    const onStartWorkspaceTask = vi.fn()
+    workspaceStoreState.sources = Array.from({ length: 6 }, (_, index) => ({
+      id: `source-${index + 1}`,
+      mediaId: index + 1,
+      title: `Source ${index + 1}`,
+      type: "pdf" as const,
+      status: "ready" as const,
+      addedAt: new Date("2026-02-18T00:00:00.000Z")
+    }))
+    workspaceStoreState.selectedSourceIds = workspaceStoreState.sources.map(
+      (source) => source.id
+    )
+
+    renderStudioPane({ onStartWorkspaceTask })
+
+    fireEvent.click(screen.getByRole("button", { name: "Start workspace task" }))
+
+    expect(onStartWorkspaceTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          selectedSourceIds: ["source-1", "source-2", "source-3", "source-4", "source-5"],
+          selectedSourceTitles: ["Source 1", "Source 2", "Source 3", "Source 4", "Source 5"],
+          selectedSourceCount: 6
+        })
+      })
+    )
+  })
+
   it("exposes accessible names for studio option controls", () => {
     renderStudioPane()
 

@@ -741,29 +741,48 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
   const handleSaveAcpRunArtifact = React.useCallback(
     (input: WorkspaceACPRunArtifactSaveInput) => {
       const rootArtifactId = `acp-run-${input.runId}`
-      const currentArtifacts = useWorkspaceStore.getState().generatedArtifacts
+      const versionIdPrefix = `${rootArtifactId}-v`
+      const currentArtifacts =
+        useWorkspaceStore.getState().generatedArtifacts || []
       const priorVersions = currentArtifacts.filter(
         (artifact: GeneratedArtifact) =>
           artifact.rootArtifactId === rootArtifactId ||
-          artifact.artifactVersionId?.startsWith(`${rootArtifactId}-v`)
+          artifact.artifactVersionId?.startsWith(versionIdPrefix)
       )
+      const getArtifactVersion = (artifact: GeneratedArtifact): number => {
+        if (Number.isFinite(artifact.version)) return artifact.version ?? 0
+        const suffix = artifact.artifactVersionId?.startsWith(versionIdPrefix)
+          ? artifact.artifactVersionId.slice(versionIdPrefix.length)
+          : ""
+        return suffix && /^\d+$/.test(suffix) ? Number(suffix) : 0
+      }
       const previousArtifact = priorVersions.reduce<GeneratedArtifact | null>(
         (latest, artifact) => {
           if (!latest) return artifact
-          return (artifact.version ?? 0) > (latest.version ?? 0)
+          return getArtifactVersion(artifact) > getArtifactVersion(latest)
             ? artifact
             : latest
         },
         null
       )
-      const version = (previousArtifact?.version ?? 0) + 1
+      const version = (previousArtifact ? getArtifactVersion(previousArtifact) : 0) + 1
       const artifactVersionId = `${rootArtifactId}-v${version}`
       const savedAt = new Date()
+      const parsedCompletedAt = input.completedAt
+        ? new Date(input.completedAt)
+        : savedAt
+      const completedAt = Number.isNaN(parsedCompletedAt.getTime())
+        ? savedAt
+        : parsedCompletedAt
 
       addArtifact({
         type: "report",
         status: "completed",
-        title: `Agent result: ${input.taskTitle}`,
+        title: t(
+          "playground:workspace.savedAgentResultTitle",
+          "Agent result: {{taskTitle}}",
+          { taskTitle: input.taskTitle }
+        ),
         content: input.resultPreview,
         previewText: input.resultPreview,
         summary: input.resultPreview,
@@ -777,7 +796,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
         ownerId: workspaceId || undefined,
         producerMetadata: {
           producerType: "acp_agent_task",
-          producerId: String(input.projectId),
+          producerId: String(input.taskId),
           runId: String(input.runId),
           sessionId: input.sessionId || undefined,
           taskId: String(input.taskId),
@@ -804,7 +823,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
             eventCount: input.history?.event_count ?? 0
           }
         },
-        completedAt: input.completedAt ? new Date(input.completedAt) : savedAt
+        completedAt
       })
       messageApi.success(
         t(

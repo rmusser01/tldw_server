@@ -635,10 +635,34 @@ export const WorkspaceACPHistoryModal: React.FC<
                     className="mt-3 grid grid-cols-4 gap-2 text-xs text-muted-foreground"
                     aria-label={observableActivityLabel}
                   >
-                    <span>{artifactCount} artifact/file</span>
-                    <span>{diagnosticCount} diagnostics/warnings</span>
-                    <span>{auditEventCount} audit/approvals</span>
-                    <span>{eventCount} events/tool activity</span>
+                    <span>
+                      {t(
+                        "playground:workspace.acpArtifactsFilesCount",
+                        "{{count}} artifacts/files",
+                        { count: artifactCount }
+                      )}
+                    </span>
+                    <span>
+                      {t(
+                        "playground:workspace.acpDiagnosticsWarningsCount",
+                        "{{count}} diagnostics/warnings",
+                        { count: diagnosticCount }
+                      )}
+                    </span>
+                    <span>
+                      {t(
+                        "playground:workspace.acpAuditApprovalsCount",
+                        "{{count}} audit/approvals",
+                        { count: auditEventCount }
+                      )}
+                    </span>
+                    <span>
+                      {t(
+                        "playground:workspace.acpEventsActivityCount",
+                        "{{count}} events/tool activity",
+                        { count: eventCount }
+                      )}
+                    </span>
                   </div>
 
                   {failureMessage && (

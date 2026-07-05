@@ -84,6 +84,7 @@ import {
 } from "../research-workspace-capabilities"
 import { renderWorkspaceMessageActionContent } from "../workspace-message-content"
 import type { WorkspaceAgentTaskPrefill } from "../WorkspaceAgentTaskHandoffModal"
+import { WORKSPACE_TASK_SOURCE_CONTEXT_LIMIT } from "../workspace-task-prefill"
 
 const { TextArea } = Input
 const VISIBLE_SOURCE_TAG_COUNT = 5
@@ -141,7 +142,6 @@ const CHAT_RESPONSE_LENGTH_OPTIONS: Array<{
 
 const LOREBOOK_ACTIVITY_PAGE_SIZE = 8
 const LOREBOOK_ACTIVITY_EXPORT_PAGE_SIZE = 200
-const WORKSPACE_TASK_SOURCE_CONTEXT_LIMIT = 5
 const WORKSPACE_TASK_TEXT_PREVIEW_LIMIT = 600
 const RETRY_BURST_WINDOW_MS = 30_000
 const RETRY_BURST_THRESHOLD = 3
@@ -161,9 +161,10 @@ type SourceFolderMembershipRecord = {
 }
 
 const truncateWorkspaceTaskText = (
-  value: string,
+  value: string | null | undefined,
   maxLength = WORKSPACE_TASK_TEXT_PREVIEW_LIMIT
 ): string => {
+  if (!value) return ""
   const trimmed = value.trim()
   if (trimmed.length <= maxLength) return trimmed
   return `${trimmed.slice(0, maxLength - 3).trimEnd()}...`
@@ -1214,8 +1215,10 @@ const SimpleChatInput: React.FC<{
   const [showSlashMenu, setShowSlashMenu] = React.useState(false)
   const [slashMenuIndex, setSlashMenuIndex] = React.useState(0)
   const inputRef = React.useRef<InputRef>(null)
+  const valueRef = React.useRef("")
   const updateValue = React.useCallback(
     (nextValue: string) => {
+      valueRef.current = nextValue
       setValue(nextValue)
       onDraftChange?.(nextValue)
     },
@@ -1275,11 +1278,13 @@ const SimpleChatInput: React.FC<{
     setShowSlashMenu(false)
     try {
       const result = await onSubmit(trimmed)
-      if (!shouldClearSubmittedDraft(result)) {
+      if (!shouldClearSubmittedDraft(result) && valueRef.current === "") {
         updateValue(submittedValue)
       }
     } catch (error) {
-      updateValue(submittedValue)
+      if (valueRef.current === "") {
+        updateValue(submittedValue)
+      }
       throw error
     }
   }
@@ -1730,10 +1735,14 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     [sourceScopeSources, statusGuardrailsEnabled]
   )
   const buildChatWorkspaceTaskPrefill = React.useCallback((): WorkspaceAgentTaskPrefill => {
-    const selectedSourceIdsForTask = sourceScopeSources.map((source) => source.id)
-    const selectedSourceTitles = sourceScopeSources
-      .slice(0, WORKSPACE_TASK_SOURCE_CONTEXT_LIMIT)
-      .map((source) => source.title || source.id)
+    const sourceContextSources = sourceScopeSources.slice(
+      0,
+      WORKSPACE_TASK_SOURCE_CONTEXT_LIMIT
+    )
+    const selectedSourceIdsForTask = sourceContextSources.map((source) => source.id)
+    const selectedSourceTitles = sourceContextSources.map(
+      (source) => source.title || source.id
+    )
     const latestUserMessage =
       [...messages]
         .reverse()
@@ -1743,8 +1752,10 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
             typeof entry.message === "string" &&
             entry.message.trim()
         )?.message || ""
-    const taskInstructionText = composerDraft.trim() || latestUserMessage
+    const draftInstructionText = composerDraft.trim()
+    const taskInstructionText = draftInstructionText || latestUserMessage
     const latestUserMessagePreview = truncateWorkspaceTaskText(taskInstructionText)
+    const usingDraftText = draftInstructionText.length > 0
     const descriptionLines = [
       t(
         "playground:chat.workspaceTaskDescriptionIntro",
@@ -1758,7 +1769,12 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
       ...(latestUserMessagePreview
         ? [
             "",
-            t("playground:chat.workspaceTaskLatestUserMessage", "Latest user message:"),
+            t(
+              usingDraftText
+                ? "playground:chat.workspaceTaskDraftInstructions"
+                : "playground:chat.workspaceTaskLatestUserMessage",
+              usingDraftText ? "Draft instructions:" : "Latest user message:"
+            ),
             latestUserMessagePreview
           ]
         : []),
@@ -1780,6 +1796,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         workspaceId: workspaceId || null,
         selectedSourceIds: selectedSourceIdsForTask,
         selectedSourceTitles,
+        selectedSourceCount: sourceScopeSources.length,
         messageCount: messages.length,
         latestUserMessagePreview: latestUserMessagePreview || null
       }
