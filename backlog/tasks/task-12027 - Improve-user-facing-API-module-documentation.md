@@ -1,16 +1,22 @@
 ---
 id: TASK-12027
 title: Improve user-facing API module documentation
-status: In Progress
+status: Done
 assignee: []
 created_date: 2026-07-04 22:25
-updated_date: 2026-07-05 03:04
+updated_date: 2026-07-05 03:07
 labels:
 - docs
 - api
 - openapi
 dependencies: []
 priority: medium
+modified_files:
+- Docs/API-related/API_Tags_Index.md
+- Docs/superpowers/plans/2026-07-04-api-module-documentation.md
+- Docs/superpowers/specs/2026-07-04-api-module-documentation-design.md
+- backlog/tasks/task-12027 - Improve-user-facing-API-module-documentation.md
+- tldw_Server_API/app/main.py
 ---
 
 ## Description
@@ -64,4 +70,5 @@ Expanded the source API tag index into a grouped module capability guide and ali
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Reopened for PR follow-up: rebase PR #2637 on latest dev and evaluate/address review comments and checks before pushing an updated branch.
+PR follow-up completed: rebased PR #2637 onto latest origin/dev (39e9d1d1c8250d62ee22732f85c17f541b735760), removing unrelated Chat, MCP, UserProfiles, Web_Scraping, and test files from the PR diff. Current diff is limited to Docs/API-related/API_Tags_Index.md, Docs/superpowers API-docs plan/spec files, tldw_Server_API/app/main.py, and this Backlog task record. Gemini's Query import and Qodo code comments are obsolete after rebase because those referenced files are no longer in the PR diff; the source-doc links in API_Tags_Index.md were verified to resolve against source docs. Verification after rebase: py_compile passes for tldw_Server_API/app/main.py; API_Tags_Index local markdown links resolve; Docs/Published is unchanged against origin/dev; git diff --check origin/dev...HEAD exits cleanly; no old code-surface files remain in the PR diff; OpenAPI smoke passes with a local dummy SINGLE_USER_API_KEY and reports tags=174 groups=10; Bandit on tldw_Server_API/app/main.py reports errors=0 results=0 in /tmp/bandit_api_module_docs_rebase.json.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
