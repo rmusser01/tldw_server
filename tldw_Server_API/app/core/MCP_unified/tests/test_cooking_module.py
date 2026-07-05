@@ -1,5 +1,6 @@
 import pytest
 
+from tldw_Server_API.app.core.MCP_unified import MCPServer
 from tldw_Server_API.app.core.MCP_unified.modules.base import ModuleConfig
 from tldw_Server_API.app.core.MCP_unified.modules.implementations.cooking_module import (
     CookingModule,
@@ -30,6 +31,24 @@ async def test_get_tools_exposes_recipe_card_render_contract() -> None:
     assert tool["inputSchema"]["required"] == ["title", "servings", "ingredients", "steps"]  # nosec B101
     assert tool["metadata"]["readOnlyHint"] is True  # nosec B101
     assert tool["metadata"]["category"] == "cooking"  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_server_registers_cooking_module_from_default_yaml(monkeypatch) -> None:
+    monkeypatch.delenv("MCP_MODULES_CONFIG", raising=False)
+    monkeypatch.delenv("MCP_MODULES", raising=False)
+
+    registrations = {}
+    server = MCPServer()
+
+    async def _register_module(module_id, cls, config):
+        registrations[module_id] = cls
+
+    monkeypatch.setattr(server.module_registry, "register_module", _register_module)
+
+    await server._register_default_modules()
+
+    assert registrations["cooking"].__name__ == "CookingModule"  # nosec B101
 
 
 @pytest.mark.asyncio
