@@ -372,11 +372,25 @@ body {
   border-color: rgb(var(--color-border)) !important;
 }
 
+.ant-table,
+.ant-table-wrapper .ant-table,
+.ant-table-container,
+.ant-table-content {
+  background-color: rgb(var(--color-surface)) !important;
+  color: rgb(var(--color-text)) !important;
+  border-color: rgb(var(--color-border)) !important;
+}
+
+.ant-popover,
+.ant-popover-container,
 .ant-popover-inner,
 .ant-dropdown-menu,
+.ant-notification-notice,
+.ant-notification-notice-wrapper,
 .ant-modal-container,
 .ant-modal-content,
 .ant-modal-header,
+.ant-drawer-section,
 .ant-drawer-content,
 .ant-drawer-header {
   background-color: rgb(var(--color-elevated)) !important;
@@ -387,11 +401,25 @@ body {
 .ant-card-head,
 .ant-modal-title,
 .ant-modal-body,
+.ant-notification-notice-title,
+.ant-notification-notice-message,
+.ant-notification-notice-description,
+.ant-notification-notice-close,
+.ant-table,
+.ant-table-cell,
+.ant-table-column-title,
+.ant-table-column-sorter,
+.ant-tag,
 .ant-drawer-title,
 .ant-typography:not(.ant-typography-danger):not(.ant-typography-success):not(.ant-typography-warning),
 .ant-form-item-label > label,
 .ant-checkbox-wrapper,
 .ant-radio-wrapper,
+.ant-radio-button-wrapper,
+.ant-btn:not(.ant-btn-primary):not(.ant-btn-dangerous):not(.ant-btn-link),
+.ant-dropdown-menu-item,
+.ant-dropdown-menu-submenu-title,
+.ant-dropdown-menu-title-content,
 .ant-tabs .ant-tabs-tab-btn,
 .ant-segmented,
 .ant-segmented-item-label {
@@ -402,6 +430,41 @@ body {
   border-color: rgb(var(--color-border)) !important;
 }
 
+.ant-table-thead > tr > th,
+.ant-table-thead > tr > td {
+  background-color: rgb(var(--color-surface-2)) !important;
+  border-color: rgb(var(--color-border)) !important;
+  color: rgb(var(--color-text)) !important;
+}
+
+.ant-table-tbody > tr > td,
+.ant-table-cell {
+  background-color: rgb(var(--color-surface)) !important;
+  border-color: rgb(var(--color-border)) !important;
+  color: rgb(var(--color-text)) !important;
+}
+
+.ant-table-column-sort {
+  background-color: rgb(var(--color-surface-2)) !important;
+}
+
+.ant-table-tbody > tr.ant-table-row:hover > td,
+.ant-table-tbody > tr > td.ant-table-cell-row-hover,
+.ant-table-tbody > tr.ant-table-row-selected > td,
+.ant-table-tbody > tr.ant-table-row-selected:hover > td {
+  background-color: rgb(var(--color-elevated)) !important;
+}
+
+.ant-tag {
+  background-color: rgb(var(--color-surface-2)) !important;
+  border-color: rgb(var(--color-border)) !important;
+  color: rgb(var(--color-text)) !important;
+}
+
+.ant-dropdown-menu-item-disabled,
+.ant-dropdown-menu-submenu-title-disabled,
+.ant-dropdown-menu-item-disabled .ant-dropdown-menu-title-content,
+.ant-dropdown-menu-submenu-title-disabled .ant-dropdown-menu-title-content,
 .ant-form-item-extra,
 .ant-form-item-explain,
 .ant-modal-close,
@@ -447,12 +510,18 @@ body {
 .ant-input-number-input,
 .ant-input-textarea,
 .ant-input-textarea textarea,
+.ant-select,
 .ant-select-selector,
 .ant-picker {
   background-color: rgb(var(--color-surface-2)) !important;
   border-color: rgb(var(--color-border)) !important;
   color: rgb(var(--color-text)) !important;
   transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.ant-select {
+  border-radius: 8px;
+  overflow: hidden;
 }
 
 .ant-input input,
@@ -623,6 +692,13 @@ body {
   background-color: rgb(var(--color-elevated)) !important;
 }
 
+.ant-dropdown-menu-item:hover,
+.ant-dropdown-menu-item-active,
+.ant-dropdown-menu-submenu-title:hover,
+.ant-dropdown-menu-submenu-title-active {
+  background-color: rgb(var(--color-surface-2)) !important;
+}
+
 .ant-btn-default:not(.ant-btn-dangerous) {
   background-color: rgb(var(--color-surface)) !important;
   border-color: rgb(var(--color-border)) !important;
@@ -662,6 +738,9 @@ body {
 .ant-select-disabled .ant-select-arrow,
 .ant-checkbox-wrapper-disabled,
 .ant-radio-wrapper-disabled,
+.ant-radio-button-wrapper-disabled,
+.ant-btn:disabled,
+.ant-btn.ant-btn-disabled,
 .ant-btn-default:disabled,
 .ant-btn-default.ant-btn-disabled {
   background-color: rgb(var(--color-surface-2) / 0.5) !important;
