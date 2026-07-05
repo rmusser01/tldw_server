@@ -603,6 +603,9 @@ async def test_stdio_transport_connect_list_call_and_close(tmp_path: Path) -> No
         resource = await transport.read_resource("resource://docs/readme")
         assert resource["contents"][0]["text"] == "# Docs"
 
+        with pytest.raises(Exception):
+            await transport.read_resource("resource://docs/missing")
+
         ok = await transport.call_tool("docs.search", {"q": "hello"})
         assert ok.is_error is False
         assert ok.content == [{"type": "text", "text": "search:hello"}]

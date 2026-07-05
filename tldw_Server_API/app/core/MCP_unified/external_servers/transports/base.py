@@ -11,6 +11,7 @@ from mcp_unified.federation.models import (
     ExternalToolCallResult,
     ExternalToolDefinition,
 )
+from tldw_Server_API.app.core.exceptions import ResourceNotFoundError
 
 if TYPE_CHECKING:  # pragma: no cover
     from tldw_Server_API.app.core.MCP_unified.protocol import RequestContext
@@ -56,7 +57,7 @@ class ExternalMCPTransportAdapter(ABC):
     ) -> dict[str, Any]:
         """Read one external resource."""
         del context
-        raise ValueError(f"Unknown external resource '{uri}'")
+        raise ResourceNotFoundError("external_resource", identifier=uri)
 
     @abstractmethod
     async def call_tool(

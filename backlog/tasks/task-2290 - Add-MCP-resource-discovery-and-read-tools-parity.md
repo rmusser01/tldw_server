@@ -4,21 +4,19 @@ title: Add MCP resource discovery and read tools parity
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-07-04 23:31'
+updated_date: 2026-07-04 23:31
 labels:
-  - mcp
-  - resources
-  - gateway
-  - tools
-  - agentic-execution
+- mcp
+- resources
+- gateway
+- tools
+- agentic-execution
 dependencies: []
 references:
-  - 'https://code.claude.com/docs/en/tools-reference'
+- https://code.claude.com/docs/en/tools-reference
 documentation:
-  - >-
-    Docs/superpowers/specs/2026-07-05-mcp-resource-discovery-read-parity-design.md
-  - >-
-    Docs/superpowers/plans/2026-07-05-mcp-resource-discovery-read-parity-implementation-plan.md
+- Docs/superpowers/specs/2026-07-05-mcp-resource-discovery-read-parity-design.md
+- Docs/superpowers/plans/2026-07-05-mcp-resource-discovery-read-parity-implementation-plan.md
 ---
 
 ## Description
@@ -67,3 +65,9 @@ Implemented MCP resource discovery/read parity for the standalone gateway extern
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Latest PR #2653 review pass: origin/dev rebase was a no-op because the branch was already current. Addressed unresolved review threads by running external resource discovery concurrently, defaulting wait_for_servers(server_ids=None) to active transports only, changing the app-side base adapter read_resource default to ResourceNotFoundError, adding docstrings around the flagged gateway test helpers, strengthening merge-order/redaction assertions, and covering unknown-resource stdio read branches. Verification: focused red checks failed before implementation for concurrency/default wait/domain exception and passed after; focused MCP suite with manager coverage passed (333 passed); package boundary regression passed (1 passed); Bandit touched implementation scope wrote /tmp/bandit_mcp_resource_parity_latest_review.json with zero findings; git diff --check origin/dev...HEAD clean. Remaining PR metadata warning requires the human-authored Change summary mandated by Docs/ADR/004 and cannot be completed by an agent.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->

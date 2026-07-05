@@ -464,7 +464,7 @@ class GatewayExternalRuntimeManager:
                 )
             ]
 
-        for server_id, transport in snapshots:
+        async def discover(server_id: str, transport: ExternalFederationTransport) -> None:
             try:
                 resources = await transport.list_resources()
             except Exception as exc:  # noqa: BLE001 - resource discovery must be row-scoped.
@@ -482,12 +482,16 @@ class GatewayExternalRuntimeManager:
                     target_type="external_server",
                     target_id=server_id,
                 )
-                continue
+                return
 
             async with self._lock:
                 if self._transports.get(server_id) is transport:
                     self._last_errors[server_id] = None
                     self._replace_server_resources(server_id, resources)
+
+        await asyncio.gather(
+            *(discover(server_id, transport) for server_id, transport in snapshots)
+        )
 
         async with self._lock:
             return [
@@ -588,10 +592,13 @@ class GatewayExternalRuntimeManager:
         timeout = max(0.0, float(timeout_seconds))
         poll_interval = max(0.001, float(poll_interval_seconds))
         deadline = loop.time() + timeout
-        if isinstance(server_ids, str):
+        if server_ids is None:
+            async with self._lock:
+                targets = set(self._transports)
+        elif isinstance(server_ids, str):
             targets = {server_ids}
         else:
-            targets = {str(server_id) for server_id in server_ids or () if str(server_id)}
+            targets = {str(server_id) for server_id in server_ids if str(server_id)}
 
         while True:
             rows = await self.list_runtime_servers()
@@ -600,7 +607,7 @@ class GatewayExternalRuntimeManager:
                 for row in rows.get("servers", [])
                 if row.get("id") is not None
             }
-            current_targets = targets or set(by_id)
+            current_targets = set(targets)
             ready = sorted(
                 server_id
                 for server_id in current_targets

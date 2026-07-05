@@ -229,6 +229,9 @@ async def test_stdio_adapter_subprocess_roundtrip_error_and_timeout(tmp_path: Pa
         resource = await adapter.read_resource("resource://docs/readme")
         assert resource["contents"][0]["text"] == "# Docs"
 
+        with pytest.raises(Exception):
+            await adapter.read_resource("resource://docs/missing")
+
         ok = await adapter.call_tool("docs.search", {"q": "hello"})
         assert ok.is_error is False
         assert ok.content == [{"type": "text", "text": "search:hello"}]
