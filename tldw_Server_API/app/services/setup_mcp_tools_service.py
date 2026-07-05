@@ -24,7 +24,13 @@ ToolExecutor = Callable[[str, dict[str, Any]], Awaitable[Any]]
 _GLOBAL_SCOPE = "global"
 _DEFAULT_TARGET = "default"
 _BUILT_IN_SAMPLE_TOOL = "mcp.tools.list"
-_GENERATED_POLICY_KEYS = ("allowed_tools", "capabilities", "first_run_mcp_tools")
+_GENERATED_POLICY_KEYS = (
+    "allowed_tools",
+    "tool_patterns",
+    "tool_names",
+    "capabilities",
+    "first_run_mcp_tools",
+)
 _STEP_PAYLOAD_KEYS = {
     "acknowledged",
     "selected_pack_ids",
@@ -238,6 +244,15 @@ class SetupMcpToolsService:
                 external_status="not_checked",
             )
 
+        if "external_network_read" not in _str_list(saved_state.get("selected_addon_ids")):
+            return _validation_result(
+                saved_state=saved_state,
+                validation_state="built_in_passed",
+                validation_message=_MESSAGE_BUILT_IN_PASSED,
+                sample_tool_name=_BUILT_IN_SAMPLE_TOOL,
+                external_status="not_enabled",
+            )
+
         external_servers = await self._enabled_external_servers()
         if not external_servers:
             return _validation_result(
@@ -436,7 +451,11 @@ def _profile_conflict(profile: Mapping[str, Any], policy_document: Mapping[str, 
     provenance = _dict(policy_document.get("first_run_mcp_tools"))
     current_hash = compute_first_run_policy_hash(policy_document)
     expected_hash = str(provenance.get("last_generated_hash") or "")
-    if current_hash == expected_hash:
+    if (
+        current_hash == expected_hash
+        and "tool_patterns" not in policy_document
+        and "tool_names" not in policy_document
+    ):
         return None
     return {
         "reason": "profile_manually_changed",

@@ -685,7 +685,7 @@ async def _require_mcp_tools_catalog_access(request: Request) -> None:
     if not bool(status_snapshot.get("setup_completed")):
         await require_local_setup_access(request)
         return
-    await get_auth_principal(request)
+    await _require_system_configure_access(request)
 
 
 async def _require_system_configure_access(request: Request) -> AuthPrincipal:

@@ -299,12 +299,16 @@ async def _applied_service_and_state(
     fake_hub: FakeMcpHub,
     fake_registry: FakeToolRegistry,
     tool_executor: FakeToolExecutor | None = None,
+    selected_addon_ids: list[str] | None = None,
 ) -> tuple[SetupMcpToolsService, dict[str, Any]]:
     service = SetupMcpToolsService(hub=fake_hub, tool_registry=fake_registry)
     service.tool_executor = tool_executor or FakeToolExecutor()
     result = await service.apply_selection(
         state=first_run_state,
-        request=McpToolsApplyRequest(selected_pack_ids=["research"], selected_addon_ids=[]),
+        request=McpToolsApplyRequest(
+            selected_pack_ids=["research"],
+            selected_addon_ids=selected_addon_ids or [],
+        ),
     )
     return service, result.step_payload
 
@@ -515,6 +519,30 @@ async def test_manual_edit_conflict_returns_structured_conflict_without_overwrit
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("manual_allow_key", ["tool_patterns", "tool_names"])
+async def test_generated_profile_manual_allow_keys_conflict_without_overwrite(
+    manual_allow_key: str,
+    first_run_state: FirstRunState,
+    fake_hub: FakeMcpHub,
+    fake_registry: FakeToolRegistry,
+    tool_entries: list[dict[str, Any]],
+) -> None:
+    edited_policy = _policy(state=first_run_state, tool_entries=tool_entries)
+    edited_policy[manual_allow_key] = ["fs.*"]
+    fake_hub.permission_profiles = [_profile(1, edited_policy)]
+    service = SetupMcpToolsService(hub=fake_hub, tool_registry=fake_registry)
+
+    result = await service.apply_selection(
+        state=first_run_state,
+        request=McpToolsApplyRequest(selected_pack_ids=["research"], selected_addon_ids=[]),
+    )
+
+    assert result.status == "conflict"
+    assert result.conflict["reason"] == "profile_manually_changed"
+    assert fake_hub.updated_profiles == []
+
+
+@pytest.mark.asyncio
 async def test_recovery_status_reports_profile_manual_change_from_saved_profile_hash(
     first_run_state: FirstRunState,
     fake_hub: FakeMcpHub,
@@ -675,6 +703,36 @@ async def test_replace_existing_overwrites_only_after_explicit_request(
 
 
 @pytest.mark.asyncio
+async def test_replace_existing_strips_manual_allow_keys_from_generated_profile(
+    first_run_state: FirstRunState,
+    fake_hub: FakeMcpHub,
+    fake_registry: FakeToolRegistry,
+    tool_entries: list[dict[str, Any]],
+) -> None:
+    edited_policy = _policy(state=first_run_state, tool_entries=tool_entries)
+    edited_policy["tool_patterns"] = ["fs.*"]
+    edited_policy["tool_names"] = ["notes.delete"]
+    fake_hub.permission_profiles = [_profile(1, edited_policy)]
+    fake_hub.policy_assignments = [_default_assignment(10, 1)]
+    service = SetupMcpToolsService(hub=fake_hub, tool_registry=fake_registry)
+
+    replaced = await service.apply_selection(
+        state=first_run_state,
+        request=McpToolsApplyRequest(
+            selected_pack_ids=["writing"],
+            selected_addon_ids=[],
+            conflict_resolution="replace_existing",
+            profile_id=1,
+        ),
+    )
+
+    replaced_policy = fake_hub.updated_profiles[0]["policy_document"]
+    assert replaced.status == "applied"
+    assert "tool_patterns" not in replaced_policy
+    assert "tool_names" not in replaced_policy
+
+
+@pytest.mark.asyncio
 async def test_step_payload_contains_only_allowlisted_mcp_tools_fields(
     first_run_state: FirstRunState,
     fake_hub: FakeMcpHub,
@@ -736,7 +794,7 @@ async def test_validate_runs_builtin_sample_when_no_external_servers(
 
     assert result.validation_state == "built_in_passed"
     assert result.sample_tool_name == "mcp.tools.list"
-    assert result.external_status == "not_configured"
+    assert result.external_status == "not_enabled"
     assert result.validation_message == "Built-in MCP tool check passed."
 
 
@@ -795,6 +853,7 @@ async def test_validate_no_safe_external_tool_is_not_error(
                 "external.tools.refresh": {"ok": True},
             },
         ),
+        selected_addon_ids=["external_network_read"],
     )
 
     result = await service.validate_selection(saved_state=saved_mcp_state)
@@ -802,6 +861,33 @@ async def test_validate_no_safe_external_tool_is_not_error(
     assert result.validation_state == "no_safe_external_tool"
     assert result.external_status == "no_safe_tool"
     assert result.validation_message == "No safe no-argument external read-only tool was available."
+
+
+@pytest.mark.asyncio
+async def test_validate_skips_external_discovery_when_external_network_addon_not_selected(
+    first_run_state: FirstRunState,
+    fake_hub: FakeMcpHub,
+    fake_registry: FakeToolRegistry,
+) -> None:
+    fake_hub.external_servers = [{"id": "docs", "enabled": True}]
+    executor = FakeToolExecutor(
+        results={
+            "mcp.tools.list": {"tools": []},
+            "external.tools.refresh": {"ok": True},
+        },
+    )
+    service, saved_mcp_state = await _applied_service_and_state(
+        first_run_state=first_run_state,
+        fake_hub=fake_hub,
+        fake_registry=fake_registry,
+        tool_executor=executor,
+    )
+
+    result = await service.validate_selection(saved_state=saved_mcp_state)
+
+    assert result.validation_state == "built_in_passed"
+    assert result.external_status == "not_enabled"
+    assert executor.calls == [("mcp.tools.list", {})]
 
 
 @pytest.mark.asyncio
@@ -823,6 +909,7 @@ async def test_validate_external_discovery_failure_is_safe_and_redacted(
                 )
             },
         ),
+        selected_addon_ids=["external_network_read"],
     )
 
     result = await service.validate_selection(saved_state=saved_mcp_state)
@@ -877,6 +964,7 @@ async def test_validate_non_raising_external_refresh_zero_refreshed_is_incomplet
         fake_hub=fake_hub,
         fake_registry=fake_registry,
         tool_executor=executor,
+        selected_addon_ids=["external_network_read"],
     )
 
     result = await service.validate_selection(saved_state=saved_mcp_state)
@@ -953,6 +1041,7 @@ async def test_validate_safe_external_registry_entry_without_tool_descriptor_is_
         fake_hub=fake_hub,
         fake_registry=fake_registry,
         tool_executor=executor,
+        selected_addon_ids=["external_network_read"],
     )
 
     result = await service.validate_selection(saved_state=saved_mcp_state)
@@ -1001,6 +1090,7 @@ async def test_validate_eligible_external_no_arg_read_tool_passes(
         fake_hub=fake_hub,
         fake_registry=fake_registry,
         tool_executor=executor,
+        selected_addon_ids=["external_network_read"],
     )
 
     result = await service.validate_selection(saved_state=saved_mcp_state)

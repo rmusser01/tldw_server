@@ -336,6 +336,27 @@ def test_first_run_mcp_tools_catalog_returns_defaults(setup_client, monkeypatch,
     assert {pack["pack_id"] for pack in body["packs"]} >= {"research", "learning", "writing"}
 
 
+def test_first_run_mcp_tools_catalog_after_completion_requires_system_configure(
+    setup_client,
+    monkeypatch,
+    tmp_path,
+):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_completed(monkeypatch)
+    _override_mcp_tools_service(monkeypatch, _FakeMcpToolsService())
+
+    async def _admin_without_system_configure(_request):
+        return SimpleNamespace(is_admin=True, permissions=[])
+
+    monkeypatch.setattr(setup_endpoint, "get_auth_principal", _admin_without_system_configure)
+
+    response = setup_client.get("/api/v1/setup/first-run/mcp-tools/catalog")
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "system_configure_required"
+
+
 def test_first_run_mcp_tools_state_rejects_raw_external_config(setup_client, monkeypatch, tmp_path):
     state_path = tmp_path / "first_run_state.json"
     monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
