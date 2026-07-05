@@ -9,12 +9,15 @@ const setupHookMocks = vi.hoisted(() => ({
   saveStep: vi.fn(),
   skip: vi.fn(),
   loadProviderCatalog: vi.fn(),
+  loadMcpToolsCatalog: vi.fn(),
   loadAudioRecommendations: vi.fn(),
   saveProvider: vi.fn(),
   validateProvider: vi.fn(),
   saveIngestDefaults: vi.fn(),
   saveAudioDefaults: vi.fn(),
   saveOptionalAdvanced: vi.fn(),
+  applyMcpTools: vi.fn(),
+  validateMcpTools: vi.fn(),
   verifyFirstChat: vi.fn(),
   complete: vi.fn(),
   refresh: vi.fn(),
@@ -47,10 +50,66 @@ const initialStateForCompletedSteps = (
       default_model: "gpt-4.1-mini",
       default_provider_credential_configured: true,
     },
+    ...(completedSteps.includes("mcp_tools")
+      ? {
+          mcp_tools: {
+            acknowledged: true,
+            validation_state: "not_run",
+            selected_pack_ids: ["research"],
+            selected_addon_ids: [],
+            profile_id: 7,
+          },
+        }
+      : {}),
   },
   acknowledged_steps: [],
   first_chat: { completed: false },
 });
+
+const mcpToolsCatalog = {
+  catalog_version: "2026-07-04",
+  confirmation_version: "v1",
+  packs: [
+    {
+      pack_id: "research",
+      label: "Research",
+      purpose: "Search saved sources.",
+      default_selected: true,
+      available: true,
+      module_targets: ["mcp"],
+      tool_patterns: ["mcp.tools.list"],
+      available_tools: [{ tool_name: "mcp.tools.list", available: true }],
+      unavailable_tools: [],
+      add_on_ids: [],
+      sample_validation_candidates: ["mcp.tools.list"],
+      catalog_version: "2026-07-04",
+    },
+    {
+      pack_id: "writing",
+      label: "Writing",
+      purpose: "Draft notes.",
+      default_selected: false,
+      available: true,
+      module_targets: ["mcp"],
+      tool_patterns: ["notes.*"],
+      available_tools: [{ tool_name: "notes.create", available: true }],
+      unavailable_tools: [],
+      add_on_ids: ["workspace_write"],
+      sample_validation_candidates: ["notes.create"],
+      catalog_version: "2026-07-04",
+    },
+  ],
+  add_ons: [
+    {
+      addon_id: "workspace_write",
+      label: "Workspace write",
+      default_selected: false,
+      requirement: "Allow tools to write workspace files.",
+      strong_confirmation: true,
+    },
+  ],
+  validation_states: ["not_run"],
+} as const;
 
 vi.mock("@/hooks/useSetupOnboarding", () => ({
   useSetupOnboarding: () => ({
@@ -86,11 +145,13 @@ vi.mock("@/hooks/useSetupOnboarding", () => ({
         recommended_for_first_chat: true,
       },
     ],
+    mcpToolsCatalog,
     audioRecommendations: [],
     loading: false,
     error: null,
     refresh: setupHookMocks.refresh,
     loadProviderCatalog: setupHookMocks.loadProviderCatalog,
+    loadMcpToolsCatalog: setupHookMocks.loadMcpToolsCatalog,
     loadAudioRecommendations: setupHookMocks.loadAudioRecommendations,
     saveStep: setupHookMocks.saveStep,
     skip: setupHookMocks.skip,
@@ -99,6 +160,8 @@ vi.mock("@/hooks/useSetupOnboarding", () => ({
     saveIngestDefaults: setupHookMocks.saveIngestDefaults,
     saveAudioDefaults: setupHookMocks.saveAudioDefaults,
     saveOptionalAdvanced: setupHookMocks.saveOptionalAdvanced,
+    applyMcpTools: setupHookMocks.applyMcpTools,
+    validateMcpTools: setupHookMocks.validateMcpTools,
     verifyFirstChat: setupHookMocks.verifyFirstChat,
     complete: setupHookMocks.complete,
   }),
@@ -132,6 +195,7 @@ describe("UnifiedSetupWizard", () => {
     setupHookMocks.saveStep.mockReset();
     setupHookMocks.skip.mockReset();
     setupHookMocks.loadProviderCatalog.mockReset().mockResolvedValue([]);
+    setupHookMocks.loadMcpToolsCatalog.mockReset().mockResolvedValue(mcpToolsCatalog);
     setupHookMocks.loadAudioRecommendations.mockReset().mockResolvedValue([]);
     setupHookMocks.saveProvider
       .mockReset()
@@ -165,6 +229,29 @@ describe("UnifiedSetupWizard", () => {
       status: "saved",
       step: "optional_advanced",
       requires_restart: false,
+    });
+    setupHookMocks.applyMcpTools.mockReset().mockResolvedValue({
+      status: "applied",
+      profile_id: 7,
+      assignment_id: 9,
+      catalog_version: "2026-07-04",
+      selected_pack_ids: ["research"],
+      selected_addon_ids: [],
+      effective_tool_count: 1,
+      effective_tools: ["mcp.tools.list"],
+      disabled_addons: [],
+      validation_state: "not_run",
+      conflict: null,
+    });
+    setupHookMocks.validateMcpTools.mockReset().mockResolvedValue({
+      status: "validated",
+      validation_state: "built_in_passed",
+      profile_id: 7,
+      assignment_id: 9,
+      catalog_version: "2026-07-04",
+      selected_pack_ids: ["research"],
+      selected_addon_ids: [],
+      effective_tool_count: 1,
     });
     setupHookMocks.verifyFirstChat.mockReset().mockResolvedValue({
       status: "ready",
@@ -348,7 +435,7 @@ describe("UnifiedSetupWizard", () => {
     });
   });
 
-  it("resumes at first chat when backend state includes the saved provider model", async () => {
+  it("resumes at MCP tools when required backend steps are complete and MCP tools are not saved", async () => {
     const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard");
 
     render(
@@ -378,9 +465,90 @@ describe("UnifiedSetupWizard", () => {
     );
 
     expect(
+      screen.getByRole("heading", { name: /mcp tools/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: /first chat/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("resumes at first chat when MCP tools are acknowledged", async () => {
+    const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard");
+
+    render(
+      <UnifiedSetupWizard
+        initialState={{
+          status: "in_progress",
+          completed_steps: [
+            "setup_path",
+            "privacy_security",
+            "providers",
+            "ingest_defaults",
+            "audio_defaults",
+            "optional_advanced",
+          ],
+          skipped_steps: [],
+          step_data: {
+            providers: {
+              acknowledged: true,
+              default_provider: "openai",
+              default_model: "gpt-4.1-mini",
+            },
+            mcp_tools: {
+              acknowledged: true,
+              validation_state: "not_run",
+              selected_pack_ids: ["research"],
+              selected_addon_ids: [],
+            },
+          },
+          acknowledged_steps: [],
+          first_chat: { completed: false },
+        }}
+      />,
+    );
+
+    expect(
       screen.getByRole("heading", { name: /first chat/i }),
     ).toBeInTheDocument();
     expect(screen.getByText(/openai \/ gpt-4.1-mini/i)).toBeInTheDocument();
+  });
+
+  it("resumes at first chat when MCP tools were skipped", async () => {
+    const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard");
+
+    render(
+      <UnifiedSetupWizard
+        initialState={{
+          status: "in_progress",
+          completed_steps: [
+            "setup_path",
+            "privacy_security",
+            "providers",
+            "ingest_defaults",
+            "audio_defaults",
+            "optional_advanced",
+          ],
+          skipped_steps: [],
+          step_data: {
+            providers: {
+              acknowledged: true,
+              default_provider: "openai",
+              default_model: "gpt-4.1-mini",
+            },
+            mcp_tools: {
+              acknowledged: true,
+              validation_state: "skipped",
+            },
+          },
+          acknowledged_steps: [],
+          first_chat: { completed: false },
+        }}
+      />,
+    );
+
+    expect(
+      screen.getByRole("heading", { name: /first chat/i }),
+    ).toBeInTheDocument();
   });
 
   it("resumes provider setup with the saved default provider selected", async () => {
@@ -623,6 +791,75 @@ describe("UnifiedSetupWizard", () => {
     await waitFor(() => {
       expect(readinessHookMocks.refresh).toHaveBeenCalledTimes(1);
     });
+    expect(
+      await screen.findByRole("heading", { name: /mcp tools/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("skips only the MCP tools step before first chat", async () => {
+    const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard");
+
+    render(
+      <UnifiedSetupWizard
+        initialState={initialStateForCompletedSteps([
+          "setup_path",
+          "privacy_security",
+          "providers",
+          "ingest_defaults",
+          "audio_defaults",
+          "optional_advanced",
+        ])}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /skip mcp tools/i }));
+
+    await waitFor(() => {
+      expect(setupHookMocks.saveStep).toHaveBeenCalledWith({
+        step: "mcp_tools",
+        data: { acknowledged: true, validation_state: "skipped" },
+      });
+    });
+    expect(setupHookMocks.skip).not.toHaveBeenCalled();
+    expect(
+      await screen.findByRole("heading", { name: /first chat/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("guards MCP tools skip against fast double clicks", async () => {
+    const deferred = createDeferred<FirstRunState>();
+    setupHookMocks.saveStep.mockReturnValueOnce(deferred.promise);
+    const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard");
+
+    render(
+      <UnifiedSetupWizard
+        initialState={initialStateForCompletedSteps([
+          "setup_path",
+          "privacy_security",
+          "providers",
+          "ingest_defaults",
+          "audio_defaults",
+          "optional_advanced",
+        ])}
+      />,
+    );
+
+    const skipButton = screen.getByRole("button", { name: /skip mcp tools/i });
+    fireEvent.click(skipButton);
+    fireEvent.click(skipButton);
+
+    expect(setupHookMocks.saveStep).toHaveBeenCalledTimes(1);
+    expect(skipButton).toBeDisabled();
+
+    deferred.resolve(initialStateForCompletedSteps([
+      "setup_path",
+      "privacy_security",
+      "providers",
+      "ingest_defaults",
+      "audio_defaults",
+      "optional_advanced",
+      "mcp_tools",
+    ]));
   });
 
   it("does not refresh readiness and notifies after first chat completion", async () => {
@@ -638,6 +875,7 @@ describe("UnifiedSetupWizard", () => {
           "ingest_defaults",
           "audio_defaults",
           "optional_advanced",
+          "mcp_tools",
         ])}
         onComplete={onComplete}
       />,
@@ -658,6 +896,97 @@ describe("UnifiedSetupWizard", () => {
     });
     expect(onComplete).toHaveBeenCalledTimes(1);
     expect(readinessHookMocks.refresh).not.toHaveBeenCalled();
+  });
+
+  it("routes first-chat Back to MCP tools", async () => {
+    const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard");
+
+    render(
+      <UnifiedSetupWizard
+        initialState={initialStateForCompletedSteps([
+          "setup_path",
+          "privacy_security",
+          "providers",
+          "ingest_defaults",
+          "audio_defaults",
+          "optional_advanced",
+          "mcp_tools",
+        ])}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /back to mcp tools/i }));
+
+    expect(
+      await screen.findByRole("heading", { name: /mcp tools/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("restores saved MCP tool choices when returning from first chat", async () => {
+    const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard");
+
+    render(
+      <UnifiedSetupWizard
+        initialState={{
+          status: "in_progress",
+          completed_steps: [
+            "setup_path",
+            "privacy_security",
+            "providers",
+            "ingest_defaults",
+            "audio_defaults",
+            "optional_advanced",
+          ],
+          skipped_steps: [],
+          step_data: {
+            providers: {
+              acknowledged: true,
+              default_provider: "openai",
+              default_model: "gpt-4.1-mini",
+              default_provider_credential_configured: true,
+            },
+            mcp_tools: {
+              acknowledged: true,
+              validation_state: "not_run",
+              profile_id: 7,
+              assignment_id: 9,
+              selected_pack_ids: ["writing"],
+              selected_addon_ids: ["workspace_write"],
+              confirmed_addon_ids: ["workspace_write"],
+              effective_tool_count: 1,
+              effective_tools: ["notes.create"],
+              disabled_addons: [],
+            },
+          },
+          acknowledged_steps: [],
+          first_chat: { completed: false },
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /back to mcp tools/i }));
+
+    expect(await screen.findByLabelText(/writing/i)).toBeChecked();
+    expect(screen.getByLabelText(/research/i)).not.toBeChecked();
+    expect(screen.getByRole("button", { name: /run sample tool/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /continue/i })).toBeEnabled();
+
+    fireEvent.click(screen.getByText(/add-ons/i));
+    expect(
+      screen.getByRole("checkbox", { name: /^workspace write/i }),
+    ).toBeChecked();
+    expect(screen.getByLabelText(/confirm workspace write/i)).toBeChecked();
+
+    fireEvent.click(screen.getByRole("button", { name: /save packs/i }));
+
+    await waitFor(() => {
+      expect(setupHookMocks.applyMcpTools).toHaveBeenCalledWith({
+        selected_pack_ids: ["writing"],
+        selected_addon_ids: ["workspace_write"],
+        confirmed_addon_ids: ["workspace_write"],
+        confirmation_version: "v1",
+      });
+    });
   });
 
   it("refreshes readiness after a failed skip attempt", async () => {
@@ -832,6 +1161,13 @@ describe("UnifiedSetupWizard", () => {
 
   it("resumes first chat and revalidates saved hosted credentials after provider edits", async () => {
     const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard");
+    setupHookMocks.verifyFirstChat.mockResolvedValueOnce({
+      status: "failed",
+      provider: "openai",
+      model: "gpt-4.1-mini",
+      failure_category: "auth",
+      message: "Invalid API key",
+    });
     setupHookMocks.validateProvider.mockImplementation(async (payload) => {
       if (!payload.api_key) {
         return {
@@ -864,6 +1200,7 @@ describe("UnifiedSetupWizard", () => {
             "ingest_defaults",
             "audio_defaults",
             "optional_advanced",
+            "mcp_tools",
           ],
           skipped_steps: [],
           step_data: {
@@ -872,6 +1209,12 @@ describe("UnifiedSetupWizard", () => {
               default_provider: "openai",
               default_model: "gpt-4.1-mini",
               default_provider_credential_configured: true,
+            },
+            mcp_tools: {
+              acknowledged: true,
+              validation_state: "not_run",
+              selected_pack_ids: ["research"],
+              selected_addon_ids: [],
             },
           },
           acknowledged_steps: [],
@@ -883,7 +1226,9 @@ describe("UnifiedSetupWizard", () => {
     expect(
       screen.getByRole("heading", { name: /first chat/i }),
     ).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /back to providers/i }));
+    fireEvent.click(screen.getByRole("button", { name: /send test chat/i }));
+    await screen.findByText(/invalid api key/i);
+    fireEvent.click(screen.getByRole("button", { name: /edit provider/i }));
     expect(
       await screen.findByRole("heading", { name: /chat provider/i }),
     ).toBeInTheDocument();
@@ -946,6 +1291,7 @@ describe("UnifiedSetupWizard", () => {
             "ingest_defaults",
             "audio_defaults",
             "optional_advanced",
+            "mcp_tools",
           ])}
           onStateChange={onStateChange}
         />,
@@ -1006,6 +1352,7 @@ describe("UnifiedSetupWizard", () => {
           "ingest_defaults",
           "audio_defaults",
           "optional_advanced",
+          "mcp_tools",
         ])}
         onStateChange={onStateChange}
       />,
@@ -1057,6 +1404,7 @@ describe("UnifiedSetupWizard", () => {
           "ingest_defaults",
           "audio_defaults",
           "optional_advanced",
+          "mcp_tools",
         ])}
       />,
     );
@@ -1073,6 +1421,13 @@ describe("UnifiedSetupWizard", () => {
 
   it("does not infer saved hosted credentials when resumed state lacks the marker", async () => {
     const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard");
+    setupHookMocks.verifyFirstChat.mockResolvedValueOnce({
+      status: "failed",
+      provider: "openai",
+      model: "gpt-4.1-mini",
+      failure_category: "auth",
+      message: "Invalid API key",
+    });
     setupHookMocks.validateProvider.mockImplementation(async (payload) => {
       if (!payload.api_key) {
         return {
@@ -1105,6 +1460,7 @@ describe("UnifiedSetupWizard", () => {
             "ingest_defaults",
             "audio_defaults",
             "optional_advanced",
+            "mcp_tools",
           ],
           skipped_steps: [],
           step_data: {
@@ -1113,6 +1469,12 @@ describe("UnifiedSetupWizard", () => {
               default_provider: "openai",
               default_model: "gpt-4.1-mini",
             },
+            mcp_tools: {
+              acknowledged: true,
+              validation_state: "not_run",
+              selected_pack_ids: ["research"],
+              selected_addon_ids: [],
+            },
           },
           acknowledged_steps: [],
           first_chat: { completed: false },
@@ -1120,7 +1482,9 @@ describe("UnifiedSetupWizard", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /back to providers/i }));
+    fireEvent.click(screen.getByRole("button", { name: /send test chat/i }));
+    await screen.findByText(/invalid api key/i);
+    fireEvent.click(screen.getByRole("button", { name: /edit provider/i }));
     expect(
       await screen.findByRole("heading", { name: /chat provider/i }),
     ).toBeInTheDocument();

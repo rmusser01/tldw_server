@@ -21,6 +21,7 @@ import {
 import { IngestDefaultsStep } from "./steps/IngestDefaultsStep";
 import { AudioSetupStep } from "./steps/AudioSetupStep";
 import { OptionalAdvancedStep } from "./steps/OptionalAdvancedStep";
+import { McpToolsStep } from "./steps/McpToolsStep";
 import { FirstChatStep } from "./steps/FirstChatStep";
 import { SetupReadinessPanel } from "./SetupReadinessPanel";
 
@@ -31,6 +32,7 @@ type WizardStep =
   | "ingest_defaults"
   | "audio_defaults"
   | "optional_advanced"
+  | "mcp_tools"
   | "first_chat"
   | "multi_user_exit";
 
@@ -54,6 +56,11 @@ const stepFromState = (state: FirstRunState | null): WizardStep => {
   if (!completed.has("ingest_defaults")) return "ingest_defaults";
   if (!completed.has("audio_defaults")) return "audio_defaults";
   if (!completed.has("optional_advanced")) return "optional_advanced";
+  const mcpToolsData = state?.step_data?.mcp_tools;
+  const mcpToolsDone =
+    mcpToolsData?.acknowledged === true ||
+    mcpToolsData?.validation_state === "skipped";
+  if (!mcpToolsDone) return "mcp_tools";
   return "first_chat";
 };
 
@@ -90,11 +97,13 @@ export function UnifiedSetupWizard({
     state,
     metadata,
     providerCatalog,
+    mcpToolsCatalog,
     audioRecommendations,
     loading,
     error,
     refresh,
     loadProviderCatalog,
+    loadMcpToolsCatalog,
     loadAudioRecommendations,
     saveStep,
     skip,
@@ -103,6 +112,8 @@ export function UnifiedSetupWizard({
     saveIngestDefaults,
     saveAudioDefaults,
     saveOptionalAdvanced,
+    applyMcpTools,
+    validateMcpTools,
     verifyFirstChat,
     complete,
   } = useSetupOnboarding({
@@ -143,6 +154,8 @@ export function UnifiedSetupWizard({
   const [savingStep, setSavingStep] = React.useState(false);
   const [skipPending, setSkipPending] = React.useState(false);
   const skipPendingRef = React.useRef(false);
+  const [mcpToolsSkipPending, setMcpToolsSkipPending] = React.useState(false);
+  const mcpToolsSkipPendingRef = React.useRef(false);
   const [stepError, setStepError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
@@ -292,6 +305,26 @@ export function UnifiedSetupWizard({
       return response;
     },
     [refreshParentState, refreshSetupReadiness, saveOptionalAdvanced],
+  );
+
+  const applyMcpToolsAndPublish = React.useCallback(
+    async (...args: Parameters<typeof applyMcpTools>) => {
+      const response = await applyMcpTools(...args);
+      refreshSetupReadiness();
+      await refreshParentState();
+      return response;
+    },
+    [applyMcpTools, refreshParentState, refreshSetupReadiness],
+  );
+
+  const validateMcpToolsAndPublish = React.useCallback(
+    async (...args: Parameters<typeof validateMcpTools>) => {
+      const response = await validateMcpTools(...args);
+      refreshSetupReadiness();
+      await refreshParentState();
+      return response;
+    },
+    [refreshParentState, refreshSetupReadiness, validateMcpTools],
   );
 
   const completeAndPublish = React.useCallback(
@@ -467,8 +500,42 @@ export function UnifiedSetupWizard({
         {step === "optional_advanced" ? (
           <OptionalAdvancedStep
             saveOptionalAdvanced={saveAdvancedAndPublish}
-            onContinue={() => setStep("first_chat")}
+            onContinue={() => setStep("mcp_tools")}
             onBack={() => setStep("audio_defaults")}
+          />
+        ) : null}
+        {step === "mcp_tools" ? (
+          <McpToolsStep
+            catalog={mcpToolsCatalog}
+            initialStepData={
+              state?.step_data?.mcp_tools ??
+              initialState?.step_data?.mcp_tools ??
+              null
+            }
+            loadCatalog={loadMcpToolsCatalog}
+            applyMcpTools={applyMcpToolsAndPublish}
+            validateMcpTools={validateMcpToolsAndPublish}
+            skipPending={mcpToolsSkipPending || savingStep}
+            onContinue={() => setStep("first_chat")}
+            onBack={() => setStep("optional_advanced")}
+            onSkip={() => {
+              if (mcpToolsSkipPendingRef.current) return;
+              mcpToolsSkipPendingRef.current = true;
+              setMcpToolsSkipPending(true);
+              void (async () => {
+                try {
+                  const nextState = await persistStep({
+                    step: "mcp_tools",
+                    data: { acknowledged: true, validation_state: "skipped" },
+                  });
+                  if (!nextState) return;
+                  setStep("first_chat");
+                } finally {
+                  mcpToolsSkipPendingRef.current = false;
+                  setMcpToolsSkipPending(false);
+                }
+              })();
+            }}
           />
         ) : null}
         {step === "first_chat" && providerSelection ? (
@@ -480,7 +547,8 @@ export function UnifiedSetupWizard({
             onComplete={() => {
               onComplete?.();
             }}
-            onBack={() => setStep("provider_setup")}
+            onBack={() => setStep("mcp_tools")}
+            backLabel="Back to MCP tools"
             onEditProvider={() => setStep("provider_setup")}
             onSwitchProvider={() => setStep("provider_setup")}
             onCheckEndpoint={() => setStep("provider_setup")}

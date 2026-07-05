@@ -11,6 +11,12 @@ import type {
   FirstRunStepSaveResponse,
   FirstRunStepUpdateRequest,
   IngestDefaultsRequest,
+  McpToolsApplyRequest,
+  McpToolsApplyResponse,
+  McpToolsCatalogResponse,
+  McpToolsRecoveryStatusResponse,
+  McpToolsValidateRequest,
+  McpToolsValidateResponse,
   OptionalAdvancedRequest,
   SetupCompleteResponse,
   SetupProviderCatalogResponse,
@@ -33,6 +39,45 @@ function redactApiKeyFields<T>(value: T): T {
     ) as T;
   }
   return value;
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value && typeof value === "object" && !Array.isArray(value));
+
+const isStringArray = (value: unknown): value is string[] =>
+  Array.isArray(value) && value.every((item) => typeof item === "string");
+
+function isMcpToolsApplyConflictResponse(
+  value: unknown,
+): value is McpToolsApplyResponse {
+  if (!isRecord(value)) return false;
+  const conflict = value.conflict;
+  return (
+    value.status === "conflict" &&
+    (typeof value.profile_id === "number" || value.profile_id === null) &&
+    (typeof value.assignment_id === "number" || value.assignment_id === null) &&
+    typeof value.catalog_version === "string" &&
+    isStringArray(value.selected_pack_ids) &&
+    isStringArray(value.selected_addon_ids) &&
+    typeof value.effective_tool_count === "number" &&
+    isStringArray(value.effective_tools) &&
+    isStringArray(value.disabled_addons) &&
+    typeof value.validation_state === "string" &&
+    isRecord(conflict) &&
+    typeof conflict.reason === "string" &&
+    typeof conflict.profile_id === "number"
+  );
+}
+
+function extractMcpToolsApplyConflict(error: unknown): McpToolsApplyResponse {
+  const candidate = error as
+    | { status?: unknown; detail?: unknown; details?: { detail?: unknown } }
+    | null;
+  const detail = candidate?.details?.detail ?? candidate?.detail;
+  if (candidate?.status === 409 && isMcpToolsApplyConflictResponse(detail)) {
+    return detail;
+  }
+  throw error;
 }
 
 export const setupOnboardingMethods = {
@@ -149,6 +194,61 @@ export const setupOnboardingMethods = {
       method: "POST",
       headers: jsonHeaders,
       noAuth: true,
+      body: payload,
+    });
+  },
+
+  async getMcpToolsCatalog(): Promise<McpToolsCatalogResponse> {
+    return await bgRequest<McpToolsCatalogResponse>({
+      path: "/api/v1/setup/first-run/mcp-tools/catalog",
+      method: "GET",
+      noAuth: true,
+    });
+  },
+
+  async applyMcpTools(
+    payload: McpToolsApplyRequest,
+  ): Promise<McpToolsApplyResponse> {
+    try {
+      return await bgRequest<McpToolsApplyResponse>({
+        path: "/api/v1/setup/first-run/mcp-tools/apply",
+        method: "POST",
+        headers: jsonHeaders,
+        noAuth: true,
+        expectedStatuses: [409],
+        body: payload,
+      });
+    } catch (error) {
+      return extractMcpToolsApplyConflict(error);
+    }
+  },
+
+  async validateMcpTools(
+    payload: McpToolsValidateRequest = {},
+  ): Promise<McpToolsValidateResponse> {
+    return await bgRequest<McpToolsValidateResponse>({
+      path: "/api/v1/setup/first-run/mcp-tools/validate",
+      method: "POST",
+      headers: jsonHeaders,
+      noAuth: true,
+      body: payload,
+    });
+  },
+
+  async getMcpToolsRecoveryStatus(): Promise<McpToolsRecoveryStatusResponse> {
+    return await bgRequest<McpToolsRecoveryStatusResponse>({
+      path: "/api/v1/setup/admin/mcp-tools/status",
+      method: "GET",
+    });
+  },
+
+  async validateMcpToolsRecovery(
+    payload: McpToolsValidateRequest = {},
+  ): Promise<McpToolsValidateResponse> {
+    return await bgRequest<McpToolsValidateResponse>({
+      path: "/api/v1/setup/admin/mcp-tools/validate",
+      method: "POST",
+      headers: jsonHeaders,
       body: payload,
     });
   },

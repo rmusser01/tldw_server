@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from tldw_Server_API.app.core.Setup import first_run_models
 from tldw_Server_API.app.core.Setup.audio_bundle_catalog import DEFAULT_AUDIO_RESOURCE_PROFILE
@@ -193,6 +193,129 @@ class SetupProviderValidationResponse(BaseModel):
     models: list[str] = Field(default_factory=list)
     validation_level: str | None = None
     can_gate_first_chat: bool = False
+
+
+class McpToolsValidationState(str, Enum):
+    """Validation states for first-run MCP tool pack setup."""
+
+    NOT_RUN = "not_run"
+    BUILT_IN_PASSED = "built_in_passed"
+    EXTERNAL_DISCOVERED = "external_discovered"
+    EXTERNAL_TOOL_PASSED = "external_tool_passed"
+    NO_SAFE_EXTERNAL_TOOL = "no_safe_external_tool"
+    EXTERNAL_DISCOVERY_INCOMPLETE = "external_discovery_incomplete"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+
+
+class McpToolsCatalogTool(BaseModel):
+    """One MCP tool availability entry in a first-run pack."""
+
+    tool_name: str
+    available: bool
+
+
+class McpToolsCatalogPack(BaseModel):
+    """One first-run MCP tool pack shown by setup."""
+
+    pack_id: str
+    label: str
+    purpose: str
+    default_selected: bool
+    available: bool
+    legacy: bool = False
+    module_targets: list[str] = Field(default_factory=list)
+    tool_patterns: list[str] = Field(default_factory=list)
+    available_tools: list[McpToolsCatalogTool] = Field(default_factory=list)
+    unavailable_tools: list[McpToolsCatalogTool] = Field(default_factory=list)
+    add_on_ids: list[str] = Field(default_factory=list)
+    sample_validation_candidates: list[str] = Field(default_factory=list)
+    catalog_version: str
+
+
+class McpToolsCatalogAddOn(BaseModel):
+    """Optional MCP tool capability add-on exposed by first-run setup."""
+
+    addon_id: str
+    label: str
+    default_selected: bool
+    requirement: str
+    strong_confirmation: bool
+
+
+class McpToolsCatalogResponse(BaseModel):
+    """First-run MCP tool pack catalog response."""
+
+    catalog_version: str
+    confirmation_version: str
+    packs: list[McpToolsCatalogPack] = Field(default_factory=list)
+    add_ons: list[McpToolsCatalogAddOn] = Field(default_factory=list)
+    validation_states: list[McpToolsValidationState] = Field(default_factory=list)
+
+
+class McpToolsApplyRequest(BaseModel):
+    """First-run MCP tool pack selection to persist in MCP Hub."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    selected_pack_ids: list[str] = Field(default_factory=list)
+    selected_addon_ids: list[str] = Field(default_factory=list)
+    confirmed_addon_ids: list[str] = Field(default_factory=list)
+    confirmation_version: str | None = None
+    conflict_resolution: str | None = Field(
+        None,
+        pattern="^(keep_existing|replace_existing)$",
+    )
+    profile_id: int | None = None
+
+
+class McpToolsApplyConflict(BaseModel):
+    """Manual profile conflict returned by first-run MCP tools apply."""
+
+    reason: str
+    profile_id: int
+    current_hash: str | None = None
+    expected_hash: str | None = None
+
+
+class McpToolsApplyResponse(BaseModel):
+    """Safe result returned after applying first-run MCP tool packs."""
+
+    status: str
+    profile_id: int | None = None
+    assignment_id: int | None = None
+    catalog_version: str
+    selected_pack_ids: list[str] = Field(default_factory=list)
+    selected_addon_ids: list[str] = Field(default_factory=list)
+    effective_tool_count: int
+    effective_tools: list[str] = Field(default_factory=list)
+    disabled_addons: list[str] = Field(default_factory=list)
+    validation_state: McpToolsValidationState
+    conflict: McpToolsApplyConflict | None = None
+
+
+class McpToolsValidateRequest(BaseModel):
+    """Request to validate saved first-run MCP tool packs."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class McpToolsValidateResponse(BaseModel):
+    """Safe validation/status response for first-run MCP tool packs."""
+
+    status: str
+    validation_state: McpToolsValidationState
+    profile_id: int | None = None
+    assignment_id: int | None = None
+    catalog_version: str | None = None
+    selected_pack_ids: list[str] = Field(default_factory=list)
+    selected_addon_ids: list[str] = Field(default_factory=list)
+    effective_tool_count: int | None = None
+    validated_at: str | None = None
+    validation_message: str | None = None
+    last_validation_run_id: str | None = None
+    sample_tool_name: str | None = None
+    external_status: str | None = None
 
 
 class SetupCompleteRequest(BaseModel):

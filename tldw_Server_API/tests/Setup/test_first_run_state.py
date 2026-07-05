@@ -392,6 +392,34 @@ def test_first_chat_success_allows_completion(tmp_path: Path):
     assert state.first_chat.completed is True
 
 
+@pytest.mark.parametrize("validation_state", ["not_run", "failed", "skipped", None])
+def test_complete_allows_optional_mcp_tools_validation_states(
+    tmp_path: Path,
+    validation_state: str | None,
+):
+    store = FirstRunStateStore(tmp_path / "first_run_state.json")
+
+    _persist_required_first_run_step_data(store)
+    if validation_state is not None:
+        store.update_step(
+            "mcp_tools",
+            {
+                "acknowledged": True,
+                "selected_pack_ids": ["research"],
+                "validation_state": validation_state,
+            },
+        )
+    store.record_first_chat_success(
+        provider="openai",
+        model="gpt-4.1-mini",
+        response_id="chatcmpl-test",
+    )
+
+    state = store.mark_completed()
+
+    assert state.status == FirstRunStatus.COMPLETED
+
+
 def test_validate_completion_ready_does_not_mark_completed(tmp_path: Path):
     store = FirstRunStateStore(tmp_path / "first_run_state.json")
 
