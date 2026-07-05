@@ -10,6 +10,7 @@ import re
 import uuid
 from typing import Any, cast
 
+from loguru import logger
 from pydantic import ValidationError
 
 from tldw_Server_API.app.api.v1.schemas.research_workspace_outputs import (
@@ -21,6 +22,11 @@ from tldw_Server_API.app.api.v1.schemas.research_workspace_outputs import (
     ResearchWorkspaceOutputSubmitResponse,
 )
 from tldw_Server_API.app.api.v1.schemas.workspace_schemas import WorkspaceArtifactResponse
+from tldw_Server_API.app.core.exceptions import (
+    FileArtifactsError,
+    FileArtifactsValidationError,
+    file_artifacts_http_status,
+)
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
@@ -53,6 +59,23 @@ _REQUIRED_OUTPUT_METADATA_KEYS = frozenset(
 )
 _PATHISH_OUTPUT_METADATA_KEY_TOKENS = frozenset(
     {"path", "file", "filename", "filepath", "folder", "directory", "dir", "storage"}
+)
+_NON_RETRYABLE_FILE_ARTIFACT_CODES = frozenset(
+    {
+        "unsupported_file_type",
+        "persist_required",
+        "unsupported_export_format",
+        "invalid_export_mode",
+        "invalid_async_mode",
+        "export_size_exceeded",
+        "row_limit_exceeded",
+        "cell_limit_exceeded",
+        "storage_quota_exceeded",
+        "reference_image_invalid",
+        "reference_image_not_found",
+        "reference_image_unsupported_by_backend",
+        "reference_image_unsupported_by_model",
+    }
 )
 _UNSAFE_OUTPUT_METADATA_VALUE = object()
 
@@ -299,6 +322,7 @@ async def process_research_workspace_output_payload(
     except ValidationError as exc:
         raise ResearchWorkspaceOutputJobError("output_settings_invalid", status_code=400) from exc
 
+    job_id = _validated_research_workspace_output_job_id(job)
     if artifact_type == "video_overview":
         raise ResearchWorkspaceOutputJobError(
             "research_workspace_video_overview_not_implemented",
@@ -312,6 +336,7 @@ async def process_research_workspace_output_payload(
         media_db=media_db,
         user_id=user_id,
         settings=settings,
+        job_id=job_id,
     )
 
 
@@ -339,6 +364,7 @@ async def _process_infographic_output_payload(
     media_db: Any,
     user_id: int,
     settings: ResearchWorkspaceOutputSettings,
+    job_id: int,
 ) -> dict[str, Any]:
     workspace_id = str(payload["workspace_id"])
     artifact_id = str(payload["artifact_id"])
@@ -347,7 +373,6 @@ async def _process_infographic_output_payload(
         for source_id in payload.get("source_ids") or []
         if str(source_id).strip()
     ]
-    job_id = int(job.get("id") or 0)
     title = settings.title_hint or "Infographic"
 
     try:
@@ -375,6 +400,9 @@ async def _process_infographic_output_payload(
         content = getattr(export, "content", None)
         if not isinstance(content, bytes) or not content:
             raise ResearchWorkspaceOutputJobError("empty_output", retryable=False)
+        export_content_type = str(getattr(export, "content_type", "") or "image/png").split(";", 1)[0].strip().lower()
+        if export_content_type != "image/png":
+            raise ResearchWorkspaceOutputJobError("image_content_type_invalid", retryable=False)
         with CollectionsDatabase.for_user(user_id=str(user_id)) as collections_db:
             persisted = persist_research_workspace_output_bytes(
                 collections_db=collections_db,
@@ -390,7 +418,7 @@ async def _process_infographic_output_payload(
                 metadata={"image_backend": structured.get("backend")},
             )
     except ResearchWorkspaceOutputJobError as exc:
-        _mark_workspace_output_artifact_failed(
+        _try_mark_workspace_output_artifact_failed(
             workspace_db=workspace_db,
             workspace_id=workspace_id,
             artifact_id=artifact_id,
@@ -399,9 +427,20 @@ async def _process_infographic_output_payload(
             error_code=exc.public_code,
         )
         raise
+    except FileArtifactsError as exc:
+        job_error = _research_workspace_output_error_from_file_artifacts_error(exc)
+        _try_mark_workspace_output_artifact_failed(
+            workspace_db=workspace_db,
+            workspace_id=workspace_id,
+            artifact_id=artifact_id,
+            artifact_type="infographic",
+            job_id=job_id,
+            error_code=job_error.public_code,
+        )
+        raise job_error from exc
     except Exception as exc:
         public_code = "infographic_generation_failed"
-        _mark_workspace_output_artifact_failed(
+        _try_mark_workspace_output_artifact_failed(
             workspace_db=workspace_db,
             workspace_id=workspace_id,
             artifact_id=artifact_id,
@@ -684,6 +723,25 @@ def _looks_absolute_path_like(value: str) -> bool:
     )
 
 
+def _validated_research_workspace_output_job_id(job: Mapping[str, Any]) -> int:
+    try:
+        job_id = int(job.get("id"))
+    except (TypeError, ValueError) as exc:
+        raise ResearchWorkspaceOutputJobError("invalid_job_id", status_code=400, retryable=False) from exc
+    if job_id <= 0:
+        raise ResearchWorkspaceOutputJobError("invalid_job_id", status_code=400, retryable=False)
+    return job_id
+
+
+def _research_workspace_output_error_from_file_artifacts_error(exc: FileArtifactsError) -> ResearchWorkspaceOutputJobError:
+    retryable = not isinstance(exc, FileArtifactsValidationError) and exc.code not in _NON_RETRYABLE_FILE_ARTIFACT_CODES
+    return ResearchWorkspaceOutputJobError(
+        str(exc.code),
+        status_code=file_artifacts_http_status(exc),
+        retryable=retryable,
+    )
+
+
 def _update_workspace_output_artifact(
     *,
     workspace_db: Any,
@@ -711,6 +769,34 @@ def _update_workspace_output_artifact(
         raise
     except Exception as exc:
         raise ResearchWorkspaceOutputJobError("workspace_artifact_update_failed", status_code=409) from exc
+
+
+def _try_mark_workspace_output_artifact_failed(
+    *,
+    workspace_db: Any,
+    workspace_id: str,
+    artifact_id: str,
+    artifact_type: str,
+    job_id: int,
+    error_code: str,
+) -> None:
+    try:
+        _mark_workspace_output_artifact_failed(
+            workspace_db=workspace_db,
+            workspace_id=workspace_id,
+            artifact_id=artifact_id,
+            artifact_type=artifact_type,
+            job_id=job_id,
+            error_code=error_code,
+        )
+    except Exception:
+        logger.warning(
+            "Failed to mark research workspace output artifact failed: workspace_id={} artifact_id={} job_id={} error_code={}",
+            workspace_id,
+            artifact_id,
+            job_id,
+            _safe_public_error_code(error_code),
+        )
 
 
 def _mark_workspace_output_artifact_failed(

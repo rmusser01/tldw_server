@@ -4,19 +4,12 @@ title: Implement Research Workspace NotebookLM media outputs WP2
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: 2026-07-05 09:20
+updated_date: '2026-07-05 09:33'
 labels: []
 dependencies: []
 references:
-- Docs/superpowers/specs/2026-07-05-research-workspace-notebooklm-media-outputs-wp2-design.md
-modified_files:
-- tldw_Server_API/app/api/v1/schemas/research_workspace_capabilities.py
-- tldw_Server_API/app/core/Research_Workspace/capabilities.py
-- tldw_Server_API/tests/Research_Workspace/test_capability_derivation.py
-- tldw_Server_API/app/api/v1/schemas/research_workspace_outputs.py
-- tldw_Server_API/app/core/Research_Workspace/output_jobs.py
-- tldw_Server_API/app/api/v1/endpoints/workspaces.py
-- tldw_Server_API/tests/Research_Workspace/test_output_jobs_api.py
+  - >-
+    Docs/superpowers/specs/2026-07-05-research-workspace-notebooklm-media-outputs-wp2-design.md
 ---
 
 ## Description
@@ -46,6 +39,8 @@ Track WP2 work for real NotebookLM-style media outputs in Research Workspace: ba
 Implementation plan approved: Docs/superpowers/plans/2026-07-05-research-workspace-notebooklm-media-outputs-wp2-plan.md. Plan review status: Approved.
 
 Task 5 complete: implemented infographic output processing through ImageAdapter.normalize/validate/export, durable PNG output persistence, optimistic-lock workspace artifact completion updates, and sanitized failed-artifact updates. Verification: red focused pytest failed on research_workspace_output_processing_not_implemented; green focused infographic pytest passed 2 tests; full pytest tldw_Server_API/tests/Research_Workspace/test_output_jobs_worker.py -v passed 14 tests; Bandit on output_jobs.py passed with 0 findings.
+
+Task 5 review fixes: preserved original worker errors when failed-artifact marking fails, mapped FileArtifactsError public codes/retryability through the Research Workspace job error contract, rejected malformed job ids before persistence, and rejected non-PNG image adapter exports before writing output artifacts. Verification: red regression pytest failed 4 focused tests; green focused regression pytest passed 4 tests; full pytest tldw_Server_API/tests/Research_Workspace/test_output_jobs_worker.py -v passed 18 tests; git diff --check passed; Bandit output_jobs.py passed with 0 findings (/tmp/bandit_task12160_task5_review_fix.json).
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
@@ -67,25 +62,3 @@ Task 5 complete: implemented infographic output processing through ImageAdapter.
 - [ ] #5 Final summary added
 - [ ] #6 Known skips or blockers documented
 <!-- DOD:END -->
-
-## Implementation Notes
-
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Task 2 started: adding Research Workspace output job schemas/API skeleton only; worker/media generation/persistence remain for later plan tasks.
-Task 2 complete: added output submit/status schemas, minimal Research Workspace output job helpers, POST/GET workspace output routes, and focused tests for validation, pending artifact/job creation, status projection, and status ownership isolation. Verification: red pytest failed on missing research_workspace_outputs module; green pytest tldw_Server_API/tests/Research_Workspace/test_output_jobs_api.py -v passed 7 tests; git diff --check passed; Bandit on touched backend implementation files passed with 0 results.
-Task 2 follow-up complete: hardened output job enqueue rollback/error mapping and fail-closed status domain scoping. Verification: red focused pytest failed on raw enqueue RuntimeError/500 and missing-domain acceptance; green focused pytest tldw_Server_API/tests/Research_Workspace/test_output_jobs_api.py -v passed 11 tests; git diff --check passed; Bandit on touched backend implementation files passed with 0 results.
-Task 2 status-lookup follow-up complete: mapped Jobs backend get_job failures to stable output_job_status_unavailable/503 before route handling. Verification: red focused pytest failed with 500 instead of 503; green focused pytest tldw_Server_API/tests/Research_Workspace/test_output_jobs_api.py -v passed 12 tests; git diff --check passed; Bandit on output_jobs.py passed with 0 results.
-Task 3 started: adding Research Workspace output worker registration and fail-fast worker skeleton only; media generation/artifact persistence remain for later plan tasks.
-Task 3 complete: added startup registration plus Research Workspace output Jobs worker skeleton with payload normalization, owner resolution, DB opening/closing, WorkerSDK runner/progress callback, and fail-fast processing placeholder. Verification: red focused pytest failed on missing worker/startup registration; green focused pytest tldw_Server_API/tests/Research_Workspace/test_output_jobs_startup.py tldw_Server_API/tests/Research_Workspace/test_output_jobs_worker.py -v passed 2 tests; regression pytest including test_output_jobs_api.py passed 14 tests; git diff --check passed; Bandit on touched backend implementation files passed with 0 results.
-Task 3 follow-up complete: updated service lifecycle/catalog contract tests for research_workspace_output_jobs_task, added worker delegation and WorkerSDK job_type coverage, and replaced duplicate worker helper code with shared Jobs worker_utils. Verification: red required suite reproduced 4 stale catalog/delegation failures; green required pytest suite passed 62 tests; git diff --check passed; Bandit on research_workspace_output_jobs_worker.py passed with 0 results.
-Task 3 owner-isolation follow-up complete: made the Research Workspace output worker derive user_id from canonical job owner_user_id and reject mismatched payload user_id as non-retryable owner_user_id_mismatch; also awaited stop watcher cancellation. Verification: red worker test failed on missing mismatch rejection; green required pytest suite passed 50 tests; git diff --check passed; Bandit on research_workspace_output_jobs_worker.py passed with 0 results.
-Task 4 complete: added bounded shared Research Workspace output source context assembly and durable byte persistence through output artifacts only. Verification: red focused pytest failed on missing build_research_workspace_output_source_context/persist_research_workspace_output_bytes helpers; green focused pytest tldw_Server_API/tests/Research_Workspace/test_output_jobs_worker.py -v passed 6 tests; git diff --check passed; Bandit on output_jobs.py passed with 0 results.
-Task 4 spec-review follow-up complete: bounded source context now counts emitted headers/titles/separators, and output persistence filters caller metadata before required research_workspace fields are set last. Verification: red focused pytest failed on oversized-title context length and metadata override/path cases; green focused pytest test_output_jobs_worker.py -v passed 8 tests; git diff --check passed; Bandit on output_jobs.py passed with 0 results.
-Task 4 spec re-review follow-up complete: source context now matches source preview by treating empty media content as unavailable without document/transcript fallbacks, and output persistence recursively filters nested caller metadata keys/values that could leak path-like data while required research_workspace metadata remains immutable. Verification: red focused pytest failed on empty-content fallback and nested metadata path leakage; green focused pytest tldw_Server_API/tests/Research_Workspace/test_output_jobs_worker.py -v passed 10 tests; git diff --check passed; Bandit on output_jobs.py passed with 0 results.
-Task 4 final spec-review follow-up complete: output metadata sanitization now rejects nested string values containing embedded POSIX or Windows absolute path-like substrings, not only values that are entirely paths. Verification: red single regression pytest failed on embedded /private/tmp and C:\\Users metadata strings leaking; green focused pytest tldw_Server_API/tests/Research_Workspace/test_output_jobs_worker.py -v passed 10 tests; git diff --check passed; Bandit on output_jobs.py passed with 0 results.
-Task 4 metadata delimiter follow-up complete: output metadata sanitization now rejects embedded Unix absolute path-like tokens after non-word delimiters, covering rendered_from=/private/tmp/source.png and JSON-looking strings such as {"path":"/private/tmp/source.png"}, while preserving safe nested metadata. Verification: red single regression pytest failed on delimited/jsonish metadata paths leaking; green focused pytest tldw_Server_API/tests/Research_Workspace/test_output_jobs_worker.py -v passed 10 tests; git diff --check passed; Bandit on output_jobs.py passed with 0 results.
-Task 4 source-context shape follow-up complete: source context bounding now budgets title and body separately so usable blocks preserve '# {title}\n\n{excerpt}' shape with a non-empty excerpt, and tiny limits skip the source rather than returning header-only context. Verification: red single regression pytest failed on missing blank-line separator/body for long title with max_chars=40; green focused pytest tldw_Server_API/tests/Research_Workspace/test_output_jobs_worker.py -v passed 10 tests; git diff --check passed; Bandit on output_jobs.py passed with 0 results.
-Task 4 persistence hardening follow-up complete: persist_research_workspace_output_bytes now fails closed on collections_db/user_id mismatch, removes written bytes if output artifact row creation fails, and recursively drops caller metadata keys/values that look file/path-like including relative local paths. Verification: red focused pytest failed on user mismatch acceptance, row-failure file leak, and relative metadata path leakage; green focused pytest tldw_Server_API/tests/Research_Workspace/test_output_jobs_worker.py -v passed 12 tests; git diff --check passed; Bandit on output_jobs.py passed with 0 results. Real CollectionsDatabase integration-style test skipped to avoid broader DB backend/schema setup churn in this focused follow-up.
-Task 4 encoded metadata sanitizer follow-up complete: caller metadata key filtering now rejects case-insensitive path substrings such as sourcePath/localPath, and JSON-looking string values are parsed and recursively sanitized so encoded path-only objects are dropped. Verification: red single regression pytest failed on sourcePath/localPath and encoded {"path":"report.pdf"} leaking; green focused pytest tldw_Server_API/tests/Research_Workspace/test_output_jobs_worker.py -v passed 12 tests; git diff --check passed; Bandit on output_jobs.py passed with 0 results.
-Task 4 filename metadata sanitizer follow-up complete: caller metadata sanitization now drops bare extension-like filenames such as report.pdf, render.png, and audio.mp3 under neutral top-level, nested, and list values while preserving safe prose strings. Verification: red focused pytest failed on plain_note/report.pdf and nested/list filename values leaking; green focused pytest tldw_Server_API/tests/Research_Workspace/test_output_jobs_worker.py -v passed 12 tests; git diff --check passed; Bandit on output_jobs.py passed with 0 findings.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
