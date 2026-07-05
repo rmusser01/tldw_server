@@ -451,7 +451,7 @@ def _sanitize_output_metadata_value(value: Any) -> Any:
 def _looks_absolute_path_like(value: str) -> bool:
     text = value.strip()
     return (
-        re.search(r"(^|\s)(?:[/\\](?:\S|$)|~[/\\](?:\S|$)|[A-Za-z]:[/\\])", text)
+        re.search(r"(^|[^\w])(?:[/\\](?:\S|$)|~[/\\](?:\S|$)|[A-Za-z]:[/\\])", text)
         is not None
     )
 
