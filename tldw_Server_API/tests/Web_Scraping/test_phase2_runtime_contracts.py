@@ -6,6 +6,7 @@ from types import MappingProxyType, SimpleNamespace
 
 import pytest
 
+import tldw_Server_API.app.core.Web_Scraping.runtime as runtime_pkg
 from tldw_Server_API.app.core.Web_Scraping.runtime import (
     FetchRequest,
     FetchResponse,
@@ -28,8 +29,14 @@ def test_runtime_request_context_freezes_metadata() -> None:
     metadata["trace"]["id"] = "mutated"
 
     assert isinstance(context.metadata, MappingProxyType)
+    assert isinstance(context.metadata["trace"], MappingProxyType)
     assert context.metadata["trace"]["id"] == "abc"
+    with pytest.raises(TypeError):
+        context.metadata["trace"]["id"] = "blocked"
     assert context.metadata["items"] == ("one", {"nested": ("two",)})
+    assert isinstance(context.metadata["items"][1], MappingProxyType)
+    with pytest.raises(TypeError):
+        context.metadata["items"][1]["nested"] = "blocked"
     assert context.source == "article_extract"
     assert context.stage == "pre_fetch"
     assert context.user_id == "123"
@@ -160,6 +167,9 @@ def test_policy_decision_matches_legacy_policy_fields() -> None:
     assert decision.source == "article_extract"
     assert decision.details["sanitized"] is True
     assert decision.details["checks"] == ("robots", {"stages": ("pre_fetch",)})
+    assert isinstance(decision.details["checks"][1], MappingProxyType)
+    with pytest.raises(TypeError):
+        decision.details["checks"][1]["stages"] = "blocked"
     with pytest.raises(TypeError):
         decision.details["new"] = "blocked"
 
@@ -209,7 +219,7 @@ def test_runtime_package_does_not_import_legacy_wrappers_or_policy_modules() -> 
         },
         "tldw_Server_API.app.core.Security": {"egress"},
     }
-    runtime_dir = Path("tldw_Server_API/app/core/Web_Scraping/runtime")
+    runtime_dir = Path(runtime_pkg.__file__).parent
 
     def is_forbidden_module(module: str) -> bool:
         return any(module == root or module.startswith(f"{root}.") for root in forbidden_roots)
