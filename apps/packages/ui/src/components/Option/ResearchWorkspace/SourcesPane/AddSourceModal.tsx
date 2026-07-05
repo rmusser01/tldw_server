@@ -421,6 +421,41 @@ const extractMediaFromAddResponse = (
 }
 
 /**
+ * SourceImportExpectations - Clarifies current source import scope
+ */
+const SourceImportExpectations: React.FC = () => {
+  const { t } = useTranslation(["playground", "common"])
+
+  return (
+    <div className="rounded-md border border-border bg-surface2/40 p-3 text-xs text-text-muted">
+      <p className="font-semibold text-text">
+        {t("playground:sources.importExpectationsTitle", "Supported now")}
+      </p>
+      <ul className="mt-1 list-disc space-y-1 pl-4">
+        <li>
+          {t(
+            "playground:sources.importExpectationsFiles",
+            "Files: PDF, DOCX, TXT/Markdown, ePub, HTML, XML, JSON, audio and video files."
+          )}
+        </li>
+        <li>
+          {t(
+            "playground:sources.importExpectationsUrls",
+            "URLs: URL imports use server extraction; YouTube/direct media links depend on server support and may import extracted text or transcripts."
+          )}
+        </li>
+        <li>
+          {t(
+            "playground:sources.importExpectationsSkips",
+            "Not included here: Google Drive sync, Google Docs/Slides/Sheets autosync, images, CSV, and PPTX."
+          )}
+        </li>
+      </ul>
+    </div>
+  )
+}
+
+/**
  * UploadTab - Upload files via drag-and-drop
  */
 const UploadTab: React.FC<{
@@ -655,6 +690,7 @@ const UploadTab: React.FC<{
           </p>
         </Dragger>
       </div>
+      <SourceImportExpectations />
       {isMobile && (
         <Button
           type="default"
