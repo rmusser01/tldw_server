@@ -163,6 +163,7 @@ _READ_FORBIDDEN_CAPABILITIES = {
     "filesystem.delete",
     "process.execute",
 }
+_BASELINE_ALLOWED_TOOL = "mcp.tools.list"
 
 
 def build_mcp_tools_catalog(
@@ -228,7 +229,7 @@ def generate_first_run_policy(
 
     entries_by_name = _entries_by_name(tool_entries)
     registry_available = bool(entries_by_name)
-    allowed_tools: list[str] = []
+    allowed_tools: list[str] = [_BASELINE_ALLOWED_TOOL]
     capabilities: list[str] = []
 
     for pack_id in selected_pack_ids:
@@ -337,6 +338,7 @@ def compute_first_run_policy_hash(policy_document: Mapping[str, Any]) -> str:
             if pack_id in _PACKS_BY_ID
         ],
         selected_addon_ids=_str_list(provenance_map.get("selected_addon_ids")),
+        catalog_version=str(provenance_map.get("catalog_version") or CATALOG_VERSION),
     )
 
 
@@ -561,13 +563,14 @@ def _generated_policy_hash(
     capabilities: Sequence[str],
     selected_pack_ids: Sequence[str],
     selected_addon_ids: Sequence[str],
+    catalog_version: str = CATALOG_VERSION,
 ) -> str:
     payload = {
         "allowed_tools": _unique_strings(allowed_tools),
         "capabilities": _unique_strings(capabilities),
         "selected_pack_ids": _unique_strings(selected_pack_ids),
         "selected_addon_ids": _unique_strings(selected_addon_ids),
-        "catalog_version": CATALOG_VERSION,
+        "catalog_version": catalog_version,
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return "sha256:" + hashlib.sha256(encoded).hexdigest()

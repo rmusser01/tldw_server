@@ -446,7 +446,7 @@ async def test_repeated_apply_preserves_unrelated_policy_fields_when_hash_matche
     assert policy_document["denied_tools"] == ["notes.delete"]
     assert policy_document["approval_mode"] == "manual"
     assert policy_document["conditions"] == {"tenant": "local"}
-    assert policy_document["allowed_tools"] == ["knowledge.search", "knowledge.get", "mcp.tools.list"]
+    assert policy_document["allowed_tools"] == ["mcp.tools.list", "knowledge.search", "knowledge.get"]
     assert policy_document["first_run_mcp_tools"]["selected_pack_ids"] == ["research"]
 
 
@@ -694,7 +694,10 @@ async def test_replace_existing_overwrites_only_after_explicit_request(
 
     assert conflict.status == "conflict"
     assert replaced.status == "applied"
-    assert fake_hub.updated_profiles[0]["policy_document"]["allowed_tools"] == ["notes.search"]
+    assert fake_hub.updated_profiles[0]["policy_document"]["allowed_tools"] == [
+        "mcp.tools.list",
+        "notes.search",
+    ]
     replaced_policy = fake_hub.updated_profiles[0]["policy_document"]
     assert (
         replaced_policy["first_run_mcp_tools"]["last_generated_hash"]

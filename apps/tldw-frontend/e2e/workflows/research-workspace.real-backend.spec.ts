@@ -609,11 +609,22 @@ const activateMenuItem = async (locator: Locator) => {
   await expect(locator).toBeVisible({ timeout: 10_000 })
   try {
     await locator.click({ timeout: 5_000 })
-  } catch {
+  } catch (error) {
+    if (!String(error).includes("nextjs-portal")) {
+      throw error
+    }
     await locator.focus()
     await expect(locator).toBeFocused({ timeout: 5_000 })
     await locator.press("Enter")
   }
+}
+
+const openSandboxDiagnosticsMenu = async (page: Page) => {
+  await clickActionable(page.getByTestId("workspace-settings-button"))
+  const sandboxDiagnosticsMenuItem = page.getByRole("menuitem", {
+    name: "Sandbox diagnostics"
+  })
+  await activateMenuItem(sandboxDiagnosticsMenuItem)
 }
 
 test.describe("Research Workspace Workflow (Real Backend)", () => {
@@ -867,13 +878,7 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
       )
     })
 
-    await clickActionable(
-      authedPage.getByTestId("workspace-settings-button")
-    )
-    const sandboxDiagnosticsMenuItem = authedPage.getByRole("menuitem", {
-      name: "Sandbox diagnostics"
-    })
-    await activateMenuItem(sandboxDiagnosticsMenuItem)
+    await openSandboxDiagnosticsMenu(authedPage)
 
     const diagnosticsRequest = await diagnosticsRequestPromise
     const diagnosticsUrl = new URL(diagnosticsRequest.url())
@@ -946,13 +951,7 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
       )
     })
 
-    await clickActionable(
-      authedPage.getByTestId("workspace-settings-button")
-    )
-    const sandboxDiagnosticsMenuItem = authedPage.getByRole("menuitem", {
-      name: "Sandbox diagnostics"
-    })
-    await activateMenuItem(sandboxDiagnosticsMenuItem)
+    await openSandboxDiagnosticsMenu(authedPage)
 
     const diagnosticsResponse = await diagnosticsResponsePromise
     expect(diagnosticsResponse.status()).toBeLessThan(400)

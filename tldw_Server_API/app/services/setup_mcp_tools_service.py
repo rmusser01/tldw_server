@@ -10,6 +10,7 @@ from typing import Any, Literal
 
 from loguru import logger
 
+from tldw_Server_API.app.core.exceptions import BadRequestError
 from tldw_Server_API.app.core.Setup.first_run_mcp_tools import (
     CATALOG_VERSION,
     PROFILE_DISPLAY_NAME,
@@ -137,7 +138,7 @@ class SetupMcpToolsService:
         """Apply a first-run MCP selection to a generated global default policy."""
 
         if request.conflict_resolution not in {None, "keep_existing", "replace_existing"}:
-            raise ValueError("Unsupported first-run MCP conflict resolution")
+            raise BadRequestError("Unsupported first-run MCP conflict resolution")
 
         tool_entries = await self.tool_registry.list_entries()
         generated_policy = generate_first_run_policy(
@@ -152,7 +153,7 @@ class SetupMcpToolsService:
 
         if request.conflict_resolution is not None:
             if profile is None or request.profile_id != int(profile["id"]):
-                raise ValueError("First-run MCP profile id mismatch")
+                raise BadRequestError("First-run MCP profile id mismatch")
 
         if profile is None:
             profile = await self.hub.create_permission_profile(
@@ -226,7 +227,8 @@ class SetupMcpToolsService:
 
         try:
             tools_payload = await self.tool_executor(_BUILT_IN_SAMPLE_TOOL, {})
-        except Exception:
+        except Exception as exc:
+            logger.debug("First-run MCP built-in validation tool failed: {}", type(exc).__name__)
             return _validation_result(
                 saved_state=saved_state,
                 validation_state="failed",
@@ -290,7 +292,8 @@ class SetupMcpToolsService:
                 _BUILT_IN_SAMPLE_TOOL,
                 {"module": "external_federation"},
             )
-        except Exception:
+        except Exception as exc:
+            logger.debug("First-run MCP external discovery listing failed: {}", type(exc).__name__)
             return _validation_result(
                 saved_state=saved_state,
                 validation_state="external_discovery_incomplete",
@@ -314,7 +317,12 @@ class SetupMcpToolsService:
                 continue
             try:
                 await self.tool_executor(tool_name, {})
-            except Exception:
+            except Exception as exc:
+                logger.debug(
+                    "First-run MCP external validation tool {} failed: {}",
+                    tool_name,
+                    type(exc).__name__,
+                )
                 return _validation_result(
                     saved_state=saved_state,
                     validation_state="failed",

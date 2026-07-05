@@ -199,6 +199,10 @@ export const PermissionProfilesTab = ({
       handledDrillRequestRef.current = drillTarget.request_id
       openForEdit(profile)
       onDrillHandled?.(drillTarget.request_id)
+    } else {
+      handledDrillRequestRef.current = drillTarget.request_id
+      setErrorMessage(`Permission profile ${drillTarget.object_id} could not be found.`)
+      onDrillHandled?.(drillTarget.request_id)
     }
   }, [drillTarget, loading, onDrillHandled, profiles, profilesLoaded])
 

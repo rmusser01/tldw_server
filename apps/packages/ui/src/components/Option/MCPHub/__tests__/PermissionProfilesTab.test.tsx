@@ -243,6 +243,27 @@ describe("PermissionProfilesTab", () => {
     expect(onDrillHandled).toHaveBeenCalledWith(17)
   })
 
+  it("clears a drill target when the profile no longer exists", async () => {
+    const onDrillHandled = vi.fn()
+    render(
+      <PermissionProfilesTab
+        drillTarget={{
+          tab: "profiles",
+          object_kind: "permission_profile",
+          object_id: "999",
+          action: "edit",
+          request_id: 18
+        }}
+        onDrillHandled={onDrillHandled}
+      />
+    )
+
+    expect(
+      await screen.findByText("Permission profile 999 could not be found.")
+    ).toBeInTheDocument()
+    expect(onDrillHandled).toHaveBeenCalledWith(18)
+  })
+
   it("deletes a profile when the user confirms the modal", async () => {
     mocks.deletePermissionProfile.mockResolvedValue(undefined)
     const confirmSpy = vi.spyOn(Modal, "confirm").mockImplementation((config: any) => {

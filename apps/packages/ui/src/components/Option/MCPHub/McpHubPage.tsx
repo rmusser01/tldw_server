@@ -138,6 +138,7 @@ export const McpHubPage = () => {
   const [mcpToolsRecoveryStatus, setMcpToolsRecoveryStatus] =
     useState<McpToolsRecoveryStatusResponse | null>(null)
   const [mcpToolsRecoveryRunning, setMcpToolsRecoveryRunning] = useState(false)
+  const [mcpToolsRecoveryError, setMcpToolsRecoveryError] = useState<string | null>(null)
   const requestIdRef = useRef(0)
 
   const routeState = useMemo(
@@ -239,10 +240,11 @@ export const McpHubPage = () => {
 
   const handleRunMcpToolsRecoveryValidation = async () => {
     setMcpToolsRecoveryRunning(true)
+    setMcpToolsRecoveryError(null)
     try {
       setMcpToolsRecoveryStatus(await setupOnboardingMethods.validateMcpToolsRecovery())
     } catch {
-      // Keep MCP Hub usable when recovery validation fails.
+      setMcpToolsRecoveryError("Could not run first-run MCP tools validation.")
     } finally {
       setMcpToolsRecoveryRunning(false)
     }
@@ -434,7 +436,11 @@ export const McpHubPage = () => {
                 ]
               : []
           }
-        />
+        >
+          {mcpToolsRecoveryError ? (
+            <p className="text-sm text-state-error">{mcpToolsRecoveryError}</p>
+          ) : null}
+        </StatePanel>
       )}
       <div
         className="flex flex-wrap gap-2"

@@ -15,6 +15,8 @@ from tldw_Server_API.app.core.Setup.first_run_state import (
 from tldw_Server_API.app.core.Setup.provider_catalog import REQUIRED_SETUP_PROVIDER_KEYS
 from tldw_Server_API.app.services.setup_mcp_tools_service import McpToolsApplyResult
 
+pytestmark = pytest.mark.integration
+
 
 def _persist_required_first_run_step_data(
     store: FirstRunStateStore,
@@ -336,6 +338,29 @@ def test_first_run_mcp_tools_catalog_returns_defaults(setup_client, monkeypatch,
     assert {pack["pack_id"] for pack in body["packs"]} >= {"research", "learning", "writing"}
 
 
+def test_first_run_mcp_tools_routes_are_rate_limited():
+    expected_routes = {
+        ("GET", "/setup/first-run/mcp-tools/catalog"),
+        ("POST", "/setup/first-run/mcp-tools/apply"),
+        ("POST", "/setup/first-run/mcp-tools/validate"),
+        ("GET", "/setup/admin/mcp-tools/status"),
+        ("POST", "/setup/admin/mcp-tools/validate"),
+    }
+    routes_by_key = {}
+    for route in setup_endpoint.router.routes:
+        path = getattr(route, "path", None)
+        methods = getattr(route, "methods", set()) or set()
+        dependencies = {
+            dependency.call
+            for dependency in getattr(getattr(route, "dependant", None), "dependencies", [])
+        }
+        for method in methods:
+            routes_by_key[(method, path)] = dependencies
+
+    for key in expected_routes:
+        assert setup_endpoint.check_rate_limit in routes_by_key[key]
+
+
 def test_first_run_mcp_tools_catalog_after_completion_requires_system_configure(
     setup_client,
     monkeypatch,
@@ -549,6 +574,31 @@ def test_first_run_mcp_tools_apply_after_completion_requires_admin_auth(
     assert response.json()["detail"] == "system_configure_required"
     assert auth_calls == ["/api/v1/setup/first-run/mcp-tools/apply"]
     assert service.apply_requests == []
+
+
+def test_first_run_mcp_tools_apply_after_completion_records_actor_id(
+    setup_client,
+    monkeypatch,
+    tmp_path,
+):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_completed(monkeypatch)
+    service = _FakeMcpToolsService()
+    _override_mcp_tools_service(monkeypatch, service)
+
+    async def _admin_principal(_request):
+        return SimpleNamespace(user_id=42, permissions=["system.configure"])
+
+    monkeypatch.setattr(setup_endpoint, "get_auth_principal", _admin_principal)
+
+    response = setup_client.post(
+        "/api/v1/setup/first-run/mcp-tools/apply",
+        json={"selected_pack_ids": ["research"], "selected_addon_ids": []},
+    )
+
+    assert response.status_code == 200
+    assert service.apply_requests[0]["actor_id"] == 42
 
 
 def test_first_run_mcp_tools_apply_returns_conflict_for_profile_conflict(

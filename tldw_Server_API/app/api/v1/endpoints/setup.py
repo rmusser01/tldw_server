@@ -82,7 +82,7 @@ from tldw_Server_API.app.api.v1.schemas.setup_schemas import (
 from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_CONFIGURE
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.config import clear_config_cache
-from tldw_Server_API.app.core.exceptions import InvalidFirstRunTransition
+from tldw_Server_API.app.core.exceptions import BadRequestError, InvalidFirstRunTransition
 from tldw_Server_API.app.core.Setup import (
     audio_pack_service,
     audio_profile_service,
@@ -335,6 +335,8 @@ async def _run_first_run_store_call(callback: Callable[[FirstRunStateStore], Any
 
 
 async def get_setup_mcp_tools_service() -> SetupMcpToolsService:
+    """Resolve the first-run MCP tools service for setup handlers."""
+
     from tldw_Server_API.app.api.v1.endpoints.mcp_hub_management import get_mcp_hub_service
 
     return SetupMcpToolsService(
@@ -669,18 +671,23 @@ def _has_system_configure_permission(principal: AuthPrincipal | None) -> bool:
     return SYSTEM_CONFIGURE in permissions or "*" in permissions
 
 
-async def _require_mcp_tools_setup_or_admin_access(request: Request) -> None:
+async def _require_mcp_tools_setup_or_admin_access(request: Request) -> AuthPrincipal | None:
+    """Allow local first-run setup or completed-setup system configuration access."""
+
     status_snapshot = setup_manager.get_status_snapshot()
     if not bool(status_snapshot.get("setup_completed")):
         await _require_first_run_write_access(request)
-        return
+        return None
 
     principal = await get_auth_principal(request)
     if not _has_system_configure_permission(principal):
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="system_configure_required")
+    return principal
 
 
 async def _require_mcp_tools_catalog_access(request: Request) -> None:
+    """Allow local catalog preview before setup or system configuration after setup."""
+
     status_snapshot = setup_manager.get_status_snapshot()
     if not bool(status_snapshot.get("setup_completed")):
         await require_local_setup_access(request)
@@ -1316,8 +1323,11 @@ async def get_first_run_provider_catalog(
 )
 async def get_first_run_mcp_tools_catalog(
     _guard: None = Depends(_require_mcp_tools_catalog_access),
+    _rate_limit: None = Depends(check_rate_limit),
     service: SetupMcpToolsService = Depends(get_setup_mcp_tools_service),
 ) -> McpToolsCatalogResponse:
+    """Return the first-run MCP tool pack catalog with saved selections."""
+
     state = await _run_first_run_store_call(lambda store: store.load())
     selected_pack_ids = _safe_str_list(_mcp_tools_step_data_from_state(state).get("selected_pack_ids"))
     catalog = build_mcp_tools_catalog(
@@ -1334,9 +1344,12 @@ async def get_first_run_mcp_tools_catalog(
 )
 async def apply_first_run_mcp_tools(
     payload: McpToolsApplyRequest,
-    _guard: None = Depends(_require_mcp_tools_setup_or_admin_access),
+    _guard: AuthPrincipal | None = Depends(_require_mcp_tools_setup_or_admin_access),
+    _rate_limit: None = Depends(check_rate_limit),
     service: SetupMcpToolsService = Depends(get_setup_mcp_tools_service),
 ) -> McpToolsApplyResponse:
+    """Apply the selected first-run MCP tool packs to MCP Hub."""
+
     state = await _run_first_run_store_call(lambda store: store.load())
     _raise_if_terminal_first_run_state(state)
     _preflight_mcp_tools_apply_payload(payload)
@@ -1344,9 +1357,9 @@ async def apply_first_run_mcp_tools(
         result = await service.apply_selection(
             state=state,
             request=_service_mcp_tools_apply_request(payload),
-            actor_id=None,
+            actor_id=_guard.user_id if _guard is not None else None,
         )
-    except ValueError as exc:
+    except (BadRequestError, ValueError) as exc:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
             detail=_public_validation_error_detail(exc, "invalid_mcp_tools_selection"),
@@ -1375,9 +1388,12 @@ async def apply_first_run_mcp_tools(
 )
 async def validate_first_run_mcp_tools(
     payload: McpToolsValidateRequest,
-    _guard: None = Depends(_require_mcp_tools_setup_or_admin_access),
+    _guard: AuthPrincipal | None = Depends(_require_mcp_tools_setup_or_admin_access),
+    _rate_limit: None = Depends(check_rate_limit),
     service: SetupMcpToolsService = Depends(get_setup_mcp_tools_service),
 ) -> McpToolsValidateResponse:
+    """Validate the saved first-run MCP tool pack selection."""
+
     del payload
     setup_completed = bool(setup_manager.get_status_snapshot().get("setup_completed"))
     state = await _run_first_run_store_call(lambda store: store.load())
@@ -2386,6 +2402,7 @@ async def verify_admin_setup_readiness(
 @router.get("/admin/mcp-tools/status", response_model=McpToolsValidateResponse)
 async def get_admin_mcp_tools_status(
     _guard: AuthPrincipal = Depends(_require_system_configure_access),
+    _rate_limit: None = Depends(check_rate_limit),
     service: SetupMcpToolsService = Depends(get_setup_mcp_tools_service),
 ) -> McpToolsValidateResponse:
     """Return the saved first-run MCP tool setup status through the admin surface."""
@@ -2406,6 +2423,7 @@ async def get_admin_mcp_tools_status(
 async def validate_admin_mcp_tools(
     payload: McpToolsValidateRequest,
     _guard: AuthPrincipal = Depends(_require_system_configure_access),
+    _rate_limit: None = Depends(check_rate_limit),
     service: SetupMcpToolsService = Depends(get_setup_mcp_tools_service),
 ) -> McpToolsValidateResponse:
     """Validate saved first-run MCP tool setup through the admin surface."""

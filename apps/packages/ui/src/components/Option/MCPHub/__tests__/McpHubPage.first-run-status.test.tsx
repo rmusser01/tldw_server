@@ -225,6 +225,22 @@ describe("McpHubPage first-run MCP tools status", () => {
     }
   )
 
+  it("shows a visible error when recovery validation fails", async () => {
+    const user = userEvent.setup()
+    getMcpToolsRecoveryStatus.mockResolvedValueOnce(
+      statusResponse({ validation_state: "not_run" })
+    )
+    validateMcpToolsRecovery.mockRejectedValueOnce(new Error("validation unavailable"))
+
+    renderMcpHubPage()
+
+    await user.click(await screen.findByRole("button", { name: "Run validation" }))
+
+    expect(
+      await screen.findByText("Could not run first-run MCP tools validation.")
+    ).toBeInTheDocument()
+  })
+
   it("does not block MCP Hub management when status loading fails", async () => {
     getMcpToolsRecoveryStatus.mockRejectedValueOnce(new Error("status unavailable"))
 

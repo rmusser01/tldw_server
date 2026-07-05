@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import React from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
@@ -114,6 +115,13 @@ const createProps = (
   ...overrides,
 });
 
+const renderMcpToolsStep = (props: McpToolsStepProps) =>
+  render(
+    <MemoryRouter>
+      <McpToolsStep {...props} />
+    </MemoryRouter>,
+  );
+
 describe("McpToolsStep", () => {
   beforeEach(() => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
@@ -125,7 +133,7 @@ describe("McpToolsStep", () => {
 
   it("loads missing catalog and renders default selected packs checked", async () => {
     const loadCatalog = vi.fn().mockResolvedValue(catalog);
-    render(<McpToolsStep {...createProps({ catalog: null, loadCatalog })} />);
+    renderMcpToolsStep(createProps({ catalog: null, loadCatalog }));
 
     expect(loadCatalog).toHaveBeenCalledTimes(1);
     expect(await screen.findByLabelText(/research/i)).toBeChecked();
@@ -133,7 +141,7 @@ describe("McpToolsStep", () => {
   });
 
   it("renders risky add-ons collapsed and off by default", () => {
-    render(<McpToolsStep {...createProps()} />);
+    renderMcpToolsStep(createProps());
 
     expect(screen.getByTestId("mcp-tools-addons")).not.toHaveAttribute("open");
 
@@ -145,7 +153,7 @@ describe("McpToolsStep", () => {
   });
 
   it("requires inline confirmation before a strong add-on can be saved", () => {
-    render(<McpToolsStep {...createProps()} />);
+    renderMcpToolsStep(createProps());
 
     fireEvent.click(screen.getByText(/add-ons/i));
     fireEvent.click(screen.getByLabelText(/workspace write/i));
@@ -162,7 +170,7 @@ describe("McpToolsStep", () => {
       effective_tool_count: 3,
       effective_tools: ["mcp.tools.list", "media.search", "notes.create"],
     });
-    render(<McpToolsStep {...createProps({ applyMcpTools })} />);
+    renderMcpToolsStep(createProps({ applyMcpTools }));
 
     fireEvent.click(screen.getByLabelText(/writing/i));
     fireEvent.click(screen.getByText(/add-ons/i));
@@ -189,24 +197,22 @@ describe("McpToolsStep", () => {
       effective_tool_count: 1,
       effective_tools: ["notes.create"],
     });
-    render(
-      <McpToolsStep
-        {...createProps({
-          applyMcpTools,
-          initialStepData: {
-            acknowledged: true,
-            validation_state: "not_run",
-            profile_id: 11,
-            assignment_id: 12,
-            selected_pack_ids: ["writing"],
-            selected_addon_ids: ["workspace_write"],
-            confirmed_addon_ids: ["workspace_write"],
-            effective_tool_count: 1,
-            effective_tools: ["notes.create"],
-            disabled_addons: [],
-          },
-        })}
-      />,
+    renderMcpToolsStep(
+      createProps({
+        applyMcpTools,
+        initialStepData: {
+          acknowledged: true,
+          validation_state: "not_run",
+          profile_id: 11,
+          assignment_id: 12,
+          selected_pack_ids: ["writing"],
+          selected_addon_ids: ["workspace_write"],
+          confirmed_addon_ids: ["workspace_write"],
+          effective_tool_count: 1,
+          effective_tools: ["notes.create"],
+          disabled_addons: [],
+        },
+      }),
     );
 
     expect(screen.getByLabelText(/research/i)).not.toBeChecked();
@@ -250,7 +256,7 @@ describe("McpToolsStep", () => {
       .fn()
       .mockResolvedValueOnce(conflict)
       .mockResolvedValue(applied);
-    render(<McpToolsStep {...createProps({ applyMcpTools })} />);
+    renderMcpToolsStep(createProps({ applyMcpTools }));
 
     fireEvent.click(screen.getByRole("button", { name: /save packs/i }));
     expect(
@@ -290,7 +296,7 @@ describe("McpToolsStep", () => {
 
   it("runs sample tool only after save", async () => {
     const validateMcpTools = vi.fn().mockResolvedValue(validated);
-    render(<McpToolsStep {...createProps({ validateMcpTools })} />);
+    renderMcpToolsStep(createProps({ validateMcpTools }));
 
     expect(screen.getByRole("button", { name: /run sample tool/i })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: /save packs/i }));
@@ -307,7 +313,7 @@ describe("McpToolsStep", () => {
 
   it("allows continuing after save even when validation has not run", async () => {
     const onContinue = vi.fn();
-    render(<McpToolsStep {...createProps({ onContinue })} />);
+    renderMcpToolsStep(createProps({ onContinue }));
 
     fireEvent.click(screen.getByRole("button", { name: /save packs/i }));
     await waitFor(() => {
@@ -319,7 +325,7 @@ describe("McpToolsStep", () => {
   });
 
   it("requires saving again after a saved selection changes", async () => {
-    render(<McpToolsStep {...createProps()} />);
+    renderMcpToolsStep(createProps());
 
     fireEvent.click(screen.getByRole("button", { name: /save packs/i }));
     await waitFor(() => {
@@ -335,7 +341,7 @@ describe("McpToolsStep", () => {
 
   it("calls the provided skip handler", () => {
     const onSkip = vi.fn();
-    render(<McpToolsStep {...createProps({ onSkip })} />);
+    renderMcpToolsStep(createProps({ onSkip }));
 
     fireEvent.click(screen.getByRole("button", { name: /skip mcp tools/i }));
 
@@ -343,7 +349,7 @@ describe("McpToolsStep", () => {
   });
 
   it("summarizes saved packs, tools, disabled add-ons, external status, and hub link", async () => {
-    render(<McpToolsStep {...createProps()} />);
+    renderMcpToolsStep(createProps());
 
     fireEvent.click(screen.getByRole("button", { name: /save packs/i }));
 

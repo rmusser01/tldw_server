@@ -1,8 +1,10 @@
 import pytest
 
 from tldw_Server_API.app.core.Setup.first_run_mcp_tools import (
+    CATALOG_VERSION,
     CONFIRMATION_VERSION,
     build_mcp_tools_catalog,
+    compute_first_run_policy_hash,
     generate_first_run_policy,
 )
 
@@ -161,6 +163,39 @@ def test_default_policy_does_not_enable_broad_capabilities():
     assert "process.execute" not in policy["allowed_tools"]
 
 
+def test_generated_policy_includes_baseline_when_no_packs_selected():
+    policy = generate_first_run_policy(
+        selected_pack_ids=[],
+        selected_addon_ids=[],
+        confirmed_addon_ids=[],
+        confirmation_version=None,
+        setup_instance_id="first_run:test",
+        tool_entries=[],
+    )
+
+    assert policy["allowed_tools"] == ["mcp.tools.list"]
+
+
+def test_generated_policy_includes_baseline_when_pack_tools_are_filtered_out():
+    policy = generate_first_run_policy(
+        selected_pack_ids=["writing"],
+        selected_addon_ids=[],
+        confirmed_addon_ids=[],
+        confirmation_version=None,
+        setup_instance_id="first_run:test",
+        tool_entries=[
+            {
+                "tool_name": "notes.search",
+                "module": "notes",
+                "risk_class": "high",
+                "mutates_state": True,
+            }
+        ],
+    )
+
+    assert policy["allowed_tools"] == ["mcp.tools.list"]
+
+
 def test_generated_policy_hash_changes_when_generated_capabilities_change():
     base_policy = generate_first_run_policy(
         selected_pack_ids=["writing"],
@@ -203,6 +238,33 @@ def test_generated_policy_hash_changes_when_generated_capabilities_change():
         base_policy["first_run_mcp_tools"]["generated_policy_hash"]
         != capability_policy["first_run_mcp_tools"]["generated_policy_hash"]
     )
+
+
+def test_compute_policy_hash_uses_stored_catalog_version():
+    policy = generate_first_run_policy(
+        selected_pack_ids=["research"],
+        selected_addon_ids=[],
+        confirmed_addon_ids=[],
+        confirmation_version=None,
+        setup_instance_id="first_run:test",
+        tool_entries=[],
+    )
+    old_policy = {
+        **policy,
+        "first_run_mcp_tools": {
+            **policy["first_run_mcp_tools"],
+            "catalog_version": "2026-01-01.v1",
+        },
+    }
+    current_policy = {
+        **policy,
+        "first_run_mcp_tools": {
+            **policy["first_run_mcp_tools"],
+            "catalog_version": CATALOG_VERSION,
+        },
+    }
+
+    assert compute_first_run_policy_hash(old_policy) != compute_first_run_policy_hash(current_policy)
 
 
 @pytest.mark.parametrize(

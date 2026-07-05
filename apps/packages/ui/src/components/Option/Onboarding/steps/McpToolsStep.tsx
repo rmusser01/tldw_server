@@ -1,5 +1,6 @@
 import React from "react";
 import { Boxes, ExternalLink } from "lucide-react";
+import { Link } from "react-router-dom";
 
 import type {
   McpToolsApplyRequest,
@@ -407,13 +408,13 @@ export function McpToolsStep({
             >
               Replace generated profile
             </button>
-            <a
-              href={hubHref(conflict.conflict?.profile_id ?? conflict.profile_id)}
+            <Link
+              to={hubHref(conflict.conflict?.profile_id ?? conflict.profile_id)}
               className="inline-flex items-center gap-1 rounded-md border border-border bg-surface px-3 py-1.5 text-sm font-medium text-text hover:bg-surface2"
             >
               Open MCP Hub
               <ExternalLink className="size-3.5" aria-hidden="true" />
-            </a>
+            </Link>
           </div>
         </div>
       ) : null}
@@ -456,13 +457,13 @@ export function McpToolsStep({
               External status: {externalStatusLabel}
             </div>
           ) : null}
-          <a
-            href={hubHref(profileId)}
+          <Link
+            to={hubHref(profileId)}
             className="mt-3 inline-flex items-center gap-1 text-sm font-medium text-primary"
           >
             Open MCP Hub
             <ExternalLink className="size-3.5" aria-hidden="true" />
-          </a>
+          </Link>
         </div>
       ) : null}
 
