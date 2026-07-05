@@ -2438,6 +2438,132 @@ describe("WorkspaceHeader workspace browser modal", () => {
     expect(mockNavigate).toHaveBeenCalledWith("/agent-tasks?workspace=workspace-alpha")
   })
 
+  it("stores workspace task context metadata on created agent tasks", async () => {
+    fetchMockState.fetch.mockImplementation(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input)
+        const body =
+          typeof init?.body === "string" ? JSON.parse(init.body) : undefined
+
+        if (
+          url ===
+          "http://127.0.0.1:8000/api/v1/agent-orchestration/workspaces/canonical-bridge"
+        ) {
+          return {
+            ok: true,
+            json: async () => ({
+              id: 33,
+              canonical_workspace: {
+                acp_workspace_id: 33
+              }
+            })
+          } as Response
+        }
+
+        if (
+          url ===
+          "http://127.0.0.1:8000/api/v1/agent-orchestration/projects"
+        ) {
+          expect(body).toMatchObject({
+            metadata: {
+              created_from: "research_workspace",
+              canonical_workspace_id: "workspace-alpha",
+              acp_workspace_id: 33,
+              research_workspace_task_context: {
+                entrypoint: "chat",
+                selectedSourceIds: ["source-1"]
+              }
+            }
+          })
+          return {
+            ok: true,
+            json: async () => ({
+              id: 44,
+              workspace_id: 33
+            })
+          } as Response
+        }
+
+        if (
+          url ===
+          "http://127.0.0.1:8000/api/v1/agent-orchestration/projects/44/tasks"
+        ) {
+          expect(body).toMatchObject({
+            title: "Investigate chat thread",
+            description: "Use selected sources.",
+            metadata: {
+              research_workspace_task_context: {
+                entrypoint: "chat",
+                selectedSourceIds: ["source-1"]
+              }
+            }
+          })
+          return {
+            ok: true,
+            json: async () => ({
+              id: 55
+            })
+          } as Response
+        }
+
+        throw new Error(`unexpected fetch: ${url}`)
+      }
+    )
+
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+        agentTaskHandoffOpenSignal={1}
+        agentTaskPrefill={{
+          title: "Investigate chat thread",
+          description: "Use selected sources.",
+          metadata: {
+            entrypoint: "chat",
+            selectedSourceIds: ["source-1"]
+          }
+        }}
+      />
+    )
+
+    const modal = await screen.findByRole("dialog", {
+      name: "Create agent task"
+    })
+    fireEvent.change(within(modal).getByLabelText("Execution root path"), {
+      target: { value: "/Users/macbook-dev/src/alpha" }
+    })
+    fireEvent.click(within(modal).getByRole("button", { name: "Create task" }))
+
+    await waitFor(() => {
+      expect(fetchMockState.fetch).toHaveBeenCalledTimes(3)
+      expect(within(modal).getByText("Agent task created")).toBeInTheDocument()
+    })
+  })
+
+  it("explains agent tasks are governed by ACP sandbox and approvals", async () => {
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+        agentTaskHandoffOpenSignal={1}
+      />
+    )
+
+    const modal = await screen.findByRole("dialog", {
+      name: "Create agent task"
+    })
+    expect(
+      within(modal).getByText(/ACP capabilities, sandbox checks, and approvals/i)
+    ).toBeInTheDocument()
+    expect(
+      within(modal).getByText(/observable events, artifacts, diagnostics, and results/i)
+    ).toBeInTheDocument()
+  })
+
   it("shows recent ACP run history for the current workspace and opens diagnostics", async () => {
     fetchMockState.fetch.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input)
