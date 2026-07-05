@@ -15,6 +15,7 @@ from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.media_db.api import managed_media_database
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
+from tldw_Server_API.app.core.Jobs.worker_utils import coerce_int, jobs_manager_from_env
 from tldw_Server_API.app.core.Research_Workspace.output_jobs import (
     RESEARCH_WORKSPACE_OUTPUT_JOB_DOMAIN,
     RESEARCH_WORKSPACE_OUTPUT_JOB_TYPE,
@@ -31,33 +32,18 @@ class _ProgressState:
     message: str | None = None
 
 
-def _jobs_manager() -> JobManager:
-    db_url = (os.getenv("JOBS_DB_URL") or "").strip()
-    if not db_url:
-        return JobManager()
-    backend = "postgres" if db_url.startswith("postgres") else None
-    return JobManager(backend=backend, db_url=db_url)
-
-
-def _coerce_int(value: Any, default: int) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return int(default)
-
-
 def _build_worker_config(*, worker_id: str, queue: str) -> WorkerConfig:
     return WorkerConfig(
         domain=RESEARCH_WORKSPACE_OUTPUT_JOB_DOMAIN,
         queue=queue,
         worker_id=worker_id,
-        lease_seconds=_coerce_int(os.getenv("RESEARCH_WORKSPACE_OUTPUT_JOBS_LEASE_SECONDS"), 180),
-        renew_jitter_seconds=_coerce_int(os.getenv("RESEARCH_WORKSPACE_OUTPUT_JOBS_RENEW_JITTER_SECONDS"), 5),
-        renew_threshold_seconds=_coerce_int(os.getenv("RESEARCH_WORKSPACE_OUTPUT_JOBS_RENEW_THRESHOLD_SECONDS"), 20),
-        backoff_base_seconds=_coerce_int(os.getenv("RESEARCH_WORKSPACE_OUTPUT_JOBS_BACKOFF_BASE_SECONDS"), 2),
-        backoff_max_seconds=_coerce_int(os.getenv("RESEARCH_WORKSPACE_OUTPUT_JOBS_BACKOFF_MAX_SECONDS"), 30),
+        lease_seconds=coerce_int(os.getenv("RESEARCH_WORKSPACE_OUTPUT_JOBS_LEASE_SECONDS"), 180),
+        renew_jitter_seconds=coerce_int(os.getenv("RESEARCH_WORKSPACE_OUTPUT_JOBS_RENEW_JITTER_SECONDS"), 5),
+        renew_threshold_seconds=coerce_int(os.getenv("RESEARCH_WORKSPACE_OUTPUT_JOBS_RENEW_THRESHOLD_SECONDS"), 20),
+        backoff_base_seconds=coerce_int(os.getenv("RESEARCH_WORKSPACE_OUTPUT_JOBS_BACKOFF_BASE_SECONDS"), 2),
+        backoff_max_seconds=coerce_int(os.getenv("RESEARCH_WORKSPACE_OUTPUT_JOBS_BACKOFF_MAX_SECONDS"), 30),
         retry_on_exception=True,
-        retry_backoff_seconds=_coerce_int(os.getenv("RESEARCH_WORKSPACE_OUTPUT_JOBS_RETRY_BACKOFF_SECONDS"), 10),
+        retry_backoff_seconds=coerce_int(os.getenv("RESEARCH_WORKSPACE_OUTPUT_JOBS_RETRY_BACKOFF_SECONDS"), 10),
     )
 
 
@@ -120,7 +106,7 @@ def close_research_workspace_output_notes_db(db: Any) -> None:
 
 async def run_research_workspace_output_jobs_worker(stop_event: asyncio.Event | None = None) -> None:
     worker_id = (os.getenv("RESEARCH_WORKSPACE_OUTPUT_JOBS_WORKER_ID") or "research-workspace-output-worker").strip()
-    jm = _jobs_manager()
+    jm = jobs_manager_from_env()
     sdk = WorkerSDK(
         jm,
         _build_worker_config(

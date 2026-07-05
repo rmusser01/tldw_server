@@ -141,6 +141,7 @@ def test_collect_startup_worker_specs_accepts_real_provider_graph() -> None:
         "quality_eval_task",
         "reading_digest_jobs_task",
         "reading_digest_sched_task",
+        "research_workspace_output_jobs_task",
         "recipe_run_jobs_task",
         "reminder_jobs_task",
         "reminders_sched_task",

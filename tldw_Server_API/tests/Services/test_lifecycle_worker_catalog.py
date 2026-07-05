@@ -113,6 +113,7 @@ TASK5_JOB_POLLER_SPEC_NAMES = {
     "audio_jobs_task",
     "audiobook_jobs_task",
     "presentation_render_jobs_task",
+    "research_workspace_output_jobs_task",
     "media_ingest_jobs_task",
     "media_ingest_heavy_jobs_task",
     "reading_digest_jobs_task",
