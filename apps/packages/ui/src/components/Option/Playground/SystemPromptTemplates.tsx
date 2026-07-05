@@ -355,17 +355,31 @@ type Props = {
   open: boolean;
   onClose: () => void;
   onSelect: (template: PromptTemplate) => void;
+  systemPrompt?: string;
+  onSystemPromptChange?: (prompt: string) => void;
 };
 
 export const SystemPromptTemplatesModal: React.FC<Props> = ({
   open,
   onClose,
   onSelect,
+  systemPrompt,
+  onSystemPromptChange,
 }) => {
   const { t } = useTranslation(["playground", "common"]);
   const [searchQuery, setSearchQuery] = React.useState("");
   const [activeCategory, setActiveCategory] = React.useState<string>("all");
   const [copiedId, setCopiedId] = React.useState<string | null>(null);
+  const [localSystemPrompt, setLocalSystemPrompt] = React.useState(
+    systemPrompt || "",
+  );
+  const committedSystemPromptRef = React.useRef(systemPrompt || "");
+
+  React.useEffect(() => {
+    const nextSystemPrompt = systemPrompt || "";
+    committedSystemPromptRef.current = nextSystemPrompt;
+    setLocalSystemPrompt(nextSystemPrompt);
+  }, [systemPrompt]);
 
   const filteredTemplates = React.useMemo(() => {
     let templates = PROMPT_TEMPLATES;
@@ -398,6 +412,19 @@ export const SystemPromptTemplatesModal: React.FC<Props> = ({
     }
   };
 
+  const commitSystemPrompt = React.useCallback(() => {
+    if (!onSystemPromptChange) return;
+    if (localSystemPrompt !== committedSystemPromptRef.current) {
+      committedSystemPromptRef.current = localSystemPrompt;
+      onSystemPromptChange(localSystemPrompt);
+    }
+  }, [localSystemPrompt, onSystemPromptChange]);
+
+  const handleClose = React.useCallback(() => {
+    commitSystemPrompt();
+    onClose();
+  }, [commitSystemPrompt, onClose]);
+
   const handleSelect = (template: PromptTemplate) => {
     onSelect(template);
     onClose();
@@ -425,13 +452,41 @@ export const SystemPromptTemplatesModal: React.FC<Props> = ({
         </div>
       }
       open={open}
-      onCancel={onClose}
+      onCancel={handleClose}
       footer={null}
       width={700}
       className="prompt-templates-modal"
     >
       <div className="space-y-4">
+        {onSystemPromptChange ? (
+          <label className="block space-y-1.5">
+            <span className="text-xs font-medium text-text-muted">
+              {t("playground:templates.currentPrompt", "Current system prompt")}
+            </span>
+            <Input.TextArea
+              aria-label={
+                t(
+                  "playground:templates.currentPrompt",
+                  "Current system prompt",
+                ) as string
+              }
+              value={localSystemPrompt}
+              onChange={(e) => setLocalSystemPrompt(e.target.value)}
+              onBlur={commitSystemPrompt}
+              rows={4}
+              placeholder={t(
+                "playground:templates.currentPromptPlaceholder",
+                "Write or edit the system prompt for this chat...",
+              )}
+            />
+          </label>
+        ) : null}
+
         <Input
+          aria-label={t(
+            "playground:templates.search",
+            "Search system prompts...",
+          )}
           placeholder={t(
             "playground:templates.search",
             "Search system prompts...",
@@ -525,11 +580,15 @@ export const SystemPromptTemplatesModal: React.FC<Props> = ({
 
 type TemplatesButtonProps = {
   onSelect: (template: PromptTemplate) => void;
+  systemPrompt?: string;
+  onSystemPromptChange?: (prompt: string) => void;
   className?: string;
 };
 
 export const SystemPromptTemplatesButton: React.FC<TemplatesButtonProps> = ({
   onSelect,
+  systemPrompt,
+  onSystemPromptChange,
   className,
 }) => {
   const { t } = useTranslation(["playground"]);
@@ -553,6 +612,8 @@ export const SystemPromptTemplatesButton: React.FC<TemplatesButtonProps> = ({
         open={open}
         onClose={() => setOpen(false)}
         onSelect={onSelect}
+        systemPrompt={systemPrompt}
+        onSystemPromptChange={onSystemPromptChange}
       />
     </>
   );
