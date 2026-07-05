@@ -1,6 +1,6 @@
 ## WP3: Connect Discovery Loops
 
-**Backlog**: TASK-12163
+**Backlog**: TASK-12894
 **Branch**: `codex/research-workspace-notebooklm-wp3`
 **Worktree**: `.worktrees/research-workspace-notebooklm-wp3`
 
@@ -37,7 +37,7 @@ The WP3 implementation should strengthen these existing paths instead of adding 
 
 - Thread existing `researchWorkspaceCapabilities` from `ResearchWorkspace` to `SourcesPane`, then to `AddSourceModal`, and only pass the existing `source_browse` capability into the Search Server tab.
 - Use `getCapabilityCopy()` for a small inline warning/block notice in Search Server. Do not add a new backend capability id.
-- Treat `source_browse` as the available workspace source-readiness signal. The current backend capability model does not expose a separate web-search-provider readiness bit; provider/search failures remain surfaced through the Search Server error path. If a separate web-search capability is found while implementing, use it and add a matching test; otherwise record the narrower signal in TASK-12163.
+- Treat `source_browse` as the available workspace source-readiness signal. The current backend capability model does not expose a separate web-search-provider readiness bit; provider/search failures remain surfaced through the Search Server error path. If a separate web-search capability is found while implementing, use it and add a matching test; otherwise record the narrower signal in TASK-12894.
 - When selected results are imported, preserve row-level state after the import attempt:
   - imported rows show a concise success status, media id if available, and copy that they are queued as workspace sources.
   - failed rows show a concise failure status and reason so the user can retry or import fewer results.
@@ -161,7 +161,7 @@ The WP3 implementation should strengthen these existing paths instead of adding 
 
 - Focused frontend tests pass.
 - Whitespace check passes.
-- Backlog TASK-12163 records implementation summary and verification.
+- Backlog TASK-12894 records implementation summary and verification.
 - Commit contains the Backlog task, plan, implementation, and tests.
 
 **Status**: Complete

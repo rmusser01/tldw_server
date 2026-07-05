@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Verify TASK-12007 Resource Governance review findings against current code and fix every validated issue with focused regression tests.
+**Goal:** Verify TASK-12794 Resource Governance review findings against current code and fix every validated issue with focused regression tests.
 
 **Architecture:** Keep the existing Resource_Governance public API intact while tightening backend correctness. Prefer small helpers inside the existing module over a large redesign; only split behavior where it reduces risk for Redis accounting, daily caps, route audit, or request identity.
 
@@ -35,9 +35,9 @@
 **Status**: Complete
 
 ## Stage 5: Cleanup, Verification, and Backlog Finalization
-**Goal**: Remove validated dead/test-only artifacts where safe, run targeted verification, run Bandit on touched backend code, and record results in TASK-12007.
+**Goal**: Remove validated dead/test-only artifacts where safe, run targeted verification, run Bandit on touched backend code, and record results in TASK-12794.
 **Success Criteria**: Targeted tests and security scan pass or any environmental blockers are documented.
-**Tests**: Targeted pytest selection plus `python -m bandit -r <touched_paths> -f json -o /tmp/bandit_resource_governance_12007.json`.
+**Tests**: Targeted pytest selection plus `python -m bandit -r <touched_paths> -f json -o /tmp/bandit_resource_governance_12794.json`.
 **Status**: Complete
 
 ## Stage 6: PR Review Comment Follow-up
