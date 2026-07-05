@@ -108,10 +108,10 @@ Optional add-ons (apply AFTER your base profile is healthy):
 ## Current Status
 
 Current release line:
-- `0.1.36` Beta status. Expect rough edges and please report issues.
+- `0.1.37` Beta status. Expect rough edges and please report issues.
 - Primary client surfaces are the Next.js WebUI, Admin UI, and browser extension.
 - Package metadata is prepared under the canonical PyPI name `tldw-server`; use a repository checkout until publishing is complete.
-- The `dev` branch carries work beyond `0.1.36`, including post-`0.1.36` branch work, and is prepared for the `0.1.36` corrective release merge to `main`; see [CHANGELOG.md](CHANGELOG.md) for the PR rollup and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for the published release entry point.
+- The `dev` branch carries work beyond `0.1.37`, including post-`0.1.37` branch work, and `main` is prepared for the `0.1.37` release; see [CHANGELOG.md](CHANGELOG.md) for the PR rollup and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for the published release entry point.
 
 <details>
 <summary>Current focus and migration notes from the old Gradio version</summary>
@@ -146,6 +146,21 @@ Current release line:
 ## What's New (in the last few releases)
 
 <details>
+<summary>0.1.37 release</summary>
+
+Included in the `0.1.37` release:
+- Research Workspace media outputs landed with media capabilities, output job APIs, worker startup contracts, persisted artifacts, infographic generation, video overview generation, frontend client contracts, and rendered output surfaces.
+- Research output handling was hardened for owner isolation, status lookup failures, worker errors, artifact persistence, context excerpts, PNG byte validation, and encoded/embedded/delimited metadata path rejection.
+- Package, FastAPI, README, and MkDocs metadata were bumped to `0.1.37`.
+
+Still active on `dev`:
+- Treat [CHANGELOG.md](CHANGELOG.md) as the authoritative branch-level history for what has entered the release train.
+
+See [CHANGELOG.md](CHANGELOG.md) for the full running history and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for published release notes.
+
+</details>
+
+<details>
 <summary>0.1.36 corrective release</summary>
 
 Included in the `0.1.36` corrective release:
@@ -154,7 +169,7 @@ Included in the `0.1.36` corrective release:
 - Package, FastAPI, README, and MkDocs metadata were bumped to `0.1.36` for a clean patch release after `0.1.35`.
 
 Still active on `dev`:
-- Final CI for the prepared `0.1.36` corrective release metadata must clear before this release is merged toward `main`.
+- `0.1.36` is superseded by the `0.1.37` release metadata above.
 - Treat [CHANGELOG.md](CHANGELOG.md) as the authoritative branch-level history for what has entered the release train.
 
 See [CHANGELOG.md](CHANGELOG.md) for the full running history and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for published release notes.

@@ -17,6 +17,34 @@ and this project adheres to Some kind of Versioning
 ### Removed
 
 
+## [0.1.37] - 2026-07-05
+
+> Rollup coverage: this entry covers the research workspace media-output work
+> merged to `main` after the `0.1.36` corrective release, including PR #2657
+> and the follow-up `dev` merge in PR #2656.
+
+### Added
+
+- **Research Workspace Media Outputs** — Added research workspace media
+  capabilities, output job APIs, background worker startup contracts,
+  persisted output artifacts, infographic generation, video overview
+  generation, frontend client contracts, and rendered media-output surfaces.
+
+### Changed
+
+- **Release Metadata** — Bumped package, FastAPI, README, and MkDocs metadata
+  to `0.1.37` for the next patch release from `main`.
+
+### Fixed
+
+- **Research Output Hardening** — Hardened research output owner isolation,
+  status lookup failures, worker error handling, artifact persistence, context
+  excerpts, PNG byte validation, and encoded/embedded/delimited output metadata
+  path rejection.
+
+### Removed
+
+
 ## [0.1.36] - 2026-07-05
 
 > Corrective release: this patch supersedes `0.1.35` after the release merge

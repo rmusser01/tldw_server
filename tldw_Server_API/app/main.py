@@ -1725,7 +1725,7 @@ _swagger_ui_params = {
 
 app = FastAPI(
     title="tldw API",
-    version="0.1.36",
+    version="0.1.37",
     description=APP_DESCRIPTION,
     terms_of_service="https://github.com/cpacker/tldw_server",
     contact={
