@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { Button, Card, Checkbox, Empty, Modal, Space, Tag, Typography } from "antd"
 import { EmptyState } from "@/components/ui/feedback"
 import { ProductStateAlert as Alert } from "@/components/Option/productStatePrimitives"
@@ -15,6 +15,7 @@ import {
   upsertProfileCredentialBinding,
   updatePermissionProfile,
   type McpHubCredentialBinding,
+  type McpHubDrillTarget,
   type McpHubExternalServer,
   type McpHubPathScopeObject,
   type McpHubPermissionPolicyDocument,
@@ -34,9 +35,18 @@ import {
 } from "./policyHelpers"
 import { PolicyDocumentEditor } from "./PolicyDocumentEditor"
 
-export const PermissionProfilesTab = () => {
+type PermissionProfilesTabProps = {
+  drillTarget?: McpHubDrillTarget | null
+  onDrillHandled?: (requestId: number) => void
+}
+
+export const PermissionProfilesTab = ({
+  drillTarget = null,
+  onDrillHandled
+}: PermissionProfilesTabProps = {}) => {
   const [profiles, setProfiles] = useState<McpHubPermissionProfile[]>([])
   const [loading, setLoading] = useState(false)
+  const [profilesLoaded, setProfilesLoaded] = useState(false)
   const [saving, setSaving] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
   const [editingId, setEditingId] = useState<number | null>(null)
@@ -56,6 +66,7 @@ export const PermissionProfilesTab = () => {
   const [profileBindings, setProfileBindings] = useState<McpHubCredentialBinding[]>([])
   const [bindingsLoading, setBindingsLoading] = useState(false)
   const [bindingServerId, setBindingServerId] = useState<string | null>(null)
+  const handledDrillRequestRef = useRef<number | null>(null)
   const managedExternalServers = useMemo(
     () => getManagedExternalServers(externalServers),
     [externalServers]
@@ -74,6 +85,7 @@ export const PermissionProfilesTab = () => {
 
   const loadProfiles = async () => {
     setLoading(true)
+    setProfilesLoaded(false)
     setErrorMessage(null)
     try {
       const rows = await listPermissionProfiles()
@@ -84,6 +96,7 @@ export const PermissionProfilesTab = () => {
       setErrorMessage(`Failed to load permission profiles: ${msg}`)
     } finally {
       setLoading(false)
+      setProfilesLoaded(true)
     }
   }
 
@@ -165,6 +178,29 @@ export const PermissionProfilesTab = () => {
     setProfileBindings([])
     void loadProfileBindings(profile.id)
   }
+
+  useEffect(() => {
+    if (
+      !drillTarget ||
+      drillTarget.tab !== "profiles" ||
+      drillTarget.object_kind !== "permission_profile"
+    ) {
+      return
+    }
+    if (
+      handledDrillRequestRef.current === drillTarget.request_id ||
+      loading ||
+      !profilesLoaded
+    ) {
+      return
+    }
+    const profile = profiles.find((row) => String(row.id) === String(drillTarget.object_id))
+    if (profile) {
+      handledDrillRequestRef.current = drillTarget.request_id
+      openForEdit(profile)
+      onDrillHandled?.(drillTarget.request_id)
+    }
+  }, [drillTarget, loading, onDrillHandled, profiles, profilesLoaded])
 
   const handleSave = async () => {
     if (!canSave) return

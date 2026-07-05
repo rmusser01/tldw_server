@@ -64,7 +64,18 @@ vi.mock(
 )
 
 vi.mock("../PermissionProfilesTab", () => ({
-  PermissionProfilesTab: () => <div>profiles tab</div>
+  PermissionProfilesTab: ({
+    drillTarget
+  }: {
+    drillTarget?: { tab?: string; object_kind?: string; object_id?: string; action?: string } | null
+  }) => (
+    <div>
+      profiles tab
+      {drillTarget ? (
+        <span>{`profile drill ${drillTarget.tab} ${drillTarget.object_kind} ${drillTarget.object_id} ${drillTarget.action}`}</span>
+      ) : null}
+    </div>
+  )
 }))
 vi.mock("../PolicyAssignmentsTab", () => ({
   PolicyAssignmentsTab: () => <div>assignments tab</div>
@@ -186,6 +197,9 @@ describe("McpHubPage first-run MCP tools status", () => {
     await user.click(screen.getByRole("button", { name: "Review profile" }))
 
     expect(screen.getByText("profiles tab")).toBeInTheDocument()
+    expect(
+      screen.getByText("profile drill profiles permission_profile 7 edit")
+    ).toBeInTheDocument()
     expect(screen.getByTestId("location-probe")).toHaveTextContent(
       "/mcp-hub?source=first-run&workflow=access&view=profiles&profile_id=7"
     )

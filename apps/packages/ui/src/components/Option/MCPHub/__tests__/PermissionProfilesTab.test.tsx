@@ -223,6 +223,26 @@ describe("PermissionProfilesTab", () => {
     expect(mocks.upsertProfileCredentialBinding).toHaveBeenCalledWith(5, "search-api", "token_write")
   })
 
+  it("opens a profile edit form from a drill target", async () => {
+    const onDrillHandled = vi.fn()
+    render(
+      <PermissionProfilesTab
+        drillTarget={{
+          tab: "profiles",
+          object_kind: "permission_profile",
+          object_id: "5",
+          action: "edit",
+          request_id: 17
+        }}
+        onDrillHandled={onDrillHandled}
+      />
+    )
+
+    expect(await screen.findByDisplayValue("Process Exec")).toBeTruthy()
+    expect(mocks.listProfileCredentialBindings).toHaveBeenCalledWith(5)
+    expect(onDrillHandled).toHaveBeenCalledWith(17)
+  })
+
   it("deletes a profile when the user confirms the modal", async () => {
     mocks.deletePermissionProfile.mockResolvedValue(undefined)
     const confirmSpy = vi.spyOn(Modal, "confirm").mockImplementation((config: any) => {

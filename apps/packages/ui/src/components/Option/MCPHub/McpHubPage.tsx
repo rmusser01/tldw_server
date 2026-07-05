@@ -249,6 +249,16 @@ export const McpHubPage = () => {
   }
 
   const handleReviewFirstRunProfile = () => {
+    if (mcpToolsRecoveryStatus?.profile_id != null) {
+      requestIdRef.current += 1
+      setDrillTarget({
+        tab: "profiles",
+        object_kind: "permission_profile",
+        object_id: String(mcpToolsRecoveryStatus.profile_id),
+        action: "edit",
+        request_id: requestIdRef.current
+      })
+    }
     const nextParams = new URLSearchParams(searchParams)
     nextParams.set("workflow", "access")
     nextParams.set("view", "profiles")
@@ -288,7 +298,12 @@ export const McpHubPage = () => {
         onOpenToolCatalog={handleOpenToolCatalog}
       />
     ),
-    profiles: <PermissionProfilesTab />,
+    profiles: (
+      <PermissionProfilesTab
+        drillTarget={drillTarget}
+        onDrillHandled={handleDrillHandled}
+      />
+    ),
     assignments: (
       <PolicyAssignmentsTab
         drillTarget={drillTarget}
