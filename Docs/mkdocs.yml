@@ -121,7 +121,7 @@ nav:
           - BYOK User Guide: User_Guides/Server/BYOK_User_Guide.md
           - Usage Module: User_Guides/Server/Usage_Module.md
           - Long-Term Admin Guide: Deployment/Long_Term_Admin_Guide.md
-          - Metrics Cheatsheet: Monitoring/Metrics_Cheatsheet.md
+          - Metrics Cheatsheet: Deployment/Monitoring/Metrics_Cheatsheet.md
       - Practical API Usage:
           - API Documentation Index: API-related/API_README.md
           - API Tag Index: API-related/API_Tags_Index.md
@@ -171,6 +171,6 @@ nav:
           - Setup UI Developer Guide: Code_Documentation/Setup_UI_Developer_Guide.md
           - Tutorial System Developer Guide: Code_Documentation/Tutorial_System_Developer_Guide.md
           - STT Testing Documentation: Code_Documentation/STT_TESTING_DOCUMENTATION.md
-          - Environment Variables: Env_Vars.md
+          - Environment Variables: Operations/Env_Vars.md
   - Feature Status: Overview/Feature_Status.md
   - Release Notes: RELEASE_NOTES.md
