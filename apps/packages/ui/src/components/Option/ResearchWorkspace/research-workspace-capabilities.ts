@@ -6,6 +6,9 @@ export const RESEARCH_WORKSPACE_CAPABILITY_IDS = [
   "artifact_text_generation",
   "slides_generation",
   "audio_summary",
+  "video_overview_generation",
+  "image_generation",
+  "infographic_generation",
   "export_download",
   "sync_share"
 ] as const
@@ -114,6 +117,8 @@ export function getArtifactCapabilityId(
 ): ResearchWorkspaceCapabilityId {
   if (type === "slides") return "slides_generation"
   if (type === "audio_overview") return "audio_summary"
+  if (type === "video_overview") return "video_overview_generation"
+  if (type === "infographic") return "infographic_generation"
   return "artifact_text_generation"
 }
 

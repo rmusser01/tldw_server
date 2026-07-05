@@ -156,6 +156,8 @@ export interface WorkspaceCollection {
 export type ArtifactType =
   | "summary"
   | "audio_overview"
+  | "video_overview"
+  | "infographic"
   | "mindmap"
   | "report"
   | "compare_sources"
@@ -424,6 +426,20 @@ export const OUTPUT_TYPES: OutputTypeConfig[] = [
     label: "Audio Summary",
     icon: "Headphones",
     description: "Generate a spoken summary of your sources",
+    requiresSelectedSources: true
+  },
+  {
+    type: "video_overview",
+    label: "Video Overview",
+    icon: "Video",
+    description: "Generate a narrated slideshow video from your sources",
+    requiresSelectedSources: true
+  },
+  {
+    type: "infographic",
+    label: "Infographic",
+    icon: "Image",
+    description: "Generate an infographic image from your sources",
     requiresSelectedSources: true
   },
   {

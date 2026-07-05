@@ -99,6 +99,8 @@ describe("Research Workspace capabilities", () => {
     }
     expect(getArtifactCapabilityId("slides")).toBe("slides_generation")
     expect(getArtifactCapabilityId("audio_overview")).toBe("audio_summary")
+    expect(getArtifactCapabilityId("video_overview")).toBe("video_overview_generation")
+    expect(getArtifactCapabilityId("infographic")).toBe("infographic_generation")
   })
 
   it("returns a capability by id without applying unrelated blocks", () => {
