@@ -1,7 +1,7 @@
 ---
 id: TASK-223.2
 title: 'PR 2: MCP Hub setup polish and diagnostics'
-status: In Progress
+status: Done
 assignee: []
 created_date: 2026-05-10 06:13
 labels:
