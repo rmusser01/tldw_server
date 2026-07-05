@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 import importlib
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
+
+from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 
 
 @pytest.fixture
@@ -18,6 +21,107 @@ def _worker_module() -> Any:
 
 def _output_jobs_module() -> Any:
     return importlib.import_module("tldw_Server_API.app.core.Research_Workspace.output_jobs")
+
+
+@pytest.fixture
+def fake_workspace_db() -> object:
+    class _FakeWorkspaceDB:
+        def list_workspace_sources(self, workspace_id: str) -> list[dict[str, Any]]:
+            assert workspace_id == "ws-1"
+            return [
+                {
+                    "id": "src-1",
+                    "workspace_id": "ws-1",
+                    "media_id": 1,
+                    "title": "Source One",
+                },
+                {
+                    "id": "src-2",
+                    "workspace_id": "ws-1",
+                    "media_id": 2,
+                    "title": "Source Two",
+                },
+            ]
+
+    return _FakeWorkspaceDB()
+
+
+@pytest.fixture
+def fake_media_db() -> object:
+    class _FakeMediaDB:
+        def get_media_by_id(self, media_id: int, **kwargs: object) -> dict[str, object] | None:
+            if media_id == 1:
+                return {"id": 1, "content": "selected media content"}
+            if media_id == 2:
+                return {"id": 2, "content": "unselected media content"}
+            return None
+
+    return _FakeMediaDB()
+
+
+@pytest.fixture
+def fake_collections_db() -> object:
+    class _FakeCollectionsDB:
+        def __init__(self) -> None:
+            self.created: list[dict[str, object]] = []
+
+        def resolve_output_storage_path(self, path_value: str) -> str:
+            assert "/" not in path_value
+            return path_value
+
+        def create_output_artifact(self, **kwargs: object) -> SimpleNamespace:
+            self.created.append(kwargs)
+            return SimpleNamespace(id=123)
+
+    return _FakeCollectionsDB()
+
+
+def test_build_source_context_uses_selected_ready_media(
+    fake_workspace_db: object,
+    fake_media_db: object,
+) -> None:
+    output_jobs = _output_jobs_module()
+
+    context = output_jobs.build_research_workspace_output_source_context(
+        workspace_db=fake_workspace_db,
+        media_db=fake_media_db,
+        workspace_id="ws-1",
+        source_ids=["src-1"],
+        max_chars=10_000,
+    )
+
+    assert "# Source One" in context.text
+    assert "selected media content" in context.text
+    assert "unselected media content" not in context.text
+    assert context.source_lineage["selected_source_ids"] == ["src-1"]
+
+
+def test_persist_output_bytes_creates_durable_output_artifact(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Any,
+    fake_collections_db: Any,
+) -> None:
+    output_jobs = _output_jobs_module()
+    monkeypatch.setattr(DatabasePaths, "get_user_outputs_dir", lambda _user_id: tmp_path)
+
+    artifact = output_jobs.persist_research_workspace_output_bytes(
+        collections_db=fake_collections_db,
+        user_id=42,
+        job_id=7,
+        artifact_type="infographic",
+        title="Infographic",
+        content=b"png-bytes",
+        format_="png",
+        content_type="image/png",
+        workspace_id="ws-1",
+        workspace_artifact_id="infographic-1",
+    )
+
+    assert artifact.download_url == "/api/v1/outputs/123/download"
+    assert artifact.byte_size == len(b"png-bytes")
+    assert fake_collections_db.created[0]["type_"] == "research_workspace_infographic"
+    written_path = tmp_path / str(fake_collections_db.created[0]["storage_path"])
+    assert written_path.read_bytes() == b"png-bytes"
 
 
 @pytest.mark.asyncio

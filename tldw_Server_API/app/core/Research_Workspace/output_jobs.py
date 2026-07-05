@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
+from dataclasses import dataclass
 import json
 import os
 import re
@@ -16,6 +18,10 @@ from tldw_Server_API.app.api.v1.schemas.research_workspace_outputs import (
 )
 from tldw_Server_API.app.api.v1.schemas.workspace_schemas import WorkspaceArtifactResponse
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
+from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.DB_Management.media_db import api as media_db_api
+from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError as MediaDatabaseError
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 
 RESEARCH_WORKSPACE_OUTPUT_JOB_DOMAIN = "research_workspace"
@@ -25,6 +31,33 @@ RESEARCH_WORKSPACE_OUTPUT_JOB_TYPE = "research_workspace_output"
 
 _OUTPUT_ARTIFACT_TYPES = {"video_overview", "infographic"}
 _PUBLIC_ERROR_CODE_RE = re.compile(r"^[a-z][a-z0-9_]{0,95}$")
+_SOURCE_CONTEXT_TOTAL_CHAR_LIMIT = 18_000
+_SOURCE_CONTEXT_PER_SOURCE_CHAR_LIMIT = 6_000
+_SOURCE_CONTEXT_PREVIEW_CHAR_LIMIT = 1_000
+_SOURCE_CONTEXT_MEDIA_ERRORS = (
+    AttributeError,
+    MediaDatabaseError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+    json.JSONDecodeError,
+)
+
+
+@dataclass(frozen=True)
+class ResearchWorkspaceOutputSourceContext:
+    text: str
+    source_lineage: dict[str, Any]
+    preview_text: str
+
+
+@dataclass(frozen=True)
+class ResearchWorkspacePersistedOutput:
+    output_id: int
+    download_url: str
+    format: str
+    content_type: str
+    byte_size: int
 
 
 def _safe_public_error_code(value: str) -> str:
@@ -60,6 +93,129 @@ def research_workspace_output_jobs_queue() -> str:
 
 def normalize_research_workspace_output_payload(value: Any) -> dict[str, Any]:
     return dict(_normalize_job_mapping(value))
+
+
+def build_research_workspace_output_source_context(
+    *,
+    workspace_db: Any,
+    media_db: Any,
+    workspace_id: str,
+    source_ids: list[str],
+    max_chars: int = _SOURCE_CONTEXT_TOTAL_CHAR_LIMIT,
+) -> ResearchWorkspaceOutputSourceContext:
+    selected_source_ids = [
+        str(source_id).strip()
+        for source_id in source_ids
+        if str(source_id).strip()
+    ]
+    source_by_id = {
+        str(source.get("id") or "").strip(): source
+        for source in workspace_db.list_workspace_sources(workspace_id)
+    }
+    remaining_chars = min(max(int(max_chars), 1), _SOURCE_CONTEXT_TOTAL_CHAR_LIMIT)
+    parts: list[str] = []
+    usable_source_ids: list[str] = []
+    skipped_source_ids: list[str] = []
+    media_ids: list[int] = []
+    truncated = False
+
+    for source_id in selected_source_ids:
+        source = source_by_id.get(source_id)
+        media_id = _source_media_id(source)
+        if source is None or media_id is None or remaining_chars <= 0:
+            skipped_source_ids.append(source_id)
+            truncated = truncated or remaining_chars <= 0
+            continue
+
+        content = _media_source_text(media_db, media_id)
+        if not content:
+            skipped_source_ids.append(source_id)
+            continue
+
+        excerpt_limit = min(_SOURCE_CONTEXT_PER_SOURCE_CHAR_LIMIT, remaining_chars)
+        excerpt = content[:excerpt_limit].strip()
+        if not excerpt:
+            skipped_source_ids.append(source_id)
+            continue
+
+        title = str(source.get("title") or source_id).strip() or source_id
+        parts.append(f"# {title}\n\n{excerpt}")
+        usable_source_ids.append(source_id)
+        media_ids.append(media_id)
+        remaining_chars -= len(excerpt)
+        truncated = truncated or len(content) > len(excerpt)
+
+    text = "\n\n".join(parts).strip()
+    if not text:
+        raise ResearchWorkspaceOutputJobError("source_context_empty", retryable=False)
+
+    return ResearchWorkspaceOutputSourceContext(
+        text=text,
+        preview_text=text[:_SOURCE_CONTEXT_PREVIEW_CHAR_LIMIT].strip(),
+        source_lineage={
+            "selected_source_ids": selected_source_ids,
+            "usable_source_ids": usable_source_ids,
+            "skipped_source_ids": skipped_source_ids,
+            "media_ids": media_ids,
+            "context_char_limit": min(
+                max(int(max_chars), 1),
+                _SOURCE_CONTEXT_TOTAL_CHAR_LIMIT,
+            ),
+            "context_truncated": truncated,
+        },
+    )
+
+
+def persist_research_workspace_output_bytes(
+    *,
+    collections_db: CollectionsDatabase,
+    user_id: int,
+    job_id: int,
+    artifact_type: str,
+    title: str,
+    content: bytes,
+    format_: str,
+    content_type: str,
+    workspace_id: str,
+    workspace_artifact_id: str,
+    metadata: Mapping[str, Any] | None = None,
+) -> ResearchWorkspacePersistedOutput:
+    if not content:
+        raise ResearchWorkspaceOutputJobError("empty_output", retryable=False)
+
+    outputs_dir = DatabasePaths.get_user_outputs_dir(user_id)
+    outputs_dir.mkdir(parents=True, exist_ok=True)
+    filename = f"research-workspace-{workspace_artifact_id}-{uuid.uuid4().hex}.{format_}"
+    storage_path = collections_db.resolve_output_storage_path(filename)
+    path = outputs_dir / storage_path
+    path.write_bytes(content)
+
+    row = collections_db.create_output_artifact(
+        job_id=job_id,
+        type_=f"research_workspace_{artifact_type}",
+        title=title,
+        format_=format_,
+        storage_path=storage_path,
+        workspace_tag=f"workspace:{workspace_id}",
+        metadata_json=json.dumps(
+            {
+                "origin": "research_workspace",
+                "workspace_id": workspace_id,
+                "workspace_artifact_id": workspace_artifact_id,
+                "content_type": content_type,
+                "byte_size": len(content),
+                **dict(metadata or {}),
+            },
+            ensure_ascii=False,
+        ),
+    )
+    return ResearchWorkspacePersistedOutput(
+        output_id=int(row.id),
+        download_url=f"/api/v1/outputs/{row.id}/download",
+        format=format_,
+        content_type=content_type,
+        byte_size=len(content),
+    )
 
 
 async def process_research_workspace_output_payload(
@@ -186,6 +342,62 @@ def _validate_workspace_sources(
     existing_ids = {str(source.get("id") or "").strip() for source in workspace_db.list_workspace_sources(workspace_id)}
     if not existing_ids or any(source_id not in existing_ids for source_id in source_ids):
         raise ResearchWorkspaceOutputJobError("workspace_sources_not_found", status_code=404)
+
+
+def _source_media_id(source: Mapping[str, Any] | None) -> int | None:
+    if source is None:
+        return None
+    try:
+        return int(source.get("media_id")) if source.get("media_id") is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _media_source_text(media_db: Any, media_id: int) -> str:
+    try:
+        media = media_db_api.get_media_by_id(media_db, media_id)
+    except _SOURCE_CONTEXT_MEDIA_ERRORS:
+        media = None
+    if not media:
+        return ""
+
+    text = _content_text((media or {}).get("content"))
+    if text:
+        return text
+
+    try:
+        version = media_db_api.get_document_version(
+            media_db,
+            media_id=media_id,
+            version_number=None,
+            include_content=True,
+        )
+    except _SOURCE_CONTEXT_MEDIA_ERRORS:
+        version = None
+    if version and version.get("content"):
+        return str(version.get("content") or "").strip()
+
+    try:
+        transcript = media_db_api.get_latest_transcription(media_db, media_id)
+    except _SOURCE_CONTEXT_MEDIA_ERRORS:
+        return ""
+    return str(transcript or "").strip()
+
+
+def _content_text(value: Any) -> str:
+    if isinstance(value, Mapping):
+        return str(value.get("content") or value.get("text") or "").strip()
+    if isinstance(value, str):
+        text = value.strip()
+        if text.startswith("{") or text.startswith("["):
+            try:
+                parsed = json.loads(text)
+            except json.JSONDecodeError:
+                return text
+            if isinstance(parsed, Mapping):
+                return str(parsed.get("content") or parsed.get("text") or text).strip()
+        return text
+    return ""
 
 
 def _pending_artifact_payload(
