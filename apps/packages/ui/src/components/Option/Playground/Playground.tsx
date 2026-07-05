@@ -3534,8 +3534,9 @@ export const Playground = () => {
       {focusModeActive && (
         <button
           type="button"
-          data-testid="playground-focus-exit"
+          data-testid="playground-chat-layout-mode-trigger"
           aria-label={exitFocusLabel}
+          aria-pressed={focusModeActive}
           title={exitFocusLabel}
           onClick={() => handleChatLayoutModeChange("cockpit")}
           className="fixed right-3 top-3 z-50 inline-flex min-h-[34px] items-center gap-2 rounded-full border border-border bg-surface/95 px-3 py-1.5 text-xs font-semibold text-text shadow-lg backdrop-blur transition hover:bg-surface2 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus sm:right-4 sm:top-4"

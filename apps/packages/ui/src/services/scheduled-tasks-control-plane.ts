@@ -285,7 +285,10 @@ const withIdempotency = (
   return trimmed ? { "Idempotency-Key": trimmed } : undefined
 }
 
-const buildQuery = (params?: object): string => {
+type QueryParamValue = string | number | boolean | null | undefined
+type QueryParams<T> = { [K in keyof T]: QueryParamValue }
+
+const buildQuery = <T extends object>(params?: QueryParams<T>): string => {
   if (!params) return ""
 
   const query = new URLSearchParams()

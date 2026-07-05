@@ -163,6 +163,7 @@ export interface VisualIdentityResolveResponse {
   is_animated: boolean
   content_type: string | null
   asset_url: string | null
+  preview_url: string | null
 }
 
 export interface VisualIdentityImportZipStartResponse {

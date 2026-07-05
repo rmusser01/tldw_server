@@ -102,6 +102,7 @@ import { resolveSavedDegradedCharacterPersist } from "@/hooks/chat/characterPers
 import { resolveEffectiveAssistantState } from "@/hooks/chat/effective-assistant-state"
 import { ensurePersonaServerChat } from "@/hooks/chat/personaServerChat"
 import { resolveUseMessageSendMode } from "@/hooks/useMessage.routing"
+import { resolveVisualIdentityBindingWithCache } from "@/hooks/useVisualIdentityResolver"
 import {
   aggregateChatSubmitResults,
   chatSubmitFailed,
@@ -265,6 +266,7 @@ type VisualIdentityMessageFields = {
   visualExpressionKey?: string | null
   visualAssetId?: number | null
   visualAssetUrl?: string | null
+  visualPreviewUrl?: string | null
   visualFallbackReason?: string | null
   visualIsAnimated?: boolean | null
 }
@@ -297,6 +299,8 @@ const buildVisualIdentityMessageFields = (
       typeof resolution.asset_id === "number" ? resolution.asset_id : null,
     visualAssetUrl:
       typeof resolution.asset_url === "string" ? resolution.asset_url : null,
+    visualPreviewUrl:
+      typeof resolution.preview_url === "string" ? resolution.preview_url : null,
     visualFallbackReason:
       typeof resolution.fallback_reason === "string"
         ? resolution.fallback_reason
@@ -319,8 +323,12 @@ const buildVisualIdentityMetadataExtra = (
     metadata.visual_expression_key = fields.visualExpressionKey
   }
   if (fields.visualAssetId != null) metadata.visual_asset_id = fields.visualAssetId
+  if (fields.visualPreviewUrl) metadata.visual_preview_url = fields.visualPreviewUrl
   if (fields.visualFallbackReason) {
     metadata.visual_fallback_reason = fields.visualFallbackReason
+  }
+  if (typeof fields.visualIsAnimated === "boolean") {
+    metadata.visual_is_animated = fields.visualIsAnimated
   }
   return metadata
 }
@@ -2256,7 +2264,7 @@ export const useChatActions = ({
           ) {
             try {
               const resolvedVisualIdentity =
-                await tldwClient.resolveVisualIdentityBinding({
+                await resolveVisualIdentityBindingWithCache(tldwClient, {
                   actor_kind: "character",
                   actor_id: speakerCharacterId,
                   expression_key:
@@ -2831,10 +2839,22 @@ export const useChatActions = ({
     serverChatIdOverride?: string | null
     researchContext?: ChatResearchContext
   }): Promise<ChatSubmitResult> => {
-    if (!isRegenerate && !isContinue) {
+    const hasVisualIdentityTarget = Boolean(
+      selectedCharacter?.id != null ||
+        selectedAssistant?.kind === "character" ||
+        selectedAssistant?.kind === "persona" ||
+        inheritedAssistant?.kind === "character" ||
+        inheritedAssistant?.kind === "persona"
+    )
+    if (
+      !isRegenerate &&
+      !isContinue &&
+      hasVisualIdentityTarget &&
+      typeof setVisualIdentityManualExpressionOverride === "function"
+    ) {
       const emoteCommand = parseVisualIdentityEmoteCommand(message)
       if (emoteCommand) {
-        setVisualIdentityManualExpressionOverride?.(emoteCommand.expressionKey)
+        setVisualIdentityManualExpressionOverride(emoteCommand.expressionKey)
         return chatSubmitSkipped("Visual identity expression updated")
       }
     }

@@ -65,6 +65,77 @@ def test_service_create_pack_has_no_active_version_until_activation(
     assert pack["default_expression_key"] == "neutral"
 
 
+def test_service_owns_visual_identity_idempotency_workflow(
+    service: VisualIdentityService,
+) -> None:
+    first = service.claim_or_replay_idempotency(
+        scope="visual_identity_import",
+        resource_id="pack:1",
+        idempotency_key="import-1",
+        payload_hash="hash-a",
+    )
+
+    assert first.replay_response is None
+    assert first.claim_token is not None
+
+    with pytest.raises(BadRequestError, match="idempotency_key_in_progress"):
+        service.claim_or_replay_idempotency(
+            scope="visual_identity_import",
+            resource_id="pack:1",
+            idempotency_key="import-1",
+            payload_hash="hash-a",
+        )
+
+    service.record_idempotency_response(
+        scope="visual_identity_import",
+        resource_id="pack:1",
+        idempotency_key="import-1",
+        payload_hash="hash-a",
+        response={"draft_id": 9},
+        claim_token=first.claim_token,
+    )
+    replay = service.claim_or_replay_idempotency(
+        scope="visual_identity_import",
+        resource_id="pack:1",
+        idempotency_key="import-1",
+        payload_hash="hash-a",
+    )
+
+    assert replay.replay_response == {"draft_id": 9}
+    assert replay.claim_token is None
+
+    with pytest.raises(BadRequestError, match="idempotency_key_conflict"):
+        service.claim_or_replay_idempotency(
+            scope="visual_identity_import",
+            resource_id="pack:1",
+            idempotency_key="import-1",
+            payload_hash="hash-b",
+        )
+
+    released = service.claim_or_replay_idempotency(
+        scope="visual_identity_import",
+        resource_id="pack:2",
+        idempotency_key="import-2",
+        payload_hash="hash-c",
+    )
+    assert released.claim_token is not None
+    service.release_idempotency_claim(
+        scope="visual_identity_import",
+        resource_id="pack:2",
+        idempotency_key="import-2",
+        claim_token=released.claim_token,
+    )
+    reclaimed = service.claim_or_replay_idempotency(
+        scope="visual_identity_import",
+        resource_id="pack:2",
+        idempotency_key="import-2",
+        payload_hash="hash-c",
+    )
+
+    assert reclaimed.claim_token
+    assert reclaimed.claim_token != released.claim_token
+
+
 def test_resolve_override_version_without_pack_raises_domain_error(
     chacha_db: CharactersRAGDB,
     service: VisualIdentityService,

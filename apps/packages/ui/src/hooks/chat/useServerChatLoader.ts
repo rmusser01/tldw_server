@@ -502,9 +502,17 @@ export const mapServerChatMessagesToPlaygroundMessages = ({
               metadataExtra.visual_asset_id
             )
           : null,
+      visualPreviewUrl:
+        typeof metadataExtra?.visual_preview_url === "string"
+          ? metadataExtra.visual_preview_url
+          : null,
       visualFallbackReason:
         typeof metadataExtra?.visual_fallback_reason === "string"
           ? metadataExtra.visual_fallback_reason
+          : null,
+      visualIsAnimated:
+        typeof metadataExtra?.visual_is_animated === "boolean"
+          ? metadataExtra.visual_is_animated
           : null,
       pinned: Boolean(
         (meta?.pinned as boolean | undefined) ??

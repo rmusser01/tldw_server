@@ -856,6 +856,7 @@ export const PlaygroundMessage = (props: Props) => {
     : ""
   const characterAvatar =
     visualCharacterAvatar || moodCharacterAvatar || baseCharacterAvatar
+  const isUsingVisualCharacterAvatar = Boolean(visualCharacterAvatar)
   const resolvedModelImage =
     shouldUseCharacterIdentity && characterAvatar
       ? characterAvatar
@@ -1927,8 +1928,8 @@ export const PlaygroundMessage = (props: Props) => {
     >
       <VisualIdentityImage
         assetUrl={portraitImage}
-        previewUrl={props.visualPreviewUrl}
-        isAnimated={Boolean(props.visualIsAnimated)}
+        previewUrl={isUsingVisualCharacterAvatar ? props.visualPreviewUrl : null}
+        isAnimated={isUsingVisualCharacterAvatar && Boolean(props.visualIsAnimated)}
         alt={
           props.isBot
             ? resolvedModelName || props.name
@@ -2986,8 +2987,8 @@ export const PlaygroundMessage = (props: Props) => {
         >
           <VisualIdentityImage
             assetUrl={portraitImage}
-            previewUrl={props.visualPreviewUrl}
-            isAnimated={Boolean(props.visualIsAnimated)}
+            previewUrl={isUsingVisualCharacterAvatar ? props.visualPreviewUrl : null}
+            isAnimated={isUsingVisualCharacterAvatar && Boolean(props.visualIsAnimated)}
             alt={
               props.isBot
                 ? resolvedModelName || props.name

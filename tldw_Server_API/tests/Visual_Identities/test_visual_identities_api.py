@@ -159,6 +159,7 @@ def _seed_ready_draft(repo: VisualIdentityRepository, *, owner_user_id: int) -> 
         sha256="abc123",
         width=64,
         height=64,
+        preview_relpath="previews/draft-1/neutral/neutral.png",
     )
     return draft
 
@@ -302,7 +303,36 @@ def test_resolve_bound_asset_returns_content_url_and_null_direct_fallback(
         f"/api/v1/visual-identities/packs/{activation['pack_id']}"
         f"/assets/{payload['asset_id']}/content"
     )
+    assert payload["preview_url"] == (
+        f"/api/v1/visual-identities/packs/{activation['pack_id']}"
+        f"/assets/{payload['asset_id']}/preview"
+    )
     assert payload["fallback_reason"] is None
+
+
+def test_preview_response_is_inline(
+    chacha_db: CharactersRAGDB,
+    repo: VisualIdentityRepository,
+    storage_root: Path,
+) -> None:
+    character_id = _seed_character(chacha_db)
+    draft = _seed_ready_draft(repo, owner_user_id=1)
+    preview_path = storage_root / "1" / "previews" / "draft-1" / "neutral" / "neutral.png"
+    preview_path.parent.mkdir(parents=True)
+    preview_path.write_bytes(_png_bytes())
+    client = _client(chacha_db)
+    activation = client.post(
+        f"/api/v1/visual-identities/drafts/{draft['id']}/activate",
+        json={"actor_kind": "character", "actor_id": character_id},
+    ).json()
+
+    response = client.get(
+        f"/api/v1/visual-identities/packs/{activation['pack_id']}"
+        f"/assets/{activation['asset_ids'][0]}/preview"
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-disposition"].startswith("inline;")
 
 
 def test_resolve_endpoint_preserves_existing_query_contract(

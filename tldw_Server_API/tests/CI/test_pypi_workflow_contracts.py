@@ -18,6 +18,13 @@ def _install_step_run(workflow: dict, job_name: str = "build-and-check") -> str:
     return install_steps[0]["run"]
 
 
+def _detect_version_step_run(workflow: dict) -> str:
+    steps = workflow["jobs"]["detect-version"]["steps"]
+    detect_steps = [step for step in steps if step.get("id") == "detect"]
+    assert detect_steps, "Detect version step missing"
+    return detect_steps[0]["run"]
+
+
 def test_pypi_package_workflow_installs_setuptools_backend() -> None:
     workflow = _load(".github/workflows/pypi-package.yml")
     run_script = _install_step_run(workflow)
@@ -48,11 +55,13 @@ def test_publish_pypi_workflow_preserves_manual_dispatch_and_gates_push() -> Non
     detect_version = workflow["jobs"]["detect-version"]
     assert detect_version["outputs"]["should_publish"] == "${{ steps.detect.outputs.should_publish }}"
 
-    build = workflow["jobs"]["build"]
-    assert build["needs"] == "detect-version"
-    assert build["if"] == (
+    test_suite = workflow["jobs"]["test-suite"]
+    assert test_suite["if"] == (
         "${{ github.event_name == 'workflow_dispatch' || needs.detect-version.outputs.should_publish == 'true' }}"
     )
+
+    build = workflow["jobs"]["build"]
+    assert build["needs"] == ["detect-version", "test-suite"]
 
     publish_testpypi = workflow["jobs"]["publish-testpypi"]
     assert publish_testpypi["if"] == (
@@ -64,3 +73,11 @@ def test_publish_pypi_workflow_preserves_manual_dispatch_and_gates_push() -> Non
         "${{ (github.event_name == 'workflow_dispatch' && inputs.target == 'pypi') || "
         "(github.event_name == 'push' && needs.detect-version.outputs.should_publish == 'true') }}"
     )
+
+
+def test_publish_pypi_detect_version_handles_decode_and_timeout_failures() -> None:
+    workflow = _load(".github/workflows/publish-pypi.yml")
+    run_script = _detect_version_step_run(workflow)
+
+    assert "json.JSONDecodeError" in run_script
+    assert "TimeoutError" in run_script

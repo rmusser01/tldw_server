@@ -56,7 +56,8 @@ const makeClient = () => ({
     fallback_reason: "no_binding",
     is_animated: false,
     content_type: null,
-    asset_url: null
+    asset_url: null,
+    preview_url: null
   })),
   listVisualIdentityPacks: vi.fn(async () => []),
   startVisualIdentityZipImport: vi.fn(async () => ({
