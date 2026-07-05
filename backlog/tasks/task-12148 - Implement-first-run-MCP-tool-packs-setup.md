@@ -1,21 +1,20 @@
 ---
 id: TASK-12148
 title: Implement first-run MCP tool packs setup
-status: In Progress
+status: Done
 assignee: []
-created_date: '2026-07-04 23:41'
-updated_date: '2026-07-05 02:54'
+created_date: 2026-07-04 23:41
+updated_date: 2026-07-05 02:54
 labels:
-  - implementation
-  - mcp
-  - setup
-  - first-run
+- implementation
+- mcp
+- setup
+- first-run
 dependencies:
-  - TASK-12132
+- TASK-12132
 references:
-  - >-
-    Docs/superpowers/plans/2026-07-04-first-run-mcp-tool-packs-implementation-plan.md
-  - Docs/superpowers/specs/2026-07-04-first-run-mcp-tool-packs-design.md
+- Docs/superpowers/plans/2026-07-04-first-run-mcp-tool-packs-implementation-plan.md
+- Docs/superpowers/specs/2026-07-04-first-run-mcp-tool-packs-design.md
 ---
 
 ## Description
@@ -26,10 +25,10 @@ Execute the reviewed first-run MCP tool packs implementation plan using subagent
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Backend setup catalog, apply, validate, and admin recovery endpoints are implemented per plan.
-- [ ] #2 Frontend onboarding MCP tools step and MCP Hub follow-up/recovery UI are implemented per plan.
-- [ ] #3 Focused backend/frontend tests and touched-scope Bandit verification are recorded.
-- [ ] #4 Implementation commits are reviewed with spec and code-quality subagent gates.
+- [x] #1 Backend setup catalog, apply, validate, and admin recovery endpoints are implemented per plan.
+- [x] #2 Frontend onboarding MCP tools step and MCP Hub follow-up/recovery UI are implemented per plan.
+- [x] #3 Focused backend/frontend tests and touched-scope Bandit verification are recorded.
+- [x] #4 Implementation commits are reviewed with spec and code-quality subagent gates.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -58,21 +57,17 @@ Task 6 code-quality review fixes: passed saved mcp_tools step data into the MCP 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Task 4 safe validation slice: added service validation for exact built-in mcp.tools.list policy checks, external discovery refresh readiness, fail-closed external no-arg read candidate selection, safe fixed validation messages, and setup/admin validate route wiring. Verification: pytest tldw_Server_API/tests/Setup/test_first_run_mcp_tools_service.py tldw_Server_API/tests/integration/test_unified_first_run_setup_api.py -k "mcp_tools or validate" -v -> 41 passed; Bandit touched backend scope -> 0 findings; git diff --check -> clean.
-
-Task 4 follow-up fail-closed fixes: admin MCP status/validate now require explicit SYSTEM_CONFIGURE or * permissions, non-raising refresh results with refreshed_servers=0/errors are treated as external_discovery_incomplete with fixed redacted messaging, and external validation requires a matching mcp.tools.list descriptor with an inputSchema mapping before executing a candidate. Verification: focused regressions -> 3 passed; pytest tldw_Server_API/tests/Setup/test_first_run_mcp_tools_service.py tldw_Server_API/tests/integration/test_unified_first_run_setup_api.py -k "mcp_tools or validate" -v -> 44 passed; Bandit touched backend scope -> 0 findings; git diff --check -> clean.
-
-Task 4 request validation follow-up: McpToolsApplyRequest and McpToolsValidateRequest now forbid unknown fields so raw config/execution payloads are rejected at the API boundary. Red check before fix: focused request-validation tests failed with 200 responses. Verification after fix: focused request-validation tests -> 3 passed; pytest tldw_Server_API/tests/integration/test_unified_first_run_setup_api.py -k "mcp_tools" -v -> 22 passed; Bandit on setup_schemas.py -> 0 findings; git diff --check -> clean.
+Implemented first-run MCP tool packs setup end to end: backend catalog/apply/validate/admin recovery endpoints, safe MCP Hub generated default profile handling, optional onboarding MCP tools step, and MCP Hub recovery/status panel. Final verification on 66f4aa8f9f: backend focused suite 180 passed, frontend focused suite 94 passed, verify:openapi passed with existing reviewed exceptions, Bandit touched backend scope had zero findings, git diff --check clean, and final subagent re-review approved with no Critical/Important issues.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
 
 ## Implementation Notes
