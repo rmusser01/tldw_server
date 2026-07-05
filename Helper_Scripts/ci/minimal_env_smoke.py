@@ -111,7 +111,7 @@ def main(argv: list[str]) -> int:
             last_err = "no response"
             while time.monotonic() < deadline:
                 if proc.poll() is not None:
-                    logger.error(
+                    logger.bind(event="minimal_env_smoke", port=args.port).error(
                         "[minimal-env-smoke] FAIL — server exited early (code {}):\n{}",
                         proc.returncode,
                         _tail_log(),
@@ -129,7 +129,7 @@ def main(argv: list[str]) -> int:
                 except (urllib.error.URLError, ConnectionError, OSError) as exc:
                     last_err = repr(exc)
                 time.sleep(1.0)
-            logger.error(
+            logger.bind(event="minimal_env_smoke", port=args.port).error(
                 "[minimal-env-smoke] FAIL — /health not healthy within {}s (last: {}):\n{}",
                 args.timeout,
                 last_err,

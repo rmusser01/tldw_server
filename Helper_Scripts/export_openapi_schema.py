@@ -33,8 +33,6 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from loguru import logger  # noqa: E402 - after the sys.path bootstrap above
-
 # Pinned canonical environment for a complete, reproducible schema. Applied
 # BEFORE importing the app so settings/route-toggles resolve identically
 # everywhere. Keep this list in sync with any new env-driven route gating.
@@ -131,24 +129,29 @@ def main(argv: list[str]) -> int:
     fp = _fingerprint(schema)
     fp_json = json.dumps(fp, indent=2, sort_keys=True) + "\n"
 
+    # Diagnostics go to STDERR via print — NOT loguru. This tool imports the
+    # full app (which reconfigures the global loguru sink unpredictably), and
+    # its bare-mode STDOUT is a machine-readable data contract (fingerprint
+    # JSON for piping). Routing diagnostics through loguru would risk polluting
+    # that stdout if the app ever attaches a stdout sink; sys.stderr is
+    # guaranteed clean.
     if args.out:
         with open(args.out, "w", encoding="utf-8") as fh:
             json.dump(schema, fh, sort_keys=True, indent=2)
             fh.write("\n")
-        logger.info(
-            "[openapi-export] wrote schema -> {} ({} paths, {} schemas)",
-            args.out,
-            fp["path_count"],
-            fp["schema_count"],
+        print(
+            f"[openapi-export] wrote schema -> {args.out} "
+            f"({fp['path_count']} paths, {fp['schema_count']} schemas)",
+            file=sys.stderr,
         )
 
     if args.fingerprint:
         with open(args.fingerprint, "w", encoding="utf-8") as fh:
             fh.write(fp_json)
-        logger.info(
-            "[openapi-export] wrote fingerprint -> {} (sha256={}...)",
-            args.fingerprint,
-            fp["sha256"][:12],
+        print(
+            f"[openapi-export] wrote fingerprint -> {args.fingerprint} "
+            f"(sha256={fp['sha256'][:12]}...)",
+            file=sys.stderr,
         )
 
     if args.check:
@@ -158,33 +161,31 @@ def main(argv: list[str]) -> int:
             if not isinstance(checked_in, dict):
                 raise ValueError("fingerprint JSON must be an object")
         except (OSError, json.JSONDecodeError, ValueError) as exc:
-            logger.error(
-                "[openapi-export] FAIL — cannot read checked-in fingerprint {}: {}", args.check, exc
+            print(
+                f"[openapi-export] FAIL — cannot read checked-in fingerprint {args.check}: {exc}",
+                file=sys.stderr,
             )
             return 2
         if checked_in.get("sha256") != fp["sha256"]:
-            logger.error(
+            print(
                 "[openapi-export] FAIL — OpenAPI contract drift detected.\n"
-                "  checked-in sha256: {}\n"
-                "  current    sha256: {}\n"
-                "  checked-in counts: paths={} schemas={}\n"
-                "  current    counts: paths={} schemas={}\n"
+                f"  checked-in sha256: {checked_in.get('sha256')}\n"
+                f"  current    sha256: {fp['sha256']}\n"
+                f"  checked-in counts: paths={checked_in.get('path_count')} "
+                f"schemas={checked_in.get('schema_count')}\n"
+                f"  current    counts: paths={fp['path_count']} schemas={fp['schema_count']}\n"
                 "  Run `make openapi-fingerprint` to update the snapshot, then regenerate the\n"
                 "  frontend types (`bun run generate:api-types` in apps/tldw-frontend) and review.",
-                checked_in.get("sha256"),
-                fp["sha256"],
-                checked_in.get("path_count"),
-                checked_in.get("schema_count"),
-                fp["path_count"],
-                fp["schema_count"],
+                file=sys.stderr,
             )
             return 1
-        logger.info("[openapi-export] OK — OpenAPI fingerprint matches the checked-in snapshot.")
+        print(
+            "[openapi-export] OK — OpenAPI fingerprint matches the checked-in snapshot.",
+            file=sys.stderr,
+        )
 
     if not any((args.out, args.fingerprint, args.check)):
-        # Bare mode writes the fingerprint JSON to STDOUT (a machine-readable
-        # data contract for piping, e.g. `... > fp.json`) — this is genuine tool
-        # output, not a diagnostic, so it stays on stdout rather than loguru.
+        # Bare mode writes the fingerprint JSON to STDOUT (the data contract).
         sys.stdout.write(fp_json)
     return 0
 
