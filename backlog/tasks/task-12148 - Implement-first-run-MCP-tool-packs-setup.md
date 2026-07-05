@@ -1,20 +1,21 @@
 ---
 id: TASK-12148
 title: Implement first-run MCP tool packs setup
-status: In Progress
+status: Done
 assignee: []
-created_date: 2026-07-04 23:41
-updated_date: 2026-07-05 02:54
+created_date: '2026-07-04 23:41'
+updated_date: '2026-07-05 05:26'
 labels:
-- implementation
-- mcp
-- setup
-- first-run
+  - implementation
+  - mcp
+  - setup
+  - first-run
 dependencies:
-- TASK-12132
+  - TASK-12132
 references:
-- Docs/superpowers/plans/2026-07-04-first-run-mcp-tool-packs-implementation-plan.md
-- Docs/superpowers/specs/2026-07-04-first-run-mcp-tool-packs-design.md
+  - >-
+    Docs/superpowers/plans/2026-07-04-first-run-mcp-tool-packs-implementation-plan.md
+  - Docs/superpowers/specs/2026-07-04-first-run-mcp-tool-packs-design.md
 ---
 
 ## Description
@@ -52,12 +53,20 @@ Task 6 frontend MCP tools wizard step: added McpToolsStep and inserted mcp_tools
 Task 6 spec-review fixes: added a FirstChatStep backLabel prop so the first-run wizard can show Back to MCP tools while standalone/provider flows keep Back to providers; cleared MCP apply/validation results when pack/add-on/confirmation choices change after save; mapped conflict reasons, add-on ids, validation states, and external status values to local user-facing labels. Red check: focused Vitest failed before fixes on the missing backLabel behavior, stale saved selection controls, and raw profile_manually_changed/local_file_read/not_run/not_configured copy. Green verification: `bunx vitest run src/components/Option/Onboarding/__tests__/McpToolsStep.test.tsx src/components/Option/Onboarding/__tests__/UnifiedSetupWizard.test.tsx src/components/Option/Onboarding/__tests__/FirstChatStep.test.tsx` from apps/packages/ui -> 3 files passed, 55 tests passed.
 
 Task 6 code-quality review fixes: passed saved mcp_tools step data into the MCP tools step, restored saved pack/add-on/confirmed add-on selections with an applied local state when returning from first chat, and added a synchronous pending guard for the MCP tools skip action. Added regression coverage for direct step hydration, wizard back-navigation hydration, and fast double-click skip protection. Focused UI verification: bunx vitest run src/components/Option/Onboarding/__tests__/McpToolsStep.test.tsx src/components/Option/Onboarding/__tests__/UnifiedSetupWizard.test.tsx src/components/Option/Onboarding/__tests__/FirstChatStep.test.tsx passed with 58 tests.
+
+PR #2649 merged into dev. First-run MCP tool packs setup implementation and review follow-up landed; review threads were resolved and local focused verification was recorded in the PR.
+
+Task 7 MCP Hub follow-up status/recovery slice: added admin setup-onboarding client methods without noAuth, compact MCP Hub first-run recovery panel with user-facing status labels/recovery/profile routing, backend admin status detection for generated MCP profile hash mismatch, and focused UI/backend tests. Verification: frontend Vitest MCP Hub/status + setup-onboarding service -> 23 passed; backend admin MCP tools integration -> 5 passed; service recovery status target included in combined backend slice -> passed; Bandit touched backend scope -> 0 findings; git diff --check -> clean.
+Task 7 spec-review follow-up: fixed MCP Hub Review profile to create a real permission_profile drill target and passed drill targets into PermissionProfilesTab. PermissionProfilesTab now opens the matching profile edit form after profiles load and marks the drill handled. Verification: bunx vitest run src/components/Option/MCPHub/__tests__/McpHubPage.first-run-status.test.tsx src/components/Option/MCPHub/__tests__/PermissionProfilesTab.test.tsx src/services/tldw/__tests__/setup-onboarding.test.ts -> 28 passed; git diff --check -> clean.
+Task 7 code-quality follow-up: recovery/manual-change status now requires first-run MCP provenance before running generated profile hash conflict checks, so a stale state pointing at a normal global profile is treated as no generated profile for conflict purposes. Added service regression coverage. Verification: focused regression target -> passed; /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Setup/test_first_run_mcp_tools_service.py tldw_Server_API/tests/integration/test_unified_first_run_setup_api.py -k "mcp_tools" -v -> 45 passed; Bandit touched backend service -> 0 findings; git diff --check -> clean.
+Final-review backend fixes: generated first-run MCP profiles now conflict on manual tool_patterns/tool_names, explicit replace strips those keys, completed catalog access requires SYSTEM_CONFIGURE/*, and validation skips external discovery unless external_network_read is selected. Verification: focused pytest 50 passed; git diff --check passed; Bandit results empty at /tmp/bandit_first_run_mcp_tools_final_review.json.
+Final-review external validation follow-up: validation now samples only external tools already present in the saved generated profile allowed_tools, preventing a refreshed tool discovered after apply from being executed or reported as passed outside the profile policy. Verification: focused validation regressions -> 3 passed; full focused backend suite -> 180 passed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented first-run MCP tool packs setup end to end: backend catalog/apply/validate/admin recovery endpoints, safe MCP Hub generated default profile handling, optional onboarding MCP tools step, and MCP Hub recovery/status panel. Final verification on 66f4aa8f9f: backend focused suite 180 passed, frontend focused suite 94 passed, verify:openapi passed with existing reviewed exceptions, Bandit touched backend scope had zero findings, git diff --check clean, and final subagent re-review approved with no Critical/Important issues.
+Merged PR #2649 for first-run MCP tool packs setup. Backend setup endpoints, MCP Hub profile integration, onboarding UI, recovery/status UI, tests, Bandit, and review follow-up are complete.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
@@ -69,13 +78,3 @@ Implemented first-run MCP tool packs setup end to end: backend catalog/apply/val
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
-
-## Implementation Notes
-
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Task 7 MCP Hub follow-up status/recovery slice: added admin setup-onboarding client methods without noAuth, compact MCP Hub first-run recovery panel with user-facing status labels/recovery/profile routing, backend admin status detection for generated MCP profile hash mismatch, and focused UI/backend tests. Verification: frontend Vitest MCP Hub/status + setup-onboarding service -> 23 passed; backend admin MCP tools integration -> 5 passed; service recovery status target included in combined backend slice -> passed; Bandit touched backend scope -> 0 findings; git diff --check -> clean.
-Task 7 spec-review follow-up: fixed MCP Hub Review profile to create a real permission_profile drill target and passed drill targets into PermissionProfilesTab. PermissionProfilesTab now opens the matching profile edit form after profiles load and marks the drill handled. Verification: bunx vitest run src/components/Option/MCPHub/__tests__/McpHubPage.first-run-status.test.tsx src/components/Option/MCPHub/__tests__/PermissionProfilesTab.test.tsx src/services/tldw/__tests__/setup-onboarding.test.ts -> 28 passed; git diff --check -> clean.
-Task 7 code-quality follow-up: recovery/manual-change status now requires first-run MCP provenance before running generated profile hash conflict checks, so a stale state pointing at a normal global profile is treated as no generated profile for conflict purposes. Added service regression coverage. Verification: focused regression target -> passed; /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Setup/test_first_run_mcp_tools_service.py tldw_Server_API/tests/integration/test_unified_first_run_setup_api.py -k "mcp_tools" -v -> 45 passed; Bandit touched backend service -> 0 findings; git diff --check -> clean.
-Final-review backend fixes: generated first-run MCP profiles now conflict on manual `tool_patterns`/`tool_names`, explicit replace strips those keys, completed catalog access requires SYSTEM_CONFIGURE/*, and validation skips external discovery unless `external_network_read` is selected. Verification: focused pytest 50 passed; git diff --check passed; Bandit results empty at /tmp/bandit_first_run_mcp_tools_final_review.json.
-Final-review external validation follow-up: validation now samples only external tools already present in the saved generated profile allowed_tools, preventing a refreshed tool discovered after apply from being executed or reported as passed outside the profile policy. Verification: focused validation regressions -> 3 passed; full focused backend suite -> 180 passed.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
