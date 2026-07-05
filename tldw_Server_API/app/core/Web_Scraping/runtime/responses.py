@@ -33,7 +33,9 @@ def _freeze_value(value: Any) -> Any:
 
 
 def _freeze_mapping(value: Mapping[str, Any] | None) -> Mapping[str, Any]:
-    return MappingProxyType({str(key): _freeze_value(item) for key, item in dict(value or {}).items()})
+    if not value:
+        return MappingProxyType({})
+    return MappingProxyType({str(key): _freeze_value(item) for key, item in value.items()})
 
 
 def _raw_get(raw: Any, key: str, default: Any = None) -> Any:

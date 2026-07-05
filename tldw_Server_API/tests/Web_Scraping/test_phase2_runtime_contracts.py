@@ -299,6 +299,14 @@ def test_runtime_timeout_contract_rejects_non_finite_values(value: float) -> Non
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("field_name", ["fetch_timeout_s", "browser_timeout_s", "preflight_timeout_s"])
+@pytest.mark.parametrize("value", [True, False])
+def test_runtime_timeout_contract_rejects_boolean_values(field_name: str, value: bool) -> None:
+    with pytest.raises(ValueError, match=f"{field_name} must be a float or int, not a boolean"):
+        RuntimeTimeouts(**{field_name: value})
+
+
+@pytest.mark.unit
 def test_browser_launch_options_normalize_viewport() -> None:
     options = BrowserLaunchOptions(headless=True, viewport_width=1280, viewport_height=720)
 

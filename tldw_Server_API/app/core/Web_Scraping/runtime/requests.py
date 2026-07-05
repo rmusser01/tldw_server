@@ -33,14 +33,16 @@ def _freeze_value(value: Any) -> Any:
 
 
 def _freeze_mapping(value: Mapping[str, Any] | None) -> Mapping[str, Any]:
-    return MappingProxyType({str(key): _freeze_value(item) for key, item in dict(value or {}).items()})
+    if not value:
+        return MappingProxyType({})
+    return MappingProxyType({str(key): _freeze_value(item) for key, item in value.items()})
 
 
 def _freeze_proxy_value(value: Mapping[str, str] | str | None) -> Mapping[str, str] | str | None:
     if value is None:
         return None
     if isinstance(value, Mapping):
-        return MappingProxyType({str(key): str(item) for key, item in dict(value).items()})
+        return MappingProxyType({str(key): str(item) for key, item in value.items()})
     return str(value)
 
 

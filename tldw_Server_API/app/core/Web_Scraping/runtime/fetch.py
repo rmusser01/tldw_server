@@ -22,14 +22,14 @@ class FetchClient(Protocol):
 def _mutable_mapping_or_none(value: Mapping[str, Any]) -> dict[str, Any] | None:
     if not value:
         return None
-    return {str(key): item for key, item in dict(value).items()}
+    return {str(key): item for key, item in value.items()}
 
 
 def _mutable_proxies(value: Mapping[str, str] | str | None) -> dict[str, str] | str | None:
     if value is None:
         return None
     if isinstance(value, Mapping):
-        return {str(key): str(item) for key, item in dict(value).items()}
+        return {str(key): str(item) for key, item in value.items()}
     return str(value)
 
 

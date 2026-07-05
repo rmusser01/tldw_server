@@ -19,6 +19,8 @@ class RuntimeTimeouts:
             value = getattr(self, field_name)
             if value is None:
                 continue
+            if isinstance(value, bool):
+                raise ValueError(f"{field_name} must be a float or int, not a boolean")
             normalized = float(value)
             if not math.isfinite(normalized):
                 raise ValueError(f"{field_name} must be finite")
