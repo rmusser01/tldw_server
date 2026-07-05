@@ -52,6 +52,70 @@ def test_guard_detects_leak_when_module_grows_a_watched_cache(
     assert "synthetic._cache" in guard.leaks[0]
 
 
+def test_guard_detects_singleton_becoming_live_from_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """None -> set is the #2580/#2581 signal (DB backend bound, drain singleton
+    became live) and must be flagged, not silently skipped."""
+    module_name = "tldw_singleton_guard_fake_none_to_set"
+    module = types.ModuleType(module_name)
+    module._instance = None  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, module_name, module)
+    watch = sg.WatchedGlobal(
+        label="synthetic._instance",
+        module=module_name,
+        reader=sg._is_set_attr("_instance"),
+        why="synthetic singleton",
+    )
+    monkeypatch.setattr(sg, "WATCHLIST", [watch])
+
+    guard = sg.SingletonGuard(mode="warn")
+    guard.enter_module("mod_a")  # baseline: _instance is None (False)
+    module._instance = object()  # mod_a leaves a live singleton  # type: ignore[attr-defined]
+    guard.enter_module("mod_b")
+    guard.finish()
+
+    assert guard.leaks, "guard missed a None->set singleton leak"
+    assert "synthetic._instance" in guard.leaks[0]
+
+
+def test_guard_is_quiet_when_module_clears_state_it_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """set -> None (a module clearing its own singleton) is hygiene, not a leak."""
+    module_name = "tldw_singleton_guard_fake_set_to_none"
+    module = types.ModuleType(module_name)
+    module._instance = object()  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, module_name, module)
+    watch = sg.WatchedGlobal(
+        label="synthetic._instance",
+        module=module_name,
+        reader=sg._is_set_attr("_instance"),
+        why="synthetic singleton",
+    )
+    monkeypatch.setattr(sg, "WATCHLIST", [watch])
+
+    guard = sg.SingletonGuard(mode="warn")
+    guard.enter_module("mod_a")  # baseline: live
+    module._instance = None  # mod_a cleaned up after itself  # type: ignore[attr-defined]
+    guard.enter_module("mod_b")
+    guard.finish()
+
+    assert not guard.leaks, f"clearing state was wrongly flagged: {guard.leaks}"
+
+
+def test_is_regression_only_flags_the_dangerous_direction() -> None:
+    """Unit coverage for the leak-direction rule."""
+    assert sg._is_regression(False, True) is True  # became live
+    assert sg._is_regression(True, False) is False  # cleared
+    assert sg._is_regression(0, 3) is True  # grew
+    assert sg._is_regression(3, 0) is False  # shrank
+    assert sg._is_regression(None, 12345) is True  # became set (id)
+    assert sg._is_regression(111, 222) is True  # rebound to a different object
+    assert sg._is_regression(12345, None) is False  # cleared (id -> None)
+    assert sg._is_regression(5, 5) is False  # unchanged
+
+
 def test_guard_is_quiet_when_module_cleans_up_after_itself(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

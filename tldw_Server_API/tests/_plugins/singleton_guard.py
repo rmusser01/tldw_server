@@ -178,6 +178,31 @@ WATCHLIST: list[WatchedGlobal] = [
 ]
 
 
+def _is_regression(start: object, end: object) -> bool:
+    """True when *end* holds MORE/DIFFERENT live state than *start*.
+
+    Only the dangerous direction is a leak — a module *clearing* its state
+    (``True -> False``, a shrinking count, ``set -> None``) is good hygiene,
+    not pollution:
+
+    * bool (is-set readers): ``False -> True`` is the leak (became live)
+    * int (len readers): growth is the leak
+    * identity ids / mixed None: becoming set or being rebound to a different
+      object is the leak; becoming ``None`` (cleared) is safe
+    """
+    if start == end:
+        return False
+    # bool is a subclass of int — check it first.
+    if isinstance(start, bool) or isinstance(end, bool):
+        return bool(end) and not bool(start)
+    if isinstance(start, int) and isinstance(end, int):
+        return end > start
+    # identity ids (or a None<->value transition): cleared is safe, set/rebind leaks
+    if end is None:
+        return False
+    return start != end
+
+
 @dataclass
 class _ModuleState:
     name: str
@@ -207,14 +232,21 @@ class SingletonGuard:
         return snap
 
     def _finalize(self, state: _ModuleState) -> None:
-        """Compare a finishing module's end snapshot against its start."""
+        """Compare a finishing module's end snapshot against its start.
+
+        Only labels present at *module start* are compared — a watched module
+        that first loaded mid-run is a lazy import, not inherited state. A key
+        maps to ``None`` only when the module was loaded but the global was
+        empty/unset; that is a real value, so a ``None -> set`` transition
+        (a singleton becoming live, a DB backend getting bound) IS a leak.
+        """
         end = self._snapshot()
         by_label = {w.label: w for w in WATCHLIST}
-        for label, end_val in end.items():
-            start_val = state.start.get(label)
-            if start_val is None or end_val is None:
-                continue
-            if end_val != start_val:
+        for label, start_val in state.start.items():
+            if label not in end:
+                continue  # module unloaded mid-run — nothing to inherit
+            end_val = end[label]
+            if _is_regression(start_val, end_val):
                 w = by_label.get(label)
                 why = f" — {w.why}" if w else ""
                 self.leaks.append(
