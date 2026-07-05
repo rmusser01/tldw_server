@@ -16,10 +16,13 @@ import {
   Globe,
   Wrench,
   ChevronDown,
-  ChevronRight
+  ChevronRight,
+  ChefHat
 } from "lucide-react"
 import { classNames } from "@/libs/class-name"
+import { RecipeCard } from "@/components/Common/RecipeCard/RecipeCard"
 import type { ToolCall, ToolCallResult } from "@/types/tool-calls"
+import { parseRecipeCardToolResult } from "@/utils/recipe-card-ui"
 
 interface ToolCallBlockProps {
   toolCalls: ToolCall[]
@@ -45,7 +48,8 @@ const TOOL_ICONS: Record<string, React.FC<{ className?: string }>> = {
   git_commit: GitBranch,
   exec_run: Terminal,
   web_search: Globe,
-  web_fetch: Globe
+  web_fetch: Globe,
+  "cooking.recipe_card.render": ChefHat
 }
 
 // Fallback display names
@@ -66,7 +70,8 @@ const TOOL_LABELS: Record<string, string> = {
   git_commit: "Commit",
   exec_run: "Run Command",
   web_search: "Web Search",
-  web_fetch: "Fetch URL"
+  web_fetch: "Fetch URL",
+  "cooking.recipe_card.render": "Recipe Card"
 }
 
 // Format tool arguments for compact display
@@ -210,6 +215,10 @@ export const ToolCallBlock: React.FC<ToolCallBlockProps> = ({
         const isExpanded = expandedIds.has(call.id)
         const argsPreview = formatArgsPreview(call.function.name, call.function.arguments)
         const result = resultsMap.get(call.id)
+        const recipePayload =
+          call.function.name === "cooking.recipe_card.render"
+            ? parseRecipeCardToolResult(result)
+            : null
 
         return (
           <div
@@ -276,16 +285,22 @@ export const ToolCallBlock: React.FC<ToolCallBlockProps> = ({
                     <div className="text-[10px] uppercase tracking-wide text-text-muted mb-1">
                       {t("common:result", "Result")}
                     </div>
-                    <pre
-                      className={classNames(
-                        "text-xs rounded p-2 overflow-x-auto max-h-48",
-                        result.error
-                          ? "bg-danger/10 text-danger"
-                          : "bg-surface"
-                      )}
-                    >
-                      {formatResult(result.content)}
-                    </pre>
+                    {recipePayload ? (
+                      <div className="max-h-96 overflow-y-auto overflow-x-hidden">
+                        <RecipeCard payload={recipePayload} />
+                      </div>
+                    ) : (
+                      <pre
+                        className={classNames(
+                          "text-xs rounded p-2 overflow-x-auto max-h-48",
+                          result.error
+                            ? "bg-danger/10 text-danger"
+                            : "bg-surface"
+                        )}
+                      >
+                        {formatResult(result.content)}
+                      </pre>
+                    )}
                   </div>
                 )}
               </div>
