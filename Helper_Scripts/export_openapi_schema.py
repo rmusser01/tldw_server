@@ -129,19 +129,30 @@ def main(argv: list[str]) -> int:
     fp = _fingerprint(schema)
     fp_json = json.dumps(fp, indent=2, sort_keys=True) + "\n"
 
+    # Diagnostics go to STDERR via print — NOT loguru. This tool imports the
+    # full app (which reconfigures the global loguru sink unpredictably), and
+    # its bare-mode STDOUT is a machine-readable data contract (fingerprint
+    # JSON for piping). Routing diagnostics through loguru would risk polluting
+    # that stdout if the app ever attaches a stdout sink; sys.stderr is
+    # guaranteed clean.
     if args.out:
         with open(args.out, "w", encoding="utf-8") as fh:
             json.dump(schema, fh, sort_keys=True, indent=2)
             fh.write("\n")
         print(
             f"[openapi-export] wrote schema -> {args.out} "
-            f"({fp['path_count']} paths, {fp['schema_count']} schemas)"
+            f"({fp['path_count']} paths, {fp['schema_count']} schemas)",
+            file=sys.stderr,
         )
 
     if args.fingerprint:
         with open(args.fingerprint, "w", encoding="utf-8") as fh:
             fh.write(fp_json)
-        print(f"[openapi-export] wrote fingerprint -> {args.fingerprint} (sha256={fp['sha256'][:12]}...)")
+        print(
+            f"[openapi-export] wrote fingerprint -> {args.fingerprint} "
+            f"(sha256={fp['sha256'][:12]}...)",
+            file=sys.stderr,
+        )
 
     if args.check:
         try:
@@ -160,17 +171,21 @@ def main(argv: list[str]) -> int:
                 "[openapi-export] FAIL — OpenAPI contract drift detected.\n"
                 f"  checked-in sha256: {checked_in.get('sha256')}\n"
                 f"  current    sha256: {fp['sha256']}\n"
-                f"  checked-in counts: paths={checked_in.get('path_count')} schemas={checked_in.get('schema_count')}\n"
+                f"  checked-in counts: paths={checked_in.get('path_count')} "
+                f"schemas={checked_in.get('schema_count')}\n"
                 f"  current    counts: paths={fp['path_count']} schemas={fp['schema_count']}\n"
                 "  Run `make openapi-fingerprint` to update the snapshot, then regenerate the\n"
                 "  frontend types (`bun run generate:api-types` in apps/tldw-frontend) and review.",
                 file=sys.stderr,
             )
             return 1
-        print("[openapi-export] OK — OpenAPI fingerprint matches the checked-in snapshot.")
+        print(
+            "[openapi-export] OK — OpenAPI fingerprint matches the checked-in snapshot.",
+            file=sys.stderr,
+        )
 
     if not any((args.out, args.fingerprint, args.check)):
-        # default: print the fingerprint
+        # Bare mode writes the fingerprint JSON to STDOUT (the data contract).
         sys.stdout.write(fp_json)
     return 0
 
