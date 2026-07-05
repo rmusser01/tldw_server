@@ -13,6 +13,10 @@ modified_files:
 - tldw_Server_API/app/api/v1/schemas/research_workspace_capabilities.py
 - tldw_Server_API/app/core/Research_Workspace/capabilities.py
 - tldw_Server_API/tests/Research_Workspace/test_capability_derivation.py
+- tldw_Server_API/app/api/v1/schemas/research_workspace_outputs.py
+- tldw_Server_API/app/core/Research_Workspace/output_jobs.py
+- tldw_Server_API/app/api/v1/endpoints/workspaces.py
+- tldw_Server_API/tests/Research_Workspace/test_output_jobs_api.py
 ---
 
 ## Description
@@ -61,3 +65,10 @@ Implementation plan approved: Docs/superpowers/plans/2026-07-05-research-workspa
 - [ ] #5 Final summary added
 - [ ] #6 Known skips or blockers documented
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Task 2 started: adding Research Workspace output job schemas/API skeleton only; worker/media generation/persistence remain for later plan tasks.
+Task 2 complete: added output submit/status schemas, minimal Research Workspace output job helpers, POST/GET workspace output routes, and focused tests for validation, pending artifact/job creation, status projection, and status ownership isolation. Verification: red pytest failed on missing research_workspace_outputs module; green pytest tldw_Server_API/tests/Research_Workspace/test_output_jobs_api.py -v passed 7 tests; git diff --check passed; Bandit on touched backend implementation files passed with 0 results.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->

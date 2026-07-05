@@ -67,6 +67,11 @@ from tldw_Server_API.app.api.v1.schemas.workspace_schemas import (
     WorkspaceSourceUpdateRequest,
     WorkspaceUpsertRequest,
 )
+from tldw_Server_API.app.api.v1.schemas.research_workspace_outputs import (
+    ResearchWorkspaceOutputStatusResponse,
+    ResearchWorkspaceOutputSubmitRequest,
+    ResearchWorkspaceOutputSubmitResponse,
+)
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
@@ -77,6 +82,11 @@ from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabas
 from tldw_Server_API.app.core.DB_Management.media_db import api as media_db_api
 from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
 from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.Research_Workspace.output_jobs import (
+    ResearchWorkspaceOutputJobError,
+    get_research_workspace_output_job_status,
+    submit_research_workspace_output_job,
+)
 from tldw_Server_API.app.core.Sandbox.store import get_store as get_sandbox_store
 from tldw_Server_API.app.core.Sandbox.workspace_volumes import SandboxWorkspaceVolumeService
 from tldw_Server_API.app.core.Sharing.workspace_deletion_hook import on_workspace_deleted
@@ -2443,6 +2453,65 @@ async def delete_source(
         db.delete_workspace_source(workspace_id, source_id)
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to delete workspace source") from exc
+
+
+# ── Outputs ─────────────────────────────────────────────────────
+
+@router.post(
+    "/{workspace_id}/outputs",
+    response_model=ResearchWorkspaceOutputSubmitResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(WORKSPACES_WRITE_RATE_LIMIT)],
+    summary="Generate a Research Workspace media output",
+)
+async def submit_workspace_output(
+    workspace_id: str,
+    body: ResearchWorkspaceOutputSubmitRequest,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    jm: JobManager | None = Depends(try_get_workspace_job_manager),
+    current_user: User = Depends(get_request_user),
+) -> ResearchWorkspaceOutputSubmitResponse:
+    _require_workspace(db, workspace_id)
+    if jm is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="jobs_unavailable")
+    try:
+        return submit_research_workspace_output_job(
+            workspace_id=workspace_id,
+            request=body,
+            workspace_db=db,
+            job_manager=jm,
+            user_id=current_user.id,
+        )
+    except ResearchWorkspaceOutputJobError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.public_code) from exc
+
+
+@router.get(
+    "/{workspace_id}/outputs/{job_id}",
+    response_model=ResearchWorkspaceOutputStatusResponse,
+    dependencies=[Depends(WORKSPACES_READ_RATE_LIMIT)],
+    summary="Get a Research Workspace media output job",
+)
+async def get_workspace_output_status(
+    workspace_id: str,
+    job_id: int,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    jm: JobManager | None = Depends(try_get_workspace_job_manager),
+    current_user: User = Depends(get_request_user),
+) -> ResearchWorkspaceOutputStatusResponse:
+    _require_workspace(db, workspace_id)
+    if jm is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="jobs_unavailable")
+    try:
+        return get_research_workspace_output_job_status(
+            workspace_id=workspace_id,
+            job_id=job_id,
+            workspace_db=db,
+            job_manager=jm,
+            user_id=current_user.id,
+        )
+    except ResearchWorkspaceOutputJobError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.public_code) from exc
 
 
 # ── Artifacts ───────────────────────────────────────────────────
