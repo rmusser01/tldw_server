@@ -5,7 +5,11 @@ Registers shared test plugins and provides common fixtures.
 """
 from __future__ import annotations
 
-pytest_plugins = ["tldw_Server_API.tests._plugins.http_client_patch_guard"]
+pytest_plugins = [
+    "tldw_Server_API.tests._plugins.http_client_patch_guard",
+    # Opt-in via TLDW_SINGLETON_GUARD=warn|error; no-op otherwise.
+    "tldw_Server_API.tests._plugins.singleton_guard",
+]
 
 from collections.abc import Callable
 import os

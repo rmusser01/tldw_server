@@ -612,6 +612,12 @@ testpaths = ["tldw_Server_API/tests", "tldw_Server_API/app/core/MCP_unified/test
 python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+# NOTE: `plugins` is NOT a recognized `[tool.pytest.ini_options]` key — pytest
+# silently ignores it. The suite's plugins are actually loaded via
+# `pytest_plugins` in conftest.py (repo root) and
+# tldw_Server_API/tests/conftest.py. This list is kept only as documentation of
+# the intended plugin set; DO NOT register a new plugin here expecting it to
+# load — add it to a `pytest_plugins` tuple instead.
 plugins = [
     # Shared fixtures/plugins for the suite
     "tldw_Server_API.tests._plugins.authnz_fixtures",
