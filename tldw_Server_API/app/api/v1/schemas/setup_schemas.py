@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from tldw_Server_API.app.core.Setup import first_run_models
 from tldw_Server_API.app.core.Setup.audio_bundle_catalog import DEFAULT_AUDIO_RESOURCE_PROFILE
@@ -256,6 +256,8 @@ class McpToolsCatalogResponse(BaseModel):
 class McpToolsApplyRequest(BaseModel):
     """First-run MCP tool pack selection to persist in MCP Hub."""
 
+    model_config = ConfigDict(extra="forbid")
+
     selected_pack_ids: list[str] = Field(default_factory=list)
     selected_addon_ids: list[str] = Field(default_factory=list)
     confirmed_addon_ids: list[str] = Field(default_factory=list)
@@ -294,6 +296,8 @@ class McpToolsApplyResponse(BaseModel):
 
 class McpToolsValidateRequest(BaseModel):
     """Request to validate saved first-run MCP tool packs."""
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class McpToolsValidateResponse(BaseModel):

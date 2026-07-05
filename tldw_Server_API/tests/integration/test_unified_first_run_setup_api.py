@@ -338,6 +338,30 @@ def test_first_run_mcp_tools_state_rejects_raw_external_config(setup_client, mon
     assert response.json()["detail"] == "unsupported_first_run_step_data"
 
 
+def test_first_run_mcp_tools_apply_rejects_unknown_raw_config_fields(
+    setup_client,
+    monkeypatch,
+    tmp_path,
+):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_needs_setup(monkeypatch)
+    service = _FakeMcpToolsService()
+    _override_mcp_tools_service(monkeypatch, service)
+
+    response = setup_client.post(
+        "/api/v1/setup/first-run/mcp-tools/apply",
+        json={
+            "selected_pack_ids": ["research"],
+            "selected_addon_ids": [],
+            "endpoint_config": {"url": "https://example.test"},
+        },
+    )
+
+    assert response.status_code == 422
+    assert service.apply_requests == []
+
+
 def test_first_run_mcp_tools_apply_persists_numeric_profile_and_assignment(
     setup_client,
     monkeypatch,
@@ -550,6 +574,42 @@ def test_first_run_mcp_tools_validate_request_has_no_ignored_fields():
     assert setup_endpoint.McpToolsValidateRequest.model_fields == {}
 
 
+def test_first_run_mcp_tools_validate_rejects_unknown_execution_fields(
+    setup_client,
+    monkeypatch,
+    tmp_path,
+):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_needs_setup(monkeypatch)
+    store = FirstRunStateStore(state_path)
+    store.update_step(
+        "mcp_tools",
+        {
+            "acknowledged": True,
+            "selected_pack_ids": ["research"],
+            "selected_addon_ids": [],
+            "confirmed_addon_ids": [],
+            "confirmation_version": None,
+            "validation_state": "not_run",
+            "profile_id": 7,
+            "assignment_id": 11,
+            "catalog_version": "2026-07-04.v1",
+            "effective_tool_count": 3,
+        },
+    )
+    service = _FakeMcpToolsService(validate_result=_fake_mcp_validation_result())
+    _override_mcp_tools_service(monkeypatch, service)
+
+    response = setup_client.post(
+        "/api/v1/setup/first-run/mcp-tools/validate",
+        json={"tool_name": "notes.delete", "arguments": {}, "endpoint_config": {}},
+    )
+
+    assert response.status_code == 422
+    assert service.validate_requests == []
+
+
 def test_first_run_mcp_tools_validate_persists_safe_service_result_during_incomplete_setup(
     setup_client,
     monkeypatch,
@@ -645,6 +705,43 @@ def test_first_run_mcp_tools_validate_after_completion_without_auth_returns_403(
     state = FirstRunStateStore(state_path).load()
     assert state.status == FirstRunStatus.COMPLETED
     assert state.step_data["mcp_tools"]["validation_state"] == "not_run"
+
+
+def test_admin_mcp_tools_validate_rejects_unknown_execution_fields(
+    setup_client,
+    monkeypatch,
+    tmp_path,
+):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_completed(monkeypatch)
+    _override_mcp_tools_admin_guard(monkeypatch)
+    service = _FakeMcpToolsService(validate_result=_fake_mcp_validation_result())
+    _override_mcp_tools_service(monkeypatch, service)
+    store = FirstRunStateStore(state_path)
+    store.update_step(
+        "mcp_tools",
+        {
+            "acknowledged": True,
+            "selected_pack_ids": ["research"],
+            "selected_addon_ids": [],
+            "confirmed_addon_ids": [],
+            "confirmation_version": None,
+            "validation_state": "not_run",
+            "profile_id": 7,
+            "assignment_id": 11,
+            "catalog_version": "2026-07-04.v1",
+            "effective_tool_count": 3,
+        },
+    )
+
+    response = setup_client.post(
+        "/api/v1/setup/admin/mcp-tools/validate",
+        json={"tool_name": "notes.delete", "arguments": {}, "endpoint_config": {}},
+    )
+
+    assert response.status_code == 422
+    assert service.validate_requests == []
 
 
 def test_admin_mcp_tools_validate_after_completion_requires_system_configure(
