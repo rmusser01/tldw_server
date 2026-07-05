@@ -169,6 +169,74 @@ class WebSocketExternalMCPAdapter(ExternalMCPTransportAdapter):
 
         return tools
 
+    async def list_resources(self) -> list[dict[str, Any]]:
+        """Discover external resources and return normalized descriptors."""
+        await self._ensure_connected()
+        response = await self._jsonrpc_request("resources/list", {})
+
+        if response.get("error"):
+            raise RuntimeError(
+                f"External MCP resources/list failed for '{self.server_id}': "
+                f"{self._error_message(response['error'])}"
+            )
+
+        result = response.get("result") or {}
+        if isinstance(result, dict):
+            raw_resources = result.get("resources") or []
+        elif isinstance(result, list):
+            raw_resources = result
+        else:
+            raw_resources = []
+
+        resources: list[dict[str, Any]] = []
+        for item in raw_resources:
+            if not isinstance(item, dict):
+                continue
+            uri = item.get("uri")
+            if not isinstance(uri, str) or not uri.strip():
+                continue
+            name = item.get("name")
+            if not isinstance(name, str):
+                name = ""
+            description = item.get("description")
+            if not isinstance(description, str):
+                description = ""
+            mime_type = item.get("mimeType")
+            if not isinstance(mime_type, str):
+                mime_type = None
+            metadata = item.get("metadata")
+            if not isinstance(metadata, dict):
+                metadata = {}
+            resources.append(
+                {
+                    "uri": uri,
+                    "name": name,
+                    "description": description,
+                    "mimeType": mime_type,
+                    "metadata": dict(metadata),
+                }
+            )
+        return resources
+
+    async def read_resource(
+        self,
+        uri: str,
+        context: Optional[Any] = None,
+    ) -> dict[str, Any]:
+        """Read one external resource."""
+        del context
+        await self._ensure_connected()
+        response = await self._jsonrpc_request("resources/read", {"uri": uri})
+
+        if response.get("error"):
+            raise RuntimeError(
+                f"External MCP resources/read failed for '{self.server_id}': "
+                f"{self._error_message(response['error'])}"
+            )
+
+        result = response.get("result")
+        return dict(result) if isinstance(result, dict) else {"contents": []}
+
     async def call_tool(
         self,
         tool_name: str,

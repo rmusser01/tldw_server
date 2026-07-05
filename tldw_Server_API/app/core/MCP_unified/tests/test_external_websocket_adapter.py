@@ -185,6 +185,77 @@ async def test_websocket_adapter_call_tool_maps_upstream_error() -> None:
 
 
 @pytest.mark.asyncio
+async def test_websocket_adapter_lists_and_reads_resources() -> None:
+    cfg = _server_config()
+    ws = _FakeWebSocket()
+    ws.enqueue({"jsonrpc": "2.0", "id": 1, "result": {"serverInfo": {"name": "stub"}}})
+
+    async def _connector(**kwargs):
+        return ws
+
+    adapter = WebSocketExternalMCPAdapter(cfg, ws_connector=_connector)
+    try:
+        await adapter.connect()
+        list_task = asyncio.create_task(adapter.list_resources())
+        await _wait_for_sent(ws, expected_count=2)
+        list_request_id = ws.sent_messages[1]["id"]
+        ws.enqueue(
+            {
+                "jsonrpc": "2.0",
+                "id": list_request_id,
+                "result": {
+                    "resources": [
+                        {
+                            "uri": "docs://one",
+                            "name": "Docs One",
+                            "description": "Reference",
+                            "mimeType": "text/plain",
+                            "metadata": {"scope": "read"},
+                        },
+                        {"uri": 7, "name": "invalid"},
+                    ]
+                },
+            }
+        )
+        resources = await list_task
+
+        read_task = asyncio.create_task(adapter.read_resource("docs://one"))
+        await _wait_for_sent(ws, expected_count=3)
+        read_request = ws.sent_messages[2]
+        ws.enqueue(
+            {
+                "jsonrpc": "2.0",
+                "id": read_request["id"],
+                "result": {
+                    "contents": [
+                        {
+                            "uri": "docs://one",
+                            "mimeType": "text/plain",
+                            "text": "hello",
+                        }
+                    ]
+                },
+            }
+        )
+        result = await read_task
+
+        assert resources == [
+            {
+                "uri": "docs://one",
+                "name": "Docs One",
+                "description": "Reference",
+                "mimeType": "text/plain",
+                "metadata": {"scope": "read"},
+            }
+        ]
+        assert read_request["method"] == "resources/read"
+        assert read_request["params"] == {"uri": "docs://one"}
+        assert result["contents"][0]["text"] == "hello"
+    finally:
+        await adapter.close()
+
+
+@pytest.mark.asyncio
 async def test_websocket_adapter_request_timeout_clears_pending() -> None:
     cfg = _server_config(request_seconds=0.1)
     ws = _FakeWebSocket()

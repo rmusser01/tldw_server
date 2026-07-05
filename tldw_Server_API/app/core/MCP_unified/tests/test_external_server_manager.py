@@ -20,6 +20,7 @@ from tldw_Server_API.app.core.MCP_unified.external_servers.transports.base impor
     adapter_supports_runtime_auth,
     call_tool_with_ephemeral_adapter,
 )
+from tldw_Server_API.app.core.exceptions import ResourceNotFoundError
 
 
 def _ensure(condition: bool, message: str) -> None:
@@ -154,6 +155,18 @@ def test_parse_virtual_tool_name_routing_contract() -> None:
         ExternalServerManager.parse_virtual_tool_name("docs.search")
     with pytest.raises(ValueError, match="must match 'ext.<server_id>.<tool_name>'"):
         ExternalServerManager.parse_virtual_tool_name("ext.docs")
+
+
+@pytest.mark.asyncio
+async def test_default_external_transport_read_resource_raises_domain_not_found() -> None:
+    """The default resource read path raises the project not-found exception."""
+    adapter = _FakeAdapter("docs", [])
+
+    with pytest.raises(ResourceNotFoundError) as exc_info:
+        await adapter.read_resource("resource://docs/missing")
+
+    assert exc_info.value.resource == "external_resource"
+    assert exc_info.value.identifier == "resource://docs/missing"
 
 
 def test_adapter_runtime_auth_compatibility_helper_handles_legacy_signature() -> None:
