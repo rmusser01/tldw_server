@@ -2471,10 +2471,10 @@ async def submit_workspace_output(
     jm: JobManager | None = Depends(try_get_workspace_job_manager),
     current_user: User = Depends(get_request_user),
 ) -> ResearchWorkspaceOutputSubmitResponse:
-    _require_workspace(db, workspace_id)
-    if jm is None:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="jobs_unavailable")
     try:
+        _require_workspace(db, workspace_id)
+        if jm is None:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="jobs_unavailable")
         return submit_research_workspace_output_job(
             workspace_id=workspace_id,
             request=body,
@@ -2484,6 +2484,8 @@ async def submit_workspace_output(
         )
     except ResearchWorkspaceOutputJobError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.public_code) from exc
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to submit workspace output job") from exc
 
 
 @router.get(
@@ -2499,10 +2501,10 @@ async def get_workspace_output_status(
     jm: JobManager | None = Depends(try_get_workspace_job_manager),
     current_user: User = Depends(get_request_user),
 ) -> ResearchWorkspaceOutputStatusResponse:
-    _require_workspace(db, workspace_id)
-    if jm is None:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="jobs_unavailable")
     try:
+        _require_workspace(db, workspace_id)
+        if jm is None:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="jobs_unavailable")
         return get_research_workspace_output_job_status(
             workspace_id=workspace_id,
             job_id=job_id,
@@ -2512,6 +2514,8 @@ async def get_workspace_output_status(
         )
     except ResearchWorkspaceOutputJobError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.public_code) from exc
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to fetch workspace output job") from exc
 
 
 # ── Artifacts ───────────────────────────────────────────────────

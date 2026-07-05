@@ -77,21 +77,34 @@ def submit_research_workspace_output_job(
             settings=request.settings,
         ),
     )
-    job = job_manager.create_job(
-        domain=RESEARCH_WORKSPACE_OUTPUT_JOB_DOMAIN,
-        queue=research_workspace_output_jobs_queue(),
-        job_type=RESEARCH_WORKSPACE_OUTPUT_JOB_TYPE,
-        owner_user_id=str(user_id),
-        payload={
-            "workspace_id": workspace_id,
-            "artifact_id": artifact_id,
-            "artifact_type": request.artifact_type,
-            "source_ids": request.source_ids,
-            "settings": request.settings.model_dump(exclude_none=True),
-            "user_id": str(user_id),
-        },
-        max_retries=1,
-    )
+    try:
+        job = job_manager.create_job(
+            domain=RESEARCH_WORKSPACE_OUTPUT_JOB_DOMAIN,
+            queue=research_workspace_output_jobs_queue(),
+            job_type=RESEARCH_WORKSPACE_OUTPUT_JOB_TYPE,
+            owner_user_id=str(user_id),
+            payload={
+                "workspace_id": workspace_id,
+                "artifact_id": artifact_id,
+                "artifact_type": request.artifact_type,
+                "source_ids": request.source_ids,
+                "settings": request.settings.model_dump(exclude_none=True),
+                "user_id": str(user_id),
+            },
+            max_retries=1,
+        )
+    except Exception as exc:
+        try:
+            workspace_db.delete_workspace_artifact(workspace_id, artifact_id)
+        except Exception as cleanup_exc:
+            raise ResearchWorkspaceOutputJobError(
+                "output_job_enqueue_failed",
+                status_code=503,
+            ) from cleanup_exc
+        raise ResearchWorkspaceOutputJobError(
+            "output_job_enqueue_failed",
+            status_code=503,
+        ) from exc
     return ResearchWorkspaceOutputSubmitResponse(
         job_id=int(job["id"]),
         status=_public_job_status(job.get("status")),
@@ -181,7 +194,7 @@ def _pending_artifact_payload(
 def _validate_job_scope(job: dict[str, Any], *, workspace_id: str, user_id: str) -> None:
     if job.get("job_type") != RESEARCH_WORKSPACE_OUTPUT_JOB_TYPE:
         raise ResearchWorkspaceOutputJobError("job_not_found", status_code=404)
-    if job.get("domain") and job.get("domain") != RESEARCH_WORKSPACE_OUTPUT_JOB_DOMAIN:
+    if job.get("domain") != RESEARCH_WORKSPACE_OUTPUT_JOB_DOMAIN:
         raise ResearchWorkspaceOutputJobError("job_not_found", status_code=404)
 
     payload = _normalize_job_mapping(job.get("payload"))
