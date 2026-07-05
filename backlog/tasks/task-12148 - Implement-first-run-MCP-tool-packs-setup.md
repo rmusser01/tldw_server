@@ -1,7 +1,7 @@
 ---
 id: TASK-12148
 title: Implement first-run MCP tool packs setup
-status: Done
+status: In Progress
 assignee: []
 created_date: 2026-07-04 23:41
 updated_date: 2026-07-05 02:54
