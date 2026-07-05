@@ -2371,6 +2371,14 @@ const ResearchWorkspaceBody: React.FC = () => {
     }
   }, [currentResearchWorkspaceSearch, switchWorkspace, workspaceId])
 
+  const openWorkspaceAgentTask = React.useCallback(
+    (prefill: WorkspaceAgentTaskPrefill) => {
+      setAgentTaskPrefill(prefill)
+      setAgentTaskHandoffOpenSignal((current) => current + 1)
+    },
+    []
+  )
+
   const handleImportDeepResearchBundle = React.useCallback(async () => {
     if (!activeDeepResearchReturnContext || !activeDeepResearchReturnKey) return
 
@@ -3267,6 +3275,7 @@ const ResearchWorkspaceBody: React.FC = () => {
           onRefreshResearchWorkspaceCapabilities={
             refreshResearchWorkspaceCapabilitiesIfStale
           }
+          onStartWorkspaceTask={openWorkspaceAgentTask}
         />
       )
     },
@@ -3842,6 +3851,7 @@ const ResearchWorkspaceBody: React.FC = () => {
                 onRefreshResearchWorkspaceCapabilities={
                   refreshResearchWorkspaceCapabilitiesIfStale
                 }
+                onStartWorkspaceTask={openWorkspaceAgentTask}
               />
             </main>
 

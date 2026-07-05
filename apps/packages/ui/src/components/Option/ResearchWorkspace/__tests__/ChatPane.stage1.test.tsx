@@ -398,6 +398,54 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     expect(vi.mocked(getDesignSystemState)).toHaveBeenCalledWith("degraded")
   })
 
+  it("starts a workspace agent task from chat context", () => {
+    const onStartWorkspaceTask = vi.fn()
+    workspaceStoreState.sources = [
+      {
+        id: "source-1",
+        mediaId: 42,
+        title: "DSPy Prompting Talk",
+        type: "video",
+        status: "ready"
+      }
+    ]
+    workspaceStoreState.selectedSourceIds = ["source-1"]
+    workspaceStoreState.getSelectedSources = () => [
+      { id: "source-1", title: "DSPy Prompting Talk" }
+    ]
+    workspaceStoreState.getSelectedMediaIds = () => [42]
+    workspaceStoreState.getEffectiveSelectedMediaIds = () => [42]
+    messageOptionState.messages = [
+      {
+        id: "message-1",
+        isBot: false,
+        name: "User",
+        message: "Find the places where the speaker contradicts the paper.",
+        sources: []
+      }
+    ]
+
+    renderChatPane({ onStartWorkspaceTask })
+
+    fireEvent.click(screen.getByRole("button", { name: "Start workspace task" }))
+
+    expect(onStartWorkspaceTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: expect.stringContaining("chat"),
+        description: expect.stringContaining("DSPy Prompting Talk"),
+        metadata: expect.objectContaining({
+          entrypoint: "chat",
+          workspaceId: "workspace-a",
+          selectedSourceIds: ["source-1"],
+          selectedSourceTitles: ["DSPy Prompting Talk"],
+          messageCount: 1,
+          latestUserMessagePreview:
+            "Find the places where the speaker contradicts the paper."
+        })
+      })
+    )
+  })
+
   it("submits the composer with Cmd/Ctrl+Enter", async () => {
     renderChatPane()
 
