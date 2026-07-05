@@ -13,6 +13,33 @@ where browser launch failures must be separated from product failures.
 - If the WebUI is autostarted, bind it to localhost explicitly. The runner
   defaults to `bun run dev -- -H 127.0.0.1 -p 8080` instead of the broader
   bind that previously failed with `EPERM`.
+- Strict sandbox diagnostics require a backend started with the sandbox route
+  enabled in `config.txt` or a temporary `TLDW_CONFIG_FILE`. Normal runtime
+  does not use `ROUTES_ENABLE=sandbox`; that override is test-only.
+
+Add this to a copied backend config used through `TLDW_CONFIG_FILE`:
+
+```ini
+[API-Routes]
+stable_only = true
+enable = sandbox
+
+[Sandbox]
+enable_execution = true
+```
+
+Keep `stable_only = true` in copied configs; omitting it changes the backend
+route-policy fallback for an explicitly present `[API-Routes]` section.
+
+For real Docker evidence, start the backend with fake execution disabled and a
+reachable Docker daemon:
+
+```bash
+TLDW_CONFIG_FILE=/tmp/research-workspace-uat-sandbox-config.txt \
+SANDBOX_ENABLE_EXECUTION=1 \
+TLDW_SANDBOX_DOCKER_FAKE_EXEC=0 \
+python -m uvicorn tldw_Server_API.app.main:app --host 127.0.0.1 --port 8000
+```
 
 ## Command
 
@@ -35,6 +62,8 @@ Useful overrides:
 TLDW_WEB_AUTOSTART=false \
 TLDW_WEB_URL=http://localhost:8080 \
 NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 \
+TLDW_E2E_REQUIRE_SANDBOX_WORKSPACE_RUN=1 \
+TLDW_E2E_EXPECT_SANDBOX_RUN_PHASE=completed \
 bun run e2e:research-workspace:uat -- --no-autostart
 ```
 
