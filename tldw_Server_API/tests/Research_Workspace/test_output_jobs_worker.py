@@ -34,6 +34,20 @@ async def test_worker_rejects_unrelated_job_type(fake_job_manager: Any) -> None:
     assert excinfo.value.retryable is False
 
 
+def test_worker_rejects_payload_user_id_mismatch() -> None:
+    worker = _worker_module()
+    output_jobs = _output_jobs_module()
+
+    with pytest.raises(output_jobs.ResearchWorkspaceOutputJobError) as excinfo:
+        worker.resolve_research_workspace_output_job_user_id(
+            {"owner_user_id": "8"},
+            {"user_id": "7"},
+        )
+
+    assert excinfo.value.public_code == "owner_user_id_mismatch"
+    assert excinfo.value.retryable is False
+
+
 @pytest.mark.asyncio
 async def test_worker_processes_valid_job_with_open_databases(
     monkeypatch: pytest.MonkeyPatch,
@@ -69,6 +83,7 @@ async def test_worker_processes_valid_job_with_open_databases(
         {
             "id": 10,
             "job_type": output_jobs.RESEARCH_WORKSPACE_OUTPUT_JOB_TYPE,
+            "owner_user_id": "7",
             "payload": {"user_id": "7", "artifact_id": "artifact-1"},
         },
         job_manager=fake_job_manager,

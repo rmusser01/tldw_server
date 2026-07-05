@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any
 
@@ -80,13 +81,21 @@ async def process_research_workspace_output_job(
 
 
 def resolve_research_workspace_output_job_user_id(job: dict[str, Any], payload: dict[str, Any]) -> int:
-    owner = payload.get("user_id") or job.get("owner_user_id")
     try:
-        user_id = int(owner)
+        user_id = int(job.get("owner_user_id"))
     except (TypeError, ValueError) as exc:
         raise ResearchWorkspaceOutputJobError("missing_owner_user_id", retryable=False) from exc
     if user_id <= 0:
         raise ResearchWorkspaceOutputJobError("missing_owner_user_id", retryable=False)
+
+    payload_owner = payload.get("user_id")
+    if payload_owner is not None and str(payload_owner).strip():
+        try:
+            payload_user_id = int(payload_owner)
+        except (TypeError, ValueError) as exc:
+            raise ResearchWorkspaceOutputJobError("owner_user_id_mismatch", retryable=False) from exc
+        if payload_user_id != user_id:
+            raise ResearchWorkspaceOutputJobError("owner_user_id_mismatch", retryable=False)
     return user_id
 
 
@@ -141,7 +150,7 @@ async def run_research_workspace_output_jobs_worker(stop_event: asyncio.Event | 
         sdk.stop()
 
     logger.info("Starting Research Workspace Output Jobs worker")
-    stop_task = asyncio.create_task(_watch_stop())
+    stop_task = asyncio.create_task(_watch_stop()) if stop_event is not None else None
     try:
         await sdk.run(
             handler=_handle_job,
@@ -149,4 +158,7 @@ async def run_research_workspace_output_jobs_worker(stop_event: asyncio.Event | 
             job_type=RESEARCH_WORKSPACE_OUTPUT_JOB_TYPE,
         )
     finally:
-        stop_task.cancel()
+        if stop_task is not None:
+            stop_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await stop_task
