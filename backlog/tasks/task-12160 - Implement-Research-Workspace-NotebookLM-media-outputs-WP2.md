@@ -66,3 +66,10 @@ Task 6 complete: routed video_overview jobs to real backend narrated slideshow g
 - [ ] #5 Final summary added
 - [ ] #6 Known skips or blockers documented
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Task 6 quality-review fixes starting: adding red regression coverage for provider-aware TTS defaults, best-effort progress updates, slide metadata sanitization before render, TTS failure error mapping/retryability, and cleanup of durable output rows/files when finalization fails.
+Task 6 quality-review fixes complete: video_overview now resolves TTS provider/model/voice via the shared TTS default resolver, treats progress persistence as best effort, strips generated slide metadata before render, maps slide/TTS failures to bounded public error codes with retryability, and cleans durable narration/final output rows plus files when rendering/final workspace updates fail. Verification: red focused pytest failed 5 review-regression tests for the expected issues; green focused pytest passed the same 5 tests; full worker suite passed 26 tests; combined output API/startup/worker suite passed 39 tests; git diff --check passed; Bandit on output_jobs.py passed with 0 findings (/tmp/bandit_task12160_task6_review_fix.json).
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->

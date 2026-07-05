@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 import json
 import os
+from pathlib import Path
 import re
 import uuid
 from typing import Any, cast
@@ -38,7 +39,15 @@ from tldw_Server_API.app.core.File_Artifacts.adapters.image_adapter import Image
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Slides.presentation_rendering import PresentationRenderError, render_presentation_video
 from tldw_Server_API.app.core.Slides.slides_db import SlidesDatabase
-from tldw_Server_API.app.core.Slides.slides_generator import SlidesGenerator
+from tldw_Server_API.app.core.Slides.slides_generator import (
+    SlidesGenerationError,
+    SlidesGenerationInputError,
+    SlidesGenerationOutputError,
+    SlidesGenerator,
+    SlidesSourceTooLargeError,
+)
+from tldw_Server_API.app.core.TTS.tts_exceptions import TTSError, is_retryable_error
+from tldw_Server_API.app.core.TTS.tts_request_resolution import resolve_tts_request_defaults
 from tldw_Server_API.app.core.TTS.tts_service_v2 import get_tts_service_v2
 
 RESEARCH_WORKSPACE_OUTPUT_JOB_DOMAIN = "research_workspace"
@@ -102,6 +111,7 @@ class ResearchWorkspacePersistedOutput:
     format: str
     content_type: str
     byte_size: int
+    storage_path: str | None = None
 
 
 def _safe_public_error_code(value: str) -> str:
@@ -302,7 +312,92 @@ def persist_research_workspace_output_bytes(
         format=format_,
         content_type=content_type,
         byte_size=len(content),
+        storage_path=storage_path,
     )
+
+
+def _cleanup_research_workspace_created_outputs(
+    *,
+    collections_db: Any,
+    user_id: int,
+    outputs: list[ResearchWorkspacePersistedOutput],
+    storage_paths: list[str],
+) -> None:
+    seen_output_ids: set[int] = set()
+    for output in reversed(outputs):
+        if output.storage_path:
+            storage_paths.append(output.storage_path)
+        if output.output_id in seen_output_ids:
+            continue
+        seen_output_ids.add(output.output_id)
+        delete_output = getattr(collections_db, "delete_output_artifact", None)
+        if not callable(delete_output):
+            continue
+        try:
+            delete_output(output.output_id, hard=True)
+        except Exception:
+            logger.warning(
+                "Failed to clean up research workspace output row: user_id={} output_id={}",
+                user_id,
+                output.output_id,
+            )
+
+    seen_storage_paths: set[str] = set()
+    for storage_path in storage_paths:
+        storage_path_text = str(storage_path or "").strip()
+        if not storage_path_text or storage_path_text in seen_storage_paths:
+            continue
+        seen_storage_paths.add(storage_path_text)
+        _unlink_research_workspace_output_path(
+            collections_db=collections_db,
+            user_id=user_id,
+            storage_path=storage_path_text,
+        )
+
+
+def _unlink_research_workspace_output_path(
+    *,
+    collections_db: Any,
+    user_id: int,
+    storage_path: str,
+) -> None:
+    outputs_dir = DatabasePaths.get_user_outputs_dir(user_id)
+    try:
+        base_path = outputs_dir.resolve(strict=False)
+        resolve_storage_path = getattr(collections_db, "resolve_output_storage_path", None)
+        if callable(resolve_storage_path):
+            try:
+                storage_path = str(resolve_storage_path(storage_path))
+            except Exception:
+                storage_path = str(storage_path)
+        candidate_path = Path(storage_path)
+        path = candidate_path if candidate_path.is_absolute() else outputs_dir / candidate_path
+        resolved_path = path.resolve(strict=False)
+        if not resolved_path.is_relative_to(base_path):
+            return
+        resolved_path.unlink(missing_ok=True)
+    except Exception:
+        logger.warning("Failed to clean up research workspace output file: user_id={}", user_id)
+
+
+def _cleanup_research_workspace_created_outputs_for_user(
+    *,
+    user_id: int,
+    outputs: list[ResearchWorkspacePersistedOutput],
+    storage_paths: list[str],
+) -> None:
+    if not outputs and not storage_paths:
+        return
+    try:
+        with CollectionsDatabase.for_user(user_id=str(user_id)) as collections_db:
+            _cleanup_research_workspace_created_outputs(
+                collections_db=collections_db,
+                user_id=user_id,
+                outputs=outputs,
+                storage_paths=storage_paths,
+            )
+    except Exception:
+        logger.warning("Failed to clean up research workspace created outputs: user_id={}", user_id)
 
 
 async def process_research_workspace_output_payload(
@@ -504,6 +599,21 @@ async def _process_infographic_output_payload(
     }
 
 
+def _slides_generation_job_error(exc: SlidesGenerationError) -> ResearchWorkspaceOutputJobError:
+    if isinstance(exc, SlidesSourceTooLargeError):
+        return ResearchWorkspaceOutputJobError("slides_source_too_large", retryable=False)
+    if isinstance(exc, (SlidesGenerationInputError, SlidesGenerationOutputError)):
+        return ResearchWorkspaceOutputJobError("slides_generation_invalid", retryable=False)
+    return ResearchWorkspaceOutputJobError("slides_generation_failed", retryable=True)
+
+
+def _tts_generation_job_error(exc: TTSError) -> ResearchWorkspaceOutputJobError:
+    return ResearchWorkspaceOutputJobError(
+        "tts_generation_failed",
+        retryable=is_retryable_error(exc),
+    )
+
+
 async def _process_video_overview_output_payload(
     *,
     job: dict[str, Any],
@@ -523,9 +633,17 @@ async def _process_video_overview_output_payload(
         for source_id in payload.get("source_ids") or []
         if str(source_id).strip()
     ]
-    tts_model = settings.tts_model or "kokoro"
-    tts_voice = settings.tts_voice or "af_heart"
+    tts_defaults = resolve_tts_request_defaults(
+        provider=settings.tts_provider,
+        model=settings.tts_model,
+        voice=settings.tts_voice,
+    )
+    tts_provider = tts_defaults.provider
+    tts_model = tts_defaults.model
+    tts_voice = tts_defaults.voice
     title = settings.title_hint or "Video Overview"
+    created_outputs: list[ResearchWorkspacePersistedOutput] = []
+    created_storage_paths: list[str] = []
 
     try:
         _update_output_job_progress(job_manager, job_id, progress, 15.0, "build_source_context")
@@ -536,34 +654,47 @@ async def _process_video_overview_output_payload(
             source_ids=source_ids,
         )
         _update_output_job_progress(job_manager, job_id, progress, 30.0, "generate_slides")
-        generated = SlidesGenerator().generate_from_text(
-            source_text=source_context.text,
-            title_hint=settings.title_hint,
-            provider=settings.provider or DEFAULT_LLM_PROVIDER,
-            model=settings.model,
-            api_key=None,
-            temperature=None,
-            max_tokens=None,
-            max_source_tokens=None,
-            max_source_chars=None,
-            enable_chunking=True,
-            chunk_size_tokens=None,
-            summary_tokens=None,
-            visual_style_snapshot=None,
-        )
+        try:
+            generated = SlidesGenerator().generate_from_text(
+                source_text=source_context.text,
+                title_hint=settings.title_hint,
+                provider=settings.provider or DEFAULT_LLM_PROVIDER,
+                model=settings.model,
+                api_key=None,
+                temperature=None,
+                max_tokens=None,
+                max_source_tokens=None,
+                max_source_chars=None,
+                enable_chunking=True,
+                chunk_size_tokens=None,
+                summary_tokens=None,
+                visual_style_snapshot=None,
+            )
+        except SlidesGenerationError as exc:
+            raise _slides_generation_job_error(exc) from exc
         title = str(generated.get("title") or title).strip() or title
         slides = _normalize_video_overview_slides(generated.get("slides"))
 
         with CollectionsDatabase.for_user(user_id=str(user_id)) as collections_db:
             _update_output_job_progress(job_manager, job_id, progress, 50.0, "generate_narration")
             for slide in slides:
-                audio_bytes = await generate_tts_audio_bytes(
-                    text=_slide_narration_text(slide),
-                    provider=settings.tts_provider,
-                    model=tts_model,
-                    voice=tts_voice,
-                    user_id=user_id,
-                )
+                try:
+                    audio_bytes = await generate_tts_audio_bytes(
+                        text=_slide_narration_text(slide),
+                        provider=tts_provider,
+                        model=tts_model,
+                        voice=tts_voice,
+                        user_id=user_id,
+                    )
+                except ResearchWorkspaceOutputJobError:
+                    raise
+                except TTSError as exc:
+                    raise _tts_generation_job_error(exc) from exc
+                except Exception as exc:
+                    raise ResearchWorkspaceOutputJobError(
+                        "tts_generation_failed",
+                        retryable=True,
+                    ) from exc
                 audio_output = persist_research_workspace_output_bytes(
                     collections_db=collections_db,
                     user_id=user_id,
@@ -577,6 +708,7 @@ async def _process_video_overview_output_payload(
                     workspace_artifact_id=artifact_id,
                     metadata={"output_format": "mp3", "content_type": "audio/mpeg"},
                 )
+                created_outputs.append(audio_output)
                 slide.setdefault("metadata", {}).setdefault("studio", {}).setdefault("audio", {})[
                     "asset_ref"
                 ] = f"output:{audio_output.output_id}"
@@ -627,12 +759,14 @@ async def _process_video_overview_output_payload(
                 collections_db=collections_db,
                 user_id=user_id,
             )
+            render_storage_path = str(render_result.storage_path)
+            created_storage_paths.append(render_storage_path)
             final_artifact = collections_db.create_output_artifact(
                 job_id=job_id,
                 type_="research_workspace_video_overview",
                 title=title,
                 format_="mp4",
-                storage_path=render_result.storage_path,
+                storage_path=render_storage_path,
                 workspace_tag=f"workspace:{workspace_id}",
                 metadata_json=json.dumps(
                     {
@@ -644,7 +778,7 @@ async def _process_video_overview_output_payload(
                         "slide_count": len(slides),
                         "content_type": "video/mp4",
                         "byte_size": int(render_result.byte_size),
-                        "tts_provider": settings.tts_provider,
+                        "tts_provider": tts_provider,
                         "tts_model": tts_model,
                         "tts_voice": tts_voice,
                         "output_format": render_result.output_format,
@@ -653,6 +787,11 @@ async def _process_video_overview_output_payload(
                 ),
             )
     except ResearchWorkspaceOutputJobError as exc:
+        _cleanup_research_workspace_created_outputs_for_user(
+            user_id=user_id,
+            outputs=created_outputs,
+            storage_paths=created_storage_paths,
+        )
         _try_mark_workspace_output_artifact_failed(
             workspace_db=workspace_db,
             workspace_id=workspace_id,
@@ -667,6 +806,11 @@ async def _process_video_overview_output_payload(
             str(exc.code),
             retryable=getattr(exc, "retryable", False),
         )
+        _cleanup_research_workspace_created_outputs_for_user(
+            user_id=user_id,
+            outputs=created_outputs,
+            storage_paths=created_storage_paths,
+        )
         _try_mark_workspace_output_artifact_failed(
             workspace_db=workspace_db,
             workspace_id=workspace_id,
@@ -678,6 +822,11 @@ async def _process_video_overview_output_payload(
         raise job_error from exc
     except Exception as exc:
         public_code = "video_overview_generation_failed"
+        _cleanup_research_workspace_created_outputs_for_user(
+            user_id=user_id,
+            outputs=created_outputs,
+            storage_paths=created_storage_paths,
+        )
         _try_mark_workspace_output_artifact_failed(
             workspace_db=workspace_db,
             workspace_id=workspace_id,
@@ -686,7 +835,7 @@ async def _process_video_overview_output_payload(
             job_id=job_id,
             error_code=public_code,
         )
-        raise ResearchWorkspaceOutputJobError(public_code, retryable=False) from exc
+        raise ResearchWorkspaceOutputJobError(public_code, retryable=True) from exc
 
     persisted = ResearchWorkspacePersistedOutput(
         output_id=int(final_artifact.id),
@@ -694,7 +843,9 @@ async def _process_video_overview_output_payload(
         format=str(render_result.output_format),
         content_type="video/mp4",
         byte_size=int(render_result.byte_size),
+        storage_path=render_storage_path,
     )
+    created_outputs.append(persisted)
     export_ref = {
         "id": persisted.output_id,
         "fileId": persisted.output_id,
@@ -704,31 +855,47 @@ async def _process_video_overview_output_payload(
         "content_type": persisted.content_type,
         "bytes": persisted.byte_size,
     }
-    _update_workspace_output_artifact(
-        workspace_db=workspace_db,
-        workspace_id=workspace_id,
-        artifact_id=artifact_id,
-        updates={
-            "status": "complete",
-            "content_type": "video/mp4",
-            "preview_text": source_context.preview_text,
-            "summary": "Generated video overview",
-            "source_lineage": source_context.source_lineage,
-            "producer_metadata": {
-                "origin": "research_workspace_output_job",
-                "job_id": job_id,
-                "artifact_type": "video_overview",
-                "presentation_id": str(presentation.id),
-                "presentation_version": int(presentation.version),
-                "slide_count": len(slides),
-                "tts_provider": settings.tts_provider,
-                "tts_model": tts_model,
-                "tts_voice": tts_voice,
+    try:
+        _update_workspace_output_artifact(
+            workspace_db=workspace_db,
+            workspace_id=workspace_id,
+            artifact_id=artifact_id,
+            updates={
+                "status": "complete",
+                "content_type": "video/mp4",
+                "preview_text": source_context.preview_text,
+                "summary": "Generated video overview",
+                "source_lineage": source_context.source_lineage,
+                "producer_metadata": {
+                    "origin": "research_workspace_output_job",
+                    "job_id": job_id,
+                    "artifact_type": "video_overview",
+                    "presentation_id": str(presentation.id),
+                    "presentation_version": int(presentation.version),
+                    "slide_count": len(slides),
+                    "tts_provider": tts_provider,
+                    "tts_model": tts_model,
+                    "tts_voice": tts_voice,
+                },
+                "export_refs": [export_ref],
+                "completed_at": _utc_now_iso(),
             },
-            "export_refs": [export_ref],
-            "completed_at": _utc_now_iso(),
-        },
-    )
+        )
+    except ResearchWorkspaceOutputJobError as exc:
+        _cleanup_research_workspace_created_outputs_for_user(
+            user_id=user_id,
+            outputs=created_outputs,
+            storage_paths=created_storage_paths,
+        )
+        _try_mark_workspace_output_artifact_failed(
+            workspace_db=workspace_db,
+            workspace_id=workspace_id,
+            artifact_id=artifact_id,
+            artifact_type="video_overview",
+            job_id=job_id,
+            error_code=exc.public_code,
+        )
+        raise
     return {
         "workspace_id": workspace_id,
         "artifact_id": artifact_id,
@@ -1034,7 +1201,6 @@ def _normalize_video_overview_slides(value: Any) -> list[dict[str, Any]]:
     slides: list[dict[str, Any]] = []
     for index, item in enumerate(raw_slides[:_VIDEO_OVERVIEW_MAX_SLIDES]):
         slide = dict(item) if isinstance(item, Mapping) else {}
-        metadata = slide.get("metadata") if isinstance(slide.get("metadata"), dict) else {}
         slides.append(
             {
                 "order": index,
@@ -1042,7 +1208,7 @@ def _normalize_video_overview_slides(value: Any) -> list[dict[str, Any]]:
                 "title": str(slide.get("title") or f"Slide {index + 1}").strip(),
                 "content": str(slide.get("content") or "").strip(),
                 "speaker_notes": str(slide.get("speaker_notes") or "").strip(),
-                "metadata": dict(metadata),
+                "metadata": {},
             }
         )
     if not slides:
@@ -1080,7 +1246,14 @@ def _update_output_job_progress(
         progress.message = message
     update = getattr(job_manager, "update_job_progress", None)
     if callable(update):
-        update(job_id, progress_percent=percent, progress_message=message)
+        try:
+            update(job_id, progress_percent=percent, progress_message=message)
+        except Exception:
+            logger.warning(
+                "Research workspace output progress update failed: job_id={} message={}",
+                job_id,
+                message,
+            )
 
 
 def _update_workspace_output_artifact(

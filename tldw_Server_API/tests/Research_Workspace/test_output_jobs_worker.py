@@ -79,6 +79,167 @@ def fake_collections_db() -> object:
     return _FakeCollectionsDB()
 
 
+class _VideoWorkspaceDB:
+    def __init__(self, *, fail_complete_update: bool = False) -> None:
+        self.artifact = {"id": "video_overview-1", "version": 1, "export_refs": []}
+        self.fail_complete_update = fail_complete_update
+        self.updates: list[dict[str, Any]] = []
+
+    def get_workspace_artifact(self, workspace_id: str, artifact_id: str) -> dict[str, Any] | None:
+        assert workspace_id == "ws-1"
+        assert artifact_id == "video_overview-1"
+        return dict(self.artifact)
+
+    def update_workspace_artifact(
+        self,
+        workspace_id: str,
+        artifact_id: str,
+        updates: dict[str, Any],
+        *,
+        expected_version: int,
+    ) -> dict[str, Any]:
+        assert workspace_id == "ws-1"
+        assert artifact_id == "video_overview-1"
+        assert expected_version == self.artifact["version"]
+        if self.fail_complete_update and updates.get("status") == "complete":
+            raise RuntimeError("stale workspace artifact version")
+        self.updates.append(updates)
+        self.artifact.update(updates)
+        self.artifact["version"] = expected_version + 1
+        return dict(self.artifact)
+
+
+def _video_slide(metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+    return {
+        "order": 0,
+        "layout": "content",
+        "title": "Slide",
+        "content": "Point",
+        "speaker_notes": "Narration",
+        "metadata": metadata or {},
+    }
+
+
+def _video_payload(settings: dict[str, Any] | None = None) -> dict[str, Any]:
+    return {
+        "workspace_id": "ws-1",
+        "artifact_id": "video_overview-1",
+        "artifact_type": "video_overview",
+        "source_ids": ["src-1"],
+        "settings": settings or {"title_hint": "Video Brief"},
+        "user_id": "42",
+    }
+
+
+def _install_video_overview_success_doubles(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Any,
+    output_jobs: Any,
+    *,
+    slides: list[dict[str, Any]] | None = None,
+    tts_impl: Any | None = None,
+    render_impl: Any | None = None,
+) -> dict[str, Any]:
+    generated_slides = slides or [_video_slide()]
+    render_calls: list[dict[str, Any]] = []
+    tts_calls: list[dict[str, Any]] = []
+
+    class _CollectionsDB:
+        instances: list[Any] = []
+
+        def __init__(self) -> None:
+            self.user_id = 42
+            self.created: list[dict[str, Any]] = []
+            self.deleted: list[dict[str, Any]] = []
+            self.__class__.instances.append(self)
+
+        @classmethod
+        def for_user(cls, user_id: str) -> Any:
+            assert user_id == "42"
+            return cls()
+
+        def __enter__(self) -> "_CollectionsDB":
+            return self
+
+        def __exit__(self, *exc_info: object) -> None:
+            return None
+
+        def resolve_output_storage_path(self, path_value: str) -> str:
+            return str(path_value)
+
+        def create_output_artifact(self, **kwargs: object) -> SimpleNamespace:
+            output_id = 200 + len(self.created)
+            row = {**kwargs, "id": output_id}
+            self.created.append(row)
+            return SimpleNamespace(id=output_id)
+
+        def delete_output_artifact(self, output_id: int, *, hard: bool = False) -> bool:
+            self.deleted.append({"output_id": output_id, "hard": hard})
+            return True
+
+    class _SlidesGenerator:
+        def generate_from_text(self, **kwargs: object) -> dict[str, Any]:
+            assert kwargs["source_text"] == "source facts"
+            return {"title": "Video Brief", "slides": generated_slides}
+
+    class _SlidesDatabase:
+        instances: list[Any] = []
+
+        def __init__(self, *, db_path: str, client_id: str) -> None:
+            assert db_path == str(tmp_path / "slides.db")
+            assert client_id == "42"
+            self.closed = False
+            self.__class__.instances.append(self)
+
+        def create_presentation(self, **kwargs: object) -> SimpleNamespace:
+            self.slides = json.loads(str(kwargs["slides"]))
+            return SimpleNamespace(id="presentation-1", title=kwargs["title"], version=1)
+
+        def close_connection(self) -> None:
+            self.closed = True
+
+    context = output_jobs.ResearchWorkspaceOutputSourceContext(
+        text="source facts",
+        preview_text="source preview",
+        source_lineage={"selected_source_ids": ["src-1"], "usable_source_ids": ["src-1"]},
+    )
+
+    async def _generate_tts_audio_bytes(**kwargs: Any) -> bytes:
+        tts_calls.append(kwargs)
+        if tts_impl is not None:
+            return await tts_impl(**kwargs)
+        return b"mp3-bytes"
+
+    def _render_presentation_video(**kwargs: Any) -> SimpleNamespace:
+        render_calls.append(kwargs)
+        if render_impl is not None:
+            return render_impl(**kwargs)
+        output_path = tmp_path / "video-overview.mp4"
+        output_path.write_bytes(b"mp4-bytes")
+        return SimpleNamespace(
+            output_format="mp4",
+            storage_path=output_path.name,
+            output_path=output_path,
+            byte_size=output_path.stat().st_size,
+        )
+
+    monkeypatch.setattr(output_jobs, "build_research_workspace_output_source_context", lambda **_: context)
+    monkeypatch.setattr(output_jobs, "SlidesGenerator", _SlidesGenerator, raising=False)
+    monkeypatch.setattr(output_jobs, "SlidesDatabase", _SlidesDatabase, raising=False)
+    monkeypatch.setattr(output_jobs, "generate_tts_audio_bytes", _generate_tts_audio_bytes, raising=False)
+    monkeypatch.setattr(output_jobs, "CollectionsDatabase", _CollectionsDB)
+    monkeypatch.setattr(output_jobs, "render_presentation_video", _render_presentation_video, raising=False)
+    monkeypatch.setattr(DatabasePaths, "get_user_outputs_dir", lambda _user_id: tmp_path)
+    monkeypatch.setattr(DatabasePaths, "get_slides_db_path", lambda _user_id: tmp_path / "slides.db")
+
+    return {
+        "collections_cls": _CollectionsDB,
+        "slides_db_cls": _SlidesDatabase,
+        "render_calls": render_calls,
+        "tts_calls": tts_calls,
+    }
+
+
 def test_build_source_context_uses_selected_ready_media(
     fake_workspace_db: object,
     fake_media_db: object,
@@ -691,6 +852,189 @@ async def test_video_overview_worker_generates_narrated_slideshow_mp4(
     assert final_row["type_"] == "research_workspace_video_overview"
     assert final_row["format_"] == "mp4"
     assert final_row["storage_path"] == "renders/video-overview.mp4"
+
+
+@pytest.mark.asyncio
+async def test_video_overview_worker_uses_provider_specific_tts_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Any,
+) -> None:
+    output_jobs = _output_jobs_module()
+    workspace_db = _VideoWorkspaceDB()
+    captures = _install_video_overview_success_doubles(monkeypatch, tmp_path, output_jobs)
+
+    await output_jobs.process_research_workspace_output_payload(
+        job={"id": 7, "owner_user_id": "42"},
+        payload=_video_payload(settings={"title_hint": "Video Brief", "tts_provider": "openai"}),
+        workspace_db=workspace_db,
+        media_db=object(),
+        user_id=42,
+        job_manager=object(),
+    )
+
+    assert captures["tts_calls"][0]["provider"] == "openai"
+    assert captures["tts_calls"][0]["model"] == "tts-1"
+    assert captures["tts_calls"][0]["voice"] == "alloy"
+    final_row = captures["collections_cls"].instances[0].created[-1]
+    final_metadata = json.loads(str(final_row["metadata_json"]))
+    assert final_metadata["tts_provider"] == "openai"
+    assert final_metadata["tts_model"] == "tts-1"
+    assert final_metadata["tts_voice"] == "alloy"
+
+
+@pytest.mark.asyncio
+async def test_video_overview_worker_ignores_progress_update_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Any,
+) -> None:
+    output_jobs = _output_jobs_module()
+    workspace_db = _VideoWorkspaceDB()
+    _install_video_overview_success_doubles(monkeypatch, tmp_path, output_jobs)
+
+    class _FailingProgressJobManager:
+        def update_job_progress(self, *args: object, **kwargs: object) -> None:
+            raise RuntimeError("progress database unavailable")
+
+    result = await output_jobs.process_research_workspace_output_payload(
+        job={"id": 7, "owner_user_id": "42"},
+        payload=_video_payload(),
+        workspace_db=workspace_db,
+        media_db=object(),
+        user_id=42,
+        job_manager=_FailingProgressJobManager(),
+    )
+
+    assert result["format"] == "mp4"
+    assert workspace_db.updates[-1]["status"] == "complete"
+
+
+@pytest.mark.asyncio
+async def test_video_overview_worker_strips_generated_slide_metadata_before_render(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Any,
+) -> None:
+    output_jobs = _output_jobs_module()
+    workspace_db = _VideoWorkspaceDB()
+    captures = _install_video_overview_success_doubles(
+        monkeypatch,
+        tmp_path,
+        output_jobs,
+        slides=[
+            _video_slide(
+                metadata={
+                    "images": [{"data_b64": "untrusted-inline-image"}],
+                    "path": "/private/tmp/untrusted.png",
+                    "studio": {
+                        "audio": {"asset_ref": "output:evil"},
+                        "presenter_note": "untrusted",
+                    },
+                }
+            )
+        ],
+    )
+
+    await output_jobs.process_research_workspace_output_payload(
+        job={"id": 7, "owner_user_id": "42"},
+        payload=_video_payload(),
+        workspace_db=workspace_db,
+        media_db=object(),
+        user_id=42,
+        job_manager=object(),
+    )
+
+    rendered_slide = captures["render_calls"][0]["slides"][0]
+    metadata = rendered_slide["metadata"]
+    assert set(metadata) == {"studio"}
+    assert set(metadata["studio"]) == {"audio"}
+    assert metadata["studio"]["audio"]["asset_ref"].startswith("output:")
+    assert metadata["studio"]["audio"]["asset_ref"] != "output:evil"
+
+
+@pytest.mark.asyncio
+async def test_video_overview_worker_maps_tts_failures_as_retryable(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Any,
+) -> None:
+    output_jobs = _output_jobs_module()
+    workspace_db = _VideoWorkspaceDB()
+
+    async def _fail_tts(**kwargs: object) -> bytes:
+        raise RuntimeError("/private/tmp/provider-secret.mp3")
+
+    _install_video_overview_success_doubles(
+        monkeypatch,
+        tmp_path,
+        output_jobs,
+        tts_impl=_fail_tts,
+    )
+
+    with pytest.raises(output_jobs.ResearchWorkspaceOutputJobError) as excinfo:
+        await output_jobs.process_research_workspace_output_payload(
+            job={"id": 7, "owner_user_id": "42"},
+            payload=_video_payload(),
+            workspace_db=workspace_db,
+            media_db=object(),
+            user_id=42,
+            job_manager=object(),
+        )
+
+    assert excinfo.value.public_code == "tts_generation_failed"
+    assert excinfo.value.retryable is True
+    update = workspace_db.updates[-1]
+    assert update["status"] == "failed"
+    assert update["producer_metadata"]["error"] == "tts_generation_failed"
+    assert "/private/tmp" not in json.dumps(update)
+
+
+@pytest.mark.asyncio
+async def test_video_overview_worker_cleans_outputs_when_final_workspace_update_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Any,
+) -> None:
+    output_jobs = _output_jobs_module()
+    workspace_db = _VideoWorkspaceDB(fail_complete_update=True)
+    render_path = tmp_path / "video-overview.mp4"
+
+    def _render_video(**kwargs: object) -> SimpleNamespace:
+        render_path.write_bytes(b"mp4-bytes")
+        return SimpleNamespace(
+            output_format="mp4",
+            storage_path=render_path.name,
+            output_path=render_path,
+            byte_size=render_path.stat().st_size,
+        )
+
+    captures = _install_video_overview_success_doubles(
+        monkeypatch,
+        tmp_path,
+        output_jobs,
+        render_impl=_render_video,
+    )
+
+    with pytest.raises(output_jobs.ResearchWorkspaceOutputJobError) as excinfo:
+        await output_jobs.process_research_workspace_output_payload(
+            job={"id": 7, "owner_user_id": "42"},
+            payload=_video_payload(),
+            workspace_db=workspace_db,
+            media_db=object(),
+            user_id=42,
+            job_manager=object(),
+        )
+
+    assert excinfo.value.public_code == "workspace_artifact_update_failed"
+    collections_db = captures["collections_cls"].instances[0]
+    created_ids = [row["id"] for row in collections_db.created]
+    deleted = [
+        item
+        for instance in captures["collections_cls"].instances
+        for item in instance.deleted
+    ]
+    assert {item["output_id"] for item in deleted} == set(created_ids)
+    assert all(item["hard"] is True for item in deleted)
+    for row in collections_db.created:
+        assert not (tmp_path / str(row["storage_path"])).exists()
+    assert not render_path.exists()
+    assert workspace_db.updates[-1]["status"] == "failed"
 
 
 @pytest.mark.asyncio
