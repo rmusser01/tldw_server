@@ -5,6 +5,7 @@ export const WEB_CLIPPER_PENDING_AGENT_TASK_STORAGE_KEY =
   "tldw:web-clipper:pendingAgentTask"
 
 const EXTRACT_PREVIEW_LIMIT = 1200
+const HANDOFF_TTL_MS = 10 * 60 * 1000
 
 export type PendingWebClipAgentTaskRequest = {
   id: string
@@ -52,8 +53,12 @@ const getExtensionStorageArea = (): ExtensionStorageArea | null => {
   return storage?.session ?? storage?.local ?? null
 }
 
-const hasChromeRuntimeError = (): boolean =>
-  Boolean(globalThis.chrome?.runtime?.lastError)
+const reportStorageFailure = (operation: string, error: unknown): void => {
+  console.warn(`Web clipper agent-task handoff ${operation} failed`, error)
+}
+
+const getChromeRuntimeError = (): unknown =>
+  globalThis.chrome?.runtime?.lastError ?? null
 
 const readExtensionStorageValue = async (key: string): Promise<unknown> => {
   const storage = getExtensionStorageArea()
@@ -69,12 +74,22 @@ const readExtensionStorageValue = async (key: string): Promise<unknown> => {
 
     try {
       const maybePromise = storage.get(key, (items) => {
-        settle(hasChromeRuntimeError() ? undefined : items)
+        const runtimeError = getChromeRuntimeError()
+        if (runtimeError) {
+          reportStorageFailure("extension read", runtimeError)
+          settle(undefined)
+          return
+        }
+        settle(items)
       })
       if (maybePromise && typeof maybePromise.then === "function") {
-        void maybePromise.then(settle).catch(() => settle(undefined))
+        void maybePromise.then(settle).catch((error) => {
+          reportStorageFailure("extension read", error)
+          settle(undefined)
+        })
       }
-    } catch {
+    } catch (error) {
+      reportStorageFailure("extension read", error)
       settle(undefined)
     }
   })
@@ -96,13 +111,23 @@ const writeExtensionStorageValue = async (
     }
 
     try {
-      const maybePromise = storage.set({ [key]: value }, () =>
-        settle(!hasChromeRuntimeError())
-      )
+      const maybePromise = storage.set({ [key]: value }, () => {
+        const runtimeError = getChromeRuntimeError()
+        if (runtimeError) {
+          reportStorageFailure("extension write", runtimeError)
+          settle(false)
+          return
+        }
+        settle(true)
+      })
       if (maybePromise && typeof maybePromise.then === "function") {
-        void maybePromise.then(() => settle(true)).catch(() => settle(false))
+        void maybePromise.then(() => settle(true)).catch((error) => {
+          reportStorageFailure("extension write", error)
+          settle(false)
+        })
       }
-    } catch {
+    } catch (error) {
+      reportStorageFailure("extension write", error)
       settle(false)
     }
   })
@@ -121,13 +146,23 @@ const removeExtensionStorageValue = async (key: string): Promise<boolean> => {
     }
 
     try {
-      const maybePromise = storage.remove(key, () =>
-        settle(!hasChromeRuntimeError())
-      )
+      const maybePromise = storage.remove(key, () => {
+        const runtimeError = getChromeRuntimeError()
+        if (runtimeError) {
+          reportStorageFailure("extension remove", runtimeError)
+          settle(false)
+          return
+        }
+        settle(true)
+      })
       if (maybePromise && typeof maybePromise.then === "function") {
-        void maybePromise.then(() => settle(true)).catch(() => settle(false))
+        void maybePromise.then(() => settle(true)).catch((error) => {
+          reportStorageFailure("extension remove", error)
+          settle(false)
+        })
       }
-    } catch {
+    } catch (error) {
+      reportStorageFailure("extension remove", error)
       settle(false)
     }
   })
@@ -136,12 +171,13 @@ const removeExtensionStorageValue = async (key: string): Promise<boolean> => {
 const readBrowserStorageValue = (key: string): unknown => {
   if (typeof window === "undefined") return undefined
 
-  for (const storage of [window.localStorage, window.sessionStorage]) {
+  for (const storage of [window.sessionStorage, window.localStorage]) {
     try {
       const raw = storage.getItem(key)
       if (!raw) continue
       return JSON.parse(raw)
-    } catch {
+    } catch (error) {
+      reportStorageFailure("browser read", error)
       continue
     }
   }
@@ -154,16 +190,10 @@ const writeBrowserStorageValue = (key: string, value: unknown): void => {
   const serialized = JSON.stringify(value)
 
   try {
-    window.localStorage.setItem(key, serialized)
-    return
-  } catch {
-    // Fall back to same-context storage for non-extension tests.
-  }
-
-  try {
     window.sessionStorage.setItem(key, serialized)
-  } catch {
-    // Ignore transient storage failures.
+    window.localStorage.removeItem(key)
+  } catch (error) {
+    reportStorageFailure("browser write", error)
   }
 }
 
@@ -172,10 +202,16 @@ const removeBrowserStorageValue = (key: string): void => {
   for (const storage of [window.localStorage, window.sessionStorage]) {
     try {
       storage.removeItem(key)
-    } catch {
-      // Ignore transient storage failures.
+    } catch (error) {
+      reportStorageFailure("browser remove", error)
     }
   }
+}
+
+const isFreshCreatedAt = (createdAt: string): boolean => {
+  const createdAtMs = Date.parse(createdAt)
+  if (!Number.isFinite(createdAtMs)) return false
+  return Date.now() - createdAtMs <= HANDOFF_TTL_MS
 }
 
 export const buildPendingWebClipAgentTaskRequest = ({
@@ -185,6 +221,9 @@ export const buildPendingWebClipAgentTaskRequest = ({
   draft: PendingClipDraft
   response: WebClipperSaveResponse
 }): PendingWebClipAgentTaskRequest | null => {
+  if (response.workspace_placement_saved !== true) {
+    return null
+  }
   const placement = response.workspace_placement
   const workspaceId = readString(placement?.workspace_id)
   const noteId = readString(response.note?.id ?? response.note_id)
@@ -219,7 +258,7 @@ export const readPendingWebClipAgentTaskRequest =
       WEB_CLIPPER_PENDING_AGENT_TASK_STORAGE_KEY
     )
     const storedValue =
-      raw == null
+      raw === undefined
         ? readBrowserStorageValue(WEB_CLIPPER_PENDING_AGENT_TASK_STORAGE_KEY)
         : raw
     try {
@@ -236,6 +275,11 @@ export const readPendingWebClipAgentTaskRequest =
       if (!workspaceId || !noteId || workspaceNoteId == null || !pageUrl) {
         return null
       }
+      const createdAt = readString(record.createdAt)
+      if (!isFreshCreatedAt(createdAt)) {
+        await clearPendingWebClipAgentTaskRequest()
+        return null
+      }
       return {
         id: readString(record.id) || crypto.randomUUID(),
         clipId: readString(record.clipId),
@@ -246,9 +290,10 @@ export const readPendingWebClipAgentTaskRequest =
         pageTitle,
         extractPreview: truncatePreview(readString(record.extractPreview)),
         hasScreenshot: Boolean(record.hasScreenshot),
-        createdAt: readString(record.createdAt) || new Date().toISOString()
+        createdAt
       }
-    } catch {
+    } catch (error) {
+      reportStorageFailure("request parse", error)
       return null
     }
   }

@@ -7,7 +7,9 @@ import {
   type PendingWebClipAgentTaskRequest
 } from "@/services/web-clipper/agent-task-handoff"
 
-const createRequest = (): PendingWebClipAgentTaskRequest => ({
+const createRequest = (
+  overrides: Partial<PendingWebClipAgentTaskRequest> = {}
+): PendingWebClipAgentTaskRequest => ({
   id: "handoff-1",
   clipId: "clip-123",
   noteId: "note-123",
@@ -17,7 +19,8 @@ const createRequest = (): PendingWebClipAgentTaskRequest => ({
   pageTitle: "Example Story",
   extractPreview: "Alpha body copy",
   hasScreenshot: false,
-  createdAt: "2026-07-05T00:00:00.000Z"
+  createdAt: new Date().toISOString(),
+  ...overrides
 })
 
 describe("web clipper agent-task handoff storage", () => {
@@ -64,10 +67,13 @@ describe("web clipper agent-task handoff storage", () => {
 
     await writePendingWebClipAgentTaskRequest(createRequest())
 
-    const fallbackValue = window.localStorage.getItem(
+    const fallbackValue = window.sessionStorage.getItem(
       WEB_CLIPPER_PENDING_AGENT_TASK_STORAGE_KEY
     )
     expect(fallbackValue).not.toBeNull()
+    expect(
+      window.localStorage.getItem(WEB_CLIPPER_PENDING_AGENT_TASK_STORAGE_KEY)
+    ).toBeNull()
 
     await expect(readPendingWebClipAgentTaskRequest()).resolves.toMatchObject({
       clipId: "clip-123",
@@ -126,7 +132,7 @@ describe("web clipper agent-task handoff storage", () => {
     await expect(readPendingWebClipAgentTaskRequest()).resolves.toBeNull()
   })
 
-  it("allows fallback handoffs after an extension tombstone", async () => {
+  it("does not read browser fallback when extension storage has a tombstone", async () => {
     const runtimeState: {
       lastError: { message: string } | null
     } = { lastError: null }
@@ -164,11 +170,34 @@ describe("web clipper agent-task handoff storage", () => {
       }
     })
 
+    window.sessionStorage.setItem(
+      WEB_CLIPPER_PENDING_AGENT_TASK_STORAGE_KEY,
+      JSON.stringify(createRequest({ id: "stale-fallback" }))
+    )
     await writePendingWebClipAgentTaskRequest(createRequest())
 
-    await expect(readPendingWebClipAgentTaskRequest()).resolves.toMatchObject({
-      clipId: "clip-123",
-      workspaceId: "workspace-alpha"
+    await expect(readPendingWebClipAgentTaskRequest()).resolves.toBeNull()
+  })
+
+  it("expires stale browser fallback handoffs", async () => {
+    const staleRequest = createRequest({
+      createdAt: new Date(Date.now() - 11 * 60 * 1000).toISOString()
     })
+    window.sessionStorage.setItem(
+      WEB_CLIPPER_PENDING_AGENT_TASK_STORAGE_KEY,
+      JSON.stringify(staleRequest)
+    )
+    window.localStorage.setItem(
+      WEB_CLIPPER_PENDING_AGENT_TASK_STORAGE_KEY,
+      JSON.stringify(staleRequest)
+    )
+
+    await expect(readPendingWebClipAgentTaskRequest()).resolves.toBeNull()
+    expect(
+      window.sessionStorage.getItem(WEB_CLIPPER_PENDING_AGENT_TASK_STORAGE_KEY)
+    ).toBeNull()
+    expect(
+      window.localStorage.getItem(WEB_CLIPPER_PENDING_AGENT_TASK_STORAGE_KEY)
+    ).toBeNull()
   })
 })

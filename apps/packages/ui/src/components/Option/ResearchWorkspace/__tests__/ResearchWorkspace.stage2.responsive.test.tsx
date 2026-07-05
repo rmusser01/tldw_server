@@ -312,6 +312,20 @@ describe("ResearchWorkspace Stage 2 drawer responsiveness", () => {
     chromeStorageState.clear()
     vi.stubGlobal("chrome", {
       storage: {
+        onChanged: {
+          addListener: vi.fn(),
+          removeListener: vi.fn()
+        },
+        local: {
+          get: chromeStorageSessionGetMock,
+          set: chromeStorageSessionSetMock,
+          remove: chromeStorageSessionRemoveMock
+        },
+        sync: {
+          get: chromeStorageSessionGetMock,
+          set: chromeStorageSessionSetMock,
+          remove: chromeStorageSessionRemoveMock
+        },
         session: {
           get: chromeStorageSessionGetMock,
           set: chromeStorageSessionSetMock,
@@ -672,7 +686,7 @@ describe("ResearchWorkspace Stage 2 drawer responsiveness", () => {
       pageTitle: "Example Story",
       extractPreview: "Alpha body copy",
       hasScreenshot: false,
-      createdAt: "2026-07-05T00:00:00.000Z"
+      createdAt: new Date().toISOString()
     })
     window.history.replaceState(
       null,
@@ -701,6 +715,7 @@ describe("ResearchWorkspace Stage 2 drawer responsiveness", () => {
 
   it("switches to the routed workspace before opening a pending web clipper agent task", async () => {
     testState.workspaceId = "workspace-current"
+    testState.switchWorkspace = vi.fn()
     await writePendingWebClipAgentTaskRequest({
       id: "handoff-2",
       clipId: "clip-456",
@@ -711,7 +726,7 @@ describe("ResearchWorkspace Stage 2 drawer responsiveness", () => {
       pageTitle: "Target Story",
       extractPreview: "Target body copy",
       hasScreenshot: true,
-      createdAt: "2026-07-05T00:00:00.000Z"
+      createdAt: new Date().toISOString()
     })
     window.history.replaceState(
       null,
@@ -728,6 +743,7 @@ describe("ResearchWorkspace Stage 2 drawer responsiveness", () => {
       chromeStorageState.get(WEB_CLIPPER_PENDING_AGENT_TASK_STORAGE_KEY)
     ).toBeDefined()
 
+    testState.workspaceId = "workspace-target"
     rerender(<ResearchWorkspace />)
 
     await waitFor(() => {
@@ -742,6 +758,65 @@ describe("ResearchWorkspace Stage 2 drawer responsiveness", () => {
     expect(
       chromeStorageState.get(WEB_CLIPPER_PENDING_AGENT_TASK_STORAGE_KEY)
     ).toBeUndefined()
+  })
+
+  it("opens a second unique web clipper agent task while the workspace stays mounted", async () => {
+    await writePendingWebClipAgentTaskRequest({
+      id: "handoff-1",
+      clipId: "clip-123",
+      noteId: "note-123",
+      workspaceId: "workspace-1",
+      workspaceNoteId: 42,
+      pageUrl: "https://example.com/first",
+      pageTitle: "First Story",
+      extractPreview: "First body copy",
+      hasScreenshot: false,
+      createdAt: new Date().toISOString()
+    })
+    window.history.replaceState(
+      null,
+      "",
+      "/research-workspace?workspace=workspace-1&agent_task_handoff=web_clip&handoff_id=handoff-1"
+    )
+
+    const { rerender } = render(<ResearchWorkspace />)
+
+    await waitFor(() => {
+      expect(
+        mockWorkspaceHeaderProps.at(-1)?.agentTaskHandoffOpenSignal
+      ).toBeGreaterThan(0)
+    })
+    const firstSignal =
+      mockWorkspaceHeaderProps.at(-1)?.agentTaskHandoffOpenSignal ?? 0
+
+    await writePendingWebClipAgentTaskRequest({
+      id: "handoff-2",
+      clipId: "clip-456",
+      noteId: "note-456",
+      workspaceId: "workspace-1",
+      workspaceNoteId: 84,
+      pageUrl: "https://example.com/second",
+      pageTitle: "Second Story",
+      extractPreview: "Second body copy",
+      hasScreenshot: false,
+      createdAt: new Date().toISOString()
+    })
+    window.history.replaceState(
+      null,
+      "",
+      "/research-workspace?workspace=workspace-1&agent_task_handoff=web_clip&handoff_id=handoff-2"
+    )
+    rerender(<ResearchWorkspace />)
+
+    await waitFor(() => {
+      expect(
+        mockWorkspaceHeaderProps.at(-1)?.agentTaskHandoffOpenSignal
+      ).toBeGreaterThan(firstSignal)
+    })
+    expect(mockWorkspaceHeaderProps.at(-1)?.agentTaskPrefill).toMatchObject({
+      title: "Review captured page: Second Story",
+      description: expect.stringContaining("URL: https://example.com/second")
+    })
   })
 
   it("cancels a bundle import when the active workspace changes during fetch", async () => {

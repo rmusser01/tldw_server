@@ -1106,7 +1106,11 @@ const ResearchWorkspaceBody: React.FC = () => {
     React.useState(0)
   const [agentTaskPrefill, setAgentTaskPrefill] =
     React.useState<WorkspaceAgentTaskPrefill | null>(null)
-  const agentTaskHandoffAppliedRef = React.useRef(false)
+  const lastAppliedWebClipHandoffIdRef = React.useRef<string | null>(null)
+  const currentResearchWorkspaceSearch =
+    typeof window === "undefined"
+      ? ""
+      : getResearchWorkspaceSearchFromLocation(window.location)
 
   // Mobile drawer state
   const [leftDrawerOpen, setLeftDrawerOpen] = React.useState(false)
@@ -2338,18 +2342,17 @@ const ResearchWorkspaceBody: React.FC = () => {
   }, [activeDeepResearchReturnContext, focusWorkspacePane])
 
   React.useEffect(() => {
-    if (agentTaskHandoffAppliedRef.current) return
     if (typeof window === "undefined") return
 
-    const search = getResearchWorkspaceSearchFromLocation(window.location)
-    const params = new URLSearchParams(search)
+    const params = new URLSearchParams(currentResearchWorkspaceSearch)
     if (params.get(WEB_CLIP_AGENT_TASK_ROUTE_FLAG) !== "web_clip") return
     const routeWorkspaceId = params.get("workspace")?.trim() || null
 
     let cancelled = false
     void readPendingWebClipAgentTaskRequest().then((request) => {
-      if (cancelled || agentTaskHandoffAppliedRef.current) return
+      if (cancelled) return
       if (!request) return
+      if (lastAppliedWebClipHandoffIdRef.current === request.id) return
       if (request.workspaceId !== workspaceId) {
         if (routeWorkspaceId === request.workspaceId) {
           switchWorkspace(routeWorkspaceId)
@@ -2357,7 +2360,7 @@ const ResearchWorkspaceBody: React.FC = () => {
         return
       }
 
-      agentTaskHandoffAppliedRef.current = true
+      lastAppliedWebClipHandoffIdRef.current = request.id
       setAgentTaskPrefill(buildWebClipAgentTaskPrefill(request))
       void clearPendingWebClipAgentTaskRequest()
       setAgentTaskHandoffOpenSignal((current) => current + 1)
@@ -2366,7 +2369,7 @@ const ResearchWorkspaceBody: React.FC = () => {
     return () => {
       cancelled = true
     }
-  }, [switchWorkspace, workspaceId])
+  }, [currentResearchWorkspaceSearch, switchWorkspace, workspaceId])
 
   const handleImportDeepResearchBundle = React.useCallback(async () => {
     if (!activeDeepResearchReturnContext || !activeDeepResearchReturnKey) return

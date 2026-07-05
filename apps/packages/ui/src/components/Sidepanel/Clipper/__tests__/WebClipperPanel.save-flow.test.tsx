@@ -1008,6 +1008,41 @@ describe("WebClipperPanel save flow", () => {
     )
   })
 
+  it("does not start an agent task when workspace placement was not saved", async () => {
+    const user = userEvent.setup()
+    apiMocks.saveWebClip.mockResolvedValueOnce({
+      clip_id: "clip-123",
+      note_id: "note-123",
+      note: { id: "note-123", title: "Example Story", version: 1 },
+      workspace_placement: {
+        workspace_id: "workspace-alpha",
+        workspace_note_id: 42,
+        source_note_id: "note-123"
+      },
+      attachments: [],
+      status: "partially_saved",
+      warnings: [],
+      workspace_placement_saved: false,
+      workspace_placement_count: 0
+    })
+
+    render(<WebClipperPanel draft={createDraft()} onCancel={vi.fn()} />)
+
+    await chooseWorkspaceDestination(user)
+    await user.click(screen.getByRole("button", { name: "Start agent task" }))
+
+    await waitFor(() => {
+      expect(apiMocks.saveWebClip).toHaveBeenCalledTimes(1)
+    })
+    expect(
+      screen.getByText("Save the clip to a workspace before starting an agent task.")
+    ).toBeInTheDocument()
+    expect(
+      chromeStorageState.get(WEB_CLIPPER_PENDING_AGENT_TASK_STORAGE_KEY)
+    ).toBeUndefined()
+    expect(openTabMock).not.toHaveBeenCalled()
+  })
+
   it("requires a workspace destination before starting an agent task", async () => {
     const user = userEvent.setup()
 

@@ -123,17 +123,23 @@ const createOpenTargetUrl = (response: WebClipperSaveResponse): string | null =>
 }
 
 const createWorkspaceAgentTaskTargetUrl = (
-  response: WebClipperSaveResponse
+  response: WebClipperSaveResponse,
+  handoffId: string
 ): string | null => {
   const chromeApi = globalThis.chrome
-  if (!chromeApi?.runtime?.getURL || response.status === "failed") {
+  if (
+    !chromeApi?.runtime?.getURL ||
+    response.status === "failed" ||
+    response.workspace_placement_saved !== true
+  ) {
     return null
   }
   const workspaceId = response.workspace_placement?.workspace_id?.trim()
   if (!workspaceId) return null
   const params = new URLSearchParams({
     workspace: workspaceId,
-    agent_task_handoff: "web_clip"
+    agent_task_handoff: "web_clip",
+    handoff_id: handoffId
   })
   return chromeApi.runtime.getURL(
     `options.html#/research-workspace?${params.toString()}`
@@ -615,7 +621,9 @@ const WebClipperPanel = ({ draft, onCancel }: WebClipperPanelProps) => {
           draft,
           response
         })
-        const url = createWorkspaceAgentTaskTargetUrl(response)
+        const url = request
+          ? createWorkspaceAgentTaskTargetUrl(response, request.id)
+          : null
         if (request && url) {
           await writePendingWebClipAgentTaskRequest(request)
           globalThis.chrome?.tabs?.create?.({ url })
