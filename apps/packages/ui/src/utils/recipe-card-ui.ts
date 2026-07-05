@@ -38,7 +38,10 @@ const isValidStep = (step: unknown) => {
   return (
     timer === undefined ||
     timer === null ||
-    (Number.isInteger(timer) && timer >= 1 && timer <= 86400)
+    (typeof timer === "number" &&
+      Number.isInteger(timer) &&
+      timer >= 1 &&
+      timer <= 86400)
   )
 }
 
