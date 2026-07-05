@@ -46,11 +46,13 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const isStringArray = (value: unknown): value is string[] =>
   Array.isArray(value) && value.every((item) => typeof item === "string");
 
-function isMcpToolsApplyResponse(value: unknown): value is McpToolsApplyResponse {
+function isMcpToolsApplyConflictResponse(
+  value: unknown,
+): value is McpToolsApplyResponse {
   if (!isRecord(value)) return false;
   const conflict = value.conflict;
   return (
-    typeof value.status === "string" &&
+    value.status === "conflict" &&
     (typeof value.profile_id === "number" || value.profile_id === null) &&
     (typeof value.assignment_id === "number" || value.assignment_id === null) &&
     typeof value.catalog_version === "string" &&
@@ -60,10 +62,9 @@ function isMcpToolsApplyResponse(value: unknown): value is McpToolsApplyResponse
     isStringArray(value.effective_tools) &&
     isStringArray(value.disabled_addons) &&
     typeof value.validation_state === "string" &&
-    (conflict == null ||
-      (isRecord(conflict) &&
-        typeof conflict.reason === "string" &&
-        typeof conflict.profile_id === "number"))
+    isRecord(conflict) &&
+    typeof conflict.reason === "string" &&
+    typeof conflict.profile_id === "number"
   );
 }
 
@@ -72,7 +73,7 @@ function extractMcpToolsApplyConflict(error: unknown): McpToolsApplyResponse {
     | { status?: unknown; detail?: unknown; details?: { detail?: unknown } }
     | null;
   const detail = candidate?.details?.detail ?? candidate?.detail;
-  if (candidate?.status === 409 && isMcpToolsApplyResponse(detail)) {
+  if (candidate?.status === 409 && isMcpToolsApplyConflictResponse(detail)) {
     return detail;
   }
   throw error;

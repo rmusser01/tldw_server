@@ -247,6 +247,34 @@ describe("setup onboarding API domain", () => {
         { selected_pack_ids: ["research"] },
       ),
     ).rejects.toThrow("Malformed conflict");
+
+    vi.mocked(bgRequest).mockRejectedValueOnce(
+      Object.assign(new Error("Applied conflict"), {
+        status: 409,
+        details: {
+          detail: {
+            status: "applied",
+            profile_id: 7,
+            assignment_id: null,
+            catalog_version: "2026-07-04",
+            selected_pack_ids: ["research"],
+            selected_addon_ids: [],
+            effective_tool_count: 1,
+            effective_tools: ["mcp.tools.list"],
+            disabled_addons: [],
+            validation_state: "not_run",
+            conflict: null,
+          },
+        },
+      }),
+    );
+
+    await expect(
+      setupOnboardingMethods.applyMcpTools.call(
+        {},
+        { selected_pack_ids: ["research"] },
+      ),
+    ).rejects.toThrow("Applied conflict");
   });
 
   it("validates first-run MCP tools with an empty default payload", async () => {
