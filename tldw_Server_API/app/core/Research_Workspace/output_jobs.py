@@ -1079,6 +1079,8 @@ def get_research_workspace_output_job_status(
 
     artifact_row = workspace_db.get_workspace_artifact(workspace_id, artifact_id)
     artifact = WorkspaceArtifactResponse.model_validate(artifact_row) if artifact_row else None
+    job_error = _job_error(job)
+    artifact_error = _artifact_error(artifact)
     return ResearchWorkspaceOutputStatusResponse(
         job_id=int(job["id"]),
         status=_public_job_status(job.get("status")),
@@ -1088,7 +1090,7 @@ def get_research_workspace_output_job_status(
         artifact_id=artifact_id,
         artifact_type=cast(ResearchWorkspaceOutputArtifactType, artifact_type),
         artifact=artifact,
-        error=_job_error(job),
+        error=artifact_error if artifact_error and job_error in {None, "worker_exception"} else job_error,
         result=result,
     )
 
@@ -1480,6 +1482,16 @@ def _job_error(job: dict[str, Any]) -> str | None:
     if _public_job_status(job.get("status")) != "failed":
         return None
     return _safe_public_error_code(str(job.get("error_code") or job.get("last_error") or job.get("error_message") or ""))
+
+
+def _artifact_error(artifact: WorkspaceArtifactResponse | None) -> str | None:
+    """Return a public artifact failure code when the linked artifact has one."""
+    if artifact is None or artifact.status != "failed":
+        return None
+    raw = artifact.producer_metadata.get("error")
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    return _safe_public_error_code(raw)
 
 
 def _normalize_job_mapping(value: Any) -> dict[str, Any]:

@@ -92,6 +92,29 @@ def test_image_unavailable_blocks_infographic_only():
     assert response.capabilities["slides_generation"].mode == "allow"
 
 
+def test_image_enabled_without_model_reports_not_configured(monkeypatch):
+    from tldw_Server_API.app.core.Image_Generation import adapter_registry, listing
+
+    class _Registry:
+        def list_backend_names(self, *, include_disabled: bool = False) -> list[str]:
+            assert include_disabled is False
+            return ["stable_diffusion_cpp"]
+
+    monkeypatch.setattr(adapter_registry, "get_registry", lambda: _Registry())
+    monkeypatch.setattr(
+        listing,
+        "list_image_models_for_catalog",
+        lambda: [{"name": "stable_diffusion_cpp", "is_configured": False}],
+    )
+
+    image_health = capabilities._collect_image_health()
+    response = build_research_workspace_capabilities(**_health_inputs(image_health=image_health))
+
+    assert image_health["reason_code"] == "image_backend_not_configured"
+    assert response.capabilities["infographic_generation"].mode == "block"
+    assert response.capabilities["infographic_generation"].reason_code == "image_backend_not_configured"
+
+
 def test_ffmpeg_unavailable_blocks_video_overview_only():
     response = build_research_workspace_capabilities(
         **_health_inputs(
@@ -114,6 +137,46 @@ def test_tts_unavailable_blocks_audio_and_video_only():
     assert response.capabilities["video_overview_generation"].reason_code == "tts_unavailable"
     assert response.capabilities["slides_generation"].mode == "allow"
     assert response.capabilities["infographic_generation"].mode == "allow"
+
+
+@pytest.mark.asyncio
+async def test_tts_failed_enabled_provider_blocks_media_generation(monkeypatch):
+    fake_tts_config = ModuleType("tldw_Server_API.app.core.TTS.tts_config")
+    fake_adapter_registry = ModuleType("tldw_Server_API.app.core.TTS.adapter_registry")
+
+    class _Manager:
+        def get_config(self):
+            return SimpleNamespace(providers={"kitten_tts": SimpleNamespace(enabled=True)})
+
+        def get_enabled_providers(self) -> list[str]:
+            return ["kitten_tts"]
+
+    class _Factory:
+        def get_status(self):
+            return {
+                "providers": {
+                    "kitten_tts": {
+                        "failed": True,
+                        "status": "error",
+                    }
+                }
+            }
+
+    async def _get_tts_factory():
+        return _Factory()
+
+    fake_tts_config.get_tts_config_manager = lambda: _Manager()
+    fake_adapter_registry.get_tts_factory = _get_tts_factory
+    monkeypatch.setitem(sys.modules, "tldw_Server_API.app.core.TTS.tts_config", fake_tts_config)
+    monkeypatch.setitem(sys.modules, "tldw_Server_API.app.core.TTS.adapter_registry", fake_adapter_registry)
+
+    tts_health = await capabilities._collect_tts_health()
+    response = build_research_workspace_capabilities(**_health_inputs(tts_health=tts_health))
+
+    assert tts_health["reason_code"] == "tts_provider_failed"
+    assert response.capabilities["audio_summary"].mode == "block"
+    assert response.capabilities["video_overview_generation"].mode == "block"
+    assert response.capabilities["video_overview_generation"].reason_code == "tts_provider_failed"
 
 
 def test_unknown_source_health_warns_instead_of_overclaiming_or_blocking():

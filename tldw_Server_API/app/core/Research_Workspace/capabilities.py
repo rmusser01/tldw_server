@@ -228,14 +228,15 @@ def _tts_capability(tts_health: Mapping[str, Any] | None) -> ResearchWorkspaceCa
     providers = _mapping_value(tts_health, "providers")
     available = providers.get("available") if isinstance(providers, Mapping) else None
     status = _status(tts_health)
+    reason = _reason_code(tts_health)
 
     if available == 0 or status == "unavailable":
-        return _cap("unavailable", "block", ["tts"], "tts_unavailable")
+        return _cap("unavailable", "block", ["tts"], reason or "tts_unavailable")
     if status == "degraded":
-        return _cap("degraded", "warn", ["tts"], "tts_degraded")
+        return _cap("degraded", "warn", ["tts"], reason or "tts_degraded")
     if status == "ready":
         return _cap("ready", "allow", ["tts"])
-    return _cap("unknown", "warn", ["tts"], "tts_unknown")
+    return _cap("unknown", "warn", ["tts"], reason or "tts_unknown")
 
 
 def _presentation_render_capability(render_health: Mapping[str, Any] | None) -> ResearchWorkspaceCapability:
@@ -549,7 +550,7 @@ def _collect_slides_health(*, user_id: int | str | None = None) -> Mapping[str, 
 
 
 async def _collect_tts_health() -> Mapping[str, Any]:
-    """Collect config-level TTS availability without initializing providers."""
+    """Collect config/runtime TTS availability without synthesizing audio."""
     try:
         from tldw_Server_API.app.core.TTS.tts_config import get_tts_config_manager
 
@@ -559,14 +560,37 @@ async def _collect_tts_health() -> Mapping[str, Any]:
         total = len(providers) if isinstance(providers, Mapping) else 0
         enabled = manager.get_enabled_providers()
         available = len(enabled)
+        status = "healthy" if available > 0 else "unhealthy"
+        reason_code: str | None = None
 
-        return {
-            "status": "healthy" if available > 0 else "unhealthy",
+        try:
+            from tldw_Server_API.app.core.TTS.adapter_registry import get_tts_factory
+
+            factory = await get_tts_factory()
+            status_summary = factory.get_status()
+            provider_statuses = _mapping_value(status_summary, "providers")
+            failed_enabled = []
+            for provider in enabled:
+                provider_status = _mapping_value(provider_statuses, provider)
+                if isinstance(provider_status, Mapping) and provider_status.get("failed") is True:
+                    failed_enabled.append(provider)
+            if failed_enabled:
+                available = max(0, available - len(failed_enabled))
+                reason_code = "tts_provider_failed" if available == 0 else "tts_provider_degraded"
+                status = "unhealthy" if available == 0 else "degraded"
+        except Exception:
+            logger.debug("Unable to collect Research Workspace TTS runtime status")
+
+        payload: dict[str, Any] = {
+            "status": status,
             "providers": {
                 "total": total,
                 "available": available,
             },
         }
+        if reason_code:
+            payload["reason_code"] = reason_code
+        return payload
     except Exception:
         logger.exception("Failed to collect Research Workspace TTS health")
         return {"status": "unknown", "reason_code": "tts_health_unknown"}
@@ -598,7 +622,7 @@ def _collect_image_health() -> Mapping[str, Any]:
         return {
             "status": "unknown",
             "providers": {"available": 0, "total": total},
-            "reason_code": "image_backend_unknown",
+            "reason_code": "image_backend_not_configured",
         }
     except Exception:
         logger.exception("Failed to collect Research Workspace image health")
