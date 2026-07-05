@@ -323,6 +323,23 @@ def generate_first_run_policy(
     }
 
 
+def compute_first_run_policy_hash(policy_document: Mapping[str, Any]) -> str:
+    """Return the first-run generated-policy hash for a stored policy document."""
+
+    provenance = policy_document.get("first_run_mcp_tools")
+    provenance_map = provenance if isinstance(provenance, Mapping) else {}
+    return _generated_policy_hash(
+        allowed_tools=_str_list(policy_document.get("allowed_tools")),
+        capabilities=_str_list(policy_document.get("capabilities")),
+        selected_pack_ids=[
+            pack_id
+            for pack_id in _str_list(provenance_map.get("selected_pack_ids"))
+            if pack_id in _PACKS_BY_ID
+        ],
+        selected_addon_ids=_str_list(provenance_map.get("selected_addon_ids")),
+    )
+
+
 def _catalog_pack(
     pack: Mapping[str, Any],
     entries_by_name: Mapping[str, Mapping[str, Any]],
