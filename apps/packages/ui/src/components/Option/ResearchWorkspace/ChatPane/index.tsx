@@ -2122,9 +2122,16 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   }, [chatFocusTarget, clearChatFocusTarget])
 
   const buildFullSourceContextPrompt = React.useCallback(
-    async (message: string): Promise<string> => {
+    async (
+      message: string,
+      responsePresetInstruction?: string | null
+    ): Promise<string> => {
+      const messageWithResponsePreset = responsePresetInstruction
+        ? `${responsePresetInstruction}\n\nUser question: ${message}`
+        : message
+
       if (!includeFullSourceContents || queryableSelectedSources.length === 0) {
-        return message
+        return messageWithResponsePreset
       }
 
       setPreparingSourceContext(true)
@@ -2172,7 +2179,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
               "Couldn't load full source contents; sending your question without inline source text."
             )
           )
-          return message
+          return messageWithResponsePreset
         }
 
         if (skippedSourceCount > 0) {
@@ -2204,6 +2211,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
             "playground:chat.fullSourceContextCitationInstruction",
             "When relevant, cite source titles directly."
           ),
+          ...(responsePresetInstruction ? [responsePresetInstruction] : []),
           "",
           fullSourceBlock,
           "",
@@ -2216,7 +2224,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
             "Failed to fetch full source contents; sending your question without inline source text."
           )
         )
-        return message
+        return messageWithResponsePreset
       } finally {
         setPreparingSourceContext(false)
       }
@@ -2314,11 +2322,9 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     setSubmitError(null)
     try {
       const responsePresetInstruction = buildResponsePresetInstruction()
-      const messageWithResponsePreset = responsePresetInstruction
-        ? `${responsePresetInstruction}\n\nUser question: ${message}`
-        : message
       const preparedMessage = await buildFullSourceContextPrompt(
-        messageWithResponsePreset
+        message,
+        responsePresetInstruction
       )
       const submitResult = await onSubmit({ message: preparedMessage, image: "" })
       if (
