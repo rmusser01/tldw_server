@@ -17,6 +17,7 @@ from tldw_Server_API.app.core.Setup.first_run_mcp_tools import (
 ConflictResolution = Literal["keep_existing", "replace_existing"]
 _GLOBAL_SCOPE = "global"
 _DEFAULT_TARGET = "default"
+_GENERATED_POLICY_KEYS = ("allowed_tools", "capabilities", "first_run_mcp_tools")
 _STEP_PAYLOAD_KEYS = {
     "acknowledged",
     "selected_pack_ids",
@@ -63,26 +64,6 @@ class McpToolsApplyResult:
     step_payload: dict[str, Any]
     conflict: dict[str, Any] | None = None
 
-    def to_dict(self) -> dict[str, Any]:
-        """Return a JSON-ready result shape for the later API layer."""
-
-        payload = {
-            "status": self.status,
-            "profile_id": self.profile_id,
-            "assignment_id": self.assignment_id,
-            "catalog_version": self.catalog_version,
-            "selected_pack_ids": list(self.selected_pack_ids),
-            "selected_addon_ids": list(self.selected_addon_ids),
-            "effective_tool_count": self.effective_tool_count,
-            "effective_tools": list(self.effective_tools),
-            "disabled_addons": list(self.disabled_addons),
-            "validation_state": self.validation_state,
-            "step_payload": dict(self.step_payload),
-        }
-        if self.conflict is not None:
-            payload["conflict"] = dict(self.conflict)
-        return payload
-
 
 class SetupMcpToolsService:
     """Apply first-run MCP tool pack selections to MCP Hub profiles."""
@@ -120,6 +101,10 @@ class SetupMcpToolsService:
         )
         profile = await self._find_existing_profile(setup_instance_id=_setup_instance_id(state))
 
+        if request.conflict_resolution is not None:
+            if profile is None or request.profile_id != int(profile["id"]):
+                raise ValueError("First-run MCP profile id mismatch")
+
         if profile is None:
             profile = await self.hub.create_permission_profile(
                 name=PROFILE_DISPLAY_NAME,
@@ -151,13 +136,14 @@ class SetupMcpToolsService:
                     policy_document=policy_document,
                     request=request,
                 )
+            merged_policy = _merge_generated_policy(policy_document, generated_policy)
             updated = await self.hub.update_permission_profile(
                 int(profile["id"]),
                 actor_id=actor_id,
-                policy_document=generated_policy,
+                policy_document=merged_policy,
             )
             profile = updated or profile
-            policy_document = generated_policy
+            policy_document = merged_policy
 
         assignment = await self._ensure_default_assignment(
             profile_id=int(profile["id"]),
@@ -225,12 +211,6 @@ class SetupMcpToolsService:
             int(assignment["id"]),
             actor_id=actor_id,
             profile_id=profile_id,
-            path_scope_object_id=None,
-            workspace_source_mode=None,
-            workspace_set_object_id=None,
-            inline_policy_document={},
-            approval_policy_id=None,
-            is_active=True,
         )
         return _dict(updated or assignment)
 
@@ -251,6 +231,19 @@ def _profile_conflict(profile: Mapping[str, Any], policy_document: Mapping[str, 
         "current_hash": current_hash,
         "expected_hash": expected_hash,
     }
+
+
+def _merge_generated_policy(
+    existing_policy: Mapping[str, Any],
+    generated_policy: Mapping[str, Any],
+) -> dict[str, Any]:
+    merged = dict(existing_policy)
+    for key in _GENERATED_POLICY_KEYS:
+        if key in generated_policy:
+            merged[key] = generated_policy[key]
+        else:
+            merged.pop(key, None)
+    return merged
 
 
 def _applied_result(
@@ -320,11 +313,16 @@ def _step_payload(
     selected_addon_ids: list[str],
     effective_tool_count: int,
 ) -> dict[str, Any]:
+    selected_addon_set = set(selected_addon_ids)
     payload = {
         "acknowledged": True,
         "selected_pack_ids": selected_pack_ids,
         "selected_addon_ids": selected_addon_ids,
-        "confirmed_addon_ids": _str_list(request.confirmed_addon_ids),
+        "confirmed_addon_ids": [
+            addon_id
+            for addon_id in _str_list(request.confirmed_addon_ids)
+            if addon_id in selected_addon_set
+        ],
         "confirmation_version": request.confirmation_version,
         "validation_state": "not_run",
         "profile_id": profile_id,

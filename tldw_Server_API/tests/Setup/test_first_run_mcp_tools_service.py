@@ -247,6 +247,12 @@ def _default_assignment(
     profile_id: int,
     *,
     target_id: str | None = None,
+    path_scope_object_id: int | None = None,
+    workspace_source_mode: str | None = None,
+    workspace_set_object_id: int | None = None,
+    inline_policy_document: dict[str, Any] | None = None,
+    approval_policy_id: int | None = None,
+    is_active: bool = True,
 ) -> dict[str, Any]:
     return {
         "id": assignment_id,
@@ -255,12 +261,12 @@ def _default_assignment(
         "owner_scope_type": "global",
         "owner_scope_id": None,
         "profile_id": profile_id,
-        "path_scope_object_id": None,
-        "workspace_source_mode": None,
-        "workspace_set_object_id": None,
-        "inline_policy_document": {},
-        "approval_policy_id": None,
-        "is_active": True,
+        "path_scope_object_id": path_scope_object_id,
+        "workspace_source_mode": workspace_source_mode,
+        "workspace_set_object_id": workspace_set_object_id,
+        "inline_policy_document": inline_policy_document or {},
+        "approval_policy_id": approval_policy_id,
+        "is_active": is_active,
     }
 
 
@@ -374,6 +380,74 @@ async def test_repeated_apply_updates_generated_policy_when_last_hash_matches(
 
 
 @pytest.mark.asyncio
+async def test_repeated_apply_preserves_unrelated_policy_fields_when_hash_matches(
+    first_run_state: FirstRunState,
+    fake_hub: FakeMcpHub,
+    fake_registry: FakeToolRegistry,
+    tool_entries: list[dict[str, Any]],
+) -> None:
+    existing_policy = _policy(state=first_run_state, tool_entries=tool_entries, selected_pack_ids=["writing"])
+    existing_policy["denied_tools"] = ["notes.delete"]
+    existing_policy["approval_mode"] = "manual"
+    existing_policy["conditions"] = {"tenant": "local"}
+    fake_hub.permission_profiles = [_profile(1, existing_policy)]
+    fake_hub.policy_assignments = [_default_assignment(10, 1)]
+    service = SetupMcpToolsService(hub=fake_hub, tool_registry=fake_registry)
+
+    await service.apply_selection(
+        state=first_run_state,
+        request=McpToolsApplyRequest(selected_pack_ids=["research"], selected_addon_ids=[]),
+    )
+
+    policy_document = fake_hub.updated_profiles[0]["policy_document"]
+    assert policy_document["denied_tools"] == ["notes.delete"]
+    assert policy_document["approval_mode"] == "manual"
+    assert policy_document["conditions"] == {"tenant": "local"}
+    assert policy_document["allowed_tools"] == ["knowledge.search", "knowledge.get", "mcp.tools.list"]
+    assert policy_document["first_run_mcp_tools"]["selected_pack_ids"] == ["research"]
+
+
+@pytest.mark.asyncio
+async def test_repointing_default_assignment_preserves_existing_controls(
+    first_run_state: FirstRunState,
+    fake_hub: FakeMcpHub,
+    fake_registry: FakeToolRegistry,
+    tool_entries: list[dict[str, Any]],
+) -> None:
+    existing_policy = _policy(state=first_run_state, tool_entries=tool_entries, selected_pack_ids=["writing"])
+    fake_hub.permission_profiles = [_profile(1, existing_policy)]
+    fake_hub.policy_assignments = [
+        _default_assignment(
+            10,
+            99,
+            path_scope_object_id=21,
+            workspace_source_mode="assignment_workspace_set",
+            workspace_set_object_id=31,
+            inline_policy_document={"denied_tools": ["notes.delete"]},
+            approval_policy_id=41,
+            is_active=False,
+        )
+    ]
+    service = SetupMcpToolsService(hub=fake_hub, tool_registry=fake_registry)
+
+    result = await service.apply_selection(
+        state=first_run_state,
+        request=McpToolsApplyRequest(selected_pack_ids=["research"], selected_addon_ids=[]),
+    )
+
+    assignment = fake_hub.policy_assignments[0]
+    assert result.assignment_id == 10
+    assert fake_hub.updated_assignments[0] == {"assignment_id": 10, "actor_id": None, "profile_id": 1}
+    assert assignment["profile_id"] == 1
+    assert assignment["path_scope_object_id"] == 21
+    assert assignment["workspace_source_mode"] == "assignment_workspace_set"
+    assert assignment["workspace_set_object_id"] == 31
+    assert assignment["inline_policy_document"] == {"denied_tools": ["notes.delete"]}
+    assert assignment["approval_policy_id"] == 41
+    assert assignment["is_active"] is False
+
+
+@pytest.mark.asyncio
 async def test_manual_edit_conflict_returns_structured_conflict_without_overwrite(
     first_run_state: FirstRunState,
     fake_hub: FakeMcpHub,
@@ -399,6 +473,38 @@ async def test_manual_edit_conflict_returns_structured_conflict_without_overwrit
     }
     assert fake_hub.updated_profiles == []
     assert fake_hub.created_assignments == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("conflict_resolution,profile_id", [("keep_existing", 2), ("replace_existing", None)])
+async def test_conflict_resolution_requires_matching_profile_id_before_mutating(
+    conflict_resolution: str,
+    profile_id: int | None,
+    first_run_state: FirstRunState,
+    fake_hub: FakeMcpHub,
+    fake_registry: FakeToolRegistry,
+    tool_entries: list[dict[str, Any]],
+) -> None:
+    edited_policy = _policy(state=first_run_state, tool_entries=tool_entries)
+    edited_policy["allowed_tools"].append("notes.delete")
+    fake_hub.permission_profiles = [_profile(1, edited_policy)]
+    fake_hub.policy_assignments = [_default_assignment(10, 99)]
+    service = SetupMcpToolsService(hub=fake_hub, tool_registry=fake_registry)
+
+    with pytest.raises(ValueError, match="First-run MCP profile id mismatch"):
+        await service.apply_selection(
+            state=first_run_state,
+            request=McpToolsApplyRequest(
+                selected_pack_ids=["writing"],
+                selected_addon_ids=[],
+                conflict_resolution=conflict_resolution,
+                profile_id=profile_id,
+            ),
+        )
+
+    assert fake_hub.updated_profiles == []
+    assert fake_hub.updated_assignments == []
+    assert fake_hub.policy_assignments[0]["profile_id"] == 99
 
 
 @pytest.mark.asyncio
@@ -505,6 +611,7 @@ async def test_step_payload_contains_only_allowlisted_mcp_tools_fields(
     assert result.step_payload["assignment_id"] == result.assignment_id
     assert result.step_payload["validation_state"] == "not_run"
     assert result.step_payload["catalog_version"] == CATALOG_VERSION
+    assert result.step_payload["confirmed_addon_ids"] == []
     assert "effective_tools" not in result.step_payload
     assert "policy_document" not in result.step_payload
     assert "endpoint_config" not in result.step_payload
