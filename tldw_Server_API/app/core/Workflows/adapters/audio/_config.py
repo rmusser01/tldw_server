@@ -126,8 +126,11 @@ class MultiVoiceTTSConfig(BaseAdapterConfig):
 
     sections: list[dict[str, Any]] | None = Field(None, description="Sections [{voice, text}] from compose step")
     voice_assignments: dict[str, str] | None = Field(None, description="Voice marker -> Kokoro voice ID mapping")
+    default_provider: str | None = Field(None, description="Default TTS provider hint")
+    provider: str | None = Field(None, description="Legacy/default TTS provider hint")
     default_model: str = Field("kokoro", description="Default TTS model")
     default_voice: str = Field("af_heart", description="Fallback voice if assignment missing")
+    fallback_provider: str | None = Field(None, description="Optional fallback TTS provider hint")
     response_format: Literal["mp3", "wav", "opus", "flac", "aac"] = Field(
         "mp3", description="Output audio format"
     )
@@ -135,7 +138,6 @@ class MultiVoiceTTSConfig(BaseAdapterConfig):
     pause_duration_seconds: float = Field(1.0, ge=0.0, le=5.0, description="Silence between sections")
     normalize: bool = Field(True, description="EBU R128 normalize final output")
     target_lufs: float = Field(-16.0, description="Target LUFS for normalization")
-    fallback_provider: str | None = Field("openai", description="Fallback TTS provider on failure")
     fallback_voice: str = Field("nova", description="Fallback voice for fallback provider")
     background_audio_uri: str | None = Field(
         None,

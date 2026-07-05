@@ -97,6 +97,12 @@ def _build_owned_job_poller_registrations(
             5.0,
         ),
         (
+            "visual_identity_jobs_task",
+            startup_worker_group_handles.visual_identity_jobs_task,
+            startup_worker_group_handles.visual_identity_jobs_stop_event,
+            5.0,
+        ),
+        (
             "vn_asset_jobs_task",
             startup_worker_group_handles.vn_asset_jobs_task,
             startup_worker_group_handles.vn_asset_jobs_stop_event,

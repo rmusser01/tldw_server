@@ -5,15 +5,15 @@ integration tests working without importing the broader endpoint surface.
 """
 from __future__ import annotations
 
-from typing import Iterable
+from collections.abc import Iterable
 
 from loguru import logger
 
+from tldw_Server_API.app.api.v1.router_groups.admin import iter_admin_router_specs
 from tldw_Server_API.app.api.v1.router_groups.conditional import (
     ImportedRouterSpec,
     append_imported_router_spec,
 )
-from tldw_Server_API.app.api.v1.router_groups.admin import iter_admin_router_specs
 from tldw_Server_API.app.api.v1.router_groups.content import iter_content_router_specs
 from tldw_Server_API.app.api.v1.router_groups.core import iter_core_router_specs
 from tldw_Server_API.app.api.v1.router_groups.factories import evaluations_router_factory
@@ -24,7 +24,11 @@ from tldw_Server_API.app.api.v1.router_groups.selection import (
 from tldw_Server_API.app.api.v1.router_groups.spec import RouterSpec
 from tldw_Server_API.app.core.testing import (
     audio_imports_enabled_for_runtime,
+)
+from tldw_Server_API.app.core.testing import (
     env_flag_enabled as _env_flag_enabled,
+)
+from tldw_Server_API.app.core.testing import (
     is_explicit_pytest_runtime as _is_explicit_pytest_runtime,
 )
 
@@ -48,6 +52,7 @@ MINIMAL_REQUIRED_ROUTER_NAMES = (
     "workspace_migrations",
     "workspaces",
     "workspace_memberships",
+    "rpg",
     "admin",
     "workspace_eligibility",
 )

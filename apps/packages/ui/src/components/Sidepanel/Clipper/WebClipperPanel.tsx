@@ -101,10 +101,7 @@ const normalizeWorkspaceOptions = (
     }))
 }
 
-const createOpenTargetUrl = (
-  destinationMode: WebClipperDestination,
-  response: WebClipperSaveResponse
-): string | null => {
+const createOpenTargetUrl = (response: WebClipperSaveResponse): string | null => {
   const chromeApi = globalThis.chrome
   if (!chromeApi?.runtime?.getURL) {
     return null
@@ -114,7 +111,7 @@ const createOpenTargetUrl = (
     return null
   }
 
-  if (destinationMode === "workspace" && response.workspace_placement) {
+  if (response.workspace_placement) {
     return chromeApi.runtime.getURL("options.html#/research-workspace")
   }
 
@@ -575,7 +572,7 @@ const WebClipperPanel = ({ draft, onCancel }: WebClipperPanelProps) => {
       }
 
       if (action === "open") {
-        const url = createOpenTargetUrl(destinationMode, response)
+        const url = createOpenTargetUrl(response)
         if (url) {
           globalThis.chrome?.tabs?.create?.({ url })
         }

@@ -36,6 +36,44 @@ async def test_docs_module_advertises_provider_tools(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_docs_module_exposes_sync_source_without_media_or_rag(tmp_path: Path) -> None:
+    module = DocsModule(
+        ModuleConfig(
+            name="docs",
+            settings={"db_path": str(tmp_path / "docs.db"), "trusted_roots": [str(tmp_path)]},
+        )
+    )
+    await module.on_initialize()
+
+    tools = {tool["name"]: tool for tool in await module.get_tools()}
+
+    assert "docs.sync_source" in tools  # nosec B101
+    assert tools["docs.sync_source"]["metadata"]["category"] == "ingestion"  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_docs_module_exposes_discover_source_when_enabled(tmp_path: Path) -> None:
+    module = DocsModule(
+        ModuleConfig(
+            name="docs",
+            settings={
+                "db_path": str(tmp_path / "docs.db"),
+                "enable_web_acquisition": True,
+                "enable_source_discovery": True,
+                "web_source_profile": "locked_down",
+                "allowed_url_prefixes": ["https://example.com/docs/"],
+            },
+        )
+    )
+    await module.on_initialize()
+
+    tools = {tool["name"]: tool for tool in await module.get_tools()}
+
+    assert "docs.discover_source" in tools  # nosec B101
+    assert tools["docs.discover_source"]["metadata"]["category"] == "ingestion"  # nosec B101
+
+
+@pytest.mark.asyncio
 async def test_docs_module_executes_with_context_scope(tmp_path: Path) -> None:
     doc_path = tmp_path / "guide.md"
     doc_path.write_text("# Guide\n\nSQLite local docs.\n", encoding="utf-8")
@@ -144,6 +182,7 @@ def test_repo_docs_mcp_config_keeps_web_acquisition_disabled() -> None:
     assert len(docs_modules) == 1  # nosec B101
     settings = docs_modules[0]["settings"]
     assert settings["enable_web_acquisition"] is False  # nosec B101
+    assert settings.get("enable_source_discovery", False) is False  # nosec B101
     assert settings["web_source_profile"] == "locked_down"  # nosec B101
     assert settings["allow_arbitrary_public_domains"] is False  # nosec B101
     assert settings["preapproved_domains"] == []  # nosec B101

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -624,6 +625,64 @@ def test_workspace_sources_status_uses_active_media_ingest_job_progress(
     assert source["progress_percent"] == 82.5
     assert source["job"]["id"] == 42
     assert source["job"]["progress_message"] == "vector indexing"
+
+
+@pytest.mark.integration
+def test_workspace_sources_status_exposes_workspace_job_failure_reason_code(
+    workspace_status_app: FastAPI,
+    tmp_path: Path,
+) -> None:
+    db = CharactersRAGDB(db_path=str(tmp_path / "failed-workspace-job.db"), client_id="user-1")
+    db.upsert_workspace("ws-failed-job", "Failed Workspace Job")
+    db.add_workspace_source(
+        "ws-failed-job",
+        {
+            "id": "src-missing-media",
+            "media_id": 404,
+            "title": "Missing source media",
+            "source_type": "document",
+            "position": 0,
+            "selected": True,
+        },
+    )
+    jobs = [
+        {
+            "id": 4040,
+            "uuid": "job-4040",
+            "domain": "media_ingest",
+            "job_type": "workspace_source_ingest",
+            "status": "failed",
+            "payload": {
+                "workspace_id": "ws-failed-job",
+                "workspace_source_id": "src-missing-media",
+                "media_id": 404,
+            },
+            "result": None,
+            "progress_percent": 35,
+            "progress_message": "inspect media",
+            "error_code": "workspace_source_media_not_found",
+            "error_message": "Workspace source media item is missing.",
+            "created_at": "2026-05-23T12:00:00Z",
+        },
+    ]
+    _install_overrides(workspace_status_app, db, _MediaStatusDB({}), jobs=jobs)
+    try:
+        with TestClient(workspace_status_app, raise_server_exceptions=False) as client:
+            response = client.get("/api/v1/workspaces/ws-failed-job/sources/status")
+    finally:
+        _clear_overrides(workspace_status_app)
+
+    assert response.status_code == 200, response.text
+    source = response.json()["sources"][0]
+    assert source["state"] == "failed"
+    assert source["status_reason"] == "workspace_source_media_not_found"
+    assert source["progress_percent"] == 35
+    assert source["progress_message"] == "Workspace source media item is missing."
+    assert source["next_action"] == "retry_ingestion_or_readd_source"
+    assert source["retry_eligible"] is True
+    assert source["job"]["id"] == 4040
+    assert source["job"]["error_code"] == "workspace_source_media_not_found"
+    assert source["job"]["error_message"] == "Workspace source media item is missing."
 
 
 @pytest.mark.integration

@@ -9,7 +9,9 @@ const {
   createChatMock,
   streamCharacterChatCompletionMock,
   persistCharacterCompletionMock,
-  normalChatModeMock
+  addChatMessageMock,
+  normalChatModeMock,
+  resolveVisualIdentityBindingMock
 } = vi.hoisted(() => ({
   createChatMock: vi.fn(),
   streamCharacterChatCompletionMock: vi.fn(),
@@ -17,8 +19,23 @@ const {
     assistant_message_id: "assistant-server-1",
     version: 1
   })),
-  normalChatModeMock: vi.fn()
+  addChatMessageMock: vi.fn(async () => ({ id: "user-server-1", version: 1 })),
+  normalChatModeMock: vi.fn(),
+  resolveVisualIdentityBindingMock: vi.fn(async () => ({
+    actor_kind: "character",
+    actor_id: 12,
+    pack_id: 1,
+    pack_version_id: 2,
+    expression_key: "surprised",
+    requested_expression_key: "surprised",
+    asset_id: 9,
+    storage_relpath: null,
+    fallback_reason: "manual_override",
+    is_animated: false,
+    content_type: "image/png",
+    asset_url: "/api/v1/visual-identities/packs/1/assets/9/content"
   }))
+}))
 
 const messageStoreState = vi.hoisted(() => ({
   value: {
@@ -138,9 +155,10 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
     createChat: createChatMock,
     streamCharacterChatCompletion: streamCharacterChatCompletionMock,
     persistCharacterCompletion: persistCharacterCompletionMock,
-    addChatMessage: vi.fn(async () => ({ id: "user-server-1", version: 1 })),
+    addChatMessage: addChatMessageMock,
     getChatSettings: vi.fn(async () => ({ settings: null })),
-    initialize: vi.fn(async () => null)
+    initialize: vi.fn(async () => null),
+    resolveVisualIdentityBinding: resolveVisualIdentityBindingMock
   }
 }))
 
@@ -262,6 +280,7 @@ describe("useChatActions character integration", () => {
       serverChatAssistantKind: null,
       serverChatSource: null
     }
+    resolveVisualIdentityBindingMock.mockClear()
   })
 
   it("keeps tracked character routing anchored to current chat metadata when global character state is stale", async () => {
@@ -289,6 +308,63 @@ describe("useChatActions character integration", () => {
     expect(options.setServerChatAssistantId).toHaveBeenCalledWith("char-tracked")
     expect(normalChatModeMock).not.toHaveBeenCalled()
     expect(options.setServerChatId).not.toHaveBeenCalledWith(null)
+  })
+
+  it("handles emote commands without sending chat", async () => {
+    const options = {
+      ...createHookOptions(),
+      setVisualIdentityManualExpressionOverride: vi.fn()
+    }
+    const { result } = renderHook(() => useChatActions(options as any))
+
+    let submitResult: unknown
+    await act(async () => {
+      submitResult = await result.current.onSubmit({
+        message: "/emote surprised",
+        image: ""
+      })
+    })
+
+    expect(options.setVisualIdentityManualExpressionOverride).toHaveBeenCalledWith(
+      "surprised"
+    )
+    expect(streamCharacterChatCompletionMock).not.toHaveBeenCalled()
+    expect(normalChatModeMock).not.toHaveBeenCalled()
+    expect(options.setStreaming).not.toHaveBeenCalledWith(true)
+    expect(submitResult).toEqual({
+      status: "skipped",
+      reason: "Visual identity expression updated"
+    })
+  })
+
+  it("uses manual visual identity override when resolving assistant message metadata", async () => {
+    const options = {
+      ...createHookOptions(),
+      serverChatCharacterId: 12,
+      selectedCharacter: {
+        id: "12",
+        name: "Numeric Character",
+        system_prompt: "Prompt"
+      },
+      visualIdentityManualExpressionOverride: "surprised"
+    }
+    const { result } = renderHook(() => useChatActions(options as any))
+
+    await act(async () => {
+      await result.current.onSubmit({
+        message: "React to this",
+        image: ""
+      })
+    })
+
+    expect(resolveVisualIdentityBindingMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actor_kind: "character",
+        actor_id: 12,
+        expression_key: "surprised",
+        manual_override_expression_key: "surprised"
+      })
+    )
   })
 
   it("does not let stale overlay assistant state override the active character chat", async () => {
@@ -334,7 +410,8 @@ describe("useChatActions character integration", () => {
       expect.objectContaining({
         assistant_content: "Tracked reply",
         speaker_character_id: 42
-      })
+      }),
+      undefined
     )
     const lastPersistCall = persistCharacterCompletionMock.mock.calls.at(-1) as
       | unknown[]
@@ -402,7 +479,8 @@ describe("useChatActions character integration", () => {
         assistant_content: "Tracked reply",
         speaker_character_id: 99,
         speaker_character_name: "Miku"
-      })
+      }),
+      undefined
     )
   })
 
@@ -459,7 +537,8 @@ describe("useChatActions character integration", () => {
         assistant_content: "Tracked reply",
         speaker_character_id: 4,
         speaker_character_name: "Ashley"
-      })
+      }),
+      undefined
     )
   })
 
@@ -516,7 +595,71 @@ describe("useChatActions character integration", () => {
         assistant_content: "Tracked reply",
         speaker_character_id: 99,
         speaker_character_name: "Miku"
-      })
+      }),
+      undefined
     )
+  })
+
+  it("passes workspace scope through when creating a character-backed chat", async () => {
+    const scope = { type: "workspace", workspaceId: "workspace-1" } as const
+    const options = {
+      ...createHookOptions(),
+      scope,
+      serverChatId: null,
+      serverChatTitle: null,
+      serverChatCharacterId: null,
+      serverChatAssistantKind: null,
+      serverChatAssistantId: null,
+      selectedCharacter: null,
+      selectedAssistant: {
+        kind: "character" as const,
+        id: "char-scoped",
+        name: "Scoped Character",
+        system_prompt: "Scoped prompt",
+        metadata: {
+          selectionMode: "tracked" as const
+        }
+      }
+    }
+    const { result } = renderHook(() => useChatActions(options as any))
+
+    await act(async () => {
+      await result.current.onSubmit({
+        message: "Hello workspace character",
+        image: ""
+      })
+    })
+
+    expect(createChatMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        character_id: "char-scoped",
+        state: "in-progress"
+      }),
+      { scope }
+    )
+    expect(addChatMessageMock).toHaveBeenCalledWith(
+      "unexpected-new-chat",
+      expect.objectContaining({
+        role: "user",
+        content: "Hello workspace character"
+      }),
+      { scope }
+    )
+    expect(streamCharacterChatCompletionMock).toHaveBeenCalledWith(
+      "unexpected-new-chat",
+      expect.objectContaining({
+        include_character_context: true,
+        model: "deepseek-chat"
+      }),
+      expect.objectContaining({ scope })
+    )
+    expect(persistCharacterCompletionMock).toHaveBeenCalledWith(
+      "unexpected-new-chat",
+      expect.objectContaining({
+        assistant_content: "Tracked reply"
+      }),
+      { scope }
+    )
+    expect(normalChatModeMock).not.toHaveBeenCalled()
   })
 })

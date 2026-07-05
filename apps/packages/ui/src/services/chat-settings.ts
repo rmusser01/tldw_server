@@ -10,6 +10,7 @@ import {
   ConversationContextSettings,
   DeepResearchAttachment
 } from "@/types/chat-session-settings"
+import type { ChatScope } from "@/types/chat-scope"
 
 const storage = createSafeStorage()
 const MAX_CHAT_SETTINGS_BYTES = 200_000
@@ -665,9 +666,11 @@ export const syncChatSettingsForServerChat = async (params: {
   historyId: string | null
   serverChatId: string | null
   allowScratchFallback?: boolean
+  scope?: ChatScope
 }): Promise<ChatSettingsRecord | null> => {
-  const { historyId, serverChatId, allowScratchFallback = false } = params
+  const { historyId, serverChatId, allowScratchFallback = false, scope } = params
   if (!serverChatId) return null
+  const scopeOptions = scope ? { scope } : undefined
 
   const serverKey = resolveChatSettingsKey({ historyId: null, serverChatId })
   const localKey = resolveChatSettingsKey({ historyId, serverChatId: null })
@@ -686,7 +689,7 @@ export const syncChatSettingsForServerChat = async (params: {
 
   let remoteSettings: ChatSettingsRecord | null = null
   try {
-    const res = await tldwClient.getChatSettings(serverChatId)
+    const res = await tldwClient.getChatSettings(serverChatId, scopeOptions)
     remoteSettings = coerceSettings(res.settings)
   } catch (error) {
     if (!isMissingRemoteChatSettingsError(error)) {
@@ -696,7 +699,11 @@ export const syncChatSettingsForServerChat = async (params: {
 
   if (!remoteSettings && localSettings) {
     try {
-      const res = await tldwClient.updateChatSettings(serverChatId, localSettings)
+      const res = await tldwClient.updateChatSettings(
+        serverChatId,
+        localSettings,
+        scopeOptions
+      )
       const synced = coerceSettings(res.settings) || localSettings
       await saveChatSettingsForKey(serverKey, synced)
       if (usedScratchFallback) {
@@ -727,7 +734,7 @@ export const syncChatSettingsForServerChat = async (params: {
 
   if (mergedTime >= remoteTime) {
     try {
-      await tldwClient.updateChatSettings(serverChatId, merged)
+      await tldwClient.updateChatSettings(serverChatId, merged, scopeOptions)
     } catch (error) {
       console.warn("Failed to reconcile chat settings to server", error)
     }

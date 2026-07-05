@@ -98,6 +98,16 @@ export type Message = {
   moodLabel?: string
   moodConfidence?: number | null
   moodTopic?: string | null
+  visualActorKind?: "character" | "persona" | null
+  visualActorId?: number | string | null
+  visualPackId?: number | null
+  visualPackVersionId?: number | null
+  visualExpressionKey?: string | null
+  visualAssetId?: number | null
+  visualAssetUrl?: string | null
+  visualPreviewUrl?: string | null
+  visualFallbackReason?: string | null
+  visualIsAnimated?: boolean | null
 }
 
 export type ChatHistory = {

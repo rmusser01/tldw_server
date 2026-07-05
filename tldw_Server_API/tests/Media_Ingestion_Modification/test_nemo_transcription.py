@@ -6,6 +6,8 @@ import pytest
 import numpy as np
 import tempfile
 import os
+import sys
+import types
 from unittest.mock import Mock, patch, MagicMock
 from pathlib import Path
 
@@ -188,6 +190,186 @@ class TestNemoTranscription:
         # Language hints should be forwarded for AST
         assert kwargs.get("source_lang") == "fr"
         assert kwargs.get("target_lang") == "en"
+
+    @patch('tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo.load_canary_model')
+    def test_transcribe_with_canary_resamples_numpy_before_direct_transcribe(self, mock_load_model: MagicMock) -> None:
+        """Canary direct NumPy path should honor non-16kHz caller sample rates."""
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo import (
+            transcribe_with_canary,
+        )
+
+        audio_data = np.ones(8000, dtype=np.float32)
+        mock_model = MagicMock()
+        mock_model.transcribe.return_value = ["resampled canary"]
+        mock_load_model.return_value = mock_model
+
+        result = transcribe_with_canary(audio_data, 8000, "en")
+
+        assert result == "resampled canary"
+        args, _kwargs = mock_model.transcribe.call_args
+        assert isinstance(args[0], list)
+        assert len(args[0][0]) == 16000
+
+    @patch('tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo.load_parakeet_model')
+    def test_transcribe_with_parakeet_resamples_numpy_before_direct_transcribe(self, mock_load_model: MagicMock) -> None:
+        """Parakeet direct NumPy path should honor non-16kHz caller sample rates."""
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo import (
+            transcribe_with_parakeet,
+        )
+
+        audio_data = np.ones(8000, dtype=np.float32)
+        mock_model = MagicMock()
+        mock_model.transcribe.return_value = ["resampled parakeet"]
+        mock_load_model.return_value = mock_model
+
+        result = transcribe_with_parakeet(audio_data, 8000, "standard")
+
+        assert result == "resampled parakeet"
+        args, _kwargs = mock_model.transcribe.call_args
+        assert len(args[0]) == 16000
+
+    @patch('tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo.load_parakeet_model')
+    def test_transcribe_with_parakeet_empty_numpy_does_not_resample_crash(self, mock_load_model: MagicMock) -> None:
+        """Parakeet direct NumPy path should not crash before provider validation on empty audio."""
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo import (
+            transcribe_with_parakeet,
+        )
+
+        audio_data = np.array([], dtype=np.float32)
+        mock_model = MagicMock()
+        mock_model.transcribe.return_value = ["empty parakeet"]
+        mock_load_model.return_value = mock_model
+
+        result = transcribe_with_parakeet(audio_data, 8000, "standard")
+
+        assert result == "empty parakeet"
+        args, _kwargs = mock_model.transcribe.call_args
+        assert args[0].size == 0
+
+    def test_prepare_numpy_audio_for_nemo_downmixes_stereo(self) -> None:
+        """Direct helper should downmix multi-channel arrays to mono."""
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo import (
+            _prepare_numpy_audio_for_nemo,
+        )
+
+        audio_data = np.column_stack(
+            (
+                np.ones(8, dtype=np.float32),
+                np.zeros(8, dtype=np.float32),
+            )
+        )
+
+        audio_np, sample_rate = _prepare_numpy_audio_for_nemo(audio_data, 16000)
+
+        assert sample_rate == 16000
+        assert audio_np.shape == (8,)
+        assert np.allclose(audio_np, 0.5)
+
+    def test_prepare_numpy_audio_for_nemo_skips_polyphase_when_terms_are_large(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Large up/down terms should use the linear fallback instead of resample_poly."""
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo import (
+            _prepare_numpy_audio_for_nemo,
+        )
+
+        fake_scipy = types.ModuleType("scipy")
+        fake_signal = types.SimpleNamespace(
+            resample_poly=lambda *_args, **_kwargs: pytest.fail("resample_poly should not be used")
+        )
+        fake_scipy.signal = fake_signal
+        monkeypatch.setitem(sys.modules, "scipy", fake_scipy)
+
+        audio_np, sample_rate = _prepare_numpy_audio_for_nemo(
+            np.ones(16001, dtype=np.float32),
+            16001,
+        )
+
+        assert sample_rate == 16000
+        assert len(audio_np) == 16000
+
+    def test_prepare_numpy_audio_for_nemo_uses_linear_fallback_without_scipy(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """SciPy import failure should fall back to bounded linear interpolation."""
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo import (
+            _prepare_numpy_audio_for_nemo,
+        )
+
+        real_import = __import__
+
+        def fake_import(name: str, *args: object, **kwargs: object) -> object:
+            if name == "scipy":
+                raise ImportError("scipy unavailable")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr("builtins.__import__", fake_import)
+
+        audio_np, sample_rate = _prepare_numpy_audio_for_nemo(
+            np.ones(8000, dtype=np.float32),
+            8000,
+        )
+
+        assert sample_rate == 16000
+        assert len(audio_np) == 16000
+
+    def test_prepare_numpy_audio_for_nemo_uses_linear_fallback_when_scipy_fails(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """SciPy resampling failure should fall back to bounded linear interpolation."""
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo import (
+            _prepare_numpy_audio_for_nemo,
+        )
+
+        fake_scipy = types.ModuleType("scipy")
+
+        def fail_resample_poly(*_args: object, **_kwargs: object) -> None:
+            raise RuntimeError("polyphase resampling failed")
+
+        fake_signal = types.SimpleNamespace(resample_poly=fail_resample_poly)
+        fake_scipy.signal = fake_signal
+        monkeypatch.setitem(sys.modules, "scipy", fake_scipy)
+
+        audio_np, sample_rate = _prepare_numpy_audio_for_nemo(
+            np.ones(8000, dtype=np.float32),
+            8000,
+        )
+
+        np.testing.assert_equal(sample_rate, 16000)
+        np.testing.assert_equal(len(audio_np), 16000)
+
+    def test_prepare_numpy_audio_for_nemo_rejects_invalid_sample_rates(self) -> None:
+        """Invalid or implausible sample rates should fail before resampling."""
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo import (
+            _prepare_numpy_audio_for_nemo,
+        )
+
+        with pytest.raises(ValueError, match="sample_rate must be positive"):
+            _prepare_numpy_audio_for_nemo(np.ones(8, dtype=np.float32), 0)
+
+        with pytest.raises(ValueError, match="supported range"):
+            _prepare_numpy_audio_for_nemo(np.ones(8, dtype=np.float32), 1)
+
+    def test_prepare_numpy_audio_for_nemo_rejects_large_resample_ratio(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Fallback interpolation should fail fast when the requested ratio is too large."""
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo import (
+            _prepare_numpy_audio_for_nemo,
+        )
+
+        monkeypatch.setitem(sys.modules, "scipy", None)
+
+        with pytest.raises(ValueError, match="resample ratio is too large"):
+            _prepare_numpy_audio_for_nemo(
+                np.ones(8000, dtype=np.float32),
+                8000,
+                target_sample_rate=128000,
+            )
 
     @patch('tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo.load_canary_model')
     def test_transcribe_with_canary_sanitizes_runtime_errors(self, mock_load_model):

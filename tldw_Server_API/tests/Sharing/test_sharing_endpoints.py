@@ -179,6 +179,25 @@ async def test_verify_chatbook_ownership_uses_storage_user_id_for_numeric_users(
 
 
 @pytest.mark.asyncio
+async def test_validate_share_target_scope_rejects_invalid_scope_id():
+    from tldw_Server_API.app.api.v1.endpoints import sharing
+
+    body = SimpleNamespace(
+        share_scope_id="not-an-int",
+        share_scope_type=SimpleNamespace(value="team"),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await sharing._validate_share_target_scope(
+            body,
+            SimpleNamespace(team_ids=[1], org_ids=[]),
+        )
+
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.detail == "Invalid share scope ID."
+
+
+@pytest.mark.asyncio
 async def test_shared_with_me_workspace_name_resolution_log_is_sanitized(
     repo,
     test_user,
@@ -448,6 +467,40 @@ class TestWorkspaceSharing:
         data = resp.json()
         assert data["workspace_id"] == "ws-1"
         assert data["access_level"] == "view_chat"
+
+    def test_share_workspace_accepts_current_user_org_scope(self, client, mock_repo):
+        resp = client.post("/api/v1/sharing/workspaces/ws-org/share", json={
+            "share_scope_type": "org",
+            "share_scope_id": 5,
+            "access_level": "view_chat_add",
+            "allow_clone": False,
+        })
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["workspace_id"] == "ws-org"
+        assert data["share_scope_type"] == "org"
+        assert data["share_scope_id"] == 5
+        assert data["access_level"] == "view_chat_add"
+        assert data["allow_clone"] is False
+
+    def test_share_workspace_rejects_team_scope_outside_current_user_membership(self, client, mock_repo):
+        resp = client.post("/api/v1/sharing/workspaces/ws-unknown-team/share", json={
+            "share_scope_type": "team",
+            "share_scope_id": 999,
+        })
+
+        assert resp.status_code == 403
+        assert resp.json()["detail"] == "You can only share with teams you belong to."
+
+    def test_share_workspace_rejects_org_scope_outside_current_user_membership(self, client, mock_repo):
+        resp = client.post("/api/v1/sharing/workspaces/ws-unknown-org/share", json={
+            "share_scope_type": "org",
+            "share_scope_id": 999,
+        })
+
+        assert resp.status_code == 403
+        assert resp.json()["detail"] == "You can only share with organizations you belong to."
 
     def test_share_workspace_succeeds_when_audit_write_fails(
         self,

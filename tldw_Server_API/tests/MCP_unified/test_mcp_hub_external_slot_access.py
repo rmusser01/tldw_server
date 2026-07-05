@@ -8,7 +8,7 @@ import pytest
 
 from tldw_Server_API.app.core.AuthNZ.repos.mcp_hub_repo import McpHubRepo
 
-pytest_plugins = ("tldw_Server_API.tests.AuthNZ.conftest",)
+pytest_plugins = ("tldw_Server_API.tests._plugins.authnz_full_fixtures",)
 
 
 @pytest.mark.asyncio

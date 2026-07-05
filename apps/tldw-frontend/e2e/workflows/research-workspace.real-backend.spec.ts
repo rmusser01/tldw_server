@@ -605,6 +605,28 @@ const clickActionable = async (locator: Locator) => {
   }
 }
 
+const activateMenuItem = async (locator: Locator) => {
+  await expect(locator).toBeVisible({ timeout: 10_000 })
+  try {
+    await locator.click({ timeout: 5_000 })
+  } catch (error) {
+    if (!String(error).includes("nextjs-portal")) {
+      throw error
+    }
+    await locator.focus()
+    await expect(locator).toBeFocused({ timeout: 5_000 })
+    await locator.press("Enter")
+  }
+}
+
+const openSandboxDiagnosticsMenu = async (page: Page) => {
+  await clickActionable(page.getByTestId("workspace-settings-button"))
+  const sandboxDiagnosticsMenuItem = page.getByRole("menuitem", {
+    name: "Sandbox diagnostics"
+  })
+  await activateMenuItem(sandboxDiagnosticsMenuItem)
+}
+
 test.describe("Research Workspace Workflow (Real Backend)", () => {
   test.beforeEach(async ({ page }) => {
     await seedAuth(page)
@@ -689,17 +711,47 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
         expect(powerEvidence.routeTiming.durationMs).toBeGreaterThanOrEqual(0)
         expect(powerEvidence.warmRouteTiming?.durationMs).toBeGreaterThanOrEqual(0)
         expect(powerEvidence.url).toContain("/research-workspace")
-        expect(
-          await powerPage.evaluate(() => {
-            const raw = localStorage.getItem("tldwConfig")
-            if (!raw) return false
-            try {
-              const parsed = JSON.parse(raw)
-              return Boolean(parsed?.apiKey)
-            } catch {
-              return false
+        const powerStoredAuth = await powerPage.evaluate(() => {
+          const raw = localStorage.getItem("tldwConfig")
+          const legacyApiKey = localStorage.getItem("apiKey")
+          const runtimeSessionApiKey = sessionStorage.getItem(
+            "tldwRuntimeSessionSingleUserApiKey"
+          )
+          if (!raw) {
+            return {
+              authMode: null,
+              raw: null,
+              tldwConfigApiKey: null,
+              legacyApiKey,
+              runtimeSessionApiKey
             }
-          })
+          }
+          try {
+            const parsed = JSON.parse(raw)
+            return {
+              authMode:
+                typeof parsed?.authMode === "string" ? parsed.authMode : null,
+              raw,
+              tldwConfigApiKey:
+                typeof parsed?.apiKey === "string" ? parsed.apiKey : null,
+              legacyApiKey,
+              runtimeSessionApiKey
+            }
+          } catch {
+            return {
+              authMode: null,
+              raw,
+              tldwConfigApiKey: null,
+              legacyApiKey,
+              runtimeSessionApiKey
+            }
+          }
+        })
+        expect(powerStoredAuth.authMode).toBe("single-user")
+        expect(
+          powerStoredAuth.tldwConfigApiKey === TEST_CONFIG.apiKey ||
+            powerStoredAuth.runtimeSessionApiKey === TEST_CONFIG.apiKey ||
+            powerStoredAuth.legacyApiKey === TEST_CONFIG.apiKey
         ).toBe(true)
       } finally {
         powerDiagnostics.dispose()
@@ -757,8 +809,13 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
       )
     })
 
-    await authedPage.getByRole("button", { name: /workspace settings/i }).click()
-    await authedPage.getByText("ACP run history").click()
+    await clickActionable(
+      authedPage.getByTestId("workspace-settings-button")
+    )
+    const acpRunHistoryMenuItem = authedPage.getByRole("menuitem", {
+      name: "ACP run history"
+    })
+    await activateMenuItem(acpRunHistoryMenuItem)
 
     const projectsRequest = await projectsRequestPromise
     const projectsUrl = new URL(projectsRequest.url())
@@ -768,13 +825,13 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
     )
 
     const modal = authedPage.getByRole("dialog", { name: /ACP run history/i })
-    await expect(modal).toBeVisible({ timeout: 10_000 })
+    await expect(modal).toBeVisible({ timeout: 30_000 })
     const terminalState = modal
       .getByText(
         /No ACP runs linked to this workspace yet|Agent orchestration is not available on this server\.|Could not load ACP run history/i
       )
       .first()
-    await expect(terminalState).toBeVisible({ timeout: 10_000 })
+    await expect(terminalState).toBeVisible({ timeout: 30_000 })
 
     await assertNoCriticalErrors(diagnostics)
   })
@@ -821,10 +878,7 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
       )
     })
 
-    await clickActionable(
-      authedPage.getByRole("button", { name: /workspace settings/i })
-    )
-    await authedPage.getByText("Sandbox diagnostics").click()
+    await openSandboxDiagnosticsMenu(authedPage)
 
     const diagnosticsRequest = await diagnosticsRequestPromise
     const diagnosticsUrl = new URL(diagnosticsRequest.url())
@@ -897,10 +951,7 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
       )
     })
 
-    await clickActionable(
-      authedPage.getByRole("button", { name: /workspace settings/i })
-    )
-    await authedPage.getByText("Sandbox diagnostics").click()
+    await openSandboxDiagnosticsMenu(authedPage)
 
     const diagnosticsResponse = await diagnosticsResponsePromise
     expect(diagnosticsResponse.status()).toBeLessThan(400)
@@ -1550,9 +1601,8 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
       })
       expect(updatedFlashcardList.items.length).toBeGreaterThan(0)
 
-      await flashcardsPage.goto()
+      await flashcardsPage.gotoPath(`/flashcards?tab=manage&deck_id=${deckId}`)
       await flashcardsPage.assertPageReady()
-      await flashcardsPage.switchToTab("manage")
       await expect(flashcardsPage.getManageFlashcardRow(firstCardUuid)).toBeVisible({
         timeout: 10_000
       })

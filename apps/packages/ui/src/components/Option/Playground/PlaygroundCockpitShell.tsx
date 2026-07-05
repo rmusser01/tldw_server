@@ -185,6 +185,10 @@ export const PlaygroundCockpitShell = ({
     "cockpit.restoreRuntimeSidechannel",
     "Restore runtime sidechannel",
   );
+  const hideContextRailLabel = t("cockpit.hideContextRail", "Hide context rail");
+  const showContextRailLabel = t("cockpit.showContextRail", "Show context rail");
+  const hideRuntimeRailLabel = t("cockpit.hideRuntimeRail", "Hide runtime rail");
+  const showRuntimeRailLabel = t("cockpit.showRuntimeRail", "Show runtime rail");
   const contextRailTabLabel = t("cockpit.contextRailTab", "Context rail");
   const runtimeRailTabLabel = t("cockpit.runtimeRailTab", "Runtime rail");
   const modeSummaryKey = buildModeSummaryKey(
@@ -304,6 +308,40 @@ export const PlaygroundCockpitShell = ({
               {rightRailVisible
                 ? t("cockpit.runtime", "Runtime")
                 : restoreRuntimeSidechannelLabel}
+            </button>
+          </div>
+          <div className="grid grid-cols-2 gap-1">
+            <button
+              type="button"
+              aria-pressed={leftRailVisible}
+              aria-controls={mobileContextPanelId}
+              onClick={() => {
+                onLeftRailVisibleChange?.(!leftRailVisible);
+                if (leftRailVisible && visibleMobilePanel === "context") {
+                  setMobilePanel("runtime");
+                } else if (!leftRailVisible) {
+                  setMobilePanel("context");
+                }
+              }}
+              className="min-h-[36px] rounded-md border border-border bg-bg px-2 py-1 text-xs font-medium text-text hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+            >
+              {leftRailVisible ? hideContextRailLabel : showContextRailLabel}
+            </button>
+            <button
+              type="button"
+              aria-pressed={rightRailVisible}
+              aria-controls={mobileRuntimePanelId}
+              onClick={() => {
+                onRightRailVisibleChange?.(!rightRailVisible);
+                if (rightRailVisible && visibleMobilePanel === "runtime") {
+                  setMobilePanel("context");
+                } else if (!rightRailVisible) {
+                  setMobilePanel("runtime");
+                }
+              }}
+              className="min-h-[36px] rounded-md border border-border bg-bg px-2 py-1 text-xs font-medium text-text hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+            >
+              {rightRailVisible ? hideRuntimeRailLabel : showRuntimeRailLabel}
             </button>
           </div>
           <p

@@ -47,11 +47,27 @@ def test_download_audio_rejects_when_content_length_exceeds_limit(monkeypatch, t
     monkeypatch.setattr(audio_files, "MAX_FILE_SIZE", 1024)
     dummy_uuid = SimpleNamespace(hex="abcdef1234567890")
     monkeypatch.setattr(audio_files.uuid, "uuid4", lambda: dummy_uuid)
+    calls = []
 
     faux_response = _FakeResponse(
         headers={"content-length": "2048", "content-type": "audio/mpeg"},
         chunks=[b"x"],
     )
+
+    def fake_downloader(*args, **kwargs):
+        calls.append((args, kwargs))
+        return faux_response
+
+    with pytest.raises(audio_files.AudioFileSizeError):
+        audio_files.download_audio_file(
+            "https://example.com/file.mp3",
+            str(tmp_path),
+            downloader=fake_downloader,
+        )
+
+    expected_path = tmp_path / "file_abcdef12.mp3"
+    assert not expected_path.exists()
+    assert len(calls) == 1
 
 
 @pytest.mark.unit

@@ -113,6 +113,66 @@ def test_resolve_tokenizer_runtime_probe_downgrades_failed_provider_native(monke
     assert resolution.tokenizer == "tiktoken:cl100k_base"
 
 
+def test_tokenizer_http_post_uses_central_http_client(monkeypatch):
+    from tldw_Server_API.app.core import http_client
+    from tldw_Server_API.app.core.LLM_Calls import tokenizer_resolver as resolver
+
+    calls: list[dict[str, object]] = []
+
+    class _FakeResponse:
+        status_code = 200
+
+        def json(self) -> dict[str, object]:
+            return {"tokens": [1, 2, 3]}
+
+    def _fake_fetch(**kwargs):
+        calls.append(dict(kwargs))
+        return _FakeResponse()
+
+    monkeypatch.setattr(http_client, "fetch", _fake_fetch)
+
+    response = resolver._http_post(
+        url="http://127.0.0.1:65535/tokenize",
+        payload={"content": "hello"},
+        headers={"X-Test": "1"},
+        timeout=7.0,
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"tokens": [1, 2, 3]}
+    assert calls == [
+        {
+            "method": "POST",
+            "url": "http://127.0.0.1:65535/tokenize",
+            "json": {"content": "hello"},
+            "headers": {"X-Test": "1"},
+            "timeout": 7.0,
+            # redirects disabled: these POSTs carry provider credentials and
+            # must not follow cross-origin redirects (PR #2604 review)
+            "allow_redirects": False,
+        }
+    ]
+
+
+def test_tokenizer_http_post_private_url_denied_by_central_policy(monkeypatch):
+    from tldw_Server_API.app.core import http_client
+    from tldw_Server_API.app.core.exceptions import EgressPolicyError
+    from tldw_Server_API.app.core.LLM_Calls import tokenizer_resolver as resolver
+
+    def _fake_fetch(**kwargs):  # noqa: ANN003, ARG001
+        raise EgressPolicyError("private_network")
+
+    monkeypatch.setattr(http_client, "fetch", _fake_fetch)
+
+    with pytest.raises(EgressPolicyError, match="private_network"):
+        resolver._http_post(
+            url="http://127.0.0.1:11434/api/tokenize",
+            payload={"content": "hello"},
+            headers={},
+            timeout=5.0,
+        )
+
+
 def test_resolve_tokenizer_openai_unavailable_error_not_masked_by_native_config(monkeypatch):
     from tldw_Server_API.app.core.LLM_Calls import tokenizer_resolver as resolver
 

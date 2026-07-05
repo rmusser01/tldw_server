@@ -65,6 +65,7 @@ class TestAudioBriefingWorkflowDefinition:
         )
         assert audio_cfg["background_audio_uri"] == "{{ inputs.background_audio_uri }}"
         assert audio_cfg["background_volume"] == "{{ inputs.background_volume }}"
+        assert audio_cfg["default_provider"] == "{{ inputs.tts_provider }}"
 
     def test_workflow_def_marks_single_voice_fallback_artifact(self):
         from tldw_Server_API.app.core.Watchlists.audio_briefing_workflow import (
@@ -83,6 +84,7 @@ class TestAudioBriefingWorkflowDefinition:
             "single_voice_fallback": True,
             "fallback_reason": "multi_voice_tts_failed",
         }
+        assert fallback_cfg["provider"] == "{{ inputs.tts_provider }}"
 
 
 class TestBuildWorkflowInputs:
@@ -821,6 +823,7 @@ class TestTriggerAudioBriefing:
         payload = scheduler.submit.call_args.kwargs["payload"]
         assert payload["inputs"]["tts_model"] == "configured-model"
         assert payload["inputs"]["tts_model"] != "kokoro"
+        assert payload["inputs"]["tts_provider"] == "configured_provider"
         assert payload["inputs"]["tts_voice"] == "Bella"
         resolver.assert_called_once_with(provider=None, model=None, voice="Bella")
 

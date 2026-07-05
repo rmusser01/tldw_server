@@ -6,12 +6,15 @@ import ipaddress
 import json
 import math
 import os
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import parse_qsl, quote, quote_plus, urlparse
+
+from loguru import logger
 
 from tldw_Server_API.app.core.config import load_comprehensive_config
 from tldw_Server_API.app.core.custom_openai_providers import (
@@ -650,10 +653,21 @@ def strict_token_counting_enabled(default: bool = False) -> bool:
 
 def _http_post(*, url: str, payload: dict[str, Any], headers: dict[str, str], timeout: float) -> Any:
     try:
-        import requests  # type: ignore
+        from tldw_Server_API.app.core.http_client import fetch
     except Exception as exc:
         raise TokenizerUnavailable("Provider tokenizer HTTP client unavailable") from exc
-    return requests.post(url, json=payload, headers=headers, timeout=timeout)
+    # allow_redirects=False: these POSTs carry provider credentials
+    # (Authorization / x-api-key); following a cross-origin redirect would
+    # resend the secrets to the redirect target. Provider tokenizer APIs
+    # never legitimately redirect.
+    return fetch(
+        method="POST",
+        url=url,
+        json=payload,
+        headers=headers,
+        timeout=timeout,
+        allow_redirects=False,
+    )
 
 
 def normalize_provider_for_tokenizer(provider: str) -> str:
@@ -885,8 +899,10 @@ def _runtime_probe_exact_resolution(
         if original_timeout is not None:
             try:
                 setattr(encoding, "timeout_seconds", original_timeout)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning(
+                    f"Failed to restore tokenizer encoding timeout_seconds={original_timeout!r}: {exc}"
+                )
 
     return resolution
 

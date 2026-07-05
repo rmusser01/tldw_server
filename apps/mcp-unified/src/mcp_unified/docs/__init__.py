@@ -6,6 +6,7 @@ from .mcp_module import DocsMCPToolProvider
 from .models import (
     AccessScope,
     ContextRequest,
+    DiscoverSourceRequest,
     DocumentRecord,
     DocumentType,
     RetrievalMode,
@@ -26,6 +27,7 @@ from .store import DocsCatalogStore
 __all__ = [
     "AccessScope",
     "ContextRequest",
+    "DiscoverSourceRequest",
     "DocsCatalogStore",
     "DocsError",
     "DocsImportService",

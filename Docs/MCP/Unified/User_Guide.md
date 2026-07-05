@@ -206,6 +206,15 @@ curl -X POST http://127.0.0.1:8000/api/v1/mcp/request \
   }'
 ```
 
+### RAG tools
+
+- `rag.capabilities` lists MCP-safe RAG capabilities and limits.
+- `rag.source_health` reports safe, canonical source readiness.
+- `rag.search` retrieves bounded, citation-aware evidence without answer generation.
+- `rag.answer` generates a grounded answer over retrieved evidence and reports `answered`, `partial`, or `abstained`.
+
+Accepted source aliases are normalized through the existing RAG source registry. Responses use canonical source ids such as `media_db` and `notes`. Catalogs can group `rag.*`, `knowledge.*`, `media.*`, and `notes.*` for retrieval workflows, but catalog membership does not grant execution rights.
+
 ### Convenience HTTP endpoints
 
 - `GET /api/v1/mcp/tools`

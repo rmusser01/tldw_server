@@ -492,7 +492,7 @@ lint-changed:
 # -----------------------------------------------------------------------------
 # Local CI — reproduce the gating GitHub checks before pushing
 # -----------------------------------------------------------------------------
-.PHONY: ci-local ci-local-full ci-local-lane
+.PHONY: ci-local ci-local-full ci-local-lane test-triage minimal-env-smoke openapi-fingerprint openapi-drift-check
 
 # Prefer the project venv python ($(VENV_PYTHON)); fall back to $(PYTHON).
 CI_LOCAL_PYTHON ?= $(shell [ -x "$(VENV_PYTHON)" ] && echo "$(VENV_PYTHON)" || echo "$(PYTHON)")
@@ -509,6 +509,18 @@ ci-local-full:       ## Full tier: compileall + ruff(all) + guards + whole suite
 ci-local-lane:       ## One area: make ci-local-lane LANE=tldw_Server_API/tests/Security
 	@test -n "$(LANE)" || (echo "Usage: make ci-local-lane LANE=<path> [CI_ARGS=...]" && exit 2)
 	$(RUN_LOCAL_CI) --lane $(LANE) $(CI_ARGS)
+
+test-triage:         ## Ranked test-quality triage report (see audits/2026-07-04-test-suite-audit-round2.md)
+	$(CI_LOCAL_PYTHON) Helper_Scripts/ci/test_quality_triage.py $(CI_ARGS)
+
+minimal-env-smoke:   ## Boot the app in a scrubbed env and probe /health (#2590-class guard)
+	$(CI_LOCAL_PYTHON) Helper_Scripts/ci/minimal_env_smoke.py $(CI_ARGS)
+
+openapi-fingerprint: ## Refresh the checked-in OpenAPI drift fingerprint
+	$(CI_LOCAL_PYTHON) Helper_Scripts/export_openapi_schema.py --fingerprint apps/tldw-frontend/lib/api/openapi.fingerprint.json
+
+openapi-drift-check: ## Fail if the OpenAPI contract drifted from the checked-in fingerprint
+	$(CI_LOCAL_PYTHON) Helper_Scripts/export_openapi_schema.py --check apps/tldw-frontend/lib/api/openapi.fingerprint.json
 
 # -----------------------------------------------------------------------------
 # Chat Streaming Load Harness (Scenario A starter)

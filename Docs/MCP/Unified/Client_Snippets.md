@@ -94,6 +94,16 @@ exec_resp = requests.post(
 print(exec_resp.json())
 ```
 
+## RAG JSON-RPC Examples
+
+```json
+{"jsonrpc":"2.0","method":"tools/call","params":{"name":"rag.search","arguments":{"query":"What did I save about retrieval?","sources":["media","notes"],"top_k":5}},"id":"rag-search-1"}
+```
+
+```json
+{"jsonrpc":"2.0","method":"tools/call","params":{"name":"rag.answer","arguments":{"query":"Summarize the evidence on contextual retrieval.","sources":["media_db"],"include_documents":true}},"id":"rag-answer-1"}
+```
+
 ## Notes
 - Tool discovery can be narrowed with catalogs: `GET /api/v1/mcp/tools?catalog=<name>` or `?catalog_id=<id>`.
 - Unresolved catalogs return an empty result with `_meta.catalog.status=unresolved`; use `/api/v1/mcp/tool_catalogs` to list visible catalog names.

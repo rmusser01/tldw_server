@@ -185,7 +185,7 @@ The canonical bundle can also drive the repeatable host-side E2E smoke:
 
 ```bash
 ./scripts/run-host-e2e-smoke.sh --dry-run --bundle "${BUNDLE_DIR}"
-runtime_dir="$(mktemp -d "${TMPDIR:-/tmp}/tldw-vz-helper-e2e.XXXXXX")"
+runtime_dir="$(mktemp -d "/tmp/tvz-e2e.XXXXXX")"
 trap 'rm -rf "${runtime_dir}"' EXIT
 chmod 700 "${runtime_dir}"
 
@@ -206,6 +206,12 @@ execution, verifies same-session VM reuse, verifies recovery diagnostics plus
 dry-run reconciliation repair planning, and stops the helper on exit. The
 recovery step is non-destructive: it uses isolated test-store metadata and does
 not terminate VMs, delete session controls, or run image-store cleanup.
+
+Use a short runtime path for host smoke sockets. macOS AF_UNIX socket paths are
+length-limited, and the per-user `${TMPDIR}` path can be too long for the
+long-lived helper socket. The wrapper default intentionally uses a short random
+`/tmp/tvz-e2e.XXXXXX` runtime directory; examples use the same prefix when an
+explicit runtime directory is needed.
 
 The smoke wrapper writes image-store metadata under
 `<runtime-dir>/image-store/` by default. Evidence packets should record source

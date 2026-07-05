@@ -157,6 +157,45 @@ def test_initialize_postgres_schema_bridge_routes_through_package_coordinator(mo
 
 
 @pytest.mark.unit
+def test_real_sqlite_schema_bootstrap_creates_core_objects(tmp_path) -> None:
+    """Run the REAL bootstrap end-to-end against a fresh SQLite database.
+
+    The dispatch tests above verify routing with the initializers stubbed;
+    this one closes the gap flagged in
+    audits/2026-07-04-test-suite-audit-round2.md (RA2): nothing here ever
+    executed the actual schema DDL, so a broken bootstrap kept the suite
+    green.
+    """
+    db = MediaDatabase(db_path=str(tmp_path / "media.db"), client_id="schema-bootstrap-test")
+    try:
+        rows = db.execute_query(
+            "SELECT name FROM sqlite_master WHERE type = 'table'"
+        ).fetchall()
+        tables = {row["name"] for row in rows}
+        assert {"Media", "schema_version", "sync_log", "Keywords", "MediaKeywords"}.issubset(
+            tables
+        ), f"core tables missing from real bootstrap: {sorted(tables)}"
+
+        fts_rows = db.execute_query(
+            "SELECT name FROM sqlite_master WHERE name LIKE '%_fts%'"
+        ).fetchall()
+        assert fts_rows, "FTS structures missing from real bootstrap"
+
+        version_row = db.execute_query("SELECT version FROM schema_version LIMIT 1").fetchone()
+        assert version_row is not None and int(version_row["version"]) >= 1
+
+        index_rows = db.execute_query(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND name NOT LIKE 'sqlite_%'"
+        ).fetchall()
+        assert index_rows, "no indexes created by real bootstrap"
+
+        # idempotence: re-running the bootstrap on an initialized DB is a no-op
+        ensure_media_schema(db)
+    finally:
+        db.close_connection()
+
+
+@pytest.mark.unit
 def test_ensure_postgres_post_core_structures_runs_followup_ensures(monkeypatch) -> None:
     from tldw_Server_API.app.core.DB_Management.media_db.schema.backends import (
         postgres_helpers as postgres_helpers_module,

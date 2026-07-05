@@ -23,7 +23,7 @@ from ..policy import SandboxPolicyConfig
 from ..runtime_capabilities import RuntimePreflightResult
 from ..streams import get_hub
 from ..utils import coerce_optional_nonempty_string
-from ..vz_guest_agent import vz_linux_guest_agent_mismatched
+from ..vz_guest_agent import classify_vz_linux_guest_agent, vz_linux_guest_agent_mismatched
 from .resource_limits import log_limit_counters
 from .vz_common import _VZ_NONCRITICAL_EXCEPTIONS, VZBaseRunner, vz_host_facts
 
@@ -533,6 +533,15 @@ class VZLinuxRunner(VZBaseRunner):
                     }
                 )
                 vm_id = vm.vm_id
+                guest_agent = classify_vz_linux_guest_agent(vm.details) if vm.details else None
+                if guest_agent and guest_agent.get("compatibility") == "mismatch":
+                    should_terminate_vm = True
+                    reasons = [
+                        str(reason)
+                        for reason in guest_agent.get("reasons", [])
+                        if str(reason).strip()
+                    ]
+                    raise RuntimeError(", ".join(reasons) or "vz_linux_guest_agent_mismatch")
                 if should_persist_run_manifest and image_store is not None and metadata_template_id:
                     image_store.prepare_run_clone(template_id=metadata_template_id, run_id=run_id)
                 should_terminate_vm = not session_mode

@@ -80,9 +80,7 @@ async function expectCharacterSessionsReachable(page: Page): Promise<void> {
     return
   }
 
-  const showPanels = page.getByRole("button", {
-    name: "Show cockpit panels",
-  })
+  const showPanels = page.getByTestId("playground-chat-layout-mode-trigger")
   if (await showPanels.isVisible().catch(() => false)) {
     await showPanels.click()
   }

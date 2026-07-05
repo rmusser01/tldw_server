@@ -15,6 +15,8 @@ from tldw_Server_API.app.core.Agent_Client_Protocol.consumers.ws_broadcaster imp
     WSBroadcaster,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _make_event(kind: AgentEventKind, session_id: str = "sess-1") -> AgentEvent:
     return AgentEvent(session_id=session_id, kind=kind, payload={"data": kind.value})
@@ -54,6 +56,51 @@ async def test_ws_broadcaster_delivers_events_full_verbosity():
     assert received[0]["kind"] == "thinking"
     assert received[1]["kind"] == "tool_call"
     assert received[2]["kind"] == "completion"
+
+
+async def test_ws_broadcaster_allows_unique_consumer_ids() -> None:
+    """Distinct broadcasters should not overwrite each other's bus subscription."""
+    bus = SessionEventBus(session_id="sess-unique-consumers")
+    first = WSBroadcaster(consumer_id="ws_broadcaster:conn-1")
+    second = WSBroadcaster(consumer_id="ws_broadcaster:conn-2")
+
+    try:
+        await first.start(bus)
+        await second.start(bus)
+
+        assert set(bus._subscribers) == {
+            "ws_broadcaster:conn-1",
+            "ws_broadcaster:conn-2",
+        }
+    finally:
+        await first.stop()
+        await second.stop()
+    assert bus._subscribers == {}
+
+
+async def test_start_reconnect_replay_cleans_up_when_registration_fails() -> None:
+    """A failing replay send must not leak the bus subscription or consume task."""
+    from tldw_Server_API.app.core.Agent_Client_Protocol.consumers.ws_broadcaster import (
+        start_reconnect_replay,
+    )
+
+    session_id = "sess-replay-fail"
+    bus = SessionEventBus(session_id=session_id)
+    await bus.publish(_make_event(AgentEventKind.COMPLETION, session_id=session_id))
+
+    async def failing_send(msg: str) -> None:
+        raise RuntimeError("send failed during replay")
+
+    with pytest.raises(RuntimeError, match="send failed during replay"):
+        await start_reconnect_replay(
+            bus,
+            conn_id="conn-replay-fail",
+            send_callback=failing_send,
+            from_sequence=1,
+        )
+
+    # the broadcaster must have been stopped: no leaked subscriber
+    assert bus._subscribers == {}
 
 
 @pytest.mark.asyncio

@@ -20,6 +20,7 @@ import { Copy, Link2, Trash2 } from "lucide-react"
 import {
   useWorkspaceShares,
   useShareWorkspace,
+  useUpdateShare,
   useRevokeShare,
   useShareTokens,
   useCreateToken,
@@ -326,9 +327,25 @@ const ActiveSharesTab: React.FC<{ workspaceId: string }> = ({
   workspaceId,
 }) => {
   const { data, isLoading } = useWorkspaceShares(workspaceId)
+  const updateShareMutation = useUpdateShare()
   const revokeMutation = useRevokeShare()
   const { data: tokensData } = useShareTokens()
   const revokeTokenMutation = useRevokeToken()
+
+  const updateShare = async (
+    record: ShareResponse,
+    patch: { access_level?: AccessLevel; allow_clone?: boolean }
+  ) => {
+    try {
+      await updateShareMutation.mutateAsync({
+        shareId: record.id,
+        ...patch,
+      })
+      message.success("Share updated")
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : "Failed to update share")
+    }
+  }
 
   const confirmRevokeShare = (record: ShareResponse) => {
     const scopeLabel = formatShareScopeLabel(record)
@@ -388,17 +405,45 @@ const ActiveSharesTab: React.FC<{ workspaceId: string }> = ({
       title: "Access",
       dataIndex: "access_level",
       key: "access",
-      render: (level: string) => (
-        <Tag color={ACCESS_LEVEL_COLORS[level] || "default"}>
-          {ACCESS_LEVEL_LABELS[level as AccessLevel] || level}
-        </Tag>
+      render: (level: string, record: ShareResponse) => (
+        <select
+          aria-label={`Access level for ${formatShareScopeLabel(record)}`}
+          className="rounded border border-border bg-surface px-2 py-1 text-sm text-text-primary"
+          disabled={updateShareMutation.isPending}
+          value={level}
+          onChange={(event) => {
+            void updateShare(record, {
+              access_level: event.target.value as AccessLevel,
+            })
+          }}
+        >
+          <option value="view_chat">{ACCESS_LEVEL_LABELS.view_chat}</option>
+          <option value="view_chat_add">{ACCESS_LEVEL_LABELS.view_chat_add}</option>
+          <option value="full_edit">{ACCESS_LEVEL_LABELS.full_edit}</option>
+        </select>
       ),
     },
     {
       title: "Clone",
       dataIndex: "allow_clone",
       key: "clone",
-      render: (v: boolean) => (v ? "Clone allowed" : "Clone disabled"),
+      render: (v: boolean, record: ShareResponse) => {
+        const scopeLabel = formatShareScopeLabel(record)
+        return (
+          <label className="inline-flex items-center gap-2 text-sm text-text-primary">
+            <input
+              aria-label={`Allow cloning for ${scopeLabel}`}
+              checked={v}
+              disabled={updateShareMutation.isPending}
+              type="checkbox"
+              onChange={(event) => {
+                void updateShare(record, { allow_clone: event.currentTarget.checked })
+              }}
+            />
+            {v ? "Clone allowed" : "Clone disabled"}
+          </label>
+        )
+      },
     },
     {
       title: "",

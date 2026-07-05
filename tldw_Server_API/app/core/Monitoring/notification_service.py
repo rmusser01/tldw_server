@@ -528,13 +528,12 @@ class NotificationService:
         """Record a generic notification payload (not tied to TopicAlert).
 
         Applies severity threshold filtering and writes to JSONL sink.
-        Adds ``ts`` field if not present.
+        Adds ``ts`` to the recorded copy if not present.
         """
         severity = payload.get("severity") or payload.get("rule_severity")
         if not self._meets_threshold(severity):
             return "skipped"
-        if "ts" not in payload:
-            payload["ts"] = datetime.now(timezone.utc).isoformat()
+        payload.setdefault("ts", datetime.now(timezone.utc).isoformat())
         payload_to_record = dict(payload)
         # lgtm[py/clear-text-storage-sensitive-data]: payload is redacted before notification persistence.
         safe_payload = _sanitize_notification_payload(payload_to_record)

@@ -468,6 +468,52 @@ export const mapServerChatMessagesToPlaygroundMessages = ({
         typeof metadataExtra?.mood_topic === "string"
           ? metadataExtra.mood_topic
           : null,
+      visualActorKind:
+        metadataExtra?.visual_actor_kind === "character" ||
+        metadataExtra?.visual_actor_kind === "persona"
+          ? metadataExtra.visual_actor_kind
+          : null,
+      visualActorId:
+        typeof metadataExtra?.visual_actor_id === "string" ||
+        typeof metadataExtra?.visual_actor_id === "number"
+          ? metadataExtra.visual_actor_id
+          : null,
+      visualPackId:
+        typeof metadataExtra?.visual_pack_id === "number"
+          ? metadataExtra.visual_pack_id
+          : null,
+      visualPackVersionId:
+        typeof metadataExtra?.visual_pack_version_id === "number"
+          ? metadataExtra.visual_pack_version_id
+          : null,
+      visualExpressionKey:
+        typeof metadataExtra?.visual_expression_key === "string"
+          ? metadataExtra.visual_expression_key
+          : null,
+      visualAssetId:
+        typeof metadataExtra?.visual_asset_id === "number"
+          ? metadataExtra.visual_asset_id
+          : null,
+      visualAssetUrl:
+        typeof metadataExtra?.visual_pack_id === "number" &&
+        typeof metadataExtra?.visual_asset_id === "number"
+          ? tldwClient.getVisualIdentityAssetContentPath(
+              metadataExtra.visual_pack_id,
+              metadataExtra.visual_asset_id
+            )
+          : null,
+      visualPreviewUrl:
+        typeof metadataExtra?.visual_preview_url === "string"
+          ? metadataExtra.visual_preview_url
+          : null,
+      visualFallbackReason:
+        typeof metadataExtra?.visual_fallback_reason === "string"
+          ? metadataExtra.visual_fallback_reason
+          : null,
+      visualIsAnimated:
+        typeof metadataExtra?.visual_is_animated === "boolean"
+          ? metadataExtra.visual_is_animated
+          : null,
       pinned: Boolean(
         (meta?.pinned as boolean | undefined) ??
           (metadataExtra?.pinned as boolean | undefined)

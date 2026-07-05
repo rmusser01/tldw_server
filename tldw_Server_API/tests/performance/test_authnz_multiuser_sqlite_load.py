@@ -3,6 +3,7 @@ import importlib
 import json
 import os
 import time
+from typing import Any, Awaitable, Callable
 from unittest.mock import patch
 
 import pytest
@@ -45,6 +46,11 @@ async def _build_app(tmp_path, monkeypatch):
     try:
         from tldw_Server_API.app.core.config import settings as core_settings
         core_settings["CSRF_ENABLED"] = False
+        # The lazy core-settings mapping materializes USER_DB_BASE_DIR from env
+        # once; DatabasePaths prefers the settings value over env when it is
+        # non-default, so without this sync the SECOND _build_app in a session
+        # would keep routing per-user DBs into the FIRST test's tmp dir.
+        core_settings["USER_DB_BASE_DIR"] = user_db_base
     except Exception:
         _ = None
 
@@ -53,11 +59,46 @@ async def _build_app(tmp_path, monkeypatch):
     from tldw_Server_API.app.core.AuthNZ.jwt_service import reset_jwt_service
     from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
     from tldw_Server_API.app.core.AuthNZ.initialize import ensure_authnz_schema_ready_once
+    # Service-layer singletons cache the db pool at first use; without these
+    # resets the SECOND _build_app in a session registers users (and writes
+    # media/audit rows) through the previous app's pool into the previous
+    # tmp database — logins then 401 and FK constraints fail (issue #2580).
+    # Mirrors the canonical reset set in tests/AuthNZ/conftest.py.
+    from tldw_Server_API.app.core.Audit.unified_audit_service import shutdown_audit_service
+    from tldw_Server_API.app.core.AuthNZ.alerting import reset_security_alert_dispatcher
+    from tldw_Server_API.app.core.AuthNZ.api_key_manager import reset_api_key_manager
+    from tldw_Server_API.app.core.AuthNZ.lockout_tracker import reset_lockout_tracker
+    from tldw_Server_API.app.core.AuthNZ.rate_limiter import reset_rate_limiter
+    from tldw_Server_API.app.core.AuthNZ.scheduler import reset_authnz_scheduler
+    from tldw_Server_API.app.core.AuthNZ.token_blacklist import reset_token_blacklist
+    from tldw_Server_API.app.core.Billing.enforcement import reset_billing_enforcer
+    from tldw_Server_API.app.core.Billing.subscription_service import reset_subscription_service
+    from tldw_Server_API.app.core.DB_Management.Users_DB import reset_users_db
+    from tldw_Server_API.app.services.org_invite_service import reset_invite_service
+    from tldw_Server_API.app.services.registration_service import reset_registration_service
+    from tldw_Server_API.app.services.storage_cleanup_service import reset_cleanup_service
+    from tldw_Server_API.app.services.storage_quota_service import reset_storage_service
+    from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import close_all_chacha_db_instances
 
+    close_all_chacha_db_instances()
     await reset_db_pool()
+    await reset_session_manager()
+    await reset_token_blacklist()
+    await reset_security_alert_dispatcher()
+    await reset_authnz_scheduler()
+    await reset_rate_limiter()
+    await reset_lockout_tracker()
     reset_settings()
     reset_jwt_service()
-    await reset_session_manager()
+    await reset_registration_service()
+    await reset_invite_service()
+    await reset_subscription_service()
+    reset_billing_enforcer()
+    await reset_api_key_manager()
+    await reset_storage_service()
+    await reset_cleanup_service()
+    await reset_users_db()
+    await shutdown_audit_service()
 
     await ensure_authnz_schema_ready_once()
 
@@ -130,9 +171,9 @@ async def test_multi_user_sqlite_register_login_load(tmp_path, monkeypatch):
             return i, j, resp.status_code, resp.text
         return None
 
-    async def _run_with_sem(func, idx, client):
+    async def _run_with_sem(func: Callable[..., Awaitable[Any]], *args: Any) -> Any:
         async with sem:
-            return await func(idx, client)
+            return await func(*args)
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:

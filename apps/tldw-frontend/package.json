@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "scripts": {
     "postinstall": "node scripts/copy-pdf-worker.mjs",
+    "generate:api-types": "node scripts/generate-api-types.mjs",
     "dev": "next dev",
     "dev:webpack": "next dev --webpack",
     "build": "node scripts/build-with-profile.mjs --bundler=turbopack && node scripts/verify-shared-token-sync.mjs --dir .next",
@@ -141,6 +142,7 @@
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.11.1",
+    "openapi-typescript": "^7.13.0",
     "@eslint/js": "^9.39.2",
     "@next/eslint-plugin-next": "^16.1.0",
     "@playwright/test": "^1.51.1",

@@ -1,7 +1,7 @@
 ---
 id: TASK-2332
 title: Upload VZ host-gated smoke evidence artifact
-status: In Review
+status: Done
 labels:
 - sandbox
 - vz_linux
@@ -44,6 +44,7 @@ Spec review found that preserving the broad runtime-tree helper-log upload would
 Implemented workflow/docs/tests. RED verification: `python -m pytest tldw_Server_API/tests/Infrastructure/test_vz_linux_host_gated_workflow.py -q` failed with 3 expected failures for missing explicit evidence dir, missing separate artifact upload, and missing policy artifact guidance. GREEN verification: focused workflow contract passed with 21 tests. Broader focused verification passed with 49 tests across host-gated workflow and smoke wrapper contracts, plus `bash -n tools/vz-linux-image/scripts/run-host-e2e-smoke.sh` and `git diff --check`. Bandit on the touched workflow test file with B101 excluded reported 0 findings and 0 errors.
 PR review fixes: added module-level `pytest.mark.unit` classification for the workflow contract test module and scoped the explicit evidence-dir assertion to the named `Run managed host smoke` step to avoid cross-step false positives. Rebased on latest `dev`; no conflicts. Verification after review fixes: focused pytest passed with 49 tests, `bash -n tools/vz-linux-image/scripts/run-host-e2e-smoke.sh` passed, `git diff --check` passed, Bandit with B101 excluded reported 0 findings and 0 errors. `actionlint` was not run locally because it is not installed.
 Additional review hardening: replaced remaining broad run-block extraction in this workflow contract file with a helper that filters only non-empty string `run` blocks, and made the named-step helper fail clearly when the expected step has no string run block. Verification repeated with the same 49 focused tests, shell syntax check, diff check, and Bandit 0 findings.
+Post-merge tracker cleanup: confirmed PR #2382 is merged and corrected this task from In Review to Done. No implementation files were changed in this cleanup.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
@@ -52,6 +53,8 @@ Additional review hardening: replaced remaining broad run-block extraction in th
 Host-gated VZ Linux CI now passes an explicit smoke evidence directory, uploads `vz-linux-host-gated-evidence` as a separate always-run artifact, and narrows `vz-linux-host-gated-helper-logs` to serial/helper logs so disposable image-store/rootfs clones are not uploaded through the raw-log artifact. Operator docs and policy now direct maintainers to inspect structured evidence first and raw logs only as fallback debugging.
 
 PR: https://github.com/rmusser01/tldw_server/pull/2382
+
+Post-merge cleanup confirmed PR #2382 was merged on 2026-06-18 and closed the stale In Review tracker state.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

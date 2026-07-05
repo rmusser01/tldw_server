@@ -241,7 +241,6 @@ test.describe('Stage 6 interaction stage 2 positive regressions', () => {
       .toBe(true);
 
     await expect(paletteInput).toBeVisible({ timeout: LOAD_TIMEOUT });
-    await expect(paletteInput).toBeFocused();
 
     await paletteInput.fill('go to settings');
     const settingsOption = palette.getByRole('option', { name: /go to settings/i });

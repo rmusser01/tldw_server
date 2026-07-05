@@ -25,6 +25,7 @@ from tldw_Server_API.app.core.Agent_Client_Protocol.runner_client import (
     SessionWebSocketRegistry,
 )
 from tldw_Server_API.app.core.Agent_Client_Protocol.event_bus import SessionEventBus
+from tldw_Server_API.app.core.Agent_Client_Protocol.events import AgentEvent, AgentEventKind
 from tldw_Server_API.app.core.Agent_Client_Protocol.stdio_client import ACPMessage
 from tldw_Server_API.app.services.acp_runtime_policy_service import (
     ACPRuntimePolicySnapshot,
@@ -282,12 +283,109 @@ async def test_acp_session_stream_start_failure_skips_unset_callback_cleanup(mon
     monkeypatch.setattr(acp_endpoints, "get_runner_client", _fake_get_runner_client)
     monkeypatch.setattr(acp_endpoints, "WebSocketStream", _FailingStream)
 
-    await acp_endpoints.acp_session_stream(_FakeWebSocket(), "session-start-failure", token="valid-token")
+    await acp_endpoints.acp_session_stream(
+        _FakeWebSocket(),
+        "session-start-failure",
+        token="valid-token",  # nosec B106
+    )
 
     if stub_client.unregister_calls:
         pytest.fail("Expected no unregister call when stream start fails before callback assignment")
     if lifecycle["stop_calls"] != 1:
         pytest.fail(f"Expected exactly one stream.stop() call, got {lifecycle['stop_calls']}")
+
+
+async def test_acp_session_stream_reconnect_cleans_up_replay_broadcaster(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reconnect replay broadcasters must not leave event-bus subscribers behind."""
+    import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
+
+    session_id = "session-reconnect-cleanup"
+    bus = SessionEventBus(session_id=session_id)
+    await bus.publish(
+        AgentEvent(
+            session_id=session_id,
+            kind=AgentEventKind.COMPLETION,
+            payload={"detail": "replay-me"},
+        )
+    )
+    stub_client = MockRunnerClient()
+    release_calls: list[str] = []
+    streams: list[Any] = []
+
+    class _DisconnectingStream:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            self.sent_payloads: list[dict[str, Any]] = []
+            self.stop_calls = 0
+            streams.append(self)
+
+        async def start(self) -> None:
+            return None
+
+        async def stop(self) -> None:
+            self.stop_calls += 1
+
+        async def send_json(self, payload: dict[str, Any]) -> None:
+            self.sent_payloads.append(payload)
+
+        async def receive_json(self) -> dict[str, Any]:
+            raise WebSocketDisconnect(code=1000)
+
+    class _FakeWebSocket:
+        async def close(self, code: int = 1000) -> None:
+            return None
+
+    async def _fake_authenticate_ws(
+        websocket: Any,
+        token: str | None = None,
+        api_key: str | None = None,
+        required_scope: str = "read",
+    ) -> int:
+        return 1
+
+    async def _fake_get_runner_client() -> MockRunnerClient:
+        return stub_client
+
+    async def _fake_resolve_persona_id(client: Any, *, session_id: str, user_id: int) -> None:
+        return None
+
+    def _fake_acquire_quota(
+        *, user_id: int, session_id: str, persona_id: str | None
+    ) -> tuple[str, None]:
+        return "quota-token", None
+
+    def _fake_release_quota(token: str) -> None:
+        release_calls.append(token)
+
+    monkeypatch.setattr(acp_endpoints, "_authenticate_ws", _fake_authenticate_ws)
+    monkeypatch.setattr(acp_endpoints, "get_runner_client", _fake_get_runner_client)
+    monkeypatch.setattr(acp_endpoints, "get_session_event_bus", lambda _: bus)
+    monkeypatch.setattr(acp_endpoints, "_resolve_acp_session_persona_id", _fake_resolve_persona_id)
+    monkeypatch.setattr(acp_endpoints, "_acp_ws_try_acquire_quota", _fake_acquire_quota)
+    monkeypatch.setattr(acp_endpoints, "_acp_ws_release_quota", _fake_release_quota)
+    monkeypatch.setattr(acp_endpoints, "WebSocketStream", _DisconnectingStream)
+
+    await acp_endpoints.acp_session_stream(
+        _FakeWebSocket(),
+        session_id,
+        token="valid-token",
+        last_sequence=1,
+    )
+
+    assert bus._subscribers == {}
+    assert not stub_client.has_websocket_connections(session_id)
+    assert release_calls == ["quota-token"]
+    assert streams and streams[0].stop_calls == 1
+    replayed_payloads = [
+        payload
+        for payload in streams[0].sent_payloads
+        if payload.get("kind") == AgentEventKind.COMPLETION.value
+    ]
+    assert len(replayed_payloads) == 1
+    assert replayed_payloads[0]["session_id"] == session_id
+    assert replayed_payloads[0]["sequence"] == 1
+    assert replayed_payloads[0]["payload"] == {"detail": "replay-me"}
 
 
 class TestACPWebSocketConnection:
@@ -889,13 +987,20 @@ class TestACPRunnerClientPermissions:
 
         # Destructive operations should be individual
         assert client._determine_permission_tier("fs.delete") == "individual"
+        assert client._determine_permission_tier("fs.write") == "individual"
         assert client._determine_permission_tier("exec.run") == "individual"
         assert client._determine_permission_tier("git.push") == "individual"
+        assert client._determine_permission_tier("modify_file") == "individual"
         assert client._determine_permission_tier("terminal.execute") == "individual"
 
     @pytest.mark.asyncio
     async def test_determine_permission_tier_batch(self):
-        """Test that write operations get batch tier."""
+        """Batch tier is the fallback for tools that are neither destructive nor read-only.
+
+        Write/modify operations were promoted to the stricter "individual"
+        tier by the ACP runner security hardening (see permission_tiers.py);
+        this test previously pinned the pre-hardening behavior.
+        """
         from tldw_Server_API.app.core.Agent_Client_Protocol.runner_client import ACPRunnerClient
 
         mock_config = MagicMock()
@@ -907,10 +1012,13 @@ class TestACPRunnerClientPermissions:
 
         client = ACPRunnerClient(mock_config)
 
-        # Write operations should be batch
-        assert client._determine_permission_tier("fs.write") == "batch"
+        # Write/modify operations are individual tier post-hardening
+        assert client._determine_permission_tier("fs.write") == "individual"
+        assert client._determine_permission_tier("modify_file") == "individual"
+
+        # Tools matching neither the individual nor auto token sets fall back to batch
         assert client._determine_permission_tier("git.commit") == "batch"
-        assert client._determine_permission_tier("modify_file") == "batch"
+        assert client._determine_permission_tier("fs.chmod") == "batch"
 
     @pytest.mark.asyncio
     async def test_permission_request_message_includes_runtime_policy_metadata(self):

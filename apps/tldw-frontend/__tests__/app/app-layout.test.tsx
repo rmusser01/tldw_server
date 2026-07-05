@@ -35,6 +35,16 @@ vi.mock("@web/extension/shims/runtime-bootstrap", () => ({
   }
 }))
 
+let mockRuntimeApiKey: string | null = null
+
+vi.mock("@web/lib/authStorage", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@web/lib/authStorage")>()
+  return {
+    ...actual,
+    getRuntimeApiKey: () => mockRuntimeApiKey
+  }
+})
+
 import App from "@web/pages/_app"
 
 const mockRouter = {
@@ -149,6 +159,7 @@ beforeEach(() => {
   delete process.env.NEXT_PUBLIC_X_API_KEY
   delete process.env.NEXT_PUBLIC_API_BEARER
   delete process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
+  mockRuntimeApiKey = null
   resetRuntimeBootstrap()
 })
 
@@ -341,6 +352,22 @@ describe("App layout routing", () => {
     expect(layout).toHaveAttribute("data-hide-sidebar", "true")
   })
 
+  it("treats runtime single-user API key overrides as authenticated shell state", async () => {
+    currentConfig = {
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "single-user"
+    }
+    setRuntimeApiKey("runtime-api-key")
+
+    renderApp("/media")
+
+    const layout = await screen.findByTestId("option-layout")
+    await waitFor(() => {
+      expect(layout).toHaveAttribute("data-hide-header", "false")
+    })
+    expect(layout).toHaveAttribute("data-hide-sidebar", "false")
+  })
+
   it("keeps setup in a setup-only shell even when authenticated", async () => {
     process.env.NEXT_PUBLIC_X_API_KEY = "env-api-key"
 
@@ -381,6 +408,26 @@ describe("App layout routing", () => {
       window.dispatchEvent(new CustomEvent("tldw:config-updated"))
     })
 
+    await waitFor(() => {
+      expect(layout).toHaveAttribute("data-hide-header", "false")
+    })
+    expect(layout).toHaveAttribute("data-hide-sidebar", "false")
+  })
+
+  it("counts runtime-override credentials as authenticated for shell chrome", async () => {
+    currentConfig = {
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "single-user",
+      apiKey: ""
+    }
+    mockRuntimeApiKey = "runtime-override-key"
+
+    renderApp("/media")
+    const layout = await screen.findByTestId("option-layout")
+
+    await waitFor(() => {
+      expect(mockGetConfig).toHaveBeenCalled()
+    })
     await waitFor(() => {
       expect(layout).toHaveAttribute("data-hide-header", "false")
     })

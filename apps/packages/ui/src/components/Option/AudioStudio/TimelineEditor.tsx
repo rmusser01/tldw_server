@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button, Checkbox, Divider, InputNumber, Typography } from "antd";
 import { Download, Pause, Play, Save } from "lucide-react";
 import { useUpsertAudioStudioClip } from "@/hooks/useAudioStudioProjects";
@@ -206,6 +206,10 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
   const [isDownloadLoading, setIsDownloadLoading] = useState(false);
   const previewStateKeyRef = useRef<string | null>(null);
   const audioElementRef = useRef<HTMLAudioElement | null>(null);
+  const setAudioElementRef = useCallback((element: HTMLAudioElement | null) => {
+    audioElementRef.current = element;
+    element?.setAttribute("referrerpolicy", "no-referrer");
+  }, []);
   const ticketRetryKeyRef = useRef<string | null>(null);
   const downloadStateKeyRef = useRef<string | null>(null);
   const upsertClip = useUpsertAudioStudioClip(
@@ -744,11 +748,10 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
             ) : null}
             {visiblePreviewUrl ? (
               <audio
-                ref={audioElementRef}
+                ref={setAudioElementRef}
                 aria-label="Selected clip audio preview"
                 className="mt-3 w-full"
                 controls
-                referrerPolicy="no-referrer"
                 src={visiblePreviewUrl}
                 onError={handleTicketPlaybackError}
               />

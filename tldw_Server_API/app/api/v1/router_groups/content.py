@@ -5,7 +5,7 @@ related operations.
 """
 from __future__ import annotations
 
-from typing import Iterable
+from collections.abc import Iterable
 
 from loguru import logger
 
@@ -458,6 +458,13 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
             prefix=f"{API_V1_PREFIX}",
             tags=("character-messages",),
             route_key="character-messages",
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.rpg",
+            log_name="rpg",
+            prefix=f"{API_V1_PREFIX}",
+            tags=("rpg",),
+            route_key="rpg",
         ),
     ):
         append_imported_router_spec(specs, character_spec)

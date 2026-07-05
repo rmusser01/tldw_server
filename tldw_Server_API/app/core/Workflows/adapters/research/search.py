@@ -11,6 +11,7 @@ This module includes adapters for academic search operations:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import tempfile
 import time
@@ -19,6 +20,7 @@ from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.core.http_client import afetch, create_async_client
 from tldw_Server_API.app.core.testing import is_test_mode as _is_test_mode
 from tldw_Server_API.app.core.Workflows.adapters._common import _resolve_artifacts_dir
 from tldw_Server_API.app.core.Workflows.adapters._registry import registry
@@ -30,6 +32,14 @@ from tldw_Server_API.app.core.Workflows.adapters.research._config import (
     PubmedSearchConfig,
     SemanticScholarSearchConfig,
 )
+
+
+async def _managed_afetch(client: Any | None = None, **kwargs: Any) -> Any:
+    if client is not None:
+        return await afetch(client=client, **kwargs)
+    timeout = kwargs.get("timeout")
+    async with create_async_client(timeout=timeout) as client:
+        return await afetch(client=client, **kwargs)
 
 
 @registry.register(
@@ -191,13 +201,12 @@ async def run_arxiv_download_adapter(config: dict[str, Any], context: dict[str, 
             output_path = str(art_dir / filename)
             paper.download_pdf(dirpath=str(art_dir), filename=filename)
         else:
-            import httpx
-            async with httpx.AsyncClient() as client:
-                response = await client.get(pdf_url, follow_redirects=True, timeout=60)
-                response.raise_for_status()
-                filename = pdf_url.split("/")[-1] or "paper.pdf"
-                output_path = str(art_dir / filename)
-                Path(output_path).write_bytes(response.content)
+            response = await _managed_afetch(method="GET", url=pdf_url, allow_redirects=True, timeout=60)
+            response.raise_for_status()
+            filename = pdf_url.split("/")[-1] or "paper.pdf"
+            output_path = str(art_dir / filename)
+            # blocking file write must not stall the event loop
+            await asyncio.to_thread(Path(output_path).write_bytes, response.content)
 
         if callable(context.get("add_artifact")):
             context["add_artifact"](
@@ -233,8 +242,6 @@ async def run_pubmed_search_adapter(config: dict[str, Any], context: dict[str, A
       - papers: list[dict]
       - total_results: int
     """
-    import httpx
-
     from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
 
     if callable(context.get("is_cancelled")) and context["is_cancelled"]():
@@ -271,7 +278,7 @@ async def run_pubmed_search_adapter(config: dict[str, Any], context: dict[str, A
         # Use NCBI E-utilities
         base_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 
-        async with httpx.AsyncClient() as client:
+        async with create_async_client(timeout=30) as client:
             # Search for IDs
             search_url = f"{base_url}/esearch.fcgi"
             search_params = {
@@ -280,7 +287,13 @@ async def run_pubmed_search_adapter(config: dict[str, Any], context: dict[str, A
                 "retmax": max_results,
                 "retmode": "json",
             }
-            search_response = await client.get(search_url, params=search_params, timeout=30)
+            search_response = await _managed_afetch(
+                client=client,
+                method="GET",
+                url=search_url,
+                params=search_params,
+                timeout=30,
+            )
             search_data = search_response.json()
 
             id_list = search_data.get("esearchresult", {}).get("idlist", [])
@@ -294,24 +307,30 @@ async def run_pubmed_search_adapter(config: dict[str, Any], context: dict[str, A
                 "id": ",".join(id_list),
                 "retmode": "json",
             }
-            fetch_response = await client.get(fetch_url, params=fetch_params, timeout=30)
+            fetch_response = await _managed_afetch(
+                client=client,
+                method="GET",
+                url=fetch_url,
+                params=fetch_params,
+                timeout=30,
+            )
             fetch_data = fetch_response.json()
 
-            papers = []
-            result_data = fetch_data.get("result", {})
-            for pmid in id_list:
-                if pmid in result_data:
-                    paper = result_data[pmid]
-                    papers.append({
-                        "pmid": pmid,
-                        "title": paper.get("title", ""),
-                        "authors": [a.get("name", "") for a in paper.get("authors", [])],
-                        "source": paper.get("source", ""),
-                        "pubdate": paper.get("pubdate", ""),
-                        "doi": paper.get("elocationid", ""),
-                    })
+        papers = []
+        result_data = fetch_data.get("result", {})
+        for pmid in id_list:
+            if pmid in result_data:
+                paper = result_data[pmid]
+                papers.append({
+                    "pmid": pmid,
+                    "title": paper.get("title", ""),
+                    "authors": [a.get("name", "") for a in paper.get("authors", [])],
+                    "source": paper.get("source", ""),
+                    "pubdate": paper.get("pubdate", ""),
+                    "doi": paper.get("elocationid", ""),
+                })
 
-            return {"papers": papers, "total_results": len(papers), "query": query}
+        return {"papers": papers, "total_results": len(papers), "query": query}
 
     except Exception:
         logger.error("PubMed search error")
@@ -337,8 +356,6 @@ async def run_semantic_scholar_search_adapter(config: dict[str, Any], context: d
       - papers: list[dict]
       - total_results: int
     """
-    import httpx
-
     from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
 
     if callable(context.get("is_cancelled")) and context["is_cancelled"]():
@@ -374,32 +391,32 @@ async def run_semantic_scholar_search_adapter(config: dict[str, Any], context: d
     fields = config.get("fields") or ["title", "authors", "abstract", "year", "citationCount", "url"]
 
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                "https://api.semanticscholar.org/graph/v1/paper/search",
-                params={
-                    "query": query,
-                    "limit": max_results,
-                    "fields": ",".join(fields),
-                },
-                timeout=30,
-            )
-            response.raise_for_status()
-            data = response.json()
+        response = await _managed_afetch(
+            method="GET",
+            url="https://api.semanticscholar.org/graph/v1/paper/search",
+            params={
+                "query": query,
+                "limit": max_results,
+                "fields": ",".join(fields),
+            },
+            timeout=30,
+        )
+        response.raise_for_status()
+        data = response.json()
 
-            papers = []
-            for paper in data.get("data", []):
-                papers.append({
-                    "paper_id": paper.get("paperId"),
-                    "title": paper.get("title"),
-                    "authors": [a.get("name", "") for a in paper.get("authors", [])],
-                    "abstract": paper.get("abstract"),
-                    "year": paper.get("year"),
-                    "citation_count": paper.get("citationCount"),
-                    "url": paper.get("url"),
-                })
+        papers = []
+        for paper in data.get("data", []):
+            papers.append({
+                "paper_id": paper.get("paperId"),
+                "title": paper.get("title"),
+                "authors": [a.get("name", "") for a in paper.get("authors", [])],
+                "abstract": paper.get("abstract"),
+                "year": paper.get("year"),
+                "citation_count": paper.get("citationCount"),
+                "url": paper.get("url"),
+            })
 
-            return {"papers": papers, "total_results": data.get("total", len(papers)), "query": query}
+        return {"papers": papers, "total_results": data.get("total", len(papers)), "query": query}
 
     except Exception:
         logger.error("Semantic Scholar search error")
@@ -504,8 +521,6 @@ async def run_patent_search_adapter(config: dict[str, Any], context: dict[str, A
       - patents: list[dict]
       - total_results: int
     """
-    import httpx
-
     from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
 
     if callable(context.get("is_cancelled")) and context["is_cancelled"]():
@@ -544,31 +559,30 @@ async def run_patent_search_adapter(config: dict[str, Any], context: dict[str, A
     try:
         import urllib.parse
 
-        async with httpx.AsyncClient() as client:
-            encoded_query = urllib.parse.quote(query)
-            url = f"https://patents.google.com/xhr/query?url=q%3D{encoded_query}&num={max_results}"
+        encoded_query = urllib.parse.quote(query)
+        url = f"https://patents.google.com/xhr/query?url=q%3D{encoded_query}&num={max_results}"
 
-            response = await client.get(url, timeout=30, headers={"Accept": "application/json"})
+        response = await _managed_afetch(method="GET", url=url, timeout=30, headers={"Accept": "application/json"})
 
-            if response.status_code == 200:
-                try:
-                    data = response.json()
-                    patents = []
-                    for result in data.get("results", {}).get("cluster", [])[:max_results]:
-                        patent = result.get("result", {}).get("patent", {})
-                        patents.append({
-                            "patent_id": patent.get("publication_number", ""),
-                            "title": patent.get("title", ""),
-                            "abstract": patent.get("abstract", ""),
-                            "assignee": patent.get("assignee", ""),
-                            "filing_date": patent.get("filing_date", ""),
-                            "publication_date": patent.get("publication_date", ""),
-                        })
-                    return {"patents": patents, "total_results": len(patents), "query": query}
-                except json.JSONDecodeError:
-                    pass
+        if response.status_code == 200:
+            try:
+                data = response.json()
+                patents = []
+                for result in data.get("results", {}).get("cluster", [])[:max_results]:
+                    patent = result.get("result", {}).get("patent", {})
+                    patents.append({
+                        "patent_id": patent.get("publication_number", ""),
+                        "title": patent.get("title", ""),
+                        "abstract": patent.get("abstract", ""),
+                        "assignee": patent.get("assignee", ""),
+                        "filing_date": patent.get("filing_date", ""),
+                        "publication_date": patent.get("publication_date", ""),
+                    })
+                return {"patents": patents, "total_results": len(patents), "query": query}
+            except json.JSONDecodeError:
+                pass
 
-            return {"patents": [], "total_results": 0, "query": query, "note": "google_patents_api_unavailable"}
+        return {"patents": [], "total_results": 0, "query": query, "note": "google_patents_api_unavailable"}
 
     except Exception:
         logger.error("Patent search error")

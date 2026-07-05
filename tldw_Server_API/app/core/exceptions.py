@@ -362,6 +362,22 @@ class ValidationError(BadRequestError):
     """Raised when validation of input parameters fails."""
 
 
+class RPGError(Exception):
+    """Base exception for RPG runtime errors."""
+
+
+class RPGNotFoundError(RPGError):
+    """Raised when an RPG resource cannot be found."""
+
+
+class RPGValidationError(RPGError):
+    """Raised when RPG input fails domain validation."""
+
+
+class RPGConflictError(RPGError):
+    """Raised when an RPG write conflicts with current state."""
+
+
 class SetupError(RuntimeError):
     """Base class for first-run setup and installer failures."""
 

@@ -17,6 +17,93 @@ and this project adheres to Some kind of Versioning
 ### Removed
 
 
+## [0.1.35] - 2026-07-03
+
+> Rollup coverage: this entry covers current `dev` work that landed after the
+> `0.1.34` release-prep metadata through PR #2654, plus current release-branch
+> follow-ups and main-only cleanup PR #2624. It includes PRs #2060, #2061,
+> #2062, #2418, #2422, #2527, #2530, #2574, #2582, #2583, #2584, #2586,
+> #2587, #2588, #2589, #2591, #2593, #2594, #2595, #2597, #2598, #2601,
+> #2602, #2603, #2604, #2615, #2616, #2617, #2619, #2620, #2621, #2624,
+> #2631, #2632, #2634, #2635, #2636, #2637, #2638, #2639, #2640, #2641,
+> #2642, #2643, #2644, #2645, #2646, #2647, #2648, #2649, #2650, #2652,
+> and #2654.
+
+### Added
+
+- **Visual Identity Expression Packs** — Added visual identity repository
+  foundations, storage validation, ZIP import jobs, activation service support,
+  API endpoints, frontend client utilities, chat metadata integration, pack
+  management UI, generated-file provenance bridging, and visual identity
+  casting resolver APIs/overrides.
+- **MCP Docs Source Synchronization** — Added MCP docs source sync settings,
+  local/URL docs source registries, approved URL source tracking, URL and local
+  page sync tooling, and host-boundary/query URL regression coverage.
+- **Research Workspace And Release Publishing Hooks** — Added research
+  workspace source ingest failure-code exposure and backend PyPI auto-publish
+  workflow wiring for main-branch version releases.
+- **Workspace, Setup, And MCP Expansion** — Added the Chat Workspace live flow,
+  WebUI setup handoff, first-run MCP tool-pack onboarding, RAG MCP module, MCP
+  docs source discovery, Research Workspace share/UAT/NotebookLM parity, and
+  expanded API/WebUI/extension documentation.
+- **Release Gate And Test Quality Coverage** — Added test-quality triage
+  scanning, singleton/lifecycle isolation guards, env-absent and minimal-startup
+  smoke coverage, OpenAPI drift checks, contract/property test expansions, and
+  sandbox-capable UAT documentation.
+
+### Changed
+
+- **Documentation And Provider Surface Cleanup** — Split published docs into
+  user and developer wiki entry points and fixed llama.cpp provider alias
+  handling for character chat.
+- **CI And Dependency Maintenance** — Updated Docker publishing actions,
+  repaired AuthNZ multi-user load-test fixtures, synced `USER_DB_BASE_DIR`
+  reset behavior into core settings, and unquarantined the
+  TTS_NEW/Embeddings/Character_Chat_NEW suites after green validation.
+- **Visual Identity Review Hardening** — Hardened visual identity storage,
+  idempotency, source-context detection, provenance validation/replay, override
+  version fallback, and frontend TypeScript baseline behavior.
+- **Release Operations And Cleanup** — Recorded VZ prepared-host evidence and
+  cleanup, external docs hosting, Pages artifact path fixes, ACP caveat
+  reconciliation, a Jobs backend parity slice, and main-branch cleanup for
+  tracked `node_modules` symlinks.
+
+### Fixed
+
+- **MCP Docs Source Privacy And Consistency** — Fixed docs source import failure
+  cleanup, source document counts, local tombstone bounds, redirected URL source
+  reconciliation/retargeting, tombstoned docs lookup filtering, acquisition
+  privacy redaction, and URL acquisition privacy review findings.
+- **Post-PR 2571 CI Follow-Ups** — Fixed Guardian generic notification logging
+  so synthetic `ts` metadata is added only to the sanitized recorded copy, and
+  retargeted the stale theme-toggle UX smoke assertion from the specialized
+  chat route to a current shared-shell route.
+- **Research Workspace Source Worker** — Fixed workspace source ingest
+  failure-code exposure for the current research workspace source-worker path.
+- **Input, Auth, And Network Hardening** — Hardened audio transcription input
+  handling, the Parakeet ONNX STT path, WebUI runtime-auth persistence across
+  hard reloads, integrations outbound egress policy, cross-origin redirect
+  credential stripping, and related PR #2604/#2619 review follow-ups.
+- **Workspace, Audio, ACP, VZ, And PostgreSQL Stability** — Fixed audio
+  briefing/artifact validation, Research Workspace generated artifact and share
+  flows, ACP reconnect broadcaster cleanup, mismatched VZ guest-agent handling,
+  prepared-host validation evidence, and PostgreSQL setup self-verify timestamp
+  timezones.
+- **Release Branch Review And CI Follow-Ups** — Rebased release prep onto
+  current `dev`, kept PyPI publishing fail-closed and test-gated, moved visual
+  identity idempotency workflow decisions into the service layer, repaired
+  Visual Identity preview/refresh/accessibility follow-ups, stabilized sandbox
+  stale-claim capacity checks, and carried main's tracked `node_modules` cleanup
+  into the release branch.
+
+### Removed
+
+- Removed the stale test-quarantine mechanism for the previously quarantined
+  TTS_NEW, Embeddings, and Character_Chat_NEW suites.
+- Removed tracked `node_modules` symlinks from frontend package trees so
+  generated dependency links are no longer part of the release diff.
+
+
 ## [0.1.34] - 2026-07-02
 
 > Rollup coverage: this entry covers current `dev` work that landed after the

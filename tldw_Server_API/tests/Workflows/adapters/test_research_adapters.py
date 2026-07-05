@@ -29,34 +29,6 @@ import pytest
 pytestmark = pytest.mark.unit
 
 
-def _patch_module_import(monkeypatch, module_name: str, fake_module: object) -> None:
-    """Patch a locally imported optional module without replacing global package state."""
-    import builtins
-
-    real_import = builtins.__import__
-
-    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
-        if name == module_name:
-            return fake_module
-        return real_import(name, globals, locals, fromlist, level)
-
-    monkeypatch.setattr(builtins, "__import__", fake_import)
-
-
-def _fake_httpx_module_with_error(message: str) -> object:
-    class _ExplodingClient:
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return False
-
-        async def get(self, *args, **kwargs):
-            raise RuntimeError(message)
-
-    return types.SimpleNamespace(AsyncClient=lambda *args, **kwargs: _ExplodingClient())
-
-
 # =============================================================================
 # Deep Research Launch Adapter Tests
 # =============================================================================
@@ -1226,6 +1198,78 @@ async def test_arxiv_download_adapter_with_pdf_url(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_arxiv_download_adapter_uses_central_http_client_for_pdf_url(monkeypatch, tmp_path):
+    """Direct PDF URL downloads must use the central outbound HTTP helper."""
+    monkeypatch.setenv("TEST_MODE", "0")
+    monkeypatch.setenv("TLDW_TEST_MODE", "0")
+
+    from tldw_Server_API.app.core.Workflows.adapters.research import (
+        run_arxiv_download_adapter,
+        search as search_module,
+    )
+
+    calls: list[dict[str, object]] = []
+
+    class _FakeResponse:
+        content = b"%PDF-1.7\ncentral"
+        status_code = 200
+
+        def raise_for_status(self) -> None:
+            return None
+
+    async def _fake_afetch(**kwargs):
+        calls.append(dict(kwargs))
+        return _FakeResponse()
+
+    monkeypatch.setattr(search_module, "afetch", _fake_afetch, raising=False)
+    monkeypatch.setattr(search_module, "_resolve_artifacts_dir", lambda _step_run_id: tmp_path)
+
+    result = await run_arxiv_download_adapter(
+        {"pdf_url": "http://127.0.0.1:65535/paper.pdf"},
+        {"step_run_id": "arxiv-pdf-egress-test"},
+    )
+
+    assert result["downloaded"] is True
+    assert Path(result["pdf_path"]).read_bytes() == _FakeResponse.content
+    assert len(calls) == 1
+    assert calls[0]["method"] == "GET"
+    assert calls[0]["url"] == "http://127.0.0.1:65535/paper.pdf"
+    assert calls[0]["allow_redirects"] is True
+    assert calls[0]["timeout"] == 60
+    assert getattr(calls[0]["client"], "_trust_env", None) is False
+
+
+@pytest.mark.asyncio
+async def test_arxiv_download_adapter_private_pdf_url_denied_by_central_policy(monkeypatch, tmp_path):
+    """Private direct PDF URLs should fail through central egress before network I/O."""
+    monkeypatch.setenv("TEST_MODE", "0")
+    monkeypatch.setenv("TLDW_TEST_MODE", "0")
+
+    from tldw_Server_API.app.core.exceptions import EgressPolicyError
+    from tldw_Server_API.app.core.Workflows.adapters.research import (
+        run_arxiv_download_adapter,
+        search as search_module,
+    )
+
+    calls: list[str] = []
+
+    async def _fake_afetch(**kwargs):
+        calls.append(str(kwargs["url"]))
+        raise EgressPolicyError("private_network")
+
+    monkeypatch.setattr(search_module, "afetch", _fake_afetch, raising=False)
+    monkeypatch.setattr(search_module, "_resolve_artifacts_dir", lambda _step_run_id: tmp_path)
+
+    result = await run_arxiv_download_adapter(
+        {"pdf_url": "http://127.0.0.1:65535/paper.pdf"},
+        {"step_run_id": "arxiv-private-pdf-egress-test"},
+    )
+
+    assert result == {"error": "arXiv download failed", "downloaded": False}
+    assert calls == ["http://127.0.0.1:65535/paper.pdf"]
+
+
+@pytest.mark.asyncio
 async def test_arxiv_download_adapter_missing_id(monkeypatch):
     """Test arXiv download handles missing ID gracefully."""
     monkeypatch.setenv("TEST_MODE", "1")
@@ -1382,6 +1426,83 @@ async def test_pubmed_search_adapter_with_template(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_pubmed_search_adapter_reuses_central_http_client(monkeypatch):
+    """PubMed search and summary requests should share one central async client."""
+    monkeypatch.setenv("TEST_MODE", "0")
+    monkeypatch.setenv("TLDW_TEST_MODE", "0")
+
+    from tldw_Server_API.app.core.Workflows.adapters.research import (
+        run_pubmed_search_adapter,
+        search as search_module,
+    )
+
+    shared_client = object()
+    client_contexts: list[dict[str, object]] = []
+    fetch_calls: list[dict[str, object]] = []
+
+    class _FakeClientContext:
+        async def __aenter__(self):
+            client_contexts.append({"event": "enter"})
+            return shared_client
+
+        async def __aexit__(self, exc_type, exc, tb):
+            client_contexts.append({"event": "exit"})
+            return False
+
+    class _SearchResponse:
+        @staticmethod
+        def json():
+            return {"esearchresult": {"idlist": ["123", "456"]}}
+
+    class _SummaryResponse:
+        @staticmethod
+        def json():
+            return {
+                "result": {
+                    "123": {
+                        "title": "First",
+                        "authors": [{"name": "A. Author"}],
+                        "source": "Journal",
+                        "pubdate": "2024",
+                        "elocationid": "10.1/example",
+                    },
+                    "456": {
+                        "title": "Second",
+                        "authors": [{"name": "B. Author"}],
+                        "source": "Journal",
+                        "pubdate": "2025",
+                        "elocationid": "10.2/example",
+                    },
+                }
+            }
+
+    def _fake_create_async_client(**kwargs):
+        client_contexts.append({"event": "create", **kwargs})
+        return _FakeClientContext()
+
+    async def _fake_afetch(**kwargs):
+        fetch_calls.append(dict(kwargs))
+        if str(kwargs["url"]).endswith("/esearch.fcgi"):
+            return _SearchResponse()
+        return _SummaryResponse()
+
+    monkeypatch.setattr(search_module, "create_async_client", _fake_create_async_client)
+    monkeypatch.setattr(search_module, "afetch", _fake_afetch, raising=False)
+
+    result = await run_pubmed_search_adapter({"query": "cancer", "max_results": 2}, {})
+
+    assert [event["event"] for event in client_contexts] == ["create", "enter", "exit"]
+    assert client_contexts[0]["timeout"] == 30
+    assert len(fetch_calls) == 2
+    assert fetch_calls[0]["client"] is shared_client
+    assert fetch_calls[1]["client"] is shared_client
+    assert fetch_calls[0]["url"].endswith("/esearch.fcgi")
+    assert fetch_calls[1]["url"].endswith("/esummary.fcgi")
+    assert result["total_results"] == 2
+    assert [paper["pmid"] for paper in result["papers"]] == ["123", "456"]
+
+
+@pytest.mark.asyncio
 async def test_pubmed_search_adapter_cancelled(monkeypatch):
     """Test PubMed search respects cancellation."""
     monkeypatch.setenv("TEST_MODE", "1")
@@ -1409,11 +1530,10 @@ async def test_pubmed_search_adapter_sanitizes_backend_errors(monkeypatch):
         search as search_module,
     )
 
-    _patch_module_import(
-        monkeypatch,
-        "httpx",
-        _fake_httpx_module_with_error("PubMed token at /private/pubmed-cache"),
-    )
+    async def _fake_managed_afetch(**_kwargs):
+        raise RuntimeError("PubMed token at /private/pubmed-cache")
+
+    monkeypatch.setattr(search_module, "_managed_afetch", _fake_managed_afetch)
 
     messages: list[str] = []
     sink_id = search_module.logger.add(lambda message: messages.append(str(message)), level="ERROR")
@@ -1529,11 +1649,10 @@ async def test_semantic_scholar_search_adapter_sanitizes_backend_errors(monkeypa
         search as search_module,
     )
 
-    _patch_module_import(
-        monkeypatch,
-        "httpx",
-        _fake_httpx_module_with_error("Semantic Scholar token at /private/s2-cache"),
-    )
+    async def _fake_managed_afetch(**_kwargs):
+        raise RuntimeError("Semantic Scholar token at /private/s2-cache")
+
+    monkeypatch.setattr(search_module, "_managed_afetch", _fake_managed_afetch)
 
     messages: list[str] = []
     sink_id = search_module.logger.add(lambda message: messages.append(str(message)), level="ERROR")
@@ -1761,11 +1880,10 @@ async def test_patent_search_adapter_sanitizes_backend_errors(monkeypatch):
         search as search_module,
     )
 
-    _patch_module_import(
-        monkeypatch,
-        "httpx",
-        _fake_httpx_module_with_error("Patent token at /private/patent-cache"),
-    )
+    async def _fake_managed_afetch(**_kwargs):
+        raise RuntimeError("Patent token at /private/patent-cache")
+
+    monkeypatch.setattr(search_module, "_managed_afetch", _fake_managed_afetch)
 
     messages: list[str] = []
     sink_id = search_module.logger.add(lambda message: messages.append(str(message)), level="ERROR")
@@ -1901,29 +2019,10 @@ async def test_doi_resolve_adapter_sanitizes_backend_errors(monkeypatch):
         run_doi_resolve_adapter,
     )
 
-    class ExplodingClient:
-        async def __aenter__(self):
-            return self
+    async def _fake_managed_afetch(**_kwargs):
+        raise RuntimeError("DOI backend exploded at /private/doi-cache")
 
-        async def __aexit__(self, exc_type, exc, tb):
-            return False
-
-        async def get(self, *args, **kwargs):
-            raise RuntimeError("DOI backend exploded at /private/doi-cache")
-
-    class FakeHttpx:
-        AsyncClient = staticmethod(lambda *args, **kwargs: ExplodingClient())
-
-    import builtins
-
-    real_import = builtins.__import__
-
-    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
-        if name == "httpx":
-            return FakeHttpx
-        return real_import(name, globals, locals, fromlist, level)
-
-    monkeypatch.setattr(builtins, "__import__", fake_import)
+    monkeypatch.setattr(bibliography_module, "_managed_afetch", _fake_managed_afetch)
 
     messages: list[str] = []
     sink_id = bibliography_module.logger.add(lambda message: messages.append(str(message)), level="ERROR")

@@ -1,6 +1,6 @@
-import asyncio
-
 import types
+
+import pytest
 
 from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as AEL
 
@@ -20,7 +20,8 @@ class DummyAsyncPlaywright:
         return False
 
 
-def test_js_required_emits_fallback_metric(monkeypatch):
+@pytest.mark.asyncio
+async def test_js_required_emits_fallback_metric(monkeypatch):
     from tldw_Server_API.app.core.Security import egress as egress_module
 
     monkeypatch.setattr(
@@ -29,11 +30,11 @@ def test_js_required_emits_fallback_metric(monkeypatch):
         lambda url: types.SimpleNamespace(allowed=True),
     )
 
+    async def allow_robots(*_args, **_kwargs):
+        return True
 
-     # stub robots allow
-    monkeypatch.setattr(AEL, "is_allowed_by_robots_async", lambda *a, **k: asyncio.Future())
-    f = asyncio.Future(); f.set_result(True)
-    monkeypatch.setattr(AEL, "is_allowed_by_robots_async", lambda *a, **k: f)
+    # stub robots allow
+    monkeypatch.setattr(AEL, "is_allowed_by_robots_async", allow_robots)
 
     # stub http fetch to return JS-required HTML
     monkeypatch.setattr(AEL, "http_fetch", lambda *a, **k: DummyResp("Please enable JavaScript to continue"))
@@ -48,7 +49,7 @@ def test_js_required_emits_fallback_metric(monkeypatch):
     monkeypatch.setattr(AEL, "increment_counter", _increment_counter)
 
     # run
-    res = asyncio.get_event_loop().run_until_complete(AEL.scrape_article("https://example.com"))
+    res = await AEL.scrape_article("https://example.com")
     assert res["extraction_successful"] is False
     # Ensure js_required metric was emitted at least once
     js_fallbacks = [c for c in calls if c[0] == "scrape_playwright_fallback_total" and c[1].get("reason") == "js_required"]

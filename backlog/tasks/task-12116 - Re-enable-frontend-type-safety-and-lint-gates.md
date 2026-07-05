@@ -1,5 +1,5 @@
 ---
-id: TASK-12102
+id: TASK-12116
 title: Re-enable frontend type-safety and lint gates, harden persisted stores
 status: In Progress
 labels:

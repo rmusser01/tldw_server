@@ -136,6 +136,7 @@ AUDIO_BRIEFING_WORKFLOW_DEF: dict[str, Any] = {
             "config": {
                 "sections": "{{ compose_script.sections }}",
                 "voice_assignments": "{{ compose_script.voice_assignments }}",
+                "default_provider": "{{ inputs.tts_provider }}",
                 "default_model": "{{ inputs.tts_model }}",
                 "default_voice": "{{ inputs.tts_voice }}",
                 "response_format": "mp3",
@@ -157,6 +158,7 @@ AUDIO_BRIEFING_WORKFLOW_DEF: dict[str, Any] = {
             "type": "tts",
             "config": {
                 "input": "{{ compose_script.text }}",
+                "provider": "{{ inputs.tts_provider }}",
                 "model": "{{ inputs.tts_model }}",
                 "voice": "{{ inputs.tts_voice }}",
                 "response_format": "mp3",
@@ -214,7 +216,7 @@ def _first_non_empty_pref(output_prefs: dict[str, Any], *keys: str) -> Any:
     return None
 
 
-def _resolve_workflow_tts_defaults(output_prefs: dict[str, Any]) -> tuple[str, str] | None:
+def _resolve_workflow_tts_defaults(output_prefs: dict[str, Any]) -> tuple[str | None, str, str] | None:
     """Resolve Watchlists audio prefs through the same defaults as /audio/speech."""
     provider = _first_non_empty_pref(output_prefs, "audio_provider", "tts_provider")
     model = _first_non_empty_pref(output_prefs, "audio_model", "tts_model")
@@ -229,11 +231,12 @@ def _resolve_workflow_tts_defaults(output_prefs: dict[str, Any]) -> tuple[str, s
         logger.warning("Audio briefing: failed to resolve TTS defaults (error_type={})", type(exc).__name__)
         return None
 
+    provider = str(resolved.provider or "").strip() or None
     model = str(resolved.model or "").strip()
     voice = str(resolved.voice or "").strip()
     if not model or not voice:
         return None
-    return model, voice
+    return provider, model, voice
 
 
 def _get_scheduler_queue_worker_count(scheduler: Any, queue_name: str) -> int | None:
@@ -275,7 +278,7 @@ def _build_workflow_inputs(
     tts_defaults = _resolve_workflow_tts_defaults(output_prefs)
     if tts_defaults is None:
         return None
-    tts_model, tts_voice = tts_defaults
+    tts_provider, tts_model, tts_voice = tts_defaults
 
     audio_cast = output_prefs.get("audio_cast")
     voice_map = output_prefs.get("voice_map")
@@ -286,6 +289,7 @@ def _build_workflow_inputs(
         "items": items,
         "target_audio_minutes": output_prefs.get("target_audio_minutes", 10),
         "audio_language": output_prefs.get("audio_language") or "en",
+        "tts_provider": tts_provider,
         "tts_model": tts_model,
         "tts_voice": tts_voice,
         "tts_speed": output_prefs.get("audio_speed") or 1.0,

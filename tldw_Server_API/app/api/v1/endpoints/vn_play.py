@@ -76,6 +76,7 @@ from tldw_Server_API.app.core.VN_Play.service import (
     VNPlayTurnError,
     VNPlayTurnResponse as ServiceTurnResponse,
 )
+from tldw_Server_API.app.core.Visual_Identities.service import VisualIdentityService
 from tldw_Server_API.app.core.VN_Platform.errors import vn_error_detail
 
 
@@ -106,6 +107,7 @@ def _service(
     return VNPlayService(
         repo=VNPlayRepository.initialized(db),
         owner_user_id=owner_user_id,
+        visual_identity_service=VisualIdentityService(db, owner_user_id=owner_user_id),
     )
 
 

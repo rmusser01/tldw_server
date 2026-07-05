@@ -4,7 +4,7 @@ import os
 
 import pytest
 
-pytest_plugins = ["tldw_Server_API.tests.AuthNZ.conftest"]
+pytest_plugins = ["tldw_Server_API.tests._plugins.authnz_full_fixtures"]
 
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseConfig

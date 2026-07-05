@@ -930,6 +930,20 @@ class MCPServer:
                     })
                     logger.info("MCP browser CDP module enabled/configured; queuing BrowserCDPModule for registration")
 
+            # 9) Optional: RPG module for campaign/session orchestration tools.
+            if self._env_flag_enabled("MCP_ENABLE_RPG_MODULE"):
+                if not any(m.get("id") == "rpg" for m in modules_to_load if isinstance(m, dict)):
+                    modules_to_load.append({
+                        "id": "rpg",
+                        "class": "tldw_Server_API.app.core.MCP_unified.modules.implementations.rpg_module:RPGModule",
+                        "enabled": True,
+                        "name": "RPG",
+                        "version": "1.0.0",
+                        "department": "management",
+                        "settings": {},
+                    })
+                logger.info("MCP_ENABLE_RPG_MODULE=true; queuing RPGModule for registration")
+
             self._remember_configured_modules_for_status(modules_to_load)
 
             # Register all specified modules

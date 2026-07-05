@@ -1841,12 +1841,15 @@ export const SkillsManager: React.FC = () => {
           selectedRowKeys: selectedSkillNames,
           onChange: (selectedRowKeys) =>
             setSelectedSkillNames(selectedRowKeys.map((key) => String(key))),
-          getCheckboxProps: (record) => ({
-            "aria-label": t("option:skills.selectSkillRow", {
-              defaultValue: `Select ${record.name}`,
-              name: record.name
-            })
-          })
+          getCheckboxProps: (record) => {
+            const checkboxProps: { disabled?: boolean } & React.AriaAttributes = {
+              "aria-label": t("option:skills.selectSkillRow", {
+                defaultValue: `Select ${record.name}`,
+                name: record.name
+              })
+            }
+            return checkboxProps
+          }
         }}
         loading={isLoading}
         onChange={handleTableChange}

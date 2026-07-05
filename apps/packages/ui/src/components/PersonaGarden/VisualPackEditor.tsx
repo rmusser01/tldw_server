@@ -108,6 +108,7 @@ import {
   NATIVE_PERSONA_VISUAL_PACK_EXTENSION
 } from "./buddyBuilderArchive"
 import type { BuddyBuilderSource } from "./buddyBuilderState"
+import { VisualIdentityPackPanel } from "../Common/VisualIdentity/VisualIdentityPackPanel"
 
 type VisualPackEditorProps = {
   selectedPersonaId: string
@@ -3682,6 +3683,12 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
           })}
         </div>
       </Modal>
+
+      <VisualIdentityPackPanel
+        actorKind="persona"
+        actorId={selectedPersonaId}
+        actorName={selectedPersonaName || selectedPersonaId}
+      />
 
       <section
         ref={packBasicsSectionRef}

@@ -878,7 +878,8 @@ describe("CharactersManager first-use onboarding", () => {
 
     await user.click(createScope.getByRole("button", { name: "Metadata" }))
     expect(createScope.getByText("Extensions (JSON)")).toBeInTheDocument()
-    expect(createScope.getByText("Mood images (coming soon)")).toBeInTheDocument()
+    expect(createScope.getByText("Expression packs available after save")).toBeInTheDocument()
+    expect(createScope.getByText("Legacy mood images")).toBeInTheDocument()
   }, 60000)
 
   it("renders the same advanced section structure in edit mode", async () => {
@@ -940,7 +941,8 @@ describe("CharactersManager first-use onboarding", () => {
     ).toBeInTheDocument()
 
     await user.click(editScope.getByRole("button", { name: "Metadata" }))
-    expect(editScope.getByText("Mood images (coming soon)")).toBeInTheDocument()
+    expect(editScope.getByText("Expression packs available after save")).toBeInTheDocument()
+    expect(editScope.getByText("Legacy mood images")).toBeInTheDocument()
   }, 60000)
 
   it("preloads world-book attachments in edit mode and syncs attachments on save", async () => {

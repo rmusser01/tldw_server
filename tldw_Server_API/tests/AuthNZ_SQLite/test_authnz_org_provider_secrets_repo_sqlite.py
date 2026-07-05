@@ -7,7 +7,7 @@ import uuid
 
 import pytest
 
-pytest_plugins = ("tldw_Server_API.tests.AuthNZ.conftest",)
+pytest_plugins = ("tldw_Server_API.tests._plugins.authnz_full_fixtures",)
 
 
 def _b64_key(byte_char: bytes) -> str:

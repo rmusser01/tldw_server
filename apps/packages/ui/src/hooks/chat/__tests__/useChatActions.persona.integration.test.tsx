@@ -7,7 +7,10 @@ import { useChatActions } from "../useChatActions"
 
 const {
   createChatMock,
+  getChatMock,
+  addChatMessageMock,
   normalChatModeMock,
+  ragModeMock,
   streamCharacterChatCompletionMock,
   baseSaveMessageOnSuccessMock,
   syncChatSettingsForServerChatMock,
@@ -16,7 +19,10 @@ const {
   buildChatSurfaceScopeKeyFromConfigMock
 } = vi.hoisted(() => ({
   createChatMock: vi.fn(),
+  getChatMock: vi.fn(),
+  addChatMessageMock: vi.fn(),
   normalChatModeMock: vi.fn(),
+  ragModeMock: vi.fn(),
   streamCharacterChatCompletionMock: vi.fn(),
   baseSaveMessageOnSuccessMock: vi.fn(
     async (_payload?: unknown): Promise<string | null> => "history-persona"
@@ -36,7 +42,7 @@ vi.mock("@/hooks/chat-modes/continueChatMode", () => ({
 }))
 
 vi.mock("@/hooks/chat-modes/ragMode", () => ({
-  ragMode: vi.fn()
+  ragMode: ragModeMock
 }))
 
 vi.mock("@/hooks/chat-modes/tabChatMode", () => ({
@@ -145,6 +151,8 @@ vi.mock("@/store/playground-session", () => ({
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     createChat: createChatMock,
+    getChat: getChatMock,
+    addChatMessage: addChatMessageMock,
     streamCharacterChatCompletion: streamCharacterChatCompletionMock,
     initialize: vi.fn(async () => null),
     getConfig: getConfigMock
@@ -263,6 +271,15 @@ describe("useChatActions persona integration", () => {
       assistant_id: "garden-helper",
       persona_memory_mode: "read_only"
     })
+    getChatMock.mockResolvedValue({
+      id: "workspace-existing-chat",
+      scope_type: "workspace",
+      workspace_id: "workspace-plain"
+    })
+    addChatMessageMock.mockImplementation(async (_chatId, payload) => ({
+      id: `server-message-${payload?.role ?? "message"}`,
+      version: 1
+    }))
     normalChatModeMock.mockResolvedValue(undefined)
   })
 
@@ -342,6 +359,48 @@ describe("useChatActions persona integration", () => {
     )
   })
 
+  it("passes workspace scope through when creating a persona-backed chat", async () => {
+    const scope = { type: "workspace", workspaceId: "workspace-1" } as const
+    const options = {
+      ...createHookOptions(),
+      scope
+    }
+    const { result } = renderHook(() => useChatActions(options as any))
+
+    await act(async () => {
+      await result.current.onSubmit({
+        message: "Hello scoped persona",
+        image: ""
+      })
+    })
+
+    expect(createChatMock).toHaveBeenCalledWith(
+      {
+        assistant_kind: "persona",
+        assistant_id: "garden-helper",
+        persona_memory_mode: "read_only",
+        state: "in-progress",
+        topic_label: undefined,
+        cluster_id: undefined,
+        source: undefined,
+        external_ref: undefined
+      },
+      { scope }
+    )
+    expect(normalChatModeMock).toHaveBeenCalledWith(
+      "Hello scoped persona",
+      "",
+      false,
+      [],
+      [],
+      expect.any(AbortSignal),
+      expect.objectContaining({
+        historyId: "history-persona",
+        serverChatId: "persona-chat-1"
+      })
+    )
+  })
+
   it("routes an inherited workspace persona default when no explicit assistant is selected", async () => {
     const inheritedWorkspaceAssistant = {
       kind: "persona" as const,
@@ -411,6 +470,266 @@ describe("useChatActions persona integration", () => {
           avatarUrl: undefined
         },
         serverChatId: "workspace-persona-chat"
+      })
+    )
+  })
+
+  it("creates a workspace-scoped server chat for plain normal sends", async () => {
+    const scope = { type: "workspace", workspaceId: "workspace-plain" } as const
+    createChatMock.mockResolvedValueOnce({
+      id: "workspace-plain-chat",
+      title: "Workspace plain chat",
+      state: "in-progress",
+      version: 3
+    })
+    normalChatModeMock.mockImplementationOnce(async (...args: unknown[]) => {
+      const params = args[6] as {
+        historyId: string | null
+        saveMessageOnSuccess: (payload: Record<string, unknown>) => Promise<string | null>
+        serverChatId?: string | null
+      }
+      expect(params.historyId).toBe("history-persona")
+      expect(params.serverChatId).toBe("workspace-plain-chat")
+      await params.saveMessageOnSuccess({
+        historyId: "history-persona",
+        isRegenerate: false,
+        selectedModel: "deepseek-chat",
+        message: "Plain workspace hello",
+        image: "",
+        fullText: "Plain workspace reply",
+        source: []
+      })
+    })
+    const options = {
+      ...createHookOptions(),
+      scope,
+      serverChatId: null,
+      serverChatTitle: null,
+      selectedAssistant: null
+    }
+    const { result } = renderHook(() => useChatActions(options as any))
+
+    await act(async () => {
+      await result.current.onSubmit({
+        message: "Plain workspace hello",
+        image: ""
+      })
+    })
+
+    expect(createChatMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        state: "in-progress"
+      }),
+      { scope }
+    )
+    expect(options.setServerChatId).toHaveBeenCalledWith("workspace-plain-chat")
+    expect(options.setServerChatAssistantKind).toHaveBeenCalledWith(null)
+    expect(options.setServerChatAssistantId).toHaveBeenCalledWith(null)
+    expect(normalChatModeMock).toHaveBeenCalledWith(
+      "Plain workspace hello",
+      "",
+      false,
+      [],
+      [],
+      expect.any(AbortSignal),
+      expect.objectContaining({
+        historyId: "history-persona",
+        serverChatId: "workspace-plain-chat"
+      })
+    )
+    expect(baseSaveMessageOnSuccessMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversationId: "workspace-plain-chat"
+      })
+    )
+    expect(addChatMessageMock).toHaveBeenCalledWith(
+      "workspace-plain-chat",
+      expect.objectContaining({
+        role: "user",
+        content: "Plain workspace hello"
+      }),
+      { scope }
+    )
+    expect(addChatMessageMock).toHaveBeenCalledWith(
+      "workspace-plain-chat",
+      expect.objectContaining({
+        role: "assistant",
+        content: "Plain workspace reply"
+      }),
+      { scope }
+    )
+  })
+
+  it("rejects a stale server chat id from another scope before workspace sends", async () => {
+    const scope = { type: "workspace", workspaceId: "workspace-fresh" } as const
+    getChatMock.mockResolvedValueOnce({
+      id: "stale-global-chat",
+      scope_type: "global",
+      workspace_id: null
+    })
+    createChatMock.mockResolvedValueOnce({
+      id: "workspace-fresh-chat",
+      title: "Workspace fresh chat",
+      state: "in-progress"
+    })
+    normalChatModeMock.mockImplementationOnce(async (...args: unknown[]) => {
+      const params = args[6] as {
+        serverChatId?: string | null
+        conversationId?: string | null
+      }
+      expect(params.serverChatId).toBe("workspace-fresh-chat")
+      expect(params.conversationId).toBe("workspace-fresh-chat")
+    })
+    const options = {
+      ...createHookOptions(),
+      scope,
+      serverChatId: "stale-global-chat",
+      serverChatTitle: "Stale global chat",
+      serverChatMetaLoaded: true,
+      selectedAssistant: null
+    }
+    const { result } = renderHook(() => useChatActions(options as any))
+
+    await act(async () => {
+      await result.current.onSubmit({
+        message: "Use the active workspace",
+        image: ""
+      })
+    })
+
+    expect(getChatMock).toHaveBeenCalledWith("stale-global-chat", { scope })
+    expect(options.setServerChatId).toHaveBeenCalledWith(null)
+    expect(options.setServerChatMetaLoaded).toHaveBeenCalledWith(false)
+    expect(createChatMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        state: "in-progress"
+      }),
+      { scope }
+    )
+    expect(options.setServerChatId).toHaveBeenLastCalledWith(
+      "workspace-fresh-chat"
+    )
+  })
+
+  it("creates a workspace-scoped server chat for staged RAG sends", async () => {
+    const scope = { type: "workspace", workspaceId: "workspace-rag" } as const
+    createChatMock.mockResolvedValueOnce({
+      id: "workspace-rag-chat",
+      title: "Workspace RAG chat",
+      state: "in-progress"
+    })
+    ragModeMock.mockImplementationOnce(async (...args: unknown[]) => {
+      const params = args[6] as {
+        historyId: string | null
+        saveMessageOnSuccess: (payload: Record<string, unknown>) => Promise<string | null>
+        serverChatId?: string | null
+      }
+      expect(params.historyId).toBe("history-persona")
+      expect(params.serverChatId).toBe("workspace-rag-chat")
+      await params.saveMessageOnSuccess({
+        historyId: "history-persona",
+        isRegenerate: false,
+        selectedModel: "deepseek-chat",
+        message: "Use staged source",
+        image: "",
+        fullText: "RAG reply",
+        source: [],
+        saveToDb: false
+      })
+    })
+    const options = {
+      ...createHookOptions(),
+      scope,
+      serverChatId: null,
+      serverChatTitle: null,
+      selectedAssistant: null
+    }
+    const { result } = renderHook(() => useChatActions(options as any))
+
+    await act(async () => {
+      await result.current.onSubmit({
+        message: "Use staged source",
+        image: "",
+        requestOverrides: {
+          fileRetrievalEnabled: true,
+          ragMediaIds: [101]
+        }
+      })
+    })
+
+    expect(createChatMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        state: "in-progress"
+      }),
+      { scope }
+    )
+    expect(ragModeMock).toHaveBeenCalledWith(
+      "Use staged source",
+      "",
+      false,
+      [],
+      [],
+      expect.any(AbortSignal),
+      expect.objectContaining({
+        historyId: "history-persona",
+        serverChatId: "workspace-rag-chat",
+        ragMediaIds: [101]
+      })
+    )
+    expect(baseSaveMessageOnSuccessMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversationId: "workspace-rag-chat"
+      })
+    )
+  })
+
+  it("keeps plain global sends out of the workspace server-chat bootstrap path", async () => {
+    let capturedParams:
+      | {
+          conversationId?: string | null
+          serverChatId?: string | null
+        }
+      | null = null
+    normalChatModeMock.mockImplementationOnce(async (...args: unknown[]) => {
+      const params = args[6] as {
+        conversationId?: string | null
+        saveMessageOnSuccess: (
+          payload: Record<string, unknown>
+        ) => Promise<string | null>
+        serverChatId?: string | null
+      }
+      capturedParams = params
+      await params.saveMessageOnSuccess({
+        historyId: "history-persona",
+        isRegenerate: false,
+        selectedModel: "deepseek-chat",
+        message: "Plain global hello",
+        image: "",
+        fullText: "Plain global reply",
+        source: []
+      })
+    })
+    const options = {
+      ...createHookOptions(),
+      selectedAssistant: null,
+      serverChatId: "existing-global-chat",
+      serverChatTitle: "Existing global chat"
+    }
+    const { result } = renderHook(() => useChatActions(options as any))
+
+    await act(async () => {
+      await result.current.onSubmit({
+        message: "Plain global hello",
+        image: ""
+      })
+    })
+
+    expect(createChatMock).not.toHaveBeenCalled()
+    expect(capturedParams?.serverChatId).toBeUndefined()
+    expect(capturedParams?.conversationId).toBeUndefined()
+    expect(baseSaveMessageOnSuccessMock).toHaveBeenCalledWith(
+      expect.not.objectContaining({
+        conversationId: "existing-global-chat"
       })
     )
   })

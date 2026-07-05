@@ -59,6 +59,10 @@ _python_magic = None
 _python_magic_loaded = False
 
 
+def _is_windows_platform() -> bool:
+    return os.name == "nt"
+
+
 def _get_python_magic_module():
     """Resolve python-magic lazily and skip it on Windows.
 
@@ -73,7 +77,7 @@ def _get_python_magic_module():
         return None
 
     _python_magic_loaded = True
-    if os.name == "nt":
+    if _is_windows_platform():
         logging.info(
             "Skipping python-magic fallback on Windows; relying on puremagic or extension guesses."
         )

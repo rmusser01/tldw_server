@@ -13,8 +13,11 @@ def validate_startup_mcp_configuration(
     validate_mcp_config: Callable[[], bool] | None,
     logger: Any,
     startup_guard_exceptions: tuple[type[BaseException], ...],
+    test_mode: bool = False,
 ) -> None:
     try:
+        if test_mode:
+            return
         if get_mcp_config is None or validate_mcp_config is None:
             return
 

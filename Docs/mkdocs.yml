@@ -1,6 +1,6 @@
 site_name: tldw Server Docs
 site_description: Documentation for the tldw_server project
-site_url: https://rmusser01.github.io/tldw_server/
+site_url: https://tldwproject.com/server/docs/
 repo_url: https://github.com/rmusser01/tldw_server
 repo_name: rmusser01/tldw_server
 edit_uri: edit/main/
@@ -33,7 +33,6 @@ theme:
       accent: indigo
 
 plugins:
-  - search
   - git-revision-date-localized:
       enable_git_follow: false
       strict: false
@@ -59,63 +58,119 @@ markdown_extensions:
 
 extra:
   generator: false
-  version: v0.1.34
+  version: v0.1.35
   social:
     - icon: fontawesome/brands/github
       link: https://github.com/rmusser01/tldw_server
       name: GitHub
 copyright: |
-  © 2024-2025 tldw_Server - v0.1.34 - <a href="https://github.com/rmusser01/tldw_server">GitHub</a>
+  © 2024-2025 tldw_Server - v0.1.35 - <a href="https://github.com/rmusser01/tldw_server">GitHub</a>
 
 nav:
-  - Home: User_Guides/index.md
-  - Getting Started: Getting_Started/README.md
-  - Feature Status: Overview/Feature_Status.md
-  - User Guides:
-      - Documentation Map: User_Guides/index.md
-      - Feature Map: User_Guides/Feature_Map.md
+  - Home: Wiki/index.md
+  - WebUI & Extension:
+      - Overview: User_Guides/WebUI/index.md
+      - Page And Feature Index: User_Guides/WebUI/Page_Feature_Index.md
+      - Start, Account, And Settings: User_Guides/WebUI/Start_Account_Settings.md
+      - Chat, Characters, And Assistants: User_Guides/WebUI/Chat_Characters_Assistants.md
+      - Knowledge, Media, And Sources: User_Guides/WebUI/Knowledge_Media_Sources.md
+      - Audio, Speech, And Audiobooks: User_Guides/WebUI/Audio_Speech_Audiobooks.md
+      - Study, Writing, And Artifacts: User_Guides/WebUI/Study_Writing_Artifacts.md
+      - Automation, Admin, And Operations: User_Guides/WebUI/Automation_Admin_Operations.md
+      - Extension Sidepanel: User_Guides/WebUI/Extension_Sidepanel.md
+      - Experimental And Specialized: User_Guides/WebUI/Experimental_And_Specialized.md
+  - User Wiki:
+      - Start Here: Wiki/User_Wiki.md
+      - Getting Started:
+          - Setup Overview: Getting_Started/README.md
+          - Docker Single-User + WebUI: Getting_Started/Profile_Docker_Single_User.md
+          - Docker Multi-User + Postgres: Getting_Started/Profile_Docker_Multi_User_Postgres.md
+          - Local Single-User: Getting_Started/Profile_Local_Single_User.md
+          - Troubleshooting: Getting_Started/TROUBLESHOOTING.md
       - WebUI and Extension:
           - WebUI User Guide: User_Guides/WebUI_Extension/User_Guide.md
           - Chat Pages: User_Guides/WebUI_Extension/Chat_Pages.md
           - Workflow Examples: User_Guides/WebUI_Extension/Workflows_Examples.md
-          - STT and TTS Quickstart: User_Guides/WebUI_Extension/Getting-Started-STT_and_TTS.md
           - Chatbooks: User_Guides/WebUI_Extension/Chatbook_User_Guide.md
           - Flashcards: User_Guides/WebUI_Extension/Flashcards_Study_Guide.md
-      - Server:
+          - Knowledge QA: User_Guides/WebUI_Extension/Knowledge_QA_Guide.md
+      - Chat and Characters:
+          - Character Roleplay Quickstart: User_Guides/WebUI_Extension/Character_Roleplay_Quickstart.md
+          - Advanced Character Roleplay: User_Guides/WebUI_Extension/Advanced_Character_Roleplay_Guide.md
+          - Character Cards: User_Guides/Server/Character_Cards_User_Guide.md
+          - Personas: User_Guides/Server/Personas_User_Guide.md
+          - Prompt Engineering Notes: User_Guides/WebUI_Extension/Prompt_Engineering_Notes.md
+      - Knowledge and Research:
+          - Feature Map: User_Guides/Feature_Map.md
+          - RAG API Consumer Guide: API-related/RAG-API-Guide.md
+          - RAG Production Configuration: User_Guides/Server/RAG_Production_Configuration_Guide.md
+          - Media to RAG Evals Workflow: User_Guides/Server/Media_to_RAG_Evals_Workflow.md
+          - Web Scraping and Ingestion: User_Guides/Server/Web_Scraping_Ingestion_Guide.md
+          - Evaluations User Guide: User_Guides/Server/Evaluations_User_Guide.md
+      - Local Models and Audio:
+          - Local LLM Setup: User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md
+          - STT and TTS Quickstart: User_Guides/WebUI_Extension/Getting-Started-STT_and_TTS.md
+          - TTS Getting Started: User_Guides/WebUI_Extension/TTS_Getting_Started.md
+          - TTS Setup Guide: User_Guides/WebUI_Extension/TTS-SETUP-GUIDE.md
+          - CPU Audio Setup: Getting_Started/First_Time_Audio_Setup_CPU.md
+          - GPU or Accelerated Audio Setup: Getting_Started/First_Time_Audio_Setup_GPU_Accelerated.md
+      - Admin and Operations:
           - Authentication Setup: User_Guides/Server/Authentication_Setup.md
           - Production Hardening: User_Guides/Server/Production_Hardening_Checklist.md
           - Organizations and Sharing: User_Guides/Server/Organizations_and_Sharing.md
           - BYOK User Guide: User_Guides/Server/BYOK_User_Guide.md
           - Usage Module: User_Guides/Server/Usage_Module.md
-      - Integrations and Experiments:
-          - Getting Started with ACP: User_Guides/Integrations_Experiments/Getting_Started_with_ACP.md
-          - Local LLM Setup: User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md
-  - API:
-      - API Documentation Index: API-related/API_README.md
-      - API Tag Index: API-related/API_Tags_Index.md
-      - Chat API: API-related/Chat_API_Documentation.md
-      - RAG API: API-related/RAG-API-Guide.md
-      - Embeddings API: API-related/Embeddings_API_Documentation.md
-      - Audio Transcription API: API-related/Audio_Transcription_API.md
-      - TTS API: API-related/TTS_API.md
-      - Evaluations API: API-related/Evaluations_API_Unified_Reference.md
-      - Media Ingest Jobs API: API-related/Media_Ingest_Jobs_API.md
-      - Collections Feeds API: API-related/Collections_Feeds_API.md
-      - Ingestion Sources API: API-related/Ingestion_Sources_API.md
-      - Prompt Studio API: API-related/Prompt_Studio_API.md
-  - Deployment:
-      - First-Time Production Setup: Deployment/First_Time_Production_Setup.md
-      - Long-Term Admin Guide: Deployment/Long_Term_Admin_Guide.md
-      - Sidecar Workers: Deployment/Sidecar_Workers.md
-      - Resource Requirements: Deployment/resource-requirements.md
-  - Monitoring:
-      - Metrics Cheatsheet: Monitoring/Metrics_Cheatsheet.md
-      - Alerts: Monitoring/Alerts/README.md
-  - Code:
-      - Code Documentation Index: Code_Documentation/index.md
-      - Embeddings Documentation: Code_Documentation/Embeddings-Documentation.md
-      - Tutorial System Developer Guide: Code_Documentation/Tutorial_System_Developer_Guide.md
-      - Documentation Site Guide: Code_Documentation/Docs_Site_Guide.md
-      - AuthNZ Code Guide: Code_Documentation/Guides/AuthNZ_Code_Guide.md
-  - Environment Variables: Env_Vars.md
+          - Long-Term Admin Guide: Deployment/Long_Term_Admin_Guide.md
+          - Metrics Cheatsheet: Deployment/Monitoring/Metrics_Cheatsheet.md
+      - Practical API Usage:
+          - API Documentation Index: API-related/API_README.md
+          - API Tag Index: API-related/API_Tags_Index.md
+          - Chat API: API-related/Chat_API_Documentation.md
+          - Media Ingest Jobs API: API-related/Media_Ingest_Jobs_API.md
+          - Prompt Studio API: API-related/Prompt_Studio_API.md
+          - Evaluations API: API-related/Evaluations_API_Unified_Reference.md
+  - Developer Wiki:
+      - Start Here: Wiki/Developer_Wiki.md
+      - Architecture and Decisions:
+          - Architecture Overview: Architecture.md
+          - ADR Index: ADR/README.md
+          - Code Documentation Index: Code_Documentation/index.md
+          - Code Map: Code_Documentation/Code_Map.md
+          - Data Flow Atlas: Code_Documentation/Data_Flow_Atlas.md
+      - API and Contracts:
+          - API Documentation Index: API-related/API_README.md
+          - API Design: API-related/API_Design.md
+          - API Tag Index: API-related/API_Tags_Index.md
+          - Providers API: API-related/Providers_API_Documentation.md
+          - Character Chat Sessions API: API-related/Character_Chat_Sessions_API.md
+          - Tools API: API-related/Tools_API_Documentation.md
+          - Storage API: API-related/Storage_API_Documentation.md
+      - Backend Code Guides:
+          - Chat Developer Guide: Code_Documentation/Chat_Developer_Guide.md
+          - Character Chat Code Guide: Code_Documentation/Guides/Character_Chat_Code_Guide.md
+          - RAG Developer Guide: Code_Documentation/RAG-Developer-Guide.md
+          - Embeddings Developer Guide: Code_Documentation/Embeddings-Developer-Guide.md
+          - Evaluations Developer Guide: Code_Documentation/Evaluations_Developer_Guide.md
+          - Services Module: Code_Documentation/Services_Module.md
+      - Data and Jobs:
+          - Database Overview: Code_Documentation/Database.md
+          - Database Backends: Code_Documentation/Database-Backends.md
+          - Media DB v2: Code_Documentation/Databases/Media_DB_v2.md
+          - ChaChaNotes DB: Code_Documentation/Databases/ChaChaNotes_DB.md
+          - Jobs Module: Code_Documentation/Jobs_Module.md
+          - Jobs Manager: Code_Documentation/Jobs_Manager.md
+      - Ingestion and Audio Internals:
+          - Ingestion Media Processing: Code_Documentation/Ingestion_Media_Processing.md
+          - Audio Pipeline: Code_Documentation/Ingestion_Pipeline_Audio.md
+          - Document Pipeline: Code_Documentation/Ingestion_Pipeline_Documents.md
+          - PDF Pipeline: Code_Documentation/Ingestion_Pipeline_PDF.md
+          - Video Pipeline: Code_Documentation/Ingestion_Pipeline_Video.md
+          - Voice Assistant Module: Code_Documentation/VoiceAssistant_Module.md
+      - Contributor Maintenance:
+          - Docs Site Guide: Code_Documentation/Docs_Site_Guide.md
+          - Setup UI Developer Guide: Code_Documentation/Setup_UI_Developer_Guide.md
+          - Tutorial System Developer Guide: Code_Documentation/Tutorial_System_Developer_Guide.md
+          - STT Testing Documentation: Code_Documentation/STT_TESTING_DOCUMENTATION.md
+          - Environment Variables: Operations/Env_Vars.md
+  - Feature Status: Overview/Feature_Status.md
   - Release Notes: RELEASE_NOTES.md

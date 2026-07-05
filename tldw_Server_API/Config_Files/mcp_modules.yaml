@@ -172,6 +172,17 @@ modules:
       respect_robots: false
       max_import_file_bytes: 2000000
 
+  - id: rag
+    class: tldw_Server_API.app.core.MCP_unified.modules.implementations.rag_module:RagModule
+    enabled: true
+    name: RAG
+    version: "1.0.0"
+    department: knowledge
+    max_concurrent: 6
+    settings:
+      max_documents: 6
+      max_content_chars: 2000
+
   - id: run_command
     class: tldw_Server_API.app.core.MCP_unified.modules.implementations.run_command_module:RunCommandModule
     # Disabled by default because it can run configured local command families.

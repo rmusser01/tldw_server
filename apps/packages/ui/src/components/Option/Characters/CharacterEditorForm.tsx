@@ -8,6 +8,7 @@ import { CHARACTER_PROMPT_PRESETS } from "@/data/character-prompt-presets"
 import { AvatarField, extractAvatarValues } from "./AvatarField"
 import { CharacterPreview } from "./CharacterPreview"
 import { GenerateFieldButton } from "./GenerateFieldButton"
+import { VisualIdentityPackPanel } from "@/components/Common/VisualIdentity/VisualIdentityPackPanel"
 import {
   MAX_NAME_LENGTH,
   SYSTEM_PROMPT_EXAMPLE,
@@ -971,19 +972,40 @@ export const CharacterEditorForm: React.FC<CharacterEditorFormProps> = ({
                     })}
                   </div>
                 ) : null}
-                <div className="rounded-md border border-dashed border-border px-3 py-2">
-                  <p className="text-xs font-medium text-text">
-                    {t("settings:manageCharacters.form.moodImages.placeholderTitle", {
-                      defaultValue: "Mood images (coming soon)",
+                {mode === "edit" && worldBookEditCharacterNumericId != null ? (
+                  <VisualIdentityPackPanel
+                    actorKind="character"
+                    actorId={worldBookEditCharacterNumericId}
+                    actorName={String(form.getFieldValue("name") || initialValues?.name || "")}
+                  />
+                ) : (
+                  <div className="rounded-md border border-dashed border-border px-3 py-2">
+                    <p className="text-xs font-medium text-text">
+                      {t("settings:manageCharacters.form.expressionPacks.unsavedTitle", {
+                        defaultValue: "Expression packs available after save",
+                      })}
+                    </p>
+                    <p className="mt-1 text-xs text-text-muted">
+                      {t("settings:manageCharacters.form.expressionPacks.unsavedBody", {
+                        defaultValue:
+                          "Save this character before importing or binding expression packs.",
+                      })}
+                    </p>
+                  </div>
+                )}
+                <details className="rounded-md border border-border/70 bg-bg/40 px-3 py-2">
+                  <summary className="cursor-pointer text-xs font-medium text-text">
+                    {t("settings:manageCharacters.form.moodImages.legacyTitle", {
+                      defaultValue: "Legacy mood images",
                     })}
-                  </p>
-                  <p className="mt-1 text-xs text-text-muted">
-                    {t("settings:manageCharacters.form.moodImages.placeholderBody", {
+                  </summary>
+                  <p className="mt-2 text-xs text-text-muted">
+                    {t("settings:manageCharacters.form.moodImages.legacyBody", {
                       defaultValue:
-                        "Per-mood image variants are planned but not yet available in the character editor.",
+                        "Existing legacy mood image data remains stored in Extensions JSON for compatibility.",
                     })}
                   </p>
-                </div>
+                </details>
               </>
             )}
           </div>
@@ -997,6 +1019,7 @@ export const CharacterEditorForm: React.FC<CharacterEditorFormProps> = ({
     form,
     generatingField,
     handleGenerateField,
+    initialValues,
     isGenerating,
     mode,
     renderAlternateGreetingsField,

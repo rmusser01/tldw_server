@@ -56,6 +56,7 @@ from tldw_Server_API.app.core.custom_openai_providers import (
     custom_openai_section_name,
     iter_custom_openai_provider_names,
 )
+from tldw_Server_API.app.core.LLM_Calls.provider_readiness import normalize_catalog_provider_for_chat
 
 _config = load_and_log_configs() or {}
 
@@ -835,8 +836,9 @@ class ChatCompletionRequest(BaseModel):
         """Validate provider ids without Python 3.11-only dynamic Literal syntax."""
         if value is None:
             return value
-        if value in ALL_SUPPORTED_PROVIDER_NAMES_LIST:
-            return value
+        normalized_value = normalize_catalog_provider_for_chat(value)
+        if normalized_value in ALL_SUPPORTED_PROVIDER_NAMES_LIST:
+            return normalized_value
         raise ValueError(f"Unsupported api_provider: {value}")
 
     # --- Standard OpenAI-like Parameters ---

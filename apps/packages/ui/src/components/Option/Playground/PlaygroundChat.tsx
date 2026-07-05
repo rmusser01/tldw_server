@@ -44,6 +44,13 @@ import {
   normalizeImageGenerationVariantBundle,
   type ImageGenerationRequestSnapshot
 } from "@/utils/image-generation-chat"
+import { ExpressionPicker } from "@/components/Common/VisualIdentity/ExpressionPicker"
+import { VisualIdentityStage } from "@/components/Common/VisualIdentity/VisualIdentityStage"
+import {
+  useVisualIdentityExpressionAvailability,
+  useVisualIdentityResolver
+} from "@/hooks/useVisualIdentityResolver"
+import { VISUAL_IDENTITY_EXPRESSION_OPTIONS } from "@/utils/visual-identity-expressions"
 
 type TimelineBlock =
   | { kind: "single"; index: number }
@@ -150,6 +157,10 @@ export const PlaygroundChat = ({
 }: PlaygroundChatProps) => {
   const { t } = useTranslation(["playground", "common"])
   const notification = useAntdNotification()
+  const [
+    visualManualExpressionKey,
+    setVisualManualExpressionKey
+  ] = React.useState<string | null>(null)
   const {
     messages,
     setMessages,
@@ -196,8 +207,12 @@ export const PlaygroundChat = ({
     setCompareParentForHistory,
     compareSplitChats,
     setCompareSplitChat,
-    compareMaxModels
-  } = useMessageOption()
+    compareMaxModels,
+    selectedAssistant
+  } = useMessageOption({
+    visualIdentityManualExpressionOverride: visualManualExpressionKey,
+    setVisualIdentityManualExpressionOverride: setVisualManualExpressionKey
+  })
   const confirmSensitiveValues = React.useCallback(async () => {
     if (typeof window === "undefined" || typeof window.confirm !== "function") {
       return false
@@ -966,6 +981,81 @@ export const PlaygroundChat = ({
     serverChatCharacterId,
     serverChatId
   ])
+  const latestAssistantMood = React.useMemo(() => {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = messages[index]
+      if (message?.isBot && typeof message.moodLabel === "string") {
+        const mood = message.moodLabel.trim()
+        if (mood) return mood
+      }
+    }
+    return null
+  }, [messages])
+  const visualStageActor = React.useMemo(() => {
+    if (characterIdentityEnabled && selectedCharacter?.id != null) {
+      return {
+        kind: "character" as const,
+        id: selectedCharacter.id,
+        name: selectedCharacterName || "Character"
+      }
+    }
+    if (selectedAssistant?.kind === "persona" && selectedAssistant.id != null) {
+      return {
+        kind: "persona" as const,
+        id: selectedAssistant.id,
+        name: selectedAssistant.name || "Persona"
+      }
+    }
+    return null
+  }, [
+    characterIdentityEnabled,
+    selectedAssistant,
+    selectedCharacter?.id,
+    selectedCharacterName
+  ])
+  React.useEffect(() => {
+    setVisualManualExpressionKey(null)
+  }, [visualStageActor?.kind, visualStageActor?.id])
+
+  const stageExpressionKey =
+    visualManualExpressionKey || latestAssistantMood || "neutral"
+  const visualIdentityResolution = useVisualIdentityResolver({
+    actorKind: visualStageActor?.kind ?? null,
+    actorId: visualStageActor?.id ?? null,
+    expressionKey: stageExpressionKey,
+    manualOverrideExpressionKey: visualManualExpressionKey,
+    moodExpressionKey: latestAssistantMood,
+    enabled: Boolean(visualStageActor)
+  })
+  const visualExpressionKeys = React.useMemo(
+    () => VISUAL_IDENTITY_EXPRESSION_OPTIONS.map((option) => option.key),
+    []
+  )
+  const visualExpressionAvailability = useVisualIdentityExpressionAvailability({
+    actorKind: visualStageActor?.kind ?? null,
+    actorId: visualStageActor?.id ?? null,
+    expressions: visualExpressionKeys,
+    enabled: Boolean(
+      visualStageActor && visualIdentityResolution.resolution?.pack_id != null
+    )
+  })
+  const expressionPickerEntries = React.useMemo(() => {
+    const activeExpression =
+      visualIdentityResolution.resolution?.expression_key || stageExpressionKey
+    return VISUAL_IDENTITY_EXPRESSION_OPTIONS.map((option) => ({
+      ...option,
+      hasAsset:
+        option.key === activeExpression ||
+        Boolean(visualExpressionAvailability.availability[option.key])
+    }))
+  }, [
+    stageExpressionKey,
+    visualExpressionAvailability.availability,
+    visualIdentityResolution.resolution?.expression_key
+  ])
+  const shouldShowVisualIdentityControls = Boolean(
+    visualStageActor && visualIdentityResolution.resolution?.asset_url
+  )
   const resolveMessageType = React.useCallback(
     (message: any, index: number) => {
       const explicit = message?.messageType ?? message?.message_type
@@ -1145,6 +1235,25 @@ export const PlaygroundChat = ({
             className="mb-6 mt-4"
           />
         </React.Suspense>
+        {shouldShowVisualIdentityControls && visualStageActor ? (
+          <div className="mb-4 w-full max-w-5xl px-4">
+            <VisualIdentityStage
+              actorName={visualStageActor.name}
+              resolution={visualIdentityResolution.resolution}
+              className="rounded-md"
+            />
+            <div className="mt-2 flex justify-center">
+              <ExpressionPicker
+                value={
+                  visualIdentityResolution.resolution?.expression_key ||
+                  stageExpressionKey
+                }
+                expressions={expressionPickerEntries}
+                onChange={setVisualManualExpressionKey}
+              />
+            </div>
+          </div>
+        ) : null}
         {returnedResearchRun &&
         returnedResearchActionPolicy &&
         returnedResearchBannerState ? (
@@ -1328,6 +1437,15 @@ export const PlaygroundChat = ({
                 moodLabel={message.moodLabel ?? null}
                 moodConfidence={message.moodConfidence ?? null}
                 moodTopic={message.moodTopic ?? null}
+                visualActorKind={message.visualActorKind ?? null}
+                visualActorId={message.visualActorId ?? null}
+                visualPackId={message.visualPackId ?? null}
+                visualPackVersionId={message.visualPackVersionId ?? null}
+                visualExpressionKey={message.visualExpressionKey ?? null}
+                visualAssetId={message.visualAssetId ?? null}
+                visualAssetUrl={message.visualAssetUrl ?? null}
+                visualFallbackReason={message.visualFallbackReason ?? null}
+                visualIsAnimated={message.visualIsAnimated ?? null}
                 searchQuery={normalizedSearchQuery || undefined}
                 searchMatch={resolveSearchMatch(block.index)}
                 message_type={resolvedMessageType}

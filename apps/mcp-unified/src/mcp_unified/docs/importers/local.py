@@ -7,6 +7,7 @@ from pathlib import Path
 from ..errors import DocsError
 from ..models import AccessScope
 from ..settings import DocsSettings
+from ..source_utils import file_uri_for_path, source_defaults_metadata
 from ..store.sqlite import DocsCatalogStore
 from .base import ParsedDocument, chunks_from_text
 from .html import parse_html
@@ -32,7 +33,7 @@ class DocsImportService:
         files = self._iter_import_files(target)
         keyword_tuple = tuple(keywords)
         collection_tuple = tuple(collection_names)
-        imported: list[dict] = []
+        parsed_imports: list[tuple[Path, ParsedDocument, list[dict[str, str]]]] = []
 
         for file_path in files:
             parsed = self._parse_file(file_path)
@@ -44,6 +45,27 @@ class DocsImportService:
                 }
                 for idx, chunk in enumerate(chunk_texts)
             ]
+            parsed_imports.append((file_path, parsed, chunks))
+
+        if not parsed_imports:
+            return {"status": "unchanged", "documents": [], "source": None}
+
+        source_type = "local_file" if target.is_file() else "local_directory"
+        source_id = self.store.upsert_source(
+            scope=scope,
+            source_type=source_type,
+            canonical_uri=file_uri_for_path(target, directory=target.is_dir()),
+            display_name=target.name or str(target),
+            source_path=str(target),
+            source_url=None,
+            redacted_source_url=None,
+            policy_profile=self.settings.web_source_profile,
+            sync_enabled=True,
+            metadata=source_defaults_metadata(keywords=keyword_tuple, collection_names=collection_tuple),
+        )
+        imported: list[dict] = []
+
+        for file_path, parsed, chunks in parsed_imports:
             document_id = self.store.upsert_document(
                 scope=scope,
                 title=parsed.title,
@@ -59,12 +81,25 @@ class DocsImportService:
                 metadata={"importer": "local"},
                 prune_orphan_keywords=False,
             )
+            self.store.link_source_document(
+                scope=scope,
+                source_id=source_id,
+                document_id=document_id,
+                source_item_uri=file_uri_for_path(file_path),
+                status="active",
+                last_hash=None,
+                metadata={"importer": "local"},
+            )
             imported.append({"id": document_id, "title": parsed.title, "chunks": len(chunks)})
 
         if imported:
             self.store.prune_orphan_keywords(scope=scope)
 
-        return {"status": "created" if imported else "unchanged", "documents": imported}
+        return {
+            "status": "created" if imported else "unchanged",
+            "documents": imported,
+            "source": self.store.get_source(scope=scope, source_id=source_id),
+        }
 
     def _assert_allowed_path(self, path: Path) -> Path:
         resolved = path.expanduser().resolve()
@@ -91,13 +126,17 @@ class DocsImportService:
                 details={"path": str(target)},
             )
 
+        source_root = target.expanduser().resolve()
         files: list[Path] = []
         for candidate in sorted(target.rglob("*")):
             if not candidate.is_file():
                 continue
             if candidate.suffix.lower() not in SUPPORTED_SUFFIXES:
                 continue
-            files.append(self._assert_allowed_path(candidate))
+            resolved_candidate = self._assert_allowed_path(candidate)
+            if not _path_is_relative_to(resolved_candidate, source_root):
+                continue
+            files.append(resolved_candidate)
         return files
 
     def _parse_file(self, path: Path) -> ParsedDocument:
@@ -145,3 +184,11 @@ class DocsImportService:
                     "max_import_file_bytes": self.settings.max_import_file_bytes,
                 },
             )
+
+
+def _path_is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return True

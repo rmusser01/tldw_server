@@ -81,7 +81,8 @@ import {
 import {
   tldwClient,
   type ChatResearchContext,
-  type ConversationState
+  type ConversationState,
+  type ServerChatSummary
 } from "@/services/tldw/TldwApiClient"
 import type { ChatScope } from "@/types/chat-scope"
 import { getServerCapabilities } from "@/services/tldw/server-capabilities"
@@ -89,6 +90,7 @@ import { generateTitle } from "@/services/title"
 import { syncChatSettingsForServerChat } from "@/services/chat-settings"
 import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
+import { validateCachedServerChatId } from "@/store/workspace-sync-contract"
 import { trackCompareMetric } from "@/utils/compare-metrics"
 import { MAX_COMPARE_MODELS } from "@/hooks/chat/compare-constants"
 import { useChatSettingsRecord } from "@/hooks/chat/useChatSettingsRecord"
@@ -100,6 +102,7 @@ import { resolveSavedDegradedCharacterPersist } from "@/hooks/chat/characterPers
 import { resolveEffectiveAssistantState } from "@/hooks/chat/effective-assistant-state"
 import { ensurePersonaServerChat } from "@/hooks/chat/personaServerChat"
 import { resolveUseMessageSendMode } from "@/hooks/useMessage.routing"
+import { resolveVisualIdentityBindingWithCache } from "@/hooks/useVisualIdentityResolver"
 import {
   aggregateChatSubmitResults,
   chatSubmitFailed,
@@ -134,6 +137,7 @@ import {
 import type { ChatModelSettings } from "@/store/model"
 import type { SaveMessageData } from "@/types/chat-modes"
 import type { DynamicUIRequest } from "@/types/dynamic-ui"
+import type { VisualIdentityResolveResponse } from "@/types/visual-identities"
 import {
   buildGreetingOptionsFromEntries,
   collectGreetingEntries,
@@ -146,6 +150,7 @@ import {
   PLAYGROUND_APPEND_FORMATTING_GUIDE_PROMPT_STORAGE_KEY,
   resolveOutputFormattingGuideSuffix
 } from "@/utils/output-formatting-guide"
+import { parseVisualIdentityEmoteCommand } from "@/utils/visual-identity-emote"
 
 type ChatModelSettingsStore = ChatModelSettings & {
   setSystemPrompt?: (prompt: string) => void
@@ -252,6 +257,81 @@ type TldwChatMeta =
   | number
   | null
   | undefined
+
+type VisualIdentityMessageFields = {
+  visualActorKind?: "character" | "persona" | null
+  visualActorId?: number | string | null
+  visualPackId?: number | null
+  visualPackVersionId?: number | null
+  visualExpressionKey?: string | null
+  visualAssetId?: number | null
+  visualAssetUrl?: string | null
+  visualPreviewUrl?: string | null
+  visualFallbackReason?: string | null
+  visualIsAnimated?: boolean | null
+}
+
+const buildVisualIdentityMessageFields = (
+  resolution: VisualIdentityResolveResponse | null | undefined
+): VisualIdentityMessageFields => {
+  if (!resolution || typeof resolution !== "object") return {}
+  return {
+    visualActorKind:
+      resolution.actor_kind === "character" || resolution.actor_kind === "persona"
+        ? resolution.actor_kind
+        : null,
+    visualActorId:
+      typeof resolution.actor_id === "string" ||
+      typeof resolution.actor_id === "number"
+        ? resolution.actor_id
+        : null,
+    visualPackId:
+      typeof resolution.pack_id === "number" ? resolution.pack_id : null,
+    visualPackVersionId:
+      typeof resolution.pack_version_id === "number"
+        ? resolution.pack_version_id
+        : null,
+    visualExpressionKey:
+      typeof resolution.expression_key === "string"
+        ? resolution.expression_key
+        : null,
+    visualAssetId:
+      typeof resolution.asset_id === "number" ? resolution.asset_id : null,
+    visualAssetUrl:
+      typeof resolution.asset_url === "string" ? resolution.asset_url : null,
+    visualPreviewUrl:
+      typeof resolution.preview_url === "string" ? resolution.preview_url : null,
+    visualFallbackReason:
+      typeof resolution.fallback_reason === "string"
+        ? resolution.fallback_reason
+        : null,
+    visualIsAnimated: Boolean(resolution.is_animated)
+  }
+}
+
+const buildVisualIdentityMetadataExtra = (
+  fields: VisualIdentityMessageFields
+): Record<string, unknown> => {
+  const metadata: Record<string, unknown> = {}
+  if (fields.visualActorKind) metadata.visual_actor_kind = fields.visualActorKind
+  if (fields.visualActorId != null) metadata.visual_actor_id = fields.visualActorId
+  if (fields.visualPackId != null) metadata.visual_pack_id = fields.visualPackId
+  if (fields.visualPackVersionId != null) {
+    metadata.visual_pack_version_id = fields.visualPackVersionId
+  }
+  if (fields.visualExpressionKey) {
+    metadata.visual_expression_key = fields.visualExpressionKey
+  }
+  if (fields.visualAssetId != null) metadata.visual_asset_id = fields.visualAssetId
+  if (fields.visualPreviewUrl) metadata.visual_preview_url = fields.visualPreviewUrl
+  if (fields.visualFallbackReason) {
+    metadata.visual_fallback_reason = fields.visualFallbackReason
+  }
+  if (typeof fields.visualIsAnimated === "boolean") {
+    metadata.visual_is_animated = fields.visualIsAnimated
+  }
+  return metadata
+}
 
 const attemptCharacterStreamRecoveryPersist = async ({
   chatId,
@@ -393,6 +473,8 @@ type UseChatActionsOptions = {
   messageSteeringMode: MessageSteeringMode
   messageSteeringForceNarrate: boolean
   clearMessageSteering: () => void
+  visualIdentityManualExpressionOverride?: string | null
+  setVisualIdentityManualExpressionOverride?: (expressionKey: string) => void
 }
 
 export const useChatActions = ({
@@ -475,7 +557,9 @@ export const useChatActions = ({
   inheritedPersonaMemoryMode,
   messageSteeringMode,
   messageSteeringForceNarrate,
-  clearMessageSteering
+  clearMessageSteering,
+  visualIdentityManualExpressionOverride,
+  setVisualIdentityManualExpressionOverride
 }: UseChatActionsOptions) => {
   const [appendFormattingGuidePrompt] = useStorage(
     PLAYGROUND_APPEND_FORMATTING_GUIDE_PROMPT_STORAGE_KEY,
@@ -906,7 +990,8 @@ export const useChatActions = ({
         await syncChatSettingsForServerChat({
           historyId: historyKey,
           serverChatId: payloadConversationId,
-          allowScratchFallback: true
+          allowScratchFallback: true,
+          ...(scope ? { scope } : {})
         })
       } catch {
         // Best-effort scratch-to-server settings reconciliation.
@@ -1051,9 +1136,10 @@ export const useChatActions = ({
           const mirroredMessage = await tldwClient.addChatMessage(
             resolvedServerConversationId,
             {
-            role: "assistant",
-            content: mirroredContent
-            }
+              role: "assistant",
+              content: mirroredContent
+            },
+            scope ? { scope } : undefined
           )
 
           await updateImageEventSyncMetadata(payload, {
@@ -1088,21 +1174,29 @@ export const useChatActions = ({
           const assistantContent = payload.fullText.trim()
 
           if (userContent.length > 0) {
-            await tldwClient.addChatMessage(cid, {
-              role: "user",
-              content: userContent,
-              ...(payload.userMetadataExtra
-                ? { metadata_extra: payload.userMetadataExtra }
-                : {})
-            })
+            await tldwClient.addChatMessage(
+              cid,
+              {
+                role: "user",
+                content: userContent,
+                ...(payload.userMetadataExtra
+                  ? { metadata_extra: payload.userMetadataExtra }
+                  : {})
+              },
+              scope ? { scope } : undefined
+            )
           }
 
           if (assistantContent.length > 0) {
-            await tldwClient.addChatMessage(cid, {
-              role: "assistant",
-              content: assistantContent,
-              metadata_extra: payload.assistantMetadataExtra
-            })
+            await tldwClient.addChatMessage(
+              cid,
+              {
+                role: "assistant",
+                content: assistantContent,
+                metadata_extra: payload.assistantMetadataExtra
+              },
+              scope ? { scope } : undefined
+            )
           }
         } catch {
           // Ignore sync errors; local history is still saved.
@@ -1273,7 +1367,162 @@ export const useChatActions = ({
       setServerChatTitle,
       setServerChatTopic,
       setServerChatVersion,
+      scope,
       temporaryChat
+    ]
+  )
+
+  const ensureWorkspaceServerChatForTurn = React.useCallback(
+    async ({
+      message,
+      serverChatIdOverride
+    }: {
+      message: string
+      serverChatIdOverride?: string | null
+    }): Promise<{ chatId: string | null; historyId: string | null }> => {
+      const overrideChatId =
+        typeof serverChatIdOverride === "string" &&
+        serverChatIdOverride.trim().length > 0
+          ? serverChatIdOverride.trim()
+          : null
+      const resolvedServerChatId = overrideChatId || serverChatId
+
+      if (scope?.type !== "workspace" || temporaryChat) {
+        return { chatId: null, historyId: null }
+      }
+
+      if (resolvedServerChatId) {
+        let validatedServerChatId: string | null = null
+        try {
+          const chat: ServerChatSummary = await tldwClient.getChat(
+            resolvedServerChatId,
+            { scope }
+          )
+          validatedServerChatId = validateCachedServerChatId({
+            cachedId: resolvedServerChatId,
+            serverScope: {
+              scope_type: chat.scope_type || "",
+              workspace_id: chat.workspace_id || null
+            },
+            expectedScope: scope
+          })
+        } catch {
+          validatedServerChatId = null
+        }
+
+        if (!validatedServerChatId) {
+          setServerChatId(null)
+          setServerChatTitle(null)
+          setServerChatCharacterId(null)
+          setServerChatAssistantKind(null)
+          setServerChatAssistantId(null)
+          setServerChatPersonaMemoryMode(null)
+          setServerChatMetaLoaded(false)
+          setServerChatState("in-progress")
+          setServerChatVersion(null)
+          setServerChatTopic(null)
+          setServerChatClusterId(null)
+          setServerChatSource(null)
+          setServerChatExternalRef(null)
+          invalidateServerChatHistory()
+        } else {
+          const ensuredHistoryId = await ensureServerChatHistoryId(
+            validatedServerChatId,
+            serverChatTitle || undefined
+          )
+          return { chatId: validatedServerChatId, historyId: ensuredHistoryId }
+        }
+      }
+
+      const titleSeed = message.trim().slice(0, 80)
+      const createPayload = {
+        title: titleSeed.length > 0 ? titleSeed : undefined,
+        state: serverChatState || "in-progress",
+        topic_label: serverChatTopic || undefined,
+        cluster_id: serverChatClusterId || undefined,
+        source: serverChatSource || undefined,
+        external_ref: serverChatExternalRef || undefined
+      }
+      const created = (await tldwClient.createChat(createPayload, {
+        scope
+      })) as TldwChatMeta
+
+      let rawId: string | number | undefined
+      if (created && typeof created === "object") {
+        const {
+          id,
+          chat_id,
+          version,
+          state,
+          conversation_state,
+          topic_label,
+          cluster_id,
+          source,
+          external_ref
+        } = created
+        rawId = id ?? chat_id
+        setServerChatState(
+          normalizeConversationState(state ?? conversation_state ?? null)
+        )
+        setServerChatVersion(typeof version === "number" ? version : null)
+        setServerChatTopic(topic_label ?? null)
+        setServerChatClusterId(cluster_id ?? null)
+        setServerChatSource(source ?? null)
+        setServerChatExternalRef(external_ref ?? null)
+      } else if (typeof created === "string" || typeof created === "number") {
+        rawId = created
+      }
+
+      const normalizedId = rawId != null ? String(rawId) : ""
+      if (!normalizedId) {
+        throw new Error("Failed to create workspace chat session")
+      }
+
+      const createdTitle =
+        created && typeof created === "object"
+          ? String(created.title ?? "")
+          : titleSeed
+      setServerChatId(normalizedId)
+      setServerChatTitle(createdTitle)
+      setServerChatCharacterId(null)
+      setServerChatAssistantKind(null)
+      setServerChatAssistantId(null)
+      setServerChatPersonaMemoryMode(null)
+      setServerChatMetaLoaded(true)
+      invalidateServerChatHistory()
+
+      const ensuredHistoryId = await ensureServerChatHistoryId(
+        normalizedId,
+        createdTitle || titleSeed || undefined
+      )
+      return { chatId: normalizedId, historyId: ensuredHistoryId }
+    },
+    [
+      ensureServerChatHistoryId,
+      invalidateServerChatHistory,
+      scope,
+      serverChatClusterId,
+      serverChatExternalRef,
+      serverChatId,
+      serverChatSource,
+      serverChatState,
+      serverChatTitle,
+      serverChatTopic,
+      setServerChatAssistantId,
+      setServerChatAssistantKind,
+      setServerChatCharacterId,
+      setServerChatClusterId,
+      setServerChatExternalRef,
+      setServerChatId,
+      setServerChatMetaLoaded,
+      setServerChatPersonaMemoryMode,
+      setServerChatSource,
+      setServerChatState,
+      setServerChatTitle,
+      setServerChatTopic,
+      setServerChatVersion,
+      temporaryChat,
+      tldwClient
     ]
   )
 
@@ -1614,14 +1863,17 @@ export const useChatActions = ({
         : effectiveServerChatCharacterId
       let createdNewChat = false
       if (!chatId) {
-        const created = await tldwClient.createChat({
+        const createPayload = {
           character_id: activeCharacter.id,
           state: serverChatState || "in-progress",
           topic_label: serverChatTopic || undefined,
           cluster_id: serverChatClusterId || undefined,
           source: effectiveServerChatSource || WEBUI_CHARACTER_CHAT_SOURCE,
           external_ref: serverChatExternalRef || undefined
-        }) as TldwChatMeta
+        }
+        const created = (scope
+          ? await tldwClient.createChat(createPayload, { scope })
+          : await tldwClient.createChat(createPayload)) as TldwChatMeta
 
         let rawId: string | number | undefined
         if (created && typeof created === "object") {
@@ -1688,7 +1940,10 @@ export const useChatActions = ({
           const createdGreeting = (await tldwClient.addChatMessage(chatId, {
             role: "assistant",
             content: greetingText
-          })) as { id?: string | number; version?: number } | null
+          }, scope ? { scope } : undefined)) as {
+            id?: string | number
+            version?: number
+          } | null
           if (createdGreeting?.id != null) {
             setMessages((prev) => {
               const updated = [...prev] as (Message & {
@@ -1756,7 +2011,8 @@ export const useChatActions = ({
         if (payload.content || payload.image_base64) {
           const createdUser = (await tldwClient.addChatMessage(
             chatId,
-            payload
+            payload,
+            scope ? { scope } : undefined
           )) as TldwChatMessage | null
           persistedUserServerMessageId =
             createdUser?.id != null ? String(createdUser.id) : undefined
@@ -1837,7 +2093,7 @@ export const useChatActions = ({
             resolvedMessageSteeringPrompts
           )
         },
-        { signal }
+        { signal, ...(scope ? { scope } : {}) }
       )) {
         resetInactivityTimer()
         const interruptionEvent =
@@ -1951,6 +2207,7 @@ export const useChatActions = ({
         let resolvedMoodTopic: string | undefined
         let metadataExtra: Record<string, unknown> | undefined
         let speakerCharacterName: string | undefined
+        let visualIdentityFields: VisualIdentityMessageFields = {}
         try {
           const directedSpeakerId =
             normalizePositiveCharacterId(directedCharacterId)
@@ -2001,6 +2258,33 @@ export const useChatActions = ({
               ? detectedMood.topic.trim()
               : undefined
 
+          if (
+            speakerCharacterId &&
+            typeof tldwClient.resolveVisualIdentityBinding === "function"
+          ) {
+            try {
+              const resolvedVisualIdentity =
+                await resolveVisualIdentityBindingWithCache(tldwClient, {
+                  actor_kind: "character",
+                  actor_id: speakerCharacterId,
+                  expression_key:
+                    visualIdentityManualExpressionOverride ||
+                    resolvedMoodLabel ||
+                    "neutral",
+                  manual_override_expression_key:
+                    visualIdentityManualExpressionOverride || null,
+                  mood_expression_key: resolvedMoodLabel || null
+                })
+              visualIdentityFields =
+                buildVisualIdentityMessageFields(resolvedVisualIdentity)
+            } catch (visualIdentityError) {
+              console.debug(
+                "[useChatActions] Failed to resolve visual identity",
+                visualIdentityError
+              )
+            }
+          }
+
           const persistPayload: Record<string, unknown> = {
             assistant_content: finalPersistedContent,
             assistant_message_id: generateMessageId
@@ -2028,12 +2312,14 @@ export const useChatActions = ({
             speaker_character_name: speakerCharacterName ?? null,
             mood_label: resolvedMoodLabel,
             mood_confidence: resolvedMoodConfidence ?? null,
-            mood_topic: resolvedMoodTopic ?? null
+            mood_topic: resolvedMoodTopic ?? null,
+            ...buildVisualIdentityMetadataExtra(visualIdentityFields)
           }
 
           const persisted = (await tldwClient.persistCharacterCompletion(
             chatId,
-            persistPayload
+            persistPayload,
+            scope ? { scope } : undefined
           )) as
             | {
                 assistant_message_id?: string | number
@@ -2063,7 +2349,8 @@ export const useChatActions = ({
                 speakerCharacterName,
                 moodLabel: resolvedMoodLabel,
                 moodConfidence: resolvedMoodConfidence ?? null,
-                moodTopic: resolvedMoodTopic ?? null
+                moodTopic: resolvedMoodTopic ?? null,
+                ...visualIdentityFields
               })
             }) as Message[])
           )
@@ -2090,7 +2377,8 @@ export const useChatActions = ({
                   speakerCharacterName,
                   moodLabel: resolvedMoodLabel,
                   moodConfidence: resolvedMoodConfidence ?? null,
-                  moodTopic: resolvedMoodTopic ?? null
+                  moodTopic: resolvedMoodTopic ?? null,
+                  ...visualIdentityFields
                 })
               }) as Message[])
             )
@@ -2099,7 +2387,10 @@ export const useChatActions = ({
               const createdAsst = (await tldwClient.addChatMessage(chatId, {
                 role: "assistant",
                 content: finalPersistedContent
-              })) as { id?: string | number; version?: number } | null
+              }, scope ? { scope } : undefined)) as {
+                id?: string | number
+                version?: number
+              } | null
               assistantPersistedToServer = createdAsst?.id != null
               setMessages((prev) =>
                 ((prev as any[]).map((m) => {
@@ -2114,7 +2405,8 @@ export const useChatActions = ({
                     speakerCharacterName,
                     moodLabel: resolvedMoodLabel,
                     moodConfidence: resolvedMoodConfidence ?? null,
-                    moodTopic: resolvedMoodTopic ?? null
+                    moodTopic: resolvedMoodTopic ?? null,
+                    ...visualIdentityFields
                   })
                 }) as Message[])
               )
@@ -2221,7 +2513,10 @@ export const useChatActions = ({
           const createdAsst = (await tldwClient.addChatMessage(activeChatId, {
             role: "assistant",
             content: assistantContent
-          })) as { id?: string | number; version?: number } | null
+          }, scope ? { scope } : undefined)) as {
+            id?: string | number
+            version?: number
+          } | null
           if (createdAsst?.id == null) return false
           assistantPersistedToServer = true
           setMessages((prev) =>
@@ -2544,6 +2839,26 @@ export const useChatActions = ({
     serverChatIdOverride?: string | null
     researchContext?: ChatResearchContext
   }): Promise<ChatSubmitResult> => {
+    const hasVisualIdentityTarget = Boolean(
+      selectedCharacter?.id != null ||
+        selectedAssistant?.kind === "character" ||
+        selectedAssistant?.kind === "persona" ||
+        inheritedAssistant?.kind === "character" ||
+        inheritedAssistant?.kind === "persona"
+    )
+    if (
+      !isRegenerate &&
+      !isContinue &&
+      hasVisualIdentityTarget &&
+      typeof setVisualIdentityManualExpressionOverride === "function"
+    ) {
+      const emoteCommand = parseVisualIdentityEmoteCommand(message)
+      if (emoteCommand) {
+        setVisualIdentityManualExpressionOverride(emoteCommand.expressionKey)
+        return chatSubmitSkipped("Visual identity expression updated")
+      }
+    }
+
     const effectiveSelectedModel = getEffectiveSelectedModel(
       requestOverrides?.selectedModel
     )
@@ -2821,6 +3136,24 @@ export const useChatActions = ({
       })
       if (shouldUseRag) {
         markSteeringApplied()
+        const workspaceServerChat = await ensureWorkspaceServerChatForTurn({
+          message,
+          serverChatIdOverride
+        })
+        const scopedRagModeParams = workspaceServerChat.chatId
+          ? {
+              ...chatModeParamsWithRegen,
+              historyId:
+                workspaceServerChat.historyId ?? chatModeParamsWithRegen.historyId,
+              serverChatId: workspaceServerChat.chatId,
+              conversationId: workspaceServerChat.chatId,
+              saveMessageOnSuccess: (data: SaveMessageData) =>
+                saveMessageOnSuccess({
+                  ...data,
+                  conversationId: workspaceServerChat.chatId
+                })
+            }
+          : chatModeParamsWithRegen
         const ragResult = await ragMode(
           message,
           image,
@@ -2828,7 +3161,7 @@ export const useChatActions = ({
           chatHistory || messages,
           memory || history,
           signal,
-          chatModeParamsWithRegen
+          scopedRagModeParams
         )
         return toChatSubmitResult(ragResult)
       } else {
@@ -2989,6 +3322,24 @@ export const useChatActions = ({
                     effectiveAssistantState.systemPromptSnapshot ?? undefined
                 }
               : enhancedChatModeParams
+          const workspaceServerChat = await ensureWorkspaceServerChatForTurn({
+            message,
+            serverChatIdOverride
+          })
+          const scopedNormalModeParams = workspaceServerChat.chatId
+            ? {
+                ...normalModeParams,
+                historyId:
+                  workspaceServerChat.historyId ?? normalModeParams.historyId,
+                serverChatId: workspaceServerChat.chatId,
+                conversationId: workspaceServerChat.chatId,
+                saveMessageOnSuccess: (data: SaveMessageData) =>
+                  saveMessageOnSuccess({
+                    ...data,
+                    conversationId: workspaceServerChat.chatId
+                  })
+              }
+            : normalModeParams
           const normalResult = await normalChatMode(
             message,
             image,
@@ -2996,7 +3347,7 @@ export const useChatActions = ({
             baseMessages,
             baseHistory,
             signal,
-            normalModeParams
+            scopedNormalModeParams
           )
           return toChatSubmitResult(normalResult)
         } else {

@@ -15,7 +15,7 @@ release artifact described in
   - `make pypi-check`
 - CI packaging validation:
   - `.github/workflows/pypi-package.yml`
-- Manual PyPI publishing workflow (Trusted Publishing):
+- PyPI publishing workflow (Trusted Publishing):
   - `.github/workflows/publish-pypi.yml`
 - Backend/API-only artifact validation:
   - `make pypi-check` fails if frontend or Node build artifacts enter the
@@ -37,7 +37,7 @@ release artifact described in
 GitHub can only manually dispatch a workflow when that workflow file exists on
 the repository's default branch. Make sure `.github/workflows/publish-pypi.yml`
 has landed on the default branch before relying on the Actions UI for a first
-publish.
+manual publish.
 
 ## Local Packaging Checks
 
@@ -76,14 +76,14 @@ not attempt to start or validate the WebUI.
 3. Publish a GitHub Release from that tag.
 4. GitHub Actions runs `publish-docker.yml` for Docker release publication.
 
-For PyPI publishing in this rollout, run `publish-pypi.yml` manually from
-Actions, select the release tag/ref that matches the GitHub Release and Docker
-release publish, and choose:
+For a manual PyPI publish, run `publish-pypi.yml` from Actions, select the
+release tag/ref that matches the GitHub Release and Docker release publish, and
+choose:
 
 - `testpypi` for TestPyPI
 - `pypi` for the real PyPI publish
 
-Recommended operator sequence:
+Recommended manual operator sequence:
 
 1. Run `make pypi-check` locally or confirm the PR packaging check passed.
 2. Run the isolated wheel smoke install shown above.
@@ -95,7 +95,8 @@ Recommended operator sequence:
 
 ## Notes
 
-- `publish-pypi.yml` is manual-dispatch-only in this rollout; GitHub Release publication no longer triggers PyPI uploads.
+- `publish-pypi.yml` has no GitHub Release trigger. A push to `main` that changes `pyproject.toml` may publish to PyPI only when the version is missing from PyPI and the workflow test gate passes.
+- Manual dispatch remains available for TestPyPI and explicit PyPI publishes; TestPyPI is never published from a push event.
 - Pushing to `main` continues to republish rolling GHCR snapshots through `publish-ghcr-main.yml` before and independently of GitHub Release publication.
 - The Next.js WebUI is not a PyPI payload. Publish and validate it through the
   WebUI container or release-artifact flow.

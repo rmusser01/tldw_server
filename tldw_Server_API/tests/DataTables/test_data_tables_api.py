@@ -7,7 +7,6 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
 from tldw_Server_API.app.api.v1.endpoints import data_tables as data_tables_endpoint
 from tldw_Server_API.app.api.v1.endpoints.data_tables import (
     _wait_for_job_completion,
-    get_job_manager,
 )
 from tldw_Server_API.app.api.v1.schemas.data_tables_schemas import DATA_TABLES_MAX_ROWS_LIMIT
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
@@ -223,7 +222,7 @@ def test_generate_job_create_error_marks_failed(tmp_path, data_tables_app_factor
         def create_job(self, **kwargs):  # noqa: ANN003
             raise RuntimeError("job manager exploded at /private/jobs.db")
 
-    app.dependency_overrides[get_job_manager] = lambda: _StubJobManager()
+    app.dependency_overrides[data_tables_endpoint.get_job_manager] = lambda: _StubJobManager()
     monkeypatch.setattr(data_tables_endpoint, "logger", logger_stub)
 
     try:
@@ -245,7 +244,7 @@ def test_generate_job_create_error_marks_failed(tmp_path, data_tables_app_factor
                 "job manager exploded",
             )
     finally:
-        app.dependency_overrides.pop(get_job_manager, None)
+        app.dependency_overrides.pop(data_tables_endpoint.get_job_manager, None)
 
     verify_db = MediaDatabase(db_path=str(db_path), client_id="verify_client")
     try:
@@ -265,7 +264,7 @@ def test_generate_wait_maps_fetch_database_error(tmp_path, data_tables_app_facto
         def create_job(self, **kwargs):  # noqa: ANN003
             return {"id": 106, "uuid": "job-106", "status": "queued"}
 
-    app.dependency_overrides[get_job_manager] = lambda: _StubJobManager()
+    app.dependency_overrides[data_tables_endpoint.get_job_manager] = lambda: _StubJobManager()
 
     async def completed_job(*args, **kwargs):  # noqa: ANN001, ARG001
         return {"status": "completed"}
@@ -293,7 +292,7 @@ def test_generate_wait_maps_fetch_database_error(tmp_path, data_tables_app_facto
             assert resp.status_code == 500, resp.text
             assert resp.json()["detail"] == "Failed to submit data table job"
     finally:
-        app.dependency_overrides.pop(get_job_manager, None)
+        app.dependency_overrides.pop(data_tables_endpoint.get_job_manager, None)
 
 
 def test_generate_wait_maps_detail_database_error(tmp_path, data_tables_app_factory, monkeypatch):
@@ -304,7 +303,7 @@ def test_generate_wait_maps_detail_database_error(tmp_path, data_tables_app_fact
         def create_job(self, **kwargs):  # noqa: ANN003
             return {"id": 107, "uuid": "job-107", "status": "queued"}
 
-    app.dependency_overrides[get_job_manager] = lambda: _StubJobManager()
+    app.dependency_overrides[data_tables_endpoint.get_job_manager] = lambda: _StubJobManager()
 
     async def completed_job(*args, **kwargs):  # noqa: ANN001, ARG001
         return {"status": "completed"}
@@ -332,7 +331,7 @@ def test_generate_wait_maps_detail_database_error(tmp_path, data_tables_app_fact
             assert resp.status_code == 500, resp.text
             assert resp.json()["detail"] == "Failed to submit data table job"
     finally:
-        app.dependency_overrides.pop(get_job_manager, None)
+        app.dependency_overrides.pop(data_tables_endpoint.get_job_manager, None)
 
 
 def test_generate_wait_returns_job_failure_conflict(tmp_path, data_tables_app_factory, monkeypatch):
@@ -343,7 +342,7 @@ def test_generate_wait_returns_job_failure_conflict(tmp_path, data_tables_app_fa
         def create_job(self, **kwargs):  # noqa: ANN003
             return {"id": 108, "uuid": "job-108", "status": "queued"}
 
-    app.dependency_overrides[get_job_manager] = lambda: _StubJobManager()
+    app.dependency_overrides[data_tables_endpoint.get_job_manager] = lambda: _StubJobManager()
 
     async def failed_job(*args, **kwargs):  # noqa: ANN001, ARG001
         return {"status": "failed", "error_message": "generation failed"}
@@ -367,7 +366,7 @@ def test_generate_wait_returns_job_failure_conflict(tmp_path, data_tables_app_fa
             assert resp.status_code == 409, resp.text
             assert resp.json()["detail"] == "generation failed"
     finally:
-        app.dependency_overrides.pop(get_job_manager, None)
+        app.dependency_overrides.pop(data_tables_endpoint.get_job_manager, None)
 
 
 def test_generate_wait_returns_not_found_when_table_missing(tmp_path, data_tables_app_factory, monkeypatch):
@@ -378,7 +377,7 @@ def test_generate_wait_returns_not_found_when_table_missing(tmp_path, data_table
         def create_job(self, **kwargs):  # noqa: ANN003
             return {"id": 109, "uuid": "job-109", "status": "queued"}
 
-    app.dependency_overrides[get_job_manager] = lambda: _StubJobManager()
+    app.dependency_overrides[data_tables_endpoint.get_job_manager] = lambda: _StubJobManager()
 
     async def completed_job(*args, **kwargs):  # noqa: ANN001, ARG001
         return {"status": "completed"}
@@ -403,7 +402,7 @@ def test_generate_wait_returns_not_found_when_table_missing(tmp_path, data_table
             assert resp.status_code == 404, resp.text
             assert resp.json()["detail"] == "data_table_not_found"
     finally:
-        app.dependency_overrides.pop(get_job_manager, None)
+        app.dependency_overrides.pop(data_tables_endpoint.get_job_manager, None)
 
 
 def test_list_update_delete_data_table(tmp_path, data_tables_app_factory):
@@ -663,14 +662,14 @@ def test_data_table_job_status_rejects_boolean_admin_without_claims(tmp_path, da
             team_ids=[],
         )
 
-    app.dependency_overrides[get_job_manager] = lambda: _StubJobManager()
+    app.dependency_overrides[data_tables_endpoint.get_job_manager] = lambda: _StubJobManager()
     app.dependency_overrides[get_auth_principal] = _principal_override
     try:
         with TestClient(app) as client:
             resp = client.get("/api/v1/data-tables/jobs/9")
             assert resp.status_code == 403
     finally:
-        app.dependency_overrides.pop(get_job_manager, None)
+        app.dependency_overrides.pop(data_tables_endpoint.get_job_manager, None)
         app.dependency_overrides.pop(get_auth_principal, None)
 
 
@@ -686,7 +685,7 @@ def test_generate_uses_configured_data_tables_queue(tmp_path, data_tables_app_fa
             captured.update(kwargs)
             return {"id": 101, "uuid": "job-101", "status": "queued"}
 
-    app.dependency_overrides[get_job_manager] = lambda: _StubJobManager()
+    app.dependency_overrides[data_tables_endpoint.get_job_manager] = lambda: _StubJobManager()
     try:
         with TestClient(app) as client:
             resp = client.post(
@@ -700,7 +699,7 @@ def test_generate_uses_configured_data_tables_queue(tmp_path, data_tables_app_fa
             assert resp.status_code == 202, resp.text
             assert captured.get("queue") == "data-tables-custom"
     finally:
-        app.dependency_overrides.pop(get_job_manager, None)
+        app.dependency_overrides.pop(data_tables_endpoint.get_job_manager, None)
 
 
 def test_regenerate_uses_configured_data_tables_queue(tmp_path, data_tables_app_factory, monkeypatch):
@@ -728,14 +727,14 @@ def test_regenerate_uses_configured_data_tables_queue(tmp_path, data_tables_app_
             captured.update(kwargs)
             return {"id": 102, "uuid": "job-102", "status": "queued"}
 
-    app.dependency_overrides[get_job_manager] = lambda: _StubJobManager()
+    app.dependency_overrides[data_tables_endpoint.get_job_manager] = lambda: _StubJobManager()
     try:
         with TestClient(app) as client:
             resp = client.post(f"/api/v1/data-tables/{table.get('uuid')}/regenerate", json={})
             assert resp.status_code == 202, resp.text
             assert captured.get("queue") == "data-tables-custom"
     finally:
-        app.dependency_overrides.pop(get_job_manager, None)
+        app.dependency_overrides.pop(data_tables_endpoint.get_job_manager, None)
 
 
 def test_regenerate_after_admin_patch_preserves_table_owner(tmp_path, data_tables_app_factory):
@@ -763,7 +762,7 @@ def test_regenerate_after_admin_patch_preserves_table_owner(tmp_path, data_table
             captured.update(kwargs)
             return {"id": 103, "uuid": "job-103", "status": "queued"}
 
-    app.dependency_overrides[get_job_manager] = lambda: _StubJobManager()
+    app.dependency_overrides[data_tables_endpoint.get_job_manager] = lambda: _StubJobManager()
     try:
         with TestClient(app) as client:
             patch = client.patch(
@@ -778,7 +777,7 @@ def test_regenerate_after_admin_patch_preserves_table_owner(tmp_path, data_table
             assert isinstance(payload, dict)
             assert payload.get("user_id") == "77"
     finally:
-        app.dependency_overrides.pop(get_job_manager, None)
+        app.dependency_overrides.pop(data_tables_endpoint.get_job_manager, None)
 
     verify_db = MediaDatabase(db_path=str(db_path), client_id="verify_client")
     try:
@@ -941,7 +940,7 @@ def test_regenerate_wait_maps_fetch_database_error(tmp_path, data_tables_app_fac
         def create_job(self, **kwargs):  # noqa: ANN003
             return {"id": 104, "uuid": "job-104", "status": "queued"}
 
-    app.dependency_overrides[get_job_manager] = lambda: _StubJobManager()
+    app.dependency_overrides[data_tables_endpoint.get_job_manager] = lambda: _StubJobManager()
 
     async def completed_job(*args, **kwargs):  # noqa: ANN001, ARG001
         return {"status": "completed"}
@@ -971,7 +970,7 @@ def test_regenerate_wait_maps_fetch_database_error(tmp_path, data_tables_app_fac
             assert resp.status_code == 500, resp.text
             assert resp.json()["detail"] == "Failed to regenerate data table"
     finally:
-        app.dependency_overrides.pop(get_job_manager, None)
+        app.dependency_overrides.pop(data_tables_endpoint.get_job_manager, None)
 
 
 def test_regenerate_wait_maps_detail_database_error(tmp_path, data_tables_app_factory, monkeypatch):
@@ -996,7 +995,7 @@ def test_regenerate_wait_maps_detail_database_error(tmp_path, data_tables_app_fa
         def create_job(self, **kwargs):  # noqa: ANN003
             return {"id": 105, "uuid": "job-105", "status": "queued"}
 
-    app.dependency_overrides[get_job_manager] = lambda: _StubJobManager()
+    app.dependency_overrides[data_tables_endpoint.get_job_manager] = lambda: _StubJobManager()
 
     async def completed_job(*args, **kwargs):  # noqa: ANN001, ARG001
         return {"status": "completed"}
@@ -1020,7 +1019,7 @@ def test_regenerate_wait_maps_detail_database_error(tmp_path, data_tables_app_fa
             assert resp.status_code == 500, resp.text
             assert resp.json()["detail"] == "Failed to regenerate data table"
     finally:
-        app.dependency_overrides.pop(get_job_manager, None)
+        app.dependency_overrides.pop(data_tables_endpoint.get_job_manager, None)
 
 
 def test_update_content_rejects_duplicate_row_indexes(tmp_path, data_tables_app_factory):

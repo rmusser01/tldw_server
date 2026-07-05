@@ -92,7 +92,7 @@ Good fit for:
 
 `make quickstart` remains the shortest Docker single-user + WebUI alias. It runs setup, start, and verification for the first profile.
 
-For a user-facing map of key workflows across the server API, WebUI, and browser extension, start with the [User Guides documentation map](Docs/User_Guides/index.md).
+For user-facing workflows across setup, the WebUI, browser extension, local models, APIs, and administration, start with the [User Wiki](Docs/Wiki/User_Wiki.md). Contributors should start with the [Developer Wiki](Docs/Wiki/Developer_Wiki.md).
 
 After cloning, you can run the optional Makefile helper checks with `make quickstart-prereqs`, or verify Python 3.10+, ffmpeg, and Docker manually for your chosen profile. On a fresh checkout, the setup targets are still the source of truth because they create the lightweight setup environment they need.
 
@@ -108,10 +108,10 @@ Optional add-ons (apply AFTER your base profile is healthy):
 ## Current Status
 
 Current release line:
-- `0.1.34` Beta status. Expect rough edges and please report issues.
+- `0.1.35` Beta status. Expect rough edges and please report issues.
 - Primary client surfaces are the Next.js WebUI, Admin UI, and browser extension.
 - Package metadata is prepared under the canonical PyPI name `tldw-server`; use a repository checkout until publishing is complete.
-- The `dev` branch carries work beyond `0.1.34`, including post-`0.1.34` branch work, and is prepared for the `0.1.34` release merge to `main`; see [CHANGELOG.md](CHANGELOG.md) for the PR rollup and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for the published release entry point.
+- The `dev` branch carries work beyond `0.1.35`, including post-`0.1.35` branch work, and is prepared for the `0.1.35` release merge to `main`; see [CHANGELOG.md](CHANGELOG.md) for the PR rollup and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for the published release entry point.
 
 <details>
 <summary>Current focus and migration notes from the old Gradio version</summary>
@@ -146,17 +146,21 @@ Current release line:
 ## What's New (in the last few releases)
 
 <details>
-<summary>0.1.34 release-prep rollup</summary>
+<summary>0.1.35 release-prep rollup</summary>
 
-Included in the `0.1.34` release-prep rollup:
-- Post-`0.1.33` dev follow-ups for PR #2568, covering review feedback from the dev-to-main PR #2567 path and current-main CodeQL alert cleanup.
-- Jobs event-filter SQL construction moved behind DB management helpers, with focused regression coverage for backend/column validation.
-- WebSearch diagnostic logging cleaned up by replacing `print()` calls with structured Loguru logging and clearer Google raw-result debug formatting.
-- Frontend auth persistence restored for manually entered API keys and bearer tokens while preserving environment-provided auth precedence.
-- `mcp-unified` typed-marker/package-data coverage restored, and related package-boundary tests kept aligned with release metadata.
+Included in the `0.1.35` release-prep rollup:
+- Visual identity expression packs added backend storage, APIs, import jobs, chat runtime integration, frontend management surfaces, provenance bridging, and casting resolver controls.
+- MCP docs source synchronization added local and URL source registries, source sync tools, approved URL tracking, redirect handling, tombstone cleanup, and privacy redaction hardening.
+- Research workspace source-worker follow-ups surfaced ingest failure codes, while backend PyPI auto-publish wiring was prepared for main-branch releases.
+- User/developer documentation wikis were split, Docker publishing actions were updated, llama.cpp character-chat provider aliases were fixed, and TTS/Embeddings/Character_Chat_NEW suites were unquarantined.
+- Post-PR #2571 CI follow-ups fixed Guardian notification payload timestamp mutation and retargeted a stale UX smoke assertion to a current shell route.
+- Chat Workspace live flow, WebUI setup handoff, first-run MCP tool packs, RAG MCP module, Research Workspace share/UAT/NotebookLM parity, and API/WebUI/extension docs landed in the release train.
+- CI/release gates were expanded with OpenAPI drift checks, env/minimal startup smokes, property/contract coverage, singleton/isolation guards, test-quality triage, and PyPI test-suite gating/fail-closed detection.
+- Hardening landed for audio transcription inputs, Parakeet ONNX dependencies, runtime auth persistence, integrations egress, redirect credential stripping, ACP reconnect cleanup, VZ guest validation, PostgreSQL setup timestamps, and tracked `node_modules` cleanup.
+- Current release branch follow-ups moved Visual Identity idempotency workflow logic into core service code and kept main-only `node_modules` cleanup in the merge path.
 
 Still active on `dev`:
-- Final CI for the prepared `0.1.34` release metadata must clear before this release is merged toward `main`.
+- Final CI for the prepared `0.1.35` release metadata must clear before this release is merged toward `main`.
 - Treat [CHANGELOG.md](CHANGELOG.md) as the authoritative branch-level history for what has entered the release train.
 
 See [CHANGELOG.md](CHANGELOG.md) for the full running history and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for published release notes.
@@ -1457,6 +1461,9 @@ Run locally
 <summary>Documentation and resources</summary>
 
 **Getting Started Guides:**
+- [Public documentation site](https://tldwproject.com/server/docs/) - canonical docs hosted on tldwproject.com
+- [User Wiki](Docs/Wiki/User_Wiki.md) - install, run, configure, and use tldw_server
+- [Developer Wiki](Docs/Wiki/Developer_Wiki.md) - contribute to, test, package, and understand the codebase
 - [User Guides Documentation Map](Docs/User_Guides/index.md) - task-oriented map for setup, WebUI, extension, API, and admin workflows
 - [Getting Started Index](Docs/Getting_Started/README.md) - choose the right setup path
 - [Docker Single-User + WebUI Profile](Docs/Getting_Started/Profile_Docker_Single_User.md) - self-host with Docker and the WebUI

@@ -102,6 +102,271 @@ triage issue.
 
 ## Latest Evidence
 
+### 2026-07-03: local-operator launchd drill on `codex/vz-launchd-drill-evidence`
+
+- Evidence source: local operator run on the same prepared Apple silicon macOS
+  host, using the manual `vz-helperctl.py launchd-drill` lifecycle check from
+  `origin/dev` after PR `#2601` merged the stale-socket evidence packet.
+- Operator or workflow run: local shell run; no GitHub Actions workflow URL.
+  Git state at capture time was branch `codex/vz-launchd-drill-evidence` at
+  `origin/dev` merge commit `f2d9be986499eb1bfda36f566870a98e8dd90d0d` plus
+  this evidence/backlog documentation update.
+- Host identity: Apple silicon `arm64`, macOS 15.6 build `24G84`, Darwin
+  `24.6.0`; local developer machine rather than a dedicated CI runner.
+- Host prep: helper build used `vz-helperctl.py build` outside the managed
+  filesystem sandbox because Swift/Clang needed access to
+  `~/.cache/clang/ModuleCache`. The drill signed the helper with
+  `tools/macos-vz-helper/macos-vz-helper.entitlements` before bootstrap.
+- Runtime paths: runtime root
+  `/private/tmp/tldw-vz-launchd-drill-launchd-drill-20260703-171446`, unique
+  LaunchAgent label
+  `org.tldw.macos-vz-helper.drill.codex.launchd-drill-20260703-171446`, helper
+  socket
+  `/private/tmp/tldw-vz-launchd-drill-launchd-drill-20260703-171446/helper.sock`,
+  log directory
+  `/private/tmp/tldw-vz-launchd-drill-launchd-drill-20260703-171446/logs`,
+  plist
+  `/private/tmp/tldw-vz-launchd-drill-launchd-drill-20260703-171446/org.tldw.macos-vz-helper.drill.codex.launchd-drill-20260703-171446.plist`,
+  and artifact directory
+  `/private/tmp/tldw-vz-launchd-drill-launchd-drill-20260703-171446/artifacts`.
+  Runtime, logs, and artifacts directories were owner-only mode `0700`.
+- Commands:
+
+  ```bash
+  tools/macos-vz-helper/scripts/vz-helperctl.py build
+
+  tools/macos-vz-helper/scripts/vz-helperctl.py launchd-drill \
+    --helper /Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/vz-launchd-drill-evidence/tools/macos-vz-helper/.build/debug/macos-vz-helper \
+    --socket /private/tmp/tldw-vz-launchd-drill-launchd-drill-20260703-171446/helper.sock \
+    --log-dir /private/tmp/tldw-vz-launchd-drill-launchd-drill-20260703-171446/logs \
+    --plist-output /private/tmp/tldw-vz-launchd-drill-launchd-drill-20260703-171446/org.tldw.macos-vz-helper.drill.codex.launchd-drill-20260703-171446.plist \
+    --label org.tldw.macos-vz-helper.drill.codex.launchd-drill-20260703-171446 \
+    --entitlements tools/macos-vz-helper/macos-vz-helper.entitlements \
+    --write-plist \
+    --create-dirs \
+    --skip-smoke \
+    --json
+  ```
+
+- Results: an initial diagnostic attempt passed a relative `--helper` path; the
+  generated LaunchAgent plist preserved that relative `ProgramArguments` value,
+  so launchd loaded and kicked the service but helper readiness failed with
+  `helper_ping_failed`. The accepted prepared-host evidence reran the drill with
+  an absolute helper path and passed with exit code `0`: preflight reported
+  `launchd_service_absent`, helper signing passed, `launchd_bootstrap`,
+  `launchd_status`, and `launchd_kickstart` passed, helper readiness passed,
+  `protocol_version=1`, `helper_version=0.1.0`, and `launchd_bootout` passed.
+- Cleanup: after the drill-owned bootout, an explicit follow-up
+  `launchd status` returned exit code `1` with `launchd_status_failed=113`, and
+  an extra bootout returned `No such process`, confirming the LaunchAgent was
+  no longer loaded. Direct helper status showed no pid file and
+  `process=helper_not_running` / `ping=helper_ping_failed`; the socket file
+  remained as an inactive socket under the private runtime directory. That
+  stale socket is isolated by the `0700` parent and is covered by the separate
+  stale-socket recovery drill.
+- Artifacts: retained under the artifact directory:
+  `launchd-drill.json`, `launchd-status-after-drill.json`,
+  `helper-status-after-launchd-bootout.json`, `launchd-bootout-after-drill.txt`,
+  `runtime-stat.txt`, `paths.txt`, exit code files, and `artifact-list.txt`.
+  Helper stdout/stderr were retained under the log directory and were empty,
+  both SHA-256
+  `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`.
+- Expected skips: no PR workflow, no nightly schedule, no self-hosted runner
+  URL, no real `vz_linux` VM smoke because this drill intentionally used
+  `--skip-smoke`, no host reboot drill, and no manual boot/readiness fault
+  injection.
+- Blocking regressions: none observed for the selected manual launchd lifecycle
+  drill. The relative-helper diagnostic attempt is recorded as an operator input
+  issue for launchd plists, not as the accepted evidence result.
+- Residual gaps: launchd-managed real VM smoke, host-reboot, and manual
+  boot/readiness fault-injection evidence remain manual/operator-gated items.
+  Broader unclassified helper crash recovery and long-term evidence retention
+  remain separate follow-ups.
+- Follow-up owner: `TASK-12137` records this evidence/update slice; repeat the
+  launchd drill when launchd scaffolding, helper signing, or plist generation
+  behavior changes.
+
+### 2026-07-03: local-operator stale-socket drill on `codex/vz-stale-socket-evidence`
+
+- Evidence source: local operator run on the same prepared Apple silicon macOS
+  host, using the manual `vz-helperctl.py stale-socket-drill` lifecycle check
+  from `origin/dev` after PR `#2418` merged.
+- Operator or workflow run: local shell run; no GitHub Actions workflow URL.
+  Git state at capture time was branch `codex/vz-stale-socket-evidence` at
+  `origin/dev` merge commit `c20013ecce7e3384ec5faa860434d6bdd76d5407` plus
+  this evidence/backlog documentation update.
+- Host identity: Apple silicon `arm64`, macOS 15.6 build `24G84`, Darwin
+  `24.6.0`; local developer machine rather than a dedicated CI runner.
+- Host prep: helper build initially failed under the managed filesystem sandbox
+  because Swift/Clang could not write `~/.cache/clang/ModuleCache`; the same
+  `vz-helperctl.py build` command succeeded outside the sandbox. The helper was
+  signed with `tools/macos-vz-helper/macos-vz-helper.entitlements`.
+- Runtime paths: runtime root
+  `/private/tmp/tldw-vz-stale-socket-stale-socket-20260703-165828`, helper
+  socket
+  `/private/tmp/tldw-vz-stale-socket-stale-socket-20260703-165828/helper.sock`,
+  pid file
+  `/private/tmp/tldw-vz-stale-socket-stale-socket-20260703-165828/helper.pid`,
+  log directory
+  `/private/tmp/tldw-vz-stale-socket-stale-socket-20260703-165828/logs`, and
+  artifact directory
+  `/private/tmp/tldw-vz-stale-socket-stale-socket-20260703-165828/artifacts`.
+  Runtime, logs, and artifacts directories were owner-only mode `0700`.
+- Commands:
+
+  ```bash
+  tools/macos-vz-helper/scripts/vz-helperctl.py build
+
+  tools/macos-vz-helper/scripts/vz-helperctl.py sign \
+    --entitlements tools/macos-vz-helper/macos-vz-helper.entitlements
+
+  tools/macos-vz-helper/scripts/vz-helperctl.py stale-socket-drill \
+    --helper tools/macos-vz-helper/.build/debug/macos-vz-helper \
+    --socket /private/tmp/tldw-vz-stale-socket-stale-socket-20260703-165828/helper.sock \
+    --pid-file /private/tmp/tldw-vz-stale-socket-stale-socket-20260703-165828/helper.pid \
+    --log-dir /private/tmp/tldw-vz-stale-socket-stale-socket-20260703-165828/logs \
+    --json
+
+  tools/macos-vz-helper/scripts/vz-helperctl.py stop \
+    --socket /private/tmp/tldw-vz-stale-socket-stale-socket-20260703-165828/helper.sock \
+    --pid-file /private/tmp/tldw-vz-stale-socket-stale-socket-20260703-165828/helper.pid
+  ```
+
+- Results: the first sandbox-managed drill attempt failed before helper start
+  with `helper_socket_create_failed` and `Operation not permitted` while
+  creating the controlled inactive Unix socket. The accepted prepared-host
+  evidence reran the same drill outside the managed sandbox and passed with
+  exit code `0`: `stale_socket=ok`, `start=ok`, `after_socket` reported
+  `helper_socket_present`, `after_pid_file` and `after_process` reported
+  `helper_pid_running`, `after_ping=ok`, `after_protocol_version=1`,
+  `after_helper_version=0.1.0`, and `stale_socket_drill=ok`.
+- Cleanup: explicit `vz-helperctl.py stop` on the same socket and pid file
+  returned exit code `0` with `helper_pid_stale`. Post-stop status reported
+  `socket=helper_socket_absent`, `pid_file=ok`, `process=helper_not_running`,
+  and `ping=helper_not_running`. The generic status command still exited `1`
+  because this host has an unrelated default `launchd_plist_mismatch`; that row
+  was not part of the direct-helper stale-socket drill.
+- Artifacts: retained under the artifact directory:
+  `stale-socket-drill.json`, `status-after-drill.json`,
+  `status-after-stop.json`, `runtime-stat.txt`, `paths.txt`, `stop.txt`, exit
+  code files, and `artifact-list.txt`. Helper stdout/stderr were retained under
+  the log directory and were empty, both SHA-256
+  `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`.
+- Expected skips: no PR workflow, no nightly schedule, no self-hosted runner
+  URL, no `vz_linux` VM smoke, no launchd validation, no host reboot drill, and
+  no manual boot/readiness fault injection.
+- Blocking regressions: none observed for the selected manual stale-socket
+  lifecycle drill. The only failed attempt was attributable to Codex managed
+  sandbox host restrictions around Unix socket creation, not helper behavior.
+- Residual gaps: launchd, host-reboot, and manual boot/readiness
+  fault-injection evidence remain manual/operator-gated items. Broader
+  unclassified helper crash recovery and long-term evidence retention remain
+  separate follow-ups.
+- Follow-up owner: `TASK-12136` records this evidence/update slice; repeat the
+  stale-socket evidence when helper socket-safety behavior or the operator
+  drill command changes.
+
+### 2026-06-20: local-operator repeat image-store clone smoke on `codex/vz-image-store-smoke-evidence`
+
+- Evidence source: local operator run on the same prepared Apple silicon macOS
+  host, using the image-store-backed smoke wrapper after the host was rebooted
+  and the PR `#2414` evidence handoff work had merged.
+- Operator or workflow run: local shell run; no GitHub Actions workflow URL.
+  Git state at capture time was branch `codex/vz-image-store-smoke-evidence`
+  at `origin/dev` plus this evidence/backlog branch work.
+- Host identity: Apple silicon `arm64`, macOS 15.6 build `24G84`, Darwin
+  `24.6.0`; local developer machine rather than a dedicated CI runner.
+- Host prep: `/usr/bin/swift`, `/usr/bin/codesign`, and `/usr/bin/shasum` were
+  available. SwiftPM built the helper in an escalated host command because the
+  managed filesystem sandbox blocked the default Clang module cache under
+  `~/.cache`; the rerun outside the sandbox completed.
+- Source bundle: `/private/tmp/tldw-vz-bundle`, a symlink to
+  `$HOME/Library/Application Support/tldw/sandbox-images/source-bundles/debian-bookworm-arm64/bundle`.
+  Source bundle hashes were identical before and after the real smoke:
+  `kernel` SHA-256
+  `6dc5255afb8c7722896b860e50a892c1a1f0e774a18338dc259e19736f27a3ef`,
+  `initrd` SHA-256
+  `89ae29154c08e22d09714588bfa94e7ed5894316c89c819b84be62f4e213a054`,
+  `manifest.json` SHA-256
+  `a7b5dc7d9e4932e5d6c13c287263f6e49dca3e48fa08e191d760f5545f8e3c29`, and
+  `rootfs.img` SHA-256
+  `e52c82e96667f6daa8f7e1d40be8a655aad110cd2c5acedb0a9fb5fa01118cbf`.
+- Image-store disposable run bundle:
+  `/private/tmp/tvz-e2e-25415/image-store/runs/host-smoke-25415/bundle`. The
+  run bundle rootfs hash after execution was
+  `b6809e38b69de1d5c2bf99398ed5eb34ab88e365c2e582cd0a8f06cc605f34f4`, while
+  the source rootfs hash remained
+  `e52c82e96667f6daa8f7e1d40be8a655aad110cd2c5acedb0a9fb5fa01118cbf`.
+  This repeat run proves the default smoke path absorbs VM writes in the
+  disposable run bundle rather than mutating the canonical source bundle.
+- Helper build/signing: helper binary
+  `tools/macos-vz-helper/.build/debug/macos-vz-helper`; ad hoc `codesign`
+  completed with `tools/macos-vz-helper/macos-vz-helper.entitlements`.
+- Runtime paths: runtime root `/tmp/tvz-e2e-25415`; helper socket
+  `/tmp/tvz-e2e-25415/helper.sock`; serial log directory
+  `/tmp/tvz-e2e-25415/serial`; image-store root
+  `/tmp/tvz-e2e-25415/image-store`; evidence directory
+  `/tmp/tvz-e2e-25415/evidence`. Runtime, serial, image-store, run-bundle, and
+  evidence directories were owner-only mode `0700`.
+- Commands:
+
+  ```bash
+  tools/vz-linux-image/scripts/run-host-e2e-smoke.sh \
+    --bundle /private/tmp/tldw-vz-bundle \
+    --entitlements tools/macos-vz-helper/macos-vz-helper.entitlements \
+    --python <repo>/.venv/bin/python \
+    --skip-build
+  ```
+
+  The recorded runtime path used the then-current PID-based default directory
+  form. PR review follow-up hardened the wrapper default to create a short
+  random `mktemp -d /tmp/tvz-e2e.XXXXXX` directory before future captures.
+
+- Results: helper daemon smoke passed `2 passed`; real `vz_linux` host smoke
+  passed `3 passed, 11 deselected`. The selected real-host tests covered
+  ephemeral execution, same-session VM reuse, and recovery diagnostics plus
+  dry-run reconciliation repair planning.
+- Failure drills: skipped; this evidence packet did not request
+  `--include-failure-drills`.
+- Launchd drill: skipped; this evidence packet did not request LaunchAgent
+  validation.
+- Stale socket drill: skipped; this evidence packet did not request the manual
+  `stale-socket-drill`.
+- Stuck boot/readiness drills: host-independent coverage remains represented by
+  the portable helper/runner test suite; no manual prepared-host boot-fault
+  injection was requested for this packet.
+- Artifacts: retained under `/tmp/tvz-e2e-25415/evidence`:
+  `host-smoke-evidence.json` size `4146`, `source-bundle-hashes-before.txt` size `327`,
+  `source-bundle-hashes-after.txt` size `327`, `run-bundle-hashes.txt` size
+  `327`, `runtime-paths.txt` size `982`, and `cleanup-status.txt` size `165`.
+  Helper stdout/stderr files were retained and empty, both SHA-256
+  `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`.
+  Serial logs were retained as pointers only:
+  `b63a1e13-11a8-437e-9229-cc150617bc4b.serial.log` SHA-256
+  `8c57397172bf86430518a233174c35b3fd023f157f1df75f5e4c6e3df46a8dd6`,
+  `bundle-smoke-vm.serial.log` SHA-256
+  `bc1184945c91fdbdeb9bcc0c9781ffb8e4c2afc0853de133ae6d9a124d3819ec`, and
+  `vz-linux-real-ephemeral.serial.log` SHA-256
+  `f7721cfbd092baed491248531f4fdf5a6ac01903a69cbb2574e9f86b5d4dd2c4`.
+- Cleanup: final exit code `0`; cleanup status `0`; helper pid `26434` was not
+  running after cleanup; accepted socket `/tmp/tvz-e2e-25415/helper.sock` was
+  absent after cleanup.
+- Expected skips: no PR workflow, no nightly schedule, no self-hosted runner
+  URL, no opt-in failure drills, no launchd validation, no stale socket drill,
+  no manual host reboot drill, and no manual boot/readiness fault injection.
+- Blocking regressions: none observed for the selected image-store clone smoke
+  coverage. A preceding setup attempt using a long `${TMPDIR}`-style socket path
+  failed before real execution with helper stderr `socketPathTooLong`; the
+  wrapper and examples now prefer short `/tmp/tvz-*` runtime paths for helper
+  sockets.
+- Residual gaps: launchd, stale-socket, host-reboot, and manual boot/readiness
+  fault-injection evidence remain manual/operator-gated items. Broader
+  unclassified helper crash recovery and long-term evidence retention remain
+  separate follow-ups.
+- Follow-up owner: `TASK-2394` records this evidence/update slice; future
+  focused tasks should cover manual drill evidence only when maintainers
+  intentionally request those disruptive checks.
+
 ### 2026-06-16: local-operator disposable image-store clone smoke on `codex/vz-smoke-clone-evidence`@`ab1c55c67c`
 
 - Evidence source: local operator run on the same prepared Apple silicon macOS
@@ -447,12 +712,12 @@ triage issue.
 | --- | --- | --- |
 | Prepared-host default smoke evidence | Recorded locally on 2026-06-16 with helper daemon smoke, real ephemeral execution, same-session reuse, and recovery diagnostics/dry-run repair smoke passing. | Repeat periodically through a trusted local or host-gated run and add newer evidence packets as needed. |
 | Failure-drill evidence | Recorded locally on 2026-06-16 with drill-owned stale VM replacement and smoke-owned helper restart drill passing. | Repeat when runtime/helper recovery behavior changes; keep manual opt-in only. |
-| Launchd-drill evidence | Manual opt-in only. | Record results only when a runner is intentionally configured for LaunchAgent validation. |
+| Launchd-drill evidence | Manual launchd lifecycle evidence was recorded locally on 2026-07-03 with isolated LaunchAgent bootstrap, kickstart, helper readiness, protocol/version check, and drill-owned bootout passing under `--skip-smoke`. | Repeat when launchd scaffolding, helper signing, or plist generation behavior changes. Run launchd-managed real VM smoke only when explicitly requested. |
 | Host reboot recovery | Manual `host-reboot-drill pre/post` procedure only and out of scheduled CI. | Record results when a maintainer explicitly runs the reboot drill on a prepared host that can tolerate disruptive reboot testing and preserve logs. |
 | Stuck boot/readiness | Host-independent helper and runner coverage verifies boot-driver failure cleanup, guest-readiness failure cleanup, and no reusable session state after create failure. The default prepared-host smoke still does not inject real boot faults. | Record manual prepared-host evidence only after a separate reviewed fault-injection plan; diagnostics/evidence should report stable reason codes and artifact pointers, not raw serial log contents. |
 | Guest-agent mismatch | Not covered by the default smoke. | Use `Docs/superpowers/specs/2026-05-18-vz-linux-lifecycle-drill-gaps-design.md` to guide narrow tests or diagnostics checks before considering automated coverage. |
-| Stale socket handling | `tools/macos-vz-helper/scripts/vz-helperctl.py stale-socket-drill` provides a manual operator check for safe inactive socket recovery. | Record prepared-host evidence when a maintainer intentionally runs the drill; keep it manual-only and out of PR/push/scheduled destructive triggers. |
-| Direct-bundle smoke mutability | The 2026-06-16 failure-drill run updated the direct bundle `rootfs.img` mtime and post-run hash while exercising real VMs. The smoke wrapper now prepares a disposable image-store run bundle by default, but fresh prepared-host evidence has not yet proved source-bundle immutability after a real run. | Run the prepared-host smoke again and record both source bundle and disposable run bundle hashes to close this gap. |
+| Stale socket handling | Manual stale-socket prepared-host evidence was recorded locally on 2026-07-03 with controlled inactive socket recovery, helper start/status verification, and explicit stop cleanup passing. | Repeat when helper socket-safety behavior or the operator drill command changes; keep it manual-only and out of PR/push/scheduled destructive triggers. |
+| Direct-bundle smoke mutability | Closed for the default smoke path by the 2026-06-16 disposable-clone evidence and repeated on 2026-06-20 after host reboot: source bundle hashes stayed identical before/after while the disposable run bundle rootfs hash changed after execution. | Repeat periodically when the smoke wrapper, image-store materializer, or helper VM write path changes. |
 
 ## Recording Guidance
 
@@ -482,10 +747,12 @@ Record the runtime directory mode, socket path result, command output, helper
 stdout/stderr paths, and whether this was skipped because no maintainer
 requested the manual drill.
 
-For a lower-level run, use a private runtime directory and cleanup trap:
+For a lower-level run, use a short private runtime directory and cleanup trap.
+Avoid long `${TMPDIR}`-based socket paths on macOS because AF_UNIX sockets are
+length-limited:
 
 ```bash
-runtime_dir="$(mktemp -d "${TMPDIR:-/tmp}/tldw-vz-helper-e2e.XXXXXX")"
+runtime_dir="$(mktemp -d "/tmp/tvz-e2e.XXXXXX")"
 chmod 700 "$runtime_dir"
 trap 'rm -rf "$runtime_dir"' EXIT
 

@@ -554,6 +554,8 @@ jobs:
           - name: gap-verified-7
             paths: >-
               tldw_Server_API/tests/Guardian
+              tldw_Server_API/tests/RPG
+              tldw_Server_API/tests/Chat_Macros
           - name: gap-verified-8
             paths: >-
               tldw_Server_API/tests/Storage
@@ -793,6 +795,7 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_resource_memberships_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_db.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py
+              tldw_Server_API/tests/Workspaces/test_workspace_artifact_validation.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
           - name: db-privileges
             paths: >-
@@ -1134,6 +1137,8 @@ jobs:
           - name: chat-character-legacy-core
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_character_chat_endpoints.py
+              tldw_Server_API/tests/Character_Chat/property/test_ccv3_parser_properties.py
+              tldw_Server_API/tests/Character_Chat/property/test_png_chara_embed_properties.py
               tldw_Server_API/tests/Character_Chat/test_chat_dictionary_legacy.py
               tldw_Server_API/tests/Character_Chat/test_chat_settings_endpoints.py
               tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_e2e_mock.py
@@ -1145,6 +1150,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_legacy_complete_deprecation.py
               tldw_Server_API/tests/Character_Chat/test_messages_tool_calls_exposure.py
               tldw_Server_API/tests/Character_Chat/test_persona_dialogue_tree_character_eval.py
+              tldw_Server_API/tests/Character_Chat/test_visual_identity_expression_metadata.py
           - name: chat-character-legacy-files
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_file_mime_detection.py
@@ -1169,6 +1175,10 @@ jobs:
           - name: chat-character-db-api
             paths: >-
               tldw_Server_API/tests/Characters/test_characters_endpoint.py
+          - name: visual-identities
+            paths: >-
+              tldw_Server_API/tests/Character_Chat/test_visual_identity_expression_metadata.py
+              tldw_Server_API/tests/Visual_Identities
           - name: chat-character-unit-core
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/test_utils.py
@@ -1206,6 +1216,7 @@ jobs:
           - name: chat-character-property
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/property
+              tldw_Server_API/tests/Visual_Identities
           - name: chat-character-integration-api
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_api.py
@@ -1636,10 +1647,6 @@ jobs:
       SHARD_NAME: ${{ matrix.shard.name }}
       TEST_PATHS: ${{ matrix.shard.paths }}
       RESULTS_DIR: test-results-linux-3.12-${{ matrix.shard.name }}
-      # Preserve pre-quarantine CI behavior: these shards pass explicit file
-      # lists from tests/Character_Chat_NEW, tests/TTS_NEW, and tests/Embeddings,
-      # which the quarantine conftest hooks would otherwise skip.
-      RUN_QUARANTINED: "1"
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
@@ -1954,6 +1961,8 @@ jobs:
           - name: gap-verified-7
             paths: >-
               tldw_Server_API/tests/Guardian
+              tldw_Server_API/tests/RPG
+              tldw_Server_API/tests/Chat_Macros
           - name: gap-verified-8
             paths: >-
               tldw_Server_API/tests/Storage
@@ -2193,6 +2202,7 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_resource_memberships_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_db.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py
+              tldw_Server_API/tests/Workspaces/test_workspace_artifact_validation.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
           - name: db-privileges
             paths: >-
@@ -2534,6 +2544,8 @@ jobs:
           - name: chat-character-legacy-core
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_character_chat_endpoints.py
+              tldw_Server_API/tests/Character_Chat/property/test_ccv3_parser_properties.py
+              tldw_Server_API/tests/Character_Chat/property/test_png_chara_embed_properties.py
               tldw_Server_API/tests/Character_Chat/test_chat_dictionary_legacy.py
               tldw_Server_API/tests/Character_Chat/test_chat_settings_endpoints.py
               tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_e2e_mock.py
@@ -2545,6 +2557,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_legacy_complete_deprecation.py
               tldw_Server_API/tests/Character_Chat/test_messages_tool_calls_exposure.py
               tldw_Server_API/tests/Character_Chat/test_persona_dialogue_tree_character_eval.py
+              tldw_Server_API/tests/Character_Chat/test_visual_identity_expression_metadata.py
           - name: chat-character-legacy-files
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_file_mime_detection.py
@@ -2569,6 +2582,10 @@ jobs:
           - name: chat-character-db-api
             paths: >-
               tldw_Server_API/tests/Characters/test_characters_endpoint.py
+          - name: visual-identities
+            paths: >-
+              tldw_Server_API/tests/Character_Chat/test_visual_identity_expression_metadata.py
+              tldw_Server_API/tests/Visual_Identities
           - name: chat-character-unit-core
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/test_utils.py
@@ -2606,6 +2623,7 @@ jobs:
           - name: chat-character-property
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/property
+              tldw_Server_API/tests/Visual_Identities
           - name: chat-character-integration-api
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_api.py
@@ -3036,10 +3054,6 @@ jobs:
       SHARD_NAME: ${{ matrix.shard.name }}
       TEST_PATHS: ${{ matrix.shard.paths }}
       RESULTS_DIR: test-results-linux-3.13-${{ matrix.shard.name }}
-      # Preserve pre-quarantine CI behavior: these shards pass explicit file
-      # lists from tests/Character_Chat_NEW, tests/TTS_NEW, and tests/Embeddings,
-      # which the quarantine conftest hooks would otherwise skip.
-      RUN_QUARANTINED: "1"
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
@@ -3466,6 +3480,7 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_resource_memberships_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_db.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py
+              tldw_Server_API/tests/Workspaces/test_workspace_artifact_validation.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
           - name: db-privileges
             paths: >-
@@ -3807,6 +3822,8 @@ jobs:
           - name: chat-character-legacy-core
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_character_chat_endpoints.py
+              tldw_Server_API/tests/Character_Chat/property/test_ccv3_parser_properties.py
+              tldw_Server_API/tests/Character_Chat/property/test_png_chara_embed_properties.py
               tldw_Server_API/tests/Character_Chat/test_chat_dictionary_legacy.py
               tldw_Server_API/tests/Character_Chat/test_chat_settings_endpoints.py
               tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_e2e_mock.py
@@ -3818,6 +3835,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_legacy_complete_deprecation.py
               tldw_Server_API/tests/Character_Chat/test_messages_tool_calls_exposure.py
               tldw_Server_API/tests/Character_Chat/test_persona_dialogue_tree_character_eval.py
+              tldw_Server_API/tests/Character_Chat/test_visual_identity_expression_metadata.py
           - name: chat-character-legacy-files
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_file_mime_detection.py
@@ -3842,6 +3860,10 @@ jobs:
           - name: chat-character-db-api
             paths: >-
               tldw_Server_API/tests/Characters/test_characters_endpoint.py
+          - name: visual-identities
+            paths: >-
+              tldw_Server_API/tests/Character_Chat/test_visual_identity_expression_metadata.py
+              tldw_Server_API/tests/Visual_Identities
           - name: chat-character-unit-core
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/test_utils.py
@@ -3879,6 +3901,7 @@ jobs:
           - name: chat-character-property
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/property
+              tldw_Server_API/tests/Visual_Identities
           - name: chat-character-integration-api
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_api.py
@@ -4285,10 +4308,6 @@ jobs:
       SHARD_NAME: ${{ matrix.shard.name }}
       TEST_PATHS: ${{ matrix.shard.paths }}
       RESULTS_DIR: test-results-macos-latest-3.12-${{ matrix.shard.name }}
-      # Preserve pre-quarantine CI behavior: these shards pass explicit file
-      # lists from tests/Character_Chat_NEW, tests/TTS_NEW, and tests/Embeddings,
-      # which the quarantine conftest hooks would otherwise skip.
-      RUN_QUARANTINED: "1"
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
@@ -4663,6 +4682,7 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_resource_memberships_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_db.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py
+              tldw_Server_API/tests/Workspaces/test_workspace_artifact_validation.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
           - name: db-privileges
             paths: >-
@@ -5004,6 +5024,8 @@ jobs:
           - name: chat-character-legacy-core
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_character_chat_endpoints.py
+              tldw_Server_API/tests/Character_Chat/property/test_ccv3_parser_properties.py
+              tldw_Server_API/tests/Character_Chat/property/test_png_chara_embed_properties.py
               tldw_Server_API/tests/Character_Chat/test_chat_dictionary_legacy.py
               tldw_Server_API/tests/Character_Chat/test_chat_settings_endpoints.py
               tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_e2e_mock.py
@@ -5015,6 +5037,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_legacy_complete_deprecation.py
               tldw_Server_API/tests/Character_Chat/test_messages_tool_calls_exposure.py
               tldw_Server_API/tests/Character_Chat/test_persona_dialogue_tree_character_eval.py
+              tldw_Server_API/tests/Character_Chat/test_visual_identity_expression_metadata.py
           - name: chat-character-legacy-files
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_file_mime_detection.py
@@ -5039,6 +5062,10 @@ jobs:
           - name: chat-character-db-api
             paths: >-
               tldw_Server_API/tests/Characters/test_characters_endpoint.py
+          - name: visual-identities
+            paths: >-
+              tldw_Server_API/tests/Character_Chat/test_visual_identity_expression_metadata.py
+              tldw_Server_API/tests/Visual_Identities
           - name: chat-character-unit-core
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/test_utils.py
@@ -5076,6 +5103,7 @@ jobs:
           - name: chat-character-property
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/property
+              tldw_Server_API/tests/Visual_Identities
           - name: chat-character-integration-api
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_api.py
@@ -5482,10 +5510,6 @@ jobs:
       SHARD_NAME: ${{ matrix.shard.name }}
       TEST_PATHS: ${{ matrix.shard.paths }}
       RESULTS_DIR: test-results-windows-latest-3.12-${{ matrix.shard.name }}
-      # Preserve pre-quarantine CI behavior: these shards pass explicit file
-      # lists from tests/Character_Chat_NEW, tests/TTS_NEW, and tests/Embeddings,
-      # which the quarantine conftest hooks would otherwise skip.
-      RUN_QUARANTINED: "1"
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
@@ -5861,6 +5885,7 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_resource_memberships_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_db.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py
+              tldw_Server_API/tests/Workspaces/test_workspace_artifact_validation.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
           - name: db-privileges
             paths: >-
@@ -6202,6 +6227,8 @@ jobs:
           - name: chat-character-legacy-core
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_character_chat_endpoints.py
+              tldw_Server_API/tests/Character_Chat/property/test_ccv3_parser_properties.py
+              tldw_Server_API/tests/Character_Chat/property/test_png_chara_embed_properties.py
               tldw_Server_API/tests/Character_Chat/test_chat_dictionary_legacy.py
               tldw_Server_API/tests/Character_Chat/test_chat_settings_endpoints.py
               tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_e2e_mock.py
@@ -6213,6 +6240,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_legacy_complete_deprecation.py
               tldw_Server_API/tests/Character_Chat/test_messages_tool_calls_exposure.py
               tldw_Server_API/tests/Character_Chat/test_persona_dialogue_tree_character_eval.py
+              tldw_Server_API/tests/Character_Chat/test_visual_identity_expression_metadata.py
           - name: chat-character-legacy-files
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_file_mime_detection.py
@@ -6237,6 +6265,10 @@ jobs:
           - name: chat-character-db-api
             paths: >-
               tldw_Server_API/tests/Characters/test_characters_endpoint.py
+          - name: visual-identities
+            paths: >-
+              tldw_Server_API/tests/Character_Chat/test_visual_identity_expression_metadata.py
+              tldw_Server_API/tests/Visual_Identities
           - name: chat-character-unit-core
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/test_utils.py
@@ -6274,6 +6306,7 @@ jobs:
           - name: chat-character-property
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/property
+              tldw_Server_API/tests/Visual_Identities
           - name: chat-character-integration-api
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_api.py
@@ -6680,10 +6713,6 @@ jobs:
       SHARD_NAME: ${{ matrix.shard.name }}
       TEST_PATHS: ${{ matrix.shard.paths }}
       RESULTS_DIR: test-results-${{ matrix.os }}-3.13-${{ matrix.shard.name }}
-      # Preserve pre-quarantine CI behavior: these shards pass explicit file
-      # lists from tests/Character_Chat_NEW, tests/TTS_NEW, and tests/Embeddings,
-      # which the quarantine conftest hooks would otherwise skip.
-      RUN_QUARANTINED: "1"
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
@@ -6824,10 +6853,6 @@ jobs:
       PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
       TEST_MODE: '0'
       DISABLE_HEAVY_STARTUP: '1'
-      # Preserve pre-quarantine CI behavior: this job passes an explicit file
-      # from tests/Character_Chat_NEW, which the quarantine conftest hook
-      # would otherwise skip.
-      RUN_QUARANTINED: "1"
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd

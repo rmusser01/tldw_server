@@ -94,6 +94,7 @@ import {
 } from "@/services/tts"
 import type { DynamicUISurface } from "@/types/dynamic-ui"
 import { DEFAULT_CHAT_SETTINGS } from "@/types/chat-settings"
+import { VisualIdentityImage } from "@/components/Common/VisualIdentity/VisualIdentityImage"
 
 const Markdown = React.lazy(() => import("../../Common/Markdown"))
 
@@ -273,6 +274,16 @@ type Props = {
   moodLabel?: string | null
   moodConfidence?: number | null
   moodTopic?: string | null
+  visualActorKind?: "character" | "persona" | null
+  visualActorId?: number | string | null
+  visualPackId?: number | null
+  visualPackVersionId?: number | null
+  visualExpressionKey?: string | null
+  visualAssetId?: number | null
+  visualAssetUrl?: string | null
+  visualFallbackReason?: string | null
+  visualIsAnimated?: boolean | null
+  visualPreviewUrl?: string | null
   messageSteeringMode?: MessageSteeringMode
   onMessageSteeringModeChange?: (mode: MessageSteeringMode) => void
   messageSteeringForceNarrate?: boolean
@@ -836,10 +847,16 @@ export const PlaygroundMessage = (props: Props) => {
   const baseCharacterAvatar = resolveCharacterBaseAvatarUrl(
     props.characterIdentity
   )
+  const visualCharacterAvatar =
+    shouldUseCharacterIdentity && typeof props.visualAssetUrl === "string"
+      ? props.visualAssetUrl.trim()
+      : ""
   const moodCharacterAvatar = shouldUseCharacterIdentity
     ? resolveCharacterMoodImageUrl(props.characterIdentity, resolvedMoodLabel)
     : ""
-  const characterAvatar = moodCharacterAvatar || baseCharacterAvatar
+  const characterAvatar =
+    visualCharacterAvatar || moodCharacterAvatar || baseCharacterAvatar
+  const isUsingVisualCharacterAvatar = Boolean(visualCharacterAvatar)
   const resolvedModelImage =
     shouldUseCharacterIdentity && characterAvatar
       ? characterAvatar
@@ -1909,8 +1926,10 @@ export const PlaygroundMessage = (props: Props) => {
         defaultValue: "Preview character avatar"
       }) as string}
     >
-      <img
-        src={portraitImage}
+      <VisualIdentityImage
+        assetUrl={portraitImage}
+        previewUrl={isUsingVisualCharacterAvatar ? props.visualPreviewUrl : null}
+        isAnimated={isUsingVisualCharacterAvatar && Boolean(props.visualIsAnimated)}
         alt={
           props.isBot
             ? resolvedModelName || props.name
@@ -2966,14 +2985,15 @@ export const PlaygroundMessage = (props: Props) => {
           footer={null}
           centered
         >
-          <Image
-            src={portraitImage}
+          <VisualIdentityImage
+            assetUrl={portraitImage}
+            previewUrl={isUsingVisualCharacterAvatar ? props.visualPreviewUrl : null}
+            isAnimated={isUsingVisualCharacterAvatar && Boolean(props.visualIsAnimated)}
             alt={
               props.isBot
                 ? resolvedModelName || props.name
                 : userDisplayName.trim() || t("common:you", "You")
             }
-            preview={false}
             className="w-full"
           />
         </Modal>

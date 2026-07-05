@@ -1,7 +1,5 @@
 import json
 
-from tldw_Server_API.app.core.Claims_Extraction.ingestion_claims import extract_claims_for_chunks
-
 
 def test_ingestion_llm_extractor_parses_json_in_fenced_block(monkeypatch):
 
@@ -30,7 +28,7 @@ def test_ingestion_llm_extractor_parses_json_in_fenced_block(monkeypatch):
 
     chunks = [{"text": "irrelevant", "metadata": {"chunk_index": 0}}]
     # Force LLM path by specifying a known provider name
-    claims = extract_claims_for_chunks(chunks, extractor_mode="openai", max_per_chunk=5)
+    claims = mod.extract_claims_for_chunks(chunks, extractor_mode="openai", max_per_chunk=5)
     texts = [c.get("claim_text", "") for c in claims]
     assert "Claim A." in texts and "Claim B." in texts
     assert isinstance(observed.get("response_format"), dict)

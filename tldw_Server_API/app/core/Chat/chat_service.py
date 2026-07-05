@@ -78,6 +78,7 @@ from tldw_Server_API.app.core.Chat.streaming_utils import (
 from tldw_Server_API.app.core.Chat.streaming_utils import (
     STREAMING_IDLE_TIMEOUT as CHAT_IDLE_TIMEOUT,
 )
+from tldw_Server_API.app.core.LLM_Calls.provider_readiness import normalize_catalog_provider_for_chat
 from tldw_Server_API.app.core.Chat.chat_loop_engine import is_chat_loop_mode_enabled
 from tldw_Server_API.app.core.Chat.run_first_presentation import (
     present_chat_tools,
@@ -1336,13 +1337,16 @@ def parse_provider_model_for_metrics(
         parts = model_str.split("/", 1)
         if len(parts) == 2:
             model_provider, model_name = parts
-            provider = (api_provider or model_provider).lower()
+            raw_provider = api_provider or model_provider
+            provider = normalize_catalog_provider_for_chat((raw_provider or "").strip().lower())
             model = model_name
         else:
-            provider = (api_provider or default_provider).lower()
+            raw_provider = api_provider or default_provider
+            provider = normalize_catalog_provider_for_chat((raw_provider or "").strip().lower())
             model = model_str
     else:
-        provider = (api_provider or default_provider).lower()
+        raw_provider = api_provider or default_provider
+        provider = normalize_catalog_provider_for_chat((raw_provider or "").strip().lower())
         model = model_str
     return provider, model
 
@@ -1375,7 +1379,9 @@ def normalize_request_provider_and_model(
             parts_for_alias = model_str.split("/", 1)
             if len(parts_for_alias) == 2:
                 inline_provider, inline_model_part = parts_for_alias[0].strip(), parts_for_alias[1].strip()
-        provider_for_mapping = ((inline_provider or api_provider or default_provider) or "").strip().lower()
+        provider_for_mapping = normalize_catalog_provider_for_chat(
+            ((inline_provider or api_provider or default_provider) or "").strip().lower()
+        )
 
 
         def _resolve_alias(provider: str, raw_model: str) -> str | None:
@@ -1434,14 +1440,17 @@ def normalize_request_provider_and_model(
         pass
     except _CHAT_NONCRITICAL_EXCEPTIONS as _unexpected:
         # Unexpected exceptions should be visible in production logs
-        pass
         logger.warning(f"Unexpected error during model alias resolution: {_unexpected}")
-    provider = (api_provider or default_provider).lower()
+    provider = normalize_catalog_provider_for_chat(
+        ((api_provider or default_provider) or "").strip().lower()
+    )
     if "/" in model_str:
         parts = model_str.split("/", 1)
         if len(parts) == 2:
             model_provider, actual_model = parts
-            inline_provider_lower = model_provider.lower()
+            inline_provider_lower = normalize_catalog_provider_for_chat(
+                model_provider.strip().lower()
+            )
             # If the api_provider was not explicitly set, allow inline provider to select it
             if not api_provider:
                 provider = inline_provider_lower

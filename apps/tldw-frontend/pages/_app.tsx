@@ -13,7 +13,11 @@ import { AppProviders } from "@web/components/AppProviders"
 import ErrorBoundary from "@web/components/ErrorBoundary"
 import { ConfigurationGuard } from "@web/components/networking/ConfigurationGuard"
 import { ServerReadinessGate } from "@web/components/networking/ServerReadinessGate"
-import { hasEnvApiAuth } from "@web/lib/authStorage"
+import {
+  getRuntimeApiBearer,
+  getRuntimeApiKey,
+  hasEnvApiAuth
+} from "@web/lib/authStorage"
 import { loadTldwAuth, loadTldwClient } from "@web/lib/configured-auth-state"
 import {
   buildFirstRunOnboardingRoute,
@@ -179,7 +183,10 @@ export default function App({ Component, pageProps }: AppProps) {
       await runtimeBootstrapReady.catch(() => undefined)
       if (cancelled) return
 
-      const envAuthed = hasEnvApiAuth()
+      const envAuthed =
+        hasEnvApiAuth() ||
+        Boolean(getRuntimeApiKey()) ||
+        Boolean(getRuntimeApiBearer())
       const configuredAuth = await getConfiguredAuthState()
       const authed = configuredAuth.hasConfig
         ? configuredAuth.authMode === "multi-user"

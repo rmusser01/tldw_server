@@ -147,7 +147,7 @@ Primary surfaces:
 | Manage bring-your-own-key provider access | Admin/user settings | [BYOK user guide](Server/BYOK_User_Guide.md) |
 | Understand usage reporting | Admin/API | [Usage module](Server/Usage_Module.md) |
 | Back up SQLite deployments | Server/admin | [Backups using Litestream](Server/Backups_Using_Litestream.md) |
-| Monitor the server | Admin/operator | [Metrics cheatsheet](https://rmusser01.github.io/tldw_server/Monitoring/Metrics_Cheatsheet/) |
+| Monitor the server | Admin/operator | [Metrics cheatsheet](../Monitoring/Metrics_Cheatsheet.md) |
 
 ## API Reference Entry Points
 
@@ -244,7 +244,7 @@ Common workflows:
 - **Study, evaluate, and review outputs**: use [Evaluations user guide](Server/Evaluations_User_Guide.md), [Evaluations API unified reference](../API-related/Evaluations_API_Unified_Reference.md), and [Flashcards study guide](WebUI_Extension/Flashcards_Study_Guide.md).
 - **Create and manage knowledge artifacts**: use [Chatbook user guide](WebUI_Extension/Chatbook_User_Guide.md), [Prompt Studio API](../API-related/Prompt_Studio_API.md), and [Reading list API](../API-related/Reading_List_API.md).
 - **Automate and integrate**: use [Workflows examples](WebUI_Extension/Workflows_Examples.md), [Collections feeds API](../API-related/Collections_Feeds_API.md), and [Getting started with ACP](Integrations_Experiments/Getting_Started_with_ACP.md).
-- **Administer a shared server**: use [Organizations and sharing](Server/Organizations_and_Sharing.md), [BYOK user guide](Server/BYOK_User_Guide.md), [Usage module](Server/Usage_Module.md), and [Metrics cheatsheet](https://rmusser01.github.io/tldw_server/Monitoring/Metrics_Cheatsheet/).
+- **Administer a shared server**: use [Organizations and sharing](Server/Organizations_and_Sharing.md), [BYOK user guide](Server/BYOK_User_Guide.md), [Usage module](Server/Usage_Module.md), and [Metrics cheatsheet](../Monitoring/Metrics_Cheatsheet.md).
 
 ## Troubleshooting
 
@@ -376,7 +376,7 @@ In `README.md`, under `**Getting Started Guides:**`, add this as the first bulle
 In `apps/extension/docs/index.md`, after the opening paragraph, add:
 
 ```markdown
-For the shared tldw_server documentation map across the server API, WebUI, browser extension, and admin/operator workflows, use the [tldw_server User Guides](https://rmusser01.github.io/tldw_server/User_Guides/). This extension guide stays focused on extension-specific setup and browser behavior.
+For the shared tldw_server documentation map across the server API, WebUI, browser extension, and admin/operator workflows, use the [tldw_server User Guides](https://tldwproject.com/server/docs/User_Guides/). This extension guide stays focused on extension-specific setup and browser behavior.
 ```
 
 - [ ] **Step 5: Verify entry point text exists**

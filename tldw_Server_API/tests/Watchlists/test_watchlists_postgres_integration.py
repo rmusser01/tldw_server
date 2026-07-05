@@ -9,7 +9,7 @@ from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatab
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 
-pytest_plugins = ["tldw_Server_API.tests.AuthNZ.conftest"]
+pytest_plugins = ["tldw_Server_API.tests._plugins.authnz_full_fixtures"]
 
 
 def _pg_backend(db_name: str):

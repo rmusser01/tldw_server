@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 
+from mcp_unified.docs.acquisition.models import FetchResponse
+from mcp_unified.docs.acquisition.service import DocsAcquisitionService
 from mcp_unified.docs.mcp_module import DocsMCPToolProvider
-from mcp_unified.docs.models import AccessScope
+from mcp_unified.docs.models import AccessScope, DiscoverSourceRequest
 from mcp_unified.docs.settings import DocsSettings
 from mcp_unified.docs.store.sqlite import DocsCatalogStore
+from tldw_Server_API.tests.MCP_unified.docs.helpers import FakeResolver, FakeTransport
 
 pytestmark = pytest.mark.unit
 
@@ -113,6 +117,96 @@ def test_provider_advertises_ingest_url_when_enabled(tmp_path: Path) -> None:
     assert tools["docs.ingest_url"]["metadata"]["readOnlyHint"] is False  # nosec B101
 
 
+def test_provider_advertises_discover_source_when_enabled(tmp_path: Path) -> None:
+    settings = DocsSettings.from_mapping(
+        {
+            "db_path": str(tmp_path / "docs.db"),
+            "enable_web_acquisition": True,
+            "enable_source_discovery": True,
+            "web_source_profile": "locked_down",
+            "allowed_url_prefixes": ("https://example.com/docs/",),
+        }
+    )
+    provider = DocsMCPToolProvider(settings=settings)
+
+    tools = {tool["name"]: tool for tool in provider.tool_definitions()}
+
+    assert "docs.discover_source" in tools  # nosec B101
+    assert tools["docs.discover_source"]["metadata"]["category"] == "ingestion"  # nosec B101
+    assert tools["docs.discover_source"]["metadata"]["readOnlyHint"] is False  # nosec B101
+
+
+def test_provider_omits_discover_source_when_disabled(tmp_path: Path) -> None:
+    provider = DocsMCPToolProvider(settings=DocsSettings(db_path=tmp_path / "docs.db"))
+
+    names = {tool["name"] for tool in provider.tool_definitions()}
+
+    assert "docs.discover_source" not in names  # nosec B101
+
+
+def test_provider_stale_discover_source_call_is_disabled(tmp_path: Path) -> None:
+    provider = DocsMCPToolProvider(settings=DocsSettings(db_path=tmp_path / "docs.db"))
+
+    result = provider.execute("docs.discover_source", {"url": "https://example.com/sitemap.xml"}, scope=AccessScope())
+
+    assert result["status"] == "denied"  # nosec B101
+    assert result["reason_code"] == "source_discovery_disabled"  # nosec B101
+
+
+def test_provider_discover_source_delegates_to_discovery_service(tmp_path: Path) -> None:
+    class FakeDiscovery:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def discover_source(self, **kwargs):
+            self.calls.append(kwargs)
+            return {"status": "completed", "reason_code": "ok"}
+
+    settings = DocsSettings.from_mapping(
+        {
+            "db_path": str(tmp_path / "docs.db"),
+            "enable_web_acquisition": True,
+            "enable_source_discovery": True,
+        }
+    )
+    provider = DocsMCPToolProvider(settings=settings)
+    discovery = FakeDiscovery()
+    provider.discovery = discovery
+    scope = AccessScope(owner_scope="owner-a", profile_scope="profile-a")
+
+    result = provider.execute(
+        "docs.discover_source",
+        {
+            "url": "https://example.com/sitemap.xml",
+            "kind": "sitemap",
+            "mode": "apply",
+            "apply_action": "register_and_ingest",
+            "max_pages": "3",
+            "max_depth": 1,
+            "collections": ["Reference"],
+            "keywords": ["docs"],
+            "title": "Example sitemap",
+            "include_seed": True,
+        },
+        scope=scope,
+    )
+
+    assert result["status"] == "completed"  # nosec B101
+    assert discovery.calls[0]["scope"] == scope  # nosec B101
+    request = discovery.calls[0]["request"]
+    assert isinstance(request, DiscoverSourceRequest)  # nosec B101
+    assert request.url == "https://example.com/sitemap.xml"  # nosec B101
+    assert request.kind == "sitemap"  # nosec B101
+    assert request.mode == "apply"  # nosec B101
+    assert request.apply_action == "register_and_ingest"  # nosec B101
+    assert request.max_pages == 3  # nosec B101
+    assert request.max_depth == 1  # nosec B101
+    assert request.collections == ("Reference",)  # nosec B101
+    assert request.keywords == ("docs",)  # nosec B101
+    assert request.title == "Example sitemap"  # nosec B101
+    assert request.include_seed is True  # nosec B101
+
+
 def test_provider_ingest_url_delegates_to_acquisition_service(tmp_path: Path) -> None:
     class FakeAcquisition:
         def __init__(self) -> None:
@@ -144,6 +238,45 @@ def test_provider_ingest_url_delegates_to_acquisition_service(tmp_path: Path) ->
             "title_override": "Guide",
         }
     ]
+
+
+def test_provider_retrieval_outputs_do_not_leak_query_bearing_ingest_url(tmp_path: Path) -> None:
+    settings = DocsSettings.from_mapping(
+        {
+            "db_path": str(tmp_path / "docs.db"),
+            "enable_web_acquisition": True,
+            "web_source_profile": "online_capable",
+            "allow_arbitrary_public_domains": True,
+        }
+    )
+    store = DocsCatalogStore(tmp_path / "docs.db")
+    store.migrate()
+    scope = AccessScope(owner_scope="owner-a", profile_scope="profile-a")
+    acquisition = DocsAcquisitionService(
+        settings=settings,
+        store=store,
+        resolver=FakeResolver({"example.com": ["93.184.216.34"]}),
+        transport=FakeTransport(
+            [FetchResponse(status_code=200, headers={"content-type": "text/plain"}, body_chunks=[b"alpha docs"])]
+        ),
+    )
+    provider = DocsMCPToolProvider(settings=settings, store=store)
+    provider.acquisition = acquisition
+
+    ingest = provider.execute("docs.ingest_url", {"url": "https://example.com/page?token=secret"}, scope=scope)
+
+    search = provider.execute("docs.search", {"query": "alpha"}, scope=scope)
+    document = provider.execute("docs.get", {"id": str(ingest["document"]["id"]), "mode": "full"}, scope=scope)
+    context = provider.execute("docs.context", {"query": "alpha"}, scope=scope)
+    listing = provider.execute("docs.list", {"kind": "documents"}, scope=scope)
+    serialized = json.dumps([ingest, search, document, context, listing], sort_keys=True)
+
+    assert ingest["document"]["canonical_uri"] == "https://example.com/page"  # nosec B101
+    assert ingest["document"]["source_url"] is None  # nosec B101
+    assert search["results"][0]["uri"] == "https://example.com/page"  # nosec B101
+    assert document["source_url"] is None  # nosec B101
+    assert "token=secret" not in serialized  # nosec B101
+    assert "?token" not in serialized  # nosec B101
 
 
 def test_provider_rejects_empty_ingest_url_when_enabled(tmp_path: Path) -> None:
@@ -247,6 +380,33 @@ def test_provider_status_reports_web_acquisition_disabled(tmp_path: Path) -> Non
     assert status["web_policy"]["allow_arbitrary_public_domains"] is False  # nosec B101
     assert status["web_policy"]["preapproved_domains"] == []  # nosec B101
     assert status["web_policy"]["allowed_url_prefixes"] == []  # nosec B101
+    assert status["source_sync"]["enabled"] is True  # nosec B101
+    assert status["source_sync"]["default_stale_policy"] == "report"  # nosec B101
+    assert status["source_sync"]["max_sync_documents"] == 500  # nosec B101
+    assert status["source_sync"]["sitemap_sync_enabled"] is False  # nosec B101
+    assert status["source_discovery"]["enabled"] is False  # nosec B101
+    assert status["source_discovery"]["available"] is False  # nosec B101
+    assert status["source_discovery"]["disabled_reason"] == "source_discovery_disabled"  # nosec B101
+    assert status["source_discovery"]["supported_kinds"] == ["sitemap", "page_links"]  # nosec B101
+
+
+def test_provider_status_reports_source_discovery_when_enabled(tmp_path: Path) -> None:
+    settings = DocsSettings.from_mapping(
+        {
+            "db_path": str(tmp_path / "docs.db"),
+            "enable_web_acquisition": True,
+            "enable_source_discovery": True,
+            "web_source_profile": "locked_down",
+            "allowed_url_prefixes": ("https://example.com/docs/",),
+        }
+    )
+    provider = DocsMCPToolProvider(settings=settings)
+
+    status = provider.execute("docs.status", {}, scope=AccessScope())
+
+    assert status["source_discovery"]["enabled"] is True  # nosec B101
+    assert status["source_discovery"]["available"] is True  # nosec B101
+    assert status["source_discovery"]["max_discovery_pages"] == 25  # nosec B101
 
 
 def test_provider_status_reports_custom_web_policy(tmp_path: Path) -> None:

@@ -716,14 +716,17 @@ class InMemoryStore(SandboxStore):
                     is_active = True
                 if not is_active:
                     continue
+                if not str(getattr(rs, "claim_owner", "") or "").strip():
+                    continue
                 active_exp = getattr(rs, "claim_expires_at", None)
                 if isinstance(active_exp, str):
                     active_exp = _parse_optional_iso_datetime(active_exp)
-                if isinstance(active_exp, datetime):
-                    if active_exp.tzinfo is None:
-                        active_exp = active_exp.replace(tzinfo=timezone.utc)
-                    if active_exp <= now:
-                        continue
+                if not isinstance(active_exp, datetime):
+                    continue
+                if active_exp.tzinfo is None:
+                    active_exp = active_exp.replace(tzinfo=timezone.utc)
+                if active_exp <= now:
+                    continue
                 active += 1
                 if target_user and self._owners.get(rs.id) == target_user:
                     active_user += 1
@@ -1835,7 +1838,8 @@ class SQLiteStore(SandboxStore):
                     (
                         "SELECT COUNT(*) AS c FROM sandbox_runs "
                         "WHERE (phase=? OR (phase=? AND started_at IS NOT NULL)) "
-                        "AND (claim_expires_at IS NULL OR claim_expires_at > ?)"
+                        "AND claim_owner IS NOT NULL AND claim_owner <> '' "
+                        "AND claim_expires_at IS NOT NULL AND claim_expires_at > ?"
                     ),
                     (RunPhase.running.value, RunPhase.starting.value, now_iso),
                 )
@@ -1853,7 +1857,8 @@ class SQLiteStore(SandboxStore):
                         (
                             "SELECT COUNT(*) AS c FROM sandbox_runs "
                             "WHERE user_id=? AND (phase=? OR (phase=? AND started_at IS NOT NULL)) "
-                            "AND (claim_expires_at IS NULL OR claim_expires_at > ?)"
+                            "AND claim_owner IS NOT NULL AND claim_owner <> '' "
+                            "AND claim_expires_at IS NOT NULL AND claim_expires_at > ?"
                         ),
                         (target_user, RunPhase.running.value, RunPhase.starting.value, now_iso),
                     )
@@ -1867,7 +1872,8 @@ class SQLiteStore(SandboxStore):
                         (
                             "SELECT COUNT(*) AS c FROM sandbox_runs "
                             "WHERE persona_id=? AND (phase=? OR (phase=? AND started_at IS NOT NULL)) "
-                            "AND (claim_expires_at IS NULL OR claim_expires_at > ?)"
+                            "AND claim_owner IS NOT NULL AND claim_owner <> '' "
+                            "AND claim_expires_at IS NOT NULL AND claim_expires_at > ?"
                         ),
                         (target_persona, RunPhase.running.value, RunPhase.starting.value, now_iso),
                     )
@@ -1881,7 +1887,8 @@ class SQLiteStore(SandboxStore):
                         (
                             "SELECT COUNT(*) AS c FROM sandbox_runs "
                             "WHERE workspace_id=? AND (phase=? OR (phase=? AND started_at IS NOT NULL)) "
-                            "AND (claim_expires_at IS NULL OR claim_expires_at > ?)"
+                            "AND claim_owner IS NOT NULL AND claim_owner <> '' "
+                            "AND claim_expires_at IS NOT NULL AND claim_expires_at > ?"
                         ),
                         (target_workspace, RunPhase.running.value, RunPhase.starting.value, now_iso),
                     )
@@ -1895,7 +1902,8 @@ class SQLiteStore(SandboxStore):
                         (
                             "SELECT COUNT(*) AS c FROM sandbox_runs "
                             "WHERE workspace_group_id=? AND (phase=? OR (phase=? AND started_at IS NOT NULL)) "
-                            "AND (claim_expires_at IS NULL OR claim_expires_at > ?)"
+                            "AND claim_owner IS NOT NULL AND claim_owner <> '' "
+                            "AND claim_expires_at IS NOT NULL AND claim_expires_at > ?"
                         ),
                         (target_workspace_group, RunPhase.running.value, RunPhase.starting.value, now_iso),
                     )
@@ -3361,7 +3369,9 @@ class PostgresStore(SandboxStore):
                     (
                         "SELECT COUNT(*) AS c FROM sandbox_runs "
                         "WHERE (phase=%s OR (phase=%s AND started_at IS NOT NULL)) "
-                        "AND (claim_expires_at IS NULL OR claim_expires_at::timestamptz > %s::timestamptz)"
+                        "AND claim_owner IS NOT NULL AND claim_owner <> '' "
+                        "AND claim_expires_at IS NOT NULL "
+                        "AND claim_expires_at::timestamptz > %s::timestamptz"
                     ),
                     (RunPhase.running.value, RunPhase.starting.value, now_iso),
                 )
@@ -3379,7 +3389,9 @@ class PostgresStore(SandboxStore):
                         (
                             "SELECT COUNT(*) AS c FROM sandbox_runs "
                             "WHERE user_id=%s AND (phase=%s OR (phase=%s AND started_at IS NOT NULL)) "
-                            "AND (claim_expires_at IS NULL OR claim_expires_at::timestamptz > %s::timestamptz)"
+                            "AND claim_owner IS NOT NULL AND claim_owner <> '' "
+                            "AND claim_expires_at IS NOT NULL "
+                            "AND claim_expires_at::timestamptz > %s::timestamptz"
                         ),
                         (target_user, RunPhase.running.value, RunPhase.starting.value, now_iso),
                     )
@@ -3393,7 +3405,9 @@ class PostgresStore(SandboxStore):
                         (
                             "SELECT COUNT(*) AS c FROM sandbox_runs "
                             "WHERE persona_id=%s AND (phase=%s OR (phase=%s AND started_at IS NOT NULL)) "
-                            "AND (claim_expires_at IS NULL OR claim_expires_at::timestamptz > %s::timestamptz)"
+                            "AND claim_owner IS NOT NULL AND claim_owner <> '' "
+                            "AND claim_expires_at IS NOT NULL "
+                            "AND claim_expires_at::timestamptz > %s::timestamptz"
                         ),
                         (target_persona, RunPhase.running.value, RunPhase.starting.value, now_iso),
                     )
@@ -3407,7 +3421,9 @@ class PostgresStore(SandboxStore):
                         (
                             "SELECT COUNT(*) AS c FROM sandbox_runs "
                             "WHERE workspace_id=%s AND (phase=%s OR (phase=%s AND started_at IS NOT NULL)) "
-                            "AND (claim_expires_at IS NULL OR claim_expires_at::timestamptz > %s::timestamptz)"
+                            "AND claim_owner IS NOT NULL AND claim_owner <> '' "
+                            "AND claim_expires_at IS NOT NULL "
+                            "AND claim_expires_at::timestamptz > %s::timestamptz"
                         ),
                         (target_workspace, RunPhase.running.value, RunPhase.starting.value, now_iso),
                     )
@@ -3421,7 +3437,9 @@ class PostgresStore(SandboxStore):
                         (
                             "SELECT COUNT(*) AS c FROM sandbox_runs "
                             "WHERE workspace_group_id=%s AND (phase=%s OR (phase=%s AND started_at IS NOT NULL)) "
-                            "AND (claim_expires_at IS NULL OR claim_expires_at::timestamptz > %s::timestamptz)"
+                            "AND claim_owner IS NOT NULL AND claim_owner <> '' "
+                            "AND claim_expires_at IS NOT NULL "
+                            "AND claim_expires_at::timestamptz > %s::timestamptz"
                         ),
                         (target_workspace_group, RunPhase.running.value, RunPhase.starting.value, now_iso),
                     )

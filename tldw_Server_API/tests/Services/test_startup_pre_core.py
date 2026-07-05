@@ -130,6 +130,7 @@ async def test_prepare_startup_pre_core_runs_helpers_in_order_and_returns_defer_
     assert calls[4][1]["app"] == "app"
     assert calls[6][1]["get_mcp_config"] == "get-mcp-config"
     assert calls[6][1]["validate_mcp_config"] == "validate-mcp-config"
+    assert calls[6][1]["test_mode"] is True
     assert calls[7][1]["route_enabled"] == "route-enabled"
     assert calls[10][1]["test_mode"] is True
     assert calls[11][1]["app"] == "app"

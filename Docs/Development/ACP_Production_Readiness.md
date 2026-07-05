@@ -13,6 +13,13 @@ evidence recorded below. Remaining live-backend and host-runtime caveats are
 called out explicitly and should be resolved before release notes claim fully
 verified production deployment on a specific host.
 
+The release-caveat tracker
+[#2398](https://github.com/rmusser01/tldw_server/issues/2398) is reconciled in
+[ACP Release-Caveat Closeout - 2026-06-21](ACP_Release_Caveat_Closeout_2026_06_21.md).
+All child issues are closed; remaining sandbox, artifact, reviewer-loop,
+failure-diagnostic, and documented-only profile caveats are expected support
+boundaries rather than open tracker blockers.
+
 ## Issue Map
 
 | Issue | Workstream | Readiness role |
@@ -32,6 +39,7 @@ verified production deployment on a specific host.
 | [#1538](https://github.com/rmusser01/tldw_server/issues/1538) | ACP output artifact mapping | Maps ACP run outputs to the artifact contract and separates execution artifacts from promoted workspace work products. |
 | [#1532](https://github.com/rmusser01/tldw_server/issues/1532) | ACP-adjacent release work tracker | Tracks artifact storage/API, promotion, UI, export, verification, compatibility, and product-state follow-ups after the first ACP productionization pass. |
 | [#1704](https://github.com/rmusser01/tldw_server/issues/1704) | ACP artifact release verification | Records release-grade verification for the first accepted ACP-to-workspace-artifact golden path. |
+| [#2398](https://github.com/rmusser01/tldw_server/issues/2398) | ACP release-caveat closeout tracker | Reconciles the final child issue outcomes, surface-language consistency, and remaining expected support boundaries before closing the release-caveat tracker. |
 | [#2401](https://github.com/rmusser01/tldw_server/issues/2401) | Artifact retention and transcript redaction release policy | Makes the release retention/redaction boundaries explicit for ACP session evidence, audit records, diagnostics, artifacts, run previews, and promoted workspace artifacts. |
 | [#2400](https://github.com/rmusser01/tldw_server/issues/2400) | Sandbox host-runtime release verification | Records release-host evidence for selected ACP sandbox runtimes before sandbox-backed support claims are made. |
 | [#2402](https://github.com/rmusser01/tldw_server/issues/2402) | Live-agent caveat verification | Records deeper Goose, Hermes, and OpenCode evidence for workspace binding and non-empty MCP server injection while preserving artifact, sandbox, reviewer-loop, and failure-diagnostic caveats. |
@@ -71,6 +79,13 @@ injection evidence for those three agents on the verified host profile. They
 must keep `supported_with_caveats` wording because live agent-produced ACP
 artifacts, sandbox-backed execution, reviewer-loop behavior, and failure
 diagnostic payloads remain unverified for those profiles.
+
+## Release-Caveat Closeout
+
+[#2398](https://github.com/rmusser01/tldw_server/issues/2398) is the final
+tracker for the June 2026 ACP release-caveat work. The reconciled child map and
+expected remaining support boundaries are recorded in
+[ACP Release-Caveat Closeout - 2026-06-21](ACP_Release_Caveat_Closeout_2026_06_21.md).
 
 ## Readiness Matrix
 

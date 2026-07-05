@@ -12,9 +12,19 @@ def test_process_pdfs_auto_chunking_adds_plan_metadata(
     client, _ = client_with_single_user
 
     import tldw_Server_API.app.api.v1.endpoints.media as media_mod
+    from tldw_Server_API.app.core.Chunking.auto_boundary_assistant import (
+        AutoChunkBoundaryAssistantResult,
+        ChatAutoChunkBoundaryAssistant,
+    )
     import tldw_Server_API.app.core.Chunking as chunking_mod
 
     captured: dict[str, object] = {}
+
+    async def _unavailable_refine(self, _request):
+        return AutoChunkBoundaryAssistantResult.fallback(
+            reason="ai_assist_unavailable",
+            rationale="LLM boundary assistant unavailable in route test.",
+        )
 
     async def _stub_process_pdf_task(**kwargs):
         captured["initial_chunk_method"] = kwargs.get("chunk_method")
@@ -29,6 +39,7 @@ def test_process_pdfs_auto_chunking_adds_plan_metadata(
         return [{"text": text, "metadata": {"chunk_num": 0}}]
 
     monkeypatch.setattr(media_mod.pdf_lib, "process_pdf_task", _stub_process_pdf_task)
+    monkeypatch.setattr(ChatAutoChunkBoundaryAssistant, "refine", _unavailable_refine)
     monkeypatch.setattr(chunking_mod, "improved_chunking_process", _stub_chunking)
 
     response = client.post(

@@ -71,13 +71,19 @@ const CHATTERBOX_VOICE_CONVERSION_FORMATS = new Set<ChatterboxVoiceConversionFor
 ])
 
 const toArrayBuffer = (value: unknown): ArrayBuffer => {
+  const copyBytes = (bytes: Uint8Array): ArrayBuffer => {
+    const copy = new Uint8Array(bytes.byteLength)
+    copy.set(bytes)
+    return copy.buffer
+  }
+
   if (value instanceof ArrayBuffer) return value
   if (value instanceof Uint8Array) {
-    return value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength)
+    return copyBytes(value)
   }
-  if (Array.isArray(value)) return Uint8Array.from(value).buffer
+  if (Array.isArray(value)) return copyBytes(Uint8Array.from(value))
   if (value && typeof value === "object" && Array.isArray((value as { data?: unknown }).data)) {
-    return Uint8Array.from((value as { data: number[] }).data).buffer
+    return copyBytes(Uint8Array.from((value as { data: number[] }).data))
   }
   throw new Error("Invalid audio buffer returned from Chatterbox voice conversion.")
 }

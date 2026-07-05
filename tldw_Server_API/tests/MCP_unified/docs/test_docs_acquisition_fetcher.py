@@ -260,7 +260,7 @@ def test_fetcher_returns_approval_required_without_resolver_or_transport() -> No
     assert transport.calls == []  # nosec B101
 
 
-def test_fetcher_respect_robots_does_not_fail_closed_without_robots_client() -> None:
+def test_fetcher_respect_robots_fails_closed_without_robots_client() -> None:
     settings = _settings(respect_robots=True)
     resolver = FakeResolver({"example.com": ["93.184.216.34"]})
     transport = FakeTransport(
@@ -269,10 +269,10 @@ def test_fetcher_respect_robots_does_not_fail_closed_without_robots_client() -> 
 
     result = _fetcher(resolver=resolver, transport=transport, settings=settings).fetch("https://example.com/docs")
 
-    assert result.status == "fetched"  # nosec B101
-    assert result.body == b"<h1>Ok</h1>"  # nosec B101
-    assert resolver.calls == [("example.com", 443)]  # nosec B101
-    assert len(transport.calls) == 1  # nosec B101
+    assert result.status == "denied"  # nosec B101
+    assert result.reason == "robots_unavailable"  # nosec B101
+    assert resolver.calls == []  # nosec B101
+    assert transport.calls == []  # nosec B101
 
 
 def test_fetcher_revalidates_redirect_target_and_denies_private_redirect() -> None:
