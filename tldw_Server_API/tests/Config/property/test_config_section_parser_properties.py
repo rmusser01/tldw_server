@@ -38,10 +38,22 @@ class TestParseIntProperties:
         result = _parse_int(raw, default)
         assert isinstance(result, int)
 
+    @staticmethod
+    def _is_unparseable_int(s: str) -> bool:
+        """True if int(s.strip()) would raise — the robust 'non-numeric' filter
+        (int() accepts leading +/-/whitespace, so a naive isdigit() check is wrong)."""
+        try:
+            int(s.strip())
+        except (TypeError, ValueError):
+            return True
+        return False
+
     @_COMMON
-    @given(raw=st.text(max_size=30).filter(lambda s: not s.strip().lstrip("-").isdigit()), default=st.integers())
+    @given(raw=st.text(max_size=30), default=st.integers())
     def test_non_numeric_and_empty_yield_default(self, raw: str, default: int) -> None:
         # a non-integer string (or empty) must fall back to the default
+        if not self._is_unparseable_int(raw):
+            return  # skip strings that ARE valid integers (covered elsewhere)
         assert _parse_int(raw, default) == default
 
     @_COMMON

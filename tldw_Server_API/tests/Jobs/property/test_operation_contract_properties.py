@@ -57,6 +57,27 @@ def _admission_is_consistent(
     return True
 
 
+def _lifecycle_is_consistent(
+    outcome: OperationOutcome,
+    row: dict | None,
+    transition_applied: bool,
+    no_transition_reason: NoTransitionReason | None,
+    durable_events: tuple,
+) -> bool:
+    """Independent oracle mirroring the LifecycleResult contract."""
+    if outcome is OperationOutcome.APPLIED:
+        if not transition_applied or row is None:
+            return False
+    else:
+        if transition_applied or durable_events:
+            return False
+    if outcome is OperationOutcome.NO_TRANSITION and no_transition_reason is None:
+        return False
+    if outcome is not OperationOutcome.NO_TRANSITION and no_transition_reason is not None:
+        return False
+    return True
+
+
 class TestAdmissionResultContract:
     @_COMMON
     @given(
@@ -150,6 +171,9 @@ class TestLifecycleResultContract:
     ) -> None:
         row = {"id": "r1"} if has_row else None
         events = ({"type": "moved"},) if has_events else ()
+        expected_ok = _lifecycle_is_consistent(
+            outcome, row, transition_applied, no_transition_reason, events
+        )
         try:
             result = LifecycleResult(
                 outcome=outcome,
@@ -159,16 +183,13 @@ class TestLifecycleResultContract:
                 durable_events=events,
             )
         except ValueError:
-            return  # a rejected combination is fine
-        # If it constructed, the applied/no-transition invariants must hold.
-        if outcome is OperationOutcome.APPLIED:
-            assert result.transition_applied and result.row is not None
-        else:
-            assert not result.transition_applied and not result.durable_events
-        if outcome is OperationOutcome.NO_TRANSITION:
-            assert result.no_transition_reason is not None
-        else:
-            assert result.no_transition_reason is None
+            # a ValueError is correct ONLY for a genuinely-inconsistent state;
+            # raising on a valid one would be a bug the oracle catches here.
+            assert not expected_ok, "contract rejected a state the oracle deems consistent"
+            return
+        assert expected_ok, "contract admitted an impossible lifecycle state (dropped invariant?)"
+        assert result.outcome is outcome
+        assert result.transition_applied is transition_applied
 
     def test_minimal_valid_constructions_succeed(self) -> None:
         LifecycleResult(outcome=OperationOutcome.APPLIED, transition_applied=True, row={"id": 1})

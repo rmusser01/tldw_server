@@ -14,6 +14,7 @@ invariants are:
 """
 from __future__ import annotations
 
+import copy
 from typing import Any
 
 import pytest
@@ -113,6 +114,9 @@ class TestValidCardInvariants:
         drop=st.sampled_from(["name", "description", "first_mes"]),
     )
     def test_dropping_a_required_field_is_always_rejected(self, card: dict, drop: str) -> None:
+        # deepcopy first — Hypothesis assumes test bodies don't mutate their
+        # generated inputs (in-place edits break shrinking/replay)
+        card = copy.deepcopy(card)
         data = card.get("data", card)
         data.pop(drop, None)
         ok, errors = validate_v3_card(card)
@@ -122,6 +126,7 @@ class TestValidCardInvariants:
     @_COMMON
     @given(card=_valid_card())
     def test_blank_name_is_always_rejected(self, card: dict) -> None:
+        card = copy.deepcopy(card)  # do not mutate the Hypothesis-generated input
         data = card.get("data", card)
         data["name"] = "   "  # whitespace-only
         ok, _errors = validate_v3_card(card)
