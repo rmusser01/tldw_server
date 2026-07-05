@@ -662,7 +662,15 @@ async def _require_first_run_write_access(request: Request) -> None:
 
 
 async def _require_mcp_tools_setup_or_admin_access(request: Request) -> None:
-    await _require_first_run_write_access(request)
+    status_snapshot = setup_manager.get_status_snapshot()
+    if not bool(status_snapshot.get("setup_completed")):
+        await _require_first_run_write_access(request)
+        return
+
+    principal = await get_auth_principal(request)
+    permissions = set(principal.permissions) if principal is not None else set()
+    if principal is None or not (principal.is_admin or SYSTEM_CONFIGURE in permissions or "*" in permissions):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="system_configure_required")
 
 
 async def _require_mcp_tools_catalog_access(request: Request) -> None:

@@ -305,6 +305,11 @@ def test_first_run_mcp_tools_apply_persists_numeric_profile_and_assignment(
     service = _FakeMcpToolsService()
     _override_mcp_tools_service(monkeypatch, service)
 
+    async def _fail_auth_resolution(_request):
+        pytest.fail("auth principal should not be resolved during incomplete first-run setup")
+
+    monkeypatch.setattr(setup_endpoint, "get_auth_principal", _fail_auth_resolution)
+
     response = setup_client.post(
         "/api/v1/setup/first-run/mcp-tools/apply",
         json={"selected_pack_ids": ["research"], "selected_addon_ids": []},
@@ -364,8 +369,10 @@ def test_first_run_mcp_tools_apply_after_completion_rejects_before_service_call(
     store.mark_completed()
     service = _FakeMcpToolsService()
     _override_mcp_tools_service(monkeypatch, service)
+    auth_calls = []
 
-    async def _admin_principal(_request):
+    async def _admin_principal(request):
+        auth_calls.append(request.url.path)
         return SimpleNamespace(is_admin=True, permissions=["system.configure"])
 
     monkeypatch.setattr(setup_endpoint, "get_auth_principal", _admin_principal)
@@ -377,6 +384,44 @@ def test_first_run_mcp_tools_apply_after_completion_rejects_before_service_call(
 
     assert response.status_code == 409
     assert response.json()["detail"] == "setup_already_completed"
+    assert auth_calls == ["/api/v1/setup/first-run/mcp-tools/apply"]
+    assert service.apply_requests == []
+
+
+def test_first_run_mcp_tools_apply_after_completion_requires_admin_auth(
+    setup_client,
+    monkeypatch,
+    tmp_path,
+):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_completed(monkeypatch)
+    store = FirstRunStateStore(state_path)
+    _persist_required_first_run_step_data(store)
+    store.record_first_chat_success(
+        provider="openai",
+        model="gpt-4.1-mini",
+        response_id="chatcmpl-test",
+    )
+    store.mark_completed()
+    service = _FakeMcpToolsService()
+    _override_mcp_tools_service(monkeypatch, service)
+    auth_calls = []
+
+    async def _missing_principal(request):
+        auth_calls.append(request.url.path)
+        return None
+
+    monkeypatch.setattr(setup_endpoint, "get_auth_principal", _missing_principal)
+
+    response = setup_client.post(
+        "/api/v1/setup/first-run/mcp-tools/apply",
+        json={"selected_pack_ids": ["research"], "selected_addon_ids": []},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "system_configure_required"
+    assert auth_calls == ["/api/v1/setup/first-run/mcp-tools/apply"]
     assert service.apply_requests == []
 
 
@@ -467,11 +512,19 @@ def test_first_run_mcp_tools_validate_after_completion_rejects_without_state_upd
         response_id="chatcmpl-test",
     )
     store.mark_completed()
+    auth_calls = []
+
+    async def _admin_principal(request):
+        auth_calls.append(request.url.path)
+        return SimpleNamespace(is_admin=True, permissions=["system.configure"])
+
+    monkeypatch.setattr(setup_endpoint, "get_auth_principal", _admin_principal)
 
     response = setup_client.post("/api/v1/setup/first-run/mcp-tools/validate", json={})
 
     assert response.status_code == 409
     assert response.json()["detail"] == "setup_already_completed"
+    assert auth_calls == ["/api/v1/setup/first-run/mcp-tools/validate"]
     state = FirstRunStateStore(state_path).load()
     assert state.status == FirstRunStatus.COMPLETED
     assert state.step_data["mcp_tools"]["validation_state"] == "not_run"
