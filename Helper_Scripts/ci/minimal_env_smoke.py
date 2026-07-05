@@ -39,7 +39,8 @@ MINIMAL_ENV = {
 
 
 def _child_env(repo_root: Path, port: int) -> dict[str, str]:
-    """A scrubbed environment: MINIMAL_ENV plus only what the OS needs to run."""
+    """Build the scrubbed child environment: MINIMAL_ENV plus only the OS
+    variables (PATH/HOME/...) the interpreter needs to run at all."""
     env: dict[str, str] = {"PYTHONPATH": str(repo_root), "PORT": str(port)}
     for passthrough in ("PATH", "HOME", "LANG", "LC_ALL", "SYSTEMROOT", "TMPDIR", "VIRTUAL_ENV"):
         value = os.environ.get(passthrough)
@@ -50,8 +51,17 @@ def _child_env(repo_root: Path, port: int) -> dict[str, str]:
 
 
 def _probe(url: str) -> tuple[int, str]:
-    with urllib.request.urlopen(url, timeout=3) as resp:  # noqa: S310 - localhost only
-        return resp.status, resp.read().decode("utf-8", "replace")
+    """GET *url* and return ``(status_code, body)``.
+
+    A non-2xx response (e.g. a 500 during a broken startup) raises
+    ``HTTPError``; catch it so the status and body still reach diagnostics
+    instead of being flattened into a generic connection error.
+    """
+    try:
+        with urllib.request.urlopen(url, timeout=3) as resp:  # noqa: S310 - localhost only
+            return resp.status, resp.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as err:
+        return err.code, err.read().decode("utf-8", "replace")
 
 
 def main(argv: list[str]) -> int:
@@ -73,21 +83,28 @@ def main(argv: list[str]) -> int:
     print(f"[minimal-env-smoke] booting: {' '.join(cmd)}")
     # Child output goes to a temp FILE, not subprocess.PIPE: the app logs
     # heavily at startup and an undrained pipe would fill (~64KB) and deadlock
-    # the child before it binds the port.
-    log_file = Path(tempfile.mkstemp(prefix="minimal-env-smoke-", suffix=".log")[1])
+    # the child before it binds the port. Close the mkstemp fd immediately
+    # (we reopen the path by name) to avoid leaking a descriptor.
+    fd, log_path = tempfile.mkstemp(prefix="minimal-env-smoke-", suffix=".log")
+    os.close(fd)
+    log_file = Path(log_path)
 
     def _tail_log(n: int = 25) -> str:
+        """Return the last *n* lines of the child's captured output."""
         try:
             return "\n".join(log_file.read_text("utf-8", "replace").splitlines()[-n:])
         except OSError:
             return "<no log captured>"
 
-    with log_file.open("w", encoding="utf-8") as sink:
-        proc = subprocess.Popen(  # noqa: S603 - fixed argv
-            cmd, cwd=str(repo_root), env=_child_env(repo_root, args.port),
-            stdout=sink, stderr=subprocess.STDOUT, text=True,
-        )
-        try:
+    proc: subprocess.Popen[str] | None = None
+    try:
+        # The `with` closes the sink before the finally unlinks it — required on
+        # Windows, where unlinking an open file raises PermissionError.
+        with log_file.open("w", encoding="utf-8") as sink:
+            proc = subprocess.Popen(  # noqa: S603 - fixed argv
+                cmd, cwd=str(repo_root), env=_child_env(repo_root, args.port),
+                stdout=sink, stderr=subprocess.STDOUT, text=True,
+            )
             deadline = time.monotonic() + args.timeout
             last_err = "no response"
             while time.monotonic() < deadline:
@@ -112,13 +129,14 @@ def main(argv: list[str]) -> int:
                 file=sys.stderr,
             )
             return 1
-        finally:
+    finally:
+        if proc is not None:
             proc.terminate()
             try:
                 proc.wait(timeout=10)
             except subprocess.TimeoutExpired:
                 proc.kill()
-            log_file.unlink(missing_ok=True)
+        log_file.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":
