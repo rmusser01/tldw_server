@@ -1,3 +1,5 @@
+"""Status values shared by web scraping contract objects."""
+
 from __future__ import annotations
 
 from enum import Enum

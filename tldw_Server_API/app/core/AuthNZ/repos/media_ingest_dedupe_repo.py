@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import contextlib
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -12,6 +11,7 @@ from tldw_Server_API.app.core.AuthNZ.database import (
     build_postgres_in_clause,
     build_sqlite_in_clause,
 )
+from tldw_Server_API.app.core.DB_Management.sqlite_schema_helpers import ensure_sqlite_column_exists
 
 
 def _normalize_optional_text(value: Any) -> str | None:
@@ -77,18 +77,13 @@ class MediaIngestDedupeRepo:
                 ON media_ingest_dedupe_entries (media_type, updated_at DESC)
                 """
             )
-            rows = await self.db_pool.fetchall("PRAGMA table_info(media_ingest_dedupe_entries)")
-            column_names = set()
-            for row in rows:
-                try:
-                    column_names.add(str(row["name"]).lower())
-                except Exception:
-                    with contextlib.suppress(Exception):
-                        column_names.add(str(row[1]).lower())
-            if "source_db_path" not in column_names:
-                await self.db_pool.execute(
-                    "ALTER TABLE media_ingest_dedupe_entries ADD COLUMN source_db_path TEXT NULL"
-                )
+            await ensure_sqlite_column_exists(
+                fetchall=self.db_pool.fetchall,
+                execute=self.db_pool.execute,
+                table_name="media_ingest_dedupe_entries",
+                column_name="source_db_path",
+                column_definition="TEXT NULL",
+            )
         except Exception as exc:
             logger.error("MediaIngestDedupeRepo.ensure_tables failed: {}", exc)
             raise

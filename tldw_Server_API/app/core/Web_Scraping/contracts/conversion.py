@@ -1,3 +1,5 @@
+"""Conversion helpers between web scraping contracts and legacy payloads."""
+
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -53,6 +55,7 @@ _SEARCH_RESERVED_KEYS = {
 
 
 def _to_plain(value: Any) -> Any:
+    """Convert immutable contract containers back to plain JSON-like values."""
     if isinstance(value, Mapping):
         return {str(key): _to_plain(item) for key, item in value.items()}
     if isinstance(value, tuple | list):
@@ -65,6 +68,7 @@ def _merge_extra_fields(
     extra_fields: Mapping[str, Any],
     reserved_keys: set[str],
 ) -> None:
+    """Merge non-reserved extra fields into a public payload in place."""
     for key, value in _to_plain(extra_fields).items():
         if key in reserved_keys:
             continue
@@ -72,11 +76,13 @@ def _merge_extra_fields(
 
 
 def _domain_tuple_to_legacy_list(domains: tuple[str, ...]) -> list[str] | None:
+    """Convert normalized domain filters to the legacy list-or-None shape."""
     values = [str(domain).strip() for domain in domains if str(domain).strip()]
     return values or None
 
 
 def preflight_result_to_public_dict(result: PreflightResult) -> dict[str, Any]:
+    """Return the public dictionary shape for preflight analyzer results."""
     return {
         "analysis": _to_plain(result.analysis),
         "advice": {
@@ -88,6 +94,7 @@ def preflight_result_to_public_dict(result: PreflightResult) -> dict[str, Any]:
 
 
 def extraction_result_to_public_dict(result: ExtractionResult) -> dict[str, Any]:
+    """Return the legacy public dictionary shape for article extraction."""
     payload: dict[str, Any] = {
         "url": result.url,
         "title": result.title,
@@ -112,6 +119,7 @@ def extraction_result_to_public_dict(result: ExtractionResult) -> dict[str, Any]
 
 
 def article_failure_to_public_dict(url: str, failure: RuntimeFailure) -> dict[str, Any]:
+    """Return the public failure payload used by article extraction."""
     payload: dict[str, Any] = {
         "url": str(url),
         "title": "N/A",
@@ -126,6 +134,7 @@ def article_failure_to_public_dict(url: str, failure: RuntimeFailure) -> dict[st
 
 
 def enhanced_failure_to_public_dict(url: str, failure: RuntimeFailure) -> dict[str, Any]:
+    """Return the public failure payload used by enhanced scraping."""
     payload: dict[str, Any] = {
         "url": str(url),
         "error": failure.public_message,
@@ -136,6 +145,7 @@ def enhanced_failure_to_public_dict(url: str, failure: RuntimeFailure) -> dict[s
 
 
 def search_result_to_public_dict(result: SearchResult | Mapping[str, Any]) -> dict[str, Any]:
+    """Return the public dictionary shape for one search result."""
     if isinstance(result, SearchResult):
         return {
             "title": result.title,
@@ -147,6 +157,7 @@ def search_result_to_public_dict(result: SearchResult | Mapping[str, Any]) -> di
 
 
 def search_results_to_public_dict(payload: SearchResultsPayload) -> dict[str, Any]:
+    """Return the legacy public dictionary shape for search responses."""
     public: dict[str, Any] = {
         "search_engine": payload.search_engine,
         "search_query": payload.search_query,
@@ -177,6 +188,7 @@ def search_results_to_public_dict(payload: SearchResultsPayload) -> dict[str, An
 
 
 def search_request_to_legacy_kwargs(request: SearchRequest) -> dict[str, Any]:
+    """Return keyword arguments accepted by the legacy search implementation."""
     return {
         "search_engine": request.search_engine,
         "search_query": request.search_query,

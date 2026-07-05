@@ -26,11 +26,15 @@ modified_files:
 - tldw_Server_API/app/core/Web_Scraping/contracts/requests.py
 - tldw_Server_API/app/core/Web_Scraping/contracts/results.py
 - tldw_Server_API/app/core/Web_Scraping/contracts/conversion.py
+- tldw_Server_API/app/core/DB_Management/sqlite_schema_helpers.py
+- tldw_Server_API/app/core/AuthNZ/repos/media_ingest_dedupe_repo.py
+- tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py
 - tldw_Server_API/tests/Web_Scraping/test_phase1_contracts.py
 - tldw_Server_API/tests/WebScraping/test_phase1_compatibility_contracts.py
 - tldw_Server_API/tests/Web_Scraping/test_js_required_fallback_metric.py
+- tldw_Server_API/tests/MediaIngestion_NEW/integration/test_media_ingest_jobs_video_dedupe.py
 - backlog/tasks/task-12158 - Plan-and-implement-Web-Scraping-refactor-Phase-1-contracts-and-compatibility-tests.md
-updated_date: 2026-07-04 23:48
+updated_date: 2026-07-04 18:07
 ---
 
 ## Description
@@ -101,12 +105,29 @@ Post-review verification:
 - `python -m bandit -r tldw_Server_API/app/core/Web_Scraping/contracts -f json -o /tmp/bandit_web_scraping_phase1_contracts_review_fixes.json` -> 0 findings.
 - `git diff --check` -> passed.
 - Follow-up code-review subagent confirmed the three Important findings are closed and found no new Critical, Important, or Minor issues.
+PR #2636 remediation pass requested: rebase branch on latest `dev`, inspect and address all PR issues/comments/check findings, then rerun verification and update the PR branch.
+
+PR #2636 latest-dev remediation:
+- Rebased `codex/web-scraping-phase-0-inventory` onto `origin/dev` at `6b727b221e55646eba663a03571e38302f7fafc2`.
+- Addressed Qodo review comments by adding explicit docstrings across `Web_Scraping/contracts`, replacing mixed per-test markers in the Phase 1 compatibility tests with one module-level `unit` marker, moving SQLite column-existence logic to `DB_Management.sqlite_schema_helpers`, and removing the broad `contextlib.suppress(Exception)` fallback in the media ingest dedupe repo.
+- Fixed stale `source_db_path` transcript reuse by falling back to the current default source user's media DB path when the stored path is stale, preserving cross-user transcript reuse without reprocessing.
+- Added a regression test for stale source DB path fallback and regenerated Web_Scraping import inventory artifacts after line-number changes.
+
+Post-latest-dev verification:
+- `python -m py_compile tldw_Server_API/app/core/Web_Scraping/contracts/*.py tldw_Server_API/app/core/DB_Management/sqlite_schema_helpers.py` -> passed.
+- `python -m pytest -q --tb=short tldw_Server_API/tests/MediaIngestion_NEW/integration/test_media_ingest_jobs_video_dedupe.py` -> 7 passed.
+- `python -m pytest -q --tb=short tldw_Server_API/tests/Agent_Client_Protocol/test_acp_websocket.py::TestACPRunnerClientPermissions` -> 4 passed.
+- `python -m pytest -q -x --tb=short tldw_Server_API/tests/Web_Scraping tldw_Server_API/tests/WebScraping tldw_Server_API/tests/WebSearch` -> 376 passed, 13 skipped.
+- `python -m bandit -r tldw_Server_API/app/core/Web_Scraping/contracts tldw_Server_API/app/core/DB_Management/sqlite_schema_helpers.py tldw_Server_API/app/core/AuthNZ/repos/media_ingest_dedupe_repo.py tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py -f json -o /tmp/bandit_pr2636_rebase_comments_after_latest_dev.json` -> 0 findings.
+- Contract docstring AST check -> passed.
+- `git diff --check` -> passed.
+- Review-only subagent caught the moved `origin/dev` ancestry and untracked helper risks; both are addressed by the second rebase and explicit staging of the new helper file.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Phase 1 of the Web_Scraping refactor is implemented as an additive contract and compatibility-test slice. Runtime behavior was not moved. The new contracts package is stdlib-only and protected by import-boundary tests; compatibility tests lock current legacy imports, pre-scrape analyzer attachment for direct and enhanced scrapers, policy-denial dict shapes, and WebSearch initialized/processed result shapes. Post-PR review fixes now preserve extraction diagnostics through guarded extra fields, prevent WebSearch provider extras from overwriting canonical keys, and add a legacy kwargs adapter for list-compatible search domain filters. Focused Web_Scraping/WebScraping/WebSearch verification, compile, Bandit, import guardrail, follow-up code review, and diff hygiene all pass.
+Phase 1 of the Web_Scraping refactor is implemented as an additive contract and compatibility-test slice. Runtime behavior was not moved. The branch is rebased onto latest `dev` at `6b727b221e55646eba663a03571e38302f7fafc2`. Post-PR comments are addressed: contract docstrings are explicit, Phase 1 compatibility tests use a single approved marker, SQLite schema migration logic lives in DB_Management, stale media ingest transcript source DB paths fall back to the current default source DB path, and import inventory artifacts are regenerated. Focused media ingest and ACP checks, broad Web_Scraping/WebScraping/WebSearch verification, compile, Bandit, contract docstring scan, and diff hygiene all pass.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

@@ -1,3 +1,5 @@
+"""Result contract objects for web scraping compatibility adapters."""
+
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
@@ -10,6 +12,7 @@ from .statuses import WebScrapingStatus
 
 
 def _freeze_value(value: Any) -> Any:
+    """Recursively convert mutable containers into immutable equivalents."""
     if isinstance(value, Mapping):
         return _freeze_mapping(value)
     if isinstance(value, list | tuple):
@@ -18,10 +21,12 @@ def _freeze_value(value: Any) -> Any:
 
 
 def _freeze_mapping(value: Mapping[str, Any] | None) -> Mapping[str, Any]:
+    """Return an immutable string-keyed mapping for result metadata."""
     return MappingProxyType({str(key): _freeze_value(item) for key, item in dict(value or {}).items()})
 
 
 def _normalize_domains(value: str | Sequence[str] | None) -> tuple[str, ...]:
+    """Normalize comma-separated or sequence domain filters into a tuple."""
     if value is None:
         return ()
     if isinstance(value, str):
@@ -33,27 +38,35 @@ def _normalize_domains(value: str | Sequence[str] | None) -> tuple[str, ...]:
 
 @dataclass(frozen=True, slots=True)
 class PreflightAdvice:
+    """Backend and method guidance derived from pre-scrape analysis."""
+
     backend: str | None = None
     method: str | None = None
     notes: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
+        """Normalize advice notes to immutable strings."""
         object.__setattr__(self, "notes", tuple(str(note) for note in (self.notes or ())))
 
 
 @dataclass(frozen=True, slots=True)
 class PreflightResult:
+    """Pre-scrape analyzer output plus normalized routing advice."""
+
     analysis: Mapping[str, Any] = field(default_factory=dict)
     advice: PreflightAdvice = field(default_factory=PreflightAdvice)
     status: WebScrapingStatus = WebScrapingStatus.OK
     failure: RuntimeFailure | None = None
 
     def __post_init__(self) -> None:
+        """Freeze analysis metadata after dataclass initialization."""
         object.__setattr__(self, "analysis", _freeze_mapping(self.analysis))
 
 
 @dataclass(frozen=True, slots=True)
 class ExtractionResult:
+    """Normalized article extraction result before public conversion."""
+
     url: str
     title: str = "N/A"
     author: str = "N/A"
@@ -69,6 +82,7 @@ class ExtractionResult:
     failure: RuntimeFailure | None = None
 
     def __post_init__(self) -> None:
+        """Validate required URL fields and freeze metadata maps."""
         normalized_url = str(self.url or "").strip()
         if not normalized_url:
             raise ValueError("url is required")
@@ -81,12 +95,15 @@ class ExtractionResult:
 
 @dataclass(frozen=True, slots=True)
 class CrawlResult:
+    """Normalized crawl result containing extracted page results."""
+
     base_url: str
     results: tuple[ExtractionResult, ...] = ()
     status: WebScrapingStatus = WebScrapingStatus.OK
     failure: RuntimeFailure | None = None
 
     def __post_init__(self) -> None:
+        """Validate the crawl base URL and freeze result ordering."""
         normalized_url = str(self.base_url or "").strip()
         if not normalized_url:
             raise ValueError("base_url is required")
@@ -96,12 +113,15 @@ class CrawlResult:
 
 @dataclass(frozen=True, slots=True)
 class SearchResult:
+    """Normalized individual web search result."""
+
     title: str
     url: str
     content: str = ""
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        """Normalize scalar fields and freeze result metadata."""
         object.__setattr__(self, "title", str(self.title or ""))
         object.__setattr__(self, "url", str(self.url or ""))
         object.__setattr__(self, "content", str(self.content or ""))
@@ -110,6 +130,8 @@ class SearchResult:
 
 @dataclass(frozen=True, slots=True)
 class SearchResultsPayload:
+    """Normalized web search response preserving legacy public fields."""
+
     search_engine: str
     search_query: str
     content_country: str = "US"
@@ -136,6 +158,7 @@ class SearchResultsPayload:
     extra_fields: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        """Normalize domain filters, search results, and extra metadata."""
         object.__setattr__(self, "site_whitelist", _normalize_domains(self.site_whitelist))
         object.__setattr__(self, "site_blacklist", _normalize_domains(self.site_blacklist))
         normalized_results: list[SearchResult | Mapping[str, Any]] = []

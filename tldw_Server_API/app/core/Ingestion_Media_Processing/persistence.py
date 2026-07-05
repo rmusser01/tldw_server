@@ -1741,16 +1741,25 @@ async def _maybe_build_reused_transcript_process_result(
         build_media_runtime_config,
     )
 
-    source_db_path = str(hit.get("source_db_path") or "").strip()
-    if not source_db_path:
-        source_db_path = str(DatabasePaths.get_media_db_path(str(source_user_id_int)))
+    stored_source_db_path = str(hit.get("source_db_path") or "").strip()
+    default_source_db_path = str(DatabasePaths.get_media_db_path(str(source_user_id_int)))
+    source_db_path = stored_source_db_path or default_source_db_path
     runtime_config = build_media_runtime_config()
     if not runtime_config.postgres_content_mode and not FilePath(source_db_path).exists():
-        logger.warning(
-            "Ignoring reusable transcript hit for media_id={} because source DB does not exist.",
-            source_media_id_int,
-        )
-        return None
+        if stored_source_db_path and stored_source_db_path != default_source_db_path:
+            logger.warning(
+                "Reusable transcript hit for media_id={} has stale source DB path {}; trying current default {}.",
+                source_media_id_int,
+                stored_source_db_path,
+                default_source_db_path,
+            )
+            source_db_path = default_source_db_path
+        if not FilePath(source_db_path).exists():
+            logger.warning(
+                "Ignoring reusable transcript hit for media_id={} because source DB does not exist.",
+                source_media_id_int,
+            )
+            return None
 
     source_db = create_media_database(
         client_id=f"media_ingest_dedupe_source:{source_user_id_int}",

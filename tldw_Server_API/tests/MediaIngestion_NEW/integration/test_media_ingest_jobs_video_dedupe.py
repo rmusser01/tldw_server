@@ -499,6 +499,145 @@ async def test_media_ingest_dedupe_skips_missing_source_db_path(
 
 
 @pytest.mark.asyncio
+async def test_media_ingest_dedupe_falls_back_when_stored_source_db_path_is_stale(
+    monkeypatch,
+    tmp_path,
+):
+    from tldw_Server_API.app.api.v1.schemas.media_request_models import AddMediaForm
+    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
+    from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+    from tldw_Server_API.app.core.Ingestion_Media_Processing import persistence
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+    import tldw_Server_API.app.services.media_ingest_jobs_worker as worker
+
+    _set_jobs_db(monkeypatch, tmp_path)
+    _allow_url_policy(monkeypatch)
+    monkeypatch.setenv("PRIVILEGE_METADATA_VALIDATE_ON_STARTUP", "0")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'users.db'}")
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "user_databases"))
+    await reset_db_pool()
+
+    source_url = "https://www.youtube.com/watch?v=stale-source-db"
+    stale_source_db = tmp_path / "stale-source" / "Media_DB_v2.db"
+    processor_calls: list[str] = []
+
+    async def _fake_process_videos(**kwargs):
+        processor_calls.extend(kwargs.get("inputs") or [])
+        call_no = len(processor_calls)
+        return {
+            "results": [
+                {
+                    "status": "Success",
+                    "input_ref": source_url,
+                    "processing_source": source_url,
+                    "media_type": "video",
+                    "content": f"Reusable transcript content {call_no}.",
+                    "segments": [],
+                    "analysis": f"processor summary {call_no}",
+                    "analysis_details": {"transcription_language": "en"},
+                    "metadata": {
+                        "title": "Stale Source DB Video",
+                        "author": "Test Author",
+                        "source_url": source_url,
+                        "url": source_url,
+                        "model": "whisper-test",
+                        "provider": "whisper",
+                        "source": "youtube",
+                    },
+                    "warnings": None,
+                }
+            ],
+            "errors_count": 0,
+            "errors": [],
+        }
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Ingestion_Media_Processing.Video.Video_DL_Ingestion_Lib.process_videos",
+        _fake_process_videos,
+        raising=True,
+    )
+
+    job_manager = JobManager()
+    seed_form = AddMediaForm(
+        media_type="video",
+        transcription_model="whisper-test",
+        perform_analysis=False,
+        perform_chunking=False,
+    )
+
+    try:
+        row1 = job_manager.create_job(
+            domain="media_ingest",
+            queue="default",
+            job_type="media_ingest_item",
+            payload={
+                "batch_id": "batch-stale-source-db-1",
+                "media_type": "video",
+                "source": source_url,
+                "source_kind": "url",
+                "input_ref": source_url,
+                "options": {
+                    "media_type": "video",
+                    "transcription_model": "whisper-test",
+                    "perform_analysis": False,
+                    "perform_chunking": False,
+                },
+            },
+            owner_user_id="1",
+        )
+        job1 = job_manager.get_job(int(row1.get("id")))
+        assert job1 is not None
+        first_result = await worker._handle_job(job1, job_manager, worker._ProgressState())
+
+        repo = await persistence._get_media_ingest_dedupe_repo()
+        for key_type, key_value in persistence._shared_transcript_dedupe_candidates(
+            source_path_or_url=source_url,
+            source_hash=None,
+            form_data=seed_form,
+        ):
+            await repo.upsert_source(
+                dedupe_key=f"{key_type}:{key_value}",
+                key_type=key_type,
+                media_type="video",
+                source_user_id=1,
+                source_media_id=int(first_result["media_id"]),
+                source_url=source_url,
+                source_db_path=str(stale_source_db),
+            )
+
+        row2 = job_manager.create_job(
+            domain="media_ingest",
+            queue="default",
+            job_type="media_ingest_item",
+            payload={
+                "batch_id": "batch-stale-source-db-2",
+                "media_type": "video",
+                "source": source_url,
+                "source_kind": "url",
+                "input_ref": source_url,
+                "options": {
+                    "media_type": "video",
+                    "transcription_model": "whisper-test",
+                    "perform_analysis": False,
+                    "perform_chunking": False,
+                },
+            },
+            owner_user_id="2",
+        )
+        job2 = job_manager.get_job(int(row2.get("id")))
+        assert job2 is not None
+        second_result = await worker._handle_job(job2, job_manager, worker._ProgressState())
+
+        default_source_db = DatabasePaths.get_media_db_path("1")
+        assert second_result.get("media_id")
+        assert default_source_db.exists()
+        assert not stale_source_db.exists()
+        assert processor_calls == [source_url]
+    finally:
+        await reset_db_pool()
+
+
+@pytest.mark.asyncio
 async def test_media_ingest_cross_user_dedupe_prefers_transcript_artifact_over_media_content(
     monkeypatch,
     tmp_path,

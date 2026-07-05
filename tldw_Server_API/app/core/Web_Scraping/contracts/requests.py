@@ -1,3 +1,5 @@
+"""Request contract objects for the staged web scraping service boundary."""
+
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
@@ -7,6 +9,7 @@ from typing import Any
 
 
 def _freeze_value(value: Any) -> Any:
+    """Recursively convert mutable containers into immutable equivalents."""
     if isinstance(value, Mapping):
         return _freeze_mapping(value)
     if isinstance(value, list | tuple):
@@ -15,10 +18,12 @@ def _freeze_value(value: Any) -> Any:
 
 
 def _freeze_mapping(value: Mapping[str, Any] | None) -> Mapping[str, Any]:
+    """Return an immutable string-keyed mapping for contract metadata."""
     return MappingProxyType({str(key): _freeze_value(item) for key, item in dict(value or {}).items()})
 
 
 def _normalize_domains(value: str | Sequence[str] | None) -> tuple[str, ...]:
+    """Normalize comma-separated or sequence domain filters into a tuple."""
     if value is None:
         return ()
     if isinstance(value, str):
@@ -30,6 +35,8 @@ def _normalize_domains(value: str | Sequence[str] | None) -> tuple[str, ...]:
 
 @dataclass(frozen=True, slots=True)
 class ScrapeContext:
+    """Context metadata carried across scraping operations."""
+
     source: str = "web_scraping"
     user_id: str | int | None = None
     request_id: str | None = None
@@ -37,11 +44,14 @@ class ScrapeContext:
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        """Freeze metadata after dataclass initialization."""
         object.__setattr__(self, "metadata", _freeze_mapping(self.metadata))
 
 
 @dataclass(frozen=True, slots=True)
 class ScrapeRequest:
+    """Single-page scrape request accepted by the compatibility boundary."""
+
     url: str
     method: str = "auto"
     backend: str | None = None
@@ -51,6 +61,7 @@ class ScrapeRequest:
     context: ScrapeContext = field(default_factory=ScrapeContext)
 
     def __post_init__(self) -> None:
+        """Validate the target URL and normalize mutable fields."""
         normalized_url = str(self.url or "").strip()
         if not normalized_url:
             raise ValueError("url is required")
@@ -63,6 +74,8 @@ class ScrapeRequest:
 
 @dataclass(frozen=True, slots=True)
 class CrawlRequest:
+    """Crawl request describing a base URL and traversal limits."""
+
     base_url: str
     max_pages: int | None = None
     max_depth: int | None = None
@@ -70,6 +83,7 @@ class CrawlRequest:
     context: ScrapeContext = field(default_factory=ScrapeContext)
 
     def __post_init__(self) -> None:
+        """Validate and normalize the crawl base URL."""
         normalized_url = str(self.base_url or "").strip()
         if not normalized_url:
             raise ValueError("base_url is required")
@@ -78,6 +92,8 @@ class CrawlRequest:
 
 @dataclass(frozen=True, slots=True)
 class SearchRequest:
+    """Search request matching the legacy web search argument surface."""
+
     search_query: str
     search_engine: str = "google"
     content_country: str = "US"
@@ -99,6 +115,7 @@ class SearchRequest:
     context: ScrapeContext = field(default_factory=ScrapeContext)
 
     def __post_init__(self) -> None:
+        """Validate the query and normalize filter metadata."""
         normalized_query = str(self.search_query or "").strip()
         if not normalized_query:
             raise ValueError("search_query is required")

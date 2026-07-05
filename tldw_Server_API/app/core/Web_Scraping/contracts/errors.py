@@ -1,3 +1,5 @@
+"""Failure contract objects used by web scraping compatibility adapters."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -19,6 +21,7 @@ class RuntimeFailure:
     provider: str | None = None
 
     def as_policy_fields(self) -> dict[str, str]:
+        """Return legacy policy metadata fields for public API payloads."""
         fields: dict[str, str] = {}
         if self.reason:
             fields["policy_reason"] = self.reason

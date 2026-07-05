@@ -1,3 +1,5 @@
+"""Stable data contracts for the staged web scraping refactor."""
+
 from __future__ import annotations
 
 from .conversion import (

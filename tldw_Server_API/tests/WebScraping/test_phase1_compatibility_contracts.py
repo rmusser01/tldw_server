@@ -9,6 +9,8 @@ from typing import Any
 import pytest
 
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 INVENTORY_JSON = REPO_ROOT / "Docs/Design/web_scraping_refactor_import_inventory.json"
 INITIALIZED_WEBSEARCH_KEYS = {
@@ -82,7 +84,6 @@ def _sample_analysis(*, js_required: bool = False, tls_active: bool = False) -> 
     }
 
 
-@pytest.mark.unit
 def test_inventory_recorded_web_scraping_imports_remain_resolvable() -> None:
     inventory = json.loads(INVENTORY_JSON.read_text(encoding="utf-8"))
     records_by_import: dict[tuple[str, str | None], dict[str, Any]] = {}
@@ -104,7 +105,6 @@ def test_inventory_recorded_web_scraping_imports_remain_resolvable() -> None:
             pytest.fail(f"Inventory import no longer resolves: {record!r}; error={exc!r}")
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("reason", "mode", "expected_error"),
     [
@@ -152,7 +152,6 @@ async def test_scrape_article_policy_denial_keeps_public_blocked_shape(
     }
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("reason", "mode", "expected_error"),
     [
@@ -219,7 +218,6 @@ def _enhanced_plan() -> types.SimpleNamespace:
     )
 
 
-@pytest.mark.asyncio
 async def test_article_preflight_tls_advice_is_attached_without_network(monkeypatch: pytest.MonkeyPatch) -> None:
     from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as article
     from tldw_Server_API.app.core.Web_Scraping import scraper_analyzers
@@ -263,7 +261,6 @@ async def test_article_preflight_tls_advice_is_attached_without_network(monkeypa
     }
 
 
-@pytest.mark.asyncio
 async def test_article_preflight_js_advice_is_attached_without_browser(monkeypatch: pytest.MonkeyPatch) -> None:
     from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as article
     from tldw_Server_API.app.core.Web_Scraping import scraper_analyzers
@@ -350,7 +347,6 @@ class _FakePage:
         return "<html><body>Rendered content</body></html>"
 
 
-@pytest.mark.asyncio
 async def test_enhanced_preflight_js_and_tls_advice_is_attached_without_network(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -396,7 +392,6 @@ async def _return_async(value: Any) -> Any:
     return value
 
 
-@pytest.mark.unit
 def test_extract_article_with_pipeline_keeps_public_dict_shape() -> None:
     from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as article
 
@@ -416,7 +411,6 @@ def test_extract_article_with_pipeline_keeps_public_dict_shape() -> None:
     assert "extraction_trace" in result
 
 
-@pytest.mark.unit
 def test_enhanced_scraping_job_to_dict_contract() -> None:
     from tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping import JobStatus, ScrapingJob
 
@@ -435,7 +429,6 @@ def test_enhanced_scraping_job_to_dict_contract() -> None:
     assert payload["cancel_requested"] is False
 
 
-@pytest.mark.unit
 def test_websearch_initialized_results_contract_and_include_domains_fallback() -> None:
     from tldw_Server_API.app.core.Web_Scraping import WebSearch_APIs as websearch
 
@@ -474,7 +467,6 @@ def test_websearch_initialized_results_contract_and_include_domains_fallback() -
     assert payload["processing_error"] is None
 
 
-@pytest.mark.unit
 def test_websearch_processed_provider_result_shape_preserves_metadata_and_extras() -> None:
     from tldw_Server_API.app.core.Web_Scraping import WebSearch_APIs as websearch
 

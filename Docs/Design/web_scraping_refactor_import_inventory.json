@@ -381,7 +381,7 @@
       {
         "import_kind": "from",
         "imported_name": "Article_Extractor_Lib",
-        "line": 224,
+        "line": 222,
         "module": "tldw_Server_API.app.core.Web_Scraping",
         "path": "tldw_Server_API/tests/WebScraping/test_phase1_compatibility_contracts.py",
         "target_name": "Article_Extractor_Lib"
@@ -389,7 +389,7 @@
       {
         "import_kind": "from",
         "imported_name": "Article_Extractor_Lib",
-        "line": 268,
+        "line": 265,
         "module": "tldw_Server_API.app.core.Web_Scraping",
         "path": "tldw_Server_API/tests/WebScraping/test_phase1_compatibility_contracts.py",
         "target_name": "Article_Extractor_Lib"
@@ -397,7 +397,7 @@
       {
         "import_kind": "from",
         "imported_name": "Article_Extractor_Lib",
-        "line": 401,
+        "line": 396,
         "module": "tldw_Server_API.app.core.Web_Scraping",
         "path": "tldw_Server_API/tests/WebScraping/test_phase1_compatibility_contracts.py",
         "target_name": "Article_Extractor_Lib"
@@ -783,7 +783,7 @@
       {
         "import_kind": "from",
         "imported_name": "WebSearch_APIs",
-        "line": 440,
+        "line": 433,
         "module": "tldw_Server_API.app.core.Web_Scraping",
         "path": "tldw_Server_API/tests/WebScraping/test_phase1_compatibility_contracts.py",
         "target_name": "WebSearch_APIs"
@@ -791,7 +791,7 @@
       {
         "import_kind": "from",
         "imported_name": "WebSearch_APIs",
-        "line": 479,
+        "line": 471,
         "module": "tldw_Server_API.app.core.Web_Scraping",
         "path": "tldw_Server_API/tests/WebScraping/test_phase1_compatibility_contracts.py",
         "target_name": "WebSearch_APIs"
@@ -1185,7 +1185,7 @@
       {
         "import_kind": "from",
         "imported_name": "enhanced_web_scraping",
-        "line": 169,
+        "line": 168,
         "module": "tldw_Server_API.app.core.Web_Scraping",
         "path": "tldw_Server_API/tests/WebScraping/test_phase1_compatibility_contracts.py",
         "target_name": "enhanced_web_scraping"
@@ -1193,7 +1193,7 @@
       {
         "import_kind": "from",
         "imported_name": "enhanced_web_scraping",
-        "line": 357,
+        "line": 353,
         "module": "tldw_Server_API.app.core.Web_Scraping",
         "path": "tldw_Server_API/tests/WebScraping/test_phase1_compatibility_contracts.py",
         "target_name": "enhanced_web_scraping"
@@ -1201,7 +1201,7 @@
       {
         "import_kind": "from",
         "imported_name": "JobStatus",
-        "line": 421,
+        "line": 415,
         "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
         "path": "tldw_Server_API/tests/WebScraping/test_phase1_compatibility_contracts.py",
         "target_name": "enhanced_web_scraping"
@@ -1209,7 +1209,7 @@
       {
         "import_kind": "from",
         "imported_name": "ScrapingJob",
-        "line": 421,
+        "line": 415,
         "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
         "path": "tldw_Server_API/tests/WebScraping/test_phase1_compatibility_contracts.py",
         "target_name": "enhanced_web_scraping"
@@ -1751,7 +1751,7 @@
       {
         "import_kind": "from",
         "imported_name": "scraper_analyzers",
-        "line": 225,
+        "line": 223,
         "module": "tldw_Server_API.app.core.Web_Scraping",
         "path": "tldw_Server_API/tests/WebScraping/test_phase1_compatibility_contracts.py",
         "target_name": "scraper_analyzers"
@@ -1759,7 +1759,7 @@
       {
         "import_kind": "from",
         "imported_name": "scraper_analyzers",
-        "line": 269,
+        "line": 266,
         "module": "tldw_Server_API.app.core.Web_Scraping",
         "path": "tldw_Server_API/tests/WebScraping/test_phase1_compatibility_contracts.py",
         "target_name": "scraper_analyzers"
