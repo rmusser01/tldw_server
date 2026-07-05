@@ -1,5 +1,5 @@
 ---
-id: TASK-12163
+id: TASK-12894
 title: Implement Research Workspace NotebookLM discovery loops WP3
 status: Done
 assignee: []
