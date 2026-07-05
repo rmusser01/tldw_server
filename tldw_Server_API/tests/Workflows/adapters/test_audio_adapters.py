@@ -1811,7 +1811,7 @@ class TestMultiVoiceTTSAdapter:
 
         calls = []
 
-        async def mock_synthesize(text, model, voice, fmt, speed, output_path):
+        async def mock_synthesize(text, model, voice, fmt, speed, output_path, provider=None):
             calls.append({"text": text, "voice": voice, "model": model})
             output_path.parent.mkdir(parents=True, exist_ok=True)
             output_path.write_bytes(b"fake_audio_" + voice.encode())
@@ -1870,14 +1870,145 @@ class TestMultiVoiceTTSAdapter:
 
     @pytest.mark.asyncio
     async def test_multi_voice_tts_empty_sections_error(self, base_context):
-        """Test empty sections returns error."""
+        """Test empty sections route through adapter failure handling."""
+        from tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts import (
+            run_multi_voice_tts_adapter,
+        )
+        from tldw_Server_API.app.core.exceptions import AdapterError
+
+        config = {"sections": []}
+        with pytest.raises(AdapterError, match="missing_sections"):
+            await run_multi_voice_tts_adapter(config, base_context)
+
+    def test_multi_voice_tts_config_fallback_provider_is_optional(self):
+        """Fallback provider stays opt-in for internal per-section retries."""
+        from tldw_Server_API.app.core.Workflows.adapters.audio._config import MultiVoiceTTSConfig
+
+        assert MultiVoiceTTSConfig().fallback_provider is None
+
+    @pytest.mark.asyncio
+    async def test_multi_voice_tts_concat_failure_returns_error_without_final_artifact(
+        self, sample_voice_assignments, base_context, tmp_path, monkeypatch
+    ):
+        """Concat failure must not promote one section as the final briefing."""
+        from tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts import (
+            run_multi_voice_tts_adapter,
+        )
+        from tldw_Server_API.app.core.exceptions import AdapterError
+
+        monkeypatch.setenv("WORKFLOWS_ARTIFACTS_DIR", str(tmp_path / "artifacts"))
+        artifacts: list[dict[str, Any]] = []
+        base_context["add_artifact"] = lambda **kwargs: artifacts.append(kwargs)
+
+        async def mock_synthesize(text, model, voice, fmt, speed, output_path, provider=None):
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_bytes(f"audio-{voice}".encode("utf-8"))
+            return output_path.stat().st_size
+
+        config = {
+            "sections": [
+                {"voice": "HOST", "text": "Welcome to the briefing."},
+                {"voice": "REPORTER", "text": "The story details go here."},
+            ],
+            "voice_assignments": sample_voice_assignments,
+            "normalize": False,
+        }
+
+        with (
+            patch(
+                "tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts._synthesize_section",
+                side_effect=mock_synthesize,
+            ),
+            patch(
+                "tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts._generate_silence",
+                return_value=False,
+            ),
+            patch(
+                "tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts._concat_files",
+                return_value=False,
+            ),
+        ):
+            with pytest.raises(AdapterError, match="concat_failed"):
+                await run_multi_voice_tts_adapter(config, base_context)
+
+        assert artifacts == []
+        assert not (tmp_path / "artifacts" / "mvtts_test_123").exists()
+
+    @pytest.mark.asyncio
+    async def test_multi_voice_tts_silence_only_output_is_failure(self, base_context, tmp_path, monkeypatch):
+        """Silence gaps alone are not a valid generated briefing."""
+        from tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts import (
+            run_multi_voice_tts_adapter,
+        )
+        from tldw_Server_API.app.core.exceptions import AdapterError
+
+        monkeypatch.setenv("WORKFLOWS_ARTIFACTS_DIR", str(tmp_path / "artifacts"))
+
+        async def mock_synthesize(text, model, voice, fmt, speed, output_path, provider=None):
+            raise RuntimeError("TTS failed")
+
+        async def mock_silence(dur, path, fmt="mp3"):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"silence")
+            return True
+
+        config = {
+            "sections": [
+                {"voice": "HOST", "text": "First section."},
+                {"voice": "REPORTER", "text": "Second section."},
+            ],
+            "voice_assignments": {"HOST": "af_bella", "REPORTER": "am_adam"},
+            "normalize": False,
+        }
+
+        with (
+            patch(
+                "tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts._synthesize_section",
+                side_effect=mock_synthesize,
+            ),
+            patch(
+                "tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts._generate_silence",
+                side_effect=mock_silence,
+            ),
+        ):
+            with pytest.raises(AdapterError, match="no_sections_generated"):
+                await run_multi_voice_tts_adapter(config, base_context)
+
+        assert not (tmp_path / "artifacts" / "mvtts_test_123").exists()
+
+    @pytest.mark.asyncio
+    async def test_multi_voice_tts_passes_default_provider_to_synthesis(
+        self, base_context, tmp_path, monkeypatch
+    ):
+        """Explicit provider selection should reach the internal TTS service."""
         from tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts import (
             run_multi_voice_tts_adapter,
         )
 
-        config = {"sections": []}
-        result = await run_multi_voice_tts_adapter(config, base_context)
-        assert result.get("error") == "missing_sections"
+        monkeypatch.setenv("WORKFLOWS_ARTIFACTS_DIR", str(tmp_path / "artifacts"))
+        providers: list[str | None] = []
+
+        async def mock_synthesize(text, model, voice, fmt, speed, output_path, provider=None):
+            providers.append(provider)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_bytes(b"audio")
+            return output_path.stat().st_size
+
+        config = {
+            "sections": [{"voice": "HOST", "text": "Welcome to the briefing."}],
+            "voice_assignments": {"HOST": "af_bella"},
+            "default_provider": "elevenlabs",
+            "normalize": False,
+        }
+
+        with patch(
+            "tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts._synthesize_section",
+            side_effect=mock_synthesize,
+        ):
+            result = await run_multi_voice_tts_adapter(config, base_context)
+
+        assert "error" not in result
+        assert providers == ["elevenlabs"]
 
     @pytest.mark.asyncio
     async def test_multi_voice_tts_sections_from_prev(
@@ -1890,7 +2021,7 @@ class TestMultiVoiceTTSAdapter:
 
         monkeypatch.setenv("WORKFLOWS_ARTIFACTS_DIR", str(tmp_path / "artifacts"))
 
-        async def mock_synthesize(text, model, voice, fmt, speed, output_path):
+        async def mock_synthesize(text, model, voice, fmt, speed, output_path, provider=None):
             output_path.parent.mkdir(parents=True, exist_ok=True)
             output_path.write_bytes(b"audio")
             return 5
@@ -1944,7 +2075,7 @@ class TestMultiVoiceTTSAdapter:
 
         call_count = 0
 
-        async def mock_synthesize(text, model, voice, fmt, speed, output_path):
+        async def mock_synthesize(text, model, voice, fmt, speed, output_path, provider=None):
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -1977,10 +2108,11 @@ class TestMultiVoiceTTSAdapter:
         from tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts import (
             run_multi_voice_tts_adapter,
         )
+        from tldw_Server_API.app.core.exceptions import AdapterError
 
         monkeypatch.setenv("WORKFLOWS_ARTIFACTS_DIR", str(tmp_path / "artifacts"))
 
-        async def mock_synthesize(text, model, voice, fmt, speed, output_path):
+        async def mock_synthesize(text, model, voice, fmt, speed, output_path, provider=None):
             if model == "kokoro":
                 raise RuntimeError("primary TTS token at /private/mvtts-primary-cache")
             raise RuntimeError("fallback TTS token at /private/mvtts-fallback-cache")
@@ -1999,11 +2131,11 @@ class TestMultiVoiceTTSAdapter:
                 "tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts._synthesize_section",
                 side_effect=mock_synthesize,
             ):
-                result = await run_multi_voice_tts_adapter(config, base_context)
+                with pytest.raises(AdapterError, match="no_sections_generated"):
+                    await run_multi_voice_tts_adapter(config, base_context)
         finally:
             multi_voice_tts.logger.remove(sink_id)
 
-        assert result.get("error") == "no_sections_generated"
         joined = "\n".join(messages)
         assert "Section 0 TTS failed with kokoro/af_bella" in joined
         assert "Section 0 fallback TTS" in joined
@@ -2039,7 +2171,7 @@ class TestMultiVoiceTTSAdapter:
         def mock_add_artifact(**kwargs):
             artifacts.append(kwargs)
 
-        async def mock_synthesize(text, model, voice, fmt, speed, output_path):
+        async def mock_synthesize(text, model, voice, fmt, speed, output_path, provider=None):
             output_path.parent.mkdir(parents=True, exist_ok=True)
             output_path.write_bytes(b"audio_data")
             return 10
@@ -2104,7 +2236,7 @@ class TestMultiVoiceTTSAdapter:
             {"voice": "HOST", "text": "That wraps up the briefing."},
         ]
 
-        async def mock_synthesize(text, model, voice, fmt, speed, output_path):
+        async def mock_synthesize(text, model, voice, fmt, speed, output_path, provider=None):
             output_path.parent.mkdir(parents=True, exist_ok=True)
             output_path.write_bytes(f"audio-{voice}".encode("utf-8"))
             return output_path.stat().st_size
@@ -2173,7 +2305,7 @@ class TestMultiVoiceTTSAdapter:
 
         calls = []
 
-        async def mock_synthesize(text, model, voice, fmt, speed, output_path):
+        async def mock_synthesize(text, model, voice, fmt, speed, output_path, provider=None):
             calls.append(voice)
             output_path.parent.mkdir(parents=True, exist_ok=True)
             output_path.write_bytes(b"audio")
@@ -2205,7 +2337,7 @@ class TestMultiVoiceTTSAdapter:
 
         observed_texts = []
 
-        async def mock_synthesize(text, model, voice, fmt, speed, output_path):
+        async def mock_synthesize(text, model, voice, fmt, speed, output_path, provider=None):
             observed_texts.append(text)
             output_path.parent.mkdir(parents=True, exist_ok=True)
             output_path.write_bytes(b"audio")
@@ -2243,7 +2375,7 @@ class TestMultiVoiceTTSAdapter:
 
         monkeypatch.setenv("WORKFLOWS_ARTIFACTS_DIR", str(tmp_path / "artifacts"))
 
-        async def mock_synthesize(text, model, voice, fmt, speed, output_path):
+        async def mock_synthesize(text, model, voice, fmt, speed, output_path, provider=None):
             output_path.parent.mkdir(parents=True, exist_ok=True)
             output_path.write_bytes(b"speech_audio")
             return len(b"speech_audio")
@@ -2290,7 +2422,7 @@ class TestMultiVoiceTTSAdapter:
 
         monkeypatch.setenv("WORKFLOWS_ARTIFACTS_DIR", str(tmp_path / "artifacts"))
 
-        async def mock_synthesize(text, model, voice, fmt, speed, output_path):
+        async def mock_synthesize(text, model, voice, fmt, speed, output_path, provider=None):
             output_path.parent.mkdir(parents=True, exist_ok=True)
             output_path.write_bytes(b"speech_audio")
             return len(b"speech_audio")

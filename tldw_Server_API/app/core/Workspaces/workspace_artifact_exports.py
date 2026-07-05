@@ -11,6 +11,9 @@ from typing import Any
 import markdown
 
 from tldw_Server_API.app.core.exceptions import WorkspaceArtifactExportStateError
+from tldw_Server_API.app.core.Workspaces.artifact_validation import (
+    validate_workspace_artifact_for_export,
+)
 
 ALLOWED_WORKSPACE_ARTIFACT_EXPORT_FORMATS = ("md", "html", "json")
 
@@ -38,11 +41,18 @@ def _artifact_identity(artifact: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def _export_metadata(artifact: Mapping[str, Any], *, export_format: str, generated_at: str) -> dict[str, Any]:
+def _export_metadata(
+    artifact: Mapping[str, Any],
+    *,
+    export_format: str,
+    generated_at: str,
+    artifact_validation: Mapping[str, Any],
+) -> dict[str, Any]:
     """Collect traceability metadata that travels with an artifact export."""
     return {
         "artifact": _artifact_identity(artifact),
         "review_state": artifact.get("review_state") or "draft",
+        "artifact_validation": dict(artifact_validation),
         "producer_metadata": artifact.get("producer_metadata") or {},
         "source_lineage": artifact.get("source_lineage") or {},
         "review_metadata": artifact.get("review_metadata") or {},
@@ -159,7 +169,13 @@ def export_workspace_artifact_version(
         raise WorkspaceArtifactExportStateError("workspace_artifact_not_accepted")
 
     generated_at = generated_at or _utc_now_iso()
-    metadata = _export_metadata(artifact, export_format=export_format, generated_at=generated_at)
+    artifact_validation = validate_workspace_artifact_for_export(artifact)
+    metadata = _export_metadata(
+        artifact,
+        export_format=export_format,
+        generated_at=generated_at,
+        artifact_validation=artifact_validation,
+    )
     content_by_format = {
         "md": _render_markdown_export,
         "html": _render_html_export,
