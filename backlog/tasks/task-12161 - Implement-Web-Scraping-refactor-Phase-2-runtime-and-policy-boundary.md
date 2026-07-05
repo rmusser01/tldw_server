@@ -28,7 +28,7 @@ modified_files:
 - tldw_Server_API/tests/Web_Scraping/test_phase2_runtime_adapters.py
 - tldw_Server_API/tests/Web_Scraping/test_phase2_article_runtime_boundary.py
 - tldw_Server_API/tests/Web_Scraping/test_router_backend_selection.py
-updated_date: 2026-07-05 05:18
+updated_date: 2026-07-05 05:27
 ---
 
 ## Description
@@ -58,6 +58,7 @@ Follow Docs/superpowers/plans/2026-07-05-web-scraping-phase-2-runtime-policy-bou
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-07-05: Started Task 1 (runtime request/response contracts only). Scope limited to runtime __init__/requests/responses plus test_phase2_runtime_contracts.py; Task 2+ files intentionally left untouched.
 2026-07-05: Task 1 TDD verification completed. Red run: focused runtime contract test failed during collection with ModuleNotFoundError for tldw_Server_API.app.core.Web_Scraping.runtime. Green run: /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest -q --tb=short tldw_Server_API/tests/Web_Scraping/test_phase2_runtime_contracts.py -> 7 passed, 20 warnings. Bandit: full touched scope produced only pytest B101 assert_used findings in test_phase2_runtime_contracts.py; production runtime-only scan exited 0 with no findings. git diff --check exited 0.
+2026-07-05: Started Task 1 review-fix pass for explicit boolean normalization, stronger runtime import-boundary checks, and immutability assertions. Scope remains limited to requests.py, responses.py, and test_phase2_runtime_contracts.py.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
