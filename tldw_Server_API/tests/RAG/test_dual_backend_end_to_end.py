@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
 import pytest
 
@@ -127,7 +128,7 @@ async def test_dual_backend_hybrid_merge_with_controlled_vector_results(
     class _ControlledVectorResult:
         """A single known vector hit — stand-in for real similarity output."""
 
-        def __init__(self, record, score: float) -> None:
+        def __init__(self, record: dict[str, Any], score: float) -> None:
             record_id = record.get("uuid") or record.get("id")
             self.id = str(record_id)
             self.content = record.get("content", "")
@@ -143,14 +144,14 @@ async def test_dual_backend_hybrid_merge_with_controlled_vector_results(
     class _ControlledVectorStore:
         """Returns one known record so the MERGE, not vector recall, is tested."""
 
-        def __init__(self, record) -> None:
+        def __init__(self, record: dict[str, Any]) -> None:
             self._record = record
             self._initialized = False
 
         async def initialize(self) -> None:
             self._initialized = True
 
-        async def search(self, *_, **__) -> list[_ControlledVectorResult]:
+        async def search(self, *_args: Any, **_kwargs: Any) -> list[_ControlledVectorResult]:
             return [_ControlledVectorResult(self._record, score=0.95)]
 
     media_retriever = MediaDBRetriever(

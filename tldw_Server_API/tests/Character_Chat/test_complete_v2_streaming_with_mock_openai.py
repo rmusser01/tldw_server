@@ -28,14 +28,21 @@ async def test_complete_v2_streaming_with_mock_openai(
 ) -> None:
     base_url = os.getenv("MOCK_OPENAI_BASE_URL")
     if not base_url:
-        pytest.skip("MOCK_OPENAI_BASE_URL not set; live mock-server streaming test is env-gated")
+        pytest.skip(
+            "MOCK_OPENAI_BASE_URL not set; this is the live-server variant. "
+            "Deterministic in-process streaming coverage that always runs lives in "
+            "test_complete_v2_streaming_e2e_mock.py, so skipping here masks nothing."
+        )
 
     # monkeypatch (not os.environ) so nothing leaks into later tests
     monkeypatch.setenv("OPENAI_API_BASE_URL", base_url)
     # mock_openai_server validates the key format: it must start with "sk-".
     # (The old test defaulted to "test-mock-key", which 401s at the mock and
-    # surfaced as the 502 this test used to tolerate.)
-    monkeypatch.setenv("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY", "sk-test-mock-key"))
+    # surfaced as the 502 this test used to tolerate.) Test plugins may set
+    # OPENAI_API_KEY to "" , so treat empty/non-sk keys as absent.
+    existing_key = os.getenv("OPENAI_API_KEY")
+    api_key = existing_key if existing_key and existing_key.startswith("sk-") else "sk-test-mock-key"
+    monkeypatch.setenv("OPENAI_API_KEY", api_key)
     monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path))
 
     from tldw_Server_API.app.main import app
@@ -83,5 +90,6 @@ async def test_complete_v2_streaming_with_mock_openai(
     for payload in data_lines[:-1]:
         chunk = json.loads(payload)
         for choice in chunk.get("choices", []):
-            content += choice.get("delta", {}).get("content") or ""
+            delta = choice.get("delta") or {}
+            content += delta.get("content") or ""
     assert content, "accumulated stream deltas were empty"

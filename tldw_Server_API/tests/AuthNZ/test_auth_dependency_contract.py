@@ -3,7 +3,10 @@ from __future__ import annotations
 import importlib
 from collections.abc import Mapping
 from types import SimpleNamespace
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from tldw_Server_API.app.core.AuthNZ.jwt_service import JWTService
 
 import pytest
 from fastapi import Depends, FastAPI, Request
@@ -172,7 +175,7 @@ def _build_real_principal_app() -> FastAPI:
     return app
 
 
-def _real_jwt_service():
+def _real_jwt_service() -> "JWTService":
     """A real JWTService (real HS256 signing/verification), no DB required.
 
     Replaces the former _FakeJwtService whose decode asserted its own
@@ -199,10 +202,10 @@ class _NullBlacklistSessionManager:
         return False
 
 
-def _build_token_scope_app(jwt_service) -> FastAPI:
+def _build_token_scope_app(jwt_service: "JWTService") -> FastAPI:
     app = FastAPI()
 
-    async def real_jwt_service_dep():
+    async def real_jwt_service_dep() -> "JWTService":
         return jwt_service
 
     async def fake_db_pool() -> object:
