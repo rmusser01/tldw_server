@@ -4,7 +4,7 @@ title: Address PR 2649 first-run MCP tools review comments
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-07-05 05:07'
+updated_date: '2026-07-05 05:18'
 labels:
   - review
   - mcp
@@ -34,13 +34,13 @@ Rebase PR #2649 onto latest dev and address Qodo/CodeRabbit review comments for 
 
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
-Rebased codex/first-run-mcp-tools onto origin/dev. Fixed valid Qodo/CodeRabbit issues: rate limits, docstrings, actor attribution, custom validation exceptions, sanitized logging, fail-closed baseline allowlist, stored catalog-version hashing, test markers, MCP Hub validation error feedback, stale drill-target handling, router-aware onboarding links, targeted Playwright fallback, sandbox diagnostics helper extraction, and duplicated task markers. Did not cache get_setup_mcp_tools_service because it wraps the existing per-request MCP Hub factory and dynamic registry snapshots; caching risks stale config/test overrides.
+Rebased codex/first-run-mcp-tools onto origin/dev and force-pushed the updated branch. Fixed valid Qodo/CodeRabbit issues: rate limits, docstrings, actor attribution, custom validation exceptions, sanitized logging, fail-closed baseline allowlist, stored catalog-version hashing, test markers, MCP Hub validation error feedback, stale drill-target handling, router-aware onboarding links, targeted Playwright fallback, sandbox diagnostics helper extraction, and duplicated task markers. Did not cache get_setup_mcp_tools_service because it wraps the existing per-request MCP Hub factory and dynamic registry snapshots; caching risks stale config/test overrides. Resolved the review threads and replied inline with the caching rationale.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Addressed PR #2649 review comments after rebasing onto latest dev. Focused verification passed: backend pytest selected 72 passed; frontend Vitest 29 passed; Bandit touched backend scope 0 findings; git diff --check clean; focused Playwright grep with localhost bind escalation ran 2 tests with 1 passed and 1 environment skip.
+Addressed PR #2649 review comments after rebasing onto latest dev. Focused verification passed: backend pytest selected 72 passed; frontend Vitest 29 passed; Bandit touched backend scope 0 findings; git diff --check clean. Focused Playwright grep with localhost bind escalation exited 0, but both selected real-backend tests were skipped by environment preconditions.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
