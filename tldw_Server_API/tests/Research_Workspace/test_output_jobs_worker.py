@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 import importlib
+import json
 from types import SimpleNamespace
 from typing import Any
 
@@ -96,6 +97,38 @@ def test_build_source_context_uses_selected_ready_media(
     assert context.source_lineage["selected_source_ids"] == ["src-1"]
 
 
+def test_build_source_context_caps_title_and_content_text() -> None:
+    output_jobs = _output_jobs_module()
+
+    class _WorkspaceDB:
+        def list_workspace_sources(self, workspace_id: str) -> list[dict[str, Any]]:
+            assert workspace_id == "ws-1"
+            return [
+                {
+                    "id": "src-1",
+                    "workspace_id": "ws-1",
+                    "media_id": 1,
+                    "title": "T" * 200,
+                }
+            ]
+
+    class _MediaDB:
+        def get_media_by_id(self, media_id: int, **kwargs: object) -> dict[str, object]:
+            assert media_id == 1
+            return {"id": 1, "content": "body text"}
+
+    context = output_jobs.build_research_workspace_output_source_context(
+        workspace_db=_WorkspaceDB(),
+        media_db=_MediaDB(),
+        workspace_id="ws-1",
+        source_ids=["src-1"],
+        max_chars=40,
+    )
+
+    assert len(context.text) <= 40
+    assert context.source_lineage["context_truncated"] is True
+
+
 def test_persist_output_bytes_creates_durable_output_artifact(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Any,
@@ -122,6 +155,48 @@ def test_persist_output_bytes_creates_durable_output_artifact(
     assert fake_collections_db.created[0]["type_"] == "research_workspace_infographic"
     written_path = tmp_path / str(fake_collections_db.created[0]["storage_path"])
     assert written_path.read_bytes() == b"png-bytes"
+
+
+def test_persist_output_bytes_keeps_required_metadata_and_drops_paths(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Any,
+    fake_collections_db: Any,
+) -> None:
+    output_jobs = _output_jobs_module()
+    monkeypatch.setattr(DatabasePaths, "get_user_outputs_dir", lambda _user_id: tmp_path)
+
+    output_jobs.persist_research_workspace_output_bytes(
+        collections_db=fake_collections_db,
+        user_id=42,
+        job_id=7,
+        artifact_type="infographic",
+        title="Infographic",
+        content=b"png-bytes",
+        format_="png",
+        content_type="image/png",
+        workspace_id="ws-1",
+        workspace_artifact_id="infographic-1",
+        metadata={
+            "origin": "caller",
+            "workspace_id": "ws-2",
+            "workspace_artifact_id": "other",
+            "content_type": "text/plain",
+            "byte_size": 999,
+            "storage_path": "/tmp/secret.png",
+            "note": "/private/tmp/secret.png",
+            "safe_note": "kept",
+        },
+    )
+
+    metadata = json.loads(str(fake_collections_db.created[0]["metadata_json"]))
+    assert metadata["origin"] == "research_workspace"
+    assert metadata["workspace_id"] == "ws-1"
+    assert metadata["workspace_artifact_id"] == "infographic-1"
+    assert metadata["content_type"] == "image/png"
+    assert metadata["byte_size"] == len(b"png-bytes")
+    assert metadata["safe_note"] == "kept"
+    assert "storage_path" not in metadata
+    assert "/private/tmp/secret.png" not in metadata.values()
 
 
 @pytest.mark.asyncio

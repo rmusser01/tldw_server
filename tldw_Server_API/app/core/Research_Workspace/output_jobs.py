@@ -42,6 +42,9 @@ _SOURCE_CONTEXT_MEDIA_ERRORS = (
     ValueError,
     json.JSONDecodeError,
 )
+_REQUIRED_OUTPUT_METADATA_KEYS = frozenset(
+    {"origin", "workspace_id", "workspace_artifact_id", "content_type", "byte_size"}
+)
 
 
 @dataclass(frozen=True)
@@ -112,7 +115,8 @@ def build_research_workspace_output_source_context(
         str(source.get("id") or "").strip(): source
         for source in workspace_db.list_workspace_sources(workspace_id)
     }
-    remaining_chars = min(max(int(max_chars), 1), _SOURCE_CONTEXT_TOTAL_CHAR_LIMIT)
+    context_char_limit = min(max(int(max_chars), 1), _SOURCE_CONTEXT_TOTAL_CHAR_LIMIT)
+    remaining_chars = context_char_limit
     parts: list[str] = []
     usable_source_ids: list[str] = []
     skipped_source_ids: list[str] = []
@@ -132,18 +136,35 @@ def build_research_workspace_output_source_context(
             skipped_source_ids.append(source_id)
             continue
 
-        excerpt_limit = min(_SOURCE_CONTEXT_PER_SOURCE_CHAR_LIMIT, remaining_chars)
-        excerpt = content[:excerpt_limit].strip()
-        if not excerpt:
+        content_excerpt = content[:_SOURCE_CONTEXT_PER_SOURCE_CHAR_LIMIT].strip()
+        if not content_excerpt:
             skipped_source_ids.append(source_id)
             continue
 
         title = str(source.get("title") or source_id).strip() or source_id
-        parts.append(f"# {title}\n\n{excerpt}")
+        separator_chars = 2 if parts else 0
+        available_chars = remaining_chars - separator_chars
+        if available_chars <= 0:
+            skipped_source_ids.append(source_id)
+            truncated = True
+            continue
+
+        raw_part = f"# {title}\n\n{content_excerpt}"
+        part = raw_part[:available_chars].rstrip()
+        if not part:
+            skipped_source_ids.append(source_id)
+            truncated = True
+            continue
+
+        parts.append(part)
         usable_source_ids.append(source_id)
         media_ids.append(media_id)
-        remaining_chars -= len(excerpt)
-        truncated = truncated or len(content) > len(excerpt)
+        remaining_chars -= separator_chars + len(part)
+        truncated = (
+            truncated
+            or len(raw_part) > len(part)
+            or len(content) > len(content_excerpt)
+        )
 
     text = "\n\n".join(parts).strip()
     if not text:
@@ -157,10 +178,7 @@ def build_research_workspace_output_source_context(
             "usable_source_ids": usable_source_ids,
             "skipped_source_ids": skipped_source_ids,
             "media_ids": media_ids,
-            "context_char_limit": min(
-                max(int(max_chars), 1),
-                _SOURCE_CONTEXT_TOTAL_CHAR_LIMIT,
-            ),
+            "context_char_limit": context_char_limit,
             "context_truncated": truncated,
         },
     )
@@ -199,12 +217,12 @@ def persist_research_workspace_output_bytes(
         workspace_tag=f"workspace:{workspace_id}",
         metadata_json=json.dumps(
             {
+                **_safe_caller_output_metadata(metadata),
                 "origin": "research_workspace",
                 "workspace_id": workspace_id,
                 "workspace_artifact_id": workspace_artifact_id,
                 "content_type": content_type,
                 "byte_size": len(content),
-                **dict(metadata or {}),
             },
             ensure_ascii=False,
         ),
@@ -398,6 +416,27 @@ def _content_text(value: Any) -> str:
                 return str(parsed.get("content") or parsed.get("text") or text).strip()
         return text
     return ""
+
+
+def _safe_caller_output_metadata(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
+    safe: dict[str, Any] = {}
+    for key, value in dict(metadata or {}).items():
+        key_text = str(key)
+        key_lower = key_text.lower()
+        if key_lower in _REQUIRED_OUTPUT_METADATA_KEYS or "path" in key_lower:
+            continue
+        if isinstance(value, str) and _looks_absolute_path_like(value):
+            continue
+        safe[key_text] = value
+    return safe
+
+
+def _looks_absolute_path_like(value: str) -> bool:
+    text = value.strip()
+    return (
+        text.startswith(("/", "\\", "~/"))
+        or re.match(r"^[A-Za-z]:[\\/]", text) is not None
+    )
 
 
 def _pending_artifact_payload(
