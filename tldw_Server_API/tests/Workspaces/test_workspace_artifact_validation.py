@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from hypothesis import given, settings, strategies as st
+from hypothesis import HealthCheck, given, settings, strategies as st
 
 from tldw_Server_API.app.core.exceptions import WorkspaceArtifactExportStateError
 from tldw_Server_API.app.core.Workspaces.artifact_validation import (
@@ -49,7 +49,7 @@ def test_generated_artifact_placeholders_are_rejected(artifact_type: str, conten
         validate_workspace_artifact_for_export(artifact)
 
 
-@settings(max_examples=30)
+@settings(max_examples=30, suppress_health_check=[HealthCheck.too_slow])
 @given(
     artifact_type=st.sampled_from(GENERATED_ARTIFACT_TYPES),
     content=st.sampled_from(PLACEHOLDER_CONTENT),

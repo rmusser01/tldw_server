@@ -393,8 +393,11 @@ async def run_multi_voice_tts_adapter(config: dict[str, Any], context: dict[str,
     Config:
       - sections: list[{voice, text}] - Sections from compose step
       - voice_assignments: dict - Voice marker -> Kokoro voice ID
+      - default_provider: str | None = None - Preferred TTS provider for primary synthesis
+      - provider: str | None = None - Legacy alias for default_provider
       - default_model: str = "kokoro"
       - default_voice: str = "af_heart"
+      - fallback_provider: str | None = None - Provider used for per-section fallback synthesis
       - response_format: str = "mp3"
       - speed: float = 1.0
       - pause_duration_seconds: float = 1.0
@@ -413,7 +416,7 @@ async def run_multi_voice_tts_adapter(config: dict[str, Any], context: dict[str,
             sections = prev.get("sections") or []
 
     if not sections:
-        return {"error": "missing_sections"}
+        raise AdapterError("missing_sections")
 
     voice_assignments = config.get("voice_assignments") or {}
     if not voice_assignments:
@@ -553,8 +556,9 @@ async def run_multi_voice_tts_adapter(config: dict[str, Any], context: dict[str,
             if await _generate_silence(pause_duration, silence_path, fmt):
                 segment_files.append(silence_path)
 
-    if not segment_files:
-        return {"error": "no_sections_generated"}
+    if sections_generated == 0:
+        shutil.rmtree(out_dir, ignore_errors=True)
+        raise AdapterError("no_sections_generated")
 
     # Concatenate
     concat_path = out_dir / f"briefing_raw.{ext}"
@@ -568,6 +572,7 @@ async def run_multi_voice_tts_adapter(config: dict[str, Any], context: dict[str,
     else:
         concat_ok = await _concat_files(segment_files, concat_path, fmt)
         if not concat_ok:
+            shutil.rmtree(out_dir, ignore_errors=True)
             raise AdapterError("concat_failed")
 
     # Normalize

@@ -1870,14 +1870,21 @@ class TestMultiVoiceTTSAdapter:
 
     @pytest.mark.asyncio
     async def test_multi_voice_tts_empty_sections_error(self, base_context):
-        """Test empty sections returns error."""
+        """Test empty sections route through adapter failure handling."""
         from tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts import (
             run_multi_voice_tts_adapter,
         )
+        from tldw_Server_API.app.core.exceptions import AdapterError
 
         config = {"sections": []}
-        result = await run_multi_voice_tts_adapter(config, base_context)
-        assert result.get("error") == "missing_sections"
+        with pytest.raises(AdapterError, match="missing_sections"):
+            await run_multi_voice_tts_adapter(config, base_context)
+
+    def test_multi_voice_tts_config_fallback_provider_is_optional(self):
+        """Fallback provider stays opt-in for internal per-section retries."""
+        from tldw_Server_API.app.core.Workflows.adapters.audio._config import MultiVoiceTTSConfig
+
+        assert MultiVoiceTTSConfig().fallback_provider is None
 
     @pytest.mark.asyncio
     async def test_multi_voice_tts_concat_failure_returns_error_without_final_artifact(
@@ -1925,6 +1932,49 @@ class TestMultiVoiceTTSAdapter:
                 await run_multi_voice_tts_adapter(config, base_context)
 
         assert artifacts == []
+        assert not (tmp_path / "artifacts" / "mvtts_test_123").exists()
+
+    @pytest.mark.asyncio
+    async def test_multi_voice_tts_silence_only_output_is_failure(self, base_context, tmp_path, monkeypatch):
+        """Silence gaps alone are not a valid generated briefing."""
+        from tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts import (
+            run_multi_voice_tts_adapter,
+        )
+        from tldw_Server_API.app.core.exceptions import AdapterError
+
+        monkeypatch.setenv("WORKFLOWS_ARTIFACTS_DIR", str(tmp_path / "artifacts"))
+
+        async def mock_synthesize(text, model, voice, fmt, speed, output_path, provider=None):
+            raise RuntimeError("TTS failed")
+
+        async def mock_silence(dur, path, fmt="mp3"):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"silence")
+            return True
+
+        config = {
+            "sections": [
+                {"voice": "HOST", "text": "First section."},
+                {"voice": "REPORTER", "text": "Second section."},
+            ],
+            "voice_assignments": {"HOST": "af_bella", "REPORTER": "am_adam"},
+            "normalize": False,
+        }
+
+        with (
+            patch(
+                "tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts._synthesize_section",
+                side_effect=mock_synthesize,
+            ),
+            patch(
+                "tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts._generate_silence",
+                side_effect=mock_silence,
+            ),
+        ):
+            with pytest.raises(AdapterError, match="no_sections_generated"):
+                await run_multi_voice_tts_adapter(config, base_context)
+
+        assert not (tmp_path / "artifacts" / "mvtts_test_123").exists()
 
     @pytest.mark.asyncio
     async def test_multi_voice_tts_passes_default_provider_to_synthesis(
@@ -2058,6 +2108,7 @@ class TestMultiVoiceTTSAdapter:
         from tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts import (
             run_multi_voice_tts_adapter,
         )
+        from tldw_Server_API.app.core.exceptions import AdapterError
 
         monkeypatch.setenv("WORKFLOWS_ARTIFACTS_DIR", str(tmp_path / "artifacts"))
 
@@ -2080,11 +2131,11 @@ class TestMultiVoiceTTSAdapter:
                 "tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts._synthesize_section",
                 side_effect=mock_synthesize,
             ):
-                result = await run_multi_voice_tts_adapter(config, base_context)
+                with pytest.raises(AdapterError, match="no_sections_generated"):
+                    await run_multi_voice_tts_adapter(config, base_context)
         finally:
             multi_voice_tts.logger.remove(sink_id)
 
-        assert result.get("error") == "no_sections_generated"
         joined = "\n".join(messages)
         assert "Section 0 TTS failed with kokoro/af_bella" in joined
         assert "Section 0 fallback TTS" in joined

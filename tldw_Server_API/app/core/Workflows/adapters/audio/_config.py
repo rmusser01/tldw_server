@@ -138,7 +138,6 @@ class MultiVoiceTTSConfig(BaseAdapterConfig):
     pause_duration_seconds: float = Field(1.0, ge=0.0, le=5.0, description="Silence between sections")
     normalize: bool = Field(True, description="EBU R128 normalize final output")
     target_lufs: float = Field(-16.0, description="Target LUFS for normalization")
-    fallback_provider: str | None = Field("openai", description="Fallback TTS provider on failure")
     fallback_voice: str = Field("nova", description="Fallback voice for fallback provider")
     background_audio_uri: str | None = Field(
         None,
