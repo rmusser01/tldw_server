@@ -48,6 +48,7 @@ class ResearchWorkspaceOutputJobError(RuntimeError):
         self.status_code = status_code
         self.retryable = retryable
         self.backoff_seconds = backoff_seconds
+        self.failure_code = self.public_code
 
 
 def research_workspace_output_jobs_queue() -> str:
@@ -55,6 +56,27 @@ def research_workspace_output_jobs_queue() -> str:
     if raw in {"default", "high", "low"}:
         return raw
     return RESEARCH_WORKSPACE_OUTPUT_JOB_QUEUE
+
+
+def normalize_research_workspace_output_payload(value: Any) -> dict[str, Any]:
+    return dict(_normalize_job_mapping(value))
+
+
+async def process_research_workspace_output_payload(
+    *,
+    job: dict[str, Any],
+    payload: dict[str, Any],
+    workspace_db: Any,
+    media_db: Any,
+    user_id: int,
+    job_manager: JobManager,
+    progress: Any | None = None,
+) -> dict[str, Any]:
+    raise ResearchWorkspaceOutputJobError(
+        "research_workspace_output_processing_not_implemented",
+        status_code=501,
+        retryable=False,
+    )
 
 
 def submit_research_workspace_output_job(
