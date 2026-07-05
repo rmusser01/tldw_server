@@ -561,17 +561,18 @@ describe("WebClipperPanel save flow", () => {
 
   it.each([
     ["Note", "#/notes"],
-    ["Both", "#/notes"],
+    ["Both", "#/research-workspace"],
     ["Workspace", "#/research-workspace"]
   ])(
     "save and open routes %s clips to %s",
     async (destinationLabel, expectedPath) => {
       const user = userEvent.setup()
+      const hasWorkspacePlacement = destinationLabel !== "Note"
       apiMocks.saveWebClip.mockResolvedValueOnce({
         clip_id: "clip-123",
         note_id: "note-123",
         note: { id: "note-123", title: "Example Story", version: 1 },
-        workspace_placement: destinationLabel === "Workspace"
+        workspace_placement: hasWorkspacePlacement
           ? {
               workspace_id: "workspace-alpha",
               workspace_note_id: 42,
@@ -581,8 +582,8 @@ describe("WebClipperPanel save flow", () => {
         attachments: [],
         status: "saved",
         warnings: [],
-        workspace_placement_saved: destinationLabel === "Workspace",
-        workspace_placement_count: destinationLabel === "Workspace" ? 1 : 0
+        workspace_placement_saved: hasWorkspacePlacement,
+        workspace_placement_count: hasWorkspacePlacement ? 1 : 0
       })
 
       render(<WebClipperPanel draft={createDraft()} onCancel={vi.fn()} />)
