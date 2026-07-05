@@ -21,6 +21,7 @@ import {
 import { IngestDefaultsStep } from "./steps/IngestDefaultsStep";
 import { AudioSetupStep } from "./steps/AudioSetupStep";
 import { OptionalAdvancedStep } from "./steps/OptionalAdvancedStep";
+import { McpToolsStep } from "./steps/McpToolsStep";
 import { FirstChatStep } from "./steps/FirstChatStep";
 import { SetupReadinessPanel } from "./SetupReadinessPanel";
 
@@ -31,6 +32,7 @@ type WizardStep =
   | "ingest_defaults"
   | "audio_defaults"
   | "optional_advanced"
+  | "mcp_tools"
   | "first_chat"
   | "multi_user_exit";
 
@@ -54,6 +56,11 @@ const stepFromState = (state: FirstRunState | null): WizardStep => {
   if (!completed.has("ingest_defaults")) return "ingest_defaults";
   if (!completed.has("audio_defaults")) return "audio_defaults";
   if (!completed.has("optional_advanced")) return "optional_advanced";
+  const mcpToolsData = state?.step_data?.mcp_tools;
+  const mcpToolsDone =
+    mcpToolsData?.acknowledged === true ||
+    mcpToolsData?.validation_state === "skipped";
+  if (!mcpToolsDone) return "mcp_tools";
   return "first_chat";
 };
 
@@ -90,11 +97,13 @@ export function UnifiedSetupWizard({
     state,
     metadata,
     providerCatalog,
+    mcpToolsCatalog,
     audioRecommendations,
     loading,
     error,
     refresh,
     loadProviderCatalog,
+    loadMcpToolsCatalog,
     loadAudioRecommendations,
     saveStep,
     skip,
@@ -103,6 +112,8 @@ export function UnifiedSetupWizard({
     saveIngestDefaults,
     saveAudioDefaults,
     saveOptionalAdvanced,
+    applyMcpTools,
+    validateMcpTools,
     verifyFirstChat,
     complete,
   } = useSetupOnboarding({
@@ -294,6 +305,26 @@ export function UnifiedSetupWizard({
     [refreshParentState, refreshSetupReadiness, saveOptionalAdvanced],
   );
 
+  const applyMcpToolsAndPublish = React.useCallback(
+    async (...args: Parameters<typeof applyMcpTools>) => {
+      const response = await applyMcpTools(...args);
+      refreshSetupReadiness();
+      await refreshParentState();
+      return response;
+    },
+    [applyMcpTools, refreshParentState, refreshSetupReadiness],
+  );
+
+  const validateMcpToolsAndPublish = React.useCallback(
+    async (...args: Parameters<typeof validateMcpTools>) => {
+      const response = await validateMcpTools(...args);
+      refreshSetupReadiness();
+      await refreshParentState();
+      return response;
+    },
+    [refreshParentState, refreshSetupReadiness, validateMcpTools],
+  );
+
   const completeAndPublish = React.useCallback(
     async (...args: Parameters<typeof complete>) => {
       const response = await complete(...args);
@@ -467,8 +498,28 @@ export function UnifiedSetupWizard({
         {step === "optional_advanced" ? (
           <OptionalAdvancedStep
             saveOptionalAdvanced={saveAdvancedAndPublish}
-            onContinue={() => setStep("first_chat")}
+            onContinue={() => setStep("mcp_tools")}
             onBack={() => setStep("audio_defaults")}
+          />
+        ) : null}
+        {step === "mcp_tools" ? (
+          <McpToolsStep
+            catalog={mcpToolsCatalog}
+            loadCatalog={loadMcpToolsCatalog}
+            applyMcpTools={applyMcpToolsAndPublish}
+            validateMcpTools={validateMcpToolsAndPublish}
+            onContinue={() => setStep("first_chat")}
+            onBack={() => setStep("optional_advanced")}
+            onSkip={() => {
+              void (async () => {
+                const nextState = await persistStep({
+                  step: "mcp_tools",
+                  data: { acknowledged: true, validation_state: "skipped" },
+                });
+                if (!nextState) return;
+                setStep("first_chat");
+              })();
+            }}
           />
         ) : null}
         {step === "first_chat" && providerSelection ? (
@@ -480,7 +531,7 @@ export function UnifiedSetupWizard({
             onComplete={() => {
               onComplete?.();
             }}
-            onBack={() => setStep("provider_setup")}
+            onBack={() => setStep("mcp_tools")}
             onEditProvider={() => setStep("provider_setup")}
             onSwitchProvider={() => setStep("provider_setup")}
             onCheckEndpoint={() => setStep("provider_setup")}
