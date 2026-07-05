@@ -2106,6 +2106,62 @@ def test_workspace_artifact_export_rejects_non_accepted_state(workspace_fastapi_
 
 
 @pytest.mark.integration
+def test_workspace_artifact_export_rejects_placeholder_generated_artifact(workspace_fastapi_app, db):
+    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+
+    async def _allow_rate_limit() -> None:
+        return None
+
+    async def _user() -> User:
+        return User(
+            id=1,
+            username="testuser",
+            email="test@example.com",
+            is_active=True,
+            roles=["admin"],
+            is_admin=True,
+        )
+
+    def _db() -> CharactersRAGDB:
+        return db
+
+    workspace_fastapi_app.dependency_overrides[get_request_user] = _user
+    workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = _db
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_READ_RATE_LIMIT] = _allow_rate_limit
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_WRITE_RATE_LIMIT] = _allow_rate_limit
+    try:
+        db.upsert_workspace("ws-export-api", "Workspace Exports")
+        db.add_workspace_artifact(
+            "ws-export-api",
+            {
+                "id": "slides-1",
+                "artifact_type": "slides",
+                "title": "Generated Slides",
+                "content": "slides go here",
+                "review_state": "accepted",
+                "source_lineage": {"sources": [{"source_id": "src-1"}]},
+            },
+        )
+
+        with TestClient(workspace_fastapi_app, raise_server_exceptions=False) as client:
+            response = client.post(
+                "/api/v1/workspaces/ws-export-api/artifacts/slides-1/exports",
+                json={"format": "md"},
+            )
+            assert response.status_code == 409, response.text
+            assert response.json()["detail"] == "workspace_artifact_placeholder_content"
+
+            fetch_response = client.get("/api/v1/workspaces/ws-export-api/artifacts")
+            assert fetch_response.status_code == 200, fetch_response.text
+            assert fetch_response.json()[0]["export_refs"] == []
+    finally:
+        workspace_fastapi_app.dependency_overrides.pop(get_request_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_READ_RATE_LIMIT, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_WRITE_RATE_LIMIT, None)
+
+
+@pytest.mark.integration
 def test_workspace_artifact_api_exposes_traceable_contract_fields(workspace_fastapi_app, db):
     from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 
