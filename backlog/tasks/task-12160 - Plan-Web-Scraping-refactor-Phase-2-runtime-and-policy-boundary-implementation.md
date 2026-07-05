@@ -1,7 +1,7 @@
 ---
 id: TASK-12160
 title: Plan Web_Scraping refactor Phase 2 runtime and policy boundary implementation
-status: In Progress
+status: Done
 created_date: 2026-07-05 04:50
 labels:
 - web-scraping
@@ -13,6 +13,7 @@ references:
 - backlog/tasks/task-12159 - Design-Web-Scraping-refactor-Phase-2-runtime-and-policy-boundary.md
 modified_files:
 - Docs/superpowers/plans/2026-07-05-web-scraping-phase-2-runtime-policy-boundary.md
+updated_date: 2026-07-05 16:04
 ---
 
 ## Description
@@ -23,10 +24,10 @@ Create the implementation plan for Web_Scraping refactor Phase 2 based on the ap
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Implementation plan is saved under Docs/superpowers/plans with concrete staged tasks.
-- [ ] #2 Plan covers runtime contracts, policy adapter, fetch adapter, browser/session/timeout/cancellation placeholders, scrape_article wiring, compatibility tests, verification, and Backlog finalization.
-- [ ] #3 Plan includes explicit guardrails for preflight analyzer preservation, curl backend call mode, curl-to-httpx fallback, import boundaries, and public API compatibility.
-- [ ] #4 Plan is self-reviewed for spec coverage, placeholders, and type consistency.
+- [x] #1 Implementation plan is saved under Docs/superpowers/plans with concrete staged tasks.
+- [x] #2 Plan covers runtime contracts, policy adapter, fetch adapter, browser/session/timeout/cancellation placeholders, scrape_article wiring, compatibility tests, verification, and Backlog finalization.
+- [x] #3 Plan includes explicit guardrails for preflight analyzer preservation, curl backend call mode, curl-to-httpx fallback, import boundaries, and public API compatibility.
+- [x] #4 Plan is self-reviewed for spec coverage, placeholders, and type consistency.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -38,21 +39,21 @@ Create the implementation plan for Web_Scraping refactor Phase 2 based on the ap
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
+2026-07-05 finalization: Implementation plan executed via TASK-12161. Rebase onto latest origin/dev completed cleanly before final verification; verification base recorded as HEAD e6bfdabe1fd2d3d67ef85eab59fc7da77f434108 with merge-base 242297a2b8e5defeb5b1d5d74253ea75e787c4b0 and branch initially ahead 16/not behind. Final verification evidence: focused Phase 2 pytest group passed 62 tests; compatibility/hardening pytest group passed 49 tests; legacy compatibility subset passed 6 tests; git diff --check exited 0; Bandit production scan wrote /tmp/bandit_web_scraping_phase2_runtime_policy.json with exit 0 and zero results.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Phase 2 runtime/policy boundary planning is finalized. The implementation plan was executed by TASK-12161, the branch was rebased cleanly onto latest origin/dev before final verification, and the required focused, compatibility, whitespace, and Bandit checks all passed. No remaining blockers are recorded for this planning task.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

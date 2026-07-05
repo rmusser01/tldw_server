@@ -1,7 +1,7 @@
 ---
 id: TASK-12161
 title: Implement Web_Scraping refactor Phase 2 runtime and policy boundary
-status: In Progress
+status: Done
 created_date: 2026-07-05 05:10
 labels:
 - web-scraping
@@ -28,7 +28,7 @@ modified_files:
 - tldw_Server_API/tests/Web_Scraping/test_phase2_runtime_adapters.py
 - tldw_Server_API/tests/Web_Scraping/test_phase2_article_runtime_boundary.py
 - tldw_Server_API/tests/Web_Scraping/test_router_backend_selection.py
-updated_date: 2026-07-05 06:35
+updated_date: 2026-07-05 16:05
 ---
 
 ## Description
@@ -66,20 +66,21 @@ Follow Docs/superpowers/plans/2026-07-05-web-scraping-phase-2-runtime-policy-bou
 2026-07-05: Task 4 concrete outbound policy adapter completed. Scope limited to tldw_Server_API/app/core/Web_Scraping/policy/__init__.py, tldw_Server_API/app/core/Web_Scraping/policy/adapters.py, and policy-adapter tests in test_phase2_runtime_adapters.py; runtime package and Article_Extractor_Lib intentionally left untouched. Red run: /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest -q --tb=short tldw_Server_API/tests/Web_Scraping/test_phase2_runtime_adapters.py -> expected ModuleNotFoundError for tldw_Server_API.app.core.Web_Scraping.policy after new tests. Green run: /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest -q --tb=short tldw_Server_API/tests/Web_Scraping/test_phase2_runtime_adapters.py tldw_Server_API/tests/Web_Scraping/test_phase2_runtime_contracts.py -> 58 passed, 122 warnings. Bandit production scan: /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m bandit -r tldw_Server_API/app/core/Web_Scraping/policy -f json -o /tmp/bandit_task4_policy_adapter.json -> exit 0, no findings.
 2026-07-05: Task 5 article runtime boundary wiring completed. Added focused article boundary tests for runtime policy-before-preflight blocking, runtime httpx fetch, curl-to-httpx fallback, and TLS preflight curl advice. Updated scrape_article to use DefaultWebOutboundPolicyChecker and DefaultFetchClient via article-local adapters while preserving preflight ordering and downstream extraction/Playwright behavior. Verification: red run of test_phase2_article_runtime_boundary.py failed on missing _ARTICLE_POLICY_CHECKER as expected. Green runs: test_phase2_article_runtime_boundary.py -> 4 passed, 14 warnings; test_router_backend_selection.py -> 3 passed, 13 warnings; test_phase2_runtime_adapters.py plus test_phase2_runtime_contracts.py -> 58 passed, 122 warnings. Production Bandit scan of Article_Extractor_Lib.py wrote /tmp/bandit_task5_article_runtime.json and reported no findings. Full touched-file Bandit scan of Article_Extractor_Lib.py plus the two Task 5 pytest files produced expected LOW B101 assert_used findings in pytest files only. Review follow-up: rg found no production callers for _fetch_with_curl, but existing WebScraping tests still monkeypatch it, so the helper was retained per review instruction. git diff --check exited 0.
 2026-07-05: Task 5 legacy WebScraping compatibility follow-up completed. Updated affected legacy article tests to patch _ARTICLE_POLICY_CHECKER and _ARTICLE_FETCH_CLIENT instead of the removed async decide_web_outbound_policy/_fetch_with_curl seams, preserving policy-block-before-network, TLS curl selection, JS Playwright selection, and curl backend assertions without live network. rg confirmed no remaining _fetch_with_curl references, so the private dead helper was removed from Article_Extractor_Lib.py. Remaining decide_web_outbound_policy references are sync helper or EnhancedWebScraper seams. Verification: legacy failing subset -> 6 passed, 18 warnings; test_phase2_article_runtime_boundary.py -> 4 passed, 14 warnings; test_router_backend_selection.py -> 3 passed, 13 warnings; test_phase2_runtime_adapters.py plus test_phase2_runtime_contracts.py -> 58 passed, 122 warnings; production Bandit /tmp/bandit_task5_article_legacy_compat.json -> 0 findings; git diff --check exited 0.
+2026-07-05 final verification after clean rebase onto latest origin/dev completed. Verification base: HEAD e6bfdabe1fd2d3d67ef85eab59fc7da77f434108, merge-base with origin/dev 242297a2b8e5defeb5b1d5d74253ea75e787c4b0, branch initially ahead 16/not behind. Commands and results: focused Phase 2 tests (`test_phase2_runtime_contracts.py`, `test_phase2_runtime_adapters.py`, `test_phase2_article_runtime_boundary.py`) passed 62 tests; compatibility/hardening tests (`test_phase1_contracts.py`, `test_router_backend_selection.py`, `test_enhanced_web_scraping_guards.py`, `test_outbound_policy.py`, `test_http_client_fetch.py`) passed 49 tests; legacy compatibility subset passed 6 tests; `git diff --check` exited 0; Bandit production scan over runtime, policy, and Article_Extractor_Lib.py wrote `/tmp/bandit_web_scraping_phase2_runtime_policy.json`, exited 0, and reported zero results. Only unrelated untracked Config_Files files were present before finalization and were not staged.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Implemented and finalized the Web_Scraping Phase 2 runtime and policy boundary. The work added runtime request/response contracts, default fetch and policy adapters, placeholder runtime modules, and article scrape wiring that preserves policy-before-network checks, preflight guidance, curl/httpx behavior, and compatibility contracts. After a clean rebase onto latest origin/dev, the required focused Phase 2, compatibility, legacy subset, whitespace, and Bandit checks all passed. No open verification blockers remain.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
