@@ -39,9 +39,9 @@ The WebUI provider catalog exposes the configured llama.cpp endpoint as provider
 - Added provider/model resolution coverage for the WebUI `model: "llama:<model>"` request path and normalized it to the llama.cpp adapter.
 - Verified `api_provider: "llama"` returns HTTP 200 against the PR worktree backend and live llama.cpp server at `127.0.0.1:9099`, with response content `alias ok`.
 - Verification:
-  - `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Chat_NEW/unit/test_provider_model_resolution.py::test_resolve_provider_and_model_normalizes_llama_colon_model_prefix -q` failed before the fix with `metrics_provider == "openai"`.
-  - `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Chat_NEW/unit/test_provider_model_resolution.py tldw_Server_API/tests/Chat/unit/test_chat_request_schemas.py -q` (`31 passed`)
-  - `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/core/Chat/chat_service.py tldw_Server_API/app/api/v1/schemas/chat_request_schemas.py -f json -o /tmp/bandit_task_12120.json` (`0 results`)
+  - `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Chat_NEW/unit/test_provider_model_resolution.py::test_resolve_provider_and_model_normalizes_llama_colon_model_prefix -q` failed before the fix with `metrics_provider == "openai"`.
+  - `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Chat_NEW/unit/test_provider_model_resolution.py tldw_Server_API/tests/Chat/unit/test_chat_request_schemas.py -q` (`31 passed`)
+  - `source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/Chat/chat_service.py tldw_Server_API/app/api/v1/schemas/chat_request_schemas.py -f json -o /tmp/bandit_task_12120.json` (`0 results`)
   - Local curl to `POST /api/v1/chat/completions` with `api_provider: "llama"` returned `HTTP/1.1 200 OK`.
   - Local curl to `POST /api/v1/chat/completions` with `model: "llama:<gguf>"` and no `api_provider` returned `HTTP/1.1 200 OK` against the PR worktree backend and live llama.cpp server, with response content `colon alias ok`.
 <!-- SECTION:FINAL_SUMMARY:END -->

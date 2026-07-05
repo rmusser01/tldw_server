@@ -107,7 +107,8 @@ def test_chat_completion_request_valid_api_provider():
 
 
 @pytest.mark.unit
-def test_chat_completion_request_normalizes_llama_provider_alias():
+def test_chat_completion_request_normalizes_llama_provider_alias() -> None:
+    """Catalog provider id `llama` should validate as canonical `llama.cpp`."""
     req = ChatCompletionRequest(
         model="gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf",
         messages=[ChatCompletionUserMessageParam(role="user", content="hi")],
