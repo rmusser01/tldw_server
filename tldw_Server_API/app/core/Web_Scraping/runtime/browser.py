@@ -39,6 +39,16 @@ class BrowserLaunchOptions:
     viewport_width: int = 1280
     viewport_height: int = 720
 
+    def __post_init__(self) -> None:
+        for field_name in ("viewport_width", "viewport_height"):
+            try:
+                normalized = int(getattr(self, field_name))
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"{field_name} must be an integer") from exc
+            if normalized < 1:
+                raise ValueError(f"{field_name} must be >= 1")
+            object.__setattr__(self, field_name, normalized)
+
     @property
     def viewport(self) -> dict[str, int]:
-        return {"width": int(self.viewport_width), "height": int(self.viewport_height)}
+        return {"width": self.viewport_width, "height": self.viewport_height}

@@ -8,8 +8,16 @@ from types import MappingProxyType
 from typing import Any
 
 
+def _freeze_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return _freeze_mapping(value)
+    if isinstance(value, list | tuple):
+        return tuple(_freeze_value(item) for item in value)
+    return value
+
+
 def _freeze_mapping(value: Mapping[str, Any] | None) -> Mapping[str, Any]:
-    return MappingProxyType({str(key): item for key, item in dict(value or {}).items()})
+    return MappingProxyType({str(key): _freeze_value(item) for key, item in dict(value or {}).items()})
 
 
 @dataclass(frozen=True, slots=True)

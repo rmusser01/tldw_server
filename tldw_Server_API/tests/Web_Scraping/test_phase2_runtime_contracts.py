@@ -209,6 +209,7 @@ def test_runtime_package_does_not_import_legacy_wrappers_or_policy_modules() -> 
         "tldw_Server_API.app.core.Web_Scraping.WebSearch_APIs",
         "tldw_Server_API.app.core.Web_Scraping.outbound_policy",
         "tldw_Server_API.app.core.Security.egress",
+        "playwright",
     }
     forbidden_package_aliases = {
         "tldw_Server_API.app.core.Web_Scraping": {
@@ -267,9 +268,34 @@ def test_runtime_session_state_freezes_cookies_and_headers() -> None:
 
 
 @pytest.mark.unit
+def test_runtime_session_state_recursively_freezes_header_values() -> None:
+    headers = {"X-Metadata": {"trace": ["one", {"nested": ["two"]}]}}
+    state = RuntimeSessionState(headers=headers)
+
+    headers["X-Metadata"]["trace"][1]["nested"].append("mutated")
+    headers["X-Metadata"]["trace"].append("mutated")
+    headers["X-Metadata"]["new"] = "mutated"
+
+    assert isinstance(state.headers["X-Metadata"], MappingProxyType)
+    assert state.headers["X-Metadata"]["trace"] == ("one", {"nested": ("two",)})
+    assert isinstance(state.headers["X-Metadata"]["trace"][1], MappingProxyType)
+    with pytest.raises(TypeError):
+        state.headers["X-Metadata"]["trace"][1]["nested"] = "blocked"
+    with pytest.raises(TypeError):
+        state.headers["X-Metadata"]["new"] = "blocked"
+
+
+@pytest.mark.unit
 def test_runtime_timeout_contract_rejects_negative_values() -> None:
     with pytest.raises(ValueError, match="fetch_timeout_s must be non-negative"):
         RuntimeTimeouts(fetch_timeout_s=-1)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_runtime_timeout_contract_rejects_non_finite_values(value: float) -> None:
+    with pytest.raises(ValueError, match="fetch_timeout_s must be finite"):
+        RuntimeTimeouts(fetch_timeout_s=value)
 
 
 @pytest.mark.unit
@@ -278,6 +304,34 @@ def test_browser_launch_options_normalize_viewport() -> None:
 
     assert options.headless is True
     assert options.viewport == {"width": 1280, "height": 720}
+
+
+@pytest.mark.unit
+def test_browser_launch_options_coerce_viewport_dimensions() -> None:
+    options = BrowserLaunchOptions(viewport_width="1280", viewport_height=720.0)
+
+    assert options.viewport_width == 1280
+    assert options.viewport_height == 720
+    assert options.viewport == {"width": 1280, "height": 720}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("field_name", "value", "message"),
+    [
+        ("viewport_width", 0, "viewport_width must be >= 1"),
+        ("viewport_height", -1, "viewport_height must be >= 1"),
+    ],
+)
+def test_browser_launch_options_reject_invalid_viewport_dimensions(
+    field_name: str,
+    value: int,
+    message: str,
+) -> None:
+    kwargs = {field_name: value}
+
+    with pytest.raises(ValueError, match=message):
+        BrowserLaunchOptions(**kwargs)
 
 
 @pytest.mark.unit

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 
@@ -19,6 +20,8 @@ class RuntimeTimeouts:
             if value is None:
                 continue
             normalized = float(value)
+            if not math.isfinite(normalized):
+                raise ValueError(f"{field_name} must be finite")
             if normalized < 0:
                 raise ValueError(f"{field_name} must be non-negative")
             object.__setattr__(self, field_name, normalized)
