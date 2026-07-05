@@ -11,6 +11,11 @@ import type {
   FirstRunStepSaveResponse,
   FirstRunStepUpdateRequest,
   IngestDefaultsRequest,
+  McpToolsApplyRequest,
+  McpToolsApplyResponse,
+  McpToolsCatalogResponse,
+  McpToolsValidateRequest,
+  McpToolsValidateResponse,
   OptionalAdvancedRequest,
   SetupCompleteResponse,
   SetupProviderCatalogResponse,
@@ -146,6 +151,39 @@ export const setupOnboardingMethods = {
   ): Promise<FirstRunStepSaveResponse> {
     return await bgRequest<FirstRunStepSaveResponse>({
       path: "/api/v1/setup/first-run/optional-advanced",
+      method: "POST",
+      headers: jsonHeaders,
+      noAuth: true,
+      body: payload,
+    });
+  },
+
+  async getMcpToolsCatalog(): Promise<McpToolsCatalogResponse> {
+    return await bgRequest<McpToolsCatalogResponse>({
+      path: "/api/v1/setup/first-run/mcp-tools/catalog",
+      method: "GET",
+      noAuth: true,
+    });
+  },
+
+  async applyMcpTools(
+    payload: McpToolsApplyRequest,
+  ): Promise<McpToolsApplyResponse> {
+    return await bgRequest<McpToolsApplyResponse>({
+      path: "/api/v1/setup/first-run/mcp-tools/apply",
+      method: "POST",
+      headers: jsonHeaders,
+      noAuth: true,
+      expectedStatuses: [409],
+      body: payload,
+    });
+  },
+
+  async validateMcpTools(
+    payload: McpToolsValidateRequest = {},
+  ): Promise<McpToolsValidateResponse> {
+    return await bgRequest<McpToolsValidateResponse>({
+      path: "/api/v1/setup/first-run/mcp-tools/validate",
       method: "POST",
       headers: jsonHeaders,
       noAuth: true,

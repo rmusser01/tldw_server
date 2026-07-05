@@ -132,4 +132,109 @@ describe("setup onboarding API domain", () => {
       noAuth: true,
     });
   });
+
+  it("fetches the first-run MCP tools catalog without auth", async () => {
+    vi.mocked(bgRequest).mockResolvedValueOnce({
+      catalog_version: "2026-07-04",
+      confirmation_version: "v1",
+      packs: [],
+      add_ons: [],
+      validation_states: ["not_run"],
+    });
+
+    const result = await setupOnboardingMethods.getMcpToolsCatalog.call({});
+
+    expect(result.catalog_version).toBe("2026-07-04");
+    expect(bgRequest).toHaveBeenCalledWith({
+      path: "/api/v1/setup/first-run/mcp-tools/catalog",
+      method: "GET",
+      noAuth: true,
+    });
+  });
+
+  it("applies first-run MCP tools with conflict responses expected", async () => {
+    vi.mocked(bgRequest).mockResolvedValueOnce({
+      status: "applied",
+      profile_id: 7,
+      assignment_id: 9,
+      catalog_version: "2026-07-04",
+      selected_pack_ids: ["research"],
+      selected_addon_ids: [],
+      effective_tool_count: 3,
+      effective_tools: ["mcp.tools.list"],
+      disabled_addons: [],
+      validation_state: "not_run",
+      conflict: null,
+    });
+
+    const payload = {
+      selected_pack_ids: ["research"],
+      selected_addon_ids: [],
+      confirmed_addon_ids: [],
+      confirmation_version: "v1",
+    };
+    const result = await setupOnboardingMethods.applyMcpTools.call({}, payload);
+
+    expect(result.profile_id).toBe(7);
+    expect(bgRequest).toHaveBeenCalledWith({
+      path: "/api/v1/setup/first-run/mcp-tools/apply",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      noAuth: true,
+      expectedStatuses: [409],
+      body: payload,
+    });
+  });
+
+  it("returns typed first-run MCP tools conflict bodies", async () => {
+    vi.mocked(bgRequest).mockResolvedValueOnce({
+      status: "conflict",
+      profile_id: 7,
+      assignment_id: null,
+      catalog_version: "2026-07-04",
+      selected_pack_ids: ["research"],
+      selected_addon_ids: [],
+      effective_tool_count: 0,
+      effective_tools: [],
+      disabled_addons: [],
+      validation_state: "not_run",
+      conflict: {
+        reason: "profile_manually_changed",
+        profile_id: 7,
+        current_hash: "changed",
+        expected_hash: "expected",
+      },
+    });
+
+    const result = await setupOnboardingMethods.applyMcpTools.call(
+      {},
+      { selected_pack_ids: ["research"] },
+    );
+
+    expect(result.status).toBe("conflict");
+    expect(result.conflict?.reason).toBe("profile_manually_changed");
+  });
+
+  it("validates first-run MCP tools with an empty default payload", async () => {
+    vi.mocked(bgRequest).mockResolvedValueOnce({
+      status: "validated",
+      validation_state: "built_in_passed",
+      profile_id: 7,
+      assignment_id: 9,
+      catalog_version: "2026-07-04",
+      selected_pack_ids: ["research"],
+      selected_addon_ids: [],
+      effective_tool_count: 3,
+    });
+
+    await setupOnboardingMethods.validateMcpTools.call({});
+
+    expect(bgRequest).toHaveBeenCalledWith({
+      path: "/api/v1/setup/first-run/mcp-tools/validate",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      noAuth: true,
+      body: {},
+    });
+  });
 });

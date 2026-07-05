@@ -12,12 +12,17 @@ import type {
   FirstRunState,
   FirstRunStepUpdateRequest,
   IngestDefaultsRequest,
+  McpToolsApplyRequest,
+  McpToolsApplyResponse,
+  McpToolsCatalogResponse,
+  McpToolsValidateRequest,
+  McpToolsValidateResponse,
   OptionalAdvancedRequest,
   SetupCompleteResponse,
   SetupProviderCatalogEntry,
   SetupProviderSaveRequest,
   SetupProviderSaveResponse,
-  SetupProviderValidationResponse
+  SetupProviderValidationResponse,
 } from "@/types/setup-onboarding"
 
 const toError = (value: unknown): Error =>
@@ -174,6 +179,8 @@ export function useSetupOnboarding(options: UseSetupOnboardingOptions = {}) {
   const [providerCatalog, setProviderCatalog] = React.useState<
     SetupProviderCatalogEntry[]
   >([])
+  const [mcpToolsCatalog, setMcpToolsCatalog] =
+    React.useState<McpToolsCatalogResponse | null>(null)
   const [audioRecommendations, setAudioRecommendations] = React.useState<
     AudioRecommendationsResponse["recommendations"]
   >([])
@@ -341,6 +348,32 @@ export function useSetupOnboarding(options: UseSetupOnboardingOptions = {}) {
     return response.recommendations
   }, [])
 
+  const loadMcpToolsCatalog = React.useCallback(async () => {
+    const response = await tldwClient.getMcpToolsCatalog()
+    setMcpToolsCatalog(response)
+    return response
+  }, [])
+
+  const applyMcpTools = React.useCallback(
+    async (payload: McpToolsApplyRequest): Promise<McpToolsApplyResponse> => {
+      const response = await tldwClient.applyMcpTools(payload)
+      await refresh().catch(() => undefined)
+      return response
+    },
+    [refresh]
+  )
+
+  const validateMcpTools = React.useCallback(
+    async (
+      payload: McpToolsValidateRequest = {}
+    ): Promise<McpToolsValidateResponse> => {
+      const response = await tldwClient.validateMcpTools(payload)
+      await refresh().catch(() => undefined)
+      return response
+    },
+    [refresh]
+  )
+
   const saveOptionalAdvanced = React.useCallback(
     async (payload: OptionalAdvancedRequest) => {
       const response = await tldwClient.saveOptionalAdvanced(payload)
@@ -376,6 +409,7 @@ export function useSetupOnboarding(options: UseSetupOnboardingOptions = {}) {
     state,
     metadata,
     providerCatalog,
+    mcpToolsCatalog,
     audioRecommendations,
     loading,
     error,
@@ -389,6 +423,9 @@ export function useSetupOnboarding(options: UseSetupOnboardingOptions = {}) {
     saveIngestDefaults,
     saveAudioDefaults,
     loadAudioRecommendations,
+    loadMcpToolsCatalog,
+    applyMcpTools,
+    validateMcpTools,
     saveOptionalAdvanced,
     verifyFirstChat,
     complete

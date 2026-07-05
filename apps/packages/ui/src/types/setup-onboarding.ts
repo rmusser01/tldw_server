@@ -78,6 +78,101 @@ export type SetupProviderValidationResponse = {
   can_gate_first_chat?: boolean
 }
 
+export type McpToolsValidationState =
+  | "not_run"
+  | "built_in_passed"
+  | "external_discovered"
+  | "external_tool_passed"
+  | "no_safe_external_tool"
+  | "external_discovery_incomplete"
+  | "failed"
+  | "skipped"
+
+export type McpToolsCatalogTool = {
+  tool_name: string
+  available: boolean
+}
+
+export type McpToolsCatalogPack = {
+  pack_id: string
+  label: string
+  purpose: string
+  default_selected: boolean
+  available: boolean
+  legacy?: boolean
+  module_targets: string[]
+  tool_patterns: string[]
+  available_tools: McpToolsCatalogTool[]
+  unavailable_tools: McpToolsCatalogTool[]
+  add_on_ids: string[]
+  sample_validation_candidates: string[]
+  catalog_version: string
+}
+
+export type McpToolsCatalogAddOn = {
+  addon_id: string
+  label: string
+  default_selected: boolean
+  requirement: string
+  strong_confirmation: boolean
+}
+
+export type McpToolsCatalogResponse = {
+  catalog_version: string
+  confirmation_version: string
+  packs: McpToolsCatalogPack[]
+  add_ons: McpToolsCatalogAddOn[]
+  validation_states: McpToolsValidationState[]
+}
+
+export type McpToolsApplyRequest = {
+  selected_pack_ids?: string[]
+  selected_addon_ids?: string[]
+  confirmed_addon_ids?: string[]
+  confirmation_version?: string | null
+  conflict_resolution?: "keep_existing" | "replace_existing" | null
+  profile_id?: number | null
+}
+
+export type McpToolsApplyConflict = {
+  reason: string
+  profile_id: number | null
+  current_hash?: string | null
+  expected_hash?: string | null
+}
+
+export type McpToolsApplyResponse = {
+  status: string
+  profile_id: number | null
+  assignment_id: number | null
+  catalog_version: string
+  selected_pack_ids: string[]
+  selected_addon_ids: string[]
+  effective_tool_count: number
+  effective_tools: string[]
+  disabled_addons: string[]
+  validation_state: McpToolsValidationState
+  conflict?: McpToolsApplyConflict | null
+}
+
+export type McpToolsValidateRequest = Record<string, never>
+
+export type McpToolsValidateResponse = {
+  status: string
+  validation_state: McpToolsValidationState
+  profile_id: number | null
+  assignment_id: number | null
+  catalog_version?: string | null
+  selected_pack_ids: string[]
+  selected_addon_ids: string[]
+  effective_tool_count?: number | null
+  validated_at?: string | null
+  validation_message?: string | null
+  last_validation_run_id?: string | null
+  sample_tool_name?: string | null
+  external_status?: string | null
+}
+
 export type FirstRunMetadata = {
   auth_mode: string
   bundled_single_user_auth_available: boolean
