@@ -1,7 +1,7 @@
 ---
 id: TASK-12028
 title: Improve WebUI and extension user-facing documentation
-status: In Progress
+status: Done
 created_date: 2026-07-04 23:49
 labels:
 - docs
@@ -11,7 +11,7 @@ priority: medium
 documentation:
 - Docs/superpowers/specs/2026-07-04-webui-extension-documentation-design.md
 - Docs/superpowers/plans/2026-07-04-webui-extension-documentation.md
-updated_date: 2026-07-05 01:49
+updated_date: 2026-07-05 02:09
 modified_files:
 - Docs/User_Guides/WebUI/index.md
 - Docs/User_Guides/WebUI/Page_Feature_Index.md
@@ -24,6 +24,9 @@ modified_files:
 - Docs/User_Guides/WebUI/Extension_Sidepanel.md
 - Docs/User_Guides/WebUI/Experimental_And_Specialized.md
 - Docs/User_Guides/index.md
+- Docs/User_Guides/Feature_Map.md
+- Docs/Wiki/User_Wiki.md
+- Docs/Wiki/Developer_Wiki.md
 - Docs/mkdocs.yml
 - Docs/superpowers/specs/2026-07-04-webui-extension-documentation-design.md
 - Docs/superpowers/plans/2026-07-04-webui-extension-documentation.md
@@ -61,6 +64,7 @@ Implementation plan written at Docs/superpowers/plans/2026-07-04-webui-extension
 Implemented the WebUI & Extension documentation section under Docs/User_Guides/WebUI and exposed it from Docs/User_Guides/index.md and Docs/mkdocs.yml. Final verification on 2026-07-04: local markdown links resolve across 11 files; new WebUI MkDocs nav targets exist for all 10 entries; Docs/Published is unchanged against dev; git diff --check dev...HEAD exits cleanly. Bandit is not applicable because the touched source files are Markdown, MkDocs YAML, Backlog task metadata, and documentation plan/spec files only; no Python files changed.
 Draft PR created for review: https://github.com/rmusser01/tldw_server/pull/2639. The PR intentionally leaves the human-authored Change summary as TODO because the repository merge gate requires the requester to write that rationale before merge.
 Reopened for PR follow-up: rebase PR #2639 on latest dev and address review comments/check issues before pushing an updated branch.
+PR follow-up completed: rebased the branch onto latest origin/dev (3943e293ac7be4a0c732640e3db5336ef4acbe37), resolving the MkDocs nav conflict by keeping the new User Wiki nav layout and preserving WebUI & Extension as a top-level section. The Gemini inline review comments were on Chat files that were unrelated to this docs PR; after the rebase, no tldw_Server_API/app/core/Chat files remain in the PR diff, so those comments are obsolete rather than code changes to apply here. Also fixed stale source-doc links for Metrics_Cheatsheet.md and Env_Vars.md that were surfaced by the rebased docs checks. Verification after rebase: focused local markdown links resolve across 14 files; new WebUI MkDocs nav targets exist for all 10 entries; Docs/Published unchanged against origin/dev; git diff --check origin/dev...HEAD exits cleanly; no Chat core files remain in the PR diff. Full MkDocs nav target audit still reports the pre-existing missing Overview/Feature_Status.md source page on current dev, which is outside this PR's WebUI documentation scope.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
