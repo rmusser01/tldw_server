@@ -1486,7 +1486,7 @@ def _job_error(job: dict[str, Any]) -> str | None:
 
 def _artifact_error(artifact: WorkspaceArtifactResponse | None) -> str | None:
     """Return a public artifact failure code when the linked artifact has one."""
-    if artifact is None or artifact.status != "failed":
+    if artifact is None or artifact.status != "failed" or not artifact.producer_metadata:
         return None
     raw = artifact.producer_metadata.get("error")
     if not isinstance(raw, str) or not raw.strip():
