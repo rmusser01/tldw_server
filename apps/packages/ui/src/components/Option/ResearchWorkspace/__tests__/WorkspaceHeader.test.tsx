@@ -1564,7 +1564,7 @@ describe("WorkspaceHeader workspace browser modal", () => {
     expect(await screen.findByText("Import Workspace")).toBeInTheDocument()
 
     await waitFor(() => {
-      expect(screen.getByText("View all workspaces")).not.toBeVisible()
+      expect(screen.queryByText("View all workspaces")).not.toBeInTheDocument()
     })
   })
 
@@ -3343,5 +3343,48 @@ describe("WorkspaceHeader workspace browser modal", () => {
     await waitFor(() => {
       expect(within(modal).getByText("Agent task created")).toBeInTheDocument()
     })
+  })
+
+  it("does not reuse web-clip agent-task prefill for later manual task creation", async () => {
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+        agentTaskHandoffOpenSignal={1}
+        agentTaskPrefill={{
+          title: "Review captured page: Example Story",
+          description: "Captured excerpt:\nAlpha body copy"
+        }}
+      />
+    )
+
+    const handoffModal = await screen.findByRole("dialog", {
+      name: "Create agent task"
+    })
+    expect(within(handoffModal).getByLabelText("Task title")).toHaveValue(
+      "Review captured page: Example Story"
+    )
+    expect(within(handoffModal).getByLabelText("Task description")).toHaveValue(
+      "Captured excerpt:\nAlpha body copy"
+    )
+
+    fireEvent.click(within(handoffModal).getByRole("button", { name: "Cancel" }))
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Create agent task" }))
+        .not.toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    fireEvent.click(await screen.findByText("Create agent task"))
+
+    const manualModal = await screen.findByRole("dialog", {
+      name: "Create agent task"
+    })
+    expect(within(manualModal).getByLabelText("Task title")).not.toHaveValue(
+      "Review captured page: Example Story"
+    )
+    expect(within(manualModal).getByLabelText("Task description")).toHaveValue("")
   })
 })

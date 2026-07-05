@@ -9,6 +9,10 @@ import {
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ResearchWorkspace } from "../index"
 import { RESEARCH_WORKSPACE_LAST_MOBILE_TAB_STORAGE_KEY } from "../research-workspace-route-state"
+import {
+  WEB_CLIPPER_PENDING_AGENT_TASK_STORAGE_KEY,
+  writePendingWebClipAgentTaskRequest
+} from "@/services/web-clipper/agent-task-handoff"
 
 const ONBOARDING_KEY = "tldw:research-workspace:onboarding-dismissed:v1"
 const {
@@ -18,7 +22,8 @@ const {
   mockGetResearchWorkspaceCapabilities,
   mockGetResearchBundle,
   mockChatPaneProps,
-  mockStudioPaneProps
+  mockStudioPaneProps,
+  mockWorkspaceHeaderProps
 } = vi.hoisted(() => ({
   onboardingStorageState: {
     value: undefined as string | undefined
@@ -40,8 +45,35 @@ const {
   })),
   mockGetResearchBundle: vi.fn(),
   mockChatPaneProps: [] as any[],
-  mockStudioPaneProps: [] as any[]
+  mockStudioPaneProps: [] as any[],
+  mockWorkspaceHeaderProps: [] as any[]
 }))
+const chromeStorageState = vi.hoisted(() => new Map<string, unknown>())
+const chromeStorageSessionGetMock = vi.hoisted(() =>
+  vi.fn((key: string, callback?: (items: Record<string, unknown>) => void) => {
+    const result = chromeStorageState.has(key)
+      ? { [key]: chromeStorageState.get(key) }
+      : {}
+    callback?.(result)
+    return Promise.resolve(result)
+  })
+)
+const chromeStorageSessionSetMock = vi.hoisted(() =>
+  vi.fn((items: Record<string, unknown>, callback?: () => void) => {
+    for (const [key, value] of Object.entries(items)) {
+      chromeStorageState.set(key, value)
+    }
+    callback?.()
+    return Promise.resolve()
+  })
+)
+const chromeStorageSessionRemoveMock = vi.hoisted(() =>
+  vi.fn((key: string, callback?: () => void) => {
+    chromeStorageState.delete(key)
+    callback?.()
+    return Promise.resolve()
+  })
+)
 
 const mockMessageApi = {
   open: vi.fn(),
@@ -97,10 +129,19 @@ vi.mock("react-i18next", () => ({
         | string
         | {
             defaultValue?: string
-          }
+          },
+      interpolation?: Record<string, unknown>
     ) => {
-      if (typeof defaultValueOrOptions === "string") return defaultValueOrOptions
-      if (defaultValueOrOptions?.defaultValue) return defaultValueOrOptions.defaultValue
+      const renderValue = (value: string) =>
+        value.replace(/\{\{(\w+)\}\}/g, (_match, token) =>
+          String(interpolation?.[token] ?? "")
+        )
+      if (typeof defaultValueOrOptions === "string") {
+        return renderValue(defaultValueOrOptions)
+      }
+      if (defaultValueOrOptions?.defaultValue) {
+        return renderValue(defaultValueOrOptions.defaultValue)
+      }
       return key
     }
   })
@@ -149,7 +190,10 @@ vi.mock("@/utils/research-workspace-prefill", () => ({
 }))
 
 vi.mock("../WorkspaceHeader", () => ({
-  WorkspaceHeader: () => <div data-testid="workspace-header" />
+  WorkspaceHeader: (props: any) => {
+    mockWorkspaceHeaderProps.push(props)
+    return <div data-testid="workspace-header" />
+  }
 }))
 
 vi.mock("../SourcesPane", () => ({
@@ -260,7 +304,20 @@ describe("ResearchWorkspace Stage 2 drawer responsiveness", () => {
     mockGetResearchBundle.mockReset()
     mockChatPaneProps.length = 0
     mockStudioPaneProps.length = 0
+    mockWorkspaceHeaderProps.length = 0
+    chromeStorageState.clear()
+    vi.stubGlobal("chrome", {
+      storage: {
+        session: {
+          get: chromeStorageSessionGetMock,
+          set: chromeStorageSessionSetMock,
+          remove: chromeStorageSessionRemoveMock
+        }
+      }
+    })
     window.localStorage.removeItem(RESEARCH_WORKSPACE_LAST_MOBILE_TAB_STORAGE_KEY)
+    window.localStorage.removeItem(WEB_CLIPPER_PENDING_AGENT_TASK_STORAGE_KEY)
+    window.sessionStorage.removeItem(WEB_CLIPPER_PENDING_AGENT_TASK_STORAGE_KEY)
     window.history.replaceState(null, "", "/research-workspace")
   })
 
@@ -574,6 +631,20 @@ describe("ResearchWorkspace Stage 2 drawer responsiveness", () => {
       }
     })
     expect(artifactPayload.data.deepResearch.runId).toBe("research-run-7")
+    expect(artifactPayload.data.deepResearch.selectedImportedSources).toEqual([
+      {
+        sourceId: "source-a",
+        mediaId: 101,
+        title: "Paper A",
+        status: "selected"
+      },
+      {
+        sourceId: "source-b",
+        mediaId: 102,
+        title: "Paper B",
+        status: "selected"
+      }
+    ])
     expect(artifactPayload.sourceCoverage.selectedSourceIds).toEqual([
       "source-a",
       "source-b"
@@ -581,6 +652,47 @@ describe("ResearchWorkspace Stage 2 drawer responsiveness", () => {
     expect(
       screen.getByTestId("workspace-deep-research-return-handoff")
     ).toHaveTextContent("Bundle imported")
+    expect(
+      screen.getByTestId("workspace-deep-research-return-handoff")
+    ).toHaveTextContent("2 selected sources")
+  })
+
+  it("opens an agent-task handoff from pending web clipper context", async () => {
+    await writePendingWebClipAgentTaskRequest({
+      id: "handoff-1",
+      clipId: "clip-123",
+      noteId: "note-123",
+      workspaceId: "workspace-1",
+      workspaceNoteId: 42,
+      pageUrl: "https://example.com/story",
+      pageTitle: "Example Story",
+      extractPreview: "Alpha body copy",
+      hasScreenshot: false,
+      createdAt: "2026-07-05T00:00:00.000Z"
+    })
+    window.history.replaceState(
+      null,
+      "",
+      "/research-workspace?workspace=workspace-1&agent_task_handoff=web_clip"
+    )
+
+    render(<ResearchWorkspace />)
+
+    await waitFor(() => {
+      expect(
+        mockWorkspaceHeaderProps.at(-1)?.agentTaskHandoffOpenSignal
+      ).toBeGreaterThan(0)
+    })
+    expect(mockWorkspaceHeaderProps.at(-1)?.agentTaskPrefill).toMatchObject({
+      title: "Review captured page: Example Story",
+      description: expect.stringContaining("URL: https://example.com/story")
+    })
+    expect(mockWorkspaceHeaderProps.at(-1)?.agentTaskPrefill.description).toContain(
+      "Alpha body copy"
+    )
+    expect(
+      chromeStorageState.get(WEB_CLIPPER_PENDING_AGENT_TASK_STORAGE_KEY)
+    ).toBeUndefined()
   })
 
   it("cancels a bundle import when the active workspace changes during fetch", async () => {

@@ -44,6 +44,12 @@ import {
   getMediaLibraryItemKey,
   normalizeMediaLibraryResponse
 } from "./media-library-normalization"
+import {
+  getCapability,
+  getCapabilityCopy,
+  type ResearchWorkspaceCapability,
+  type ResearchWorkspaceCapabilitiesResponse
+} from "../research-workspace-capabilities"
 
 const { TextArea } = Input
 const { Dragger } = Upload
@@ -119,6 +125,20 @@ type ExistingMediaCache = {
   items: MediaLibraryItem[]
   totalCount: number
   cachedAt: number
+}
+
+type SearchResultImportState =
+  | {
+      status: "imported"
+      mediaId: number
+    }
+  | {
+      status: "failed"
+      reason: string
+    }
+
+export type AddSourceModalProps = {
+  researchWorkspaceCapabilities?: ResearchWorkspaceCapabilitiesResponse
 }
 
 const EXISTING_MEDIA_CACHE_TTL_MS = 60_000
@@ -1241,14 +1261,25 @@ const SearchTab: React.FC<{
   onAddSources: AddSourceHandler
   setProcessing: (p: boolean) => void
   setError: (e: string | null) => void
-}> = ({ onAddSources, setProcessing, setError }) => {
+  sourceBrowseCapability?: ResearchWorkspaceCapability
+}> = ({ onAddSources, setProcessing, setError, sourceBrowseCapability }) => {
   const { t } = useTranslation(["playground", "common"])
   const [query, setQuery] = React.useState("")
   const [results, setResults] = React.useState<any[]>([])
   const [selectedResults, setSelectedResults] = React.useState<Set<number>>(
     new Set()
   )
+  const [importStates, setImportStates] = React.useState<
+    Record<number, SearchResultImportState>
+  >({})
   const [isSearching, setIsSearching] = React.useState(false)
+  const searchBlocked = sourceBrowseCapability?.mode === "block"
+  const capabilityCopy = sourceBrowseCapability
+    ? getCapabilityCopy(
+        sourceBrowseCapability,
+        t("playground:sources.searchServerAction", "Search Server")
+      )
+    : null
 
   const getResultUrl = React.useCallback(
     (item: Record<string, unknown>) =>
@@ -1278,12 +1309,13 @@ const SearchTab: React.FC<{
   }, [])
 
   const handleSearch = async () => {
-    if (!query.trim()) return
+    if (!query.trim() || searchBlocked) return
 
     setIsSearching(true)
     setError(null)
     setResults([])
     setSelectedResults(new Set())
+    setImportStates({})
 
     try {
       const response = await tldwClient.webSearch({
@@ -1312,85 +1344,113 @@ const SearchTab: React.FC<{
     if (selectedResults.size === 0) return
 
     setProcessing(true)
-      const selectedUrls = results.filter((_, idx) => selectedResults.has(idx))
-    const addedSources: AddSourceCandidate[] = []
-    const failures: Array<{ url: string; reason: string }> = []
+    try {
+      const selectedUrls = results
+        .map((result, idx) => ({ result, idx }))
+        .filter(({ idx }) => selectedResults.has(idx))
+      const addedSources: AddSourceCandidate[] = []
+      const failures: Array<{ idx: number; url: string; reason: string }> = []
+      const nextImportStates: Record<number, SearchResultImportState> = {}
 
-    for (const result of selectedUrls) {
-      const resultUrl = getResultUrl(result as Record<string, unknown>) || "unknown url"
-      try {
-        const response = await tldwClient.addMedia(resultUrl, {
-          ...WORKSPACE_RAG_INGEST_FIELDS
-        })
-        const added = extractMediaFromAddResponse(response)
-        if (added.mediaId != null) {
-          addedSources.push({
-            mediaId: added.mediaId,
-            title: added.title || result.title || resultUrl,
-            type: "website",
-            status: "processing",
-            url: added.url || resultUrl,
-            fileSize: added.fileSize,
-            duration: added.duration,
-            pageCount: added.pageCount,
-            sourceCreatedAt: added.sourceCreatedAt,
-            thumbnailUrl: added.thumbnailUrl
+      for (const { result, idx } of selectedUrls) {
+        const resultUrl =
+          getResultUrl(result as Record<string, unknown>) || "unknown url"
+        try {
+          const response = await tldwClient.addMedia(resultUrl, {
+            ...WORKSPACE_RAG_INGEST_FIELDS
           })
-        } else {
-          failures.push({
-            url: resultUrl,
-            reason: t(
+          const added = extractMediaFromAddResponse(response)
+          if (added.mediaId != null) {
+            addedSources.push({
+              mediaId: added.mediaId,
+              title: added.title || result.title || resultUrl,
+              type: "website",
+              status: "processing",
+              url: added.url || resultUrl,
+              fileSize: added.fileSize,
+              duration: added.duration,
+              pageCount: added.pageCount,
+              sourceCreatedAt: added.sourceCreatedAt,
+              thumbnailUrl: added.thumbnailUrl
+            })
+            nextImportStates[idx] = {
+              status: "imported",
+              mediaId: added.mediaId
+            }
+          } else {
+            const reason = t(
               "playground:sources.batchResultInvalid",
               "No media ID returned"
             )
+            nextImportStates[idx] = {
+              status: "failed",
+              reason
+            }
+            failures.push({
+              idx,
+              url: resultUrl,
+              reason
+            })
+          }
+        } catch (error) {
+          const reason = mapSourceIngestionError(error)
+          nextImportStates[idx] = {
+            status: "failed",
+            reason
+          }
+          failures.push({
+            idx,
+            url: resultUrl,
+            reason
           })
         }
-      } catch (error) {
-        failures.push({
-          url: resultUrl,
-          reason: mapSourceIngestionError(error)
-        })
       }
-    }
 
-    if (addedSources.length > 0) {
-      await onAddSources(addedSources)
-    }
+      setImportStates((previous) => ({
+        ...previous,
+        ...nextImportStates
+      }))
+      setSelectedResults(new Set(failures.map((failure) => failure.idx)))
 
-    if (failures.length > 0) {
-      const totalCount = selectedUrls.length
-      const addedCount = addedSources.length
-      const details = failures
-        .slice(0, 2)
-        .map((failure) => `${failure.url}: ${failure.reason}`)
-        .join("; ")
-      const overflowCount = failures.length - 2
-      const detailSuffix =
-        overflowCount > 0
-          ? `${details}; +${overflowCount} more`
-          : details
+      if (addedSources.length > 0) {
+        await onAddSources(addedSources, { closeModal: false })
+      }
 
-      const summary = t(
-        "playground:sources.batchResultSummary",
-        "Added {{added}} of {{total}} sources. {{failed}} failed: {{details}}",
-        {
-          added: addedCount,
-          total: totalCount,
-          failed: failures.length,
-          details: detailSuffix
+      if (failures.length > 0) {
+        const totalCount = selectedUrls.length
+        const addedCount = addedSources.length
+        const details = failures
+          .slice(0, 2)
+          .map((failure) => `${failure.url}: ${failure.reason}`)
+          .join("; ")
+        const overflowCount = failures.length - 2
+        const detailSuffix =
+          overflowCount > 0
+            ? `${details}; +${overflowCount} more`
+            : details
+
+        const summary = t(
+          "playground:sources.batchResultSummary",
+          "Added {{added}} of {{total}} sources. {{failed}} failed: {{details}}",
+          {
+            added: addedCount,
+            total: totalCount,
+            failed: failures.length,
+            details: detailSuffix
+          }
+        )
+
+        if (addedCount === 0) {
+          setError(summary)
         }
-      )
-
-      if (addedCount > 0) {
-        message.warning(summary)
-      } else {
-        setError(summary)
       }
+    } finally {
+      setProcessing(false)
     }
-    setProcessing(false)
   }
 
   const toggleResult = (idx: number) => {
+    if (importStates[idx]?.status === "imported") return
     const newSelected = new Set(selectedResults)
     if (newSelected.has(idx)) {
       newSelected.delete(idx)
@@ -1402,6 +1462,12 @@ const SearchTab: React.FC<{
 
   return (
     <div className="space-y-4">
+      {capabilityCopy ? (
+        <Alert
+          type={searchBlocked ? "warning" : "info"}
+          title={capabilityCopy}
+        />
+      ) : null}
       <div className="flex gap-2">
         <Input
           prefix={<Search className="h-4 w-4 text-text-muted" />}
@@ -1417,7 +1483,7 @@ const SearchTab: React.FC<{
           type="primary"
           onClick={handleSearch}
           loading={isSearching}
-          disabled={!query.trim()}
+          disabled={!query.trim() || searchBlocked}
         >
           {t("common:search", "Search")}
         </Button>
@@ -1435,12 +1501,16 @@ const SearchTab: React.FC<{
               const resultSnippet = getResultSnippet(record)
               const faviconUrl = getFaviconUrl(resultUrl)
               const resultTitle = item.title || resultUrl || `Result ${idx + 1}`
+              const importState = importStates[idx]
+              const isImported = importState?.status === "imported"
 
               return (
                 <div
                   key={`${resultUrl || resultTitle}-${idx}`}
                   role="listitem"
-                  className={`cursor-pointer p-3 transition hover:bg-surface2 ${
+                  className={`p-3 transition hover:bg-surface2 ${
+                    isImported ? "cursor-default" : "cursor-pointer"
+                  } ${
                     selectedResults.has(idx) ? "bg-primary/10" : ""
                   }`}
                   tabIndex={0}
@@ -1456,6 +1526,7 @@ const SearchTab: React.FC<{
                   <div className="flex items-start gap-2">
                     <Checkbox
                       checked={selectedResults.has(idx)}
+                      disabled={isImported}
                       onClick={(event) => event.stopPropagation()}
                       onChange={() => toggleResult(idx)}
                     />
@@ -1480,6 +1551,39 @@ const SearchTab: React.FC<{
                             <p className="mt-0.5 line-clamp-2 text-xs text-text-subtle">
                               {resultSnippet}
                             </p>
+                          ) : null}
+                          {importState ? (
+                            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                              {importState.status === "imported" ? (
+                                <>
+                                  <span className="rounded border border-success/30 bg-success/10 px-2 py-0.5 font-medium text-success">
+                                    {t(
+                                      "playground:sources.searchResultQueued",
+                                      "Queued as workspace source"
+                                    )}
+                                  </span>
+                                  <span className="text-text-muted">
+                                    {t(
+                                      "playground:sources.searchResultMediaId",
+                                      "Media #{{mediaId}}",
+                                      { mediaId: importState.mediaId }
+                                    )}
+                                  </span>
+                                </>
+                              ) : (
+                                <>
+                                  <span className="rounded border border-danger/30 bg-danger/10 px-2 py-0.5 font-medium text-danger">
+                                    {t(
+                                      "playground:sources.searchResultFailed",
+                                      "Failed to import"
+                                    )}
+                                  </span>
+                                  <span className="text-danger">
+                                    {importState.reason}
+                                  </span>
+                                </>
+                              )}
+                            </div>
                           ) : null}
                         </div>
                       </div>
@@ -2012,7 +2116,9 @@ function getSourceTypeFromMediaType(mediaType: string): WorkspaceSourceType {
 /**
  * AddSourceModal - Modal for adding sources to workspace
  */
-export const AddSourceModal: React.FC = () => {
+export const AddSourceModal: React.FC<AddSourceModalProps> = ({
+  researchWorkspaceCapabilities
+}) => {
   const { t } = useTranslation(["playground", "common"])
   const isMobile = useMobile()
 
@@ -2032,6 +2138,13 @@ export const AddSourceModal: React.FC = () => {
   const workspaceTag = useWorkspaceStore((s) => s.workspaceTag)
   const [tabUsage, setTabUsage] = React.useState<AddSourceTabUsage>(() =>
     readAddSourceTabUsage()
+  )
+  const sourceBrowseCapability = React.useMemo(
+    () =>
+      researchWorkspaceCapabilities
+        ? getCapability(researchWorkspaceCapabilities, "source_browse")
+        : undefined,
+    [researchWorkspaceCapabilities]
   )
 
   React.useEffect(() => {
@@ -2185,6 +2298,7 @@ export const AddSourceModal: React.FC = () => {
           onAddSources={handleAddSources}
           setProcessing={setProcessing}
           setError={setError}
+          sourceBrowseCapability={sourceBrowseCapability}
         />
       )
     }

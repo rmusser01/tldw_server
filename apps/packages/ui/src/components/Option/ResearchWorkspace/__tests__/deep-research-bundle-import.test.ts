@@ -128,6 +128,66 @@ describe("Deep Research bundle import", () => {
     ])
   })
 
+  it("persists selected imported sources and recovery details from returned bundles", () => {
+    const richBundle = {
+      ...bundle,
+      unsupported_claims: [
+        { text: "Unsupported claim one", reason: "No matching citation" }
+      ],
+      contradictions: [
+        { text: "Contradiction one", source_id: "src_2" }
+      ],
+      skipped_sources: [
+        { source_id: "src_3", title: "Paper C", reason: "paywalled" }
+      ],
+      failed_sources: [
+        { source_id: "src_4", title: "Paper D", reason: "extraction failed" }
+      ]
+    }
+
+    const artifact = buildDeepResearchBundleArtifactPayload({
+      bundle: richBundle,
+      returnContext,
+      sourceArtifact
+    })
+    const deepResearch = artifact.data?.deepResearch as {
+      selectedImportedSources: unknown[]
+      skippedSources: unknown[]
+      failedSources: unknown[]
+    }
+
+    expect(deepResearch.selectedImportedSources).toEqual([
+      {
+        sourceId: "source-a",
+        mediaId: 101,
+        title: "Paper A",
+        status: "selected"
+      },
+      {
+        sourceId: "source-b",
+        mediaId: 102,
+        title: "Paper B",
+        status: "selected"
+      }
+    ])
+    expect(deepResearch.skippedSources).toEqual([
+      { sourceId: "src_3", title: "Paper C", reason: "paywalled" }
+    ])
+    expect(deepResearch.failedSources).toEqual([
+      { sourceId: "src_4", title: "Paper D", reason: "extraction failed" }
+    ])
+    expect(artifact.content).toContain("## Selected Imported Sources")
+    expect(artifact.content).toContain("- Paper A (source-a, media #101) - selected")
+    expect(artifact.content).toContain("## Skipped Sources")
+    expect(artifact.content).toContain("- Paper C (src_3): paywalled")
+    expect(artifact.content).toContain("## Failed Sources")
+    expect(artifact.content).toContain("- Paper D (src_4): extraction failed")
+    expect(artifact.content).toContain("## Unsupported Claims")
+    expect(artifact.content).toContain("- Unsupported claim one")
+    expect(artifact.content).toContain("## Contradictions")
+    expect(artifact.content).toContain("- Contradiction one")
+  })
+
   it("rejects malformed bundles without a usable report", () => {
     expect(() =>
       buildDeepResearchBundleArtifactPayload({
@@ -170,6 +230,8 @@ describe("Deep Research bundle import", () => {
       ),
       unsupported_claims: unboundedList,
       contradictions: unboundedList,
+      skipped_sources: unboundedList,
+      failed_sources: unboundedList,
       source_trust: unboundedList
     }
 
@@ -183,6 +245,8 @@ describe("Deep Research bundle import", () => {
       unresolvedQuestions: unknown[]
       unsupportedClaims: unknown[]
       contradictions: unknown[]
+      skippedSources: unknown[]
+      failedSources: unknown[]
       sourceTrust: unknown[]
     }
 
@@ -191,11 +255,80 @@ describe("Deep Research bundle import", () => {
     expect(deepResearch.unresolvedQuestions).toHaveLength(MAX_IMPORT_LIST_ITEMS)
     expect(deepResearch.unsupportedClaims).toHaveLength(MAX_IMPORT_LIST_ITEMS)
     expect(deepResearch.contradictions).toHaveLength(MAX_IMPORT_LIST_ITEMS)
+    expect(deepResearch.skippedSources).toHaveLength(MAX_IMPORT_LIST_ITEMS)
+    expect(deepResearch.failedSources).toHaveLength(MAX_IMPORT_LIST_ITEMS)
     expect(deepResearch.sourceTrust).toHaveLength(MAX_IMPORT_LIST_ITEMS)
     expect(artifact.sourceCoverage.selectedSourceIds).toHaveLength(
       MAX_IMPORT_LIST_ITEMS
     )
     expect(artifact.sourceLineage).toHaveLength(MAX_IMPORT_LIST_ITEMS)
     expect(artifact.content).toContain(`Source inventory: ${MAX_IMPORT_LIST_ITEMS}`)
+  })
+
+  it("bounds provenance copied from an existing source artifact", () => {
+    const unboundedSources = Array.from(
+      { length: MAX_IMPORT_LIST_ITEMS + 10 },
+      (_, index) => ({
+        sourceId: `source-${index}`,
+        mediaId: index + 1,
+        title: `Paper ${index}`
+      })
+    )
+    const unboundedSourceArtifact = {
+      ...sourceArtifact,
+      sourceCoverage: {
+        selectedSourceIds: unboundedSources.map((source) => source.sourceId),
+        usableSources: unboundedSources,
+        skippedSources: unboundedSources.map((source) => ({
+          ...source,
+          reason: "context_limit" as const
+        })),
+        truncatedSources: unboundedSources,
+        minimumUsableSourcesMet: true
+      },
+      sourceLineage: unboundedSources.map((source) => ({
+        ...source,
+        citationCount: 1,
+        citationSpans: Array.from(
+          { length: MAX_IMPORT_LIST_ITEMS + 10 },
+          (_, index) => ({ index })
+        ),
+        evidenceIds: Array.from(
+          { length: MAX_IMPORT_LIST_ITEMS + 10 },
+          (_, index) => `evidence-${index}`
+        ),
+        oversizedUnknownField: Array.from(
+          { length: MAX_IMPORT_LIST_ITEMS + 10 },
+          (_, index) => ({ index })
+        )
+      }))
+    } satisfies GeneratedArtifact
+
+    const artifact = buildDeepResearchBundleArtifactPayload({
+      bundle,
+      returnContext,
+      sourceArtifact: unboundedSourceArtifact
+    })
+
+    expect(artifact.sourceCoverage.selectedSourceIds).toHaveLength(
+      MAX_IMPORT_LIST_ITEMS
+    )
+    expect(artifact.sourceCoverage.usableSources).toHaveLength(
+      MAX_IMPORT_LIST_ITEMS
+    )
+    expect(artifact.sourceCoverage.skippedSources).toHaveLength(
+      MAX_IMPORT_LIST_ITEMS
+    )
+    expect(artifact.sourceCoverage.truncatedSources).toHaveLength(
+      MAX_IMPORT_LIST_ITEMS
+    )
+    expect(artifact.sourceLineage).toHaveLength(MAX_IMPORT_LIST_ITEMS)
+    expect(artifact.sourceLineage[0].citationSpans).toHaveLength(
+      MAX_IMPORT_LIST_ITEMS
+    )
+    expect(artifact.sourceLineage[0].evidenceIds).toHaveLength(
+      MAX_IMPORT_LIST_ITEMS
+    )
+    expect(artifact.sourceLineage[0]).not.toHaveProperty("oversizedUnknownField")
   })
 })

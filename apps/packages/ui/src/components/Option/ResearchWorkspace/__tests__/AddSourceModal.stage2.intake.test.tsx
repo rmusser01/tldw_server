@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { AddSourceModal } from "../SourcesPane/AddSourceModal"
+import { buildUnknownResearchWorkspaceCapabilities } from "../research-workspace-capabilities"
 import type { AddSourceTab } from "@/types/workspace"
 
 const ADD_SOURCE_TAB_USAGE_STORAGE_KEY =
@@ -578,6 +579,80 @@ describe("AddSourceModal Stage 2 intake and relevance", () => {
 
     const favicon = screen.getByTestId("search-result-favicon-0")
     expect(favicon).toHaveAttribute("src", expect.stringContaining("google.com/s2/favicons"))
+  })
+
+  it("keeps Search Server import results visible with imported and failed row states", async () => {
+    workspaceStoreState.addSourceModalTab = "search"
+    mockWebSearch.mockResolvedValueOnce({
+      results: [
+        {
+          title: "Result One",
+          url: "https://example.com/one",
+          snippet: "First result"
+        },
+        {
+          title: "Result Two",
+          url: "https://example.com/two",
+          snippet: "Second result"
+        }
+      ]
+    })
+    mockAddMedia
+      .mockResolvedValueOnce({ results: [{ media_id: 9001, title: "Result One" }] })
+      .mockRejectedValueOnce(new Error("timeout"))
+
+    render(<AddSourceModal />)
+
+    fireEvent.change(screen.getByLabelText("Search the web"), {
+      target: { value: "workspace discovery" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Search" }))
+
+    expect(await screen.findByText("Result One")).toBeInTheDocument()
+    fireEvent.click(screen.getByText("Result One"))
+    fireEvent.click(screen.getByText("Result Two"))
+    fireEvent.click(screen.getByRole("button", { name: "Add 2 selected" }))
+
+    await waitFor(() => {
+      expect(mockAddSource).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mediaId: 9001,
+          status: "processing",
+          url: "https://example.com/one"
+        })
+      )
+    })
+
+    expect(mockCloseAddSourceModal).not.toHaveBeenCalled()
+    expect(screen.getByText("Queued as workspace source")).toBeInTheDocument()
+    expect(screen.getByText("Media #9001")).toBeInTheDocument()
+    expect(screen.getByText("Failed to import")).toBeInTheDocument()
+    expect(screen.getByText(/timed out|timeout/i)).toBeInTheDocument()
+  })
+
+  it("blocks Search Server when the source browse capability is unavailable", async () => {
+    workspaceStoreState.addSourceModalTab = "search"
+    const capabilities = buildUnknownResearchWorkspaceCapabilities()
+    capabilities.capabilities.source_browse = {
+      status: "unavailable",
+      mode: "block",
+      dependencies: ["workspace_sources"],
+      reason_code: "provider_unavailable"
+    }
+
+    render(<AddSourceModal researchWorkspaceCapabilities={capabilities} />)
+
+    fireEvent.change(screen.getByLabelText("Search the web"), {
+      target: { value: "blocked query" }
+    })
+
+    expect(
+      screen.getByText(
+        "Search Server is unavailable because the model provider is unavailable. Open model settings or retry status."
+      )
+    ).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Search" })).toBeDisabled()
+    expect(mockWebSearch).not.toHaveBeenCalled()
   })
 
   it("supports library load-more pagination and total count text", async () => {

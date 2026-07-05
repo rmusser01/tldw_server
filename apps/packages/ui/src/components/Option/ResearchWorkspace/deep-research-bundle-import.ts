@@ -19,6 +19,14 @@ type DeepResearchBundleImportOptions = {
 }
 
 type GeneratedArtifactPayload = Omit<GeneratedArtifact, "id" | "createdAt">
+type DeepResearchImportedSource = ArtifactSourceCoverageEntry & {
+  status: "selected" | "inventory"
+}
+type DeepResearchSourceDetail = {
+  sourceId: string
+  title?: string
+  reason?: string
+}
 
 export class DeepResearchBundleImportError extends Error {
   constructor(message: string) {
@@ -85,6 +93,53 @@ const normalizeSourceInventory = (
     })
     .filter((entry): entry is ArtifactSourceCoverageEntry => Boolean(entry))
 
+const buildSelectedImportedSources = (
+  sourceCoverage: ArtifactSourceCoverage,
+  sourceInventory: ArtifactSourceCoverageEntry[]
+): DeepResearchImportedSource[] => {
+  const selectedSources = sourceCoverage.usableSources.length
+    ? sourceCoverage.usableSources
+    : sourceInventory
+  const status: DeepResearchImportedSource["status"] =
+    sourceCoverage.usableSources.length ? "selected" : "inventory"
+
+  return capImportList(selectedSources).map((source) => ({
+    sourceId: source.sourceId,
+    ...(source.mediaId !== undefined ? { mediaId: source.mediaId } : {}),
+    ...(source.title ? { title: source.title } : {}),
+    status
+  }))
+}
+
+const normalizeBundleSourceDetails = (
+  value: unknown
+): DeepResearchSourceDetail[] =>
+  readRecordList(value)
+    .map((entry): DeepResearchSourceDetail | null => {
+      const sourceId = readString(entry.source_id ?? entry.sourceId ?? entry.id)
+      if (!sourceId) return null
+
+      const title = readString(entry.title ?? entry.label)
+      const reason = readString(
+        entry.reason ?? entry.error ?? entry.message ?? entry.status_message
+      )
+      return {
+        sourceId,
+        ...(title ? { title } : {}),
+        ...(reason ? { reason } : {})
+      }
+    })
+    .filter((entry): entry is DeepResearchSourceDetail => Boolean(entry))
+
+const normalizeCoverageSkippedSources = (
+  sourceCoverage: ArtifactSourceCoverage
+): DeepResearchSourceDetail[] =>
+  capImportList(sourceCoverage.skippedSources).map((source) => ({
+    sourceId: source.sourceId,
+    ...(source.title ? { title: source.title } : {}),
+    reason: source.reason
+  }))
+
 const buildFallbackSourceCoverage = (
   sources: ArtifactSourceCoverageEntry[]
 ): ArtifactSourceCoverage => ({
@@ -94,6 +149,60 @@ const buildFallbackSourceCoverage = (
   truncatedSources: [],
   minimumUsableSourcesMet: sources.length > 0
 })
+
+const sanitizeSourceCoverage = (
+  sourceCoverage: ArtifactSourceCoverage
+): ArtifactSourceCoverage => ({
+  selectedSourceIds: capImportList(
+    sourceCoverage.selectedSourceIds.map(readString).filter(Boolean)
+  ),
+  usableSources: capImportList(sourceCoverage.usableSources),
+  skippedSources: capImportList(sourceCoverage.skippedSources),
+  truncatedSources: capImportList(sourceCoverage.truncatedSources),
+  ...(sourceCoverage.sourceContextCharLimit
+    ? { sourceContextCharLimit: sourceCoverage.sourceContextCharLimit }
+    : {}),
+  minimumUsableSourcesMet: sourceCoverage.minimumUsableSourcesMet
+})
+
+const sanitizeSourceLineage = (
+  sourceLineage: ArtifactSourceLineage[]
+): ArtifactSourceLineage[] =>
+  capImportList(sourceLineage)
+    .map((lineage): ArtifactSourceLineage | null => {
+      const sourceId = readString(lineage.sourceId)
+      if (!sourceId) return null
+
+      return {
+        sourceId,
+        ...(readString(lineage.sourceType)
+          ? { sourceType: readString(lineage.sourceType) }
+          : {}),
+        ...(typeof lineage.mediaId === "number" && Number.isFinite(lineage.mediaId)
+          ? { mediaId: lineage.mediaId }
+          : {}),
+        ...(readString(lineage.title) ? { title: readString(lineage.title) } : {}),
+        ...(readString(lineage.label) ? { label: readString(lineage.label) } : {}),
+        ...(typeof lineage.citationCount === "number" &&
+        Number.isFinite(lineage.citationCount)
+          ? { citationCount: lineage.citationCount }
+          : {}),
+        ...(Array.isArray(lineage.citationSpans)
+          ? { citationSpans: capImportList(lineage.citationSpans) }
+          : {}),
+        ...(Array.isArray(lineage.evidenceIds)
+          ? {
+              evidenceIds: capImportList(lineage.evidenceIds)
+                .map(readString)
+                .filter(Boolean)
+            }
+          : {}),
+        ...(readString(lineage.coverageNotes)
+          ? { coverageNotes: readString(lineage.coverageNotes) }
+          : {})
+      }
+    })
+    .filter((lineage): lineage is ArtifactSourceLineage => Boolean(lineage))
 
 const buildCitationCounts = (
   claims: Array<Record<string, unknown>>
@@ -131,12 +240,60 @@ const buildSourceArtifactMetadata = (
   title: sourceArtifact?.title ?? returnContext.sourceArtifactTitle
 })
 
+const formatSourceEntry = (
+  source: ArtifactSourceCoverageEntry,
+  options?: { status?: string }
+): string => {
+  const label = source.title || source.sourceId
+  const details = [
+    source.sourceId,
+    source.mediaId !== undefined ? `media #${source.mediaId}` : null
+  ].filter(Boolean)
+  const detailSuffix = details.length ? ` (${details.join(", ")})` : ""
+  const statusSuffix = options?.status ? ` - ${options.status}` : ""
+  return `- ${label}${detailSuffix}${statusSuffix}`
+}
+
+const formatSourceDetailEntry = (source: DeepResearchSourceDetail): string => {
+  const label = source.title || source.sourceId
+  const reasonSuffix = source.reason ? `: ${source.reason}` : ""
+  return `- ${label} (${source.sourceId})${reasonSuffix}`
+}
+
+const readRecordSummary = (
+  record: Record<string, unknown>,
+  fallback: string
+): string =>
+  readString(
+    record.text ??
+      record.claim ??
+      record.summary ??
+      record.title ??
+      record.reason ??
+      record.source_id ??
+      record.id
+  ) || fallback
+
+const buildRecordSummaryLines = (
+  records: Array<Record<string, unknown>>
+): string[] =>
+  records.map((record, index) => `- ${readRecordSummary(record, `Item ${index + 1}`)}`)
+
+const buildSection = (title: string, lines: string[]): string[] =>
+  lines.length ? ["", `## ${title}`, "", ...lines] : []
+
 const buildImportedContent = (options: {
   question: string
   reportMarkdown: string
   returnContext: ResearchWorkspaceDeepResearchReturnContext
   sourceTitle: string
   sourceCount: number
+  selectedImportedSources: DeepResearchImportedSource[]
+  sourceInventory: ArtifactSourceCoverageEntry[]
+  skippedSources: DeepResearchSourceDetail[]
+  failedSources: DeepResearchSourceDetail[]
+  unsupportedClaims: Array<Record<string, unknown>>
+  contradictions: Array<Record<string, unknown>>
   verificationSummary: Record<string, unknown>
   unresolvedQuestions: string[]
 }): string => {
@@ -158,6 +315,32 @@ const buildImportedContent = (options: {
         ...options.unresolvedQuestions.map((question) => `- ${question}`)
       ]
     : []
+  const selectedImportedSources = buildSection(
+    "Selected Imported Sources",
+    options.selectedImportedSources.map((source) =>
+      formatSourceEntry(source, { status: source.status })
+    )
+  )
+  const sourceInventory = buildSection(
+    "Source Inventory",
+    options.sourceInventory.map((source) => formatSourceEntry(source))
+  )
+  const skippedSources = buildSection(
+    "Skipped Sources",
+    options.skippedSources.map(formatSourceDetailEntry)
+  )
+  const failedSources = buildSection(
+    "Failed Sources",
+    options.failedSources.map(formatSourceDetailEntry)
+  )
+  const unsupportedClaims = buildSection(
+    "Unsupported Claims",
+    buildRecordSummaryLines(options.unsupportedClaims)
+  )
+  const contradictions = buildSection(
+    "Contradictions",
+    buildRecordSummaryLines(options.contradictions)
+  )
 
   return [
     `# Deep Research Import: ${options.sourceTitle}`,
@@ -167,6 +350,12 @@ const buildImportedContent = (options: {
     `Question: ${options.question}`,
     `Source inventory: ${options.sourceCount}`,
     verificationBits.length ? `Verification: ${verificationBits.join(", ")}` : "",
+    ...selectedImportedSources,
+    ...sourceInventory,
+    ...skippedSources,
+    ...failedSources,
+    ...unsupportedClaims,
+    ...contradictions,
     "",
     "## Report",
     "",
@@ -203,11 +392,24 @@ export const buildDeepResearchBundleArtifactPayload = ({
 
   const claims = readRecordList(bundle.claims)
   const sourceInventory = normalizeSourceInventory(bundle)
-  const sourceCoverage =
+  const sourceCoverage = sanitizeSourceCoverage(
     sourceArtifact?.sourceCoverage ?? buildFallbackSourceCoverage(sourceInventory)
-  const sourceLineage =
+  )
+  const sourceLineage = sanitizeSourceLineage(
     sourceArtifact?.sourceLineage ??
-    buildFallbackSourceLineage(sourceInventory, claims)
+      buildFallbackSourceLineage(sourceInventory, claims)
+  )
+  const selectedImportedSources = buildSelectedImportedSources(
+    sourceCoverage,
+    sourceInventory
+  )
+  const skippedSources = capImportList([
+    ...normalizeCoverageSkippedSources(sourceCoverage),
+    ...normalizeBundleSourceDetails(bundle.skipped_sources)
+  ])
+  const failedSources = normalizeBundleSourceDetails(bundle.failed_sources)
+  const unsupportedClaims = readRecordList(bundle.unsupported_claims)
+  const contradictions = readRecordList(bundle.contradictions)
   const sourceArtifactMetadata = buildSourceArtifactMetadata(
     returnContext,
     sourceArtifact
@@ -224,6 +426,12 @@ export const buildDeepResearchBundleArtifactPayload = ({
     returnContext,
     sourceTitle,
     sourceCount: sourceInventory.length,
+    selectedImportedSources,
+    sourceInventory,
+    skippedSources,
+    failedSources,
+    unsupportedClaims,
+    contradictions,
     verificationSummary,
     unresolvedQuestions
   })
@@ -271,10 +479,13 @@ export const buildDeepResearchBundleArtifactPayload = ({
         sourceArtifact: sourceArtifactMetadata,
         claims,
         sourceInventory: readRecordList(bundle.source_inventory),
+        selectedImportedSources,
+        skippedSources,
+        failedSources,
         unresolvedQuestions,
         verificationSummary,
-        unsupportedClaims: readRecordList(bundle.unsupported_claims),
-        contradictions: readRecordList(bundle.contradictions),
+        unsupportedClaims,
+        contradictions,
         sourceTrust: readRecordList(bundle.source_trust)
       }
     },
