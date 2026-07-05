@@ -26,13 +26,13 @@ Resolve the broad active Backlog task-id collisions left after the MCP setup str
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Initial measurement found 2,256 active task files with ids, 1,531 unique ids, 432 duplicate-id groups, and 725 duplicate records to renumber. A single-pass reference scan found 349 duplicated ids with 2,378 non-id reference occurrences across Backlog/Docs; those references were already ambiguous, so this cleanup deliberately did not attempt semantic reference rewriting. Applied deterministic renumbering: for each duplicate group, kept one canonical record, preferring non-Done records over Done records and then path order; renumbered the remaining 725 records to TASK-12169 through TASK-12893. Verification after the rewrite found 2,256 active task files with ids, 2,256 unique ids, 0 duplicate-id groups, and 0 filename/frontmatter id mismatches. `git diff --check` passed. Bandit not applicable because this is Backlog metadata only.
+Initial measurement found 2,256 active task files with ids, 1,531 unique ids, 432 duplicate-id groups, and 725 duplicate records to renumber. A single-pass reference scan found 349 duplicated ids with 2,378 non-id reference occurrences across Backlog/Docs; those references were already ambiguous, so this cleanup deliberately did not attempt semantic reference rewriting. Applied deterministic renumbering: for each duplicate group, kept one canonical record, preferring non-Done records over Done records and then path order; renumbered the remaining 725 records to TASK-12169 through TASK-12893. Verification after the rewrite found 2,256 active task files with ids, 2,256 unique ids, 0 duplicate-id groups, and 0 filename/frontmatter id mismatches. `git diff --check` passed. PR: https://github.com/rmusser01/tldw_server/pull/2661. Bandit not applicable because this is Backlog metadata only.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Resolved the broad active Backlog duplicate-id set under backlog/tasks by renumbering 725 duplicate records to TASK-12169 through TASK-12893. Active task ids are now unique and task filenames match frontmatter ids. This was intentionally metadata-only and did not attempt semantic repair of already-ambiguous historical TASK-* references across Backlog/Docs; that remains a separate, context-heavy cleanup if needed.
+Resolved the broad active Backlog duplicate-id set under backlog/tasks by renumbering 725 duplicate records to TASK-12169 through TASK-12893. Active task ids are now unique and task filenames match frontmatter ids. This was intentionally metadata-only and did not attempt semantic repair of already-ambiguous historical TASK-* references across Backlog/Docs; that remains a separate, context-heavy cleanup if needed. PR: https://github.com/rmusser01/tldw_server/pull/2661.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
