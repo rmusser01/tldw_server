@@ -82,8 +82,8 @@ from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabas
 from tldw_Server_API.app.core.DB_Management.media_db import api as media_db_api
 from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
 from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.exceptions import ResearchWorkspaceOutputJobError
 from tldw_Server_API.app.core.Research_Workspace.output_jobs import (
-    ResearchWorkspaceOutputJobError,
     get_research_workspace_output_job_status,
     submit_research_workspace_output_job,
 )

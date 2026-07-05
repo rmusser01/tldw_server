@@ -30,7 +30,8 @@ pytestmark = pytest.mark.integration
 
 
 class FakeWorkspaceDB:
-    def __init__(self) -> None:
+    def __init__(self, *, fail_delete: bool = False) -> None:
+        self.fail_delete = fail_delete
         self.sources = [
             {
                 "id": "src-1",
@@ -73,6 +74,8 @@ class FakeWorkspaceDB:
 
     def delete_workspace_artifact(self, workspace_id: str, artifact_id: str) -> None:
         self.deleted_artifacts.append((workspace_id, artifact_id))
+        if self.fail_delete:
+            raise RuntimeError("cleanup unavailable")
         self.artifacts.pop(artifact_id, None)
 
 
@@ -178,6 +181,30 @@ def test_submit_output_rolls_back_pending_artifact_when_job_create_fails() -> No
     assert workspace_db.added_artifacts[0]["status"] == "pending"
     assert workspace_db.deleted_artifacts == [("ws-1", workspace_db.added_artifacts[0]["id"])]
     assert workspace_db.artifacts == {}
+
+
+def test_submit_output_preserves_job_create_error_when_rollback_cleanup_fails() -> None:
+    workspace_db = FakeWorkspaceDB(fail_delete=True)
+    job_manager = FakeJobManager(fail_create=True)
+
+    with pytest.raises(ResearchWorkspaceOutputJobError) as excinfo:
+        submit_research_workspace_output_job(
+            workspace_id="ws-1",
+            request=ResearchWorkspaceOutputSubmitRequest(
+                artifact_type="infographic",
+                source_ids=["src-1"],
+            ),
+            workspace_db=workspace_db,
+            job_manager=job_manager,
+            user_id="42",
+        )
+
+    assert excinfo.value.public_code == "output_job_enqueue_failed"
+    assert excinfo.value.status_code == 503
+    assert isinstance(excinfo.value.__cause__, RuntimeError)
+    assert str(excinfo.value.__cause__) == "queue full"
+    assert workspace_db.deleted_artifacts == [("ws-1", workspace_db.added_artifacts[0]["id"])]
+    assert workspace_db.artifacts
 
 
 def test_status_returns_job_progress_plus_artifact() -> None:

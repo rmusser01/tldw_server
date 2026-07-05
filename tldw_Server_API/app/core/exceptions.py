@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+import re
 from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Request, status
@@ -815,6 +816,36 @@ class FileArtifactsJobError(RuntimeError):
         self.retryable = retryable
         if backoff_seconds is not None:
             self.backoff_seconds = backoff_seconds
+
+
+_RESEARCH_WORKSPACE_OUTPUT_ERROR_CODE_RE = re.compile(r"^[a-z][a-z0-9_]{0,95}$")
+
+
+def _safe_research_workspace_output_error_code(value: str) -> str:
+    """Return a stable public code for Research Workspace output failures."""
+    raw = str(value or "").strip().lower()
+    if _RESEARCH_WORKSPACE_OUTPUT_ERROR_CODE_RE.fullmatch(raw):
+        return raw
+    return "research_workspace_output_failed"
+
+
+class ResearchWorkspaceOutputJobError(RuntimeError):
+    """Worker-visible Research Workspace output failure with retry metadata."""
+
+    def __init__(
+        self,
+        public_code: str,
+        *,
+        status_code: int = 400,
+        retryable: bool = False,
+        backoff_seconds: int | None = None,
+    ) -> None:
+        super().__init__(public_code)
+        self.public_code = _safe_research_workspace_output_error_code(public_code)
+        self.status_code = status_code
+        self.retryable = retryable
+        self.backoff_seconds = backoff_seconds
+        self.failure_code = self.public_code
 
 
 class ReadingDigestJobError(RuntimeError):

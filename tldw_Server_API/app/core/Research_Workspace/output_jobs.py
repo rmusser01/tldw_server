@@ -1,3 +1,5 @@
+"""Build and run Research Workspace media output jobs."""
+
 from __future__ import annotations
 
 import asyncio
@@ -28,6 +30,7 @@ from tldw_Server_API.app.api.v1.schemas.workspace_schemas import WorkspaceArtifa
 from tldw_Server_API.app.core.exceptions import (
     FileArtifactsError,
     FileArtifactsValidationError,
+    ResearchWorkspaceOutputJobError,
     file_artifacts_http_status,
 )
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
@@ -100,6 +103,8 @@ _UNSAFE_OUTPUT_METADATA_VALUE = object()
 
 @dataclass(frozen=True)
 class ResearchWorkspaceOutputSourceContext:
+    """Source text and lineage used to generate a workspace media output."""
+
     text: str
     source_lineage: dict[str, Any]
     preview_text: str
@@ -107,6 +112,8 @@ class ResearchWorkspaceOutputSourceContext:
 
 @dataclass(frozen=True)
 class ResearchWorkspacePersistedOutput:
+    """Durable output artifact metadata returned after persistence."""
+
     output_id: int
     download_url: str
     format: str
@@ -116,30 +123,15 @@ class ResearchWorkspacePersistedOutput:
 
 
 def _safe_public_error_code(value: str) -> str:
+    """Return a stable public failure code for workspace artifact metadata."""
     raw = str(value or "").strip().lower()
     if _PUBLIC_ERROR_CODE_RE.fullmatch(raw):
         return raw
     return "research_workspace_output_failed"
 
 
-class ResearchWorkspaceOutputJobError(RuntimeError):
-    def __init__(
-        self,
-        public_code: str,
-        *,
-        status_code: int = 400,
-        retryable: bool = False,
-        backoff_seconds: int | None = None,
-    ) -> None:
-        super().__init__(public_code)
-        self.public_code = _safe_public_error_code(public_code)
-        self.status_code = status_code
-        self.retryable = retryable
-        self.backoff_seconds = backoff_seconds
-        self.failure_code = self.public_code
-
-
 def research_workspace_output_jobs_queue() -> str:
+    """Return the configured Jobs queue for Research Workspace outputs."""
     raw = (os.getenv(RESEARCH_WORKSPACE_OUTPUT_JOBS_QUEUE_ENV) or "").strip().lower()
     if raw in {"default", "high", "low"}:
         return raw
@@ -147,6 +139,7 @@ def research_workspace_output_jobs_queue() -> str:
 
 
 def normalize_research_workspace_output_payload(value: Any) -> dict[str, Any]:
+    """Normalize a queued Research Workspace output job payload."""
     return dict(_normalize_job_mapping(value))
 
 
@@ -158,6 +151,7 @@ def build_research_workspace_output_source_context(
     source_ids: list[str],
     max_chars: int = _SOURCE_CONTEXT_TOTAL_CHAR_LIMIT,
 ) -> ResearchWorkspaceOutputSourceContext:
+    """Build bounded source text and lineage for a media output request."""
     selected_source_ids = [
         str(source_id).strip()
         for source_id in source_ids
@@ -262,6 +256,7 @@ def persist_research_workspace_output_bytes(
     workspace_artifact_id: str,
     metadata: Mapping[str, Any] | None = None,
 ) -> ResearchWorkspacePersistedOutput:
+    """Persist generated output bytes as a user-owned output artifact."""
     if not content:
         raise ResearchWorkspaceOutputJobError("empty_output", retryable=False)
 
@@ -324,6 +319,7 @@ def _cleanup_research_workspace_created_outputs(
     outputs: list[ResearchWorkspacePersistedOutput],
     storage_paths: list[str],
 ) -> None:
+    """Remove output rows and files created during a failed generation run."""
     seen_output_ids: set[int] = set()
     for output in reversed(outputs):
         if output.storage_path:
@@ -362,6 +358,7 @@ def _unlink_research_workspace_output_path(
     user_id: int,
     storage_path: str,
 ) -> None:
+    """Delete one generated output file when it resolves under the user output root."""
     outputs_dir = DatabasePaths.get_user_outputs_dir(user_id)
     try:
         base_path = outputs_dir.resolve(strict=False)
@@ -387,6 +384,7 @@ def _cleanup_research_workspace_created_outputs_for_user(
     outputs: list[ResearchWorkspacePersistedOutput],
     storage_paths: list[str],
 ) -> None:
+    """Open the user's collections database and clean created output artifacts."""
     if not outputs and not storage_paths:
         return
     try:
@@ -411,6 +409,7 @@ async def process_research_workspace_output_payload(
     job_manager: JobManager,
     progress: Any | None = None,
 ) -> dict[str, Any]:
+    """Dispatch a normalized output job payload to the matching generator."""
     normalized_payload = normalize_research_workspace_output_payload(payload)
     workspace_id = str(normalized_payload.get("workspace_id") or "").strip()
     artifact_id = str(normalized_payload.get("artifact_id") or "").strip()
@@ -455,6 +454,7 @@ def generate_infographic_prompt(
     source_context: ResearchWorkspaceOutputSourceContext,
     settings: ResearchWorkspaceOutputSettings,
 ) -> str:
+    """Create the prompt sent to the infographic image backend."""
     title = f"Title: {settings.title_hint.strip()}\n" if settings.title_hint else ""
     source_text = source_context.text[:_INFOGRAPHIC_PROMPT_SOURCE_CHAR_LIMIT].strip()
     return (
@@ -476,6 +476,7 @@ async def _process_infographic_output_payload(
     settings: ResearchWorkspaceOutputSettings,
     job_id: int,
 ) -> dict[str, Any]:
+    """Generate and persist an infographic output for a workspace artifact."""
     workspace_id = str(payload["workspace_id"])
     artifact_id = str(payload["artifact_id"])
     source_ids = [
@@ -620,6 +621,7 @@ async def _process_infographic_output_payload(
 
 
 def _slides_generation_job_error(exc: SlidesGenerationError) -> ResearchWorkspaceOutputJobError:
+    """Map slide generation failures onto stable output job errors."""
     if isinstance(exc, SlidesSourceTooLargeError):
         return ResearchWorkspaceOutputJobError("slides_source_too_large", retryable=False)
     if isinstance(exc, (SlidesGenerationInputError, SlidesGenerationOutputError)):
@@ -628,6 +630,7 @@ def _slides_generation_job_error(exc: SlidesGenerationError) -> ResearchWorkspac
 
 
 def _tts_generation_job_error(exc: TTSError) -> ResearchWorkspaceOutputJobError:
+    """Map TTS failures onto stable output job errors."""
     return ResearchWorkspaceOutputJobError(
         "tts_generation_failed",
         retryable=is_retryable_error(exc),
@@ -637,6 +640,7 @@ def _tts_generation_job_error(exc: TTSError) -> ResearchWorkspaceOutputJobError:
 def _resolve_research_workspace_slides_visual_style(
     settings: ResearchWorkspaceOutputSettings,
 ) -> dict[str, Any] | None:
+    """Resolve an optional built-in Slides visual style for video outputs."""
     style_id = str(settings.slides_visual_style_id or "").strip()
     if not style_id:
         return None
@@ -664,6 +668,7 @@ async def _process_video_overview_output_payload(
     job_manager: JobManager,
     progress: Any | None = None,
 ) -> dict[str, Any]:
+    """Generate narration, slides, and MP4 output for a video overview job."""
     workspace_id = str(payload["workspace_id"])
     artifact_id = str(payload["artifact_id"])
     source_ids = [
@@ -698,7 +703,9 @@ async def _process_video_overview_output_payload(
         )
         _update_output_job_progress(job_manager, job_id, progress, 30.0, "generate_slides")
         try:
-            generated = SlidesGenerator().generate_from_text(
+            generator = SlidesGenerator()
+            generated = await asyncio.to_thread(
+                generator.generate_from_text,
                 source_text=source_context.text,
                 title_hint=settings.title_hint,
                 provider=settings.provider or DEFAULT_LLM_PROVIDER,
@@ -959,6 +966,7 @@ async def generate_tts_audio_bytes(
     voice: str,
     user_id: int,
 ) -> bytes:
+    """Generate a complete MP3 byte stream for one narration segment."""
     request = OpenAISpeechRequest(
         model=model,
         input=text,
@@ -968,17 +976,17 @@ async def generate_tts_audio_bytes(
         stream=False,
     )
     tts_service = await get_tts_service_v2()
-    chunks = b""
+    chunks = bytearray()
     async for chunk in tts_service.generate_speech(
         request,
         provider=provider,
         fallback=True,
         user_id=user_id,
     ):
-        chunks += chunk
+        chunks.extend(chunk)
     if not chunks:
         raise ResearchWorkspaceOutputJobError("empty_output", retryable=False)
-    return chunks
+    return bytes(chunks)
 
 
 def submit_research_workspace_output_job(
@@ -989,6 +997,7 @@ def submit_research_workspace_output_job(
     job_manager: JobManager,
     user_id: int | str,
 ) -> ResearchWorkspaceOutputSubmitResponse:
+    """Create a pending workspace artifact and enqueue its generation job."""
     _validate_workspace_sources(workspace_db, workspace_id, request.source_ids)
     artifact_id = f"{request.artifact_type}-{uuid.uuid4().hex}"
     workspace_db.add_workspace_artifact(
@@ -1021,10 +1030,13 @@ def submit_research_workspace_output_job(
         try:
             workspace_db.delete_workspace_artifact(workspace_id, artifact_id)
         except Exception as cleanup_exc:
-            raise ResearchWorkspaceOutputJobError(
-                "output_job_enqueue_failed",
-                status_code=503,
-            ) from cleanup_exc
+            logger.warning(
+                "Failed to delete pending Research Workspace output artifact {} for workspace {} "
+                "after job enqueue failure: {}",
+                artifact_id,
+                workspace_id,
+                cleanup_exc,
+            )
         raise ResearchWorkspaceOutputJobError(
             "output_job_enqueue_failed",
             status_code=503,
@@ -1046,6 +1058,7 @@ def get_research_workspace_output_job_status(
     job_manager: JobManager,
     user_id: int | str,
 ) -> ResearchWorkspaceOutputStatusResponse:
+    """Return public job status and the linked workspace artifact snapshot."""
     try:
         job = job_manager.get_job(int(job_id))
     except Exception as exc:
@@ -1085,12 +1098,14 @@ def _validate_workspace_sources(
     workspace_id: str,
     source_ids: list[str],
 ) -> None:
+    """Verify that all requested source ids belong to the workspace."""
     existing_ids = {str(source.get("id") or "").strip() for source in workspace_db.list_workspace_sources(workspace_id)}
     if not existing_ids or any(source_id not in existing_ids for source_id in source_ids):
         raise ResearchWorkspaceOutputJobError("workspace_sources_not_found", status_code=404)
 
 
 def _source_media_id(source: Mapping[str, Any] | None) -> int | None:
+    """Extract a media id from a workspace source row."""
     if source is None:
         return None
     try:
@@ -1100,6 +1115,7 @@ def _source_media_id(source: Mapping[str, Any] | None) -> int | None:
 
 
 def _media_source_text(media_db: Any, media_id: int) -> str:
+    """Load text content for a media item, returning an empty string on misses."""
     try:
         media = media_db_api.get_media_by_id(media_db, media_id)
     except _SOURCE_CONTEXT_MEDIA_ERRORS:
@@ -1114,6 +1130,7 @@ def _media_source_text(media_db: Any, media_id: int) -> str:
 
 
 def _content_text(value: Any) -> str:
+    """Extract text from raw or JSON-encoded media content values."""
     if isinstance(value, Mapping):
         return str(value.get("content") or value.get("text") or "").strip()
     if isinstance(value, str):
@@ -1130,6 +1147,7 @@ def _content_text(value: Any) -> str:
 
 
 def _safe_caller_output_metadata(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Return caller metadata with path-like values removed."""
     safe: dict[str, Any] = {}
     for key, value in dict(metadata or {}).items():
         key_text = str(key)
@@ -1143,6 +1161,7 @@ def _safe_caller_output_metadata(metadata: Mapping[str, Any] | None) -> dict[str
 
 
 def _sanitize_output_metadata_value(value: Any) -> Any:
+    """Sanitize a metadata value recursively for output persistence."""
     if isinstance(value, Mapping):
         safe: dict[str, Any] = {}
         for key, child in value.items():
@@ -1180,6 +1199,7 @@ def _sanitize_output_metadata_value(value: Any) -> Any:
 
 
 def _is_unsafe_output_metadata_key(key_text: str) -> bool:
+    """Return whether a metadata key can expose local storage details."""
     key_lower = key_text.lower()
     if (
         key_lower in _REQUIRED_OUTPUT_METADATA_KEYS
@@ -1192,6 +1212,7 @@ def _is_unsafe_output_metadata_key(key_text: str) -> bool:
 
 
 def _looks_fileish_or_pathish_text(value: str) -> bool:
+    """Return whether text appears to contain filenames or relative paths."""
     text = value.strip()
     return (
         _looks_absolute_path_like(text)
@@ -1206,6 +1227,7 @@ def _looks_fileish_or_pathish_text(value: str) -> bool:
 
 
 def _looks_absolute_path_like(value: str) -> bool:
+    """Return whether text appears to contain an absolute filesystem path."""
     text = value.strip()
     return (
         re.search(r"(^|[^\w])(?:[/\\](?:\S|$)|~[/\\](?:\S|$)|[A-Za-z]:[/\\])", text)
@@ -1214,6 +1236,7 @@ def _looks_absolute_path_like(value: str) -> bool:
 
 
 def _validated_research_workspace_output_job_id(job: Mapping[str, Any]) -> int:
+    """Return a positive integer job id or raise a stable job error."""
     try:
         job_id = int(job.get("id"))
     except (TypeError, ValueError) as exc:
@@ -1224,6 +1247,7 @@ def _validated_research_workspace_output_job_id(job: Mapping[str, Any]) -> int:
 
 
 def _research_workspace_output_error_from_file_artifacts_error(exc: FileArtifactsError) -> ResearchWorkspaceOutputJobError:
+    """Map File Artifacts errors to Research Workspace output job errors."""
     retryable = not isinstance(exc, FileArtifactsValidationError) and exc.code not in _NON_RETRYABLE_FILE_ARTIFACT_CODES
     return ResearchWorkspaceOutputJobError(
         str(exc.code),
@@ -1233,6 +1257,7 @@ def _research_workspace_output_error_from_file_artifacts_error(exc: FileArtifact
 
 
 def _is_png_export_content(content: bytes, content_type: Any) -> bool:
+    """Validate exported image bytes and content type as PNG."""
     normalized_content_type = str(content_type or "").split(";", 1)[0].strip().lower()
     if normalized_content_type and normalized_content_type != "image/png":
         return False
@@ -1240,6 +1265,7 @@ def _is_png_export_content(content: bytes, content_type: Any) -> bool:
 
 
 def _normalize_video_overview_slides(value: Any) -> list[dict[str, Any]]:
+    """Normalize generated slide data for rendering and narration."""
     raw_slides = value if isinstance(value, list) else []
     slides: list[dict[str, Any]] = []
     for index, item in enumerate(raw_slides[:_VIDEO_OVERVIEW_MAX_SLIDES]):
@@ -1260,6 +1286,7 @@ def _normalize_video_overview_slides(value: Any) -> list[dict[str, Any]]:
 
 
 def _slide_narration_text(slide: Mapping[str, Any]) -> str:
+    """Return the narration text for a generated slide."""
     text = str(slide.get("speaker_notes") or slide.get("content") or slide.get("title") or "").strip()
     if not text:
         raise ResearchWorkspaceOutputJobError("slide_narration_empty", retryable=False)
@@ -1267,6 +1294,7 @@ def _slide_narration_text(slide: Mapping[str, Any]) -> str:
 
 
 def _video_overview_slides_text(slides: list[Mapping[str, Any]]) -> str:
+    """Flatten generated slides into searchable presentation text."""
     parts: list[str] = []
     for slide in slides:
         parts.extend(
@@ -1284,6 +1312,7 @@ def _update_output_job_progress(
     percent: float,
     message: str,
 ) -> None:
+    """Best-effort update for job progress state and persisted progress."""
     if progress is not None:
         progress.percent = percent
         progress.message = message
@@ -1306,6 +1335,7 @@ def _update_workspace_output_artifact(
     artifact_id: str,
     updates: dict[str, Any],
 ) -> dict[str, Any]:
+    """Update a workspace output artifact with optimistic version checks."""
     existing = workspace_db.get_workspace_artifact(workspace_id, artifact_id)
     if existing is None:
         raise ResearchWorkspaceOutputJobError("workspace_artifact_not_found", status_code=404)
@@ -1337,6 +1367,7 @@ def _try_mark_workspace_output_artifact_failed(
     job_id: int,
     error_code: str,
 ) -> None:
+    """Best-effort mark a workspace output artifact as failed."""
     try:
         _mark_workspace_output_artifact_failed(
             workspace_db=workspace_db,
@@ -1365,6 +1396,7 @@ def _mark_workspace_output_artifact_failed(
     job_id: int,
     error_code: str,
 ) -> None:
+    """Persist the failed status and public error code on a workspace artifact."""
     public_code = _safe_public_error_code(error_code)
     _update_workspace_output_artifact(
         workspace_db=workspace_db,
@@ -1384,6 +1416,7 @@ def _mark_workspace_output_artifact_failed(
 
 
 def _utc_now_iso() -> str:
+    """Return the current UTC time as an ISO timestamp."""
     return datetime.now(UTC).isoformat()
 
 
@@ -1395,6 +1428,7 @@ def _pending_artifact_payload(
     user_id: str,
     settings: ResearchWorkspaceOutputSettings,
 ) -> dict[str, Any]:
+    """Build the pending workspace artifact row for a queued output job."""
     title = settings.title_hint or artifact_type.replace("_", " ").title()
     content_type = "video/mp4" if artifact_type == "video_overview" else "image/png"
     return {
@@ -1419,6 +1453,7 @@ def _pending_artifact_payload(
 
 
 def _validate_job_scope(job: dict[str, Any], *, workspace_id: str, user_id: str) -> None:
+    """Validate that a job belongs to the requested workspace and user."""
     if job.get("job_type") != RESEARCH_WORKSPACE_OUTPUT_JOB_TYPE:
         raise ResearchWorkspaceOutputJobError("job_not_found", status_code=404)
     if job.get("domain") != RESEARCH_WORKSPACE_OUTPUT_JOB_DOMAIN:
@@ -1431,6 +1466,7 @@ def _validate_job_scope(job: dict[str, Any], *, workspace_id: str, user_id: str)
 
 
 def _public_job_status(value: Any) -> ResearchWorkspaceOutputStatus:
+    """Normalize internal Jobs status names to output API statuses."""
     raw = str(value or "").strip().lower()
     if raw in {"queued", "processing", "completed", "failed", "cancelled"}:
         return cast(ResearchWorkspaceOutputStatus, raw)
@@ -1440,12 +1476,14 @@ def _public_job_status(value: Any) -> ResearchWorkspaceOutputStatus:
 
 
 def _job_error(job: dict[str, Any]) -> str | None:
+    """Return a public error code for failed jobs."""
     if _public_job_status(job.get("status")) != "failed":
         return None
     return _safe_public_error_code(str(job.get("error_code") or job.get("last_error") or job.get("error_message") or ""))
 
 
 def _normalize_job_mapping(value: Any) -> dict[str, Any]:
+    """Coerce dict or JSON string job payload values to dictionaries."""
     if isinstance(value, dict):
         return value
     if isinstance(value, str):

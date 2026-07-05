@@ -11,6 +11,8 @@ import pytest
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.exceptions import FileArtifactsError
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def fake_job_manager() -> object:
@@ -1048,6 +1050,34 @@ async def test_video_overview_worker_applies_builtin_visual_style(
     persisted_snapshot = json.loads(str(presentation_kwargs["visual_style_snapshot"]))
     assert persisted_snapshot["id"] == "notebooklm-blueprint"
     assert persisted_snapshot["scope"] == "builtin"
+
+
+@pytest.mark.asyncio
+async def test_video_overview_worker_runs_slide_generation_in_thread(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Any,
+) -> None:
+    output_jobs = _output_jobs_module()
+    workspace_db = _VideoWorkspaceDB()
+    _install_video_overview_success_doubles(monkeypatch, tmp_path, output_jobs)
+    to_thread_calls: list[str] = []
+
+    async def _record_to_thread(func: Any, /, *args: Any, **kwargs: Any) -> Any:
+        to_thread_calls.append(str(getattr(func, "__name__", func.__class__.__name__)))
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(output_jobs.asyncio, "to_thread", _record_to_thread)
+
+    await output_jobs.process_research_workspace_output_payload(
+        job={"id": 7, "owner_user_id": "42"},
+        payload=_video_payload(),
+        workspace_db=workspace_db,
+        media_db=object(),
+        user_id=42,
+        job_manager=object(),
+    )
+
+    assert "generate_from_text" in to_thread_calls
 
 
 @pytest.mark.asyncio
