@@ -1326,6 +1326,7 @@ describe("StudioPane Stage 2 workflows", () => {
 
     renderStudioPane()
 
+    fireEvent.click(screen.getByRole("button", { name: /More outputs/ }))
     const compareButton = screen.getByRole("button", { name: "Compare Sources" })
     expect(compareButton).toBeDisabled()
   }, 15000)

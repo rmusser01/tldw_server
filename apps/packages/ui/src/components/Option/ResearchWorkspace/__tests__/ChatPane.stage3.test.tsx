@@ -401,6 +401,45 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
     })
   })
 
+  it("prepends response style and length instructions only when presets are active", async () => {
+    renderChatPane()
+
+    fireEvent.change(screen.getByLabelText("Response style"), {
+      target: { value: "explain" }
+    })
+    fireEvent.change(screen.getByLabelText("Answer length"), {
+      target: { value: "brief" }
+    })
+    fireEvent.change(screen.getByLabelText("Chat message"), {
+      target: { value: "What should I know?" }
+    })
+    fireEvent.keyDown(screen.getByLabelText("Chat message"), {
+      key: "Enter"
+    })
+
+    await waitFor(() => expect(mockOnSubmit).toHaveBeenCalled())
+    expect(mockOnSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.stringContaining("Response preference:")
+      })
+    )
+    expect(mockOnSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.stringContaining("explain the answer")
+      })
+    )
+    expect(mockOnSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.stringContaining("Keep the answer brief")
+      })
+    )
+    expect(mockOnSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.stringContaining("User question: What should I know?")
+      })
+    )
+  })
+
   it("groups mode and RAG controls inside one toolbar region", () => {
     workspaceStoreState.selectedSourceIds = ["source-doc-1"]
     workspaceStoreState.getSelectedSources = () => [
@@ -563,6 +602,51 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
         message: expect.stringContaining("User question: What's the synopsis?")
       })
     )
+  })
+
+  it("does not duplicate question framing when full source contents and response presets are enabled", async () => {
+    workspaceStoreState.selectedSourceIds = ["source-doc-1"]
+    workspaceStoreState.getSelectedSources = () => [
+      {
+        id: "source-doc-1",
+        mediaId: 101,
+        title: "Primary Paper",
+        type: "pdf",
+        status: "ready"
+      }
+    ]
+    workspaceStoreState.getSelectedMediaIds = () => [101]
+    mockGetMediaDetails.mockResolvedValue({
+      content: {
+        text: "Primary paper full text block."
+      }
+    })
+
+    renderChatPane()
+
+    fireEvent.change(screen.getByLabelText("Response style"), {
+      target: { value: "source-first" }
+    })
+    fireEvent.change(screen.getByLabelText("Answer length"), {
+      target: { value: "detailed" }
+    })
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "Include full source contents" })
+    )
+    fireEvent.change(screen.getByLabelText("Chat message"), {
+      target: { value: "How do the findings connect?" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Send" }))
+
+    await waitFor(() => expect(mockOnSubmit).toHaveBeenCalled())
+    const submittedMessage = mockOnSubmit.mock.calls.at(-1)?.[0].message
+
+    expect(submittedMessage).toContain("Response preference:")
+    expect(submittedMessage).toContain("Source 101: Primary Paper")
+    expect(submittedMessage).toContain(
+      "User question: How do the findings connect?"
+    )
+    expect(submittedMessage.match(/User question:/g)).toHaveLength(1)
   })
 
   it("shows keyboard shortcut hint below the composer", () => {

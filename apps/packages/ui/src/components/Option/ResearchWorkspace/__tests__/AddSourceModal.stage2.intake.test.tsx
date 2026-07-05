@@ -101,6 +101,16 @@ describe("AddSourceModal Stage 2 intake and relevance", () => {
     mockListMedia.mockResolvedValue({ media: [] })
   })
 
+  it("explains supported source imports and Google-specific skips", () => {
+    render(<AddSourceModal />)
+
+    expect(screen.getByText("Supported now")).toBeInTheDocument()
+    expect(screen.getByText(/PDF, DOCX, TXT\/Markdown, ePub, HTML, XML, JSON/i)).toBeInTheDocument()
+    expect(screen.getByText(/audio and video files/i)).toBeInTheDocument()
+    expect(screen.getByText(/URL imports use server extraction/i)).toBeInTheDocument()
+    expect(screen.getByText(/Not included here: Google Drive sync/i)).toBeInTheDocument()
+  })
+
   it("uploads pasted text with an explicit document media_type", async () => {
     workspaceStoreState.addSourceModalTab = "paste"
     mockUploadMedia.mockResolvedValueOnce({
