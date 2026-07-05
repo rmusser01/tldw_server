@@ -101,7 +101,10 @@ import {
   normalizeRolloutPercentage
 } from "@/utils/feature-rollout"
 import { WorkspaceShortcutsModal } from "./WorkspaceShortcutsModal"
-import { WorkspaceAgentTaskHandoffModal } from "./WorkspaceAgentTaskHandoffModal"
+import {
+  WorkspaceAgentTaskHandoffModal,
+  type WorkspaceAgentTaskPrefill
+} from "./WorkspaceAgentTaskHandoffModal"
 import { WorkspaceACPHistoryModal } from "./WorkspaceACPHistoryModal"
 import { WorkspaceSandboxDiagnosticsPanel } from "./WorkspaceSandboxDiagnosticsPanel"
 import { WORKSPACES_PATH } from "@/routes/route-paths"
@@ -135,6 +138,10 @@ interface WorkspaceHeaderProps {
   statusGuardrailsEnabled?: boolean
   /** Increment when page-level workspace reconciliation has fresh server context. */
   serverContextRefreshVersion?: number
+  /** Increment to open the agent-task modal from a route or extension handoff. */
+  agentTaskHandoffOpenSignal?: number
+  /** Optional title/description for the next agent-task modal open. */
+  agentTaskPrefill?: WorkspaceAgentTaskPrefill | null
 }
 
 const TELEMETRY_EVENT_ORDER: ResearchWorkspaceTelemetryEventType[] = [
@@ -291,7 +298,9 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
   storageAccountQuotaBytes,
   provenanceEnabled = true,
   statusGuardrailsEnabled = true,
-  serverContextRefreshVersion
+  serverContextRefreshVersion,
+  agentTaskHandoffOpenSignal = 0,
+  agentTaskPrefill = null
 }) => {
   const { t } = useTranslation(["playground", "option", "common"])
   const navigate = useNavigate()
@@ -313,6 +322,9 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
   const [workspaceSettingsOpen, setWorkspaceSettingsOpen] = React.useState(false)
   const [shortcutsModalOpen, setShortcutsModalOpen] = React.useState(false)
   const [agentTaskModalOpen, setAgentTaskModalOpen] = React.useState(false)
+  const [agentTaskModalPrefill, setAgentTaskModalPrefill] =
+    React.useState<WorkspaceAgentTaskPrefill | null>(null)
+  const lastAgentTaskHandoffSignalRef = React.useRef(0)
   const [acpHistoryModalOpen, setAcpHistoryModalOpen] = React.useState(false)
   const [sandboxDiagnosticsOpen, setSandboxDiagnosticsOpen] = React.useState(false)
   const [deleteConfirmOpen, setDeleteConfirmOpen] = React.useState(false)
@@ -379,6 +391,14 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
     React.useState<string | null>(null)
   const [defaultAssistantWorkspace, setDefaultAssistantWorkspace] =
     React.useState<WorkspaceApiResponse | null>(null)
+
+  React.useEffect(() => {
+    if (agentTaskHandoffOpenSignal <= 0) return
+    if (lastAgentTaskHandoffSignalRef.current === agentTaskHandoffOpenSignal) return
+    lastAgentTaskHandoffSignalRef.current = agentTaskHandoffOpenSignal
+    setAgentTaskModalPrefill(agentTaskPrefill)
+    setAgentTaskModalOpen(true)
+  }, [agentTaskHandoffOpenSignal, agentTaskPrefill])
   const [personaProfiles, setPersonaProfiles] = React.useState<
     PersonaProfileSummary[]
   >([])
@@ -696,11 +716,13 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
   }
 
   const handleOpenAgentTaskModal = () => {
+    setAgentTaskModalPrefill(null)
     setAgentTaskModalOpen(true)
   }
 
   const handleCloseAgentTaskModal = () => {
     setAgentTaskModalOpen(false)
+    setAgentTaskModalPrefill(null)
   }
 
   const handleOpenAcpHistoryModal = () => {
@@ -899,6 +921,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
 
   const handleOpenAgentTasksPage = () => {
     setAgentTaskModalOpen(false)
+    setAgentTaskModalPrefill(null)
     setAcpHistoryModalOpen(false)
     const canonicalWorkspaceId = workspaceId?.trim()
     if (!canonicalWorkspaceId) {
@@ -2441,6 +2464,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
         workspaceId={workspaceId}
         workspaceName={workspaceName}
         workspaceTag={workspaceTag}
+        prefill={agentTaskModalPrefill}
         onBeforeSubmit={saveCurrentWorkspace}
         onCancel={handleCloseAgentTaskModal}
         onOpenAgentTasks={handleOpenAgentTasksPage}

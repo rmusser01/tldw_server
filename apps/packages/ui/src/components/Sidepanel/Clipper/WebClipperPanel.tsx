@@ -11,6 +11,10 @@ import {
   type PendingClipDraft
 } from "@/services/web-clipper/pending-draft"
 import {
+  buildPendingWebClipAgentTaskRequest,
+  writePendingWebClipAgentTaskRequest
+} from "@/services/web-clipper/agent-task-handoff"
+import {
   buildPendingEnrichmentResults,
   buildPendingWebClipAnalyzeRequest,
   persistRequestedWebClipEnrichments,
@@ -32,7 +36,7 @@ type WebClipperPanelProps = {
   onCancel: () => void
 }
 
-type SubmitAction = "save" | "open" | "analyze"
+type SubmitAction = "save" | "open" | "analyze" | "agent"
 
 type EnrichmentStatusTone = "success" | "warning" | "error"
 
@@ -116,6 +120,30 @@ const createOpenTargetUrl = (response: WebClipperSaveResponse): string | null =>
   }
 
   return chromeApi.runtime.getURL("options.html#/notes")
+}
+
+const createWorkspaceAgentTaskTargetUrl = (
+  response: WebClipperSaveResponse,
+  handoffId: string
+): string | null => {
+  const chromeApi = globalThis.chrome
+  if (
+    !chromeApi?.runtime?.getURL ||
+    response.status === "failed" ||
+    response.workspace_placement_saved !== true
+  ) {
+    return null
+  }
+  const workspaceId = response.workspace_placement?.workspace_id?.trim()
+  if (!workspaceId) return null
+  const params = new URLSearchParams({
+    workspace: workspaceId,
+    agent_task_handoff: "web_clip",
+    handoff_id: handoffId
+  })
+  return chromeApi.runtime.getURL(
+    `options.html#/research-workspace?${params.toString()}`
+  )
 }
 
 const parseOptionalFolderId = (value: string): number | null => {
@@ -434,6 +462,16 @@ const WebClipperPanel = ({ draft, onCancel }: WebClipperPanelProps) => {
     setWorkspaceValidation(null)
     setSubmissionError(null)
 
+    if (action === "agent" && !needsWorkspace) {
+      setSubmissionError(
+        t(
+          "sidepanel:clipper.agentTaskRequiresWorkspaceDestination",
+          "Choose Workspace or Both before starting an agent task."
+        )
+      )
+      return
+    }
+
     if (hasInvalidFolderId) {
       setFolderValidation(
         t(
@@ -575,6 +613,27 @@ const WebClipperPanel = ({ draft, onCancel }: WebClipperPanelProps) => {
         const url = createOpenTargetUrl(response)
         if (url) {
           globalThis.chrome?.tabs?.create?.({ url })
+        }
+      }
+
+      if (action === "agent") {
+        const request = buildPendingWebClipAgentTaskRequest({
+          draft,
+          response
+        })
+        const url = request
+          ? createWorkspaceAgentTaskTargetUrl(response, request.id)
+          : null
+        if (request && url) {
+          await writePendingWebClipAgentTaskRequest(request)
+          globalThis.chrome?.tabs?.create?.({ url })
+        } else {
+          setSubmissionError(
+            t(
+              "sidepanel:clipper.agentTaskRequiresWorkspace",
+              "Save the clip to a workspace before starting an agent task."
+            )
+          )
         }
       }
     } catch (error) {
@@ -757,6 +816,18 @@ const WebClipperPanel = ({ draft, onCancel }: WebClipperPanelProps) => {
         </section>
       ) : null}
 
+      <p className="text-xs text-text-muted">
+        {destinationMode === "workspace" || destinationMode === "both"
+          ? t(
+              "sidepanel:clipper.workspaceActionHint",
+              "Save to workspace, then open it, ask chat, or start an agent task with this page."
+            )
+          : t(
+              "sidepanel:clipper.noteActionHint",
+              "Save as a note, or ask chat about the captured page."
+            )}
+      </p>
+
       <div className="flex flex-wrap gap-2" data-testid="web-clipper-actions">
         <button
           type="button"
@@ -786,7 +857,7 @@ const WebClipperPanel = ({ draft, onCancel }: WebClipperPanelProps) => {
         >
           {isSaving && activeAction === "analyze"
             ? t("sidepanel:clipper.savingLabel", "Saving...")
-            : t("sidepanel:clipper.analyzeNowLabel", "Analyze now")}
+            : t("sidepanel:clipper.askChatLabel", "Ask chat")}
         </button>
 
         <button
@@ -798,6 +869,17 @@ const WebClipperPanel = ({ draft, onCancel }: WebClipperPanelProps) => {
           {isSaving && activeAction === "open"
             ? t("sidepanel:clipper.savingLabel", "Saving...")
             : t("sidepanel:clipper.saveAndOpenLabel", "Save and open")}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => void submitSave("agent")}
+          disabled={isSaving}
+          className="min-w-[8rem] flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm font-semibold text-text disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {isSaving && activeAction === "agent"
+            ? t("sidepanel:clipper.savingLabel", "Saving...")
+            : t("sidepanel:clipper.startAgentTaskLabel", "Start agent task")}
         </button>
       </div>
     </div>

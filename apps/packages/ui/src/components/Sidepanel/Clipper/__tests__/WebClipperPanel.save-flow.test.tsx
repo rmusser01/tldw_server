@@ -8,6 +8,7 @@ import {
   readPendingClipDraft,
   writePendingClipDraft
 } from "@/services/web-clipper/pending-draft"
+import { WEB_CLIPPER_PENDING_AGENT_TASK_STORAGE_KEY } from "@/services/web-clipper/agent-task-handoff"
 import WebClipperPanel from "../WebClipperPanel"
 
 const apiMocks = vi.hoisted(() => ({
@@ -21,6 +22,32 @@ const apiMocks = vi.hoisted(() => ({
 
 const openTabMock = vi.hoisted(() => vi.fn())
 const navigateMock = vi.hoisted(() => vi.fn())
+const chromeStorageState = vi.hoisted(() => new Map<string, unknown>())
+const chromeStorageSessionGetMock = vi.hoisted(() =>
+  vi.fn((key: string, callback?: (items: Record<string, unknown>) => void) => {
+    const result = chromeStorageState.has(key)
+      ? { [key]: chromeStorageState.get(key) }
+      : {}
+    callback?.(result)
+    return Promise.resolve(result)
+  })
+)
+const chromeStorageSessionSetMock = vi.hoisted(() =>
+  vi.fn((items: Record<string, unknown>, callback?: () => void) => {
+    for (const [key, value] of Object.entries(items)) {
+      chromeStorageState.set(key, value)
+    }
+    callback?.()
+    return Promise.resolve()
+  })
+)
+const chromeStorageSessionRemoveMock = vi.hoisted(() =>
+  vi.fn((key: string, callback?: () => void) => {
+    chromeStorageState.delete(key)
+    callback?.()
+    return Promise.resolve()
+  })
+)
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
@@ -116,7 +143,9 @@ const chooseWorkspaceDestination = async (
 describe("WebClipperPanel save flow", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    chromeStorageState.clear()
     window.sessionStorage.clear()
+    window.localStorage.removeItem(WEB_CLIPPER_PENDING_AGENT_TASK_STORAGE_KEY)
     clearPendingClipDraft()
     apiMocks.initialize.mockResolvedValue(undefined)
     apiMocks.listNoteFolders.mockResolvedValue({
@@ -199,6 +228,13 @@ describe("WebClipperPanel save flow", () => {
       },
       runtime: {
         getURL: (path: string) => `chrome-extension://unit-test/${path}`
+      },
+      storage: {
+        session: {
+          get: chromeStorageSessionGetMock,
+          set: chromeStorageSessionSetMock,
+          remove: chromeStorageSessionRemoveMock
+        }
       }
     })
     ;(window as Window & { __tldwNavigate?: (path: string) => void }).__tldwNavigate =
@@ -904,7 +940,7 @@ describe("WebClipperPanel save flow", () => {
 
     render(<WebClipperPanel draft={createScreenshotDraft()} onCancel={vi.fn()} />)
 
-    await user.click(screen.getByRole("button", { name: "Analyze now" }))
+    await user.click(screen.getByRole("button", { name: "Ask chat" }))
 
     await waitFor(() => {
       expect(apiMocks.saveWebClip).toHaveBeenCalledTimes(1)
@@ -922,6 +958,106 @@ describe("WebClipperPanel save flow", () => {
       }
     })
     expect(navigateMock).toHaveBeenCalledWith("/chat")
+  })
+
+  it("opens Research Workspace with captured context for an agent task", async () => {
+    const user = userEvent.setup()
+    apiMocks.saveWebClip.mockResolvedValueOnce({
+      clip_id: "clip-123",
+      note_id: "note-123",
+      note: { id: "note-123", title: "Example Story", version: 1 },
+      workspace_placement: {
+        workspace_id: "workspace-alpha",
+        workspace_note_id: 42,
+        source_note_id: "note-123"
+      },
+      attachments: [],
+      status: "saved",
+      warnings: [],
+      workspace_placement_saved: true,
+      workspace_placement_count: 1
+    })
+
+    render(<WebClipperPanel draft={createDraft()} onCancel={vi.fn()} />)
+
+    await chooseWorkspaceDestination(user)
+    await user.click(screen.getByRole("button", { name: "Start agent task" }))
+
+    await waitFor(() => {
+      expect(apiMocks.saveWebClip).toHaveBeenCalledTimes(1)
+    })
+
+    const stored = chromeStorageState.get(
+      WEB_CLIPPER_PENDING_AGENT_TASK_STORAGE_KEY
+    )
+    expect(stored).toMatchObject({
+      clipId: "clip-123",
+      noteId: "note-123",
+      workspaceId: "workspace-alpha",
+      workspaceNoteId: 42,
+      pageUrl: "https://example.com/story",
+      pageTitle: "Example Story",
+      extractPreview: "Alpha body copy"
+    })
+    expect(openTabMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: expect.stringContaining(
+          "#/research-workspace?workspace=workspace-alpha&agent_task_handoff=web_clip"
+        )
+      })
+    )
+  })
+
+  it("does not start an agent task when workspace placement was not saved", async () => {
+    const user = userEvent.setup()
+    apiMocks.saveWebClip.mockResolvedValueOnce({
+      clip_id: "clip-123",
+      note_id: "note-123",
+      note: { id: "note-123", title: "Example Story", version: 1 },
+      workspace_placement: {
+        workspace_id: "workspace-alpha",
+        workspace_note_id: 42,
+        source_note_id: "note-123"
+      },
+      attachments: [],
+      status: "partially_saved",
+      warnings: [],
+      workspace_placement_saved: false,
+      workspace_placement_count: 0
+    })
+
+    render(<WebClipperPanel draft={createDraft()} onCancel={vi.fn()} />)
+
+    await chooseWorkspaceDestination(user)
+    await user.click(screen.getByRole("button", { name: "Start agent task" }))
+
+    await waitFor(() => {
+      expect(apiMocks.saveWebClip).toHaveBeenCalledTimes(1)
+    })
+    expect(
+      screen.getByText("Save the clip to a workspace before starting an agent task.")
+    ).toBeInTheDocument()
+    expect(
+      chromeStorageState.get(WEB_CLIPPER_PENDING_AGENT_TASK_STORAGE_KEY)
+    ).toBeUndefined()
+    expect(openTabMock).not.toHaveBeenCalled()
+  })
+
+  it("requires a workspace destination before starting an agent task", async () => {
+    const user = userEvent.setup()
+
+    render(<WebClipperPanel draft={createDraft()} onCancel={vi.fn()} />)
+
+    await user.click(screen.getByRole("button", { name: "Start agent task" }))
+
+    expect(
+      screen.getByText("Choose Workspace or Both before starting an agent task.")
+    ).toBeInTheDocument()
+    expect(apiMocks.saveWebClip).not.toHaveBeenCalled()
+    expect(
+      chromeStorageState.get(WEB_CLIPPER_PENDING_AGENT_TASK_STORAGE_KEY)
+    ).toBeUndefined()
+    expect(openTabMock).not.toHaveBeenCalled()
   })
 
   it("ignores late enrichment results after the panel switches to a different clip", async () => {
@@ -988,7 +1124,7 @@ describe("WebClipperPanel save flow", () => {
       <WebClipperPanel draft={createScreenshotDraft()} onCancel={vi.fn()} />
     )
 
-    await user.click(screen.getByRole("button", { name: "Analyze now" }))
+    await user.click(screen.getByRole("button", { name: "Ask chat" }))
 
     rerender(<WebClipperPanel draft={createDraft()} onCancel={vi.fn()} />)
 

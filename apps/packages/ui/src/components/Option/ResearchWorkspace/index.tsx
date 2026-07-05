@@ -119,6 +119,12 @@ import {
   DeepResearchBundleImportError,
   buildDeepResearchBundleArtifactPayload
 } from "./deep-research-bundle-import"
+import {
+  clearPendingWebClipAgentTaskRequest,
+  readPendingWebClipAgentTaskRequest,
+  type PendingWebClipAgentTaskRequest
+} from "@/services/web-clipper/agent-task-handoff"
+import type { WorkspaceAgentTaskPrefill } from "./WorkspaceAgentTaskHandoffModal"
 
 const SourcesPane = React.lazy(() =>
   import("./SourcesPane").then((module) => ({ default: module.SourcesPane }))
@@ -138,6 +144,7 @@ const WORKSPACE_STORAGE_PAYLOAD_BUDGET_NEXT_ENV =
   "NEXT_PUBLIC_WORKSPACE_STORAGE_PAYLOAD_BUDGET_MB"
 const WORKSPACE_STORAGE_SPLIT_KEY_PREFIX = `${WORKSPACE_STORAGE_KEY}:workspace:`
 const WORKSPACE_STORAGE_USAGE_REFRESH_DELAY_MS = 120
+const WEB_CLIP_AGENT_TASK_ROUTE_FLAG = "agent_task_handoff"
 const ACCOUNT_STORAGE_USAGE_REFRESH_DELAY_MS = 1400
 const WORKSPACE_ONBOARDING_DISMISSED_STORAGE_KEY =
   "tldw:research-workspace:onboarding-dismissed:v1"
@@ -184,6 +191,25 @@ const buildDeepResearchBundleImportContextKey = (
     context.sourceArtifactId ?? "",
     context.researchRunId
   ].join(":")
+
+const buildWebClipAgentTaskPrefill = (
+  request: PendingWebClipAgentTaskRequest
+): WorkspaceAgentTaskPrefill => ({
+  title: `Review captured page: ${request.pageTitle || request.pageUrl}`,
+  description: [
+    `Captured page: ${request.pageTitle || request.pageUrl}`,
+    `URL: ${request.pageUrl}`,
+    `Clip ID: ${request.clipId}`,
+    `Note ID: ${request.noteId}`,
+    `Workspace note ID: ${request.workspaceNoteId}`,
+    request.hasScreenshot ? "Screenshot attached to captured note: yes" : "",
+    ...(request.extractPreview
+      ? ["", "Captured excerpt:", request.extractPreview]
+      : [])
+  ]
+    .filter((line) => line !== "")
+    .join("\n")
+})
 
 const collectResearchWorkspaceLegacyLocalStorageKeys = (): string[] => {
   if (typeof window === "undefined") return []
@@ -1076,6 +1102,15 @@ const ResearchWorkspaceBody: React.FC = () => {
     researchWorkspaceCapabilitiesFetchedAt,
     setResearchWorkspaceCapabilitiesFetchedAt
   ] = React.useState<number | null>(null)
+  const [agentTaskHandoffOpenSignal, setAgentTaskHandoffOpenSignal] =
+    React.useState(0)
+  const [agentTaskPrefill, setAgentTaskPrefill] =
+    React.useState<WorkspaceAgentTaskPrefill | null>(null)
+  const lastAppliedWebClipHandoffIdRef = React.useRef<string | null>(null)
+  const currentResearchWorkspaceSearch =
+    typeof window === "undefined"
+      ? ""
+      : getResearchWorkspaceSearchFromLocation(window.location)
 
   // Mobile drawer state
   const [leftDrawerOpen, setLeftDrawerOpen] = React.useState(false)
@@ -1272,6 +1307,7 @@ const ResearchWorkspaceBody: React.FC = () => {
   const setCurrentNote = useWorkspaceStore((s) => s.setCurrentNote)
   const loadNote = useWorkspaceStore((s) => s.loadNote)
   const duplicateWorkspace = useWorkspaceStore((s) => s.duplicateWorkspace)
+  const switchWorkspace = useWorkspaceStore((s) => s.switchWorkspace)
   const selectedSourceIds = useWorkspaceStore((s) => s.selectedSourceIds)
   const selectedSourceFolderIds = useWorkspaceStore(
     (s) => s.selectedSourceFolderIds
@@ -2305,6 +2341,36 @@ const ResearchWorkspaceBody: React.FC = () => {
     focusWorkspacePane("studio")
   }, [activeDeepResearchReturnContext, focusWorkspacePane])
 
+  React.useEffect(() => {
+    if (typeof window === "undefined") return
+
+    const params = new URLSearchParams(currentResearchWorkspaceSearch)
+    if (params.get(WEB_CLIP_AGENT_TASK_ROUTE_FLAG) !== "web_clip") return
+    const routeWorkspaceId = params.get("workspace")?.trim() || null
+
+    let cancelled = false
+    void readPendingWebClipAgentTaskRequest().then((request) => {
+      if (cancelled) return
+      if (!request) return
+      if (lastAppliedWebClipHandoffIdRef.current === request.id) return
+      if (request.workspaceId !== workspaceId) {
+        if (routeWorkspaceId === request.workspaceId) {
+          switchWorkspace(routeWorkspaceId)
+        }
+        return
+      }
+
+      lastAppliedWebClipHandoffIdRef.current = request.id
+      setAgentTaskPrefill(buildWebClipAgentTaskPrefill(request))
+      void clearPendingWebClipAgentTaskRequest()
+      setAgentTaskHandoffOpenSignal((current) => current + 1)
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [currentResearchWorkspaceSearch, switchWorkspace, workspaceId])
+
   const handleImportDeepResearchBundle = React.useCallback(async () => {
     if (!activeDeepResearchReturnContext || !activeDeepResearchReturnKey) return
 
@@ -2341,6 +2407,14 @@ const ResearchWorkspaceBody: React.FC = () => {
         returnContext,
         sourceArtifact
       })
+      const importedDeepResearchData = artifactPayload.data?.deepResearch as
+        | { selectedImportedSources?: unknown }
+        | undefined
+      const selectedImportedSourceCount = Array.isArray(
+        importedDeepResearchData?.selectedImportedSources
+      )
+        ? importedDeepResearchData.selectedImportedSources.length
+        : 0
 
       if (!canContinueImport()) return
       addArtifact(artifactPayload)
@@ -2348,10 +2422,17 @@ const ResearchWorkspaceBody: React.FC = () => {
       setDeepResearchBundleImportState({
         contextKey: returnContextKey,
         status: "imported",
-        message: t(
-          "playground:studio.deepResearchBundleImported",
-          "Bundle imported"
-        )
+        message:
+          selectedImportedSourceCount > 0
+            ? t(
+                "playground:studio.deepResearchBundleImportedWithSources",
+                "Bundle imported · {{count}} selected sources",
+                { count: selectedImportedSourceCount }
+              )
+            : t(
+                "playground:studio.deepResearchBundleImported",
+                "Bundle imported"
+              )
       })
       focusWorkspacePane("studio")
     } catch (error) {
@@ -3219,6 +3300,7 @@ const ResearchWorkspaceBody: React.FC = () => {
           onResetAdvancedSourceFilters={resetAdvancedSourceFilters}
           statusGuardrailsEnabled={statusGuardrailsEnabled}
           statusProjectionError={workspaceStatusProjectionError}
+          researchWorkspaceCapabilities={researchWorkspaceCapabilities}
         />
       </Suspense>
     )
@@ -3618,6 +3700,8 @@ const ResearchWorkspaceBody: React.FC = () => {
             provenanceEnabled={provenanceEnabled}
             statusGuardrailsEnabled={statusGuardrailsEnabled}
             serverContextRefreshVersion={workspaceStatusProjectionReadyVersion}
+            agentTaskHandoffOpenSignal={agentTaskHandoffOpenSignal}
+            agentTaskPrefill={agentTaskPrefill}
           />
 
           <WorkspaceBanner
@@ -3675,6 +3759,8 @@ const ResearchWorkspaceBody: React.FC = () => {
             provenanceEnabled={provenanceEnabled}
             statusGuardrailsEnabled={statusGuardrailsEnabled}
             serverContextRefreshVersion={workspaceStatusProjectionReadyVersion}
+            agentTaskHandoffOpenSignal={agentTaskHandoffOpenSignal}
+            agentTaskPrefill={agentTaskPrefill}
           />
 
           <WorkspaceBanner

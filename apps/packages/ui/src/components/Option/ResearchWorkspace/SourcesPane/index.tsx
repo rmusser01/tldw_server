@@ -61,6 +61,7 @@ import {
   getSourceSelectionOrigin
 } from "@/store/workspace-organization"
 import { AddSourceModal } from "./AddSourceModal"
+import type { ResearchWorkspaceCapabilitiesResponse } from "../research-workspace-capabilities"
 import {
   SourceFolderMembershipMenu,
   type SourceFolderMembershipOption
@@ -377,6 +378,8 @@ interface SourcesPaneProps {
   onResetAdvancedSourceFilters?: () => void
   /** Non-blocking server-side context/status warning for this workspace. */
   statusProjectionError?: string | null
+  /** Workspace capability state used to gate discovery actions. */
+  researchWorkspaceCapabilities?: ResearchWorkspaceCapabilitiesResponse
 }
 
 /**
@@ -389,7 +392,8 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
   sourceListViewState = DEFAULT_SOURCE_LIST_VIEW_STATE,
   onPatchSourceListViewState,
   onResetAdvancedSourceFilters,
-  statusProjectionError = null
+  statusProjectionError = null,
+  researchWorkspaceCapabilities
 }) => {
   const { t } = useTranslation(["playground", "common"])
   const readyStateLabel = getDesignSystemState("ready")?.label ?? READY_STATE_LABEL
@@ -2636,7 +2640,7 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
           })()}
       </Modal>
 
-      <AddSourceModal />
+      <AddSourceModal researchWorkspaceCapabilities={researchWorkspaceCapabilities} />
     </div>
   )
 }
