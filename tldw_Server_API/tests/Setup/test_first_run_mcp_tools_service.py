@@ -937,6 +937,7 @@ async def test_validate_non_raising_external_refresh_zero_refreshed_is_incomplet
             "metadata_source": "explicit",
             "risk_class": "low",
             "mutates_state": False,
+            "uses_network": True,
             "uses_filesystem": False,
             "uses_processes": False,
             "capabilities": [],
@@ -1052,6 +1053,55 @@ async def test_validate_safe_external_registry_entry_without_tool_descriptor_is_
 
 
 @pytest.mark.asyncio
+async def test_validate_refreshed_external_tool_must_be_allowed_by_saved_profile(
+    first_run_state: FirstRunState,
+    fake_hub: FakeMcpHub,
+    fake_registry: FakeToolRegistry,
+) -> None:
+    fake_hub.external_servers = [{"id": "docs", "enabled": True}]
+    executor = FakeToolExecutor(
+        results={
+            "mcp.tools.list": {
+                "tools": [
+                    {
+                        "name": "external.docs.read",
+                        "inputSchema": {"properties": {}, "required": []},
+                    }
+                ]
+            },
+            "external.tools.refresh": {"ok": True},
+            "external.docs.read": {"documents": []},
+        },
+    )
+    service, saved_mcp_state = await _applied_service_and_state(
+        first_run_state=first_run_state,
+        fake_hub=fake_hub,
+        fake_registry=fake_registry,
+        tool_executor=executor,
+        selected_addon_ids=["external_network_read"],
+    )
+    fake_registry.entries = [
+        *fake_registry.entries,
+        {
+            "tool_name": "external.docs.read",
+            "module": "external_federation",
+            "metadata_source": "explicit",
+            "risk_class": "low",
+            "mutates_state": False,
+            "uses_filesystem": False,
+            "uses_processes": False,
+            "capabilities": [],
+        },
+    ]
+
+    result = await service.validate_selection(saved_state=saved_mcp_state)
+
+    assert result.validation_state == "no_safe_external_tool"
+    assert result.external_status == "no_safe_tool"
+    assert ("external.docs.read", {}) not in executor.calls
+
+
+@pytest.mark.asyncio
 async def test_validate_eligible_external_no_arg_read_tool_passes(
     first_run_state: FirstRunState,
     fake_hub: FakeMcpHub,
@@ -1066,6 +1116,7 @@ async def test_validate_eligible_external_no_arg_read_tool_passes(
             "metadata_source": "explicit",
             "risk_class": "low",
             "mutates_state": False,
+            "uses_network": True,
             "uses_filesystem": False,
             "uses_processes": False,
             "capabilities": [],

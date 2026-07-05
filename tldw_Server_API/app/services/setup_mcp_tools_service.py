@@ -305,6 +305,8 @@ class SetupMcpToolsService:
             tool_name = str(entry.get("tool_name") or "").strip()
             if not tool_name:
                 continue
+            if tool_name not in allowed_tools:
+                continue
             tool_def = tool_defs.get(tool_name)
             if tool_def is None:
                 continue
