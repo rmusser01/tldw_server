@@ -75,7 +75,6 @@ tldw_Server_API/tests/AuthNZ/property/test_auth_endpoints_property.py::status_on
 tldw_Server_API/tests/AuthNZ/property/test_user_endpoints_property.py::ambiguous_accept=1
 tldw_Server_API/tests/AuthNZ/property/test_user_endpoints_property.py::stub_injection=2
 tldw_Server_API/tests/AuthNZ/test_auth_dependency_contract.py::status_only=2
-tldw_Server_API/tests/AuthNZ/test_auth_dependency_contract.py::tautology_suspect=2
 tldw_Server_API/tests/AuthNZ/unit/test_api_keys_repo_schema_strictness.py::tautology_suspect=1
 tldw_Server_API/tests/AuthNZ/unit/test_hmac_derivation.py::tautology_suspect=4
 tldw_Server_API/tests/AuthNZ/unit/test_key_resolution.py::tautology_suspect=8
@@ -130,7 +129,6 @@ tldw_Server_API/tests/Billing/test_billing_enforcer_org_usage.py::tautology_susp
 tldw_Server_API/tests/Billing/test_subscription_service.py::tautology_suspect=3
 tldw_Server_API/tests/ChaChaNotesDB/test_chacha_conversation_store.py::stub_injection=2
 tldw_Server_API/tests/ChaChaNotesDB/test_persona_exemplar_migration.py::stub_injection=1
-tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_with_mock_openai.py::ambiguous_accept=1
 tldw_Server_API/tests/Character_Chat/test_complete_v2_with_mock_openai.py::ambiguous_accept=1
 tldw_Server_API/tests/Character_Chat/test_complete_v2_with_mock_openai.py::status_only=1
 tldw_Server_API/tests/Character_Chat/test_rate_limits_specific.py::status_only=3

@@ -172,31 +172,43 @@ def _build_real_principal_app() -> FastAPI:
     return app
 
 
-class _FakeJwtService:
-    def __init__(self, payload: dict[str, Any]) -> None:
-        self.payload = payload
+def _real_jwt_service():
+    """A real JWTService (real HS256 signing/verification), no DB required.
 
-    def decode_access_token(self, token: str) -> dict[str, Any]:
-        assert token == "jwt.header.signature"
-        return dict(self.payload)
+    Replaces the former _FakeJwtService whose decode asserted its own
+    hardcoded token — real signature/expiry validation was never exercised
+    (audits/2026-07-04-test-suite-audit-round2.md, RA2).
+    """
+    from tldw_Server_API.app.core.AuthNZ.jwt_service import JWTService
+    from tldw_Server_API.app.core.AuthNZ.settings import Settings
+
+    settings = Settings(
+        AUTH_MODE="multi_user",
+        JWT_SECRET_KEY="test-secret-key-for-testing-only-needs-32-chars-minimum",
+        JWT_ALGORITHM="HS256",
+        ACCESS_TOKEN_EXPIRE_MINUTES=30,
+    )
+    return JWTService(settings=settings)
 
 
-class _FakeSessionManager:
+class _NullBlacklistSessionManager:
+    """Session manager stub: nothing is blacklisted (blacklisting is DB-backed
+    and out of scope here; token validation itself is real)."""
+
     async def is_token_blacklisted(self, token: str, jti: str | None = None) -> bool:
-        assert token == "jwt.header.signature"
         return False
 
 
-def _build_token_scope_app(payload: dict[str, Any]) -> FastAPI:
+def _build_token_scope_app(jwt_service) -> FastAPI:
     app = FastAPI()
 
-    async def fake_jwt_service() -> _FakeJwtService:
-        return _FakeJwtService(payload)
+    async def real_jwt_service_dep():
+        return jwt_service
 
     async def fake_db_pool() -> object:
         return object()
 
-    app.dependency_overrides[auth_deps.get_jwt_service_dep] = fake_jwt_service
+    app.dependency_overrides[auth_deps.get_jwt_service_dep] = real_jwt_service_dep
     app.dependency_overrides[auth_deps.get_db_pool] = fake_db_pool
 
     @app.get("/token-scope")
@@ -695,26 +707,35 @@ def test_token_scope_guard_alias_preserves_scoped_jwt_success_and_failures(
 ) -> None:
     from tldw_Server_API.app.core.AuthNZ import session_manager
 
-    async def fake_session_manager() -> _FakeSessionManager:
-        return _FakeSessionManager()
+    async def null_blacklist_session_manager() -> _NullBlacklistSessionManager:
+        return _NullBlacklistSessionManager()
 
-    monkeypatch.setattr(session_manager, "get_session_manager", fake_session_manager)
+    monkeypatch.setattr(session_manager, "get_session_manager", null_blacklist_session_manager)
 
-    scoped_response = TestClient(
-        _build_token_scope_app({"scope": "skills.run", "jti": "token-1"}),
-    ).get(
-        "/token-scope",
-        headers={"Authorization": "Bearer jwt.header.signature"},
+    jwt_service = _real_jwt_service()
+    app = _build_token_scope_app(jwt_service)
+    scoped_token = jwt_service.create_access_token(
+        user_id=1, username="scoped", role="user", additional_claims={"scope": "skills.run"}
     )
-    invalid_scope_response = TestClient(
-        _build_token_scope_app({"scope": "wrong.scope", "jti": "token-2"}),
-    ).get(
-        "/token-scope",
-        headers={"Authorization": "Bearer jwt.header.signature"},
+    wrong_scope_token = jwt_service.create_access_token(
+        user_id=2, username="wrong", role="user", additional_claims={"scope": "wrong.scope"}
     )
-    missing_credentials_response = TestClient(
-        _build_token_scope_app({"scope": "skills.run", "jti": "token-3"}),
-    ).get("/token-scope")
+
+    scoped_response = TestClient(app).get(
+        "/token-scope",
+        headers={"Authorization": f"Bearer {scoped_token}"},
+    )
+    invalid_scope_response = TestClient(app).get(
+        "/token-scope",
+        headers={"Authorization": f"Bearer {wrong_scope_token}"},
+    )
+    missing_credentials_response = TestClient(app).get("/token-scope")
+    # real signature verification: flip the last signature character
+    tampered = scoped_token[:-2] + ("AA" if not scoped_token.endswith("AA") else "BB")
+    tampered_response = TestClient(app).get(
+        "/token-scope",
+        headers={"Authorization": f"Bearer {tampered}"},
+    )
 
     assert scoped_response.status_code == 200
     assert scoped_response.json() == {
@@ -727,6 +748,7 @@ def test_token_scope_guard_alias_preserves_scoped_jwt_success_and_failures(
     assert missing_credentials_response.status_code == 401
     assert missing_credentials_response.json()["detail"] == "Authentication required"
     assert missing_credentials_response.headers.get("WWW-Authenticate") == "Bearer"
+    assert tampered_response.status_code == 401, "tampered signature must not authenticate"
 
 
 def test_current_principal_alias_preserves_missing_credentials_401() -> None:
