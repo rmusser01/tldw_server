@@ -12,6 +12,7 @@ from tldw_Server_API.app.core.Setup.first_run_state import (
     FirstRunStatus,
 )
 from tldw_Server_API.app.core.Setup.provider_catalog import REQUIRED_SETUP_PROVIDER_KEYS
+from tldw_Server_API.app.services.setup_mcp_tools_service import McpToolsApplyResult
 
 
 def _persist_required_first_run_step_data(
@@ -79,6 +80,59 @@ def _setup_needs_setup(monkeypatch):
             "remote_access_active": False,
         },
     )
+
+
+class _FakeMcpToolRegistry:
+    async def list_entries(self):
+        return []
+
+
+class _FakeMcpToolsService:
+    def __init__(self, *, result: McpToolsApplyResult | None = None) -> None:
+        self.tool_registry = _FakeMcpToolRegistry()
+        self.result = result
+        self.apply_requests = []
+        self.validate_called = False
+
+    async def apply_selection(self, **kwargs):
+        self.apply_requests.append(kwargs)
+        return self.result or McpToolsApplyResult(
+            status="applied",
+            profile_id=7,
+            assignment_id=11,
+            catalog_version="2026-07-04.v1",
+            selected_pack_ids=["research"],
+            selected_addon_ids=[],
+            effective_tool_count=3,
+            effective_tools=["knowledge.search", "knowledge.get", "mcp.tools.list"],
+            disabled_addons=[],
+            validation_state="not_run",
+            step_payload={
+                "acknowledged": True,
+                "selected_pack_ids": ["research"],
+                "selected_addon_ids": [],
+                "confirmed_addon_ids": [],
+                "confirmation_version": None,
+                "validation_state": "not_run",
+                "profile_id": 7,
+                "assignment_id": 11,
+                "catalog_version": "2026-07-04.v1",
+                "effective_tool_count": 3,
+                "validated_at": None,
+                "validation_message": None,
+                "last_validation_run_id": None,
+            },
+        )
+
+    async def validate_selection(self, **_kwargs):
+        self.validate_called = True
+        pytest.fail("validation should not run before MCP tool packs are saved")
+
+
+def _override_mcp_tools_service(monkeypatch, service: _FakeMcpToolsService) -> None:
+    factory = getattr(setup_endpoint, "get_setup_mcp_tools_service", None)
+    if factory is not None:
+        monkeypatch.setitem(app.dependency_overrides, factory, lambda: service)
 
 
 def _fail_if_state_update_reaches_endpoint(*_args, **_kwargs):
@@ -189,6 +243,112 @@ def test_first_run_provider_catalog_returns_required_provider_keys(setup_client)
     body = response.json()
     keys = {provider["provider_key"] for provider in body["providers"]}
     assert set(REQUIRED_SETUP_PROVIDER_KEYS) <= keys
+
+
+def test_first_run_mcp_tools_catalog_returns_defaults(setup_client, monkeypatch, tmp_path):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _override_mcp_tools_service(monkeypatch, _FakeMcpToolsService())
+
+    response = setup_client.get("/api/v1/setup/first-run/mcp-tools/catalog")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["catalog_version"] == "2026-07-04.v1"
+    assert {pack["pack_id"] for pack in body["packs"]} >= {"research", "learning", "writing"}
+
+
+def test_first_run_mcp_tools_state_rejects_raw_external_config(setup_client, monkeypatch, tmp_path):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_needs_setup(monkeypatch)
+
+    response = setup_client.post(
+        "/api/v1/setup/first-run/state",
+        json={"step": "mcp_tools", "data": {"endpoint_config": {"url": "https://example.test"}}},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "unsupported_first_run_step_data"
+
+
+def test_first_run_mcp_tools_apply_persists_numeric_profile_and_assignment(
+    setup_client,
+    monkeypatch,
+    tmp_path,
+):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_needs_setup(monkeypatch)
+    service = _FakeMcpToolsService()
+    _override_mcp_tools_service(monkeypatch, service)
+
+    response = setup_client.post(
+        "/api/v1/setup/first-run/mcp-tools/apply",
+        json={"selected_pack_ids": ["research"], "selected_addon_ids": []},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["profile_id"] == 7
+    assert isinstance(body["profile_id"], int)
+    assert body["assignment_id"] == 11
+    assert isinstance(body["assignment_id"], int)
+    state = FirstRunStateStore(state_path).load()
+    assert state.step_data["mcp_tools"]["profile_id"] == 7
+    assert state.step_data["mcp_tools"]["assignment_id"] == 11
+
+
+def test_first_run_mcp_tools_apply_returns_conflict_for_profile_conflict(
+    setup_client,
+    monkeypatch,
+    tmp_path,
+):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_needs_setup(monkeypatch)
+    service = _FakeMcpToolsService(
+        result=McpToolsApplyResult(
+            status="conflict",
+            profile_id=7,
+            assignment_id=None,
+            catalog_version="2026-07-04.v1",
+            selected_pack_ids=["research"],
+            selected_addon_ids=[],
+            effective_tool_count=3,
+            effective_tools=["knowledge.search", "knowledge.get", "mcp.tools.list"],
+            disabled_addons=[],
+            validation_state="not_run",
+            step_payload={},
+            conflict={"reason": "profile_manually_changed", "profile_id": 7},
+        )
+    )
+    _override_mcp_tools_service(monkeypatch, service)
+
+    response = setup_client.post(
+        "/api/v1/setup/first-run/mcp-tools/apply",
+        json={"selected_pack_ids": ["research"], "selected_addon_ids": []},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["reason"] == "profile_manually_changed"
+    assert "mcp_tools" not in FirstRunStateStore(state_path).load().step_data
+
+
+def test_first_run_mcp_tools_validate_rejects_before_packs_saved(
+    setup_client,
+    monkeypatch,
+    tmp_path,
+):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_needs_setup(monkeypatch)
+    _override_mcp_tools_service(monkeypatch, _FakeMcpToolsService())
+
+    response = setup_client.post("/api/v1/setup/first-run/mcp-tools/validate", json={})
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "mcp_tools_selection_required"
 
 
 def test_first_run_provider_save_masks_key_and_writes_config(monkeypatch, tmp_path, setup_client):
@@ -2159,6 +2319,65 @@ def test_first_run_state_get_filters_non_public_step_fields(
     assert body["skipped_steps"] == ["audio_defaults"]
     assert "hf_abcdef1234567890" not in str(body)
     assert "not_real" not in str(body)
+
+
+def test_first_run_state_get_projects_only_public_mcp_tools_step_data(
+    monkeypatch,
+    tmp_path,
+    setup_client,
+):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    state = FirstRunStateStore(state_path).update_step(
+        "mcp_tools",
+        {
+            "acknowledged": True,
+            "selected_pack_ids": ["research"],
+            "selected_addon_ids": [],
+            "confirmed_addon_ids": [],
+            "confirmation_version": "2026-07-04.v1",
+            "validation_state": "not_run",
+            "profile_id": 7,
+            "assignment_id": 11,
+            "catalog_version": "2026-07-04.v1",
+            "effective_tool_count": 3,
+            "validated_at": None,
+            "validation_message": None,
+            "last_validation_run_id": None,
+        },
+    )
+    payload = setup_endpoint.json.loads(state.model_dump_json())
+    payload["step_data"]["mcp_tools"].update(
+        {
+            "effective_tools": ["notes.delete"],
+            "policy_document": {"allowed_tools": ["notes.delete"]},
+            "endpoint_config": {"url": "https://example.test"},
+        }
+    )
+    state_path.write_text(setup_endpoint.json.dumps(payload), encoding="utf-8")
+
+    response = setup_client.get("/api/v1/setup/first-run/state")
+
+    assert response.status_code == 200
+    mcp_tools = response.json()["step_data"]["mcp_tools"]
+    assert set(mcp_tools) == {
+        "acknowledged",
+        "selected_pack_ids",
+        "selected_addon_ids",
+        "confirmed_addon_ids",
+        "confirmation_version",
+        "validation_state",
+        "profile_id",
+        "assignment_id",
+        "catalog_version",
+        "effective_tool_count",
+        "validated_at",
+        "validation_message",
+        "last_validation_run_id",
+    }
+    rendered_body = str(response.json())
+    assert "notes.delete" not in rendered_body
+    assert "https://example.test" not in rendered_body
 
 
 def test_skipped_first_run_state_rejected_by_shared_write_guard(

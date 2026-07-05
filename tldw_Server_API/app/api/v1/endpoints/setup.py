@@ -53,6 +53,12 @@ from tldw_Server_API.app.api.v1.schemas.setup_schemas import (
     FirstRunStepSaveResponse,
     FirstRunStepUpdateRequest,
     IngestDefaultsRequest,
+    McpToolsApplyRequest,
+    McpToolsApplyResponse,
+    McpToolsCatalogResponse,
+    McpToolsValidateRequest,
+    McpToolsValidateResponse,
+    McpToolsValidationState,
     OptionalAdvancedRequest,
     SetupAssistantResponse,
     SetupCompleteResponse,
@@ -90,6 +96,7 @@ from tldw_Server_API.app.core.Setup.audio_bundle_catalog import (
     get_audio_bundle_catalog,
 )
 from tldw_Server_API.app.core.Setup.first_chat_verifier import verify_first_chat
+from tldw_Server_API.app.core.Setup.first_run_mcp_tools import build_mcp_tools_catalog
 from tldw_Server_API.app.core.Setup.first_run_state import (
     REQUIRED_FIRST_RUN_STEPS,
     FirstRunStateStore,
@@ -115,6 +122,12 @@ from tldw_Server_API.app.core.Setup.readiness_models import LANE_IDS, LANE_STATU
 from tldw_Server_API.app.core.Setup.readiness_service import preview_readiness_selection, verify_readiness_lanes
 from tldw_Server_API.app.core.Utils.pydantic_compat import model_dump_compat
 from tldw_Server_API.app.services.auth_service import mark_user_verified
+from tldw_Server_API.app.services.mcp_hub_tool_registry import McpHubToolRegistryService
+from tldw_Server_API.app.services.setup_mcp_tools_service import (
+    McpToolsApplyRequest as ServiceMcpToolsApplyRequest,
+    McpToolsApplyResult,
+    SetupMcpToolsService,
+)
 
 router = APIRouter(prefix="/setup", tags=["setup"], include_in_schema=True)
 
@@ -186,6 +199,23 @@ _FIRST_RUN_STEP_DATA_ALLOWED_KEYS = {
             "selected_options",
             "storage_paths",
             "values",
+        }
+    ),
+    "mcp_tools": frozenset(
+        {
+            "acknowledged",
+            "selected_pack_ids",
+            "selected_addon_ids",
+            "confirmed_addon_ids",
+            "confirmation_version",
+            "validation_state",
+            "profile_id",
+            "assignment_id",
+            "catalog_version",
+            "effective_tool_count",
+            "validated_at",
+            "validation_message",
+            "last_validation_run_id",
         }
     ),
 }
@@ -299,6 +329,15 @@ def _first_run_store() -> FirstRunStateStore:
 
 async def _run_first_run_store_call(callback: Callable[[FirstRunStateStore], Any]) -> Any:
     return await asyncio.to_thread(lambda: callback(_first_run_store()))
+
+
+async def get_setup_mcp_tools_service() -> SetupMcpToolsService:
+    from tldw_Server_API.app.api.v1.endpoints.mcp_hub_management import get_mcp_hub_service
+
+    return SetupMcpToolsService(
+        hub=await get_mcp_hub_service(),
+        tool_registry=McpHubToolRegistryService(),
+    )
 
 
 def _normalized_public_step_data_key(key: object) -> str:
@@ -615,6 +654,34 @@ async def _require_first_run_write_access(request: Request) -> None:
         )
 
 
+async def _require_mcp_tools_setup_or_admin_access(request: Request) -> None:
+    status_snapshot = setup_manager.get_status_snapshot()
+    if not bool(status_snapshot.get("setup_completed")):
+        await _require_first_run_write_access(request)
+        return
+
+    principal = await get_auth_principal(request)
+    permissions = set(principal.permissions) if principal is not None else set()
+    if principal is None or not (principal.is_admin or SYSTEM_CONFIGURE in permissions or "*" in permissions):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="system_configure_required")
+
+
+async def _require_mcp_tools_catalog_access(request: Request) -> None:
+    status_snapshot = setup_manager.get_status_snapshot()
+    if not bool(status_snapshot.get("setup_completed")):
+        await require_local_setup_access(request)
+        return
+    await get_auth_principal(request)
+
+
+async def _require_system_configure_access(request: Request) -> AuthPrincipal:
+    principal = await get_auth_principal(request)
+    permissions = set(principal.permissions) if principal is not None else set()
+    if principal is None or not (principal.is_admin or SYSTEM_CONFIGURE in permissions or "*" in permissions):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="system_configure_required")
+    return principal
+
+
 def _read_config_auth_mode() -> str | None:
     try:
         parser = ConfigParser()
@@ -866,6 +933,96 @@ def _safe_ingest_defaults_payload(payload: IngestDefaultsRequest) -> dict[str, A
     return _validated_public_first_run_step_data("ingest_defaults", _step_payload(payload))
 
 
+def _service_mcp_tools_apply_request(payload: McpToolsApplyRequest) -> ServiceMcpToolsApplyRequest:
+    return ServiceMcpToolsApplyRequest(
+        selected_pack_ids=payload.selected_pack_ids,
+        selected_addon_ids=payload.selected_addon_ids,
+        confirmed_addon_ids=payload.confirmed_addon_ids,
+        confirmation_version=payload.confirmation_version,
+        conflict_resolution=payload.conflict_resolution,
+        profile_id=payload.profile_id,
+    )
+
+
+def _mcp_tools_apply_response(result: McpToolsApplyResult) -> McpToolsApplyResponse:
+    return McpToolsApplyResponse(
+        status=result.status,
+        profile_id=result.profile_id,
+        assignment_id=result.assignment_id,
+        catalog_version=result.catalog_version,
+        selected_pack_ids=result.selected_pack_ids,
+        selected_addon_ids=result.selected_addon_ids,
+        effective_tool_count=result.effective_tool_count,
+        effective_tools=result.effective_tools,
+        disabled_addons=result.disabled_addons,
+        validation_state=result.validation_state,
+        conflict=result.conflict,
+    )
+
+
+def _safe_mcp_tools_step_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    return _validated_public_first_run_step_data("mcp_tools", payload)
+
+
+def _safe_int_or_none(value: object) -> int | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _safe_str_list(value: object) -> list[str]:
+    if isinstance(value, str):
+        cleaned = value.strip()
+        return [cleaned] if cleaned else []
+    if not isinstance(value, list):
+        return []
+    return [item for raw in value for item in [str(raw or "").strip()] if item]
+
+
+def _mcp_tools_step_data_from_state(state: FirstRunStateResponse) -> dict[str, Any]:
+    data = state.step_data.get("mcp_tools")
+    if not isinstance(data, dict):
+        return {}
+    return _public_first_run_step_data("mcp_tools", data)
+
+
+def _require_saved_mcp_tools_selection(state: FirstRunStateResponse) -> dict[str, Any]:
+    data = _mcp_tools_step_data_from_state(state)
+    if not data.get("selected_pack_ids"):
+        raise HTTPException(status.HTTP_409_CONFLICT, detail="mcp_tools_selection_required")
+    return data
+
+
+def _mcp_tools_validation_state(value: object) -> McpToolsValidationState:
+    try:
+        return McpToolsValidationState(str(value))
+    except ValueError:
+        return McpToolsValidationState.NOT_RUN
+
+
+def _mcp_tools_status_response(data: dict[str, Any], *, status_value: str) -> McpToolsValidateResponse:
+    return McpToolsValidateResponse(
+        status=status_value,
+        validation_state=_mcp_tools_validation_state(data.get("validation_state")),
+        profile_id=_safe_int_or_none(data.get("profile_id")),
+        assignment_id=_safe_int_or_none(data.get("assignment_id")),
+        catalog_version=str(data["catalog_version"]) if data.get("catalog_version") is not None else None,
+        selected_pack_ids=_safe_str_list(data.get("selected_pack_ids")),
+        selected_addon_ids=_safe_str_list(data.get("selected_addon_ids")),
+        effective_tool_count=_safe_int_or_none(data.get("effective_tool_count")),
+        validated_at=str(data["validated_at"]) if data.get("validated_at") is not None else None,
+        validation_message=(
+            str(data["validation_message"]) if data.get("validation_message") is not None else None
+        ),
+        last_validation_run_id=(
+            str(data["last_validation_run_id"]) if data.get("last_validation_run_id") is not None else None
+        ),
+    )
+
+
 def _install_plan_background_payload(install_plan: InstallPlan) -> dict[str, Any]:
     payload = model_dump_compat(install_plan)
     embeddings = payload.get("embeddings")
@@ -1082,6 +1239,91 @@ async def get_first_run_provider_catalog(
     _guard: None = Depends(require_local_setup_access),
 ) -> SetupProviderCatalogResponse:
     return get_setup_provider_catalog()
+
+
+@router.get(
+    "/first-run/mcp-tools/catalog",
+    openapi_extra={"security": []},
+    response_model=McpToolsCatalogResponse,
+)
+async def get_first_run_mcp_tools_catalog(
+    _guard: None = Depends(_require_mcp_tools_catalog_access),
+    service: SetupMcpToolsService = Depends(get_setup_mcp_tools_service),
+) -> McpToolsCatalogResponse:
+    state = await _run_first_run_store_call(lambda store: store.load())
+    selected_pack_ids = _safe_str_list(_mcp_tools_step_data_from_state(state).get("selected_pack_ids"))
+    catalog = build_mcp_tools_catalog(
+        tool_entries=await service.tool_registry.list_entries(),
+        selected_pack_ids=selected_pack_ids,
+    )
+    return McpToolsCatalogResponse.model_validate(catalog)
+
+
+@router.post(
+    "/first-run/mcp-tools/apply",
+    openapi_extra={"security": []},
+    response_model=McpToolsApplyResponse,
+)
+async def apply_first_run_mcp_tools(
+    payload: McpToolsApplyRequest,
+    _guard: None = Depends(_require_mcp_tools_setup_or_admin_access),
+    service: SetupMcpToolsService = Depends(get_setup_mcp_tools_service),
+) -> McpToolsApplyResponse:
+    state = await _run_first_run_store_call(lambda store: store.load())
+    try:
+        result = await service.apply_selection(
+            state=state,
+            request=_service_mcp_tools_apply_request(payload),
+            actor_id=None,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail=_public_validation_error_detail(exc, "invalid_mcp_tools_selection"),
+        ) from exc
+
+    if result.status == "conflict":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail=result.conflict or {"reason": "profile_manually_changed"},
+        )
+
+    try:
+        await _run_first_run_store_call(
+            lambda store: store.update_step("mcp_tools", _safe_mcp_tools_step_payload(result.step_payload))
+        )
+    except InvalidFirstRunTransition as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+    return _mcp_tools_apply_response(result)
+
+
+@router.post(
+    "/first-run/mcp-tools/validate",
+    openapi_extra={"security": []},
+    response_model=McpToolsValidateResponse,
+)
+async def validate_first_run_mcp_tools(
+    payload: McpToolsValidateRequest,
+    _guard: None = Depends(_require_mcp_tools_setup_or_admin_access),
+) -> McpToolsValidateResponse:
+    del payload
+    state = await _run_first_run_store_call(lambda store: store.load())
+    data = _require_saved_mcp_tools_selection(state)
+    validation_payload = dict(data)
+    validation_payload["validation_state"] = McpToolsValidationState.SKIPPED.value
+    validation_payload["validation_message"] = "MCP tool validation execution is deferred."
+    validation_payload = _safe_mcp_tools_step_payload(validation_payload)
+    try:
+        updated = await _run_first_run_store_call(
+            lambda store: store.update_step("mcp_tools", validation_payload)
+        )
+    except InvalidFirstRunTransition as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    return _mcp_tools_status_response(
+        _mcp_tools_step_data_from_state(updated),
+        status_value="skipped",
+    )
 
 
 @router.post(
@@ -2064,6 +2306,37 @@ async def verify_admin_setup_readiness(
     """Verify setup readiness lanes through the admin setup surface."""
 
     return await _verify_setup_readiness(payload, allow_completed_when_disabled=True)
+
+
+@router.get("/admin/mcp-tools/status", response_model=McpToolsValidateResponse)
+async def get_admin_mcp_tools_status(
+    _guard: AuthPrincipal = Depends(_require_system_configure_access),
+) -> McpToolsValidateResponse:
+    """Return the saved first-run MCP tool setup status through the admin surface."""
+
+    state = await _run_first_run_store_call(lambda store: store.load())
+    data = _mcp_tools_step_data_from_state(state)
+    return _mcp_tools_status_response(
+        data,
+        status_value="saved" if data.get("selected_pack_ids") else "not_saved",
+    )
+
+
+@router.post("/admin/mcp-tools/validate", response_model=McpToolsValidateResponse)
+async def validate_admin_mcp_tools(
+    payload: McpToolsValidateRequest,
+    _guard: AuthPrincipal = Depends(_require_system_configure_access),
+    service: SetupMcpToolsService = Depends(get_setup_mcp_tools_service),
+) -> McpToolsValidateResponse:
+    """Return a no-execution MCP tool validation placeholder through the admin surface."""
+
+    del payload, service
+    state = await _run_first_run_store_call(lambda store: store.load())
+    data = _require_saved_mcp_tools_selection(state)
+    data = dict(data)
+    data["validation_state"] = McpToolsValidationState.SKIPPED.value
+    data["validation_message"] = "MCP tool validation execution is deferred."
+    return _mcp_tools_status_response(data, status_value="skipped")
 
 
 def _build_audio_recommendations_response(

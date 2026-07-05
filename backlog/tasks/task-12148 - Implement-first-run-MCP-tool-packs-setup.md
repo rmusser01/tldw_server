@@ -3,18 +3,22 @@ id: TASK-12148
 title: Implement first-run MCP tool packs setup
 status: In Progress
 assignee: []
-created_date: '2026-07-04 23:41'
+created_date: 2026-07-04 23:41
 labels:
-  - implementation
-  - mcp
-  - setup
-  - first-run
+- implementation
+- mcp
+- setup
+- first-run
 dependencies:
-  - TASK-12132
+- TASK-12132
 references:
-  - >-
-    Docs/superpowers/plans/2026-07-04-first-run-mcp-tool-packs-implementation-plan.md
-  - Docs/superpowers/specs/2026-07-04-first-run-mcp-tool-packs-design.md
+- Docs/superpowers/plans/2026-07-04-first-run-mcp-tool-packs-implementation-plan.md
+- Docs/superpowers/specs/2026-07-04-first-run-mcp-tool-packs-design.md
+modified_files:
+- tldw_Server_API/app/api/v1/schemas/setup_schemas.py
+- tldw_Server_API/app/api/v1/endpoints/setup.py
+- tldw_Server_API/tests/integration/test_unified_first_run_setup_api.py
+- tldw_Server_API/tests/Setup/test_first_run_state.py
 ---
 
 ## Description
