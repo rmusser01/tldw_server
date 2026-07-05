@@ -1,23 +1,34 @@
+from collections.abc import Mapping
+from typing import Any
 import types
+
 import pytest
 
-from tldw_Server_API.app.core.Web_Scraping.runtime import FetchResponse, PolicyDecision
+from tldw_Server_API.app.core.Web_Scraping.runtime import FetchRequest, FetchResponse, PolicyDecision
 
 
 class FakeArticlePolicyChecker:
-    def __init__(self, decision: PolicyDecision):
+    def __init__(self, decision: PolicyDecision) -> None:
         self.decision = decision
 
-    async def decide(self, _url, *, respect_robots, user_agent, context, config):  # noqa: ANN001
+    async def decide(
+        self,
+        _url: str,
+        *,
+        respect_robots: bool,
+        user_agent: str,
+        context: object,
+        config: Mapping[str, Any],
+    ) -> PolicyDecision:
         return self.decision
 
 
 class FakeArticleFetchClient:
-    def __init__(self, response):
+    def __init__(self, response: FetchResponse | BaseException) -> None:
         self.response = response
-        self.requests = []
+        self.requests: list[FetchRequest] = []
 
-    def fetch(self, request):
+    def fetch(self, request: FetchRequest) -> FetchResponse:
         self.requests.append(request)
         if isinstance(self.response, BaseException):
             raise self.response

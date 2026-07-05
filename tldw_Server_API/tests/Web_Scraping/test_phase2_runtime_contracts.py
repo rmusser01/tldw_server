@@ -105,6 +105,26 @@ def test_fetch_request_rejects_missing_url() -> None:
 
 
 @pytest.mark.unit
+def test_fetch_request_rejects_negative_timeout() -> None:
+    with pytest.raises(ValueError, match="timeout must be non-negative"):
+        FetchRequest(url="https://example.com/article", timeout=-1)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_fetch_request_rejects_non_finite_timeout(value: float) -> None:
+    with pytest.raises(ValueError, match="timeout must be finite"):
+        FetchRequest(url="https://example.com/article", timeout=value)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("value", [True, False])
+def test_fetch_request_rejects_boolean_timeout(value: bool) -> None:
+    with pytest.raises(ValueError, match="timeout must be a float or int, not a boolean"):
+        FetchRequest(url="https://example.com/article", timeout=value)
+
+
+@pytest.mark.unit
 def test_fetch_response_normalizes_mapping_response() -> None:
     response = FetchResponse.from_raw(
         {

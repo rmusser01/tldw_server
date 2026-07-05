@@ -9,6 +9,7 @@ from typing import Any
 
 
 def _freeze_value(value: Any) -> Any:
+    """Recursively freeze nested mappings and sequences."""
     if isinstance(value, Mapping):
         return _freeze_mapping(value)
     if isinstance(value, list | tuple):
@@ -17,6 +18,7 @@ def _freeze_value(value: Any) -> Any:
 
 
 def _freeze_mapping(value: Mapping[str, Any] | None) -> Mapping[str, Any]:
+    """Return an immutable copy of runtime session metadata."""
     if not value:
         return MappingProxyType({})
     return MappingProxyType({str(key): _freeze_value(item) for key, item in value.items()})

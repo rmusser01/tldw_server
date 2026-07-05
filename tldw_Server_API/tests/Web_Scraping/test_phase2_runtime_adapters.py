@@ -10,10 +10,12 @@ from tldw_Server_API.app.core.Web_Scraping.runtime.fetch import DefaultFetchClie
 
 
 @pytest.mark.unit
-def test_default_fetch_client_uses_simplified_get_path_without_method_for_curl(monkeypatch) -> None:
+def test_default_fetch_client_uses_simplified_get_path_without_method_for_curl(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     calls: dict[str, object] = {}
 
-    def fake_fetch(url, **kwargs):
+    def fake_fetch(url: str, **kwargs: object) -> dict[str, object]:
         calls["url"] = url
         calls["kwargs"] = kwargs
         return {
@@ -55,10 +57,12 @@ def test_default_fetch_client_uses_simplified_get_path_without_method_for_curl(m
 
 
 @pytest.mark.unit
-def test_default_fetch_client_uses_response_mode_for_httpx_security(monkeypatch) -> None:
+def test_default_fetch_client_uses_response_mode_for_httpx_security(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     calls: dict[str, object] = {}
 
-    def fake_fetch(*args, **kwargs):
+    def fake_fetch(*args: object, **kwargs: object) -> SimpleNamespace:
         calls["args"] = args
         calls["kwargs"] = kwargs
         return SimpleNamespace(
@@ -101,10 +105,12 @@ def test_default_fetch_client_uses_response_mode_for_httpx_security(monkeypatch)
 
 
 @pytest.mark.unit
-def test_default_fetch_client_measures_elapsed_with_monotonic_clock(monkeypatch) -> None:
+def test_default_fetch_client_measures_elapsed_with_monotonic_clock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     times = iter([10.0, 12.5])
 
-    def fake_fetch(url, **kwargs):
+    def fake_fetch(url: str, **kwargs: object) -> dict[str, object]:
         return {
             "status": 200,
             "headers": {},
@@ -129,15 +135,16 @@ def test_default_fetch_client_rejects_non_get_method() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
-async def test_default_policy_checker_delegates_to_existing_outbound_policy(monkeypatch) -> None:
+async def test_default_policy_checker_delegates_to_existing_outbound_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import tldw_Server_API.app.core.Web_Scraping.policy.adapters as policy_adapters
     from tldw_Server_API.app.core.Web_Scraping.policy import DefaultWebOutboundPolicyChecker
     from tldw_Server_API.app.core.Web_Scraping.runtime import RuntimeRequestContext
 
     calls: dict[str, object] = {}
 
-    async def fake_decide_web_outbound_policy(url, **kwargs):
+    async def fake_decide_web_outbound_policy(url: str, **kwargs: object) -> SimpleNamespace:
         calls["url"] = url
         calls["kwargs"] = kwargs
         return SimpleNamespace(
@@ -180,13 +187,14 @@ async def test_default_policy_checker_delegates_to_existing_outbound_policy(monk
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
-async def test_default_policy_checker_defaults_context_source_and_stage(monkeypatch) -> None:
+async def test_default_policy_checker_defaults_context_source_and_stage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import tldw_Server_API.app.core.Web_Scraping.policy.adapters as policy_adapters
     from tldw_Server_API.app.core.Web_Scraping.policy import DefaultWebOutboundPolicyChecker
     from tldw_Server_API.app.core.Web_Scraping.runtime import RuntimeRequestContext
 
-    async def fake_decide_web_outbound_policy(url, **kwargs):
+    async def fake_decide_web_outbound_policy(url: str, **kwargs: object) -> SimpleNamespace:
         return SimpleNamespace(
             allowed=True,
             mode="compat",

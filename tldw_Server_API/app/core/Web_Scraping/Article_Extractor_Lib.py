@@ -2785,7 +2785,7 @@ def _fetch_article_lightweight(
             response = _fetch_with_backend("curl")
             return response, response.backend or "curl"
         except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS as exc:
-            logging.debug(f"curl backend failed; falling back to httpx: {exc}")
+            logger.debug("curl backend failed; falling back to httpx: {}", exc)
 
     response = _fetch_with_backend("httpx")
     return response, response.backend or "httpx"

@@ -13,6 +13,7 @@ _TRUE_STRINGS = frozenset({"true", "1", "yes", "on"})
 
 
 def _normalize_bool(value: Any, *, field_name: str) -> bool:
+    """Normalize boolean values accepted at the response boundary."""
     if isinstance(value, bool):
         return value
     if isinstance(value, str):
@@ -25,6 +26,7 @@ def _normalize_bool(value: Any, *, field_name: str) -> bool:
 
 
 def _freeze_value(value: Any) -> Any:
+    """Recursively freeze nested mappings and sequences."""
     if isinstance(value, Mapping):
         return _freeze_mapping(value)
     if isinstance(value, list | tuple):
@@ -33,12 +35,14 @@ def _freeze_value(value: Any) -> Any:
 
 
 def _freeze_mapping(value: Mapping[str, Any] | None) -> Mapping[str, Any]:
+    """Return an immutable copy of a mapping with string keys."""
     if not value:
         return MappingProxyType({})
     return MappingProxyType({str(key): _freeze_value(item) for key, item in value.items()})
 
 
 def _raw_get(raw: Any, key: str, default: Any = None) -> Any:
+    """Read a key from mapping-, index-, attribute-, or data-backed objects."""
     if isinstance(raw, Mapping):
         return raw.get(key, default)
     try:

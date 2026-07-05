@@ -20,12 +20,14 @@ class FetchClient(Protocol):
 
 
 def _mutable_mapping_or_none(value: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Return a mutable copy for HTTP helpers that treat empty mappings as absent."""
     if not value:
         return None
     return {str(key): item for key, item in value.items()}
 
 
 def _mutable_proxies(value: Mapping[str, str] | str | None) -> dict[str, str] | str | None:
+    """Return proxies in the mutable shape expected by the central HTTP helper."""
     if value is None:
         return None
     if isinstance(value, Mapping):

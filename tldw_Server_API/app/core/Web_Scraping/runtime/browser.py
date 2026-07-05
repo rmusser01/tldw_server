@@ -9,6 +9,7 @@ from typing import Any, Protocol
 
 
 def _normalize_viewport_dimension(value: Any, *, field_name: str) -> int:
+    """Normalize a positive integral viewport dimension."""
     if isinstance(value, bool):
         raise ValueError(f"{field_name} must be a finite integer")
     if isinstance(value, int):

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
@@ -13,6 +14,7 @@ _TRUE_STRINGS = frozenset({"true", "1", "yes", "on"})
 
 
 def _normalize_bool(value: Any, *, field_name: str) -> bool:
+    """Normalize boolean values accepted at the runtime boundary."""
     if isinstance(value, bool):
         return value
     if isinstance(value, str):
@@ -25,6 +27,7 @@ def _normalize_bool(value: Any, *, field_name: str) -> bool:
 
 
 def _freeze_value(value: Any) -> Any:
+    """Recursively freeze nested mappings and sequences."""
     if isinstance(value, Mapping):
         return _freeze_mapping(value)
     if isinstance(value, list | tuple):
@@ -33,12 +36,14 @@ def _freeze_value(value: Any) -> Any:
 
 
 def _freeze_mapping(value: Mapping[str, Any] | None) -> Mapping[str, Any]:
+    """Return an immutable copy of a mapping with string keys."""
     if not value:
         return MappingProxyType({})
     return MappingProxyType({str(key): _freeze_value(item) for key, item in value.items()})
 
 
 def _freeze_proxy_value(value: Mapping[str, str] | str | None) -> Mapping[str, str] | str | None:
+    """Normalize proxy configuration while preserving string proxy URLs."""
     if value is None:
         return None
     if isinstance(value, Mapping):
@@ -90,7 +95,14 @@ class FetchRequest:
         object.__setattr__(self, "headers", _freeze_mapping(self.headers))
         object.__setattr__(self, "cookies", _freeze_mapping(self.cookies))
         if self.timeout is not None:
-            object.__setattr__(self, "timeout", float(self.timeout))
+            if isinstance(self.timeout, bool):
+                raise ValueError("timeout must be a float or int, not a boolean")
+            normalized_timeout = float(self.timeout)
+            if not math.isfinite(normalized_timeout):
+                raise ValueError("timeout must be finite")
+            if normalized_timeout < 0:
+                raise ValueError("timeout must be non-negative")
+            object.__setattr__(self, "timeout", normalized_timeout)
         object.__setattr__(self, "backend", str(self.backend or "httpx").strip().lower() or "httpx")
         object.__setattr__(
             self,

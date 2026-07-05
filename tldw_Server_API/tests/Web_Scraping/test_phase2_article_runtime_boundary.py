@@ -1,18 +1,34 @@
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
+from types import ModuleType
+from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
 
-from tldw_Server_API.app.core.Web_Scraping.runtime import FetchResponse, PolicyDecision
+from tldw_Server_API.app.core.Web_Scraping.runtime import (
+    FetchRequest,
+    FetchResponse,
+    PolicyDecision,
+    RuntimeRequestContext,
+)
 
 
 class FakePolicyChecker:
-    def __init__(self, decision: PolicyDecision):
+    def __init__(self, decision: PolicyDecision) -> None:
         self.decision = decision
         self.calls: list[dict[str, object]] = []
 
-    async def decide(self, url, *, respect_robots, user_agent, context, config):
+    async def decide(
+        self,
+        url: str,
+        *,
+        respect_robots: bool,
+        user_agent: str,
+        context: RuntimeRequestContext,
+        config: Mapping[str, Any],
+    ) -> PolicyDecision:
         self.calls.append(
             {
                 "url": url,
@@ -26,11 +42,11 @@ class FakePolicyChecker:
 
 
 class FakeFetchClient:
-    def __init__(self, responses):
+    def __init__(self, responses: Sequence[FetchResponse | BaseException]) -> None:
         self.responses = list(responses)
-        self.requests = []
+        self.requests: list[FetchRequest] = []
 
-    def fetch(self, request):
+    def fetch(self, request: FetchRequest) -> FetchResponse:
         self.requests.append(request)
         response = self.responses.pop(0)
         if isinstance(response, BaseException):
@@ -38,7 +54,12 @@ class FakeFetchClient:
         return response
 
 
-def _install_article_defaults(monkeypatch, *, backend="httpx", web_scraper_config=None):
+def _install_article_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    backend: str = "httpx",
+    web_scraper_config: Mapping[str, Any] | None = None,
+) -> ModuleType:
     from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as ael
 
     config = {"web_scraper": web_scraper_config or {}}
@@ -55,7 +76,7 @@ def _install_article_defaults(monkeypatch, *, backend="httpx", web_scraper_confi
     }
     monkeypatch.setattr(ael.ScraperRouter, "load_rules_from_yaml", lambda path: rules)
 
-    def fake_handler(html, url):
+    def fake_handler(html: str, url: str) -> dict[str, object]:
         return {
             "url": url,
             "title": "handled",
@@ -71,8 +92,8 @@ def _install_article_defaults(monkeypatch, *, backend="httpx", web_scraper_confi
     return ael
 
 
-@pytest.mark.asyncio
-async def test_scrape_article_uses_runtime_policy_before_preflight(monkeypatch) -> None:
+@pytest.mark.unit
+async def test_scrape_article_uses_runtime_policy_before_preflight(monkeypatch: pytest.MonkeyPatch) -> None:
     ael = _install_article_defaults(
         monkeypatch,
         backend="httpx",
@@ -109,8 +130,8 @@ async def test_scrape_article_uses_runtime_policy_before_preflight(monkeypatch) 
     run_analysis.assert_not_called()
 
 
-@pytest.mark.asyncio
-async def test_scrape_article_uses_runtime_fetch_client_for_httpx_success(monkeypatch) -> None:
+@pytest.mark.unit
+async def test_scrape_article_uses_runtime_fetch_client_for_httpx_success(monkeypatch: pytest.MonkeyPatch) -> None:
     ael = _install_article_defaults(monkeypatch, backend="httpx")
     policy_checker = FakePolicyChecker(
         PolicyDecision(
@@ -146,8 +167,8 @@ async def test_scrape_article_uses_runtime_fetch_client_for_httpx_success(monkey
     assert request.allow_redirects is True
 
 
-@pytest.mark.asyncio
-async def test_scrape_article_preserves_curl_to_httpx_fallback(monkeypatch) -> None:
+@pytest.mark.unit
+async def test_scrape_article_preserves_curl_to_httpx_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     ael = _install_article_defaults(monkeypatch, backend="curl")
     policy_checker = FakePolicyChecker(
         PolicyDecision(
@@ -179,8 +200,8 @@ async def test_scrape_article_preserves_curl_to_httpx_fallback(monkeypatch) -> N
     assert [request.backend for request in fetch_client.requests] == ["curl", "httpx"]
 
 
-@pytest.mark.asyncio
-async def test_scrape_article_preflight_tls_advice_still_selects_curl(monkeypatch) -> None:
+@pytest.mark.unit
+async def test_scrape_article_preflight_tls_advice_still_selects_curl(monkeypatch: pytest.MonkeyPatch) -> None:
     ael = _install_article_defaults(
         monkeypatch,
         backend="auto",
@@ -210,7 +231,7 @@ async def test_scrape_article_preflight_tls_advice_still_selects_curl(monkeypatc
         ]
     )
 
-    def fake_run_analysis(*args, **kwargs):
+    def fake_run_analysis(*args: object, **kwargs: object) -> dict[str, object]:
         return {"results": {"tls": {"status": "active"}, "js": {"status": "success"}}}
 
     monkeypatch.setattr(ael, "_ARTICLE_POLICY_CHECKER", policy_checker)
