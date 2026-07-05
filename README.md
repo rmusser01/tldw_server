@@ -154,6 +154,10 @@ Included in the `0.1.35` release-prep rollup:
 - Research workspace source-worker follow-ups surfaced ingest failure codes, while backend PyPI auto-publish wiring was prepared for main-branch releases.
 - User/developer documentation wikis were split, Docker publishing actions were updated, llama.cpp character-chat provider aliases were fixed, and TTS/Embeddings/Character_Chat_NEW suites were unquarantined.
 - Post-PR #2571 CI follow-ups fixed Guardian notification payload timestamp mutation and retargeted a stale UX smoke assertion to a current shell route.
+- Chat Workspace live flow, WebUI setup handoff, first-run MCP tool packs, RAG MCP module, Research Workspace share/UAT/NotebookLM parity, and API/WebUI/extension docs landed in the release train.
+- CI/release gates were expanded with OpenAPI drift checks, env/minimal startup smokes, property/contract coverage, singleton/isolation guards, test-quality triage, and PyPI test-suite gating/fail-closed detection.
+- Hardening landed for audio transcription inputs, Parakeet ONNX dependencies, runtime auth persistence, integrations egress, redirect credential stripping, ACP reconnect cleanup, VZ guest validation, PostgreSQL setup timestamps, and tracked `node_modules` cleanup.
+- Current release branch follow-ups moved Visual Identity idempotency workflow logic into core service code and kept main-only `node_modules` cleanup in the merge path.
 
 Still active on `dev`:
 - Final CI for the prepared `0.1.35` release metadata must clear before this release is merged toward `main`.
