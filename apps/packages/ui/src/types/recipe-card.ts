@@ -1,8 +1,8 @@
 export type RecipeCardIngredient = {
   display: string
-  name?: string
-  quantity?: number
-  unit?: string
+  name?: string | null
+  quantity?: number | null
+  unit?: string | null
   note?: string | null
   scalable?: boolean
 }

@@ -38,6 +38,31 @@ describe("parseRecipeCardToolResult", () => {
     expect(parsed?.recipe.ingredients[0].quantity).toBe(3)
   })
 
+  it("accepts backend-normalized null optional ingredient fields", () => {
+    const parsed = parseRecipeCardToolResult(
+      resultWith({
+        ...validPayload,
+        tldw_ui: {
+          ...validPayload.tldw_ui,
+          recipe: {
+            ...validPayload.tldw_ui.recipe,
+            ingredients: [
+              {
+                display: "salt to taste",
+                name: null,
+                quantity: null,
+                unit: null,
+                note: null
+              }
+            ]
+          }
+        }
+      })
+    )
+
+    expect(parsed?.recipe.ingredients[0].display).toBe("salt to taste")
+  })
+
   it("returns null for error results", () => {
     expect(
       parseRecipeCardToolResult({

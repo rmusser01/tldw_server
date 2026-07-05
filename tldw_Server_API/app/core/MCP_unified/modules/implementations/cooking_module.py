@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from typing import Any
 
 from ..base import BaseModule, create_tool_definition
@@ -15,15 +16,19 @@ class CookingModule(BaseModule):
     """Read-only cooking helpers for typed UI payloads."""
 
     async def on_initialize(self) -> None:
+        """Initialize the stateless cooking module."""
         return None
 
     async def on_shutdown(self) -> None:
+        """Shut down the stateless cooking module."""
         return None
 
     async def check_health(self) -> dict[str, bool]:
+        """Report health for the stateless cooking module."""
         return {"initialized": True, "dependencies_ok": True}
 
     async def get_tools(self) -> list[dict[str, Any]]:
+        """Return the recipe card render tool contract."""
         return [
             create_tool_definition(
                 name=TOOL_NAME,
@@ -48,7 +53,11 @@ class CookingModule(BaseModule):
                                 "properties": {
                                     "display": {"type": "string", "minLength": 1, "maxLength": 180},
                                     "name": {"type": "string", "maxLength": 120},
-                                    "quantity": {"type": "number"},
+                                    "quantity": {
+                                        "type": "number",
+                                        "exclusiveMinimum": 0,
+                                        "maximum": 100000,
+                                    },
                                     "unit": {"type": "string", "maxLength": 32},
                                     "note": {"type": ["string", "null"], "maxLength": 160},
                                     "scalable": {"type": "boolean"},
@@ -75,7 +84,7 @@ class CookingModule(BaseModule):
                         },
                         "summary": {"type": ["string", "null"], "maxLength": 300},
                         "notes": {
-                            "type": "array",
+                            "type": ["array", "null"],
                             "maxItems": 8,
                             "items": {"type": "string", "maxLength": 300},
                         },
@@ -92,12 +101,13 @@ class CookingModule(BaseModule):
         arguments: dict[str, Any],
         context: Any | None = None,
     ) -> Any:
+        """Execute a cooking tool and return a typed UI payload or structured error."""
         del context
         if tool_name != TOOL_NAME:
             return _error("unknown_tool", f"Unknown tool: {tool_name}")
 
         try:
-            recipe = _normalize_recipe(self.sanitize_input(arguments))
+            recipe = _normalize_recipe(arguments)
         except ValueError as exc:
             return _error("invalid_arguments", str(exc))
 
@@ -105,10 +115,12 @@ class CookingModule(BaseModule):
 
 
 def _error(reason_code: str, message: str) -> dict[str, Any]:
+    """Build a structured tool error response."""
     return {"ok": False, "reason_code": reason_code, "error": message}
 
 
 def _normalize_recipe(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Validate and normalize recipe arguments into the UI payload shape."""
     if not isinstance(arguments, dict):
         raise ValueError("arguments must be an object")
 
@@ -119,7 +131,8 @@ def _normalize_recipe(arguments: dict[str, Any]) -> dict[str, Any]:
     summary = arguments.get("summary")
     if summary is not None:
         summary = _string(summary, "summary", max_len=300)
-    notes = _items(arguments.get("notes", []), "notes", 0, 8, _note)
+    notes_value = arguments.get("notes")
+    notes = _items(notes_value, "notes", 0, 8, _note) if notes_value is not None else []
 
     return {
         "title": title,
@@ -132,6 +145,7 @@ def _normalize_recipe(arguments: dict[str, Any]) -> dict[str, Any]:
 
 
 def _servings(value: Any) -> dict[str, Any]:
+    """Normalize servings metadata and default the human label."""
     if not isinstance(value, dict):
         raise ValueError("servings must be an object")
     serving_value = _number(value.get("value"), "servings.value", min_value=1, max_value=50)
@@ -144,11 +158,14 @@ def _servings(value: Any) -> dict[str, Any]:
 
 
 def _ingredient(value: Any) -> dict[str, Any]:
+    """Normalize one ingredient row."""
     if not isinstance(value, dict):
         raise ValueError("ingredient must be an object")
     quantity = value.get("quantity")
     if quantity is not None:
-        quantity = _number(quantity, "ingredient.quantity")
+        quantity = _number(quantity, "ingredient.quantity", max_value=100000)
+        if quantity <= 0:
+            raise ValueError("ingredient.quantity must be greater than 0")
     scalable = value.get("scalable", False)
     if not isinstance(scalable, bool):
         raise ValueError("ingredient.scalable must be a boolean")
@@ -163,6 +180,7 @@ def _ingredient(value: Any) -> dict[str, Any]:
 
 
 def _step(value: Any) -> dict[str, Any]:
+    """Normalize one cooking step."""
     if not isinstance(value, dict):
         raise ValueError("step must be an object")
     timer_seconds = value.get("timer_seconds")
@@ -178,10 +196,18 @@ def _step(value: Any) -> dict[str, Any]:
 
 
 def _note(value: Any) -> str:
+    """Normalize one recipe note."""
     return _string(value, "note", max_len=300)
 
 
-def _items(value: Any, field: str, min_len: int, max_len: int, normalize) -> list[Any]:
+def _items(
+    value: Any,
+    field: str,
+    min_len: int,
+    max_len: int,
+    normalize: Callable[[Any], Any],
+) -> list[Any]:
+    """Normalize a bounded list field."""
     if not isinstance(value, list):
         raise ValueError(f"{field} must be an array")
     if not min_len <= len(value) <= max_len:
@@ -190,12 +216,14 @@ def _items(value: Any, field: str, min_len: int, max_len: int, normalize) -> lis
 
 
 def _optional_string(value: Any, field: str, max_len: int) -> str | None:
+    """Normalize an optional string field."""
     if value is None:
         return None
     return _string(value, field, max_len=max_len)
 
 
 def _string(value: Any, field: str, *, min_len: int = 0, max_len: int) -> str:
+    """Validate and trim a bounded string."""
     if not isinstance(value, str):
         raise ValueError(f"{field} must be a string")
     text = value.strip()
@@ -211,6 +239,7 @@ def _number(
     min_value: float | None = None,
     max_value: float | None = None,
 ) -> int | float:
+    """Validate a finite numeric field with optional inclusive bounds."""
     if not isinstance(value, int | float) or isinstance(value, bool) or not math.isfinite(value):
         raise ValueError(f"{field} must be a finite number")
     if min_value is not None and value < min_value:

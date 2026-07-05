@@ -23,11 +23,15 @@ const isIngredientQuantity = (value: unknown): value is number =>
 
 const isValidIngredient = (ingredient: unknown) => {
   if (!isObject(ingredient) || !isString(ingredient.display, 180)) return false
-  if (!isOptionalString(ingredient.name, 120)) return false
-  if (ingredient.quantity !== undefined && !isIngredientQuantity(ingredient.quantity)) {
+  if (!isOptionalStringOrNull(ingredient.name, 120)) return false
+  if (
+    ingredient.quantity !== undefined &&
+    ingredient.quantity !== null &&
+    !isIngredientQuantity(ingredient.quantity)
+  ) {
     return false
   }
-  if (!isOptionalString(ingredient.unit, 32)) return false
+  if (!isOptionalStringOrNull(ingredient.unit, 32)) return false
   if (!isOptionalStringOrNull(ingredient.note, 160)) return false
   return ingredient.scalable === undefined || typeof ingredient.scalable === "boolean"
 }
@@ -86,21 +90,24 @@ export const parseRecipeCardToolResult = (
 ): RecipeCardPayload | null => {
   if (!result || result.error === true) return null
 
+  let parsed: unknown
   try {
-    const parsed = JSON.parse(result.content) as unknown
-    if (!isObject(parsed) || !isObject(parsed.tldw_ui)) return null
-
-    const payload = parsed.tldw_ui
-    if (
-      payload.kind !== "recipe_card" ||
-      payload.version !== 1 ||
-      !isValidRecipe(payload.recipe)
-    ) {
-      return null
-    }
-
-    return payload as RecipeCardPayload
-  } catch {
+    parsed = JSON.parse(result.content) as unknown
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) throw error
     return null
   }
+
+  if (!isObject(parsed) || !isObject(parsed.tldw_ui)) return null
+
+  const payload = parsed.tldw_ui
+  if (
+    payload.kind !== "recipe_card" ||
+    payload.version !== 1 ||
+    !isValidRecipe(payload.recipe)
+  ) {
+    return null
+  }
+
+  return payload as RecipeCardPayload
 }
