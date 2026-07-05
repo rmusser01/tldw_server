@@ -46,6 +46,7 @@ _SOURCE_CONTEXT_TOTAL_CHAR_LIMIT = 18_000
 _SOURCE_CONTEXT_PER_SOURCE_CHAR_LIMIT = 6_000
 _SOURCE_CONTEXT_PREVIEW_CHAR_LIMIT = 1_000
 _INFOGRAPHIC_PROMPT_SOURCE_CHAR_LIMIT = 8_000
+_PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 _SOURCE_CONTEXT_MEDIA_ERRORS = (
     AttributeError,
     MediaDatabaseError,
@@ -400,8 +401,7 @@ async def _process_infographic_output_payload(
         content = getattr(export, "content", None)
         if not isinstance(content, bytes) or not content:
             raise ResearchWorkspaceOutputJobError("empty_output", retryable=False)
-        export_content_type = str(getattr(export, "content_type", "") or "image/png").split(";", 1)[0].strip().lower()
-        if export_content_type != "image/png":
+        if not _is_png_export_content(content, getattr(export, "content_type", None)):
             raise ResearchWorkspaceOutputJobError("image_content_type_invalid", retryable=False)
         with CollectionsDatabase.for_user(user_id=str(user_id)) as collections_db:
             persisted = persist_research_workspace_output_bytes(
@@ -740,6 +740,13 @@ def _research_workspace_output_error_from_file_artifacts_error(exc: FileArtifact
         status_code=file_artifacts_http_status(exc),
         retryable=retryable,
     )
+
+
+def _is_png_export_content(content: bytes, content_type: Any) -> bool:
+    normalized_content_type = str(content_type or "").split(";", 1)[0].strip().lower()
+    if normalized_content_type and normalized_content_type != "image/png":
+        return False
+    return content.startswith(_PNG_SIGNATURE)
 
 
 def _update_workspace_output_artifact(
