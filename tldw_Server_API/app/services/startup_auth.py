@@ -88,10 +88,12 @@ async def _ensure_pg_extras(db_pool: object) -> None:
             ensure_privilege_snapshots_table_pg,
             ensure_tool_catalogs_tables_pg,
             ensure_usage_tables_pg,
+            ensure_user_timestamp_timezones_pg,
             ensure_virtual_key_counters_pg,
         )
 
         pg_ensures = [
+            ("users timestamp time zones", ensure_user_timestamp_timezones_pg),
             ("AuthNZ core tables", ensure_authnz_core_tables_pg),
             ("generated_files table", ensure_generated_files_table_pg),
             ("tool catalogs tables", ensure_tool_catalogs_tables_pg),

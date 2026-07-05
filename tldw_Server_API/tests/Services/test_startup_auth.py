@@ -145,6 +145,7 @@ async def test_init_auth_services_runs_pg_extras_when_pool_present(
     _install_module(
         monkeypatch,
         "tldw_Server_API.app.core.AuthNZ.pg_migrations_extra",
+        ensure_user_timestamp_timezones_pg=_make_pg_ensure("user_timestamps"),
         ensure_authnz_core_tables_pg=_make_pg_ensure("authnz_core"),
         ensure_generated_files_table_pg=_make_pg_ensure("generated_files"),
         ensure_tool_catalogs_tables_pg=_make_pg_ensure("tool_catalogs"),
@@ -161,6 +162,7 @@ async def test_init_auth_services_runs_pg_extras_when_pool_present(
 
     assert result is db_pool
     assert pg_calls == [
+        "user_timestamps",
         "authnz_core",
         "generated_files",
         "tool_catalogs",

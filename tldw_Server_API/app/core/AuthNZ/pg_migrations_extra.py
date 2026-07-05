@@ -34,6 +34,39 @@ _BUDGET_FIELD_KEYS = {
     "budget_month_tokens",
 }
 
+_ENSURE_USER_TIMESTAMP_TIMEZONES_SQL = """
+DO $$
+DECLARE
+    col_name text;
+BEGIN
+    FOREACH col_name IN ARRAY ARRAY[
+        'created_at',
+        'updated_at',
+        'last_login',
+        'locked_until',
+        'email_verified_at',
+        'password_changed_at'
+    ]
+    LOOP
+        IF EXISTS (
+            SELECT 1
+            FROM information_schema.columns c
+            WHERE c.table_schema = current_schema()
+              AND c.table_name = 'users'
+              AND c.column_name = col_name
+              AND c.data_type = 'timestamp without time zone'
+        ) THEN
+            EXECUTE format(
+                'ALTER TABLE users ALTER COLUMN %I TYPE TIMESTAMPTZ USING %I AT TIME ZONE ''UTC''',
+                col_name,
+                col_name
+            );
+        END IF;
+    END LOOP;
+END
+$$
+"""
+
 
 _CREATE_TOOL_CATALOGS = [
     # tool_catalogs
@@ -2621,6 +2654,20 @@ async def ensure_mcp_prompt_read_permission_pg(pool: DatabasePool | None = None)
         return True
     except _PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS as exc:
         logger.warning(f"Failed to ensure PostgreSQL MCP prompts.read permission: {exc}")
+        return False
+
+
+async def ensure_user_timestamp_timezones_pg(pool: DatabasePool | None = None) -> bool:
+    """Ensure legacy PostgreSQL users timestamp columns accept aware UTC datetimes."""
+    try:
+        db_pool = pool or await get_db_pool()
+        if getattr(db_pool, "pool", None) is None:
+            return False
+        await db_pool.execute(_ENSURE_USER_TIMESTAMP_TIMEZONES_SQL)
+        logger.info("Ensured PostgreSQL users timestamp columns use TIMESTAMPTZ")
+        return True
+    except _PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS as exc:
+        logger.warning(f"Failed to ensure PostgreSQL users timestamp time zones: {exc}")
         return False
 
 
