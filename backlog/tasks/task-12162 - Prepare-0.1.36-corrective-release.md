@@ -1,10 +1,10 @@
 ---
 id: TASK-12162
 title: Prepare 0.1.36 corrective release
-status: In Progress
+status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-07-05 07:24'
+updated_date: '2026-07-05 14:44'
 labels:
   - release
 dependencies: []
@@ -40,15 +40,15 @@ PR #2656 review-fix validation: addressed still-valid Gemini/Qodo comments with 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Prepared and opened PR #2655 for the 0.1.36 corrective release. The branch bumps canonical release metadata to 0.1.36, adds CHANGELOG/README corrective release notes, and records validation: git diff --check, release docs/PyPI workflow contracts 17/17, py_compile main.py, and Bandit on main.py with zero results.
+Prepared 0.1.36 as a direct dev -> main corrective release in PR #2656 after closing the incorrect intermediary-branch PR #2655. The release metadata and changelog/README/docs now target 0.1.36. PR review follow-ups were addressed in 91432af8e0: websocket resource errors use NetworkError, websocket resource payloads are deep-copied, external runtime resource/server guards handle malformed data, and file:// resource read text is redacted. Validation recorded: git diff --check, focused regressions 4/4, affected MCP external runtime/websocket files 50/50, py_compile, and Bandit with zero results. Known skips: informational CodeRabbit/Qodo summary/rate-limit comments required no code changes.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
+- [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
+- [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
