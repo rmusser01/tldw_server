@@ -1244,7 +1244,7 @@ async def lifespan(app: FastAPI):
         route_enabled=route_enabled,
         get_mcp_config=get_mcp_config,
         validate_mcp_config=validate_mcp_config,
-        test_mode=bool(globals().get("_TEST_MODE")),
+        test_mode=bool(globals().get("_TEST_MODE")) or _runtime_test_mode_active(),
         run_pg_rls_auto_ensure=_run_pg_rls_auto_ensure,
         register_owned_job_poller=_register_owned_job_poller,
         replace_owned_job_poller_inventory=_replace_owned_job_poller_inventory,
@@ -2252,6 +2252,15 @@ _EXPLICIT_PYTEST_RUNTIME = _is_explicit_pytest_runtime()
 _TEST_MODE = _EXPLICIT_PYTEST_RUNTIME and (
     _TEST_FLAGS_SET or bool(_env_os.getenv("PYTEST_CURRENT_TEST"))
 )
+
+
+def _runtime_test_mode_active() -> bool:
+    return _is_explicit_pytest_runtime() and (
+        _shared_is_test_mode()
+        or _test_env_flag_enabled("TESTING")
+        or bool(_env_os.getenv("PYTEST_CURRENT_TEST"))
+    )
+
 
 if _TEST_FLAGS_SET and not _EXPLICIT_PYTEST_RUNTIME:
     logger.warning(

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-pytest_plugins = ("tldw_Server_API.tests.AuthNZ.conftest",)
+pytest_plugins = ("tldw_Server_API.tests._plugins.authnz_full_fixtures",)
 
 
 @pytest.mark.asyncio

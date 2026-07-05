@@ -3,11 +3,13 @@ import pytest
 import asyncio
 import inspect
 from pathlib import Path
+from collections.abc import Iterable
 from typing import Final
 
 from tldw_Server_API.app.main import app
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user, User
 from tldw_Server_API.app.api.v1.API_Deps import auth_deps
+from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 from fastapi import Request
 from fastapi.testclient import TestClient
 
@@ -24,7 +26,34 @@ def admin_user():
         from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
         return User(id=42, username="admin", email="a@x", is_active=True, is_admin=True)
 
-    app.dependency_overrides[get_request_user] = _admin
+    def _iter_dependency_calls(dependant) -> Iterable[object]:
+        for child in getattr(dependant, "dependencies", []) or []:
+            call = getattr(child, "call", None)
+            if call is not None:
+                yield call
+            yield from _iter_dependency_calls(child)
+
+    def _route_auth_dependency_keys(name: str) -> set[object]:
+        keys: set[object] = set()
+        for route in getattr(app, "routes", []):
+            path = str(getattr(route, "path", ""))
+            if not (path.startswith("/api/v1/embeddings") or path.startswith("/api/v1/vector_stores")):
+                continue
+            dependant = getattr(route, "dependant", None)
+            if dependant is None:
+                continue
+            for call in _iter_dependency_calls(dependant):
+                if getattr(call, "__name__", None) == name:
+                    keys.add(call)
+        return keys
+
+    request_user_keys = {
+        get_request_user,
+        auth_deps.get_request_user,
+        *_route_auth_dependency_keys("get_request_user"),
+    }
+    for key in request_user_keys:
+        app.dependency_overrides[key] = _admin
 
     async def _principal_override(request: Request):
         """Override get_auth_principal with an admin AuthPrincipal for tests."""
@@ -55,12 +84,19 @@ def admin_user():
         )
         return principal
 
-    app.dependency_overrides[auth_deps.get_auth_principal] = _principal_override
+    principal_keys = {
+        auth_deps.get_auth_principal,
+        *_route_auth_dependency_keys("get_auth_principal"),
+    }
+    for key in principal_keys:
+        app.dependency_overrides[key] = _principal_override
     try:
         yield
     finally:
-        app.dependency_overrides.pop(get_request_user, None)
-        app.dependency_overrides.pop(auth_deps.get_auth_principal, None)
+        for key in request_user_keys:
+            app.dependency_overrides.pop(key, None)
+        for key in principal_keys:
+            app.dependency_overrides.pop(key, None)
 
 
 class _RedisHarness:
@@ -177,7 +213,7 @@ def test_client(disable_heavy_startup):
             client.cookies.set("csrf_token", csrf)
             client.headers["X-CSRF-Token"] = csrf
             # Accept Authorization in single-user mode
-            client.headers["Authorization"] = "Bearer test-api-key"
+            client.headers["Authorization"] = f"Bearer {get_settings().SINGLE_USER_API_KEY}"
             yield client
     finally:
         # Ensure dependency overrides do not leak across tests
@@ -190,8 +226,10 @@ def test_client(disable_heavy_startup):
 @pytest.fixture
 def auth_headers():
     csrf = "test-csrf"
+    api_key = get_settings().SINGLE_USER_API_KEY
     return {
-        "Authorization": "Bearer test-api-key",
+        "Authorization": f"Bearer {api_key}",
+        "X-API-KEY": api_key,
         "X-CSRF-Token": csrf,
         "Content-Type": "application/json",
     }
@@ -315,4 +353,3 @@ def pgvector_dsn():  # pragma: no cover - test helper for environments without P
 @pytest.fixture
 def pgvector_temp_table(pgvector_dsn):  # pragma: no cover - test helper for environments without PG
     pytest.skip("pgvector temporary table not available in this test run")
-

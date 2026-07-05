@@ -17,7 +17,7 @@ from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 # - Explicitly listing the plugin at the module level ensures this test can be
 #   run in isolation (e.g., `pytest -q this_file.py`) and still find the
 #   required fixtures without reintroducing a root conftest.
-pytest_plugins = ["tldw_Server_API.tests.AuthNZ.conftest"]
+pytest_plugins = ["tldw_Server_API.tests._plugins.authnz_full_fixtures"]
 
 
 @pytest.mark.unit

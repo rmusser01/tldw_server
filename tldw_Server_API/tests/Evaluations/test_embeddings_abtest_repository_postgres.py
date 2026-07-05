@@ -12,7 +12,7 @@ from tldw_Server_API.app.core.Evaluations.embeddings_abtest_repository import (
 )
 
 
-pytest_plugins = ["tldw_Server_API.tests.AuthNZ.conftest"]
+pytest_plugins = ["tldw_Server_API.tests._plugins.authnz_full_fixtures"]
 pytestmark = [pytest.mark.integration, pytest.mark.postgres]
 
 

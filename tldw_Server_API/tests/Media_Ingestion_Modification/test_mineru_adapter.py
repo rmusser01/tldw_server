@@ -53,7 +53,7 @@ def test_load_mineru_config_preserves_windows_command_backslashes(monkeypatch):
     from tldw_Server_API.app.core.Ingestion_Media_Processing.PDF import mineru_adapter
 
     windows_python = r"C:\hostedtoolcache\windows\Python\3.12.10\x64\python.exe"
-    monkeypatch.setattr(mineru_adapter.os, "name", "nt")
+    monkeypatch.setattr(mineru_adapter, "_is_windows_platform", lambda: True)
     monkeypatch.setenv("MINERU_CMD", f"{windows_python} -m mineru_cli")
 
     config = mineru_adapter.load_mineru_config()

@@ -54,10 +54,15 @@ def _coerce_bool(raw_value: str | None, default: bool = False) -> bool:
     return str(raw_value).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _is_windows_platform() -> bool:
+    return os.name == "nt"
+
+
 def _mineru_command_tokens() -> list[str]:
     raw = os.getenv("MINERU_CMD", "mineru").strip() or "mineru"
-    tokens = shlex.split(raw, posix=os.name != "nt")
-    if os.name == "nt":
+    is_windows = _is_windows_platform()
+    tokens = shlex.split(raw, posix=not is_windows)
+    if is_windows:
         tokens = [
             token[1:-1]
             if len(token) >= 2 and token[0] == token[-1] and token[0] in {"'", '"'}

@@ -51,6 +51,7 @@ async def prepare_startup_pre_core(
         validate_mcp_config=validate_mcp_config,
         logger=logger,
         startup_guard_exceptions=startup_guard_exceptions,
+        test_mode=test_mode,
     )
     _validate_startup_acp_configuration(
         route_enabled=route_enabled,

@@ -107,6 +107,15 @@ def _allow_destination(monkeypatch: pytest.MonkeyPatch, worker: Any, models_dir:
     )
 
 
+def _allow_example_dot_com_dns(monkeypatch: pytest.MonkeyPatch, worker: Any) -> None:
+    def fake_getaddrinfo(host: str, *_args, **_kwargs):
+        if host == "example.com":
+            return [(None, None, None, None, ("93.184.216.34", 0))]
+        raise AssertionError(f"unexpected host lookup: {host}")
+
+    monkeypatch.setattr(worker.acquisition_service.socket, "getaddrinfo", fake_getaddrinfo)
+
+
 @pytest.mark.asyncio
 async def test_worker_downloads_validates_promotes_registers_and_reports_progress(
     monkeypatch: pytest.MonkeyPatch,
@@ -119,6 +128,7 @@ async def test_worker_downloads_validates_promotes_registers_and_reports_progres
     final_path = tmp_path / "models" / "model.gguf"
     final_path.parent.mkdir()
     _allow_destination(monkeypatch, worker, final_path.parent)
+    _allow_example_dot_com_dns(monkeypatch, worker)
     registered: list[Path] = []
 
     def _register(path: Path):
@@ -173,6 +183,7 @@ async def test_worker_checksum_mismatch_removes_partial_and_final_files(
     final_path = tmp_path / "models" / "model.gguf"
     final_path.parent.mkdir()
     _allow_destination(monkeypatch, worker, final_path.parent)
+    _allow_example_dot_com_dns(monkeypatch, worker)
     registered: list[Path] = []
     monkeypatch.setattr(
         worker.acquisition_service,
@@ -209,6 +220,7 @@ async def test_worker_cancellation_deletes_partial_and_skips_registration(
     final_path = tmp_path / "models" / "model.gguf"
     final_path.parent.mkdir()
     _allow_destination(monkeypatch, worker, final_path.parent)
+    _allow_example_dot_com_dns(monkeypatch, worker)
     registered: list[Path] = []
     monkeypatch.setattr(
         worker.acquisition_service,
@@ -253,6 +265,7 @@ async def test_worker_cancel_check_error_falls_back_to_jobs_status(
     final_path = tmp_path / "models" / "model.gguf"
     final_path.parent.mkdir()
     _allow_destination(monkeypatch, worker, final_path.parent)
+    _allow_example_dot_com_dns(monkeypatch, worker)
 
     def _stream_factory(_url: str, *, timeout_seconds: float):
         del timeout_seconds
@@ -286,6 +299,7 @@ async def test_worker_throttles_small_chunk_progress_updates(
     final_path = tmp_path / "models" / "model.gguf"
     final_path.parent.mkdir()
     _allow_destination(monkeypatch, worker, final_path.parent)
+    _allow_example_dot_com_dns(monkeypatch, worker)
     chunks = [b"x"] * 20
 
     def _stream_factory(_url: str, *, timeout_seconds: float):
@@ -320,6 +334,7 @@ async def test_worker_existing_destination_without_overwrite_fails_terminally(
     final_path = tmp_path / "models" / "model.gguf"
     final_path.parent.mkdir()
     _allow_destination(monkeypatch, worker, final_path.parent)
+    _allow_example_dot_com_dns(monkeypatch, worker)
     final_path.write_bytes(b"existing")
 
     def _stream_factory(_url: str, *, timeout_seconds: float):

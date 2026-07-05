@@ -1478,6 +1478,67 @@ def _build_reused_process_result(
     }
 
 
+def _source_media_matches_reuse_hit(
+    *,
+    source_media: dict[str, Any],
+    media_type: str,
+    original_input_ref: str,
+    source_hash: str | None,
+    hit: dict[str, Any],
+) -> bool:
+    actual_media_type = str(source_media.get("media_type") or "").strip().lower()
+    expected_media_type = str(media_type or "").strip().lower()
+    if actual_media_type and expected_media_type and actual_media_type != expected_media_type:
+        logger.warning(
+            "Ignoring reusable transcript hit for media_id={} because media_type {} != {}",
+            hit.get("source_media_id"),
+            actual_media_type,
+            expected_media_type,
+        )
+        return False
+
+    key_type = str(hit.get("key_type") or "").strip().lower()
+    if key_type == "url":
+        expected_urls: set[str] = set()
+        for raw in (hit.get("source_url"), original_input_ref):
+            expected_urls.update(media_dedupe_url_candidates(str(raw)) if raw else ())
+
+        actual_urls: set[str] = set()
+        for raw in (source_media.get("url"), source_media.get("source_url")):
+            actual_urls.update(media_dedupe_url_candidates(str(raw)) if raw else ())
+
+        if expected_urls and actual_urls and expected_urls.isdisjoint(actual_urls):
+            logger.warning(
+                "Ignoring reusable transcript hit for media_id={} because source URL does not match.",
+                hit.get("source_media_id"),
+            )
+            return False
+        if expected_urls and not actual_urls:
+            logger.warning(
+                "Ignoring reusable transcript hit for media_id={} because the source media has no URL.",
+                hit.get("source_media_id"),
+            )
+            return False
+
+    if key_type == "source_hash":
+        expected_hash = str(hit.get("source_hash") or source_hash or "").strip()
+        actual_hash = str(source_media.get("source_hash") or "").strip()
+        if expected_hash and actual_hash and expected_hash != actual_hash:
+            logger.warning(
+                "Ignoring reusable transcript hit for media_id={} because source hash does not match.",
+                hit.get("source_media_id"),
+            )
+            return False
+        if expected_hash and not actual_hash:
+            logger.warning(
+                "Ignoring reusable transcript hit for media_id={} because the source media has no source hash.",
+                hit.get("source_media_id"),
+            )
+            return False
+
+    return True
+
+
 def _synthesize_reused_transcript_analysis_sync(
     *,
     process_result: dict[str, Any],
@@ -1676,10 +1737,33 @@ async def _maybe_build_reused_transcript_process_result(
     from tldw_Server_API.app.core.DB_Management.media_db.api import (
         get_media_transcripts,
     )
+    from tldw_Server_API.app.core.DB_Management.media_db.runtime.defaults import (
+        build_media_runtime_config,
+    )
+
+    stored_source_db_path = str(hit.get("source_db_path") or "").strip()
+    default_source_db_path = str(DatabasePaths.get_media_db_path(str(source_user_id_int)))
+    source_db_path = stored_source_db_path or default_source_db_path
+    runtime_config = build_media_runtime_config()
+    if not runtime_config.postgres_content_mode and not FilePath(source_db_path).exists():
+        if stored_source_db_path and stored_source_db_path != default_source_db_path:
+            logger.warning(
+                "Reusable transcript hit for media_id={} has stale source DB path {}; trying current default {}.",
+                source_media_id_int,
+                stored_source_db_path,
+                default_source_db_path,
+            )
+            source_db_path = default_source_db_path
+        if not FilePath(source_db_path).exists():
+            logger.warning(
+                "Ignoring reusable transcript hit for media_id={} because source DB does not exist.",
+                source_media_id_int,
+            )
+            return None
 
     source_db = create_media_database(
         client_id=f"media_ingest_dedupe_source:{source_user_id_int}",
-        db_path=str(DatabasePaths.get_media_db_path(str(source_user_id_int))),
+        db_path=source_db_path,
     )
     try:
         source_media = source_db.get_media_by_id(
@@ -1688,6 +1772,14 @@ async def _maybe_build_reused_transcript_process_result(
             include_trash=False,
         )
         if not source_media:
+            return None
+        if not _source_media_matches_reuse_hit(
+            source_media=source_media,
+            media_type=media_type,
+            original_input_ref=original_input_ref,
+            source_hash=source_hash,
+            hit=hit,
+        ):
             return None
         transcript_rows = get_media_transcripts(source_db, source_media_id_int)
         content_text, normalized_stt = _extract_reusable_transcript_payload(
@@ -1723,6 +1815,7 @@ async def _register_reusable_transcript_source(
     process_result: dict[str, Any],
     user_id: int | None,
     form_data: Any,
+    source_db_path: str | None,
 ) -> None:
     if str(media_type) != "video" or user_id is None:
         return
@@ -1753,6 +1846,7 @@ async def _register_reusable_transcript_source(
             source_media_id=media_id_int,
             source_url=original_input_ref if key_type == "url" else None,
             source_hash=source_hash if key_type == "source_hash" else None,
+            source_db_path=source_db_path,
         )
 
 
@@ -4581,6 +4675,7 @@ async def process_batch_media(
             process_result=process_result,
             user_id=user_id,
             form_data=form_data,
+            source_db_path=db_path,
         )
 
         final_batch_results.append(process_result)

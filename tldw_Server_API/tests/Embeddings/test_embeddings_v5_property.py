@@ -149,7 +149,7 @@ class TestCacheProperties:
     @given(
         ttl_seconds=st.floats(min_value=0.1, max_value=1.0)
     )
-    @settings(max_examples=PROPERTY_MAX_EXAMPLES, deadline=10000)
+    @settings(max_examples=PROPERTY_MAX_EXAMPLES, deadline=10000, suppress_health_check=[HealthCheck.function_scoped_fixture])
     @pytest.mark.asyncio
     async def test_cache_ttl_expiration_property(self, ttl_seconds, monkeypatch):
         """Property: Items expire after TTL"""
