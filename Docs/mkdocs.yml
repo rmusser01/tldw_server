@@ -68,6 +68,17 @@ copyright: |
 
 nav:
   - Home: Wiki/index.md
+  - WebUI & Extension:
+      - Overview: User_Guides/WebUI/index.md
+      - Page And Feature Index: User_Guides/WebUI/Page_Feature_Index.md
+      - Start, Account, And Settings: User_Guides/WebUI/Start_Account_Settings.md
+      - Chat, Characters, And Assistants: User_Guides/WebUI/Chat_Characters_Assistants.md
+      - Knowledge, Media, And Sources: User_Guides/WebUI/Knowledge_Media_Sources.md
+      - Audio, Speech, And Audiobooks: User_Guides/WebUI/Audio_Speech_Audiobooks.md
+      - Study, Writing, And Artifacts: User_Guides/WebUI/Study_Writing_Artifacts.md
+      - Automation, Admin, And Operations: User_Guides/WebUI/Automation_Admin_Operations.md
+      - Extension Sidepanel: User_Guides/WebUI/Extension_Sidepanel.md
+      - Experimental And Specialized: User_Guides/WebUI/Experimental_And_Specialized.md
   - User Wiki:
       - Start Here: Wiki/User_Wiki.md
       - Getting Started:
@@ -110,7 +121,7 @@ nav:
           - BYOK User Guide: User_Guides/Server/BYOK_User_Guide.md
           - Usage Module: User_Guides/Server/Usage_Module.md
           - Long-Term Admin Guide: Deployment/Long_Term_Admin_Guide.md
-          - Metrics Cheatsheet: Monitoring/Metrics_Cheatsheet.md
+          - Metrics Cheatsheet: Deployment/Monitoring/Metrics_Cheatsheet.md
       - Practical API Usage:
           - API Documentation Index: API-related/API_README.md
           - API Tag Index: API-related/API_Tags_Index.md
@@ -160,6 +171,6 @@ nav:
           - Setup UI Developer Guide: Code_Documentation/Setup_UI_Developer_Guide.md
           - Tutorial System Developer Guide: Code_Documentation/Tutorial_System_Developer_Guide.md
           - STT Testing Documentation: Code_Documentation/STT_TESTING_DOCUMENTATION.md
-          - Environment Variables: Env_Vars.md
+          - Environment Variables: Operations/Env_Vars.md
   - Feature Status: Overview/Feature_Status.md
   - Release Notes: RELEASE_NOTES.md

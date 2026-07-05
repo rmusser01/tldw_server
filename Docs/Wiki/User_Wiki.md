@@ -56,7 +56,7 @@ This is the user-facing map for installing, running, configuring, and using tldw
 - [Usage module](../User_Guides/Server/Usage_Module.md)
 - [Backups using Litestream](../User_Guides/Server/Backups_Using_Litestream.md)
 - [Long-term admin guide](../Deployment/Long_Term_Admin_Guide.md)
-- [Metrics cheatsheet](../Monitoring/Metrics_Cheatsheet.md)
+- [Metrics cheatsheet](../Deployment/Monitoring/Metrics_Cheatsheet.md)
 
 ## Practical API Usage
 
