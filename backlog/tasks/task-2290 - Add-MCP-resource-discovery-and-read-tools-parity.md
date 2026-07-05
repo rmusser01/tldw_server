@@ -66,7 +66,7 @@ Implemented MCP resource discovery/read parity for the standalone gateway extern
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
 
-## Implementation Notes
+## Review-Fix Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Latest PR #2653 review pass: origin/dev rebase was a no-op because the branch was already current. Addressed unresolved review threads by running external resource discovery concurrently, defaulting wait_for_servers(server_ids=None) to active transports only, changing the app-side base adapter read_resource default to ResourceNotFoundError, adding docstrings around the flagged gateway test helpers, strengthening merge-order/redaction assertions, and covering unknown-resource stdio read branches. Verification: focused red checks failed before implementation for concurrency/default wait/domain exception and passed after; focused MCP suite with manager coverage passed (333 passed); package boundary regression passed (1 passed); Bandit touched implementation scope wrote /tmp/bandit_mcp_resource_parity_latest_review.json with zero findings; git diff --check origin/dev...HEAD clean. Remaining PR metadata warning requires the human-authored Change summary mandated by Docs/ADR/004 and cannot be completed by an agent.

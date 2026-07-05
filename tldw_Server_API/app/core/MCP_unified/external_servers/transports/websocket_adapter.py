@@ -6,10 +6,13 @@ import asyncio
 import inspect
 import json
 from contextlib import suppress
-from copy import deepcopy
 from typing import Any, Awaitable, Callable, Optional
 
 from loguru import logger
+from mcp_unified.federation.resource_payloads import (
+    normalize_external_resource_list,
+    normalize_external_resource_read,
+)
 
 from tldw_Server_API.app.core.exceptions import NetworkError
 
@@ -183,43 +186,7 @@ class WebSocketExternalMCPAdapter(ExternalMCPTransportAdapter):
                 f"{self._error_message(response['error'])}"
             )
 
-        result = response.get("result") or {}
-        if isinstance(result, dict):
-            raw_resources = result.get("resources") or []
-        elif isinstance(result, list):
-            raw_resources = result
-        else:
-            raw_resources = []
-
-        resources: list[dict[str, Any]] = []
-        for item in raw_resources:
-            if not isinstance(item, dict):
-                continue
-            uri = item.get("uri")
-            if not isinstance(uri, str) or not uri.strip():
-                continue
-            name = item.get("name")
-            if not isinstance(name, str):
-                name = ""
-            description = item.get("description")
-            if not isinstance(description, str):
-                description = ""
-            mime_type = item.get("mimeType")
-            if not isinstance(mime_type, str):
-                mime_type = None
-            metadata = item.get("metadata")
-            if not isinstance(metadata, dict):
-                metadata = {}
-            resources.append(
-                {
-                    "uri": uri,
-                    "name": name,
-                    "description": description,
-                    "mimeType": mime_type,
-                    "metadata": deepcopy(metadata),
-                }
-            )
-        return resources
+        return normalize_external_resource_list(response.get("result"))
 
     async def read_resource(
         self,
@@ -237,8 +204,7 @@ class WebSocketExternalMCPAdapter(ExternalMCPTransportAdapter):
                 f"{self._error_message(response['error'])}"
             )
 
-        result = response.get("result")
-        return deepcopy(result) if isinstance(result, dict) else {"contents": []}
+        return normalize_external_resource_read(response.get("result"))
 
     async def call_tool(
         self,
