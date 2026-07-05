@@ -70,6 +70,56 @@ for raw in sys.stdin:
         )
         continue
 
+    if method == "resources/list":
+        _send(
+            {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "result": {
+                    "resources": [
+                        {
+                            "uri": "resource://docs/readme",
+                            "name": "Docs README",
+                            "description": "Documentation entry",
+                            "mimeType": "text/markdown",
+                            "metadata": {"category": "read"},
+                        },
+                        {"uri": "resource://docs/defaulted", "name": 7, "metadata": []},
+                    ]
+                },
+            }
+        )
+        continue
+
+    if method == "resources/read":
+        uri = str(params.get("uri") or "")
+        if uri == "resource://docs/readme":
+            _send(
+                {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": {
+                        "contents": [
+                            {
+                                "uri": "resource://docs/readme",
+                                "mimeType": "text/markdown",
+                                "text": "# Docs",
+                            }
+                        ]
+                    },
+                }
+            )
+            continue
+
+        _send(
+            {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "error": {"code": -32601, "message": f"unknown resource: {uri}"},
+            }
+        )
+        continue
+
     if method == "tools/call":
         tool_name = str(params.get("name") or "")
         arguments = params.get("arguments") or {}
@@ -158,6 +208,26 @@ async def test_stdio_adapter_subprocess_roundtrip_error_and_timeout(tmp_path: Pa
         assert [tool.name for tool in tools] == ["docs.search", "docs.defaulted"]
         assert tools[1].input_schema == {"type": "object"}
         assert tools[1].metadata == {}
+
+        resources = await adapter.list_resources()
+        assert resources == [
+            {
+                "uri": "resource://docs/readme",
+                "name": "Docs README",
+                "description": "Documentation entry",
+                "mimeType": "text/markdown",
+                "metadata": {"category": "read"},
+            },
+            {
+                "uri": "resource://docs/defaulted",
+                "name": "",
+                "description": "",
+                "mimeType": None,
+                "metadata": {},
+            },
+        ]
+        resource = await adapter.read_resource("resource://docs/readme")
+        assert resource["contents"][0]["text"] == "# Docs"
 
         ok = await adapter.call_tool("docs.search", {"q": "hello"})
         assert ok.is_error is False

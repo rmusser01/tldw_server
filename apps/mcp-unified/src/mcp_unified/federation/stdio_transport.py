@@ -227,6 +227,61 @@ class StdioExternalTransport:
             )
         return tools
 
+    async def list_resources(self) -> list[dict[str, Any]]:
+        """Discover and normalize upstream MCP resource descriptors."""
+        await self._ensure_connected()
+        response = await self._request("resources/list", {})
+        result = response.get("result") or {}
+        if isinstance(result, dict):
+            raw_resources = result.get("resources") or []
+        elif isinstance(result, list):
+            raw_resources = result
+        else:
+            raw_resources = []
+
+        resources: list[dict[str, Any]] = []
+        for item in raw_resources:
+            if not isinstance(item, dict):
+                continue
+            uri = item.get("uri")
+            if not isinstance(uri, str) or not uri.strip():
+                continue
+            name = item.get("name")
+            if not isinstance(name, str):
+                name = ""
+            description = item.get("description")
+            if not isinstance(description, str):
+                description = ""
+            mime_type = item.get("mimeType")
+            if not isinstance(mime_type, str):
+                mime_type = None
+            metadata = item.get("metadata")
+            if not isinstance(metadata, dict):
+                metadata = {}
+            resources.append(
+                {
+                    "uri": uri,
+                    "name": name,
+                    "description": description,
+                    "mimeType": mime_type,
+                    "metadata": deepcopy(metadata),
+                }
+            )
+        return resources
+
+    async def read_resource(
+        self,
+        uri: str,
+        *,
+        context: Any = None,
+    ) -> dict[str, Any]:
+        """Read one upstream MCP resource."""
+        del context
+        await self._ensure_connected()
+        response = await self._request("resources/read", {"uri": uri})
+        result = response.get("result")
+        return deepcopy(result) if isinstance(result, dict) else {"contents": []}
+
     async def call_tool(
         self,
         tool_name: str,

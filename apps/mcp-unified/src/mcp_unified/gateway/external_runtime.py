@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import inspect
 import traceback
 from collections.abc import Callable, Iterable
@@ -130,6 +131,7 @@ class GatewayExternalRuntimeManager:
         self._servers: dict[str, ExternalServerDefinition] = {}
         self._transports: dict[str, ExternalFederationTransport] = {}
         self._virtual_tools: dict[str, VirtualExternalTool] = {}
+        self._virtual_resources: dict[str, dict[str, Any]] = {}
         self._last_errors: dict[str, str | None] = {}
         self._lock = asyncio.Lock()
 
@@ -442,6 +444,127 @@ class GatewayExternalRuntimeManager:
                 for name in sorted(self._virtual_tools)
             ]
 
+    async def list_virtual_resources(self) -> list[dict[str, Any]]:
+        """Return caller-owned external resources for active servers."""
+        async with self._lock:
+            snapshots = [
+                (server_id, transport)
+                for server_id, transport in sorted(self._transports.items())
+            ]
+
+        for server_id, transport in snapshots:
+            try:
+                resources = await transport.list_resources()
+            except Exception as exc:  # noqa: BLE001 - resource discovery must be row-scoped.
+                async with self._lock:
+                    if self._transports.get(server_id) is transport:
+                        self._last_errors[server_id] = self._exception_summary(exc)
+                        self._clear_server_resources(server_id)
+                await self._audit_best_effort(
+                    "external_server.resource_discovery",
+                    payload={
+                        "reason_code": "external_server_resource_discovery_failed",
+                        "server_id": server_id,
+                        "error_type": type(exc).__name__,
+                    },
+                    target_type="external_server",
+                    target_id=server_id,
+                )
+                continue
+
+            async with self._lock:
+                if self._transports.get(server_id) is transport:
+                    self._replace_server_resources(server_id, resources)
+
+        async with self._lock:
+            return [
+                deepcopy(self._virtual_resources[uri]["descriptor"])
+                for uri in sorted(self._virtual_resources)
+            ]
+
+    async def read_virtual_resource(
+        self,
+        uri: str,
+        *,
+        context: Any = None,
+    ) -> dict[str, Any]:
+        """Read one active virtual external resource."""
+        async with self._lock:
+            entry = self._virtual_resources.get(uri)
+            if entry is None:
+                raise GatewayExternalRuntimeError(
+                    f"External resource '{uri}' was not found",
+                    reason_code="external_resource_not_found",
+                    server_id=self._server_id_from_virtual_resource_uri(uri),
+                )
+            server_id = str(entry["server_id"])
+            upstream_uri = str(entry["upstream_uri"])
+            transport = self._transports.get(server_id)
+            if transport is None:
+                raise GatewayExternalRuntimeError(
+                    f"External server '{server_id}' is not active",
+                    reason_code="external_server_transport_unavailable",
+                    server_id=server_id,
+                )
+
+        try:
+            result = await transport.read_resource(upstream_uri, context=context)
+        except Exception as exc:  # noqa: BLE001 - transport adapters define read errors.
+            raise GatewayExternalRuntimeError(
+                f"External resource '{uri}' failed during read",
+                reason_code="external_resource_read_failed",
+                server_id=server_id,
+            ) from exc
+        return self._resource_read_payload(result, virtual_uri=uri, upstream_uri=upstream_uri)
+
+    async def wait_for_servers(
+        self,
+        server_ids: list[str] | tuple[str, ...] | set[str] | None = None,
+        *,
+        timeout_seconds: float = 5.0,
+        poll_interval_seconds: float = 0.1,
+    ) -> dict[str, Any]:
+        """Wait briefly for external servers to report healthy runtime status."""
+        loop = asyncio.get_running_loop()
+        timeout = max(0.0, float(timeout_seconds))
+        poll_interval = max(0.001, float(poll_interval_seconds))
+        deadline = loop.time() + timeout
+        if isinstance(server_ids, str):
+            targets = {server_ids}
+        else:
+            targets = {str(server_id) for server_id in server_ids or () if str(server_id)}
+
+        while True:
+            rows = await self.list_runtime_servers()
+            by_id = {
+                str(row.get("id")): row
+                for row in rows.get("servers", [])
+                if row.get("id") is not None
+            }
+            current_targets = targets or set(by_id)
+            ready = sorted(
+                server_id
+                for server_id in current_targets
+                if by_id.get(server_id, {}).get("status") == "healthy"
+            )
+            unknown = sorted(current_targets - set(by_id))
+            unavailable = sorted(current_targets - set(ready) - set(unknown))
+            if not unavailable and not unknown:
+                return {
+                    "ok": True,
+                    "ready_servers": ready,
+                    "unavailable_servers": [],
+                    "unknown_servers": [],
+                }
+            if loop.time() >= deadline:
+                return {
+                    "ok": False,
+                    "ready_servers": ready,
+                    "unavailable_servers": unavailable,
+                    "unknown_servers": unknown,
+                }
+            await asyncio.sleep(min(poll_interval, max(0.0, deadline - loop.time())))
+
     async def has_virtual_tool(self, virtual_tool_name: str) -> bool:
         """Return whether an active virtual tool exists without copying the catalog."""
 
@@ -603,6 +726,7 @@ class GatewayExternalRuntimeManager:
         self._servers.pop(server_id, None)
         self._last_errors.pop(server_id, None)
         self._clear_server_tools(server_id)
+        self._clear_server_resources(server_id)
         return transport
 
     async def _close_stopped_transport(
@@ -787,6 +911,93 @@ class GatewayExternalRuntimeManager:
 
     def _count_tools_for_server(self, server_id: str) -> int:
         return sum(1 for tool in self._virtual_tools.values() if tool.server_id == server_id)
+
+    def _replace_server_resources(
+        self,
+        server_id: str,
+        resources: list[dict[str, Any]],
+    ) -> None:
+        self._clear_server_resources(server_id)
+        for resource in resources:
+            if not isinstance(resource, dict):
+                continue
+            upstream_uri = resource.get("uri")
+            if not isinstance(upstream_uri, str) or not upstream_uri.strip():
+                continue
+            virtual_uri = self._virtual_resource_uri(server_id, upstream_uri)
+            self._virtual_resources[virtual_uri] = {
+                "server_id": server_id,
+                "upstream_uri": upstream_uri,
+                "descriptor": self._virtual_resource_descriptor(
+                    server_id=server_id,
+                    virtual_uri=virtual_uri,
+                    resource=resource,
+                ),
+            }
+
+    def _clear_server_resources(self, server_id: str) -> None:
+        self._virtual_resources = {
+            uri: entry
+            for uri, entry in self._virtual_resources.items()
+            if entry["server_id"] != server_id
+        }
+
+    @staticmethod
+    def _virtual_resource_descriptor(
+        *,
+        server_id: str,
+        virtual_uri: str,
+        resource: dict[str, Any],
+    ) -> dict[str, Any]:
+        name = resource.get("name")
+        description = resource.get("description")
+        mime_type = resource.get("mimeType")
+        return {
+            "uri": virtual_uri,
+            "name": name if isinstance(name, str) else "",
+            "description": description if isinstance(description, str) else "",
+            "mimeType": mime_type if isinstance(mime_type, str) else None,
+            "metadata": {
+                "external_server_id": server_id,
+                "source": "external_runtime",
+            },
+        }
+
+    @staticmethod
+    def _virtual_resource_uri(server_id: str, upstream_uri: str) -> str:
+        digest = hashlib.sha256(upstream_uri.encode("utf-8")).hexdigest()[:24]
+        return f"external://{server_id}/{digest}"
+
+    @staticmethod
+    def _server_id_from_virtual_resource_uri(uri: str) -> str | None:
+        prefix = "external://"
+        if not uri.startswith(prefix):
+            return None
+        remainder = uri[len(prefix):]
+        server_id, _, _digest = remainder.partition("/")
+        return server_id or None
+
+    @staticmethod
+    def _resource_read_payload(
+        payload: dict[str, Any],
+        *,
+        virtual_uri: str,
+        upstream_uri: str,
+    ) -> dict[str, Any]:
+        result = deepcopy(payload) if isinstance(payload, dict) else {"contents": []}
+        contents = result.get("contents")
+        if isinstance(contents, list):
+            rewritten: list[Any] = []
+            for item in contents:
+                if not isinstance(item, dict):
+                    rewritten.append(item)
+                    continue
+                item_copy = dict(item)
+                if item_copy.get("uri") == upstream_uri:
+                    item_copy["uri"] = virtual_uri
+                rewritten.append(item_copy)
+            result["contents"] = rewritten
+        return result
 
     async def _installer_status(
         self,

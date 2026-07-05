@@ -45,6 +45,19 @@ class ExternalMCPTransportAdapter(ABC):
     async def list_tools(self) -> list[ExternalToolDefinition]:
         """Discover external tools and return normalized definitions."""
 
+    async def list_resources(self) -> list[dict[str, Any]]:
+        """Discover external resources and return normalized descriptors."""
+        return []
+
+    async def read_resource(
+        self,
+        uri: str,
+        context: RequestContext | None = None,
+    ) -> dict[str, Any]:
+        """Read one external resource."""
+        del context
+        raise ValueError(f"Unknown external resource '{uri}'")
+
     @abstractmethod
     async def call_tool(
         self,

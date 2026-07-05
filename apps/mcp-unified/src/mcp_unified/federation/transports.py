@@ -38,6 +38,19 @@ class ExternalFederationTransport(Protocol):
         """Return discovered external tool definitions."""
         ...
 
+    async def list_resources(self) -> list[dict[str, Any]]:
+        """Return discovered external resource descriptors."""
+        ...
+
+    async def read_resource(
+        self,
+        uri: str,
+        *,
+        context: Any = None,
+    ) -> dict[str, Any]:
+        """Read one upstream external resource."""
+        ...
+
     async def call_tool(
         self,
         tool_name: str,
@@ -60,6 +73,8 @@ class FakeExternalTransport:
         *,
         server_id: str,
         tools: list[ExternalToolDefinition] | None = None,
+        resources: list[dict[str, Any]] | None = None,
+        resource_results: dict[str, dict[str, Any]] | None = None,
         results: dict[str, ExternalToolCallResult] | None = None,
         health: dict[str, bool] | None = None,
     ) -> None:
@@ -69,8 +84,14 @@ class FakeExternalTransport:
         self.close_count = 0
         self.spawn_count = 0
         self.calls: list[tuple[str, dict[str, Any]]] = []
+        self.resource_reads: list[str] = []
         self.runtime_auth_seen: BrokeredExternalCredential | None = None
         self._tools = [tool.copy() for tool in tools or []]
+        self._resources = [deepcopy(resource) for resource in resources or []]
+        self._resource_results = {
+            uri: deepcopy(result)
+            for uri, result in (resource_results or {}).items()
+        }
         self._results = {
             name: result.copy()
             for name, result in (results or {}).items()
@@ -99,6 +120,24 @@ class FakeExternalTransport:
     async def list_tools(self) -> list[ExternalToolDefinition]:
         """Return caller-owned fake tool definitions."""
         return [tool.copy() for tool in self._tools]
+
+    async def list_resources(self) -> list[dict[str, Any]]:
+        """Return caller-owned fake resource descriptors."""
+        return [deepcopy(resource) for resource in self._resources]
+
+    async def read_resource(
+        self,
+        uri: str,
+        *,
+        context: Any = None,
+    ) -> dict[str, Any]:
+        """Return a configured fake resource result."""
+        del context
+        self.resource_reads.append(uri)
+        result = self._resource_results.get(uri)
+        if result is None:
+            raise ValueError(f"Unknown fake external resource '{uri}'")
+        return deepcopy(result)
 
     async def call_tool(
         self,

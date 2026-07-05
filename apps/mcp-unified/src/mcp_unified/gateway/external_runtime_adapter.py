@@ -86,19 +86,27 @@ class ExternalRuntimeGatewayRuntime:
         raise ValueError(f"Unknown gateway tool: {name}")
 
     async def list_resources(self, context: GatewayRequestContext) -> list[dict[str, Any]]:
-        """Delegate resource listing to the base runtime when available."""
+        """Return local resources followed by active external virtual resources."""
 
+        resources: list[dict[str, Any]] = []
         if self._base_runtime is None:
-            return []
-        return await self._base_runtime.list_resources(context)
+            return await self._external_runtime_manager.list_virtual_resources()
+        resources.extend(await self._base_runtime.list_resources(context))
+        resources.extend(await self._external_runtime_manager.list_virtual_resources())
+        return resources
 
     async def read_resource(
         self,
         uri: str,
         context: GatewayRequestContext,
     ) -> dict[str, Any]:
-        """Delegate resource reads to the base runtime when available."""
+        """Read external virtual resources or delegate to the base runtime."""
 
+        if uri.startswith("external://"):
+            return await self._external_runtime_manager.read_virtual_resource(
+                uri,
+                context=context,
+            )
         if self._base_runtime is None:
             raise ValueError(f"Unknown gateway resource: {uri}")
         return await self._base_runtime.read_resource(uri, context)
