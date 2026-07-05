@@ -971,7 +971,25 @@ def _safe_mcp_tools_step_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return _validated_public_first_run_step_data("mcp_tools", payload)
 
 
+_MCP_TOOLS_SETUP_IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
+
+
+def _validate_mcp_tools_apply_identifier(value: str) -> None:
+    stripped = value.strip()
+    if stripped != value or not stripped or not _MCP_TOOLS_SETUP_IDENTIFIER_RE.fullmatch(value):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="unsupported_first_run_step_data")
+
+
 def _preflight_mcp_tools_apply_payload(payload: McpToolsApplyRequest) -> None:
+    for value in (
+        *payload.selected_pack_ids,
+        *payload.selected_addon_ids,
+        *payload.confirmed_addon_ids,
+    ):
+        _validate_mcp_tools_apply_identifier(value)
+    if payload.confirmation_version is not None:
+        _validate_mcp_tools_apply_identifier(payload.confirmation_version)
+
     _safe_mcp_tools_step_payload(
         {
             "acknowledged": True,

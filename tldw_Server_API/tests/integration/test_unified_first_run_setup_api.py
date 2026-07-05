@@ -326,10 +326,38 @@ def test_first_run_mcp_tools_apply_persists_numeric_profile_and_assignment(
     assert state.step_data["mcp_tools"]["assignment_id"] == 11
 
 
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {
+            "selected_pack_ids": ["research", "/Users/me/.env"],
+            "selected_addon_ids": ["hf_abcdef1234567890"],
+        },
+        {
+            "selected_pack_ids": ["research", "https://user:secret@example.test/simple"],
+            "selected_addon_ids": [],
+        },
+        {
+            "selected_pack_ids": ["research"],
+            "selected_addon_ids": ["https://user:secret@example.test/simple"],
+        },
+        {
+            "selected_pack_ids": ["research"],
+            "selected_addon_ids": [],
+            "confirmed_addon_ids": ["https://user:secret@example.test/simple"],
+        },
+        {
+            "selected_pack_ids": ["research"],
+            "selected_addon_ids": [],
+            "confirmation_version": "https://user:secret@example.test/simple",
+        },
+    ],
+)
 def test_first_run_mcp_tools_apply_rejects_unsafe_selection_before_service_call(
     setup_client,
     monkeypatch,
     tmp_path,
+    payload,
 ):
     state_path = tmp_path / "first_run_state.json"
     monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
@@ -339,10 +367,7 @@ def test_first_run_mcp_tools_apply_rejects_unsafe_selection_before_service_call(
 
     response = setup_client.post(
         "/api/v1/setup/first-run/mcp-tools/apply",
-        json={
-            "selected_pack_ids": ["research", "/Users/me/.env"],
-            "selected_addon_ids": ["hf_abcdef1234567890"],
-        },
+        json=payload,
     )
 
     assert response.status_code == 400
