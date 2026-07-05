@@ -282,18 +282,36 @@ class ProfileAwareGatewayRuntime:
         )
 
     async def list_resources(self, context: GatewayRequestContext) -> list[dict[str, Any]]:
-        """Delegate resource discovery unchanged for this profile slice."""
+        """Return resources visible to the resolved profile."""
 
-        return await self._backend.list_resources(context)
+        profile_result = await self._resolve_profile(context)
+        if profile_result.status != "resolved" or profile_result.profile is None:
+            return []
+        policy_result = build_effective_policy_result(profile_result.profile)
+        if policy_result.status != "resolved" or policy_result.policy is None:
+            return []
+        return await self._backend.list_resources(
+            _context_with_effective_policy(context, policy_result.policy)
+        )
 
     async def read_resource(
         self,
         uri: str,
         context: GatewayRequestContext,
     ) -> dict[str, Any]:
-        """Delegate resource reads unchanged for this profile slice."""
+        """Read resources through the resolved profile policy."""
 
-        return await self._backend.read_resource(uri, context)
+        profile = await self._require_profile(context)
+        policy_result = build_effective_policy_result(profile)
+        if policy_result.status != "resolved" or policy_result.policy is None:
+            raise _policy_denied(
+                policy_result,
+                message=f"Gateway profile denied resource read: {policy_result.reason_code}",
+            )
+        return await self._backend.read_resource(
+            uri,
+            _context_with_effective_policy(context, policy_result.policy),
+        )
 
     async def list_prompts(self, context: GatewayRequestContext) -> list[dict[str, Any]]:
         """Delegate prompt discovery unchanged for this profile slice."""

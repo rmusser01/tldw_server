@@ -90,9 +90,15 @@ class ExternalRuntimeGatewayRuntime:
 
         resources: list[dict[str, Any]] = []
         if self._base_runtime is None:
-            return await self._external_runtime_manager.list_virtual_resources()
+            return await self._external_runtime_manager.list_virtual_resources(
+                effective_policy=_effective_policy_from_context(context),
+            )
         resources.extend(await self._base_runtime.list_resources(context))
-        resources.extend(await self._external_runtime_manager.list_virtual_resources())
+        resources.extend(
+            await self._external_runtime_manager.list_virtual_resources(
+                effective_policy=_effective_policy_from_context(context),
+            )
+        )
         return resources
 
     async def read_resource(
@@ -103,10 +109,18 @@ class ExternalRuntimeGatewayRuntime:
         """Read external virtual resources or delegate to the base runtime."""
 
         if uri.startswith("external://"):
-            return await self._external_runtime_manager.read_virtual_resource(
-                uri,
-                context=context,
-            )
+            try:
+                return await self._external_runtime_manager.read_virtual_resource(
+                    uri,
+                    context=context,
+                    effective_policy=_effective_policy_from_context(context),
+                )
+            except FederationPolicyDenied as exc:
+                raise GatewayPolicyDenied(
+                    str(exc),
+                    reason_code=exc.reason_code,
+                    provenance=deepcopy(exc.payload),
+                ) from exc
         if self._base_runtime is None:
             raise ValueError(f"Unknown gateway resource: {uri}")
         return await self._base_runtime.read_resource(uri, context)

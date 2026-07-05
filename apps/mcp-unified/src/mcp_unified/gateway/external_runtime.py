@@ -5,11 +5,13 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import inspect
+import re
 import traceback
 from collections.abc import Callable, Iterable
 from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any, Protocol
+from urllib.parse import parse_qsl, urlsplit
 from uuid import uuid4
 
 from loguru import logger
@@ -64,6 +66,7 @@ _INSTALLER_SENSITIVE_KEY_TOKENS = (
 )
 _UNSAFE_INSTALLER_VALUE = object()
 _DEFAULT_INSTALLER_STATUS_TIMEOUT_SECONDS = 2.0
+_UNSCOPED_EFFECTIVE_POLICY = object()
 
 
 class GatewayExternalRuntimeError(RuntimeError):
@@ -444,12 +447,21 @@ class GatewayExternalRuntimeManager:
                 for name in sorted(self._virtual_tools)
             ]
 
-    async def list_virtual_resources(self) -> list[dict[str, Any]]:
+    async def list_virtual_resources(
+        self,
+        *,
+        effective_policy: Any = _UNSCOPED_EFFECTIVE_POLICY,
+    ) -> list[dict[str, Any]]:
         """Return caller-owned external resources for active servers."""
         async with self._lock:
             snapshots = [
                 (server_id, transport)
                 for server_id, transport in sorted(self._transports.items())
+                if self._resource_policy_allows_server(
+                    effective_policy,
+                    server_id,
+                    self._servers.get(server_id),
+                )
             ]
 
         for server_id, transport in snapshots:
@@ -474,12 +486,18 @@ class GatewayExternalRuntimeManager:
 
             async with self._lock:
                 if self._transports.get(server_id) is transport:
+                    self._last_errors[server_id] = None
                     self._replace_server_resources(server_id, resources)
 
         async with self._lock:
             return [
                 deepcopy(self._virtual_resources[uri]["descriptor"])
                 for uri in sorted(self._virtual_resources)
+                if self._resource_policy_allows_server(
+                    effective_policy,
+                    str(self._virtual_resources[uri]["server_id"]),
+                    self._servers.get(str(self._virtual_resources[uri]["server_id"])),
+                )
             ]
 
     async def read_virtual_resource(
@@ -487,6 +505,7 @@ class GatewayExternalRuntimeManager:
         uri: str,
         *,
         context: Any = None,
+        effective_policy: Any = _UNSCOPED_EFFECTIVE_POLICY,
     ) -> dict[str, Any]:
         """Read one active virtual external resource."""
         async with self._lock:
@@ -506,6 +525,46 @@ class GatewayExternalRuntimeManager:
                     reason_code="external_server_transport_unavailable",
                     server_id=server_id,
                 )
+            server = self._servers.get(server_id)
+            if server is None:
+                raise GatewayExternalRuntimeError(
+                    f"External server '{server_id}' is not active",
+                    reason_code="external_server_transport_unavailable",
+                    server_id=server_id,
+                )
+            server = server.model_copy(deep=True)
+            if (
+                effective_policy is not _UNSCOPED_EFFECTIVE_POLICY
+                and not self._has_resource_server_grant(effective_policy, server_id)
+            ):
+                raise FederationPolicyDenied(
+                    "external_server_not_granted",
+                    f"External server '{server_id}' is not allowed",
+                    payload={
+                        "reason_code": "external_server_not_granted",
+                        "server_id": server_id,
+                        "resource_uri": uri,
+                    },
+                )
+            if effective_policy is not _UNSCOPED_EFFECTIVE_POLICY:
+                missing_slots = self._missing_credential_slots(
+                    server=server,
+                    effective_policy=effective_policy,
+                )
+                if missing_slots:
+                    raise FederationPolicyDenied(
+                        "required_credential_grant_missing",
+                        (
+                            f"External server '{server_id}' requires credential grants for "
+                            f"{', '.join(missing_slots)}"
+                        ),
+                        payload={
+                            "reason_code": "required_credential_grant_missing",
+                            "server_id": server_id,
+                            "resource_uri": uri,
+                            "credential_slots": list(missing_slots),
+                        },
+                    )
 
         try:
             result = await transport.read_resource(upstream_uri, context=context)
@@ -985,19 +1044,127 @@ class GatewayExternalRuntimeManager:
         upstream_uri: str,
     ) -> dict[str, Any]:
         result = deepcopy(payload) if isinstance(payload, dict) else {"contents": []}
-        contents = result.get("contents")
-        if isinstance(contents, list):
-            rewritten: list[Any] = []
-            for item in contents:
-                if not isinstance(item, dict):
-                    rewritten.append(item)
-                    continue
-                item_copy = dict(item)
-                if item_copy.get("uri") == upstream_uri:
-                    item_copy["uri"] = virtual_uri
-                rewritten.append(item_copy)
-            result["contents"] = rewritten
-        return result
+        uri_prefix = GatewayExternalRuntimeManager._same_origin_uri_prefix(upstream_uri)
+        sensitive_values = GatewayExternalRuntimeManager._sensitive_uri_values(upstream_uri)
+        return GatewayExternalRuntimeManager._redact_resource_read_value(
+            result,
+            virtual_uri=virtual_uri,
+            upstream_uri=upstream_uri,
+            uri_prefix=uri_prefix,
+            sensitive_values=sensitive_values,
+        )
+
+    @staticmethod
+    def _redact_resource_read_value(
+        value: Any,
+        *,
+        virtual_uri: str,
+        upstream_uri: str,
+        uri_prefix: str | None,
+        sensitive_values: tuple[str, ...],
+        key: str | None = None,
+    ) -> Any:
+        if isinstance(value, dict):
+            return {
+                str(child_key): GatewayExternalRuntimeManager._redact_resource_read_value(
+                    child_value,
+                    virtual_uri=virtual_uri,
+                    upstream_uri=upstream_uri,
+                    uri_prefix=uri_prefix,
+                    sensitive_values=sensitive_values,
+                    key=str(child_key),
+                )
+                for child_key, child_value in value.items()
+            }
+        if isinstance(value, list):
+            return [
+                GatewayExternalRuntimeManager._redact_resource_read_value(
+                    item,
+                    virtual_uri=virtual_uri,
+                    upstream_uri=upstream_uri,
+                    uri_prefix=uri_prefix,
+                    sensitive_values=sensitive_values,
+                )
+                for item in value
+            ]
+        if isinstance(value, str):
+            if GatewayExternalRuntimeManager._is_resource_uri_key(key):
+                return virtual_uri
+            redacted = value.replace(upstream_uri, virtual_uri)
+            if uri_prefix:
+                redacted = re.sub(
+                    rf"{re.escape(uri_prefix)}[^\s\"'<>)]*",
+                    virtual_uri,
+                    redacted,
+                )
+            for sensitive_value in sensitive_values:
+                redacted = redacted.replace(sensitive_value, "[redacted]")
+            return redacted
+        return value
+
+    @staticmethod
+    def _has_resource_server_grant(effective_policy: Any, server_id: str) -> bool:
+        """Return whether policy grants resource access to an external server."""
+
+        return any(
+            GatewayExternalRuntimeManager._grant_matches_server(grant, server_id)
+            for grant in GatewayExternalRuntimeManager._policy_dicts(
+                effective_policy,
+                "external_server_grants",
+            )
+        )
+
+    def _resource_policy_allows_server(
+        self,
+        effective_policy: Any,
+        server_id: str,
+        server: ExternalServerDefinition | None,
+    ) -> bool:
+        """Return whether resource discovery/read may touch this server."""
+
+        if effective_policy is _UNSCOPED_EFFECTIVE_POLICY:
+            return True
+        if not self._has_resource_server_grant(effective_policy, server_id):
+            return False
+        if server is None:
+            return False
+        return not self._missing_credential_slots(
+            server=server,
+            effective_policy=effective_policy,
+        )
+
+    @staticmethod
+    def _is_resource_uri_key(key: str | None) -> bool:
+        """Return whether a payload key is expected to carry a URI/URL value."""
+
+        if key is None:
+            return False
+        normalized = key.replace("_", "").replace("-", "").lower()
+        return normalized in {"uri", "url", "href", "sourceuri"} or normalized.endswith(
+            ("uri", "url")
+        )
+
+    @staticmethod
+    def _same_origin_uri_prefix(upstream_uri: str) -> str | None:
+        """Return the scheme/netloc prefix used to scrub related upstream URIs."""
+
+        parsed = urlsplit(upstream_uri)
+        if not parsed.scheme or not parsed.netloc:
+            return None
+        return f"{parsed.scheme}://{parsed.netloc}"
+
+    @staticmethod
+    def _sensitive_uri_values(upstream_uri: str) -> tuple[str, ...]:
+        """Return sensitive query values from the upstream URI for text redaction."""
+
+        parsed = urlsplit(upstream_uri)
+        sensitive_tokens = ("auth", "credential", "key", "password", "secret", "token")
+        values: list[str] = []
+        for key, value in parse_qsl(parsed.query, keep_blank_values=False):
+            key_text = key.lower()
+            if len(value) >= 4 and any(token in key_text for token in sensitive_tokens):
+                values.append(value)
+        return tuple(dict.fromkeys(values))
 
     async def _installer_status(
         self,

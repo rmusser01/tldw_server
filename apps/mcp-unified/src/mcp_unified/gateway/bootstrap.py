@@ -15,6 +15,7 @@ from mcp_unified.profiles.presets import duplicate_builtin_preset
 from mcp_unified.profiles.resolver import AssignmentBackedProfileResolver
 from mcp_unified.profiles.store import InMemoryProfileAssignmentStore, InMemoryProfileStore
 
+from .external_runtime_adapter import ExternalRuntimeGatewayRuntime
 from .profile_runtime import ProfileAwareGatewayRuntime
 from .runtime import GatewayRuntime
 
@@ -99,8 +100,14 @@ async def bootstrap_profile_gateway(
         assignment_store=assignments,
         fallback_default_profile_id=resolved_default_profile_id,
     )
+    resolved_backend: GatewayRuntime = backend
+    if external_runtime_manager is not None:
+        resolved_backend = ExternalRuntimeGatewayRuntime(
+            external_runtime_manager=external_runtime_manager,
+            base_runtime=backend,
+        )
     runtime = ProfileAwareGatewayRuntime(
-        backend,
+        resolved_backend,
         profile_resolver=resolver,
         policy_grant_store=policy_grant_store,
     )
