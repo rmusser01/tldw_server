@@ -122,7 +122,13 @@ def get_research_workspace_output_job_status(
     job_manager: JobManager,
     user_id: int | str,
 ) -> ResearchWorkspaceOutputStatusResponse:
-    job = job_manager.get_job(int(job_id))
+    try:
+        job = job_manager.get_job(int(job_id))
+    except Exception as exc:
+        raise ResearchWorkspaceOutputJobError(
+            "output_job_status_unavailable",
+            status_code=503,
+        ) from exc
     if job is None:
         raise ResearchWorkspaceOutputJobError("job_not_found", status_code=404)
     _validate_job_scope(job, workspace_id=workspace_id, user_id=str(user_id))

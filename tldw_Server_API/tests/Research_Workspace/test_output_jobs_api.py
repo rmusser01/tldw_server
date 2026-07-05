@@ -77,8 +77,9 @@ class FakeWorkspaceDB:
 
 
 class FakeJobManager:
-    def __init__(self, *, fail_create: bool = False) -> None:
+    def __init__(self, *, fail_create: bool = False, fail_get: bool = False) -> None:
         self.fail_create = fail_create
+        self.fail_get = fail_get
         self.created_jobs: list[dict[str, Any]] = []
         self.jobs: dict[int, dict[str, Any]] = {}
 
@@ -98,6 +99,8 @@ class FakeJobManager:
         return row
 
     def get_job(self, job_id: int) -> dict[str, Any] | None:
+        if self.fail_get:
+            raise RuntimeError("jobs backend unavailable")
         return self.jobs.get(int(job_id))
 
 
@@ -300,6 +303,27 @@ def test_submit_output_route_maps_job_create_failure_to_stable_error() -> None:
     assert response.status_code == 503, response.text
     assert response.json()["detail"] == "output_job_enqueue_failed"
     assert workspace_db.artifacts == {}
+
+
+def test_status_route_maps_job_lookup_failure_to_stable_error() -> None:
+    app = FastAPI()
+    app.include_router(workspaces_endpoint.router, prefix="/api/v1/workspaces")
+    workspace_db = FakeWorkspaceDB()
+    job_manager = FakeJobManager(fail_get=True)
+
+    async def _allow_rate_limit() -> None:
+        return None
+
+    app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=42)
+    app.dependency_overrides[get_chacha_db_for_user] = lambda: workspace_db
+    app.dependency_overrides[workspaces_endpoint.try_get_workspace_job_manager] = lambda: job_manager
+    app.dependency_overrides[WORKSPACES_READ_RATE_LIMIT] = _allow_rate_limit
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.get("/api/v1/workspaces/ws-1/outputs/101")
+
+    assert response.status_code == 503, response.text
+    assert response.json()["detail"] == "output_job_status_unavailable"
+    assert workspace_db.artifact_lookups == 0
 
 
 @pytest.mark.parametrize(
