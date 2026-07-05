@@ -8,6 +8,8 @@ from typing import Any
 
 import pytest
 
+from tldw_Server_API.app.core.Web_Scraping.runtime import FetchResponse, PolicyDecision
+
 
 pytestmark = pytest.mark.unit
 
@@ -84,6 +86,26 @@ def _sample_analysis(*, js_required: bool = False, tls_active: bool = False) -> 
     }
 
 
+class _FakeArticlePolicyChecker:
+    def __init__(self, decision: PolicyDecision):
+        self.decision = decision
+
+    async def decide(self, _url: str, *, respect_robots, user_agent, context, config):  # noqa: ANN001
+        return self.decision
+
+
+class _FakeArticleFetchClient:
+    def __init__(self, response: FetchResponse | BaseException):
+        self.response = response
+        self.requests = []
+
+    def fetch(self, request):
+        self.requests.append(request)
+        if isinstance(self.response, BaseException):
+            raise self.response
+        return self.response
+
+
 def test_inventory_recorded_web_scraping_imports_remain_resolvable() -> None:
     inventory = json.loads(INVENTORY_JSON.read_text(encoding="utf-8"))
     records_by_import: dict[tuple[str, str | None], dict[str, Any]] = {}
@@ -119,21 +141,22 @@ async def test_scrape_article_policy_denial_keeps_public_blocked_shape(
     expected_error: str,
 ) -> None:
     from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as article
-    from tldw_Server_API.app.core.Web_Scraping.outbound_policy import WebOutboundPolicyDecision
 
     _force_article_default_plan(monkeypatch, article)
     monkeypatch.setattr(article, "load_and_log_configs", lambda: _article_test_config())
-
-    async def deny(_url: str, **kwargs: Any) -> WebOutboundPolicyDecision:
-        return WebOutboundPolicyDecision(
-            allowed=False,
-            mode=mode,  # type: ignore[arg-type]
-            reason=reason,
-            stage=str(kwargs.get("stage", "pre_fetch")),
-            source=str(kwargs.get("source", "article_extract")),
-        )
-
-    monkeypatch.setattr(article, "decide_web_outbound_policy", deny)
+    monkeypatch.setattr(
+        article,
+        "_ARTICLE_POLICY_CHECKER",
+        _FakeArticlePolicyChecker(
+            PolicyDecision(
+                allowed=False,
+                mode=mode,  # type: ignore[arg-type]
+                reason=reason,
+                stage="pre_fetch",
+                source="article_extract",
+            )
+        ),
+    )
 
     result = await article.scrape_article("https://example.com/blocked")
 
@@ -221,31 +244,35 @@ def _enhanced_plan() -> types.SimpleNamespace:
 async def test_article_preflight_tls_advice_is_attached_without_network(monkeypatch: pytest.MonkeyPatch) -> None:
     from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as article
     from tldw_Server_API.app.core.Web_Scraping import scraper_analyzers
-    from tldw_Server_API.app.core.Web_Scraping.outbound_policy import WebOutboundPolicyDecision
 
     analysis = _sample_analysis(tls_active=True)
     _force_article_default_plan(monkeypatch, article)
     monkeypatch.setattr(article, "load_and_log_configs", lambda: _article_test_config(preflight=True))
     monkeypatch.setattr(scraper_analyzers, "run_analysis", lambda *_args, **_kwargs: analysis)
     monkeypatch.setattr(article, "convert_html_to_markdown", lambda content: content)
-
-    async def allow(_url: str, **kwargs: Any) -> WebOutboundPolicyDecision:
-        return WebOutboundPolicyDecision(
-            allowed=True,
-            mode="compat",
-            reason="allowed",
-            stage=str(kwargs.get("stage", "pre_fetch")),
-            source=str(kwargs.get("source", "article_extract")),
+    monkeypatch.setattr(
+        article,
+        "_ARTICLE_POLICY_CHECKER",
+        _FakeArticlePolicyChecker(
+            PolicyDecision(
+                allowed=True,
+                mode="compat",
+                reason="allowed",
+                stage="pre_fetch",
+                source="article_extract",
+            )
+        ),
+    )
+    fetch_client = _FakeArticleFetchClient(
+        FetchResponse(
+            url="https://example.com/article",
+            status=200,
+            text="<html><body>Article</body></html>",
+            headers={},
+            backend="curl",
         )
-
-    class Response:
-        status = 200
-        text = "<html><body>Article</body></html>"
-        headers: dict[str, str] = {}
-        backend = "curl"
-
-    monkeypatch.setattr(article, "decide_web_outbound_policy", allow)
-    monkeypatch.setattr(article, "_fetch_with_curl", lambda *_args, **_kwargs: Response())
+    )
+    monkeypatch.setattr(article, "_ARTICLE_FETCH_CLIENT", fetch_client)
     monkeypatch.setattr(article, "http_fetch", lambda *_args, **_kwargs: pytest.fail("http_fetch should not run"))
     monkeypatch.setattr(
         article,
@@ -255,6 +282,7 @@ async def test_article_preflight_tls_advice_is_attached_without_network(monkeypa
 
     result = await article.scrape_article("https://example.com/article")
 
+    assert fetch_client.requests[0].backend == "curl"
     assert result["preflight_analysis"] == {
         "analysis": analysis,
         "advice": {"backend": "curl", "method": "auto", "notes": ["tls_active"]},
@@ -264,7 +292,6 @@ async def test_article_preflight_tls_advice_is_attached_without_network(monkeypa
 async def test_article_preflight_js_advice_is_attached_without_browser(monkeypatch: pytest.MonkeyPatch) -> None:
     from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as article
     from tldw_Server_API.app.core.Web_Scraping import scraper_analyzers
-    from tldw_Server_API.app.core.Web_Scraping.outbound_policy import WebOutboundPolicyDecision
 
     analysis = _sample_analysis(js_required=True)
     _force_article_default_plan(monkeypatch, article)
@@ -272,18 +299,21 @@ async def test_article_preflight_js_advice_is_attached_without_browser(monkeypat
     monkeypatch.setattr(scraper_analyzers, "run_analysis", lambda *_args, **_kwargs: analysis)
     monkeypatch.setattr(article, "async_playwright", lambda: _FakePlaywright())
     monkeypatch.setattr(article, "convert_html_to_markdown", lambda content: content)
-
-    async def allow(_url: str, **kwargs: Any) -> WebOutboundPolicyDecision:
-        return WebOutboundPolicyDecision(
-            allowed=True,
-            mode="compat",
-            reason="allowed",
-            stage=str(kwargs.get("stage", "pre_fetch")),
-            source=str(kwargs.get("source", "article_extract")),
-        )
-
-    monkeypatch.setattr(article, "decide_web_outbound_policy", allow)
-    monkeypatch.setattr(article, "_fetch_with_curl", lambda *_args, **_kwargs: pytest.fail("curl should not run"))
+    monkeypatch.setattr(
+        article,
+        "_ARTICLE_POLICY_CHECKER",
+        _FakeArticlePolicyChecker(
+            PolicyDecision(
+                allowed=True,
+                mode="compat",
+                reason="allowed",
+                stage="pre_fetch",
+                source="article_extract",
+            )
+        ),
+    )
+    fetch_client = _FakeArticleFetchClient(AssertionError("lightweight fetch should not run"))
+    monkeypatch.setattr(article, "_ARTICLE_FETCH_CLIENT", fetch_client)
     monkeypatch.setattr(article, "http_fetch", lambda *_args, **_kwargs: pytest.fail("http_fetch should not run"))
     monkeypatch.setattr(
         article,
@@ -293,6 +323,7 @@ async def test_article_preflight_js_advice_is_attached_without_browser(monkeypat
 
     result = await article.scrape_article("https://example.com/spa")
 
+    assert fetch_client.requests == []
     assert result["preflight_analysis"] == {
         "analysis": analysis,
         "advice": {"backend": "auto", "method": "playwright", "notes": ["js_required"]},
