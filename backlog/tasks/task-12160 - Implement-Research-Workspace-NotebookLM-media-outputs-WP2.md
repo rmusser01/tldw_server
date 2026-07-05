@@ -4,7 +4,7 @@ title: Implement Research Workspace NotebookLM media outputs WP2
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-07-05 09:37'
+updated_date: '2026-07-05 09:45'
 labels: []
 dependencies: []
 references:
@@ -43,6 +43,8 @@ Task 5 complete: implemented infographic output processing through ImageAdapter.
 Task 5 review fixes: preserved original worker errors when failed-artifact marking fails, mapped FileArtifactsError public codes/retryability through the Research Workspace job error contract, rejected malformed job ids before persistence, and rejected non-PNG image adapter exports before writing output artifacts. Verification: red regression pytest failed 4 focused tests; green focused regression pytest passed 4 tests; full pytest tldw_Server_API/tests/Research_Workspace/test_output_jobs_worker.py -v passed 18 tests; git diff --check passed; Bandit output_jobs.py passed with 0 findings (/tmp/bandit_task12160_task5_review_fix.json).
 
 Task 5 final hardening: required infographic exports to have PNG magic bytes in addition to acceptable MIME, covering adapters that omit content_type before durable persistence. Verification: red pytest failed test_infographic_worker_rejects_non_png_bytes_when_image_export_omits_content_type; green focused pytest passed 2 tests; full pytest tldw_Server_API/tests/Research_Workspace/test_output_jobs_worker.py -v passed 19 tests; git diff --check passed; Bandit output_jobs.py passed with 0 findings (/tmp/bandit_task12160_task5_png_signature.json).
+
+Task 6 complete: routed video_overview jobs to real backend narrated slideshow generation using SlidesGenerator, SlidesDatabase, per-slide TTS MP3 output artifacts, direct render_presentation_video MP4 rendering, and final Collections output artifact persistence from the renderer storage_path. Added complete/failed workspace artifact updates with durable export refs and sanitized producer metadata. Verification: red focused pytest failed with research_workspace_video_overview_not_implemented; green focused video pytest passed; focused render-failure pytest passed; full pytest tldw_Server_API/tests/Research_Workspace/test_output_jobs_worker.py -v passed 21 tests; git diff --check passed; Bandit output_jobs.py passed with 0 findings (/tmp/bandit_task12160_task6_video_overview.json).
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
