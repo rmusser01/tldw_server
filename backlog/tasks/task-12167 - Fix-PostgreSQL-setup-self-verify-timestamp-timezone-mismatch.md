@@ -1,5 +1,5 @@
 ---
-id: TASK-12160
+id: TASK-12167
 title: Fix PostgreSQL setup self-verify timestamp timezone mismatch
 status: Done
 labels:
