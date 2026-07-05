@@ -101,6 +101,7 @@ async def test_scrape_article_backend_playwright_skips_httpx(monkeypatch):
 @pytest.mark.asyncio
 async def test_scrape_article_backend_curl_uses_curl(monkeypatch):
     from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as ael
+    from tldw_Server_API.app.core.Web_Scraping.runtime import FetchResponse
     from tldw_Server_API.app.core.Security import egress as egress_module
 
     monkeypatch.setattr(
@@ -137,21 +138,25 @@ async def test_scrape_article_backend_curl_uses_curl(monkeypatch):
 
     monkeypatch.setattr(ael, "resolve_handler", lambda _: fake_handler)
 
-    calls = {"curl": 0}
+    class FakeFetchClient:
+        def __init__(self):
+            self.requests = []
 
-    def fake_curl_fetch(*args, **kwargs):
-        calls["curl"] += 1
-        return {
-            "status": 200,
-            "text": "<html><body>ok</body></html>",
-            "headers": {},
-            "backend": "curl",
-        }
+        def fetch(self, request):
+            self.requests.append(request)
+            return FetchResponse(
+                url=request.url,
+                status=200,
+                text="<html><body>ok</body></html>",
+                headers={},
+                backend=request.backend,
+            )
 
-    monkeypatch.setattr(ael, "_fetch_with_curl", fake_curl_fetch)
+    fetch_client = FakeFetchClient()
+    monkeypatch.setattr(ael, "_ARTICLE_FETCH_CLIENT", fetch_client)
 
     result = await ael.scrape_article("https://example.com/path")
-    assert calls["curl"] == 1
+    assert fetch_client.requests[0].backend == "curl"
     assert result["content"] == "handled-content"
 
 

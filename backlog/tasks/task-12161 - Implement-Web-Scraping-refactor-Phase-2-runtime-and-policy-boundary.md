@@ -28,7 +28,7 @@ modified_files:
 - tldw_Server_API/tests/Web_Scraping/test_phase2_runtime_adapters.py
 - tldw_Server_API/tests/Web_Scraping/test_phase2_article_runtime_boundary.py
 - tldw_Server_API/tests/Web_Scraping/test_router_backend_selection.py
-updated_date: 2026-07-05 06:26
+updated_date: 2026-07-05 06:35
 ---
 
 ## Description
@@ -42,9 +42,9 @@ Execute the approved Phase 2 runtime and policy boundary implementation plan. Ad
 - [x] #1 Runtime contracts and import-boundary tests are implemented.
 - [x] #2 Concrete policy adapter lives outside runtime and delegates to existing outbound policy.
 - [x] #3 Default fetch adapter preserves central http_client simplified GET mode, curl backend support, and response normalization.
-- [ ] #4 Article scrape path uses runtime policy/fetch adapters while preserving policy-before-preflight order, curl-to-httpx fallback, preflight payloads, public return dicts, and public function signature.
-- [ ] #5 Focused Phase 2 tests and existing compatibility/hardening tests pass.
-- [ ] #6 Bandit is run on touched Python scope and new findings are fixed or documented if pre-existing.
+- [x] #4 Article scrape path uses runtime policy/fetch adapters while preserving policy-before-preflight order, curl-to-httpx fallback, preflight payloads, public return dicts, and public function signature.
+- [x] #5 Focused Phase 2 tests and existing compatibility/hardening tests pass.
+- [x] #6 Bandit is run on touched Python scope and new findings are fixed or documented if pre-existing.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -64,6 +64,7 @@ Follow Docs/superpowers/plans/2026-07-05-web-scraping-phase-2-runtime-policy-bou
 2026-07-05: Started Task 3 review hardening follow-up. Scope limited to adding timeout forwarding assertion in test_phase2_runtime_adapters.py and switching runtime/fetch.py elapsed duration measurement from time.time() to time.monotonic().
 2026-07-05: Task 3 review hardening verification completed. Red run after adding monotonic elapsed test failed as expected: test_default_fetch_client_measures_elapsed_with_monotonic_clock expected 2.5 but saw a near-zero time.time() delta. Green run: /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest -q --tb=short tldw_Server_API/tests/Web_Scraping/test_phase2_runtime_adapters.py -> 4 passed, 14 warnings. Import-boundary run: /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest -q --tb=short tldw_Server_API/tests/Web_Scraping/test_phase2_runtime_contracts.py::test_runtime_package_does_not_import_legacy_wrappers_or_policy_modules -> 1 passed, 8 warnings. Bandit full touched scope wrote /tmp/bandit_task3_fetch_adapter_hardening.json and reported only LOW B101 pytest assert findings in test_phase2_runtime_adapters.py; production runtime-only scan wrote /tmp/bandit_task3_fetch_adapter_hardening_runtime.json and had no results. git diff --check exited 0.
 2026-07-05: Task 4 concrete outbound policy adapter completed. Scope limited to tldw_Server_API/app/core/Web_Scraping/policy/__init__.py, tldw_Server_API/app/core/Web_Scraping/policy/adapters.py, and policy-adapter tests in test_phase2_runtime_adapters.py; runtime package and Article_Extractor_Lib intentionally left untouched. Red run: /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest -q --tb=short tldw_Server_API/tests/Web_Scraping/test_phase2_runtime_adapters.py -> expected ModuleNotFoundError for tldw_Server_API.app.core.Web_Scraping.policy after new tests. Green run: /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest -q --tb=short tldw_Server_API/tests/Web_Scraping/test_phase2_runtime_adapters.py tldw_Server_API/tests/Web_Scraping/test_phase2_runtime_contracts.py -> 58 passed, 122 warnings. Bandit production scan: /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m bandit -r tldw_Server_API/app/core/Web_Scraping/policy -f json -o /tmp/bandit_task4_policy_adapter.json -> exit 0, no findings.
+2026-07-05: Task 5 article runtime boundary wiring completed. Added focused article boundary tests for runtime policy-before-preflight blocking, runtime httpx fetch, curl-to-httpx fallback, and TLS preflight curl advice. Updated scrape_article to use DefaultWebOutboundPolicyChecker and DefaultFetchClient via article-local adapters while preserving preflight ordering and downstream extraction/Playwright behavior. Verification: red run of test_phase2_article_runtime_boundary.py failed on missing _ARTICLE_POLICY_CHECKER as expected. Green runs: test_phase2_article_runtime_boundary.py -> 4 passed, 14 warnings; test_router_backend_selection.py -> 3 passed, 13 warnings; test_phase2_runtime_adapters.py plus test_phase2_runtime_contracts.py -> 58 passed, 122 warnings. Bandit production scan of Article_Extractor_Lib.py wrote /tmp/bandit_task5_article_runtime.json and reported no findings. git diff --check exited 0.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
