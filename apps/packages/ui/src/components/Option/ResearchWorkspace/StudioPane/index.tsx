@@ -3,6 +3,8 @@ import { useTranslation } from "react-i18next"
 import { Link } from "react-router-dom"
 import {
   Headphones,
+  Video,
+  Image,
   FileText,
   GitBranch,
   FileSpreadsheet,
@@ -117,6 +119,8 @@ export { estimateGenerationSeconds, estimateGenerationTokens, estimateGeneration
 // Icon mapping for artifact types
 const ARTIFACT_TYPE_ICONS: Record<ArtifactType, React.ElementType> = {
   audio_overview: Headphones,
+  video_overview: Video,
+  infographic: Image,
   summary: FileText,
   mindmap: GitBranch,
   report: FileSpreadsheet,
@@ -142,6 +146,22 @@ const OUTPUT_BUTTONS: {
       OUTPUT_TYPES.find((config) => config.type === "audio_overview")
         ?.description || "Generate a spoken summary of your sources",
     icon: Headphones
+  },
+  {
+    type: "video_overview",
+    label: "Video Overview",
+    description:
+      OUTPUT_TYPES.find((config) => config.type === "video_overview")
+        ?.description || "Generate a narrated slideshow video from your sources",
+    icon: Video
+  },
+  {
+    type: "infographic",
+    label: "Infographic",
+    description:
+      OUTPUT_TYPES.find((config) => config.type === "infographic")
+        ?.description || "Generate an infographic image from your sources",
+    icon: Image
   },
   {
     type: "summary",
@@ -226,7 +246,15 @@ const OUTPUT_GROUPS: Array<{
   {
     id: "notebook-basics",
     label: "Notebook basics",
-    types: ["summary", "audio_overview", "mindmap", "flashcards", "quiz"]
+    types: [
+      "summary",
+      "audio_overview",
+      "video_overview",
+      "infographic",
+      "mindmap",
+      "flashcards",
+      "quiz"
+    ]
   },
   {
     id: "reports-and-tables",
@@ -244,6 +272,8 @@ const OUTPUT_GROUPS: Array<{
 const PRIMARY_OUTPUT_TYPES = new Set<ArtifactType>([
   "summary",
   "audio_overview",
+  "video_overview",
+  "infographic",
   "mindmap",
   "flashcards",
   "quiz"
@@ -526,6 +556,18 @@ const MindMapArtifactViewer = React.lazy(() =>
 const DataTableArtifactViewer = React.lazy(() =>
   import("./ArtifactModalContent").then((module) => ({
     default: module.DataTableArtifactViewer
+  }))
+)
+
+const VideoOverviewArtifactViewer = React.lazy(() =>
+  import("./ArtifactModalContent").then((module) => ({
+    default: module.VideoOverviewArtifactViewer
+  }))
+)
+
+const InfographicArtifactViewer = React.lazy(() =>
+  import("./ArtifactModalContent").then((module) => ({
+    default: module.InfographicArtifactViewer
   }))
 )
 
@@ -921,7 +963,9 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
 
   const contextualAudioSettingsVisible =
     activeOutputType === "audio_overview" ||
-    generatingOutputType === "audio_overview"
+    activeOutputType === "video_overview" ||
+    generatingOutputType === "audio_overview" ||
+    generatingOutputType === "video_overview"
   const studioControlSize = isMobile ? "large" : "small"
   const summaryUsesDirectSourceGeneration =
     activeOutputType === "summary" || generatingOutputType === "summary"
@@ -1138,7 +1182,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
         return
       }
 
-      if (type === "audio_overview") {
+      if (type === "audio_overview" || type === "video_overview") {
         setShowTtsSettings(true)
       }
       await handleGenerateOutput(type, options)
@@ -1311,6 +1355,34 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
           t("playground:studio.loadingOutputViewer", "Loading output viewer...")
         ),
         ...responsiveModalProps(980),
+        footer: null,
+        icon: null
+      })
+      return
+    }
+
+    if (artifact.type === "video_overview") {
+      Modal.info({
+        title: artifact.title,
+        content: renderArtifactModalContent(
+          <VideoOverviewArtifactViewer artifact={artifact} />,
+          t("playground:studio.loadingOutputViewer", "Loading output viewer...")
+        ),
+        ...responsiveModalProps(960),
+        footer: null,
+        icon: null
+      })
+      return
+    }
+
+    if (artifact.type === "infographic") {
+      Modal.info({
+        title: artifact.title,
+        content: renderArtifactModalContent(
+          <InfographicArtifactViewer artifact={artifact} />,
+          t("playground:studio.loadingOutputViewer", "Loading output viewer...")
+        ),
+        ...responsiveModalProps(960),
         footer: null,
         icon: null
       })

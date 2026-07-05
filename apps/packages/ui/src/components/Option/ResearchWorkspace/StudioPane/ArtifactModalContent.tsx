@@ -160,6 +160,77 @@ export const DataTableArtifactViewer: React.FC<{
   )
 }
 
+const getArtifactPreviewUrl = (
+  artifact: GeneratedArtifact,
+  formats: string[]
+) => {
+  const normalizedFormats = new Set(
+    formats.map((format) => format.trim().toLowerCase()).filter(Boolean)
+  )
+  const ref = artifact.exportRefs?.find((entry) => {
+    const format = String(entry.format || "").trim().toLowerCase()
+    const status = String(entry.status || "ready").trim().toLowerCase()
+    return (
+      normalizedFormats.has(format) &&
+      status !== "failed" &&
+      typeof entry.url === "string" &&
+      entry.url.trim().length > 0
+    )
+  })
+  return typeof ref?.url === "string" ? ref.url : null
+}
+
+export const VideoOverviewArtifactViewer: React.FC<{
+  artifact: GeneratedArtifact
+}> = ({ artifact }) => {
+  const src = getArtifactPreviewUrl(artifact, ["mp4"])
+  if (!src) {
+    return (
+      <MarkdownPreview
+        content={artifact.previewText || artifact.summary || ""}
+        size="sm"
+      />
+    )
+  }
+
+  return (
+    <div className="max-h-[70vh] overflow-y-auto">
+      <video
+        className="max-h-[62vh] w-full rounded border border-border bg-surface2"
+        controls
+        preload="metadata"
+      >
+        <source src={src} type={artifact.contentType || "video/mp4"} />
+        Your browser does not support the video element.
+      </video>
+    </div>
+  )
+}
+
+export const InfographicArtifactViewer: React.FC<{
+  artifact: GeneratedArtifact
+}> = ({ artifact }) => {
+  const src = getArtifactPreviewUrl(artifact, ["png"])
+  if (!src) {
+    return (
+      <MarkdownPreview
+        content={artifact.previewText || artifact.summary || ""}
+        size="sm"
+      />
+    )
+  }
+
+  return (
+    <div className="max-h-[70vh] overflow-auto">
+      <img
+        src={src}
+        alt={artifact.title || "Infographic"}
+        className="mx-auto max-h-[64vh] max-w-full rounded border border-border object-contain"
+      />
+    </div>
+  )
+}
+
 export const ProposalDeepResearchVerificationViewer: React.FC<{
   proposalArtifact: GeneratedArtifact
   verificationArtifact: GeneratedArtifact

@@ -10,6 +10,9 @@ const {
   mockRagSearch,
   mockSynthesizeSpeech,
   mockGenerateSlidesFromMedia,
+  mockSubmitWorkspaceOutput,
+  mockGetWorkspaceOutputStatus,
+  mockDownloadOutput,
   mockGenerateFlashcardsService,
   mockListVisualStyles,
   mockAddArtifact,
@@ -46,6 +49,9 @@ const {
   const ragSearch = vi.fn()
   const synthesizeSpeech = vi.fn()
   const generateSlidesFromMedia = vi.fn()
+  const submitWorkspaceOutput = vi.fn()
+  const getWorkspaceOutputStatus = vi.fn()
+  const downloadOutput = vi.fn()
   const generateFlashcardsService = vi.fn()
   const listVisualStyles = vi.fn()
   const addArtifact = vi.fn()
@@ -193,6 +199,9 @@ const {
     mockRagSearch: ragSearch,
     mockSynthesizeSpeech: synthesizeSpeech,
     mockGenerateSlidesFromMedia: generateSlidesFromMedia,
+    mockSubmitWorkspaceOutput: submitWorkspaceOutput,
+    mockGetWorkspaceOutputStatus: getWorkspaceOutputStatus,
+    mockDownloadOutput: downloadOutput,
     mockGenerateFlashcardsService: generateFlashcardsService,
     mockListVisualStyles: listVisualStyles,
     mockAddArtifact: addArtifact,
@@ -296,11 +305,13 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
     ragSearch: mockRagSearch,
     synthesizeSpeech: mockSynthesizeSpeech,
     generateSlidesFromMedia: mockGenerateSlidesFromMedia,
+    submitWorkspaceOutput: mockSubmitWorkspaceOutput,
+    getWorkspaceOutputStatus: mockGetWorkspaceOutputStatus,
     getMediaDetails: mockGetMediaDetails,
     upsertWorkspace: mockUpsertWorkspace,
     listVisualStyles: mockListVisualStyles,
     exportPresentation: vi.fn(),
-    downloadOutput: vi.fn()
+    downloadOutput: mockDownloadOutput
   }
 }))
 
@@ -536,6 +547,8 @@ describe("StudioPane Stage 3 information architecture and UX polish", () => {
 
     expect(screen.getByRole("button", { name: "Summary" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Audio Summary" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Video Overview" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Infographic" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Mind Map" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Flashcards" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Quiz" })).toBeInTheDocument()
@@ -555,6 +568,168 @@ describe("StudioPane Stage 3 information architecture and UX polish", () => {
     expect(
       await screen.findByText("Create a concise summary of key points")
     ).toBeInTheDocument()
+  })
+
+  it("disables blocked media outputs from capability health", () => {
+    const capabilities = buildUnknownResearchWorkspaceCapabilities()
+    capabilities.capabilities.video_overview_generation = {
+      status: "unavailable",
+      mode: "block",
+      dependencies: ["jobs", "slides", "tts"],
+      reason_code: "video_overview_unavailable"
+    }
+
+    renderExpandedStudioPane({ researchWorkspaceCapabilities: capabilities })
+
+    expect(
+      screen.getByText(
+        "Video Overview is unavailable while required services are offline."
+      )
+    ).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Video Overview" })).toBeDisabled()
+  })
+
+  it("submits and polls infographic output jobs through the workspace API", async () => {
+    mockSubmitWorkspaceOutput.mockResolvedValue({
+      job_id: 22,
+      status: "queued",
+      workspace_id: "workspace-a",
+      artifact_id: "artifact-backend",
+      artifact_type: "infographic"
+    })
+    mockGetWorkspaceOutputStatus.mockResolvedValue({
+      job_id: 22,
+      status: "completed",
+      progress_percent: 100,
+      progress_message: "completed",
+      workspace_id: "workspace-a",
+      artifact_id: "artifact-backend",
+      artifact_type: "infographic",
+      version: 2,
+      artifact: {
+        id: "artifact-backend",
+        workspace_id: "workspace-a",
+        artifact_type: "infographic",
+        title: "Workspace A Infographic",
+        status: "completed",
+        content_type: "image/png",
+        content: null,
+        preview_text: "Infographic preview",
+        summary: "Generated infographic",
+        total_tokens: 321,
+        total_cost_usd: 0.045,
+        producer_metadata: { backend: "image" },
+        source_lineage: [{ sourceId: "source-1", title: "DSPy Prompting Talk" }],
+        export_refs: [
+          {
+            id: "output-artifact-123",
+            fileId: "output-file-123",
+            format: "png",
+            status: "ready",
+            url: "/api/v1/outputs/output-file-123/download"
+          }
+        ],
+        created_at: "2026-02-18T10:00:00.000Z",
+        completed_at: "2026-02-18T10:01:00.000Z",
+        version: 2
+      }
+    })
+
+    renderExpandedStudioPane()
+
+    fireEvent.click(screen.getByRole("button", { name: "Infographic" }))
+
+    await waitFor(() => {
+      expect(mockSubmitWorkspaceOutput).toHaveBeenCalledWith(
+        "workspace-a",
+        expect.objectContaining({
+          artifact_type: "infographic",
+          source_ids: ["source-1"],
+          settings: expect.objectContaining({
+            model: "gpt-4o-mini",
+            title_hint: "Workspace A"
+          })
+        })
+      )
+    })
+    await waitFor(() => {
+      expect(mockGetWorkspaceOutputStatus).toHaveBeenCalledWith("workspace-a", 22)
+    })
+    expect(mockUpdateArtifactStatus).toHaveBeenCalledWith(
+      expect.stringMatching(/^artifact-/),
+      "completed",
+      expect.objectContaining({
+        serverId: "output-file-123",
+        contentType: "image/png",
+        previewText: "Infographic preview",
+        summary: "Generated infographic",
+        totalTokens: 321,
+        totalCostUsd: 0.045,
+        version: 2,
+        exportRefs: [
+          expect.objectContaining({
+            fileId: "output-file-123",
+            format: "png",
+            url: "/api/v1/outputs/output-file-123/download"
+          })
+        ]
+      })
+    )
+    expect(mockRagSearch).not.toHaveBeenCalled()
+  })
+
+  it("previews completed media artifacts from export refs and downloads by output artifact id", async () => {
+    mockDownloadOutput.mockResolvedValue(new Blob(["png"], { type: "image/png" }))
+    const createObjectUrlSpy = vi
+      .spyOn(URL, "createObjectURL")
+      .mockReturnValue("blob:infographic")
+    const revokeObjectUrlSpy = vi
+      .spyOn(URL, "revokeObjectURL")
+      .mockImplementation(() => {})
+    const anchorClickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => {})
+
+    workspaceStoreState.generatedArtifacts = [
+      {
+        id: "artifact-infographic",
+        type: "infographic",
+        title: "Infographic",
+        status: "completed",
+        contentType: "image/png",
+        exportRefs: [
+          {
+            id: "output-artifact-123",
+            fileId: "output-file-123",
+            format: "png",
+            status: "ready",
+            url: "/api/v1/outputs/output-file-123/download"
+          }
+        ],
+        createdAt: new Date("2026-02-18T10:00:00.000Z")
+      }
+    ]
+
+    renderExpandedStudioPane()
+
+    fireEvent.click(screen.getByRole("button", { name: "View" }))
+
+    expect(
+      await screen.findByRole("img", { name: "Infographic" })
+    ).toHaveAttribute("src", "/api/v1/outputs/output-file-123/download")
+
+    fireEvent.click(screen.getByRole("button", { name: "Download" }))
+
+    await waitFor(() => {
+      expect(mockDownloadOutput).toHaveBeenCalledWith("output-file-123")
+    })
+    expect(createObjectUrlSpy).toHaveBeenCalled()
+    expect(anchorClickSpy).toHaveBeenCalled()
+    expect(revokeObjectUrlSpy).toHaveBeenCalled()
+
+    createObjectUrlSpy.mockRestore()
+    revokeObjectUrlSpy.mockRestore()
+    anchorClickSpy.mockRestore()
   })
 
   it("groups Notebook-style outputs before advanced analysis outputs", async () => {
