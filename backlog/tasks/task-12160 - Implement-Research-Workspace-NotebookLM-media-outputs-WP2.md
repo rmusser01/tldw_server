@@ -4,7 +4,7 @@ title: Implement Research Workspace NotebookLM media outputs WP2
 status: Done
 assignee: []
 created_date: ''
-updated_date: 2026-07-05 09:45
+updated_date: 2026-07-05 20:10
 labels: []
 dependencies: []
 references:
@@ -19,13 +19,13 @@ Track WP2 work for real NotebookLM-style media outputs in Research Workspace: ba
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Video Overview generates a real backend-rendered narrated slideshow artifact with durable preview/download.
-- [ ] #2 Infographic generates a real image-backend PNG artifact with durable preview/download.
-- [ ] #3 Research Workspace output jobs are submitted, drained by a registered worker, and expose status/progress/errors.
-- [ ] #4 Final media and per-slide narration assets use durable output artifacts, not TTL file-artifact export URLs or generated-file ids alone.
-- [ ] #5 UI capability gates, pending states, completed previews, and unavailable states are covered by tests.
-- [ ] #6 Backend validation, worker, capability, and persistence paths are covered by tests.
-- [ ] #7 Bandit and targeted frontend/backend verification are recorded before completion.
+- [x] #1 Video Overview generates a real backend-rendered narrated slideshow artifact with durable preview/download.
+- [x] #2 Infographic generates a real image-backend PNG artifact with durable preview/download.
+- [x] #3 Research Workspace output jobs are submitted, drained by a registered worker, and expose status/progress/errors.
+- [x] #4 Final media and per-slide narration assets use durable output artifacts, not TTL file-artifact export URLs or generated-file ids alone.
+- [x] #5 UI capability gates, pending states, completed previews, and unavailable states are covered by tests.
+- [x] #6 Backend validation, worker, capability, and persistence paths are covered by tests.
+- [x] #7 Bandit and targeted frontend/backend verification are recorded before completion.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -49,21 +49,17 @@ Task 6 complete: routed video_overview jobs to real backend narrated slideshow g
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
-<!-- SECTION:FINAL_SUMMARY:END -->
-
-<!-- SECTION:FINAL_SUMMARY:END -->
-
+Implemented WP2 media outputs for Research Workspace. Video Overview now runs as a backend job that generates a narrated slideshow MP4 using slides, TTS narration output artifacts, and direct presentation rendering. Infographic now runs as a backend job that generates a PNG through the image generation backend and persists it as a durable output artifact. The WebUI exposes both Studio actions with capability gates, pending/progress handling, authenticated previews, and download controls. Focused backend/frontend verification and Bandit passed; optional local smoke with real TTS/image/ffmpeg backends was not run because those local services were not verified in this session.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
 
 ## Implementation Notes
