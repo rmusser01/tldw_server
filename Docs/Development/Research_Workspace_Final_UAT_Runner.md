@@ -21,11 +21,15 @@ Add this to a copied backend config used through `TLDW_CONFIG_FILE`:
 
 ```ini
 [API-Routes]
+stable_only = true
 enable = sandbox
 
 [Sandbox]
 enable_execution = true
 ```
+
+Keep `stable_only = true` in copied configs; omitting it changes the backend
+route-policy fallback for an explicitly present `[API-Routes]` section.
 
 For real Docker evidence, start the backend with fake execution disabled and a
 reachable Docker daemon:

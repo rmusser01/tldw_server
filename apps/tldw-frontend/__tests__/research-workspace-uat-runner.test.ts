@@ -203,7 +203,7 @@ describe("research-workspace-uat-runner", () => {
     expect(evidence.failureScope).toBe("environment")
     expect(evidence.requiredSetup).toContain("Local network permission")
     expect(evidence.requiredSetup).toContain(
-      "Sandbox-capable backend profile with [API-Routes] enable = sandbox for strict workspace sandbox diagnostics"
+      "Sandbox-capable backend profile with [API-Routes] stable_only = true and enable = sandbox for strict workspace sandbox diagnostics"
     )
     expect(evidence.fallback).toContain("in-app browser/CDP")
     expect(evidence.evidencePath).toContain(
