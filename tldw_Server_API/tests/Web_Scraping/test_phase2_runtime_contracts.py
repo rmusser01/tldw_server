@@ -317,9 +317,33 @@ def test_browser_launch_options_coerce_viewport_dimensions() -> None:
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
+    ("field_name", "value", "expected"),
+    [
+        ("viewport_width", 1280, 1280),
+        ("viewport_width", "1280", 1280),
+        ("viewport_width", 1280.0, 1280),
+        ("viewport_height", 720, 720),
+        ("viewport_height", "720", 720),
+        ("viewport_height", 720.0, 720),
+    ],
+)
+def test_browser_launch_options_accept_integral_viewport_dimensions(
+    field_name: str,
+    value: int | float | str,
+    expected: int,
+) -> None:
+    options = BrowserLaunchOptions(**{field_name: value})
+
+    assert getattr(options, field_name) == expected
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
     ("field_name", "value", "message"),
     [
         ("viewport_width", 0, "viewport_width must be >= 1"),
+        ("viewport_width", -1, "viewport_width must be >= 1"),
+        ("viewport_height", 0, "viewport_height must be >= 1"),
         ("viewport_height", -1, "viewport_height must be >= 1"),
     ],
 )
@@ -332,6 +356,17 @@ def test_browser_launch_options_reject_invalid_viewport_dimensions(
 
     with pytest.raises(ValueError, match=message):
         BrowserLaunchOptions(**kwargs)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("field_name", ["viewport_width", "viewport_height"])
+@pytest.mark.parametrize("value", [720.5, True, float("inf"), float("nan"), "wide"])
+def test_browser_launch_options_reject_non_integral_viewport_dimensions(
+    field_name: str,
+    value: bool | float | str,
+) -> None:
+    with pytest.raises(ValueError, match=field_name):
+        BrowserLaunchOptions(**{field_name: value})
 
 
 @pytest.mark.unit

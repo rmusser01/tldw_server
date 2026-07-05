@@ -2,8 +2,34 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from typing import Any, Protocol
+
+
+def _normalize_viewport_dimension(value: Any, *, field_name: str) -> int:
+    if isinstance(value, bool):
+        raise ValueError(f"{field_name} must be a finite integer")
+    if isinstance(value, int):
+        normalized = value
+    elif isinstance(value, float):
+        if not math.isfinite(value) or not value.is_integer():
+            raise ValueError(f"{field_name} must be a finite integer")
+        normalized = int(value)
+    elif isinstance(value, str):
+        try:
+            parsed = Decimal(value.strip())
+        except InvalidOperation as exc:
+            raise ValueError(f"{field_name} must be a finite integer") from exc
+        if not parsed.is_finite() or parsed != parsed.to_integral_value():
+            raise ValueError(f"{field_name} must be a finite integer")
+        normalized = int(parsed)
+    else:
+        raise ValueError(f"{field_name} must be a finite integer")
+    if normalized < 1:
+        raise ValueError(f"{field_name} must be >= 1")
+    return normalized
 
 
 class RuntimeBrowserPage(Protocol):
@@ -41,12 +67,7 @@ class BrowserLaunchOptions:
 
     def __post_init__(self) -> None:
         for field_name in ("viewport_width", "viewport_height"):
-            try:
-                normalized = int(getattr(self, field_name))
-            except (TypeError, ValueError) as exc:
-                raise ValueError(f"{field_name} must be an integer") from exc
-            if normalized < 1:
-                raise ValueError(f"{field_name} must be >= 1")
+            normalized = _normalize_viewport_dimension(getattr(self, field_name), field_name=field_name)
             object.__setattr__(self, field_name, normalized)
 
     @property
