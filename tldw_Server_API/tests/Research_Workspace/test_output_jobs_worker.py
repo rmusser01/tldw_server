@@ -129,6 +129,45 @@ def test_build_source_context_caps_title_and_content_text() -> None:
     assert context.source_lineage["context_truncated"] is True
 
 
+def test_build_source_context_treats_empty_media_content_as_unavailable() -> None:
+    output_jobs = _output_jobs_module()
+
+    class _WorkspaceDB:
+        def list_workspace_sources(self, workspace_id: str) -> list[dict[str, Any]]:
+            assert workspace_id == "ws-1"
+            return [
+                {
+                    "id": "src-1",
+                    "workspace_id": "ws-1",
+                    "media_id": 1,
+                    "title": "Source One",
+                }
+            ]
+
+    class _MediaDB:
+        def get_media_by_id(self, media_id: int, **kwargs: object) -> dict[str, object]:
+            assert media_id == 1
+            return {"id": 1, "content": ""}
+
+        def get_document_version(self, **kwargs: object) -> dict[str, object]:
+            return {"content": "document fallback must not be used"}
+
+        def get_latest_transcription(self, media_id: int) -> str:
+            return "transcript fallback must not be used"
+
+    with pytest.raises(output_jobs.ResearchWorkspaceOutputJobError) as excinfo:
+        output_jobs.build_research_workspace_output_source_context(
+            workspace_db=_WorkspaceDB(),
+            media_db=_MediaDB(),
+            workspace_id="ws-1",
+            source_ids=["src-1"],
+            max_chars=10_000,
+        )
+
+    assert excinfo.value.public_code == "source_context_empty"
+    assert excinfo.value.retryable is False
+
+
 def test_persist_output_bytes_creates_durable_output_artifact(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Any,
@@ -197,6 +236,52 @@ def test_persist_output_bytes_keeps_required_metadata_and_drops_paths(
     assert metadata["safe_note"] == "kept"
     assert "storage_path" not in metadata
     assert "/private/tmp/secret.png" not in metadata.values()
+
+
+def test_persist_output_bytes_sanitizes_nested_metadata_paths(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Any,
+    fake_collections_db: Any,
+) -> None:
+    output_jobs = _output_jobs_module()
+    monkeypatch.setattr(DatabasePaths, "get_user_outputs_dir", lambda _user_id: tmp_path)
+
+    output_jobs.persist_research_workspace_output_bytes(
+        collections_db=fake_collections_db,
+        user_id=42,
+        job_id=7,
+        artifact_type="infographic",
+        title="Infographic",
+        content=b"png-bytes",
+        format_="png",
+        content_type="image/png",
+        workspace_id="ws-1",
+        workspace_artifact_id="infographic-1",
+        metadata={
+            "nested": {
+                "safe": "kept",
+                "/tmp/key": "drop-key",
+                "source_path": "/tmp/secret.png",
+                "windows": "C:\\Users\\secret.png",
+            },
+            "items": [
+                "kept",
+                "/tmp/list-secret.png",
+                {"inner": "safe", "home": "~/secret.png", "asset_path": "relative"},
+            ],
+        },
+    )
+
+    raw_metadata = str(fake_collections_db.created[0]["metadata_json"])
+    metadata = json.loads(raw_metadata)
+    assert metadata["nested"] == {"safe": "kept"}
+    assert metadata["items"] == ["kept", {"inner": "safe"}]
+    assert "/tmp/" not in raw_metadata
+    assert "~/" not in raw_metadata
+    assert "C:\\Users" not in raw_metadata
+    assert "/tmp/key" not in raw_metadata
+    assert "source_path" not in raw_metadata
+    assert "asset_path" not in raw_metadata
 
 
 @pytest.mark.asyncio

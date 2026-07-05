@@ -45,6 +45,7 @@ _SOURCE_CONTEXT_MEDIA_ERRORS = (
 _REQUIRED_OUTPUT_METADATA_KEYS = frozenset(
     {"origin", "workspace_id", "workspace_artifact_id", "content_type", "byte_size"}
 )
+_UNSAFE_OUTPUT_METADATA_VALUE = object()
 
 
 @dataclass(frozen=True)
@@ -382,24 +383,7 @@ def _media_source_text(media_db: Any, media_id: int) -> str:
     text = _content_text((media or {}).get("content"))
     if text:
         return text
-
-    try:
-        version = media_db_api.get_document_version(
-            media_db,
-            media_id=media_id,
-            version_number=None,
-            include_content=True,
-        )
-    except _SOURCE_CONTEXT_MEDIA_ERRORS:
-        version = None
-    if version and version.get("content"):
-        return str(version.get("content") or "").strip()
-
-    try:
-        transcript = media_db_api.get_latest_transcription(media_db, media_id)
-    except _SOURCE_CONTEXT_MEDIA_ERRORS:
-        return ""
-    return str(transcript or "").strip()
+    return ""
 
 
 def _content_text(value: Any) -> str:
@@ -423,12 +407,45 @@ def _safe_caller_output_metadata(metadata: Mapping[str, Any] | None) -> dict[str
     for key, value in dict(metadata or {}).items():
         key_text = str(key)
         key_lower = key_text.lower()
-        if key_lower in _REQUIRED_OUTPUT_METADATA_KEYS or "path" in key_lower:
+        if (
+            key_lower in _REQUIRED_OUTPUT_METADATA_KEYS
+            or "path" in key_lower
+            or _looks_absolute_path_like(key_text)
+        ):
             continue
-        if isinstance(value, str) and _looks_absolute_path_like(value):
+        sanitized = _sanitize_output_metadata_value(value)
+        if sanitized is _UNSAFE_OUTPUT_METADATA_VALUE:
             continue
-        safe[key_text] = value
+        safe[key_text] = sanitized
     return safe
+
+
+def _sanitize_output_metadata_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        safe: dict[str, Any] = {}
+        for key, child in value.items():
+            key_text = str(key)
+            key_lower = key_text.lower()
+            if (
+                key_lower in _REQUIRED_OUTPUT_METADATA_KEYS
+                or "path" in key_lower
+                or _looks_absolute_path_like(key_text)
+            ):
+                continue
+            sanitized = _sanitize_output_metadata_value(child)
+            if sanitized is not _UNSAFE_OUTPUT_METADATA_VALUE:
+                safe[key_text] = sanitized
+        return safe
+    if isinstance(value, list | tuple):
+        safe_items = [
+            sanitized
+            for item in value
+            if (sanitized := _sanitize_output_metadata_value(item)) is not _UNSAFE_OUTPUT_METADATA_VALUE
+        ]
+        return safe_items
+    if isinstance(value, str) and _looks_absolute_path_like(value):
+        return _UNSAFE_OUTPUT_METADATA_VALUE
+    return value
 
 
 def _looks_absolute_path_like(value: str) -> bool:
