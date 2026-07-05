@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from .browser import BrowserLaunchOptions, RuntimeBrowserContext, RuntimeBrowserLauncher, RuntimeBrowserPage
 from .cancellation import is_cancellation
+from .fetch import DefaultFetchClient, FetchClient
 from .policy import OutboundPolicyChecker
 from .requests import FetchRequest, RuntimeRequestContext
 from .responses import FetchResponse, PolicyDecision
@@ -12,6 +13,8 @@ from .timeouts import RuntimeTimeouts
 
 __all__ = [
     "BrowserLaunchOptions",
+    "DefaultFetchClient",
+    "FetchClient",
     "FetchRequest",
     "FetchResponse",
     "OutboundPolicyChecker",
