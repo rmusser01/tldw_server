@@ -9,6 +9,8 @@ pytest_plugins = [
     "tldw_Server_API.tests._plugins.http_client_patch_guard",
     # Opt-in via TLDW_SINGLETON_GUARD=warn|error; no-op otherwise.
     "tldw_Server_API.tests._plugins.singleton_guard",
+    # Opt-in `reset_embeddings_singletons` fixture (not autouse).
+    "tldw_Server_API.tests._plugins.singleton_reset_fixtures",
 ]
 
 from collections.abc import Callable
