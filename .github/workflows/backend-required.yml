@@ -123,3 +123,17 @@ jobs:
         if: needs.changes.outputs.backend_changed == 'true'
         run: |
           python Helper_Scripts/ci/minimal_env_smoke.py --timeout 150
+
+      # OpenAPI contract drift gate (RF1 / #2590 class): recompute the schema
+      # fingerprint and fail if it drifts from the checked-in snapshot. A
+      # backend Pydantic model change that alters the API without updating the
+      # snapshot (and regenerating the frontend types) fails here. Runs in the
+      # backend workflow because it is guaranteed to run on drift-causing PRs
+      # and has the server deps installed.
+      - name: OpenAPI contract drift gate
+        if: needs.changes.outputs.backend_changed == 'true'
+        env:
+          PYTHONPATH: .
+        run: |
+          python Helper_Scripts/export_openapi_schema.py \
+            --check apps/tldw-frontend/lib/api/openapi.fingerprint.json
