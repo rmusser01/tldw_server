@@ -70,6 +70,31 @@ def test_resolve_provider_and_model_normalizes_llamacpp_catalog_alias() -> None:
 
 
 @pytest.mark.unit
+def test_resolve_provider_and_model_normalizes_llama_colon_model_prefix() -> None:
+    """Frontend provider-qualified model ids should route to llama.cpp."""
+    request = ChatCompletionRequest(
+        model="llama:gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf",
+        messages=[{"role": "user", "content": "Hello"}],
+    )
+
+    metrics_provider, metrics_model, selected_provider, selected_model, debug_info = (
+        resolve_provider_and_model(
+            request_data=request,
+            metrics_default_provider="openai",
+            normalize_default_provider="openai",
+        )
+    )
+
+    assert metrics_provider == "llama.cpp"
+    assert metrics_model == "gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf"
+    assert selected_provider == "llama.cpp"
+    assert selected_model == "gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf"
+    assert request.model == "gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf"
+    assert debug_info["raw"]["model"] == "llama:gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf"
+    assert debug_info["normalized"]["provider"] == "llama.cpp"
+
+
+@pytest.mark.unit
 def test_resolve_provider_and_model_catalog_unique_match_when_provider_not_explicit(monkeypatch):
     request = ChatCompletionRequest(
         model="deepseek-chat",

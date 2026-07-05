@@ -234,6 +234,12 @@ _PROVIDER_MODEL_CONFIG_FIELDS.update(
     }
 )
 
+_INLINE_MODEL_PROVIDER_NAMES = frozenset(
+    normalize_catalog_provider_for_chat(provider_name)
+    for provider_name in _adapter_registry.ChatProviderRegistry.DEFAULT_ADAPTERS
+)
+_NAMESPACED_MODEL_PROVIDERS = {"openrouter", "huggingface", "novita", "poe", "together"}
+
 _OPENROUTER_MODEL_DISCOVERY_TIMEOUT_SECONDS = 5.0
 _DEFAULT_ASSISTANT_SYSTEM_PROMPT = "You are a helpful AI assistant."
 
@@ -1223,6 +1229,26 @@ def infer_provider_from_model_catalog(
     return current_provider, debug
 
 
+def _split_inline_provider_model(model_str: str) -> tuple[str | None, str | None, str | None]:
+    """Split frontend provider-qualified model ids into provider/model parts."""
+    model_value = (model_str or "").strip()
+    if not model_value:
+        return None, None, None
+
+    if "/" in model_value:
+        model_provider, model_name = model_value.split("/", 1)
+        return model_provider.strip(), model_name.strip(), "/"
+
+    if ":" not in model_value:
+        return None, None, None
+
+    model_provider, model_name = model_value.split(":", 1)
+    normalized_provider = normalize_catalog_provider_for_chat(model_provider.strip().lower())
+    if normalized_provider not in _INLINE_MODEL_PROVIDER_NAMES:
+        return None, None, None
+    return model_provider.strip(), model_name.strip(), ":"
+
+
 def invalidate_model_alias_caches() -> None:
     """Invalidate cached model list and alias overrides for hot-reload.
 
@@ -1333,17 +1359,11 @@ def parse_provider_model_for_metrics(
     """
     model_str = getattr(request_data, "model", None) or "unknown"
     api_provider = getattr(request_data, "api_provider", None)
-    if "/" in model_str:
-        parts = model_str.split("/", 1)
-        if len(parts) == 2:
-            model_provider, model_name = parts
-            raw_provider = api_provider or model_provider
-            provider = normalize_catalog_provider_for_chat((raw_provider or "").strip().lower())
-            model = model_name
-        else:
-            raw_provider = api_provider or default_provider
-            provider = normalize_catalog_provider_for_chat((raw_provider or "").strip().lower())
-            model = model_str
+    model_provider, model_name, _ = _split_inline_provider_model(model_str)
+    if model_provider is not None and model_name is not None:
+        raw_provider = api_provider or model_provider
+        provider = normalize_catalog_provider_for_chat((raw_provider or "").strip().lower())
+        model = model_name
     else:
         raw_provider = api_provider or default_provider
         provider = normalize_catalog_provider_for_chat((raw_provider or "").strip().lower())
@@ -1375,10 +1395,8 @@ def normalize_request_provider_and_model(
         # prefer that; else honor api_provider, then default_provider.
         inline_provider: str | None = None
         inline_model_part: str | None = None
-        if "/" in model_str:
-            parts_for_alias = model_str.split("/", 1)
-            if len(parts_for_alias) == 2:
-                inline_provider, inline_model_part = parts_for_alias[0].strip(), parts_for_alias[1].strip()
+        inline_separator: str | None = None
+        inline_provider, inline_model_part, inline_separator = _split_inline_provider_model(model_str)
         provider_for_mapping = normalize_catalog_provider_for_chat(
             ((inline_provider or api_provider or default_provider) or "").strip().lower()
         )
@@ -1418,7 +1436,7 @@ def normalize_request_provider_and_model(
             allow_cross = _shared_is_truthy(os.getenv("CHAT_ALLOW_CROSS_PROVIDER_ALIASING", "0"))
             if inline_provider:
                 # Preserve inline provider prefix until final normalization below
-                combined = f"{inline_provider}/{resolved}"
+                combined = f"{inline_provider}{inline_separator or '/'}{resolved}"
                 request_data.model = combined
                 model_str = combined
             else:
@@ -1444,31 +1462,29 @@ def normalize_request_provider_and_model(
     provider = normalize_catalog_provider_for_chat(
         ((api_provider or default_provider) or "").strip().lower()
     )
-    if "/" in model_str:
-        parts = model_str.split("/", 1)
-        if len(parts) == 2:
-            model_provider, actual_model = parts
-            inline_provider_lower = normalize_catalog_provider_for_chat(
-                model_provider.strip().lower()
-            )
-            # If the api_provider was not explicitly set, allow inline provider to select it
-            if not api_provider:
-                provider = inline_provider_lower
-                # In this case, strip the inline provider prefix from the model
-                request_data.model = actual_model
-            else:
-                # api_provider is explicitly set on the request. For some providers,
-                # many valid model IDs include a namespace
-                # (e.g., "openai/gpt-4o-mini", "z-ai/glm-4.6"). Preserve the full
-                # namespaced model id unless the inline namespace matches "openrouter".
-                if provider in {"openrouter", "huggingface", "novita", "poe", "together"}:
-                    if provider == "openrouter" and inline_provider_lower == "openrouter":
-                        request_data.model = actual_model
-                    else:
-                        request_data.model = model_str
-                else:
-                    # Non-OpenRouter providers do not use namespaced model ids; strip prefix
+    model_provider, actual_model, inline_separator = _split_inline_provider_model(model_str)
+    if model_provider is not None and actual_model is not None:
+        inline_provider_lower = normalize_catalog_provider_for_chat(
+            model_provider.strip().lower()
+        )
+        # If the api_provider was not explicitly set, allow inline provider to select it
+        if not api_provider:
+            provider = inline_provider_lower
+            # In this case, strip the inline provider prefix from the model
+            request_data.model = actual_model
+        else:
+            # api_provider is explicitly set on the request. For some providers,
+            # many valid model IDs include a namespace
+            # (e.g., "openai/gpt-4o-mini", "z-ai/glm-4.6"). Preserve slash
+            # namespaces unless the inline namespace is the provider itself.
+            if provider in _NAMESPACED_MODEL_PROVIDERS and inline_separator == "/":
+                if provider == "openrouter" and inline_provider_lower == "openrouter":
                     request_data.model = actual_model
+                else:
+                    request_data.model = model_str
+            else:
+                # Non-namespaced providers do not use provider-qualified model ids; strip prefix
+                request_data.model = actual_model
     return provider
 
 
