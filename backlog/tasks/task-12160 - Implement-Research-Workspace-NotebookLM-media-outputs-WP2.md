@@ -1,15 +1,14 @@
 ---
 id: TASK-12160
 title: Implement Research Workspace NotebookLM media outputs WP2
-status: In Progress
+status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-07-05 09:45'
+updated_date: 2026-07-05 09:45
 labels: []
 dependencies: []
 references:
-  - >-
-    Docs/superpowers/specs/2026-07-05-research-workspace-notebooklm-media-outputs-wp2-design.md
+- Docs/superpowers/specs/2026-07-05-research-workspace-notebooklm-media-outputs-wp2-design.md
 ---
 
 ## Description
@@ -76,4 +75,5 @@ Task 7 starting: frontend contract slice for media-output artifact types, capabi
 Task 7 complete: added frontend media artifact types/output config, Research Workspace media capability IDs/mapping, and workspace output submit/status API client types and methods. Also corrected stale path-encoding tests to use valid space-containing IDs and added explicit slash-rejection coverage for the current path-safety contract. Verification: red focused Vitest failed for missing media capability mapping and missing submitWorkspaceOutput method; package dependencies were restored with bun install from apps because the worktree UI node_modules links were incomplete; green focused Vitest passed 2 files / 17 tests; git diff --check passed. Bandit not applicable for this frontend-only slice.
 Task 8 started: implementing Studio pane submission, polling, media preview, and download wiring for video overviews and infographics. Plan adjustment: the existing Stage 3 test mock intentionally replaces `OUTPUT_TYPES` with `[]`, so media button assertions will target labels and behavior from the Studio pane config rather than shared description strings.
 Task 8 complete: Studio pane now exposes Video Overview and Infographic output actions, capability-gates media generation, submits/polls backend workspace output jobs for media outputs, maps completed workspace artifacts into local generated artifacts, previews MP4/PNG export refs, and downloads media outputs via durable output artifact refs. Verification: red Stage 3 Vitest failed 4 intended media-output tests; green focused Vitest passed Stage 3 (24 tests); planned frontend verification passed 3 files / 41 tests; git diff --check passed. UI no-emit type check required NODE_OPTIONS=--max-old-space-size=8192 and now reports only pre-existing unrelated test type errors in ChatGreetingPicker, background-session-store, TldwChat.abort, and character-export.ssrf; no touched-file errors remain. Bandit not applicable for this frontend-only slice.
+WP2 verification complete. Backend focused pytest passed 68 tests across capability derivation, capability endpoint, output jobs API, output jobs worker, and startup registration. Frontend focused Vitest passed 3 files / 41 tests across media capabilities, workspace output API client, and Studio pane behavior. Bandit passed with 0 findings in the touched backend scope; report: /tmp/bandit_research_workspace_wp2.json. Optional local smoke was not run because local image generation, TTS, and ffmpeg readiness were not verified in this session; only the local llama.cpp API availability was known.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
