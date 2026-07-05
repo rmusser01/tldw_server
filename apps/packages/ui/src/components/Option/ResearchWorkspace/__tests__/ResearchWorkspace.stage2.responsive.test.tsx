@@ -91,6 +91,7 @@ const testState = {
   workspaceTag: "",
   initializeWorkspace: vi.fn(),
   createNewWorkspace: vi.fn(),
+  switchWorkspace: vi.fn(),
   addSources: vi.fn(),
   setSelectedSourceIds: vi.fn(),
   captureToCurrentNote: vi.fn(),
@@ -297,6 +298,9 @@ describe("ResearchWorkspace Stage 2 drawer responsiveness", () => {
     testState.generatedArtifacts = []
     testState.setSourceStatusByMediaId = vi.fn()
     testState.createNewWorkspace = vi.fn()
+    testState.switchWorkspace = vi.fn((workspaceId: string) => {
+      testState.workspaceId = workspaceId
+    })
     testState.clearCurrentNote = vi.fn()
     testState.loadNote = vi.fn()
     testState.addArtifact = vi.fn()
@@ -690,6 +694,51 @@ describe("ResearchWorkspace Stage 2 drawer responsiveness", () => {
     expect(mockWorkspaceHeaderProps.at(-1)?.agentTaskPrefill.description).toContain(
       "Alpha body copy"
     )
+    expect(
+      chromeStorageState.get(WEB_CLIPPER_PENDING_AGENT_TASK_STORAGE_KEY)
+    ).toBeUndefined()
+  })
+
+  it("switches to the routed workspace before opening a pending web clipper agent task", async () => {
+    testState.workspaceId = "workspace-current"
+    await writePendingWebClipAgentTaskRequest({
+      id: "handoff-2",
+      clipId: "clip-456",
+      noteId: "note-456",
+      workspaceId: "workspace-target",
+      workspaceNoteId: 84,
+      pageUrl: "https://example.com/target",
+      pageTitle: "Target Story",
+      extractPreview: "Target body copy",
+      hasScreenshot: true,
+      createdAt: "2026-07-05T00:00:00.000Z"
+    })
+    window.history.replaceState(
+      null,
+      "",
+      "/research-workspace?workspace=workspace-target&agent_task_handoff=web_clip"
+    )
+
+    const { rerender } = render(<ResearchWorkspace />)
+
+    await waitFor(() => {
+      expect(testState.switchWorkspace).toHaveBeenCalledWith("workspace-target")
+    })
+    expect(
+      chromeStorageState.get(WEB_CLIPPER_PENDING_AGENT_TASK_STORAGE_KEY)
+    ).toBeDefined()
+
+    rerender(<ResearchWorkspace />)
+
+    await waitFor(() => {
+      expect(
+        mockWorkspaceHeaderProps.at(-1)?.agentTaskHandoffOpenSignal
+      ).toBeGreaterThan(0)
+    })
+    expect(mockWorkspaceHeaderProps.at(-1)?.agentTaskPrefill).toMatchObject({
+      title: "Review captured page: Target Story",
+      description: expect.stringContaining("URL: https://example.com/target")
+    })
     expect(
       chromeStorageState.get(WEB_CLIPPER_PENDING_AGENT_TASK_STORAGE_KEY)
     ).toBeUndefined()

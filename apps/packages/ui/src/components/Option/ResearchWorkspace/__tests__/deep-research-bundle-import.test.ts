@@ -102,7 +102,7 @@ describe("Deep Research bundle import", () => {
         supported_claim_count: 1,
         unsupported_claim_count: 0
       },
-      sourceTrust: [{ source_id: "src_1", snapshot_policy: "full_artifact" }]
+      sourceTrust: [{ sourceId: "src_1", snapshotPolicy: "full_artifact" }]
     })
   })
 
@@ -262,7 +262,161 @@ describe("Deep Research bundle import", () => {
       MAX_IMPORT_LIST_ITEMS
     )
     expect(artifact.sourceLineage).toHaveLength(MAX_IMPORT_LIST_ITEMS)
-    expect(artifact.content).toContain(`Source inventory: ${MAX_IMPORT_LIST_ITEMS}`)
+    expect(artifact.content).toContain(
+      `Source inventory: ${MAX_IMPORT_LIST_ITEMS + 10} (${MAX_IMPORT_LIST_ITEMS} shown)`
+    )
+  })
+
+  it("normalizes retained bundle metadata before persisting artifact data", () => {
+    const oversizedText = `Oversized field ${"x".repeat(1200)}`
+    const oversizedSourceId = `src_${"x".repeat(300)}`
+    const noisyBundle = {
+      ...bundle,
+      claims: [
+        {
+          claim_id: "claim-1",
+          text: oversizedText,
+          focus_area: "background",
+          source_ids: ["src_1"],
+          citations: [{ source_id: "src_1", quote: oversizedText }],
+          metadata: { nested: oversizedText }
+        }
+      ],
+      source_inventory: [
+        {
+          source_id: oversizedSourceId,
+          title: oversizedText,
+          provider: "local_corpus",
+          metadata: { nested: oversizedText },
+          excerpt: oversizedText
+        }
+      ],
+      unsupported_claims: [
+        {
+          claim_id: "claim-2",
+          text: oversizedText,
+          focus_area: "background",
+          reason: "No supporting notes",
+          source_ids: ["src_1"],
+          citations: [{ source_id: "src_1", quote: oversizedText }],
+          metadata: { nested: oversizedText }
+        }
+      ],
+      contradictions: [
+        {
+          note_id: "note-1",
+          source_id: "src_1",
+          focus_area: "background",
+          marker: "however",
+          text: oversizedText,
+          metadata: { nested: oversizedText }
+        }
+      ],
+      skipped_sources: [
+        {
+          source_id: oversizedSourceId,
+          title: oversizedText,
+          reason: oversizedText,
+          metadata: { nested: oversizedText }
+        }
+      ],
+      failed_sources: [
+        {
+          source_id: oversizedSourceId,
+          title: oversizedText,
+          reason: oversizedText,
+          metadata: { nested: oversizedText }
+        }
+      ],
+      source_trust: [
+        {
+          source_id: "src_1",
+          title: oversizedText,
+          provider: "local_corpus",
+          source_type: "web_result",
+          trust_tier: "internal",
+          trust_label: "local_corpus",
+          snapshot_policy: "full_artifact",
+          warnings: ["full_source_snapshot_unavailable"],
+          metadata: { nested: oversizedText },
+          excerpt: oversizedText
+        }
+      ]
+    }
+
+    const artifact = buildDeepResearchBundleArtifactPayload({
+      bundle: noisyBundle,
+      returnContext
+    })
+    const deepResearch = artifact.data?.deepResearch as {
+      claims: unknown[]
+      sourceInventory: unknown[]
+      skippedSources: unknown[]
+      failedSources: unknown[]
+      unsupportedClaims: unknown[]
+      contradictions: unknown[]
+      sourceTrust: unknown[]
+    }
+    const serializedMetadata = JSON.stringify(deepResearch)
+
+    expect(deepResearch.sourceInventory).toEqual([
+      { sourceId: expect.any(String), title: expect.any(String) }
+    ])
+    expect(deepResearch.sourceInventory[0]).toMatchObject({
+      sourceId: expect.stringMatching(/^src_/)
+    })
+    expect(String((deepResearch.sourceInventory[0] as { sourceId: string }).sourceId))
+      .toHaveLength(128)
+    expect(deepResearch.skippedSources[0]).toMatchObject({
+      sourceId: expect.stringMatching(/^src_/),
+      reason: expect.any(String)
+    })
+    expect(
+      String((deepResearch.skippedSources[0] as { sourceId: string }).sourceId)
+    ).toHaveLength(128)
+    expect(
+      String((deepResearch.skippedSources[0] as { reason: string }).reason).length
+    ).toBeLessThanOrEqual(500)
+    expect(
+      String((deepResearch.failedSources[0] as { reason: string }).reason).length
+    ).toBeLessThanOrEqual(500)
+    expect(deepResearch.sourceTrust).toEqual([
+      {
+        sourceId: "src_1",
+        title: expect.any(String),
+        provider: "local_corpus",
+        sourceType: "web_result",
+        trustTier: "internal",
+        trustLabel: "local_corpus",
+        snapshotPolicy: "full_artifact",
+        warnings: ["full_source_snapshot_unavailable"]
+      }
+    ])
+    expect(deepResearch.unsupportedClaims[0]).toMatchObject({
+      claimId: "claim-2",
+      text: expect.any(String),
+      focusArea: "background",
+      reason: "No supporting notes",
+      sourceIds: ["src_1"]
+    })
+    expect(deepResearch.contradictions[0]).toMatchObject({
+      noteId: "note-1",
+      sourceId: "src_1",
+      focusArea: "background",
+      marker: "however",
+      text: expect.any(String)
+    })
+    expect(deepResearch.claims[0]).toMatchObject({
+      claimId: "claim-1",
+      text: expect.any(String),
+      focusArea: "background",
+      sourceIds: ["src_1"]
+    })
+    expect(serializedMetadata).not.toContain("metadata")
+    expect(serializedMetadata).not.toContain("excerpt")
+    expect(serializedMetadata).not.toContain("citations")
+    expect(serializedMetadata).not.toContain(oversizedText)
+    expect(serializedMetadata).not.toContain(oversizedSourceId)
   })
 
   it("bounds provenance copied from an existing source artifact", () => {

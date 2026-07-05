@@ -1303,6 +1303,7 @@ const ResearchWorkspaceBody: React.FC = () => {
   const setCurrentNote = useWorkspaceStore((s) => s.setCurrentNote)
   const loadNote = useWorkspaceStore((s) => s.loadNote)
   const duplicateWorkspace = useWorkspaceStore((s) => s.duplicateWorkspace)
+  const switchWorkspace = useWorkspaceStore((s) => s.switchWorkspace)
   const selectedSourceIds = useWorkspaceStore((s) => s.selectedSourceIds)
   const selectedSourceFolderIds = useWorkspaceStore(
     (s) => s.selectedSourceFolderIds
@@ -2343,11 +2344,18 @@ const ResearchWorkspaceBody: React.FC = () => {
     const search = getResearchWorkspaceSearchFromLocation(window.location)
     const params = new URLSearchParams(search)
     if (params.get(WEB_CLIP_AGENT_TASK_ROUTE_FLAG) !== "web_clip") return
+    const routeWorkspaceId = params.get("workspace")?.trim() || null
 
     let cancelled = false
     void readPendingWebClipAgentTaskRequest().then((request) => {
       if (cancelled || agentTaskHandoffAppliedRef.current) return
-      if (!request || request.workspaceId !== workspaceId) return
+      if (!request) return
+      if (request.workspaceId !== workspaceId) {
+        if (routeWorkspaceId === request.workspaceId) {
+          switchWorkspace(routeWorkspaceId)
+        }
+        return
+      }
 
       agentTaskHandoffAppliedRef.current = true
       setAgentTaskPrefill(buildWebClipAgentTaskPrefill(request))
@@ -2358,7 +2366,7 @@ const ResearchWorkspaceBody: React.FC = () => {
     return () => {
       cancelled = true
     }
-  }, [workspaceId])
+  }, [switchWorkspace, workspaceId])
 
   const handleImportDeepResearchBundle = React.useCallback(async () => {
     if (!activeDeepResearchReturnContext || !activeDeepResearchReturnKey) return
