@@ -126,6 +126,7 @@ from tldw_Server_API.app.services.mcp_hub_tool_registry import McpHubToolRegistr
 from tldw_Server_API.app.services.setup_mcp_tools_service import (
     McpToolsApplyRequest as ServiceMcpToolsApplyRequest,
     McpToolsApplyResult,
+    McpToolsValidationResult,
     SetupMcpToolsService,
 )
 
@@ -216,6 +217,8 @@ _FIRST_RUN_STEP_DATA_ALLOWED_KEYS = {
             "validated_at",
             "validation_message",
             "last_validation_run_id",
+            "sample_tool_name",
+            "external_status",
         }
     ),
 }
@@ -1062,6 +1065,26 @@ def _mcp_tools_status_response(data: dict[str, Any], *, status_value: str) -> Mc
         last_validation_run_id=(
             str(data["last_validation_run_id"]) if data.get("last_validation_run_id") is not None else None
         ),
+        sample_tool_name=str(data["sample_tool_name"]) if data.get("sample_tool_name") is not None else None,
+        external_status=str(data["external_status"]) if data.get("external_status") is not None else None,
+    )
+
+
+def _mcp_tools_validation_response(result: McpToolsValidationResult) -> McpToolsValidateResponse:
+    return McpToolsValidateResponse(
+        status=result.status,
+        validation_state=_mcp_tools_validation_state(result.validation_state),
+        profile_id=result.profile_id,
+        assignment_id=result.assignment_id,
+        catalog_version=result.catalog_version,
+        selected_pack_ids=result.selected_pack_ids,
+        selected_addon_ids=result.selected_addon_ids,
+        effective_tool_count=result.effective_tool_count,
+        validated_at=result.validated_at,
+        validation_message=result.validation_message,
+        last_validation_run_id=result.last_validation_run_id,
+        sample_tool_name=result.sample_tool_name,
+        external_status=result.external_status,
     )
 
 
@@ -1350,15 +1373,19 @@ async def apply_first_run_mcp_tools(
 async def validate_first_run_mcp_tools(
     payload: McpToolsValidateRequest,
     _guard: None = Depends(_require_mcp_tools_setup_or_admin_access),
+    service: SetupMcpToolsService = Depends(get_setup_mcp_tools_service),
 ) -> McpToolsValidateResponse:
     del payload
+    setup_completed = bool(setup_manager.get_status_snapshot().get("setup_completed"))
     state = await _run_first_run_store_call(lambda store: store.load())
-    _raise_if_terminal_first_run_state(state)
+    if not setup_completed:
+        _raise_if_terminal_first_run_state(state)
     data = _require_saved_mcp_tools_selection(state)
-    validation_payload = dict(data)
-    validation_payload["validation_state"] = McpToolsValidationState.SKIPPED.value
-    validation_payload["validation_message"] = "MCP tool validation execution is deferred."
-    validation_payload = _safe_mcp_tools_step_payload(validation_payload)
+    result = await service.validate_selection(saved_state=data)
+    if setup_completed:
+        return _mcp_tools_validation_response(result)
+
+    validation_payload = _safe_mcp_tools_step_payload(result.step_payload)
     try:
         updated = await _run_first_run_store_call(
             lambda store: store.update_step("mcp_tools", validation_payload)
@@ -1367,7 +1394,7 @@ async def validate_first_run_mcp_tools(
         raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     return _mcp_tools_status_response(
         _mcp_tools_step_data_from_state(updated),
-        status_value="skipped",
+        status_value=result.status,
     )
 
 
@@ -2373,15 +2400,13 @@ async def validate_admin_mcp_tools(
     _guard: AuthPrincipal = Depends(_require_system_configure_access),
     service: SetupMcpToolsService = Depends(get_setup_mcp_tools_service),
 ) -> McpToolsValidateResponse:
-    """Return a no-execution MCP tool validation placeholder through the admin surface."""
+    """Validate saved first-run MCP tool setup through the admin surface."""
 
-    del payload, service
+    del payload
     state = await _run_first_run_store_call(lambda store: store.load())
     data = _require_saved_mcp_tools_selection(state)
-    data = dict(data)
-    data["validation_state"] = McpToolsValidationState.SKIPPED.value
-    data["validation_message"] = "MCP tool validation execution is deferred."
-    return _mcp_tools_status_response(data, status_value="skipped")
+    result = await service.validate_selection(saved_state=data)
+    return _mcp_tools_validation_response(result)
 
 
 def _build_audio_recommendations_response(

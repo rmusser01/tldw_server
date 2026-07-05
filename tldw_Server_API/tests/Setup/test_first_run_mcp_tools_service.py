@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+from tldw_Server_API.app.core.Setup import first_run_mcp_tools
 from tldw_Server_API.app.core.Setup.first_run_mcp_tools import (
     CATALOG_VERSION,
     CONFIRMATION_VERSION,
@@ -109,10 +110,29 @@ class FakeToolRegistry:
         return deepcopy(self.entries)
 
 
+class FakeToolExecutor:
+    def __init__(
+        self,
+        *,
+        results: dict[str, Any] | None = None,
+        failures: dict[str, Exception] | None = None,
+    ) -> None:
+        self.results = results or {"mcp.tools.list": {"tools": []}}
+        self.failures = failures or {}
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+
+    async def __call__(self, tool_name: str, arguments: dict[str, Any]) -> Any:
+        self.calls.append((tool_name, deepcopy(arguments)))
+        if tool_name in self.failures:
+            raise self.failures[tool_name]
+        return deepcopy(self.results.get(tool_name, {}))
+
+
 class FakeMcpHub:
     def __init__(self) -> None:
         self.permission_profiles: list[dict[str, Any]] = []
         self.policy_assignments: list[dict[str, Any]] = []
+        self.external_servers: list[dict[str, Any]] = []
         self.created_profiles: list[dict[str, Any]] = []
         self.updated_profiles: list[dict[str, Any]] = []
         self.created_assignments: list[dict[str, Any]] = []
@@ -156,6 +176,9 @@ class FakeMcpHub:
                 )
                 return row
         return None
+
+    async def list_external_servers(self) -> list[dict[str, Any]]:
+        return deepcopy(self.external_servers)
 
     async def list_policy_assignments(
         self,
@@ -268,6 +291,22 @@ def _default_assignment(
         "approval_policy_id": approval_policy_id,
         "is_active": is_active,
     }
+
+
+async def _applied_service_and_state(
+    *,
+    first_run_state: FirstRunState,
+    fake_hub: FakeMcpHub,
+    fake_registry: FakeToolRegistry,
+    tool_executor: FakeToolExecutor | None = None,
+) -> tuple[SetupMcpToolsService, dict[str, Any]]:
+    service = SetupMcpToolsService(hub=fake_hub, tool_registry=fake_registry)
+    service.tool_executor = tool_executor or FakeToolExecutor()
+    result = await service.apply_selection(
+        state=first_run_state,
+        request=McpToolsApplyRequest(selected_pack_ids=["research"], selected_addon_ids=[]),
+    )
+    return service, result.step_payload
 
 
 @pytest.mark.asyncio
@@ -606,6 +645,8 @@ async def test_step_payload_contains_only_allowlisted_mcp_tools_fields(
         "validated_at",
         "validation_message",
         "last_validation_run_id",
+        "sample_tool_name",
+        "external_status",
     }
     assert result.step_payload["profile_id"] == result.profile_id
     assert result.step_payload["assignment_id"] == result.assignment_id
@@ -615,3 +656,201 @@ async def test_step_payload_contains_only_allowlisted_mcp_tools_fields(
     assert "effective_tools" not in result.step_payload
     assert "policy_document" not in result.step_payload
     assert "endpoint_config" not in result.step_payload
+
+
+@pytest.mark.asyncio
+async def test_validate_runs_builtin_sample_when_no_external_servers(
+    first_run_state: FirstRunState,
+    fake_hub: FakeMcpHub,
+    fake_registry: FakeToolRegistry,
+) -> None:
+    service, saved_mcp_state = await _applied_service_and_state(
+        first_run_state=first_run_state,
+        fake_hub=fake_hub,
+        fake_registry=fake_registry,
+        tool_executor=FakeToolExecutor(results={"mcp.tools.list": {"tools": []}}),
+    )
+
+    result = await service.validate_selection(saved_state=saved_mcp_state)
+
+    assert result.validation_state == "built_in_passed"
+    assert result.sample_tool_name == "mcp.tools.list"
+    assert result.external_status == "not_configured"
+    assert result.validation_message == "Built-in MCP tool check passed."
+
+
+@pytest.mark.asyncio
+async def test_validate_builtin_sample_is_denied_if_removed_from_generated_allowed_tools(
+    first_run_state: FirstRunState,
+    fake_hub: FakeMcpHub,
+    fake_registry: FakeToolRegistry,
+) -> None:
+    executor = FakeToolExecutor()
+    service, saved_mcp_state = await _applied_service_and_state(
+        first_run_state=first_run_state,
+        fake_hub=fake_hub,
+        fake_registry=fake_registry,
+        tool_executor=executor,
+    )
+    fake_hub.permission_profiles[0]["policy_document"]["allowed_tools"].remove("mcp.tools.list")
+
+    result = await service.validate_selection(saved_state=saved_mcp_state)
+
+    assert result.validation_state == "failed"
+    assert result.sample_tool_name == "mcp.tools.list"
+    assert executor.calls == []
+
+
+@pytest.mark.asyncio
+async def test_validate_no_safe_external_tool_is_not_error(
+    first_run_state: FirstRunState,
+    fake_hub: FakeMcpHub,
+    fake_registry: FakeToolRegistry,
+) -> None:
+    fake_hub.external_servers = [{"id": "docs", "enabled": True}]
+    fake_registry.entries = [
+        *fake_registry.entries,
+        {
+            "tool_name": "external.docs.write",
+            "module": "external_federation",
+            "metadata_source": "explicit",
+            "risk_class": "high",
+        },
+    ]
+    service, saved_mcp_state = await _applied_service_and_state(
+        first_run_state=first_run_state,
+        fake_hub=fake_hub,
+        fake_registry=fake_registry,
+        tool_executor=FakeToolExecutor(
+            results={
+                "mcp.tools.list": {
+                    "tools": [
+                        {
+                            "name": "external.docs.write",
+                            "inputSchema": {"properties": {}, "required": []},
+                        }
+                    ]
+                },
+                "external.tools.refresh": {"ok": True},
+            },
+        ),
+    )
+
+    result = await service.validate_selection(saved_state=saved_mcp_state)
+
+    assert result.validation_state == "no_safe_external_tool"
+    assert result.external_status == "no_safe_tool"
+    assert result.validation_message == "No safe no-argument external read-only tool was available."
+
+
+@pytest.mark.asyncio
+async def test_validate_external_discovery_failure_is_safe_and_redacted(
+    first_run_state: FirstRunState,
+    fake_hub: FakeMcpHub,
+    fake_registry: FakeToolRegistry,
+) -> None:
+    fake_hub.external_servers = [{"id": "docs", "enabled": True}]
+    service, saved_mcp_state = await _applied_service_and_state(
+        first_run_state=first_run_state,
+        fake_hub=fake_hub,
+        fake_registry=fake_registry,
+        tool_executor=FakeToolExecutor(
+            results={"mcp.tools.list": {"tools": []}},
+            failures={
+                "external.tools.refresh": RuntimeError(
+                    "Traceback /Users/me/.ssh token=abc https://user:secret@example.test && rm -rf /"
+                )
+            },
+        ),
+    )
+
+    result = await service.validate_selection(saved_state=saved_mcp_state)
+
+    assert result.validation_state == "external_discovery_incomplete"
+    assert result.validation_message == "External discovery did not complete."
+    assert "/Users" not in result.validation_message
+    assert "secret" not in result.validation_message
+    assert "Traceback" not in result.validation_message
+    assert "rm -rf" not in result.validation_message
+
+
+def test_safe_external_validation_candidate_requires_explicit_low_risk_no_arg_read_only_metadata() -> None:
+    entry = {
+        "tool_name": "external.docs.read",
+        "module": "external_federation",
+        "metadata_source": "explicit",
+        "risk_class": "low",
+        "mutates_state": False,
+        "uses_filesystem": False,
+        "uses_processes": False,
+        "capabilities": [],
+    }
+    tool_def = {"inputSchema": {"properties": {}, "required": []}}
+
+    assert first_run_mcp_tools.is_safe_external_validation_candidate(entry, tool_def) is True
+
+    for update in (
+        {"module": "notes"},
+        {"metadata_source": "heuristic"},
+        {"risk_class": "medium"},
+        {"mutates_state": True},
+        {"uses_filesystem": True},
+        {"uses_processes": True},
+        {"capabilities": ["filesystem.write"]},
+        {"capabilities": ["filesystem.delete"]},
+        {"capabilities": ["process.execute"]},
+    ):
+        unsafe = {**entry, **update}
+        assert first_run_mcp_tools.is_safe_external_validation_candidate(unsafe, tool_def) is False
+
+    required_arg_tool = {"inputSchema": {"properties": {"query": {"type": "string"}}, "required": ["query"]}}
+    assert first_run_mcp_tools.is_safe_external_validation_candidate(entry, required_arg_tool) is False
+
+
+@pytest.mark.asyncio
+async def test_validate_eligible_external_no_arg_read_tool_passes(
+    first_run_state: FirstRunState,
+    fake_hub: FakeMcpHub,
+    fake_registry: FakeToolRegistry,
+) -> None:
+    fake_hub.external_servers = [{"id": "docs", "enabled": True}]
+    fake_registry.entries = [
+        *fake_registry.entries,
+        {
+            "tool_name": "external.docs.read",
+            "module": "external_federation",
+            "metadata_source": "explicit",
+            "risk_class": "low",
+            "mutates_state": False,
+            "uses_filesystem": False,
+            "uses_processes": False,
+            "capabilities": [],
+        },
+    ]
+    executor = FakeToolExecutor(
+        results={
+            "mcp.tools.list": {
+                "tools": [
+                    {
+                        "name": "external.docs.read",
+                        "inputSchema": {"properties": {}, "required": []},
+                    }
+                ]
+            },
+            "external.tools.refresh": {"ok": True},
+            "external.docs.read": {"documents": []},
+        },
+    )
+    service, saved_mcp_state = await _applied_service_and_state(
+        first_run_state=first_run_state,
+        fake_hub=fake_hub,
+        fake_registry=fake_registry,
+        tool_executor=executor,
+    )
+
+    result = await service.validate_selection(saved_state=saved_mcp_state)
+
+    assert result.validation_state == "external_tool_passed"
+    assert result.external_status == "tool_passed"
+    assert result.sample_tool_name == "external.docs.read"
+    assert ("external.docs.read", {}) in executor.calls

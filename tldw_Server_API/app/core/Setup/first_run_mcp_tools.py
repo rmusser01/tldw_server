@@ -340,6 +340,26 @@ def compute_first_run_policy_hash(policy_document: Mapping[str, Any]) -> str:
     )
 
 
+def is_safe_external_validation_candidate(entry: Mapping[str, Any], tool_def: Mapping[str, Any]) -> bool:
+    """Return whether an external tool is safe to sample during setup validation."""
+
+    input_schema = tool_def.get("inputSchema")
+    input_schema = input_schema if isinstance(input_schema, Mapping) else {}
+    capabilities = set(_str_list(entry.get("capabilities")))
+    return (
+        entry.get("module") == "external_federation"
+        and entry.get("metadata_source") == "explicit"
+        and entry.get("risk_class") == "low"
+        and entry.get("mutates_state") is False
+        and entry.get("uses_filesystem") is False
+        and entry.get("uses_processes") is False
+        and "filesystem.write" not in capabilities
+        and "filesystem.delete" not in capabilities
+        and "process.execute" not in capabilities
+        and not input_schema.get("required")
+    )
+
+
 def _catalog_pack(
     pack: Mapping[str, Any],
     entries_by_name: Mapping[str, Mapping[str, Any]],

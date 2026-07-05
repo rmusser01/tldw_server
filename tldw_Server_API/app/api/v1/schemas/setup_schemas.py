@@ -310,6 +310,8 @@ class McpToolsValidateResponse(BaseModel):
     validated_at: str | None = None
     validation_message: str | None = None
     last_validation_run_id: str | None = None
+    sample_tool_name: str | None = None
+    external_status: str | None = None
 
 
 class SetupCompleteRequest(BaseModel):

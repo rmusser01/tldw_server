@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+import uuid
 from typing import Any, Literal
+
+from loguru import logger
 
 from tldw_Server_API.app.core.Setup.first_run_mcp_tools import (
     CATALOG_VERSION,
@@ -12,11 +16,14 @@ from tldw_Server_API.app.core.Setup.first_run_mcp_tools import (
     SETUP_ORIGIN,
     compute_first_run_policy_hash,
     generate_first_run_policy,
+    is_safe_external_validation_candidate,
 )
 
 ConflictResolution = Literal["keep_existing", "replace_existing"]
+ToolExecutor = Callable[[str, dict[str, Any]], Awaitable[Any]]
 _GLOBAL_SCOPE = "global"
 _DEFAULT_TARGET = "default"
+_BUILT_IN_SAMPLE_TOOL = "mcp.tools.list"
 _GENERATED_POLICY_KEYS = ("allowed_tools", "capabilities", "first_run_mcp_tools")
 _STEP_PAYLOAD_KEYS = {
     "acknowledged",
@@ -32,7 +39,15 @@ _STEP_PAYLOAD_KEYS = {
     "validated_at",
     "validation_message",
     "last_validation_run_id",
+    "sample_tool_name",
+    "external_status",
 }
+_MESSAGE_BUILT_IN_PASSED = "Built-in MCP tool check passed."
+_MESSAGE_BUILT_IN_FAILED = "Built-in MCP tool check failed."
+_MESSAGE_EXTERNAL_DISCOVERY_INCOMPLETE = "External discovery did not complete."
+_MESSAGE_NO_SAFE_EXTERNAL_TOOL = "No safe no-argument external read-only tool was available."
+_MESSAGE_EXTERNAL_TOOL_FAILED = "External MCP validation tool check failed."
+_MESSAGE_EXTERNAL_TOOL_PASSED = "External MCP validation tool check passed."
 
 
 @dataclass(frozen=True)
@@ -65,10 +80,36 @@ class McpToolsApplyResult:
     conflict: dict[str, Any] | None = None
 
 
+@dataclass(frozen=True)
+class McpToolsValidationResult:
+    """Safe result returned by first-run MCP tool validation."""
+
+    status: str
+    validation_state: str
+    profile_id: int | None
+    assignment_id: int | None
+    catalog_version: str | None
+    selected_pack_ids: list[str]
+    selected_addon_ids: list[str]
+    effective_tool_count: int | None
+    validated_at: str
+    validation_message: str
+    last_validation_run_id: str
+    sample_tool_name: str | None
+    external_status: str
+    step_payload: dict[str, Any]
+
+
 class SetupMcpToolsService:
     """Apply first-run MCP tool pack selections to MCP Hub profiles."""
 
-    def __init__(self, *, hub: Any, tool_registry: Any | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        hub: Any,
+        tool_registry: Any | None = None,
+        tool_executor: ToolExecutor | None = None,
+    ) -> None:
         self.hub = hub
         if tool_registry is None:
             from tldw_Server_API.app.services.mcp_hub_tool_registry import (
@@ -77,6 +118,7 @@ class SetupMcpToolsService:
 
             tool_registry = McpHubToolRegistryService()
         self.tool_registry = tool_registry
+        self.tool_executor = tool_executor or _default_tool_executor
 
     async def apply_selection(
         self,
@@ -156,6 +198,126 @@ class SetupMcpToolsService:
             request=request,
         )
 
+    async def validate_selection(
+        self,
+        *,
+        saved_state: Mapping[str, Any],
+    ) -> McpToolsValidationResult:
+        """Safely validate the saved first-run MCP tool selection."""
+
+        saved_state = _dict(saved_state)
+        policy_document = await self._validation_policy_document(saved_state)
+        allowed_tools = _str_list(policy_document.get("allowed_tools"))
+        if _BUILT_IN_SAMPLE_TOOL not in allowed_tools:
+            return _validation_result(
+                saved_state=saved_state,
+                validation_state="failed",
+                validation_message=_MESSAGE_BUILT_IN_FAILED,
+                sample_tool_name=_BUILT_IN_SAMPLE_TOOL,
+                external_status="not_checked",
+            )
+
+        try:
+            tools_payload = await self.tool_executor(_BUILT_IN_SAMPLE_TOOL, {})
+        except Exception:
+            return _validation_result(
+                saved_state=saved_state,
+                validation_state="failed",
+                validation_message=_MESSAGE_BUILT_IN_FAILED,
+                sample_tool_name=_BUILT_IN_SAMPLE_TOOL,
+                external_status="not_checked",
+            )
+
+        if not isinstance(tools_payload, Mapping) or not isinstance(tools_payload.get("tools"), list):
+            return _validation_result(
+                saved_state=saved_state,
+                validation_state="failed",
+                validation_message=_MESSAGE_BUILT_IN_FAILED,
+                sample_tool_name=_BUILT_IN_SAMPLE_TOOL,
+                external_status="not_checked",
+            )
+
+        external_servers = await self._enabled_external_servers()
+        if not external_servers:
+            return _validation_result(
+                saved_state=saved_state,
+                validation_state="built_in_passed",
+                validation_message=_MESSAGE_BUILT_IN_PASSED,
+                sample_tool_name=_BUILT_IN_SAMPLE_TOOL,
+                external_status="not_configured",
+            )
+
+        refresh_succeeded = False
+        for server in external_servers:
+            server_id = str(server.get("id") or "").strip()
+            try:
+                await self.tool_executor(
+                    "external.tools.refresh",
+                    {"server_id": server_id} if server_id else {},
+                )
+                refresh_succeeded = True
+            except Exception as exc:
+                logger.debug("First-run MCP external discovery refresh failed: {}", type(exc).__name__)
+
+        if not refresh_succeeded:
+            return _validation_result(
+                saved_state=saved_state,
+                validation_state="external_discovery_incomplete",
+                validation_message=_MESSAGE_EXTERNAL_DISCOVERY_INCOMPLETE,
+                sample_tool_name=_BUILT_IN_SAMPLE_TOOL,
+                external_status="discovery_incomplete",
+            )
+
+        try:
+            refreshed_entries = await self.tool_registry.list_entries()
+            refreshed_tools_payload = await self.tool_executor(
+                _BUILT_IN_SAMPLE_TOOL,
+                {"module": "external_federation"},
+            )
+        except Exception:
+            return _validation_result(
+                saved_state=saved_state,
+                validation_state="external_discovery_incomplete",
+                validation_message=_MESSAGE_EXTERNAL_DISCOVERY_INCOMPLETE,
+                sample_tool_name=_BUILT_IN_SAMPLE_TOOL,
+                external_status="discovery_incomplete",
+            )
+
+        tool_defs = _tool_defs_by_name(refreshed_tools_payload)
+        for entry in refreshed_entries:
+            entry = _dict(entry)
+            tool_name = str(entry.get("tool_name") or "").strip()
+            if not tool_name:
+                continue
+            tool_def = tool_defs.get(tool_name) or _entry_tool_def(entry)
+            if not is_safe_external_validation_candidate(entry, tool_def):
+                continue
+            try:
+                await self.tool_executor(tool_name, {})
+            except Exception:
+                return _validation_result(
+                    saved_state=saved_state,
+                    validation_state="failed",
+                    validation_message=_MESSAGE_EXTERNAL_TOOL_FAILED,
+                    sample_tool_name=tool_name,
+                    external_status="tool_failed",
+                )
+            return _validation_result(
+                saved_state=saved_state,
+                validation_state="external_tool_passed",
+                validation_message=_MESSAGE_EXTERNAL_TOOL_PASSED,
+                sample_tool_name=tool_name,
+                external_status="tool_passed",
+            )
+
+        return _validation_result(
+            saved_state=saved_state,
+            validation_state="no_safe_external_tool",
+            validation_message=_MESSAGE_NO_SAFE_EXTERNAL_TOOL,
+            sample_tool_name=_BUILT_IN_SAMPLE_TOOL,
+            external_status="no_safe_tool",
+        )
+
     async def _find_existing_profile(self, *, setup_instance_id: str) -> dict[str, Any] | None:
         profiles = await self.hub.list_permission_profiles(
             owner_scope_type=_GLOBAL_SCOPE,
@@ -213,6 +375,26 @@ class SetupMcpToolsService:
             profile_id=profile_id,
         )
         return _dict(updated or assignment)
+
+    async def _validation_policy_document(self, saved_state: Mapping[str, Any]) -> dict[str, Any]:
+        profile_id = _safe_int(saved_state.get("profile_id"))
+        if profile_id is None:
+            return {}
+        profiles = await self.hub.list_permission_profiles(
+            owner_scope_type=_GLOBAL_SCOPE,
+            owner_scope_id=None,
+        )
+        for profile in profiles:
+            if _safe_int(_dict(profile).get("id")) == profile_id:
+                return _dict(_dict(profile).get("policy_document"))
+        return {}
+
+    async def _enabled_external_servers(self) -> list[dict[str, Any]]:
+        list_external_servers = getattr(self.hub, "list_external_servers", None)
+        if not callable(list_external_servers):
+            return []
+        servers = await list_external_servers()
+        return [_dict(server) for server in servers if bool(_dict(server).get("enabled", True))]
 
 
 def _setup_instance_id(state: Any) -> str:
@@ -332,8 +514,115 @@ def _step_payload(
         "validated_at": None,
         "validation_message": None,
         "last_validation_run_id": None,
+        "sample_tool_name": None,
+        "external_status": None,
     }
     return {key: payload[key] for key in _STEP_PAYLOAD_KEYS}
+
+
+def _validation_result(
+    *,
+    saved_state: Mapping[str, Any],
+    validation_state: str,
+    validation_message: str,
+    sample_tool_name: str | None,
+    external_status: str,
+) -> McpToolsValidationResult:
+    validated_at = datetime.now(timezone.utc).isoformat()
+    last_validation_run_id = f"mcp-tools-validation:{uuid.uuid4().hex}"
+    profile_id = _safe_int(saved_state.get("profile_id"))
+    assignment_id = _safe_int(saved_state.get("assignment_id"))
+    catalog_version = str(saved_state["catalog_version"]) if saved_state.get("catalog_version") else CATALOG_VERSION
+    selected_pack_ids = _str_list(saved_state.get("selected_pack_ids"))
+    selected_addon_ids = _str_list(saved_state.get("selected_addon_ids"))
+    effective_tool_count = _safe_int(saved_state.get("effective_tool_count"))
+    payload = {
+        "acknowledged": True,
+        "selected_pack_ids": selected_pack_ids,
+        "selected_addon_ids": selected_addon_ids,
+        "confirmed_addon_ids": _str_list(saved_state.get("confirmed_addon_ids")),
+        "confirmation_version": saved_state.get("confirmation_version"),
+        "validation_state": validation_state,
+        "profile_id": profile_id,
+        "assignment_id": assignment_id,
+        "catalog_version": catalog_version,
+        "effective_tool_count": effective_tool_count,
+        "validated_at": validated_at,
+        "validation_message": validation_message,
+        "last_validation_run_id": last_validation_run_id,
+        "sample_tool_name": sample_tool_name,
+        "external_status": external_status,
+    }
+    return McpToolsValidationResult(
+        status="failed" if validation_state == "failed" else "validated",
+        validation_state=validation_state,
+        profile_id=profile_id,
+        assignment_id=assignment_id,
+        catalog_version=catalog_version,
+        selected_pack_ids=selected_pack_ids,
+        selected_addon_ids=selected_addon_ids,
+        effective_tool_count=effective_tool_count,
+        validated_at=validated_at,
+        validation_message=validation_message,
+        last_validation_run_id=last_validation_run_id,
+        sample_tool_name=sample_tool_name,
+        external_status=external_status,
+        step_payload={key: payload[key] for key in _STEP_PAYLOAD_KEYS},
+    )
+
+
+def _tool_defs_by_name(payload: Any) -> dict[str, dict[str, Any]]:
+    if not isinstance(payload, Mapping) or not isinstance(payload.get("tools"), list):
+        return {}
+    out: dict[str, dict[str, Any]] = {}
+    for tool_def in payload["tools"]:
+        tool_def = _dict(tool_def)
+        name = str(tool_def.get("name") or tool_def.get("tool_name") or "").strip()
+        if name:
+            out[name] = tool_def
+    return out
+
+
+def _entry_tool_def(entry: Mapping[str, Any]) -> dict[str, Any]:
+    for key in ("tool_def", "tool_definition"):
+        value = entry.get(key)
+        if isinstance(value, Mapping):
+            return dict(value)
+    input_schema = entry.get("inputSchema") or entry.get("input_schema")
+    return {"inputSchema": dict(input_schema)} if isinstance(input_schema, Mapping) else {}
+
+
+def _safe_int(value: Any) -> int | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+async def _default_tool_executor(tool_name: str, arguments: dict[str, Any]) -> Any:
+    args = dict(arguments or {})
+    if tool_name == _BUILT_IN_SAMPLE_TOOL:
+        from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol
+        from tldw_Server_API.app.core.MCP_unified.protocol_types import RequestContext
+
+        context = RequestContext(
+            request_id=f"first-run-mcp-tools-validation:{uuid.uuid4().hex}",
+            client_id="setup",
+            metadata={},
+        )
+        return await MCPProtocol()._handle_tools_list(args, context)
+
+    from tldw_Server_API.app.core.MCP_unified.server import get_mcp_server
+
+    server = get_mcp_server()
+    if not getattr(server, "initialized", False):
+        await server.initialize()
+    module = await server.module_registry.find_module_for_tool(tool_name)
+    if module is None:
+        raise RuntimeError("MCP validation tool unavailable")
+    return await module.execute_with_circuit_breaker(module.execute_tool, tool_name, args)
 
 
 def _dict(value: Any) -> dict[str, Any]:
