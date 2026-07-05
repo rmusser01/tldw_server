@@ -670,6 +670,48 @@ def test_admin_mcp_tools_validate_after_completion_requires_system_configure(
     assert service.validate_requests == []
 
 
+def test_admin_mcp_tools_status_and_validate_reject_admin_without_system_configure(
+    setup_client,
+    monkeypatch,
+    tmp_path,
+):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_completed(monkeypatch)
+    service = _FakeMcpToolsService(validate_result=_fake_mcp_validation_result())
+    _override_mcp_tools_service(monkeypatch, service)
+    store = FirstRunStateStore(state_path)
+    store.update_step(
+        "mcp_tools",
+        {
+            "acknowledged": True,
+            "selected_pack_ids": ["research"],
+            "selected_addon_ids": [],
+            "confirmed_addon_ids": [],
+            "confirmation_version": None,
+            "validation_state": "not_run",
+            "profile_id": 7,
+            "assignment_id": 11,
+            "catalog_version": "2026-07-04.v1",
+            "effective_tool_count": 3,
+        },
+    )
+
+    async def _admin_without_system_configure(_request):
+        return SimpleNamespace(is_admin=True, permissions=[])
+
+    monkeypatch.setattr(setup_endpoint, "get_auth_principal", _admin_without_system_configure)
+
+    status_response = setup_client.get("/api/v1/setup/admin/mcp-tools/status")
+    validate_response = setup_client.post("/api/v1/setup/admin/mcp-tools/validate", json={})
+
+    assert status_response.status_code == 403
+    assert status_response.json()["detail"] == "system_configure_required"
+    assert validate_response.status_code == 403
+    assert validate_response.json()["detail"] == "system_configure_required"
+    assert service.validate_requests == []
+
+
 def test_admin_mcp_tools_status_and_validate_use_saved_state_without_reopening_first_run(
     setup_client,
     monkeypatch,

@@ -774,6 +774,59 @@ async def test_validate_external_discovery_failure_is_safe_and_redacted(
     assert "rm -rf" not in result.validation_message
 
 
+@pytest.mark.asyncio
+async def test_validate_non_raising_external_refresh_zero_refreshed_is_incomplete(
+    first_run_state: FirstRunState,
+    fake_hub: FakeMcpHub,
+    fake_registry: FakeToolRegistry,
+) -> None:
+    fake_hub.external_servers = [{"id": "docs", "enabled": True}]
+    fake_registry.entries = [
+        *fake_registry.entries,
+        {
+            "tool_name": "external.docs.read",
+            "module": "external_federation",
+            "metadata_source": "explicit",
+            "risk_class": "low",
+            "mutates_state": False,
+            "uses_filesystem": False,
+            "uses_processes": False,
+            "capabilities": [],
+        },
+    ]
+    executor = FakeToolExecutor(
+        results={
+            "mcp.tools.list": {
+                "tools": [
+                    {
+                        "name": "external.docs.read",
+                        "inputSchema": {"properties": {}, "required": []},
+                    }
+                ]
+            },
+            "external.tools.refresh": {
+                "refreshed_servers": 0,
+                "errors": {"docs": "https://user:secret@example.test/path /Users/me/.ssh"},
+            },
+            "external.docs.read": {"documents": []},
+        },
+    )
+    service, saved_mcp_state = await _applied_service_and_state(
+        first_run_state=first_run_state,
+        fake_hub=fake_hub,
+        fake_registry=fake_registry,
+        tool_executor=executor,
+    )
+
+    result = await service.validate_selection(saved_state=saved_mcp_state)
+
+    assert result.validation_state == "external_discovery_incomplete"
+    assert result.validation_message == "External discovery did not complete."
+    assert "secret" not in result.validation_message
+    assert "/Users" not in result.validation_message
+    assert ("external.docs.read", {}) not in executor.calls
+
+
 def test_safe_external_validation_candidate_requires_explicit_low_risk_no_arg_read_only_metadata() -> None:
     entry = {
         "tool_name": "external.docs.read",
@@ -805,6 +858,47 @@ def test_safe_external_validation_candidate_requires_explicit_low_risk_no_arg_re
 
     required_arg_tool = {"inputSchema": {"properties": {"query": {"type": "string"}}, "required": ["query"]}}
     assert first_run_mcp_tools.is_safe_external_validation_candidate(entry, required_arg_tool) is False
+
+
+@pytest.mark.asyncio
+async def test_validate_safe_external_registry_entry_without_tool_descriptor_is_not_executed(
+    first_run_state: FirstRunState,
+    fake_hub: FakeMcpHub,
+    fake_registry: FakeToolRegistry,
+) -> None:
+    fake_hub.external_servers = [{"id": "docs", "enabled": True}]
+    fake_registry.entries = [
+        *fake_registry.entries,
+        {
+            "tool_name": "external.docs.read",
+            "module": "external_federation",
+            "metadata_source": "explicit",
+            "risk_class": "low",
+            "mutates_state": False,
+            "uses_filesystem": False,
+            "uses_processes": False,
+            "capabilities": [],
+        },
+    ]
+    executor = FakeToolExecutor(
+        results={
+            "mcp.tools.list": {"tools": []},
+            "external.tools.refresh": {"ok": True},
+            "external.docs.read": {"documents": []},
+        },
+    )
+    service, saved_mcp_state = await _applied_service_and_state(
+        first_run_state=first_run_state,
+        fake_hub=fake_hub,
+        fake_registry=fake_registry,
+        tool_executor=executor,
+    )
+
+    result = await service.validate_selection(saved_state=saved_mcp_state)
+
+    assert result.validation_state == "no_safe_external_tool"
+    assert result.validation_message == "No safe no-argument external read-only tool was available."
+    assert ("external.docs.read", {}) not in executor.calls
 
 
 @pytest.mark.asyncio

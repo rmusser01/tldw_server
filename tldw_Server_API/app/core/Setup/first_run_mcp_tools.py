@@ -344,7 +344,8 @@ def is_safe_external_validation_candidate(entry: Mapping[str, Any], tool_def: Ma
     """Return whether an external tool is safe to sample during setup validation."""
 
     input_schema = tool_def.get("inputSchema")
-    input_schema = input_schema if isinstance(input_schema, Mapping) else {}
+    if not isinstance(input_schema, Mapping):
+        return False
     capabilities = set(_str_list(entry.get("capabilities")))
     return (
         entry.get("module") == "external_federation"

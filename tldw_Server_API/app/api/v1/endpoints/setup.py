@@ -664,6 +664,11 @@ async def _require_first_run_write_access(request: Request) -> None:
     _raise_if_terminal_first_run_state(state)
 
 
+def _has_system_configure_permission(principal: AuthPrincipal | None) -> bool:
+    permissions = set(principal.permissions) if principal is not None else set()
+    return SYSTEM_CONFIGURE in permissions or "*" in permissions
+
+
 async def _require_mcp_tools_setup_or_admin_access(request: Request) -> None:
     status_snapshot = setup_manager.get_status_snapshot()
     if not bool(status_snapshot.get("setup_completed")):
@@ -671,8 +676,7 @@ async def _require_mcp_tools_setup_or_admin_access(request: Request) -> None:
         return
 
     principal = await get_auth_principal(request)
-    permissions = set(principal.permissions) if principal is not None else set()
-    if principal is None or not (principal.is_admin or SYSTEM_CONFIGURE in permissions or "*" in permissions):
+    if not _has_system_configure_permission(principal):
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="system_configure_required")
 
 
@@ -686,8 +690,7 @@ async def _require_mcp_tools_catalog_access(request: Request) -> None:
 
 async def _require_system_configure_access(request: Request) -> AuthPrincipal:
     principal = await get_auth_principal(request)
-    permissions = set(principal.permissions) if principal is not None else set()
-    if principal is None or not (principal.is_admin or SYSTEM_CONFIGURE in permissions or "*" in permissions):
+    if not _has_system_configure_permission(principal):
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="system_configure_required")
     return principal
 

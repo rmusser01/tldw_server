@@ -251,11 +251,11 @@ class SetupMcpToolsService:
         for server in external_servers:
             server_id = str(server.get("id") or "").strip()
             try:
-                await self.tool_executor(
+                refresh_payload = await self.tool_executor(
                     "external.tools.refresh",
                     {"server_id": server_id} if server_id else {},
                 )
-                refresh_succeeded = True
+                refresh_succeeded = refresh_succeeded or _refresh_succeeded(refresh_payload)
             except Exception as exc:
                 logger.debug("First-run MCP external discovery refresh failed: {}", type(exc).__name__)
 
@@ -289,7 +289,9 @@ class SetupMcpToolsService:
             tool_name = str(entry.get("tool_name") or "").strip()
             if not tool_name:
                 continue
-            tool_def = tool_defs.get(tool_name) or _entry_tool_def(entry)
+            tool_def = tool_defs.get(tool_name)
+            if tool_def is None:
+                continue
             if not is_safe_external_validation_candidate(entry, tool_def):
                 continue
             try:
@@ -583,13 +585,15 @@ def _tool_defs_by_name(payload: Any) -> dict[str, dict[str, Any]]:
     return out
 
 
-def _entry_tool_def(entry: Mapping[str, Any]) -> dict[str, Any]:
-    for key in ("tool_def", "tool_definition"):
-        value = entry.get(key)
-        if isinstance(value, Mapping):
-            return dict(value)
-    input_schema = entry.get("inputSchema") or entry.get("input_schema")
-    return {"inputSchema": dict(input_schema)} if isinstance(input_schema, Mapping) else {}
+def _refresh_succeeded(payload: Any) -> bool:
+    if not isinstance(payload, Mapping):
+        return False
+    if "refreshed_servers" in payload:
+        return _safe_int(payload.get("refreshed_servers")) not in {None, 0}
+    errors = payload.get("errors")
+    if isinstance(errors, Mapping) and errors:
+        return False
+    return payload.get("ok") is True or payload.get("success") is True
 
 
 def _safe_int(value: Any) -> int | None:
