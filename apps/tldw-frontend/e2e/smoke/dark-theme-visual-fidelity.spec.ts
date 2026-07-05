@@ -49,6 +49,26 @@ const fulfillJson = async (route: Route, status: number, body: unknown) =>
     body: JSON.stringify(body),
   })
 
+const emptyChatbookJobsResponse = (url: URL) => {
+  const limit = Number(url.searchParams.get("limit") ?? 100)
+  const offset = Number(url.searchParams.get("offset") ?? 0)
+
+  return {
+    jobs: [],
+    total: 0,
+    has_more: false,
+    next_offset: null,
+    pagination: {
+      mode: "offset",
+      limit,
+      offset,
+      total: 0,
+      has_more: false,
+      next_offset: null,
+    },
+  }
+}
+
 const installApiMocks = async (page: Page) => {
   await page.route("**/*", async (route) => {
     const request = route.request()
@@ -82,6 +102,10 @@ const installApiMocks = async (page: Page) => {
           "/api/v1/characters": {},
           "/api/v1/characters/query": {},
           "/api/v1/characters/world-books": {},
+          "/api/v1/chatbooks/export": {},
+          "/api/v1/chatbooks/export/jobs": {},
+          "/api/v1/chatbooks/health": {},
+          "/api/v1/chatbooks/import/jobs": {},
           "/api/v1/notes/": {},
         },
       })
@@ -91,7 +115,7 @@ const installApiMocks = async (page: Page) => {
     if (path === "/api/v1/config/docs-info") {
       await fulfillJson(route, 200, {
         info: { version: "visual-fidelity" },
-        capabilities: { hasAudio: true, hasStt: true, hasTts: true },
+        capabilities: { hasAudio: true, hasChatbooks: true, hasStt: true, hasTts: true },
       })
       return
     }
@@ -264,6 +288,70 @@ const installApiMocks = async (page: Page) => {
 
     if (path.startsWith("/api/v1/notes/trash")) {
       await fulfillJson(route, 200, { notes: [], total: 0 })
+      return
+    }
+
+    if (path === "/api/v1/media") {
+      await fulfillJson(route, 200, {
+        items: [],
+        pagination: { total_items: 0 },
+      })
+      return
+    }
+
+    if (path === "/api/v1/prompts") {
+      await fulfillJson(route, 200, [])
+      return
+    }
+
+    if (path === "/api/v1/evaluations" || path === "/api/v1/evaluations/") {
+      await fulfillJson(route, 200, { data: [], total: 0 })
+      return
+    }
+
+    if (path === "/api/v1/characters/world-books") {
+      await fulfillJson(route, 200, [])
+      return
+    }
+
+    if (path === "/api/v1/chat/dictionaries") {
+      await fulfillJson(route, 200, [])
+      return
+    }
+
+    if (path === "/api/v1/chat/documents") {
+      await fulfillJson(route, 200, { documents: [], total: 0 })
+      return
+    }
+
+    if (path === "/api/v1/chatbooks/export/jobs") {
+      await fulfillJson(route, 200, emptyChatbookJobsResponse(url))
+      return
+    }
+
+    if (path === "/api/v1/chatbooks/import/jobs") {
+      await fulfillJson(route, 200, emptyChatbookJobsResponse(url))
+      return
+    }
+
+    if (path === "/api/v1/chatbooks/health") {
+      await fulfillJson(route, 200, {
+        service: "chatbooks",
+        status: "healthy",
+        timestamp: "2026-07-05T12:00:00.000Z",
+        components: {
+          storage_base: {
+            path: "/tmp/tldw-chatbooks",
+            exists: true,
+            writable: true,
+          },
+        },
+      })
+      return
+    }
+
+    if (path === "/api/v1/chatbooks/cleanup") {
+      await fulfillJson(route, 200, { deleted_count: 0 })
       return
     }
 
@@ -449,10 +537,10 @@ const preparePage = async (page: Page) => {
   await installApiMocks(page)
 }
 
-test("chat, character chat, extension sidepanel chat, characters, and notes stay visually dark", async ({
+test("chat, character chat, extension sidepanel chat, characters, notes, and chatbooks stay visually dark", async ({
   page,
 }, testInfo) => {
-  test.setTimeout(120_000)
+  test.setTimeout(150_000)
 
   await preparePage(page)
   await page.setViewportSize({ width: 1440, height: 960 })
@@ -535,4 +623,78 @@ test("chat, character chat, extension sidepanel chat, characters, and notes stay
     await overflow.first().click()
     await expectNoDarkVisualLeaks(page, "Notes overflow menu")
   }
+
+  await page.goto("/chatbooks", { waitUntil: "domcontentloaded", timeout: SMOKE_LOAD_TIMEOUT })
+  await waitForAppShell(page, SMOKE_LOAD_TIMEOUT)
+  await expect(page.getByRole("heading", { name: /chatbooks playground/i })).toBeVisible({
+    timeout: SMOKE_LOAD_TIMEOUT,
+  })
+  await captureDarkScreenshot(page, testInfo, "chatbooks-export-dark")
+  await expectNoDarkVisualLeaks(page, "Chatbooks export")
+
+  const mediaQualitySelect = page
+    .locator(".ant-select")
+    .filter({ has: page.getByRole("combobox", { name: /media quality/i }) })
+    .first()
+  await mediaQualitySelect.click()
+  const mediaQualityDropdown = page.locator(".ant-select-dropdown:visible").first()
+  await expect(mediaQualityDropdown).toBeVisible({
+    timeout: SMOKE_LOAD_TIMEOUT,
+  })
+  await captureDarkScreenshot(page, testInfo, "chatbooks-export-media-menu-dark")
+  await expectNoDarkVisualLeaks(page, "Chatbooks export media menu")
+  await page.keyboard.press("Escape")
+  await expect(mediaQualityDropdown).toBeHidden()
+
+  await page.getByText(/^Evaluations$/).first().scrollIntoViewIfNeeded()
+  await captureDarkScreenshot(page, testInfo, "chatbooks-export-lower-dark")
+  await expectNoDarkVisualLeaks(page, "Chatbooks lower export pickers")
+  await page.getByRole("heading", { name: /chatbooks playground/i }).scrollIntoViewIfNeeded()
+
+  await page.getByRole("tab", { name: /^Import$/ }).click()
+  await expect(page.getByText(/Preview before import|Drop a \.zip/i).first()).toBeVisible({
+    timeout: SMOKE_LOAD_TIMEOUT,
+  })
+  await captureDarkScreenshot(page, testInfo, "chatbooks-import-dark")
+  await expectNoDarkVisualLeaks(page, "Chatbooks import")
+
+  const sourceSelect = page
+    .locator(".ant-select")
+    .filter({ has: page.getByRole("combobox", { name: /import source/i }) })
+    .first()
+  await sourceSelect.click()
+  const sourceDropdown = page.locator(".ant-select-dropdown:visible").first()
+  await expect(sourceDropdown).toBeVisible({
+    timeout: SMOKE_LOAD_TIMEOUT,
+  })
+  await captureDarkScreenshot(page, testInfo, "chatbooks-import-source-menu-dark")
+  await expectNoDarkVisualLeaks(page, "Chatbooks import source menu")
+  await page.locator(".ant-select-item-option").filter({ hasText: "OpenWebUI JSON" }).first().click()
+  await expect(sourceDropdown).toBeHidden()
+  await expect(page.getByText(/OpenWebUI attachment hydration/i)).toBeVisible({
+    timeout: SMOKE_LOAD_TIMEOUT,
+  })
+  await captureDarkScreenshot(page, testInfo, "chatbooks-import-openwebui-dark")
+  await expectNoDarkVisualLeaks(page, "Chatbooks OpenWebUI import")
+
+  const conflictSelect = page
+    .locator(".ant-select")
+    .filter({ has: page.getByRole("combobox", { name: /conflict resolution/i }) })
+    .first()
+  await conflictSelect.click()
+  const conflictDropdown = page.locator(".ant-select-dropdown:visible").first()
+  await expect(conflictDropdown).toBeVisible({
+    timeout: SMOKE_LOAD_TIMEOUT,
+  })
+  await captureDarkScreenshot(page, testInfo, "chatbooks-import-conflict-menu-dark")
+  await expectNoDarkVisualLeaks(page, "Chatbooks import conflict menu")
+  await page.keyboard.press("Escape")
+  await expect(conflictDropdown).toBeHidden()
+
+  await page.getByRole("tab", { name: /^Jobs$/ }).click()
+  await expect(page.getByText(/Job status/i)).toBeVisible({
+    timeout: SMOKE_LOAD_TIMEOUT,
+  })
+  await captureDarkScreenshot(page, testInfo, "chatbooks-jobs-dark")
+  await expectNoDarkVisualLeaks(page, "Chatbooks jobs")
 })
