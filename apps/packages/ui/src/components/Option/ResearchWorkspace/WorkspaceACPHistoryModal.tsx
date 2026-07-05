@@ -96,12 +96,37 @@ type WorkspaceACPHistoryError =
   | { kind: "message"; message: string }
   | { kind: "unsupported" }
 
+export type WorkspaceACPRunArtifactSaveInput = {
+  projectId: number
+  projectName: string
+  taskId: number
+  taskTitle: string
+  runId: number
+  status: string
+  resultPreview: string
+  sessionId: string | null
+  agentType?: string | null
+  startedAt?: string | null
+  completedAt?: string | null
+  links?: Record<string, string>
+  history?: {
+    audit_event_count?: number
+    artifact_count?: number
+    diagnostic_count?: number
+    event_count?: number
+    result?: {
+      preview?: string | null
+    } | null
+  } | null
+}
+
 export interface WorkspaceACPHistoryModalProps {
   open: boolean
   workspaceId?: string | null
   workspaceName?: string | null
   onCancel: () => void
   onOpenAgentTasks: () => void
+  onSaveRunArtifact?: (input: WorkspaceACPRunArtifactSaveInput) => void
 }
 
 const normalizeListPayload = <T,>(payload: unknown, key: string): T[] => {
@@ -202,6 +227,11 @@ const statusColor = (status: string): string => {
   return "default"
 }
 
+const isCompletedRunStatus = (status: string): boolean => {
+  const normalizedStatus = status.toLowerCase()
+  return normalizedStatus === "completed" || normalizedStatus === "complete"
+}
+
 const formatCountLabel = (count: number, singular: string, plural: string): string =>
   `${count} ${count === 1 ? singular : plural}`
 
@@ -222,7 +252,14 @@ const isUnsupportedError = (
 
 export const WorkspaceACPHistoryModal: React.FC<
   WorkspaceACPHistoryModalProps
-> = ({ open, workspaceId, workspaceName, onCancel, onOpenAgentTasks }) => {
+> = ({
+  open,
+  workspaceId,
+  workspaceName,
+  onCancel,
+  onOpenAgentTasks,
+  onSaveRunArtifact
+}) => {
   const { t } = useTranslation(["playground", "common"])
   const navigate = useNavigate()
   const {
@@ -547,8 +584,28 @@ export const WorkspaceACPHistoryModal: React.FC<
               const sessionId = getSessionId(run)
               const failureMessage =
                 run.failure_context?.message || run.error || null
-              const resultPreview =
-                run.result_summary || run.history?.result?.preview || null
+              const resultPreview = run.result_summary?.trim()
+                ? run.result_summary
+                : run.history?.result?.preview || null
+              const artifactCount = run.history?.artifact_count ?? 0
+              const diagnosticCount = run.history?.diagnostic_count ?? 0
+              const auditEventCount = run.history?.audit_event_count ?? 0
+              const eventCount = run.history?.event_count ?? 0
+              const observableActivityLabel = t(
+                "playground:workspace.acpRunObservableActivity",
+                "Observable activity: {{artifactCount}} artifacts/files, {{diagnosticCount}} diagnostics/warnings, {{auditEventCount}} audit/approvals, {{eventCount}} events/tool activity",
+                {
+                  artifactCount,
+                  diagnosticCount,
+                  auditEventCount,
+                  eventCount
+                }
+              )
+              const canSaveRunArtifact = Boolean(
+                onSaveRunArtifact &&
+                  resultPreview?.trim() &&
+                  isCompletedRunStatus(run.status)
+              )
 
               return (
                 <div
@@ -574,10 +631,14 @@ export const WorkspaceACPHistoryModal: React.FC<
                     </div>
                   )}
 
-                  <div className="mt-3 grid grid-cols-3 gap-2 text-xs text-muted-foreground">
-                    <span>{run.history?.artifact_count ?? 0} artifacts</span>
-                    <span>{run.history?.diagnostic_count ?? 0} diagnostics</span>
-                    <span>{run.history?.audit_event_count ?? 0} audit</span>
+                  <div
+                    className="mt-3 grid grid-cols-4 gap-2 text-xs text-muted-foreground"
+                    aria-label={observableActivityLabel}
+                  >
+                    <span>{artifactCount} artifacts</span>
+                    <span>{diagnosticCount} diagnostics</span>
+                    <span>{auditEventCount} audit</span>
+                    <span>{eventCount} events</span>
                   </div>
 
                   {failureMessage && (
@@ -589,16 +650,18 @@ export const WorkspaceACPHistoryModal: React.FC<
                     <div className="mt-3 text-sm">{resultPreview}</div>
                   )}
 
-                  {sessionId && (
+                  {(sessionId || canSaveRunArtifact) && (
                     <div className="mt-3 flex flex-wrap gap-2">
-                      <Button
-                        size="small"
-                        icon={<ExternalLink className="h-3 w-3" />}
-                        onClick={() => openSessionRoute(run)}
-                      >
-                        {t("playground:workspace.openSession", "Open session")}
-                      </Button>
-                      {run.session?.links?.diagnostics && (
+                      {sessionId && (
+                        <Button
+                          size="small"
+                          icon={<ExternalLink className="h-3 w-3" />}
+                          onClick={() => openSessionRoute(run)}
+                        >
+                          {t("playground:workspace.openSession", "Open session")}
+                        </Button>
+                      )}
+                      {sessionId && run.session?.links?.diagnostics && (
                         <Button
                           size="small"
                           icon={<ExternalLink className="h-3 w-3" />}
@@ -610,7 +673,7 @@ export const WorkspaceACPHistoryModal: React.FC<
                           )}
                         </Button>
                       )}
-                      {run.session?.links?.artifacts && (
+                      {sessionId && run.session?.links?.artifacts && (
                         <Button
                           size="small"
                           icon={<ExternalLink className="h-3 w-3" />}
@@ -619,7 +682,31 @@ export const WorkspaceACPHistoryModal: React.FC<
                           {t("playground:workspace.openArtifacts", "Open artifacts")}
                         </Button>
                       )}
-                      {run.session?.links?.audit && (
+                      {canSaveRunArtifact && (
+                        <Button
+                          size="small"
+                          onClick={() =>
+                            onSaveRunArtifact?.({
+                              projectId: entry.projectId,
+                              projectName: entry.projectName,
+                              taskId: entry.taskId,
+                              taskTitle: entry.taskTitle,
+                              runId: run.id,
+                              status: run.status,
+                              resultPreview: resultPreview?.trim() || "",
+                              sessionId,
+                              agentType: run.agent_type,
+                              startedAt: run.started_at,
+                              completedAt: run.completed_at,
+                              links: run.session?.links,
+                              history: run.history
+                            })
+                          }
+                        >
+                          {t("playground:workspace.saveRunToStudio", "Save to Studio")}
+                        </Button>
+                      )}
+                      {sessionId && run.session?.links?.audit && (
                         <Button
                           size="small"
                           icon={<ExternalLink className="h-3 w-3" />}

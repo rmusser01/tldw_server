@@ -41,6 +41,7 @@ const mockNormalizeWorkspaceBannerImage = vi.fn()
 const mockTrackResearchWorkspaceTelemetry = vi.fn()
 const mockGetResearchWorkspaceTelemetryState = vi.fn()
 const mockResetResearchWorkspaceTelemetryState = vi.fn()
+const mockAddArtifact = vi.fn()
 const workspaceContextMocks = vi.hoisted(() => ({
   useActiveWorkspaceContext: vi.fn()
 }))
@@ -96,6 +97,7 @@ const mockStoreState = {
       url: "https://example.com/alpha-whitepaper"
     }
   ],
+  generatedArtifacts: [] as Array<any>,
   assistantDefaults: null,
   effectiveAssistantDefault: null,
   setWorkspaceName: mockSetWorkspaceName,
@@ -154,6 +156,7 @@ const mockStoreState = {
   restoreArchivedWorkspace: mockRestoreArchivedWorkspace,
   deleteWorkspace: mockDeleteWorkspace,
   saveCurrentWorkspace: mockSaveCurrentWorkspace,
+  addArtifact: mockAddArtifact,
   captureUndoSnapshot: mockCaptureUndoSnapshot,
   restoreUndoSnapshot: mockRestoreUndoSnapshot
 }
@@ -514,6 +517,7 @@ describe("WorkspaceHeader workspace browser modal", () => {
     mockStoreState.workspaceId = "workspace-alpha"
     mockStoreState.workspaceName = "Alpha Research"
     mockStoreState.workspaceTag = "workspace:alpha-research"
+    mockStoreState.generatedArtifacts = []
     mockStoreState.assistantDefaults = null
     mockStoreState.effectiveAssistantDefault = null
     connectionConfigState.loading = false
@@ -2706,6 +2710,298 @@ describe("WorkspaceHeader workspace browser modal", () => {
       "/agent-tasks?workspace=workspace-alpha"
     )
     expect(mockNavigate).toHaveBeenCalledTimes(2)
+  })
+
+  it("saves ACP run results as traceable Studio artifacts", async () => {
+    mockStoreState.generatedArtifacts = [
+      {
+        id: "artifact-prior",
+        type: "report",
+        title: "Agent result: Synthesize the workspace",
+        status: "completed",
+        version: 1,
+        artifactVersionId: "acp-run-99-v1",
+        rootArtifactId: "acp-run-99",
+        content: "Prior saved result.",
+        createdAt: new Date("2026-05-13T13:05:00.000Z")
+      }
+    ]
+    fetchMockState.fetch.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input)
+
+      if (url === ACP_SESSIONS_FOR_ALPHA_URL) {
+        return {
+          ok: true,
+          json: async () => ({ sessions: [], total: 0 })
+        } as Response
+      }
+
+      if (url === ACP_PROJECTS_FOR_ALPHA_URL) {
+        return {
+          ok: true,
+          json: async () => [
+            {
+              id: 66,
+              name: "Alpha agent work",
+              canonical_workspace: {
+                canonical_workspace_id: "workspace-alpha",
+                link_status: "linked"
+              }
+            }
+          ]
+        } as Response
+      }
+
+      if (
+        url ===
+        "http://127.0.0.1:8000/api/v1/agent-orchestration/projects/66/tasks"
+      ) {
+        return {
+          ok: true,
+          json: async () => [
+            {
+              id: 77,
+              project_id: 66,
+              title: "Synthesize the workspace",
+              status: "complete",
+              canonical_workspace: {
+                canonical_workspace_id: "workspace-alpha"
+              }
+            }
+          ]
+        } as Response
+      }
+
+      if (
+        url ===
+        "http://127.0.0.1:8000/api/v1/agent-orchestration/tasks/77"
+      ) {
+        return {
+          ok: true,
+          json: async () => ({
+            id: 77,
+            project_id: 66,
+            title: "Synthesize the workspace",
+            status: "complete",
+            runs: [
+              {
+                id: 99,
+                task_id: 77,
+                status: "completed",
+                agent_type: "codex",
+                result_summary: "Completed synthesis with two follow-up actions.",
+                started_at: "2026-05-13T13:00:00.000Z",
+                completed_at: "2026-05-13T13:05:00.000Z",
+                session: {
+                  session_id: "sess-99",
+                  available: true,
+                  links: {
+                    diagnostics: "/api/v1/acp/sessions/sess-99/diagnostics",
+                    artifacts: "/api/v1/acp/sessions/sess-99/artifacts",
+                    audit: "/api/v1/acp/sessions/sess-99/audit"
+                  }
+                },
+                history: {
+                  audit_event_count: 2,
+                  artifact_count: 1,
+                  diagnostic_count: 3,
+                  event_count: 4,
+                  result: {
+                    preview: "Completed synthesis from result preview."
+                  }
+                }
+              }
+            ]
+          })
+        } as Response
+      }
+
+      throw new Error(`unexpected fetch: ${url}`)
+    })
+
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    fireEvent.click(await screen.findByText("ACP run history"))
+
+    const modal = await screen.findByRole("dialog", {
+      name: "ACP run history"
+    })
+    expect(await within(modal).findByText("Alpha agent work")).toBeInTheDocument()
+    expect(
+      within(modal).getByLabelText(
+        /Observable activity: 1 artifacts\/files, 3 diagnostics\/warnings, 2 audit\/approvals, 4 events\/tool activity/i
+      )
+    ).toBeInTheDocument()
+
+    fireEvent.click(within(modal).getByRole("button", { name: "Save to Studio" }))
+
+    expect(mockAddArtifact).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "report",
+        status: "completed",
+        title: expect.stringContaining("Agent result"),
+        content: expect.stringContaining("Completed synthesis"),
+        version: 2,
+        artifactVersionId: "acp-run-99-v2",
+        rootArtifactId: "acp-run-99",
+        previousVersionId: "acp-run-99-v1",
+        projectId: "66",
+        taskId: "77",
+        ownerScope: "research_workspace",
+        ownerId: "workspace-alpha",
+        producerMetadata: expect.objectContaining({
+          producerType: "acp_agent_task",
+          runId: "99",
+          sessionId: "sess-99",
+          taskId: "77",
+          projectId: "66",
+          links: expect.objectContaining({
+            diagnostics: "/api/v1/acp/sessions/sess-99/diagnostics",
+            artifacts: "/api/v1/acp/sessions/sess-99/artifacts",
+            audit: "/api/v1/acp/sessions/sess-99/audit"
+          })
+        }),
+        versionMetadata: expect.objectContaining({
+          revisionReason: "Saved from ACP run history"
+        }),
+        data: expect.objectContaining({
+          acpRun: expect.objectContaining({
+            artifactCount: 1,
+            diagnosticCount: 3,
+            auditEventCount: 2,
+            eventCount: 4
+          })
+        })
+      })
+    )
+    expect(mockSaveCurrentWorkspace).toHaveBeenCalled()
+    expect(mockMessageApi.success).toHaveBeenCalledWith(
+      "Agent result saved to Studio outputs."
+    )
+  })
+
+  it("saves completed ACP run results even when the session is no longer retained", async () => {
+    fetchMockState.fetch.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input)
+
+      if (url === ACP_SESSIONS_FOR_ALPHA_URL) {
+        return {
+          ok: true,
+          json: async () => ({ sessions: [], total: 0 })
+        } as Response
+      }
+
+      if (url === ACP_PROJECTS_FOR_ALPHA_URL) {
+        return {
+          ok: true,
+          json: async () => [
+            {
+              id: 67,
+              name: "Alpha retained results",
+              canonical_workspace: {
+                canonical_workspace_id: "workspace-alpha",
+                link_status: "linked"
+              }
+            }
+          ]
+        } as Response
+      }
+
+      if (
+        url ===
+        "http://127.0.0.1:8000/api/v1/agent-orchestration/projects/67/tasks"
+      ) {
+        return {
+          ok: true,
+          json: async () => [
+            {
+              id: 78,
+              project_id: 67,
+              title: "Write retained summary",
+              status: "complete",
+              canonical_workspace: {
+                canonical_workspace_id: "workspace-alpha"
+              }
+            }
+          ]
+        } as Response
+      }
+
+      if (
+        url ===
+        "http://127.0.0.1:8000/api/v1/agent-orchestration/tasks/78"
+      ) {
+        return {
+          ok: true,
+          json: async () => ({
+            id: 78,
+            project_id: 67,
+            title: "Write retained summary",
+            status: "complete",
+            runs: [
+              {
+                id: 100,
+                task_id: 78,
+                session_id: null,
+                status: "completed",
+                result_summary: "Completed retained summary.",
+                completed_at: "2026-05-13T13:15:00.000Z",
+                session: null,
+                history: {
+                  audit_event_count: 0,
+                  artifact_count: 0,
+                  diagnostic_count: 0,
+                  event_count: 2
+                }
+              }
+            ]
+          })
+        } as Response
+      }
+
+      throw new Error(`unexpected fetch: ${url}`)
+    })
+
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    fireEvent.click(await screen.findByText("ACP run history"))
+
+    const modal = await screen.findByRole("dialog", {
+      name: "ACP run history"
+    })
+    expect(await within(modal).findByText("Alpha retained results")).toBeInTheDocument()
+
+    fireEvent.click(within(modal).getByRole("button", { name: "Save to Studio" }))
+
+    expect(mockAddArtifact).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Agent result: Write retained summary",
+        content: "Completed retained summary.",
+        artifactVersionId: "acp-run-100-v1",
+        rootArtifactId: "acp-run-100",
+        producerMetadata: expect.objectContaining({
+          producerType: "acp_agent_task",
+          runId: "100",
+          sessionId: undefined
+        })
+      })
+    )
   })
 
   it("shows direct workspace ACP sessions when Agent Tasks history has no runs", async () => {

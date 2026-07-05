@@ -41,6 +41,7 @@ import {
 } from "lucide-react"
 import type {
   EffectiveWorkspaceAssistantDefault,
+  GeneratedArtifact,
   SavedWorkspace,
   WorkspaceAssistantDefaults,
   WorkspaceBannerImage,
@@ -105,7 +106,10 @@ import {
   WorkspaceAgentTaskHandoffModal,
   type WorkspaceAgentTaskPrefill
 } from "./WorkspaceAgentTaskHandoffModal"
-import { WorkspaceACPHistoryModal } from "./WorkspaceACPHistoryModal"
+import {
+  WorkspaceACPHistoryModal,
+  type WorkspaceACPRunArtifactSaveInput
+} from "./WorkspaceACPHistoryModal"
 import { WorkspaceSandboxDiagnosticsPanel } from "./WorkspaceSandboxDiagnosticsPanel"
 import { WORKSPACES_PATH } from "@/routes/route-paths"
 import { useActiveWorkspaceContext } from "@/services/workspace-context"
@@ -625,6 +629,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
     image: null
   }
   const sources = useWorkspaceStore((s) => s.sources)
+  const generatedArtifacts = useWorkspaceStore((s) => s.generatedArtifacts)
   const setWorkspaceName = useWorkspaceStore((s) => s.setWorkspaceName)
   const setWorkspaceBanner =
     useWorkspaceStore((s) => s.setWorkspaceBanner) || (() => undefined)
@@ -656,6 +661,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
     (s) => s.restoreArchivedWorkspace
   )
   const deleteWorkspace = useWorkspaceStore((s) => s.deleteWorkspace)
+  const addArtifact = useWorkspaceStore((s) => s.addArtifact)
   const captureUndoSnapshot = useWorkspaceStore((s) => s.captureUndoSnapshot)
   const restoreUndoSnapshot = useWorkspaceStore((s) => s.restoreUndoSnapshot)
   const saveCurrentWorkspace = useWorkspaceStore((s) => s.saveCurrentWorkspace)
@@ -732,6 +738,84 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
   const handleCloseAcpHistoryModal = () => {
     setAcpHistoryModalOpen(false)
   }
+
+  const handleSaveAcpRunArtifact = React.useCallback(
+    (input: WorkspaceACPRunArtifactSaveInput) => {
+      const rootArtifactId = `acp-run-${input.runId}`
+      const priorVersions = generatedArtifacts.filter(
+        (artifact: GeneratedArtifact) =>
+          artifact.rootArtifactId === rootArtifactId ||
+          artifact.artifactVersionId?.startsWith(`${rootArtifactId}-v`)
+      )
+      const previousArtifact = priorVersions.reduce<GeneratedArtifact | null>(
+        (latest, artifact) => {
+          if (!latest) return artifact
+          return (artifact.version ?? 0) > (latest.version ?? 0)
+            ? artifact
+            : latest
+        },
+        null
+      )
+      const version = (previousArtifact?.version ?? 0) + 1
+      const artifactVersionId = `${rootArtifactId}-v${version}`
+      const savedAt = new Date()
+
+      addArtifact({
+        type: "report",
+        status: "completed",
+        title: `Agent result: ${input.taskTitle}`,
+        content: input.resultPreview,
+        previewText: input.resultPreview,
+        summary: input.resultPreview,
+        version,
+        artifactVersionId,
+        rootArtifactId,
+        previousVersionId: previousArtifact?.artifactVersionId,
+        projectId: String(input.projectId),
+        taskId: String(input.taskId),
+        ownerScope: "research_workspace",
+        ownerId: workspaceId || undefined,
+        producerMetadata: {
+          producerType: "acp_agent_task",
+          producerId: String(input.projectId),
+          runId: String(input.runId),
+          sessionId: input.sessionId || undefined,
+          taskId: String(input.taskId),
+          projectId: String(input.projectId),
+          agentType: input.agentType || undefined,
+          links: input.links
+        },
+        versionMetadata: {
+          revisionReason: "Saved from ACP run history",
+          versionLabel: `v${version}`
+        },
+        data: {
+          acpRun: {
+            runId: input.runId,
+            sessionId: input.sessionId,
+            status: input.status,
+            agentType: input.agentType,
+            startedAt: input.startedAt,
+            completedAt: input.completedAt,
+            savedAt: savedAt.toISOString(),
+            artifactCount: input.history?.artifact_count ?? 0,
+            diagnosticCount: input.history?.diagnostic_count ?? 0,
+            auditEventCount: input.history?.audit_event_count ?? 0,
+            eventCount: input.history?.event_count ?? 0
+          }
+        },
+        completedAt: input.completedAt ? new Date(input.completedAt) : savedAt
+      })
+      messageApi.success(
+        t(
+          "playground:workspace.acpRunSavedToStudio",
+          "Agent result saved to Studio outputs."
+        )
+      )
+      saveCurrentWorkspace()
+    },
+    [addArtifact, generatedArtifacts, messageApi, saveCurrentWorkspace, t, workspaceId]
+  )
 
   const applyDefaultAssistantWorkspaceState = (
     workspace: WorkspaceApiResponse
@@ -2476,6 +2560,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
         workspaceName={workspaceName}
         onCancel={handleCloseAcpHistoryModal}
         onOpenAgentTasks={handleOpenAgentTasksPage}
+        onSaveRunArtifact={handleSaveAcpRunArtifact}
       />
 
       <Modal
