@@ -101,12 +101,42 @@ type RetrievalDiagnostics = {
 }
 
 type ChatModePreference = "normal" | "rag"
+type ChatResponseStyle = "balanced" | "explain" | "source_first"
+type ChatResponseLength = "standard" | "brief" | "detailed"
 type ChatPaneContentWidthMode = "comfortable" | "expanded" | "full"
 type LorebookActivityTurn = {
   turnNumber: number
   assistantPreview: string
   entryCount: number
 }
+
+const CHAT_RESPONSE_STYLE_OPTIONS: Array<{
+  value: ChatResponseStyle
+  label: string
+  instruction: string | null
+}> = [
+  { value: "balanced", label: "Balanced", instruction: null },
+  {
+    value: "explain",
+    label: "Explain",
+    instruction: "When answering, explain the answer clearly for a reader who is learning the topic."
+  },
+  {
+    value: "source_first",
+    label: "Source-first",
+    instruction: "When answering, lead with what the selected sources support and call out uncertainty."
+  }
+]
+
+const CHAT_RESPONSE_LENGTH_OPTIONS: Array<{
+  value: ChatResponseLength
+  label: string
+  instruction: string | null
+}> = [
+  { value: "standard", label: "Standard", instruction: null },
+  { value: "brief", label: "Brief", instruction: "Keep the answer brief." },
+  { value: "detailed", label: "Detailed", instruction: "Give a detailed answer with useful structure." }
+]
 
 const LOREBOOK_ACTIVITY_PAGE_SIZE = 8
 const LOREBOOK_ACTIVITY_EXPORT_PAGE_SIZE = 200
@@ -1559,6 +1589,10 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   const [preferredChatMode, setPreferredChatMode] = React.useState<
     ChatModePreference | null
   >(null)
+  const [responseStyle, setResponseStyle] =
+    React.useState<ChatResponseStyle>("balanced")
+  const [responseLength, setResponseLength] =
+    React.useState<ChatResponseLength>("standard")
   const [dropZoneActive, setDropZoneActive] = React.useState(false)
   const [seededPrompt, setSeededPrompt] = React.useState<string | null>(null)
   const [highlightedChatMessageId, setHighlightedChatMessageId] = React.useState<
@@ -2190,6 +2224,18 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     [includeFullSourceContents, messageApi, queryableSelectedSources, t]
   )
 
+  const buildResponsePresetInstruction = React.useCallback(() => {
+    const instructions = [
+      CHAT_RESPONSE_STYLE_OPTIONS.find((option) => option.value === responseStyle)
+        ?.instruction,
+      CHAT_RESPONSE_LENGTH_OPTIONS.find((option) => option.value === responseLength)
+        ?.instruction
+    ].filter((value): value is string => Boolean(value))
+
+    if (instructions.length === 0) return null
+    return `Response preference: ${instructions.join(" ")}`
+  }, [responseLength, responseStyle])
+
   const handleSubmit = async (message: string): Promise<boolean> => {
     if (preparingSourceContext) return false
     if (
@@ -2267,7 +2313,13 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
 
     setSubmitError(null)
     try {
-      const preparedMessage = await buildFullSourceContextPrompt(message)
+      const responsePresetInstruction = buildResponsePresetInstruction()
+      const messageWithResponsePreset = responsePresetInstruction
+        ? `${responsePresetInstruction}\n\nUser question: ${message}`
+        : message
+      const preparedMessage = await buildFullSourceContextPrompt(
+        messageWithResponsePreset
+      )
       const submitResult = await onSubmit({ message: preparedMessage, image: "" })
       if (
         submitResult &&
@@ -3371,6 +3423,40 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                 </button>
               </Tooltip>
             </div>
+            <label className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-surface/80 px-2 py-1 text-[11px] text-text-muted">
+              <span>{t("playground:chat.responseStyleCompactLabel", "Style")}</span>
+              <select
+                aria-label={t("playground:chat.responseStyleAria", "Response style")}
+                value={responseStyle}
+                onChange={(event) =>
+                  setResponseStyle(event.target.value as ChatResponseStyle)
+                }
+                className="rounded border border-border bg-surface px-1.5 py-0.5 text-xs text-text"
+              >
+                {CHAT_RESPONSE_STYLE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-surface/80 px-2 py-1 text-[11px] text-text-muted">
+              <span>{t("playground:chat.responseLengthCompactLabel", "Length")}</span>
+              <select
+                aria-label={t("playground:chat.responseLengthAria", "Answer length")}
+                value={responseLength}
+                onChange={(event) =>
+                  setResponseLength(event.target.value as ChatResponseLength)
+                }
+                className="rounded border border-border bg-surface px-1.5 py-0.5 text-xs text-text"
+              >
+                {CHAT_RESPONSE_LENGTH_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
             {hasQueryableSelectedSources && (
               <label
                 className="inline-flex items-center gap-1.5 rounded-full border border-border/70 bg-surface/80 px-2 py-1 text-[11px] text-text-muted"

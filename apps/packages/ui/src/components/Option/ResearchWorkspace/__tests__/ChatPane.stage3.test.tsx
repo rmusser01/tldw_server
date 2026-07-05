@@ -401,6 +401,45 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
     })
   })
 
+  it("prepends response style and length instructions only when presets are active", async () => {
+    renderChatPane()
+
+    fireEvent.change(screen.getByLabelText("Response style"), {
+      target: { value: "explain" }
+    })
+    fireEvent.change(screen.getByLabelText("Answer length"), {
+      target: { value: "brief" }
+    })
+    fireEvent.change(screen.getByLabelText("Chat message"), {
+      target: { value: "What should I know?" }
+    })
+    fireEvent.keyDown(screen.getByLabelText("Chat message"), {
+      key: "Enter"
+    })
+
+    await waitFor(() => expect(mockOnSubmit).toHaveBeenCalled())
+    expect(mockOnSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.stringContaining("Response preference:")
+      })
+    )
+    expect(mockOnSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.stringContaining("explain the answer")
+      })
+    )
+    expect(mockOnSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.stringContaining("Keep the answer brief")
+      })
+    )
+    expect(mockOnSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.stringContaining("User question: What should I know?")
+      })
+    )
+  })
+
   it("groups mode and RAG controls inside one toolbar region", () => {
     workspaceStoreState.selectedSourceIds = ["source-doc-1"]
     workspaceStoreState.getSelectedSources = () => [
