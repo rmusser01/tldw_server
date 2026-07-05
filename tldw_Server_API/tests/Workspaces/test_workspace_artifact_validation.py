@@ -148,6 +148,18 @@ def test_short_real_content_that_mentions_invalid_is_allowed() -> None:
     assert metadata["status"] == "passed"
 
 
+def test_non_latin_generated_artifact_content_is_not_treated_as_empty() -> None:
+    artifact = {
+        "artifact_type": "slides",
+        "review_state": "accepted",
+        "content": "# 調査結果\n- 出典に基づく要約です。",
+    }
+
+    metadata = validate_workspace_artifact_for_export(artifact)
+
+    assert metadata["status"] == "passed"
+
+
 def test_validation_metadata_copies_and_flattens_warning_sequences() -> None:
     warnings = ["needs source review"]
     artifact = {
@@ -171,6 +183,25 @@ def test_validation_metadata_copies_and_flattens_warning_sequences() -> None:
     artifact["review_metadata"]["verification_summary"]["warnings"] = ("first", "second")
     metadata = validate_workspace_artifact_for_export(artifact)
     assert metadata["claims_validation"]["warnings"] == ["first", "second"]
+
+
+def test_claims_validation_metadata_preserves_explicit_non_pass_status() -> None:
+    artifact = {
+        "artifact_type": "slides",
+        "review_state": "accepted",
+        "content": "# Findings\n- The source pack supports this answer.",
+        "review_metadata": {
+            "verification_summary": {
+                "validator": "claims_source_pack_v1",
+                "unsupported_claim_count": 0,
+                "status": "skipped",
+            }
+        },
+    }
+
+    metadata = validate_workspace_artifact_for_export(artifact)
+
+    assert metadata["claims_validation"]["status"] == "skipped"
 
 
 def test_validator_rejects_non_accepted_artifacts_directly() -> None:

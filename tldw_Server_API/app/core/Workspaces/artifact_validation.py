@@ -35,7 +35,7 @@ _PLACEHOLDER_PHRASES = (
     "lorem ipsum",
 )
 
-_WRAPPER_RE = re.compile(r"[^a-z0-9]+")
+_WRAPPER_RE = re.compile(r"[^\w]+", re.UNICODE)
 _FAIL_STATUSES = {"failed", "fail", "error", "rejected", "invalid"}
 _PASS_STATUSES = {"passed", "pass", "ok", "success", "succeeded", "valid"}
 
@@ -85,10 +85,10 @@ def _reject_placeholder_content(artifact: Mapping[str, Any], family: str | None)
         return
 
     content = str(artifact.get("content") or "")
-    normalized = _normalize_content(content)
-    if not normalized:
+    if not content.strip():
         raise WorkspaceArtifactExportStateError("workspace_artifact_missing_content")
 
+    normalized = _normalize_content(content)
     if normalized in _EXACT_PLACEHOLDER_CONTENT:
         raise WorkspaceArtifactExportStateError("workspace_artifact_placeholder_content")
 
@@ -193,7 +193,7 @@ def _claims_validation_metadata(
     status = str(report.get("status") or "").strip().lower()
     unsupported_count = _unsupported_claim_count(report)
     return {
-        "status": status if status in _PASS_STATUSES else "passed",
+        "status": status or "passed",
         "validator": (
             report.get("validator")
             or report.get("validator_name")

@@ -1887,6 +1887,7 @@ class TestMultiVoiceTTSAdapter:
         from tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts import (
             run_multi_voice_tts_adapter,
         )
+        from tldw_Server_API.app.core.exceptions import AdapterError
 
         monkeypatch.setenv("WORKFLOWS_ARTIFACTS_DIR", str(tmp_path / "artifacts"))
         artifacts: list[dict[str, Any]] = []
@@ -1920,7 +1921,7 @@ class TestMultiVoiceTTSAdapter:
                 return_value=False,
             ),
         ):
-            with pytest.raises(RuntimeError, match="concat_failed"):
+            with pytest.raises(AdapterError, match="concat_failed"):
                 await run_multi_voice_tts_adapter(config, base_context)
 
         assert artifacts == []

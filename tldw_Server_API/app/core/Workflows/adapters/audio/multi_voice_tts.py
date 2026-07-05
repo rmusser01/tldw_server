@@ -16,6 +16,7 @@ from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.core.exceptions import AdapterError
 from tldw_Server_API.app.core.TTS.utils import clean_text_for_tts
 from tldw_Server_API.app.core.Workflows.adapters._common import (
     AsyncFileWriter,
@@ -567,7 +568,7 @@ async def run_multi_voice_tts_adapter(config: dict[str, Any], context: dict[str,
     else:
         concat_ok = await _concat_files(segment_files, concat_path, fmt)
         if not concat_ok:
-            raise RuntimeError("concat_failed")
+            raise AdapterError("concat_failed")
 
     # Normalize
     final_path = concat_path
