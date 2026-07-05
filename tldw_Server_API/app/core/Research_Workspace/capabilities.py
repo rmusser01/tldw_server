@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import os
 import re
+import shutil
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -25,6 +27,9 @@ RESEARCH_WORKSPACE_CAPABILITY_IDS = (
     "artifact_text_generation",
     "slides_generation",
     "audio_summary",
+    "video_overview_generation",
+    "image_generation",
+    "infographic_generation",
     "export_download",
     "sync_share",
 )
@@ -46,9 +51,7 @@ _REASON_CODE_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,95}$")
 
 
 HealthCollector = Callable[[], Mapping[str, Any] | Awaitable[Mapping[str, Any]]]
-SlidesHealthCollector = Callable[
-    ..., Mapping[str, Any] | Awaitable[Mapping[str, Any]]
-]
+SlidesHealthCollector = Callable[..., Mapping[str, Any] | Awaitable[Mapping[str, Any]]]
 
 
 @dataclass(frozen=True)
@@ -60,6 +63,8 @@ class ResearchWorkspaceHealthCollectors:
     llm_health: HealthCollector
     slides_health: SlidesHealthCollector
     tts_health: HealthCollector
+    render_health: HealthCollector
+    image_health: HealthCollector
 
 
 def build_research_workspace_capabilities(
@@ -69,6 +74,8 @@ def build_research_workspace_capabilities(
     llm_health: Mapping[str, Any] | None = None,
     slides_health: Mapping[str, Any] | None = None,
     tts_health: Mapping[str, Any] | None = None,
+    render_health: Mapping[str, Any] | None = None,
+    image_health: Mapping[str, Any] | None = None,
     timestamp: datetime | None = None,
     ttl_seconds: int = 30,
 ) -> ResearchWorkspaceCapabilitiesResponse:
@@ -83,6 +90,8 @@ def build_research_workspace_capabilities(
         degraded_reason="slides_degraded",
     )
     tts = _tts_capability(tts_health)
+    render = _presentation_render_capability(render_health)
+    image = _image_capability(image_health)
 
     capabilities = {
         "source_browse": source,
@@ -102,6 +111,15 @@ def build_research_workspace_capabilities(
         "audio_summary": _compose_capability(
             dependencies=["source_browse", "llm", "tts"],
             required=[source, llm, tts],
+        ),
+        "video_overview_generation": _compose_capability(
+            dependencies=["source_browse", "llm", "slides", "tts", "presentation_render"],
+            required=[source, llm, slides, tts, render],
+        ),
+        "image_generation": image,
+        "infographic_generation": _compose_capability(
+            dependencies=["source_browse", "llm", "image_generation"],
+            required=[source, llm, image],
         ),
         "export_download": _cap("ready", "allow", ["local_artifact_state"]),
         "sync_share": _cap("unknown", "warn", ["sync"], "sync_health_unknown"),
@@ -123,7 +141,7 @@ async def collect_research_workspace_capabilities(
 ) -> ResearchWorkspaceCapabilitiesResponse:
     """Collect lightweight local health snapshots for the Research Workspace contract."""
     active_collectors = collectors or _default_health_collectors()
-    aggregate, rag, llm, slides, tts = await asyncio.gather(
+    aggregate, rag, llm, slides, tts, render, image = await asyncio.gather(
         _run_health_probe(
             "aggregate",
             active_collectors.aggregate_health,
@@ -151,6 +169,16 @@ async def collect_research_workspace_capabilities(
             active_collectors.tts_health,
             timeout_seconds=probe_timeout_seconds,
         ),
+        _run_health_probe(
+            "render",
+            active_collectors.render_health,
+            timeout_seconds=probe_timeout_seconds,
+        ),
+        _run_health_probe(
+            "image",
+            active_collectors.image_health,
+            timeout_seconds=probe_timeout_seconds,
+        ),
     )
 
     return build_research_workspace_capabilities(
@@ -159,6 +187,8 @@ async def collect_research_workspace_capabilities(
         llm_health=llm,
         slides_health=slides,
         tts_health=tts,
+        render_health=render,
+        image_health=image,
     )
 
 
@@ -206,6 +236,38 @@ def _tts_capability(tts_health: Mapping[str, Any] | None) -> ResearchWorkspaceCa
     if status == "ready":
         return _cap("ready", "allow", ["tts"])
     return _cap("unknown", "warn", ["tts"], "tts_unknown")
+
+
+def _presentation_render_capability(render_health: Mapping[str, Any] | None) -> ResearchWorkspaceCapability:
+    status = _status(render_health)
+    reason = _reason_code(render_health)
+    if status == "ready":
+        return _cap("ready", "allow", ["presentation_render"])
+    if status == "degraded":
+        return _cap("degraded", "warn", ["presentation_render"], reason or "presentation_render_degraded")
+    if status == "unavailable":
+        return _cap(
+            "unavailable",
+            "block",
+            ["presentation_render"],
+            reason or "presentation_render_unavailable",
+        )
+    return _cap("unknown", "warn", ["presentation_render"], reason or "presentation_render_unknown")
+
+
+def _image_capability(image_health: Mapping[str, Any] | None) -> ResearchWorkspaceCapability:
+    providers = _mapping_value(image_health, "providers")
+    available = providers.get("available") if isinstance(providers, Mapping) else None
+    status = _status(image_health)
+    reason = _reason_code(image_health)
+
+    if available == 0 or status == "unavailable":
+        return _cap("unavailable", "block", ["image_generation"], reason or "image_backend_unavailable")
+    if status == "degraded":
+        return _cap("degraded", "warn", ["image_generation"], reason or "image_backend_degraded")
+    if status == "ready":
+        return _cap("ready", "allow", ["image_generation"])
+    return _cap("unknown", "warn", ["image_generation"], reason or "image_backend_unknown")
 
 
 def _dependency_capability(
@@ -321,6 +383,8 @@ def _default_health_collectors() -> ResearchWorkspaceHealthCollectors:
         llm_health=_collect_llm_health,
         slides_health=_collect_slides_health,
         tts_health=_collect_tts_health,
+        render_health=_collect_presentation_render_health,
+        image_health=_collect_image_health,
     )
 
 
@@ -362,9 +426,7 @@ async def _invoke_health_collector(
 
 def _is_async_callable(collector: Callable[..., Any]) -> bool:
     """Return whether a callable or callable instance should run on the event loop."""
-    return inspect.iscoroutinefunction(collector) or inspect.iscoroutinefunction(
-        getattr(collector, "__call__", None)
-    )
+    return inspect.iscoroutinefunction(collector) or inspect.iscoroutinefunction(getattr(collector, "__call__", None))
 
 
 async def _collect_aggregate_health() -> Mapping[str, Any]:
@@ -508,3 +570,36 @@ async def _collect_tts_health() -> Mapping[str, Any]:
     except Exception:
         logger.exception("Failed to collect Research Workspace TTS health")
         return {"status": "unknown", "reason_code": "tts_health_unknown"}
+
+
+def _collect_presentation_render_health() -> Mapping[str, Any]:
+    ffmpeg_path = (os.getenv("FFMPEG_PATH") or "").strip() or shutil.which("ffmpeg")
+    if not ffmpeg_path:
+        return {"status": "unavailable", "reason_code": "presentation_render_ffmpeg_unavailable"}
+    return {"status": "healthy", "components": {"ffmpeg": {"status": "healthy"}}}
+
+
+def _collect_image_health() -> Mapping[str, Any]:
+    try:
+        from tldw_Server_API.app.core.Image_Generation.adapter_registry import get_registry
+        from tldw_Server_API.app.core.Image_Generation.listing import list_image_models_for_catalog
+
+        registry = get_registry()
+        total = len(registry.list_backend_names(include_disabled=False))
+        available = sum(1 for model in list_image_models_for_catalog() if model.get("is_configured"))
+        if available > 0:
+            return {"status": "healthy", "providers": {"available": available, "total": total}}
+        if total == 0:
+            return {
+                "status": "unavailable",
+                "providers": {"available": 0, "total": 0},
+                "reason_code": "image_backend_unavailable",
+            }
+        return {
+            "status": "unknown",
+            "providers": {"available": 0, "total": total},
+            "reason_code": "image_backend_unknown",
+        }
+    except Exception:
+        logger.exception("Failed to collect Research Workspace image health")
+        return {"status": "unknown", "reason_code": "image_health_unknown"}

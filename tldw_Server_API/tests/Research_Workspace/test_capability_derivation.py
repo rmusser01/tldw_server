@@ -45,6 +45,8 @@ def _health_inputs(**overrides):
         },
         "slides_health": {"status": "ok"},
         "tts_health": {"status": "healthy", "providers": {"available": 1}},
+        "render_health": {"status": "healthy"},
+        "image_health": {"status": "healthy", "providers": {"available": 1}},
     }
     inputs.update(overrides)
     return inputs
@@ -64,6 +66,54 @@ def test_ready_dependencies_allow_core_research_workspace_actions():
     assert response.capabilities["sync_share"].mode == "warn"
     assert response.status == "ready"
     assert response.ttl_seconds == 30
+
+
+def test_ready_dependencies_allow_media_output_actions():
+    response = build_research_workspace_capabilities(
+        **_health_inputs(
+            render_health={"status": "healthy"},
+            image_health={"status": "healthy", "providers": {"available": 1}},
+        )
+    )
+
+    assert response.capabilities["image_generation"].mode == "allow"
+    assert response.capabilities["infographic_generation"].mode == "allow"
+    assert response.capabilities["video_overview_generation"].mode == "allow"
+
+
+def test_image_unavailable_blocks_infographic_only():
+    response = build_research_workspace_capabilities(
+        **_health_inputs(image_health={"status": "unavailable", "reason_code": "image_backend_unavailable"})
+    )
+
+    assert response.capabilities["image_generation"].mode == "block"
+    assert response.capabilities["infographic_generation"].mode == "block"
+    assert response.capabilities["video_overview_generation"].mode == "allow"
+    assert response.capabilities["slides_generation"].mode == "allow"
+
+
+def test_ffmpeg_unavailable_blocks_video_overview_only():
+    response = build_research_workspace_capabilities(
+        **_health_inputs(
+            render_health={"status": "unavailable", "reason_code": "presentation_render_ffmpeg_unavailable"}
+        )
+    )
+
+    assert response.capabilities["video_overview_generation"].mode == "block"
+    assert response.capabilities["video_overview_generation"].reason_code == "presentation_render_ffmpeg_unavailable"
+    assert response.capabilities["infographic_generation"].mode == "allow"
+
+
+def test_tts_unavailable_blocks_audio_and_video_only():
+    response = build_research_workspace_capabilities(
+        **_health_inputs(tts_health={"status": "error", "providers": {"available": 0}})
+    )
+
+    assert response.capabilities["audio_summary"].mode == "block"
+    assert response.capabilities["video_overview_generation"].mode == "block"
+    assert response.capabilities["video_overview_generation"].reason_code == "tts_unavailable"
+    assert response.capabilities["slides_generation"].mode == "allow"
+    assert response.capabilities["infographic_generation"].mode == "allow"
 
 
 def test_unknown_source_health_warns_instead_of_overclaiming_or_blocking():
@@ -167,9 +217,7 @@ def test_llm_unavailable_blocks_generation_but_not_read_only_browsing():
 
 
 def test_rag_degraded_warns_chat_without_blocking_text_artifacts():
-    response = build_research_workspace_capabilities(
-        **_health_inputs(rag_health={"status": "degraded"})
-    )
+    response = build_research_workspace_capabilities(**_health_inputs(rag_health={"status": "degraded"}))
 
     assert response.capabilities["chat"].status == "degraded"
     assert response.capabilities["chat"].mode == "warn"
@@ -178,9 +226,7 @@ def test_rag_degraded_warns_chat_without_blocking_text_artifacts():
 
 
 def test_rag_unavailable_blocks_chat_as_dependency_failure():
-    response = build_research_workspace_capabilities(
-        **_health_inputs(rag_health={"status": "unhealthy"})
-    )
+    response = build_research_workspace_capabilities(**_health_inputs(rag_health={"status": "unhealthy"}))
 
     assert response.capabilities["chat"].status == "unavailable"
     assert response.capabilities["chat"].mode == "block"
@@ -190,9 +236,7 @@ def test_rag_unavailable_blocks_chat_as_dependency_failure():
 
 def test_unknown_dependency_health_preserves_probe_reason_code():
     response = build_research_workspace_capabilities(
-        **_health_inputs(
-            rag_health={"status": "unknown", "reason_code": "rag_health_timeout"}
-        )
+        **_health_inputs(rag_health={"status": "unknown", "reason_code": "rag_health_timeout"})
     )
 
     assert response.capabilities["chat"].status == "unknown"
@@ -203,16 +247,14 @@ def test_unknown_dependency_health_preserves_probe_reason_code():
 
 def test_dependency_health_rejects_unsafe_reason_code_values():
     response = build_research_workspace_capabilities(
-        **_health_inputs(
-            rag_health={"status": "unknown", "reason_code": "/tmp/secret"}
-        )
+        **_health_inputs(rag_health={"status": "unknown", "reason_code": "/tmp/secret"})
     )
 
     assert response.capabilities["chat"].reason_code == "rag_unknown"
     assert "/tmp/secret" not in response.model_dump_json()
 
 
-def test_slides_and_tts_health_only_gate_their_artifact_types():
+def test_slides_and_tts_health_gate_media_artifact_types():
     response = build_research_workspace_capabilities(
         **_health_inputs(
             slides_health={"status": "unhealthy"},
@@ -226,6 +268,8 @@ def test_slides_and_tts_health_only_gate_their_artifact_types():
     assert response.capabilities["slides_generation"].mode == "block"
     assert response.capabilities["audio_summary"].reason_code == "tts_unavailable"
     assert response.capabilities["audio_summary"].mode == "block"
+    assert response.capabilities["video_overview_generation"].reason_code == "slides_unavailable"
+    assert response.capabilities["video_overview_generation"].mode == "block"
 
 
 def test_slides_db_lookup_failure_blocks_slides_generation(monkeypatch):
@@ -243,9 +287,7 @@ def test_slides_db_lookup_failure_blocks_slides_generation(monkeypatch):
     )
 
     slides_health = capabilities._collect_slides_health(user_id=42)
-    response = build_research_workspace_capabilities(
-        **_health_inputs(slides_health=slides_health)
-    )
+    response = build_research_workspace_capabilities(**_health_inputs(slides_health=slides_health))
 
     assert slides_health["status"] == "unavailable"
     assert response.capabilities["slides_generation"].reason_code == "slides_unavailable"
@@ -364,12 +406,24 @@ async def test_capability_collection_runs_bounded_independent_probes_concurrentl
         await asyncio.sleep(0.01)
         return {"status": "healthy", "providers": {"available": 1}}
 
+    async def ready_render_health():
+        started.append("render")
+        await asyncio.sleep(0.01)
+        return {"status": "healthy"}
+
+    async def ready_image_health():
+        started.append("image")
+        await asyncio.sleep(0.01)
+        return {"status": "healthy", "providers": {"available": 1}}
+
     collectors = ResearchWorkspaceHealthCollectors(
         aggregate_health=slow_aggregate_health,
         rag_health=ready_rag_health,
         llm_health=ready_llm_health,
         slides_health=ready_slides_health,
         tts_health=ready_tts_health,
+        render_health=ready_render_health,
+        image_health=ready_image_health,
     )
 
     started_at = time.perf_counter()
@@ -381,7 +435,7 @@ async def test_capability_collection_runs_bounded_independent_probes_concurrentl
     elapsed = time.perf_counter() - started_at
 
     assert elapsed < 0.15
-    assert set(started) == {"aggregate", "rag", "llm", "slides:42", "tts"}
+    assert set(started) == {"aggregate", "rag", "llm", "slides:42", "tts", "render", "image"}
     assert response.capabilities["source_browse"].status == "unknown"
     assert response.capabilities["chat"].mode == "warn"
 
@@ -414,12 +468,20 @@ async def test_slides_probe_timeout_blocks_slides_generation():
     async def ready_tts_health():
         return {"status": "healthy", "providers": {"available": 1}}
 
+    async def ready_render_health():
+        return {"status": "healthy"}
+
+    async def ready_image_health():
+        return {"status": "healthy", "providers": {"available": 1}}
+
     collectors = ResearchWorkspaceHealthCollectors(
         aggregate_health=ready_aggregate_health,
         rag_health=ready_rag_health,
         llm_health=ready_llm_health,
         slides_health=slow_slides_health,
         tts_health=ready_tts_health,
+        render_health=ready_render_health,
+        image_health=ready_image_health,
     )
 
     response = await collect_research_workspace_capabilities(
@@ -431,6 +493,8 @@ async def test_slides_probe_timeout_blocks_slides_generation():
     assert response.capabilities["slides_generation"].status == "unavailable"
     assert response.capabilities["slides_generation"].mode == "block"
     assert response.capabilities["slides_generation"].reason_code == "slides_health_timeout"
+    assert response.capabilities["video_overview_generation"].mode == "block"
+    assert response.capabilities["video_overview_generation"].reason_code == "slides_health_timeout"
     assert response.capabilities["artifact_text_generation"].mode == "allow"
 
 

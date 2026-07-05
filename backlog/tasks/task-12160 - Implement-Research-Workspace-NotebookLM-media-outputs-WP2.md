@@ -4,12 +4,15 @@ title: Implement Research Workspace NotebookLM media outputs WP2
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-07-05 05:57'
+updated_date: 2026-07-05 05:57
 labels: []
 dependencies: []
 references:
-  - >-
-    Docs/superpowers/specs/2026-07-05-research-workspace-notebooklm-media-outputs-wp2-design.md
+- Docs/superpowers/specs/2026-07-05-research-workspace-notebooklm-media-outputs-wp2-design.md
+modified_files:
+- tldw_Server_API/app/api/v1/schemas/research_workspace_capabilities.py
+- tldw_Server_API/app/core/Research_Workspace/capabilities.py
+- tldw_Server_API/tests/Research_Workspace/test_capability_derivation.py
 ---
 
 ## Description
