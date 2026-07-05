@@ -1,6 +1,13 @@
 name: MCP Unified Publish Readiness
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - apps/mcp-unified/pyproject.toml
+      - apps/mcp-unified/src/mcp_unified/__init__.py
+      - .github/workflows/mcp-unified-publish.yml
   workflow_dispatch:
     inputs:
       target:
@@ -26,8 +33,156 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  detect-version-change:
+    name: Detect MCP Unified version publish candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      version_changed: ${{ steps.detect.outputs.version_changed }}
+      old_version: ${{ steps.detect.outputs.old_version }}
+      new_version: ${{ steps.detect.outputs.new_version }}
+      publish_candidate: ${{ steps.detect.outputs.publish_candidate }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Detect package version change
+        id: detect
+        env:
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_EVENT_BEFORE: ${{ github.event.before }}
+        run: |
+          python - <<'PY'
+          from __future__ import annotations
+
+          import ast
+          import os
+          import subprocess
+          import urllib.error
+          import urllib.request
+          from pathlib import Path
+          import tomllib
+
+          PYPROJECT = Path("apps/mcp-unified/pyproject.toml")
+          INIT_FILE = Path("apps/mcp-unified/src/mcp_unified/__init__.py")
+          PACKAGE_NAME = "mcp-unified"
+
+
+          def load_pyproject_version(text: str) -> str:
+              data = tomllib.loads(text)
+              version = data.get("project", {}).get("version")
+              if not isinstance(version, str) or not version:
+                  raise SystemExit("apps/mcp-unified/pyproject.toml is missing project.version")
+              return version
+
+
+          def load_init_version(path: Path) -> str:
+              tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+              for node in tree.body:
+                  if not isinstance(node, ast.Assign):
+                      continue
+                  for target in node.targets:
+                      if (
+                          isinstance(target, ast.Name)
+                          and target.id == "__version__"
+                          and isinstance(node.value, ast.Constant)
+                          and isinstance(node.value.value, str)
+                      ):
+                          return node.value.value
+              raise SystemExit(f"{path} is missing a string __version__ assignment")
+
+
+          def load_previous_version(before: str) -> str:
+              if not before or set(before) == {"0"}:
+                  return ""
+              try:
+                  text = subprocess.check_output(
+                      ["git", "show", f"{before}:{PYPROJECT.as_posix()}"],
+                      text=True,
+                  )
+              except subprocess.CalledProcessError:
+                  return ""
+              return load_pyproject_version(text)
+
+
+          def ensure_version_not_on_pypi(version: str) -> None:
+              url = f"https://pypi.org/pypi/{PACKAGE_NAME}/{version}/json"
+              request = urllib.request.Request(
+                  url,
+                  headers={"User-Agent": "tldw-server-mcp-unified-publish/1.0"},
+              )
+              try:
+                  with urllib.request.urlopen(request, timeout=15) as response:
+                      if response.status == 200:
+                          raise SystemExit(
+                              f"{PACKAGE_NAME} {version} already exists on PyPI; "
+                              "bump apps/mcp-unified/pyproject.toml before publishing"
+                          )
+                      raise SystemExit(
+                          f"unexpected PyPI response while checking {PACKAGE_NAME} {version}: "
+                          f"HTTP {response.status}"
+                      )
+              except urllib.error.HTTPError as exc:
+                  if exc.code == 404:
+                      return
+                  raise SystemExit(
+                      f"could not verify PyPI version availability for {PACKAGE_NAME} {version}: "
+                      f"HTTP {exc.code}"
+                  ) from exc
+              except urllib.error.URLError as exc:
+                  raise SystemExit(
+                      f"could not verify PyPI version availability for {PACKAGE_NAME} {version}: "
+                      f"{exc.reason}"
+                  ) from exc
+
+
+          event_name = os.environ.get("GITHUB_EVENT_NAME", "")
+          current_version = load_pyproject_version(PYPROJECT.read_text(encoding="utf-8"))
+          init_version = load_init_version(INIT_FILE)
+          if init_version != current_version:
+              raise SystemExit(
+                  f"{INIT_FILE} __version__={init_version!r} does not match "
+                  f"{PYPROJECT} project.version={current_version!r}"
+              )
+
+          old_version = ""
+          version_changed = False
+          publish_candidate = False
+          if event_name == "push":
+              old_version = load_previous_version(os.environ.get("GITHUB_EVENT_BEFORE", ""))
+              version_changed = current_version != old_version
+              publish_candidate = version_changed
+              if publish_candidate:
+                  ensure_version_not_on_pypi(current_version)
+
+          outputs = {
+              "old_version": old_version,
+              "new_version": current_version,
+              "version_changed": str(version_changed).lower(),
+              "publish_candidate": str(publish_candidate).lower(),
+          }
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
+              for key, value in outputs.items():
+                  output.write(f"{key}={value}\n")
+
+          print(
+              "MCP Unified publish detector:",
+              f"event={event_name}",
+              f"old_version={old_version or '<none>'}",
+              f"new_version={current_version}",
+              f"publish_candidate={publish_candidate}",
+          )
+          PY
+
   publish-plan:
     name: Build RC and publish dry-run plan
+    needs: detect-version-change
+    if: ${{ github.event_name == 'workflow_dispatch' || needs.detect-version-change.outputs.publish_candidate == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -99,8 +254,10 @@ jobs:
 
   publish-pypi:
     name: Upload MCP Unified to PyPI
-    needs: publish-plan
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.target == 'pypi' && inputs.confirm_publish == 'MCP_UNIFIED_PUBLISH' }}
+    needs:
+      - detect-version-change
+      - publish-plan
+    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.target == 'pypi' && inputs.confirm_publish == 'MCP_UNIFIED_PUBLISH') || (github.event_name == 'push' && needs.detect-version-change.outputs.publish_candidate == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -115,6 +272,53 @@ jobs:
         with:
           name: mcp-unified-publish-plan
           path: .artifacts/mcp-unified-rc
+
+      - name: Guard against duplicate PyPI version
+        env:
+          MCP_UNIFIED_PACKAGE_VERSION: ${{ needs.detect-version-change.outputs.new_version }}
+        run: |
+          python - <<'PY'
+          from __future__ import annotations
+
+          import os
+          import sys
+          import urllib.error
+          import urllib.request
+
+          package_name = "mcp-unified"
+          version = os.environ.get("MCP_UNIFIED_PACKAGE_VERSION", "").strip()
+          if not version:
+              raise SystemExit("MCP_UNIFIED_PACKAGE_VERSION is required before PyPI upload")
+
+          url = f"https://pypi.org/pypi/{package_name}/{version}/json"
+          request = urllib.request.Request(
+              url,
+              headers={"User-Agent": "tldw-server-mcp-unified-publish/1.0"},
+          )
+          try:
+              with urllib.request.urlopen(request, timeout=15) as response:
+                  if response.status == 200:
+                      raise SystemExit(
+                          f"{package_name} {version} already exists on PyPI; refusing duplicate upload"
+                      )
+                  raise SystemExit(
+                      f"unexpected PyPI response while checking {package_name} {version}: "
+                      f"HTTP {response.status}"
+                  )
+          except urllib.error.HTTPError as exc:
+              if exc.code == 404:
+                  print(f"{package_name} {version} is not present on PyPI; continuing")
+                  sys.exit(0)
+              raise SystemExit(
+                  f"could not verify PyPI version availability for {package_name} {version}: "
+                  f"HTTP {exc.code}"
+              ) from exc
+          except urllib.error.URLError as exc:
+              raise SystemExit(
+                  f"could not verify PyPI version availability for {package_name} {version}: "
+                  f"{exc.reason}"
+              ) from exc
+          PY
 
       - name: Publish MCP Unified to PyPI
         uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e # v1.13.0
