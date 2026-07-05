@@ -121,6 +121,21 @@ def test_claims_required_artifact_rejects_missing_validation_report() -> None:
         validate_workspace_artifact_for_export(artifact)
 
 
+def test_numeric_claims_required_flag_is_enforced() -> None:
+    artifact = {
+        "artifact_type": "slides",
+        "review_state": "accepted",
+        "content": "# Findings\n- The source pack supports this answer.",
+        "producer_metadata": {"claims_validation_required": 1},
+    }
+
+    with pytest.raises(
+        WorkspaceArtifactExportStateError,
+        match="workspace_artifact_claims_validation_missing",
+    ):
+        validate_workspace_artifact_for_export(artifact)
+
+
 def test_short_real_content_that_mentions_invalid_is_allowed() -> None:
     artifact = {
         "artifact_type": "quiz",
@@ -131,6 +146,45 @@ def test_short_real_content_that_mentions_invalid_is_allowed() -> None:
     metadata = validate_workspace_artifact_for_export(artifact)
 
     assert metadata["status"] == "passed"
+
+
+def test_validation_metadata_copies_and_flattens_warning_sequences() -> None:
+    warnings = ["needs source review"]
+    artifact = {
+        "artifact_type": "slides",
+        "review_state": "accepted",
+        "content": "# Findings\n- The source pack supports this answer.",
+        "review_metadata": {
+            "verification_summary": {
+                "validator": "claims_source_pack_v1",
+                "unsupported_claim_count": 0,
+                "warnings": warnings,
+            }
+        },
+    }
+
+    metadata = validate_workspace_artifact_for_export(artifact)
+
+    assert metadata["claims_validation"]["warnings"] == ["needs source review"]
+    assert metadata["claims_validation"]["warnings"] is not warnings
+
+    artifact["review_metadata"]["verification_summary"]["warnings"] = ("first", "second")
+    metadata = validate_workspace_artifact_for_export(artifact)
+    assert metadata["claims_validation"]["warnings"] == ["first", "second"]
+
+
+def test_validator_rejects_non_accepted_artifacts_directly() -> None:
+    artifact = {
+        "artifact_type": "slides",
+        "review_state": "needs_revision",
+        "content": "# Findings\n- The source pack supports this answer.",
+    }
+
+    with pytest.raises(
+        WorkspaceArtifactExportStateError,
+        match="workspace_artifact_not_accepted",
+    ):
+        validate_workspace_artifact_for_export(artifact)
 
 
 def test_claims_required_artifact_rejects_unresolved_unsupported_claims() -> None:

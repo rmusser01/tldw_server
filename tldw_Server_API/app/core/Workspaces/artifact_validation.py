@@ -47,6 +47,8 @@ def _as_mapping(value: Any) -> Mapping[str, Any]:
 def _metadata_bool(value: Any) -> bool:
     if isinstance(value, bool):
         return value
+    if isinstance(value, (int, float)):
+        return bool(value)
     if isinstance(value, str):
         return value.strip().lower() in {"1", "true", "yes", "required", "on"}
     return False
@@ -173,8 +175,10 @@ def _unsupported_claim_count(report: Mapping[str, Any]) -> int | None:
 def _as_list(value: Any) -> list[Any]:
     if value is None:
         return []
-    if isinstance(value, list):
-        return value
+    if isinstance(value, (list, tuple, set)):
+        return list(value)
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        return list(value)
     return [value]
 
 
@@ -216,6 +220,9 @@ def _reject_failed_claims_report(report: Mapping[str, Any]) -> None:
 
 def validate_workspace_artifact_for_export(artifact: Mapping[str, Any]) -> dict[str, Any]:
     """Validate a workspace artifact immediately before export."""
+    if str(artifact.get("review_state") or "draft") != "accepted":
+        raise WorkspaceArtifactExportStateError("workspace_artifact_not_accepted")
+
     family = _artifact_family(artifact)
     _reject_placeholder_content(artifact, family)
 
