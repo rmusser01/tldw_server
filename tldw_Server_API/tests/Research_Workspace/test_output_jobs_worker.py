@@ -342,9 +342,12 @@ def test_persist_output_bytes_sanitizes_nested_metadata_paths(
                 "/tmp/key": "drop-key",
                 "description": "rendered from /private/tmp/source.png",
                 "delimited": "rendered_from=/private/tmp/source.png",
+                "encoded_note": '{"path":"report.pdf"}',
                 "jsonish": '{"path":"/private/tmp/source.png"}',
+                "localPath": "report.pdf",
                 "relative_file": "tmp/render.png",
                 "relative_note": "rendered from outputs/foo.png",
+                "sourcePath": "report.pdf",
                 "windows_note": "loaded from C:\\Users\\secret\\source.png",
                 "source_path": "/tmp/secret.png",
                 "windows": "C:\\Users\\secret.png",
@@ -368,8 +371,12 @@ def test_persist_output_bytes_sanitizes_nested_metadata_paths(
     assert "C:\\\\Users" not in raw_metadata
     assert "/tmp/key" not in raw_metadata
     assert "source_path" not in raw_metadata
+    assert "encoded_note" not in raw_metadata
+    assert "localPath" not in raw_metadata
+    assert "report.pdf" not in raw_metadata
     assert "relative_file" not in raw_metadata
     assert "relative_note" not in raw_metadata
+    assert "sourcePath" not in raw_metadata
     assert "outputs/foo.png" not in raw_metadata
     assert "asset_path" not in raw_metadata
 

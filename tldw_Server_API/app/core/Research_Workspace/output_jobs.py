@@ -462,16 +462,34 @@ def _sanitize_output_metadata_value(value: Any) -> Any:
             sanitized
             for item in value
             if (sanitized := _sanitize_output_metadata_value(item)) is not _UNSAFE_OUTPUT_METADATA_VALUE
+            and sanitized not in ({}, [])
         ]
         return safe_items
-    if isinstance(value, str) and _looks_fileish_or_pathish_text(value):
-        return _UNSAFE_OUTPUT_METADATA_VALUE
+    if isinstance(value, str):
+        text = value.strip()
+        if text.startswith(("{", "[")):
+            try:
+                parsed = json.loads(text)
+            except json.JSONDecodeError:
+                pass
+            else:
+                if isinstance(parsed, Mapping | list):
+                    sanitized = _sanitize_output_metadata_value(parsed)
+                    if sanitized is _UNSAFE_OUTPUT_METADATA_VALUE or sanitized in ({}, []):
+                        return _UNSAFE_OUTPUT_METADATA_VALUE
+                    return sanitized
+        if _looks_fileish_or_pathish_text(value):
+            return _UNSAFE_OUTPUT_METADATA_VALUE
     return value
 
 
 def _is_unsafe_output_metadata_key(key_text: str) -> bool:
     key_lower = key_text.lower()
-    if key_lower in _REQUIRED_OUTPUT_METADATA_KEYS or _looks_absolute_path_like(key_text):
+    if (
+        key_lower in _REQUIRED_OUTPUT_METADATA_KEYS
+        or "path" in key_lower
+        or _looks_absolute_path_like(key_text)
+    ):
         return True
     key_tokens = re.split(r"[^a-z0-9]+", key_lower)
     return any(token in _PATHISH_OUTPUT_METADATA_KEY_TOKENS for token in key_tokens)
