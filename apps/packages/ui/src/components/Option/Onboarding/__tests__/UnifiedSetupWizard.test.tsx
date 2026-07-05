@@ -84,8 +84,30 @@ const mcpToolsCatalog = {
       sample_validation_candidates: ["mcp.tools.list"],
       catalog_version: "2026-07-04",
     },
+    {
+      pack_id: "writing",
+      label: "Writing",
+      purpose: "Draft notes.",
+      default_selected: false,
+      available: true,
+      module_targets: ["mcp"],
+      tool_patterns: ["notes.*"],
+      available_tools: [{ tool_name: "notes.create", available: true }],
+      unavailable_tools: [],
+      add_on_ids: ["workspace_write"],
+      sample_validation_candidates: ["notes.create"],
+      catalog_version: "2026-07-04",
+    },
   ],
-  add_ons: [],
+  add_ons: [
+    {
+      addon_id: "workspace_write",
+      label: "Workspace write",
+      default_selected: false,
+      requirement: "Allow tools to write workspace files.",
+      strong_confirmation: true,
+    },
+  ],
   validation_states: ["not_run"],
 } as const;
 
@@ -804,6 +826,42 @@ describe("UnifiedSetupWizard", () => {
     ).toBeInTheDocument();
   });
 
+  it("guards MCP tools skip against fast double clicks", async () => {
+    const deferred = createDeferred<FirstRunState>();
+    setupHookMocks.saveStep.mockReturnValueOnce(deferred.promise);
+    const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard");
+
+    render(
+      <UnifiedSetupWizard
+        initialState={initialStateForCompletedSteps([
+          "setup_path",
+          "privacy_security",
+          "providers",
+          "ingest_defaults",
+          "audio_defaults",
+          "optional_advanced",
+        ])}
+      />,
+    );
+
+    const skipButton = screen.getByRole("button", { name: /skip mcp tools/i });
+    fireEvent.click(skipButton);
+    fireEvent.click(skipButton);
+
+    expect(setupHookMocks.saveStep).toHaveBeenCalledTimes(1);
+    expect(skipButton).toBeDisabled();
+
+    deferred.resolve(initialStateForCompletedSteps([
+      "setup_path",
+      "privacy_security",
+      "providers",
+      "ingest_defaults",
+      "audio_defaults",
+      "optional_advanced",
+      "mcp_tools",
+    ]));
+  });
+
   it("does not refresh readiness and notifies after first chat completion", async () => {
     const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard");
     const onComplete = vi.fn();
@@ -862,6 +920,73 @@ describe("UnifiedSetupWizard", () => {
     expect(
       await screen.findByRole("heading", { name: /mcp tools/i }),
     ).toBeInTheDocument();
+  });
+
+  it("restores saved MCP tool choices when returning from first chat", async () => {
+    const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard");
+
+    render(
+      <UnifiedSetupWizard
+        initialState={{
+          status: "in_progress",
+          completed_steps: [
+            "setup_path",
+            "privacy_security",
+            "providers",
+            "ingest_defaults",
+            "audio_defaults",
+            "optional_advanced",
+          ],
+          skipped_steps: [],
+          step_data: {
+            providers: {
+              acknowledged: true,
+              default_provider: "openai",
+              default_model: "gpt-4.1-mini",
+              default_provider_credential_configured: true,
+            },
+            mcp_tools: {
+              acknowledged: true,
+              validation_state: "not_run",
+              profile_id: 7,
+              assignment_id: 9,
+              selected_pack_ids: ["writing"],
+              selected_addon_ids: ["workspace_write"],
+              confirmed_addon_ids: ["workspace_write"],
+              effective_tool_count: 1,
+              effective_tools: ["notes.create"],
+              disabled_addons: [],
+            },
+          },
+          acknowledged_steps: [],
+          first_chat: { completed: false },
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /back to mcp tools/i }));
+
+    expect(await screen.findByLabelText(/writing/i)).toBeChecked();
+    expect(screen.getByLabelText(/research/i)).not.toBeChecked();
+    expect(screen.getByRole("button", { name: /run sample tool/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /continue/i })).toBeEnabled();
+
+    fireEvent.click(screen.getByText(/add-ons/i));
+    expect(
+      screen.getByRole("checkbox", { name: /^workspace write/i }),
+    ).toBeChecked();
+    expect(screen.getByLabelText(/confirm workspace write/i)).toBeChecked();
+
+    fireEvent.click(screen.getByRole("button", { name: /save packs/i }));
+
+    await waitFor(() => {
+      expect(setupHookMocks.applyMcpTools).toHaveBeenCalledWith({
+        selected_pack_ids: ["writing"],
+        selected_addon_ids: ["workspace_write"],
+        confirmed_addon_ids: ["workspace_write"],
+        confirmation_version: "v1",
+      });
+    });
   });
 
   it("refreshes readiness after a failed skip attempt", async () => {

@@ -11,6 +11,7 @@ import type {
 
 export type McpToolsStepProps = {
   catalog: McpToolsCatalogResponse | null;
+  initialStepData?: Record<string, unknown> | null;
   loadCatalog: () => Promise<McpToolsCatalogResponse>;
   applyMcpTools: (
     payload: McpToolsApplyRequest,
@@ -18,6 +19,7 @@ export type McpToolsStepProps = {
   validateMcpTools: (
     payload: McpToolsValidateRequest,
   ) => Promise<McpToolsValidateResponse>;
+  skipPending?: boolean;
   onContinue: () => void;
   onBack: () => void;
   onSkip: () => void;
@@ -31,6 +33,12 @@ const hubHref = (profileId?: number | null) => {
 
 const toggle = (items: string[], id: string) =>
   items.includes(id) ? items.filter((item) => item !== id) : [...items, id];
+
+const isStringArray = (value: unknown): value is string[] =>
+  Array.isArray(value) && value.every((item) => typeof item === "string");
+
+const asNumberOrNull = (value: unknown) =>
+  typeof value === "number" ? value : null;
 
 const CONFLICT_REASON_LABELS: Record<string, string> = {
   profile_manually_changed: "Generated profile was changed in MCP Hub.",
@@ -47,6 +55,11 @@ const VALIDATION_STATE_LABELS: Record<string, string> = {
   failed: "Failed",
   skipped: "Skipped",
 };
+
+const isValidationState = (
+  value: unknown,
+): value is McpToolsApplyResponse["validation_state"] =>
+  typeof value === "string" && value in VALIDATION_STATE_LABELS;
 
 const EXTERNAL_STATUS_LABELS: Record<string, string> = {
   not_configured: "Not configured",
@@ -76,9 +89,11 @@ const labelsForIds = (
 
 export function McpToolsStep({
   catalog,
+  initialStepData = null,
   loadCatalog,
   applyMcpTools,
   validateMcpTools,
+  skipPending = false,
   onContinue,
   onBack,
   onSkip,
@@ -119,17 +134,60 @@ export function McpToolsStep({
   React.useEffect(() => {
     if (!activeCatalog || initializedRef.current) return;
     initializedRef.current = true;
-    setSelectedPacks(
-      activeCatalog.packs
-        .filter((pack) => pack.default_selected)
-        .map((pack) => pack.pack_id),
-    );
-    setSelectedAddOns(
-      activeCatalog.add_ons
-        .filter((addon) => addon.default_selected)
-        .map((addon) => addon.addon_id),
-    );
-  }, [activeCatalog]);
+    const savedPackIds = initialStepData?.selected_pack_ids;
+    const savedAddonIds = initialStepData?.selected_addon_ids;
+    const selectedPackIds = isStringArray(savedPackIds)
+      ? savedPackIds
+      : activeCatalog.packs
+          .filter((pack) => pack.default_selected)
+          .map((pack) => pack.pack_id);
+    const selectedAddonIds = isStringArray(savedAddonIds)
+      ? savedAddonIds
+      : activeCatalog.add_ons
+          .filter((addon) => addon.default_selected)
+          .map((addon) => addon.addon_id);
+    const confirmedAddonIds = isStringArray(initialStepData?.confirmed_addon_ids)
+      ? initialStepData.confirmed_addon_ids
+      : [];
+    setSelectedPacks(selectedPackIds);
+    setSelectedAddOns(selectedAddonIds);
+    setConfirmedAddOns(confirmedAddonIds);
+
+    if (
+      initialStepData?.acknowledged === true &&
+      initialStepData.validation_state !== "skipped" &&
+      isStringArray(savedPackIds)
+    ) {
+      const effectiveTools = isStringArray(initialStepData.effective_tools)
+        ? initialStepData.effective_tools
+        : activeCatalog.packs
+            .filter((pack) => selectedPackIds.includes(pack.pack_id))
+            .flatMap((pack) => pack.available_tools.map((tool) => tool.tool_name));
+      setApplyResult({
+        status: "applied",
+        profile_id: asNumberOrNull(initialStepData.profile_id),
+        assignment_id: asNumberOrNull(initialStepData.assignment_id),
+        catalog_version:
+          typeof initialStepData.catalog_version === "string"
+            ? initialStepData.catalog_version
+            : activeCatalog.catalog_version,
+        selected_pack_ids: selectedPackIds,
+        selected_addon_ids: selectedAddonIds,
+        effective_tool_count:
+          typeof initialStepData.effective_tool_count === "number"
+            ? initialStepData.effective_tool_count
+            : effectiveTools.length,
+        effective_tools: effectiveTools,
+        disabled_addons: isStringArray(initialStepData.disabled_addons)
+          ? initialStepData.disabled_addons
+          : [],
+        validation_state: isValidationState(initialStepData.validation_state)
+          ? initialStepData.validation_state
+          : "not_run",
+        conflict: null,
+      });
+    }
+  }, [activeCatalog, initialStepData]);
 
   const selectedStrongAddOns =
     activeCatalog?.add_ons.filter(
@@ -421,10 +479,10 @@ export function McpToolsStep({
           <button
             type="button"
             onClick={onSkip}
-            disabled={saving || validating}
+            disabled={saving || validating || skipPending}
             className="rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-text hover:bg-surface2 disabled:opacity-50"
           >
-            Skip MCP tools
+            {skipPending ? "Skipping MCP tools..." : "Skip MCP tools"}
           </button>
           <button
             type="button"

@@ -181,6 +181,57 @@ describe("McpToolsStep", () => {
     });
   });
 
+  it("restores saved selections and saved state from initial step data", async () => {
+    const applyMcpTools = vi.fn().mockResolvedValue({
+      ...applied,
+      selected_pack_ids: ["writing"],
+      selected_addon_ids: ["workspace_write"],
+      effective_tool_count: 1,
+      effective_tools: ["notes.create"],
+    });
+    render(
+      <McpToolsStep
+        {...createProps({
+          applyMcpTools,
+          initialStepData: {
+            acknowledged: true,
+            validation_state: "not_run",
+            profile_id: 11,
+            assignment_id: 12,
+            selected_pack_ids: ["writing"],
+            selected_addon_ids: ["workspace_write"],
+            confirmed_addon_ids: ["workspace_write"],
+            effective_tool_count: 1,
+            effective_tools: ["notes.create"],
+            disabled_addons: [],
+          },
+        })}
+      />,
+    );
+
+    expect(screen.getByLabelText(/research/i)).not.toBeChecked();
+    expect(screen.getByLabelText(/writing/i)).toBeChecked();
+    expect(screen.getByRole("button", { name: /run sample tool/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /continue/i })).toBeEnabled();
+
+    fireEvent.click(screen.getByText(/add-ons/i));
+    expect(
+      screen.getByRole("checkbox", { name: /^workspace write/i }),
+    ).toBeChecked();
+    expect(screen.getByLabelText(/confirm workspace write/i)).toBeChecked();
+
+    fireEvent.click(screen.getByRole("button", { name: /save packs/i }));
+
+    await waitFor(() => {
+      expect(applyMcpTools).toHaveBeenCalledWith({
+        selected_pack_ids: ["writing"],
+        selected_addon_ids: ["workspace_write"],
+        confirmed_addon_ids: ["workspace_write"],
+        confirmation_version: "v1",
+      });
+    });
+  });
+
   it("shows conflict actions and resolves by keeping or replacing the existing profile", async () => {
     const conflict = {
       ...applied,

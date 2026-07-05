@@ -154,6 +154,8 @@ export function UnifiedSetupWizard({
   const [savingStep, setSavingStep] = React.useState(false);
   const [skipPending, setSkipPending] = React.useState(false);
   const skipPendingRef = React.useRef(false);
+  const [mcpToolsSkipPending, setMcpToolsSkipPending] = React.useState(false);
+  const mcpToolsSkipPendingRef = React.useRef(false);
   const [stepError, setStepError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
@@ -505,19 +507,33 @@ export function UnifiedSetupWizard({
         {step === "mcp_tools" ? (
           <McpToolsStep
             catalog={mcpToolsCatalog}
+            initialStepData={
+              state?.step_data?.mcp_tools ??
+              initialState?.step_data?.mcp_tools ??
+              null
+            }
             loadCatalog={loadMcpToolsCatalog}
             applyMcpTools={applyMcpToolsAndPublish}
             validateMcpTools={validateMcpToolsAndPublish}
+            skipPending={mcpToolsSkipPending || savingStep}
             onContinue={() => setStep("first_chat")}
             onBack={() => setStep("optional_advanced")}
             onSkip={() => {
+              if (mcpToolsSkipPendingRef.current) return;
+              mcpToolsSkipPendingRef.current = true;
+              setMcpToolsSkipPending(true);
               void (async () => {
-                const nextState = await persistStep({
-                  step: "mcp_tools",
-                  data: { acknowledged: true, validation_state: "skipped" },
-                });
-                if (!nextState) return;
-                setStep("first_chat");
+                try {
+                  const nextState = await persistStep({
+                    step: "mcp_tools",
+                    data: { acknowledged: true, validation_state: "skipped" },
+                  });
+                  if (!nextState) return;
+                  setStep("first_chat");
+                } finally {
+                  mcpToolsSkipPendingRef.current = false;
+                  setMcpToolsSkipPending(false);
+                }
               })();
             }}
           />
