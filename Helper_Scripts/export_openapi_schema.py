@@ -33,6 +33,8 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from loguru import logger  # noqa: E402 - after the sys.path bootstrap above
+
 # Pinned canonical environment for a complete, reproducible schema. Applied
 # BEFORE importing the app so settings/route-toggles resolve identically
 # everywhere. Keep this list in sync with any new env-driven route gating.
@@ -133,15 +135,21 @@ def main(argv: list[str]) -> int:
         with open(args.out, "w", encoding="utf-8") as fh:
             json.dump(schema, fh, sort_keys=True, indent=2)
             fh.write("\n")
-        print(
-            f"[openapi-export] wrote schema -> {args.out} "
-            f"({fp['path_count']} paths, {fp['schema_count']} schemas)"
+        logger.info(
+            "[openapi-export] wrote schema -> {} ({} paths, {} schemas)",
+            args.out,
+            fp["path_count"],
+            fp["schema_count"],
         )
 
     if args.fingerprint:
         with open(args.fingerprint, "w", encoding="utf-8") as fh:
             fh.write(fp_json)
-        print(f"[openapi-export] wrote fingerprint -> {args.fingerprint} (sha256={fp['sha256'][:12]}...)")
+        logger.info(
+            "[openapi-export] wrote fingerprint -> {} (sha256={}...)",
+            args.fingerprint,
+            fp["sha256"][:12],
+        )
 
     if args.check:
         try:
@@ -150,27 +158,33 @@ def main(argv: list[str]) -> int:
             if not isinstance(checked_in, dict):
                 raise ValueError("fingerprint JSON must be an object")
         except (OSError, json.JSONDecodeError, ValueError) as exc:
-            print(
-                f"[openapi-export] FAIL — cannot read checked-in fingerprint {args.check}: {exc}",
-                file=sys.stderr,
+            logger.error(
+                "[openapi-export] FAIL — cannot read checked-in fingerprint {}: {}", args.check, exc
             )
             return 2
         if checked_in.get("sha256") != fp["sha256"]:
-            print(
+            logger.error(
                 "[openapi-export] FAIL — OpenAPI contract drift detected.\n"
-                f"  checked-in sha256: {checked_in.get('sha256')}\n"
-                f"  current    sha256: {fp['sha256']}\n"
-                f"  checked-in counts: paths={checked_in.get('path_count')} schemas={checked_in.get('schema_count')}\n"
-                f"  current    counts: paths={fp['path_count']} schemas={fp['schema_count']}\n"
+                "  checked-in sha256: {}\n"
+                "  current    sha256: {}\n"
+                "  checked-in counts: paths={} schemas={}\n"
+                "  current    counts: paths={} schemas={}\n"
                 "  Run `make openapi-fingerprint` to update the snapshot, then regenerate the\n"
                 "  frontend types (`bun run generate:api-types` in apps/tldw-frontend) and review.",
-                file=sys.stderr,
+                checked_in.get("sha256"),
+                fp["sha256"],
+                checked_in.get("path_count"),
+                checked_in.get("schema_count"),
+                fp["path_count"],
+                fp["schema_count"],
             )
             return 1
-        print("[openapi-export] OK — OpenAPI fingerprint matches the checked-in snapshot.")
+        logger.info("[openapi-export] OK — OpenAPI fingerprint matches the checked-in snapshot.")
 
     if not any((args.out, args.fingerprint, args.check)):
-        # default: print the fingerprint
+        # Bare mode writes the fingerprint JSON to STDOUT (a machine-readable
+        # data contract for piping, e.g. `... > fp.json`) — this is genuine tool
+        # output, not a diagnostic, so it stays on stdout rather than loguru.
         sys.stdout.write(fp_json)
     return 0
 

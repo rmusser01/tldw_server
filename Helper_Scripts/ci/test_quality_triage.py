@@ -54,6 +54,8 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from loguru import logger
+
 DEFAULT_TESTS_ROOT = "tldw_Server_API/tests"
 DEFAULT_BASELINE_FILE = "Helper_Scripts/ci/test_quality_baseline.txt"
 
@@ -487,7 +489,7 @@ def main(argv: list[str]) -> int:
     repo_root = Path(args.repo_root).resolve()
     tests_root = repo_root / args.tests_root
     if not tests_root.exists():
-        print(f"[test-triage] tests root not found: {tests_root}", file=sys.stderr)
+        logger.error("[test-triage] tests root not found: {}", tests_root)
         return 2
 
     files = collect_test_files(tests_root)
@@ -499,9 +501,11 @@ def main(argv: list[str]) -> int:
         for flag, count in r.flags.items():
             flag_totals[flag] = flag_totals.get(flag, 0) + count
 
-    print(
-        f"[test-triage] scanned={len(files)} flagged_files={len(reports)} "
-        + " ".join(f"{k}={v}" for k, v in sorted(flag_totals.items()))
+    logger.info(
+        "[test-triage] scanned={} flagged_files={} {}",
+        len(files),
+        len(reports),
+        " ".join(f"{k}={v}" for k, v in sorted(flag_totals.items())),
     )
 
     if args.write_baseline:
@@ -516,7 +520,7 @@ def main(argv: list[str]) -> int:
             "# Regenerate with: python Helper_Scripts/ci/test_quality_triage.py --write-baseline\n"
         )
         out_path.write_text(header + "\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
-        print(f"[test-triage] wrote baseline with {len(lines)} offenses -> {out_path}")
+        logger.info("[test-triage] wrote baseline with {} offenses -> {}", len(lines), out_path)
         return 0
 
     if args.json:
@@ -525,8 +529,10 @@ def main(argv: list[str]) -> int:
             for r in reports
         ]
         Path(args.json).write_text(jsonlib.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        print(f"[test-triage] wrote JSON -> {args.json}")
+        logger.info("[test-triage] wrote JSON -> {}", args.json)
 
+    # The ranked report is the tool's primary DATA product (meant to be read /
+    # redirected as a block), so it is written to stdout rather than loguru.
     print(f"[test-triage] top {min(args.top, len(reports))} by score:")
     for r in reports[: args.top]:
         flags = ", ".join(f"{k}x{v}" for k, v in sorted(r.flags.items()))
@@ -537,15 +543,13 @@ def main(argv: list[str]) -> int:
         current = offense_counts(reports, enforceable_only=True)
         regressions = new_offenses(current, baseline)
         if regressions:
-            print(
-                f"[test-triage] FAIL — {len(regressions)} offense(s) new or worse "
-                "than the baseline:",
-                file=sys.stderr,
+            logger.error(
+                "[test-triage] FAIL — {} offense(s) new or worse than the baseline:\n{}",
+                len(regressions),
+                "\n".join(f"  {token}" for token in regressions),
             )
-            for token in regressions:
-                print(f"  {token}", file=sys.stderr)
             return 1
-        print("[test-triage] OK — no offenses beyond the baseline.")
+        logger.info("[test-triage] OK — no offenses beyond the baseline.")
     return 0
 
 

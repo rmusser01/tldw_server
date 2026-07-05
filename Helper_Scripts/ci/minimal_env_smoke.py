@@ -23,6 +23,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from loguru import logger
+
 # The pinned minimal env a single-user deployment actually needs, and nothing
 # else — no WORKFLOWS_EGRESS_*, no TEST_MODE, no MINIMAL_TEST_APP convenience.
 MINIMAL_ENV = {
@@ -80,7 +82,7 @@ def main(argv: list[str]) -> int:
         "--host", "127.0.0.1", "--port", str(args.port),
         "--log-level", "warning",
     ]
-    print(f"[minimal-env-smoke] booting: {' '.join(cmd)}")
+    logger.info("[minimal-env-smoke] booting: {}", " ".join(cmd))
     # Child output goes to a temp FILE, not subprocess.PIPE: the app logs
     # heavily at startup and an undrained pipe would fill (~64KB) and deadlock
     # the child before it binds the port. Close the mkstemp fd immediately
@@ -109,24 +111,29 @@ def main(argv: list[str]) -> int:
             last_err = "no response"
             while time.monotonic() < deadline:
                 if proc.poll() is not None:
-                    print(
-                        f"[minimal-env-smoke] FAIL — server exited early (code {proc.returncode}):\n{_tail_log()}",
-                        file=sys.stderr,
+                    logger.error(
+                        "[minimal-env-smoke] FAIL — server exited early (code {}):\n{}",
+                        proc.returncode,
+                        _tail_log(),
                     )
                     return 1
                 try:
                     status, body = _probe(health_url)
                     if status == 200 and "healthy" in body.lower():
-                        print(f"[minimal-env-smoke] OK — /health returned 200 in a scrubbed environment: {body[:120]}")
+                        logger.info(
+                            "[minimal-env-smoke] OK — /health returned 200 in a scrubbed environment: {}",
+                            body[:120],
+                        )
                         return 0
                     last_err = f"status={status} body={body[:120]}"
                 except (urllib.error.URLError, ConnectionError, OSError) as exc:
                     last_err = repr(exc)
                 time.sleep(1.0)
-            print(
-                f"[minimal-env-smoke] FAIL — /health not healthy within {args.timeout}s "
-                f"(last: {last_err}):\n{_tail_log()}",
-                file=sys.stderr,
+            logger.error(
+                "[minimal-env-smoke] FAIL — /health not healthy within {}s (last: {}):\n{}",
+                args.timeout,
+                last_err,
+                _tail_log(),
             )
             return 1
     finally:
