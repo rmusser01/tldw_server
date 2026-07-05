@@ -3327,6 +3327,7 @@ const ResearchWorkspaceBody: React.FC = () => {
           onRefreshResearchWorkspaceCapabilities={
             refreshResearchWorkspaceCapabilitiesIfStale
           }
+          onStartWorkspaceTask={openWorkspaceAgentTask}
         />
       </Suspense>
     )

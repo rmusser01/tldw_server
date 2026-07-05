@@ -440,6 +440,38 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
     mockGetModel.mockResolvedValue(null)
   })
 
+  it("starts a workspace agent task from studio context", () => {
+    const onStartWorkspaceTask = vi.fn()
+    workspaceStoreState.generatedArtifacts = [
+      {
+        id: "artifact-1",
+        type: "summary",
+        title: "Current Summary",
+        status: "completed",
+        content: "A generated summary.",
+        createdAt: new Date("2026-02-18T00:00:00.000Z")
+      }
+    ]
+
+    renderStudioPane({ onStartWorkspaceTask })
+
+    fireEvent.click(screen.getByRole("button", { name: "Start workspace task" }))
+
+    expect(onStartWorkspaceTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: expect.stringContaining("Studio"),
+        description: expect.stringContaining("DSPy Prompting Talk"),
+        metadata: expect.objectContaining({
+          entrypoint: "studio",
+          selectedSourceIds: ["source-1"],
+          selectedSourceTitles: ["DSPy Prompting Talk"],
+          artifactIds: ["artifact-1"],
+          artifactTitles: ["Current Summary"]
+        })
+      })
+    )
+  })
+
   it("exposes accessible names for studio option controls", () => {
     renderStudioPane()
 

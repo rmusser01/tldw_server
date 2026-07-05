@@ -423,6 +423,35 @@ describe("ResearchWorkspace Stage 2 drawer responsiveness", () => {
     expect(mockWorkspaceHeaderProps.at(-1)?.agentTaskPrefill).toBe(prefill)
   })
 
+  it("opens the agent task handoff from the Studio pane entrypoint", async () => {
+    render(<ResearchWorkspace />)
+
+    await waitFor(() => {
+      expect(typeof mockStudioPaneProps.at(-1)?.onStartWorkspaceTask).toBe(
+        "function"
+      )
+    })
+
+    const prefill = {
+      title: "Continue Studio work",
+      description: "Use generated outputs.",
+      metadata: {
+        entrypoint: "studio"
+      }
+    }
+
+    act(() => {
+      mockStudioPaneProps.at(-1)?.onStartWorkspaceTask(prefill)
+    })
+
+    await waitFor(() => {
+      expect(
+        mockWorkspaceHeaderProps.at(-1)?.agentTaskHandoffOpenSignal
+      ).toBeGreaterThan(0)
+    })
+    expect(mockWorkspaceHeaderProps.at(-1)?.agentTaskPrefill).toBe(prefill)
+  })
+
   it("renders mobile tab count badges with AA-safe token classes", () => {
     testState.isMobile = true
     testState.selectedSourceIds = ["source-1", "source-2"]
