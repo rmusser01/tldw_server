@@ -34,6 +34,30 @@ type ArtifactDiscussDetail = {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null
 
+const getReadyExportRef = (
+  artifact: GeneratedArtifact,
+  formats: string[]
+) => {
+  const normalizedFormats = new Set(
+    formats.map((format) => format.trim().toLowerCase()).filter(Boolean)
+  )
+  return artifact.exportRefs?.find((ref) => {
+    const format = String(ref.format || "").trim().toLowerCase()
+    const status = String(ref.status || "ready").trim().toLowerCase()
+    return normalizedFormats.has(format) && status !== "failed"
+  })
+}
+
+const getMediaOutputDownloadRef = (artifact: GeneratedArtifact) => {
+  if (artifact.type === "video_overview") {
+    return getReadyExportRef(artifact, ["mp4"])
+  }
+  if (artifact.type === "infographic") {
+    return getReadyExportRef(artifact, ["png"])
+  }
+  return undefined
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared helpers
 // ─────────────────────────────────────────────────────────────────────────────
@@ -64,6 +88,10 @@ export function getFileExtension(type: ArtifactType): string {
       return "csv"
     case "audio_overview":
       return "mp3"
+    case "video_overview":
+      return "mp4"
+    case "infographic":
+      return "png"
     default:
       return "txt"
   }
@@ -269,6 +297,33 @@ export function useArtifactExport(deps: UseArtifactExportDeps) {
         a.download = `${artifact.title}.${artifact.audioFormat || "mp3"}`
         a.click()
         return
+      }
+
+      if (artifact.type === "video_overview" || artifact.type === "infographic") {
+        const exportRef = getMediaOutputDownloadRef(artifact)
+        const outputId = exportRef?.fileId ?? exportRef?.id ?? artifact.serverId
+        if (outputId) {
+          try {
+            const blob = await tldwClient.downloadOutput(String(outputId))
+            downloadBlobFile(
+              blob,
+              `${artifact.title}.${getFileExtension(artifact.type)}`
+            )
+            messageApi.success(
+              t("common:downloadSuccess", "Downloaded successfully")
+            )
+          } catch {
+            messageApi.error(t("common:downloadError", "Download failed"))
+          }
+          return
+        }
+        if (typeof exportRef?.url === "string" && exportRef.url.trim()) {
+          const a = document.createElement("a")
+          a.href = exportRef.url
+          a.download = `${artifact.title}.${getFileExtension(artifact.type)}`
+          a.click()
+          return
+        }
       }
 
       // Handle slides download with format selection

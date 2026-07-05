@@ -110,6 +110,46 @@ describe("workspace API status and capabilities methods", () => {
     })
   })
 
+  it("submits and polls Research Workspace output jobs", async () => {
+    vi.mocked(bgRequest)
+      .mockResolvedValueOnce({
+        job_id: 7,
+        status: "queued",
+        workspace_id: "ws-1",
+        artifact_id: "infographic-1",
+        artifact_type: "infographic"
+      })
+      .mockResolvedValueOnce({
+        job_id: 7,
+        status: "processing",
+        progress_percent: 45,
+        progress_message: "render_video",
+        workspace_id: "ws-1",
+        artifact_id: "infographic-1",
+        artifact_type: "infographic",
+        artifact: null,
+        error: null,
+        result: {}
+      })
+
+    await workspaceApiMethods.submitWorkspaceOutput("ws-1", {
+      artifact_type: "infographic",
+      source_ids: ["src-1"]
+    })
+    await workspaceApiMethods.getWorkspaceOutputStatus("ws-1", 7)
+
+    expect(bgRequest).toHaveBeenNthCalledWith(1, {
+      path: "/api/v1/workspaces/ws-1/outputs",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: { artifact_type: "infographic", source_ids: ["src-1"] }
+    })
+    expect(bgRequest).toHaveBeenNthCalledWith(2, {
+      path: "/api/v1/workspaces/ws-1/outputs/7",
+      method: "GET"
+    })
+  })
+
   it("fetches bounded workspace source preview detail", async () => {
     vi.mocked(bgRequest).mockResolvedValueOnce({
       workspace_id: "ws-1",
@@ -143,7 +183,7 @@ describe("workspace API status and capabilities methods", () => {
   it("encodes workspace and source path parameters for source preview", async () => {
     vi.mocked(bgRequest).mockResolvedValueOnce({
       workspace_id: "workspace with space",
-      source_id: "source/with/slash",
+      source_id: "source with space",
       media_id: 1,
       title: "Source",
       source_type: "pdf",
@@ -161,13 +201,21 @@ describe("workspace API status and capabilities methods", () => {
 
     await workspaceApiMethods.getWorkspaceSourcePreview(
       "workspace with space",
-      "source/with/slash"
+      "source with space"
     )
 
     expect(bgRequest).toHaveBeenCalledWith({
-      path: "/api/v1/workspaces/workspace%20with%20space/sources/source%2Fwith%2Fslash/preview",
+      path: "/api/v1/workspaces/workspace%20with%20space/sources/source%20with%20space/preview",
       method: "GET"
     })
+  })
+
+  it("rejects slash-delimited source ids before building source preview paths", async () => {
+    await expect(
+      workspaceApiMethods.getWorkspaceSourcePreview("ws-1", "source/with/slash")
+    ).rejects.toThrow('sourceId cannot contain "/"')
+
+    expect(bgRequest).not.toHaveBeenCalled()
   })
 
   it("creates a Research Workspace migration session through the canonical protocol endpoint", async () => {
@@ -222,8 +270,8 @@ describe("workspace API status and capabilities methods", () => {
 
   it("records Research Workspace migration chunk receipts with encoded path ids", async () => {
     vi.mocked(bgRequest).mockResolvedValueOnce({
-      id: "chunk/1",
-      migration_id: "mig/1",
+      id: "chunk 1",
+      migration_id: "mig 1",
       sha256: "b".repeat(64),
       byte_count: 12,
       chunk_kind: "workspace_bundle",
@@ -232,7 +280,7 @@ describe("workspace API status and capabilities methods", () => {
       accepted_at: "2026-05-26T00:00:00Z"
     })
 
-    await workspaceApiMethods.putWorkspaceMigrationChunk("mig/1", "chunk/1", {
+    await workspaceApiMethods.putWorkspaceMigrationChunk("mig 1", "chunk 1", {
       sha256: "b".repeat(64),
       byte_count: 12,
       chunk_kind: "workspace_bundle",
@@ -240,7 +288,7 @@ describe("workspace API status and capabilities methods", () => {
     })
 
     expect(bgRequest).toHaveBeenCalledWith({
-      path: "/api/v1/workspaces/migrations/mig%2F1/chunks/chunk%2F1",
+      path: "/api/v1/workspaces/migrations/mig%201/chunks/chunk%201",
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: {

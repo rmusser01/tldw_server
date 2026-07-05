@@ -7740,6 +7740,10 @@ export class TldwApiClientBase {
           ? "text/markdown"
           : format === "mp3"
             ? "audio/mpeg"
+            : format === "png"
+              ? "image/png"
+              : format === "mp4"
+                ? "video/mp4"
             : "application/octet-stream"
     return new Blob([data], { type: mime })
   }

@@ -1,6 +1,10 @@
 import React, { useState, useEffect, useRef } from "react"
 import type { MessageInstance } from "antd/es/message/interface"
 import { tldwClient, type VisualStyleRecord } from "@/services/tldw/TldwApiClient"
+import type {
+  ResearchWorkspaceOutputStatusResponse,
+  WorkspaceArtifactApiResponse
+} from "@/services/tldw/domains/workspace-api"
 import { tldwModels, type ModelInfo } from "@/services/tldw"
 import { trackResearchWorkspaceTelemetry } from "@/utils/research-workspace-telemetry"
 import { parseProviderQualifiedModelSelection } from "@/utils/resolve-api-provider"
@@ -69,6 +73,8 @@ const STUDIO_GENERATION_CHAT_TIMEOUT_MS = 180000
 const STUDIO_SOURCE_CHAR_LIMIT = 6000
 const STUDIO_TOTAL_SOURCE_CHAR_LIMIT = 18000
 const FLASHCARD_GENERATION_TEXT_LIMIT = 8000
+const MEDIA_OUTPUT_POLL_INTERVAL_MS = 1500
+const MEDIA_OUTPUT_POLL_TIMEOUT_MS = 5 * 60 * 1000
 
 const TEXT_FAILURE_SENTINELS: Partial<Record<ArtifactType, string[]>> = {
   summary: ["Summary generation failed"],
@@ -184,10 +190,18 @@ type UsageMetrics = {
 type GenerationResult = {
   serverId?: number | string
   content?: string
+  contentType?: string
+  previewText?: string
+  summary?: string
   audioUrl?: string
   audioFormat?: string
   presentationId?: string
   presentationVersion?: number
+  producerMetadata?: GeneratedArtifact["producerMetadata"]
+  sourceLineage?: GeneratedArtifact["sourceLineage"]
+  exportRefs?: GeneratedArtifact["exportRefs"]
+  version?: number
+  completedAt?: Date
   totalTokens?: number
   totalCostUsd?: number
   data?: Record<string, unknown>
@@ -521,6 +535,8 @@ export const estimateGenerationSeconds = (
     flashcards: 10,
     mindmap: 12,
     audio_overview: 24,
+    video_overview: 45,
+    infographic: 28,
     slides: 20,
     data_table: 14
   }
@@ -533,6 +549,8 @@ export const estimateGenerationSeconds = (
     flashcards: 2,
     mindmap: 3,
     audio_overview: 5,
+    video_overview: 9,
+    infographic: 4,
     slides: 4,
     data_table: 3
   }
@@ -555,6 +573,8 @@ export const estimateGenerationTokens = (
     flashcards: 1300,
     mindmap: 1500,
     audio_overview: 2600,
+    video_overview: 3200,
+    infographic: 2200,
     slides: 2400,
     data_table: 1800
   }
@@ -567,6 +587,8 @@ export const estimateGenerationTokens = (
     flashcards: 350,
     mindmap: 450,
     audio_overview: 900,
+    video_overview: 1100,
+    infographic: 650,
     slides: 800,
     data_table: 550
   }
@@ -1008,6 +1030,220 @@ const finalizeGenerationResult = (
     default:
       return result
   }
+}
+
+type BackendMediaOutputType = Extract<
+  ArtifactType,
+  "video_overview" | "infographic"
+>
+
+const buildAbortError = () => {
+  const error = new Error("Aborted")
+  error.name = "AbortError"
+  return error
+}
+
+const throwIfAborted = (signal?: AbortSignal) => {
+  if (signal?.aborted) {
+    throw buildAbortError()
+  }
+}
+
+const waitForMediaOutputPoll = (
+  delayMs: number,
+  signal?: AbortSignal
+): Promise<void> =>
+  new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(buildAbortError())
+      return
+    }
+    let timeoutId: number
+    const finish = () => {
+      signal?.removeEventListener("abort", handleAbort)
+      resolve()
+    }
+    const handleAbort = () => {
+      window.clearTimeout(timeoutId)
+      reject(buildAbortError())
+    }
+    timeoutId = window.setTimeout(finish, delayMs)
+    signal?.addEventListener("abort", handleAbort, { once: true })
+  })
+
+const getWorkspaceArtifactReadyExportRef = (
+  artifact: WorkspaceArtifactApiResponse,
+  formats: string[]
+) => {
+  const normalizedFormats = new Set(
+    formats.map((format) => format.trim().toLowerCase()).filter(Boolean)
+  )
+  return artifact.export_refs?.find((ref) => {
+    const format = String(ref.format || "").trim().toLowerCase()
+    const status = String(ref.status || "ready").trim().toLowerCase()
+    return normalizedFormats.has(format) && status !== "failed"
+  })
+}
+
+const normalizeWorkspaceArtifactSourceLineage = (
+  value: WorkspaceArtifactApiResponse["source_lineage"]
+): GeneratedArtifact["sourceLineage"] | undefined => {
+  if (Array.isArray(value)) {
+    return value as GeneratedArtifact["sourceLineage"]
+  }
+  if (isRecord(value) && Array.isArray(value.sources)) {
+    return value.sources as GeneratedArtifact["sourceLineage"]
+  }
+  if (isRecord(value) && Array.isArray(value.source_refs)) {
+    return value.source_refs as GeneratedArtifact["sourceLineage"]
+  }
+  if (isRecord(value)) {
+    const sourceIds = (
+      Array.isArray(value.usable_source_ids)
+        ? value.usable_source_ids
+        : Array.isArray(value.selected_source_ids)
+          ? value.selected_source_ids
+          : []
+    )
+      .map((sourceId) => String(sourceId || "").trim())
+      .filter(Boolean)
+    if (sourceIds.length > 0) {
+      const mediaIds = Array.isArray(value.media_ids) ? value.media_ids : []
+      return sourceIds.map((sourceId, index) => {
+        const rawMediaId = mediaIds[index]
+        const mediaId =
+          typeof rawMediaId === "number" && Number.isFinite(rawMediaId)
+            ? rawMediaId
+            : typeof rawMediaId === "string" && Number.isFinite(Number(rawMediaId))
+              ? Number(rawMediaId)
+              : undefined
+        return mediaId === undefined ? { sourceId } : { sourceId, mediaId }
+      })
+    }
+  }
+  return undefined
+}
+
+const toGeneratedArtifactFromWorkspaceArtifact = (
+  response: WorkspaceArtifactApiResponse,
+  fallbackType: BackendMediaOutputType
+): GenerationResult => {
+  const exportFormats =
+    fallbackType === "video_overview" ? ["mp4"] : ["png"]
+  const exportRef = getWorkspaceArtifactReadyExportRef(response, exportFormats)
+  const exportRefId = exportRef?.fileId ?? exportRef?.id
+  const serverId =
+    typeof exportRefId === "string" || typeof exportRefId === "number"
+      ? exportRefId
+      : response.id
+  const status = String(response.status || "").trim().toLowerCase()
+  if (status !== "completed" && status !== "complete") {
+    throw new Error("Media output completed without a completed artifact.")
+  }
+
+  return {
+    serverId,
+    content: response.content ?? undefined,
+    contentType: response.content_type ?? undefined,
+    previewText: response.preview_text ?? undefined,
+    summary: response.summary ?? undefined,
+    producerMetadata: isRecord(response.producer_metadata)
+      ? response.producer_metadata
+      : undefined,
+    sourceLineage: normalizeWorkspaceArtifactSourceLineage(
+      response.source_lineage
+    ),
+    exportRefs: Array.isArray(response.export_refs)
+      ? (response.export_refs as GeneratedArtifact["exportRefs"])
+      : undefined,
+    totalTokens: response.total_tokens ?? undefined,
+    totalCostUsd: response.total_cost_usd ?? undefined,
+    version: response.version,
+    completedAt: response.completed_at
+      ? new Date(response.completed_at)
+      : undefined
+  }
+}
+
+const generateBackendMediaOutput = async (
+  type: BackendMediaOutputType,
+  options: SourceContentGenerationOptions & {
+    workspaceId?: string
+    workspaceName?: string
+    audioSettings: AudioGenerationSettings
+    slidesVisualStyleValue?: string
+    onProgress?: (status: ResearchWorkspaceOutputStatusResponse) => void
+  }
+): Promise<GenerationResult> => {
+  const workspaceId = typeof options.workspaceId === "string"
+    ? options.workspaceId.trim()
+    : ""
+  if (!workspaceId) {
+    throw new Error("Open a workspace before generating media outputs.")
+  }
+
+  const sourceIds = options.selectedSources
+    .map((source) => source.id)
+    .filter(Boolean)
+  if (sourceIds.length === 0) {
+    throw new Error("Select sources before generating media outputs.")
+  }
+
+  const { visualStyleId } = parseSlidesVisualStyleValue(
+    options.slidesVisualStyleValue || ""
+  )
+  const submitResponse = await tldwClient.submitWorkspaceOutput(workspaceId, {
+    artifact_type: type,
+    source_ids: sourceIds,
+    settings: {
+      provider: options.apiProvider,
+      model: options.model,
+      title_hint:
+        typeof options.workspaceName === "string" && options.workspaceName.trim()
+          ? options.workspaceName.trim()
+          : undefined,
+      slides_visual_style_id:
+        type === "video_overview" ? visualStyleId || undefined : undefined,
+      tts_provider:
+        type === "video_overview" ? options.audioSettings.provider : undefined,
+      tts_model:
+        type === "video_overview" ? options.audioSettings.model : undefined,
+      tts_voice:
+        type === "video_overview" ? options.audioSettings.voice : undefined
+    }
+  })
+
+  const startedAt = Date.now()
+  while (Date.now() - startedAt < MEDIA_OUTPUT_POLL_TIMEOUT_MS) {
+    throwIfAborted(options.abortSignal)
+    const status = await tldwClient.getWorkspaceOutputStatus(
+      workspaceId,
+      submitResponse.job_id
+    )
+    options.onProgress?.(status)
+
+    if (status.status === "completed") {
+      if (!status.artifact) {
+        throw new Error("Media output completed without an artifact.")
+      }
+      return toGeneratedArtifactFromWorkspaceArtifact(status.artifact, type)
+    }
+
+    if (status.status === "failed") {
+      throw new Error(status.error || "Media output generation failed.")
+    }
+
+    if (status.status === "cancelled") {
+      throw new Error("Media output generation was cancelled.")
+    }
+
+    await waitForMediaOutputPoll(
+      MEDIA_OUTPUT_POLL_INTERVAL_MS,
+      options.abortSignal
+    )
+  }
+
+  throw new Error("Media output generation timed out.")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2841,10 +3077,16 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
               totalCostUsd: undefined,
               serverId: undefined,
               content: undefined,
+              contentType: undefined,
+              previewText: undefined,
+              summary: undefined,
               audioUrl: undefined,
               audioFormat: undefined,
               presentationId: undefined,
               presentationVersion: undefined,
+              producerMetadata: undefined,
+              exportRefs: undefined,
+              version: undefined,
               data: undefined,
               sourceCoverage: undefined,
               errorMessage: undefined,
@@ -3040,6 +3282,37 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
               abortSignal: activeAbort.signal
             })
             break
+          case "video_overview":
+          case "infographic": {
+            const mediaRuntime = await resolveStudioChatRuntime()
+            result = await generateBackendMediaOutput(type, {
+              mediaIds,
+              selectedSources,
+              model: mediaRuntime.model,
+              apiProvider: mediaRuntime.provider,
+              temperature: resolvedTemperature,
+              topP: resolvedTopP,
+              maxTokens: resolvedNumPredict,
+              audioSettings,
+              workspaceId,
+              workspaceName,
+              slidesVisualStyleValue: effectiveSlidesVisualStyleValue,
+              abortSignal: activeAbort.signal,
+              onProgress: (status) => {
+                if (!artifact) return
+                updateArtifactStatus(artifact.id, "generating", {
+                  producerMetadata: {
+                    ...(artifact.producerMetadata || {}),
+                    producerType: "research_workspace_output_job",
+                    runId: String(status.job_id),
+                    progressPercent: status.progress_percent ?? undefined,
+                    progressMessage: status.progress_message ?? undefined
+                  }
+                })
+              }
+            })
+            break
+          }
           case "slides": {
             const slidesRuntime = await resolveStudioChatRuntime()
             const { visualStyleId, visualStyleScope } = parseSlidesVisualStyleValue(
@@ -3132,6 +3405,14 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
           audioFormat: result.audioFormat,
           presentationId: result.presentationId,
           presentationVersion: result.presentationVersion,
+          contentType: result.contentType,
+          previewText: result.previewText,
+          summary: result.summary,
+          producerMetadata: result.producerMetadata,
+          sourceLineage: result.sourceLineage,
+          exportRefs: result.exportRefs,
+          version: result.version,
+          completedAt: result.completedAt,
           sourceCoverage: result.sourceCoverage,
           totalTokens:
             result.totalTokens ||

@@ -467,6 +467,40 @@ export interface WorkspaceArtifactApiResponse {
   version: number
 }
 
+export type ResearchWorkspaceOutputArtifactType =
+  | "video_overview"
+  | "infographic"
+
+export type ResearchWorkspaceOutputStatus =
+  | "queued"
+  | "processing"
+  | "completed"
+  | "failed"
+  | "cancelled"
+
+export interface ResearchWorkspaceOutputSubmitRequest {
+  artifact_type: ResearchWorkspaceOutputArtifactType
+  source_ids: string[]
+  settings?: Record<string, unknown>
+}
+
+export interface ResearchWorkspaceOutputSubmitResponse {
+  job_id: number
+  status: ResearchWorkspaceOutputStatus
+  workspace_id: string
+  artifact_id: string
+  artifact_type: ResearchWorkspaceOutputArtifactType
+}
+
+export interface ResearchWorkspaceOutputStatusResponse
+  extends ResearchWorkspaceOutputSubmitResponse {
+  progress_percent?: number | null
+  progress_message?: string | null
+  artifact?: WorkspaceArtifactApiResponse | null
+  error?: string | null
+  result?: Record<string, unknown>
+}
+
 export interface WorkspaceNoteApiResponse {
   id: number
   workspace_id: string
@@ -1450,6 +1484,29 @@ export const workspaceApiMethods = {
   ): Promise<WorkspaceContextResponse> {
     return await bgRequest<WorkspaceContextResponse>({
       path: workspacePath(workspaceId, "/context"),
+      method: "GET"
+    })
+  },
+
+  async submitWorkspaceOutput(
+    workspaceId: string,
+    data: ResearchWorkspaceOutputSubmitRequest
+  ): Promise<ResearchWorkspaceOutputSubmitResponse> {
+    return await bgRequest<ResearchWorkspaceOutputSubmitResponse>({
+      path: workspacePath(workspaceId, "/outputs"),
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: data
+    })
+  },
+
+  async getWorkspaceOutputStatus(
+    workspaceId: string,
+    jobId: number | string
+  ): Promise<ResearchWorkspaceOutputStatusResponse> {
+    const encodedJobId = encodeWorkspacePathSegment(String(jobId), "jobId")
+    return await bgRequest<ResearchWorkspaceOutputStatusResponse>({
+      path: workspacePath(workspaceId, `/outputs/${encodedJobId}`),
       method: "GET"
     })
   },
