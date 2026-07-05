@@ -374,6 +374,7 @@ body {
 
 .ant-popover-inner,
 .ant-dropdown-menu,
+.ant-modal-container,
 .ant-modal-content,
 .ant-modal-header,
 .ant-drawer-content,
@@ -385,6 +386,7 @@ body {
 
 .ant-card-head,
 .ant-modal-title,
+.ant-modal-body,
 .ant-drawer-title,
 .ant-typography:not(.ant-typography-danger):not(.ant-typography-success):not(.ant-typography-warning),
 .ant-form-item-label > label,
@@ -402,10 +404,17 @@ body {
 
 .ant-form-item-extra,
 .ant-form-item-explain,
+.ant-modal-close,
+.ant-modal-close-x,
 .ant-typography-secondary,
 .ant-typography .ant-typography-secondary,
 .ant-tabs .ant-tabs-tab:not(.ant-tabs-tab-active) .ant-tabs-tab-btn {
   color: rgb(var(--color-text-muted)) !important;
+}
+
+.ant-modal-close:hover {
+  background-color: rgb(var(--color-surface-2)) !important;
+  color: rgb(var(--color-text)) !important;
 }
 
 .ant-tabs .ant-tabs-tab:hover .ant-tabs-tab-btn,

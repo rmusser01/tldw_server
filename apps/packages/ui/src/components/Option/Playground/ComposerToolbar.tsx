@@ -843,7 +843,11 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
               {formattingGuideControl}
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <SystemPromptTemplatesButton onSelect={onTemplateSelect} />
+              <SystemPromptTemplatesButton
+                onSelect={onTemplateSelect}
+                systemPrompt={systemPrompt}
+                onSystemPromptChange={setSystemPrompt}
+              />
               {messages.length > 0 && (
                 <SessionCostEstimation
                   modelId={selectedModel}
@@ -968,7 +972,11 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
           {tabsCountBadge}
           {filesCountBadge}
           <ParameterPresets compact />
-          <SystemPromptTemplatesButton onSelect={onTemplateSelect} />
+          <SystemPromptTemplatesButton
+            onSelect={onTemplateSelect}
+            systemPrompt={systemPrompt}
+            onSystemPromptChange={setSystemPrompt}
+          />
           {formattingGuideControl}
         </div>
       </div>
@@ -1066,6 +1074,8 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
         open={systemPromptsOpen}
         onClose={() => setSystemPromptsOpen(false)}
         onSelect={handleMobileTemplateSelect}
+        systemPrompt={systemPrompt}
+        onSystemPromptChange={setSystemPrompt}
       />
       <Modal
         title={t("playground:presets.title", "Generation style") as string}
