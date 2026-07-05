@@ -299,4 +299,42 @@ describe("setup onboarding API domain", () => {
       body: {},
     });
   });
+
+  it("fetches admin MCP tools recovery status with configured auth", async () => {
+    vi.mocked(bgRequest).mockResolvedValueOnce({
+      status: "saved",
+      validation_state: "not_run",
+      profile_id: 7,
+      assignment_id: 9,
+      selected_pack_ids: ["research"],
+      selected_addon_ids: [],
+    });
+
+    await setupOnboardingMethods.getMcpToolsRecoveryStatus.call({});
+
+    expect(bgRequest).toHaveBeenCalledWith({
+      path: "/api/v1/setup/admin/mcp-tools/status",
+      method: "GET",
+    });
+  });
+
+  it("validates admin MCP tools recovery with configured auth", async () => {
+    vi.mocked(bgRequest).mockResolvedValueOnce({
+      status: "validated",
+      validation_state: "built_in_passed",
+      profile_id: 7,
+      assignment_id: 9,
+      selected_pack_ids: ["research"],
+      selected_addon_ids: [],
+    });
+
+    await setupOnboardingMethods.validateMcpToolsRecovery.call({});
+
+    expect(bgRequest).toHaveBeenCalledWith({
+      path: "/api/v1/setup/admin/mcp-tools/validate",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: {},
+    });
+  });
 });

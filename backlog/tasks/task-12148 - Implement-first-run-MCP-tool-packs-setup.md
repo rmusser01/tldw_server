@@ -74,3 +74,9 @@ Task 4 request validation follow-up: McpToolsApplyRequest and McpToolsValidateRe
 - [ ] #5 Final summary added
 - [ ] #6 Known skips or blockers documented
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Task 7 MCP Hub follow-up status/recovery slice: added admin setup-onboarding client methods without noAuth, compact MCP Hub first-run recovery panel with user-facing status labels/recovery/profile routing, backend admin status detection for generated MCP profile hash mismatch, and focused UI/backend tests. Verification: frontend Vitest MCP Hub/status + setup-onboarding service -> 23 passed; backend admin MCP tools integration -> 5 passed; service recovery status target included in combined backend slice -> passed; Bandit touched backend scope -> 0 findings; git diff --check -> clean.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->

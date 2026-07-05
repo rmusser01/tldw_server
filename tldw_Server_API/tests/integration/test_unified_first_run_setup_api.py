@@ -106,12 +106,20 @@ class _FakeMcpToolRegistry:
 
 
 class _FakeMcpToolsService:
-    def __init__(self, *, result: McpToolsApplyResult | None = None, validate_result=None) -> None:
+    def __init__(
+        self,
+        *,
+        result: McpToolsApplyResult | None = None,
+        validate_result=None,
+        recovery_status_result=None,
+    ) -> None:
         self.tool_registry = _FakeMcpToolRegistry()
         self.result = result
         self.apply_requests = []
         self.validate_result = validate_result
         self.validate_requests = []
+        self.recovery_status_result = recovery_status_result
+        self.recovery_status_requests = []
 
     async def apply_selection(self, **kwargs):
         self.apply_requests.append(kwargs)
@@ -148,6 +156,10 @@ class _FakeMcpToolsService:
         if self.validate_result is None:
             pytest.fail("validation should not run before MCP tool packs are saved")
         return self.validate_result
+
+    async def recovery_status(self, **kwargs):
+        self.recovery_status_requests.append(kwargs)
+        return self.recovery_status_result
 
 
 def _fake_mcp_validation_result(**overrides):
@@ -860,6 +872,49 @@ def test_admin_mcp_tools_status_and_validate_use_saved_state_without_reopening_f
     state = FirstRunStateStore(state_path).load()
     assert state.status == FirstRunStatus.COMPLETED
     assert state.step_data["mcp_tools"]["validation_state"] == "not_run"
+
+
+def test_admin_mcp_tools_status_reports_profile_manual_change(
+    setup_client,
+    monkeypatch,
+    tmp_path,
+):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_completed(monkeypatch)
+    _override_mcp_tools_admin_guard(monkeypatch)
+    service = _FakeMcpToolsService(
+        recovery_status_result=_fake_mcp_validation_result(
+            status="profile_manually_changed",
+            validation_state="not_run",
+            validation_message="Generated MCP profile was changed in MCP Hub.",
+        )
+    )
+    _override_mcp_tools_service(monkeypatch, service)
+    store = FirstRunStateStore(state_path)
+    store.update_step(
+        "mcp_tools",
+        {
+            "acknowledged": True,
+            "selected_pack_ids": ["research"],
+            "selected_addon_ids": [],
+            "confirmed_addon_ids": [],
+            "confirmation_version": None,
+            "validation_state": "not_run",
+            "profile_id": 7,
+            "assignment_id": 11,
+            "catalog_version": "2026-07-04.v1",
+            "effective_tool_count": 3,
+        },
+    )
+
+    status_response = setup_client.get("/api/v1/setup/admin/mcp-tools/status")
+
+    assert status_response.status_code == 200
+    assert status_response.json()["status"] == "profile_manually_changed"
+    assert status_response.json()["validation_message"] == "Generated MCP profile was changed in MCP Hub."
+    assert service.recovery_status_requests[0]["saved_state"]["profile_id"] == 7
+    assert service.recovery_status_requests[0]["saved_state"]["selected_pack_ids"] == ["research"]
 
 
 def test_first_run_provider_save_masks_key_and_writes_config(monkeypatch, tmp_path, setup_client):

@@ -173,6 +173,8 @@ export type McpToolsValidateResponse = {
   external_status?: string | null
 }
 
+export type McpToolsRecoveryStatusResponse = McpToolsValidateResponse
+
 export type FirstRunMetadata = {
   auth_mode: string
   bundled_single_user_auth_available: boolean

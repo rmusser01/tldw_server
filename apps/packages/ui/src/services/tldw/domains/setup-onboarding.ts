@@ -14,6 +14,7 @@ import type {
   McpToolsApplyRequest,
   McpToolsApplyResponse,
   McpToolsCatalogResponse,
+  McpToolsRecoveryStatusResponse,
   McpToolsValidateRequest,
   McpToolsValidateResponse,
   OptionalAdvancedRequest,
@@ -230,6 +231,24 @@ export const setupOnboardingMethods = {
       method: "POST",
       headers: jsonHeaders,
       noAuth: true,
+      body: payload,
+    });
+  },
+
+  async getMcpToolsRecoveryStatus(): Promise<McpToolsRecoveryStatusResponse> {
+    return await bgRequest<McpToolsRecoveryStatusResponse>({
+      path: "/api/v1/setup/admin/mcp-tools/status",
+      method: "GET",
+    });
+  },
+
+  async validateMcpToolsRecovery(
+    payload: McpToolsValidateRequest = {},
+  ): Promise<McpToolsValidateResponse> {
+    return await bgRequest<McpToolsValidateResponse>({
+      path: "/api/v1/setup/admin/mcp-tools/validate",
+      method: "POST",
+      headers: jsonHeaders,
       body: payload,
     });
   },

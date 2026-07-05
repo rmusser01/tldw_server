@@ -1,7 +1,8 @@
-import { useMemo, useRef, useState, type ReactNode } from "react"
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { useSearchParams } from "react-router-dom"
 import { Button, Tabs, Typography } from "antd"
 import { StatePanel } from "@/components/ui/state"
+import { setupOnboardingMethods } from "@/services/tldw/domains/setup-onboarding"
 
 import { ApprovalPoliciesTab } from "./ApprovalPoliciesTab"
 import { CapabilityMappingsTab } from "./CapabilityMappingsTab"
@@ -23,6 +24,10 @@ import {
   persistMcpHubExplainerDismissed,
   readMcpHubExplainerDismissed
 } from "@/utils/ftux-storage"
+import type {
+  McpToolsRecoveryStatusResponse,
+  McpToolsValidationState
+} from "@/types/setup-onboarding"
 import {
   MCP_HUB_VIEW_LABELS,
   MCP_HUB_WORKFLOW_ORDER,
@@ -86,12 +91,53 @@ const MCP_HUB_SHORTCUT_ITEMS: McpHubShortcutItem[] = [
   }
 ]
 
+const RECOVERABLE_MCP_TOOL_STATES = new Set<McpToolsValidationState>([
+  "skipped",
+  "failed",
+  "not_run",
+  "external_discovery_incomplete"
+])
+
+const mcpRecoveryStatusLabel = (status: McpToolsRecoveryStatusResponse) => {
+  if (status.status === "profile_manually_changed") return "Profile manually changed"
+  if (
+    status.validation_state === "built_in_passed" ||
+    status.validation_state === "external_tool_passed"
+  ) {
+    return "Validated during setup"
+  }
+  if (status.validation_state === "failed") return "Validation failed"
+  if (status.validation_state === "external_discovery_incomplete") {
+    return "External discovery incomplete"
+  }
+  return "Not validated during setup"
+}
+
+const mcpRecoveryPanelState = (status: McpToolsRecoveryStatusResponse) => {
+  if (status.status === "profile_manually_changed" || status.validation_state === "failed") {
+    return "error" as const
+  }
+  if (status.validation_state === "external_discovery_incomplete") {
+    return "degraded" as const
+  }
+  if (
+    status.validation_state === "built_in_passed" ||
+    status.validation_state === "external_tool_passed"
+  ) {
+    return "ready" as const
+  }
+  return "empty" as const
+}
+
 export const McpHubPage = () => {
   const [searchParams, setSearchParams] = useSearchParams()
   const [explainerDismissed, setExplainerDismissed] = useState(
     () => readMcpHubExplainerDismissed()
   )
   const [drillTarget, setDrillTarget] = useState<McpHubDrillTarget | null>(null)
+  const [mcpToolsRecoveryStatus, setMcpToolsRecoveryStatus] =
+    useState<McpToolsRecoveryStatusResponse | null>(null)
+  const [mcpToolsRecoveryRunning, setMcpToolsRecoveryRunning] = useState(false)
   const requestIdRef = useRef(0)
 
   const routeState = useMemo(
@@ -176,6 +222,42 @@ export const McpHubPage = () => {
     })
   }
 
+  useEffect(() => {
+    let active = true
+    setupOnboardingMethods
+      .getMcpToolsRecoveryStatus()
+      .then((status) => {
+        if (active) setMcpToolsRecoveryStatus(status)
+      })
+      .catch(() => {
+        if (active) setMcpToolsRecoveryStatus(null)
+      })
+    return () => {
+      active = false
+    }
+  }, [])
+
+  const handleRunMcpToolsRecoveryValidation = async () => {
+    setMcpToolsRecoveryRunning(true)
+    try {
+      setMcpToolsRecoveryStatus(await setupOnboardingMethods.validateMcpToolsRecovery())
+    } catch {
+      // Keep MCP Hub usable when recovery validation fails.
+    } finally {
+      setMcpToolsRecoveryRunning(false)
+    }
+  }
+
+  const handleReviewFirstRunProfile = () => {
+    const nextParams = new URLSearchParams(searchParams)
+    nextParams.set("workflow", "access")
+    nextParams.set("view", "profiles")
+    if (mcpToolsRecoveryStatus?.profile_id != null) {
+      nextParams.set("profile_id", String(mcpToolsRecoveryStatus.profile_id))
+    }
+    setSearchParams(nextParams, { replace: true })
+  }
+
   const handleOpenExternalServer = (serverId: string, action: McpHubDrillAction) => {
     requestIdRef.current += 1
     setDrillTarget({
@@ -233,6 +315,20 @@ export const McpHubPage = () => {
   }
 
   const activeWorkflow = MCP_HUB_WORKFLOWS[routeState.workflow]
+  const shouldShowMcpToolsRecovery =
+    Boolean(mcpToolsRecoveryStatus) &&
+    (searchParams.get("source") === "first-run" ||
+      mcpToolsRecoveryStatus?.profile_id != null ||
+      Boolean(mcpToolsRecoveryStatus?.selected_pack_ids.length))
+  const mcpToolsRecoveryLabel = mcpToolsRecoveryStatus
+    ? mcpRecoveryStatusLabel(mcpToolsRecoveryStatus)
+    : null
+  const mcpToolsProfileChanged =
+    mcpToolsRecoveryStatus?.status === "profile_manually_changed"
+  const canRunMcpToolsRecovery =
+    Boolean(mcpToolsRecoveryStatus) &&
+    !mcpToolsProfileChanged &&
+    RECOVERABLE_MCP_TOOL_STATES.has(mcpToolsRecoveryStatus.validation_state)
   const childTabItems = activeWorkflow.views.map((view) => ({
     key: view,
     label: (
@@ -291,6 +387,38 @@ export const McpHubPage = () => {
               onClick: handleExplainerClose
             }
           ]}
+        />
+      )}
+      {shouldShowMcpToolsRecovery && mcpToolsRecoveryStatus && mcpToolsRecoveryLabel && (
+        <StatePanel
+          data-testid="mcp-tools-recovery-status"
+          state={mcpRecoveryPanelState(mcpToolsRecoveryStatus)}
+          title="First-run MCP tools"
+          message={mcpToolsRecoveryLabel}
+          primaryAction={
+            canRunMcpToolsRecovery
+              ? {
+                  label: "Run validation",
+                  loading: mcpToolsRecoveryRunning,
+                  onClick: handleRunMcpToolsRecoveryValidation
+                }
+              : mcpToolsProfileChanged
+                ? {
+                    label: "Review profile",
+                    onClick: handleReviewFirstRunProfile
+                  }
+                : undefined
+          }
+          secondaryActions={
+            mcpToolsRecoveryStatus.profile_id != null && !mcpToolsProfileChanged
+              ? [
+                  {
+                    label: "Open profile",
+                    onClick: handleReviewFirstRunProfile
+                  }
+                ]
+              : []
+          }
         />
       )}
       <div

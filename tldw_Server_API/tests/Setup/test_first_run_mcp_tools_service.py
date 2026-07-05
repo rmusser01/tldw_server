@@ -515,6 +515,36 @@ async def test_manual_edit_conflict_returns_structured_conflict_without_overwrit
 
 
 @pytest.mark.asyncio
+async def test_recovery_status_reports_profile_manual_change_from_saved_profile_hash(
+    first_run_state: FirstRunState,
+    fake_hub: FakeMcpHub,
+    fake_registry: FakeToolRegistry,
+    tool_entries: list[dict[str, Any]],
+) -> None:
+    edited_policy = _policy(state=first_run_state, tool_entries=tool_entries)
+    edited_policy["allowed_tools"].append("notes.delete")
+    fake_hub.permission_profiles = [_profile(7, edited_policy)]
+    service = SetupMcpToolsService(hub=fake_hub, tool_registry=fake_registry)
+
+    result = await service.recovery_status(
+        saved_state={
+            "selected_pack_ids": ["research"],
+            "selected_addon_ids": [],
+            "validation_state": "not_run",
+            "profile_id": 7,
+            "assignment_id": 11,
+            "catalog_version": CATALOG_VERSION,
+            "effective_tool_count": 3,
+        }
+    )
+
+    assert result.status == "profile_manually_changed"
+    assert result.validation_state == "not_run"
+    assert result.profile_id == 7
+    assert result.validation_message == "Generated MCP profile was changed in MCP Hub."
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("conflict_resolution,profile_id", [("keep_existing", 2), ("replace_existing", None)])
 async def test_conflict_resolution_requires_matching_profile_id_before_mutating(
     conflict_resolution: str,

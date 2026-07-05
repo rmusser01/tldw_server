@@ -2386,11 +2386,16 @@ async def verify_admin_setup_readiness(
 @router.get("/admin/mcp-tools/status", response_model=McpToolsValidateResponse)
 async def get_admin_mcp_tools_status(
     _guard: AuthPrincipal = Depends(_require_system_configure_access),
+    service: SetupMcpToolsService = Depends(get_setup_mcp_tools_service),
 ) -> McpToolsValidateResponse:
     """Return the saved first-run MCP tool setup status through the admin surface."""
 
     state = await _run_first_run_store_call(lambda store: store.load())
     data = _mcp_tools_step_data_from_state(state)
+    if data.get("selected_pack_ids"):
+        recovery_status = await service.recovery_status(saved_state=data)
+        if recovery_status is not None:
+            return _mcp_tools_validation_response(recovery_status)
     return _mcp_tools_status_response(
         data,
         status_value="saved" if data.get("selected_pack_ids") else "not_saved",

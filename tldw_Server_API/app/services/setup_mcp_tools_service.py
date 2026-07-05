@@ -48,6 +48,7 @@ _MESSAGE_EXTERNAL_DISCOVERY_INCOMPLETE = "External discovery did not complete."
 _MESSAGE_NO_SAFE_EXTERNAL_TOOL = "No safe no-argument external read-only tool was available."
 _MESSAGE_EXTERNAL_TOOL_FAILED = "External MCP validation tool check failed."
 _MESSAGE_EXTERNAL_TOOL_PASSED = "External MCP validation tool check passed."
+_MESSAGE_PROFILE_MANUALLY_CHANGED = "Generated MCP profile was changed in MCP Hub."
 
 
 @dataclass(frozen=True)
@@ -92,11 +93,11 @@ class McpToolsValidationResult:
     selected_pack_ids: list[str]
     selected_addon_ids: list[str]
     effective_tool_count: int | None
-    validated_at: str
-    validation_message: str
-    last_validation_run_id: str
+    validated_at: str | None
+    validation_message: str | None
+    last_validation_run_id: str | None
     sample_tool_name: str | None
-    external_status: str
+    external_status: str | None
     step_payload: dict[str, Any]
 
 
@@ -320,6 +321,28 @@ class SetupMcpToolsService:
             external_status="no_safe_tool",
         )
 
+    async def recovery_status(
+        self,
+        *,
+        saved_state: Mapping[str, Any],
+    ) -> McpToolsValidationResult | None:
+        """Return follow-up status that requires MCP Hub data, if any."""
+
+        saved_state = _dict(saved_state)
+        profile = await self._saved_profile(saved_state)
+        if profile is None:
+            return None
+        policy_document = _dict(profile.get("policy_document"))
+        conflict = _profile_conflict(profile, policy_document)
+        if conflict is None:
+            return None
+        return _status_result(
+            saved_state=saved_state,
+            status="profile_manually_changed",
+            validation_state=str(saved_state.get("validation_state") or "not_run"),
+            validation_message=_MESSAGE_PROFILE_MANUALLY_CHANGED,
+        )
+
     async def _find_existing_profile(self, *, setup_instance_id: str) -> dict[str, Any] | None:
         profiles = await self.hub.list_permission_profiles(
             owner_scope_type=_GLOBAL_SCOPE,
@@ -379,17 +402,21 @@ class SetupMcpToolsService:
         return _dict(updated or assignment)
 
     async def _validation_policy_document(self, saved_state: Mapping[str, Any]) -> dict[str, Any]:
+        profile = await self._saved_profile(saved_state)
+        return _dict(profile.get("policy_document")) if profile else {}
+
+    async def _saved_profile(self, saved_state: Mapping[str, Any]) -> dict[str, Any] | None:
         profile_id = _safe_int(saved_state.get("profile_id"))
         if profile_id is None:
-            return {}
+            return None
         profiles = await self.hub.list_permission_profiles(
             owner_scope_type=_GLOBAL_SCOPE,
             owner_scope_id=None,
         )
         for profile in profiles:
             if _safe_int(_dict(profile).get("id")) == profile_id:
-                return _dict(_dict(profile).get("policy_document"))
-        return {}
+                return _dict(profile)
+        return None
 
     async def _enabled_external_servers(self) -> list[dict[str, Any]]:
         list_external_servers = getattr(self.hub, "list_external_servers", None)
@@ -570,6 +597,35 @@ def _validation_result(
         sample_tool_name=sample_tool_name,
         external_status=external_status,
         step_payload={key: payload[key] for key in _STEP_PAYLOAD_KEYS},
+    )
+
+
+def _status_result(
+    *,
+    saved_state: Mapping[str, Any],
+    status: str,
+    validation_state: str,
+    validation_message: str,
+) -> McpToolsValidationResult:
+    profile_id = _safe_int(saved_state.get("profile_id"))
+    assignment_id = _safe_int(saved_state.get("assignment_id"))
+    return McpToolsValidationResult(
+        status=status,
+        validation_state=validation_state,
+        profile_id=profile_id,
+        assignment_id=assignment_id,
+        catalog_version=str(saved_state["catalog_version"]) if saved_state.get("catalog_version") else CATALOG_VERSION,
+        selected_pack_ids=_str_list(saved_state.get("selected_pack_ids")),
+        selected_addon_ids=_str_list(saved_state.get("selected_addon_ids")),
+        effective_tool_count=_safe_int(saved_state.get("effective_tool_count")),
+        validated_at=str(saved_state["validated_at"]) if saved_state.get("validated_at") else None,
+        validation_message=validation_message,
+        last_validation_run_id=(
+            str(saved_state["last_validation_run_id"]) if saved_state.get("last_validation_run_id") else None
+        ),
+        sample_tool_name=str(saved_state["sample_tool_name"]) if saved_state.get("sample_tool_name") else None,
+        external_status=str(saved_state["external_status"]) if saved_state.get("external_status") else None,
+        step_payload={},
     )
 
 
