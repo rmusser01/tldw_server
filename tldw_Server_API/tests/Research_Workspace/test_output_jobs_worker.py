@@ -64,6 +64,7 @@ def fake_media_db() -> object:
 def fake_collections_db() -> object:
     class _FakeCollectionsDB:
         def __init__(self) -> None:
+            self.user_id = 42
             self.created: list[dict[str, object]] = []
 
         def resolve_output_storage_path(self, path_value: str) -> str:
@@ -199,6 +200,76 @@ def test_persist_output_bytes_creates_durable_output_artifact(
     assert written_path.read_bytes() == b"png-bytes"
 
 
+def test_persist_output_bytes_rejects_collections_user_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Any,
+    fake_collections_db: Any,
+) -> None:
+    output_jobs = _output_jobs_module()
+    fake_collections_db.user_id = 43
+    monkeypatch.setattr(DatabasePaths, "get_user_outputs_dir", lambda _user_id: tmp_path)
+
+    with pytest.raises(output_jobs.ResearchWorkspaceOutputJobError) as excinfo:
+        output_jobs.persist_research_workspace_output_bytes(
+            collections_db=fake_collections_db,
+            user_id=42,
+            job_id=7,
+            artifact_type="infographic",
+            title="Infographic",
+            content=b"png-bytes",
+            format_="png",
+            content_type="image/png",
+            workspace_id="ws-1",
+            workspace_artifact_id="infographic-1",
+        )
+
+    assert excinfo.value.public_code == "output_user_mismatch"
+    assert excinfo.value.retryable is False
+    assert fake_collections_db.created == []
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_persist_output_bytes_removes_file_when_artifact_row_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Any,
+) -> None:
+    output_jobs = _output_jobs_module()
+    monkeypatch.setattr(DatabasePaths, "get_user_outputs_dir", lambda _user_id: tmp_path)
+
+    class _FailingCollectionsDB:
+        def __init__(self) -> None:
+            self.user_id = 42
+            self.storage_path: str | None = None
+
+        def resolve_output_storage_path(self, path_value: str) -> str:
+            self.storage_path = path_value
+            return path_value
+
+        def create_output_artifact(self, **kwargs: object) -> SimpleNamespace:
+            raise RuntimeError("db unavailable")
+
+    collections_db = _FailingCollectionsDB()
+
+    with pytest.raises(output_jobs.ResearchWorkspaceOutputJobError) as excinfo:
+        output_jobs.persist_research_workspace_output_bytes(
+            collections_db=collections_db,
+            user_id=42,
+            job_id=7,
+            artifact_type="infographic",
+            title="Infographic",
+            content=b"png-bytes",
+            format_="png",
+            content_type="image/png",
+            workspace_id="ws-1",
+            workspace_artifact_id="infographic-1",
+        )
+
+    assert excinfo.value.public_code == "output_artifact_create_failed"
+    assert excinfo.value.retryable is False
+    assert collections_db.storage_path is not None
+    assert not (tmp_path / collections_db.storage_path).exists()
+
+
 def test_persist_output_bytes_keeps_required_metadata_and_drops_paths(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Any,
@@ -226,6 +297,8 @@ def test_persist_output_bytes_keeps_required_metadata_and_drops_paths(
             "byte_size": 999,
             "storage_path": "/tmp/secret.png",
             "note": "/private/tmp/secret.png",
+            "relative_file": "tmp/render.png",
+            "relative_note": "rendered from outputs/foo.png",
             "safe_note": "kept",
         },
     )
@@ -238,6 +311,8 @@ def test_persist_output_bytes_keeps_required_metadata_and_drops_paths(
     assert metadata["byte_size"] == len(b"png-bytes")
     assert metadata["safe_note"] == "kept"
     assert "storage_path" not in metadata
+    assert "relative_file" not in metadata
+    assert "relative_note" not in metadata
     assert "/private/tmp/secret.png" not in metadata.values()
 
 
@@ -268,6 +343,8 @@ def test_persist_output_bytes_sanitizes_nested_metadata_paths(
                 "description": "rendered from /private/tmp/source.png",
                 "delimited": "rendered_from=/private/tmp/source.png",
                 "jsonish": '{"path":"/private/tmp/source.png"}',
+                "relative_file": "tmp/render.png",
+                "relative_note": "rendered from outputs/foo.png",
                 "windows_note": "loaded from C:\\Users\\secret\\source.png",
                 "source_path": "/tmp/secret.png",
                 "windows": "C:\\Users\\secret.png",
@@ -275,6 +352,7 @@ def test_persist_output_bytes_sanitizes_nested_metadata_paths(
             "items": [
                 "kept",
                 "/tmp/list-secret.png",
+                "outputs/foo.png",
                 {"inner": "safe", "home": "~/secret.png", "asset_path": "relative"},
             ],
         },
@@ -290,6 +368,9 @@ def test_persist_output_bytes_sanitizes_nested_metadata_paths(
     assert "C:\\\\Users" not in raw_metadata
     assert "/tmp/key" not in raw_metadata
     assert "source_path" not in raw_metadata
+    assert "relative_file" not in raw_metadata
+    assert "relative_note" not in raw_metadata
+    assert "outputs/foo.png" not in raw_metadata
     assert "asset_path" not in raw_metadata
 
 

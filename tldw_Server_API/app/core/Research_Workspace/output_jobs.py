@@ -45,6 +45,9 @@ _SOURCE_CONTEXT_MEDIA_ERRORS = (
 _REQUIRED_OUTPUT_METADATA_KEYS = frozenset(
     {"origin", "workspace_id", "workspace_artifact_id", "content_type", "byte_size"}
 )
+_PATHISH_OUTPUT_METADATA_KEY_TOKENS = frozenset(
+    {"path", "file", "filename", "filepath", "folder", "directory", "dir", "storage"}
+)
 _UNSAFE_OUTPUT_METADATA_VALUE = object()
 
 
@@ -214,6 +217,12 @@ def persist_research_workspace_output_bytes(
     if not content:
         raise ResearchWorkspaceOutputJobError("empty_output", retryable=False)
 
+    try:
+        if int(getattr(collections_db, "user_id")) != int(user_id):
+            raise ResearchWorkspaceOutputJobError("output_user_mismatch", retryable=False)
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise ResearchWorkspaceOutputJobError("output_user_mismatch", retryable=False) from exc
+
     outputs_dir = DatabasePaths.get_user_outputs_dir(user_id)
     outputs_dir.mkdir(parents=True, exist_ok=True)
     filename = f"research-workspace-{workspace_artifact_id}-{uuid.uuid4().hex}.{format_}"
@@ -221,25 +230,35 @@ def persist_research_workspace_output_bytes(
     path = outputs_dir / storage_path
     path.write_bytes(content)
 
-    row = collections_db.create_output_artifact(
-        job_id=job_id,
-        type_=f"research_workspace_{artifact_type}",
-        title=title,
-        format_=format_,
-        storage_path=storage_path,
-        workspace_tag=f"workspace:{workspace_id}",
-        metadata_json=json.dumps(
-            {
-                **_safe_caller_output_metadata(metadata),
-                "origin": "research_workspace",
-                "workspace_id": workspace_id,
-                "workspace_artifact_id": workspace_artifact_id,
-                "content_type": content_type,
-                "byte_size": len(content),
-            },
-            ensure_ascii=False,
-        ),
-    )
+    try:
+        row = collections_db.create_output_artifact(
+            job_id=job_id,
+            type_=f"research_workspace_{artifact_type}",
+            title=title,
+            format_=format_,
+            storage_path=storage_path,
+            workspace_tag=f"workspace:{workspace_id}",
+            metadata_json=json.dumps(
+                {
+                    **_safe_caller_output_metadata(metadata),
+                    "origin": "research_workspace",
+                    "workspace_id": workspace_id,
+                    "workspace_artifact_id": workspace_artifact_id,
+                    "content_type": content_type,
+                    "byte_size": len(content),
+                },
+                ensure_ascii=False,
+            ),
+        )
+    except Exception as exc:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise ResearchWorkspaceOutputJobError(
+            "output_artifact_create_failed",
+            retryable=False,
+        ) from exc
     return ResearchWorkspacePersistedOutput(
         output_id=int(row.id),
         download_url=f"/api/v1/outputs/{row.id}/download",
@@ -418,12 +437,7 @@ def _safe_caller_output_metadata(metadata: Mapping[str, Any] | None) -> dict[str
     safe: dict[str, Any] = {}
     for key, value in dict(metadata or {}).items():
         key_text = str(key)
-        key_lower = key_text.lower()
-        if (
-            key_lower in _REQUIRED_OUTPUT_METADATA_KEYS
-            or "path" in key_lower
-            or _looks_absolute_path_like(key_text)
-        ):
+        if _is_unsafe_output_metadata_key(key_text):
             continue
         sanitized = _sanitize_output_metadata_value(value)
         if sanitized is _UNSAFE_OUTPUT_METADATA_VALUE:
@@ -437,12 +451,7 @@ def _sanitize_output_metadata_value(value: Any) -> Any:
         safe: dict[str, Any] = {}
         for key, child in value.items():
             key_text = str(key)
-            key_lower = key_text.lower()
-            if (
-                key_lower in _REQUIRED_OUTPUT_METADATA_KEYS
-                or "path" in key_lower
-                or _looks_absolute_path_like(key_text)
-            ):
+            if _is_unsafe_output_metadata_key(key_text):
                 continue
             sanitized = _sanitize_output_metadata_value(child)
             if sanitized is not _UNSAFE_OUTPUT_METADATA_VALUE:
@@ -455,9 +464,25 @@ def _sanitize_output_metadata_value(value: Any) -> Any:
             if (sanitized := _sanitize_output_metadata_value(item)) is not _UNSAFE_OUTPUT_METADATA_VALUE
         ]
         return safe_items
-    if isinstance(value, str) and _looks_absolute_path_like(value):
+    if isinstance(value, str) and _looks_fileish_or_pathish_text(value):
         return _UNSAFE_OUTPUT_METADATA_VALUE
     return value
+
+
+def _is_unsafe_output_metadata_key(key_text: str) -> bool:
+    key_lower = key_text.lower()
+    if key_lower in _REQUIRED_OUTPUT_METADATA_KEYS or _looks_absolute_path_like(key_text):
+        return True
+    key_tokens = re.split(r"[^a-z0-9]+", key_lower)
+    return any(token in _PATHISH_OUTPUT_METADATA_KEY_TOKENS for token in key_tokens)
+
+
+def _looks_fileish_or_pathish_text(value: str) -> bool:
+    text = value.strip()
+    return _looks_absolute_path_like(text) or re.search(
+        r"(^|[^\w])(?:[A-Za-z0-9_.-]+/)+[A-Za-z0-9_.-]+(?:\.[A-Za-z0-9]{1,12})?(?=$|[^\w])",
+        text,
+    ) is not None
 
 
 def _looks_absolute_path_like(value: str) -> bool:
