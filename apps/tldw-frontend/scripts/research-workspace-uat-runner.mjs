@@ -376,6 +376,7 @@ export const createEvidence = ({
     "WebUI autostart command binds to 127.0.0.1 instead of 0.0.0.0",
     "Browser launch permissions for the selected Playwright channel",
     "Backend running at the configured API URL for real-backend specs",
+    "Sandbox-capable backend profile with [API-Routes] enable = sandbox for strict workspace sandbox diagnostics",
   ],
   specs: config.specs,
   startedAt,
