@@ -108,10 +108,10 @@ Optional add-ons (apply AFTER your base profile is healthy):
 ## Current Status
 
 Current release line:
-- `0.1.35` Beta status. Expect rough edges and please report issues.
+- `0.1.36` Beta status. Expect rough edges and please report issues.
 - Primary client surfaces are the Next.js WebUI, Admin UI, and browser extension.
 - Package metadata is prepared under the canonical PyPI name `tldw-server`; use a repository checkout until publishing is complete.
-- The `dev` branch carries work beyond `0.1.35`, including post-`0.1.35` branch work, and is prepared for the `0.1.35` release merge to `main`; see [CHANGELOG.md](CHANGELOG.md) for the PR rollup and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for the published release entry point.
+- The `dev` branch carries work beyond `0.1.36`, including post-`0.1.36` branch work, and is prepared for the `0.1.36` corrective release merge to `main`; see [CHANGELOG.md](CHANGELOG.md) for the PR rollup and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for the published release entry point.
 
 <details>
 <summary>Current focus and migration notes from the old Gradio version</summary>
@@ -146,6 +146,22 @@ Current release line:
 ## What's New (in the last few releases)
 
 <details>
+<summary>0.1.36 corrective release</summary>
+
+Included in the `0.1.36` corrective release:
+- MCP external resource discovery/read parity landed for external servers, including redacted `external://` resource URIs, profile-aware grants, gateway bootstrap wiring, and stdio/websocket list/read support.
+- The `0.1.35` release merge was synced back into `dev` so `main` remains the release branch and `dev` remains the forward working branch.
+- Package, FastAPI, README, and MkDocs metadata were bumped to `0.1.36` for a clean patch release after `0.1.35`.
+
+Still active on `dev`:
+- Final CI for the prepared `0.1.36` corrective release metadata must clear before this release is merged toward `main`.
+- Treat [CHANGELOG.md](CHANGELOG.md) as the authoritative branch-level history for what has entered the release train.
+
+See [CHANGELOG.md](CHANGELOG.md) for the full running history and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for published release notes.
+
+</details>
+
+<details>
 <summary>0.1.35 release-prep rollup</summary>
 
 Included in the `0.1.35` release-prep rollup:
@@ -160,7 +176,7 @@ Included in the `0.1.35` release-prep rollup:
 - Current release branch follow-ups moved Visual Identity idempotency workflow logic into core service code and kept main-only `node_modules` cleanup in the merge path.
 
 Still active on `dev`:
-- Final CI for the prepared `0.1.35` release metadata must clear before this release is merged toward `main`.
+- `0.1.35` is superseded by the `0.1.36` corrective release metadata above.
 - Treat [CHANGELOG.md](CHANGELOG.md) as the authoritative branch-level history for what has entered the release train.
 
 See [CHANGELOG.md](CHANGELOG.md) for the full running history and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for published release notes.

@@ -17,6 +17,8 @@ from mcp_unified.gateway.external_runtime import (
     GatewayExternalRuntimeError,
     GatewayExternalRuntimeManager,
 )
+from mcp_unified.gateway.external_runtime_adapter import ExternalRuntimeGatewayRuntime
+from mcp_unified.gateway.runtime import GatewayRequestContext
 from mcp_unified.interfaces.storage import ExternalRegistryStoreUnavailableError
 from mcp_unified.storage.models import AuditEvent, ExternalServerDefinition
 
@@ -124,6 +126,8 @@ class RecordingExternalTransport:
         *,
         server_id: str,
         tools: list[ExternalToolDefinition] | None = None,
+        resources: list[dict[str, Any]] | None = None,
+        resource_reads: dict[str, dict[str, Any]] | None = None,
         result: ExternalToolCallResult | None = None,
     ) -> None:
         self.server_id = server_id
@@ -131,12 +135,20 @@ class RecordingExternalTransport:
         self.connect_count = 0
         self.close_count = 0
         self.list_tools_count = 0
+        self.list_resources_count = 0
         self.calls: list[tuple[str, dict[str, Any]]] = []
+        self.resource_reads: list[str] = []
         self.runtime_auth_seen: BrokeredExternalCredential | None = None
         self.fail_list = False
+        self.fail_resources = False
         self.fail_health = False
         self.fail_call = False
         self.tools = [tool.copy() for tool in tools or ()]
+        self.resources = [dict(resource) for resource in resources or ()]
+        self.resource_results = {
+            uri: dict(result)
+            for uri, result in (resource_reads or {}).items()
+        }
         self.result = result or ExternalToolCallResult(content={"ok": True})
 
     async def connect(self) -> None:
@@ -165,6 +177,21 @@ class RecordingExternalTransport:
         if self.fail_list:
             raise RuntimeError("discovery failed")
         return [tool.copy() for tool in self.tools]
+
+    async def list_resources(self) -> list[dict[str, Any]]:
+        """Return configured resources or raise a discovery failure."""
+        self.list_resources_count += 1
+        if self.fail_resources:
+            raise RuntimeError("resource discovery failed")
+        return [dict(resource) for resource in self.resources]
+
+    async def read_resource(self, uri: str, *, context: Any = None) -> dict[str, Any]:
+        """Record and return a configured resource read."""
+        del context
+        self.resource_reads.append(uri)
+        if uri not in self.resource_results:
+            raise RuntimeError("resource missing")
+        return dict(self.resource_results[uri])
 
     async def call_tool(
         self,
@@ -217,6 +244,94 @@ class BlockingConnectTransport(RecordingExternalTransport):
         self.connect_started.set()
         await self.allow_connect.wait()
         self.connected = True
+
+
+class BlockingResourceListTransport(RecordingExternalTransport):
+    """Fake transport that pauses resource discovery until released."""
+
+    def __init__(
+        self,
+        *,
+        server_id: str,
+        resources: list[dict[str, Any]],
+        allow_list: asyncio.Event,
+    ) -> None:
+        super().__init__(server_id=server_id, resources=resources)
+        self.list_started = asyncio.Event()
+        self.allow_list = allow_list
+
+    async def list_resources(self) -> list[dict[str, Any]]:
+        """Wait for the test to release resource discovery."""
+        self.list_resources_count += 1
+        self.list_started.set()
+        await self.allow_list.wait()
+        return [dict(resource) for resource in self.resources]
+
+
+class BaseResourceRuntime:
+    """Base gateway runtime fake used by adapter resource tests."""
+
+    name = "base-runtime"
+    version = "0.0-test"
+
+    def __init__(self) -> None:
+        """Initialize request recording state."""
+        self.read_requests: list[str] = []
+
+    async def list_tools(self, context: GatewayRequestContext) -> list[dict[str, Any]]:
+        """Return no base tools for resource-focused tests."""
+        del context
+        return []
+
+    async def call_tool(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        context: GatewayRequestContext,
+    ) -> dict[str, Any]:
+        """Return an empty tool result for unused tool calls."""
+        del name, arguments, context
+        return {}
+
+    async def list_resources(self, context: GatewayRequestContext) -> list[dict[str, Any]]:
+        """Return one local resource before external resources."""
+        del context
+        return [{"uri": "resource://local/doc", "name": "Local Doc"}]
+
+    async def read_resource(
+        self,
+        uri: str,
+        context: GatewayRequestContext,
+    ) -> dict[str, Any]:
+        """Record the local read request and return local content."""
+        del context
+        self.read_requests.append(uri)
+        return {"contents": [{"uri": uri, "text": "local"}]}
+
+    async def list_prompts(self, context: GatewayRequestContext) -> list[dict[str, Any]]:
+        """Return no prompts for resource-focused tests."""
+        del context
+        return []
+
+    async def get_prompt(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        context: GatewayRequestContext,
+    ) -> dict[str, Any]:
+        """Return an empty prompt payload for unused prompt calls."""
+        del name, arguments, context
+        return {}
+
+    async def list_modules(self, context: GatewayRequestContext) -> list[dict[str, Any]]:
+        """Return no modules for resource-focused tests."""
+        del context
+        return []
+
+    async def get_modules_health(self, context: GatewayRequestContext) -> dict[str, Any]:
+        """Return an empty module health payload."""
+        del context
+        return {"modules": []}
 
 
 class RecordingCredentialBroker:
@@ -474,6 +589,424 @@ async def test_external_runtime_start_discovers_tools_and_reports_healthy_status
         "external_server_started",
         "external_server_discovered",
     ]
+
+
+@pytest.mark.asyncio
+async def test_external_runtime_lists_and_reads_redacted_resources() -> None:
+    """External resources and read payloads expose only redacted virtual URIs."""
+    upstream_uri = "secret://docs/source?token=do-not-leak"
+    store = InMemoryExternalRegistryStore([_server()])
+    transport = RecordingExternalTransport(
+        server_id="research",
+        resources=[
+            {
+                "uri": upstream_uri,
+                "name": "Secret Doc",
+                "description": "Safe description",
+                "mimeType": "text/plain",
+                "metadata": {
+                    "category": "docs",
+                    "api_key": "do-not-leak",
+                },
+            }
+        ],
+        resource_reads={
+            upstream_uri: {
+                "uri": upstream_uri,
+                "sourceUri": f"{upstream_uri}#source",
+                "metadata": {"href": "secret://docs/related?token=do-not-leak"},
+                "contents": [
+                    {
+                        "uri": upstream_uri,
+                        "mimeType": "text/plain",
+                        "text": f"external contents from {upstream_uri}",
+                    },
+                    {
+                        "uri": "secret://docs/related?token=do-not-leak",
+                        "type": "text",
+                        "text": "see secret://docs/related?token=do-not-leak",
+                    }
+                ]
+            }
+        },
+    )
+    manager = GatewayExternalRuntimeManager(
+        external_registry_store=store,
+        transport_factory=lambda _server: transport,
+    )
+    await manager.start_server("research")
+
+    resources = await manager.list_virtual_resources()
+    public_payload = json.dumps(resources, sort_keys=True)
+    resource = resources[0]
+    result = await manager.read_virtual_resource(resource["uri"])
+
+    assert resource["uri"].startswith("external://research/")
+    assert resource["name"] == "Secret Doc"
+    assert resource["mimeType"] == "text/plain"
+    assert resource["metadata"] == {
+        "external_server_id": "research",
+        "source": "external_runtime",
+    }
+    assert "do-not-leak" not in public_payload
+    assert upstream_uri not in public_payload
+    private_payload = json.dumps(result, sort_keys=True)
+    assert "do-not-leak" not in private_payload
+    assert "secret://docs/" not in private_payload
+    assert result["contents"][0]["uri"] == resource["uri"]
+    assert [content["uri"] for content in result["contents"]] == [
+        resource["uri"],
+        resource["uri"],
+    ]
+    assert transport.resource_reads == [upstream_uri]
+
+
+@pytest.mark.asyncio
+async def test_external_runtime_redacts_related_file_uris_in_resource_read_text() -> None:
+    upstream_uri = "file:///Users/example/private/source.txt"
+    related_uri = "file:///Users/example/private/related.txt"
+    store = InMemoryExternalRegistryStore([_server()])
+    transport = RecordingExternalTransport(
+        server_id="research",
+        resources=[{"uri": upstream_uri, "name": "Local secret"}],
+        resource_reads={
+            upstream_uri: {
+                "contents": [
+                    {
+                        "uri": upstream_uri,
+                        "mimeType": "text/plain",
+                        "text": f"see {related_uri}",
+                    }
+                ]
+            }
+        },
+    )
+    manager = GatewayExternalRuntimeManager(
+        external_registry_store=store,
+        transport_factory=lambda _server: transport,
+    )
+    await manager.start_server("research")
+    resource = (await manager.list_virtual_resources())[0]
+
+    result = await manager.read_virtual_resource(resource["uri"])
+    payload = json.dumps(result, sort_keys=True)
+
+    assert "file:///" not in payload
+    assert result["contents"][0]["uri"] == resource["uri"]
+    assert result["contents"][0]["text"] == f"see {resource['uri']}"
+
+
+@pytest.mark.asyncio
+async def test_external_runtime_resource_listing_filters_ungranted_servers_before_discovery() -> None:
+    """Resource discovery skips active servers outside the effective profile policy."""
+    research_uri = "resource://research/one"
+    docs_uri = "resource://docs/one"
+    store = InMemoryExternalRegistryStore(
+        [
+            _server(id="research", name="Research"),
+            _server(id="docs", name="Docs"),
+        ]
+    )
+    research = RecordingExternalTransport(
+        server_id="research",
+        resources=[{"uri": research_uri, "name": "Research Doc"}],
+    )
+    docs = RecordingExternalTransport(
+        server_id="docs",
+        resources=[{"uri": docs_uri, "name": "Docs Doc"}],
+    )
+    transports = {"research": research, "docs": docs}
+    manager = GatewayExternalRuntimeManager(
+        external_registry_store=store,
+        transport_factory=lambda server: transports[server.id],
+    )
+    await manager.start_server("research")
+    await manager.start_server("docs")
+
+    resources = await manager.list_virtual_resources(
+        effective_policy={"external_server_grants": [{"server_id": "research"}]}
+    )
+
+    assert [resource["name"] for resource in resources] == ["Research Doc"]
+    assert research.list_resources_count == 1
+    assert docs.list_resources_count == 0
+
+
+@pytest.mark.asyncio
+async def test_external_runtime_resource_discovery_runs_active_servers_concurrently() -> None:
+    """Resource discovery starts all allowed active servers before awaiting completion."""
+    allow_list = asyncio.Event()
+    store = InMemoryExternalRegistryStore(
+        [
+            _server(id="research", name="Research"),
+            _server(id="docs", name="Docs"),
+        ]
+    )
+    research = BlockingResourceListTransport(
+        server_id="research",
+        resources=[{"uri": "resource://research/one", "name": "Research Doc"}],
+        allow_list=allow_list,
+    )
+    docs = BlockingResourceListTransport(
+        server_id="docs",
+        resources=[{"uri": "resource://docs/one", "name": "Docs Doc"}],
+        allow_list=allow_list,
+    )
+    transports = {"research": research, "docs": docs}
+    manager = GatewayExternalRuntimeManager(
+        external_registry_store=store,
+        transport_factory=lambda server: transports[server.id],
+    )
+    await manager.start_server("research")
+    await manager.start_server("docs")
+
+    list_task = asyncio.create_task(manager.list_virtual_resources())
+    try:
+        await asyncio.wait_for(research.list_started.wait(), timeout=0.2)
+        await asyncio.wait_for(docs.list_started.wait(), timeout=0.2)
+    finally:
+        allow_list.set()
+    resources = await asyncio.wait_for(list_task, timeout=0.2)
+
+    assert [resource["name"] for resource in resources] == ["Docs Doc", "Research Doc"]
+
+
+@pytest.mark.asyncio
+async def test_external_runtime_resource_read_requires_credential_grants_before_transport_call() -> None:
+    """External resource reads fail before transport calls when credentials are ungranted."""
+    upstream_uri = "resource://docs/secret"
+    store = InMemoryExternalRegistryStore([_server(credential_slots=["api_key"])])
+    transport = RecordingExternalTransport(
+        server_id="research",
+        resources=[{"uri": upstream_uri, "name": "Secret"}],
+        resource_reads={upstream_uri: {"contents": [{"uri": upstream_uri, "text": "secret"}]}},
+    )
+    manager = GatewayExternalRuntimeManager(
+        external_registry_store=store,
+        transport_factory=lambda _server: transport,
+    )
+    await manager.start_server("research")
+    resources = await manager.list_virtual_resources()
+
+    with pytest.raises(FederationPolicyDenied) as exc_info:
+        await manager.read_virtual_resource(
+            resources[0]["uri"],
+            effective_policy={"external_server_grants": [{"server_id": "research"}]},
+        )
+
+    assert exc_info.value.reason_code == "required_credential_grant_missing"
+    assert transport.resource_reads == []
+
+
+@pytest.mark.asyncio
+async def test_external_runtime_resource_discovery_success_clears_last_error() -> None:
+    """A successful rediscovery clears the server's stale resource discovery error."""
+    upstream_uri = "resource://docs/one"
+    store = InMemoryExternalRegistryStore([_server()])
+    transport = RecordingExternalTransport(
+        server_id="research",
+        resources=[{"uri": upstream_uri, "name": "Doc"}],
+    )
+    manager = GatewayExternalRuntimeManager(
+        external_registry_store=store,
+        transport_factory=lambda _server: transport,
+    )
+    await manager.start_server("research")
+
+    transport.fail_resources = True
+    assert await manager.list_virtual_resources() == []
+    degraded = await manager.wait_for_servers(
+        ["research"],
+        timeout_seconds=0.01,
+        poll_interval_seconds=0.001,
+    )
+
+    transport.fail_resources = False
+    resources = await manager.list_virtual_resources()
+    ready = await manager.wait_for_servers(
+        ["research"],
+        timeout_seconds=0.01,
+        poll_interval_seconds=0.001,
+    )
+
+    assert degraded["ok"] is False
+    assert resources[0]["name"] == "Doc"
+    assert ready == {
+        "ok": True,
+        "ready_servers": ["research"],
+        "unavailable_servers": [],
+        "unknown_servers": [],
+    }
+
+
+@pytest.mark.asyncio
+async def test_external_runtime_resource_read_reports_missing_or_stopped() -> None:
+    upstream_uri = "resource://docs/one"
+    store = InMemoryExternalRegistryStore([_server()])
+    transport = RecordingExternalTransport(
+        server_id="research",
+        resources=[{"uri": upstream_uri, "name": "Doc"}],
+        resource_reads={upstream_uri: {"contents": [{"uri": upstream_uri, "text": "ok"}]}},
+    )
+    manager = GatewayExternalRuntimeManager(
+        external_registry_store=store,
+        transport_factory=lambda _server: transport,
+    )
+    await manager.start_server("research")
+    resources = await manager.list_virtual_resources()
+
+    with pytest.raises(GatewayExternalRuntimeError) as missing:
+        await manager.read_virtual_resource("external://research/missing")
+    assert missing.value.reason_code == "external_resource_not_found"
+
+    await manager.stop_server("research")
+    with pytest.raises(GatewayExternalRuntimeError) as stopped:
+        await manager.read_virtual_resource(resources[0]["uri"])
+    assert stopped.value.reason_code == "external_resource_not_found"
+
+
+@pytest.mark.asyncio
+async def test_external_runtime_adapter_merges_base_and_external_resources() -> None:
+    """Gateway runtime lists base resources first, then external resources."""
+    upstream_uri = "resource://docs/one"
+    store = InMemoryExternalRegistryStore([_server()])
+    transport = RecordingExternalTransport(
+        server_id="research",
+        resources=[{"uri": upstream_uri, "name": "External Doc"}],
+        resource_reads={upstream_uri: {"contents": [{"uri": upstream_uri, "text": "external"}]}},
+    )
+    manager = GatewayExternalRuntimeManager(
+        external_registry_store=store,
+        transport_factory=lambda _server: transport,
+    )
+    await manager.start_server("research")
+    base_runtime = BaseResourceRuntime()
+    runtime = ExternalRuntimeGatewayRuntime(
+        external_runtime_manager=manager,
+        base_runtime=base_runtime,
+    )
+    context = GatewayRequestContext(
+        request_id="resources",
+        metadata={
+            "_gateway_effective_policy": {
+                "external_server_grants": [{"server_id": "research"}],
+            }
+        },
+    )
+
+    resources = await runtime.list_resources(context)
+    external_uri = next(
+        resource["uri"]
+        for resource in resources
+        if resource.get("metadata", {}).get("source") == "external_runtime"
+    )
+    external = await runtime.read_resource(external_uri, context)
+    local = await runtime.read_resource("resource://local/doc", context)
+
+    assert [resource["uri"] for resource in resources] == [
+        "resource://local/doc",
+        external_uri,
+    ]
+    assert external["contents"][0]["text"] == "external"
+    assert local["contents"][0]["text"] == "local"
+    assert base_runtime.read_requests == ["resource://local/doc"]
+
+
+@pytest.mark.asyncio
+async def test_external_runtime_wait_for_servers_reports_ready_and_unavailable() -> None:
+    """Explicit server ids report unavailable before start and ready after start."""
+    store = InMemoryExternalRegistryStore([_server()])
+    transport = RecordingExternalTransport(server_id="research")
+    manager = GatewayExternalRuntimeManager(
+        external_registry_store=store,
+        transport_factory=lambda _server: transport,
+    )
+
+    unavailable = await manager.wait_for_servers(
+        ["research"],
+        timeout_seconds=0.01,
+        poll_interval_seconds=0.001,
+    )
+    await manager.start_server("research")
+    ready = await manager.wait_for_servers(
+        ["research"],
+        timeout_seconds=0.01,
+        poll_interval_seconds=0.001,
+    )
+
+    assert unavailable == {
+        "ok": False,
+        "ready_servers": [],
+        "unavailable_servers": ["research"],
+        "unknown_servers": [],
+    }
+    assert ready == {
+        "ok": True,
+        "ready_servers": ["research"],
+        "unavailable_servers": [],
+        "unknown_servers": [],
+    }
+
+
+@pytest.mark.asyncio
+async def test_external_runtime_wait_for_servers_tolerates_malformed_runtime_rows() -> None:
+    class MalformedRuntimeRowsManager(GatewayExternalRuntimeManager):
+        async def list_runtime_servers(self) -> dict[str, Any]:
+            return {
+                "servers": [
+                    None,
+                    "not-a-row",
+                    {"id": "research", "status": "healthy"},
+                    {"id": None, "status": "healthy"},
+                ]
+            }
+
+    manager = MalformedRuntimeRowsManager(
+        external_registry_store=InMemoryExternalRegistryStore([_server()]),
+        transport_factory=lambda _server: RecordingExternalTransport(server_id="research"),
+    )
+
+    ready = await manager.wait_for_servers(
+        ["research"],
+        timeout_seconds=0,
+        poll_interval_seconds=0.001,
+    )
+
+    assert ready == {
+        "ok": True,
+        "ready_servers": ["research"],
+        "unavailable_servers": [],
+        "unknown_servers": [],
+    }
+
+
+@pytest.mark.asyncio
+async def test_external_runtime_wait_for_servers_defaults_to_active_servers() -> None:
+    """Omitted server ids wait for active transports rather than all registry rows."""
+    store = InMemoryExternalRegistryStore(
+        [
+            _server(id="research", name="Research"),
+            _server(id="docs", name="Docs"),
+        ]
+    )
+    transport = RecordingExternalTransport(server_id="research")
+    manager = GatewayExternalRuntimeManager(
+        external_registry_store=store,
+        transport_factory=lambda _server: transport,
+    )
+    await manager.start_server("research")
+
+    ready = await manager.wait_for_servers(
+        timeout_seconds=0.01,
+        poll_interval_seconds=0.001,
+    )
+
+    assert ready == {
+        "ok": True,
+        "ready_servers": ["research"],
+        "unavailable_servers": [],
+        "unknown_servers": [],
+    }
 
 
 @pytest.mark.asyncio

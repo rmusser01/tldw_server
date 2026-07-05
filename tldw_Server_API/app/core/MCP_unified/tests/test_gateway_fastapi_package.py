@@ -4608,6 +4608,132 @@ def test_gateway_config_bootstrap_external_runtime_uses_injected_transport_facto
         asyncio.run(bootstrap.profile_store.aclose())
 
 
+def test_gateway_config_bootstrap_exposes_external_resources_through_runtime(
+    tmp_path: Path,
+) -> None:
+    """Configured external runtime should be visible through the bootstrapped runtime."""
+
+    from mcp_unified.federation.models import ExternalToolDefinition
+    from mcp_unified.gateway.config import (
+        GatewayExternalRuntimeBootstrapConfig,
+        GatewayProfileBootstrapConfig,
+        GatewayProfileStoreConfig,
+        bootstrap_profile_gateway_from_config,
+    )
+    from mcp_unified.gateway.runtime import GatewayRequestContext
+    from mcp_unified.storage.models import ExternalServerDefinition
+
+    upstream_uri = "secret://docs/source?token=do-not-leak"
+
+    class ResourceTransport:
+        transport_name = "resource"
+
+        def __init__(self, server_id: str) -> None:
+            self.server_id = server_id
+            self.connected = False
+
+        async def connect(self) -> None:
+            self.connected = True
+
+        async def close(self) -> None:
+            self.connected = False
+
+        async def health_check(self) -> dict[str, bool]:
+            return {
+                "configured": True,
+                "connected": self.connected,
+                "initialized": self.connected,
+            }
+
+        async def list_tools(self) -> list[ExternalToolDefinition]:
+            return [ExternalToolDefinition(name="search", description="Search")]
+
+        async def call_tool(
+            self,
+            tool_name: str,
+            arguments: dict[str, Any],
+            *,
+            context: Any = None,
+            runtime_auth: Any = None,
+        ) -> dict[str, Any]:
+            del tool_name, arguments, context, runtime_auth
+            return {"content": []}
+
+        async def list_resources(self) -> list[dict[str, Any]]:
+            return [{"uri": upstream_uri, "name": "Research Source"}]
+
+        async def read_resource(
+            self,
+            uri: str,
+            *,
+            context: Any = None,
+        ) -> dict[str, Any]:
+            del context
+            return {
+                "contents": [
+                    {
+                        "uri": uri,
+                        "mimeType": "text/plain",
+                        "text": f"read {uri}",
+                    }
+                ]
+            }
+
+    def factory(server: ExternalServerDefinition) -> ResourceTransport:
+        return ResourceTransport(server.id)
+
+    sqlite_path = tmp_path / "gateway.db"
+    bootstrap = asyncio.run(
+        bootstrap_profile_gateway_from_config(
+            _MultiToolGatewayRuntime(),
+            GatewayProfileBootstrapConfig(
+                store=GatewayProfileStoreConfig(kind="sqlite", sqlite_path=sqlite_path),
+                profiles=[
+                    {
+                        "id": "researcher",
+                        "name": "Researcher",
+                        "external_server_grants": [{"server_id": "research"}],
+                    }
+                ],
+                default_profile_id="researcher",
+                external_runtime=GatewayExternalRuntimeBootstrapConfig(enabled=True),
+            ),
+            external_transport_factory=factory,
+        )
+    )
+
+    try:
+        manager = bootstrap.external_runtime_manager
+        assert manager is not None
+        asyncio.run(
+            bootstrap.profile_store.create_server(
+                ExternalServerDefinition(
+                    id="research",
+                    name="Research",
+                    transport="stdio",
+                    command=["fake-mcp-server"],
+                )
+            )
+        )
+        asyncio.run(manager.start_server("research"))
+
+        context = GatewayRequestContext(request_id="config-resource", user_id="user-1")
+        resources = asyncio.run(bootstrap.runtime.list_resources(context))
+        external_uri = next(
+            resource["uri"]
+            for resource in resources
+            if resource.get("metadata", {}).get("external_server_id") == "research"
+        )
+        result = asyncio.run(bootstrap.runtime.read_resource(external_uri, context))
+
+        payload = json.dumps(result, sort_keys=True)
+        assert external_uri.startswith("external://research/")
+        assert "do-not-leak" not in payload
+        assert result["contents"][0]["uri"] == external_uri
+    finally:
+        asyncio.run(bootstrap.profile_store.aclose())
+
+
 def test_gateway_config_bootstrap_accepts_process_policy_mapping() -> None:
     """External runtime config validates and stores stdio process policy mappings."""
 

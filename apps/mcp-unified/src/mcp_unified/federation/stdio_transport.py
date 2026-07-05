@@ -23,6 +23,10 @@ from mcp_unified.federation.process_policy import (
     coerce_stdio_process_policy,
     validate_stdio_process_policy,
 )
+from mcp_unified.federation.resource_payloads import (
+    normalize_external_resource_list,
+    normalize_external_resource_read,
+)
 from mcp_unified.storage.models import ExternalServerDefinition
 
 _MCP_PROTOCOL_VERSION = "2024-11-05"
@@ -226,6 +230,24 @@ class StdioExternalTransport:
                 )
             )
         return tools
+
+    async def list_resources(self) -> list[dict[str, Any]]:
+        """Discover and normalize upstream MCP resource descriptors."""
+        await self._ensure_connected()
+        response = await self._request("resources/list", {})
+        return normalize_external_resource_list(response.get("result"))
+
+    async def read_resource(
+        self,
+        uri: str,
+        *,
+        context: Any = None,
+    ) -> dict[str, Any]:
+        """Read one upstream MCP resource."""
+        del context
+        await self._ensure_connected()
+        response = await self._request("resources/read", {"uri": uri})
+        return normalize_external_resource_read(response.get("result"))
 
     async def call_tool(
         self,

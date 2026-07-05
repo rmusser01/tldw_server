@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import pytest
@@ -255,9 +256,38 @@ async def _started_runtime(
 ) -> tuple[ExternalRuntimeGatewayRuntime, FakeExternalTransport]:
     """Create an adapter around a started external runtime manager."""
 
+    upstream_resource_uri = "secret://docs/source?token=do-not-leak"
     transport = FakeExternalTransport(
         server_id="research",
         tools=[_search_tool()],
+        resources=[
+            {
+                "uri": upstream_resource_uri,
+                "name": "Research Source",
+                "mimeType": "text/plain",
+            }
+        ],
+        resource_results={
+            upstream_resource_uri: {
+                "uri": upstream_resource_uri,
+                "contents": [
+                    {
+                        "uri": upstream_resource_uri,
+                        "mimeType": "text/plain",
+                        "text": "external resource",
+                    },
+                    {
+                        "uri": "secret://docs/related?token=do-not-leak",
+                        "mimeType": "text/plain",
+                        "text": "related",
+                    },
+                    {
+                        "type": "text",
+                        "text": f"see {upstream_resource_uri}#section",
+                    },
+                ],
+            }
+        },
         results={
             "search": ExternalToolCallResult(
                 content={"matches": ["paper-1"]},
@@ -439,6 +469,66 @@ async def test_profile_runtime_passes_external_grants_to_adapter() -> None:
     assert EFFECTIVE_POLICY_METADATA_KEY not in context.metadata
 
 
+async def test_profile_runtime_passes_external_resource_grants_to_adapter() -> None:
+    """Resolved profile grants should govern external resources."""
+
+    adapter, _transport = await _started_runtime()
+    profile_store = InMemoryProfileStore()
+    await profile_store.upsert_profile(
+        MCPProfile(
+            id="researcher",
+            name="Researcher",
+            external_server_grants=[{"server_id": "research"}],
+        )
+    )
+    runtime = ProfileAwareGatewayRuntime(
+        adapter,
+        profile_store=profile_store,
+        default_profile_id="researcher",
+    )
+    context = GatewayRequestContext(request_id="profile-resource", user_id="user-1")
+
+    resources = await runtime.list_resources(context)
+    result = await runtime.read_resource(resources[0]["uri"], context)
+
+    payload = json.dumps(result, sort_keys=True)
+    assert resources[0]["metadata"]["external_server_id"] == "research"
+    assert result["contents"][0]["text"] == "external resource"
+    assert "do-not-leak" not in payload
+    assert "secret://docs/" not in payload
+    assert EFFECTIVE_POLICY_METADATA_KEY not in context.metadata
+
+
+async def test_profile_runtime_hides_external_resources_without_grant() -> None:
+    """Profiles without an external server grant cannot list or read resources."""
+
+    adapter, _transport = await _started_runtime()
+    granted_context = GatewayRequestContext(
+        request_id="granted",
+        metadata={
+            EFFECTIVE_POLICY_METADATA_KEY: {
+                "external_server_grants": [{"server_id": "research"}],
+            }
+        },
+    )
+    external_uri = (await adapter.list_resources(granted_context))[0]["uri"]
+    profile_store = InMemoryProfileStore()
+    await profile_store.upsert_profile(
+        MCPProfile(id="researcher", name="Researcher")
+    )
+    runtime = ProfileAwareGatewayRuntime(
+        adapter,
+        profile_store=profile_store,
+        default_profile_id="researcher",
+    )
+    context = GatewayRequestContext(request_id="no-resource-grant", user_id="user-1")
+
+    assert await runtime.list_resources(context) == []
+    with pytest.raises(GatewayPolicyDenied) as exc_info:
+        await runtime.read_resource(external_uri, context)
+    assert exc_info.value.reason_code == "external_server_not_granted"
+
+
 async def test_profile_runtime_enriches_context_with_missing_metadata() -> None:
     """Profile policy metadata enrichment should tolerate a null metadata mapping."""
 
@@ -505,3 +595,24 @@ async def test_jsonrpc_maps_external_policy_denial_to_policy_error() -> None:
     assert response.error is not None
     assert response.error.code == -32001
     assert response.error.data["reason_code"] == "external_server_not_granted"
+
+
+async def test_jsonrpc_maps_external_resource_errors_to_stable_reason_codes() -> None:
+    """External resource runtime errors should keep their public reason code."""
+
+    runtime, _transport = await _started_runtime()
+    response = await handle_jsonrpc(
+        runtime,
+        {
+            "jsonrpc": "2.0",
+            "method": "resources/read",
+            "params": {"uri": "external://research/missing"},
+            "id": "missing-resource",
+        },
+        path="/mcp",
+    )
+
+    assert not isinstance(response, list)
+    assert response.error is not None
+    assert response.error.code == -32602
+    assert response.error.data["reason_code"] == "external_resource_not_found"

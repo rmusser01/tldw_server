@@ -6,6 +6,10 @@ import asyncio
 from typing import Any, Awaitable, Callable, Optional
 
 from loguru import logger
+from mcp_unified.federation.resource_payloads import (
+    normalize_external_resource_list,
+    normalize_external_resource_read,
+)
 
 from tldw_Server_API.app.core.Agent_Client_Protocol.stdio_client import (
     ACPResponseError,
@@ -133,6 +137,23 @@ class StdioExternalMCPAdapter(ExternalMCPTransportAdapter):
                 )
             )
         return tools
+
+    async def list_resources(self) -> list[dict[str, Any]]:
+        """Discover external resources and return normalized descriptors."""
+        await self._ensure_connected()
+        response = await self._request("resources/list", {})
+        return normalize_external_resource_list(response.get("result"))
+
+    async def read_resource(
+        self,
+        uri: str,
+        context: Optional[Any] = None,
+    ) -> dict[str, Any]:
+        """Read one external resource."""
+        del context
+        await self._ensure_connected()
+        response = await self._request("resources/read", {"uri": uri})
+        return normalize_external_resource_read(response.get("result"))
 
     async def call_tool(
         self,

@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import inspect
+import re
 import traceback
 from collections.abc import Callable, Iterable
 from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any, Protocol
+from urllib.parse import parse_qsl, urlsplit
 from uuid import uuid4
 
 from loguru import logger
@@ -63,6 +66,7 @@ _INSTALLER_SENSITIVE_KEY_TOKENS = (
 )
 _UNSAFE_INSTALLER_VALUE = object()
 _DEFAULT_INSTALLER_STATUS_TIMEOUT_SECONDS = 2.0
+_UNSCOPED_EFFECTIVE_POLICY = object()
 
 
 class GatewayExternalRuntimeError(RuntimeError):
@@ -130,6 +134,7 @@ class GatewayExternalRuntimeManager:
         self._servers: dict[str, ExternalServerDefinition] = {}
         self._transports: dict[str, ExternalFederationTransport] = {}
         self._virtual_tools: dict[str, VirtualExternalTool] = {}
+        self._virtual_resources: dict[str, dict[str, Any]] = {}
         self._last_errors: dict[str, str | None] = {}
         self._lock = asyncio.Lock()
 
@@ -442,6 +447,193 @@ class GatewayExternalRuntimeManager:
                 for name in sorted(self._virtual_tools)
             ]
 
+    async def list_virtual_resources(
+        self,
+        *,
+        effective_policy: Any = _UNSCOPED_EFFECTIVE_POLICY,
+    ) -> list[dict[str, Any]]:
+        """Return caller-owned external resources for active servers."""
+        async with self._lock:
+            snapshots = [
+                (server_id, transport)
+                for server_id, transport in sorted(self._transports.items())
+                if self._resource_policy_allows_server(
+                    effective_policy,
+                    server_id,
+                    self._servers.get(server_id),
+                )
+            ]
+
+        async def discover(server_id: str, transport: ExternalFederationTransport) -> None:
+            try:
+                resources = await transport.list_resources()
+            except Exception as exc:  # noqa: BLE001 - resource discovery must be row-scoped.
+                async with self._lock:
+                    if self._transports.get(server_id) is transport:
+                        self._last_errors[server_id] = self._exception_summary(exc)
+                        self._clear_server_resources(server_id)
+                await self._audit_best_effort(
+                    "external_server.resource_discovery",
+                    payload={
+                        "reason_code": "external_server_resource_discovery_failed",
+                        "server_id": server_id,
+                        "error_type": type(exc).__name__,
+                    },
+                    target_type="external_server",
+                    target_id=server_id,
+                )
+                return
+
+            async with self._lock:
+                if self._transports.get(server_id) is transport:
+                    self._last_errors[server_id] = None
+                    self._replace_server_resources(server_id, resources)
+
+        await asyncio.gather(
+            *(discover(server_id, transport) for server_id, transport in snapshots)
+        )
+
+        async with self._lock:
+            return [
+                deepcopy(self._virtual_resources[uri]["descriptor"])
+                for uri in sorted(self._virtual_resources)
+                if self._resource_policy_allows_server(
+                    effective_policy,
+                    str(self._virtual_resources[uri]["server_id"]),
+                    self._servers.get(str(self._virtual_resources[uri]["server_id"])),
+                )
+            ]
+
+    async def read_virtual_resource(
+        self,
+        uri: str,
+        *,
+        context: Any = None,
+        effective_policy: Any = _UNSCOPED_EFFECTIVE_POLICY,
+    ) -> dict[str, Any]:
+        """Read one active virtual external resource."""
+        async with self._lock:
+            entry = self._virtual_resources.get(uri)
+            if entry is None:
+                raise GatewayExternalRuntimeError(
+                    f"External resource '{uri}' was not found",
+                    reason_code="external_resource_not_found",
+                    server_id=self._server_id_from_virtual_resource_uri(uri),
+                )
+            server_id = str(entry["server_id"])
+            upstream_uri = str(entry["upstream_uri"])
+            transport = self._transports.get(server_id)
+            if transport is None:
+                raise GatewayExternalRuntimeError(
+                    f"External server '{server_id}' is not active",
+                    reason_code="external_server_transport_unavailable",
+                    server_id=server_id,
+                )
+            server = self._servers.get(server_id)
+            if server is None:
+                raise GatewayExternalRuntimeError(
+                    f"External server '{server_id}' is not active",
+                    reason_code="external_server_transport_unavailable",
+                    server_id=server_id,
+                )
+            server = server.model_copy(deep=True)
+            if (
+                effective_policy is not _UNSCOPED_EFFECTIVE_POLICY
+                and not self._has_resource_server_grant(effective_policy, server_id)
+            ):
+                raise FederationPolicyDenied(
+                    "external_server_not_granted",
+                    f"External server '{server_id}' is not allowed",
+                    payload={
+                        "reason_code": "external_server_not_granted",
+                        "server_id": server_id,
+                        "resource_uri": uri,
+                    },
+                )
+            if effective_policy is not _UNSCOPED_EFFECTIVE_POLICY:
+                missing_slots = self._missing_credential_slots(
+                    server=server,
+                    effective_policy=effective_policy,
+                )
+                if missing_slots:
+                    raise FederationPolicyDenied(
+                        "required_credential_grant_missing",
+                        (
+                            f"External server '{server_id}' requires credential grants for "
+                            f"{', '.join(missing_slots)}"
+                        ),
+                        payload={
+                            "reason_code": "required_credential_grant_missing",
+                            "server_id": server_id,
+                            "resource_uri": uri,
+                            "credential_slots": list(missing_slots),
+                        },
+                    )
+
+        try:
+            result = await transport.read_resource(upstream_uri, context=context)
+        except Exception as exc:  # noqa: BLE001 - transport adapters define read errors.
+            raise GatewayExternalRuntimeError(
+                f"External resource '{uri}' failed during read",
+                reason_code="external_resource_read_failed",
+                server_id=server_id,
+            ) from exc
+        return self._resource_read_payload(result, virtual_uri=uri, upstream_uri=upstream_uri)
+
+    async def wait_for_servers(
+        self,
+        server_ids: list[str] | tuple[str, ...] | set[str] | None = None,
+        *,
+        timeout_seconds: float = 5.0,
+        poll_interval_seconds: float = 0.1,
+    ) -> dict[str, Any]:
+        """Wait briefly for external servers to report healthy runtime status."""
+        loop = asyncio.get_running_loop()
+        timeout = max(0.0, float(timeout_seconds))
+        poll_interval = max(0.001, float(poll_interval_seconds))
+        deadline = loop.time() + timeout
+        if server_ids is None:
+            async with self._lock:
+                targets = set(self._transports)
+        elif isinstance(server_ids, str):
+            targets = {server_ids}
+        else:
+            targets = {str(server_id) for server_id in server_ids if str(server_id)}
+
+        while True:
+            rows = await self.list_runtime_servers() or {}
+            raw_servers = rows.get("servers", []) if isinstance(rows, dict) else []
+            if not isinstance(raw_servers, list):
+                raw_servers = []
+            by_id = {
+                str(row.get("id")): row
+                for row in raw_servers
+                if isinstance(row, dict) and row.get("id") is not None
+            }
+            current_targets = set(targets)
+            ready = sorted(
+                server_id
+                for server_id in current_targets
+                if by_id.get(server_id, {}).get("status") == "healthy"
+            )
+            unknown = sorted(current_targets - set(by_id))
+            unavailable = sorted(current_targets - set(ready) - set(unknown))
+            if not unavailable and not unknown:
+                return {
+                    "ok": True,
+                    "ready_servers": ready,
+                    "unavailable_servers": [],
+                    "unknown_servers": [],
+                }
+            if loop.time() >= deadline:
+                return {
+                    "ok": False,
+                    "ready_servers": ready,
+                    "unavailable_servers": unavailable,
+                    "unknown_servers": unknown,
+                }
+            await asyncio.sleep(min(poll_interval, max(0.0, deadline - loop.time())))
+
     async def has_virtual_tool(self, virtual_tool_name: str) -> bool:
         """Return whether an active virtual tool exists without copying the catalog."""
 
@@ -603,6 +795,7 @@ class GatewayExternalRuntimeManager:
         self._servers.pop(server_id, None)
         self._last_errors.pop(server_id, None)
         self._clear_server_tools(server_id)
+        self._clear_server_resources(server_id)
         return transport
 
     async def _close_stopped_transport(
@@ -787,6 +980,203 @@ class GatewayExternalRuntimeManager:
 
     def _count_tools_for_server(self, server_id: str) -> int:
         return sum(1 for tool in self._virtual_tools.values() if tool.server_id == server_id)
+
+    def _replace_server_resources(
+        self,
+        server_id: str,
+        resources: list[dict[str, Any]] | None,
+    ) -> None:
+        self._clear_server_resources(server_id)
+        for resource in resources or []:
+            if not isinstance(resource, dict):
+                continue
+            upstream_uri = resource.get("uri")
+            if not isinstance(upstream_uri, str) or not upstream_uri.strip():
+                continue
+            virtual_uri = self._virtual_resource_uri(server_id, upstream_uri)
+            self._virtual_resources[virtual_uri] = {
+                "server_id": server_id,
+                "upstream_uri": upstream_uri,
+                "descriptor": self._virtual_resource_descriptor(
+                    server_id=server_id,
+                    virtual_uri=virtual_uri,
+                    resource=resource,
+                ),
+            }
+
+    def _clear_server_resources(self, server_id: str) -> None:
+        self._virtual_resources = {
+            uri: entry
+            for uri, entry in self._virtual_resources.items()
+            if entry["server_id"] != server_id
+        }
+
+    @staticmethod
+    def _virtual_resource_descriptor(
+        *,
+        server_id: str,
+        virtual_uri: str,
+        resource: dict[str, Any],
+    ) -> dict[str, Any]:
+        name = resource.get("name")
+        description = resource.get("description")
+        mime_type = resource.get("mimeType")
+        return {
+            "uri": virtual_uri,
+            "name": name if isinstance(name, str) else "",
+            "description": description if isinstance(description, str) else "",
+            "mimeType": mime_type if isinstance(mime_type, str) else None,
+            "metadata": {
+                "external_server_id": server_id,
+                "source": "external_runtime",
+            },
+        }
+
+    @staticmethod
+    def _virtual_resource_uri(server_id: str, upstream_uri: str) -> str:
+        digest = hashlib.sha256(upstream_uri.encode("utf-8")).hexdigest()[:24]
+        return f"external://{server_id}/{digest}"
+
+    @staticmethod
+    def _server_id_from_virtual_resource_uri(uri: str) -> str | None:
+        prefix = "external://"
+        if not uri.startswith(prefix):
+            return None
+        remainder = uri[len(prefix):]
+        server_id, _, _digest = remainder.partition("/")
+        return server_id or None
+
+    @staticmethod
+    def _resource_read_payload(
+        payload: dict[str, Any],
+        *,
+        virtual_uri: str,
+        upstream_uri: str,
+    ) -> dict[str, Any]:
+        result = deepcopy(payload) if isinstance(payload, dict) else {"contents": []}
+        uri_prefix = GatewayExternalRuntimeManager._same_origin_uri_prefix(upstream_uri)
+        sensitive_values = GatewayExternalRuntimeManager._sensitive_uri_values(upstream_uri)
+        return GatewayExternalRuntimeManager._redact_resource_read_value(
+            result,
+            virtual_uri=virtual_uri,
+            upstream_uri=upstream_uri,
+            uri_prefix=uri_prefix,
+            sensitive_values=sensitive_values,
+        )
+
+    @staticmethod
+    def _redact_resource_read_value(
+        value: Any,
+        *,
+        virtual_uri: str,
+        upstream_uri: str,
+        uri_prefix: str | None,
+        sensitive_values: tuple[str, ...],
+        key: str | None = None,
+    ) -> Any:
+        if isinstance(value, dict):
+            return {
+                str(child_key): GatewayExternalRuntimeManager._redact_resource_read_value(
+                    child_value,
+                    virtual_uri=virtual_uri,
+                    upstream_uri=upstream_uri,
+                    uri_prefix=uri_prefix,
+                    sensitive_values=sensitive_values,
+                    key=str(child_key),
+                )
+                for child_key, child_value in value.items()
+            }
+        if isinstance(value, list):
+            return [
+                GatewayExternalRuntimeManager._redact_resource_read_value(
+                    item,
+                    virtual_uri=virtual_uri,
+                    upstream_uri=upstream_uri,
+                    uri_prefix=uri_prefix,
+                    sensitive_values=sensitive_values,
+                )
+                for item in value
+            ]
+        if isinstance(value, str):
+            if GatewayExternalRuntimeManager._is_resource_uri_key(key):
+                return virtual_uri
+            redacted = value.replace(upstream_uri, virtual_uri)
+            if uri_prefix:
+                redacted = re.sub(
+                    rf"{re.escape(uri_prefix)}[^\s\"'<>)]*",
+                    virtual_uri,
+                    redacted,
+                )
+            for sensitive_value in sensitive_values:
+                redacted = redacted.replace(sensitive_value, "[redacted]")
+            return redacted
+        return value
+
+    @staticmethod
+    def _has_resource_server_grant(effective_policy: Any, server_id: str) -> bool:
+        """Return whether policy grants resource access to an external server."""
+
+        return any(
+            GatewayExternalRuntimeManager._grant_matches_server(grant, server_id)
+            for grant in GatewayExternalRuntimeManager._policy_dicts(
+                effective_policy,
+                "external_server_grants",
+            )
+        )
+
+    def _resource_policy_allows_server(
+        self,
+        effective_policy: Any,
+        server_id: str,
+        server: ExternalServerDefinition | None,
+    ) -> bool:
+        """Return whether resource discovery/read may touch this server."""
+
+        if effective_policy is _UNSCOPED_EFFECTIVE_POLICY:
+            return True
+        if not self._has_resource_server_grant(effective_policy, server_id):
+            return False
+        if server is None:
+            return False
+        return not self._missing_credential_slots(
+            server=server,
+            effective_policy=effective_policy,
+        )
+
+    @staticmethod
+    def _is_resource_uri_key(key: str | None) -> bool:
+        """Return whether a payload key is expected to carry a URI/URL value."""
+
+        if key is None:
+            return False
+        normalized = key.replace("_", "").replace("-", "").lower()
+        return normalized in {"uri", "url", "href", "sourceuri"} or normalized.endswith(
+            ("uri", "url")
+        )
+
+    @staticmethod
+    def _same_origin_uri_prefix(upstream_uri: str) -> str | None:
+        """Return the scheme/netloc prefix used to scrub related upstream URIs."""
+
+        parsed = urlsplit(upstream_uri)
+        if parsed.scheme == "file":
+            return "file://"
+        if not parsed.scheme or not parsed.netloc:
+            return None
+        return f"{parsed.scheme}://{parsed.netloc}"
+
+    @staticmethod
+    def _sensitive_uri_values(upstream_uri: str) -> tuple[str, ...]:
+        """Return sensitive query values from the upstream URI for text redaction."""
+
+        parsed = urlsplit(upstream_uri)
+        sensitive_tokens = ("auth", "credential", "key", "password", "secret", "token")
+        values: list[str] = []
+        for key, value in parse_qsl(parsed.query, keep_blank_values=False):
+            key_text = key.lower()
+            if len(value) >= 4 and any(token in key_text for token in sensitive_tokens):
+                values.append(value)
+        return tuple(dict.fromkeys(values))
 
     async def _installer_status(
         self,

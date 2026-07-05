@@ -40,6 +40,8 @@ class ContentJobsPollerHandles:
     audio_studio_jobs_task: Any | None = None
     presentation_render_jobs_stop_event: Any | None = None
     presentation_render_jobs_task: Any | None = None
+    research_workspace_output_jobs_stop_event: Any | None = None
+    research_workspace_output_jobs_task: Any | None = None
     media_ingest_jobs_stop_event: Any | None = None
     media_ingest_jobs_task: Any | None = None
     media_ingest_heavy_jobs_stop_event: Any | None = None
@@ -89,6 +91,17 @@ def provide_content_jobs_worker_specs(
             enabled=route_enabled_predicate(
                 "PRESENTATION_RENDER_JOBS_WORKER_ENABLED",
                 "slides",
+            ),
+        ),
+        stop_event_worker_spec(
+            name="research_workspace_output_jobs_task",
+            worker_service=_run_research_workspace_output_jobs_worker_service,
+            category="jobs",
+            phase=ShutdownPhase.JOB_POLLER_QUIESCE,
+            enabled=route_enabled_predicate(
+                "RESEARCH_WORKSPACE_OUTPUT_JOBS_WORKER_ENABLED",
+                "research-workspace-output-jobs",
+                default_stable=True,
             ),
         ),
         stop_event_worker_spec(
@@ -218,6 +231,15 @@ async def start_content_jobs_pollers(
             worker_inventory=worker_inventory,
         )
     )
+    research_workspace_output_jobs_stop_event, research_workspace_output_jobs_task = (
+        await _start_research_workspace_output_jobs_worker(
+            app=app,
+            owned_job_pollers=owned_job_pollers,
+            register_owned_job_poller=register_owned_job_poller,
+            should_start_worker=should_start_worker,
+            worker_inventory=worker_inventory,
+        )
+    )
     (
         media_ingest_jobs_stop_event,
         media_ingest_jobs_task,
@@ -283,6 +305,8 @@ async def start_content_jobs_pollers(
         audio_studio_jobs_task=audio_studio_jobs_task,
         presentation_render_jobs_stop_event=presentation_render_jobs_stop_event,
         presentation_render_jobs_task=presentation_render_jobs_task,
+        research_workspace_output_jobs_stop_event=research_workspace_output_jobs_stop_event,
+        research_workspace_output_jobs_task=research_workspace_output_jobs_task,
         media_ingest_jobs_stop_event=media_ingest_jobs_stop_event,
         media_ingest_jobs_task=media_ingest_jobs_task,
         media_ingest_heavy_jobs_stop_event=media_ingest_heavy_jobs_stop_event,
@@ -492,6 +516,54 @@ async def _start_presentation_render_jobs_worker(
         return stop_event, task
     except _STARTUP_GUARD_EXCEPTIONS as exc:
         logger.warning(f"Failed to start Presentation Render Jobs worker: {exc}")
+        return None, None
+
+
+async def _start_research_workspace_output_jobs_worker(
+    *,
+    app: Any,
+    owned_job_pollers: list[Any],
+    register_owned_job_poller: Callable[..., None],
+    should_start_worker: Callable[..., bool],
+    worker_inventory: WorkerRegistry | None = None,
+) -> tuple[Any | None, Any | None]:
+    """Start the Research Workspace output jobs poller and return its shutdown handles."""
+
+    try:
+        enabled = should_start_worker(
+            "RESEARCH_WORKSPACE_OUTPUT_JOBS_WORKER_ENABLED",
+            "research-workspace-output-jobs",
+            default_stable=True,
+        )
+        if not enabled:
+            logger.info(
+                "Research Workspace Output Jobs worker disabled by flag "
+                "(RESEARCH_WORKSPACE_OUTPUT_JOBS_WORKER_ENABLED)"
+            )
+            return None, None
+
+        if worker_inventory is not None:
+            stop_event, task = await _register_jobs_worker_with_inventory(
+                worker_inventory,
+                name="research_workspace_output_jobs_task",
+                coroutine_factory=_run_research_workspace_output_jobs_worker_service,
+            )
+            logger.info("Research Workspace Output Jobs worker started with explicit stop_event signal")
+            return stop_event, task
+
+        stop_event = _make_event()
+        task = _create_task(_run_research_workspace_output_jobs_worker_service(stop_event))
+        logger.info("Research Workspace Output Jobs worker started with explicit stop_event signal")
+        register_owned_job_poller(
+            app,
+            owned_job_pollers,
+            name="research_workspace_output_jobs_task",
+            task=task,
+            stop_event=stop_event,
+        )
+        return stop_event, task
+    except _STARTUP_GUARD_EXCEPTIONS as exc:
+        logger.warning(f"Failed to start Research Workspace Output Jobs worker: {exc}")
         return None, None
 
 
@@ -908,6 +980,14 @@ def _run_presentation_render_jobs_worker_service(stop_event: Any) -> Any:
     )
 
     return _run_presentation_render_jobs_worker(stop_event)
+
+
+def _run_research_workspace_output_jobs_worker_service(stop_event: Any) -> Any:
+    from tldw_Server_API.app.services.research_workspace_output_jobs_worker import (
+        run_research_workspace_output_jobs_worker as _run_research_workspace_output_jobs_worker,
+    )
+
+    return _run_research_workspace_output_jobs_worker(stop_event)
 
 
 def _run_media_ingest_jobs_worker_service(stop_event: Any) -> Any:

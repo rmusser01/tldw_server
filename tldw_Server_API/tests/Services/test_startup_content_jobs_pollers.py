@@ -49,6 +49,7 @@ def _specs_by_name(startup_pollers: Any) -> dict[str, Any]:
         "audio_jobs_task",
         "audiobook_jobs_task",
         "presentation_render_jobs_task",
+        "research_workspace_output_jobs_task",
         "media_ingest_jobs_task",
         "media_ingest_heavy_jobs_task",
         "reading_digest_jobs_task",
@@ -82,6 +83,7 @@ def test_content_jobs_worker_specs_use_expected_names() -> None:
         "audio_jobs_task",
         "audiobook_jobs_task",
         "presentation_render_jobs_task",
+        "research_workspace_output_jobs_task",
         "media_ingest_jobs_task",
         "media_ingest_heavy_jobs_task",
         "reading_digest_jobs_task",
@@ -103,6 +105,7 @@ def test_content_jobs_worker_spec_factories_delegate_to_existing_worker_services
         ("audio_jobs_task", "_run_audio_jobs_worker_service"),
         ("audiobook_jobs_task", "_run_audiobook_jobs_worker_service"),
         ("presentation_render_jobs_task", "_run_presentation_render_jobs_worker_service"),
+        ("research_workspace_output_jobs_task", "_run_research_workspace_output_jobs_worker_service"),
         ("media_ingest_jobs_task", "_run_media_ingest_jobs_worker_service"),
         ("media_ingest_heavy_jobs_task", "_run_media_ingest_heavy_jobs_worker_service"),
         ("reading_digest_jobs_task", "_run_reading_digest_jobs_worker_service"),
@@ -128,6 +131,7 @@ def test_content_jobs_worker_spec_factories_delegate_to_existing_worker_services
         ("audio_jobs_task", "audio_jobs_task-stop"),
         ("audiobook_jobs_task", "audiobook_jobs_task-stop"),
         ("presentation_render_jobs_task", "presentation_render_jobs_task-stop"),
+        ("research_workspace_output_jobs_task", "research_workspace_output_jobs_task-stop"),
         ("media_ingest_jobs_task", "media_ingest_jobs_task-stop"),
         ("media_ingest_heavy_jobs_task", "media_ingest_heavy_jobs_task-stop"),
         ("reading_digest_jobs_task", "reading_digest_jobs_task-stop"),
@@ -156,6 +160,7 @@ def test_content_jobs_worker_spec_predicates_use_route_enabled_arguments(
         "audio_jobs_task",
         "audiobook_jobs_task",
         "presentation_render_jobs_task",
+        "research_workspace_output_jobs_task",
         "media_ingest_jobs_task",
         "media_ingest_heavy_jobs_task",
         "reading_digest_jobs_task",
@@ -170,6 +175,7 @@ def test_content_jobs_worker_spec_predicates_use_route_enabled_arguments(
                 "audio_jobs_task": "AUDIO_JOBS_WORKER_ENABLED",
                 "audiobook_jobs_task": "AUDIOBOOK_JOBS_WORKER_ENABLED",
                 "presentation_render_jobs_task": "PRESENTATION_RENDER_JOBS_WORKER_ENABLED",
+                "research_workspace_output_jobs_task": "RESEARCH_WORKSPACE_OUTPUT_JOBS_WORKER_ENABLED",
                 "media_ingest_jobs_task": "MEDIA_INGEST_JOBS_WORKER_ENABLED",
                 "media_ingest_heavy_jobs_task": "MEDIA_INGEST_HEAVY_JOBS_WORKER_ENABLED",
                 "reading_digest_jobs_task": "READING_DIGEST_JOBS_WORKER_ENABLED",
@@ -187,6 +193,7 @@ def test_content_jobs_worker_spec_predicates_use_route_enabled_arguments(
         (("audio-jobs",), {}),
         (("audiobooks",), {}),
         (("slides",), {}),
+        (("research-workspace-output-jobs",), {"default_stable": True}),
         (("media",), {}),
         (
             ("media-ingest-heavy-jobs",),
@@ -231,6 +238,11 @@ async def test_start_content_jobs_pollers_combines_handles_in_order(
         calls.append("presentation")
         return ("presentation-stop", "presentation-task")
 
+    async def _record_research_output(**kwargs):
+        del kwargs
+        calls.append("research-output")
+        return ("research-output-stop", "research-output-task")
+
     async def _record_media_ingest(**kwargs):
         del kwargs
         calls.append("media-ingest")
@@ -269,6 +281,7 @@ async def test_start_content_jobs_pollers_combines_handles_in_order(
     monkeypatch.setattr(startup_pollers, "_start_audiobook_jobs_worker", _record_audiobook)
     monkeypatch.setattr(startup_pollers, "_start_audio_studio_jobs_worker", _record_audio_studio)
     monkeypatch.setattr(startup_pollers, "_start_presentation_render_jobs_worker", _record_presentation)
+    monkeypatch.setattr(startup_pollers, "_start_research_workspace_output_jobs_worker", _record_research_output)
     monkeypatch.setattr(startup_pollers, "_start_media_ingest_jobs_workers", _record_media_ingest)
     monkeypatch.setattr(startup_pollers, "_start_reading_digest_jobs_worker", _record_reading_digest)
     monkeypatch.setattr(
@@ -292,6 +305,7 @@ async def test_start_content_jobs_pollers_combines_handles_in_order(
         "audiobook",
         "audio-studio",
         "presentation",
+        "research-output",
         "media-ingest",
         "reading-digest",
         "llamacpp-acquisition",
@@ -307,6 +321,8 @@ async def test_start_content_jobs_pollers_combines_handles_in_order(
     assert handles.audio_studio_jobs_task == "audio-studio-task"
     assert handles.presentation_render_jobs_stop_event == "presentation-stop"
     assert handles.presentation_render_jobs_task == "presentation-task"
+    assert handles.research_workspace_output_jobs_stop_event == "research-output-stop"
+    assert handles.research_workspace_output_jobs_task == "research-output-task"
     assert handles.media_ingest_jobs_stop_event == "media-stop"
     assert handles.media_ingest_jobs_task == "media-task"
     assert handles.media_ingest_heavy_jobs_stop_event == "media-heavy-stop"
@@ -366,6 +382,11 @@ async def test_start_content_jobs_pollers_passes_inventory_to_workers(
     )
     monkeypatch.setattr(
         startup_pollers,
+        "_start_research_workspace_output_jobs_worker",
+        _record_worker("research-output", ("research-output-stop", "research-output-task")),
+    )
+    monkeypatch.setattr(
+        startup_pollers,
         "_start_media_ingest_jobs_workers",
         _record_worker("media-ingest", ("media-stop", "media-task", "media-heavy-stop", "media-heavy-task")),
     )
@@ -411,6 +432,7 @@ async def test_start_content_jobs_pollers_passes_inventory_to_workers(
         "audiobook": worker_inventory,
         "audio-studio": worker_inventory,
         "presentation": worker_inventory,
+        "research-output": worker_inventory,
         "media-ingest": worker_inventory,
         "reading-digest": worker_inventory,
         "llamacpp-acquisition": worker_inventory,
@@ -427,6 +449,7 @@ async def test_start_content_jobs_pollers_passes_inventory_to_workers(
         "route_name",
         "registered_name",
         "factory_name",
+        "route_kwargs",
     ),
     [
         (
@@ -435,6 +458,7 @@ async def test_start_content_jobs_pollers_passes_inventory_to_workers(
             "audio-jobs",
             "audio_jobs_task",
             "_run_audio_jobs_worker_service",
+            {},
         ),
         (
             "_start_audiobook_jobs_worker",
@@ -442,6 +466,7 @@ async def test_start_content_jobs_pollers_passes_inventory_to_workers(
             "audiobooks",
             "audiobook_jobs_task",
             "_run_audiobook_jobs_worker_service",
+            {},
         ),
         (
             "_start_audio_studio_jobs_worker",
@@ -449,6 +474,7 @@ async def test_start_content_jobs_pollers_passes_inventory_to_workers(
             "audio-studio",
             "audio_studio_jobs_task",
             "_run_audio_studio_jobs_worker_service",
+            {},
         ),
         (
             "_start_presentation_render_jobs_worker",
@@ -456,6 +482,15 @@ async def test_start_content_jobs_pollers_passes_inventory_to_workers(
             "slides",
             "presentation_render_jobs_task",
             "_run_presentation_render_jobs_worker_service",
+            {},
+        ),
+        (
+            "_start_research_workspace_output_jobs_worker",
+            "RESEARCH_WORKSPACE_OUTPUT_JOBS_WORKER_ENABLED",
+            "research-workspace-output-jobs",
+            "research_workspace_output_jobs_task",
+            "_run_research_workspace_output_jobs_worker_service",
+            {"default_stable": True},
         ),
         (
             "_start_reading_digest_jobs_worker",
@@ -463,6 +498,7 @@ async def test_start_content_jobs_pollers_passes_inventory_to_workers(
             "reading",
             "reading_digest_jobs_task",
             "_run_reading_digest_jobs_worker_service",
+            {},
         ),
         (
             "_start_llamacpp_acquisition_jobs_worker",
@@ -470,6 +506,7 @@ async def test_start_content_jobs_pollers_passes_inventory_to_workers(
             "llamacpp-acquisition",
             "llamacpp_acquisition_jobs_task",
             "_run_llamacpp_acquisition_jobs_worker_service",
+            {},
         ),
         (
             "_start_companion_reflection_jobs_worker",
@@ -477,6 +514,7 @@ async def test_start_content_jobs_pollers_passes_inventory_to_workers(
             "companion",
             "companion_reflection_jobs_task",
             "_run_companion_reflection_jobs_worker_service",
+            {},
         ),
     ],
 )
@@ -488,6 +526,7 @@ async def test_content_jobs_worker_registers_with_worker_inventory_when_enabled(
     route_name: str,
     registered_name: str,
     factory_name: str,
+    route_kwargs: dict[str, object],
 ) -> None:
     startup_pollers = _import_startup_content_jobs_pollers()
     registrations: list[dict[str, object]] = []
@@ -519,7 +558,7 @@ async def test_content_jobs_worker_registers_with_worker_inventory_when_enabled(
         app="app",
         owned_job_pollers=[],
         register_owned_job_poller=_register_owned_job_poller,
-        should_start_worker=lambda flag, route, **kwargs: (flag, route, kwargs) == (flag_name, route_name, {}),
+        should_start_worker=lambda flag, route, **kwargs: (flag, route, kwargs) == (flag_name, route_name, route_kwargs),
         worker_inventory=_FakeWorkerInventory(),
     )
 

@@ -5,6 +5,7 @@ import json
 
 import pytest
 
+from tldw_Server_API.app.core.exceptions import NetworkError
 from tldw_Server_API.app.core.MCP_unified.external_servers.config_schema import (
     ExternalAuthConfig,
     ExternalAuthMode,
@@ -182,6 +183,147 @@ async def test_websocket_adapter_call_tool_maps_upstream_error() -> None:
         assert result.metadata["upstream_error"]["code"] == -32042
     finally:
         await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_websocket_adapter_lists_and_reads_resources() -> None:
+    cfg = _server_config()
+    ws = _FakeWebSocket()
+    ws.enqueue({"jsonrpc": "2.0", "id": 1, "result": {"serverInfo": {"name": "stub"}}})
+
+    async def _connector(**kwargs):
+        return ws
+
+    adapter = WebSocketExternalMCPAdapter(cfg, ws_connector=_connector)
+    try:
+        await adapter.connect()
+        list_task = asyncio.create_task(adapter.list_resources())
+        await _wait_for_sent(ws, expected_count=2)
+        list_request_id = ws.sent_messages[1]["id"]
+        ws.enqueue(
+            {
+                "jsonrpc": "2.0",
+                "id": list_request_id,
+                "result": {
+                    "resources": [
+                        {
+                            "uri": "docs://one",
+                            "name": "Docs One",
+                            "description": "Reference",
+                            "mimeType": "text/plain",
+                            "metadata": {"scope": "read"},
+                        },
+                        {"uri": 7, "name": "invalid"},
+                    ]
+                },
+            }
+        )
+        resources = await list_task
+
+        read_task = asyncio.create_task(adapter.read_resource("docs://one"))
+        await _wait_for_sent(ws, expected_count=3)
+        read_request = ws.sent_messages[2]
+        ws.enqueue(
+            {
+                "jsonrpc": "2.0",
+                "id": read_request["id"],
+                "result": {
+                    "contents": [
+                        {
+                            "uri": "docs://one",
+                            "mimeType": "text/plain",
+                            "text": "hello",
+                        }
+                    ]
+                },
+            }
+        )
+        result = await read_task
+
+        assert resources == [
+            {
+                "uri": "docs://one",
+                "name": "Docs One",
+                "description": "Reference",
+                "mimeType": "text/plain",
+                "metadata": {"scope": "read"},
+            }
+        ]
+        assert read_request["method"] == "resources/read"
+        assert read_request["params"] == {"uri": "docs://one"}
+        assert result["contents"][0]["text"] == "hello"
+    finally:
+        await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_websocket_adapter_resource_errors_raise_network_error() -> None:
+    cfg = _server_config()
+    adapter = WebSocketExternalMCPAdapter(cfg)
+    responses = [
+        {"error": {"code": -32000, "message": "list failed"}},
+        {"error": {"code": -32001, "message": "read failed"}},
+    ]
+
+    async def _ensure_connected() -> None:
+        return None
+
+    async def _request(method: str, params: dict[str, object]) -> dict[str, object]:
+        assert method in {"resources/list", "resources/read"}
+        assert isinstance(params, dict)
+        return responses.pop(0)
+
+    adapter._ensure_connected = _ensure_connected  # type: ignore[method-assign]
+    adapter._jsonrpc_request = _request  # type: ignore[method-assign]
+
+    with pytest.raises(NetworkError, match="resources/list failed.*list failed"):
+        await adapter.list_resources()
+    with pytest.raises(NetworkError, match="resources/read failed.*read failed"):
+        await adapter.read_resource("docs://one")
+
+
+@pytest.mark.asyncio
+async def test_websocket_adapter_resource_payloads_are_deep_copied() -> None:
+    cfg = _server_config()
+    adapter = WebSocketExternalMCPAdapter(cfg)
+    list_response = {
+        "result": {
+            "resources": [
+                {
+                    "uri": "docs://one",
+                    "metadata": {"nested": {"value": "original"}},
+                }
+            ]
+        }
+    }
+    read_response = {
+        "result": {
+            "contents": [
+                {
+                    "uri": "docs://one",
+                    "metadata": {"nested": {"value": "original"}},
+                }
+            ]
+        }
+    }
+
+    async def _ensure_connected() -> None:
+        return None
+
+    async def _request(method: str, params: dict[str, object]) -> dict[str, object]:
+        del params
+        return list_response if method == "resources/list" else read_response
+
+    adapter._ensure_connected = _ensure_connected  # type: ignore[method-assign]
+    adapter._jsonrpc_request = _request  # type: ignore[method-assign]
+
+    resources = await adapter.list_resources()
+    resources[0]["metadata"]["nested"]["value"] = "changed"
+    result = await adapter.read_resource("docs://one")
+    result["contents"][0]["metadata"]["nested"]["value"] = "changed"
+
+    assert list_response["result"]["resources"][0]["metadata"]["nested"]["value"] == "original"
+    assert read_response["result"]["contents"][0]["metadata"]["nested"]["value"] == "original"
 
 
 @pytest.mark.asyncio

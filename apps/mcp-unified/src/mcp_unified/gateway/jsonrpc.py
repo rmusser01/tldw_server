@@ -36,6 +36,7 @@ except ImportError:  # pragma: no cover - defensive fallback for future pydantic
     _pydantic_encoder = None
 
 from .runtime import GatewayPolicyDenied, GatewayRequestContext, GatewayRuntime
+from .external_runtime import GatewayExternalRuntimeError
 
 PROTOCOL_VERSION = "2024-11-05"
 JSONRPC_VERSION = "2.0"
@@ -407,6 +408,8 @@ async def handle_single_jsonrpc(
         )
     except GatewayPolicyDenied as exc:
         error = jsonrpc_error(POLICY_DENIED, str(exc), envelope.request_id, data=exc.to_error_data())
+    except GatewayExternalRuntimeError as exc:
+        error = jsonrpc_error(INVALID_PARAMS, str(exc), envelope.request_id, data=exc.to_payload())
     except ValueError as exc:
         error = jsonrpc_error(INVALID_PARAMS, str(exc), envelope.request_id)
     except NotImplementedError:

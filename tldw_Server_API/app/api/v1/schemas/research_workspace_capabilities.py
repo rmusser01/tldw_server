@@ -11,6 +11,9 @@ ResearchWorkspaceCapabilityId = Literal[
     "artifact_text_generation",
     "slides_generation",
     "audio_summary",
+    "video_overview_generation",
+    "image_generation",
+    "infographic_generation",
     "export_download",
     "sync_share",
 ]
