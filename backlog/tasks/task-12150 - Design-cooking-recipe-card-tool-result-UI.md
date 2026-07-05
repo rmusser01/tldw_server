@@ -1,16 +1,16 @@
 ---
 id: TASK-12150
 title: Design cooking recipe card tool-result UI
-status: In Progress
+status: Done
+assignee: []
+created_date: ''
+updated_date: '2026-07-05 14:49'
 labels:
-- design
-- mcp
-- frontend
-priority: Medium
-modified_files:
-- Docs/superpowers/specs/2026-07-05-cooking-recipe-card-tool-result-ui-design.md
-- Docs/superpowers/plans/2026-07-05-cooking-recipe-card-tool-result-ui.md
-- backlog/tasks/task-12150 - Design-cooking-recipe-card-tool-result-UI.md
+  - design
+  - mcp
+  - frontend
+dependencies: []
+priority: medium
 ---
 
 ## Description
@@ -31,22 +31,40 @@ Implementation plan written at Docs/superpowers/plans/2026-07-05-cooking-recipe-
 
 ## Implementation Notes
 
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+<!-- SECTION:NOTES:BEGIN -->
+Implemented on branch codex/cooking-recipe-card-tool-ui.
 
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
+Files changed:
+- Backend MCP tool: tldw_Server_API/app/core/MCP_unified/modules/implementations/cooking_module.py
+- MCP registration/surface: tldw_Server_API/Config_Files/mcp_modules.yaml; tldw_Server_API/app/core/MCP_unified/module_surface.py
+- Backend tests: tldw_Server_API/app/core/MCP_unified/tests/test_cooking_module.py; tldw_Server_API/app/core/MCP_unified/tests/test_basic_functionality.py
+- Frontend parser/types: apps/packages/ui/src/types/recipe-card.ts; apps/packages/ui/src/utils/recipe-card-ui.ts; apps/packages/ui/src/utils/__tests__/recipe-card-ui.test.ts
+- Shared component: apps/packages/ui/src/components/Common/RecipeCard/RecipeCard.tsx; apps/packages/ui/src/components/Common/RecipeCard/__tests__/RecipeCard.test.tsx
+- Tool rendering/replay guard: apps/packages/ui/src/components/Sidepanel/Chat/ToolCallBlock.tsx; apps/packages/ui/src/components/Sidepanel/Chat/__tests__/ToolCallBlock.recipe-card.test.tsx; apps/packages/ui/src/components/Common/Playground/__tests__/tool-results-replay.guard.test.ts
+
+Key decisions kept from the approved spec: domain-specific read-only MCP tool only; no OpenUI changes; no frontend prose detection; no persistent recipe database; no timers/notifications beyond inline cooking-mode display.
+<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Design spec and implementation plan are written and locally reviewed. Independent spec review could not complete after three timed-out subagent attempts; plan subagent review was not retried because the review path had already failed repeatedly and the user instructed continuation. Local checks passed: plan and spec have no TODO/TBD/FIXME markers, and both are ASCII-only. Awaiting execution choice.
+Implemented a read-only cooking.recipe_card.render MCP tool that validates recipe data and returns a namespaced tldw_ui recipe_card payload. Registered it in the default MCP module config and classified it as read-only in module surface reporting. Added a shared frontend parser and RecipeCard component, then integrated rendering into ToolCallBlock for cooking tool results only, with generic fallback for errors, malformed JSON, unsupported payloads, and unknown tools. Added replay guards for WebUI, extension sidepanel, compare clusters, and Message-to-ToolCallBlock handoff.
+
+Verification recorded:
+- Backend targeted pytest: 17 passed.
+- Frontend targeted Vitest suite: 24 passed.
+- Bandit on cooking_module.py: zero findings, output /tmp/bandit_cooking_recipe_card.json.
+- Typecheck attempted after temporarily repairing local antd symlink; our recipe parser TS issue was fixed, remaining failures are existing unrelated errors in AudioStudio, ScheduledTasks, Skills, service clients, and e2e fixtures.
+
+Visual browser QA was not run; coverage is via focused component/integration tests and replay source guards.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
