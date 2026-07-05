@@ -41,6 +41,7 @@ type CreatedAgentTask = {
 export type WorkspaceAgentTaskPrefill = {
   title?: string | null
   description?: string | null
+  metadata?: Record<string, unknown> | null
 }
 
 export interface WorkspaceAgentTaskHandoffModalProps {
@@ -267,6 +268,10 @@ export const WorkspaceAgentTaskHandoffModal: React.FC<
       workspace_name: workspaceName?.trim() || null,
       workspace_tag: workspaceTag?.trim() || null
     }
+    const prefillMetadata =
+      prefill?.metadata && typeof prefill.metadata === "object"
+        ? prefill.metadata
+        : null
 
     let createdProjectId: number | null = null
     try {
@@ -294,7 +299,10 @@ export const WorkspaceAgentTaskHandoffModal: React.FC<
 
       const metadata = {
         ...baseMetadata,
-        acp_workspace_id: acpWorkspaceId
+        acp_workspace_id: acpWorkspaceId,
+        ...(prefillMetadata
+          ? { research_workspace_task_context: prefillMetadata }
+          : {})
       }
       const project = await postJson<ProjectResponse>(PROJECTS_PATH, {
         name: `${workspaceDisplayName} agent work`,
@@ -433,6 +441,13 @@ export const WorkspaceAgentTaskHandoffModal: React.FC<
             </div>
           </Alert>
         )}
+
+        <Alert>
+          {t(
+            "playground:workspace.agentTaskGovernanceNotice",
+            "Agent tasks run through existing ACP capabilities, sandbox checks, and approvals. Run history shows observable events, artifacts, diagnostics, and results without exposing hidden reasoning."
+          )}
+        </Alert>
 
         <div className="space-y-1.5">
           <label

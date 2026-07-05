@@ -24,6 +24,7 @@ import {
   MessageCircle,
   Microscope,
   StickyNote,
+  Briefcase,
   Pencil,
   Trash2,
   ChevronDown,
@@ -108,6 +109,8 @@ import {
 } from "../research-workspace-capabilities"
 import { buildLiteratureDeepResearchLaunchPath } from "./literature-deep-research-launch"
 import { findProposalDeepResearchVerificationArtifact } from "./proposal-deep-research-verification"
+import type { WorkspaceAgentTaskPrefill } from "../WorkspaceAgentTaskHandoffModal"
+import { WORKSPACE_TASK_SOURCE_CONTEXT_LIMIT } from "../workspace-task-prefill"
 
 // Re-export for external consumers
 export { estimateGenerationSeconds, estimateGenerationTokens, estimateGenerationCostUsd } from "./hooks/useArtifactGeneration"
@@ -267,6 +270,7 @@ const OUTPUT_GROUPS: Array<{
     types: ["compare_sources", "timeline"]
   }
 ]
+const WORKSPACE_TASK_ARTIFACT_CONTEXT_LIMIT = 5
 
 // Primary output types shown by default; remaining are collapsed behind an expander
 const PRIMARY_OUTPUT_TYPES = new Set<ArtifactType>([
@@ -766,6 +770,8 @@ interface StudioPaneProps {
   researchWorkspaceCapabilities?: ResearchWorkspaceCapabilitiesResponse
   /** Refresh capability health before expensive generation actions */
   onRefreshResearchWorkspaceCapabilities?: () => Promise<ResearchWorkspaceCapabilitiesResponse>
+  /** Open the shared governed workspace agent-task handoff. */
+  onStartWorkspaceTask?: (prefill: WorkspaceAgentTaskPrefill) => void
 }
 
 /**
@@ -775,7 +781,8 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
   onHide,
   onRequestSources,
   researchWorkspaceCapabilities,
-  onRefreshResearchWorkspaceCapabilities
+  onRefreshResearchWorkspaceCapabilities,
+  onStartWorkspaceTask
 }) => {
   const { t } = useTranslation(["playground", "common"])
   const isMobile = useMobile()
@@ -908,6 +915,68 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
     blockingProcessingCount: selectedBlockingProcessingSourceCount,
     errorCount: selectedErrorSourceCount
   })
+  const buildStudioWorkspaceTaskPrefill = React.useCallback((): WorkspaceAgentTaskPrefill => {
+    const sourceContextSources = effectiveSelectedSources.slice(
+      0,
+      WORKSPACE_TASK_SOURCE_CONTEXT_LIMIT
+    )
+    const selectedSourceTitles = sourceContextSources.map(
+      (source) => source.title || source.id
+    )
+    const contextArtifacts = generatedArtifacts.slice(
+      0,
+      WORKSPACE_TASK_ARTIFACT_CONTEXT_LIMIT
+    )
+    const artifactTitles = contextArtifacts.map(
+      (artifact) => artifact.title || artifact.id
+    )
+    const descriptionLines = [
+      t(
+        "playground:studio.workspaceTaskDescriptionIntro",
+        "Workspace task from Studio."
+      ),
+      "",
+      selectedSourceTitles.length > 0
+        ? t("playground:studio.workspaceTaskSelectedSources", "Selected sources:")
+        : t("playground:studio.workspaceTaskNoSources", "No selected sources."),
+      ...selectedSourceTitles.map((title) => `- ${title}`),
+      ...(contextArtifacts.length > 0
+        ? [
+            "",
+            t(
+              "playground:studio.workspaceTaskGeneratedArtifacts",
+              "Generated outputs:"
+            ),
+            ...contextArtifacts.map(
+              (artifact) => `- ${artifact.title || artifact.id} (${artifact.status})`
+            )
+          ]
+        : []),
+      "",
+      t(
+        "playground:studio.workspaceTaskSaveBackNote",
+        "Save completed results back through Studio outputs or notes when appropriate."
+      )
+    ]
+
+    return {
+      title: t("playground:studio.workspaceTaskTitle", "Continue Studio work"),
+      description: descriptionLines.join("\n"),
+      metadata: {
+        entrypoint: "studio",
+        workspaceId: workspaceId || null,
+        workspaceTag: workspaceTag || null,
+        selectedSourceIds: sourceContextSources.map((source) => source.id),
+        selectedSourceTitles,
+        selectedSourceCount: effectiveSelectedSources.length,
+        artifactIds: contextArtifacts.map((artifact) => artifact.id),
+        artifactTitles
+      }
+    }
+  }, [effectiveSelectedSources, generatedArtifacts, t, workspaceId, workspaceTag])
+  const handleStartWorkspaceTask = React.useCallback(() => {
+    onStartWorkspaceTask?.(buildStudioWorkspaceTaskPrefill())
+  }, [buildStudioWorkspaceTaskPrefill, onStartWorkspaceTask])
   const selectedModelValue =
     typeof selectedModel === "string" ? selectedModel.trim() : ""
   const hasSelectedModelValue = selectedModelValue.length > 0
@@ -1514,18 +1583,39 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
             {t("playground:studio.subtitle", "Generate outputs from your sources")}
           </p>
         </div>
-        {onHide && (
-          <Tooltip title={t("playground:workspace.hideStudio", "Hide studio")}>
+        <div className="flex items-center gap-1">
+          <Tooltip
+            title={t(
+              "playground:studio.startWorkspaceTask",
+              "Start workspace task"
+            )}
+          >
             <button
               type="button"
-              onClick={onHide}
-              className="hidden h-9 w-9 items-center justify-center rounded text-text-muted transition hover:bg-surface2 hover:text-text lg:flex"
-              aria-label={t("playground:workspace.hideStudio", "Hide studio")}
+              onClick={handleStartWorkspaceTask}
+              disabled={!onStartWorkspaceTask}
+              className="flex h-9 w-9 items-center justify-center rounded text-text-muted transition hover:bg-surface2 hover:text-text disabled:cursor-not-allowed disabled:opacity-50"
+              aria-label={t(
+                "playground:studio.startWorkspaceTask",
+                "Start workspace task"
+              )}
             >
-              <PanelRightClose className="h-4 w-4" />
+              <Briefcase className="h-4 w-4" />
             </button>
           </Tooltip>
-        )}
+          {onHide && (
+            <Tooltip title={t("playground:workspace.hideStudio", "Hide studio")}>
+              <button
+                type="button"
+                onClick={onHide}
+                className="hidden h-9 w-9 items-center justify-center rounded text-text-muted transition hover:bg-surface2 hover:text-text lg:flex"
+                aria-label={t("playground:workspace.hideStudio", "Hide studio")}
+              >
+                <PanelRightClose className="h-4 w-4" />
+              </button>
+            </Tooltip>
+          )}
+        </div>
       </div>
 
       {/* Studio Options Section - Collapsible */}

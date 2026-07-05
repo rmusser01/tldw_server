@@ -83,6 +83,8 @@ import {
   type ResearchWorkspaceCapabilitiesResponse
 } from "../research-workspace-capabilities"
 import { renderWorkspaceMessageActionContent } from "../workspace-message-content"
+import type { WorkspaceAgentTaskPrefill } from "../WorkspaceAgentTaskHandoffModal"
+import { WORKSPACE_TASK_SOURCE_CONTEXT_LIMIT } from "../workspace-task-prefill"
 
 const { TextArea } = Input
 const VISIBLE_SOURCE_TAG_COUNT = 5
@@ -140,6 +142,7 @@ const CHAT_RESPONSE_LENGTH_OPTIONS: Array<{
 
 const LOREBOOK_ACTIVITY_PAGE_SIZE = 8
 const LOREBOOK_ACTIVITY_EXPORT_PAGE_SIZE = 200
+const WORKSPACE_TASK_TEXT_PREVIEW_LIMIT = 600
 const RETRY_BURST_WINDOW_MS = 30_000
 const RETRY_BURST_THRESHOLD = 3
 const DUPLICATE_SUBMISSION_WINDOW_MS = 12_000
@@ -155,6 +158,16 @@ type SourceFolderSelectionRecord = {
 type SourceFolderMembershipRecord = {
   sourceId: string
   folderId: string
+}
+
+const truncateWorkspaceTaskText = (
+  value: string | null | undefined,
+  maxLength = WORKSPACE_TASK_TEXT_PREVIEW_LIMIT
+): string => {
+  if (!value) return ""
+  const trimmed = value.trim()
+  if (trimmed.length <= maxLength) return trimmed
+  return `${trimmed.slice(0, maxLength - 3).trimEnd()}...`
 }
 
 const getChatWorkspaceSourceStatus = (
@@ -1178,6 +1191,7 @@ const SimpleChatInput: React.FC<{
   placeholder?: string
   seededValue?: string | null
   onSeedConsumed?: () => void
+  onDraftChange?: (value: string) => void
   slashCommands?: Array<{ name: string; description: string }>
 }> = ({
   onSubmit,
@@ -1193,6 +1207,7 @@ const SimpleChatInput: React.FC<{
   placeholder,
   seededValue,
   onSeedConsumed,
+  onDraftChange,
   slashCommands = []
 }) => {
   const { t } = useTranslation(["playground", "common"])
@@ -1200,15 +1215,24 @@ const SimpleChatInput: React.FC<{
   const [showSlashMenu, setShowSlashMenu] = React.useState(false)
   const [slashMenuIndex, setSlashMenuIndex] = React.useState(0)
   const inputRef = React.useRef<InputRef>(null)
+  const valueRef = React.useRef("")
+  const updateValue = React.useCallback(
+    (nextValue: string) => {
+      valueRef.current = nextValue
+      setValue(nextValue)
+      onDraftChange?.(nextValue)
+    },
+    [onDraftChange]
+  )
 
   React.useEffect(() => {
     if (typeof seededValue !== "string") return
-    setValue(seededValue)
+    updateValue(seededValue)
     window.setTimeout(() => {
       inputRef.current?.focus({ cursor: "end" })
     }, 0)
     onSeedConsumed?.()
-  }, [onSeedConsumed, seededValue])
+  }, [onSeedConsumed, seededValue, updateValue])
 
   // Slash command filtering
   const filteredSlashCommands = React.useMemo(() => {
@@ -1225,7 +1249,7 @@ const SimpleChatInput: React.FC<{
   }, [filteredSlashCommands.length, value])
 
   const selectSlashCommand = (cmd: { name: string }) => {
-    setValue(`/${cmd.name} `)
+    updateValue(`/${cmd.name} `)
     setShowSlashMenu(false)
   }
 
@@ -1250,15 +1274,17 @@ const SimpleChatInput: React.FC<{
     ) {
       return
     }
-    setValue("")
+    updateValue("")
     setShowSlashMenu(false)
     try {
       const result = await onSubmit(trimmed)
-      if (!shouldClearSubmittedDraft(result)) {
-        setValue(submittedValue)
+      if (!shouldClearSubmittedDraft(result) && valueRef.current === "") {
+        updateValue(submittedValue)
       }
     } catch (error) {
-      setValue(submittedValue)
+      if (valueRef.current === "") {
+        updateValue(submittedValue)
+      }
       throw error
     }
   }
@@ -1355,7 +1381,7 @@ const SimpleChatInput: React.FC<{
             ref={inputRef}
             aria-label={t("playground:chat.messageInputLabel", "Chat message")}
             value={value}
-            onChange={(e) => setValue(e.target.value)}
+            onChange={(e) => updateValue(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder={
               isChatUnavailable
@@ -1469,6 +1495,7 @@ interface ChatPaneProps {
   workspaceCapabilities?: WorkspaceCapabilitiesResponse | null
   researchWorkspaceCapabilitiesStale?: boolean
   onRefreshResearchWorkspaceCapabilities?: () => Promise<ResearchWorkspaceCapabilitiesResponse>
+  onStartWorkspaceTask?: (prefill: WorkspaceAgentTaskPrefill) => void
 }
 
 export const ChatPane: React.FC<ChatPaneProps> = ({
@@ -1478,7 +1505,8 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   researchWorkspaceCapabilities,
   workspaceCapabilities = null,
   researchWorkspaceCapabilitiesStale = false,
-  onRefreshResearchWorkspaceCapabilities
+  onRefreshResearchWorkspaceCapabilities,
+  onStartWorkspaceTask
 }) => {
   const { t } = useTranslation(["playground", "common"])
   const translate = React.useCallback(
@@ -1595,6 +1623,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     React.useState<ChatResponseLength>("standard")
   const [dropZoneActive, setDropZoneActive] = React.useState(false)
   const [seededPrompt, setSeededPrompt] = React.useState<string | null>(null)
+  const [composerDraft, setComposerDraft] = React.useState("")
   const [highlightedChatMessageId, setHighlightedChatMessageId] = React.useState<
     string | null
   >(null)
@@ -1705,6 +1734,78 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
       ).length,
     [sourceScopeSources, statusGuardrailsEnabled]
   )
+  const buildChatWorkspaceTaskPrefill = React.useCallback((): WorkspaceAgentTaskPrefill => {
+    const sourceContextSources = sourceScopeSources.slice(
+      0,
+      WORKSPACE_TASK_SOURCE_CONTEXT_LIMIT
+    )
+    const selectedSourceIdsForTask = sourceContextSources.map((source) => source.id)
+    const selectedSourceTitles = sourceContextSources.map(
+      (source) => source.title || source.id
+    )
+    const latestUserMessage =
+      [...messages]
+        .reverse()
+        .find(
+          (entry) =>
+            !entry.isBot &&
+            typeof entry.message === "string" &&
+            entry.message.trim()
+        )?.message || ""
+    const draftInstructionText = composerDraft.trim()
+    const taskInstructionText = draftInstructionText || latestUserMessage
+    const latestUserMessagePreview = truncateWorkspaceTaskText(taskInstructionText)
+    const usingDraftText = draftInstructionText.length > 0
+    const descriptionLines = [
+      t(
+        "playground:chat.workspaceTaskDescriptionIntro",
+        "Workspace task from chat."
+      ),
+      "",
+      selectedSourceTitles.length > 0
+        ? t("playground:chat.workspaceTaskSelectedSources", "Selected sources:")
+        : t("playground:chat.workspaceTaskNoSources", "No selected sources."),
+      ...selectedSourceTitles.map((title) => `- ${title}`),
+      ...(latestUserMessagePreview
+        ? [
+            "",
+            t(
+              usingDraftText
+                ? "playground:chat.workspaceTaskDraftInstructions"
+                : "playground:chat.workspaceTaskLatestUserMessage",
+              usingDraftText ? "Draft instructions:" : "Latest user message:"
+            ),
+            latestUserMessagePreview
+          ]
+        : []),
+      "",
+      t(
+        "playground:chat.workspaceTaskApprovalNote",
+        "Use existing approvals for tool, code, file, or sandbox actions."
+      )
+    ]
+
+    return {
+      title: t(
+        "playground:chat.workspaceTaskTitle",
+        "Investigate chat thread"
+      ),
+      description: descriptionLines.join("\n"),
+      metadata: {
+        entrypoint: "chat",
+        workspaceId: workspaceId || null,
+        selectedSourceIds: selectedSourceIdsForTask,
+        selectedSourceTitles,
+        selectedSourceCount: sourceScopeSources.length,
+        messageCount: messages.length,
+        latestUserMessagePreview: latestUserMessagePreview || null
+      }
+    }
+  }, [composerDraft, messages, sourceScopeSources, t, workspaceId])
+
+  const handleStartWorkspaceTask = React.useCallback(() => {
+    onStartWorkspaceTask?.(buildChatWorkspaceTaskPrefill())
+  }, [buildChatWorkspaceTaskPrefill, onStartWorkspaceTask])
   const sourceQueryabilityMessage =
     hasSelectedSources && !hasQueryableSelectedSources
       ? selectedBlockingProcessingSourceCount > 0 &&
@@ -3094,7 +3195,30 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
 
       {/* Chat controls */}
       <div className="border-b border-border bg-surface px-4 py-2">
-        <div className={`mx-auto flex w-full ${contentMaxWidthClass} items-center justify-end`}>
+        <div className={`mx-auto flex w-full ${contentMaxWidthClass} items-center justify-end gap-1.5`}>
+          <Tooltip
+            title={t(
+              "playground:chat.startWorkspaceTask",
+              "Start workspace task"
+            )}
+          >
+            <button
+              type="button"
+              onClick={handleStartWorkspaceTask}
+              disabled={!onStartWorkspaceTask}
+              className="rounded p-1.5 text-text-muted transition hover:bg-surface2 hover:text-text disabled:cursor-not-allowed disabled:opacity-50"
+              aria-label={t(
+                "playground:chat.startWorkspaceTask",
+                "Start workspace task"
+              )}
+              title={t(
+                "playground:chat.startWorkspaceTask",
+                "Start workspace task"
+              ) as string}
+            >
+              <Briefcase className="h-4 w-4" />
+            </button>
+          </Tooltip>
           <button
             type="button"
             onClick={handleClearChat}
@@ -3672,6 +3796,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
             }
             seededValue={seededPrompt}
             onSeedConsumed={() => setSeededPrompt(null)}
+            onDraftChange={setComposerDraft}
             slashCommands={slashCommands}
             placeholder={
               hasQueryableSelectedSources

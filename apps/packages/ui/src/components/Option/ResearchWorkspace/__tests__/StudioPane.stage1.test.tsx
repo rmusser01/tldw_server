@@ -440,6 +440,104 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
     mockGetModel.mockResolvedValue(null)
   })
 
+  it("starts a workspace agent task from studio context", () => {
+    const onStartWorkspaceTask = vi.fn()
+    workspaceStoreState.generatedArtifacts = [
+      {
+        id: "artifact-1",
+        type: "summary",
+        title: "Current Summary",
+        status: "completed",
+        content: "A generated summary.",
+        createdAt: new Date("2026-02-18T00:00:00.000Z")
+      }
+    ]
+
+    renderStudioPane({ onStartWorkspaceTask })
+
+    fireEvent.click(screen.getByRole("button", { name: "Start workspace task" }))
+
+    expect(onStartWorkspaceTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: expect.stringContaining("Studio"),
+        description: expect.stringContaining("DSPy Prompting Talk"),
+        metadata: expect.objectContaining({
+          entrypoint: "studio",
+          selectedSourceIds: ["source-1"],
+          selectedSourceTitles: ["DSPy Prompting Talk"],
+          artifactIds: ["artifact-1"],
+          artifactTitles: ["Current Summary"]
+        })
+      })
+    )
+  })
+
+  it("includes selected sources that are not yet usable in studio workspace task metadata", () => {
+    const onStartWorkspaceTask = vi.fn()
+    workspaceStoreState.sources = [
+      {
+        id: "source-ready",
+        mediaId: 101,
+        title: "Ready Transcript",
+        type: "video",
+        status: "ready",
+        addedAt: new Date("2026-02-18T00:00:00.000Z")
+      },
+      {
+        id: "source-processing",
+        mediaId: 202,
+        title: "Still Indexing Interview",
+        type: "audio",
+        status: "processing",
+        addedAt: new Date("2026-02-18T00:00:00.000Z")
+      }
+    ]
+    workspaceStoreState.selectedSourceIds = ["source-ready", "source-processing"]
+
+    renderStudioPane({ onStartWorkspaceTask })
+
+    fireEvent.click(screen.getByRole("button", { name: "Start workspace task" }))
+
+    expect(onStartWorkspaceTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        description: expect.stringContaining("Still Indexing Interview"),
+        metadata: expect.objectContaining({
+          selectedSourceIds: ["source-ready", "source-processing"],
+          selectedSourceTitles: ["Ready Transcript", "Still Indexing Interview"]
+        })
+      })
+    )
+  })
+
+  it("caps selected source ids in studio workspace task metadata", () => {
+    const onStartWorkspaceTask = vi.fn()
+    workspaceStoreState.sources = Array.from({ length: 6 }, (_, index) => ({
+      id: `source-${index + 1}`,
+      mediaId: index + 1,
+      title: `Source ${index + 1}`,
+      type: "pdf" as const,
+      status: "ready" as const,
+      addedAt: new Date("2026-02-18T00:00:00.000Z")
+    }))
+    workspaceStoreState.selectedSourceIds = workspaceStoreState.sources.map(
+      (source) => source.id
+    )
+
+    renderStudioPane({ onStartWorkspaceTask })
+
+    fireEvent.click(screen.getByRole("button", { name: "Start workspace task" }))
+
+    expect(onStartWorkspaceTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          selectedSourceIds: ["source-1", "source-2", "source-3", "source-4", "source-5"],
+          selectedSourceTitles: ["Source 1", "Source 2", "Source 3", "Source 4", "Source 5"],
+          selectedSourceCount: 6
+        })
+      })
+    )
+  })
+
   it("exposes accessible names for studio option controls", () => {
     renderStudioPane()
 
