@@ -153,6 +153,11 @@ _PACKS_BY_ID = {pack["pack_id"]: pack for pack in _PACKS}
 _STRONG_ADD_ON_IDS = {
     addon["addon_id"] for addon in _ADD_ONS if addon["strong_confirmation"]
 }
+_SAFE_MCP_DISCOVERY_TOOLS = {
+    "mcp.catalogs.list",
+    "mcp.modules.list",
+    "mcp.tools.list",
+}
 _READ_FORBIDDEN_CAPABILITIES = {
     "filesystem.write",
     "filesystem.delete",
@@ -224,6 +229,7 @@ def generate_first_run_policy(
     entries_by_name = _entries_by_name(tool_entries)
     registry_available = bool(entries_by_name)
     allowed_tools: list[str] = []
+    capabilities: list[str] = []
 
     for pack_id in selected_pack_ids:
         pack = _PACKS_BY_ID.get(pack_id)
@@ -236,7 +242,7 @@ def generate_first_run_policy(
             allowed_tools.append(tool_name)
 
     if "external_network_read" in selected_addon_ids:
-        allowed_tools.append("network.external")
+        capabilities.append("network.external")
         allowed_tools.extend(
             entry["tool_name"]
             for entry in entries_by_name.values()
@@ -250,7 +256,7 @@ def generate_first_run_policy(
             if _is_safe_local_file_read_tool(entry)
         ]
         if local_file_tools:
-            allowed_tools.append("filesystem.read")
+            capabilities.append("filesystem.read")
             allowed_tools.extend(local_file_tools)
 
     if _strong_addon_enabled(
@@ -276,7 +282,7 @@ def generate_first_run_policy(
         ]
         allowed_tools.extend(entry["tool_name"] for entry in destructive_tools)
         if any(_as_bool(entry.get("uses_filesystem")) for entry in destructive_tools):
-            allowed_tools.append("filesystem.delete")
+            capabilities.append("filesystem.delete")
 
     if _strong_addon_enabled(
         "process_run_command",
@@ -290,9 +296,10 @@ def generate_first_run_policy(
         ]
         allowed_tools.extend(entry["tool_name"] for entry in process_tools)
         if process_tools:
-            allowed_tools.append("process.execute")
+            capabilities.append("process.execute")
 
     allowed_tools = _unique_strings(allowed_tools)
+    capabilities = _unique_strings(capabilities)
     policy_hash = _generated_policy_hash(
         allowed_tools=allowed_tools,
         selected_pack_ids=[pack_id for pack_id in selected_pack_ids if pack_id in _PACKS_BY_ID],
@@ -300,6 +307,7 @@ def generate_first_run_policy(
     )
     return {
         "allowed_tools": allowed_tools,
+        "capabilities": capabilities,
         "first_run_mcp_tools": {
             "setup_origin": SETUP_ORIGIN,
             "setup_instance_id": setup_instance_id,
@@ -395,9 +403,12 @@ def _strong_addon_enabled(
 
 
 def _is_safe_default_read_tool(entry: Mapping[str, Any] | None) -> bool:
+    if entry is None:
+        return False
+    if str(entry.get("tool_name") or "").strip() in _SAFE_MCP_DISCOVERY_TOOLS:
+        return _is_non_mutating_internal_tool(entry)
     return (
-        entry is not None
-        and _is_low_risk_read_only(entry)
+        _is_low_risk_read_only(entry)
         and not _uses_external_network(entry)
         and not _as_bool(entry.get("uses_filesystem"))
         and not _is_process_tool(entry)
@@ -466,6 +477,17 @@ def _is_low_risk_read_only(entry: Mapping[str, Any]) -> bool:
         and not _as_bool(entry.get("mutates_state"))
         and not _is_destructive_tool(entry)
         and not _has_any_capability(entry, _READ_FORBIDDEN_CAPABILITIES)
+    )
+
+
+def _is_non_mutating_internal_tool(entry: Mapping[str, Any]) -> bool:
+    return (
+        not _as_bool(entry.get("mutates_state"))
+        and not _is_destructive_tool(entry)
+        and not _has_any_capability(entry, _READ_FORBIDDEN_CAPABILITIES)
+        and not _uses_external_network(entry)
+        and not _as_bool(entry.get("uses_filesystem"))
+        and not _is_process_tool(entry)
     )
 
 

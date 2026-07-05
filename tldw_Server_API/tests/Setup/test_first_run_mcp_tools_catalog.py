@@ -65,6 +65,55 @@ def test_catalog_marks_missing_spec_tools_unavailable_when_registry_is_available
     assert "knowledge.get" in unavailable
 
 
+def test_default_policy_keeps_mcp_discovery_tools_with_registry_rows():
+    policy = generate_first_run_policy(
+        selected_pack_ids=["research"],
+        selected_addon_ids=[],
+        confirmed_addon_ids=[],
+        confirmation_version=None,
+        setup_instance_id="first_run:test",
+        tool_entries=[
+            {
+                "tool_name": "mcp.catalogs.list",
+                "module": "mcp_discovery",
+                "category": "unclassified",
+                "risk_class": "unclassified",
+                "mutates_state": False,
+                "uses_filesystem": False,
+                "uses_network": False,
+                "uses_processes": False,
+                "catalog_exempt": True,
+            },
+            {
+                "tool_name": "mcp.modules.list",
+                "module": "mcp_discovery",
+                "category": "unclassified",
+                "risk_class": "unclassified",
+                "mutates_state": False,
+                "uses_filesystem": False,
+                "uses_network": False,
+                "uses_processes": False,
+                "catalog_exempt": True,
+            },
+            {
+                "tool_name": "mcp.tools.list",
+                "module": "mcp_discovery",
+                "category": "unclassified",
+                "risk_class": "unclassified",
+                "mutates_state": False,
+                "uses_filesystem": False,
+                "uses_network": False,
+                "uses_processes": False,
+                "catalog_exempt": True,
+            },
+        ],
+    )
+
+    assert "mcp.catalogs.list" in policy["allowed_tools"]
+    assert "mcp.modules.list" in policy["allowed_tools"]
+    assert "mcp.tools.list" in policy["allowed_tools"]
+
+
 def test_default_policy_uses_explicit_allowed_tools_not_module_patterns():
     policy = generate_first_run_policy(
         selected_pack_ids=["research", "writing"],
@@ -91,6 +140,7 @@ def test_default_policy_uses_explicit_allowed_tools_not_module_patterns():
     assert "notes.search" in policy["allowed_tools"]
     assert "notes.create" not in policy["allowed_tools"]
     assert "module_patterns" not in policy
+    assert policy["capabilities"] == []
 
 
 def test_default_policy_does_not_enable_broad_capabilities():
@@ -103,6 +153,7 @@ def test_default_policy_does_not_enable_broad_capabilities():
         tool_entries=[],
     )
 
+    assert policy["capabilities"] == []
     assert "filesystem.read" not in policy["allowed_tools"]
     assert "filesystem.write" not in policy["allowed_tools"]
     assert "filesystem.delete" not in policy["allowed_tools"]
@@ -179,7 +230,8 @@ def test_local_file_read_addon_adds_only_safe_read_file_tools():
         ],
     )
 
-    assert "filesystem.read" in policy["allowed_tools"]
+    assert "filesystem.read" in policy["capabilities"]
+    assert "filesystem.read" not in policy["allowed_tools"]
     assert "fs.read_text" in policy["allowed_tools"]
     assert "fs.write_text" not in policy["allowed_tools"]
 
@@ -216,7 +268,8 @@ def test_external_network_read_addon_adds_only_low_risk_external_read_tools():
         ],
     )
 
-    assert "network.external" in policy["allowed_tools"]
+    assert "network.external" in policy["capabilities"]
+    assert "network.external" not in policy["allowed_tools"]
     assert "web.search" in policy["allowed_tools"]
     assert "web.lookup" in policy["allowed_tools"]
     assert "web.post" not in policy["allowed_tools"]
@@ -248,6 +301,7 @@ def test_confirmed_workspace_write_addon_enumerates_non_destructive_write_tools(
 
     assert "notes.create" in policy["allowed_tools"]
     assert "notes.delete" not in policy["allowed_tools"]
+    assert policy["capabilities"] == []
     assert "filesystem.write" not in policy["allowed_tools"]
 
 
@@ -279,7 +333,8 @@ def test_confirmed_destructive_addon_enumerates_delete_tools():
 
     assert "notes.delete" in policy["allowed_tools"]
     assert "fs.delete" in policy["allowed_tools"]
-    assert "filesystem.delete" in policy["allowed_tools"]
+    assert "filesystem.delete" in policy["capabilities"]
+    assert "filesystem.delete" not in policy["allowed_tools"]
 
 
 def test_confirmed_process_addon_enumerates_process_tools():
@@ -301,4 +356,5 @@ def test_confirmed_process_addon_enumerates_process_tools():
     )
 
     assert "shell.run" in policy["allowed_tools"]
-    assert "process.execute" in policy["allowed_tools"]
+    assert "process.execute" in policy["capabilities"]
+    assert "process.execute" not in policy["allowed_tools"]
