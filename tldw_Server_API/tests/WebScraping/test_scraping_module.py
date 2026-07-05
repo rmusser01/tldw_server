@@ -1,6 +1,28 @@
 import types
 import pytest
 
+from tldw_Server_API.app.core.Web_Scraping.runtime import FetchResponse, PolicyDecision
+
+
+class FakeArticlePolicyChecker:
+    def __init__(self, decision: PolicyDecision):
+        self.decision = decision
+
+    async def decide(self, _url, *, respect_robots, user_agent, context, config):  # noqa: ANN001
+        return self.decision
+
+
+class FakeArticleFetchClient:
+    def __init__(self, response):
+        self.response = response
+        self.requests = []
+
+    def fetch(self, request):
+        self.requests.append(request)
+        if isinstance(self.response, BaseException):
+            raise self.response
+        return self.response
+
 
 @pytest.mark.asyncio
 async def test_egress_denied_scrape_article(monkeypatch):
@@ -33,32 +55,27 @@ async def test_egress_denied_enhanced_scraper(monkeypatch):
 @pytest.mark.asyncio
 async def test_article_scrape_blocks_on_shared_policy_before_network(monkeypatch):
     from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as ael
-    from tldw_Server_API.app.core.Web_Scraping.outbound_policy import (
-        WebOutboundPolicyDecision,
-    )
 
     monkeypatch.setattr(ael, "load_and_log_configs", lambda: {"web_scraper": {}})
-    async def fake_policy(*args, **kwargs):
-        return WebOutboundPolicyDecision(
-            allowed=False,
-            mode="strict",
-            reason="robots_unreachable",
-            stage="pre_fetch",
-            source="article_extract",
-        )
-
     monkeypatch.setattr(
         ael,
-        "decide_web_outbound_policy",
-        fake_policy,
-        raising=False,
+        "_ARTICLE_POLICY_CHECKER",
+        FakeArticlePolicyChecker(
+            PolicyDecision(
+                allowed=False,
+                mode="strict",
+                reason="robots_unreachable",
+                stage="pre_fetch",
+                source="article_extract",
+            )
+        ),
     )
 
     def fail_http_fetch(*args, **kwargs):
         raise AssertionError("network fetch should not run when outbound policy blocks")
 
     monkeypatch.setattr(ael, "http_fetch", fail_http_fetch)
-    monkeypatch.setattr(ael, "_fetch_with_curl", fail_http_fetch)
+    monkeypatch.setattr(ael, "_ARTICLE_FETCH_CLIENT", FakeArticleFetchClient(AssertionError("fetch should not run")))
 
     result = await ael.scrape_article("https://example.com/blocked")
 
@@ -305,10 +322,19 @@ async def test_article_preflight_prefers_playwright_for_js(monkeypatch):
         }
 
     monkeypatch.setattr(ael, "load_and_log_configs", fake_cfg)
-    async def fake_allowed(*args, **kwargs):
-        return True
-
-    monkeypatch.setattr(ael, "is_allowed_by_robots_async", fake_allowed)
+    monkeypatch.setattr(
+        ael,
+        "_ARTICLE_POLICY_CHECKER",
+        FakeArticlePolicyChecker(
+            PolicyDecision(
+                allowed=True,
+                mode="compat",
+                reason="allowed",
+                stage="pre_fetch",
+                source="article_extract",
+            )
+        ),
+    )
     monkeypatch.setattr(
         sa,
         "run_analysis",
@@ -368,12 +394,14 @@ async def test_article_preflight_prefers_playwright_for_js(monkeypatch):
 
     monkeypatch.setattr(ael, "async_playwright", fake_async_playwright)
     monkeypatch.setattr(ael, "extract_article_with_pipeline", fake_extract)
-    monkeypatch.setattr(ael, "_fetch_with_curl", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError()))
+    fetch_client = FakeArticleFetchClient(AssertionError("fetch should not run"))
+    monkeypatch.setattr(ael, "_ARTICLE_FETCH_CLIENT", fetch_client)
     monkeypatch.setattr(ael, "http_fetch", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError()))
 
     result = await ael.scrape_article("https://example.com")
     assert result.get("extraction_successful") is True
     assert playwright_used["used"] is True
+    assert fetch_client.requests == []
 
 
 @pytest.mark.asyncio
@@ -396,29 +424,41 @@ async def test_article_preflight_prefers_curl_for_tls(monkeypatch):
         }
 
     monkeypatch.setattr(ael, "load_and_log_configs", fake_cfg)
-    async def fake_allowed(*args, **kwargs):
-        return True
-
-    monkeypatch.setattr(ael, "is_allowed_by_robots_async", fake_allowed)
+    monkeypatch.setattr(
+        ael,
+        "_ARTICLE_POLICY_CHECKER",
+        FakeArticlePolicyChecker(
+            PolicyDecision(
+                allowed=True,
+                mode="compat",
+                reason="allowed",
+                stage="pre_fetch",
+                source="article_extract",
+            )
+        ),
+    )
     monkeypatch.setattr(
         sa,
         "run_analysis",
         lambda *args, **kwargs: {"results": {"tls": {"status": "active"}}},
     )
 
-    curl_used = {"used": False}
-
-    def fake_fetch_with_curl(*args, **kwargs):
-        curl_used["used"] = True
-        return {"status": 200, "text": "<html><body>ok</body></html>", "backend": "curl"}
+    fetch_client = FakeArticleFetchClient(
+        FetchResponse(
+            url="https://example.com",
+            status=200,
+            text="<html><body>ok</body></html>",
+            backend="curl",
+        )
+    )
 
     def fake_extract(*args, **kwargs):
         return {"extraction_successful": True, "content": "ok", "title": "t"}
 
-    monkeypatch.setattr(ael, "_fetch_with_curl", fake_fetch_with_curl)
+    monkeypatch.setattr(ael, "_ARTICLE_FETCH_CLIENT", fetch_client)
     monkeypatch.setattr(ael, "extract_article_with_pipeline", fake_extract)
     monkeypatch.setattr(ael, "http_fetch", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError()))
 
     result = await ael.scrape_article("https://example.com")
     assert result.get("extraction_successful") is True
-    assert curl_used["used"] is True
+    assert fetch_client.requests[0].backend == "curl"

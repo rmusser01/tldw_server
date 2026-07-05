@@ -268,30 +268,6 @@ def _resp_get(resp: Any, key: str, default: Any = None) -> Any:
     return default
 
 
-def _fetch_with_curl(
-    url: str,
-    *,
-    headers: dict[str, Any],
-    cookies: Optional[dict[str, str]],
-    timeout: float,
-    impersonate: Optional[str],
-    proxies: Optional[dict[str, str]],
-) -> dict[str, Any]:
-    """Fetch HTML using curl_cffi via the centralized http_client."""
-    from tldw_Server_API.app.core.http_client import fetch as http_fetch
-
-    return http_fetch(
-        url,
-        headers=headers,
-        cookies=cookies,
-        timeout=timeout,
-        proxies=proxies,
-        backend="curl",
-        impersonate=impersonate,
-        follow_redirects=True,
-    )
-
-
 _ARTICLE_POLICY_CHECKER: OutboundPolicyChecker = DefaultWebOutboundPolicyChecker()
 _ARTICLE_FETCH_CLIENT: FetchClient = DefaultFetchClient()
 
