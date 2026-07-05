@@ -161,6 +161,50 @@ def test_default_policy_does_not_enable_broad_capabilities():
     assert "process.execute" not in policy["allowed_tools"]
 
 
+def test_generated_policy_hash_changes_when_generated_capabilities_change():
+    base_policy = generate_first_run_policy(
+        selected_pack_ids=["writing"],
+        selected_addon_ids=["destructive_actions"],
+        confirmed_addon_ids=["destructive_actions"],
+        confirmation_version=CONFIRMATION_VERSION,
+        setup_instance_id="first_run:test",
+        tool_entries=[
+            {
+                "tool_name": "notes.delete",
+                "module": "notes",
+                "risk_class": "high",
+                "mutates_state": True,
+                "destructive": True,
+            }
+        ],
+    )
+    capability_policy = generate_first_run_policy(
+        selected_pack_ids=["writing"],
+        selected_addon_ids=["destructive_actions"],
+        confirmed_addon_ids=["destructive_actions"],
+        confirmation_version=CONFIRMATION_VERSION,
+        setup_instance_id="first_run:test",
+        tool_entries=[
+            {
+                "tool_name": "notes.delete",
+                "module": "notes",
+                "risk_class": "high",
+                "mutates_state": True,
+                "uses_filesystem": True,
+                "destructive": True,
+            }
+        ],
+    )
+
+    assert base_policy["allowed_tools"] == capability_policy["allowed_tools"]
+    assert base_policy["capabilities"] == []
+    assert capability_policy["capabilities"] == ["filesystem.delete"]
+    assert (
+        base_policy["first_run_mcp_tools"]["generated_policy_hash"]
+        != capability_policy["first_run_mcp_tools"]["generated_policy_hash"]
+    )
+
+
 @pytest.mark.parametrize(
     "addon_id",
     ["workspace_write", "destructive_actions", "process_run_command"],

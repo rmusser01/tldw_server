@@ -302,6 +302,7 @@ def generate_first_run_policy(
     capabilities = _unique_strings(capabilities)
     policy_hash = _generated_policy_hash(
         allowed_tools=allowed_tools,
+        capabilities=capabilities,
         selected_pack_ids=[pack_id for pack_id in selected_pack_ids if pack_id in _PACKS_BY_ID],
         selected_addon_ids=selected_addon_ids,
     )
@@ -519,13 +520,15 @@ def _as_bool(value: Any) -> bool:
 def _generated_policy_hash(
     *,
     allowed_tools: Sequence[str],
+    capabilities: Sequence[str],
     selected_pack_ids: Sequence[str],
     selected_addon_ids: Sequence[str],
 ) -> str:
     payload = {
-        "allowed_tools": list(allowed_tools),
-        "selected_pack_ids": list(selected_pack_ids),
-        "selected_addon_ids": list(selected_addon_ids),
+        "allowed_tools": _unique_strings(allowed_tools),
+        "capabilities": _unique_strings(capabilities),
+        "selected_pack_ids": _unique_strings(selected_pack_ids),
+        "selected_addon_ids": _unique_strings(selected_addon_ids),
         "catalog_version": CATALOG_VERSION,
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
