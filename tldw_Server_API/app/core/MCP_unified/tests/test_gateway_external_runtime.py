@@ -662,6 +662,41 @@ async def test_external_runtime_lists_and_reads_redacted_resources() -> None:
 
 
 @pytest.mark.asyncio
+async def test_external_runtime_redacts_related_file_uris_in_resource_read_text() -> None:
+    upstream_uri = "file:///Users/example/private/source.txt"
+    related_uri = "file:///Users/example/private/related.txt"
+    store = InMemoryExternalRegistryStore([_server()])
+    transport = RecordingExternalTransport(
+        server_id="research",
+        resources=[{"uri": upstream_uri, "name": "Local secret"}],
+        resource_reads={
+            upstream_uri: {
+                "contents": [
+                    {
+                        "uri": upstream_uri,
+                        "mimeType": "text/plain",
+                        "text": f"see {related_uri}",
+                    }
+                ]
+            }
+        },
+    )
+    manager = GatewayExternalRuntimeManager(
+        external_registry_store=store,
+        transport_factory=lambda _server: transport,
+    )
+    await manager.start_server("research")
+    resource = (await manager.list_virtual_resources())[0]
+
+    result = await manager.read_virtual_resource(resource["uri"])
+    payload = json.dumps(result, sort_keys=True)
+
+    assert "file:///" not in payload
+    assert result["contents"][0]["uri"] == resource["uri"]
+    assert result["contents"][0]["text"] == f"see {resource['uri']}"
+
+
+@pytest.mark.asyncio
 async def test_external_runtime_resource_listing_filters_ungranted_servers_before_discovery() -> None:
     """Resource discovery skips active servers outside the effective profile policy."""
     research_uri = "resource://research/one"
@@ -905,6 +940,38 @@ async def test_external_runtime_wait_for_servers_reports_ready_and_unavailable()
         "unavailable_servers": ["research"],
         "unknown_servers": [],
     }
+    assert ready == {
+        "ok": True,
+        "ready_servers": ["research"],
+        "unavailable_servers": [],
+        "unknown_servers": [],
+    }
+
+
+@pytest.mark.asyncio
+async def test_external_runtime_wait_for_servers_tolerates_malformed_runtime_rows() -> None:
+    class MalformedRuntimeRowsManager(GatewayExternalRuntimeManager):
+        async def list_runtime_servers(self) -> dict[str, Any]:
+            return {
+                "servers": [
+                    None,
+                    "not-a-row",
+                    {"id": "research", "status": "healthy"},
+                    {"id": None, "status": "healthy"},
+                ]
+            }
+
+    manager = MalformedRuntimeRowsManager(
+        external_registry_store=InMemoryExternalRegistryStore([_server()]),
+        transport_factory=lambda _server: RecordingExternalTransport(server_id="research"),
+    )
+
+    ready = await manager.wait_for_servers(
+        ["research"],
+        timeout_seconds=0,
+        poll_interval_seconds=0.001,
+    )
+
     assert ready == {
         "ok": True,
         "ready_servers": ["research"],

@@ -601,11 +601,14 @@ class GatewayExternalRuntimeManager:
             targets = {str(server_id) for server_id in server_ids if str(server_id)}
 
         while True:
-            rows = await self.list_runtime_servers()
+            rows = await self.list_runtime_servers() or {}
+            raw_servers = rows.get("servers", []) if isinstance(rows, dict) else []
+            if not isinstance(raw_servers, list):
+                raw_servers = []
             by_id = {
                 str(row.get("id")): row
-                for row in rows.get("servers", [])
-                if row.get("id") is not None
+                for row in raw_servers
+                if isinstance(row, dict) and row.get("id") is not None
             }
             current_targets = set(targets)
             ready = sorted(
@@ -981,10 +984,10 @@ class GatewayExternalRuntimeManager:
     def _replace_server_resources(
         self,
         server_id: str,
-        resources: list[dict[str, Any]],
+        resources: list[dict[str, Any]] | None,
     ) -> None:
         self._clear_server_resources(server_id)
-        for resource in resources:
+        for resource in resources or []:
             if not isinstance(resource, dict):
                 continue
             upstream_uri = resource.get("uri")
@@ -1156,6 +1159,8 @@ class GatewayExternalRuntimeManager:
         """Return the scheme/netloc prefix used to scrub related upstream URIs."""
 
         parsed = urlsplit(upstream_uri)
+        if parsed.scheme == "file":
+            return "file://"
         if not parsed.scheme or not parsed.netloc:
             return None
         return f"{parsed.scheme}://{parsed.netloc}"

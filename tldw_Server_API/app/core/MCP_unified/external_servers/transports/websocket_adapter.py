@@ -6,9 +6,12 @@ import asyncio
 import inspect
 import json
 from contextlib import suppress
+from copy import deepcopy
 from typing import Any, Awaitable, Callable, Optional
 
 from loguru import logger
+
+from tldw_Server_API.app.core.exceptions import NetworkError
 
 from ..config_schema import ExternalMCPServerConfig
 from .base import (
@@ -175,7 +178,7 @@ class WebSocketExternalMCPAdapter(ExternalMCPTransportAdapter):
         response = await self._jsonrpc_request("resources/list", {})
 
         if response.get("error"):
-            raise RuntimeError(
+            raise NetworkError(
                 f"External MCP resources/list failed for '{self.server_id}': "
                 f"{self._error_message(response['error'])}"
             )
@@ -213,7 +216,7 @@ class WebSocketExternalMCPAdapter(ExternalMCPTransportAdapter):
                     "name": name,
                     "description": description,
                     "mimeType": mime_type,
-                    "metadata": dict(metadata),
+                    "metadata": deepcopy(metadata),
                 }
             )
         return resources
@@ -229,13 +232,13 @@ class WebSocketExternalMCPAdapter(ExternalMCPTransportAdapter):
         response = await self._jsonrpc_request("resources/read", {"uri": uri})
 
         if response.get("error"):
-            raise RuntimeError(
+            raise NetworkError(
                 f"External MCP resources/read failed for '{self.server_id}': "
                 f"{self._error_message(response['error'])}"
             )
 
         result = response.get("result")
-        return dict(result) if isinstance(result, dict) else {"contents": []}
+        return deepcopy(result) if isinstance(result, dict) else {"contents": []}
 
     async def call_tool(
         self,
