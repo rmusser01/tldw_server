@@ -25,6 +25,7 @@ type FirstChatStepProps = {
   onSkip: () => void;
   skipPending?: boolean;
   onCheckEndpoint?: () => void;
+  backLabel?: string;
 };
 
 const DEFAULT_FIRST_PROMPT = "Say hello in one short sentence.";
@@ -156,6 +157,7 @@ export function FirstChatStep({
   onSkip,
   skipPending = false,
   onCheckEndpoint,
+  backLabel = "Back to providers",
 }: FirstChatStepProps) {
   const [prompt, setPrompt] = React.useState(DEFAULT_FIRST_PROMPT);
   const [response, setResponse] =
@@ -361,7 +363,7 @@ export function FirstChatStep({
           disabled={running}
           className="rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-text hover:bg-surface2 disabled:opacity-50"
         >
-          Back to providers
+          {backLabel}
         </button>
         <button
           type="button"

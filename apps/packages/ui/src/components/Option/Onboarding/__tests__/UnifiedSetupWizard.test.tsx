@@ -857,7 +857,7 @@ describe("UnifiedSetupWizard", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /back to providers/i }));
+    fireEvent.click(screen.getByRole("button", { name: /back to mcp tools/i }));
 
     expect(
       await screen.findByRole("heading", { name: /mcp tools/i }),

@@ -202,7 +202,10 @@ describe("McpToolsStep", () => {
     render(<McpToolsStep {...createProps({ applyMcpTools })} />);
 
     fireEvent.click(screen.getByRole("button", { name: /save packs/i }));
-    expect(await screen.findByText(/profile_manually_changed/i)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/generated profile was changed/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/profile_manually_changed/i)).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: /open mcp hub/i })).toHaveAttribute(
       "href",
       "/mcp-hub?source=first-run&profile_id=7",
@@ -220,7 +223,7 @@ describe("McpToolsStep", () => {
 
     applyMcpTools.mockResolvedValueOnce(conflict);
     fireEvent.click(screen.getByRole("button", { name: /save packs/i }));
-    await screen.findByText(/profile_manually_changed/i);
+    await screen.findByText(/generated profile was changed/i);
     fireEvent.click(
       screen.getByRole("button", { name: /replace generated profile/i }),
     );
@@ -264,6 +267,21 @@ describe("McpToolsStep", () => {
     expect(onContinue).toHaveBeenCalledTimes(1);
   });
 
+  it("requires saving again after a saved selection changes", async () => {
+    render(<McpToolsStep {...createProps()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /save packs/i }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /run sample tool/i })).toBeEnabled();
+      expect(screen.getByRole("button", { name: /continue/i })).toBeEnabled();
+    });
+
+    fireEvent.click(screen.getByLabelText(/writing/i));
+
+    expect(screen.getByRole("button", { name: /run sample tool/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /continue/i })).toBeDisabled();
+  });
+
   it("calls the provided skip handler", () => {
     const onSkip = vi.fn();
     render(<McpToolsStep {...createProps({ onSkip })} />);
@@ -283,13 +301,17 @@ describe("McpToolsStep", () => {
     expect(screen.getByText(/2 tools/i)).toBeInTheDocument();
     expect(screen.getByText(/mcp.tools.list/i)).toBeInTheDocument();
     expect(screen.getByText(/media.search/i)).toBeInTheDocument();
-    expect(screen.getByText(/local_file_read/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/^Local file read$/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Not run/i)).toBeInTheDocument();
+    expect(screen.queryByText(/local_file_read/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/not_run/i)).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: /open mcp hub/i })).toHaveAttribute(
       "href",
       "/mcp-hub?source=first-run&profile_id=7",
     );
 
     fireEvent.click(screen.getByRole("button", { name: /run sample tool/i }));
-    expect(await screen.findByText(/not_configured/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Not configured/i)).toBeInTheDocument();
+    expect(screen.queryByText(/not_configured/i)).not.toBeInTheDocument();
   });
 });

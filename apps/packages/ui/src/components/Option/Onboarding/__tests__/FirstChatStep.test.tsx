@@ -6,6 +6,35 @@ import { describe, expect, it, vi } from "vitest";
 import { FirstChatStep } from "../steps/FirstChatStep";
 
 describe("FirstChatStep", () => {
+  it("uses provider back label by default and allows wizard-specific copy", () => {
+    const onBack = vi.fn();
+    const props = {
+      provider: "openai",
+      model: "gpt-4.1-mini",
+      verifyFirstChat: vi.fn(),
+      complete: vi.fn(),
+      onComplete: vi.fn(),
+      onBack,
+      onEditProvider: vi.fn(),
+      onSwitchProvider: vi.fn(),
+      onSkip: vi.fn(),
+    };
+
+    const { rerender } = render(<FirstChatStep {...props} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /back to providers/i }));
+    expect(onBack).toHaveBeenCalledTimes(1);
+
+    rerender(<FirstChatStep {...props} backLabel="Back to MCP tools" />);
+
+    expect(
+      screen.getByRole("button", { name: /back to mcp tools/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /back to providers/i }),
+    ).not.toBeInTheDocument();
+  });
+
   it("requires a successful first chat before calling complete", async () => {
     const verifyFirstChat = vi.fn().mockResolvedValue({
       status: "ready",

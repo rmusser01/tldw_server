@@ -532,6 +532,7 @@ export function UnifiedSetupWizard({
               onComplete?.();
             }}
             onBack={() => setStep("mcp_tools")}
+            backLabel="Back to MCP tools"
             onEditProvider={() => setStep("provider_setup")}
             onSwitchProvider={() => setStep("provider_setup")}
             onCheckEndpoint={() => setStep("provider_setup")}

@@ -4,7 +4,7 @@ title: Implement first-run MCP tool packs setup
 status: In Progress
 assignee: []
 created_date: '2026-07-04 23:41'
-updated_date: '2026-07-05 02:36'
+updated_date: '2026-07-05 02:43'
 labels:
   - implementation
   - mcp
@@ -49,6 +49,8 @@ Task 5 frontend conflict guard follow-up: tightened applyMcpTools 409 extraction
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 Task 6 frontend MCP tools wizard step: added McpToolsStep and inserted mcp_tools between optional_advanced and first_chat in UnifiedSetupWizard. Step supports default pack selection, collapsed add-ons, inline strong add-on confirmation, apply conflict resolution, sample validation, skip-step persistence, and MCP Hub handoff links. Red check: `bunx vitest run src/components/Option/Onboarding/__tests__/McpToolsStep.test.tsx src/components/Option/Onboarding/__tests__/UnifiedSetupWizard.test.tsx` from apps/packages/ui failed before implementation on missing McpToolsStep and old wizard route. Green verification: same command -> 2 files passed, 38 tests passed. Bandit not run for this frontend-only slice.
+
+Task 6 spec-review fixes: added a FirstChatStep backLabel prop so the first-run wizard can show Back to MCP tools while standalone/provider flows keep Back to providers; cleared MCP apply/validation results when pack/add-on/confirmation choices change after save; mapped conflict reasons, add-on ids, validation states, and external status values to local user-facing labels. Red check: focused Vitest failed before fixes on the missing backLabel behavior, stale saved selection controls, and raw profile_manually_changed/local_file_read/not_run/not_configured copy. Green verification: `bunx vitest run src/components/Option/Onboarding/__tests__/McpToolsStep.test.tsx src/components/Option/Onboarding/__tests__/UnifiedSetupWizard.test.tsx src/components/Option/Onboarding/__tests__/FirstChatStep.test.tsx` from apps/packages/ui -> 3 files passed, 55 tests passed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

@@ -32,6 +32,37 @@ const hubHref = (profileId?: number | null) => {
 const toggle = (items: string[], id: string) =>
   items.includes(id) ? items.filter((item) => item !== id) : [...items, id];
 
+const CONFLICT_REASON_LABELS: Record<string, string> = {
+  profile_manually_changed: "Generated profile was changed in MCP Hub.",
+  profile_conflict: "MCP Hub profile needs review.",
+};
+
+const VALIDATION_STATE_LABELS: Record<string, string> = {
+  not_run: "Not run",
+  built_in_passed: "Built-in check passed",
+  external_discovered: "External tools discovered",
+  external_tool_passed: "Sample external tool passed",
+  no_safe_external_tool: "No safe sample tool available",
+  external_discovery_incomplete: "External discovery incomplete",
+  failed: "Failed",
+  skipped: "Skipped",
+};
+
+const EXTERNAL_STATUS_LABELS: Record<string, string> = {
+  not_configured: "Not configured",
+  ready: "Ready",
+  unavailable: "Unavailable",
+  incomplete: "Incomplete",
+};
+
+const humanizeToken = (value: string) =>
+  value
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+
+const labelFromMap = (value: string | null | undefined, labels: Record<string, string>) =>
+  value ? labels[value] ?? humanizeToken(value) : null;
+
 const labelsForIds = (
   ids: string[],
   catalog: McpToolsCatalogResponse | null,
@@ -65,6 +96,11 @@ export function McpToolsStep({
   const [validating, setValidating] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const initializedRef = React.useRef(false);
+
+  const clearSavedResults = () => {
+    setApplyResult(null);
+    setValidationResult(null);
+  };
 
   React.useEffect(() => {
     if (catalog) setActiveCatalog(catalog);
@@ -156,6 +192,14 @@ export function McpToolsStep({
   );
   const effectiveToolCount =
     validationResult?.effective_tool_count ?? applyResult?.effective_tool_count;
+  const validationLabel = labelFromMap(
+    validationResult?.validation_state ?? applyResult?.validation_state,
+    VALIDATION_STATE_LABELS,
+  );
+  const externalStatusLabel = labelFromMap(
+    validationResult?.external_status,
+    EXTERNAL_STATUS_LABELS,
+  );
 
   return (
     <section aria-labelledby="mcp-tools-title" className="space-y-5">
@@ -193,7 +237,10 @@ export function McpToolsStep({
               <input
                 type="checkbox"
                 checked={selectedPacks.includes(pack.pack_id)}
-                onChange={() => setSelectedPacks(toggle(selectedPacks, pack.pack_id))}
+                onChange={() => {
+                  clearSavedResults();
+                  setSelectedPacks(toggle(selectedPacks, pack.pack_id));
+                }}
                 disabled={!pack.available || saving}
                 className="mr-2"
               />
@@ -221,6 +268,7 @@ export function McpToolsStep({
                     type="checkbox"
                     checked={selected}
                     onChange={() => {
+                      clearSavedResults();
                       setSelectedAddOns(toggle(selectedAddOns, addon.addon_id));
                       setConfirmedAddOns(
                         confirmedAddOns.filter((id) => id !== addon.addon_id),
@@ -240,9 +288,10 @@ export function McpToolsStep({
                       type="checkbox"
                       aria-label={`Confirm ${addon.label}`}
                       checked={confirmedAddOns.includes(addon.addon_id)}
-                      onChange={() =>
-                        setConfirmedAddOns(toggle(confirmedAddOns, addon.addon_id))
-                      }
+                      onChange={() => {
+                        clearSavedResults();
+                        setConfirmedAddOns(toggle(confirmedAddOns, addon.addon_id));
+                      }}
                       disabled={saving}
                       className="mr-2"
                     />
@@ -268,7 +317,10 @@ export function McpToolsStep({
         >
           <p className="font-medium">MCP Hub profile changed</p>
           <p className="mt-1 text-text-muted">
-            {conflict.conflict?.reason ?? "profile_conflict"}
+            {labelFromMap(
+              conflict.conflict?.reason ?? "profile_conflict",
+              CONFLICT_REASON_LABELS,
+            )}
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
             <button
@@ -327,20 +379,23 @@ export function McpToolsStep({
           ) : null}
           {applyResult.disabled_addons.length ? (
             <div className="mt-3 text-text-muted">
-              Disabled add-ons: {applyResult.disabled_addons.join(", ")}
+              Disabled add-ons:{" "}
+              {labelsForIds(applyResult.disabled_addons, activeCatalog).join(", ")}
             </div>
           ) : null}
-          <div className="mt-3 text-text-muted">
-            Validation: {validationResult?.validation_state ?? applyResult.validation_state}
-          </div>
+          {validationLabel ? (
+            <div className="mt-3 text-text-muted">
+              Validation: {validationLabel}
+            </div>
+          ) : null}
           {validationResult?.validation_message ? (
             <div className="mt-1 text-text-muted">
               {validationResult.validation_message}
             </div>
           ) : null}
-          {validationResult?.external_status ? (
+          {externalStatusLabel ? (
             <div className="mt-1 text-text-muted">
-              External status: {validationResult.external_status}
+              External status: {externalStatusLabel}
             </div>
           ) : null}
           <a
