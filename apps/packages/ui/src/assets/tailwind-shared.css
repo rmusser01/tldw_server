@@ -412,8 +412,15 @@ body {
   color: rgb(var(--color-text-muted)) !important;
 }
 
-.ant-modal-close:hover {
+.ant-modal-close:hover,
+.ant-modal-close:focus-visible {
   background-color: rgb(var(--color-surface-2)) !important;
+}
+
+.ant-modal-close:hover,
+.ant-modal-close:hover .ant-modal-close-x,
+.ant-modal-close:focus-visible,
+.ant-modal-close:focus-visible .ant-modal-close-x {
   color: rgb(var(--color-text)) !important;
 }
 

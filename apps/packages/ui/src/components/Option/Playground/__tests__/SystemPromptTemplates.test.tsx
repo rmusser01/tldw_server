@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import React from "react"
 import { describe, expect, it, vi } from "vitest"
@@ -29,6 +29,7 @@ vi.mock("antd", async () => {
       placeholder={props.placeholder}
       value={props.value}
       onChange={props.onChange}
+      onBlur={props.onBlur}
     />
   )
 
@@ -103,7 +104,11 @@ describe("SystemPromptTemplatesModal", () => {
     await user.clear(editor)
     await user.type(editor, "Speak plainly.")
 
-    expect(onSystemPromptChange).toHaveBeenLastCalledWith("Speak plainly.")
     expect(editor).toHaveValue("Speak plainly.")
+    expect(onSystemPromptChange).not.toHaveBeenCalled()
+
+    fireEvent.blur(editor)
+
+    expect(onSystemPromptChange).toHaveBeenLastCalledWith("Speak plainly.")
   })
 })
