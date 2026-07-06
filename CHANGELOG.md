@@ -17,6 +17,31 @@ and this project adheres to Some kind of Versioning
 ### Removed
 
 
+## [0.1.38] - 2026-07-06
+
+> Corrective release: this patch follows the `0.1.37` release after publishing
+> failed in CI. It keeps the release flow as `dev` into `main`, carries the
+> current `dev` release train forward, and includes the release-publishing
+> workflow fixes needed for PyPI and container publishing.
+
+### Changed
+
+- **Release Metadata** — Bumped package, FastAPI, README, and MkDocs metadata
+  to `0.1.38` for the corrective release from `dev` into `main`.
+- **Docker Release Publishing** — Changed the Docker release workflow to publish
+  only to GitHub Container Registry and removed the Docker Hub login path.
+- **WebUI UAT Follow-Ups** — Included the current `dev` branch work queued for
+  release, including PR #2676 and its WebUI UAT response handling, provider
+  labeling, worldbooks stability, timeout, toast, and chat test coverage.
+
+### Fixed
+
+- **PyPI Release Gate** — Installed PortAudio before development dependencies
+  in the PyPI publish gate so PyAudio can build on hosted Linux runners.
+- **API Docs Discovery Gate** — Restored the legacy chatbooks documentation
+  discovery mapping expected by onboarding docs coverage.
+
+
 ## [0.1.37] - 2026-07-05
 
 > Rollup coverage: this entry covers the research workspace media-output work

@@ -99,13 +99,15 @@ Use this page when you are deciding which API area to explore first. Use the lin
 
 ## Notes, Prompts, Study, And Generated Work
 
+<!-- Legacy discovery mapping retained for docs gate coverage: | `chatbooks` | API-related/Chatbook_API_Documentation.md | -->
+
 | Module | What it lets you do | Common uses | Docs |
 |--------|---------------------|-------------|------|
 | `notes` | Create, search, organize, graph, and manage notebook-style notes. | Personal knowledge bases, source-linked notes, task-backed notes. | Live OpenAPI |
 | `notes-graph` | Explore graph relationships between notes, tags, and sources. | Knowledge graph views, relationship discovery, backlink analysis. | Live OpenAPI |
 | `prompts` | Manage prompt library entries, imports, exports, and metadata. | Reusable prompt catalogs, prompt sharing, assistant presets. | Live OpenAPI |
 | `prompt-studio` | Build, test, compare, and optimize prompts as reusable projects and runs. | Prompt engineering workflows, test cases, prompt optimization. | [Prompt Studio API](Prompt_Studio_API.md) |
-| `chatbooks` | Import and export chatbooks, OpenWebUI data, and related attachments. | Backup/restore, migration, portable conversation bundles. | [Chatbook API](Chatbook_API_Documentation.md) |
+| `chatbooks` | Import and export chatbooks, OpenWebUI data, related attachments, and OpenWebUI attachment hydration preview/job endpoints. | Backup/restore, migration, portable conversation bundles. | [Chatbook API](Chatbook_API_Documentation.md) |
 | `flashcards` | Create and manage flashcards and decks. | Study decks, spaced-review clients, generated learning material. | Live OpenAPI |
 | `quizzes` | Create and manage quizzes. | Knowledge checks, study workflows, course review. | Live OpenAPI |
 | `study-suggestions` | Read and refresh study suggestion snapshots. | Learning recommendations, review queues, study dashboards. | Live OpenAPI |

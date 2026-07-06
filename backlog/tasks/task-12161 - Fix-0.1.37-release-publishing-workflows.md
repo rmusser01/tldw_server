@@ -1,7 +1,7 @@
 ---
 id: TASK-12161
 title: Fix 0.1.37 release publishing workflows
-status: In Progress
+status: Done
 priority: High
 references:
 - https://github.com/rmusser01/tldw_server/actions/runs/28766551634
@@ -34,15 +34,18 @@ Root causes verified from failed release logs and workflow files: `publish-docke
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+- Removed Docker Hub login/image publication from the Docker release workflow so releases publish only to GHCR.
+- Added PortAudio setup before PyPI release test-suite dependency installation so PyAudio can build on hosted Linux runners.
+- Added workflow contract tests covering both release publishing regressions.
+- Verification: `python -m pytest -q tldw_Server_API/tests/CI/test_release_workflow_contracts.py`; `python -m pytest -q tldw_Server_API/tests/CI/test_required_workflow_contracts.py::test_setup_ffmpeg_action_can_skip_ffmpeg_but_keep_portaudio`; `git diff --check`; Bandit on the changed CI test reported only existing pytest `assert` B101 findings.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
+- [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
