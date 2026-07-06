@@ -277,6 +277,12 @@ export const formatToMessage = (messages: MessageHistory): MessageType[] => {
   const { collapsed, variantsByParent } = collapseVariantMessages(messages)
   return collapsed.map((message) => {
     const normalizedRole = normalizeChatRole(message.role)
+    const metadataExtra =
+      message?.metadataExtra as MessageType["metadataExtra"] | undefined
+    const moodLabel =
+      typeof metadataExtra?.mood_label === "string"
+        ? metadataExtra.mood_label
+        : undefined
     const mapped: MessageType = {
       isBot: normalizedRole === "assistant",
       message: message.content,
@@ -289,7 +295,8 @@ export const formatToMessage = (messages: MessageHistory): MessageType[] => {
       modelId: message?.modelId,
       parentMessageId: message?.parent_message_id ?? null,
       generationInfo: message?.generationInfo,
-      metadataExtra: message?.metadataExtra as MessageType["metadataExtra"],
+      metadataExtra,
+      moodLabel,
       reasoning_time_taken: message?.reasoning_time_taken,
       modelName: message?.modelName,
       modelImage: message?.modelImage,

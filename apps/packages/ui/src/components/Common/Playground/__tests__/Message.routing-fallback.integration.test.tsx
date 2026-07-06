@@ -9,6 +9,7 @@ const storageOverrides = vi.hoisted(() => new Map<string, unknown>())
 const detectCharacterMoodMock = vi.hoisted(() =>
   vi.fn(() => ({ label: "neutral", confidence: 0.5, topic: null }))
 )
+const resolveCharacterMoodImageUrlMock = vi.hoisted(() => vi.fn(() => ""))
 const initializeMock = vi.hoisted(() => vi.fn(async () => undefined))
 const saveChatKnowledgeMock = vi.hoisted(() => vi.fn(async () => undefined))
 
@@ -262,9 +263,10 @@ vi.mock("@/utils/disco-skill-check", () => ({
 
 vi.mock("@/utils/character-mood", () => ({
   detectCharacterMood: detectCharacterMoodMock,
-  normalizeCharacterMoodLabel: (value: unknown) => value,
+  normalizeCharacterMoodLabel: (value: unknown) =>
+    value === "neutral" ? "neutral" : null,
   resolveCharacterBaseAvatarUrl: () => "",
-  resolveCharacterMoodImageUrl: () => ""
+  resolveCharacterMoodImageUrl: resolveCharacterMoodImageUrlMock
 }))
 
 vi.mock("@/db/dexie/helpers", () => ({
@@ -303,6 +305,8 @@ describe("PlaygroundMessage routing fallback integration", () => {
     storageOverrides.clear()
     initializeMock.mockClear()
     saveChatKnowledgeMock.mockClear()
+    resolveCharacterMoodImageUrlMock.mockReset()
+    resolveCharacterMoodImageUrlMock.mockReturnValue("")
     detectCharacterMoodMock.mockReset()
     detectCharacterMoodMock.mockReturnValue({
       label: "neutral",
@@ -328,10 +332,8 @@ describe("PlaygroundMessage routing fallback integration", () => {
     )
 
     const audit = screen.getByTestId("message-fallback-audit")
-    expect(audit).toHaveTextContent("Auto fallback")
-    expect(audit).toHaveTextContent(
-      "openai/gpt-4o-mini → anthropic/claude-3-5-sonnet"
-    )
+    expect(audit).toHaveTextContent("Using: anthropic/claude-3-5-sonnet")
+    expect(audit).toHaveTextContent("(fallback)")
     expect(audit).toHaveTextContent("2 attempts")
     expect(audit).toHaveTextContent("Rate limited upstream")
   })
@@ -453,6 +455,41 @@ describe("PlaygroundMessage routing fallback integration", () => {
       "final response"
     )
     expect(screen.queryByTestId("playground-streaming-plain-text")).toBeNull()
+  })
+
+  it("renders a custom explicit emote portrait for character messages", () => {
+    const smugPortrait = "data:image/png;base64,c211Zw=="
+    resolveCharacterMoodImageUrlMock.mockImplementation((_character, mood) =>
+      mood === "smug" ? smugPortrait : ""
+    )
+
+    render(
+      <PlaygroundMessage
+        {...baseProps}
+        moodLabel="smug"
+        characterIdentityEnabled
+        characterIdentity={
+          {
+            id: 42,
+            name: "Ashley",
+            extensions: {
+              tldw: {
+                mood_images: {
+                  smug: smugPortrait
+                }
+              }
+            }
+          } as any
+        }
+        speakerCharacterId={42}
+      />
+    )
+
+    expect(resolveCharacterMoodImageUrlMock).toHaveBeenCalledWith(
+      expect.anything(),
+      "smug"
+    )
+    expect(screen.getByAltText("Ashley")).toHaveAttribute("src", smugPortrait)
   })
 
   it("passes workspace scope when saving chat knowledge", async () => {
