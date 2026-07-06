@@ -82,4 +82,22 @@ def test_sqlite_normalization_quotes_plain_tokens_with_punctuation():
         "sqlite",
     )
 
-    assert out == '"codex-flashcards-ux" front:"state-of-the-art"'
+    assert out == '"codex-flashcards-ux" "front:state-of-the-art"'
+
+
+def test_sqlite_normalization_preserves_quoted_column_phrases_and_quotes_negative_terms():
+    from tldw_Server_API.app.core.DB_Management.backends.fts_translator import FTSQueryTranslator
+
+    out = FTSQueryTranslator.normalize_query(
+        'front:"two words" front:"already-quoted" front:"state of the art" '
+        '-state-of-the-art -back:old-style -"two words" -front:"old style"',
+        "sqlite",
+    )
+
+    assert (
+        out
+        == 'front:"two words" front:"already-quoted" front:"state of the art" '
+        'NOT "state-of-the-art" NOT "back:old-style" NOT "two words" NOT front:"old style"'
+    )
+
+    assert FTSQueryTranslator.normalize_query("-state-of-the-art", "sqlite") == '"-state-of-the-art"'

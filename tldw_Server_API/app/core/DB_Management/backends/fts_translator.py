@@ -15,6 +15,9 @@ MAX_FTS_QUERY_LENGTH = 8192
 SQLITE_FTS_OPERATOR_TOKENS = {'AND', 'OR', 'NEAR', 'NOT'}
 SQLITE_FTS_SAFE_TOKEN_RE = re.compile(r'^[A-Za-z0-9_]+\*?$')
 SQLITE_FTS_COLUMN_TOKEN_RE = re.compile(r'^([A-Za-z_][A-Za-z0-9_]*):(.*)$')
+SQLITE_FTS_TOKEN_RE = re.compile(
+    r'-?[A-Za-z_][A-Za-z0-9_]*:"[^"]*"|-?"[^"]*"|\S+'
+)
 
 
 class FTSQueryTranslator:
@@ -193,26 +196,53 @@ class FTSQueryTranslator:
     @staticmethod
     def _normalize_sqlite_query(query: str) -> str:
         """Protect plain text SQLite FTS5 searches from punctuation parsing."""
-        parts = re.findall(r'"[^"]*"|\S+', query)
+        parts = SQLITE_FTS_TOKEN_RE.findall(query)
         normalized_parts = []
+        last_allows_not = False
 
         for part in parts:
             upper = part.upper()
             if upper in SQLITE_FTS_OPERATOR_TOKENS or part.startswith('"') and part.endswith('"'):
                 normalized_parts.append(part)
+                last_allows_not = upper not in SQLITE_FTS_OPERATOR_TOKENS
                 continue
 
-            if part.startswith('-'):
-                normalized_parts.append(part)
+            if part.startswith('-') and len(part) > 1:
+                body = part[1:]
+                column_match = SQLITE_FTS_COLUMN_TOKEN_RE.fullmatch(body)
+                if (
+                    column_match
+                    and column_match.group(2).startswith('"')
+                    and column_match.group(2).endswith('"')
+                ):
+                    column, value = column_match.groups()
+                    operand = f'{column}:{value}'
+                elif body.startswith('"') and body.endswith('"'):
+                    operand = body
+                elif last_allows_not:
+                    operand = FTSQueryTranslator._quote_sqlite_fts_token(body)
+                else:
+                    operand = FTSQueryTranslator._quote_sqlite_fts_token(part)
+                if last_allows_not:
+                    normalized_parts.extend(['NOT', operand])
+                else:
+                    normalized_parts.append(operand)
+                last_allows_not = True
                 continue
 
             column_match = SQLITE_FTS_COLUMN_TOKEN_RE.fullmatch(part)
-            if column_match and column_match.group(2):
+            if (
+                column_match
+                and column_match.group(2).startswith('"')
+                and column_match.group(2).endswith('"')
+            ):
                 column, value = column_match.groups()
-                normalized_parts.append(f'{column}:{FTSQueryTranslator._quote_sqlite_fts_token(value)}')
+                normalized_parts.append(f'{column}:{value}')
+                last_allows_not = True
                 continue
 
             normalized_parts.append(FTSQueryTranslator._quote_sqlite_fts_token(part))
+            last_allows_not = True
 
         return ' '.join(normalized_parts)
 

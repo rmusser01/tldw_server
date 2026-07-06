@@ -51,11 +51,9 @@ export const FlashcardActionsMenu: React.FC<FlashcardActionsMenuProps> = ({
   const handleEditPointerDown = React.useCallback(
     (event: React.PointerEvent<HTMLButtonElement>) => {
       if (event.button !== 0 || disabled) return
-      event.preventDefault()
       event.stopPropagation()
-      onEdit()
     },
-    [disabled, onEdit]
+    [disabled]
   )
 
   const handleEditClick = React.useCallback(
