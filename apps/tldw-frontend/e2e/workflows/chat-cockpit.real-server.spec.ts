@@ -54,20 +54,38 @@ type CockpitLayoutSeed = {
 const switchChatLayoutMode = async (page: Page, targetMode: 'cockpit' | 'focus') => {
   const shell = page.getByTestId('playground-cockpit-shell');
   if ((await shell.getAttribute('data-mode')) === targetMode) {
-    return;
+    if (targetMode === 'focus') return;
+  } else {
+    const triggerName = targetMode === 'cockpit' ? 'Exit focus' : 'Enter focus chat';
+    try {
+      await page
+        .getByRole('button', { name: triggerName, exact: true })
+        .click({ timeout: 10_000 });
+    } catch (error) {
+      await expect(shell).toHaveAttribute('data-mode', targetMode, { timeout: 5_000 }).catch(() => {
+        throw error;
+      });
+    }
+    await expect(shell).toHaveAttribute('data-mode', targetMode);
   }
 
-  const triggerName = targetMode === 'cockpit' ? 'Exit focus' : 'Enter focus chat';
-  try {
-    await page
-      .getByRole('button', { name: triggerName, exact: true })
-      .click({ timeout: 10_000 });
-  } catch (error) {
-    await expect(shell).toHaveAttribute('data-mode', targetMode, { timeout: 5_000 }).catch(() => {
-      throw error;
-    });
+  if (targetMode === 'cockpit') {
+    for (const restoreId of [
+      'playground-cockpit-left-rail-restore',
+      'playground-cockpit-right-rail-restore',
+    ]) {
+      const restoreControl = page.getByTestId(restoreId);
+      if (await restoreControl.isVisible().catch(() => false)) {
+        await restoreControl.click();
+      }
+    }
   }
-  await expect(shell).toHaveAttribute('data-mode', targetMode);
+};
+
+const waitForPlaygroundDraftSaved = async (page: Page) => {
+  await expect(page.getByRole('status').filter({ hasText: 'Draft saved' })).toBeVisible({
+    timeout: 5_000,
+  });
 };
 
 type DisposableCharacter = {
@@ -1950,6 +1968,7 @@ test.describe('/chat cockpit real-server parity', () => {
     };
     await fillEditableComposer(page, mobileDraft);
     await expectMobileDraftReachable();
+    await waitForPlaygroundDraftSaved(page);
     await expectNoMobileBottomControls();
 
     await expect(page.getByTestId('playground-cockpit-shell')).toHaveAttribute(
