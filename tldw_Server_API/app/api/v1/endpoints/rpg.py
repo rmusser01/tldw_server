@@ -13,6 +13,7 @@ from fastapi.security import HTTPAuthorizationCredentials
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     RequirePermission,
     TokenScopeGuard,
+    User,
     enforce_rbac_rate_limit,
     get_auth_principal,
     get_request_user,
@@ -40,7 +41,6 @@ from tldw_Server_API.app.api.v1.schemas.rpg_schemas import (
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.llm_budget_guard import enforce_llm_budget
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 from tldw_Server_API.app.core.DB_Management.RPG_DB import RPGRepository

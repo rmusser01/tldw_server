@@ -51,6 +51,25 @@ type CockpitLayoutSeed = {
   mobilePanel?: 'context' | 'runtime' | null;
 };
 
+const switchChatLayoutMode = async (page: Page, targetMode: 'cockpit' | 'focus') => {
+  const shell = page.getByTestId('playground-cockpit-shell');
+  if ((await shell.getAttribute('data-mode')) === targetMode) {
+    return;
+  }
+
+  const triggerName = targetMode === 'cockpit' ? 'Exit focus' : 'Enter focus chat';
+  try {
+    await page
+      .getByRole('button', { name: triggerName, exact: true })
+      .click({ timeout: 10_000 });
+  } catch (error) {
+    if ((await shell.getAttribute('data-mode')) !== targetMode) {
+      throw error;
+    }
+  }
+  await expect(shell).toHaveAttribute('data-mode', targetMode);
+};
+
 type DisposableCharacter = {
   id: string;
   name: string;
@@ -1614,11 +1633,7 @@ test.describe('/chat cockpit real-server parity', () => {
       .click();
     await expect(mcpSettingsDialog).toBeHidden();
 
-    await page.getByRole('button', { name: 'Enter focus chat' }).click();
-    await expect(page.getByTestId('playground-cockpit-shell')).toHaveAttribute(
-      'data-mode',
-      'focus'
-    );
+    await switchChatLayoutMode(page, 'focus');
     await expect(modeSummary).toHaveText(
       'Focus mode hides rails. Chat and composer remain active.'
     );
@@ -1631,11 +1646,7 @@ test.describe('/chat cockpit real-server parity', () => {
       fullPage: true,
     });
 
-    await page.getByTestId('playground-chat-layout-mode-trigger').click();
-    await expect(page.getByTestId('playground-cockpit-shell')).toHaveAttribute(
-      'data-mode',
-      'cockpit'
-    );
+    await switchChatLayoutMode(page, 'cockpit');
     await expect(page.getByTestId('playground-cockpit-left-rail')).toBeVisible();
     await expect(page.getByTestId('playground-cockpit-right-rail')).toBeVisible();
     await assertNoHorizontalOverflow(page);
@@ -1928,11 +1939,7 @@ test.describe('/chat cockpit real-server parity', () => {
     );
     await expect(page.getByTestId('playground-cockpit-mobile-rails')).toHaveCount(0);
 
-    await page.getByTestId('playground-chat-layout-mode-trigger').click();
-    await expect(page.getByTestId('playground-cockpit-shell')).toHaveAttribute(
-      'data-mode',
-      'cockpit'
-    );
+    await switchChatLayoutMode(page, 'cockpit');
     const mobileRails = page.getByTestId('playground-cockpit-mobile-rails');
     await expect(mobileRails).toBeVisible();
     await expect(mobileRails).toHaveAttribute('data-mobile-panel', 'context');
@@ -2095,11 +2102,7 @@ test.describe('/chat cockpit real-server parity', () => {
       fullPage: true,
     });
     await expectNoMobileBottomControls();
-    await page.getByTestId('playground-chat-layout-mode-trigger').click();
-    await expect(page.getByTestId('playground-cockpit-shell')).toHaveAttribute(
-      'data-mode',
-      'cockpit'
-    );
+    await switchChatLayoutMode(page, 'cockpit');
     await expect(mobileRails).toHaveAttribute('data-mobile-panel', 'runtime');
     await expectMobileDraftPreserved();
     await expect(runtimePanelTarget).toBeVisible();

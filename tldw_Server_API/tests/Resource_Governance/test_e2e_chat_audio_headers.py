@@ -528,6 +528,10 @@ async def test_e2e_audio_transcriptions_headers_and_mocked_stt(monkeypatch, tmp_
 
     import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as tl
 
+    def fake_convert_to_wav(path, *args, **kwargs):
+        _ = (args, kwargs)
+        return path
+
     def fake_speech_to_text(
         path,
         whisper_model,
@@ -553,6 +557,7 @@ async def test_e2e_audio_transcriptions_headers_and_mocked_stt(monkeypatch, tmp_
             return segs, "en"
         return segs
 
+    monkeypatch.setattr(tl, "convert_to_wav", fake_convert_to_wav)
     monkeypatch.setattr(tl, "speech_to_text", fake_speech_to_text)
 
     from tldw_Server_API.app.main import app

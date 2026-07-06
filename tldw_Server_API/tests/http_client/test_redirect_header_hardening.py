@@ -25,10 +25,10 @@ from tldw_Server_API.app.core.http_client import (
 
 pytestmark = pytest.mark.unit
 
-# TEST-NET literal IPs: public-range, pass egress checks without DNS, and
-# MockTransport intercepts before any real socket is opened.
+# Public hosts already allowlisted in CI; MockTransport intercepts before any
+# real socket is opened.
 ORIGIN_A = "http://93.184.216.34"
-ORIGIN_B = "http://203.0.113.7"
+ORIGIN_B = "http://example.com"
 
 SECRET_HEADERS = {
     "Authorization": "Bearer secret-token",
@@ -202,7 +202,7 @@ class TestRedirectFlows:
             await client.aclose()
 
         origin_headers = seen["93.184.216.34"]
-        target_headers = seen["203.0.113.7"]
+        target_headers = seen["example.com"]
         # original host got the credentials
         assert origin_headers.get("authorization") == "Bearer secret-token"
         assert origin_headers.get("x-api-key") == "sk-secret"
@@ -261,7 +261,7 @@ class TestRedirectFlows:
         finally:
             client.close()
 
-        target_headers = seen["203.0.113.7"]
+        target_headers = seen["example.com"]
         for name in ("authorization", "x-api-key", "cookie"):
             assert name not in target_headers, f"{name} leaked to redirect target"
         assert target_headers.get("x-custom") == "keep-me"
@@ -285,7 +285,7 @@ class TestRedirectFlows:
             assert len(client.cookies) == 0, "cookie jar not cleared at origin boundary"
         finally:
             await client.aclose()
-        assert "cookie" not in seen["203.0.113.7"]
+        assert "cookie" not in seen["example.com"]
 
     async def test_sse_stream_strips_credentials_on_cross_origin_redirect(self) -> None:
         """The SSE streaming redirect loop applies the same stripping."""
@@ -322,7 +322,7 @@ class TestRedirectFlows:
 
         assert events, "expected at least one SSE event through the redirect"
         assert seen["93.184.216.34"].get("authorization") == "Bearer secret-token"
-        target_headers = seen["203.0.113.7"]
+        target_headers = seen["example.com"]
         for name in ("authorization", "x-api-key", "cookie"):
             assert name not in target_headers, f"{name} leaked to SSE redirect target"
         assert target_headers.get("x-custom") == "keep-me"

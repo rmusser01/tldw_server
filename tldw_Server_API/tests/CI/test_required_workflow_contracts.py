@@ -1231,6 +1231,7 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
         # a feature directory rather than a DB-specific one).
         auth_db_extra_files = {
             "tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py",
+            "tldw_Server_API/tests/Workspaces/test_workspace_artifact_validation.py",
         }
         auth_db_files = {
             str(path)
