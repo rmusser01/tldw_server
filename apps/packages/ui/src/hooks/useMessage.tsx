@@ -1309,6 +1309,47 @@ export const useMessage = () => {
     if (!activeCharacter?.id) {
       throw new Error("No character selected");
     }
+    const emoteStream = createCharacterEmoteStream();
+    const getExplicitEmoteMoodLabel = () =>
+      emoteStream.events.length > 0
+        ? emoteStream.events[emoteStream.events.length - 1]?.state
+        : undefined;
+    const getExplicitEmoteMetadataExtra = (): MessageMetadataExtra | undefined => {
+      const moodLabel = getExplicitEmoteMoodLabel();
+      return moodLabel
+        ? {
+            mood_label: moodLabel,
+            mood_confidence: null,
+            mood_topic: null,
+            emote_events: [...emoteStream.events],
+          }
+        : undefined;
+    };
+    const applyEmoteEventsToMessage = (
+      newEvents: CharacterEmoteEvent[],
+    ) => {
+      if (newEvents.length === 0) return;
+      const moodLabel = getExplicitEmoteMoodLabel();
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === generateMessageId
+            ? updateActiveVariant(m, {
+                moodLabel,
+                metadataExtra: {
+                  ...(m.metadataExtra ?? {}),
+                  emote_events: [...emoteStream.events],
+                },
+              })
+            : m,
+        ),
+      );
+    };
+    const flushCharacterEmoteStream = () => {
+      const flushedEmotes = emoteStream.flush({ fullText, contentToSave });
+      fullText = flushedEmotes.fullText;
+      contentToSave = flushedEmotes.contentToSave;
+      applyEmoteEventsToMessage(flushedEmotes.emoteEvents);
+    };
 
     try {
       const hasImageInput =
@@ -1591,27 +1632,6 @@ export const useMessage = () => {
       let reasoningEndTime: Date | null = null;
       let timetaken = 0;
       let apiReasoning = false;
-      const emoteStream = createCharacterEmoteStream();
-      const applyEmoteEventsToMessage = (
-        newEvents: CharacterEmoteEvent[],
-      ) => {
-        if (newEvents.length === 0) return;
-        const moodLabel =
-          emoteStream.events[emoteStream.events.length - 1]?.state;
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === generateMessageId
-              ? updateActiveVariant(m, {
-                  moodLabel,
-                  metadataExtra: {
-                    ...(m.metadataExtra ?? {}),
-                    emote_events: [...emoteStream.events],
-                  },
-                })
-              : m,
-          ),
-        );
-      };
 
       const explicitProvider = resolveExplicitProviderForSelectedModel({
         currentSelectedModel: selectedModel,
@@ -1699,10 +1719,7 @@ export const useMessage = () => {
         if (signal?.aborted) break;
       }
       if (inactivityTimer) clearTimeout(inactivityTimer);
-      const flushedEmotes = emoteStream.flush({ fullText, contentToSave });
-      fullText = flushedEmotes.fullText;
-      contentToSave = flushedEmotes.contentToSave;
-      applyEmoteEventsToMessage(flushedEmotes.emoteEvents);
+      flushCharacterEmoteStream();
 
       if (inactivityAborted) {
         const timeoutError = new Error(
@@ -1973,6 +1990,9 @@ export const useMessage = () => {
         return;
       }
 
+      flushCharacterEmoteStream();
+      const recoveryMoodLabel = getExplicitEmoteMoodLabel();
+      const recoveryMetadataExtra = getExplicitEmoteMetadataExtra();
       const assistantContent = buildCharacterChatAssistantErrorContent(
         fullText,
         e,
@@ -1982,7 +2002,20 @@ export const useMessage = () => {
         setMessages((prev) =>
           prev.map((msg) =>
             msg.id === generateMessageId
-              ? updateActiveVariant(msg, { message: assistantContent })
+              ? updateActiveVariant(msg, {
+                  message: assistantContent,
+                  ...(recoveryMetadataExtra
+                    ? {
+                        metadataExtra: {
+                          ...(msg.metadataExtra ?? {}),
+                          ...recoveryMetadataExtra,
+                        },
+                        moodLabel: recoveryMoodLabel,
+                        moodConfidence: null,
+                        moodTopic: null,
+                      }
+                    : {}),
+                })
               : msg,
           ),
         );

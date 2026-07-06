@@ -738,4 +738,68 @@ describe("useChatActions character integration", () => {
     expect(moodLabels).toContain("smug")
     expect(moodLabels).toContain("annoyed")
   })
+
+  it("preserves explicit emote metadata when recovering a failed stream", async () => {
+    streamCharacterChatCompletionMock.mockImplementationOnce(async function* () {
+      yield "Em"
+      yield "ote: smug\n"
+      yield "Em"
+      throw new Error("stream failed")
+    })
+
+    let messagesState: any[] = []
+    const messageSnapshots: any[][] = []
+    const options = {
+      ...createHookOptions(),
+      setMessages: vi.fn((next) => {
+        messagesState = typeof next === "function" ? next(messagesState) : next
+        messageSnapshots.push(messagesState)
+      })
+    }
+    const { result } = renderHook(() => useChatActions(options as any))
+
+    await act(async () => {
+      await result.current.onSubmit({
+        message: "Recover explicit emote",
+        image: ""
+      })
+    })
+
+    const persistCall = persistCharacterCompletionMock.mock.calls.at(-1) as
+      | unknown[]
+      | undefined
+    const persistPayload = persistCall?.[1] as
+      | Record<string, unknown>
+      | undefined
+    expect(persistPayload).toMatchObject({
+      assistant_content: "Em",
+      mood_label: "smug",
+      emote_events: [{ state: "smug", at_char: 0 }]
+    })
+    expect(persistPayload).not.toHaveProperty("mood_confidence")
+    expect(persistPayload).not.toHaveProperty("mood_topic")
+    expect(detectCharacterMoodMock).not.toHaveBeenCalled()
+
+    const assistantMessages = messageSnapshots
+      .flatMap((snapshot) => snapshot.filter((message) => message?.isBot))
+      .map((message) => ({
+        message: String(message?.message ?? ""),
+        moodLabel: message?.moodLabel,
+        metadataExtra: message?.metadataExtra
+      }))
+    expect(assistantMessages.some((entry) => entry.message.includes("Emote:"))).toBe(
+      false
+    )
+    expect(assistantMessages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          message: "Em",
+          moodLabel: "smug",
+          metadataExtra: expect.objectContaining({
+            emote_events: [{ state: "smug", at_char: 0 }]
+          })
+        })
+      ])
+    )
+  })
 })

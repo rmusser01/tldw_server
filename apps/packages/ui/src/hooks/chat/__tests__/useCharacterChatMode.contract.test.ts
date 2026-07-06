@@ -360,6 +360,112 @@ describe("createCharacterChatMode contract", () => {
     expect(moodLabels).toContain("annoyed")
   })
 
+  it("preserves explicit emote metadata when recovering a failed stream", async () => {
+    const setters = createSetterBundle()
+    let messagesState: any[] = []
+    const messageSnapshots: any[][] = []
+    setters.setMessages.mockImplementation((next) => {
+      messagesState = typeof next === "function" ? next(messagesState) : next
+      messageSnapshots.push(messagesState)
+    })
+    mocks.streamCharacterChatCompletionMock.mockImplementationOnce(
+      async function* () {
+        yield "Em"
+        yield "ote: smug\n"
+        yield "Em"
+        throw new Error("stream failed")
+      }
+    )
+    const controller = new AbortController()
+    const mode = createCharacterChatMode({
+      ...setters,
+      t: translate as any,
+      notification: { error: vi.fn() },
+      selectedCharacter: {
+        id: 42,
+        name: "Mira",
+        avatar_url: "https://example.test/mira.png"
+      } as any,
+      temporaryChat: false,
+      historyId: "history-1",
+      serverChatId: null,
+      serverChatCharacterId: null,
+      serverChatState: "in-progress",
+      serverChatTopic: null,
+      serverChatClusterId: null,
+      serverChatSource: null,
+      serverChatExternalRef: null,
+      currentChatModelSettings: {
+        apiProvider: "openai",
+        setSystemPrompt: vi.fn()
+      },
+      invalidateServerChatHistory: vi.fn(),
+      greetingEnabled: false,
+      greetingSelectionId: null,
+      greetingsChecksum: null,
+      useCharacterDefault: false,
+      directedCharacterId: 88,
+      resolvedMessageSteeringPrompts: null,
+      getEffectiveSelectedModel: vi.fn(() => "tldw:test-model"),
+      saveMessageOnSuccess: vi.fn(async () => "history-1"),
+      saveMessageOnError: vi.fn(async () => "history-1"),
+      discardCurrentTurnOnAbortRef: { current: false }
+    } as any)
+
+    await mode({
+      message: "Recover explicit emote",
+      image: "",
+      isRegenerate: false,
+      messages: [],
+      history: [],
+      signal: controller.signal,
+      model: "tldw:test-model",
+      controller,
+      messageSteering: {
+        continueAsUser: false,
+        impersonateUser: false,
+        forceNarrate: false
+      }
+    })
+
+    const persistCall = mocks.persistCharacterCompletionMock.mock.calls.at(-1) as
+      | unknown[]
+      | undefined
+    const persistPayload = persistCall?.[1] as
+      | Record<string, unknown>
+      | undefined
+    expect(persistPayload).toMatchObject({
+      assistant_content: "Em",
+      mood_label: "smug",
+      emote_events: [{ state: "smug", at_char: 0 }]
+    })
+    expect(persistPayload).not.toHaveProperty("mood_confidence")
+    expect(persistPayload).not.toHaveProperty("mood_topic")
+    expect(mocks.detectCharacterMoodMock).not.toHaveBeenCalled()
+
+    const assistantMessages = messageSnapshots
+      .flatMap((snapshot) => snapshot.filter((message) => message?.isBot))
+      .map((message) => ({
+        message: String(message?.message ?? ""),
+        moodLabel: message?.moodLabel,
+        metadataExtra: message?.metadataExtra
+      }))
+    expect(assistantMessages.some((entry) => entry.message.includes("Emote:"))).toBe(
+      false
+    )
+    expect(assistantMessages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          message: "Em",
+          moodLabel: "smug",
+          metadataExtra: expect.objectContaining({
+            emote_events: [{ state: "smug", at_char: 0 }]
+          })
+        })
+      ])
+    )
+  })
+
   it("classifies structured provider setup failures without treating every 503 as configuration", () => {
     const providerSetupError = Object.assign(
       new Error("provider_not_configured: OpenAI API key is missing"),

@@ -565,6 +565,47 @@ export const createCharacterChatMode = (deps: CharacterChatModeDeps) => {
       clearTimeout(streamingTimer);
       streamingTimer = null;
     };
+    const emoteStream = createCharacterEmoteStream();
+    const getExplicitEmoteMoodLabel = () =>
+      emoteStream.events.length > 0
+        ? emoteStream.events[emoteStream.events.length - 1]?.state
+        : undefined;
+    const getExplicitEmoteMetadataExtra = (): MessageMetadataExtra | undefined => {
+      const moodLabel = getExplicitEmoteMoodLabel();
+      return moodLabel
+        ? {
+            mood_label: moodLabel,
+            mood_confidence: null,
+            mood_topic: null,
+            emote_events: [...emoteStream.events],
+          }
+        : undefined;
+    };
+    const applyEmoteEventsToMessage = (
+      newEvents: CharacterEmoteEvent[],
+    ) => {
+      if (newEvents.length === 0) return;
+      const moodLabel = getExplicitEmoteMoodLabel();
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === generateMessageId
+            ? updateActiveVariant(m, {
+                moodLabel,
+                metadataExtra: {
+                  ...(m.metadataExtra ?? {}),
+                  emote_events: [...emoteStream.events],
+                },
+              })
+            : m,
+        ),
+      );
+    };
+    const flushCharacterEmoteStream = () => {
+      const flushedEmotes = emoteStream.flush({ fullText, contentToSave });
+      fullText = flushedEmotes.fullText;
+      contentToSave = flushedEmotes.contentToSave;
+      applyEmoteEventsToMessage(flushedEmotes.emoteEvents);
+    };
 
     const abortCancelStreamingUpdate = () => cancelStreamingUpdate();
     signal.addEventListener("abort", abortCancelStreamingUpdate);
@@ -886,27 +927,6 @@ export const createCharacterChatMode = (deps: CharacterChatModeDeps) => {
       let apiReasoning = false;
       let streamTransportInterrupted = false;
       let streamTransportInterruptionReason: string | null = null;
-      const emoteStream = createCharacterEmoteStream();
-      const applyEmoteEventsToMessage = (
-        newEvents: CharacterEmoteEvent[],
-      ) => {
-        if (newEvents.length === 0) return;
-        const moodLabel =
-          emoteStream.events[emoteStream.events.length - 1]?.state;
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === generateMessageId
-              ? updateActiveVariant(m, {
-                  moodLabel,
-                  metadataExtra: {
-                    ...(m.metadataExtra ?? {}),
-                    emote_events: [...emoteStream.events],
-                  },
-                })
-              : m,
-          ),
-        );
-      };
 
       const explicitProvider = resolveExplicitProviderForSelectedModel({
         currentSelectedModel: getEffectiveSelectedModel(),
@@ -1007,10 +1027,7 @@ export const createCharacterChatMode = (deps: CharacterChatModeDeps) => {
       cancelStreamingUpdate();
       flushStreamingUpdate();
       if (inactivityTimer) clearTimeout(inactivityTimer);
-      const flushedEmotes = emoteStream.flush({ fullText, contentToSave });
-      fullText = flushedEmotes.fullText;
-      contentToSave = flushedEmotes.contentToSave;
-      applyEmoteEventsToMessage(flushedEmotes.emoteEvents);
+      flushCharacterEmoteStream();
 
       if (inactivityAborted) {
         const timeoutError = new Error(
@@ -1314,6 +1331,9 @@ export const createCharacterChatMode = (deps: CharacterChatModeDeps) => {
       }
 
       cancelStreamingUpdate();
+      flushCharacterEmoteStream();
+      const recoveryMoodLabel = getExplicitEmoteMoodLabel();
+      const recoveryMetadataExtra = getExplicitEmoteMetadataExtra();
       await attemptCharacterStreamRecoveryPersist({
         chatId: activeChatId,
         temporaryChat,
@@ -1322,12 +1342,66 @@ export const createCharacterChatMode = (deps: CharacterChatModeDeps) => {
         error: e,
         persist: async (assistantContent) => {
           if (!activeChatId) return false;
+          if (recoveryMoodLabel) {
+            try {
+              const persistPayload: Record<string, unknown> = {
+                assistant_content: assistantContent,
+                assistant_message_id: generateMessageId,
+                mood_label: recoveryMoodLabel,
+                emote_events: [...emoteStream.events],
+              };
+              if (persistedUserServerMessageId) {
+                persistPayload.user_message_id = persistedUserServerMessageId;
+              }
+              const persisted = (await tldwClient.persistCharacterCompletion(
+                activeChatId,
+                persistPayload,
+                scope ? { scope } : undefined,
+              )) as {
+                assistant_message_id?: string | number;
+                message_id?: string | number;
+                id?: string | number;
+                version?: number;
+              } | null;
+              const createdAsstServerId =
+                persisted?.assistant_message_id ??
+                persisted?.message_id ??
+                persisted?.id;
+              if (createdAsstServerId != null) {
+                assistantPersistedToServer = true;
+                setMessages(
+                  (prev) =>
+                    (prev as any[]).map((m) => {
+                      if (m.id !== generateMessageId) return m;
+                      return updateActiveVariant(m, {
+                        serverMessageId: String(createdAsstServerId),
+                        serverMessageVersion: persisted?.version,
+                        metadataExtra: {
+                          ...(m.metadataExtra ?? {}),
+                          ...(recoveryMetadataExtra ?? {}),
+                        },
+                        moodLabel: recoveryMoodLabel,
+                        moodConfidence: null,
+                        moodTopic: null,
+                      });
+                    }) as Message[],
+                );
+                return true;
+              }
+            } catch {
+              // Fall back to the generic chat-message endpoint below.
+            }
+          }
+          const payload: Record<string, unknown> = {
+            role: "assistant",
+            content: assistantContent,
+          };
+          if (recoveryMetadataExtra) {
+            payload.metadata_extra = recoveryMetadataExtra;
+          }
           const createdAsst = (await tldwClient.addChatMessage(
             activeChatId,
-            {
-              role: "assistant",
-              content: assistantContent,
-            },
+            payload,
             scope ? { scope } : undefined,
           )) as { id?: string | number; version?: number } | null;
           if (createdAsst?.id == null) return false;
@@ -1339,6 +1413,17 @@ export const createCharacterChatMode = (deps: CharacterChatModeDeps) => {
                 return updateActiveVariant(m, {
                   serverMessageId: String(createdAsst.id),
                   serverMessageVersion: createdAsst?.version,
+                  ...(recoveryMetadataExtra
+                    ? {
+                        metadataExtra: {
+                          ...(m.metadataExtra ?? {}),
+                          ...recoveryMetadataExtra,
+                        },
+                        moodLabel: recoveryMoodLabel,
+                        moodConfidence: null,
+                        moodTopic: null,
+                      }
+                    : {}),
                 });
               }) as Message[],
           );
@@ -1358,6 +1443,17 @@ export const createCharacterChatMode = (deps: CharacterChatModeDeps) => {
             msg.id === generateMessageId
               ? updateActiveVariant(msg, {
                   message: assistantContent,
+                  ...(recoveryMetadataExtra
+                    ? {
+                        metadataExtra: {
+                          ...(msg.metadataExtra ?? {}),
+                          ...recoveryMetadataExtra,
+                        },
+                        moodLabel: recoveryMoodLabel,
+                        moodConfidence: null,
+                        moodTopic: null,
+                      }
+                    : {}),
                   generationInfo: {
                     ...(msg.generationInfo || {}),
                     interrupted: true,
