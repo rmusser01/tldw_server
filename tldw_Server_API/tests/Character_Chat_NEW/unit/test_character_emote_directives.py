@@ -67,21 +67,25 @@ def test_validate_emote_events_rejects_invalid_metadata(events):
         validate_emote_events(events)
 
 
-def test_resolve_character_emote_completion_prefers_explicit_directives():
+@pytest.mark.unit
+def test_resolve_completion_emotes_prefers_last_explicit_event() -> None:
     result = resolve_character_emote_completion(
-        "Emote: smug\nFine.",
+        "Emote: annoyed\nWhat now?\nEmote: smug\nFine.",
         fallback_mood_label="happy",
         fallback_mood_confidence=0.9,
         fallback_mood_topic="fallback",
     )
 
-    CASE.assertEqual(result.clean_text, "Fine.")
+    CASE.assertEqual(result.clean_text, "What now?\nFine.")
     CASE.assertEqual(result.mood_label, "smug")
     CASE.assertIsNone(result.mood_confidence)
     CASE.assertIsNone(result.mood_topic)
     CASE.assertEqual(
         [event.model_dump() for event in result.emote_events],
-        [{"state": "smug", "at_char": 0}],
+        [
+            {"state": "annoyed", "at_char": 0},
+            {"state": "smug", "at_char": 10},
+        ],
     )
 
 

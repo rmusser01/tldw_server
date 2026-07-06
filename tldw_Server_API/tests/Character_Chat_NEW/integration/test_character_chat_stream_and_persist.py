@@ -219,6 +219,222 @@ def test_persist_streamed_message_preserves_active_speaker_identity(test_client:
     }
 
 
+def test_persist_streamed_message_stores_emote_events(test_client: TestClient, auth_headers) -> None:
+    _, chat_id = _create_character_and_chat(test_client, auth_headers)
+
+    response = test_client.post(
+        f"/api/v1/chats/{chat_id}/completions/persist",
+        json={
+            "assistant_content": "What now?\nFine.",
+            "mood_label": "smug",
+            "emote_events": [
+                {"state": "annoyed", "at_char": 0},
+                {"state": "smug", "at_char": 10},
+            ],
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    assistant_message_id = response.json()["assistant_message_id"]
+    message_resp = test_client.get(
+        f"/api/v1/messages/{assistant_message_id}",
+        params={"include_metadata": "true"},
+        headers=auth_headers,
+    )
+    assert message_resp.status_code == 200
+    metadata_extra = message_resp.json()["metadata_extra"]
+    assert metadata_extra["mood_label"] == "smug"
+    assert metadata_extra["emote_events"] == [
+        {"state": "annoyed", "at_char": 0},
+        {"state": "smug", "at_char": 10},
+    ]
+
+
+def test_persist_streamed_message_rejects_invalid_emote_events(test_client: TestClient, auth_headers) -> None:
+    _, chat_id = _create_character_and_chat(test_client, auth_headers)
+
+    response = test_client.post(
+        f"/api/v1/chats/{chat_id}/completions/persist",
+        json={
+            "assistant_content": "bad metadata",
+            "emote_events": [{"state": "../../bad", "at_char": 0}],
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 422
+
+
+def test_persist_streamed_message_retry_preserves_emote_events(
+    test_client: TestClient,
+    auth_headers,
+) -> None:
+    _, chat_id = _create_character_and_chat(test_client, auth_headers)
+    user_resp = test_client.post(
+        f"/api/v1/chats/{chat_id}/messages",
+        json={"role": "user", "content": "trigger duplicate guard"},
+        headers=auth_headers,
+    )
+    assert user_resp.status_code == 201
+
+    payload = {
+        "assistant_content": "idempotent emote reply",
+        "user_message_id": user_resp.json()["id"],
+        "emote_events": [{"state": "smug", "at_char": 0}],
+    }
+
+    first = test_client.post(
+        f"/api/v1/chats/{chat_id}/completions/persist",
+        json=payload,
+        headers=auth_headers,
+    )
+    second = test_client.post(
+        f"/api/v1/chats/{chat_id}/completions/persist",
+        json=payload,
+        headers=auth_headers,
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["assistant_message_id"] == second.json()["assistant_message_id"]
+
+    message_resp = test_client.get(
+        f"/api/v1/messages/{second.json()['assistant_message_id']}",
+        params={"include_metadata": "true"},
+        headers=auth_headers,
+    )
+    assert message_resp.status_code == 200
+    assert message_resp.json()["metadata_extra"]["emote_events"] == [
+        {"state": "smug", "at_char": 0}
+    ]
+
+
+def test_complete_v2_sanitizes_emote_directives_for_non_streaming_response_and_storage(
+    test_client: TestClient,
+    auth_headers,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, chat_id = _create_character_and_chat(test_client, auth_headers)
+    monkeypatch.setenv("ENABLE_LOCAL_LLM_PROVIDER", "1")
+
+    import tldw_Server_API.app.api.v1.endpoints.character_chat_sessions as mod
+
+    def _stub_chat_api_call(api_endpoint, messages_payload, **kwargs):
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "content": "Emote: annoyed\nWhat now?\nEmote: smug\nFine."
+                    }
+                }
+            ]
+        }
+
+    monkeypatch.setattr(mod, "perform_chat_api_call", _stub_chat_api_call)
+
+    response = test_client.post(
+        f"/api/v1/chats/{chat_id}/complete-v2",
+        json={
+            "provider": "local-llm",
+            "model": "local-test",
+            "append_user_message": "continue",
+            "include_character_context": False,
+            "save_to_db": True,
+            "mood_label": "happy",
+            "mood_confidence": 0.9,
+            "mood_topic": "fallback",
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["assistant_content"] == "What now?\nFine."
+    assert payload["mood_label"] == "smug"
+    assert payload["mood_confidence"] is None
+    assert payload["mood_topic"] is None
+
+    message_resp = test_client.get(
+        f"/api/v1/messages/{payload['assistant_message_id']}",
+        params={"include_metadata": "true"},
+        headers=auth_headers,
+    )
+    assert message_resp.status_code == 200
+    stored = message_resp.json()
+    assert stored["content"] == "What now?\nFine."
+    assert stored["metadata_extra"]["mood_label"] == "smug"
+    assert stored["metadata_extra"]["emote_events"] == [
+        {"state": "annoyed", "at_char": 0},
+        {"state": "smug", "at_char": 10},
+    ]
+
+
+def test_complete_v2_prompt_contract_mentions_available_emote_states(
+    test_client: TestClient,
+    auth_headers,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    char_resp = test_client.post(
+        "/api/v1/characters/",
+        json={
+            "name": "EmotePromptChar",
+            "description": "Streaming test",
+            "personality": "Calm",
+            "first_message": "Hello!",
+            "extensions": {
+                "tldw": {
+                    "mood_images": {
+                        "smug": "data:image/png;base64,AA==",
+                        "thinking hard": "data:image/png;base64,AA==",
+                        "../../bad": "data:image/png;base64,AA==",
+                    }
+                }
+            },
+        },
+        headers=auth_headers,
+    )
+    assert char_resp.status_code == 201
+    chat_resp = test_client.post(
+        "/api/v1/chats/",
+        json={"character_id": char_resp.json()["id"], "title": "Prompt Contract"},
+        headers=auth_headers,
+    )
+    assert chat_resp.status_code == 201
+    captured = {}
+    monkeypatch.setenv("ENABLE_LOCAL_LLM_PROVIDER", "1")
+
+    import tldw_Server_API.app.api.v1.endpoints.character_chat_sessions as mod
+
+    def _stub_chat_api_call(api_endpoint, messages_payload, **kwargs):
+        captured["messages"] = messages_payload
+        return {"choices": [{"message": {"content": "ok"}}]}
+
+    monkeypatch.setattr(mod, "perform_chat_api_call", _stub_chat_api_call)
+
+    response = test_client.post(
+        f"/api/v1/chats/{chat_resp.json()['id']}/complete-v2",
+        json={
+            "provider": "local-llm",
+            "model": "local-test",
+            "append_user_message": "go",
+            "include_character_context": True,
+            "save_to_db": False,
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    system_text = "\n".join(
+        message.get("content", "")
+        for message in captured["messages"]
+        if message.get("role") == "system"
+    )
+    assert "Emote: <state>" in system_text
+    assert "Prefer these available states: smug, thinking-hard." in system_text
+    assert "../../bad" not in system_text
+
+
 def test_persist_streamed_message_saves_then_returns_503_when_counting_degrades(
     test_client: TestClient,
     auth_headers,

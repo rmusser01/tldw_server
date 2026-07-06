@@ -8,6 +8,7 @@ from typing import Any, Literal, Optional, Union
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta, PagePaginationMeta
+from tldw_Server_API.app.core.Character_Chat.emote_directives import CharacterEmoteEvent
 from tldw_Server_API.app.core.LLM_Calls.routing.models import RoutingOverride
 
 ALLOWED_CONVERSATION_STATES = ("in-progress", "resolved", "backlog", "non-viable")
@@ -802,6 +803,11 @@ class CharacterChatStreamPersistRequest(BaseModel):
         None,
         max_length=200,
         description="Optional short topic cue associated with the detected mood.",
+    )
+    emote_events: Optional[list[CharacterEmoteEvent]] = Field(
+        None,
+        max_length=5,
+        description="Optional sanitized character emote events for this assistant message.",
     )
     tool_calls: Optional[list[dict[str, Any]]] = Field(None, description="Optional tool_calls metadata to store")
     usage: Optional[dict[str, int]] = Field(None, description="Optional token usage stats: prompt_tokens, completion_tokens, total_tokens")

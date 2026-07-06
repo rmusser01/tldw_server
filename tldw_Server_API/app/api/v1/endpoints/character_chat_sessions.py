@@ -124,6 +124,11 @@ from tldw_Server_API.app.core.testing import is_truthy
 from tldw_Server_API.app.core.Character_Chat.modules.character_generation_presets import (
     resolve_character_generation_settings,
 )
+from tldw_Server_API.app.core.Character_Chat.emote_directives import (
+    CharacterEmoteEvent,
+    normalize_character_emote_state,
+    resolve_character_emote_completion,
+)
 from tldw_Server_API.app.core.Character_Chat.modules.character_prompt_presets import (
     DEFAULT_PROMPT_PRESET,
     build_character_system_prompt,
@@ -927,6 +932,7 @@ def _build_stream_persist_metadata_extra(
     mood_label: str | None,
     mood_confidence: float | None,
     mood_topic: str | None,
+    emote_events: list[CharacterEmoteEvent] | None,
     usage: dict[str, Any] | None,
     visual_identity: Any | None = None,
 ) -> dict[str, Any]:
@@ -948,6 +954,8 @@ def _build_stream_persist_metadata_extra(
         trimmed_topic = mood_topic.strip()
         if trimmed_topic:
             metadata_extra["mood_topic"] = trimmed_topic
+    if emote_events:
+        metadata_extra["emote_events"] = [event.model_dump() for event in emote_events]
     if usage is not None:
         metadata_extra["usage"] = usage
     metadata_extra.update(_visual_identity_metadata_extra(visual_identity))
@@ -2404,6 +2412,48 @@ def _extract_character_default_author_note(character: dict[str, Any]) -> str:
         if ext_value:
             return ext_value
     return ""
+
+
+def _extract_character_mood_image_states(character: dict[str, Any]) -> list[str]:
+    extensions = character.get("extensions") if isinstance(character, dict) else None
+    if isinstance(extensions, str):
+        try:
+            extensions = json.loads(extensions)
+        except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS:
+            extensions = {}
+    if not isinstance(extensions, dict):
+        return []
+
+    tldw = extensions.get("tldw") if isinstance(extensions.get("tldw"), dict) else {}
+    for source in (
+        tldw.get("mood_images"),
+        tldw.get("moodImages"),
+        extensions.get("mood_images"),
+        extensions.get("moodImages"),
+    ):
+        if not isinstance(source, dict):
+            continue
+        states: list[str] = []
+        seen: set[str] = set()
+        for raw_state in source:
+            state = normalize_character_emote_state(raw_state)
+            if state and state not in seen:
+                states.append(state)
+                seen.add(state)
+        return states
+    return []
+
+
+def _append_character_emote_prompt_instruction(sys_text: str, character: dict[str, Any]) -> str:
+    states = _extract_character_mood_image_states(character)
+    prefer = f" Prefer these available states: {', '.join(states)}." if states else ""
+    instruction = (
+        "When the character expression should change, emit a standalone line exactly like "
+        "`Emote: <state>`."
+        f"{prefer} Do not emit an emote after every sentence."
+    )
+    base = sys_text.strip()
+    return f"{base}\n\n{instruction}" if base else instruction
 
 
 def _extract_character_memory_note(settings: dict[str, Any], character_id: Any) -> str:
@@ -5428,6 +5478,7 @@ async def character_chat_completion(
                 user_name=user_name,
                 preset_id=completion_preset,
             )
+            sys_text = _append_character_emote_prompt_instruction(sys_text, character)
             if sys_text.strip():
                 formatted.append({"role": "system", "content": sys_text.strip()})
         if summary_content:
@@ -6111,6 +6162,16 @@ async def character_chat_completion(
             if isinstance(body.mood_topic, str) and body.mood_topic.strip()
             else None
         )
+        resolved_emotes = resolve_character_emote_completion(
+            assistant_text,
+            fallback_mood_label=resolved_mood_label,
+            fallback_mood_confidence=resolved_mood_confidence,
+            fallback_mood_topic=resolved_mood_topic,
+        )
+        assistant_text = resolved_emotes.clean_text
+        resolved_mood_label = resolved_emotes.mood_label
+        resolved_mood_confidence = resolved_emotes.mood_confidence
+        resolved_mood_topic = resolved_emotes.mood_topic
 
         saved = False
         assistant_msg_id: Optional[str] = None
@@ -6163,6 +6224,10 @@ async def character_chat_completion(
                 metadata_extra["mood_confidence"] = resolved_mood_confidence
             if resolved_mood_topic:
                 metadata_extra["mood_topic"] = resolved_mood_topic
+            if resolved_emotes.emote_events:
+                metadata_extra["emote_events"] = [
+                    event.model_dump() for event in resolved_emotes.emote_events
+                ]
             if turn_lorebook_diagnostics:
                 metadata_extra["lorebook_diagnostics"] = turn_lorebook_diagnostics
             if turn_lorebook_cost_diagnostics:
@@ -7324,6 +7389,7 @@ async def persist_streamed_assistant_message(
                     mood_label=body.mood_label,
                     mood_confidence=body.mood_confidence,
                     mood_topic=body.mood_topic,
+                    emote_events=body.emote_events,
                     usage=_validate_stream_persist_usage(getattr(body, "usage", None)),
                     visual_identity=visual_identity_metadata,
                 ),
@@ -7361,6 +7427,7 @@ async def persist_streamed_assistant_message(
             mood_label=body.mood_label,
             mood_confidence=body.mood_confidence,
             mood_topic=body.mood_topic,
+            emote_events=body.emote_events,
             usage=_validate_stream_persist_usage(getattr(body, "usage", None)),
             visual_identity=visual_identity_metadata,
         )
