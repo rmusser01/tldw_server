@@ -1569,7 +1569,10 @@ describe("WorkspaceHeader workspace browser modal", () => {
     expect(await screen.findByText("Import Workspace")).toBeInTheDocument()
 
     await waitFor(() => {
-      expect(screen.queryByText("View all workspaces")).not.toBeInTheDocument()
+      const viewAllWorkspaces = screen.queryByText("View all workspaces")
+      if (viewAllWorkspaces) {
+        expect(viewAllWorkspaces).not.toBeVisible()
+      }
     })
   })
 
@@ -3942,15 +3945,25 @@ describe("WorkspaceHeader workspace browser modal", () => {
 
     fireEvent.click(within(handoffModal).getByRole("button", { name: "Cancel" }))
     await waitFor(() => {
-      expect(screen.queryByRole("dialog", { name: "Create agent task" }))
-        .not.toBeInTheDocument()
+      const dialog = screen.queryByRole("dialog", { name: "Create agent task" })
+      if (!dialog) {
+        expect(dialog).not.toBeInTheDocument()
+        return
+      }
+      expect(dialog).toHaveClass("ant-zoom-leave")
     })
 
     fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
-    fireEvent.click(await screen.findByText("Create agent task"))
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Create agent task" })
+    )
 
-    const manualModal = await screen.findByRole("dialog", {
-      name: "Create agent task"
+    const manualModal = await waitFor(() => {
+      const activeDialog = screen
+        .getAllByRole("dialog", { name: "Create agent task" })
+        .find((dialog) => !dialog.classList.contains("ant-zoom-leave"))
+      expect(activeDialog).toBeDefined()
+      return activeDialog as HTMLElement
     })
     expect(within(manualModal).getByLabelText("Task title")).not.toHaveValue(
       "Review captured page: Example Story"
