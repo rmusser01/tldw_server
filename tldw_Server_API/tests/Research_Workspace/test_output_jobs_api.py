@@ -254,6 +254,48 @@ def test_status_returns_job_progress_plus_artifact() -> None:
     assert result.result == {"step": "render"}
 
 
+def test_status_prefers_artifact_error_when_worker_error_is_generic() -> None:
+    workspace_db = FakeWorkspaceDB()
+    artifact = workspace_db.add_workspace_artifact(
+        "ws-1",
+        {
+            "id": "video_overview-abc",
+            "artifact_type": "video_overview",
+            "title": "Video Overview",
+            "status": "failed",
+            "content": None,
+            "content_type": "video/mp4",
+            "producer_metadata": {"error": "tts_generation_failed"},
+        },
+    )
+    job_manager = FakeJobManager()
+    job_manager.jobs[101] = {
+        "id": 101,
+        "status": "failed",
+        "owner_user_id": "42",
+        "domain": RESEARCH_WORKSPACE_OUTPUT_JOB_DOMAIN,
+        "job_type": RESEARCH_WORKSPACE_OUTPUT_JOB_TYPE,
+        "payload": {
+            "workspace_id": "ws-1",
+            "artifact_id": artifact["id"],
+            "artifact_type": "video_overview",
+        },
+        "error_code": "worker_exception",
+        "error_message": "worker_exception",
+    }
+
+    result = get_research_workspace_output_job_status(
+        workspace_id="ws-1",
+        job_id=101,
+        workspace_db=workspace_db,
+        job_manager=job_manager,
+        user_id="42",
+    )
+
+    assert result.status == "failed"
+    assert result.error == "tts_generation_failed"
+
+
 def test_status_rejects_missing_job_domain_before_artifact_lookup() -> None:
     workspace_db = FakeWorkspaceDB()
     job_manager = FakeJobManager()

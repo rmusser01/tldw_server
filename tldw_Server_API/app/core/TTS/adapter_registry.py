@@ -1338,6 +1338,11 @@ _factory_instance: Optional[TTSAdapterFactory] = None
 _factory_lock = asyncio.Lock()
 
 
+def get_existing_tts_factory() -> Optional[TTSAdapterFactory]:
+    """Return the current TTS factory singleton without creating it."""
+    return _factory_instance
+
+
 async def get_tts_factory(config: Optional[dict[str, Any]] = None) -> TTSAdapterFactory:
     """
     Get or create the TTS adapter factory singleton.
