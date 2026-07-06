@@ -1475,6 +1475,7 @@ jobs:
               tldw_Server_API/tests/Workflows/test_workflow_preflight_api.py
               tldw_Server_API/tests/Workflows/test_workflow_templates_api.py
               tldw_Server_API/tests/Workflows/test_workflows_api.py
+              tldw_Server_API/tests/Workflows/test_workflows_config_defaults.py
           - name: product-workflows-storage
             paths: >-
               tldw_Server_API/tests/Workflows/test_dual_backend_workflows.py
@@ -2882,6 +2883,7 @@ jobs:
               tldw_Server_API/tests/Workflows/test_workflow_preflight_api.py
               tldw_Server_API/tests/Workflows/test_workflow_templates_api.py
               tldw_Server_API/tests/Workflows/test_workflows_api.py
+              tldw_Server_API/tests/Workflows/test_workflows_config_defaults.py
           - name: product-workflows-storage
             paths: >-
               tldw_Server_API/tests/Workflows/test_dual_backend_workflows.py
@@ -4160,6 +4162,7 @@ jobs:
               tldw_Server_API/tests/Workflows/test_workflow_preflight_api.py
               tldw_Server_API/tests/Workflows/test_workflow_templates_api.py
               tldw_Server_API/tests/Workflows/test_workflows_api.py
+              tldw_Server_API/tests/Workflows/test_workflows_config_defaults.py
           - name: product-workflows-storage
             paths: >-
               tldw_Server_API/tests/Workflows/test_dual_backend_workflows.py
@@ -5362,6 +5365,7 @@ jobs:
               tldw_Server_API/tests/Workflows/test_workflow_preflight_api.py
               tldw_Server_API/tests/Workflows/test_workflow_templates_api.py
               tldw_Server_API/tests/Workflows/test_workflows_api.py
+              tldw_Server_API/tests/Workflows/test_workflows_config_defaults.py
           - name: product-workflows-storage
             paths: >-
               tldw_Server_API/tests/Workflows/test_dual_backend_workflows.py
@@ -6565,6 +6569,7 @@ jobs:
               tldw_Server_API/tests/Workflows/test_workflow_preflight_api.py
               tldw_Server_API/tests/Workflows/test_workflow_templates_api.py
               tldw_Server_API/tests/Workflows/test_workflows_api.py
+              tldw_Server_API/tests/Workflows/test_workflows_config_defaults.py
           - name: product-workflows-storage
             paths: >-
               tldw_Server_API/tests/Workflows/test_dual_backend_workflows.py

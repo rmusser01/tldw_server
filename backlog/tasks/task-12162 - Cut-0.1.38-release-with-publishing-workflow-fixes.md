@@ -4,6 +4,7 @@ title: Cut 0.1.38 release with publishing workflow fixes
 status: In Progress
 priority: High
 modified_files:
+- .github/workflows/ci.yml
 - CHANGELOG.md
 - Docs/API-related/API_Tags_Index.md
 - Docs/mkdocs.yml
@@ -35,7 +36,10 @@ Create a new 0.1.38 release that includes the GHCR-only Docker release workflow 
   - `git diff --check`
   - `python -m pytest -q tldw_Server_API/tests/CI/test_release_workflow_contracts.py`
   - `python -m pytest -q tldw_Server_API/tests/Docs/test_chatbook_openwebui_import_docs.py::test_openwebui_import_is_discoverable_from_api_docs`
+  - `python Helper_Scripts/ci/check_shard_coverage.py --ci-file .github/workflows/ci.yml`
+  - `python -m pytest -q tldw_Server_API/tests/Workflows/test_workflows_config_defaults.py`
   - `python -m bandit -r tldw_Server_API/app/main.py -f json -o /tmp/bandit_release_0_1_38_main.json`
+- CI follow-up: PR #2677 initially failed `Shard coverage guard` because `tldw_Server_API/tests/Workflows/test_workflows_config_defaults.py` had not been assigned to a full-suite shard. Added it to the existing `product-workflows-api` shard entries.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
