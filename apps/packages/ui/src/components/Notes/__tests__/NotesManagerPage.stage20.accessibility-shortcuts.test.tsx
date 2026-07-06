@@ -263,6 +263,26 @@ describe("NotesManagerPage stage 20 accessibility shortcut discovery", () => {
     expect(mockStartTutorial).toHaveBeenCalledWith("notes-basics")
   })
 
+  it("suppresses the first-visit tutorial when the user starts interacting before the timer fires", async () => {
+    vi.useFakeTimers()
+    renderPage()
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    fireEvent.pointerDown(window)
+
+    await act(async () => {
+      vi.advanceTimersByTime(1000)
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(mockStorageSet).toHaveBeenCalledWith("notes-tutorial-shown", "1")
+    expect(mockStartTutorial).not.toHaveBeenCalled()
+  })
+
   it("removes tutorial state from shared storage when restarting the tutorial", async () => {
     renderPage()
 

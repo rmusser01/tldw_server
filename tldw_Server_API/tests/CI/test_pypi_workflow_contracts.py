@@ -48,7 +48,7 @@ def test_publish_pypi_workflow_preserves_manual_dispatch_and_gates_push() -> Non
     assert set(on) == {"workflow_dispatch", "push"}
     assert "release" not in on
     assert push["branches"] == ["main"]
-    assert push["paths"] == ["pyproject.toml"]
+    assert push["paths"] == ["pyproject.toml", ".github/workflows/publish-pypi.yml"]
     assert target["options"] == ["testpypi", "pypi"]
     assert target["default"] == "testpypi"
 

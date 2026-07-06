@@ -16,6 +16,7 @@ on:
       - main
     paths:
       - pyproject.toml
+      - .github/workflows/publish-pypi.yml
 
 permissions:
   contents: read
@@ -141,6 +142,12 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           persist-credentials: false
+
+      - name: Install FFmpeg and PortAudio (Linux)
+        uses: ./.github/actions/setup-ffmpeg
+        with:
+          install-ffmpeg: 'false'
+          install-portaudio: 'true'
 
       - name: Setup Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405

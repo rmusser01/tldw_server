@@ -149,6 +149,11 @@ _FLASHCARD_REVIEW_SESSION_STATUSES = frozenset({"active", "completed", "abandone
 _FLASHCARD_REVIEW_MODES = frozenset({"due", "cram"})
 _FLASHCARD_REVIEW_SESSION_TIMEOUT = timedelta(minutes=30)
 _FLASHCARD_REVIEW_SESSION_JSON_FIELDS = ["source_bundle_json"]
+_FLASHCARD_SQLITE_FTS_COLUMN_ALIASES = {
+    "front": "front_search",
+    "back": "back_search",
+    "notes": "notes_search",
+}
 _SUPPORTED_WEB_CLIPPER_DESTINATIONS = {"note", "workspace", "both"}
 _SUPPORTED_WEB_CLIPPER_OUTCOME_STATES = {"saved", "saved_with_warnings", "partially_saved", "failed"}
 _SUPPORTED_WEB_CLIPPER_ENRICHMENT_TYPES = {"ocr", "vlm"}
@@ -24160,6 +24165,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             return f"{deck_alias}.workspace_id IS NULL", tuple(), True
         return "", tuple(), False
 
+    @staticmethod
+    def _normalize_flashcard_sqlite_query(q: str) -> str:
+        return FTSQueryTranslator.normalize_query(
+            q,
+            'sqlite',
+            sqlite_column_aliases=_FLASHCARD_SQLITE_FTS_COLUMN_ALIASES,
+        )
+
     def list_flashcards(self,
                         deck_id: int | None = None,
                         workspace_id: str | None = None,
@@ -24219,7 +24232,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 params.append(tsquery)
             else:
                 # Normalize query for SQLite FTS5 (quotes/operators)
-                norm_q = FTSQueryTranslator.normalize_query(q, 'sqlite')
+                norm_q = self._normalize_flashcard_sqlite_query(q)
                 if not norm_q:
                     logger.debug("Flashcard query normalized to empty sqlite tsquery for input '{}'", q)
                     return []
@@ -24303,7 +24316,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 fts_filter = "AND f.flashcards_fts_tsv @@ to_tsquery('english', ?)"
                 params.append(tsquery)
             else:
-                norm_q = FTSQueryTranslator.normalize_query(q, 'sqlite')
+                norm_q = self._normalize_flashcard_sqlite_query(q)
                 if not norm_q:
                     return 0
                 fts_filter = "AND f.rowid IN (SELECT rowid FROM flashcards_fts WHERE flashcards_fts MATCH ?)"

@@ -528,7 +528,13 @@ class WorkflowEngine:
                 return
             await asyncio.sleep(0.2)
 
-    async def start_run(self, run_id: str, mode: RunMode = RunMode.ASYNC) -> None:
+    async def start_run(
+        self,
+        run_id: str,
+        mode: RunMode = RunMode.ASYNC,
+        *,
+        scheduler_for_notify: WorkflowScheduler | None = None,
+    ) -> None:
         """Execute a linear workflow with retries, timeouts, and cancel checks."""
         logger.debug(f"WorkflowEngine: starting run {run_id} in mode={mode}")
         # Purge any expired in-memory secrets upfront
@@ -538,7 +544,7 @@ class WorkflowEngine:
         _r = self.db.get_run(run_id)
         _tenant_for_notify = _r.tenant_id if _r else self.config.tenant_id
         _wf_for_notify = _r.workflow_id if _r else None
-        _scheduler_for_notify = WorkflowScheduler.instance()
+        _scheduler_for_notify = scheduler_for_notify or WorkflowScheduler.instance()
 
         def _finalize(keep: bool = False) -> None:
             try:
@@ -2226,7 +2232,7 @@ class WorkflowScheduler:
         with self._lock:
             run = engine.db.get_run(run_id)
             if not run:
-                self._spawn(engine.start_run(run_id, mode))
+                self._spawn(engine.start_run(run_id, mode, scheduler_for_notify=self))
             else:
                 tenant = run.tenant_id
                 wf = run.workflow_id
@@ -2270,7 +2276,7 @@ class WorkflowScheduler:
         self._active_tenant[tenant] = self._active_tenant.get(tenant, 0) + 1
         if workflow_id is not None:
             self._active_workflow[workflow_id] = self._active_workflow.get(workflow_id, 0) + 1
-        self._spawn(engine.start_run(run_id, mode))
+        self._spawn(engine.start_run(run_id, mode, scheduler_for_notify=self))
 
     # Health/metrics helpers
     def queue_depth(self) -> int:

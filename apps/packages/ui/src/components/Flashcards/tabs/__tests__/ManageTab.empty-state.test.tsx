@@ -242,14 +242,15 @@ describe("ManageTab no-card empty state", () => {
     vi.mocked(useCardsKeyboardNav).mockImplementation(() => undefined)
   })
 
-  it("shows create, import, and generate actions before filter chrome for a true first run", () => {
+  it("shows create, import, generate, and primary filters before expert chrome for a true first run", () => {
     renderManageTab()
 
     expect(screen.getByText("No flashcards yet")).toBeInTheDocument()
     expect(screen.getByTestId("flashcards-manage-empty-create-cta")).toBeInTheDocument()
     expect(screen.getByTestId("flashcards-manage-empty-import-cta")).toBeInTheDocument()
     expect(screen.getByTestId("flashcards-manage-empty-generate-cta")).toBeInTheDocument()
-    expect(screen.queryByTestId("flashcards-manage-search")).not.toBeInTheDocument()
+    expect(screen.getByTestId("flashcards-manage-search")).toBeInTheDocument()
+    expect(screen.getByTestId("flashcards-manage-deck-select")).toBeInTheDocument()
     expect(screen.queryByTestId("flashcards-density-toggle")).not.toBeInTheDocument()
   })
 

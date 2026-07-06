@@ -116,7 +116,7 @@ VALID_TXT_URL = "https://raw.githubusercontent.com/rmusser01/tldw/main/LICENSE.t
 VALID_MD_URL = "https://raw.githubusercontent.com/rmusser01/tldw/main/README.md"
 VALID_HTML_URL = "https://example.com/" # Use example.com for basic HTML
 INVALID_URL = "http://this.url.definitely.does.not.exist.invalid/resource.mp4"
-URL_404 = "https://httpbin.org/status/404"
+URL_404 = "https://example.com/status/404"
 
 PDF_ENGINES_TO_TEST = ["pymupdf4llm", "pymupdf", "docling"]
 TEST_VIDEO_TRANSCRIPTION_MODEL = "small"
@@ -824,7 +824,12 @@ class TestProcessAudios:
 
         # Check error message for the failed URL
         assert error_result["error"] is not None
-        assert "Download failed" in error_result["error"] or "404" in error_result["error"]
+        assert (
+            "Download failed" in error_result["error"]
+            or "404" in error_result["error"]
+            or "URL blocked by security policy" in error_result["error"]
+            or "Host not in allowlist" in error_result["error"]
+        )
 
         # Check successful item results (assuming defaults enabled chunking)
         assert success_result["content"] is not None

@@ -310,6 +310,7 @@ jobs:
               tldw_Server_API/tests/Config/test_module_yaml_integration.py
           - name: config-runtime-env
             paths: >-
+              tldw_Server_API/tests/Config/test_env_absent_defaults.py
               tldw_Server_API/tests/Config/test_env_file_selection.py
               tldw_Server_API/tests/Config/test_feature_flags.py
               tldw_Server_API/tests/Config/test_local_api_and_custom_openai2_config_keys.py
@@ -1150,7 +1151,6 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_legacy_complete_deprecation.py
               tldw_Server_API/tests/Character_Chat/test_messages_tool_calls_exposure.py
               tldw_Server_API/tests/Character_Chat/test_persona_dialogue_tree_character_eval.py
-              tldw_Server_API/tests/Character_Chat/test_visual_identity_expression_metadata.py
           - name: chat-character-legacy-files
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_file_mime_detection.py
@@ -1475,6 +1475,7 @@ jobs:
               tldw_Server_API/tests/Workflows/test_workflow_preflight_api.py
               tldw_Server_API/tests/Workflows/test_workflow_templates_api.py
               tldw_Server_API/tests/Workflows/test_workflows_api.py
+              tldw_Server_API/tests/Workflows/test_workflows_config_defaults.py
           - name: product-workflows-storage
             paths: >-
               tldw_Server_API/tests/Workflows/test_dual_backend_workflows.py
@@ -2557,7 +2558,6 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_legacy_complete_deprecation.py
               tldw_Server_API/tests/Character_Chat/test_messages_tool_calls_exposure.py
               tldw_Server_API/tests/Character_Chat/test_persona_dialogue_tree_character_eval.py
-              tldw_Server_API/tests/Character_Chat/test_visual_identity_expression_metadata.py
           - name: chat-character-legacy-files
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_file_mime_detection.py
@@ -2882,6 +2882,7 @@ jobs:
               tldw_Server_API/tests/Workflows/test_workflow_preflight_api.py
               tldw_Server_API/tests/Workflows/test_workflow_templates_api.py
               tldw_Server_API/tests/Workflows/test_workflows_api.py
+              tldw_Server_API/tests/Workflows/test_workflows_config_defaults.py
           - name: product-workflows-storage
             paths: >-
               tldw_Server_API/tests/Workflows/test_dual_backend_workflows.py
@@ -3835,7 +3836,6 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_legacy_complete_deprecation.py
               tldw_Server_API/tests/Character_Chat/test_messages_tool_calls_exposure.py
               tldw_Server_API/tests/Character_Chat/test_persona_dialogue_tree_character_eval.py
-              tldw_Server_API/tests/Character_Chat/test_visual_identity_expression_metadata.py
           - name: chat-character-legacy-files
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_file_mime_detection.py
@@ -4160,6 +4160,7 @@ jobs:
               tldw_Server_API/tests/Workflows/test_workflow_preflight_api.py
               tldw_Server_API/tests/Workflows/test_workflow_templates_api.py
               tldw_Server_API/tests/Workflows/test_workflows_api.py
+              tldw_Server_API/tests/Workflows/test_workflows_config_defaults.py
           - name: product-workflows-storage
             paths: >-
               tldw_Server_API/tests/Workflows/test_dual_backend_workflows.py
@@ -5037,7 +5038,6 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_legacy_complete_deprecation.py
               tldw_Server_API/tests/Character_Chat/test_messages_tool_calls_exposure.py
               tldw_Server_API/tests/Character_Chat/test_persona_dialogue_tree_character_eval.py
-              tldw_Server_API/tests/Character_Chat/test_visual_identity_expression_metadata.py
           - name: chat-character-legacy-files
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_file_mime_detection.py
@@ -5362,6 +5362,7 @@ jobs:
               tldw_Server_API/tests/Workflows/test_workflow_preflight_api.py
               tldw_Server_API/tests/Workflows/test_workflow_templates_api.py
               tldw_Server_API/tests/Workflows/test_workflows_api.py
+              tldw_Server_API/tests/Workflows/test_workflows_config_defaults.py
           - name: product-workflows-storage
             paths: >-
               tldw_Server_API/tests/Workflows/test_dual_backend_workflows.py
@@ -6240,7 +6241,6 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_legacy_complete_deprecation.py
               tldw_Server_API/tests/Character_Chat/test_messages_tool_calls_exposure.py
               tldw_Server_API/tests/Character_Chat/test_persona_dialogue_tree_character_eval.py
-              tldw_Server_API/tests/Character_Chat/test_visual_identity_expression_metadata.py
           - name: chat-character-legacy-files
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_file_mime_detection.py
@@ -6565,6 +6565,7 @@ jobs:
               tldw_Server_API/tests/Workflows/test_workflow_preflight_api.py
               tldw_Server_API/tests/Workflows/test_workflow_templates_api.py
               tldw_Server_API/tests/Workflows/test_workflows_api.py
+              tldw_Server_API/tests/Workflows/test_workflows_config_defaults.py
           - name: product-workflows-storage
             paths: >-
               tldw_Server_API/tests/Workflows/test_dual_backend_workflows.py

@@ -21,7 +21,7 @@ def _make_sqlite_db() -> CharactersRAGDB:
 
 def test_list_flashcards_sqlite_empty_fts_returns_empty(monkeypatch: pytest.MonkeyPatch) -> None:
     db = _make_sqlite_db()
-    monkeypatch.setattr(FTSQueryTranslator, "normalize_query", lambda _q, _backend: "")
+    monkeypatch.setattr(FTSQueryTranslator, "normalize_query", lambda _q, _backend, **_kwargs: "")
 
     result = db.list_flashcards(q="!!!", limit=10, offset=0)
 
@@ -31,7 +31,7 @@ def test_list_flashcards_sqlite_empty_fts_returns_empty(monkeypatch: pytest.Monk
 
 def test_count_flashcards_sqlite_empty_fts_returns_zero(monkeypatch: pytest.MonkeyPatch) -> None:
     db = _make_sqlite_db()
-    monkeypatch.setattr(FTSQueryTranslator, "normalize_query", lambda _q, _backend: "")
+    monkeypatch.setattr(FTSQueryTranslator, "normalize_query", lambda _q, _backend, **_kwargs: "")
 
     result = db.count_flashcards(q="!!!")
 

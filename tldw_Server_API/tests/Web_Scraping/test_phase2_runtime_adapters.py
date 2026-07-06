@@ -120,7 +120,7 @@ def test_default_fetch_client_measures_elapsed_with_monotonic_clock(
         }
 
     monkeypatch.setattr(runtime_fetch, "http_fetch", fake_fetch)
-    monkeypatch.setattr(runtime_fetch.time, "monotonic", lambda: next(times))
+    monkeypatch.setattr(runtime_fetch.time, "monotonic", lambda: next(times, 12.5))
 
     response = DefaultFetchClient().fetch(
         FetchRequest(url="https://example.com/article", backend="httpx", timeout=15.0)

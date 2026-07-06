@@ -288,7 +288,10 @@ export const FlashcardsManager: React.FC = () => {
       forceShowWorkspaceItems: currentStudyIntent?.forceShowWorkspaceItems ?? false
     })
   }, [currentStudyIntent?.attemptId, currentStudyIntent?.deckId, currentStudyIntent?.forceShowWorkspaceItems, currentStudyIntent?.quizId, reviewDeckId])
-  const canOpenQuizCta = currentStudyIntent?.quizId !== undefined
+  const canOpenQuizCta =
+    currentStudyIntent?.quizId !== undefined ||
+    reviewDeckId != null ||
+    currentStudyIntent?.deckId != null
   const effectiveActiveTab = activeTab
   const effectiveSchedulerDeckId = schedulerDeckHandoff?.deckId ?? schedulerHandoffDeckId
   const effectiveSchedulerHandoffKey =
@@ -368,7 +371,7 @@ export const FlashcardsManager: React.FC = () => {
                 canOpenQuizCta
                   ? undefined
                   : t("option:flashcards.quizCtaNeedsContext", {
-                      defaultValue: "Open a Quiz-linked flashcard session before testing with Quiz."
+                      defaultValue: "Select a review deck before testing with Quiz."
                     })
               }
             >

@@ -3,6 +3,7 @@ import { Button, Dropdown, Tooltip, Typography } from 'antd'
 import type { MenuProps } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { useMobile } from '@/hooks/useMediaQuery'
+import { useTutorialStore } from '@/store/tutorials'
 import type { SaveIndicatorState } from './notes-manager-types'
 import NotesSaveStatus from './NotesSaveStatus'
 import {
@@ -241,35 +242,40 @@ const NotesEditorHeader: React.FC<NotesEditorHeaderProps> = ({
       }
 
       // --- AI group ---
+      const aiChildren: MenuProps['items'] = [
+        {
+          key: 'notes-studio',
+          label: t('option:notesSearch.notesStudioAction', {
+            defaultValue: 'Notes Studio'
+          }),
+          icon: (<SparklesIcon className="w-4 h-4" />),
+          disabled: !canOpenNotesStudio
+        },
+        {
+          key: 'flashcards',
+          label: t('option:notesSearch.generateFlashcardsAction', {
+            defaultValue: 'Generate flashcards'
+          }),
+          icon: (<SparklesIcon className="w-4 h-4" />),
+          disabled: !canGenerateFlashcards
+        }
+      ]
+
+      if (isMobileViewport) {
+        aiChildren.push({
+          key: 'study-pack',
+          label: t('option:notesSearch.createStudyPackAction', {
+            defaultValue: 'Create study pack'
+          }),
+          icon: (<SparklesIcon className="w-4 h-4" />),
+          disabled: !canCreateStudyPack
+        })
+      }
+
       items.push({
         type: 'group' as const,
         label: t('option:notesSearch.overflowGroupAI', { defaultValue: 'AI' }),
-        children: [
-          {
-            key: 'notes-studio',
-            label: t('option:notesSearch.notesStudioAction', {
-              defaultValue: 'Notes Studio'
-            }),
-            icon: (<SparklesIcon className="w-4 h-4" />),
-            disabled: !canOpenNotesStudio
-          },
-          {
-            key: 'flashcards',
-            label: t('option:notesSearch.generateFlashcardsAction', {
-              defaultValue: 'Generate flashcards'
-            }),
-            icon: (<SparklesIcon className="w-4 h-4" />),
-            disabled: !canGenerateFlashcards
-          },
-          {
-            key: 'study-pack',
-            label: t('option:notesSearch.createStudyPackAction', {
-              defaultValue: 'Create study pack'
-            }),
-            icon: (<SparklesIcon className="w-4 h-4" />),
-            disabled: !canCreateStudyPack
-          }
-        ]
+        children: aiChildren
       })
     }
 
@@ -481,7 +487,7 @@ const NotesEditorHeader: React.FC<NotesEditorHeaderProps> = ({
         className={
           isMobileViewport
             ? 'flex w-full flex-wrap items-center justify-start gap-2'
-            : 'flex items-center gap-2'
+            : 'flex items-center justify-end gap-2'
         }
         data-testid="notes-header-actions"
       >
@@ -617,6 +623,33 @@ const NotesEditorHeader: React.FC<NotesEditorHeaderProps> = ({
           </div>
         )}
 
+        {!isMobileViewport && onCreateStudyPack ? (
+          <Tooltip
+            title={
+              canCreateStudyPack
+                ? t('option:notesSearch.createStudyPack', {
+                    defaultValue: 'Create study pack'
+                  })
+                : t('option:notesSearch.createStudyPackDisabledTooltip', {
+                    defaultValue: 'Save and title this note before creating a study pack'
+                  })
+            }
+          >
+            <Button
+              type="primary"
+              size={toolbarButtonSize}
+              onClick={onCreateStudyPack}
+              disabled={!canCreateStudyPack}
+              className="whitespace-nowrap"
+              data-testid="notes-create-study-pack-button"
+            >
+              {t('option:notesSearch.createStudyPack', {
+                defaultValue: 'Create study pack'
+              })}
+            </Button>
+          </Tooltip>
+        ) : null}
+
         {/* Overflow "More actions" menu */}
         <Dropdown
           trigger={['click']}
@@ -638,6 +671,9 @@ const NotesEditorHeader: React.FC<NotesEditorHeaderProps> = ({
                 defaultValue: 'More actions'
               })}
               data-testid="notes-overflow-menu-button"
+              onClick={() => {
+                useTutorialStore.getState().endTutorial()
+              }}
             />
           </Tooltip>
         </Dropdown>

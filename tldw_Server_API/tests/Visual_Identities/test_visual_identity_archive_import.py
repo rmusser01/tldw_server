@@ -228,6 +228,13 @@ def test_archive_import_rejects_unsafe_zip_entries(
     assert expected_code in _error_codes(json.loads(result["validation_summary_json"]))
 
 
+def test_zip_fixture_preserves_backslash_member_names(tmp_path: Path) -> None:
+    archive_path = _zip_with_entries(tmp_path / "backslash.zip", {r"sprites\happy.png": b"data"})
+
+    with zipfile.ZipFile(archive_path) as archive:
+        assert archive.namelist() == [r"sprites\happy.png"]
+
+
 @pytest.mark.parametrize("member_name", ["C:happy.png", "sprites/C:happy.png"])
 def test_archive_import_rejects_windows_drive_letter_segments(
     repo: VisualIdentityRepository,
@@ -504,11 +511,28 @@ def _png_bytes(color: str = "red") -> bytes:
 
 
 def _zip_with_entries(path: Path, entries: Mapping[str, bytes]) -> Path:
+    raw_backslash_names: list[str] = []
     with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for name, content in entries.items():
             info = zipfile.ZipInfo("entry")
             info.filename = name
             archive.writestr(info, content)
+            if "\\" in name:
+                raw_backslash_names.append(name)
+    if raw_backslash_names:
+        with zipfile.ZipFile(path) as archive:
+            actual_names = set(archive.namelist())
+        archive_bytes = path.read_bytes()
+        for raw_name in raw_backslash_names:
+            if raw_name in actual_names:
+                continue
+            normalized_name = raw_name.replace("\\", "/")
+            assert normalized_name in actual_names
+            archive_bytes = archive_bytes.replace(
+                normalized_name.encode("utf-8"),
+                raw_name.encode("utf-8"),
+            )
+        path.write_bytes(archive_bytes)
     return path
 
 

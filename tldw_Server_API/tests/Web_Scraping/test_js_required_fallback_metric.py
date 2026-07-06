@@ -27,17 +27,30 @@ async def test_js_required_emits_fallback_metric(monkeypatch):
     monkeypatch.setattr(
         egress_module,
         "evaluate_url_policy",
-        lambda url: types.SimpleNamespace(allowed=True),
+        lambda url, **_kwargs: types.SimpleNamespace(allowed=True),
     )
 
     async def allow_robots(*_args, **_kwargs):
         return True
 
+    async def allow_policy(*_args, **_kwargs):
+        return types.SimpleNamespace(
+            allowed=True,
+            reason="allowed",
+            mode="test",
+            stage="pre_fetch",
+            source="article_extract",
+        )
+
     # stub robots allow
     monkeypatch.setattr(AEL, "is_allowed_by_robots_async", allow_robots)
+    monkeypatch.setattr(AEL, "_decide_article_pre_fetch_policy", allow_policy)
 
-    # stub http fetch to return JS-required HTML
-    monkeypatch.setattr(AEL, "http_fetch", lambda *a, **k: DummyResp("Please enable JavaScript to continue"))
+    # stub the lightweight fetch boundary to return JS-required HTML
+    def fake_fetch_article_lightweight(*_args, **_kwargs):
+        return DummyResp("Please enable JavaScript to continue"), "httpx"
+
+    monkeypatch.setattr(AEL, "_fetch_article_lightweight", fake_fetch_article_lightweight)
 
     # stub async_playwright to avoid launching
     monkeypatch.setattr(AEL, "async_playwright", lambda: DummyAsyncPlaywright())

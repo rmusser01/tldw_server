@@ -37,6 +37,13 @@ policies:
   # Core defaults for endpoints without explicit module-level policies.
   core.default: *core_policy
 
+  # Cheap health/readiness probes should not spend the same bucket as
+  # interactive app routes. The WebUI polls these while users work.
+  health.default:
+    requests: { rpm: 6000, burst: 1.0 }
+    scopes: [global, ip]
+    fail_mode: fallback_memory
+
   # Chat API: per-user and per-conversation controls
   chat.default:
     requests: { rpm: 120, burst: 2.0 }
@@ -239,6 +246,19 @@ policies:
     requests: { rpm: 6000, burst: 1.2 }
     scopes: [user, api_key]
 
+  # Interactive study tools make several lightweight reads while the user
+  # navigates decks, reviews cards, and searches content. Keep these separate
+  # from core.default so page boot traffic cannot block a review or quiz action.
+  flashcards.default:
+    requests: { rpm: 600, burst: 1.2 }
+    scopes: [user, api_key, ip]
+    fail_mode: fallback_memory
+
+  quizzes.default:
+    requests: { rpm: 600, burst: 1.2 }
+    scopes: [user, api_key, ip]
+    fail_mode: fallback_memory
+
   # Chatbooks import/export endpoints (legacy ingress compat → RG).
   # Covers `/api/v1/chatbooks/*` used for conversation backup/restore and bulk
   # user-data transfer (export/import). Limits are intentionally conservative
@@ -275,7 +295,7 @@ policies:
 # Route/tag mapping helpers. Middleware may use these to resolve policy_id.
 route_map:
   by_tag:
-    health: core.default
+    health: health.default
     authentication: authnz.default
     auth: authnz.default
     users: core.default
@@ -293,8 +313,8 @@ route_map:
     reading-highlights: core.default
     items: core.default
     kanban: core.default
-    flashcards: core.default
-    quizzes: core.default
+    flashcards: flashcards.default
+    quizzes: quizzes.default
     moderation: core.default
     authnz-debug: core.default
     sandbox: core.default
@@ -355,15 +375,15 @@ route_map:
     watchlists: watchlists.default
     resource-governor: core.default
   by_path:
-    "/health": core.default
-    "/healthz": core.default
-    "/readyz": core.default
+    "/health": health.default
+    "/healthz": health.default
+    "/readyz": health.default
     "/metrics": core.default
     "/setup*": core.default
     "/v1/rerank": core.default
     "/v1/reranking": core.default
-    "/api/v1/health*": core.default
-    "/api/v1/readyz": core.default
+    "/api/v1/health*": health.default
+    "/api/v1/readyz": health.default
     "/api/v1/metrics*": core.default
     "/api/v1/monitoring*": core.default
     "/api/v1/setup*": core.default
@@ -447,8 +467,8 @@ route_map:
     "/api/v1/vlm*": core.default
     "/api/v1/llm*": core.default
     "/api/v1/llamacpp*": core.default
-    "/api/v1/flashcards*": core.default
-    "/api/v1/quizzes*": core.default
+    "/api/v1/flashcards*": flashcards.default
+    "/api/v1/quizzes*": quizzes.default
     "/api/v1/chunking*": core.default
     "/api/v1/resource-governor*": core.default
 

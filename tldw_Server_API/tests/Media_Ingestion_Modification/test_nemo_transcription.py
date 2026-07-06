@@ -486,7 +486,11 @@ class TestNemoTranscription:
                 mock_session = MagicMock()
                 mock_ort_session.return_value = mock_session
 
-                model = load_parakeet_model('onnx')
+                with patch(
+                    'tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Parakeet_ONNX.get_stt_config',
+                    return_value={"parakeet_onnx_model_id": str(model_path)},
+                ):
+                    model = load_parakeet_model('onnx')
 
                 # Should create session with the onnx file
                 assert model is not None

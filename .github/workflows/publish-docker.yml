@@ -13,11 +13,10 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
-  DOCKERHUB_IMAGE: ${{ vars.DOCKERHUB_IMAGE }}
 
 jobs:
   push_to_registries:
-    name: Push ${{ matrix.name }} image to GHCR and Docker Hub
+    name: Push ${{ matrix.name }} image to GHCR
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -31,27 +30,18 @@ jobs:
           - name: app
             dockerfile: Dockerfiles/Dockerfile.prod
             ghcr_suffix: ""
-            dockerhub_suffix: ""
           - name: worker
             dockerfile: Dockerfiles/Dockerfile.worker
             ghcr_suffix: "-worker"
-            dockerhub_suffix: "-worker"
           - name: audio-worker
             dockerfile: Dockerfiles/Dockerfile.audio_gpu_worker
             ghcr_suffix: "-audio-worker"
-            dockerhub_suffix: "-audio-worker"
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd
-
-      - name: Log in to Docker Hub
-        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Log in to GHCR
         uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee
@@ -60,12 +50,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata (tags, labels) for Docker
+      - name: Extract metadata (tags, labels) for GHCR
         id: meta
         uses: docker/metadata-action@80c7e94dd9b9319bd5eb7a0e0fe9291e23a2a2e9
         with:
           images: |
-            ${{ env.DOCKERHUB_IMAGE }}${{ matrix.dockerhub_suffix }}
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}${{ matrix.ghcr_suffix }}
           tags: |
             type=semver,pattern={{version}}

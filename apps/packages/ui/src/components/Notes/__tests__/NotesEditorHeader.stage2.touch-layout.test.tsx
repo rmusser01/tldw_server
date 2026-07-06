@@ -138,4 +138,29 @@ describe("NotesEditorHeader stage 2 touch layout", () => {
     const menuItem = (await screen.findByText("Save & new")).closest(".ant-dropdown-menu-item")
     expect(menuItem).toHaveClass("ant-dropdown-menu-item-disabled")
   })
+
+  it("keeps create study pack in the desktop toolbar and mobile overflow menu", async () => {
+    const onCreateStudyPack = vi.fn()
+
+    responsiveState.isMobile = false
+    const { unmount } = renderHeader({
+      canCreateStudyPack: true,
+      onCreateStudyPack
+    })
+
+    expect(screen.getByTestId("notes-create-study-pack-button")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("notes-overflow-menu-button"))
+    expect(screen.getAllByText("Create study pack")).toHaveLength(1)
+
+    unmount()
+    responsiveState.isMobile = true
+    renderHeader({
+      canCreateStudyPack: true,
+      onCreateStudyPack
+    })
+
+    expect(screen.queryByTestId("notes-create-study-pack-button")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("notes-overflow-menu-button"))
+    expect(await screen.findByText("Create study pack")).toBeInTheDocument()
+  })
 })

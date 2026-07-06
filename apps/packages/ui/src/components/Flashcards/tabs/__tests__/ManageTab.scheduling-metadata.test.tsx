@@ -330,8 +330,8 @@ describe("ManageTab scheduling metadata visibility", () => {
 
     expect(screen.getByText("No flashcards yet")).toBeInTheDocument()
     expect(screen.queryByTestId("flashcards-manage-shortcut-chips")).not.toBeInTheDocument()
-    expect(screen.queryByTestId("flashcards-manage-search")).not.toBeInTheDocument()
-    expect(screen.queryByTestId("flashcards-manage-deck-select")).not.toBeInTheDocument()
+    expect(screen.getByTestId("flashcards-manage-search")).toBeInTheDocument()
+    expect(screen.getByTestId("flashcards-manage-deck-select")).toBeInTheDocument()
     expect(screen.queryByTestId("flashcards-manage-selection-summary")).not.toBeInTheDocument()
     expect(screen.getByTestId("flashcards-manage-empty-create-cta")).toBeInTheDocument()
     expect(screen.getByTestId("flashcards-manage-empty-import-cta")).toBeInTheDocument()
@@ -717,6 +717,24 @@ describe("ManageTab scheduling metadata visibility", () => {
     expect(screen.getByTestId("mock-create-drawer-include-workspace")).toHaveTextContent("false")
     expect(screen.getByTestId("mock-create-drawer-workspace-id")).toBeEmptyDOMElement()
     expect(onCreateHandoffConsumed).toHaveBeenCalledTimes(1)
+  })
+
+  it("preselects the active Manage deck when opening the create drawer", async () => {
+    render(
+      <ManageTab
+        onNavigateToImport={() => {}}
+        onReviewCard={() => {}}
+        isActive
+        initialDeckId={1}
+      />
+    )
+
+    fireEvent.click(screen.getByTestId("flashcards-fab-create"))
+
+    await waitFor(() => {
+      expect(screen.getByTestId("mock-create-drawer")).toBeInTheDocument()
+    })
+    expect(screen.getByTestId("mock-create-drawer-initial-deck-id")).toHaveTextContent("1")
   })
 
   it("moves deck scope by patching workspace_id in the update payload", async () => {
