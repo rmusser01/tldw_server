@@ -128,3 +128,20 @@ def test_sqlite_normalization_allows_negative_terms_after_binary_operators():
         FTSQueryTranslator.normalize_query("alpha AND -state-of-the-art OR -front:old-style", "sqlite")
         == 'alpha AND NOT "state-of-the-art" OR NOT front:"old-style"'
     )
+
+
+def test_sqlite_normalization_does_not_depend_on_regex_tokenizer(monkeypatch):
+    """SQLite normalization tokenizes user input without a backtracking regex."""
+    from tldw_Server_API.app.core.DB_Management.backends import fts_translator
+    from tldw_Server_API.app.core.DB_Management.backends.fts_translator import FTSQueryTranslator
+
+    class ExplodingTokenizer:
+        def findall(self, query):
+            raise AssertionError("regex tokenizer should not be used")
+
+    monkeypatch.setattr(fts_translator, "SQLITE_FTS_TOKEN_RE", ExplodingTokenizer(), raising=False)
+
+    assert (
+        FTSQueryTranslator.normalize_query('front:"said ""hello""" alpha OR -state-of-the-art', "sqlite")
+        == 'front:"said ""hello""" alpha OR NOT "state-of-the-art"'
+    )

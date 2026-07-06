@@ -69,6 +69,12 @@ Create a new 0.1.38 release that includes the GHCR-only Docker release workflow 
   - `git diff --check`
   - `python -m bandit -r tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py tldw_Server_API/app/core/DB_Management/backends/fts_translator.py -f json -o /tmp/bandit_pr2677_review_prod.json` (zero findings)
   - `python -m bandit -r tldw_Server_API/tests/CI/test_release_workflow_contracts.py tldw_Server_API/tests/RAG_NEW/unit/test_fts_query_translation_edge_cases.py tldw_Server_API/tests/Flashcards/test_flashcards_db_assets.py -f json -o /tmp/bandit_pr2677_review_tests.json` (pytest `assert` B101 findings only; no non-B101 findings)
+- CodeQL follow-up: replaced the SQLite FTS normalizer's regex tokenizer with a linear scanner to resolve the high-severity "Polynomial regular expression used on uncontrolled data" alert on `fts_translator.py`.
+- CodeQL fix verification:
+  - `python -m pytest -q tldw_Server_API/tests/RAG_NEW/unit/test_fts_query_translation_edge_cases.py::test_sqlite_normalization_does_not_depend_on_regex_tokenizer` failed before the fix and passed after it.
+  - `python -m pytest -q tldw_Server_API/tests/CI/test_release_workflow_contracts.py tldw_Server_API/tests/RAG_NEW/unit/test_fts_query_translation_edge_cases.py tldw_Server_API/tests/Flashcards/test_flashcards_db_assets.py`
+  - `git diff --check`
+  - `python -m bandit -r tldw_Server_API/app/core/DB_Management/backends/fts_translator.py tldw_Server_API/tests/RAG_NEW/unit/test_fts_query_translation_edge_cases.py -f json -o /tmp/bandit_pr2677_codeql_fix.json` (production file zero findings; pytest `assert` B101 findings only in the test file; no non-B101 findings)
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

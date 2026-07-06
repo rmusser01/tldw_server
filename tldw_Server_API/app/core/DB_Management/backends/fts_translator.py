@@ -15,9 +15,75 @@ MAX_FTS_QUERY_LENGTH = 8192
 SQLITE_FTS_OPERATOR_TOKENS = {'AND', 'OR', 'NEAR', 'NOT'}
 SQLITE_FTS_SAFE_TOKEN_RE = re.compile(r'^[A-Za-z0-9_]+\*?$')
 SQLITE_FTS_COLUMN_TOKEN_RE = re.compile(r'^([A-Za-z_][A-Za-z0-9_]*):(.*)$')
-SQLITE_FTS_TOKEN_RE = re.compile(
-    r'-?[A-Za-z_][A-Za-z0-9_]*:"(?:[^"]|"")*"|-?"(?:[^"]|"")*"|\S+'
-)
+
+
+def _is_ascii_identifier_start(char: str) -> bool:
+    return char == '_' or 'A' <= char <= 'Z' or 'a' <= char <= 'z'
+
+
+def _is_ascii_identifier_char(char: str) -> bool:
+    return _is_ascii_identifier_start(char) or '0' <= char <= '9'
+
+
+def _quoted_sqlite_token_start(query: str, start: int) -> int:
+    """Return the quote index for phrase tokens, or -1 for plain tokens."""
+    index = start + 1 if query[start] == '-' else start
+    if index >= len(query):
+        return -1
+    if query[index] == '"':
+        return index
+    if not _is_ascii_identifier_start(query[index]):
+        return -1
+
+    index += 1
+    while index < len(query) and _is_ascii_identifier_char(query[index]):
+        index += 1
+
+    if index + 1 < len(query) and query[index] == ':' and query[index + 1] == '"':
+        return index + 1
+    return -1
+
+
+def _quoted_sqlite_token_end(query: str, quote_index: int) -> int:
+    """Return the end-exclusive phrase token index, honoring doubled quotes."""
+    index = quote_index + 1
+    while index < len(query):
+        if query[index] != '"':
+            index += 1
+            continue
+        if index + 1 < len(query) and query[index + 1] == '"':
+            index += 2
+            continue
+        return index + 1
+    return -1
+
+
+def _tokenize_sqlite_fts_query(query: str) -> list[str]:
+    """Tokenize SQLite FTS5 input linearly without regex backtracking."""
+    parts: list[str] = []
+    index = 0
+    query_length = len(query)
+
+    while index < query_length:
+        while index < query_length and query[index].isspace():
+            index += 1
+        if index >= query_length:
+            break
+
+        quote_index = _quoted_sqlite_token_start(query, index)
+        if quote_index != -1:
+            token_end = _quoted_sqlite_token_end(query, quote_index)
+            if token_end != -1:
+                parts.append(query[index:token_end])
+                index = token_end
+                continue
+
+        token_start = index
+        while index < query_length and not query[index].isspace():
+            index += 1
+        parts.append(query[token_start:index])
+
+    return parts
 
 
 class FTSQueryTranslator:
@@ -199,7 +265,7 @@ class FTSQueryTranslator:
         column_aliases: Optional[dict[str, str]] = None,
     ) -> str:
         """Protect plain text SQLite FTS5 searches from punctuation parsing."""
-        parts = SQLITE_FTS_TOKEN_RE.findall(query)
+        parts = _tokenize_sqlite_fts_query(query)
         normalized_parts = []
         last_allows_not = False
         has_operand = False
