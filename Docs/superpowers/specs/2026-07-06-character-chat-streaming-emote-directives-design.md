@@ -141,6 +141,8 @@ Emote: <state>
 Rules:
 
 - Prefix matching is case-insensitive.
+- Directive classification trims leading and trailing whitespace, but stripping
+  removes the whole source line.
 - Inline prose is not parsed. `She says Emote: smug` remains visible text.
 - Directives inside fenced code blocks are ignored and remain visible code.
 - State labels are trimmed, lowercased, and internal whitespace is converted to
@@ -171,6 +173,11 @@ Character-chat prompting should tell the model to emit `Emote: <state>` only
 when the character expression should change. It should not emit an emote after
 every sentence.
 
+When the character has known mood/emote image states, the prompt should include
+those exact normalized state slugs and tell the model to prefer them. Arbitrary
+safe states are still valid metadata, but known states are the only ones that can
+reliably change the portrait image in V1.
+
 Example:
 
 ```text
@@ -191,16 +198,19 @@ misformat instructions.
 ## Streaming Data Flow
 
 1. Character-chat stream starts.
-2. Response chunks are appended to a parser buffer that holds only the current
-   incomplete line.
-3. Complete lines are classified as visible text, directives, or fenced code.
-4. Visible text is emitted to the assistant message.
-5. Accepted directives update the active portrait state immediately and append
+2. Response chunks pass through a streaming parser that withholds only short
+   candidate prefixes that could still become a directive or fenced-code marker.
+3. Once the current line can no longer become `Emote:` or a fence marker, the
+   buffered visible text is emitted and later text on that same line can stream
+   normally instead of waiting for a newline.
+4. Complete lines are classified as visible text, directives, or fenced code.
+5. Visible text is emitted to the assistant message.
+6. Accepted directives update the active portrait state immediately and append
    an event with an offset in sanitized visible text.
-6. Invalid, duplicate, and over-cap directives are stripped without firing an
+7. Invalid, duplicate, and over-cap directives are stripped without firing an
    event.
-7. On stream end, the parser flushes the final unterminated line.
-8. The frontend persists the sanitized assistant text, the last accepted emote
+8. On stream end, the parser flushes the final unterminated line.
+9. The frontend persists the sanitized assistant text, the last accepted emote
    as `mood_label`, and optional `emote_events` metadata.
 
 The parser must normalize `\n`, `\r\n`, and final text without a trailing
@@ -251,6 +261,11 @@ Persistence path:
 
 - Add optional `emote_events` support to the character stream persist request
   and include it in `_build_stream_persist_metadata_extra()`.
+- Validate incoming `emote_events` at the API boundary. The value is optional;
+  when present it must contain at most 5 events. Each event must contain a
+  normalized `state` matching `^[a-z0-9][a-z0-9_-]{0,39}$` and an `at_char`
+  nonnegative integer. Invalid request payloads should fail with request
+  validation rather than being stored.
 - For backend-persisted non-streaming character completions, store parser output
   directly in `metadata_extra`.
 - Do not add a database migration. The existing message metadata storage remains
@@ -274,8 +289,9 @@ current built-in labels. Only the image map and explicit emote resolver need to
 accept arbitrary safe slugs.
 
 If an exact matching asset exists for the normalized state slug, show it. If
-not, keep the current portrait or base character image. Do not add fuzzy
-matching in V1.
+not, do not change the currently displayed portrait. If no emote portrait has
+been displayed for the assistant message yet, remain on the base character
+avatar. Do not add fuzzy matching in V1.
 
 Explicit emote directives override `detectCharacterMood()`. The heuristic
 classifier runs only when no valid explicit directive exists for the assistant
@@ -287,7 +303,8 @@ message.
 - Unsafe state labels are stripped and ignored.
 - Duplicate consecutive states are stripped and ignored.
 - Over-cap directives are stripped and ignored.
-- Asset misses keep the current/base portrait.
+- Asset misses do not change the displayed portrait; if no emote portrait has
+  been displayed yet, the base avatar remains visible.
 - Malformed metadata on load is ignored.
 - Parser errors should fall back to visible sanitized text rather than breaking
   chat rendering.
@@ -312,17 +329,23 @@ The UI should not log full assistant content while reporting parser errors.
 - Records `at_char` against sanitized visible text.
 - Uses the exact 40-character slug limit and 5-event cap.
 
+Use shared parser test vectors for the TypeScript streaming/final parser and
+the Python backend final parser. Prefer one checked-in JSON fixture file that
+both test suites read, so behavior does not drift across runtimes.
+
 ### Streaming Buffer Tests
 
 - A directive split across chunks never appears in visible output.
 - Normal text split across chunks is preserved.
-- The buffer holds only the current incomplete line.
+- Long non-directive lines stream before a newline once they are no longer
+  directive or fence-marker candidates.
 - The final unterminated line flushes correctly on stream completion.
 
 ### Character Chat Integration Tests
 
 - Explicit final emote persists as `mood_label`.
 - `emote_events` persists under metadata.
+- Backend persist request validation rejects malformed `emote_events`.
 - The last accepted emote event becomes `mood_label`.
 - `detectCharacterMood()` is bypassed when at least one valid directive exists.
 - Non-streaming character responses are parsed and stripped before
