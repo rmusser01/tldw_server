@@ -255,17 +255,17 @@ const sanitizeSourceCoverage = (
   sourceCoverage: ArtifactSourceCoverage
 ): ArtifactSourceCoverage => ({
   selectedSourceIds: capImportList(
-    sourceCoverage.selectedSourceIds
+    (sourceCoverage.selectedSourceIds || [])
       .map((sourceId) => readBoundedString(sourceId, METADATA_ID_LIMIT))
       .filter(Boolean)
   ),
-  usableSources: capImportList(sourceCoverage.usableSources)
+  usableSources: capImportList(sourceCoverage.usableSources || [])
     .map(normalizeCoverageEntry)
     .filter((source): source is ArtifactSourceCoverageEntry => Boolean(source)),
-  skippedSources: capImportList(sourceCoverage.skippedSources)
+  skippedSources: capImportList(sourceCoverage.skippedSources || [])
     .map(normalizeSkippedCoverageEntry)
     .filter((source): source is ArtifactSkippedSource => Boolean(source)),
-  truncatedSources: capImportList(sourceCoverage.truncatedSources)
+  truncatedSources: capImportList(sourceCoverage.truncatedSources || [])
     .map(normalizeCoverageEntry)
     .filter((source): source is ArtifactSourceCoverageEntry => Boolean(source)),
   ...(sourceCoverage.sourceContextCharLimit
@@ -275,9 +275,9 @@ const sanitizeSourceCoverage = (
 })
 
 const sanitizeSourceLineage = (
-  sourceLineage: ArtifactSourceLineage[]
+  sourceLineage: ArtifactSourceLineage[] | null | undefined
 ): ArtifactSourceLineage[] =>
-  capImportList(sourceLineage)
+  (Array.isArray(sourceLineage) ? capImportList(sourceLineage) : [])
     .map((lineage): ArtifactSourceLineage | null => {
       const sourceId = readString(lineage.sourceId)
       if (!sourceId) return null

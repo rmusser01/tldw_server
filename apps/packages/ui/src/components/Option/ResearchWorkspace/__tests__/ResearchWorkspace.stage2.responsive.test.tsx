@@ -877,6 +877,36 @@ describe("ResearchWorkspace Stage 2 drawer responsiveness", () => {
     })
   })
 
+  it("preserves a pending web clipper handoff when the route id does not match", async () => {
+    await writePendingWebClipAgentTaskRequest({
+      id: "handoff-stored",
+      clipId: "clip-123",
+      noteId: "note-123",
+      workspaceId: "workspace-1",
+      workspaceNoteId: 42,
+      pageUrl: "https://example.com/stored",
+      pageTitle: "Stored Story",
+      extractPreview: "Stored body copy",
+      hasScreenshot: false,
+      createdAt: new Date().toISOString()
+    })
+    window.history.replaceState(
+      null,
+      "",
+      "/research-workspace?workspace=workspace-1&agent_task_handoff=web_clip&handoff_id=handoff-other"
+    )
+
+    render(<ResearchWorkspace />)
+
+    await waitFor(() => {
+      expect(chromeStorageSessionGetMock).toHaveBeenCalled()
+    })
+    expect(mockWorkspaceHeaderProps.at(-1)?.agentTaskPrefill).toBeNull()
+    expect(
+      chromeStorageState.get(WEB_CLIPPER_PENDING_AGENT_TASK_STORAGE_KEY)
+    ).toMatchObject({ id: "handoff-stored" })
+  })
+
   it("cancels a bundle import when the active workspace changes during fetch", async () => {
     let resolveBundle!: (bundle: unknown) => void
     const bundlePromise = new Promise<unknown>((resolve) => {

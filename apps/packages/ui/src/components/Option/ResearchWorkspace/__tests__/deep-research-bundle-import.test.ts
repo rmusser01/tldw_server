@@ -485,4 +485,29 @@ describe("Deep Research bundle import", () => {
     )
     expect(artifact.sourceLineage[0]).not.toHaveProperty("oversizedUnknownField")
   })
+
+  it("treats missing source provenance arrays as empty during import", () => {
+    const partialSourceArtifact = {
+      ...sourceArtifact,
+      sourceCoverage: {
+        minimumUsableSourcesMet: false
+      },
+      sourceLineage: "not-a-list"
+    } as unknown as GeneratedArtifact
+
+    const artifact = buildDeepResearchBundleArtifactPayload({
+      bundle,
+      returnContext,
+      sourceArtifact: partialSourceArtifact
+    })
+
+    expect(artifact.sourceCoverage).toMatchObject({
+      selectedSourceIds: [],
+      usableSources: [],
+      skippedSources: [],
+      truncatedSources: [],
+      minimumUsableSourcesMet: false
+    })
+    expect(artifact.sourceLineage).toEqual([])
+  })
 })

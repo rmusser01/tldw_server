@@ -36,6 +36,18 @@ const truncatePreview = (value: string): string =>
     ? value
     : `${value.slice(0, EXTRACT_PREVIEW_LIMIT).trimEnd()}\n[Truncated for agent task handoff.]`
 
+const generateUUID = (): string => {
+  const randomUUID = globalThis.crypto?.randomUUID
+  if (typeof randomUUID === "function") {
+    return randomUUID.call(globalThis.crypto)
+  }
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (char) => {
+    const value = Math.floor(Math.random() * 16)
+    const nibble = char === "x" ? value : (value & 0x3) | 0x8
+    return nibble.toString(16)
+  })
+}
+
 type ExtensionStorageArea = {
   get?: (
     key: string,
@@ -239,7 +251,7 @@ export const buildPendingWebClipAgentTaskRequest = ({
   )
 
   return {
-    id: crypto.randomUUID(),
+    id: generateUUID(),
     clipId: response.clip_id || draft.clipId,
     noteId,
     workspaceId,
@@ -281,7 +293,7 @@ export const readPendingWebClipAgentTaskRequest =
         return null
       }
       return {
-        id: readString(record.id) || crypto.randomUUID(),
+        id: readString(record.id) || generateUUID(),
         clipId: readString(record.clipId),
         noteId,
         workspaceId,

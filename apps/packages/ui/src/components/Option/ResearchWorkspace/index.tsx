@@ -2347,11 +2347,13 @@ const ResearchWorkspaceBody: React.FC = () => {
     const params = new URLSearchParams(currentResearchWorkspaceSearch)
     if (params.get(WEB_CLIP_AGENT_TASK_ROUTE_FLAG) !== "web_clip") return
     const routeWorkspaceId = params.get("workspace")?.trim() || null
+    const routeHandoffId = params.get("handoff_id")?.trim() || null
 
     let cancelled = false
     void readPendingWebClipAgentTaskRequest().then((request) => {
       if (cancelled) return
       if (!request) return
+      if (routeHandoffId && request.id !== routeHandoffId) return
       if (lastAppliedWebClipHandoffIdRef.current === request.id) return
       if (request.workspaceId !== workspaceId) {
         if (routeWorkspaceId === request.workspaceId) {

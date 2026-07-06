@@ -472,6 +472,24 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
     )
   })
 
+  it("starts a workspace agent task when generated artifacts are not hydrated", () => {
+    const onStartWorkspaceTask = vi.fn()
+    workspaceStoreState.generatedArtifacts = undefined as any
+
+    renderStudioPane({ onStartWorkspaceTask })
+
+    fireEvent.click(screen.getByRole("button", { name: "Start workspace task" }))
+
+    expect(onStartWorkspaceTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          artifactIds: [],
+          artifactTitles: []
+        })
+      })
+    )
+  })
+
   it("includes selected sources that are not yet usable in studio workspace task metadata", () => {
     const onStartWorkspaceTask = vi.fn()
     workspaceStoreState.sources = [

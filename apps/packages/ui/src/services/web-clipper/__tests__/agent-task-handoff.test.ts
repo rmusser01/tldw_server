@@ -1,11 +1,14 @@
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {
   WEB_CLIPPER_PENDING_AGENT_TASK_STORAGE_KEY,
+  buildPendingWebClipAgentTaskRequest,
   clearPendingWebClipAgentTaskRequest,
   readPendingWebClipAgentTaskRequest,
   writePendingWebClipAgentTaskRequest,
   type PendingWebClipAgentTaskRequest
 } from "@/services/web-clipper/agent-task-handoff"
+
+const FIXED_NOW = new Date("2026-01-01T00:00:00.000Z")
 
 const createRequest = (
   overrides: Partial<PendingWebClipAgentTaskRequest> = {}
@@ -24,10 +27,73 @@ const createRequest = (
 })
 
 describe("web clipper agent-task handoff storage", () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(FIXED_NOW)
+  })
+
   afterEach(() => {
+    vi.useRealTimers()
     vi.unstubAllGlobals()
     window.localStorage.clear()
     window.sessionStorage.clear()
+  })
+
+  it("builds handoffs when crypto randomUUID is unavailable", () => {
+    vi.stubGlobal("crypto", {})
+
+    const request = buildPendingWebClipAgentTaskRequest({
+      draft: {
+        clipId: "clip-123",
+        requestedType: "article",
+        clipType: "article",
+        pageUrl: "https://example.com/story",
+        pageTitle: "Example Story",
+        visibleBody: "Visible body",
+        selectionText: "Selected text",
+        captureMetadata: {
+          clipType: "article",
+          actualType: "article",
+          fallbackPath: []
+        },
+        capturedAt: FIXED_NOW.toISOString()
+      },
+      response: {
+        clip_id: "clip-123",
+        status: "saved",
+        note: { id: "note-123", title: "Example Story", version: 1 },
+        workspace_placement: {
+          workspace_id: "workspace-alpha",
+          workspace_note_id: 42,
+          source_note_id: "note-123"
+        },
+        attachments: [],
+        warnings: [],
+        note_id: "note-123",
+        workspace_placement_saved: true,
+        workspace_placement_count: 1
+      }
+    })
+
+    expect(request?.id).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+    )
+  })
+
+  it("fills missing stored handoff ids when crypto randomUUID is unavailable", async () => {
+    vi.stubGlobal("crypto", {})
+    const { id: _id, ...requestWithoutId } = createRequest()
+    window.sessionStorage.setItem(
+      WEB_CLIPPER_PENDING_AGENT_TASK_STORAGE_KEY,
+      JSON.stringify(requestWithoutId)
+    )
+
+    await expect(readPendingWebClipAgentTaskRequest()).resolves.toMatchObject({
+      id: expect.stringMatching(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+      ),
+      clipId: "clip-123"
+    })
   })
 
   it("falls back when chrome storage callbacks report runtime errors", async () => {

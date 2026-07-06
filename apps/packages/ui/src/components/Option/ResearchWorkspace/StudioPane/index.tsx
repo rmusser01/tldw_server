@@ -798,7 +798,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
   const sourceFolderMemberships = useWorkspaceStore(
     (s) => s.sourceFolderMemberships
   ) || []
-  const generatedArtifacts = useWorkspaceStore((s) => s.generatedArtifacts)
+  const generatedArtifacts = useWorkspaceStore((s) => s.generatedArtifacts) || []
   const isGeneratingOutput = useWorkspaceStore((s) => s.isGeneratingOutput)
   const generatingOutputType = useWorkspaceStore((s) => s.generatingOutputType)
   const workspaceId = useWorkspaceStore((s) => s.workspaceId)
@@ -916,14 +916,14 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
     errorCount: selectedErrorSourceCount
   })
   const buildStudioWorkspaceTaskPrefill = React.useCallback((): WorkspaceAgentTaskPrefill => {
-    const sourceContextSources = effectiveSelectedSources.slice(
+    const sourceContextSources = (effectiveSelectedSources || []).slice(
       0,
       WORKSPACE_TASK_SOURCE_CONTEXT_LIMIT
     )
     const selectedSourceTitles = sourceContextSources.map(
       (source) => source.title || source.id
     )
-    const contextArtifacts = generatedArtifacts.slice(
+    const contextArtifacts = (generatedArtifacts || []).slice(
       0,
       WORKSPACE_TASK_ARTIFACT_CONTEXT_LIMIT
     )
