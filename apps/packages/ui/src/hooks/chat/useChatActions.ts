@@ -2441,10 +2441,15 @@ export const useChatActions = ({
             )
           } else {
             try {
-              const createdAsst = (await tldwClient.addChatMessage(chatId, {
-                role: "assistant",
-                content: finalPersistedContent
-              }, scope ? { scope } : undefined)) as {
+              const createdAsst = (await tldwClient.addChatMessage(
+                chatId,
+                {
+                  role: "assistant",
+                  content: finalPersistedContent,
+                  ...(metadataExtra ? { metadata_extra: metadataExtra } : {})
+                },
+                scope ? { scope } : undefined
+              )) as {
                 id?: string | number
                 version?: number
               } | null
@@ -2614,8 +2619,33 @@ export const useChatActions = ({
                 )
                 return true
               }
-            } catch {
-              // Fall back to the generic chat-message endpoint below.
+            } catch (persistError) {
+              const savedOutcome =
+                resolveSavedDegradedCharacterPersist(persistError)
+              if (savedOutcome?.saved) {
+                assistantPersistedToServer = true
+                setMessages((prev) =>
+                  ((prev as any[]).map((m) => {
+                    if (m.id !== generateMessageId) return m
+                    const serverMessageId =
+                      savedOutcome.assistantMessageId != null
+                        ? String(savedOutcome.assistantMessageId)
+                        : undefined
+                    return updateActiveVariant(m, {
+                      serverMessageId,
+                      serverMessageVersion: savedOutcome.version,
+                      metadataExtra: {
+                        ...(m.metadataExtra ?? {}),
+                        ...(recoveryMetadataExtra ?? {})
+                      },
+                      moodLabel: recoveryMoodLabel,
+                      moodConfidence: null,
+                      moodTopic: null
+                    })
+                  }) as Message[])
+                )
+                return true
+              }
             }
           }
           const payload: Record<string, unknown> = {

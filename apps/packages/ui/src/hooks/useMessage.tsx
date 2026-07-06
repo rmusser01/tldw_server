@@ -1882,6 +1882,7 @@ export const useMessage = () => {
               const createdAsst = (await tldwClient.addChatMessage(chatId, {
                 role: "assistant",
                 content: finalPersistedContent,
+                ...(metadataExtra ? { metadata_extra: metadataExtra } : {}),
               })) as { id?: string | number; version?: number } | null;
               setMessages(
                 (prev) =>
