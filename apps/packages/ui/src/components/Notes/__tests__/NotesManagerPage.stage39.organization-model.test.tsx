@@ -1,5 +1,6 @@
 import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import userEvent from "@testing-library/user-event"
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import NotesManagerPage from "../NotesManagerPage"
@@ -174,7 +175,7 @@ const selectKeywordPickerOption = async (pickerDialog: HTMLElement, keywordSegme
       ? option
       : option.querySelector<HTMLInputElement>('input[type="checkbox"]')
   expect(checkbox).toBeTruthy()
-  fireEvent.click(checkbox as HTMLInputElement)
+  await userEvent.click(checkbox as HTMLInputElement)
   await waitFor(() => {
     expect(checkbox).toBeChecked()
   })
