@@ -15,6 +15,8 @@ from loguru import logger
 from tldw_Server_API.app.core.testing import is_truthy
 
 DEFAULT_ALLOWED_SCHEMES = {"http", "https"}
+DEFAULT_ALLOWED_PORTS = (80, 443, 8080)
+DEFAULT_ALLOWED_PORTS_ENV_VALUE = ",".join(str(port) for port in DEFAULT_ALLOWED_PORTS)
 ALLOWLIST_ENV = "WORKFLOWS_EGRESS_ALLOWLIST"
 DENYLIST_ENV = "WORKFLOWS_EGRESS_DENYLIST"
 # Global variants (applied across all usages)
@@ -394,7 +396,7 @@ def evaluate_url_policy(
 
     # Ports policy (defaults 80/443/8080; override via env)
     def _default_ports() -> list[int]:
-        raw = os.getenv(ALLOWED_PORTS_ENV, "80,443,8080")
+        raw = os.getenv(ALLOWED_PORTS_ENV, DEFAULT_ALLOWED_PORTS_ENV_VALUE)
         tokens = [part.strip().lower() for part in (raw or "").split(",") if part.strip()]
         if any(token in {"*", "any", "all"} for token in tokens):
             return []
@@ -404,7 +406,7 @@ def evaluate_url_policy(
                 out.append(int(p))
             except ValueError:
                 continue
-        return out or [80, 443]
+        return out or list(DEFAULT_ALLOWED_PORTS)
 
     allowed_ports = _default_ports()
     if (os.getenv("PYTEST_CURRENT_TEST") or os.getenv("TESTING")) and host in {"localhost", "127.0.0.1", "::1"}:
