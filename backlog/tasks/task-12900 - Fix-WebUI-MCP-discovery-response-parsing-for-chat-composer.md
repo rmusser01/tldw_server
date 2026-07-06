@@ -1,5 +1,5 @@
 ---
-id: TASK-12898
+id: TASK-12900
 title: Fix WebUI MCP discovery response parsing for chat composer
 status: Done
 assignee: []
