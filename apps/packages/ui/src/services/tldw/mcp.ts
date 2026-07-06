@@ -101,13 +101,23 @@ export const executeMcpTool = async (
   })
 }
 
-const unwrapToolResult = (payload: Record<string, unknown> | null | undefined) => {
+const unwrapToolResult = (payload: Record<string, unknown> | null | undefined): unknown => {
   if (!payload || typeof payload !== "object") return null
-  if ("result" in payload) {
-    const value = (payload as Record<string, unknown>).result
-    return value && typeof value === "object" ? (value as Record<string, unknown>) : value
+  const value = "result" in payload ? payload.result : payload
+  if (!value || typeof value !== "object") return value
+  const result = value as Record<string, unknown>
+  const content = result.content
+  if (Array.isArray(content)) {
+    const jsonContent = content.find(
+      (entry) =>
+        entry &&
+        typeof entry === "object" &&
+        "json" in entry &&
+        (entry as Record<string, unknown>).json != null
+    ) as Record<string, unknown> | undefined
+    if (jsonContent) return jsonContent.json
   }
-  return payload
+  return result
 }
 
 const normalizeCatalogList = (payload: unknown): McpToolCatalog[] => {
