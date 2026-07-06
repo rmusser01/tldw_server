@@ -17,6 +17,60 @@ and this project adheres to Some kind of Versioning
 ### Removed
 
 
+## [0.1.37] - 2026-07-05
+
+> Rollup coverage: this entry covers the research workspace media-output work
+> and follow-up `dev` work queued for `main` after the `0.1.36` corrective
+> release. It includes PRs #2657, #2659, #2661, #2662, #2663, #2664, #2665,
+> #2666, #2667, #2668, #2669, #2670, #2671, #2673, #2674, and #2675, plus the
+> follow-up `dev` merge in PR #2656 and release-review hardening in PR #2672.
+
+### Added
+
+- **Research Workspace Media Outputs** — Added research workspace media
+  capabilities, output job APIs, background worker startup contracts,
+  persisted output artifacts, infographic generation, video overview
+  generation, frontend client contracts, and rendered media-output surfaces.
+- **Research Workspace Agent Tasks** — Added agent-task entry points from Chat
+  and Studio, persisted ACP run results as workspace artifacts, preserved task
+  context, connected discovery loops, and expanded NotebookLM-style workspace
+  parity coverage.
+- **Web Scraping Runtime Boundary** — Added runtime request/response contracts,
+  policy adapters, central fetch adapter wiring, viewport validation, article
+  fetch egress pinning, and focused runtime contract coverage for the phase 2
+  scraping boundary.
+
+### Changed
+
+- **Release Metadata** — Bumped package, FastAPI, README, and MkDocs metadata
+  to `0.1.37` for the next patch release from `main`.
+- **Release And Backlog Hygiene** — Recorded release-task closeout, cleaned up
+  completed MCP setup bookkeeping, made active Backlog task ids unique, and
+  kept the release branch synchronized with the latest `dev` follow-ups.
+
+### Fixed
+
+- **Research Output Hardening** — Hardened research output owner isolation,
+  status lookup failures, worker error handling, artifact persistence, context
+  excerpts, PNG byte validation, and encoded/embedded/delimited output metadata
+  path rejection.
+- **Research Workspace Readiness** — Fixed media readiness blockers, smoke-test
+  blockers, header sanity coverage, unhydrated Studio artifact access, web
+  clipper handoff id validation, and malformed Deep Research provenance imports.
+- **MCP First-Run Discovery** — Fixed setup wizard router test context,
+  duplicate task ids, discovery response parsing, and the end-to-end MCP
+  discovery validation path.
+- **Provider And UI Follow-Ups** — Fixed provider-prefixed llama model ids,
+  default egress port coverage for `8080`, chat system prompt modal editing,
+  dark-theme visual fidelity, and Chatbooks dark-theme visual coverage.
+- **Web Scraping Runtime Review Hardening** — Replaced generic fetch validation
+  errors with project-specific errors, added the missing fetch adapter
+  docstring, wrapped overlong response fallback formatting, and bounded imported
+  source lineage ids.
+
+### Removed
+
+
 ## [0.1.36] - 2026-07-05
 
 > Corrective release: this patch supersedes `0.1.35` after the release merge

@@ -1828,6 +1828,7 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
             <Switch checked={includeMedia} onChange={setIncludeMedia} />
             <Text>{t("settings:chatbooksPlayground.includeMedia", "Include media")}</Text>
             <Select
+              aria-label={t("settings:chatbooksPlayground.mediaQuality", "Media quality")}
               value={mediaQuality}
               onChange={setMediaQuality}
               options={[
@@ -1983,6 +1984,7 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
           <Space wrap>
             <Text>{t("settings:chatbooksPlayground.importSource", "Source")}</Text>
             <Select
+              aria-label={t("settings:chatbooksPlayground.importSource", "Import source")}
               value={importSourceFormat}
               onChange={(value) => setImportSourceFormat(value as ImportSourceFormat)}
               className="min-w-[220px]"
@@ -2550,6 +2552,7 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
 
           <Space wrap>
             <Select
+              aria-label={t("settings:chatbooksPlayground.conflictResolution", "Conflict resolution")}
               value={conflictResolution}
               onChange={setConflictResolution}
               options={

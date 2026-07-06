@@ -82,6 +82,10 @@ from tldw_Server_API.app.core.http_client import afetch as _http_afetch
 from tldw_Server_API.app.core.MCP_unified.auth.jwt_manager import get_jwt_manager
 from tldw_Server_API.app.core.Resource_Governance.deps import derive_entity_key
 from tldw_Server_API.app.core.Resource_Governance.governor import RGRequest
+from tldw_Server_API.app.core.Security.egress import (
+    ALLOWED_PORTS_ENV,
+    DEFAULT_ALLOWED_PORTS,
+)
 from tldw_Server_API.app.core.Streaming.streams import WebSocketStream
 from tldw_Server_API.app.core.testing import (
     env_flag_enabled,
@@ -4329,7 +4333,7 @@ async def get_workflows_config(
         },
         "egress": {
             "profile": (os.getenv("WORKFLOWS_EGRESS_PROFILE", "") or "(auto)").strip(),
-            "allowed_ports": _csv("WORKFLOWS_EGRESS_ALLOWED_PORTS") or ["80","443"],
+            "allowed_ports": _csv(ALLOWED_PORTS_ENV) or [str(port) for port in DEFAULT_ALLOWED_PORTS],
             "allowlist": _csv("WORKFLOWS_EGRESS_ALLOWLIST"),
             "block_private": _env_bool("WORKFLOWS_EGRESS_BLOCK_PRIVATE", True),
         },

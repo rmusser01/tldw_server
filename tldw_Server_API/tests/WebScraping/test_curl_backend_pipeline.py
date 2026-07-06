@@ -1,6 +1,7 @@
 import types
 import pytest
 
+from tldw_Server_API.app.core.Web_Scraping.runtime import FetchResponse
 from tldw_Server_API.app.core.Web_Scraping.scraper_router import ScraperRouter
 
 
@@ -34,13 +35,22 @@ async def test_scrape_article_uses_curl_backend(monkeypatch):
       </body>
     </html>
     """
-    called = {"curl": False}
 
-    def fake_fetch(url, headers, cookies, timeout, impersonate, proxies):  # noqa: ANN001, ARG001
-        called["curl"] = True
-        return {"status": 200, "text": html}
+    class FakeFetchClient:
+        def __init__(self):
+            self.requests = []
 
-    monkeypatch.setattr(ael, "_fetch_with_curl", fake_fetch)
+        def fetch(self, request):
+            self.requests.append(request)
+            return FetchResponse(
+                url=request.url,
+                status=200,
+                text=html,
+                backend=request.backend,
+            )
+
+    fetch_client = FakeFetchClient()
+    monkeypatch.setattr(ael, "_ARTICLE_FETCH_CLIENT", fetch_client)
 
     rules = ScraperRouter.validate_rules(
         {
@@ -64,6 +74,6 @@ async def test_scrape_article_uses_curl_backend(monkeypatch):
 
     result = await ael.scrape_article("https://example.com/path")
 
-    assert called["curl"] is True
+    assert fetch_client.requests[0].backend == "curl"
     assert result["extraction_successful"] is True
     assert result["title"] == "Title"

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Fix validated Watchlists core review findings from TASK-10000 without broad module refactors.
+**Goal:** Fix validated Watchlists core review findings from TASK-12790 without broad module refactors.
 
 **Architecture:** Keep the changes at existing boundaries: filter safety stays in `Watchlists/filters.py`, tenant/status/cancellation behavior stays in pipeline and scheduler handler code, ownership checks stay in `Watchlists_DB.py`, and output enrichment scheduling reuses the existing `output_enrichment_handler.enrich_output` worker. Regression coverage is focused on the specific broken contracts.
 
@@ -66,7 +66,7 @@
 **Files:**
 - Modify: `tldw_Server_API/app/api/v1/endpoints/watchlists.py`
 - Test: `tldw_Server_API/tests/Watchlists/test_watchlists_api.py`
-- Update: `backlog/tasks/task-10000 - Harden-Watchlists-core-review-findings.md`
+- Update: `backlog/tasks/task-12790 - Harden-Watchlists-core-review-findings.md`
 
 **Success Criteria:** Creating an output with briefing summary or topic grouping schedules `enrich_output` after artifact creation, existing output behavior remains unchanged, focused Watchlists tests pass, and Bandit reports no new findings on touched Python files.
 

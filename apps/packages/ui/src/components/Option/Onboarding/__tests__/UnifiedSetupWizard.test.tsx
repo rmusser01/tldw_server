@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import React from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { FirstRunState } from "@/types/setup-onboarding";
@@ -902,17 +903,19 @@ describe("UnifiedSetupWizard", () => {
     const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard");
 
     render(
-      <UnifiedSetupWizard
-        initialState={initialStateForCompletedSteps([
-          "setup_path",
-          "privacy_security",
-          "providers",
-          "ingest_defaults",
-          "audio_defaults",
-          "optional_advanced",
-          "mcp_tools",
-        ])}
-      />,
+      <MemoryRouter>
+        <UnifiedSetupWizard
+          initialState={initialStateForCompletedSteps([
+            "setup_path",
+            "privacy_security",
+            "providers",
+            "ingest_defaults",
+            "audio_defaults",
+            "optional_advanced",
+            "mcp_tools",
+          ])}
+        />
+      </MemoryRouter>,
     );
 
     fireEvent.click(screen.getByRole("button", { name: /back to mcp tools/i }));
@@ -926,42 +929,44 @@ describe("UnifiedSetupWizard", () => {
     const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard");
 
     render(
-      <UnifiedSetupWizard
-        initialState={{
-          status: "in_progress",
-          completed_steps: [
-            "setup_path",
-            "privacy_security",
-            "providers",
-            "ingest_defaults",
-            "audio_defaults",
-            "optional_advanced",
-          ],
-          skipped_steps: [],
-          step_data: {
-            providers: {
-              acknowledged: true,
-              default_provider: "openai",
-              default_model: "gpt-4.1-mini",
-              default_provider_credential_configured: true,
+      <MemoryRouter>
+        <UnifiedSetupWizard
+          initialState={{
+            status: "in_progress",
+            completed_steps: [
+              "setup_path",
+              "privacy_security",
+              "providers",
+              "ingest_defaults",
+              "audio_defaults",
+              "optional_advanced",
+            ],
+            skipped_steps: [],
+            step_data: {
+              providers: {
+                acknowledged: true,
+                default_provider: "openai",
+                default_model: "gpt-4.1-mini",
+                default_provider_credential_configured: true,
+              },
+              mcp_tools: {
+                acknowledged: true,
+                validation_state: "not_run",
+                profile_id: 7,
+                assignment_id: 9,
+                selected_pack_ids: ["writing"],
+                selected_addon_ids: ["workspace_write"],
+                confirmed_addon_ids: ["workspace_write"],
+                effective_tool_count: 1,
+                effective_tools: ["notes.create"],
+                disabled_addons: [],
+              },
             },
-            mcp_tools: {
-              acknowledged: true,
-              validation_state: "not_run",
-              profile_id: 7,
-              assignment_id: 9,
-              selected_pack_ids: ["writing"],
-              selected_addon_ids: ["workspace_write"],
-              confirmed_addon_ids: ["workspace_write"],
-              effective_tool_count: 1,
-              effective_tools: ["notes.create"],
-              disabled_addons: [],
-            },
-          },
-          acknowledged_steps: [],
-          first_chat: { completed: false },
-        }}
-      />,
+            acknowledged_steps: [],
+            first_chat: { completed: false },
+          }}
+        />
+      </MemoryRouter>,
     );
 
     fireEvent.click(screen.getByRole("button", { name: /back to mcp tools/i }));

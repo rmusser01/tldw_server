@@ -18,7 +18,7 @@ The Security module owns outbound network policy helpers in `egress.py` and endp
 TASK-2247 confirmed the current implementation that bounds this ADR:
 
 - `evaluate_url_policy()` accepts only HTTP and HTTPS schemes.
-- URLs must include a hostname and a valid port. Allowed ports default to 80 and 443 unless `WORKFLOWS_EGRESS_ALLOWED_PORTS` changes that policy.
+- URLs must include a hostname and a valid port. Allowed ports default to 80, 443, and 8080 unless `WORKFLOWS_EGRESS_ALLOWED_PORTS` changes that policy.
 - Global and workflow allow/deny lists are merged from `EGRESS_ALLOWLIST`, `EGRESS_DENYLIST`, `WORKFLOWS_EGRESS_ALLOWLIST`, and `WORKFLOWS_EGRESS_DENYLIST`.
 - Denylist entries win over allowlist entries.
 - Production-like environments default to a strict profile that requires an allowlist; non-production defaults to permissive public-host behavior unless allowlists are configured.

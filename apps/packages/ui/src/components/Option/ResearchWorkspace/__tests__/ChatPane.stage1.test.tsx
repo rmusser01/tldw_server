@@ -398,6 +398,103 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     expect(vi.mocked(getDesignSystemState)).toHaveBeenCalledWith("degraded")
   })
 
+  it("starts a workspace agent task from chat context", () => {
+    const onStartWorkspaceTask = vi.fn()
+    workspaceStoreState.sources = [
+      {
+        id: "source-1",
+        mediaId: 42,
+        title: "DSPy Prompting Talk",
+        type: "video",
+        status: "ready"
+      }
+    ]
+    workspaceStoreState.selectedSourceIds = ["source-1"]
+    workspaceStoreState.getSelectedSources = () => [
+      { id: "source-1", title: "DSPy Prompting Talk" }
+    ]
+    workspaceStoreState.getSelectedMediaIds = () => [42]
+    workspaceStoreState.getEffectiveSelectedMediaIds = () => [42]
+    messageOptionState.messages = [
+      {
+        id: "message-1",
+        isBot: false,
+        name: "User",
+        message: "Find the places where the speaker contradicts the paper.",
+        sources: []
+      }
+    ]
+
+    renderChatPane({ onStartWorkspaceTask })
+
+    fireEvent.click(screen.getByRole("button", { name: "Start workspace task" }))
+
+    expect(onStartWorkspaceTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: expect.stringContaining("chat"),
+        description: expect.stringContaining("DSPy Prompting Talk"),
+        metadata: expect.objectContaining({
+          entrypoint: "chat",
+          workspaceId: "workspace-a",
+          selectedSourceIds: ["source-1"],
+          selectedSourceTitles: ["DSPy Prompting Talk"],
+          messageCount: 1,
+          latestUserMessagePreview:
+            "Find the places where the speaker contradicts the paper."
+        })
+      })
+    )
+  })
+
+  it("uses an unsent chat draft when starting a workspace agent task", () => {
+    const onStartWorkspaceTask = vi.fn()
+
+    renderChatPane({ onStartWorkspaceTask })
+
+    fireEvent.change(screen.getByLabelText("Chat message"), {
+      target: { value: "Use this draft as the task brief." }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Start workspace task" }))
+
+    const prefill = onStartWorkspaceTask.mock.calls[0]?.[0]
+    expect(prefill.description).toContain("Draft instructions:")
+    expect(prefill.description).toContain("Use this draft as the task brief.")
+    expect(prefill.description).not.toContain("Latest user message:")
+    expect(prefill.metadata).toEqual(
+      expect.objectContaining({
+        latestUserMessagePreview: "Use this draft as the task brief."
+      })
+    )
+  })
+
+  it("caps selected source ids in chat workspace task metadata", () => {
+    const onStartWorkspaceTask = vi.fn()
+    workspaceStoreState.sources = Array.from({ length: 6 }, (_, index) => ({
+      id: `source-${index + 1}`,
+      mediaId: index + 1,
+      title: `Source ${index + 1}`,
+      type: "pdf",
+      status: "ready" as const
+    }))
+    workspaceStoreState.selectedSourceIds = workspaceStoreState.sources.map(
+      (source) => source.id
+    )
+
+    renderChatPane({ onStartWorkspaceTask })
+
+    fireEvent.click(screen.getByRole("button", { name: "Start workspace task" }))
+
+    expect(onStartWorkspaceTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          selectedSourceIds: ["source-1", "source-2", "source-3", "source-4", "source-5"],
+          selectedSourceTitles: ["Source 1", "Source 2", "Source 3", "Source 4", "Source 5"],
+          selectedSourceCount: 6
+        })
+      })
+    )
+  })
+
   it("submits the composer with Cmd/Ctrl+Enter", async () => {
     renderChatPane()
 
@@ -711,6 +808,35 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     )
     expect(mockSetRagMediaIds).not.toHaveBeenLastCalledWith(null)
     expect(screen.queryByText(/Unable to reach server/)).not.toBeInTheDocument()
+  })
+
+  it("does not restore a failed submitted draft over newer composer edits", async () => {
+    let resolveSubmit: (value: { status: "failed"; errorMessage: string }) => void = () => {}
+    mockOnSubmit.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveSubmit = resolve as (value: {
+            status: "failed"
+            errorMessage: string
+          }) => void
+        })
+    )
+
+    renderChatPane()
+
+    const textarea = screen.getByPlaceholderText("Type a message...")
+    fireEvent.change(textarea, { target: { value: "Original draft" } })
+    fireEvent.click(screen.getByRole("button", { name: "Send" }))
+    await waitFor(() => {
+      expect(textarea).toHaveValue("")
+    })
+    fireEvent.change(textarea, { target: { value: "New draft" } })
+
+    resolveSubmit({ status: "failed", errorMessage: "no_provider_configured" })
+
+    await waitFor(() => {
+      expect(textarea).toHaveValue("New draft")
+    })
   })
 
   it("clears an accepted draft optimistically while the chat request is pending", async () => {

@@ -69,10 +69,16 @@ from tldw_Server_API.app.core.Web_Scraping.filters import (
     URLPatternFilter,
 )
 from tldw_Server_API.app.core.Web_Scraping.handlers import resolve_handler
-from tldw_Server_API.app.core.Web_Scraping.outbound_policy import (
-    WebOutboundPolicyDecision,
-    decide_web_outbound_policy,
-    decide_web_outbound_policy_sync,
+from tldw_Server_API.app.core.Web_Scraping.outbound_policy import decide_web_outbound_policy_sync
+from tldw_Server_API.app.core.Web_Scraping.policy import DefaultWebOutboundPolicyChecker
+from tldw_Server_API.app.core.Web_Scraping.runtime import (
+    DefaultFetchClient,
+    FetchClient,
+    FetchRequest,
+    FetchResponse,
+    OutboundPolicyChecker,
+    PolicyDecision,
+    RuntimeRequestContext,
 )
 from tldw_Server_API.app.core.Web_Scraping.scraper_router import ScraperRouter
 from tldw_Server_API.app.core.Web_Scraping.ua_profiles import (
@@ -262,28 +268,8 @@ def _resp_get(resp: Any, key: str, default: Any = None) -> Any:
     return default
 
 
-def _fetch_with_curl(
-    url: str,
-    *,
-    headers: dict[str, Any],
-    cookies: Optional[dict[str, str]],
-    timeout: float,
-    impersonate: Optional[str],
-    proxies: Optional[dict[str, str]],
-) -> dict[str, Any]:
-    """Fetch HTML using curl_cffi via the centralized http_client."""
-    from tldw_Server_API.app.core.http_client import fetch as http_fetch
-
-    return http_fetch(
-        url,
-        headers=headers,
-        cookies=cookies,
-        timeout=timeout,
-        proxies=proxies,
-        backend="curl",
-        impersonate=impersonate,
-        follow_redirects=True,
-    )
+_ARTICLE_POLICY_CHECKER: OutboundPolicyChecker = DefaultWebOutboundPolicyChecker()
+_ARTICLE_FETCH_CLIENT: FetchClient = DefaultFetchClient()
 
 
 def is_allowed_by_robots(url: str, user_agent: str, *, timeout: float = 5.0) -> bool:
@@ -2725,7 +2711,7 @@ def _record_robot_policy_block(url: str, reason: str) -> None:
 
 def _blocked_article_result(
     url: str,
-    decision: WebOutboundPolicyDecision,
+    decision: PolicyDecision,
 ) -> dict[str, Any]:
     _record_robot_policy_block(url, decision.reason)
     if decision.reason.startswith("robots_"):
@@ -2745,6 +2731,64 @@ def _blocked_article_result(
         "policy_stage": decision.stage,
         "policy_source": decision.source,
     }
+
+
+async def _decide_article_pre_fetch_policy(
+    url: str,
+    *,
+    respect_robots: bool,
+    user_agent: str,
+    config: dict[str, Any],
+    policy_checker: OutboundPolicyChecker | None = None,
+) -> PolicyDecision:
+    checker = policy_checker or _ARTICLE_POLICY_CHECKER
+    return await checker.decide(
+        url,
+        respect_robots=respect_robots,
+        user_agent=user_agent,
+        context=RuntimeRequestContext(source="article_extract", stage="pre_fetch"),
+        config={"web_scraper": config},
+    )
+
+
+def _fetch_article_lightweight(
+    url: str,
+    *,
+    backend_choice: str,
+    headers: dict[str, str],
+    cookies: dict[str, str] | None,
+    timeout: float,
+    impersonate: str | None,
+    proxies: dict[str, str] | None,
+    fetch_client: FetchClient | None = None,
+) -> tuple[FetchResponse, str]:
+    client = fetch_client or _ARTICLE_FETCH_CLIENT
+
+    def _fetch_with_backend(backend: str) -> FetchResponse:
+        return client.fetch(
+            FetchRequest(
+                url=url,
+                method="GET",
+                headers=headers,
+                cookies=cookies or {},
+                timeout=timeout,
+                backend=backend,
+                allow_redirects=True,
+                impersonate=impersonate,
+                proxies=proxies,
+                context=RuntimeRequestContext(source="article_extract", stage="fetch"),
+            )
+        )
+
+    if backend_choice == "curl":
+        try:
+            response = _fetch_with_backend("curl")
+            return response, response.backend or "curl"
+        except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS as exc:
+            logger.debug("curl backend failed; falling back to httpx: {}", exc)
+
+    response = _fetch_with_backend("httpx")
+    return response, response.backend or "httpx"
 
 
 async def scrape_article(url: str, custom_cookies: Optional[list[dict[str, Any]]] = None) -> dict[str, Any]:
@@ -2808,13 +2852,11 @@ async def scrape_article(url: str, custom_cookies: Optional[list[dict[str, Any]]
 
     effective_ua = ua_headers.get("User-Agent", web_scraping_user_agent)
     try:
-        decision = await decide_web_outbound_policy(
+        decision = await _decide_article_pre_fetch_policy(
             url,
             respect_robots=bool(getattr(plan, "respect_robots", True)),
             user_agent=effective_ua,
-            source="article_extract",
-            stage="pre_fetch",
-            config={"web_scraper": ws_cfg},
+            config=ws_cfg,
         )
     except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS as exc:
         logging.error(f"Outbound policy evaluation failed: {exc}")
@@ -2904,43 +2946,16 @@ async def scrape_article(url: str, custom_cookies: Optional[list[dict[str, Any]]
                 cookies_map.update({str(k): str(v) for k, v in plan.cookies.items()})
 
             t0 = time.time()
-            if backend_choice == "curl":
-                try:
-                    resp = await asyncio.to_thread(
-                        _fetch_with_curl,
-                        url,
-                        headers=ua_headers,
-                        cookies=cookies_map or None,
-                        timeout=15.0,
-                        impersonate=getattr(plan, "impersonate", None),
-                        proxies=getattr(plan, "proxies", None) or None,
-                    )
-                    backend_used = "curl"
-                except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS as exc:
-                    logging.debug(f"curl backend failed; falling back to httpx: {exc}")
-                    resp = await asyncio.to_thread(
-                        http_fetch,
-                        url,
-                        method="GET",
-                        headers=ua_headers,
-                        cookies=cookies_map or None,
-                        timeout=15.0,
-                        allow_redirects=True,
-                        proxies=getattr(plan, "proxies", None) or None,
-                    )
-                    backend_used = _resp_get(resp, "backend", "httpx")
-            else:
-                resp = await asyncio.to_thread(
-                    http_fetch,
-                    url,
-                    method="GET",
-                    headers=ua_headers,
-                    cookies=cookies_map or None,
-                    timeout=15.0,
-                    allow_redirects=True,
-                    proxies=getattr(plan, "proxies", None) or None,
-                )
-                backend_used = _resp_get(resp, "backend", "httpx")
+            resp, backend_used = await asyncio.to_thread(
+                _fetch_article_lightweight,
+                url,
+                backend_choice=backend_choice,
+                headers=ua_headers,
+                cookies=cookies_map or None,
+                timeout=15.0,
+                impersonate=getattr(plan, "impersonate", None),
+                proxies=getattr(plan, "proxies", None) or None,
+            )
 
             elapsed = max(0.0, time.time() - t0)
             observe_histogram("scrape_fetch_latency_seconds", elapsed, labels={"backend": backend_used})

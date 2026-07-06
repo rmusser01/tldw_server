@@ -9,6 +9,10 @@ import {
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ResearchWorkspace } from "../index"
 import { RESEARCH_WORKSPACE_LAST_MOBILE_TAB_STORAGE_KEY } from "../research-workspace-route-state"
+import {
+  WEB_CLIPPER_PENDING_AGENT_TASK_STORAGE_KEY,
+  writePendingWebClipAgentTaskRequest
+} from "@/services/web-clipper/agent-task-handoff"
 
 const ONBOARDING_KEY = "tldw:research-workspace:onboarding-dismissed:v1"
 const {
@@ -18,7 +22,8 @@ const {
   mockGetResearchWorkspaceCapabilities,
   mockGetResearchBundle,
   mockChatPaneProps,
-  mockStudioPaneProps
+  mockStudioPaneProps,
+  mockWorkspaceHeaderProps
 } = vi.hoisted(() => ({
   onboardingStorageState: {
     value: undefined as string | undefined
@@ -40,8 +45,35 @@ const {
   })),
   mockGetResearchBundle: vi.fn(),
   mockChatPaneProps: [] as any[],
-  mockStudioPaneProps: [] as any[]
+  mockStudioPaneProps: [] as any[],
+  mockWorkspaceHeaderProps: [] as any[]
 }))
+const chromeStorageState = vi.hoisted(() => new Map<string, unknown>())
+const chromeStorageSessionGetMock = vi.hoisted(() =>
+  vi.fn((key: string, callback?: (items: Record<string, unknown>) => void) => {
+    const result = chromeStorageState.has(key)
+      ? { [key]: chromeStorageState.get(key) }
+      : {}
+    callback?.(result)
+    return Promise.resolve(result)
+  })
+)
+const chromeStorageSessionSetMock = vi.hoisted(() =>
+  vi.fn((items: Record<string, unknown>, callback?: () => void) => {
+    for (const [key, value] of Object.entries(items)) {
+      chromeStorageState.set(key, value)
+    }
+    callback?.()
+    return Promise.resolve()
+  })
+)
+const chromeStorageSessionRemoveMock = vi.hoisted(() =>
+  vi.fn((key: string, callback?: () => void) => {
+    chromeStorageState.delete(key)
+    callback?.()
+    return Promise.resolve()
+  })
+)
 
 const mockMessageApi = {
   open: vi.fn(),
@@ -59,6 +91,7 @@ const testState = {
   workspaceTag: "",
   initializeWorkspace: vi.fn(),
   createNewWorkspace: vi.fn(),
+  switchWorkspace: vi.fn(),
   addSources: vi.fn(),
   setSelectedSourceIds: vi.fn(),
   captureToCurrentNote: vi.fn(),
@@ -97,10 +130,19 @@ vi.mock("react-i18next", () => ({
         | string
         | {
             defaultValue?: string
-          }
+          },
+      interpolation?: Record<string, unknown>
     ) => {
-      if (typeof defaultValueOrOptions === "string") return defaultValueOrOptions
-      if (defaultValueOrOptions?.defaultValue) return defaultValueOrOptions.defaultValue
+      const renderValue = (value: string) =>
+        value.replace(/\{\{(\w+)\}\}/g, (_match, token) =>
+          String(interpolation?.[token] ?? "")
+        )
+      if (typeof defaultValueOrOptions === "string") {
+        return renderValue(defaultValueOrOptions)
+      }
+      if (defaultValueOrOptions?.defaultValue) {
+        return renderValue(defaultValueOrOptions.defaultValue)
+      }
       return key
     }
   })
@@ -149,7 +191,10 @@ vi.mock("@/utils/research-workspace-prefill", () => ({
 }))
 
 vi.mock("../WorkspaceHeader", () => ({
-  WorkspaceHeader: () => <div data-testid="workspace-header" />
+  WorkspaceHeader: (props: any) => {
+    mockWorkspaceHeaderProps.push(props)
+    return <div data-testid="workspace-header" />
+  }
 }))
 
 vi.mock("../SourcesPane", () => ({
@@ -253,6 +298,9 @@ describe("ResearchWorkspace Stage 2 drawer responsiveness", () => {
     testState.generatedArtifacts = []
     testState.setSourceStatusByMediaId = vi.fn()
     testState.createNewWorkspace = vi.fn()
+    testState.switchWorkspace = vi.fn((workspaceId: string) => {
+      testState.workspaceId = workspaceId
+    })
     testState.clearCurrentNote = vi.fn()
     testState.loadNote = vi.fn()
     testState.addArtifact = vi.fn()
@@ -260,7 +308,34 @@ describe("ResearchWorkspace Stage 2 drawer responsiveness", () => {
     mockGetResearchBundle.mockReset()
     mockChatPaneProps.length = 0
     mockStudioPaneProps.length = 0
+    mockWorkspaceHeaderProps.length = 0
+    chromeStorageState.clear()
+    vi.stubGlobal("chrome", {
+      storage: {
+        onChanged: {
+          addListener: vi.fn(),
+          removeListener: vi.fn()
+        },
+        local: {
+          get: chromeStorageSessionGetMock,
+          set: chromeStorageSessionSetMock,
+          remove: chromeStorageSessionRemoveMock
+        },
+        sync: {
+          get: chromeStorageSessionGetMock,
+          set: chromeStorageSessionSetMock,
+          remove: chromeStorageSessionRemoveMock
+        },
+        session: {
+          get: chromeStorageSessionGetMock,
+          set: chromeStorageSessionSetMock,
+          remove: chromeStorageSessionRemoveMock
+        }
+      }
+    })
     window.localStorage.removeItem(RESEARCH_WORKSPACE_LAST_MOBILE_TAB_STORAGE_KEY)
+    window.localStorage.removeItem(WEB_CLIPPER_PENDING_AGENT_TASK_STORAGE_KEY)
+    window.sessionStorage.removeItem(WEB_CLIPPER_PENDING_AGENT_TASK_STORAGE_KEY)
     window.history.replaceState(null, "", "/research-workspace")
   })
 
@@ -317,6 +392,64 @@ describe("ResearchWorkspace Stage 2 drawer responsiveness", () => {
         typeof mockStudioPaneProps.at(-1)?.onRefreshResearchWorkspaceCapabilities
       ).toBe("function")
     })
+  })
+
+  it("opens the agent task handoff from the Chat pane entrypoint", async () => {
+    render(<ResearchWorkspace />)
+
+    await waitFor(() => {
+      expect(typeof mockChatPaneProps.at(-1)?.onStartWorkspaceTask).toBe(
+        "function"
+      )
+    })
+
+    const prefill = {
+      title: "Investigate chat thread",
+      description: "Use the selected sources.",
+      metadata: {
+        entrypoint: "chat"
+      }
+    }
+
+    act(() => {
+      mockChatPaneProps.at(-1)?.onStartWorkspaceTask(prefill)
+    })
+
+    await waitFor(() => {
+      expect(
+        mockWorkspaceHeaderProps.at(-1)?.agentTaskHandoffOpenSignal
+      ).toBeGreaterThan(0)
+    })
+    expect(mockWorkspaceHeaderProps.at(-1)?.agentTaskPrefill).toBe(prefill)
+  })
+
+  it("opens the agent task handoff from the Studio pane entrypoint", async () => {
+    render(<ResearchWorkspace />)
+
+    await waitFor(() => {
+      expect(typeof mockStudioPaneProps.at(-1)?.onStartWorkspaceTask).toBe(
+        "function"
+      )
+    })
+
+    const prefill = {
+      title: "Continue Studio work",
+      description: "Use generated outputs.",
+      metadata: {
+        entrypoint: "studio"
+      }
+    }
+
+    act(() => {
+      mockStudioPaneProps.at(-1)?.onStartWorkspaceTask(prefill)
+    })
+
+    await waitFor(() => {
+      expect(
+        mockWorkspaceHeaderProps.at(-1)?.agentTaskHandoffOpenSignal
+      ).toBeGreaterThan(0)
+    })
+    expect(mockWorkspaceHeaderProps.at(-1)?.agentTaskPrefill).toBe(prefill)
   })
 
   it("renders mobile tab count badges with AA-safe token classes", () => {
@@ -574,6 +707,20 @@ describe("ResearchWorkspace Stage 2 drawer responsiveness", () => {
       }
     })
     expect(artifactPayload.data.deepResearch.runId).toBe("research-run-7")
+    expect(artifactPayload.data.deepResearch.selectedImportedSources).toEqual([
+      {
+        sourceId: "source-a",
+        mediaId: 101,
+        title: "Paper A",
+        status: "selected"
+      },
+      {
+        sourceId: "source-b",
+        mediaId: 102,
+        title: "Paper B",
+        status: "selected"
+      }
+    ])
     expect(artifactPayload.sourceCoverage.selectedSourceIds).toEqual([
       "source-a",
       "source-b"
@@ -581,6 +728,183 @@ describe("ResearchWorkspace Stage 2 drawer responsiveness", () => {
     expect(
       screen.getByTestId("workspace-deep-research-return-handoff")
     ).toHaveTextContent("Bundle imported")
+    expect(
+      screen.getByTestId("workspace-deep-research-return-handoff")
+    ).toHaveTextContent("2 selected sources")
+  })
+
+  it("opens an agent-task handoff from pending web clipper context", async () => {
+    await writePendingWebClipAgentTaskRequest({
+      id: "handoff-1",
+      clipId: "clip-123",
+      noteId: "note-123",
+      workspaceId: "workspace-1",
+      workspaceNoteId: 42,
+      pageUrl: "https://example.com/story",
+      pageTitle: "Example Story",
+      extractPreview: "Alpha body copy",
+      hasScreenshot: false,
+      createdAt: new Date().toISOString()
+    })
+    window.history.replaceState(
+      null,
+      "",
+      "/research-workspace?workspace=workspace-1&agent_task_handoff=web_clip"
+    )
+
+    render(<ResearchWorkspace />)
+
+    await waitFor(() => {
+      expect(
+        mockWorkspaceHeaderProps.at(-1)?.agentTaskHandoffOpenSignal
+      ).toBeGreaterThan(0)
+    })
+    expect(mockWorkspaceHeaderProps.at(-1)?.agentTaskPrefill).toMatchObject({
+      title: "Review captured page: Example Story",
+      description: expect.stringContaining("URL: https://example.com/story")
+    })
+    expect(mockWorkspaceHeaderProps.at(-1)?.agentTaskPrefill.description).toContain(
+      "Alpha body copy"
+    )
+    expect(
+      chromeStorageState.get(WEB_CLIPPER_PENDING_AGENT_TASK_STORAGE_KEY)
+    ).toBeUndefined()
+  })
+
+  it("switches to the routed workspace before opening a pending web clipper agent task", async () => {
+    testState.workspaceId = "workspace-current"
+    testState.switchWorkspace = vi.fn()
+    await writePendingWebClipAgentTaskRequest({
+      id: "handoff-2",
+      clipId: "clip-456",
+      noteId: "note-456",
+      workspaceId: "workspace-target",
+      workspaceNoteId: 84,
+      pageUrl: "https://example.com/target",
+      pageTitle: "Target Story",
+      extractPreview: "Target body copy",
+      hasScreenshot: true,
+      createdAt: new Date().toISOString()
+    })
+    window.history.replaceState(
+      null,
+      "",
+      "/research-workspace?workspace=workspace-target&agent_task_handoff=web_clip"
+    )
+
+    const { rerender } = render(<ResearchWorkspace />)
+
+    await waitFor(() => {
+      expect(testState.switchWorkspace).toHaveBeenCalledWith("workspace-target")
+    })
+    expect(
+      chromeStorageState.get(WEB_CLIPPER_PENDING_AGENT_TASK_STORAGE_KEY)
+    ).toBeDefined()
+
+    testState.workspaceId = "workspace-target"
+    rerender(<ResearchWorkspace />)
+
+    await waitFor(() => {
+      expect(
+        mockWorkspaceHeaderProps.at(-1)?.agentTaskHandoffOpenSignal
+      ).toBeGreaterThan(0)
+    })
+    expect(mockWorkspaceHeaderProps.at(-1)?.agentTaskPrefill).toMatchObject({
+      title: "Review captured page: Target Story",
+      description: expect.stringContaining("URL: https://example.com/target")
+    })
+    expect(
+      chromeStorageState.get(WEB_CLIPPER_PENDING_AGENT_TASK_STORAGE_KEY)
+    ).toBeUndefined()
+  })
+
+  it("opens a second unique web clipper agent task while the workspace stays mounted", async () => {
+    await writePendingWebClipAgentTaskRequest({
+      id: "handoff-1",
+      clipId: "clip-123",
+      noteId: "note-123",
+      workspaceId: "workspace-1",
+      workspaceNoteId: 42,
+      pageUrl: "https://example.com/first",
+      pageTitle: "First Story",
+      extractPreview: "First body copy",
+      hasScreenshot: false,
+      createdAt: new Date().toISOString()
+    })
+    window.history.replaceState(
+      null,
+      "",
+      "/research-workspace?workspace=workspace-1&agent_task_handoff=web_clip&handoff_id=handoff-1"
+    )
+
+    const { rerender } = render(<ResearchWorkspace />)
+
+    await waitFor(() => {
+      expect(
+        mockWorkspaceHeaderProps.at(-1)?.agentTaskHandoffOpenSignal
+      ).toBeGreaterThan(0)
+    })
+    const firstSignal =
+      mockWorkspaceHeaderProps.at(-1)?.agentTaskHandoffOpenSignal ?? 0
+
+    await writePendingWebClipAgentTaskRequest({
+      id: "handoff-2",
+      clipId: "clip-456",
+      noteId: "note-456",
+      workspaceId: "workspace-1",
+      workspaceNoteId: 84,
+      pageUrl: "https://example.com/second",
+      pageTitle: "Second Story",
+      extractPreview: "Second body copy",
+      hasScreenshot: false,
+      createdAt: new Date().toISOString()
+    })
+    window.history.replaceState(
+      null,
+      "",
+      "/research-workspace?workspace=workspace-1&agent_task_handoff=web_clip&handoff_id=handoff-2"
+    )
+    rerender(<ResearchWorkspace />)
+
+    await waitFor(() => {
+      expect(
+        mockWorkspaceHeaderProps.at(-1)?.agentTaskHandoffOpenSignal
+      ).toBeGreaterThan(firstSignal)
+    })
+    expect(mockWorkspaceHeaderProps.at(-1)?.agentTaskPrefill).toMatchObject({
+      title: "Review captured page: Second Story",
+      description: expect.stringContaining("URL: https://example.com/second")
+    })
+  })
+
+  it("preserves a pending web clipper handoff when the route id does not match", async () => {
+    await writePendingWebClipAgentTaskRequest({
+      id: "handoff-stored",
+      clipId: "clip-123",
+      noteId: "note-123",
+      workspaceId: "workspace-1",
+      workspaceNoteId: 42,
+      pageUrl: "https://example.com/stored",
+      pageTitle: "Stored Story",
+      extractPreview: "Stored body copy",
+      hasScreenshot: false,
+      createdAt: new Date().toISOString()
+    })
+    window.history.replaceState(
+      null,
+      "",
+      "/research-workspace?workspace=workspace-1&agent_task_handoff=web_clip&handoff_id=handoff-other"
+    )
+
+    render(<ResearchWorkspace />)
+
+    await waitFor(() => {
+      expect(chromeStorageSessionGetMock).toHaveBeenCalled()
+    })
+    expect(mockWorkspaceHeaderProps.at(-1)?.agentTaskPrefill).toBeNull()
+    expect(
+      chromeStorageState.get(WEB_CLIPPER_PENDING_AGENT_TASK_STORAGE_KEY)
+    ).toMatchObject({ id: "handoff-stored" })
   })
 
   it("cancels a bundle import when the active workspace changes during fetch", async () => {
