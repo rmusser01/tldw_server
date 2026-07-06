@@ -7,7 +7,7 @@ no-override defaults. The existing private-IP tests explicitly SET
 pass that flips the ``os.getenv(..., "true")`` fallback would not be caught.
 
 These tests scrub every egress env var and assert the real-deployment defaults:
-private IPs blocked, only ports 80/443 allowed, non-http(s) schemes rejected.
+private IPs blocked, ports 80/443/8080 allowed, non-http(s) schemes rejected.
 ``resolved_ips_override`` avoids real DNS.
 """
 from __future__ import annotations
@@ -76,15 +76,36 @@ def test_public_ip_allowed_by_default_in_non_prod(monkeypatch: pytest.MonkeyPatc
     assert result.allowed is True, f"public URL wrongly denied by default: {result.reason}"
 
 
-def test_non_standard_port_rejected_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    """With no WORKFLOWS_EGRESS_ALLOWED_PORTS, only 80/443 are allowed."""
+def test_default_ports_allow_8080_and_reject_other_non_standard(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With no WORKFLOWS_EGRESS_ALLOWED_PORTS, 80/443/8080 are allowed."""
     _scrub_egress_env(monkeypatch)
+    allowed = egress.evaluate_url_policy(
+        "https://example.com:8080/ok",
+        resolved_ips_override=["93.184.216.34"],
+    )
+    assert allowed.allowed is True, f"8080 wrongly denied by default: {allowed.reason}"
+
+    rejected = egress.evaluate_url_policy(
+        "https://example.com:9099/ok",
+        resolved_ips_override=["93.184.216.34"],
+    )
+    assert rejected.allowed is False
+    assert "port" in (rejected.reason or "").lower()
+
+
+@pytest.mark.parametrize("raw_ports", ["", "not-a-port"])
+def test_invalid_allowed_ports_env_falls_back_to_default_ports(
+    monkeypatch: pytest.MonkeyPatch,
+    raw_ports: str,
+) -> None:
+    """An empty or invalid port override should not silently drop default port 8080."""
+    _scrub_egress_env(monkeypatch)
+    monkeypatch.setenv(egress.ALLOWED_PORTS_ENV, raw_ports)
     result = egress.evaluate_url_policy(
         "https://example.com:8080/ok",
         resolved_ips_override=["93.184.216.34"],
     )
-    assert result.allowed is False
-    assert "port" in (result.reason or "").lower()
+    assert result.allowed is True, f"8080 wrongly denied with invalid port env: {result.reason}"
 
 
 def test_non_http_scheme_rejected_by_default(monkeypatch: pytest.MonkeyPatch) -> None:

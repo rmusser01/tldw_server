@@ -114,6 +114,7 @@ After this profile is running, continue with one of:
 - If the WebUI is unavailable, verify no other process is using port `8080`.
 - If direct API calls return `401`, confirm `SINGLE_USER_API_KEY` in `tldw_Server_API/Config_Files/.env` and use it as `X-API-KEY`.
 - If WebUI setup cannot save provider settings, use `/setup` as the backend/operator recovery surface and inspect `tldw_Server_API/Config_Files/.env` only as a troubleshooting step.
+- If provider validation or first chat cannot reach your inference server, remember the API server makes that outbound request, not the browser. Egress allows ports `80`, `443`, and `8080` by default; inference servers on ports such as `9099` or private/LAN/loopback addresses need `WORKFLOWS_EGRESS_ALLOWED_PORTS` and possibly `WORKFLOWS_EGRESS_BLOCK_PRIVATE=false`, then a restart. In Docker, use an address reachable from the app container.
 - If you need a full reset, stop the stack and remove volumes with `docker compose -f Dockerfiles/docker-compose.single-user.yml -f Dockerfiles/docker-compose.webui.yml down -v`.
 
 ## Optional Add-ons
