@@ -140,6 +140,7 @@ def test_list_flashcards_search_matches_sanitized_alt_text(chacha_db):
 
 
 def test_list_flashcards_search_accepts_hyphenated_plain_text(chacha_db):
+    """Hyphenated flashcard search terms are normalized without FTS5 syntax errors."""
     card_uuid = chacha_db.add_flashcard(
         {
             "front": "codex-flashcards-ux front",
@@ -157,6 +158,7 @@ def test_list_flashcards_search_accepts_hyphenated_plain_text(chacha_db):
 
 
 def test_list_flashcards_search_accepts_negative_hyphenated_terms(chacha_db):
+    """Negative hyphenated flashcard search terms exclude matching cards safely."""
     keep_uuid = chacha_db.add_flashcard(
         {
             "front": "codex-flashcards-ux clean",
@@ -178,4 +180,6 @@ def test_list_flashcards_search_accepts_negative_hyphenated_terms(chacha_db):
 
     assert [row["uuid"] for row in results] == [keep_uuid]
 
-    assert isinstance(chacha_db.list_flashcards(q="codex-flashcards-ux -front:state-of-the-art"), list)
+    scoped_results = chacha_db.list_flashcards(q="codex-flashcards-ux -front:state-of-the-art")
+
+    assert [row["uuid"] for row in scoped_results] == [keep_uuid]

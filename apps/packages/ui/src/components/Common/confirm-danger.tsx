@@ -20,7 +20,7 @@ export type ConfirmDangerOptions = {
 export function useConfirmDanger() {
   const modal = useAntdModal()
 
-  return (options: ConfirmDangerOptions): Promise<boolean> => {
+  return React.useCallback((options: ConfirmDangerOptions): Promise<boolean> => {
     const {
       title = "Please confirm",
       content,
@@ -59,5 +59,5 @@ export function useConfirmDanger() {
 
       void instance
     })
-  }
+  }, [modal])
 }

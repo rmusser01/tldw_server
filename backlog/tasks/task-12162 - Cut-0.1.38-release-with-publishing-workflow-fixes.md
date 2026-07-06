@@ -9,9 +9,18 @@ modified_files:
 - Docs/API-related/API_Tags_Index.md
 - Docs/mkdocs.yml
 - README.md
+- apps/packages/ui/src/components/Common/confirm-danger.tsx
+- apps/packages/ui/src/components/Notes/__tests__/NotesEditorHeader.stage2.touch-layout.test.tsx
+- apps/packages/ui/src/components/Notes/NotesEditorHeader.tsx
+- apps/tldw-frontend/e2e/utils/page-objects/FlashcardsPage.ts
 - apps/tldw-frontend/lib/api/openapi.fingerprint.json
 - pyproject.toml
+- tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py
+- tldw_Server_API/app/core/DB_Management/backends/fts_translator.py
 - tldw_Server_API/app/main.py
+- tldw_Server_API/tests/CI/test_release_workflow_contracts.py
+- tldw_Server_API/tests/Flashcards/test_flashcards_db_assets.py
+- tldw_Server_API/tests/RAG_NEW/unit/test_fts_query_translation_edge_cases.py
 - tldw_Server_API/tests/Web_Scraping/test_phase2_article_runtime_boundary.py
 ---
 
@@ -51,6 +60,15 @@ Create a new 0.1.38 release that includes the GHCR-only Docker release workflow 
 - CI follow-up: PR #2677 initially failed `Shard coverage guard` because `tldw_Server_API/tests/Workflows/test_workflows_config_defaults.py` had not been assigned to a full-suite shard. Added it to the existing `product-workflows-api` shard entries.
 - CI follow-up: PR #2677 then failed push `run-pre-commit` because one existing Web Scraping test helper call had `monkeypatch` and `backend="httpx"` on the same line, matching the raw HTTP patch guard. Split the call over multiple lines without changing behavior.
 - CI follow-up: PR #2677 then failed `backend-required` at the OpenAPI drift gate. Reproduced with a CI-matching temporary Python 3.12 environment, updated `apps/tldw-frontend/lib/api/openapi.fingerprint.json` to sha256 `ccf658a22089cc43e9d691d1ac000e3a4f473c7159135a72217d32df0b1652dd` (`1963` paths, `2827` schemas), and verified `bun run generate:api-types` completes with that Python env. The full generated schema/type files remain ignored.
+- PR review follow-up: addressed all inline CodeRabbit/Qodo/Gemini comments by tightening SQLite FTS tokenization for doubled quotes, case-sensitive operator handling, binary-operator negation, column-scoped punctuation values, and flashcard FTS column aliases; memoized `useConfirmDanger`; made the Notes study-pack overflow action mobile-only; scoped Flashcards select option lookup to the visible AntD dropdown; and waited for the edit drawer before keyboard fallback.
+- PR review verification:
+  - `python -m pytest -q tldw_Server_API/tests/CI/test_release_workflow_contracts.py tldw_Server_API/tests/RAG_NEW/unit/test_fts_query_translation_edge_cases.py tldw_Server_API/tests/Flashcards/test_flashcards_db_assets.py`
+  - `TMPDIR=/private/tmp bun run test:run ../packages/ui/src/components/Notes/__tests__/NotesEditorHeader.stage2.touch-layout.test.tsx`
+  - `TMPDIR=/private/tmp bun run typecheck`
+  - `TMPDIR=/private/tmp ./node_modules/.bin/eslint e2e/utils/page-objects/FlashcardsPage.ts`
+  - `git diff --check`
+  - `python -m bandit -r tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py tldw_Server_API/app/core/DB_Management/backends/fts_translator.py -f json -o /tmp/bandit_pr2677_review_prod.json` (zero findings)
+  - `python -m bandit -r tldw_Server_API/tests/CI/test_release_workflow_contracts.py tldw_Server_API/tests/RAG_NEW/unit/test_fts_query_translation_edge_cases.py tldw_Server_API/tests/Flashcards/test_flashcards_db_assets.py -f json -o /tmp/bandit_pr2677_review_tests.json` (pytest `assert` B101 findings only; no non-B101 findings)
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

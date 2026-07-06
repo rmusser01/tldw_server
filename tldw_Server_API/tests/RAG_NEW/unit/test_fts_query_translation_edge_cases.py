@@ -3,7 +3,6 @@ import pytest
 
 def test_sqlite_to_postgres_handles_hyphens_and_near():
 
-
     from tldw_Server_API.app.core.DB_Management.backends.fts_translator import FTSQueryTranslator
 
     # hyphenated word with wildcard
@@ -22,7 +21,6 @@ def test_sqlite_to_postgres_handles_hyphens_and_near():
 
 def test_sqlite_to_postgres_handles_quotes_and_parentheses():
 
-
     from tldw_Server_API.app.core.DB_Management.backends.fts_translator import FTSQueryTranslator
 
     q = '"exact phrase" (bonus)'
@@ -34,8 +32,8 @@ def test_sqlite_to_postgres_handles_quotes_and_parentheses():
 
 def test_fts_query_builder_hyphen_and_unicode():
 
-
     from tldw_Server_API.app.core.RAG.rag_service.database_retrievers import MediaDBRetriever
+
     r = MediaDBRetriever(db_path="/tmp/test.db")  # path used for constructing object only  # nosec B108
 
     q1 = "state-of-the-art models"
@@ -50,7 +48,6 @@ def test_fts_query_builder_hyphen_and_unicode():
 
 def test_fts_query_translation_truncates_long_input():
 
-
     from tldw_Server_API.app.core.DB_Management.backends.fts_translator import (
         FTSQueryTranslator,
         MAX_FTS_QUERY_LENGTH,
@@ -63,7 +60,6 @@ def test_fts_query_translation_truncates_long_input():
 
 def test_postgres_to_sqlite_truncates_long_input():
 
-
     from tldw_Server_API.app.core.DB_Management.backends.fts_translator import (
         FTSQueryTranslator,
         MAX_FTS_QUERY_LENGTH,
@@ -75,6 +71,7 @@ def test_postgres_to_sqlite_truncates_long_input():
 
 
 def test_sqlite_normalization_quotes_plain_tokens_with_punctuation():
+    """Plain punctuation terms are quoted without destroying column filters."""
     from tldw_Server_API.app.core.DB_Management.backends.fts_translator import FTSQueryTranslator
 
     out = FTSQueryTranslator.normalize_query(
@@ -82,10 +79,19 @@ def test_sqlite_normalization_quotes_plain_tokens_with_punctuation():
         "sqlite",
     )
 
-    assert out == '"codex-flashcards-ux" "front:state-of-the-art"'
+    assert out == '"codex-flashcards-ux" front:"state-of-the-art"'
+
+    aliased = FTSQueryTranslator.normalize_query(
+        "codex-flashcards-ux front:state-of-the-art",
+        "sqlite",
+        sqlite_column_aliases={"front": "front_search"},
+    )
+
+    assert aliased == '"codex-flashcards-ux" front_search:"state-of-the-art"'
 
 
 def test_sqlite_normalization_preserves_quoted_column_phrases_and_quotes_negative_terms():
+    """Quoted phrases and allowed negative punctuation terms stay valid FTS5."""
     from tldw_Server_API.app.core.DB_Management.backends.fts_translator import FTSQueryTranslator
 
     out = FTSQueryTranslator.normalize_query(
@@ -95,9 +101,30 @@ def test_sqlite_normalization_preserves_quoted_column_phrases_and_quotes_negativ
     )
 
     assert (
-        out
-        == 'front:"two words" front:"already-quoted" front:"state of the art" '
-        'NOT "state-of-the-art" NOT "back:old-style" NOT "two words" NOT front:"old style"'
+        out == 'front:"two words" front:"already-quoted" front:"state of the art" '
+        'NOT "state-of-the-art" NOT back:"old-style" NOT "two words" NOT front:"old style"'
     )
 
     assert FTSQueryTranslator.normalize_query("-state-of-the-art", "sqlite") == '"-state-of-the-art"'
+
+
+def test_sqlite_normalization_handles_escaped_phrase_quotes_and_case_sensitive_operators():
+    """Doubled phrase quotes stay tokenized, while lowercase operator words stay terms."""
+    from tldw_Server_API.app.core.DB_Management.backends.fts_translator import FTSQueryTranslator
+
+    out = FTSQueryTranslator.normalize_query(
+        'front:"said ""hello""" alpha and beta OR gamma',
+        "sqlite",
+    )
+
+    assert out == 'front:"said ""hello""" alpha and beta OR gamma'
+
+
+def test_sqlite_normalization_allows_negative_terms_after_binary_operators():
+    """Negative punctuation terms after AND/OR are rewritten to SQLite FTS5 NOT operands."""
+    from tldw_Server_API.app.core.DB_Management.backends.fts_translator import FTSQueryTranslator
+
+    assert (
+        FTSQueryTranslator.normalize_query("alpha AND -state-of-the-art OR -front:old-style", "sqlite")
+        == 'alpha AND NOT "state-of-the-art" OR NOT front:"old-style"'
+    )

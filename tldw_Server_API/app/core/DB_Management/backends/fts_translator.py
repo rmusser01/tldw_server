@@ -16,7 +16,7 @@ SQLITE_FTS_OPERATOR_TOKENS = {'AND', 'OR', 'NEAR', 'NOT'}
 SQLITE_FTS_SAFE_TOKEN_RE = re.compile(r'^[A-Za-z0-9_]+\*?$')
 SQLITE_FTS_COLUMN_TOKEN_RE = re.compile(r'^([A-Za-z_][A-Za-z0-9_]*):(.*)$')
 SQLITE_FTS_TOKEN_RE = re.compile(
-    r'-?[A-Za-z_][A-Za-z0-9_]*:"[^"]*"|-?"[^"]*"|\S+'
+    r'-?[A-Za-z_][A-Za-z0-9_]*:"(?:[^"]|"")*"|-?"(?:[^"]|"")*"|\S+'
 )
 
 
@@ -194,29 +194,40 @@ class FTSQueryTranslator:
         return f'"{escaped}"{suffix}'
 
     @staticmethod
-    def _normalize_sqlite_query(query: str) -> str:
+    def _normalize_sqlite_query(
+        query: str,
+        column_aliases: Optional[dict[str, str]] = None,
+    ) -> str:
         """Protect plain text SQLite FTS5 searches from punctuation parsing."""
         parts = SQLITE_FTS_TOKEN_RE.findall(query)
         normalized_parts = []
         last_allows_not = False
+        has_operand = False
 
         for part in parts:
-            upper = part.upper()
-            if upper in SQLITE_FTS_OPERATOR_TOKENS or part.startswith('"') and part.endswith('"'):
+            if part in SQLITE_FTS_OPERATOR_TOKENS:
                 normalized_parts.append(part)
-                last_allows_not = upper not in SQLITE_FTS_OPERATOR_TOKENS
+                last_allows_not = part != 'NOT' and has_operand
+                continue
+
+            if part.startswith('"') and part.endswith('"'):
+                normalized_parts.append(part)
+                last_allows_not = True
+                has_operand = True
                 continue
 
             if part.startswith('-') and len(part) > 1:
                 body = part[1:]
                 column_match = SQLITE_FTS_COLUMN_TOKEN_RE.fullmatch(body)
-                if (
-                    column_match
-                    and column_match.group(2).startswith('"')
-                    and column_match.group(2).endswith('"')
-                ):
+                if column_match:
                     column, value = column_match.groups()
-                    operand = f'{column}:{value}'
+                    if column_aliases:
+                        column = column_aliases.get(column, column)
+                    operand = (
+                        f'{column}:{value}'
+                        if value.startswith('"') and value.endswith('"')
+                        else f'{column}:{FTSQueryTranslator._quote_sqlite_fts_token(value)}'
+                    )
                 elif body.startswith('"') and body.endswith('"'):
                     operand = body
                 elif last_allows_not:
@@ -228,26 +239,35 @@ class FTSQueryTranslator:
                 else:
                     normalized_parts.append(operand)
                 last_allows_not = True
+                has_operand = True
                 continue
 
             column_match = SQLITE_FTS_COLUMN_TOKEN_RE.fullmatch(part)
-            if (
-                column_match
-                and column_match.group(2).startswith('"')
-                and column_match.group(2).endswith('"')
-            ):
+            if column_match:
                 column, value = column_match.groups()
-                normalized_parts.append(f'{column}:{value}')
+                if column_aliases:
+                    column = column_aliases.get(column, column)
+                normalized_parts.append(
+                    f'{column}:{value}'
+                    if value.startswith('"') and value.endswith('"')
+                    else f'{column}:{FTSQueryTranslator._quote_sqlite_fts_token(value)}'
+                )
                 last_allows_not = True
+                has_operand = True
                 continue
 
             normalized_parts.append(FTSQueryTranslator._quote_sqlite_fts_token(part))
             last_allows_not = True
+            has_operand = True
 
         return ' '.join(normalized_parts)
 
     @staticmethod
-    def normalize_query(query: str, backend: str) -> str:
+    def normalize_query(
+        query: str,
+        backend: str,
+        sqlite_column_aliases: Optional[dict[str, str]] = None,
+    ) -> str:
         """
         Normalize a query for a specific backend.
 
@@ -257,6 +277,7 @@ class FTSQueryTranslator:
         Args:
             query: Search query in unknown format
             backend: Target backend ('sqlite' or 'postgresql')
+            sqlite_column_aliases: Optional SQLite FTS5 column name aliases
 
         Returns:
             Normalized query for the target backend
@@ -281,7 +302,7 @@ class FTSQueryTranslator:
         elif backend == 'sqlite':
             if is_postgres and not is_sqlite:
                 query = FTSQueryTranslator.postgres_to_sqlite(query)
-            return FTSQueryTranslator._normalize_sqlite_query(query)
+            return FTSQueryTranslator._normalize_sqlite_query(query, sqlite_column_aliases)
 
         return query
 

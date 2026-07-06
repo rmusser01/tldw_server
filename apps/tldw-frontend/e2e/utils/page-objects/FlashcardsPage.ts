@@ -664,9 +664,9 @@ export class FlashcardsPage extends BasePage {
       : optionName;
 
     return this.page
-      .locator('.ant-select-item-option-content')
+      .locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden):visible .ant-select-item-option-content')
       .filter({ hasText: optionText })
-      .last();
+      .first();
   }
 
   async selectManageDeckByName(deckName: string): Promise<void> {
@@ -748,9 +748,14 @@ export class FlashcardsPage extends BasePage {
     const editButton = this.getManageFlashcardEditButton(cardUuid);
     await editButton.scrollIntoViewIfNeeded();
     await editButton.click();
-    if (await this.editDrawer.isVisible({ timeout: 1_000 }).catch(() => false)) return;
+    const drawerOpened = await this.editDrawer
+      .waitFor({ state: 'visible', timeout: 1_000 })
+      .then(() => true)
+      .catch(() => false);
+    if (drawerOpened) return;
     await this.getManageFlashcardRow(cardUuid).click();
     await this.page.keyboard.press('Enter');
+    await expect(this.editDrawer).toBeVisible({ timeout: 10_000 });
   }
 
   // -- Tab Navigation --------------------------------------------------------

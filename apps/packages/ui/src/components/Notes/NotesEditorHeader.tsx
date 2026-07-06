@@ -242,35 +242,40 @@ const NotesEditorHeader: React.FC<NotesEditorHeaderProps> = ({
       }
 
       // --- AI group ---
+      const aiChildren: MenuProps['items'] = [
+        {
+          key: 'notes-studio',
+          label: t('option:notesSearch.notesStudioAction', {
+            defaultValue: 'Notes Studio'
+          }),
+          icon: (<SparklesIcon className="w-4 h-4" />),
+          disabled: !canOpenNotesStudio
+        },
+        {
+          key: 'flashcards',
+          label: t('option:notesSearch.generateFlashcardsAction', {
+            defaultValue: 'Generate flashcards'
+          }),
+          icon: (<SparklesIcon className="w-4 h-4" />),
+          disabled: !canGenerateFlashcards
+        }
+      ]
+
+      if (isMobileViewport) {
+        aiChildren.push({
+          key: 'study-pack',
+          label: t('option:notesSearch.createStudyPackAction', {
+            defaultValue: 'Create study pack'
+          }),
+          icon: (<SparklesIcon className="w-4 h-4" />),
+          disabled: !canCreateStudyPack
+        })
+      }
+
       items.push({
         type: 'group' as const,
         label: t('option:notesSearch.overflowGroupAI', { defaultValue: 'AI' }),
-        children: [
-          {
-            key: 'notes-studio',
-            label: t('option:notesSearch.notesStudioAction', {
-              defaultValue: 'Notes Studio'
-            }),
-            icon: (<SparklesIcon className="w-4 h-4" />),
-            disabled: !canOpenNotesStudio
-          },
-          {
-            key: 'flashcards',
-            label: t('option:notesSearch.generateFlashcardsAction', {
-              defaultValue: 'Generate flashcards'
-            }),
-            icon: (<SparklesIcon className="w-4 h-4" />),
-            disabled: !canGenerateFlashcards
-          },
-          {
-            key: 'study-pack',
-            label: t('option:notesSearch.createStudyPackAction', {
-              defaultValue: 'Create study pack'
-            }),
-            icon: (<SparklesIcon className="w-4 h-4" />),
-            disabled: !canCreateStudyPack
-          }
-        ]
+        children: aiChildren
       })
     }
 

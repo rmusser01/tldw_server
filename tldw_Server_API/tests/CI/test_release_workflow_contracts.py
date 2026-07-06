@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import pytest
 import yaml
 
 
@@ -12,6 +13,7 @@ def _workflow_on(workflow: dict) -> dict:
 
 
 def _get_step(steps: list[dict], name: str) -> dict:
+    """Return a named workflow step or fail the contract test clearly."""
     matching = [step for step in steps if step.get("name") == name]
     assert matching, f"{name} step missing"
     return matching[0]
@@ -33,7 +35,9 @@ def test_publish_docker_matrix_remains_app_worker_audio_worker() -> None:
     assert [entry["name"] for entry in matrix] == ["app", "worker", "audio-worker"]
 
 
+@pytest.mark.unit
 def test_publish_docker_release_workflow_targets_ghcr_only() -> None:
+    """Docker release publishing must target GHCR and avoid Docker Hub credentials."""
     workflow = _load(".github/workflows/publish-docker.yml")
     job = workflow["jobs"]["push_to_registries"]
     steps = job["steps"]
@@ -47,7 +51,9 @@ def test_publish_docker_release_workflow_targets_ghcr_only() -> None:
     assert all("dockerhub_suffix" not in entry for entry in job["strategy"]["matrix"]["include"])
 
 
+@pytest.mark.unit
 def test_publish_pypi_workflow_installs_portaudio_before_dev_dependencies() -> None:
+    """PyPI release tests must install PortAudio before installing dev extras."""
     workflow = _load(".github/workflows/publish-pypi.yml")
     on = _workflow_on(workflow)
     steps = workflow["jobs"]["test-suite"]["steps"]
