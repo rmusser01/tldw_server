@@ -63,9 +63,9 @@ const switchChatLayoutMode = async (page: Page, targetMode: 'cockpit' | 'focus')
       .getByRole('button', { name: triggerName, exact: true })
       .click({ timeout: 10_000 });
   } catch (error) {
-    if ((await shell.getAttribute('data-mode')) !== targetMode) {
+    await expect(shell).toHaveAttribute('data-mode', targetMode, { timeout: 5_000 }).catch(() => {
       throw error;
-    }
+    });
   }
   await expect(shell).toHaveAttribute('data-mode', targetMode);
 };
