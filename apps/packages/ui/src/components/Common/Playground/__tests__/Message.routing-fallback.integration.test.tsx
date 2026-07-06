@@ -489,6 +489,7 @@ describe("PlaygroundMessage routing fallback integration", () => {
       expect.anything(),
       "smug"
     )
+    expect(detectCharacterMoodMock).not.toHaveBeenCalled()
     expect(screen.getByAltText("Ashley")).toHaveAttribute("src", smugPortrait)
   })
 

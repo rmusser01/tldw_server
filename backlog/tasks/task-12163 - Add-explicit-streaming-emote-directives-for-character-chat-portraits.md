@@ -4,7 +4,7 @@ title: Add explicit streaming emote directives for character chat portraits
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-07-06 18:58'
+updated_date: '2026-07-06 19:12'
 labels:
   - frontend
   - character-chat
@@ -49,6 +49,10 @@ Docs/superpowers/plans/2026-07-06-character-chat-streaming-emote-directives-impl
 Task 2 complete in commit 48df2747c7: custom safe emote image slugs resolve via character mood image maps while classifier labels remain unchanged. Red: bunx vitest run src/utils/__tests__/character-mood.test.ts --maxWorkers=1 failed on smug returning empty string. Green: bunx vitest run src/utils/__tests__/character-mood.test.ts src/utils/__tests__/character-emotes.test.ts --maxWorkers=1 passed 23 tests. Bandit not run: touched files are frontend TypeScript only.
 
 Task 6 final verification complete. Targeted frontend suite: bunx vitest run src/utils/__tests__/character-emotes.test.ts src/utils/__tests__/character-mood.test.ts src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx src/hooks/chat/__tests__/useCharacterChatMode.contract.test.ts src/hooks/__tests__/useServerChatLoader.test.ts src/db/dexie/__tests__/helpers.character-emotes.test.ts src/components/Common/Playground/__tests__/Message.routing-fallback.integration.test.tsx --maxWorkers=1 passed 7 files / 82 tests. Targeted backend suite: python -m pytest tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_emote_directives.py tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_stream_and_persist.py -q passed 39 tests with 4 warnings. Bandit touched backend scope: no errors and no findings in /tmp/bandit_character_emotes.json. App-wide frontend typecheck was attempted with bun run typecheck and failed on existing baseline errors outside the character-emote touched files: TimelineEditor referrerPolicy, ScheduledTasks definitions, Skills Manager checkbox aria-label, scheduled task service param types, MCP hub path type, voice cloning ArrayBuffer, and e2e fixture/spec typing.
+
+Code review follow-up reopened: fixing explicit-mood classifier short-circuit and stream persist assistant_content sanitization before merge.
+
+Code review follow-up fixed in this branch: Message now skips detectCharacterMood when an explicit moodLabel is present, and the stream persist endpoint sanitizes raw Emote directives before fingerprint/idempotency/storage while deriving emote_events when the client did not send them. Red checks: Message routing test failed on detectCharacterMood being called once; backend persist sanitization test failed before endpoint sanitization. Green checks: Message routing suite passed 12 tests; targeted frontend emote suite passed 7 files / 82 tests; targeted backend emote suite passed 40 tests with 3 warnings; Bandit review-fix report had no errors and no findings. bun run typecheck was rerun and still fails on the known unrelated baseline files outside this feature.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

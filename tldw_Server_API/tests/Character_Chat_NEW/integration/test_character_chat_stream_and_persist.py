@@ -257,6 +257,35 @@ def test_persist_streamed_message_stores_emote_events(test_client: TestClient, a
     ]
 
 
+def test_persist_streamed_message_sanitizes_raw_emote_directives(
+    test_client: TestClient,
+    auth_headers,
+) -> None:
+    _, chat_id = _create_character_and_chat(test_client, auth_headers)
+
+    response = test_client.post(
+        f"/api/v1/chats/{chat_id}/completions/persist",
+        json={
+            "assistant_content": "Emote: smug\nVisible reply",
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    assistant_message_id = response.json()["assistant_message_id"]
+    message_resp = test_client.get(
+        f"/api/v1/messages/{assistant_message_id}",
+        params={"include_metadata": "true"},
+        headers=auth_headers,
+    )
+    assert message_resp.status_code == 200
+    stored = message_resp.json()
+    assert stored["content"] == "Visible reply"
+    metadata_extra = stored["metadata_extra"]
+    assert metadata_extra["mood_label"] == "smug"
+    assert metadata_extra["emote_events"] == [{"state": "smug", "at_char": 0}]
+
+
 def test_persist_streamed_message_rejects_invalid_emote_events(test_client: TestClient, auth_headers) -> None:
     _, chat_id = _create_character_and_chat(test_client, auth_headers)
 

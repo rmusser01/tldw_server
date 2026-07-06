@@ -7335,17 +7335,28 @@ async def persist_streamed_assistant_message(
             if isinstance(body.assistant_message_id, str)
             else ""
         ) or None
+        resolved_emotes = resolve_character_emote_completion(
+            body.assistant_content,
+            fallback_mood_label=body.mood_label,
+            fallback_mood_confidence=body.mood_confidence,
+            fallback_mood_topic=body.mood_topic,
+        )
+        assistant_content = resolved_emotes.clean_text
+        emote_events = body.emote_events or resolved_emotes.emote_events
+        resolved_visual_mood = (
+            emote_events[-1].state if emote_events else resolved_emotes.mood_label
+        )
         visual_identity_metadata = _safe_resolve_character_visual_identity(
             db=db,
             current_user=current_user,
             actor_id=resolved_speaker_id,
-            mood_label=_optional_text_metadata(body.mood_label),
+            mood_label=_optional_text_metadata(resolved_visual_mood),
         )
         persist_fingerprint = None
         if not requested_assistant_message_id and getattr(body, "user_message_id", None):
             persist_fingerprint = _build_stream_persist_fingerprint(
                 chat_id,
-                body.assistant_content,
+                assistant_content,
                 body.user_message_id,
                 resolved_speaker_id,
                 body.ranking if getattr(body, "ranking", None) is not None else None,
@@ -7371,7 +7382,7 @@ async def persist_streamed_assistant_message(
                 db,
                 chat_id,
                 requested_assistant_message_id,
-                assistant_content=body.assistant_content,
+                assistant_content=assistant_content,
                 parent_message_id=body.user_message_id,
                 speaker_name=resolved_speaker_name,
             )
@@ -7390,10 +7401,10 @@ async def persist_streamed_assistant_message(
                     turn_taking_mode=resolved_turn_mode,
                     validation_degraded=existing_extra.get("persist_validation_degraded") is True,
                     persist_fingerprint=persist_fingerprint,
-                    mood_label=body.mood_label,
-                    mood_confidence=body.mood_confidence,
-                    mood_topic=body.mood_topic,
-                    emote_events=body.emote_events,
+                    mood_label=resolved_emotes.mood_label,
+                    mood_confidence=resolved_emotes.mood_confidence,
+                    mood_topic=resolved_emotes.mood_topic,
+                    emote_events=emote_events,
                     usage=_validate_stream_persist_usage(getattr(body, "usage", None)),
                     visual_identity=visual_identity_metadata,
                 ),
@@ -7428,10 +7439,10 @@ async def persist_streamed_assistant_message(
             turn_taking_mode=resolved_turn_mode,
             validation_degraded=validation_degraded is not None,
             persist_fingerprint=persist_fingerprint,
-            mood_label=body.mood_label,
-            mood_confidence=body.mood_confidence,
-            mood_topic=body.mood_topic,
-            emote_events=body.emote_events,
+            mood_label=resolved_emotes.mood_label,
+            mood_confidence=resolved_emotes.mood_confidence,
+            mood_topic=resolved_emotes.mood_topic,
+            emote_events=emote_events,
             usage=_validate_stream_persist_usage(getattr(body, "usage", None)),
             visual_identity=visual_identity_metadata,
         )
@@ -7442,7 +7453,7 @@ async def persist_streamed_assistant_message(
                 db=db,
                 conversation_id=chat_id,
                 character_name=resolved_speaker_name,
-                message_content=body.assistant_content,
+                message_content=assistant_content,
                 is_user_message=False,
                 message_id=requested_assistant_message_id,
                 parent_message_id=body.user_message_id,
@@ -7455,7 +7466,7 @@ async def persist_streamed_assistant_message(
                 db,
                 chat_id,
                 requested_assistant_message_id,
-                assistant_content=body.assistant_content,
+                assistant_content=assistant_content,
                 parent_message_id=body.user_message_id,
                 speaker_name=resolved_speaker_name,
             )

@@ -822,9 +822,9 @@ export const PlaygroundMessage = (props: Props) => {
     speakerMatchesCharacterIdentity
   const explicitMoodLabel = normalizeCharacterEmoteState(props.moodLabel)
   const inferredMoodLabel = React.useMemo(() => {
-    if (!props.isBot || isSystemMessage) return null
+    if (explicitMoodLabel || !props.isBot || isSystemMessage) return null
     return detectCharacterMood({ assistantText: props.message }).label
-  }, [isSystemMessage, props.isBot, props.message])
+  }, [explicitMoodLabel, isSystemMessage, props.isBot, props.message])
   const resolvedMoodLabel = explicitMoodLabel || inferredMoodLabel
   const moodBadgeLabel = React.useMemo(() => {
     if (!resolvedMoodLabel) return null
