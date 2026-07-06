@@ -12,6 +12,8 @@ const {
   mockMessageInfo,
   mockNavigate,
   mockConfirmDanger,
+  mockEndTutorial,
+  mockStartTutorial,
   mockGetSetting,
   mockSetSetting,
   mockClearSetting
@@ -23,6 +25,8 @@ const {
   mockMessageInfo: vi.fn(),
   mockNavigate: vi.fn(),
   mockConfirmDanger: vi.fn(),
+  mockEndTutorial: vi.fn(),
+  mockStartTutorial: vi.fn(),
   mockGetSetting: vi.fn(),
   mockSetSetting: vi.fn(),
   mockClearSetting: vi.fn()
@@ -72,6 +76,16 @@ vi.mock("@/hooks/useServerCapabilities", () => ({
 vi.mock("@/components/Common/confirm-danger", () => ({
   useConfirmDanger: () => mockConfirmDanger
 }))
+
+vi.mock("@/store/tutorials", () => {
+  const store = Object.assign(() => ({}), {
+    getState: () => ({
+      endTutorial: mockEndTutorial,
+      startTutorial: mockStartTutorial
+    })
+  })
+  return { useTutorialStore: store }
+})
 
 vi.mock("@/hooks/useAntdMessage", () => ({
   useAntdMessage: () => ({
@@ -243,6 +257,10 @@ describe("NotesManagerPage stage 33 link-aware delete warnings", () => {
     await waitFor(() => {
       expect(mockConfirmDanger).toHaveBeenCalled()
     })
+    expect(mockEndTutorial).toHaveBeenCalled()
+    expect(mockEndTutorial.mock.invocationCallOrder[0]).toBeLessThan(
+      mockConfirmDanger.mock.invocationCallOrder[0]
+    )
     const deleteDialogArgs = mockConfirmDanger.mock.calls[0][0]
     expect(String(deleteDialogArgs.content)).toBe("Delete this note?")
   })

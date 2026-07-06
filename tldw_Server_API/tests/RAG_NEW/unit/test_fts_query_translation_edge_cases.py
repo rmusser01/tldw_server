@@ -72,3 +72,14 @@ def test_postgres_to_sqlite_truncates_long_input():
     long_query = "a" * (MAX_FTS_QUERY_LENGTH + 50)
     out = FTSQueryTranslator.postgres_to_sqlite(long_query)
     assert len(out) == MAX_FTS_QUERY_LENGTH
+
+
+def test_sqlite_normalization_quotes_plain_tokens_with_punctuation():
+    from tldw_Server_API.app.core.DB_Management.backends.fts_translator import FTSQueryTranslator
+
+    out = FTSQueryTranslator.normalize_query(
+        "codex-flashcards-ux front:state-of-the-art",
+        "sqlite",
+    )
+
+    assert out == '"codex-flashcards-ux" front:"state-of-the-art"'

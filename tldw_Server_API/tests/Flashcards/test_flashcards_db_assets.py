@@ -137,3 +137,20 @@ def test_list_flashcards_search_matches_sanitized_alt_text(chacha_db):
 
     assert total == 1
     assert [row["uuid"] for row in results] == [card_uuid]
+
+
+def test_list_flashcards_search_accepts_hyphenated_plain_text(chacha_db):
+    card_uuid = chacha_db.add_flashcard(
+        {
+            "front": "codex-flashcards-ux front",
+            "back": "Regression coverage for FTS5 punctuation handling",
+            "notes": "",
+            "extra": "",
+        }
+    )
+
+    results = chacha_db.list_flashcards(q="codex-flashcards-ux")
+    total = chacha_db.count_flashcards(q="codex-flashcards-ux")
+
+    assert total == 1
+    assert [row["uuid"] for row in results] == [card_uuid]

@@ -42,7 +42,7 @@ export function useConfirmDanger() {
         okButtonProps: { danger },
         maskClosable: false,
         keyboard: true,
-        autoFocusButton,
+        focusable: { autoFocusButton },
         onOk: () => {
           if (!settled) {
             settled = true

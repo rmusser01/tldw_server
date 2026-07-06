@@ -163,8 +163,9 @@ async function skipIfFlashcardsBackendUnavailable(
 test.describe('Flashcards', () => {
   let flashcards: FlashcardsPage;
 
-  test.beforeEach(async ({ page }) => {
+  test.beforeEach(async ({ page, request }, testInfo) => {
     await seedAuth(page);
+    await cleanupFlashcardsRunRecords(request, flashcardsRunIdForTest(testInfo));
     flashcards = new FlashcardsPage(page);
   });
 
@@ -236,7 +237,21 @@ test.describe('Flashcards', () => {
         } else if (tab === 'templates') {
           await expect(flashcards.templatesTab).toHaveAttribute('aria-selected', 'true');
         } else if (tab === 'scheduler') {
-          await expect(authedPage.getByPlaceholder('Search decks')).toBeVisible({ timeout: 10_000 });
+          await expect
+            .poll(
+              async () => {
+                const searchVisible = await authedPage
+                  .getByPlaceholder('Search decks')
+                  .isVisible()
+                  .catch(() => false);
+                const emptyPreviewVisible = await flashcards.schedulerEmptyPreview
+                  .isVisible()
+                  .catch(() => false);
+                return searchVisible || emptyPreviewVisible;
+              },
+              { timeout: 10_000 }
+            )
+            .toBe(true);
         } else if (tab === 'transfer') {
           await expect(flashcards.transferTaskSwitcher).toBeVisible({ timeout: 10_000 });
         } else {
@@ -304,7 +319,8 @@ test.describe('Flashcards', () => {
       expect(await flashcards.isOnline()).toBe(true);
       await expect(flashcards.studyTab).toHaveAttribute('aria-selected', 'true');
       await expect(flashcards.transferTab).toBeVisible();
-      await expect(flashcards.schedulerTab).toHaveCount(0);
+      await expect(flashcards.schedulerTab).toBeVisible();
+      await expect(flashcards.schedulerTab).not.toHaveAttribute('aria-selected', 'true');
       await expect(flashcards.tabsContainer.getByText('LLM', { exact: true })).toHaveCount(0);
       await expect(authedPage.locator('[data-testid="flashcards-review-onboarding-guide"]')).toBeVisible({
         timeout: 10_000,
@@ -776,12 +792,7 @@ test.describe('Flashcards', () => {
       await expect(flashcards.createTagPickerSearchInput).toBeVisible({ timeout: 10_000 });
       await flashcards.createTagPickerSearchInput.fill(createSuggestionTag);
 
-      const createTagOption = authedPage.getByRole('option', {
-        name: createSuggestionTag,
-        exact: true,
-      });
-      await expect(createTagOption).toBeVisible({ timeout: 10_000 });
-      await createTagOption.click();
+      await flashcards.selectVisibleDropdownOption(createSuggestionTag);
       await expect(flashcards.createTagPicker).toContainText(createSuggestionTag);
 
       await authedPage.getByPlaceholder('Question or prompt...').fill(`${seed.runId} created via UI`);
@@ -805,7 +816,7 @@ test.describe('Flashcards', () => {
       });
       await flashcards.openManageFlashcardEdit(knownCard.uuid);
 
-      await expect(authedPage.getByText('Edit Flashcard')).toBeVisible({ timeout: 10_000 });
+      await expect(flashcards.editDrawer).toBeVisible({ timeout: 10_000 });
       await flashcards.editDrawerAdditionalFieldsToggle.click();
       await expect(flashcards.editTagPicker).toBeVisible({ timeout: 10_000 });
 
@@ -813,12 +824,7 @@ test.describe('Flashcards', () => {
       await expect(flashcards.editTagPickerSearchInput).toBeVisible({ timeout: 10_000 });
       await flashcards.editTagPickerSearchInput.fill(editSuggestionTag);
 
-      const editTagOption = authedPage.getByRole('option', {
-        name: editSuggestionTag,
-        exact: true,
-      });
-      await expect(editTagOption).toBeVisible({ timeout: 10_000 });
-      await editTagOption.click();
+      await flashcards.selectVisibleDropdownOption(editSuggestionTag);
       await expect(flashcards.editTagPicker).toContainText(editSuggestionTag);
 
       const updateResponsePromise = authedPage.waitForResponse((response) => {
@@ -840,7 +846,7 @@ test.describe('Flashcards', () => {
       });
 
       await flashcards.openManageFlashcardEdit(knownCard.uuid);
-      await expect(authedPage.getByText('Edit Flashcard')).toBeVisible({ timeout: 10_000 });
+      await expect(flashcards.editDrawer).toBeVisible({ timeout: 10_000 });
       await flashcards.editDrawerAdditionalFieldsToggle.click();
       await expect(flashcards.editTagPicker).toBeVisible({ timeout: 10_000 });
       await expect(flashcards.editTagPicker).toContainText(editSuggestionTag);

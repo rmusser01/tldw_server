@@ -44,6 +44,9 @@ async def test_rg_route_map_covers_rate_limited_paths():
     decorated_paths = [
         "/api/v1/audio/speech",
         "/api/v1/audio/transcriptions",
+        "/api/v1/health",
+        "/api/v1/flashcards/review",
+        "/api/v1/quizzes",
         "/api/v1/chatbooks/export",
         "/api/v1/chatbooks/import",
         "/api/v1/chatbooks/preview",

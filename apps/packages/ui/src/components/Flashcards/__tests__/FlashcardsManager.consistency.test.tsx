@@ -663,7 +663,22 @@ describe("FlashcardsManager consistency standards", () => {
     expect(mocks.navigate).not.toHaveBeenCalled()
   })
 
-  it("disables quiz CTA without a valid quiz handoff context", () => {
+  it("enables quiz CTA after selecting a review deck", () => {
+    window.history.replaceState({}, "", "/flashcards")
+    render(<FlashcardsManager />)
+
+    fireEvent.click(screen.getByText("Select Deck 12"))
+
+    const quizButton = screen.getByTestId("flashcards-to-quiz-cta")
+    expect(quizButton).not.toBeDisabled()
+    fireEvent.click(quizButton)
+
+    expect(mocks.navigate).toHaveBeenCalledWith(
+      expect.stringContaining("/quiz?tab=take&source=flashcards&deck_id=12")
+    )
+  })
+
+  it("disables quiz CTA without a valid quiz or deck context", () => {
     window.history.replaceState({}, "", "/flashcards")
     render(<FlashcardsManager />)
 

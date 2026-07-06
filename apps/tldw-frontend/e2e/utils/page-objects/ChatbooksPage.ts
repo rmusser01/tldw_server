@@ -65,7 +65,7 @@ export class ChatbooksPage extends BasePage {
 
   /** File upload dragger area */
   get uploadDropzone(): Locator {
-    return this.page.getByText(/drop a \.zip chatbook/i)
+    return this.page.getByText(/drop a \.zip or \.chatbook archive/i)
   }
 
   /** Job tracker card */
