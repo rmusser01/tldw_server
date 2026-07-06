@@ -132,7 +132,10 @@ async def test_scrape_article_uses_runtime_policy_before_preflight(monkeypatch: 
 
 @pytest.mark.unit
 async def test_scrape_article_uses_runtime_fetch_client_for_httpx_success(monkeypatch: pytest.MonkeyPatch) -> None:
-    ael = _install_article_defaults(monkeypatch, backend="httpx")
+    ael = _install_article_defaults(
+        monkeypatch,
+        backend="httpx",
+    )
     policy_checker = FakePolicyChecker(
         PolicyDecision(
             allowed=True,
