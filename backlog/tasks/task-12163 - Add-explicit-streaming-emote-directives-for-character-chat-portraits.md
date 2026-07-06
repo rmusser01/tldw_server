@@ -4,15 +4,15 @@ title: Add explicit streaming emote directives for character chat portraits
 status: To Do
 assignee: []
 created_date: ''
-updated_date: '2026-07-06 16:36'
+updated_date: 2026-07-06 16:36
 labels:
-  - frontend
-  - character-chat
-  - emotes
+- frontend
+- character-chat
+- emotes
 dependencies: []
 documentation:
-  - >-
-    Docs/superpowers/specs/2026-07-06-character-chat-streaming-emote-directives-design.md
+- Docs/superpowers/specs/2026-07-06-character-chat-streaming-emote-directives-design.md
+- Docs/superpowers/plans/2026-07-06-character-chat-streaming-emote-directives-implementation-plan.md
 priority: high
 ---
 
@@ -35,21 +35,21 @@ Implement v1 character chat emote control: parse standalone Emote: <state> direc
 - [ ] #9 Parser, streaming-buffer, integration, and minimal UI behavior tests cover the directive flow.
 <!-- AC:END -->
 
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Docs/superpowers/plans/2026-07-06-character-chat-streaming-emote-directives-implementation-plan.md
+<!-- SECTION:PLAN:END -->
+
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
-<!-- SECTION:FINAL_SUMMARY:END -->
-
-<!-- SECTION:FINAL_SUMMARY:END -->
 
 <!-- SECTION:FINAL_SUMMARY:END -->
 
