@@ -42,6 +42,8 @@ Implementation:
 - Changed image readiness to return `image_backend_not_configured` when backends exist but no configured model exists.
 - Changed output job status to prefer the failed artifact error when the job error is absent or generic `worker_exception`.
 - Added focused regression coverage for image readiness, TTS failed-provider readiness, and artifact error precedence.
+PR review pass after rebasing onto latest `origin/dev`: addressing Qodo marker/type-hint/TTS probe comments and Gemini nullable producer metadata comment on PR #2671.
+PR #2671 review fixes implemented: added `get_existing_tts_factory()` to avoid creating the TTS factory during readiness probes, skipped runtime TTS inspection when no providers are enabled, logged runtime-probe exceptions with exception details, removed the extra `pytest.mark.asyncio` marker by using `asyncio.run`, and added type annotations to the new test helpers. Gemini's nullable `producer_metadata` guard was already present after syncing the remote PR branch.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
@@ -54,6 +56,12 @@ Verification:
 - `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/core/Research_Workspace/capabilities.py tldw_Server_API/app/core/Research_Workspace/output_jobs.py -f json -o /tmp/bandit_research_workspace_wp2_readiness.json` -> 0 findings, 0 errors.
 
 Remaining environment requirement: actual WP2 media generation still requires configured local image/TTS providers; this change makes the readiness/status failures precise and fail-closed when providers are missing or failed.
+
+Review-pass verification after rebasing onto latest `origin/dev`:
+- `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Research_Workspace/test_capability_derivation.py tldw_Server_API/tests/Research_Workspace/test_output_jobs_api.py -q` -> 41 passed, 4 warnings.
+- `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Research_Workspace/test_capability_endpoint.py tldw_Server_API/tests/Research_Workspace/test_output_jobs_worker.py -q` -> 34 passed, 2 warnings.
+- `git diff --check` -> exit 0.
+- `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/core/Research_Workspace/capabilities.py tldw_Server_API/app/core/Research_Workspace/output_jobs.py tldw_Server_API/app/core/TTS/adapter_registry.py -f json -o /tmp/bandit_research_workspace_wp2_pr2671_review.json` -> 0 findings, 0 errors.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

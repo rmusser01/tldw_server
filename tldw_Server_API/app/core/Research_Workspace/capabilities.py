@@ -562,24 +562,35 @@ async def _collect_tts_health() -> Mapping[str, Any]:
         available = len(enabled)
         status = "healthy" if available > 0 else "unhealthy"
         reason_code: str | None = None
+        if available == 0:
+            return {
+                "status": status,
+                "providers": {
+                    "total": total,
+                    "available": available,
+                },
+            }
 
         try:
-            from tldw_Server_API.app.core.TTS.adapter_registry import get_tts_factory
+            from tldw_Server_API.app.core.TTS.adapter_registry import get_existing_tts_factory
 
-            factory = await get_tts_factory()
-            status_summary = factory.get_status()
-            provider_statuses = _mapping_value(status_summary, "providers")
-            failed_enabled = []
-            for provider in enabled:
-                provider_status = _mapping_value(provider_statuses, provider)
-                if isinstance(provider_status, Mapping) and provider_status.get("failed") is True:
-                    failed_enabled.append(provider)
-            if failed_enabled:
-                available = max(0, available - len(failed_enabled))
-                reason_code = "tts_provider_failed" if available == 0 else "tts_provider_degraded"
-                status = "unhealthy" if available == 0 else "degraded"
-        except Exception:
-            logger.debug("Unable to collect Research Workspace TTS runtime status")
+            factory = get_existing_tts_factory()
+            if factory is not None:
+                status_summary = factory.get_status()
+                provider_statuses = _mapping_value(status_summary, "providers")
+                failed_enabled = []
+                for provider in enabled:
+                    provider_status = _mapping_value(provider_statuses, provider)
+                    if isinstance(provider_status, Mapping) and provider_status.get("failed") is True:
+                        failed_enabled.append(provider)
+                if failed_enabled:
+                    available = max(0, available - len(failed_enabled))
+                    reason_code = "tts_provider_failed" if available == 0 else "tts_provider_degraded"
+                    status = "unhealthy" if available == 0 else "degraded"
+        except Exception as exc:
+            logger.bind(error_type=type(exc).__name__).opt(exception=exc).debug(
+                "Unable to collect Research Workspace TTS runtime status"
+            )
 
         payload: dict[str, Any] = {
             "status": status,
