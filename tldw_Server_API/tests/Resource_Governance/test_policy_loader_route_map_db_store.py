@@ -26,5 +26,11 @@ async def test_db_policy_loader_includes_route_map_from_file(monkeypatch):
     assert isinstance(snap.route_map, dict) and snap.route_map
     assert "by_tag" in snap.route_map
     assert snap.route_map["by_tag"].get("chat") == "chat.default"
+    assert snap.route_map["by_tag"].get("health") == "health.default"
+    assert snap.route_map["by_tag"].get("flashcards") == "flashcards.default"
+    assert snap.route_map["by_tag"].get("quizzes") == "quizzes.default"
     assert snap.route_map.get("by_path", {}).get("/api/v1/chatbooks/export") == "chatbooks.export"
+    assert snap.route_map.get("by_path", {}).get("/api/v1/health*") == "health.default"
+    assert snap.route_map.get("by_path", {}).get("/api/v1/flashcards*") == "flashcards.default"
+    assert snap.route_map.get("by_path", {}).get("/api/v1/quizzes*") == "quizzes.default"
     assert snap.route_map.get("by_path", {}).get("/api/v1/watchlists/*") == "watchlists.default"

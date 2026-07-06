@@ -8,7 +8,7 @@ import {
 import { bgRequest } from '@/services/background-proxy'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useServerOnline } from '@/hooks/useServerOnline'
-import { useConfirmDanger } from '@/components/Common/confirm-danger'
+import { useConfirmDanger, type ConfirmDangerOptions } from '@/components/Common/confirm-danger'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { useDemoMode } from '@/context/demo-mode'
@@ -117,7 +117,11 @@ const NotesManagerPage: React.FC = () => {
   const navigate = useNavigate()
   const { capabilities, loading: capsLoading } = useServerCapabilities()
   const message = useAntdMessage()
-  const confirmDanger = useConfirmDanger()
+  const rawConfirmDanger = useConfirmDanger()
+  const confirmDanger = React.useCallback((options: ConfirmDangerOptions) => {
+    useTutorialStore.getState().endTutorial()
+    return rawConfirmDanger(options)
+  }, [rawConfirmDanger])
   const {
     setHistory,
     setMessages,
@@ -2129,13 +2133,37 @@ const NotesManagerPage: React.FC = () => {
     if (typeof window === 'undefined') return
     let cancelled = false
     let timer: number | null = null
+    let userInteracted = false
+
+    function removeInteractionListeners() {
+      window.removeEventListener('pointerdown', handleUserInteraction, true)
+      window.removeEventListener('keydown', handleUserInteraction, true)
+    }
+
+    function handleUserInteraction() {
+      if (cancelled || userInteracted) return
+      userInteracted = true
+      if (timer != null) {
+        window.clearTimeout(timer)
+        timer = null
+      }
+      removeInteractionListeners()
+      void notesUiStorage
+        .set(NOTES_TUTORIAL_SHOWN_STORAGE_KEY, '1')
+        .catch(() => undefined)
+    }
+
+    window.addEventListener('pointerdown', handleUserInteraction, { capture: true, once: true })
+    window.addEventListener('keydown', handleUserInteraction, { capture: true, once: true })
 
     void (async () => {
       const alreadyShown = await notesUiStorage
         .get<string | null>(NOTES_TUTORIAL_SHOWN_STORAGE_KEY)
         .catch(() => null)
-      if (cancelled || alreadyShown) return
+      if (cancelled || alreadyShown || userInteracted) return
       timer = window.setTimeout(() => {
+        if (cancelled || userInteracted) return
+        removeInteractionListeners()
         void notesUiStorage
           .set(NOTES_TUTORIAL_SHOWN_STORAGE_KEY, '1')
           .catch(() => undefined)
@@ -2146,6 +2174,7 @@ const NotesManagerPage: React.FC = () => {
     return () => {
       cancelled = true
       if (timer != null) window.clearTimeout(timer)
+      removeInteractionListeners()
     }
   }, [])
 
@@ -2191,19 +2220,6 @@ const NotesManagerPage: React.FC = () => {
       <p id={NOTES_SHORTCUTS_SUMMARY_ID} className="sr-only">
         {t('option:notesSearch.shortcutSummaryText', { defaultValue: 'Keyboard shortcuts: Ctrl or Command plus S to save, question mark to open keyboard shortcuts help, Escape to close dialogs.' })}
       </p>
-      {!isMobileViewport && (
-        <div className="absolute right-4 top-4 z-20">
-          <Button
-            type="primary"
-            size="small"
-            onClick={handleCreateStudyPackFromNote}
-            disabled={ed.selectedId == null || ed.isDirty || !ed.title.trim()}
-            data-testid="notes-create-study-pack-button"
-          >
-            {t('option:notesSearch.createStudyPack', { defaultValue: 'Create study pack' })}
-          </Button>
-        </div>
-      )}
       {isMobileViewport && mobileSidebarOpen && (
         <button type="button" aria-label={t('option:notesSearch.closeMobileSidebar', { defaultValue: 'Close notes list' })} data-testid="notes-mobile-sidebar-backdrop" className="absolute inset-0 z-30 bg-black/35" onClick={() => setMobileSidebarOpen(false)} />
       )}

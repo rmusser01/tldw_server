@@ -48,6 +48,22 @@ export const FlashcardActionsMenu: React.FC<FlashcardActionsMenuProps> = ({
     }
   ]
 
+  const handleEditPointerDown = React.useCallback(
+    (event: React.PointerEvent<HTMLButtonElement>) => {
+      if (event.button !== 0 || disabled) return
+      event.stopPropagation()
+    },
+    [disabled]
+  )
+
+  const handleEditClick = React.useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>) => {
+      event.stopPropagation()
+      onEdit()
+    },
+    [onEdit]
+  )
+
   return (
     <div className="flex items-center gap-1">
       <Tooltip title={t("common:edit", { defaultValue: "Edit" })}>
@@ -55,10 +71,8 @@ export const FlashcardActionsMenu: React.FC<FlashcardActionsMenuProps> = ({
           type="text"
           size="small"
           icon={<Pen className="size-4" />}
-          onClick={(e) => {
-            e.stopPropagation()
-            onEdit()
-          }}
+          onPointerDown={handleEditPointerDown}
+          onClick={handleEditClick}
           disabled={disabled}
           aria-label={t("common:edit", { defaultValue: "Edit" })}
           data-testid={`flashcard-edit-${card.uuid}`}

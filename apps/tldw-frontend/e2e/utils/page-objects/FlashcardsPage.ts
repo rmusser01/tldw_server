@@ -56,6 +56,10 @@ export function buildFlashcardsSeedRecord(
   };
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 type FlashcardsCleanupDeck = {
   id?: number;
   name?: string;
@@ -302,6 +306,10 @@ export class FlashcardsPage extends BasePage {
     return this.page.getByRole('tab', { name: /scheduler/i });
   }
 
+  get schedulerEmptyPreview(): Locator {
+    return this.page.locator('[data-testid="flashcards-scheduler-empty-preview"]');
+  }
+
   get templatesCreateButton(): Locator {
     return this.page.getByRole('button', { name: /create template/i });
   }
@@ -541,7 +549,7 @@ export class FlashcardsPage extends BasePage {
   }
 
   get editDrawer(): Locator {
-    return this.page.getByRole('dialog', { name: 'Edit Flashcard' }).last();
+    return this.page.getByRole('dialog', { name: 'Edit Card' }).last();
   }
 
   get editDrawerAdditionalFieldsToggle(): Locator {
@@ -651,15 +659,19 @@ export class FlashcardsPage extends BasePage {
   }
 
   getActiveSelectOption(optionName: string, exact = false): Locator {
+    const optionText = exact
+      ? new RegExp(`^\\s*${escapeRegExp(optionName)}\\s*$`)
+      : optionName;
+
     return this.page
-      .locator('.ant-select-dropdown')
-      .filter({ has: this.page.getByRole('option', { name: optionName, exact }) })
-      .locator('[role="option"]')
-      .filter({ hasText: optionName })
-      .first();
+      .locator('.ant-select-item-option-content')
+      .filter({ hasText: optionText })
+      .last();
   }
 
   async selectManageDeckByName(deckName: string): Promise<void> {
+    const selectedDeck = this.manageDeckSelect.getByText(deckName, { exact: true });
+    if (await selectedDeck.isVisible().catch(() => false)) return;
     await this.manageDeckSelect.click({ force: true });
     const deckOption = this.getActiveSelectOption(deckName);
     await expect(deckOption).toBeVisible({ timeout: 10_000 });
@@ -687,10 +699,19 @@ export class FlashcardsPage extends BasePage {
   }
 
   async selectCreateDrawerDeckByName(deckName: string): Promise<void> {
+    const selectedDeck = this.createDrawerDeckSelect.getByText(deckName, { exact: true });
+    if (await selectedDeck.isVisible().catch(() => false)) return;
+    await this.createDrawerDeckSelect.scrollIntoViewIfNeeded();
     await this.createDrawerDeckSelect.click({ force: true });
     const deckOption = this.getActiveSelectOption(deckName);
     await expect(deckOption).toBeVisible({ timeout: 10_000 });
     await deckOption.click();
+  }
+
+  async selectVisibleDropdownOption(optionName: string): Promise<void> {
+    const option = this.getActiveSelectOption(optionName, true);
+    await expect(option).toBeVisible({ timeout: 10_000 });
+    await option.click();
   }
 
   async selectImportFormat(formatLabel: string): Promise<void> {
@@ -724,7 +745,12 @@ export class FlashcardsPage extends BasePage {
   }
 
   async openManageFlashcardEdit(cardUuid: string): Promise<void> {
-    await this.getManageFlashcardEditButton(cardUuid).click({ force: true });
+    const editButton = this.getManageFlashcardEditButton(cardUuid);
+    await editButton.scrollIntoViewIfNeeded();
+    await editButton.click();
+    if (await this.editDrawer.isVisible({ timeout: 1_000 }).catch(() => false)) return;
+    await this.getManageFlashcardRow(cardUuid).click();
+    await this.page.keyboard.press('Enter');
   }
 
   // -- Tab Navigation --------------------------------------------------------

@@ -36,6 +36,8 @@ async def test_rg_route_map_covers_rate_limited_paths():
     await loader.load_once()
     snap = loader.get_snapshot()
     by_path = dict((snap.route_map or {}).get("by_path") or {})
+    assert loader.get_policy("flashcards.default")["fail_mode"] == "fallback_memory"
+    assert loader.get_policy("quizzes.default")["fail_mode"] == "fallback_memory"
 
     # Minimal representative set of ingress-limited routes:
     # - audio.py (multiple endpoints) -> /api/v1/audio/*
@@ -44,6 +46,9 @@ async def test_rg_route_map_covers_rate_limited_paths():
     decorated_paths = [
         "/api/v1/audio/speech",
         "/api/v1/audio/transcriptions",
+        "/api/v1/health",
+        "/api/v1/flashcards/review",
+        "/api/v1/quizzes",
         "/api/v1/chatbooks/export",
         "/api/v1/chatbooks/import",
         "/api/v1/chatbooks/preview",

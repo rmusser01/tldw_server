@@ -222,7 +222,7 @@ describe("ManageTab first-time state", () => {
     vi.mocked(useCardsKeyboardNav).mockImplementation(() => undefined)
   })
 
-  it("suppresses expert manage chrome when there are no cards and no active filters", () => {
+  it("suppresses expert manage chrome while keeping primary filters when there are no cards and no active filters", () => {
     render(
       <ManageTab
         onNavigateToImport={() => {}}
@@ -233,7 +233,8 @@ describe("ManageTab first-time state", () => {
 
     expect(screen.getByText("No flashcards yet")).toBeInTheDocument()
     expect(screen.queryByTestId("flashcards-manage-shortcut-chips")).not.toBeInTheDocument()
-    expect(screen.queryByTestId("flashcards-manage-search")).not.toBeInTheDocument()
+    expect(screen.getByTestId("flashcards-manage-search")).toBeInTheDocument()
+    expect(screen.getByTestId("flashcards-manage-deck-select")).toBeInTheDocument()
     expect(screen.queryByTestId("flashcards-manage-sort-select")).not.toBeInTheDocument()
     expect(screen.queryByTestId("flashcards-density-toggle")).not.toBeInTheDocument()
     expect(screen.queryByTestId("flashcards-manage-selection-summary")).not.toBeInTheDocument()

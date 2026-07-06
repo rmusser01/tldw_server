@@ -12,6 +12,12 @@ from typing import Optional
 from loguru import logger
 
 MAX_FTS_QUERY_LENGTH = 8192
+SQLITE_FTS_OPERATOR_TOKENS = {'AND', 'OR', 'NEAR', 'NOT'}
+SQLITE_FTS_SAFE_TOKEN_RE = re.compile(r'^[A-Za-z0-9_]+\*?$')
+SQLITE_FTS_COLUMN_TOKEN_RE = re.compile(r'^([A-Za-z_][A-Za-z0-9_]*):(.*)$')
+SQLITE_FTS_TOKEN_RE = re.compile(
+    r'-?[A-Za-z_][A-Za-z0-9_]*:"[^"]*"|-?"[^"]*"|\S+'
+)
 
 
 class FTSQueryTranslator:
@@ -177,6 +183,70 @@ class FTSQueryTranslator:
         return query
 
     @staticmethod
+    def _quote_sqlite_fts_token(token: str) -> str:
+        """Quote FTS5 tokens that contain punctuation with query semantics."""
+        if not token or SQLITE_FTS_SAFE_TOKEN_RE.fullmatch(token):
+            return token
+
+        suffix = '*' if token.endswith('*') and len(token) > 1 else ''
+        token_body = token[:-1] if suffix else token
+        escaped = token_body.replace('"', '""')
+        return f'"{escaped}"{suffix}'
+
+    @staticmethod
+    def _normalize_sqlite_query(query: str) -> str:
+        """Protect plain text SQLite FTS5 searches from punctuation parsing."""
+        parts = SQLITE_FTS_TOKEN_RE.findall(query)
+        normalized_parts = []
+        last_allows_not = False
+
+        for part in parts:
+            upper = part.upper()
+            if upper in SQLITE_FTS_OPERATOR_TOKENS or part.startswith('"') and part.endswith('"'):
+                normalized_parts.append(part)
+                last_allows_not = upper not in SQLITE_FTS_OPERATOR_TOKENS
+                continue
+
+            if part.startswith('-') and len(part) > 1:
+                body = part[1:]
+                column_match = SQLITE_FTS_COLUMN_TOKEN_RE.fullmatch(body)
+                if (
+                    column_match
+                    and column_match.group(2).startswith('"')
+                    and column_match.group(2).endswith('"')
+                ):
+                    column, value = column_match.groups()
+                    operand = f'{column}:{value}'
+                elif body.startswith('"') and body.endswith('"'):
+                    operand = body
+                elif last_allows_not:
+                    operand = FTSQueryTranslator._quote_sqlite_fts_token(body)
+                else:
+                    operand = FTSQueryTranslator._quote_sqlite_fts_token(part)
+                if last_allows_not:
+                    normalized_parts.extend(['NOT', operand])
+                else:
+                    normalized_parts.append(operand)
+                last_allows_not = True
+                continue
+
+            column_match = SQLITE_FTS_COLUMN_TOKEN_RE.fullmatch(part)
+            if (
+                column_match
+                and column_match.group(2).startswith('"')
+                and column_match.group(2).endswith('"')
+            ):
+                column, value = column_match.groups()
+                normalized_parts.append(f'{column}:{value}')
+                last_allows_not = True
+                continue
+
+            normalized_parts.append(FTSQueryTranslator._quote_sqlite_fts_token(part))
+            last_allows_not = True
+
+        return ' '.join(normalized_parts)
+
+    @staticmethod
     def normalize_query(query: str, backend: str) -> str:
         """
         Normalize a query for a specific backend.
@@ -210,8 +280,8 @@ class FTSQueryTranslator:
 
         elif backend == 'sqlite':
             if is_postgres and not is_sqlite:
-                return FTSQueryTranslator.postgres_to_sqlite(query)
-            return query
+                query = FTSQueryTranslator.postgres_to_sqlite(query)
+            return FTSQueryTranslator._normalize_sqlite_query(query)
 
         return query
 
