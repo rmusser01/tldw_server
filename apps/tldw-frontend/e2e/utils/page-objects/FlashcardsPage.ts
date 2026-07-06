@@ -670,9 +670,9 @@ export class FlashcardsPage extends BasePage {
   }
 
   async selectManageDeckByName(deckName: string): Promise<void> {
-    await this.manageDeckSelect.click({ force: true });
     const selectedDeck = this.manageDeckSelect.getByText(deckName, { exact: true });
     if (await selectedDeck.isVisible().catch(() => false)) return;
+    await this.manageDeckSelect.click({ force: true });
     const deckOption = this.getActiveSelectOption(deckName);
     await expect(deckOption).toBeVisible({ timeout: 10_000 });
     await deckOption.click();

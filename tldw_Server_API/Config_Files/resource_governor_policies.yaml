@@ -252,10 +252,12 @@ policies:
   flashcards.default:
     requests: { rpm: 600, burst: 1.2 }
     scopes: [user, api_key, ip]
+    fail_mode: fallback_memory
 
   quizzes.default:
     requests: { rpm: 600, burst: 1.2 }
     scopes: [user, api_key, ip]
+    fail_mode: fallback_memory
 
   # Chatbooks import/export endpoints (legacy ingress compat → RG).
   # Covers `/api/v1/chatbooks/*` used for conversation backup/restore and bulk

@@ -51,6 +51,8 @@ Confirmed root causes and fixes:
 - Flashcards edit E2E targeted stale dialog text; updated the page object to the current `Edit Card` drawer and hardened the edit trigger.
 - PR review follow-up: SQLite FTS normalization now keeps explicit quoted column phrases intact, treats unquoted `field:value` text as a literal to avoid invalid-table-column 500s in Flashcards, and converts mixed negative terms to valid FTS5 `NOT` operands.
 - PR review follow-up: Flashcards edit pointerdown now only stops row propagation; click remains the only edit action trigger, preventing double `onEdit()` calls.
+- PR review follow-up: CodeRabbit items addressed by extracting Flashcards Manage expert filters into `ManageExpertFilters`, preventing an already-selected Manage deck dropdown from staying open in E2E helpers, and making Flashcards/Quizzes ResourceGovernor policies use `fallback_memory`.
+- PR review follow-up: CodeRabbit's FTS hyphen comment was verified against `9368cde2` and was already addressed by the prior negative-token fix and regression coverage.
 
 Verification:
 - Live tier-2 UAT passed 32/32 for Chatbooks, Flashcards, and Quizzes against the live backend.
@@ -60,6 +62,7 @@ Verification:
 - `git diff --check` passed.
 - Bandit found no issues in the touched implementation file. A full touched Python scan only reported `B101` pytest asserts in test files; the non-assert scan passed with `-s B101`.
 - PR review follow-up focused checks passed: backend FTS/Flashcards/ResourceGovernor regressions 6/6, Flashcards UI Vitest 54/54, `git diff --check`, and Bandit with pytest asserts excluded.
+- CodeRabbit follow-up focused checks passed: Flashcards UI Vitest 54/54, backend FTS/Flashcards/ResourceGovernor regressions 6/6, and frontend `bun run typecheck`.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

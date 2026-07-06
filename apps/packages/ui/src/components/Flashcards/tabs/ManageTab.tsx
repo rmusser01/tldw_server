@@ -80,6 +80,7 @@ import {
   getFlashcard,
   listFlashcards,
   updateFlashcard,
+  type Deck,
   type Flashcard,
   type FlashcardUpdate
 } from "@/services/flashcards"
@@ -124,6 +125,197 @@ export const buildFlashcardsWorkspaceVisibilityOptions = (
   includeWorkspaceItems: selectedWorkspaceId == null ? showWorkspaceDecks : false,
   include_workspace_items: selectedWorkspaceId == null ? showWorkspaceDecks : false
 })
+
+type ManageExpertFiltersProps = {
+  selectedDeck: Deck | null
+  showWorkspaceDecks: boolean
+  setShowWorkspaceDecks: React.Dispatch<React.SetStateAction<boolean>>
+  selectedWorkspaceId: string | null
+  setSelectedWorkspaceId: React.Dispatch<React.SetStateAction<string | null>>
+  workspaceFilterOptions: Array<{ label: string; value: string }>
+  mTags: string[]
+  mTagInput: string
+  setMTagInput: React.Dispatch<React.SetStateAction<string>>
+  filteredTagSuggestions: string[]
+  hasActiveFilters: boolean
+  openDeckScopeEditor: () => void
+  addTagFilter: (rawValue: string) => void
+  removeTagFilter: (targetTag: string) => void
+  clearAllFilters: () => void
+  setPage: React.Dispatch<React.SetStateAction<number>>
+}
+
+const ManageExpertFilters: React.FC<ManageExpertFiltersProps> = ({
+  selectedDeck,
+  showWorkspaceDecks,
+  setShowWorkspaceDecks,
+  selectedWorkspaceId,
+  setSelectedWorkspaceId,
+  workspaceFilterOptions,
+  mTags,
+  mTagInput,
+  setMTagInput,
+  filteredTagSuggestions,
+  hasActiveFilters,
+  openDeckScopeEditor,
+  addTagFilter,
+  removeTagFilter,
+  clearAllFilters,
+  setPage
+}) => {
+  const { t } = useTranslation(["option", "common"])
+
+  return (
+    <>
+      <Button
+        onClick={openDeckScopeEditor}
+        disabled={!selectedDeck}
+        data-testid="flashcards-manage-move-scope"
+      >
+        {t("option:flashcards.moveScope", { defaultValue: "Move scope" })}
+      </Button>
+      <Checkbox
+        checked={showWorkspaceDecks}
+        onChange={(event) => {
+          setShowWorkspaceDecks(event.target.checked)
+          if (!event.target.checked) {
+            setSelectedWorkspaceId(null)
+          }
+          setPage(1)
+        }}
+        aria-label={t("option:flashcards.showWorkspaceDecks", {
+          defaultValue: "Show workspace decks"
+        })}
+        data-testid="flashcards-manage-show-workspace-decks"
+      >
+        {t("option:flashcards.showWorkspaceDecks", {
+          defaultValue: "Show workspace decks"
+        })}
+      </Checkbox>
+      <Select<string>
+        allowClear
+        showSearch
+        placeholder={t("option:flashcards.filterWorkspace", {
+          defaultValue: "Filter workspace"
+        })}
+        value={selectedWorkspaceId ?? undefined}
+        onChange={(value) => {
+          setSelectedWorkspaceId(value ?? null)
+          setPage(1)
+        }}
+        disabled={!showWorkspaceDecks && selectedWorkspaceId == null}
+        options={workspaceFilterOptions}
+        className="min-w-44"
+        data-testid="flashcards-manage-workspace-filter"
+      />
+      <Popover
+        trigger="click"
+        placement="bottomLeft"
+        content={
+          <div className="w-72 space-y-2">
+            <div className="text-sm font-medium text-text-muted">
+              {t("option:flashcards.filterByTag", {
+                defaultValue: "Filter by tag"
+              })}
+            </div>
+            <Input
+              placeholder={t("option:flashcards.tagPlaceholder", {
+                defaultValue: "Type a tag and press Enter"
+              })}
+              value={mTagInput}
+              onChange={(e) => {
+                setMTagInput(e.target.value)
+              }}
+              onPressEnter={() => addTagFilter(mTagInput)}
+              onKeyDown={(event) => {
+                if (event.key === ",") {
+                  event.preventDefault()
+                  addTagFilter(mTagInput)
+                }
+              }}
+              allowClear
+              data-testid="flashcards-manage-tag-input"
+            />
+            <div className="flex flex-wrap gap-1" data-testid="flashcards-manage-tag-selected">
+              {mTags.length > 0 ? (
+                mTags.map((tag) => (
+                  <Tag
+                    key={tag.toLowerCase()}
+                    closable
+                    onClose={(event) => {
+                      event.preventDefault()
+                      removeTagFilter(tag)
+                    }}
+                    className="!m-0"
+                  >
+                    {tag}
+                  </Tag>
+                ))
+              ) : (
+                <Text type="secondary" className="text-xs">
+                  {t("option:flashcards.tagFilterMatchAllHint", {
+                    defaultValue: "Add one or more tags. Cards must match all selected tags."
+                  })}
+                </Text>
+              )}
+            </div>
+            {filteredTagSuggestions.length > 0 && (
+              <div className="flex flex-wrap gap-1" data-testid="flashcards-manage-tag-suggestions">
+                {filteredTagSuggestions.map((tag) => (
+                  <Button
+                    key={tag.toLowerCase()}
+                    size="small"
+                    type="default"
+                    onClick={() => addTagFilter(tag)}
+                    className="!h-6 !px-2 !text-xs"
+                  >
+                    {tag}
+                  </Button>
+                ))}
+              </div>
+            )}
+          </div>
+        }
+      >
+        <Badge dot={mTags.length > 0} offset={[-4, 4]}>
+          <Button icon={<Filter className="size-4" />}>
+            {t("option:flashcards.moreFilters", { defaultValue: "More" })}
+          </Button>
+        </Badge>
+      </Popover>
+      {hasActiveFilters && (
+        <Button size="small" type="link" onClick={clearAllFilters}>
+          {t("option:flashcards.clearFilters", { defaultValue: "Clear all" })}
+        </Button>
+      )}
+      {mTags.length > 0 && (
+        <div
+          className="flex basis-full flex-wrap items-center gap-1.5"
+          data-testid="flashcards-manage-active-tag-filters"
+        >
+          <Text type="secondary" className="text-xs">
+            {t("option:flashcards.activeTagFilters", {
+              defaultValue: "Tag filters:"
+            })}
+          </Text>
+          {mTags.map((tag) => (
+            <Tag
+              key={`active-${tag.toLowerCase()}`}
+              closable
+              onClose={(event) => {
+                event.preventDefault()
+                removeTagFilter(tag)
+              }}
+              className="!m-0"
+            >
+              {tag}
+            </Tag>
+          ))}
+        </div>
+      )}
+    </>
+  )
+}
 
 /**
  * Cards tab for browsing, filtering, creating, editing, and bulk operations on flashcards.
@@ -1881,158 +2073,26 @@ export const ManageTab: React.FC<ManageTabProps> = ({
               }))}
             />
             {showManageExpertChrome && (
-              <>
-                <Button
-                  onClick={openDeckScopeEditor}
-                  disabled={!selectedDeck}
-                  data-testid="flashcards-manage-move-scope"
-                >
-                  {t("option:flashcards.moveScope", { defaultValue: "Move scope" })}
-                </Button>
-                <Checkbox
-                  checked={showWorkspaceDecks}
-                  onChange={(event) => {
-                    setShowWorkspaceDecks(event.target.checked)
-                    if (!event.target.checked) {
-                      setSelectedWorkspaceId(null)
-                    }
-                    setPage(1)
-                  }}
-                  aria-label={t("option:flashcards.showWorkspaceDecks", {
-                    defaultValue: "Show workspace decks"
-                  })}
-                  data-testid="flashcards-manage-show-workspace-decks"
-                >
-                  {t("option:flashcards.showWorkspaceDecks", {
-                    defaultValue: "Show workspace decks"
-                  })}
-                </Checkbox>
-                <Select<string>
-                  allowClear
-                  showSearch
-                  placeholder={t("option:flashcards.filterWorkspace", {
-                    defaultValue: "Filter workspace"
-                  })}
-                  value={selectedWorkspaceId ?? undefined}
-                  onChange={(value) => {
-                    setSelectedWorkspaceId(value ?? null)
-                    setPage(1)
-                  }}
-                  disabled={!showWorkspaceDecks && selectedWorkspaceId == null}
-                  options={workspaceFilterOptions}
-                  className="min-w-44"
-                  data-testid="flashcards-manage-workspace-filter"
-                />
-                {/* Tag filter in popover */}
-                <Popover
-                  trigger="click"
-                  placement="bottomLeft"
-                  content={
-                    <div className="w-72 space-y-2">
-                      <div className="text-sm font-medium text-text-muted">
-                        {t("option:flashcards.filterByTag", {
-                          defaultValue: "Filter by tag"
-                        })}
-                      </div>
-                      <Input
-                        placeholder={t("option:flashcards.tagPlaceholder", {
-                          defaultValue: "Type a tag and press Enter"
-                        })}
-                        value={mTagInput}
-                        onChange={(e) => {
-                          setMTagInput(e.target.value)
-                        }}
-                        onPressEnter={() => addTagFilter(mTagInput)}
-                        onKeyDown={(event) => {
-                          if (event.key === ",") {
-                            event.preventDefault()
-                            addTagFilter(mTagInput)
-                          }
-                        }}
-                        allowClear
-                        data-testid="flashcards-manage-tag-input"
-                      />
-                      <div className="flex flex-wrap gap-1" data-testid="flashcards-manage-tag-selected">
-                        {mTags.length > 0 ? (
-                          mTags.map((tag) => (
-                            <Tag
-                              key={tag.toLowerCase()}
-                              closable
-                              onClose={(event) => {
-                                event.preventDefault()
-                                removeTagFilter(tag)
-                              }}
-                              className="!m-0"
-                            >
-                              {tag}
-                            </Tag>
-                          ))
-                        ) : (
-                          <Text type="secondary" className="text-xs">
-                            {t("option:flashcards.tagFilterMatchAllHint", {
-                              defaultValue: "Add one or more tags. Cards must match all selected tags."
-                            })}
-                          </Text>
-                        )}
-                      </div>
-                      {filteredTagSuggestions.length > 0 && (
-                        <div className="flex flex-wrap gap-1" data-testid="flashcards-manage-tag-suggestions">
-                          {filteredTagSuggestions.map((tag) => (
-                            <Button
-                              key={tag.toLowerCase()}
-                              size="small"
-                              type="default"
-                              onClick={() => addTagFilter(tag)}
-                              className="!h-6 !px-2 !text-xs"
-                            >
-                              {tag}
-                            </Button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  }
-                >
-                  <Badge dot={mTags.length > 0} offset={[-4, 4]}>
-                    <Button icon={<Filter className="size-4" />}>
-                      {t("option:flashcards.moreFilters", { defaultValue: "More" })}
-                    </Button>
-                  </Badge>
-                </Popover>
-                {hasActiveFilters && (
-                  <Button size="small" type="link" onClick={clearAllFilters}>
-                    {t("option:flashcards.clearFilters", { defaultValue: "Clear all" })}
-                  </Button>
-                )}
-              </>
+              <ManageExpertFilters
+                selectedDeck={selectedDeck}
+                showWorkspaceDecks={showWorkspaceDecks}
+                setShowWorkspaceDecks={setShowWorkspaceDecks}
+                selectedWorkspaceId={selectedWorkspaceId}
+                setSelectedWorkspaceId={setSelectedWorkspaceId}
+                workspaceFilterOptions={workspaceFilterOptions}
+                mTags={mTags}
+                mTagInput={mTagInput}
+                setMTagInput={setMTagInput}
+                filteredTagSuggestions={filteredTagSuggestions}
+                hasActiveFilters={hasActiveFilters}
+                openDeckScopeEditor={openDeckScopeEditor}
+                addTagFilter={addTagFilter}
+                removeTagFilter={removeTagFilter}
+                clearAllFilters={clearAllFilters}
+                setPage={setPage}
+              />
             )}
           </div>
-
-          {showManageExpertChrome && mTags.length > 0 && (
-            <div
-              className="flex flex-wrap items-center gap-1.5"
-              data-testid="flashcards-manage-active-tag-filters"
-            >
-              <Text type="secondary" className="text-xs">
-                {t("option:flashcards.activeTagFilters", {
-                  defaultValue: "Tag filters:"
-                })}
-              </Text>
-              {mTags.map((tag) => (
-                <Tag
-                  key={`active-${tag.toLowerCase()}`}
-                  closable
-                  onClose={(event) => {
-                    event.preventDefault()
-                    removeTagFilter(tag)
-                  }}
-                  className="!m-0"
-                >
-                  {tag}
-                </Tag>
-              ))}
-            </div>
-          )}
 
           {/* Due status as segmented control + density toggle */}
           {showManageExpertChrome && (
