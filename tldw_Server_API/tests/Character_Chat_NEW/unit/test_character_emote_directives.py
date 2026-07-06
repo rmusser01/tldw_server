@@ -9,6 +9,7 @@ import pytest
 from tldw_Server_API.app.core.Character_Chat.emote_directives import (
     EMOTE_EVENT_LIMIT,
     parse_character_emote_directives,
+    resolve_character_emote_completion,
     validate_emote_events,
 )
 
@@ -54,8 +55,46 @@ def test_validate_emote_events_accepts_valid_event():
         [{"state": "../../bad", "at_char": 0}],
         [{"state": "smug", "at_char": -1}],
         [{"state": f"state-{index}", "at_char": 0} for index in range(EMOTE_EVENT_LIMIT + 1)],
+        [{"state": "smug", "at_char": "1"}],
+        [{"state": "smug", "at_char": 1.0}],
+        [{"state": "smug", "at_char": True}],
+        [{"state": b"smug", "at_char": 0}],
+        [{"state": "smug", "at_char": 0, "extra": "ignored"}],
     ],
 )
 def test_validate_emote_events_rejects_invalid_metadata(events):
     with pytest.raises(ValueError):
         validate_emote_events(events)
+
+
+def test_resolve_character_emote_completion_prefers_explicit_directives():
+    result = resolve_character_emote_completion(
+        "Emote: smug\nFine.",
+        fallback_mood_label="happy",
+        fallback_mood_confidence=0.9,
+        fallback_mood_topic="fallback",
+    )
+
+    CASE.assertEqual(result.clean_text, "Fine.")
+    CASE.assertEqual(result.mood_label, "smug")
+    CASE.assertIsNone(result.mood_confidence)
+    CASE.assertIsNone(result.mood_topic)
+    CASE.assertEqual(
+        [event.model_dump() for event in result.emote_events],
+        [{"state": "smug", "at_char": 0}],
+    )
+
+
+def test_resolve_character_emote_completion_preserves_fallback_without_directives():
+    result = resolve_character_emote_completion(
+        "Fine.",
+        fallback_mood_label="happy",
+        fallback_mood_confidence=0.9,
+        fallback_mood_topic="fallback",
+    )
+
+    CASE.assertEqual(result.clean_text, "Fine.")
+    CASE.assertEqual(result.mood_label, "happy")
+    CASE.assertEqual(result.mood_confidence, 0.9)
+    CASE.assertEqual(result.mood_topic, "fallback")
+    CASE.assertEqual(result.emote_events, [])

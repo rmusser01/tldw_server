@@ -16,6 +16,32 @@ describe("character emote directives", () => {
     })
   })
 
+  it.each(fixtures)("streams fixture parity: $name", (fixture) => {
+    const parser = createCharacterEmoteStreamParser()
+    const sizes = [1, 2, 5, 3]
+    const events = []
+    let cleanText = ""
+    let offset = 0
+
+    for (let index = 0; offset < fixture.input.length; index += 1) {
+      const size = sizes[index % sizes.length]
+      const pushed = parser.push(fixture.input.slice(offset, offset + size))
+      cleanText += pushed.visibleText
+      events.push(...pushed.events)
+      offset += size
+    }
+
+    const flushed = parser.flush()
+    cleanText += flushed.visibleText
+    events.push(...flushed.events)
+
+    expect({ cleanText, events }).toEqual({
+      cleanText: fixture.clean_text,
+      events: fixture.events
+    })
+    expect(parser.flush()).toEqual({ visibleText: "", events: [] })
+  })
+
   it("normalizes emote states exactly", () => {
     expect(normalizeCharacterEmoteState(" Thinking Hard ")).toBe("thinking-hard")
     expect(normalizeCharacterEmoteState("../../bad")).toBeNull()

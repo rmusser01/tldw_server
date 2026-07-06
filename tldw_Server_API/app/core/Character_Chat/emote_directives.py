@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 EMOTE_EVENT_LIMIT = 5
 CHARACTER_EMOTE_STATE_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,39}$")
@@ -11,8 +11,16 @@ _DIRECTIVE_PATTERN = re.compile(r"^emote:(.*)$", re.IGNORECASE)
 
 
 class CharacterEmoteEvent(BaseModel):
-    state: str = Field(..., min_length=1, max_length=40)
-    at_char: int = Field(..., ge=0)
+    model_config = ConfigDict(extra="forbid")
+
+    state: str = Field(
+        ...,
+        min_length=1,
+        max_length=40,
+        pattern=CHARACTER_EMOTE_STATE_PATTERN.pattern,
+        strict=True,
+    )
+    at_char: int = Field(..., ge=0, strict=True)
 
 
 class CharacterEmoteParseResult(BaseModel):
