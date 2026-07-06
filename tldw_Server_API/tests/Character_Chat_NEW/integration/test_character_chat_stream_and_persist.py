@@ -8,6 +8,8 @@ import pytest
 pytestmark = pytest.mark.integration
 from fastapi.testclient import TestClient
 
+from tldw_Server_API.app.core.Character_Chat.emote_directives import EMOTE_EVENT_LIMIT
+
 
 def _create_character_and_chat(client: TestClient, headers) -> tuple[int, str]:
     char_resp = client.post(
@@ -226,7 +228,9 @@ def test_persist_streamed_message_stores_emote_events(test_client: TestClient, a
         f"/api/v1/chats/{chat_id}/completions/persist",
         json={
             "assistant_content": "What now?\nFine.",
-            "mood_label": "smug",
+            "mood_label": "happy",
+            "mood_confidence": 0.91,
+            "mood_topic": "fallback",
             "emote_events": [
                 {"state": "annoyed", "at_char": 0},
                 {"state": "smug", "at_char": 10},
@@ -245,6 +249,8 @@ def test_persist_streamed_message_stores_emote_events(test_client: TestClient, a
     assert message_resp.status_code == 200
     metadata_extra = message_resp.json()["metadata_extra"]
     assert metadata_extra["mood_label"] == "smug"
+    assert "mood_confidence" not in metadata_extra
+    assert "mood_topic" not in metadata_extra
     assert metadata_extra["emote_events"] == [
         {"state": "annoyed", "at_char": 0},
         {"state": "smug", "at_char": 10},
@@ -259,6 +265,24 @@ def test_persist_streamed_message_rejects_invalid_emote_events(test_client: Test
         json={
             "assistant_content": "bad metadata",
             "emote_events": [{"state": "../../bad", "at_char": 0}],
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 422
+
+
+def test_persist_streamed_message_rejects_too_many_emote_events(test_client: TestClient, auth_headers) -> None:
+    _, chat_id = _create_character_and_chat(test_client, auth_headers)
+
+    response = test_client.post(
+        f"/api/v1/chats/{chat_id}/completions/persist",
+        json={
+            "assistant_content": "too many",
+            "emote_events": [
+                {"state": f"state-{index}", "at_char": 0}
+                for index in range(EMOTE_EVENT_LIMIT + 1)
+            ],
         },
         headers=auth_headers,
     )
@@ -281,6 +305,9 @@ def test_persist_streamed_message_retry_preserves_emote_events(
     payload = {
         "assistant_content": "idempotent emote reply",
         "user_message_id": user_resp.json()["id"],
+        "mood_label": "happy",
+        "mood_confidence": 0.8,
+        "mood_topic": "fallback",
         "emote_events": [{"state": "smug", "at_char": 0}],
     }
 
@@ -305,7 +332,11 @@ def test_persist_streamed_message_retry_preserves_emote_events(
         headers=auth_headers,
     )
     assert message_resp.status_code == 200
-    assert message_resp.json()["metadata_extra"]["emote_events"] == [
+    metadata_extra = message_resp.json()["metadata_extra"]
+    assert metadata_extra["mood_label"] == "smug"
+    assert "mood_confidence" not in metadata_extra
+    assert "mood_topic" not in metadata_extra
+    assert metadata_extra["emote_events"] == [
         {"state": "smug", "at_char": 0}
     ]
 
@@ -433,6 +464,42 @@ def test_complete_v2_prompt_contract_mentions_available_emote_states(
     assert "Emote: <state>" in system_text
     assert "Prefer these available states: smug, thinking-hard." in system_text
     assert "../../bad" not in system_text
+
+    prep_response = test_client.post(
+        f"/api/v1/chats/{chat_resp.json()['id']}/completions",
+        json={
+            "append_user_message": "go",
+            "include_character_context": True,
+        },
+        headers=auth_headers,
+    )
+    assert prep_response.status_code == 200
+    prep_system_text = "\n".join(
+        message.get("content", "")
+        for message in prep_response.json()["messages"]
+        if message.get("role") == "system"
+    )
+    assert "Emote: <state>" in prep_system_text
+    assert "Prefer these available states: smug, thinking-hard." in prep_system_text
+    assert "../../bad" not in prep_system_text
+
+    preview_response = test_client.post(
+        f"/api/v1/chats/{chat_resp.json()['id']}/prompt-preview",
+        json={
+            "append_user_message": "go",
+            "include_character_context": True,
+        },
+        headers=auth_headers,
+    )
+    assert preview_response.status_code == 200
+    preset_section = next(
+        section
+        for section in preview_response.json()["sections"]
+        if section["name"] == "preset"
+    )
+    assert "Emote: <state>" in preset_section["content"]
+    assert "Prefer these available states: smug, thinking-hard." in preset_section["content"]
+    assert "../../bad" not in preset_section["content"]
 
 
 def test_persist_streamed_message_saves_then_returns_503_when_counting_degrades(

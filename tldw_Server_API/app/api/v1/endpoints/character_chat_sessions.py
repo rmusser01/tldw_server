@@ -944,18 +944,20 @@ def _build_stream_persist_metadata_extra(
     }
     if persist_fingerprint:
         metadata_extra["stream_persist_fingerprint"] = persist_fingerprint
-    if isinstance(mood_label, str):
-        trimmed_label = mood_label.strip()
-        if trimmed_label:
-            metadata_extra["mood_label"] = trimmed_label
-    if mood_confidence is not None:
-        metadata_extra["mood_confidence"] = float(mood_confidence)
-    if isinstance(mood_topic, str):
-        trimmed_topic = mood_topic.strip()
-        if trimmed_topic:
-            metadata_extra["mood_topic"] = trimmed_topic
     if emote_events:
+        metadata_extra["mood_label"] = emote_events[-1].state
         metadata_extra["emote_events"] = [event.model_dump() for event in emote_events]
+    else:
+        if isinstance(mood_label, str):
+            trimmed_label = mood_label.strip()
+            if trimmed_label:
+                metadata_extra["mood_label"] = trimmed_label
+        if mood_confidence is not None:
+            metadata_extra["mood_confidence"] = float(mood_confidence)
+        if isinstance(mood_topic, str):
+            trimmed_topic = mood_topic.strip()
+            if trimmed_topic:
+                metadata_extra["mood_topic"] = trimmed_topic
     if usage is not None:
         metadata_extra["usage"] = usage
     metadata_extra.update(_visual_identity_metadata_extra(visual_identity))
@@ -4700,6 +4702,7 @@ async def prepare_chat_completion(
                 user_name=user_name,
                 preset_id=effective_preset,
             )
+            sys_text = _append_character_emote_prompt_instruction(sys_text, character)
             if sys_text.strip():
                 formatted.append({"role": "system", "content": sys_text.strip()})
         if summary_content:
@@ -5100,6 +5103,7 @@ async def prompt_assembly_preview(
                 user_name=user_name,
                 preset_id=preview_preset,
             )
+            sys_text = _append_character_emote_prompt_instruction(sys_text, character)
             if sys_text.strip():
                 formatted.append({"role": "system", "content": sys_text.strip()})
         if summary_content:
