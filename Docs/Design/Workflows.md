@@ -236,7 +236,7 @@ In single-user mode, the fixed user is exposed with admin-like claims for compat
 - Egress policy (centralized):
   - Profile: `WORKFLOWS_EGRESS_PROFILE=strict|permissive|custom` (default `strict` in `prod`, `permissive` otherwise based on `ENVIRONMENT`/`APP_ENV`).
   - Allowed schemes: `http, https` (fixed).
-  - Allowed ports: `WORKFLOWS_EGRESS_ALLOWED_PORTS` (comma-separated; default `80,443`).
+  - Allowed ports: `WORKFLOWS_EGRESS_ALLOWED_PORTS` (comma-separated; default `80,443,8080`).
   - Allowlist (host/domain): `WORKFLOWS_EGRESS_ALLOWLIST` (comma-separated; supports subdomains via `example.com`).
   - Block private/reserved IPs: `WORKFLOWS_EGRESS_BLOCK_PRIVATE=true|false` (default true). DNS is resolved and all target IPs must be public.
   - Webhook-specific allow/deny (global and per-tenant) remain available as documented above; they use the centralized evaluator.
@@ -404,7 +404,7 @@ Ordering is stable with a tie-breaker (`run_id` for runs; `event_id` for events)
 
 - Egress policy
   - Profile: `WORKFLOWS_EGRESS_PROFILE=strict|permissive|custom` (defaults to `strict` in prod, `permissive` elsewhere).
-  - Allowed ports: `WORKFLOWS_EGRESS_ALLOWED_PORTS` (default `80,443`).
+  - Allowed ports: `WORKFLOWS_EGRESS_ALLOWED_PORTS` (default `80,443,8080`).
   - Host allowlist: `WORKFLOWS_EGRESS_ALLOWLIST` (comma-separated, supports subdomains).
   - Private IP blocking: `WORKFLOWS_EGRESS_BLOCK_PRIVATE=true|false` (default true).
   - Webhook allow/deny: `WORKFLOWS_WEBHOOK_ALLOWLIST(_<TENANT>)`, `WORKFLOWS_WEBHOOK_DENYLIST(_<TENANT>)`.

@@ -104,6 +104,7 @@ After this profile is running, continue with one of:
 - If startup fails, check the bundled `postgres` service logs and only inspect `TLDW_DATABASE_URL_OVERRIDE` / `TLDW_JOBS_DB_URL_OVERRIDE` if you intentionally configured external databases.
 - If login fails, check app logs with `docker compose -f Dockerfiles/docker-compose.multi-user-postgres.yml logs --tail=200 app`.
 - If port `8000` is already in use, stop the conflicting process or change the host port mapping in the compose file.
+- If provider validation or first chat cannot reach your inference server, remember the API server makes that outbound request, not the browser. Egress allows ports `80`, `443`, and `8080` by default; inference servers on ports such as `9099` or private/LAN/loopback addresses need `WORKFLOWS_EGRESS_ALLOWED_PORTS` and possibly `WORKFLOWS_EGRESS_BLOCK_PRIVATE=false`, then a restart. In Docker, use an address reachable from the app container.
 - If you need a full reset, stop the stack and remove volumes with `docker compose -f Dockerfiles/docker-compose.multi-user-postgres.yml down -v`.
 
 ## Optional Add-ons

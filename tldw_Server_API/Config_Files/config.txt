@@ -589,8 +589,8 @@ egress_denylist =
 workflows_allowlist =
 workflows_denylist =
 
-# Allowed outbound ports (comma-separated integers; default: 80,443)
-allowed_ports = 80,443
+# Allowed outbound ports (comma-separated integers; default: 80,443,8080)
+allowed_ports = 80,443,8080
 
 # Block private/reserved IP ranges by default (true/false)
 block_private = true

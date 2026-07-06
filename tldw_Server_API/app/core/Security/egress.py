@@ -392,9 +392,9 @@ def evaluate_url_policy(
     if not host:
         return URLPolicyResult(False, "URL must include a hostname")
 
-    # Ports policy (defaults 80/443; override via env)
+    # Ports policy (defaults 80/443/8080; override via env)
     def _default_ports() -> list[int]:
-        raw = os.getenv(ALLOWED_PORTS_ENV, "80,443")
+        raw = os.getenv(ALLOWED_PORTS_ENV, "80,443,8080")
         tokens = [part.strip().lower() for part in (raw or "").split(",") if part.strip()]
         if any(token in {"*", "any", "all"} for token in tokens):
             return []
