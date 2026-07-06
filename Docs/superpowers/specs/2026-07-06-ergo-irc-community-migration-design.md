@@ -20,8 +20,10 @@ Make Ergo IRC the default communications area for the tldw project/community whi
 - Launch channels: `#tldw`, `#support`, `#dev`, and `#announcements`.
 - Launch with no-email IRC account self-registration, then enable email verification in milestone 2.
 - Require registered IRC accounts to speak in public IRC channels.
+- Make `#announcements` public read-only for normal users; only project operators or explicitly voiced announcement accounts may speak.
 - Keep Discord permanently bridged, but document IRC as canonical.
 - Make `#support` public, searchable, archived for 365 days, and clearly disclosed at every entry point.
+- Treat `<project-domain>` as an intentional deploy-time placeholder. The implementation plan must replace it with the real tldw community domain before deployment.
 
 ## Architecture
 
@@ -37,6 +39,7 @@ DNS:
 
 - `chat.<project-domain>` points to the VPS and serves Kiwi over HTTPS.
 - `irc.<project-domain>` points to the VPS for native IRC over TLS port `6697`.
+- `https://chat.<project-domain>/support/` is the default public support archive route.
 
 Network exposure:
 
@@ -53,7 +56,7 @@ Network exposure:
 
 `#dev` is for contributor and development discussion. It is IRC-only at launch to preserve an IRC-native area and avoid making every important space Discord-backed.
 
-`#announcements` is canonical on IRC and mirrored one-way into Discord.
+`#announcements` is canonical on IRC and mirrored one-way into Discord. It is publicly readable but not publicly writable. Normal registered users must not be able to post there; use a moderated/read-only channel setup where only IRC operators or approved announcement accounts can speak.
 
 Matterbridge configuration must make direction explicit:
 
@@ -78,6 +81,7 @@ Required operator controls:
 - Register the Matterbridge IRC account.
 - Do not grant the Matterbridge account IRC operator/founder powers.
 - Limit Matterbridge to the bridged channels only.
+- Keep `#announcements` write access restricted to project operators or approved announcement accounts so one-way Discord mirroring cannot become an accidental public broadcast path.
 - Give the Discord bot only the permissions needed for the mapped channels.
 - Configure Matterbridge message delay and queue limits so Discord bursts can drop bridge messages instead of flooding IRC.
 - Document a kill switch for disabling all Matterbridge traffic or one gateway.
@@ -94,6 +98,7 @@ The launch archive should be deliberately boring:
 - Static daily pages are generated.
 - A static search index is generated from retained messages.
 - Message entries include timestamp, source protocol (`irc` or `discord`), display name, and text.
+- Discord-origin messages must be tagged before they enter IRC, using Matterbridge remote nick formatting or an equivalent gateway-specific prefix such as `[discord] <display-name>`. The archive collector identifies Discord-origin entries from the Matterbridge IRC account plus that configured source marker; all other `#support` messages are recorded as IRC-origin.
 - Attachments are not downloaded, rehosted, or embedded. Text links may be shown.
 - Entries expire after 365 days.
 - Raw logs, generated pages, search index, and backups all follow the same 365-day retention policy.
@@ -190,6 +195,7 @@ The implementation plan must create concise operator docs for:
 - `#support` archive displays the public archive warning.
 - `#support` archive search works.
 - `#support` archive labels `irc` vs `discord` origin.
+- Discord-origin support messages carry the configured bridge source marker before archive collection.
 - `#support` archive excludes attachments.
 - `#support` archive entries expire after 365 days.
 - Support archive backups do not outlive 365-day retention.
