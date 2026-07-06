@@ -90,6 +90,18 @@ def test_sqlite_normalization_quotes_plain_tokens_with_punctuation():
     assert aliased == '"codex-flashcards-ux" front_search:"state-of-the-art"'
 
 
+def test_sqlite_normalization_resolves_aliases_case_insensitively_and_quotes_unknown_scopes():
+    from tldw_Server_API.app.core.DB_Management.backends.fts_translator import FTSQueryTranslator
+
+    out = FTSQueryTranslator.normalize_query(
+        "Front:alpha extra:beta OR -Back:old-style OR -extra:legacy",
+        "sqlite",
+        sqlite_column_aliases={"front": "front_search", "back": "back_search"},
+    )
+
+    assert out == 'front_search:alpha beta OR NOT back_search:"old-style" OR NOT legacy'
+
+
 def test_sqlite_normalization_preserves_quoted_column_phrases_and_quotes_negative_terms():
     """Quoted phrases and allowed negative punctuation terms stay valid FTS5."""
     from tldw_Server_API.app.core.DB_Management.backends.fts_translator import FTSQueryTranslator

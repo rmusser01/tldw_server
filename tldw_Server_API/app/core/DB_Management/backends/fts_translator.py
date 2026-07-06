@@ -288,12 +288,19 @@ class FTSQueryTranslator:
                 if column_match:
                     column, value = column_match.groups()
                     if column_aliases:
-                        column = column_aliases.get(column, column)
-                    operand = (
-                        f'{column}:{value}'
-                        if value.startswith('"') and value.endswith('"')
-                        else f'{column}:{FTSQueryTranslator._quote_sqlite_fts_token(value)}'
-                    )
+                        column = column_aliases.get(column.lower())
+                    if column:
+                        operand = (
+                            f'{column}:{value}'
+                            if value.startswith('"') and value.endswith('"')
+                            else f'{column}:{FTSQueryTranslator._quote_sqlite_fts_token(value)}'
+                        )
+                    else:
+                        operand = (
+                            value
+                            if value.startswith('"') and value.endswith('"')
+                            else FTSQueryTranslator._quote_sqlite_fts_token(value)
+                        )
                 elif body.startswith('"') and body.endswith('"'):
                     operand = body
                 elif last_allows_not:
@@ -312,7 +319,16 @@ class FTSQueryTranslator:
             if column_match:
                 column, value = column_match.groups()
                 if column_aliases:
-                    column = column_aliases.get(column, column)
+                    column = column_aliases.get(column.lower())
+                    if not column:
+                        normalized_parts.append(
+                            value
+                            if value.startswith('"') and value.endswith('"')
+                            else FTSQueryTranslator._quote_sqlite_fts_token(value)
+                        )
+                        last_allows_not = True
+                        has_operand = True
+                        continue
                 normalized_parts.append(
                     f'{column}:{value}'
                     if value.startswith('"') and value.endswith('"')
