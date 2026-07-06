@@ -32,6 +32,13 @@ def test_parse_character_emote_directives_matches_shared_fixture(fixture):
     CASE.assertEqual(_event_dicts(result), fixture["events"])
 
 
+def test_parse_character_emote_directives_counts_offsets_like_js_strings():
+    result = parse_character_emote_directives("😀\nEmote: smug\nDone.")
+
+    CASE.assertEqual(result.clean_text, "😀\nDone.")
+    CASE.assertEqual(_event_dicts(result), [{"state": "smug", "at_char": 3}])
+
+
 def test_validate_emote_events_accepts_valid_event():
     events = validate_emote_events([{"state": "smug", "at_char": 0}])
 

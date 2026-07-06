@@ -50,6 +50,10 @@ def _is_fence_line(line: str) -> bool:
     return line.strip().startswith("```")
 
 
+def _js_string_length(value: str) -> int:
+    return len(value.encode("utf-16-le", errors="surrogatepass")) // 2
+
+
 def _parse_directive_state(line: str) -> str | None | object:
     match = _DIRECTIVE_PATTERN.fullmatch(line.strip())
     return normalize_character_emote_state(match.group(1)) if match else _NO_DIRECTIVE
@@ -69,7 +73,7 @@ def parse_character_emote_directives(text: str) -> CharacterEmoteParseResult:
         if _is_fence_line(line):
             visible = line + separator
             clean_parts.append(visible)
-            clean_length += len(visible)
+            clean_length += _js_string_length(visible)
             in_fence = not in_fence
             continue
 
@@ -87,7 +91,7 @@ def parse_character_emote_directives(text: str) -> CharacterEmoteParseResult:
 
         visible = line + separator
         clean_parts.append(visible)
-        clean_length += len(visible)
+        clean_length += _js_string_length(visible)
 
     return CharacterEmoteParseResult(clean_text="".join(clean_parts), events=events)
 
