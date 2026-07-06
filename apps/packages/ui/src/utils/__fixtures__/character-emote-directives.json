@@ -1,0 +1,41 @@
+[
+  {
+    "name": "strips directives and records offsets",
+    "input": "Emote: annoyed\nWhat now?\n\nEmote: smug\nFine.",
+    "clean_text": "What now?\n\nFine.",
+    "events": [
+      { "state": "annoyed", "at_char": 0 },
+      { "state": "smug", "at_char": 11 }
+    ]
+  },
+  {
+    "name": "keeps inline prose visible",
+    "input": "She says Emote: smug and smiles.",
+    "clean_text": "She says Emote: smug and smiles.",
+    "events": []
+  },
+  {
+    "name": "keeps directives inside code fences visible",
+    "input": "```text\nEmote: smug\n```\nDone.",
+    "clean_text": "```text\nEmote: smug\n```\nDone.",
+    "events": []
+  },
+  {
+    "name": "strips invalid standalone directive",
+    "input": "Emote: ../../bad\nVisible.",
+    "clean_text": "Visible.",
+    "events": []
+  },
+  {
+    "name": "normalizes whitespace state",
+    "input": "  Emote: Thinking Hard  \nVisible.",
+    "clean_text": "Visible.",
+    "events": [{ "state": "thinking-hard", "at_char": 0 }]
+  },
+  {
+    "name": "drops duplicate consecutive state",
+    "input": "Emote: smug\nEmote: smug\nVisible.",
+    "clean_text": "Visible.",
+    "events": [{ "state": "smug", "at_char": 0 }]
+  }
+]
