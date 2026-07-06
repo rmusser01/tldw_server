@@ -126,8 +126,9 @@ from tldw_Server_API.app.core.Character_Chat.modules.character_generation_preset
 )
 from tldw_Server_API.app.core.Character_Chat.emote_directives import (
     CharacterEmoteEvent,
-    normalize_character_emote_state,
+    append_character_emote_prompt_instruction,
     resolve_character_emote_completion,
+    validate_emote_events_for_text,
 )
 from tldw_Server_API.app.core.Character_Chat.modules.character_prompt_presets import (
     DEFAULT_PROMPT_PRESET,
@@ -2416,48 +2417,6 @@ def _extract_character_default_author_note(character: dict[str, Any]) -> str:
     return ""
 
 
-def _extract_character_mood_image_states(character: dict[str, Any]) -> list[str]:
-    extensions = character.get("extensions") if isinstance(character, dict) else None
-    if isinstance(extensions, str):
-        try:
-            extensions = json.loads(extensions)
-        except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS:
-            extensions = {}
-    if not isinstance(extensions, dict):
-        return []
-
-    tldw = extensions.get("tldw") if isinstance(extensions.get("tldw"), dict) else {}
-    for source in (
-        tldw.get("mood_images"),
-        tldw.get("moodImages"),
-        extensions.get("mood_images"),
-        extensions.get("moodImages"),
-    ):
-        if not isinstance(source, dict):
-            continue
-        states: list[str] = []
-        seen: set[str] = set()
-        for raw_state in source:
-            state = normalize_character_emote_state(raw_state)
-            if state and state not in seen:
-                states.append(state)
-                seen.add(state)
-        return states
-    return []
-
-
-def _append_character_emote_prompt_instruction(sys_text: str, character: dict[str, Any]) -> str:
-    states = _extract_character_mood_image_states(character)
-    prefer = f" Prefer these available states: {', '.join(states)}." if states else ""
-    instruction = (
-        "When the character expression should change, emit a standalone line exactly like "
-        "`Emote: <state>`."
-        f"{prefer} Do not emit an emote after every sentence."
-    )
-    base = sys_text.strip()
-    return f"{base}\n\n{instruction}" if base else instruction
-
-
 def _extract_character_memory_note(settings: dict[str, Any], character_id: Any) -> str:
     memory_by_id = settings.get("characterMemoryById")
     if not isinstance(memory_by_id, dict):
@@ -4702,7 +4661,7 @@ async def prepare_chat_completion(
                 user_name=user_name,
                 preset_id=effective_preset,
             )
-            sys_text = _append_character_emote_prompt_instruction(sys_text, character)
+            sys_text = append_character_emote_prompt_instruction(sys_text, character)
             if sys_text.strip():
                 formatted.append({"role": "system", "content": sys_text.strip()})
         if summary_content:
@@ -5103,7 +5062,7 @@ async def prompt_assembly_preview(
                 user_name=user_name,
                 preset_id=preview_preset,
             )
-            sys_text = _append_character_emote_prompt_instruction(sys_text, character)
+            sys_text = append_character_emote_prompt_instruction(sys_text, character)
             if sys_text.strip():
                 formatted.append({"role": "system", "content": sys_text.strip()})
         if summary_content:
@@ -5482,7 +5441,7 @@ async def character_chat_completion(
                 user_name=user_name,
                 preset_id=completion_preset,
             )
-            sys_text = _append_character_emote_prompt_instruction(sys_text, character)
+            sys_text = append_character_emote_prompt_instruction(sys_text, character)
             if sys_text.strip():
                 formatted.append({"role": "system", "content": sys_text.strip()})
         if summary_content:
@@ -7342,7 +7301,17 @@ async def persist_streamed_assistant_message(
             fallback_mood_topic=body.mood_topic,
         )
         assistant_content = resolved_emotes.clean_text
-        emote_events = body.emote_events or resolved_emotes.emote_events
+        try:
+            emote_events = (
+                validate_emote_events_for_text(body.emote_events, assistant_content)
+                if body.emote_events
+                else resolved_emotes.emote_events
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=str(exc),
+            ) from exc
         resolved_visual_mood = (
             emote_events[-1].state if emote_events else resolved_emotes.mood_label
         )

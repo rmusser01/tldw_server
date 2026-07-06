@@ -4,7 +4,7 @@ title: Add explicit streaming emote directives for character chat portraits
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-07-06 19:12'
+updated_date: '2026-07-06 20:04'
 labels:
   - frontend
   - character-chat
@@ -53,6 +53,10 @@ Task 6 final verification complete. Targeted frontend suite: bunx vitest run src
 Code review follow-up reopened: fixing explicit-mood classifier short-circuit and stream persist assistant_content sanitization before merge.
 
 Code review follow-up fixed in this branch: Message now skips detectCharacterMood when an explicit moodLabel is present, and the stream persist endpoint sanitizes raw Emote directives before fingerprint/idempotency/storage while deriving emote_events when the client did not send them. Red checks: Message routing test failed on detectCharacterMood being called once; backend persist sanitization test failed before endpoint sanitization. Green checks: Message routing suite passed 12 tests; targeted frontend emote suite passed 7 files / 82 tests; targeted backend emote suite passed 40 tests with 3 warnings; Bandit review-fix report had no errors and no findings. bun run typecheck was rerun and still fails on the known unrelated baseline files outside this feature.
+
+PR review follow-up after rebase on latest dev: addressing Qodo comments for docstrings/types, moving emote prompt business logic to core, capping prompt state lists, pytest markers, and validating persisted emote event offsets.
+
+PR review follow-up complete after focused rebase onto origin/dev. Addressed Qodo comments by adding emote core docstrings/type annotations, moving prompt instruction/state extraction into core Character_Chat logic, capping prompt state lists at 25 with (+N more), adding module-level pytest markers, validating persisted client emote offsets against sanitized UTF-16 content length with non-decreasing offsets, and removing a rebase duplicate mock declaration in the frontend integration test. Verification: backend targeted suite passed 44 tests with 3 warnings; frontend targeted emote suite passed 7 files / 85 tests; apps/tldw-frontend bun run typecheck passed; Bandit touched backend report /tmp/bandit_character_emotes_pr_review.json had no errors and no findings.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

@@ -319,6 +319,24 @@ def test_persist_streamed_message_rejects_too_many_emote_events(test_client: Tes
     assert response.status_code == 422
 
 
+def test_persist_streamed_message_rejects_emote_event_offset_beyond_clean_content(
+    test_client: TestClient,
+    auth_headers,
+) -> None:
+    _, chat_id = _create_character_and_chat(test_client, auth_headers)
+
+    response = test_client.post(
+        f"/api/v1/chats/{chat_id}/completions/persist",
+        json={
+            "assistant_content": "Emote: smug\nVisible",
+            "emote_events": [{"state": "smug", "at_char": 99}],
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 422
+
+
 def test_persist_streamed_message_retry_preserves_emote_events(
     test_client: TestClient,
     auth_headers,

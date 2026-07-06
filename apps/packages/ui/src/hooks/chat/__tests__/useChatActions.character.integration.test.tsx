@@ -11,7 +11,6 @@ const {
   detectCharacterMoodMock,
   streamCharacterChatCompletionMock,
   persistCharacterCompletionMock,
-  addChatMessageMock,
   normalChatModeMock,
   resolveVisualIdentityBindingMock
 } = vi.hoisted(() => ({
@@ -23,7 +22,6 @@ const {
     assistant_message_id: "assistant-server-1",
     version: 1
   })),
-  addChatMessageMock: vi.fn(async () => ({ id: "user-server-1", version: 1 })),
   normalChatModeMock: vi.fn(),
   resolveVisualIdentityBindingMock: vi.fn(async () => ({
     actor_kind: "character",
