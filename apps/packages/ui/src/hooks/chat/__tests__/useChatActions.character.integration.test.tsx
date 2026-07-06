@@ -7,6 +7,7 @@ import { useChatActions } from "../useChatActions"
 
 const {
   createChatMock,
+  detectCharacterMoodMock,
   streamCharacterChatCompletionMock,
   persistCharacterCompletionMock,
   addChatMessageMock,
@@ -14,6 +15,7 @@ const {
   resolveVisualIdentityBindingMock
 } = vi.hoisted(() => ({
   createChatMock: vi.fn(),
+  detectCharacterMoodMock: vi.fn(),
   streamCharacterChatCompletionMock: vi.fn(),
   persistCharacterCompletionMock: vi.fn(async () => ({
     assistant_message_id: "assistant-server-1",
@@ -112,6 +114,10 @@ vi.mock("@/db/dexie/branch", () => ({
 
 vi.mock("@/services/actor-settings", () => ({
   getActorSettingsForChat: vi.fn(async () => null)
+}))
+
+vi.mock("@/utils/character-mood", () => ({
+  detectCharacterMood: detectCharacterMoodMock
 }))
 
 vi.mock("@/utils/selected-character-storage", () => ({
@@ -272,6 +278,11 @@ describe("useChatActions character integration", () => {
           }
         ]
       }
+    })
+    detectCharacterMoodMock.mockReturnValue({
+      label: "neutral",
+      confidence: 0.2,
+      topic: "reply"
     })
     messageStoreState.value = {
       selectedModel: "deepseek-chat",
@@ -661,5 +672,70 @@ describe("useChatActions character integration", () => {
       { scope }
     )
     expect(normalChatModeMock).not.toHaveBeenCalled()
+  })
+
+  it("strips explicit streaming emote directives and persists emote events", async () => {
+    streamCharacterChatCompletionMock.mockImplementationOnce(async function* () {
+      yield "Em"
+      yield "ote: smug\n"
+      yield "Hello "
+      yield "there.\n"
+      yield "Emote: annoyed\n"
+      yield "Fine."
+    })
+    detectCharacterMoodMock.mockReturnValueOnce({
+      label: "happy",
+      confidence: 0.9,
+      topic: "classifier"
+    })
+
+    let messagesState: any[] = []
+    const messageSnapshots: any[][] = []
+    const moodLabels: unknown[] = []
+    const options = {
+      ...createHookOptions(),
+      setMessages: vi.fn((next) => {
+        messagesState = typeof next === "function" ? next(messagesState) : next
+        messageSnapshots.push(messagesState)
+        const assistant = messagesState.find((message) => message?.isBot)
+        moodLabels.push(assistant?.moodLabel)
+      })
+    }
+    const { result } = renderHook(() => useChatActions(options as any))
+
+    await act(async () => {
+      await result.current.onSubmit({
+        message: "Test explicit emotes",
+        image: ""
+      })
+    })
+
+    const persistCall = persistCharacterCompletionMock.mock.calls.at(-1) as
+      | unknown[]
+      | undefined
+    const persistPayload = persistCall?.[1] as
+      | Record<string, unknown>
+      | undefined
+    expect(persistPayload).toMatchObject({
+      assistant_content: "Hello there.\nFine.",
+      mood_label: "annoyed",
+      emote_events: [
+        { state: "smug", at_char: 0 },
+        { state: "annoyed", at_char: 13 }
+      ]
+    })
+    expect(persistPayload).not.toHaveProperty("mood_confidence")
+    expect(persistPayload).not.toHaveProperty("mood_topic")
+    expect(detectCharacterMoodMock).not.toHaveBeenCalled()
+
+    const renderedAssistantMessages = messageSnapshots
+      .flatMap((snapshot) => snapshot.filter((message) => message?.isBot))
+      .map((message) => String(message?.message ?? ""))
+    expect(
+      renderedAssistantMessages.some((message) => message.includes("Emote:"))
+    ).toBe(false)
+    expect(renderedAssistantMessages.at(-1)).toBe("Hello there.\nFine.")
+    expect(moodLabels).toContain("smug")
+    expect(moodLabels).toContain("annoyed")
   })
 })

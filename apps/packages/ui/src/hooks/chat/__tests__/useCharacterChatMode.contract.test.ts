@@ -124,7 +124,15 @@ describe("createCharacterChatMode contract", () => {
       yield { delta: "Pong" }
     })
     mocks.consumeStreamingChunkMock.mockImplementation((state, chunk) => {
-      const token = String((chunk as { delta?: string })?.delta || "")
+      const token =
+        typeof chunk === "string"
+          ? chunk
+          : String(
+              (chunk as any)?.choices?.[0]?.delta?.content ??
+                (chunk as { delta?: string; content?: string })?.delta ??
+                (chunk as { content?: string })?.content ??
+                ""
+            )
       return {
         fullText: `${state.fullText}${token}`,
         contentToSave: `${state.contentToSave}${token}`,
@@ -243,6 +251,113 @@ describe("createCharacterChatMode contract", () => {
     )
     expect(setters.setServerChatId).toHaveBeenCalledWith("chat-77")
     expect(setters.setServerChatCharacterId).toHaveBeenCalledWith(42)
+  })
+
+  it("strips explicit streaming emote directives and persists emote events", async () => {
+    const setters = createSetterBundle()
+    let messagesState: any[] = []
+    const messageSnapshots: any[][] = []
+    const moodLabels: unknown[] = []
+    setters.setMessages.mockImplementation((next) => {
+      messagesState = typeof next === "function" ? next(messagesState) : next
+      messageSnapshots.push(messagesState)
+      const assistant = messagesState.find((message) => message?.isBot)
+      moodLabels.push(assistant?.moodLabel)
+    })
+    mocks.streamCharacterChatCompletionMock.mockImplementationOnce(
+      async function* () {
+        yield "Em"
+        yield "ote: smug\n"
+        yield "Hello "
+        yield "there.\n"
+        yield "Emote: annoyed\n"
+        yield "Fine."
+      }
+    )
+    mocks.detectCharacterMoodMock.mockReturnValueOnce({
+      label: "happy",
+      confidence: 0.9,
+      topic: "classifier"
+    })
+    const controller = new AbortController()
+    const mode = createCharacterChatMode({
+      ...setters,
+      t: translate as any,
+      notification: { error: vi.fn() },
+      selectedCharacter: {
+        id: 42,
+        name: "Mira",
+        avatar_url: "https://example.test/mira.png"
+      } as any,
+      temporaryChat: false,
+      historyId: "history-1",
+      serverChatId: null,
+      serverChatCharacterId: null,
+      serverChatState: "in-progress",
+      serverChatTopic: null,
+      serverChatClusterId: null,
+      serverChatSource: null,
+      serverChatExternalRef: null,
+      currentChatModelSettings: {
+        apiProvider: "openai",
+        setSystemPrompt: vi.fn()
+      },
+      invalidateServerChatHistory: vi.fn(),
+      greetingEnabled: false,
+      greetingSelectionId: null,
+      greetingsChecksum: null,
+      useCharacterDefault: false,
+      directedCharacterId: 88,
+      resolvedMessageSteeringPrompts: null,
+      getEffectiveSelectedModel: vi.fn(() => "tldw:test-model"),
+      saveMessageOnSuccess: vi.fn(async () => "history-1"),
+      saveMessageOnError: vi.fn(async () => "history-1"),
+      discardCurrentTurnOnAbortRef: { current: false }
+    } as any)
+
+    await mode({
+      message: "Test explicit emotes",
+      image: "",
+      isRegenerate: false,
+      messages: [],
+      history: [],
+      signal: controller.signal,
+      model: "tldw:test-model",
+      controller,
+      messageSteering: {
+        continueAsUser: false,
+        impersonateUser: false,
+        forceNarrate: false
+      }
+    })
+
+    const persistCall = mocks.persistCharacterCompletionMock.mock.calls.at(-1) as
+      | unknown[]
+      | undefined
+    const persistPayload = persistCall?.[1] as
+      | Record<string, unknown>
+      | undefined
+    expect(persistPayload).toMatchObject({
+      assistant_content: "Hello there.\nFine.",
+      mood_label: "annoyed",
+      emote_events: [
+        { state: "smug", at_char: 0 },
+        { state: "annoyed", at_char: 13 }
+      ]
+    })
+    expect(persistPayload).not.toHaveProperty("mood_confidence")
+    expect(persistPayload).not.toHaveProperty("mood_topic")
+    expect(mocks.detectCharacterMoodMock).not.toHaveBeenCalled()
+
+    const renderedAssistantMessages = messageSnapshots
+      .flatMap((snapshot) => snapshot.filter((message) => message?.isBot))
+      .map((message) => String(message?.message ?? ""))
+    expect(
+      renderedAssistantMessages.some((message) => message.includes("Emote:"))
+    ).toBe(false)
+    expect(renderedAssistantMessages.at(-1)).toBe("Hello there.\nFine.")
+    expect(moodLabels).toContain("smug")
+    expect(moodLabels).toContain("annoyed")
   })
 
   it("classifies structured provider setup failures without treating every 503 as configuration", () => {

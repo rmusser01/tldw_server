@@ -5,7 +5,7 @@ import { useStoreMessageOption, type Message } from "~/store/option";
 import { useStoreMessage } from "~/store";
 import { getContentFromCurrentTab } from "~/libs/get-html";
 // RAG now uses tldw_server endpoints instead of local embeddings
-import { ChatHistory } from "@/store/option";
+import { ChatHistory, type MessageMetadataExtra } from "@/store/option";
 import {
   deleteChatForEdit,
   deleteChatAfterMessageId,
@@ -21,6 +21,7 @@ import { usePageAssist } from "@/context";
 import { formatDocs } from "@/utils/format-docs";
 import { buildAssistantErrorContent } from "@/utils/chat-error-message";
 import { buildCharacterChatAssistantErrorContent } from "@/hooks/chat/useCharacterChatMode";
+import { createCharacterEmoteStream } from "@/hooks/chat/character-emote-stream";
 import { detectCharacterMood } from "@/utils/character-mood";
 import { useStorage } from "@plasmohq/storage/hook";
 import { useStoreChatModelSettings } from "@/store/model";
@@ -50,6 +51,7 @@ import {
   createRegenerateLastMessage,
 } from "./handlers/messageHandlers";
 import { consumeStreamingChunk } from "@/utils/streaming-chunks";
+import type { CharacterEmoteEvent } from "@/utils/character-emotes";
 import type { ToolCall } from "@/types/tool-calls";
 import {
   createSaveMessageOnError,
@@ -1589,6 +1591,27 @@ export const useMessage = () => {
       let reasoningEndTime: Date | null = null;
       let timetaken = 0;
       let apiReasoning = false;
+      const emoteStream = createCharacterEmoteStream();
+      const applyEmoteEventsToMessage = (
+        newEvents: CharacterEmoteEvent[],
+      ) => {
+        if (newEvents.length === 0) return;
+        const moodLabel =
+          emoteStream.events[emoteStream.events.length - 1]?.state;
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === generateMessageId
+              ? updateActiveVariant(m, {
+                  moodLabel,
+                  metadataExtra: {
+                    ...(m.metadataExtra ?? {}),
+                    emote_events: [...emoteStream.events],
+                  },
+                })
+              : m,
+          ),
+        );
+      };
 
       const explicitProvider = resolveExplicitProviderForSelectedModel({
         currentSelectedModel: selectedModel,
@@ -1632,15 +1655,18 @@ export const useMessage = () => {
         if (loopEvent) {
           dispatchChatLoopEvent(loopEvent);
         }
+        const previousFullText = fullText;
         const chunkState = consumeStreamingChunk(
           { fullText, contentToSave, apiReasoning },
           chunk,
         );
-        fullText = chunkState.fullText;
-        contentToSave = chunkState.contentToSave;
-        apiReasoning = chunkState.apiReasoning;
+        const sanitizedChunkState = emoteStream.sanitizeChunk(chunkState);
+        fullText = sanitizedChunkState.fullText;
+        contentToSave = sanitizedChunkState.contentToSave;
+        apiReasoning = sanitizedChunkState.apiReasoning;
+        applyEmoteEventsToMessage(sanitizedChunkState.emoteEvents);
 
-        if (chunkState.token) {
+        if (chunkState.token && fullText !== previousFullText) {
           setMessages((prev) =>
             prev.map((m) =>
               m.id === generateMessageId
@@ -1673,6 +1699,10 @@ export const useMessage = () => {
         if (signal?.aborted) break;
       }
       if (inactivityTimer) clearTimeout(inactivityTimer);
+      const flushedEmotes = emoteStream.flush({ fullText, contentToSave });
+      fullText = flushedEmotes.fullText;
+      contentToSave = flushedEmotes.contentToSave;
+      applyEmoteEventsToMessage(flushedEmotes.emoteEvents);
 
       if (inactivityAborted) {
         const timeoutError = new Error(
@@ -1699,7 +1729,8 @@ export const useMessage = () => {
       );
 
       // Persist assistant reply on server
-      const finalPersistedContent = fullText.trim();
+      const finalContent = contentToSave || fullText;
+      const finalPersistedContent = finalContent.trim();
       if (finalPersistedContent.length > 0) {
         let fallbackSpeakerId: number | undefined;
         let speakerCharacterId: number | undefined;
@@ -1707,7 +1738,7 @@ export const useMessage = () => {
         let resolvedMoodLabel: string | undefined;
         let resolvedMoodConfidence: number | undefined;
         let resolvedMoodTopic: string | undefined;
-        let metadataExtra: Record<string, unknown> | undefined;
+        let metadataExtra: MessageMetadataExtra | undefined;
         try {
           fallbackSpeakerId = Number.parseInt(
             String(activeCharacter.id),
@@ -1717,20 +1748,26 @@ export const useMessage = () => {
             Number.isFinite(fallbackSpeakerId) && fallbackSpeakerId > 0
               ? fallbackSpeakerId
               : undefined;
-          detectedMood = detectCharacterMood({
-            assistantText: finalPersistedContent,
-            userText: message,
-          });
-          resolvedMoodLabel = detectedMood.label;
-          resolvedMoodConfidence =
-            typeof detectedMood.confidence === "number" &&
-            Number.isFinite(detectedMood.confidence)
-              ? detectedMood.confidence
-              : undefined;
-          resolvedMoodTopic =
-            typeof detectedMood.topic === "string" && detectedMood.topic.trim()
-              ? detectedMood.topic.trim()
-              : undefined;
+          if (emoteStream.events.length > 0) {
+            resolvedMoodLabel =
+              emoteStream.events[emoteStream.events.length - 1]?.state;
+          } else {
+            detectedMood = detectCharacterMood({
+              assistantText: finalPersistedContent,
+              userText: message,
+            });
+            resolvedMoodLabel = detectedMood.label;
+            resolvedMoodConfidence =
+              typeof detectedMood.confidence === "number" &&
+              Number.isFinite(detectedMood.confidence)
+                ? detectedMood.confidence
+                : undefined;
+            resolvedMoodTopic =
+              typeof detectedMood.topic === "string" &&
+              detectedMood.topic.trim()
+                ? detectedMood.topic.trim()
+                : undefined;
+          }
           const persistPayload: Record<string, unknown> = {
             assistant_content: finalPersistedContent,
             assistant_message_id: generateMessageId,
@@ -1746,6 +1783,9 @@ export const useMessage = () => {
           if (resolvedMoodTopic) {
             persistPayload.mood_topic = resolvedMoodTopic;
           }
+          if (emoteStream.events.length > 0) {
+            persistPayload.emote_events = [...emoteStream.events];
+          }
           if (persistedUserServerMessageId) {
             persistPayload.user_message_id = persistedUserServerMessageId;
           }
@@ -1755,6 +1795,9 @@ export const useMessage = () => {
             mood_label: resolvedMoodLabel,
             mood_confidence: resolvedMoodConfidence ?? null,
             mood_topic: resolvedMoodTopic ?? null,
+            ...(emoteStream.events.length > 0
+              ? { emote_events: [...emoteStream.events] }
+              : {}),
           };
           const persisted = (await tldwClient.persistCharacterCompletion(
             chatId,
@@ -1870,13 +1913,13 @@ export const useMessage = () => {
         if (endsWithUser) {
           setHistory([
             ...historyBase,
-            { role: "assistant", content: fullText },
+            { role: "assistant", content: finalContent },
           ]);
         } else if (endsWithUserAssistant) {
           setHistory(
             historyBase.map((entry, index) =>
               index === historyBase.length - 1 && entry.role === "assistant"
-                ? { ...entry, content: fullText }
+                ? { ...entry, content: finalContent }
                 : entry,
             ),
           );
@@ -1884,14 +1927,14 @@ export const useMessage = () => {
           setHistory([
             ...historyBase,
             { role: "user", content: message, image },
-            { role: "assistant", content: fullText },
+            { role: "assistant", content: finalContent },
           ]);
         }
       } else {
         setHistory([
           ...historyBase,
           { role: "user", content: message, image },
-          { role: "assistant", content: fullText },
+          { role: "assistant", content: finalContent },
         ]);
       }
 

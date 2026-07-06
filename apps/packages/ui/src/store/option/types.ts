@@ -13,6 +13,7 @@ import type {
   QueuedRequest,
   QueuedRequestInput
 } from "@/utils/chat-request-queue"
+import type { CharacterEmoteEvent } from "@/utils/character-emotes"
 
 // Knowledge type is now server-side only; this is a placeholder for legacy compatibility
 export type Knowledge = {
@@ -37,6 +38,7 @@ export type CompareContinuationMode = "winner" | "compare"
 export type MessageMetadataExtra = Record<string, unknown> & {
   dynamic_ui?: DynamicUIEnvelope
   dynamic_ui_action?: DynamicUIActionUserMetadata
+  emote_events?: CharacterEmoteEvent[]
 }
 
 export type ReplyTarget = {

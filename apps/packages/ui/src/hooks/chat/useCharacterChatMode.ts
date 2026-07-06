@@ -43,9 +43,11 @@ import {
   discardAbortedTurnIfRequested,
 } from "@/hooks/chat/abort-turn-cleanup";
 import { resolveSavedDegradedCharacterPersist } from "@/hooks/chat/characterPersistOutcome";
+import { createCharacterEmoteStream } from "@/hooks/chat/character-emote-stream";
 import type { Character } from "@/types/character";
+import type { CharacterEmoteEvent } from "@/utils/character-emotes";
 import type { ChatScope } from "@/types/chat-scope";
-import type { ChatHistory, Message } from "@/store/option";
+import type { ChatHistory, Message, MessageMetadataExtra } from "@/store/option";
 import {
   attemptCharacterStreamRecoveryPersist,
   type TldwChatMeta,
@@ -884,6 +886,27 @@ export const createCharacterChatMode = (deps: CharacterChatModeDeps) => {
       let apiReasoning = false;
       let streamTransportInterrupted = false;
       let streamTransportInterruptionReason: string | null = null;
+      const emoteStream = createCharacterEmoteStream();
+      const applyEmoteEventsToMessage = (
+        newEvents: CharacterEmoteEvent[],
+      ) => {
+        if (newEvents.length === 0) return;
+        const moodLabel =
+          emoteStream.events[emoteStream.events.length - 1]?.state;
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === generateMessageId
+              ? updateActiveVariant(m, {
+                  moodLabel,
+                  metadataExtra: {
+                    ...(m.metadataExtra ?? {}),
+                    emote_events: [...emoteStream.events],
+                  },
+                })
+              : m,
+          ),
+        );
+      };
 
       const explicitProvider = resolveExplicitProviderForSelectedModel({
         currentSelectedModel: getEffectiveSelectedModel(),
@@ -945,15 +968,18 @@ export const createCharacterChatMode = (deps: CharacterChatModeDeps) => {
             detail.length > 0 ? detail : streamTransportInterruptionReason;
           continue;
         }
+        const previousFullText = fullText;
         const chunkState = consumeStreamingChunk(
           { fullText, contentToSave, apiReasoning },
           chunk,
         );
-        fullText = chunkState.fullText;
-        contentToSave = chunkState.contentToSave;
-        apiReasoning = chunkState.apiReasoning;
+        const sanitizedChunkState = emoteStream.sanitizeChunk(chunkState);
+        fullText = sanitizedChunkState.fullText;
+        contentToSave = sanitizedChunkState.contentToSave;
+        apiReasoning = sanitizedChunkState.apiReasoning;
+        applyEmoteEventsToMessage(sanitizedChunkState.emoteEvents);
 
-        if (chunkState.token) {
+        if (chunkState.token && fullText !== previousFullText) {
           scheduleStreamingUpdate(`${fullText}▋`, timetaken);
         }
         if (count === 0) {
@@ -981,6 +1007,10 @@ export const createCharacterChatMode = (deps: CharacterChatModeDeps) => {
       cancelStreamingUpdate();
       flushStreamingUpdate();
       if (inactivityTimer) clearTimeout(inactivityTimer);
+      const flushedEmotes = emoteStream.flush({ fullText, contentToSave });
+      fullText = flushedEmotes.fullText;
+      contentToSave = flushedEmotes.contentToSave;
+      applyEmoteEventsToMessage(flushedEmotes.emoteEvents);
 
       if (inactivityAborted) {
         const timeoutError = new Error(
@@ -1036,7 +1066,7 @@ export const createCharacterChatMode = (deps: CharacterChatModeDeps) => {
         let resolvedMoodLabel: string | undefined;
         let resolvedMoodConfidence: number | undefined;
         let resolvedMoodTopic: string | undefined;
-        let metadataExtra: Record<string, unknown> | undefined;
+        let metadataExtra: MessageMetadataExtra | undefined;
         try {
           fallbackSpeakerId = Number.parseInt(
             String(activeCharacter.id),
@@ -1049,20 +1079,26 @@ export const createCharacterChatMode = (deps: CharacterChatModeDeps) => {
               : Number.isFinite(fallbackSpeakerId) && fallbackSpeakerId > 0
                 ? fallbackSpeakerId
                 : undefined;
-          detectedMood = detectCharacterMood({
-            assistantText: finalPersistedContent,
-            userText: message,
-          });
-          resolvedMoodLabel = detectedMood.label;
-          resolvedMoodConfidence =
-            typeof detectedMood.confidence === "number" &&
-            Number.isFinite(detectedMood.confidence)
-              ? detectedMood.confidence
-              : undefined;
-          resolvedMoodTopic =
-            typeof detectedMood.topic === "string" && detectedMood.topic.trim()
-              ? detectedMood.topic.trim()
-              : undefined;
+          if (emoteStream.events.length > 0) {
+            resolvedMoodLabel =
+              emoteStream.events[emoteStream.events.length - 1]?.state;
+          } else {
+            detectedMood = detectCharacterMood({
+              assistantText: finalPersistedContent,
+              userText: message,
+            });
+            resolvedMoodLabel = detectedMood.label;
+            resolvedMoodConfidence =
+              typeof detectedMood.confidence === "number" &&
+              Number.isFinite(detectedMood.confidence)
+                ? detectedMood.confidence
+                : undefined;
+            resolvedMoodTopic =
+              typeof detectedMood.topic === "string" &&
+              detectedMood.topic.trim()
+                ? detectedMood.topic.trim()
+                : undefined;
+          }
 
           const persistPayload: Record<string, unknown> = {
             assistant_content: finalPersistedContent,
@@ -1079,6 +1115,9 @@ export const createCharacterChatMode = (deps: CharacterChatModeDeps) => {
           if (resolvedMoodTopic) {
             persistPayload.mood_topic = resolvedMoodTopic;
           }
+          if (emoteStream.events.length > 0) {
+            persistPayload.emote_events = [...emoteStream.events];
+          }
           if (persistedUserServerMessageId) {
             persistPayload.user_message_id = persistedUserServerMessageId;
           }
@@ -1088,6 +1127,9 @@ export const createCharacterChatMode = (deps: CharacterChatModeDeps) => {
             mood_label: resolvedMoodLabel,
             mood_confidence: resolvedMoodConfidence ?? null,
             mood_topic: resolvedMoodTopic ?? null,
+            ...(emoteStream.events.length > 0
+              ? { emote_events: [...emoteStream.events] }
+              : {}),
           };
 
           const persisted = (await tldwClient.persistCharacterCompletion(
