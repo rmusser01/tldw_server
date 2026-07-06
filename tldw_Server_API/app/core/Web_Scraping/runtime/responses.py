@@ -97,7 +97,11 @@ class FetchResponse:
             status=int(status or 0),
             headers=dict(_raw_get(raw, "headers", {}) or {}),
             text=str(_raw_get(raw, "text", "") or ""),
-            backend=str(_raw_get(raw, "backend", fallback_backend or "httpx") or fallback_backend or "httpx"),
+            backend=str(
+                _raw_get(raw, "backend", fallback_backend or "httpx")
+                or fallback_backend
+                or "httpx"
+            ),
             elapsed_seconds=float(elapsed_seconds or 0.0),
             metadata=metadata or {},
         )

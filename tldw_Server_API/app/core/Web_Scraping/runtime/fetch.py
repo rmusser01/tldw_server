@@ -6,6 +6,7 @@ import time
 from collections.abc import Mapping
 from typing import Any, Protocol
 
+from tldw_Server_API.app.core.exceptions import BadRequestError
 from tldw_Server_API.app.core.http_client import fetch as http_fetch
 
 from .requests import FetchRequest
@@ -39,8 +40,11 @@ class DefaultFetchClient:
     """Default Web_Scraping fetch adapter over the central HTTP helper."""
 
     def fetch(self, request: FetchRequest) -> FetchResponse:
+        """Fetch a normalized response for supported Web_Scraping requests."""
         if request.method != "GET":
-            raise ValueError("DefaultFetchClient only supports GET requests in Phase 2")
+            raise BadRequestError(
+                "DefaultFetchClient only supports GET requests in Phase 2"
+            )
 
         started = time.monotonic()
         if request.backend == "curl":

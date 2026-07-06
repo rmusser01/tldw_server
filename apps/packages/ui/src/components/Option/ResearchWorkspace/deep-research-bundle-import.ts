@@ -279,7 +279,7 @@ const sanitizeSourceLineage = (
 ): ArtifactSourceLineage[] =>
   (Array.isArray(sourceLineage) ? capImportList(sourceLineage) : [])
     .map((lineage): ArtifactSourceLineage | null => {
-      const sourceId = readString(lineage.sourceId)
+      const sourceId = readBoundedString(lineage.sourceId, METADATA_ID_LIMIT)
       if (!sourceId) return null
 
       return {

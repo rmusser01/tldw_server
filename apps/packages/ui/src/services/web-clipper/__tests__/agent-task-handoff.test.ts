@@ -9,6 +9,7 @@ import {
 } from "@/services/web-clipper/agent-task-handoff"
 
 const FIXED_NOW = new Date("2026-01-01T00:00:00.000Z")
+const STALE_CREATED_AT = "2025-12-31T23:49:00.000Z"
 
 const createRequest = (
   overrides: Partial<PendingWebClipAgentTaskRequest> = {}
@@ -247,7 +248,7 @@ describe("web clipper agent-task handoff storage", () => {
 
   it("expires stale browser fallback handoffs", async () => {
     const staleRequest = createRequest({
-      createdAt: new Date(Date.now() - 11 * 60 * 1000).toISOString()
+      createdAt: STALE_CREATED_AT
     })
     window.sessionStorage.setItem(
       WEB_CLIPPER_PENDING_AGENT_TASK_STORAGE_KEY,

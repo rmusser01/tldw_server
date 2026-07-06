@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 import tldw_Server_API.app.core.Web_Scraping.runtime.fetch as runtime_fetch
+from tldw_Server_API.app.core.exceptions import BadRequestError
 from tldw_Server_API.app.core.Web_Scraping.runtime import FetchRequest
 from tldw_Server_API.app.core.Web_Scraping.runtime.fetch import DefaultFetchClient
 
@@ -130,8 +131,10 @@ def test_default_fetch_client_measures_elapsed_with_monotonic_clock(
 
 @pytest.mark.unit
 def test_default_fetch_client_rejects_non_get_method() -> None:
-    with pytest.raises(ValueError, match="only supports GET"):
-        DefaultFetchClient().fetch(FetchRequest(url="https://example.com/article", method="POST"))
+    with pytest.raises(BadRequestError, match="only supports GET"):
+        DefaultFetchClient().fetch(
+            FetchRequest(url="https://example.com/article", method="POST")
+        )
 
 
 @pytest.mark.unit

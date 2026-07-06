@@ -423,7 +423,7 @@ describe("Deep Research bundle import", () => {
     const unboundedSources = Array.from(
       { length: MAX_IMPORT_LIST_ITEMS + 10 },
       (_, index) => ({
-        sourceId: `source-${index}`,
+        sourceId: index === 0 ? "source-".repeat(40) : `source-${index}`,
         mediaId: index + 1,
         title: `Paper ${index}`
       })
@@ -477,6 +477,8 @@ describe("Deep Research bundle import", () => {
       MAX_IMPORT_LIST_ITEMS
     )
     expect(artifact.sourceLineage).toHaveLength(MAX_IMPORT_LIST_ITEMS)
+    expect(artifact.sourceLineage[0].sourceId).toHaveLength(128)
+    expect(artifact.sourceLineage[0].sourceId).toMatch(/\.\.\.$/)
     expect(artifact.sourceLineage[0].citationSpans).toHaveLength(
       MAX_IMPORT_LIST_ITEMS
     )
