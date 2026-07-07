@@ -43,9 +43,11 @@ import {
   discardAbortedTurnIfRequested,
 } from "@/hooks/chat/abort-turn-cleanup";
 import { resolveSavedDegradedCharacterPersist } from "@/hooks/chat/characterPersistOutcome";
+import { createCharacterEmoteStream } from "@/hooks/chat/character-emote-stream";
 import type { Character } from "@/types/character";
+import type { CharacterEmoteEvent } from "@/utils/character-emotes";
 import type { ChatScope } from "@/types/chat-scope";
-import type { ChatHistory, Message } from "@/store/option";
+import type { ChatHistory, Message, MessageMetadataExtra } from "@/store/option";
 import {
   attemptCharacterStreamRecoveryPersist,
   type TldwChatMeta,
@@ -563,6 +565,47 @@ export const createCharacterChatMode = (deps: CharacterChatModeDeps) => {
       clearTimeout(streamingTimer);
       streamingTimer = null;
     };
+    const emoteStream = createCharacterEmoteStream();
+    const getExplicitEmoteMoodLabel = () =>
+      emoteStream.events.length > 0
+        ? emoteStream.events[emoteStream.events.length - 1]?.state
+        : undefined;
+    const getExplicitEmoteMetadataExtra = (): MessageMetadataExtra | undefined => {
+      const moodLabel = getExplicitEmoteMoodLabel();
+      return moodLabel
+        ? {
+            mood_label: moodLabel,
+            mood_confidence: null,
+            mood_topic: null,
+            emote_events: [...emoteStream.events],
+          }
+        : undefined;
+    };
+    const applyEmoteEventsToMessage = (
+      newEvents: CharacterEmoteEvent[],
+    ) => {
+      if (newEvents.length === 0) return;
+      const moodLabel = getExplicitEmoteMoodLabel();
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === generateMessageId
+            ? updateActiveVariant(m, {
+                moodLabel,
+                metadataExtra: {
+                  ...(m.metadataExtra ?? {}),
+                  emote_events: [...emoteStream.events],
+                },
+              })
+            : m,
+        ),
+      );
+    };
+    const flushCharacterEmoteStream = () => {
+      const flushedEmotes = emoteStream.flush({ fullText, contentToSave });
+      fullText = flushedEmotes.fullText;
+      contentToSave = flushedEmotes.contentToSave;
+      applyEmoteEventsToMessage(flushedEmotes.emoteEvents);
+    };
 
     const abortCancelStreamingUpdate = () => cancelStreamingUpdate();
     signal.addEventListener("abort", abortCancelStreamingUpdate);
@@ -945,15 +988,18 @@ export const createCharacterChatMode = (deps: CharacterChatModeDeps) => {
             detail.length > 0 ? detail : streamTransportInterruptionReason;
           continue;
         }
+        const previousFullText = fullText;
         const chunkState = consumeStreamingChunk(
           { fullText, contentToSave, apiReasoning },
           chunk,
         );
-        fullText = chunkState.fullText;
-        contentToSave = chunkState.contentToSave;
-        apiReasoning = chunkState.apiReasoning;
+        const sanitizedChunkState = emoteStream.sanitizeChunk(chunkState);
+        fullText = sanitizedChunkState.fullText;
+        contentToSave = sanitizedChunkState.contentToSave;
+        apiReasoning = sanitizedChunkState.apiReasoning;
+        applyEmoteEventsToMessage(sanitizedChunkState.emoteEvents);
 
-        if (chunkState.token) {
+        if (chunkState.token && fullText !== previousFullText) {
           scheduleStreamingUpdate(`${fullText}▋`, timetaken);
         }
         if (count === 0) {
@@ -981,6 +1027,7 @@ export const createCharacterChatMode = (deps: CharacterChatModeDeps) => {
       cancelStreamingUpdate();
       flushStreamingUpdate();
       if (inactivityTimer) clearTimeout(inactivityTimer);
+      flushCharacterEmoteStream();
 
       if (inactivityAborted) {
         const timeoutError = new Error(
@@ -1036,7 +1083,7 @@ export const createCharacterChatMode = (deps: CharacterChatModeDeps) => {
         let resolvedMoodLabel: string | undefined;
         let resolvedMoodConfidence: number | undefined;
         let resolvedMoodTopic: string | undefined;
-        let metadataExtra: Record<string, unknown> | undefined;
+        let metadataExtra: MessageMetadataExtra | undefined;
         try {
           fallbackSpeakerId = Number.parseInt(
             String(activeCharacter.id),
@@ -1049,20 +1096,26 @@ export const createCharacterChatMode = (deps: CharacterChatModeDeps) => {
               : Number.isFinite(fallbackSpeakerId) && fallbackSpeakerId > 0
                 ? fallbackSpeakerId
                 : undefined;
-          detectedMood = detectCharacterMood({
-            assistantText: finalPersistedContent,
-            userText: message,
-          });
-          resolvedMoodLabel = detectedMood.label;
-          resolvedMoodConfidence =
-            typeof detectedMood.confidence === "number" &&
-            Number.isFinite(detectedMood.confidence)
-              ? detectedMood.confidence
-              : undefined;
-          resolvedMoodTopic =
-            typeof detectedMood.topic === "string" && detectedMood.topic.trim()
-              ? detectedMood.topic.trim()
-              : undefined;
+          if (emoteStream.events.length > 0) {
+            resolvedMoodLabel =
+              emoteStream.events[emoteStream.events.length - 1]?.state;
+          } else {
+            detectedMood = detectCharacterMood({
+              assistantText: finalPersistedContent,
+              userText: message,
+            });
+            resolvedMoodLabel = detectedMood.label;
+            resolvedMoodConfidence =
+              typeof detectedMood.confidence === "number" &&
+              Number.isFinite(detectedMood.confidence)
+                ? detectedMood.confidence
+                : undefined;
+            resolvedMoodTopic =
+              typeof detectedMood.topic === "string" &&
+              detectedMood.topic.trim()
+                ? detectedMood.topic.trim()
+                : undefined;
+          }
 
           const persistPayload: Record<string, unknown> = {
             assistant_content: finalPersistedContent,
@@ -1079,6 +1132,9 @@ export const createCharacterChatMode = (deps: CharacterChatModeDeps) => {
           if (resolvedMoodTopic) {
             persistPayload.mood_topic = resolvedMoodTopic;
           }
+          if (emoteStream.events.length > 0) {
+            persistPayload.emote_events = [...emoteStream.events];
+          }
           if (persistedUserServerMessageId) {
             persistPayload.user_message_id = persistedUserServerMessageId;
           }
@@ -1088,6 +1144,9 @@ export const createCharacterChatMode = (deps: CharacterChatModeDeps) => {
             mood_label: resolvedMoodLabel,
             mood_confidence: resolvedMoodConfidence ?? null,
             mood_topic: resolvedMoodTopic ?? null,
+            ...(emoteStream.events.length > 0
+              ? { emote_events: [...emoteStream.events] }
+              : {}),
           };
 
           const persisted = (await tldwClient.persistCharacterCompletion(
@@ -1161,6 +1220,7 @@ export const createCharacterChatMode = (deps: CharacterChatModeDeps) => {
                 {
                   role: "assistant",
                   content: finalPersistedContent,
+                  ...(metadataExtra ? { metadata_extra: metadataExtra } : {}),
                 },
                 scope ? { scope } : undefined,
               )) as { id?: string | number; version?: number } | null;
@@ -1272,6 +1332,9 @@ export const createCharacterChatMode = (deps: CharacterChatModeDeps) => {
       }
 
       cancelStreamingUpdate();
+      flushCharacterEmoteStream();
+      const recoveryMoodLabel = getExplicitEmoteMoodLabel();
+      const recoveryMetadataExtra = getExplicitEmoteMetadataExtra();
       await attemptCharacterStreamRecoveryPersist({
         chatId: activeChatId,
         temporaryChat,
@@ -1280,12 +1343,92 @@ export const createCharacterChatMode = (deps: CharacterChatModeDeps) => {
         error: e,
         persist: async (assistantContent) => {
           if (!activeChatId) return false;
+          if (recoveryMoodLabel) {
+            try {
+              const persistPayload: Record<string, unknown> = {
+                assistant_content: assistantContent,
+                assistant_message_id: generateMessageId,
+                mood_label: recoveryMoodLabel,
+                emote_events: [...emoteStream.events],
+              };
+              if (persistedUserServerMessageId) {
+                persistPayload.user_message_id = persistedUserServerMessageId;
+              }
+              const persisted = (await tldwClient.persistCharacterCompletion(
+                activeChatId,
+                persistPayload,
+                scope ? { scope } : undefined,
+              )) as {
+                assistant_message_id?: string | number;
+                message_id?: string | number;
+                id?: string | number;
+                version?: number;
+              } | null;
+              const createdAsstServerId =
+                persisted?.assistant_message_id ??
+                persisted?.message_id ??
+                persisted?.id;
+              if (createdAsstServerId != null) {
+                assistantPersistedToServer = true;
+                setMessages(
+                  (prev) =>
+                    (prev as any[]).map((m) => {
+                      if (m.id !== generateMessageId) return m;
+                      return updateActiveVariant(m, {
+                        serverMessageId: String(createdAsstServerId),
+                        serverMessageVersion: persisted?.version,
+                        metadataExtra: {
+                          ...(m.metadataExtra ?? {}),
+                          ...(recoveryMetadataExtra ?? {}),
+                        },
+                        moodLabel: recoveryMoodLabel,
+                        moodConfidence: null,
+                        moodTopic: null,
+                      });
+                    }) as Message[],
+                );
+                return true;
+              }
+            } catch (persistError) {
+              const savedOutcome =
+                resolveSavedDegradedCharacterPersist(persistError);
+              if (savedOutcome?.saved) {
+                assistantPersistedToServer = true;
+                setMessages(
+                  (prev) =>
+                    (prev as any[]).map((m) => {
+                      if (m.id !== generateMessageId) return m;
+                      const serverMessageId =
+                        savedOutcome.assistantMessageId != null
+                          ? String(savedOutcome.assistantMessageId)
+                          : undefined;
+                      return updateActiveVariant(m, {
+                        serverMessageId,
+                        serverMessageVersion: savedOutcome.version,
+                        metadataExtra: {
+                          ...(m.metadataExtra ?? {}),
+                          ...(recoveryMetadataExtra ?? {}),
+                        },
+                        moodLabel: recoveryMoodLabel,
+                        moodConfidence: null,
+                        moodTopic: null,
+                      });
+                    }) as Message[],
+                );
+                return true;
+              }
+            }
+          }
+          const payload: Record<string, unknown> = {
+            role: "assistant",
+            content: assistantContent,
+          };
+          if (recoveryMetadataExtra) {
+            payload.metadata_extra = recoveryMetadataExtra;
+          }
           const createdAsst = (await tldwClient.addChatMessage(
             activeChatId,
-            {
-              role: "assistant",
-              content: assistantContent,
-            },
+            payload,
             scope ? { scope } : undefined,
           )) as { id?: string | number; version?: number } | null;
           if (createdAsst?.id == null) return false;
@@ -1297,6 +1440,17 @@ export const createCharacterChatMode = (deps: CharacterChatModeDeps) => {
                 return updateActiveVariant(m, {
                   serverMessageId: String(createdAsst.id),
                   serverMessageVersion: createdAsst?.version,
+                  ...(recoveryMetadataExtra
+                    ? {
+                        metadataExtra: {
+                          ...(m.metadataExtra ?? {}),
+                          ...recoveryMetadataExtra,
+                        },
+                        moodLabel: recoveryMoodLabel,
+                        moodConfidence: null,
+                        moodTopic: null,
+                      }
+                    : {}),
                 });
               }) as Message[],
           );
@@ -1316,6 +1470,17 @@ export const createCharacterChatMode = (deps: CharacterChatModeDeps) => {
             msg.id === generateMessageId
               ? updateActiveVariant(msg, {
                   message: assistantContent,
+                  ...(recoveryMetadataExtra
+                    ? {
+                        metadataExtra: {
+                          ...(msg.metadataExtra ?? {}),
+                          ...recoveryMetadataExtra,
+                        },
+                        moodLabel: recoveryMoodLabel,
+                        moodConfidence: null,
+                        moodTopic: null,
+                      }
+                    : {}),
                   generationInfo: {
                     ...(msg.generationInfo || {}),
                     interrupted: true,

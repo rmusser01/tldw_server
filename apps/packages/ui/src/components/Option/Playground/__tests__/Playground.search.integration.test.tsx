@@ -206,6 +206,10 @@ vi.mock("@/hooks/useSmartScroll", () => ({
 
 vi.mock("@/services/settings/ui-settings", () => ({
   CHAT_BACKGROUND_IMAGE_SETTING: "chatBackgroundImage",
+  THEME_SETTING: {
+    key: "theme",
+    defaultValue: "dark"
+  },
   HEADER_SHORTCUT_IDS: [],
   SIDEBAR_SHORTCUT_IDS: []
 }))

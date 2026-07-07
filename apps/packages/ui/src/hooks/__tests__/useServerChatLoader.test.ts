@@ -449,6 +449,31 @@ describe("mapServerChatMessagesToPlaygroundMessages", () => {
     })
   })
 
+  it("restores explicit character emote metadata from server messages", () => {
+    const [message] = mapServerChatMessagesToPlaygroundMessages({
+      assistantName: "Ashley",
+      characterId: 42,
+      serverMessages: [
+        {
+          id: "server-1",
+          role: "assistant",
+          content: "What now?",
+          created_at: "2026-06-01T00:00:00.000Z",
+          metadata_extra: {
+            speaker_character_id: 42,
+            mood_label: "smug",
+            emote_events: [{ state: "smug", at_char: 0 }]
+          }
+        }
+      ]
+    })
+
+    expect(message.moodLabel).toBe("smug")
+    expect(message.metadataExtra?.emote_events).toEqual([
+      { state: "smug", at_char: 0 }
+    ])
+  })
+
   it("maps mirrored image event messages into assistant image event cards", () => {
     const mirroredContent = buildImageGenerationEventMirrorContent({
       kind: "image_generation_event",

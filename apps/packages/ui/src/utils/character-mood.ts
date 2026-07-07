@@ -1,4 +1,5 @@
 import { createImageDataUrl } from "@/utils/image-utils"
+import { normalizeCharacterEmoteState } from "./character-emotes"
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === "object" && !Array.isArray(value)
@@ -25,7 +26,7 @@ export type CharacterMoodDetection = {
   topic: string | null
 }
 
-type CharacterMoodImages = Partial<Record<CharacterMoodLabel, string>>
+type CharacterMoodImages = Record<string, string>
 
 type CharacterWithPortraitData = {
   avatar_url?: string | null
@@ -239,7 +240,7 @@ export const getCharacterMoodImagesFromExtensions = (
 
   const result: CharacterMoodImages = {}
   Object.entries(source).forEach(([rawMood, rawImage]) => {
-    const moodLabel = normalizeCharacterMoodLabel(rawMood)
+    const moodLabel = normalizeCharacterEmoteState(rawMood)
     if (!moodLabel) return
     const normalizedImage = normalizeMoodImageSource(rawImage)
     if (!normalizedImage) return
@@ -258,7 +259,7 @@ export const mergeCharacterMoodImagesIntoExtensions = (
 
   const normalizedMap: CharacterMoodImages = {}
   Object.entries(moodImages || {}).forEach(([rawMood, rawImage]) => {
-    const moodLabel = normalizeCharacterMoodLabel(rawMood)
+    const moodLabel = normalizeCharacterEmoteState(rawMood)
     if (!moodLabel) return
     const normalizedImage = normalizeMoodImageSource(rawImage)
     if (!normalizedImage) return
@@ -340,7 +341,7 @@ export const resolveCharacterMoodImageUrl = (
 ): string => {
   if (!character) return ""
 
-  const normalizedMood = normalizeCharacterMoodLabel(moodLabel)
+  const normalizedMood = normalizeCharacterEmoteState(moodLabel)
   if (!normalizedMood) return ""
 
   const moodImages = getCharacterMoodImagesFromExtensions(character.extensions)

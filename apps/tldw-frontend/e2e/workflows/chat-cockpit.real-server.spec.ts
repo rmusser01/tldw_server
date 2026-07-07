@@ -675,6 +675,26 @@ const assertCoreComposerControls = async (
   await expect(page.getByRole('button', { name: /Advanced controls/i })).toBeVisible();
 };
 
+const fillEditableComposer = async (page: Page, value: string) => {
+  const input = page.getByTestId('chat-input');
+  await expect(input).toBeEditable({ timeout: 15_000 });
+  await input.fill(value);
+  await expect(input).toHaveValue(value);
+};
+
+const ensureDesktopCockpitRailsVisible = async (page: Page) => {
+  const leftRestore = page.getByTestId('playground-cockpit-left-rail-restore');
+  if (await leftRestore.isVisible().catch(() => false)) {
+    await leftRestore.click();
+  }
+  const rightRestore = page.getByTestId('playground-cockpit-right-rail-restore');
+  if (await rightRestore.isVisible().catch(() => false)) {
+    await rightRestore.click();
+  }
+  await expect(page.getByTestId('playground-cockpit-left-rail')).toBeVisible();
+  await expect(page.getByTestId('playground-cockpit-right-rail')).toBeVisible();
+};
+
 const assertRuntimeProviderSummary = async (runtimeInspector: Locator) => {
   const runtimeState = runtimeInspector.getByRole('region', { name: 'Runtime state' });
   await expect(runtimeState.getByRole('heading', { name: 'Runtime' })).toBeVisible();
@@ -1647,8 +1667,7 @@ test.describe('/chat cockpit real-server parity', () => {
     });
 
     await switchChatLayoutMode(page, 'cockpit');
-    await expect(page.getByTestId('playground-cockpit-left-rail')).toBeVisible();
-    await expect(page.getByTestId('playground-cockpit-right-rail')).toBeVisible();
+    await ensureDesktopCockpitRailsVisible(page);
     await assertNoHorizontalOverflow(page);
     await expect(
       getDesktopContextRail(page).getByRole('button', { name: 'Web search', exact: true })
@@ -1929,7 +1948,7 @@ test.describe('/chat cockpit real-server parity', () => {
       await expect(panel).toHaveAttribute('aria-labelledby', tabId as string);
       return panel;
     };
-    await page.getByTestId('chat-input').fill(mobileDraft);
+    await fillEditableComposer(page, mobileDraft);
     await expectMobileDraftReachable();
     await expectNoMobileBottomControls();
 

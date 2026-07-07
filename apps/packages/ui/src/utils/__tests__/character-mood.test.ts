@@ -60,6 +60,23 @@ describe("character mood utilities", () => {
     expect((merged as any).tldw.prompt_preset).toBe("default")
   })
 
+  it("resolves custom emote image states without expanding classifier labels", () => {
+    const extensions = {
+      tldw: {
+        mood_images: {
+          smug: TINY_PNG_BASE64,
+          "thinking-hard": TINY_PNG_BASE64,
+          "../../bad": TINY_PNG_BASE64
+        }
+      }
+    }
+
+    expect(resolveCharacterMoodImageUrl({ extensions }, "smug")).toMatch(/^data:image\/png;base64,/)
+    expect(resolveCharacterMoodImageUrl({ extensions }, "thinking hard")).toMatch(/^data:image\/png;base64,/)
+    expect(resolveCharacterMoodImageUrl({ extensions }, "../../bad")).toBe("")
+    expect(normalizeCharacterMoodLabel("smug")).toBeNull()
+  })
+
   it("upserts and removes mood images", () => {
     const withImage = upsertCharacterMoodImage({}, "happy", TINY_PNG_BASE64)
     const imageAfterUpsert = resolveCharacterMoodImageUrl(

@@ -124,6 +124,12 @@ from tldw_Server_API.app.core.testing import is_truthy
 from tldw_Server_API.app.core.Character_Chat.modules.character_generation_presets import (
     resolve_character_generation_settings,
 )
+from tldw_Server_API.app.core.Character_Chat.emote_directives import (
+    CharacterEmoteEvent,
+    append_character_emote_prompt_instruction,
+    resolve_character_emote_completion,
+    validate_emote_events_for_text,
+)
 from tldw_Server_API.app.core.Character_Chat.modules.character_prompt_presets import (
     DEFAULT_PROMPT_PRESET,
     build_character_system_prompt,
@@ -927,6 +933,7 @@ def _build_stream_persist_metadata_extra(
     mood_label: str | None,
     mood_confidence: float | None,
     mood_topic: str | None,
+    emote_events: list[CharacterEmoteEvent] | None = None,
     usage: dict[str, Any] | None,
     visual_identity: Any | None = None,
 ) -> dict[str, Any]:
@@ -938,16 +945,20 @@ def _build_stream_persist_metadata_extra(
     }
     if persist_fingerprint:
         metadata_extra["stream_persist_fingerprint"] = persist_fingerprint
-    if isinstance(mood_label, str):
-        trimmed_label = mood_label.strip()
-        if trimmed_label:
-            metadata_extra["mood_label"] = trimmed_label
-    if mood_confidence is not None:
-        metadata_extra["mood_confidence"] = float(mood_confidence)
-    if isinstance(mood_topic, str):
-        trimmed_topic = mood_topic.strip()
-        if trimmed_topic:
-            metadata_extra["mood_topic"] = trimmed_topic
+    if emote_events:
+        metadata_extra["mood_label"] = emote_events[-1].state
+        metadata_extra["emote_events"] = [event.model_dump() for event in emote_events]
+    else:
+        if isinstance(mood_label, str):
+            trimmed_label = mood_label.strip()
+            if trimmed_label:
+                metadata_extra["mood_label"] = trimmed_label
+        if mood_confidence is not None:
+            metadata_extra["mood_confidence"] = float(mood_confidence)
+        if isinstance(mood_topic, str):
+            trimmed_topic = mood_topic.strip()
+            if trimmed_topic:
+                metadata_extra["mood_topic"] = trimmed_topic
     if usage is not None:
         metadata_extra["usage"] = usage
     metadata_extra.update(_visual_identity_metadata_extra(visual_identity))
@@ -4650,6 +4661,7 @@ async def prepare_chat_completion(
                 user_name=user_name,
                 preset_id=effective_preset,
             )
+            sys_text = append_character_emote_prompt_instruction(sys_text, character)
             if sys_text.strip():
                 formatted.append({"role": "system", "content": sys_text.strip()})
         if summary_content:
@@ -5050,6 +5062,7 @@ async def prompt_assembly_preview(
                 user_name=user_name,
                 preset_id=preview_preset,
             )
+            sys_text = append_character_emote_prompt_instruction(sys_text, character)
             if sys_text.strip():
                 formatted.append({"role": "system", "content": sys_text.strip()})
         if summary_content:
@@ -5428,6 +5441,7 @@ async def character_chat_completion(
                 user_name=user_name,
                 preset_id=completion_preset,
             )
+            sys_text = append_character_emote_prompt_instruction(sys_text, character)
             if sys_text.strip():
                 formatted.append({"role": "system", "content": sys_text.strip()})
         if summary_content:
@@ -6111,6 +6125,16 @@ async def character_chat_completion(
             if isinstance(body.mood_topic, str) and body.mood_topic.strip()
             else None
         )
+        resolved_emotes = resolve_character_emote_completion(
+            assistant_text,
+            fallback_mood_label=resolved_mood_label,
+            fallback_mood_confidence=resolved_mood_confidence,
+            fallback_mood_topic=resolved_mood_topic,
+        )
+        assistant_text = resolved_emotes.clean_text
+        resolved_mood_label = resolved_emotes.mood_label
+        resolved_mood_confidence = resolved_emotes.mood_confidence
+        resolved_mood_topic = resolved_emotes.mood_topic
 
         saved = False
         assistant_msg_id: Optional[str] = None
@@ -6163,6 +6187,10 @@ async def character_chat_completion(
                 metadata_extra["mood_confidence"] = resolved_mood_confidence
             if resolved_mood_topic:
                 metadata_extra["mood_topic"] = resolved_mood_topic
+            if resolved_emotes.emote_events:
+                metadata_extra["emote_events"] = [
+                    event.model_dump() for event in resolved_emotes.emote_events
+                ]
             if turn_lorebook_diagnostics:
                 metadata_extra["lorebook_diagnostics"] = turn_lorebook_diagnostics
             if turn_lorebook_cost_diagnostics:
@@ -7266,17 +7294,38 @@ async def persist_streamed_assistant_message(
             if isinstance(body.assistant_message_id, str)
             else ""
         ) or None
+        resolved_emotes = resolve_character_emote_completion(
+            body.assistant_content,
+            fallback_mood_label=body.mood_label,
+            fallback_mood_confidence=body.mood_confidence,
+            fallback_mood_topic=body.mood_topic,
+        )
+        assistant_content = resolved_emotes.clean_text
+        try:
+            emote_events = (
+                validate_emote_events_for_text(body.emote_events, assistant_content)
+                if body.emote_events
+                else resolved_emotes.emote_events
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=str(exc),
+            ) from exc
+        resolved_visual_mood = (
+            emote_events[-1].state if emote_events else resolved_emotes.mood_label
+        )
         visual_identity_metadata = _safe_resolve_character_visual_identity(
             db=db,
             current_user=current_user,
             actor_id=resolved_speaker_id,
-            mood_label=_optional_text_metadata(body.mood_label),
+            mood_label=_optional_text_metadata(resolved_visual_mood),
         )
         persist_fingerprint = None
         if not requested_assistant_message_id and getattr(body, "user_message_id", None):
             persist_fingerprint = _build_stream_persist_fingerprint(
                 chat_id,
-                body.assistant_content,
+                assistant_content,
                 body.user_message_id,
                 resolved_speaker_id,
                 body.ranking if getattr(body, "ranking", None) is not None else None,
@@ -7302,7 +7351,7 @@ async def persist_streamed_assistant_message(
                 db,
                 chat_id,
                 requested_assistant_message_id,
-                assistant_content=body.assistant_content,
+                assistant_content=assistant_content,
                 parent_message_id=body.user_message_id,
                 speaker_name=resolved_speaker_name,
             )
@@ -7321,9 +7370,10 @@ async def persist_streamed_assistant_message(
                     turn_taking_mode=resolved_turn_mode,
                     validation_degraded=existing_extra.get("persist_validation_degraded") is True,
                     persist_fingerprint=persist_fingerprint,
-                    mood_label=body.mood_label,
-                    mood_confidence=body.mood_confidence,
-                    mood_topic=body.mood_topic,
+                    mood_label=resolved_emotes.mood_label,
+                    mood_confidence=resolved_emotes.mood_confidence,
+                    mood_topic=resolved_emotes.mood_topic,
+                    emote_events=emote_events,
                     usage=_validate_stream_persist_usage(getattr(body, "usage", None)),
                     visual_identity=visual_identity_metadata,
                 ),
@@ -7358,9 +7408,10 @@ async def persist_streamed_assistant_message(
             turn_taking_mode=resolved_turn_mode,
             validation_degraded=validation_degraded is not None,
             persist_fingerprint=persist_fingerprint,
-            mood_label=body.mood_label,
-            mood_confidence=body.mood_confidence,
-            mood_topic=body.mood_topic,
+            mood_label=resolved_emotes.mood_label,
+            mood_confidence=resolved_emotes.mood_confidence,
+            mood_topic=resolved_emotes.mood_topic,
+            emote_events=emote_events,
             usage=_validate_stream_persist_usage(getattr(body, "usage", None)),
             visual_identity=visual_identity_metadata,
         )
@@ -7371,7 +7422,7 @@ async def persist_streamed_assistant_message(
                 db=db,
                 conversation_id=chat_id,
                 character_name=resolved_speaker_name,
-                message_content=body.assistant_content,
+                message_content=assistant_content,
                 is_user_message=False,
                 message_id=requested_assistant_message_id,
                 parent_message_id=body.user_message_id,
@@ -7384,7 +7435,7 @@ async def persist_streamed_assistant_message(
                 db,
                 chat_id,
                 requested_assistant_message_id,
-                assistant_content=body.assistant_content,
+                assistant_content=assistant_content,
                 parent_message_id=body.user_message_id,
                 speaker_name=resolved_speaker_name,
             )
