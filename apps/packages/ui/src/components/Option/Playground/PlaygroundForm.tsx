@@ -5762,6 +5762,7 @@ export const PlaygroundForm = ({
                             selectedModel={selectedModel}
                             systemPrompt={systemPrompt}
                             selectedCharacter={selectedCharacter}
+                            serverScope={canonicalConnectionConfig?.serverUrl}
                             ragPinnedResultsLength={ragPinnedResults.length}
                             startupTemplateDraftName={startupTemplateDraftName}
                             setStartupTemplateDraftName={

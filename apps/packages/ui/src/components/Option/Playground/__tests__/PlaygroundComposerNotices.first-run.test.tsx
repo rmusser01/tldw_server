@@ -95,6 +95,21 @@ const buildProps = (): PlaygroundComposerNoticesProps => ({
   }) as PlaygroundComposerNoticesProps["t"]
 })
 
+const mockNoFirstRunBanner = () => {
+  useFirstRunCheckMock.mockReturnValue({
+    shouldShowSetup: false,
+    resumeStep: null,
+    loading: false
+  })
+}
+
+const renderNotices = (props: Partial<PlaygroundComposerNoticesProps> = {}) =>
+  render(
+    <MemoryRouter>
+      <PlaygroundComposerNotices {...buildProps()} {...props} />
+    </MemoryRouter>
+  )
+
 describe("PlaygroundComposerNotices first-run banner", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -225,5 +240,118 @@ describe("PlaygroundComposerNotices first-run banner", () => {
       "href",
       "/settings/health"
     )
+  })
+
+  it("shows the expression nudge for a selected character with no expression images", () => {
+    mockNoFirstRunBanner()
+
+    renderNotices({
+      selectedCharacter: { id: 42, name: "Ada", extensions: {} },
+      selectedCharacterName: "Ada"
+    })
+
+    expect(screen.getByText(/add expression images/i)).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Edit expressions" })).toHaveAttribute(
+      "href",
+      "/characters?from=chat-emote-nudge&focus=expressions"
+    )
+  })
+
+  it("does not show the expression nudge when mood images are configured", () => {
+    mockNoFirstRunBanner()
+
+    renderNotices({
+      selectedCharacter: {
+        id: 42,
+        name: "Ada",
+        extensions: {
+          tldw: {
+            mood_images: {
+              happy: "https://example.test/happy.png"
+            }
+          }
+        }
+      },
+      selectedCharacterName: "Ada"
+    })
+
+    expect(screen.queryByText(/add expression images/i)).not.toBeInTheDocument()
+  })
+
+  it("dismisses the expression nudge with the full scoped storage key", () => {
+    mockNoFirstRunBanner()
+
+    renderNotices({
+      selectedCharacter: {
+        id: 42,
+        name: "Ada",
+        server_url: "http://localhost:8000",
+        user_id: 7,
+        extensions: {}
+      },
+      selectedCharacterName: "Ada"
+    })
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /dismiss expression image setup/i })
+    )
+
+    expect(
+      localStorage.getItem(
+        "character-expression-nudge:server:http://localhost:8000:user:7:character:42"
+      )
+    ).toBe("true")
+    expect(screen.queryByText(/add expression images/i)).not.toBeInTheDocument()
+  })
+
+  it("keeps expression nudge dismissal scoped by server", () => {
+    mockNoFirstRunBanner()
+
+    const { unmount } = renderNotices({
+      selectedCharacter: {
+        id: 42,
+        name: "Ada",
+        server_url: "http://localhost:8000",
+        extensions: {}
+      },
+      selectedCharacterName: "Ada"
+    })
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /dismiss expression image setup/i })
+    )
+    unmount()
+
+    renderNotices({
+      selectedCharacter: {
+        id: 42,
+        name: "Ada",
+        server_url: "http://127.0.0.1:8000",
+        extensions: {}
+      },
+      selectedCharacterName: "Ada"
+    })
+
+    expect(screen.getByText(/add expression images/i)).toBeInTheDocument()
+  })
+
+  it("dismisses the expression nudge without broad storage when no stable character id exists", () => {
+    mockNoFirstRunBanner()
+
+    renderNotices({
+      selectedCharacter: { name: "Nameless", extensions: {} },
+      selectedCharacterName: "Nameless"
+    })
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /dismiss expression image setup/i })
+    )
+
+    expect(screen.queryByText(/add expression images/i)).not.toBeInTheDocument()
+    expect(
+      Object.keys(localStorage).some((key) =>
+        key.startsWith("character-expression-nudge")
+      )
+    ).toBe(false)
   })
 })

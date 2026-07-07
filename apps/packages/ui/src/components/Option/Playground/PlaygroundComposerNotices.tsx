@@ -8,6 +8,7 @@ import { Link, useNavigate } from "react-router-dom"
 import { Alert } from "@/components/ui/primitives"
 import { FirstRunBanner } from "@/components/PersonaGarden/FirstRunBanner"
 import { useFirstRunCheck } from "@/hooks/useFirstRunCheck"
+import { getCharacterMoodImagesFromExtensions } from "@/utils/character-mood"
 import { ModelRecommendationsPanel } from "./ModelRecommendationsPanel"
 import type {
   ModelRecommendation,
@@ -16,6 +17,7 @@ import type {
 import { toText } from "./hooks/utils"
 
 const CHAT_NUDGE_DISMISSED_KEY = "assistant_nudge_dismissed_chat"
+const CHARACTER_EXPRESSION_NUDGE_KEY_PREFIX = "character-expression-nudge"
 
 const readChatNudgeDismissedState = (): boolean => {
   try {
@@ -31,6 +33,98 @@ const persistChatNudgeDismissedState = (): void => {
     localStorage.setItem(CHAT_NUDGE_DISMISSED_KEY, "true")
   } catch (error) {
     console.warn("Failed to persist assistant chat nudge dismissal state", error)
+  }
+}
+
+type CharacterExpressionNudgeScopeInput = {
+  server?: unknown
+  user?: unknown
+  character: unknown
+}
+
+const normalizeStableScopeValue = (value: unknown): string | null => {
+  if (typeof value === "number" && Number.isFinite(value)) return String(value)
+  if (typeof value !== "string") return null
+  const trimmed = value.trim()
+  return trimmed ? trimmed : null
+}
+
+const readFirstStableRecordValue = (
+  record: Record<string, unknown>,
+  keys: string[]
+): string | null => {
+  for (const key of keys) {
+    const normalized = normalizeStableScopeValue(record[key])
+    if (normalized) return normalized
+  }
+  return null
+}
+
+const getStableCharacterNudgeScope = ({
+  server,
+  user,
+  character
+}: CharacterExpressionNudgeScopeInput): string | null => {
+  if (!character || typeof character !== "object") return null
+  const record = character as Record<string, unknown>
+  const characterId = readFirstStableRecordValue(record, [
+    "id",
+    "character_id",
+    "characterId",
+    "slug"
+  ])
+  if (!characterId) return null
+
+  const serverId =
+    normalizeStableScopeValue(server) ||
+    readFirstStableRecordValue(record, [
+      "server_id",
+      "serverId",
+      "server_url",
+      "serverUrl",
+      "api_base_url",
+      "apiBaseUrl"
+    ])
+  const userId =
+    normalizeStableScopeValue(user) ||
+    readFirstStableRecordValue(record, [
+      "user_id",
+      "userId",
+      "owner_user_id",
+      "ownerUserId"
+    ])
+
+  const parts: string[] = []
+  if (serverId) parts.push("server", serverId)
+  if (userId) parts.push("user", userId)
+  parts.push("character", characterId)
+  return parts.join(":")
+}
+
+const buildCharacterExpressionNudgeDismissKey = (
+  scope: string | null
+): string | null => (scope ? `${CHARACTER_EXPRESSION_NUDGE_KEY_PREFIX}:${scope}` : null)
+
+const hasExpressionImages = (character: unknown): boolean => {
+  if (!character || typeof character !== "object") return false
+  const extensions = (character as Record<string, unknown>).extensions
+  return Object.keys(getCharacterMoodImagesFromExtensions(extensions)).length > 0
+}
+
+const readCharacterExpressionNudgeDismissedState = (key: string): boolean => {
+  try {
+    return localStorage.getItem(key) === "true"
+  } catch (error) {
+    console.warn("Failed to read character expression nudge dismissal state", error)
+    return false
+  }
+}
+
+const persistCharacterExpressionNudgeDismissedState = (key: string): void => {
+  try {
+    localStorage.setItem(key, "true")
+  } catch (error) {
+    console.warn("Failed to persist character expression nudge dismissal state", error)
   }
 }
 
@@ -67,6 +161,8 @@ export type PlaygroundComposerNoticesProps = {
   selectedModel: string | null | undefined
   systemPrompt: string | null | undefined
   selectedCharacter: unknown
+  serverScope?: unknown
+  userScope?: unknown
   ragPinnedResultsLength: number
   startupTemplateDraftName: string
   setStartupTemplateDraftName: (name: string) => void
@@ -124,6 +220,102 @@ function ChatFirstRunNudge() {
   )
 }
 
+function CharacterExpressionSetupNudge({
+  selectedCharacter,
+  selectedCharacterName,
+  serverScope,
+  userScope,
+  t
+}: {
+  selectedCharacter: unknown
+  selectedCharacterName: string | null
+  serverScope?: unknown
+  userScope?: unknown
+  t: PlaygroundComposerNoticesProps["t"]
+}) {
+  const scope = React.useMemo(
+    () =>
+      getStableCharacterNudgeScope({
+        server: serverScope,
+        user: userScope,
+        character: selectedCharacter
+      }),
+    [selectedCharacter, serverScope, userScope]
+  )
+  const dismissKey = React.useMemo(
+    () => buildCharacterExpressionNudgeDismissKey(scope),
+    [scope]
+  )
+  const [dismissedKey, setDismissedKey] = React.useState<string | null>(null)
+  const [sessionDismissed, setSessionDismissed] = React.useState(false)
+
+  const persistedDismissed = React.useMemo(() => {
+    if (!dismissKey) return false
+    if (dismissedKey === dismissKey) return true
+    return readCharacterExpressionNudgeDismissedState(dismissKey)
+  }, [dismissKey, dismissedKey])
+
+  const characterName = normalizeStableScopeValue(selectedCharacterName)
+
+  const handleDismiss = React.useCallback(() => {
+    if (!dismissKey) {
+      setSessionDismissed(true)
+      return
+    }
+    persistCharacterExpressionNudgeDismissedState(dismissKey)
+    setDismissedKey(dismissKey)
+  }, [dismissKey])
+
+  if (
+    !selectedCharacter ||
+    typeof selectedCharacter !== "object" ||
+    hasExpressionImages(selectedCharacter) ||
+    (dismissKey ? persistedDismissed : sessionDismissed)
+  ) {
+    return null
+  }
+
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="mt-1 flex flex-wrap items-center justify-between gap-2 rounded-md border border-primary/30 bg-primary/10 px-2 py-2 text-xs text-primaryStrong"
+    >
+      <span>
+        {characterName
+          ? t(
+              "playground:composer.expressionNudgeNamed",
+              "Add expression images for {{name}}.",
+              { name: characterName }
+            )
+          : t(
+              "playground:composer.expressionNudge",
+              "Add expression images for this character."
+            )}
+      </span>
+      <div className="flex items-center gap-2">
+        <Link
+          to="/characters?from=chat-emote-nudge&focus=expressions"
+          className="rounded border border-primary/30 bg-surface px-2 py-0.5 text-[11px] font-medium text-primaryStrong hover:bg-primary/10"
+        >
+          {t("playground:composer.expressionNudgeAction", "Edit expressions")}
+        </Link>
+        <button
+          type="button"
+          aria-label={t(
+            "playground:composer.expressionNudgeDismiss",
+            "Dismiss expression image setup"
+          )}
+          onClick={handleDismiss}
+          className="rounded border border-primary/20 bg-surface px-2 py-0.5 text-[11px] font-medium text-text-muted hover:bg-muted"
+        >
+          {t("common:dismiss", "Dismiss")}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export const PlaygroundComposerNotices = React.memo(function PlaygroundComposerNotices(
   props: PlaygroundComposerNoticesProps
 ) {
@@ -150,6 +342,9 @@ export const PlaygroundComposerNotices = React.memo(function PlaygroundComposerN
     selectedModel,
     systemPrompt,
     selectedCharacter,
+    selectedCharacterName,
+    serverScope,
+    userScope,
     ragPinnedResultsLength,
     startupTemplateDraftName,
     setStartupTemplateDraftName,
@@ -172,6 +367,13 @@ export const PlaygroundComposerNotices = React.memo(function PlaygroundComposerN
   return (
     <>
       <ChatFirstRunNudge />
+      <CharacterExpressionSetupNudge
+        selectedCharacter={selectedCharacter}
+        selectedCharacterName={selectedCharacterName}
+        serverScope={serverScope}
+        userScope={userScope}
+        t={t}
+      />
       {modeAnnouncement && (
         <div
           role="status"
