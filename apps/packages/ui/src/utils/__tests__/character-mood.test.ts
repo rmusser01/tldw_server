@@ -60,6 +60,63 @@ describe("character mood utilities", () => {
     expect((merged as any).tldw.prompt_preset).toBe("default")
   })
 
+  it("reads arbitrary safe expression states from canonical mood images", () => {
+    const images = getCharacterMoodImagesFromExtensions({
+      tldw: {
+        mood_images: {
+          smirk: TINY_PNG_BASE64,
+          "joy-soft": "https://example.test/joy.png"
+        }
+      }
+    })
+
+    expect(images.smirk).toMatch(/^data:image\/png;base64,/)
+    expect(images["joy-soft"]).toBe("https://example.test/joy.png")
+  })
+
+  it("prefers canonical mood images as a whole map over legacy aliases", () => {
+    const images = getCharacterMoodImagesFromExtensions({
+      tldw: {
+        mood_images: { happy: "https://example.test/happy.png" },
+        moodImages: { sad: "https://example.test/sad.png" }
+      },
+      mood_images: { angry: "https://example.test/angry.png" }
+    })
+
+    expect(Object.keys(images)).toEqual(["happy"])
+  })
+
+  it("writes canonical mood images and removes legacy aliases", () => {
+    const merged = mergeCharacterMoodImagesIntoExtensions(
+      {
+        tldw: {
+          moodImages: { sad: "https://example.test/sad.png" },
+          prompt_preset: "roleplay"
+        },
+        mood_images: { angry: "https://example.test/angry.png" },
+        moodImages: { confused: "https://example.test/confused.png" }
+      },
+      { smirk: "https://example.test/smirk.png" }
+    )
+
+    expect((merged as any).tldw.mood_images).toEqual({
+      smirk: "https://example.test/smirk.png"
+    })
+    expect((merged as any).tldw.moodImages).toBeUndefined()
+    expect((merged as any).mood_images).toBeUndefined()
+    expect((merged as any).moodImages).toBeUndefined()
+    expect((merged as any).tldw.prompt_preset).toBe("roleplay")
+  })
+
+  it("removes mood image keys when saving an empty map", () => {
+    const merged = mergeCharacterMoodImagesIntoExtensions(
+      { tldw: { mood_images: { happy: "https://example.test/happy.png" } } },
+      {}
+    )
+
+    expect((merged as any).tldw).toBeUndefined()
+  })
+
   it("resolves custom emote image states without expanding classifier labels", () => {
     const extensions = {
       tldw: {
@@ -75,6 +132,20 @@ describe("character mood utilities", () => {
     expect(resolveCharacterMoodImageUrl({ extensions }, "thinking hard")).toMatch(/^data:image\/png;base64,/)
     expect(resolveCharacterMoodImageUrl({ extensions }, "../../bad")).toBe("")
     expect(normalizeCharacterMoodLabel("smug")).toBeNull()
+  })
+
+  it("resolves legacy mood aliases after custom emote lookup misses", () => {
+    const extensions = {
+      tldw: {
+        mood_images: {
+          happy: "https://example.test/happy.png"
+        }
+      }
+    }
+
+    expect(resolveCharacterMoodImageUrl({ extensions }, "joy")).toBe(
+      "https://example.test/happy.png"
+    )
   })
 
   it("upserts and removes mood images", () => {

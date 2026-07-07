@@ -26,7 +26,7 @@ export type CharacterMoodDetection = {
   topic: string | null
 }
 
-type CharacterMoodImages = Record<string, string>
+export type CharacterMoodImages = Record<string, string>
 
 type CharacterWithPortraitData = {
   avatar_url?: string | null
@@ -270,8 +270,8 @@ export const mergeCharacterMoodImagesIntoExtensions = (
     tldw.mood_images = normalizedMap
   } else {
     delete tldw.mood_images
-    delete tldw.moodImages
   }
+  delete tldw.moodImages
 
   if (Object.keys(tldw).length > 0) {
     parsed.tldw = tldw
@@ -342,10 +342,15 @@ export const resolveCharacterMoodImageUrl = (
   if (!character) return ""
 
   const normalizedMood = normalizeCharacterEmoteState(moodLabel)
-  if (!normalizedMood) return ""
-
   const moodImages = getCharacterMoodImagesFromExtensions(character.extensions)
-  const image = moodImages[normalizedMood]
+  if (normalizedMood && typeof moodImages[normalizedMood] === "string") {
+    return moodImages[normalizedMood]
+  }
+
+  const legacyMood = normalizeCharacterMoodLabel(moodLabel)
+  if (!legacyMood || legacyMood === normalizedMood) return ""
+
+  const image = moodImages[legacyMood]
   return typeof image === "string" ? image : ""
 }
 
