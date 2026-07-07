@@ -20,6 +20,7 @@ WORKDIR /app
 # Copy packaging metadata and source to build/install python deps.
 COPY pyproject.toml README.md /app/
 COPY tldw_Server_API /app/tldw_Server_API
+COPY apps/mcp-unified/src /app/apps/mcp-unified/src
 
 RUN pip install --upgrade pip && \
     pip install --prefix=/install .
