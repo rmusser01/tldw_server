@@ -4,9 +4,13 @@ title: Fix PR 2679 chat cockpit UX smoke failure
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-07-07 19:42'
+updated_date: 2026-07-07 19:42
 labels: []
 dependencies: []
+modified_files:
+- apps/tldw-frontend/e2e/workflows/chat-cockpit.real-server.spec.ts
+- apps/packages/ui/src/components/Option/Playground/PlaygroundCockpitShell.tsx
+- apps/packages/ui/src/components/Option/Playground/__tests__/Playground.cockpit-rail-restore.test.tsx
 ---
 
 ## Description
@@ -50,3 +54,9 @@ Fresh current-head UX Smoke Gate failure after push ecc0818e65b3c6ed0a2bf9ab00c1
 - [ ] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Follow-up fix for run 28893776631 keeps the real-server spec from racing React/layout churn: desktop cockpit restoration now drives the current restore DOM node and waits for shell data-left/data-right rail attributes plus visible rails, while the mobile overlap helper polls until both targets are measurable and non-overlapping. Verification before staging: apps/tldw-frontend bun run typecheck passed; apps/packages/ui cockpit vitest 3 files / 54 tests passed; git diff --check passed. Bandit is not applicable because this follow-up only changes TypeScript test code.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->

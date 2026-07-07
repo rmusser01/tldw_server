@@ -51,6 +51,36 @@ type CockpitLayoutSeed = {
   mobilePanel?: 'context' | 'runtime' | null;
 };
 
+type DesktopCockpitRail = 'left' | 'right';
+
+const desktopCockpitRailConfig: Record<
+  DesktopCockpitRail,
+  { attr: 'data-left-rail' | 'data-right-rail'; railId: string; restoreId: string }
+> = {
+  left: {
+    attr: 'data-left-rail',
+    railId: 'playground-cockpit-left-rail',
+    restoreId: 'playground-cockpit-left-rail-restore',
+  },
+  right: {
+    attr: 'data-right-rail',
+    railId: 'playground-cockpit-right-rail',
+    restoreId: 'playground-cockpit-right-rail-restore',
+  },
+};
+
+const restoreDesktopCockpitRail = async (page: Page, rail: DesktopCockpitRail) => {
+  const shell = page.getByTestId('playground-cockpit-shell');
+  const config = desktopCockpitRailConfig[rail];
+  if ((await shell.getAttribute(config.attr)) === 'visible') return;
+
+  const restoreControl = page.getByTestId(config.restoreId);
+  await expect(restoreControl).toBeVisible({ timeout: 10_000 });
+  await restoreControl.evaluate((element: HTMLElement) => element.click());
+  await expect(shell).toHaveAttribute(config.attr, 'visible', { timeout: 10_000 });
+  await expect(page.getByTestId(config.railId)).toBeVisible({ timeout: 10_000 });
+};
+
 const switchChatLayoutMode = async (page: Page, targetMode: 'cockpit' | 'focus') => {
   const shell = page.getByTestId('playground-cockpit-shell');
   if ((await shell.getAttribute('data-mode')) === targetMode) {
@@ -70,15 +100,8 @@ const switchChatLayoutMode = async (page: Page, targetMode: 'cockpit' | 'focus')
   }
 
   if (targetMode === 'cockpit') {
-    for (const restoreId of [
-      'playground-cockpit-left-rail-restore',
-      'playground-cockpit-right-rail-restore',
-    ]) {
-      const restoreControl = page.getByTestId(restoreId);
-      if (await restoreControl.isVisible().catch(() => false)) {
-        await restoreControl.click();
-      }
-    }
+    await restoreDesktopCockpitRail(page, 'left');
+    await restoreDesktopCockpitRail(page, 'right');
   }
 };
 
@@ -771,12 +794,20 @@ const assertNoHorizontalOverflow = async (page: Page) => {
 };
 
 const assertNoVerticalOverlap = async (first: Locator, second: Locator, label: string) => {
-  const firstBox = await first.boundingBox();
-  const secondBox = await second.boundingBox();
-
-  expect(firstBox, `${label}: first element is measurable`).not.toBeNull();
-  expect(secondBox, `${label}: second element is measurable`).not.toBeNull();
-  expect(firstBox!.y + firstBox!.height).toBeLessThanOrEqual(secondBox!.y + 1);
+  await expect
+    .poll(
+      async () => {
+        const firstBox = await first.boundingBox();
+        const secondBox = await second.boundingBox();
+        if (!firstBox) return 'first element is not measurable';
+        if (!secondBox) return 'second element is not measurable';
+        return firstBox.y + firstBox.height <= secondBox.y + 1
+          ? 'ok'
+          : `overlap: first bottom ${firstBox.y + firstBox.height}, second top ${secondBox.y}`;
+      },
+      { message: label, timeout: 5_000 }
+    )
+    .toBe('ok');
 };
 
 const assertHealthResponse = (health: { status: number; body: any }) => {
