@@ -1,8 +1,8 @@
 import React from "react"
-import { Form, type FormInstance } from "antd"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { Form, message, type FormInstance } from "antd"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { CharacterExpressionImagesSection } from "../CharacterExpressionImagesSection"
 import { expressionRowsFromExtensions } from "../character-expression-images"
@@ -37,8 +37,12 @@ const renderSection = (
     )
   }
 
-  render(<Harness />)
+  const result = render(<Harness />)
   return {
+    ...result,
+    setRows: (rows: ExpressionImageRow[]) => {
+      formRef?.setFieldsValue({ expression_images: rows })
+    },
     getRows: () =>
       formRef?.getFieldValue("expression_images") as ExpressionImageRow[]
   }
@@ -53,6 +57,11 @@ describe("CharacterExpressionImagesSection", () => {
     } as any)
   })
 
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+  })
+
   it("renders starter expression rows and adds a custom row", async () => {
     render(
       <Form initialValues={{ expression_images: expressionRowsFromExtensions({}) }}>
@@ -63,8 +72,8 @@ describe("CharacterExpressionImagesSection", () => {
       </Form>
     )
 
-    expect(screen.getByDisplayValue("neutral")).toBeInTheDocument()
-    expect(screen.getByDisplayValue("thinking")).toBeInTheDocument()
+    expect(screen.getByLabelText("Expression state neutral")).toBeInTheDocument()
+    expect(screen.getByLabelText("Expression state thinking")).toBeInTheDocument()
 
     await userEvent.click(screen.getByRole("button", { name: /add expression/i }))
     expect(screen.getByLabelText(/custom expression state/i)).toBeInTheDocument()
@@ -72,6 +81,9 @@ describe("CharacterExpressionImagesSection", () => {
 
   it("copies the selected preview emote directive", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined)
+    const successSpy = vi
+      .spyOn(message, "success")
+      .mockImplementation(() => ({}) as any)
     Object.assign(navigator, { clipboard: { writeText } })
 
     render(
@@ -99,6 +111,77 @@ describe("CharacterExpressionImagesSection", () => {
       screen.getByRole("button", { name: /copy emote directive/i })
     )
     expect(writeText).toHaveBeenCalledWith("Emote: thinking")
+    expect(successSpy).toHaveBeenCalledWith("Copied emote directive.")
+  })
+
+  it("shows an error when clipboard copy is unavailable", async () => {
+    const errorSpy = vi
+      .spyOn(message, "error")
+      .mockImplementation(() => ({}) as any)
+    Object.assign(navigator, { clipboard: undefined })
+
+    render(
+      <Form
+        initialValues={{
+          expression_images: [
+            {
+              id: "thinking",
+              state: "thinking",
+              starter: true,
+              image: {
+                mode: "url",
+                url: "https://example.test/thinking.png",
+                base64: ""
+              }
+            }
+          ]
+        }}
+      >
+        <CharacterExpressionImagesSection characterName="Mira" />
+      </Form>
+    )
+
+    await userEvent.click(
+      screen.getByRole("button", { name: /copy emote directive/i })
+    )
+
+    expect(errorSpy).toHaveBeenCalledWith("Unable to copy emote directive.")
+  })
+
+  it("shows an error when clipboard copy rejects", async () => {
+    const writeText = vi.fn().mockRejectedValue(new Error("denied"))
+    const errorSpy = vi
+      .spyOn(message, "error")
+      .mockImplementation(() => ({}) as any)
+    Object.assign(navigator, { clipboard: { writeText } })
+
+    render(
+      <Form
+        initialValues={{
+          expression_images: [
+            {
+              id: "thinking",
+              state: "thinking",
+              starter: true,
+              image: {
+                mode: "url",
+                url: "https://example.test/thinking.png",
+                base64: ""
+              }
+            }
+          ]
+        }}
+      >
+        <CharacterExpressionImagesSection characterName="Mira" />
+      </Form>
+    )
+
+    await userEvent.click(
+      screen.getByRole("button", { name: /copy emote directive/i })
+    )
+
+    expect(writeText).toHaveBeenCalledWith("Emote: thinking")
+    expect(errorSpy).toHaveBeenCalledWith("Unable to copy emote directive.")
   })
 
   it("surfaces duplicate state and missing custom image row messages", () => {
@@ -201,5 +284,82 @@ describe("CharacterExpressionImagesSection", () => {
       url: "https://example.test/smirk.png",
       base64: ""
     })
+  })
+
+  it("applies uploaded images by stable row id after earlier rows are removed", async () => {
+    let fileReader: {
+      result: string | null
+      onload: (() => void) | null
+      onerror: (() => void) | null
+      readAsDataURL: (file: File) => void
+    } | null = null
+
+    class MockFileReader {
+      result: string | null = null
+      error: Error | null = null
+      onload: (() => void) | null = null
+      onerror: (() => void) | null = null
+      readAsDataURL = vi.fn(() => {
+        fileReader = this
+      })
+    }
+
+    vi.stubGlobal("FileReader", MockFileReader)
+
+    const initialRows: ExpressionImageRow[] = [
+      {
+        id: "neutral",
+        state: "neutral",
+        starter: true,
+        image: { mode: "url", url: "", base64: "" }
+      },
+      {
+        id: "target",
+        state: "thinking",
+        starter: false,
+        image: { mode: "url", url: "", base64: "" }
+      }
+    ]
+    const { container, getRows, setRows } = renderSection(initialRows)
+
+    act(() => {
+      setRows([
+        initialRows[0],
+        {
+          ...initialRows[1],
+          image: { mode: "upload", url: "", base64: "" }
+        }
+      ])
+    })
+    await screen.findByRole("button", { name: "Upload image" })
+    const input = await waitFor(() => {
+      const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement
+      expect(fileInput).toBeTruthy()
+      return fileInput
+    })
+
+    fireEvent.change(input, {
+      target: { files: [new File(["x"], "thinking.png", { type: "image/png" })] }
+    })
+    await userEvent.click(
+      screen.getByRole("button", { name: "Remove expression neutral" })
+    )
+
+    expect(fileReader).toBeTruthy()
+    fileReader!.result = `data:image/png;base64,${ONE_PIXEL_PNG_BASE64}`
+    fileReader!.onload?.()
+
+    await waitFor(() =>
+      expect(getRows()).toEqual([
+        expect.objectContaining({
+          id: "target",
+          image: {
+            mode: "upload",
+            url: "",
+            base64: ONE_PIXEL_PNG_BASE64
+          }
+        })
+      ])
+    )
   })
 })

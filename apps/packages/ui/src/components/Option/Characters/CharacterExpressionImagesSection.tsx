@@ -159,12 +159,18 @@ function ExpressionRowEditor({
   }, [mode, prompt, row?.state, characterName, characterDescription])
 
   const setRowImage = (nextImage: AvatarFieldValue) => {
+    const rowId = row?.id
+    if (!rowId) return
+
     const rows = [...(form.getFieldValue("expression_images") || [])]
-    rows[field.name] = {
-      ...rows[field.name],
+    const rowIndex = rows.findIndex((candidate) => candidate?.id === rowId)
+    if (rowIndex === -1) return
+
+    rows[rowIndex] = {
+      ...rows[rowIndex],
       image: nextImage
     }
-    form.setFieldValue("expression_images", rows)
+    form.setFieldsValue({ expression_images: rows })
   }
 
   const handleModeChange = (nextMode: AvatarMode) => {
@@ -256,6 +262,15 @@ function ExpressionRowEditor({
 
   return (
     <div className="rounded-md border border-border p-3 space-y-3">
+      <Form.Item name={[field.name, "id"]} hidden>
+        <Input />
+      </Form.Item>
+      <Form.Item name={[field.name, "image", "mode"]} hidden>
+        <Input />
+      </Form.Item>
+      <Form.Item name={[field.name, "image", "base64"]} hidden>
+        <Input />
+      </Form.Item>
       <div className="grid gap-2 md:grid-cols-[minmax(9rem,1fr)_auto_auto] md:items-start">
         <Form.Item name={[field.name, "state"]} className="!mb-0">
           <Input
@@ -452,7 +467,20 @@ export function CharacterExpressionImagesSection({
   const copyDirective = async () => {
     const state = selectedPreviewRow?.state?.trim()
     if (!state) return
-    await navigator.clipboard?.writeText(`Emote: ${state}`)
+
+    const clipboard =
+      typeof navigator !== "undefined" ? navigator.clipboard : undefined
+    if (!clipboard?.writeText) {
+      message.error("Unable to copy emote directive.")
+      return
+    }
+
+    try {
+      await clipboard.writeText(`Emote: ${state}`)
+      message.success("Copied emote directive.")
+    } catch {
+      message.error("Unable to copy emote directive.")
+    }
   }
 
   return (
