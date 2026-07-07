@@ -1,5 +1,8 @@
 {
   "navigation": {
+    "setupRecovery": "Setup & Recovery",
+    "preferencesWorkflow": "Preferences & Workflow",
+    "dataAdmin": "Data & Administration",
     "serverAndAuth": "Server e Auth",
     "knowledgeTools": "Strumenti di conoscenza",
     "workspace": "Area di lavoro",
@@ -12,6 +15,13 @@
     "dataManagement": "Gestione dati"
   },
   "healthNav": "Stato",
+  "preferencesSettings": {
+    "navTitle": "Preferences",
+    "title": "General preferences"
+  },
+  "setupRecovery": {
+    "title": "Setup & Recovery"
+  },
   "worldBooksNav": "Libri del mondo",
   "chatDictionariesNav": "Dizionari chat",
   "charactersNav": "Personaggi",

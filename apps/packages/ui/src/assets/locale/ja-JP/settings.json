@@ -1,5 +1,8 @@
 {
   "navigation": {
+    "setupRecovery": "Setup & Recovery",
+    "preferencesWorkflow": "Preferences & Workflow",
+    "dataAdmin": "Data & Administration",
     "serverAndAuth": "サーバーと認証",
     "knowledgeTools": "ナレッジツール",
     "workspace": "ワークスペース",
@@ -12,6 +15,13 @@
     "dataManagement": "データ管理"
   },
   "healthNav": "ヘルス",
+  "preferencesSettings": {
+    "navTitle": "Preferences",
+    "title": "General preferences"
+  },
+  "setupRecovery": {
+    "title": "Setup & Recovery"
+  },
   "worldBooksNav": "ワールドブック",
   "chatDictionariesNav": "チャット辞書",
   "charactersNav": "キャラクター",

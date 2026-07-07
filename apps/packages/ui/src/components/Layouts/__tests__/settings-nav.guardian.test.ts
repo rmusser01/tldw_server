@@ -117,15 +117,14 @@ describe("settings nav guardian gating", () => {
   })
 
   it("keeps settings navigation locale keys present across locale directories", () => {
-    const localeRoot = path.resolve(process.cwd(), "src/assets/locale")
+    const localeRoot = path.resolve(
+      process.cwd(),
+      "../packages/ui/src/assets/locale"
+    )
     const requiredSettingsKeys = [
-      "navigation.connect",
-      "navigation.aiModels",
-      "navigation.experience",
-      "navigation.knowledgeWorkspace",
-      "navigation.safetyAdmin",
-      "navigation.dataManagement",
-      "navigation.about",
+      "navigation.setupRecovery",
+      "navigation.preferencesWorkflow",
+      "navigation.dataAdmin",
       "providerKeys.navTitle",
       "dataManagement.navTitle"
     ]
@@ -161,26 +160,30 @@ describe("settings nav guardian gating", () => {
     )
 
     expect(groups.map((group) => group.key)).toEqual([
-      "connect",
-      "aiModels",
-      "experience",
-      "knowledgeWorkspace",
-      "safetyAdmin",
-      "dataManagement",
-      "about"
+      "setupRecovery",
+      "preferencesWorkflow",
+      "dataAdmin"
     ])
-    expect(pathsByGroup.connect).toEqual(
+    expect(pathsByGroup.setupRecovery).toEqual(
       expect.arrayContaining([
+        "/settings",
         "/settings/tldw",
         "/settings/provider-keys",
+        "/settings/model",
         "/settings/health"
       ])
     )
-    expect(pathsByGroup.aiModels).toContain("/settings/model")
-    expect(pathsByGroup.experience).toEqual(
-      expect.arrayContaining(["/settings", "/settings/chat"])
+    expect(pathsByGroup.preferencesWorkflow).toEqual(
+      expect.arrayContaining([
+        "/settings/preferences",
+        "/settings/chat",
+        "/settings/ui",
+        "/settings/rag"
+      ])
     )
-    expect(pathsByGroup.dataManagement).toEqual(["/settings/data"])
+    expect(pathsByGroup.dataAdmin).toEqual(
+      expect.arrayContaining(["/settings/data", "/settings/about"])
+    )
   })
 
   it("keeps only settings-prefixed routes in settings navigation", () => {

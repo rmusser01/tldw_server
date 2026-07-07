@@ -22,6 +22,12 @@ describe("settings active-route matching", () => {
     expect(isSettingsNavItemActive("/settings/chat", "/settings/chat")).toBe(true)
   })
 
+  it("does not mark root settings active for child settings routes", () => {
+    expect(isSettingsNavItemActive("/settings/preferences", "/settings")).toBe(
+      false
+    )
+  })
+
   it("matches nested route under the same section", () => {
     expect(isSettingsNavItemActive("/settings/chat/advanced", "/settings/chat")).toBe(
       true

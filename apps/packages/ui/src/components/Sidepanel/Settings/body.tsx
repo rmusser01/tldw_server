@@ -1,545 +1,125 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import React from "react"
-import {
-  getOllamaURL,
-  systemPromptForNonRag,
-  promptForRag,
-  setOllamaURL as saveOllamaURL,
-  setPromptForRag,
-  setSystemPromptForNonRag,
-  defaultEmbeddingChunkOverlap,
-  defaultEmbeddingChunkSize,
-  defaultEmbeddingModelForRag,
-  saveForRag,
-  getEmbeddingModels
-} from "~/services/tldw-server"
-
-import {
-  Skeleton,
-  Radio,
-  Select,
-  Form,
-  InputNumber,
-  Collapse,
-  Switch
-} from "antd"
-import { SaveButton } from "~/components/Common/SaveButton"
-import { SUPPORTED_LANGUAGES } from "~/utils/supported-languages"
-import { Trans, useTranslation } from "react-i18next"
-import { useI18n } from "@/hooks/useI18n"
-import { TTSModeSettings } from "@/components/Option/Settings/TTSModeSettings"
-import { AdvancedCORSSettings } from "@/components/Common/Settings/AdvancedCORSSettings"
+import { Switch } from "antd"
+import { useTranslation } from "react-i18next"
 import { useStorage } from "@plasmohq/storage/hook"
-import { getTotalFilePerKB } from "@/services/app"
-import { SidepanelRag } from "@/components/Option/Settings/sidepanel-rag"
-import { SSTSettings } from "@/components/Option/Settings/SSTSettings"
-import { CitationDictionarySettings } from "@/components/Sidepanel/Settings/CitationDictionarySettings"
+
 import { ThemePicker } from "@/components/Common/Settings/ThemePicker"
 
-const RAG_VALIDATION_RANGES = {
-  chunkSize: { min: 100, max: 10000 },
-  chunkOverlap: { min: 0, max: 1000 }
-} as const
+const shortcuts = [
+  {
+    path: "/settings",
+    label: "Setup & Recovery",
+    description: "Connection, auth, provider keys, models, and diagnostics."
+  },
+  {
+    path: "/settings/preferences",
+    label: "Preferences",
+    description: "Language, notifications, persona, tutorials, and web search."
+  },
+  {
+    path: "/settings/ui",
+    label: "UI customization",
+    description: "Theme, shortcuts, display defaults, and visual behavior."
+  },
+  {
+    path: "/settings/tldw",
+    label: "Server & auth",
+    description: "Change the server URL or API key."
+  },
+  {
+    path: "/settings/health",
+    label: "Full diagnostics",
+    description: "Open detailed server and subsystem checks."
+  }
+] as const
+
+type BrowserRuntimeGlobal = typeof globalThis & {
+  browser?: {
+    runtime?: {
+      getURL?: (path: string) => string
+    }
+  }
+}
+
+const resolveOptionsHref = (path: string) => {
+  try {
+    const runtime = (globalThis as BrowserRuntimeGlobal).browser?.runtime
+    if (runtime?.getURL) {
+      return runtime.getURL(`/options.html#${path}`)
+    }
+  } catch {
+    // Fall back to the hosted WebUI path when extension APIs are unavailable.
+  }
+
+  return path
+}
 
 export const SettingsBody = () => {
   const { t } = useTranslation("settings")
-  const [ollamaURL, setOllamaURL] = React.useState<string>("")
-  const [systemPrompt, setSystemPrompt] = React.useState<string>("")
-  const [ragPrompt, setRagPrompt] = React.useState<string>("")
-  const [ragQuestionPrompt, setRagQuestionPrompt] = React.useState<string>("")
-  const [selectedValue, setSelectedValue] = React.useState<"normal" | "rag">(
-    "normal"
-  )
   const [copilotResumeLastChat, setCopilotResumeLastChat] = useStorage(
     "copilotResumeLastChat",
     false
   )
-
   const [hideCurrentChatModelSettings, setHideCurrentChatModelSettings] =
     useStorage("hideCurrentChatModelSettings", false)
 
-  const [speechToTextLanguage, setSpeechToTextLanguage] = useStorage(
-    "speechToTextLanguage",
-    "en-US"
-  )
-  const queryClient = useQueryClient()
-
-  const { changeLocale, locale, supportLanguage } = useI18n()
-
-  const { data, status } = useQuery({
-    queryKey: ["sidebarSettings"],
-    queryFn: async () => {
-      const [
-        ollamaURL,
-        systemPrompt,
-        ragPrompt,
-        allModels,
-        chunkOverlap,
-        chunkSize,
-        defaultEM,
-        totalFilePerKB
-      ] = await Promise.all([
-        getOllamaURL(),
-        systemPromptForNonRag(),
-        promptForRag(),
-        getEmbeddingModels(),
-        defaultEmbeddingChunkOverlap(),
-        defaultEmbeddingChunkSize(),
-        defaultEmbeddingModelForRag(),
-        getTotalFilePerKB()
-      ])
-      return {
-        url: ollamaURL,
-        normalSystemPrompt: systemPrompt,
-        ragSystemPrompt: ragPrompt.ragPrompt,
-        ragQuestionPrompt: ragPrompt.ragQuestionPrompt,
-        models: allModels,
-        chunkOverlap,
-        chunkSize,
-        defaultEM,
-        totalFilePerKB
-      }
-    }
-  })
-
-  const { mutate: saveRAG, isPending: isSaveRAGPending } = useMutation({
-    mutationFn: async (f: {
-      model: string
-      chunkSize: number
-      overlap: number
-    }) => {
-      await saveForRag(f.model, f.chunkSize, f.overlap, data.totalFilePerKB)
-      await queryClient.invalidateQueries({ queryKey: ["sidebarSettings"] })
-    }
-  })
-
-  React.useEffect(() => {
-    if (data) {
-      setOllamaURL(data.url)
-      setSystemPrompt(data.normalSystemPrompt)
-      setRagPrompt(data.ragSystemPrompt)
-      setRagQuestionPrompt(data.ragQuestionPrompt)
-    }
-  }, [data])
-
-  if (status === "pending") {
-    return (
-      <div className="flex flex-col gap-4 p-4">
-        <Skeleton active />
-        <Skeleton active />
-        <Skeleton active />
-        <Skeleton active />
-      </div>
-    )
-  }
-
-  if (status === "error") {
-    return <div>Error</div>
-  }
-
-  const missingDefaultEmbedding =
-    !!data?.defaultEM &&
-    Array.isArray(data?.models) &&
-    !data.models.some((model) => model.model === data.defaultEM)
-
-  const sectionLinks = [
-    {
-      id: "chat-settings-prompts",
-      label: t("settingsNav.prompts", "Prompts")
-    },
-    {
-      id: "chat-settings-connection",
-      label: t("settingsNav.connection", "Connection")
-    },
-    {
-      id: "chat-settings-embeddings",
-      label: t("settingsNav.embeddings", "Embeddings")
-    },
-    {
-      id: "chat-settings-general",
-      label: t("settingsNav.general", "General")
-    },
-    {
-      id: "chat-settings-speech",
-      label: t("settingsNav.speech", "Speech")
-    },
-    {
-      id: "chat-settings-theme",
-      label: t("settingsNav.theme", "Theme")
-    }
-  ]
-
   return (
-    <div className="flex flex-col gap-4 p-4 max-w-2xl mx-auto lg:max-w-3xl xl:max-w-4xl 2xl:max-w-5xl">
-      <nav
-        className="sticky top-0 z-20 -mx-4 overflow-x-auto border-b border-border/70 bg-bg/95 px-4 py-2 backdrop-blur"
-        aria-label={t("settingsNav.sections", "Settings sections")}
-      >
-        <div className="flex min-w-max items-center gap-2">
-          {sectionLinks.map((section) => (
+    <div className="flex flex-col gap-4 p-4">
+      <section className="space-y-3">
+        <div>
+          <h2 className="text-base font-semibold text-text">
+            {t("sidepanelSettings.shortcuts.title", "Settings shortcuts")}
+          </h2>
+          <p className="mt-1 text-xs text-text-muted">
+            {t(
+              "sidepanelSettings.shortcuts.description",
+              "Jump to the full settings page that owns the change."
+            )}
+          </p>
+        </div>
+        <div className="space-y-2">
+          {shortcuts.map((shortcut) => (
             <a
-              key={section.id}
-              href={`#${section.id}`}
-              className="rounded-full border border-border px-3 py-1 text-xs font-medium text-text-muted transition hover:bg-surface2 hover:text-text"
+              aria-label={shortcut.label}
+              className="block rounded-md border border-border bg-surface p-3 text-text transition hover:bg-surface2"
+              href={resolveOptionsHref(shortcut.path)}
+              key={shortcut.path}
+              rel="noreferrer"
+              target="_blank"
             >
-              {section.label}
+              <span className="text-sm font-medium">{shortcut.label}</span>
+              <span className="mt-1 block text-xs text-text-muted">
+                {shortcut.description}
+              </span>
             </a>
           ))}
         </div>
-      </nav>
-      <section id="chat-settings-prompts" className="scroll-mt-20">
-      <div className="border border-border rounded p-4 bg-surface">
-        <h2 className="text-md font-semibold text-text">
-          {t("managePrompts.title")}
-        </h2>
-        <div className="my-3 flex justify-end">
-          <Radio.Group
-            defaultValue={selectedValue}
-            onChange={(e) => setSelectedValue(e.target.value)}>
-            <Radio.Button value="normal">
-              {t("managePrompts.option1")}
-            </Radio.Button>
-            <Radio.Button value="rag">
-              {t("managePrompts.option2")}
-            </Radio.Button>
-          </Radio.Group>
-        </div>
-
-        {selectedValue === "normal" && (
-          <div>
-            <span className="text-md font-thin text-text-muted">
-              {t("managePrompts.systemPrompt")}
-            </span>
-            <textarea
-              className="w-full border border-border rounded p-2 bg-surface text-text placeholder:text-text-subtle"
-              value={systemPrompt}
-              onChange={(e) => setSystemPrompt(e.target.value)}
-            />
-            <div className="flex justify-end">
-              <SaveButton
-                text="Save normal prompt"
-                textOnSave="Normal prompt saved"
-                onClick={() => {
-                  setSystemPromptForNonRag(systemPrompt)
-                }}
-              />
-            </div>
-          </div>
-        )}
-
-        {selectedValue === "rag" && (
-          <div>
-            <div className="mb-3">
-              <span className="text-md font-thin text-text-muted">
-                {t("managePrompts.systemPrompt")}
-              </span>
-              <textarea
-                className="w-full border border-border rounded p-2 bg-surface text-text placeholder:text-text-subtle"
-                value={ragPrompt}
-                onChange={(e) => setRagPrompt(e.target.value)}
-              />
-            </div>
-            <div className="mb-3">
-              <span className="text-md font-thin text-text-muted">
-                {t("managePrompts.questionPrompt")}
-              </span>
-              <textarea
-                className="w-full border border-border rounded p-2 bg-surface text-text placeholder:text-text-subtle"
-                value={ragQuestionPrompt}
-                onChange={(e) => setRagQuestionPrompt(e.target.value)}
-              />
-            </div>
-
-            <div className="flex justify-end">
-              <SaveButton
-                text="Save RAG prompts"
-                textOnSave="RAG prompts saved"
-                onClick={() => {
-                  setPromptForRag(ragPrompt, ragQuestionPrompt)
-                }}
-              />
-            </div>
-          </div>
-        )}
-      </div>
-      </section>
-      <div className="border border-border rounded p-4 bg-surface">
-        <SidepanelRag hideBorder />
-      </div>
-      <CitationDictionarySettings />
-      <section id="chat-settings-connection" className="scroll-mt-20">
-      <div className="border flex flex-col gap-4 border-border rounded p-4 bg-surface">
-        <h2 className="text-md font-semibold text-text">
-          {t("ollamaSettings.heading")}
-        </h2>
-        <input
-          className="w-full border border-border rounded p-2 bg-surface text-text placeholder:text-text-subtle"
-          value={ollamaURL}
-          type="url"
-          onChange={(e) => setOllamaURL(e.target.value)}
-          placeholder={t("ollamaSettings.settings.ollamaUrl.placeholder")}
-        />
-
-        <Collapse
-          size="small"
-          items={[
-            {
-              key: "1",
-              label: (
-                <div>
-                  <h2 className="text-base font-semibold leading-7 text-text">
-                    {t("ollamaSettings.settings.advanced.label")}
-                  </h2>
-                  <p className="text-xs text-text-subtle mb-4">
-                    <Trans
-                      i18nKey="settings:ollamaSettings.settings.advanced.help"
-                      components={{
-                        anchor: (
-                          <a
-                            href="https://github.com/n4ze3m/page-assist/blob/main/docs/connection-issue.md#solutions"
-                            target="__blank"
-                            className="text-primary"></a>
-                        )
-                      }}
-                    />
-                  </p>
-                </div>
-              ),
-              children: <AdvancedCORSSettings />
-            }
-          ]}
-        />
-
-        <div className="flex justify-end">
-          <SaveButton
-            text="Save server URL"
-            textOnSave="Server URL saved"
-            onClick={() => {
-              saveOllamaURL(ollamaURL)
-            }}
-          />
-        </div>
-      </div>
-      </section>
-      <section id="chat-settings-embeddings" className="scroll-mt-20">
-      <div className="border border-border rounded p-4 bg-surface">
-        <h2 className="text-md mb-4 font-semibold text-text">
-          {t("rag.ragSettings.label")}
-        </h2>
-        <Form
-          onFinish={(data) => {
-            saveRAG({
-              model: data.defaultEM,
-              chunkSize: data.chunkSize,
-              overlap: data.chunkOverlap
-            })
-          }}
-          initialValues={{
-            chunkSize: data.chunkSize,
-            chunkOverlap: data.chunkOverlap,
-            defaultEM: data.defaultEM
-          }}>
-          <Form.Item
-            name="defaultEM"
-            label={t("rag.ragSettings.model.label")}
-            help={
-              missingDefaultEmbedding
-                ? t(
-                    "rag.ragSettings.model.helpMissing",
-                    "Previously saved embedding model is no longer available on the server. Please choose another model."
-                  )
-                : data?.defaultEM
-                    ? t(
-                        "rag.ragSettings.model.helpRecommended",
-                        "Recommended: {{model}} (from server config)",
-                        { model: data.defaultEM }
-                      )
-                    : t("rag.ragSettings.model.help")
-            }
-            rules={[
-              {
-                required: true,
-                message: t("rag.ragSettings.model.required")
-              }
-            ]}>
-            <Select
-              size="large"
-              filterOption={(input, option) =>
-                option.label.toLowerCase().indexOf(input.toLowerCase()) >= 0 ||
-                option.value.toLowerCase().indexOf(input.toLowerCase()) >= 0
-              }
-              showSearch
-              placeholder="Select a model"
-              style={{ width: "100%" }}
-              className="mt-4"
-              options={data.models?.map((model) => ({
-                label: model.name,
-                value: model.model
-              }))}
-            />
-          </Form.Item>
-
-          <Form.Item
-            name="chunkSize"
-            label={t("rag.ragSettings.chunkSize.label")}
-            rules={[
-              {
-                required: true,
-                message: t("rag.ragSettings.chunkSize.required")
-              },
-              {
-                type: "number",
-                min: RAG_VALIDATION_RANGES.chunkSize.min,
-                max: RAG_VALIDATION_RANGES.chunkSize.max,
-                message: t(
-                  "rag.ragSettings.chunkSize.range",
-                  {
-                    min: RAG_VALIDATION_RANGES.chunkSize.min,
-                    max: RAG_VALIDATION_RANGES.chunkSize.max,
-                    defaultValue: `Must be between ${RAG_VALIDATION_RANGES.chunkSize.min} and ${RAG_VALIDATION_RANGES.chunkSize.max}`
-                  }
-                )
-              }
-            ]}>
-            <InputNumber
-              style={{ width: "100%" }}
-              min={RAG_VALIDATION_RANGES.chunkSize.min}
-              max={RAG_VALIDATION_RANGES.chunkSize.max}
-              placeholder={t("rag.ragSettings.chunkSize.placeholder")}
-            />
-          </Form.Item>
-          <Form.Item
-            name="chunkOverlap"
-            label={t("rag.ragSettings.chunkOverlap.label")}
-            rules={[
-              {
-                required: true,
-                message: t("rag.ragSettings.chunkOverlap.required")
-              },
-              {
-                type: "number",
-                min: RAG_VALIDATION_RANGES.chunkOverlap.min,
-                max: RAG_VALIDATION_RANGES.chunkOverlap.max,
-                message: t(
-                  "rag.ragSettings.chunkOverlap.range",
-                  {
-                    min: RAG_VALIDATION_RANGES.chunkOverlap.min,
-                    max: RAG_VALIDATION_RANGES.chunkOverlap.max
-                  }
-                )
-              }
-            ]}>
-            <InputNumber
-              style={{ width: "100%" }}
-              min={RAG_VALIDATION_RANGES.chunkOverlap.min}
-              max={RAG_VALIDATION_RANGES.chunkOverlap.max}
-              placeholder={t("rag.ragSettings.chunkOverlap.placeholder")}
-            />
-          </Form.Item>
-
-          <div className="flex justify-end">
-            <SaveButton
-              disabled={isSaveRAGPending}
-              btnType="submit"
-              text="Save RAG defaults"
-              textOnSave="RAG defaults saved"
-            />
-          </div>
-        </Form>
-      </div>
       </section>
 
-      <section id="chat-settings-general" className="scroll-mt-20">
-      <div className="border space-y-3 w-full border-border rounded p-4 bg-surface">
-        <h2 className="text-base mb-4 font-semibold leading-7 text-text">
-          {t("generalSettings.title")}
-        </h2>
-        <div className="flex flex-col  space-y-4">
-          <span className="text-text-muted">
+      <section className="space-y-3 rounded-md border border-border bg-surface p-3">
+        <h3 className="text-sm font-semibold text-text">
+          {t("sidepanelSettings.local.title", "Sidepanel behavior")}
+        </h3>
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-sm text-text">
             {t("generalSettings.settings.copilotResumeLastChat.label")}
           </span>
-
-          <div>
-            <Switch
-              checked={copilotResumeLastChat}
-              onChange={(checked) => setCopilotResumeLastChat(checked)}
-            />
-          </div>
-        </div>
-        <div className="flex flex-col space-y-4">
-          <div className="inline-flex items-center gap-2">
-            <span className="text-text-muted">
-              {t("generalSettings.settings.hideCurrentChatModelSettings.label")}
-            </span>
-          </div>
-          <div>
-            <Switch
-              checked={hideCurrentChatModelSettings}
-              onChange={(checked) => setHideCurrentChatModelSettings(checked)}
-            />
-          </div>
-        </div>
-        <div>
-          <div className="text-xs mb-2 text-text">
-            {t("generalSettings.settings.speechRecognitionLang.label")}{" "}
-          </div>
-          <Select
-            placeholder={t(
-              "generalSettings.settings.speechRecognitionLang.placeholder"
-            )}
-            allowClear
-            showSearch
-            options={SUPPORTED_LANGUAGES}
-            value={speechToTextLanguage}
-            filterOption={(input, option) =>
-              option.label.toLowerCase().indexOf(input.toLowerCase()) >= 0 ||
-              option.value.toLowerCase().indexOf(input.toLowerCase()) >= 0
-            }
-            onChange={(value) => {
-              setSpeechToTextLanguage(value)
-            }}
-            style={{
-              width: "100%"
-            }}
+          <Switch
+            checked={copilotResumeLastChat}
+            onChange={setCopilotResumeLastChat}
           />
         </div>
-        <div>
-          <div className="text-xs mb-2 text-text">
-            {t("generalSettings.settings.language.label")}{" "}
-          </div>
-
-          <Select
-            placeholder={t("generalSettings.settings.language.placeholder")}
-            showSearch
-            options={supportLanguage}
-            value={locale}
-            filterOption={(input, option) =>
-              option.label.toLowerCase().indexOf(input.toLowerCase()) >= 0 ||
-              option.value.toLowerCase().indexOf(input.toLowerCase()) >= 0
-            }
-            onChange={(value) => {
-              changeLocale(value)
-            }}
-            style={{
-              width: "100%"
-            }}
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-sm text-text">
+            {t("generalSettings.settings.hideCurrentChatModelSettings.label")}
+          </span>
+          <Switch
+            checked={hideCurrentChatModelSettings}
+            onChange={setHideCurrentChatModelSettings}
           />
         </div>
-      </div>
       </section>
-      <section id="chat-settings-speech" className="scroll-mt-20">
-      <div className="border border-border rounded p-4 bg-surface">
-        <SSTSettings hideBorder />
-      </div>
-      <div className="border border-border rounded p-4 bg-surface">
-        <TTSModeSettings hideBorder />
-      </div>
-      </section>
-      <section id="chat-settings-theme" className="scroll-mt-20">
-      <div className="border border-border rounded p-4 bg-surface">
-        <ThemePicker />
-      </div>
-      </section>
+
+      <ThemePicker />
     </div>
   )
 }

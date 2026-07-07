@@ -1,5 +1,8 @@
 {
   "navigation": {
+    "setupRecovery": "Setup & Recovery",
+    "preferencesWorkflow": "Preferences & Workflow",
+    "dataAdmin": "Data & Administration",
     "serverAndAuth": "الخادم والمصادقة",
     "knowledgeTools": "أدوات المعرفة",
     "workspace": "مساحة العمل",
@@ -12,6 +15,13 @@
     "dataManagement": "إدارة البيانات"
   },
   "healthNav": "الحالة",
+  "preferencesSettings": {
+    "navTitle": "Preferences",
+    "title": "General preferences"
+  },
+  "setupRecovery": {
+    "title": "Setup & Recovery"
+  },
   "worldBooksNav": "كتب العوالم",
   "chatDictionariesNav": "قواميس الدردشة",
   "charactersNav": "الشخصيات",

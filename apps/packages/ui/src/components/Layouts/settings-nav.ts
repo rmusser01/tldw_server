@@ -20,16 +20,15 @@ export type SettingsNavGroup = {
 }
 
 const NAV_GROUPS: Array<{ key: NavGroupKey; titleToken: string }> = [
-  { key: "connect", titleToken: "settings:navigation.connect" },
-  { key: "aiModels", titleToken: "settings:navigation.aiModels" },
-  { key: "experience", titleToken: "settings:navigation.experience" },
   {
-    key: "knowledgeWorkspace",
-    titleToken: "settings:navigation.knowledgeWorkspace"
+    key: "setupRecovery",
+    titleToken: "settings:navigation.setupRecovery"
   },
-  { key: "safetyAdmin", titleToken: "settings:navigation.safetyAdmin" },
-  { key: "dataManagement", titleToken: "settings:navigation.dataManagement" },
-  { key: "about", titleToken: "settings:navigation.about" }
+  {
+    key: "preferencesWorkflow",
+    titleToken: "settings:navigation.preferencesWorkflow"
+  },
+  { key: "dataAdmin", titleToken: "settings:navigation.dataAdmin" }
 ]
 
 type NavItemWithOrder = SettingsNavItem & { order: number }

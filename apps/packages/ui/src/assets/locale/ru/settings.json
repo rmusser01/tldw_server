@@ -1,5 +1,8 @@
 {
   "navigation": {
+    "setupRecovery": "Setup & Recovery",
+    "preferencesWorkflow": "Preferences & Workflow",
+    "dataAdmin": "Data & Administration",
     "serverAndAuth": "Сервер и авторизация",
     "knowledgeTools": "Инструменты знаний",
     "workspace": "Рабочее пространство",
@@ -12,6 +15,13 @@
     "dataManagement": "Управление данными"
   },
   "healthNav": "Состояние",
+  "preferencesSettings": {
+    "navTitle": "Preferences",
+    "title": "General preferences"
+  },
+  "setupRecovery": {
+    "title": "Setup & Recovery"
+  },
   "worldBooksNav": "Книги мира",
   "chatDictionariesNav": "Словари чата",
   "charactersNav": "Персонажи",

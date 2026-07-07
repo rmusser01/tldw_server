@@ -30,13 +30,9 @@ import {
 } from "@/routes/route-paths"
 
 export type NavGroupKey =
-  | "connect"
-  | "aiModels"
-  | "experience"
-  | "knowledgeWorkspace"
-  | "safetyAdmin"
-  | "dataManagement"
-  | "about"
+  | "setupRecovery"
+  | "preferencesWorkflow"
+  | "dataAdmin"
 
 export type SettingsNavRouteMeta = {
   path: string
@@ -50,56 +46,63 @@ export type SettingsNavRouteMeta = {
 export const SETTINGS_ROUTE_NAV_ITEMS: SettingsNavRouteMeta[] = [
   {
     path: "/settings",
-    group: "experience",
-    labelToken: "settings:generalSettings.title",
+    group: "setupRecovery",
+    labelToken: "settings:setupRecovery.title",
     icon: OrbitIcon,
     order: 1
   },
   {
-    path: "/settings/tldw",
-    group: "connect",
-    labelToken: "settings:tldw.serverNav",
-    icon: ServerIcon,
+    path: "/settings/preferences",
+    group: "preferencesWorkflow",
+    labelToken: "settings:preferencesSettings.navTitle",
+    icon: SlidersHorizontal,
     order: 1
   },
   {
-    path: "/settings/provider-keys",
-    group: "connect",
-    labelToken: "settings:providerKeys.navTitle",
+    path: "/settings/tldw",
+    group: "setupRecovery",
+    labelToken: "settings:tldw.serverNav",
     icon: ServerIcon,
     order: 2
   },
   {
+    path: "/settings/provider-keys",
+    group: "setupRecovery",
+    labelToken: "settings:providerKeys.navTitle",
+    icon: ServerIcon,
+    order: 3
+  },
+  {
     path: "/settings/data",
-    group: "dataManagement",
+    group: "dataAdmin",
     labelToken: "settings:dataManagement.navTitle",
     icon: DatabaseIcon,
     order: 1
   },
   {
     path: "/settings/model",
-    group: "aiModels",
+    group: "setupRecovery",
     labelToken: "settings:manageModels.title",
     icon: BrainCircuitIcon,
-    order: 1
+    order: 4
   },
   {
     path: "/settings/mcp-hub",
-    group: "aiModels",
+    group: "dataAdmin",
     labelToken: "settings:mcpHubNav",
     icon: ServerIcon,
     order: 5
   },
   {
     path: "/settings/prompt",
-    group: "knowledgeWorkspace",
+    group: "preferencesWorkflow",
     labelToken: "settings:managePrompts.title",
     icon: BookIcon,
-    order: 2
+    order: 8
   },
   {
     path: "/settings/evaluations",
-    group: "safetyAdmin",
+    group: "dataAdmin",
     labelToken: "settings:evaluationsSettings.title",
     icon: FlaskConical,
     order: 3,
@@ -107,141 +110,141 @@ export const SETTINGS_ROUTE_NAV_ITEMS: SettingsNavRouteMeta[] = [
   },
   {
     path: "/settings/chat",
-    group: "experience",
+    group: "preferencesWorkflow",
     labelToken: "settings:chatSettingsNav",
     icon: MessageSquare,
     order: 2
   },
   {
     path: "/settings/ui",
-    group: "experience",
+    group: "preferencesWorkflow",
     labelToken: "settings:uiCustomizationNav",
     icon: SlidersHorizontal,
-    order: 3.5
+    order: 3
   },
   {
     path: "/settings/splash",
-    group: "experience",
+    group: "preferencesWorkflow",
     labelToken: "settings:splashSettingsNav",
     icon: Sparkles,
-    order: 3.6
+    order: 3.5
   },
   {
     path: "/settings/quick-ingest",
-    group: "experience",
+    group: "preferencesWorkflow",
     labelToken: "settings:quickIngestSettingsNav",
     icon: ClipboardList,
     order: 4
   },
   {
     path: "/settings/speech",
-    group: "aiModels",
+    group: "preferencesWorkflow",
     labelToken: "settings:speechSettingsNav",
     icon: MicIcon,
-    order: 3
+    order: 5
   },
   {
     path: "/settings/image-generation",
-    group: "aiModels",
+    group: "preferencesWorkflow",
     labelToken: "settings:imageGenerationSettingsNav",
     icon: ImageIcon,
-    order: 4
+    order: 6
   },
   {
     path: "/settings/share",
-    group: "knowledgeWorkspace",
+    group: "dataAdmin",
     labelToken: "settings:manageShare.title",
     icon: ShareIcon,
-    order: 7
+    order: 2
   },
   {
     path: "/settings/health",
-    group: "connect",
+    group: "setupRecovery",
     labelToken: "settings:healthNav",
     icon: ActivityIcon,
-    order: 3
+    order: 5
   },
   {
     path: "/settings/prompt-studio",
-    group: "knowledgeWorkspace",
+    group: "preferencesWorkflow",
     labelToken: "settings:promptStudio.nav",
     icon: Microscope,
-    order: 3,
+    order: 9,
     beta: true
   },
   {
     path: "/settings/knowledge",
-    group: "knowledgeWorkspace",
+    group: "preferencesWorkflow",
     labelToken: "settings:manageKnowledge.title",
     icon: BookText,
-    order: 1
+    order: 7
   },
   {
     path: "/settings/chatbooks",
-    group: "knowledgeWorkspace",
+    group: "preferencesWorkflow",
     labelToken: "settings:chatbooksNav",
     icon: BookText,
-    order: 4
+    order: 10
   },
   {
     path: "/settings/characters",
-    group: "knowledgeWorkspace",
+    group: "preferencesWorkflow",
     labelToken: "settings:charactersNav",
     icon: BookIcon,
-    order: 5
+    order: 11
   },
   {
     path: "/settings/world-books",
-    group: "knowledgeWorkspace",
+    group: "preferencesWorkflow",
     labelToken: "settings:worldBooksNav",
     icon: BookOpen,
-    order: 5.1
+    order: 12
   },
   {
     path: "/settings/chat-dictionaries",
-    group: "knowledgeWorkspace",
+    group: "preferencesWorkflow",
     labelToken: "settings:chatDictionariesNav",
     icon: BookMarked,
-    order: 5.2
+    order: 13
   },
   {
     path: "/settings/rag",
-    group: "aiModels",
+    group: "preferencesWorkflow",
     labelToken: "settings:rag.title",
     icon: CombineIcon,
-    order: 2
+    order: 7.5
   },
   {
     path: "/settings/about",
-    group: "about",
+    group: "dataAdmin",
     labelToken: "settings:about.title",
     icon: InfoIcon,
-    order: 1
+    order: 99
   },
   {
     path: MODERATION_REVIEW_PATH,
-    group: "safetyAdmin",
+    group: "dataAdmin",
     labelToken: "option:moderationReview.nav",
     icon: ClipboardList,
     order: 4
   },
   {
     path: MODERATION_RULES_PATH,
-    group: "safetyAdmin",
+    group: "dataAdmin",
     labelToken: "option:moderationRules.nav",
     icon: ShieldCheck,
     order: 5
   },
   {
     path: "/settings/family-guardrails",
-    group: "safetyAdmin",
+    group: "dataAdmin",
     labelToken: "settings:familyGuardrailsWizardNav",
     icon: Users,
     order: 2
   },
   {
     path: "/settings/guardian",
-    group: "safetyAdmin",
+    group: "dataAdmin",
     labelToken: "settings:guardianNav",
     icon: Eye,
     order: 1

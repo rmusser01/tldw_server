@@ -90,6 +90,16 @@ export const SettingsLayout = ({ children }: { children: React.ReactNode }) => {
       }))
       .filter((group) => group.items.length > 0);
   }, [normalizedFilterQuery, settingsNavGroups, showSettingsFilter, t]);
+  const mobileSettingsNavGroups = React.useMemo(
+    () =>
+      settingsNavGroups
+        .map((group) => ({
+          ...group,
+          items: group.items.filter((item) => !shouldHideForBrowser(item)),
+        }))
+        .filter((group) => group.items.length > 0),
+    [settingsNavGroups],
+  );
   const currentNavItem = React.useMemo(() => {
     return resolveCurrentSettingsNavItem(location.pathname, settingsNavGroups);
   }, [location.pathname, settingsNavGroups]);
@@ -101,7 +111,7 @@ export const SettingsLayout = ({ children }: { children: React.ReactNode }) => {
     location.pathname === "/settings/model"
       ? t("settings:modelSettings.heading", "Model settings")
       : location.pathname === "/settings"
-        ? t("settings:heading", "Settings")
+        ? t("settings:setupRecovery.title", "Setup & Recovery")
         : currentBreadcrumbLabel || t("settings:heading", "Settings");
   const hasVisibleBetaItems = React.useMemo(
     () =>
@@ -149,8 +159,40 @@ export const SettingsLayout = ({ children }: { children: React.ReactNode }) => {
                     {t("settings:switchToSidebar", "Switch to Sidebar")}
                   </button>
                 </div>
+                <div className="mb-3 lg:hidden">
+                  <label
+                    htmlFor="settings-nav-select"
+                    className="mb-1 block text-xs font-semibold uppercase tracking-wide text-text-muted"
+                  >
+                    {t("settings:navigation.mobileLabel", "Settings section")}
+                  </label>
+                  <select
+                    id="settings-nav-select"
+                    value={currentNavItem?.to ?? ""}
+                    onChange={(event) => {
+                      if (event.currentTarget.value) {
+                        navigate(event.currentTarget.value);
+                      }
+                    }}
+                    className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text"
+                    data-testid="settings-nav-select"
+                  >
+                    {currentNavItem ? null : (
+                      <option value="">{routeHeadingLabel}</option>
+                    )}
+                    {mobileSettingsNavGroups.map((group) => (
+                      <optgroup key={group.key} label={t(group.titleToken)}>
+                        {group.items.map((item) => (
+                          <option key={item.to} value={item.to}>
+                            {t(item.labelToken)}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </select>
+                </div>
                 {showSettingsFilter ? (
-                  <div className="mb-3">
+                  <div className="mb-3 hidden lg:block">
                     <label htmlFor="settings-nav-filter" className="sr-only">
                       {t(
                         "settings:navigation.filterLabel",
@@ -173,7 +215,7 @@ export const SettingsLayout = ({ children }: { children: React.ReactNode }) => {
                     />
                   </div>
                 ) : null}
-                <div className="flex flex-col gap-6">
+                <div className="hidden flex-col gap-6 lg:flex">
                   {visibleSettingsNavGroups.map((group) => {
                     const items = group.items.filter(
                       (item) => !shouldHideForBrowser(item),
@@ -261,7 +303,7 @@ export const SettingsLayout = ({ children }: { children: React.ReactNode }) => {
                   ) : null}
                 </div>
                 {hasVisibleBetaItems ? (
-                  <div className="mt-4">
+                  <div className="mt-4 hidden lg:block">
                     <button
                       type="button"
                       className="text-xs border rounded px-2 py-1 text-text-muted hover:text-text hover:bg-surface2"

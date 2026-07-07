@@ -107,12 +107,16 @@ describe("settings navigation wayfinding", () => {
     const user = userEvent.setup();
     renderSettingsLayout("/settings/tldw");
 
+    const sectionSelect = screen.getByLabelText("Settings section");
     const activeLink = screen.getByRole("link", {
       name: "settings:tldw.serverNav",
     });
     const chatLink = screen.getByRole("link", {
       name: "settings:chatSettingsNav",
     });
+
+    await user.tab();
+    expect(sectionSelect).toHaveFocus();
 
     await user.tab();
     expect(activeLink).toHaveFocus();
@@ -123,6 +127,20 @@ describe("settings navigation wayfinding", () => {
     await user.keyboard("{Enter}");
     expect(screen.getByTestId("settings-layout-location")).toHaveTextContent(
       "/settings/chat",
+    );
+  });
+
+  it("uses a compact section selector for small-screen settings navigation", async () => {
+    const user = userEvent.setup();
+    renderSettingsLayout("/settings/tldw");
+
+    const sectionSelect = screen.getByLabelText("Settings section");
+    expect(sectionSelect).toHaveValue("/settings/tldw");
+
+    await user.selectOptions(sectionSelect, "/settings/model");
+
+    expect(screen.getByTestId("settings-layout-location")).toHaveTextContent(
+      "/settings/model",
     );
   });
 

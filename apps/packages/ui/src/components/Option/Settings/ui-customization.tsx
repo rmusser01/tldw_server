@@ -18,6 +18,8 @@ import {
   getHeaderShortcutGroups,
   getHeaderShortcutItems
 } from "@/components/Layouts/header-shortcut-items"
+import { ThemePicker } from "@/components/Common/Settings/ThemePicker"
+import { SystemSettings } from "./system-settings"
 
 const arraysEqual = <T,>(a: T[], b: T[]) =>
   a.length === b.length && a.every((value, index) => value === b[index])
@@ -352,6 +354,8 @@ export const UiCustomizationSettings = () => {
           defaultSelection={DEFAULT_HEADER_SHORTCUT_SELECTION}
           onChange={(next) => void setHeaderShortcutSelection(next)}
         />
+        <ThemePicker />
+        <SystemSettings />
       </div>
     </div>
   )

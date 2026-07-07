@@ -1,5 +1,8 @@
 {
   "navigation": {
+    "setupRecovery": "Setup & Recovery",
+    "preferencesWorkflow": "Preferences & Workflow",
+    "dataAdmin": "Data & Administration",
     "serverAndAuth": "服务器与认证",
     "knowledgeTools": "知识工具",
     "workspace": "工作区",
@@ -12,6 +15,13 @@
     "dataManagement": "数据管理"
   },
   "healthNav": "健康",
+  "preferencesSettings": {
+    "navTitle": "Preferences",
+    "title": "General preferences"
+  },
+  "setupRecovery": {
+    "title": "Setup & Recovery"
+  },
   "worldBooksNav": "世界书籍",
   "chatDictionariesNav": "聊天词典",
   "charactersNav": "角色",

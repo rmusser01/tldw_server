@@ -1,5 +1,8 @@
 {
   "navigation": {
+    "setupRecovery": "Setup & Recovery",
+    "preferencesWorkflow": "Preferences & Workflow",
+    "dataAdmin": "Data & Administration",
     "serverAndAuth": "സെർവർ & ഓത്",
     "knowledgeTools": "നോളജ് ടൂളുകൾ",
     "workspace": "വർക്ക്സ്പേസ്",
@@ -12,6 +15,13 @@
     "dataManagement": "ഡാറ്റ മാനേജ്മെന്റ്"
   },
   "healthNav": "ഹെൽത്ത്",
+  "preferencesSettings": {
+    "navTitle": "Preferences",
+    "title": "General preferences"
+  },
+  "setupRecovery": {
+    "title": "Setup & Recovery"
+  },
   "worldBooksNav": "വേൾഡ് ബുക്കുകൾ",
   "chatDictionariesNav": "ചാറ്റ് നിഘണ്ടു",
   "charactersNav": "ക്യാരക്ടേഴ്സ്",

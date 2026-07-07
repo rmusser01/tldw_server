@@ -1,5 +1,8 @@
 {
   "navigation": {
+    "setupRecovery": "Setup & Recovery",
+    "preferencesWorkflow": "Preferences & Workflow",
+    "dataAdmin": "Data & Administration",
     "serverAndAuth": "سرور و احراز هویت",
     "knowledgeTools": "ابزارهای دانش",
     "workspace": "محیط کار",
@@ -12,6 +15,13 @@
     "dataManagement": "مدیریت داده"
   },
   "healthNav": "سلامت",
+  "preferencesSettings": {
+    "navTitle": "Preferences",
+    "title": "General preferences"
+  },
+  "setupRecovery": {
+    "title": "Setup & Recovery"
+  },
   "worldBooksNav": "کتاب‌های جهان",
   "chatDictionariesNav": "واژه‌نامه‌های چت",
   "charactersNav": "شخصیت‌ها",

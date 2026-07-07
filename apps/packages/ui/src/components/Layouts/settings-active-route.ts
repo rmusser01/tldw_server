@@ -25,6 +25,7 @@ export const isSettingsNavItemActive = (
 
   if (current === target) return true
   if (target === "/") return current === "/"
+  if (target === "/settings") return current === "/settings"
   return current.startsWith(`${target}/`)
 }
 

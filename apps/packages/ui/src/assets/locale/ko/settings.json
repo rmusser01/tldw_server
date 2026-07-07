@@ -1,5 +1,8 @@
 {
   "navigation": {
+    "setupRecovery": "Setup & Recovery",
+    "preferencesWorkflow": "Preferences & Workflow",
+    "dataAdmin": "Data & Administration",
     "serverAndAuth": "서버 및 인증",
     "knowledgeTools": "지식 도구",
     "workspace": "작업 공간",
@@ -12,6 +15,13 @@
     "dataManagement": "데이터 관리"
   },
   "healthNav": "상태",
+  "preferencesSettings": {
+    "navTitle": "Preferences",
+    "title": "General preferences"
+  },
+  "setupRecovery": {
+    "title": "Setup & Recovery"
+  },
   "worldBooksNav": "월드북",
   "chatDictionariesNav": "채팅 사전",
   "charactersNav": "캐릭터",

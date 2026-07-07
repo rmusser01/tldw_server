@@ -1,5 +1,8 @@
 {
   "navigation": {
+    "setupRecovery": "Setup & Recovery",
+    "preferencesWorkflow": "Preferences & Workflow",
+    "dataAdmin": "Data & Administration",
     "connect": "Connect",
     "aiModels": "AI & Models",
     "experience": "Experience",
@@ -9,6 +12,13 @@
     "dataManagement": "Data Management"
   },
   "healthNav": "Health & Diagnostics",
+  "preferencesSettings": {
+    "navTitle": "Preferences",
+    "title": "General preferences"
+  },
+  "setupRecovery": {
+    "title": "Setup & Recovery"
+  },
   "worldBooksNav": "World Books",
   "chatDictionariesNav": "Chat Dictionaries",
   "chatbooksNav": "Chatbooks",
