@@ -9,6 +9,9 @@ references:
 modified_files:
 - Docs/superpowers/specs/2026-07-07-advanced-quiz-generation-controls-design.md
 - Docs/superpowers/plans/2026-07-07-advanced-quiz-generation-controls-implementation-plan.md
+- apps/packages/ui/src/services/quizzes.ts
+- apps/packages/ui/src/components/Quiz/tabs/GenerateTab.tsx
+- apps/packages/ui/src/components/Quiz/tabs/__tests__/GenerateTab.question-plan.test.tsx
 ---
 
 ## Description
@@ -43,7 +46,14 @@ Docs/superpowers/plans/2026-07-07-advanced-quiz-generation-controls-implementati
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Task 4 WebUI controls: added frontend question_plan type support, replaced GenerateTab's legacy question type/count controls with fixed five-row plan state, and submitted num_questions plus question_plan from enabled rows only.
 
+Verification:
+- RED: `bunx vitest run ../packages/ui/src/components/Quiz/tabs/__tests__/GenerateTab.question-plan.test.tsx` from `apps/tldw-frontend` failed with 6 missing-plan UI assertions.
+- GREEN: `bunx vitest run ../packages/ui/src/components/Quiz/tabs/__tests__/GenerateTab.question-plan.test.tsx ../packages/ui/src/components/Quiz/tabs/__tests__/GenerateTab.media-selection.test.tsx` from `apps/tldw-frontend` passed 15 tests.
+- Bandit skipped: frontend-only TypeScript/TSX changes.
+
+Known caveat: the plain root-cwd Vitest command does not load the frontend alias/setup config in this worktree; tests were run from `apps/tldw-frontend`, matching existing frontend test config.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
