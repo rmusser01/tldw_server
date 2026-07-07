@@ -1,17 +1,16 @@
 ---
 id: TASK-12169
 title: Add advanced quiz generation controls
-status: In Progress
+status: Done
+assignee: []
+created_date: ''
+updated_date: '2026-07-07 21:30'
+labels: []
+dependencies: []
 references:
-- Spec review approved by subagent 019f3dfe-9e1d-7762-8bf9-88a8e354e13f
-- Final spec review approved by subagent 019f3e03-825a-7d80-aa7d-3c5c27de712f
-- Plan review approved by subagent 019f3e20-d73f-70d2-8bf9-1074c1c4c5bc
-modified_files:
-- Docs/superpowers/specs/2026-07-07-advanced-quiz-generation-controls-design.md
-- Docs/superpowers/plans/2026-07-07-advanced-quiz-generation-controls-implementation-plan.md
-- apps/packages/ui/src/services/quizzes.ts
-- apps/packages/ui/src/components/Quiz/tabs/GenerateTab.tsx
-- apps/packages/ui/src/components/Quiz/tabs/__tests__/GenerateTab.question-plan.test.tsx
+  - Spec review approved by subagent 019f3dfe-9e1d-7762-8bf9-88a8e354e13f
+  - Final spec review approved by subagent 019f3e03-825a-7d80-aa7d-3c5c27de712f
+  - Plan review approved by subagent 019f3e20-d73f-70d2-8bf9-1074c1c4c5bc
 ---
 
 ## Description
@@ -39,29 +38,51 @@ Docs/superpowers/plans/2026-07-07-advanced-quiz-generation-controls-implementati
 
 ## Implementation Notes
 
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+<!-- SECTION:NOTES:BEGIN -->
+Implemented TASK-12169 advanced quiz generation controls.
 
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
+Touched backend files:
+- tldw_Server_API/app/api/v1/schemas/quizzes.py
+- tldw_Server_API/app/api/v1/endpoints/quizzes.py
+- tldw_Server_API/app/services/quiz_generator.py
+- tldw_Server_API/tests/Quizzes/test_quiz_generate_schema_contract.py
+- tldw_Server_API/tests/Quizzes/test_quiz_generator_question_plan.py
+- tldw_Server_API/tests/Quizzes/test_quiz_generator_prompt_template.py
+- tldw_Server_API/tests/Quizzes/test_quiz_generator_test_mode.py
+- tldw_Server_API/tests/Quizzes/test_quizzes_endpoint_integration.py
+
+Touched frontend files:
+- apps/packages/ui/src/services/quizzes.ts
+- apps/packages/ui/src/components/Quiz/tabs/GenerateTab.tsx
+- apps/packages/ui/src/components/Quiz/tabs/__tests__/GenerateTab.question-plan.test.tsx
+
+Design and plan:
+- Docs/superpowers/specs/2026-07-07-advanced-quiz-generation-controls-design.md
+- Docs/superpowers/plans/2026-07-07-advanced-quiz-generation-controls-implementation-plan.md
+<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Task 4 WebUI controls: added frontend question_plan type support, replaced GenerateTab's legacy question type/count controls with fixed five-row plan state, and submitted num_questions plus question_plan from enabled rows only.
+Implemented advanced quiz generation controls end to end. Backend now accepts a structured question_plan, validates exact per-type counts and option/pair ranges at both schema and service layers, preserves legacy question_types behavior, renders plan-aware prompts, normalizes 5-option MCQ, multi-select, matching, true/false, and fill-blank outputs, and supports deterministic planned generation in test mode. The WebUI Generate tab now exposes a fixed five-row question mix, derives num_questions from enabled rows, submits question_plan, clamps integer numeric controls to backend ranges, and keeps remediation/legacy request types available elsewhere.
 
 Verification:
-- RED: `bunx vitest run ../packages/ui/src/components/Quiz/tabs/__tests__/GenerateTab.question-plan.test.tsx` from `apps/tldw-frontend` failed with 6 missing-plan UI assertions.
-- GREEN: `bunx vitest run ../packages/ui/src/components/Quiz/tabs/__tests__/GenerateTab.question-plan.test.tsx ../packages/ui/src/components/Quiz/tabs/__tests__/GenerateTab.media-selection.test.tsx` from `apps/tldw-frontend` passed 15 tests.
-- Bandit skipped: frontend-only TypeScript/TSX changes.
+- Backend focused suite: source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Quizzes/test_quiz_generate_schema_contract.py tldw_Server_API/tests/Quizzes/test_quiz_generator_question_plan.py tldw_Server_API/tests/Quizzes/test_quiz_generator_prompt_template.py tldw_Server_API/tests/Quizzes/test_quiz_generator_test_mode.py tldw_Server_API/tests/Quizzes/test_quizzes_endpoint_integration.py -q -> 120 passed, 5 warnings.
+- Frontend focused suite from apps/tldw-frontend: bunx vitest run ../packages/ui/src/components/Quiz/tabs/__tests__/GenerateTab.question-plan.test.tsx ../packages/ui/src/components/Quiz/tabs/__tests__/GenerateTab.media-selection.test.tsx -> 2 files passed, 17 tests passed.
+- Bandit: source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m bandit tldw_Server_API/app/api/v1/schemas/quizzes.py tldw_Server_API/app/api/v1/endpoints/quizzes.py tldw_Server_API/app/services/quiz_generator.py -f json -o /tmp/bandit_task_12169.json -> exit 0, 0 findings.
 
-Known caveat: the plain root-cwd Vitest command does not load the frontend alias/setup config in this worktree; tests were run from `apps/tldw-frontend`, matching existing frontend test config.
+Known caveats:
+- Full frontend TypeScript no-emit check was attempted from apps/tldw-frontend and failed on existing unrelated files outside the touched quiz scope: AudioStudio, ScheduledTasks, Skills Manager, scheduled task services, MCP hub, voice-cloning, and e2e fixtures. No touched quiz files were reported in that output.
+- Vitest emits existing AntD Alert message deprecation warnings during GenerateTab tests.
+- Two unrelated untracked watchlist template files remain untouched in the worktree.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
