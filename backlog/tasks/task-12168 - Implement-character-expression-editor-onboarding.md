@@ -40,6 +40,8 @@ Docs/superpowers/plans/2026-07-07-character-expression-editor-onboarding-impleme
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implementation plan written at Docs/superpowers/plans/2026-07-07-character-expression-editor-onboarding-implementation-plan.md. Plan-document review loop completed. Reviewer iterations found and plan fixed: nudge dismissal server/user/character scoping, circular dependency between row helpers and character utils, and invalid raw extensions behavior for untouched empty starter rows. Final review status: Approved. Advisory starter-state load test was added to the plan.
+
+Task 1 metadata helper contract completed in commit e5ec2d45cb. Added regression coverage for arbitrary safe expression state image keys, canonical mood image precedence over legacy aliases, canonical write cleanup, empty-map removal, and legacy alias resolution fallback. Verification: initial focused Vitest run failed on nested legacy alias cleanup and legacy resolver fallback; final `bunx vitest run src/utils/__tests__/character-mood.test.ts` from apps/packages/ui passed 11 tests. `git diff --check` passed. Bandit was attempted against touched TypeScript files with the project venv and produced no findings, with expected TypeScript parse errors because Bandit is Python-only.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
