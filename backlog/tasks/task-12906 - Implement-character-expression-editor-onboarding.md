@@ -1,32 +1,27 @@
 ---
 id: TASK-12906
 title: Implement character expression editor onboarding
-status: In Progress
+status: Done
+assignee: []
+created_date: ''
+updated_date: '2026-07-07 19:05'
 labels:
-- frontend
-- characters
-- emotes
-- implementation
-priority: Medium
+  - frontend
+  - characters
+  - emotes
+  - implementation
+dependencies: []
 references:
-- TASK-12905
-- TASK-12164
-- Docs/superpowers/specs/2026-07-07-character-expression-editor-onboarding-design.md
+  - TASK-12905
+  - TASK-12164
+  - >-
+    Docs/superpowers/specs/2026-07-07-character-expression-editor-onboarding-design.md
 documentation:
-- Docs/superpowers/specs/2026-07-07-character-expression-editor-onboarding-design.md
-- Docs/superpowers/plans/2026-07-07-character-expression-editor-onboarding-implementation-plan.md
-modified_files:
-- Docs/superpowers/plans/2026-07-07-character-expression-editor-onboarding-implementation-plan.md
-- apps/packages/ui/src/components/Option/Characters/character-expression-images.ts
-- apps/packages/ui/src/components/Option/Characters/__tests__/character-expression-images.test.ts
-- apps/packages/ui/src/components/Option/Characters/utils.ts
-- apps/packages/ui/src/components/Option/Characters/CharacterEditorForm.tsx
-- apps/packages/ui/src/components/Option/Characters/CharacterExpressionImagesSection.tsx
-- apps/packages/ui/src/components/Option/Characters/__tests__/CharacterExpressionImagesSection.test.tsx
-- apps/packages/ui/src/components/Option/Characters/__tests__/Manager.first-use.test.tsx
-- apps/packages/ui/src/components/Option/Characters/hooks/useCharacterCrud.tsx
-- apps/packages/ui/src/components/Option/Characters/CharacterDialogs.tsx
-- backlog/tasks/task-12906 - Implement-character-expression-editor-onboarding.md
+  - >-
+    Docs/superpowers/specs/2026-07-07-character-expression-editor-onboarding-design.md
+  - >-
+    Docs/superpowers/plans/2026-07-07-character-expression-editor-onboarding-implementation-plan.md
+priority: medium
 ---
 
 ## Description
@@ -47,6 +42,7 @@ Docs/superpowers/plans/2026-07-07-character-expression-editor-onboarding-impleme
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implementation plan written at Docs/superpowers/plans/2026-07-07-character-expression-editor-onboarding-implementation-plan.md. Plan-document review loop completed. Reviewer iterations found and plan fixed: nudge dismissal server/user/character scoping, circular dependency between row helpers and character utils, and invalid raw extensions behavior for untouched empty starter rows. Final review status: Approved. Advisory starter-state load test was added to the plan.
 
@@ -70,18 +66,29 @@ Task 5 code-quality review fix completed. `PlaygroundForm` now derives `userScop
 Task 6 Extension Handoff Route completed. Extended `buildCharactersRoute()` with `focus` and `characterId`, extracted shared `openCharactersWorkspace()` behavior from `CharacterSelect`, and added the `Edit character expressions` action to `CharacterControlsSheet` using `from=sidepanel-character-controls&focus=expressions` plus `characterId` for tracked/selected characters. Touched files: `apps/packages/ui/src/utils/characters-route.ts`, `apps/packages/ui/src/utils/__tests__/characters-route.test.ts`, `apps/packages/ui/src/components/Sidepanel/Chat/CharacterSelect.tsx`, `apps/packages/ui/src/components/Sidepanel/Chat/CharacterControlsSheet.tsx`, `apps/packages/ui/src/components/Sidepanel/Chat/__tests__/CharacterControlsSheet.test.tsx`. Red check: `bunx vitest run src/utils/__tests__/characters-route.test.ts src/components/Sidepanel/Chat/__tests__/CharacterControlsSheet.test.tsx -t "expression|characters route"` failed on missing route params and missing action as expected. Verification from `apps/packages/ui`: focused rerun passed 5 tests; required `bunx vitest run src/utils/__tests__/characters-route.test.ts src/components/Sidepanel/Chat/__tests__/CharacterControlsSheet.test.tsx src/components/Sidepanel/Chat/__tests__/ControlRow.role-play-handoff.test.tsx` passed 17 tests; `bunx vitest run src/components/Sidepanel/Chat/__tests__/CharacterSelect.persona-avatar.test.tsx` passed 3 tests; `git diff --check` passed. Bandit with shared repo venv wrote `/tmp/bandit_task6_extension_handoff.json` with `results=[]` and expected TypeScript AST parse errors. `NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false --project tsconfig.json` completed and failed on existing unrelated test type errors outside the touched files.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
+Final verification completed from apps/packages/ui unless noted:
+- bunx vitest run src/utils/__tests__/character-mood.test.ts src/components/Option/Characters/__tests__/character-expression-images.test.ts src/components/Option/Characters/__tests__/CharacterExpressionImagesSection.test.tsx src/components/Option/Playground/__tests__/PlaygroundComposerNotices.first-run.test.tsx src/components/Sidepanel/Chat/__tests__/CharacterControlsSheet.test.tsx src/utils/__tests__/characters-route.test.ts: passed 56 tests across 6 files.
+- bunx vitest run src/components/Sidepanel/Chat/__tests__/ControlRow.role-play-handoff.test.tsx src/components/Sidepanel/Chat/__tests__/CharacterSelect.persona-avatar.test.tsx: passed 6 tests across 2 files.
+- bun run typecheck from apps/tldw-frontend: passed.
+- git diff --check: passed.
+- git status --short: clean before final Backlog update.
+- Bandit: touched implementation is frontend TypeScript/docs only; per-task Bandit attempts produced results=[] with expected TypeScript parse errors. No Python files were touched.
+<!-- SECTION:NOTES:END -->
+
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Implemented the shared character expression image editor onboarding slice. The character editor now reads legacy mood image metadata, edits arbitrary safe expression image states, validates rows before save, and writes canonical extensions.tldw.mood_images while cleaning legacy aliases. Character chat now shows a scoped, dismissible setup nudge for characters without expression images, and the browser extension sidepanel links users to the shared Characters editor route instead of embedding a second editor. Final targeted tests and frontend typecheck passed; Bandit is not applicable to the final touched scope because it is frontend TypeScript/docs only.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
