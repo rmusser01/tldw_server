@@ -118,6 +118,26 @@ describe("character expression image rows", () => {
     )
   })
 
+  it("blocks image sources that would be dropped by metadata persistence", () => {
+    const result = normalizeExpressionImageRows([
+      {
+        id: "relative",
+        state: "smirk",
+        image: {
+          mode: "url",
+          url: "/foo.png",
+          base64: ""
+        },
+        starter: false
+      }
+    ])
+
+    expect(result.rows).toEqual([])
+    expect(result.errors).toEqual([
+      expect.objectContaining({ id: "relative", reason: "invalid-image" })
+    ])
+  })
+
   it("drops empty starter rows and returns mood image map", () => {
     expect(
       expressionRowsToMoodImages([

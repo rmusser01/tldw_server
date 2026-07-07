@@ -42,6 +42,7 @@ type ExpressionRowEditorProps = {
 
 const ERROR_MESSAGES: Record<ExpressionImageRowErrorReason, string> = {
   "duplicate": "Expression state is duplicated.",
+  "invalid-image": "Use an HTTP(S) URL, image data URL, or uploaded image.",
   "invalid-state": "Use letters, numbers, spaces, hyphens, or underscores.",
   "missing-image": "Custom expressions need an image.",
   "missing-state": "Expression state is required."

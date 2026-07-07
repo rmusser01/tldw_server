@@ -4,7 +4,7 @@ title: Implement character expression editor onboarding
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-07-07 19:05'
+updated_date: '2026-07-07 19:11'
 labels:
   - frontend
   - characters
@@ -73,6 +73,8 @@ Final verification completed from apps/packages/ui unless noted:
 - git diff --check: passed.
 - git status --short: clean before final Backlog update.
 - Bandit: touched implementation is frontend TypeScript/docs only; per-task Bandit attempts produced results=[] with expected TypeScript parse errors. No Python files were touched.
+
+Final review fix completed. Expression image row validation now rejects image sources that the canonical mood-image persistence layer cannot save, using the same supported source rule: HTTP(S), data:image URL, or valid uploaded/base64 image payload. Added regression coverage for relative URL input (`/foo.png`) so unsupported sources no longer pass validation and disappear on save. Verification from apps/packages/ui: focused red check failed before the helper fix; `bunx vitest run src/components/Option/Characters/__tests__/character-expression-images.test.ts -t "dropped by metadata persistence"` passed after the fix; `bunx vitest run src/components/Option/Characters/__tests__/character-expression-images.test.ts src/components/Option/Characters/__tests__/CharacterExpressionImagesSection.test.tsx` passed 19 tests.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

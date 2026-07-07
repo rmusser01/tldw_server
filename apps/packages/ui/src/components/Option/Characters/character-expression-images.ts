@@ -8,6 +8,7 @@ import {
   type CharacterMoodImages
 } from "@/utils/character-mood"
 import { normalizeCharacterEmoteState } from "@/utils/character-emotes"
+import { createImageDataUrl } from "@/utils/image-utils"
 
 export const EXPRESSION_IMAGE_STARTER_STATES = [
   "neutral",
@@ -27,6 +28,7 @@ export type ExpressionImageRow = {
 
 export type ExpressionImageRowErrorReason =
   | "invalid-state"
+  | "invalid-image"
   | "duplicate"
   | "missing-state"
   | "missing-image"
@@ -45,7 +47,18 @@ const hasExpressionImage = (image: AvatarFieldValue): boolean => {
 
 const expressionImageSource = (image: AvatarFieldValue): string | null => {
   const values = extractAvatarValues(image)
-  return values.avatar_url || values.image_base64 || null
+  const source = values.avatar_url || values.image_base64 || null
+  if (typeof source !== "string") return null
+  const trimmed = source.trim()
+  if (!trimmed) return null
+  if (
+    trimmed.startsWith("data:image/") ||
+    trimmed.startsWith("http://") ||
+    trimmed.startsWith("https://")
+  ) {
+    return trimmed
+  }
+  return createImageDataUrl(trimmed)
 }
 
 export const expressionRowsFromExtensions = (
@@ -91,6 +104,7 @@ export const normalizeExpressionImageRows = (
     const rawState = row.state.trim()
     const normalizedState = normalizeCharacterEmoteState(row.state)
     const hasImage = hasExpressionImage(row.image)
+    const imageSource = expressionImageSource(row.image)
 
     if (!rawState) {
       errors.push({ id: row.id, reason: "missing-state" })
@@ -98,11 +112,15 @@ export const normalizeExpressionImageRows = (
       errors.push({ id: row.id, reason: "invalid-state" })
     }
 
+    if (hasImage && !imageSource) {
+      errors.push({ id: row.id, reason: "invalid-image" })
+    }
+
     if (!hasImage && !row.starter) {
       errors.push({ id: row.id, reason: "missing-image" })
     }
 
-    if (!normalizedState || (!hasImage && row.starter)) return
+    if (!normalizedState || !imageSource) return
 
     if (seenStates.has(normalizedState)) {
       errors.push({ id: row.id, reason: "duplicate" })
