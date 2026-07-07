@@ -49,6 +49,7 @@ import { useVoiceChatStream } from "@/hooks/useVoiceChatStream";
 // useQueuedRequests moved to usePlaygroundQueueManagement
 import type { ChatDocuments } from "@/models/ChatTypes";
 import { clearSetting, getSetting } from "@/services/settings/registry";
+import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope";
 import {
   DISCUSS_MEDIA_PROMPT_SETTING,
   DISCUSS_WATCHLIST_PROMPT_SETTING,
@@ -5763,6 +5764,13 @@ export const PlaygroundForm = ({
                             systemPrompt={systemPrompt}
                             selectedCharacter={selectedCharacter}
                             serverScope={canonicalConnectionConfig?.serverUrl}
+                            userScope={
+                              canonicalConnectionConfig
+                                ? buildChatSurfaceScopeKeyFromConfig(
+                                    canonicalConnectionConfig,
+                                  )
+                                : undefined
+                            }
                             ragPinnedResultsLength={ragPinnedResults.length}
                             startupTemplateDraftName={startupTemplateDraftName}
                             setStartupTemplateDraftName={

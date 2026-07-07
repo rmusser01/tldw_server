@@ -1,3 +1,6 @@
+import fs from "node:fs"
+import path from "node:path"
+
 import React from "react"
 import { fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -109,6 +112,9 @@ const renderNotices = (props: Partial<PlaygroundComposerNoticesProps> = {}) =>
       <PlaygroundComposerNotices {...buildProps()} {...props} />
     </MemoryRouter>
   )
+
+const readPlaygroundFormSource = () =>
+  fs.readFileSync(path.resolve(__dirname, "../PlaygroundForm.tsx"), "utf8")
 
 describe("PlaygroundComposerNotices first-run banner", () => {
   beforeEach(() => {
@@ -302,6 +308,46 @@ describe("PlaygroundComposerNotices first-run banner", () => {
       )
     ).toBe("true")
     expect(screen.queryByText(/add expression images/i)).not.toBeInTheDocument()
+  })
+
+  it("includes prop-provided expression nudge user scope in the storage key", () => {
+    mockNoFirstRunBanner()
+
+    renderNotices({
+      selectedCharacter: {
+        id: 42,
+        name: "Ada",
+        extensions: {}
+      },
+      selectedCharacterName: "Ada",
+      serverScope: "http://localhost:8000",
+      userScope: "auth:multi-user:org:7:user:user-42"
+    })
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /dismiss expression image setup/i })
+    )
+
+    const scopedKey =
+      "character-expression-nudge:server:http://localhost:8000:user:auth:multi-user:org:7:user:user-42:character:42"
+    expect(localStorage.getItem(scopedKey)).toBe("true")
+    expect(scopedKey).not.toContain("raw-access-token")
+    expect(scopedKey).not.toContain("raw-api-key")
+  })
+
+  it("passes credential-safe chat surface scope from PlaygroundForm to the expression nudge", () => {
+    const formSource = readPlaygroundFormSource()
+
+    expect(formSource).toContain("buildChatSurfaceScopeKeyFromConfig")
+    expect(formSource).toContain(
+      'from "@/services/chat-surface-scope"'
+    )
+    expect(formSource).toContain(
+      "serverScope={canonicalConnectionConfig?.serverUrl}"
+    )
+    expect(formSource).toMatch(
+      /userScope=\{\s*canonicalConnectionConfig\s*\?\s*buildChatSurfaceScopeKeyFromConfig\(\s*canonicalConnectionConfig,?\s*\)\s*:\s*undefined\s*\}/s
+    )
   })
 
   it("keeps expression nudge dismissal scoped by server", () => {
