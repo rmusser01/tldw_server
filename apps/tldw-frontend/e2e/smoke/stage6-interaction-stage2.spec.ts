@@ -3,6 +3,11 @@ import type { Locator, Route } from '@playwright/test';
 import { dispatchKeyboardShortcut, waitForAppShell } from '../utils/helpers';
 
 const LOAD_TIMEOUT = SMOKE_LOAD_TIMEOUT;
+const E2E_RUNTIME_API_KEY = 'test-key-not-placeholder';
+const DEFAULT_CHARACTER_FIXTURE = {
+  id: 1,
+  name: 'Helpful AI Assistant',
+};
 
 const fulfillJson = async (route: Route, status: number, data: unknown) => {
   await route.fulfill({
@@ -23,7 +28,7 @@ const expectMobileTouchTarget = async (locator: Locator, name: string) => {
 
 test.describe('Stage 6 interaction stage 2 positive regressions', () => {
   test('search typing and deterministic no-results answer remain functional', async ({ page }) => {
-    await seedAuth(page);
+    await seedAuth(page, { apiKey: E2E_RUNTIME_API_KEY });
     await page.addInitScript(() => {
       try {
         localStorage.setItem('ff_knowledgeQaStreaming', 'false');
@@ -34,12 +39,26 @@ test.describe('Stage 6 interaction stage 2 positive regressions', () => {
     let lastRagQuery = '';
     let messageCounter = 0;
 
-    await page.route('**/api/v1/characters/search**', async (route) => {
-      await fulfillJson(route, 200, []);
+    await page.route('**/api/_tldw-webui/runtime-config', async (route) => {
+      await fulfillJson(route, 200, {
+        runtimeAuth: {
+          available: true,
+          authMode: 'single-user',
+          apiKey: E2E_RUNTIME_API_KEY,
+        },
+        networking: {
+          deploymentMode: 'advanced',
+          serverUrl: '',
+        },
+      });
     });
 
-    await page.route('**/api/v1/characters**', async (route) => {
-      await fulfillJson(route, 200, []);
+    await page.route(/\/api\/v1\/characters\/search(?:\?.*)?$/, async (route) => {
+      await fulfillJson(route, 200, [DEFAULT_CHARACTER_FIXTURE]);
+    });
+
+    await page.route(/\/api\/v1\/characters\/?(?:\?.*)?$/, async (route) => {
+      await fulfillJson(route, 200, [DEFAULT_CHARACTER_FIXTURE]);
     });
 
     await page.route('**/api/v1/chats/**', async (route) => {
@@ -137,7 +156,15 @@ test.describe('Stage 6 interaction stage 2 positive regressions', () => {
       await fulfillJson(route, 200, { success: true });
     });
 
-    await page.route('**/api/v1/rag/search**', async (route) => {
+    await page.route(/\/api\/v1\/rag\/search\/stream(?:\?.*)?$/, async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'text/plain',
+        body: '',
+      });
+    });
+
+    await page.route(/\/api\/v1\/rag\/search(?:\?.*)?$/, async (route) => {
       ragSearchCalls += 1;
       const body = route.request().postDataJSON() as { query?: string } | null;
       lastRagQuery = typeof body?.query === 'string' ? body.query : '';
@@ -178,7 +205,8 @@ test.describe('Stage 6 interaction stage 2 positive regressions', () => {
 
     if (ragSearchCalls === 0) {
       if (await askButton.isVisible().catch(() => false)) {
-        await askButton.click();
+        await expect(askButton).toBeEnabled({ timeout: LOAD_TIMEOUT });
+        await askButton.press('Enter');
       }
     }
 
