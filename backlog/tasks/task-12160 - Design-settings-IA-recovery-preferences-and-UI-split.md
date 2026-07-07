@@ -1,7 +1,7 @@
 ---
 id: TASK-12160
 title: Design settings IA recovery preferences and UI split
-status: In Progress
+status: Done
 labels:
 - design
 - frontend
@@ -32,7 +32,7 @@ Write and review a design spec for redesigning WebUI/extension settings around S
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Design spec drafted and spec-document-reviewer approved on iteration 3. User review is pending before implementation planning.
+Design spec drafted, reviewed, revised, and approved for implementation planning. User-facing hub label updated to Preferences & Workflow, and implementation planning moved to TASK-12166. Verification: docs-only diff reviewed; stale status/label scan clean; Bandit not applicable because no code changed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
