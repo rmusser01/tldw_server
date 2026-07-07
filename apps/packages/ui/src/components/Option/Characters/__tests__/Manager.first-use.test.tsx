@@ -25,6 +25,7 @@ const {
   generateFieldMock,
   cancelGenerationMock,
   clearGenerationErrorMock,
+  useFormDraftMock,
   useStorageMock,
   exportCharacterToJSONMock,
   exportCharacterToPNGMock,
@@ -54,6 +55,7 @@ const {
   ),
   cancelGenerationMock: vi.fn(),
   clearGenerationErrorMock: vi.fn(),
+  useFormDraftMock: vi.fn(),
   useStorageMock: vi.fn(),
   exportCharacterToJSONMock: vi.fn(),
   exportCharacterToPNGMock: vi.fn(),
@@ -233,15 +235,8 @@ vi.mock("@/hooks/useCharacterGeneration", () => ({
 }))
 
 vi.mock("@/hooks/useFormDraft", () => ({
-  useFormDraft: () => ({
-    hasDraft: false,
-    draftData: null,
-    saveDraft: vi.fn(),
-    clearDraft: vi.fn(),
-    applyDraft: vi.fn(() => null),
-    dismissDraft: vi.fn(),
-    lastSaved: null
-  })
+  useFormDraft: (...args: any[]) => useFormDraftMock(...args),
+  formatDraftAge: () => "just now"
 }))
 
 vi.mock("@/hooks/useSelectedCharacter", () => ({
@@ -339,6 +334,15 @@ describe("CharactersManager first-use onboarding", () => {
     useIsConnectedMock.mockReturnValue(true)
     confirmDangerMock.mockResolvedValue(true)
     tldwClientMock.fetchWithAuth.mockReset()
+    useFormDraftMock.mockImplementation(() => ({
+      hasDraft: false,
+      draftData: null,
+      saveDraft: vi.fn(),
+      clearDraft: vi.fn(),
+      applyDraft: vi.fn(() => null),
+      dismissDraft: vi.fn(),
+      lastSaved: null
+    }))
     useStorageMock.mockImplementation(
       (_key: unknown, defaultValue: unknown) => [
         defaultValue ?? null,
@@ -3294,6 +3298,95 @@ describe("CharactersManager first-use onboarding", () => {
           mood_images: {
             happy: "https://example.test/happy.png",
             smirk: "https://example.test/smirk.png"
+          }
+        }
+      })
+    })
+  }, 30000)
+
+  it("restores draft expression metadata before saving canonical mood image metadata", async () => {
+    const user = userEvent.setup()
+    const draftValues = {
+      name: "Draft Expression Character",
+      system_prompt: "Stay expressive from draft.",
+      greeting: "Hello from draft",
+      description: "Draft expression test",
+      extensions: JSON.stringify({
+        moodImages: {
+          smirk: "https://example.test/draft-smirk.png"
+        }
+      })
+    }
+
+    window.localStorage.setItem(TEMPLATE_CHOOSER_SEEN_KEY, "true")
+    useFormDraftMock.mockImplementation((options?: { formType?: string }) => {
+      if (options?.formType === "create") {
+        return {
+          hasDraft: true,
+          draftData: {
+            formData: draftValues,
+            formType: "create",
+            savedAt: Date.now()
+          },
+          saveDraft: vi.fn(),
+          clearDraft: vi.fn(),
+          applyDraft: vi.fn(() => draftValues),
+          dismissDraft: vi.fn(),
+          lastSaved: null
+        }
+      }
+      return {
+        hasDraft: false,
+        draftData: null,
+        saveDraft: vi.fn(),
+        clearDraft: vi.fn(),
+        applyDraft: vi.fn(() => null),
+        dismissDraft: vi.fn(),
+        lastSaved: null
+      }
+    })
+    useMutationMock.mockImplementation((opts: any) => ({
+      mutate: async (variables: any) => {
+        const result = await opts?.mutationFn?.(variables)
+        await opts?.onSuccess?.(result, variables, undefined)
+        return result
+      },
+      mutateAsync: async (variables: any) => {
+        const result = await opts?.mutationFn?.(variables)
+        await opts?.onSuccess?.(result, variables, undefined)
+        return result
+      },
+      isPending: false
+    }))
+
+    render(<CharactersManager />)
+
+    await user.click(screen.getByRole("button", { name: "New character" }))
+    await user.click(await screen.findByRole("button", { name: "Restore" }))
+    const createSubmitButton = await waitFor(() => {
+      const candidate = screen
+        .getAllByRole("button", { name: "Create character" })
+        .find((button) => button.getAttribute("type") === "submit")
+      expect(candidate).toBeDefined()
+      return candidate as HTMLElement
+    }, { timeout: 15000 })
+    const createFormElement = createSubmitButton.closest("form")
+    expect(createFormElement).not.toBeNull()
+    const createScope = within(createFormElement as HTMLElement)
+
+    await user.click(await createScope.findByRole("button", { name: "Metadata" }))
+    expect(
+      await createScope.findByLabelText("Expression image URL for smirk")
+    ).toHaveValue("https://example.test/draft-smirk.png")
+
+    fireEvent.submit(createFormElement as HTMLFormElement)
+
+    await waitFor(() => {
+      const payload = tldwClientMock.createCharacter.mock.calls.at(-1)?.[0] as any
+      expect(payload?.extensions).toEqual({
+        tldw: {
+          mood_images: {
+            smirk: "https://example.test/draft-smirk.png"
           }
         }
       })
