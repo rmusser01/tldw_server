@@ -933,7 +933,7 @@ def _build_stream_persist_metadata_extra(
     mood_label: str | None,
     mood_confidence: float | None,
     mood_topic: str | None,
-    emote_events: list[CharacterEmoteEvent] | None,
+    emote_events: list[CharacterEmoteEvent] | None = None,
     usage: dict[str, Any] | None,
     visual_identity: Any | None = None,
 ) -> dict[str, Any]:

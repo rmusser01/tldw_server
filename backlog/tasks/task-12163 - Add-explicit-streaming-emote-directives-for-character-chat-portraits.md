@@ -4,7 +4,7 @@ title: Add explicit streaming emote directives for character chat portraits
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-07-06 20:04'
+updated_date: '2026-07-07 07:00'
 labels:
   - frontend
   - character-chat
@@ -57,6 +57,10 @@ Code review follow-up fixed in this branch: Message now skips detectCharacterMoo
 PR review follow-up after rebase on latest dev: addressing Qodo comments for docstrings/types, moving emote prompt business logic to core, capping prompt state lists, pytest markers, and validating persisted emote event offsets.
 
 PR review follow-up complete after focused rebase onto origin/dev. Addressed Qodo comments by adding emote core docstrings/type annotations, moving prompt instruction/state extraction into core Character_Chat logic, capping prompt state lists at 25 with (+N more), adding module-level pytest markers, validating persisted client emote offsets against sanitized UTF-16 content length with non-decreasing offsets, and removing a rebase duplicate mock declaration in the frontend integration test. Verification: backend targeted suite passed 44 tests with 3 warnings; frontend targeted emote suite passed 7 files / 85 tests; apps/tldw-frontend bun run typecheck passed; Bandit touched backend report /tmp/bandit_character_emotes_pr_review.json had no errors and no findings.
+
+CI follow-up reopened after rebasing onto dev eeec7431f3. Current failing checks include PR-owned failures: visual identity metadata helper missing emote_events default, shard coverage missing test_character_emote_directives.py, and OpenAPI fingerprint drift. Other observed failures appear unrelated/baseline: OIDC password policy, Guardian timestamp, Windows zip path handling, Playground THEME_SETTING mock, and UX smoke cockpit layout/draft failures. Investigating and fixing branch-owned failures first.
+
+CI follow-up fixes complete. Addressed current PR-owned failures by adding the emote directive unit test to every chat-character shard list, regenerating apps/tldw-frontend/lib/api/openapi.fingerprint.json from the rebased backend contract, making _build_stream_persist_metadata_extra backward-compatible for visual identity metadata tests, adding THEME_SETTING to the Playground a11y test mock, and hardening the chat cockpit real-server spec to wait for an editable composer and restore cockpit rails after focus mode. Verification: backend visual identity plus emote directive tests passed 22 tests; shard coverage guard passed with 0 new uncovered tests; make openapi-drift-check passed; apps/packages/ui bun run test:playground:a11y passed 10 files / 27 tests; apps/tldw-frontend bun run typecheck passed; Playwright listed the two affected chat cockpit real-server tests successfully. The full UX smoke live-server command was not run locally because it depends on the CI-launched backend/frontend environment. Bandit touched backend report /tmp/bandit_character_emotes_ci_followup.json had no errors and no findings.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
