@@ -652,11 +652,11 @@ test.describe('Smoke Tests - Wayfinding', () => {
     );
 
     await expect(page.getByTestId('settings-navigation')).toBeVisible();
-    await expect(page.getByTestId('settings-current-section')).toBeVisible();
 
     const activeSettingsLink = page.locator(
       '[data-testid^="settings-nav-link-"][aria-current="page"]'
     );
+    await expect(activeSettingsLink).toHaveCount(1);
     await expect(activeSettingsLink.first()).toBeVisible();
 
     const issues = getCriticalIssues(diagnostics);
