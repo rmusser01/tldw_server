@@ -40,7 +40,7 @@ Docs/superpowers/plans/2026-07-07-settings-ia-recovery-preferences-ui-implementa
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implementation plan drafted from the approved settings IA spec. Local plan review checked for placeholder markers, new-route-abstraction scope drift, whitespace errors, and resolved ownership questions: SearchModeSettings to Preferences, OCR defaults to Quick Ingest, SystemSettings to UI, and destructive data controls to Data/Admin. Bandit skipped because only docs/task metadata changed.
+Implementation plan drafted from the approved settings IA spec, then executed on branch `codex/settings-ia-split`. Final verification: focused settings unit/component suite passed (7 files, 34 tests); Stage 6 interaction smoke passed (5/5); tier-1 settings workflow and tier-4 settings workflow exited cleanly but skipped because the live backend preflight at `127.0.0.1:8000` was unavailable; `bun run typecheck` remains blocked by unrelated baseline errors in AudioStudio, ScheduledTasks, Skills, MCP Hub, voice cloning, and E2E fixtures. Bandit skipped because no Python files changed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
