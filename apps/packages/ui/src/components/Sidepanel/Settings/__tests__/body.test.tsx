@@ -56,7 +56,7 @@ describe("SettingsBody", () => {
     expect(screen.getByText("Theme picker")).toBeInTheDocument()
 
     const source = readFileSync(
-      resolve(process.cwd(), "../packages/ui/src/components/Sidepanel/Settings/body.tsx"),
+      resolve(__dirname, "../body.tsx"),
       "utf8"
     )
     expect(source).not.toContain("defaultEmbeddingModelForRag")

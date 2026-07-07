@@ -1,6 +1,7 @@
+import { Modal } from "antd"
 import { useStorage } from "@plasmohq/storage/hook"
 import { useTranslation } from "react-i18next"
-import { Link } from "react-router-dom"
+import { Link, useNavigate } from "react-router-dom"
 
 import {
   useConnectionActions,
@@ -28,6 +29,7 @@ const statusClassName: Record<RowStatus, string> = {
 
 export const SetupRecoverySettings = () => {
   const { t } = useTranslation("settings")
+  const navigate = useNavigate()
   const connection = useConnectionState()
   const { errorKind, isChecking, uxState } = useConnectionUxState()
   const { restartOnboarding } = useConnectionActions()
@@ -122,6 +124,25 @@ export const SetupRecoverySettings = () => {
     }
   ]
 
+  const confirmRestartOnboarding = () => {
+    Modal.confirm({
+      cancelText: t("setupRecovery.restartOnboarding.cancel", "Cancel"),
+      content: t(
+        "setupRecovery.restartOnboarding.confirmDescription",
+        "This reopens the initial setup flow so you can review server and authentication settings."
+      ),
+      okText: t("setupRecovery.restartOnboarding.confirm", "Restart"),
+      onOk: async () => {
+        await restartOnboarding()
+        navigate("/")
+      },
+      title: t(
+        "setupRecovery.restartOnboarding.confirmTitle",
+        "Restart onboarding?"
+      )
+    })
+  }
+
   return (
     <div className="space-y-6 text-sm">
       <div>
@@ -163,7 +184,7 @@ export const SetupRecoverySettings = () => {
 
       <button
         className="rounded-md border border-border px-3 py-1.5 text-sm text-text hover:bg-surface2"
-        onClick={() => void restartOnboarding()}
+        onClick={confirmRestartOnboarding}
         type="button"
       >
         {t("setupRecovery.restartOnboarding.button", "Restart onboarding")}

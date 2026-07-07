@@ -118,8 +118,8 @@ describe("settings nav guardian gating", () => {
 
   it("keeps settings navigation locale keys present across locale directories", () => {
     const localeRoot = path.resolve(
-      process.cwd(),
-      "../packages/ui/src/assets/locale"
+      __dirname,
+      "../../../assets/locale"
     )
     const requiredSettingsKeys = [
       "navigation.setupRecovery",

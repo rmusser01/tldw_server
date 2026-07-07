@@ -7,8 +7,8 @@ describe("settings route split", () => {
   it("registers setup and preferences as separate settings routes", () => {
     const source = readFileSync(
       resolve(
-        process.cwd(),
-        "../packages/ui/src/routes/option-settings-route-registry.tsx"
+        __dirname,
+        "../option-settings-route-registry.tsx"
       ),
       "utf8"
     )
@@ -21,11 +21,11 @@ describe("settings route split", () => {
 
   it("keeps health and processed settings routes inside the shared settings layout", () => {
     const healthSource = readFileSync(
-      resolve(process.cwd(), "../packages/ui/src/routes/option-settings-health.tsx"),
+      resolve(__dirname, "../option-settings-health.tsx"),
       "utf8"
     )
     const processedSource = readFileSync(
-      resolve(process.cwd(), "../packages/ui/src/routes/option-settings-processed.tsx"),
+      resolve(__dirname, "../option-settings-processed.tsx"),
       "utf8"
     )
 
@@ -35,7 +35,10 @@ describe("settings route split", () => {
 
   it("exposes a hosted /settings/data page", () => {
     const dataPageSource = readFileSync(
-      resolve(process.cwd(), "pages/settings/data.tsx"),
+      resolve(
+        __dirname,
+        "../../../../../tldw-frontend/pages/settings/data.tsx"
+      ),
       "utf8"
     )
 
@@ -45,11 +48,14 @@ describe("settings route split", () => {
 
   it("lists setup, preferences, and data settings in hosted smoke inventories", () => {
     const pageMapping = readFileSync(
-      resolve(process.cwd(), "e2e/page-mapping.ts"),
+      resolve(__dirname, "../../../../../tldw-frontend/e2e/page-mapping.ts"),
       "utf8"
     )
     const pageInventory = readFileSync(
-      resolve(process.cwd(), "e2e/smoke/page-inventory.ts"),
+      resolve(
+        __dirname,
+        "../../../../../tldw-frontend/e2e/smoke/page-inventory.ts"
+      ),
       "utf8"
     )
 

@@ -1,8 +1,20 @@
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
-import { describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { SetupRecoverySettings } from "../setup-recovery-settings"
+
+const mocks = vi.hoisted(() => ({
+  modalConfirm: vi.fn(),
+  navigate: vi.fn(),
+  restartOnboarding: vi.fn(async () => undefined)
+}))
+
+vi.mock("antd", () => ({
+  Modal: {
+    confirm: mocks.modalConfirm
+  }
+}))
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -11,8 +23,20 @@ vi.mock("react-i18next", () => ({
   })
 }))
 
+vi.mock("react-router-dom", async () => {
+  const actual =
+    await vi.importActual<typeof import("react-router-dom")>(
+      "react-router-dom"
+    )
+
+  return {
+    ...actual,
+    useNavigate: () => mocks.navigate
+  }
+})
+
 vi.mock("@/hooks/useConnectionState", () => ({
-  useConnectionActions: () => ({ restartOnboarding: vi.fn() }),
+  useConnectionActions: () => ({ restartOnboarding: mocks.restartOnboarding }),
   useConnectionState: () => ({
     isConnected: false,
     knowledgeStatus: "unknown",
@@ -40,6 +64,12 @@ vi.mock("@plasmohq/storage/hook", () => ({
 }))
 
 describe("SetupRecoverySettings", () => {
+  beforeEach(() => {
+    mocks.modalConfirm.mockClear()
+    mocks.navigate.mockClear()
+    mocks.restartOnboarding.mockClear()
+  })
+
   it("shows recovery rows with specialist links and no raw diagnostics payload", () => {
     render(
       <MemoryRouter>
@@ -61,5 +91,30 @@ describe("SetupRecoverySettings", () => {
       screen.getByRole("link", { name: /embedding defaults/i })
     ).toHaveAttribute("href", "/settings/rag")
     expect(screen.queryByText(/\{/)).not.toBeInTheDocument()
+  })
+
+  it("confirms and redirects when restarting onboarding", async () => {
+    render(
+      <MemoryRouter>
+        <SetupRecoverySettings />
+      </MemoryRouter>
+    )
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /restart onboarding/i })
+    )
+
+    expect(mocks.modalConfirm).toHaveBeenCalledTimes(1)
+
+    const confirmOptions = mocks.modalConfirm.mock.calls[0]?.[0] as {
+      onOk?: () => Promise<void> | void
+      title?: string
+    }
+
+    expect(confirmOptions.title).toBe("Restart onboarding?")
+    await confirmOptions.onOk?.()
+
+    expect(mocks.restartOnboarding).toHaveBeenCalledTimes(1)
+    expect(mocks.navigate).toHaveBeenCalledWith("/")
   })
 })
