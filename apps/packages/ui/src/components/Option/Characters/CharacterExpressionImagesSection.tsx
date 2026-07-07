@@ -91,7 +91,14 @@ const readFileAsDataUrl = (file: File): Promise<string> =>
 
 const getRowImageUrl = (value?: AvatarFieldValue): string => {
   if (!value) return ""
-  if (value.mode === "url") return value.url?.trim() || ""
+  if (value.mode === "url") {
+    const trimmed = value.url?.trim() || ""
+    if (!trimmed) return ""
+    if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+      return trimmed
+    }
+    return createImageDataUrl(trimmed) || ""
+  }
   return value.base64 ? createImageDataUrl(value.base64) || "" : ""
 }
 
@@ -136,6 +143,7 @@ function ExpressionRowEditor({
   const [backendsFetched, setBackendsFetched] = React.useState(false)
   const [generating, setGenerating] = React.useState(false)
   const [generationError, setGenerationError] = React.useState<string | null>(null)
+  const initializedPromptRowRef = React.useRef<string | null>(null)
 
   const image = row?.image || { mode: "url", url: "", base64: "" }
   const mode = image.mode || "url"
@@ -170,13 +178,19 @@ function ExpressionRowEditor({
   }, [mode, backendsFetched, backendsLoading, selectedBackend])
 
   React.useEffect(() => {
-    if (mode !== "generate" || prompt) return
+    const promptRowKey = row?.id || String(field.key)
+    if (mode !== "generate") {
+      initializedPromptRowRef.current = null
+      return
+    }
+    if (initializedPromptRowRef.current === promptRowKey) return
 
     const parts = [`Portrait of ${characterName || "the character"}`]
     if (row?.state?.trim()) parts.push(`showing ${row.state.trim()}`)
     if (characterDescription) parts.push(characterDescription)
     setPrompt(parts.join(", "))
-  }, [mode, prompt, row?.state, characterName, characterDescription])
+    initializedPromptRowRef.current = promptRowKey
+  }, [mode, field.key, row?.id, row?.state, characterName, characterDescription])
 
   const setRowImage = (nextImage: AvatarFieldValue) => {
     const rowId = row?.id
@@ -552,37 +566,6 @@ export function CharacterExpressionImagesSection({
         )}
       </Form.List>
 
-      <Form.Item
-        name="_expression_images_validation"
-        dependencies={["expression_images", "extensions"]}
-        hidden
-        rules={[
-          {
-            validator: async () => {
-              const currentRows = (
-                (form.getFieldValue("expression_images") || []) as Partial<
-                  ExpressionImageRow
-                >[]
-              ).map(toEffectiveRow)
-              const currentNormalizedRows = normalizeExpressionImageRows(currentRows)
-              if (currentNormalizedRows.errors.length > 0) {
-                throw new Error("Fix expression image rows before saving.")
-              }
-              if (
-                hasInvalidExtensionsJsonForMerge(
-                  form.getFieldValue("extensions"),
-                  currentNormalizedRows.rows
-                )
-              ) {
-                throw new Error(INVALID_EXTENSIONS_JSON_MESSAGE)
-              }
-            }
-          }
-        ]}
-      >
-        <Input />
-      </Form.Item>
-
       {invalidExtensionsJson ? (
         <p role="alert" className="text-xs text-danger">
           {INVALID_EXTENSIONS_JSON_MESSAGE}
@@ -638,5 +621,42 @@ export function CharacterExpressionImagesSection({
         </Button>
       </div>
     </section>
+  )
+}
+
+export function CharacterExpressionImagesValidationItem() {
+  const form = Form.useFormInstance()
+
+  return (
+    <Form.Item
+      name="_expression_images_validation"
+      dependencies={["expression_images", "extensions"]}
+      hidden
+      rules={[
+        {
+          validator: async () => {
+            const currentRows = (
+              (form.getFieldValue("expression_images") || []) as Partial<
+                ExpressionImageRow
+              >[]
+            ).map(toEffectiveRow)
+            const currentNormalizedRows = normalizeExpressionImageRows(currentRows)
+            if (currentNormalizedRows.errors.length > 0) {
+              throw new Error("Fix expression image rows before saving.")
+            }
+            if (
+              hasInvalidExtensionsJsonForMerge(
+                form.getFieldValue("extensions"),
+                currentNormalizedRows.rows
+              )
+            ) {
+              throw new Error(INVALID_EXTENSIONS_JSON_MESSAGE)
+            }
+          }
+        }
+      ]}
+    >
+      <Input />
+    </Form.Item>
   )
 }

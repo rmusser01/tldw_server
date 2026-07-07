@@ -9,6 +9,7 @@ import { Alert } from "@/components/ui/primitives"
 import { FirstRunBanner } from "@/components/PersonaGarden/FirstRunBanner"
 import { useFirstRunCheck } from "@/hooks/useFirstRunCheck"
 import { getCharacterMoodImagesFromExtensions } from "@/utils/character-mood"
+import { buildCharactersRoute } from "@/utils/characters-route"
 import { ModelRecommendationsPanel } from "./ModelRecommendationsPanel"
 import type {
   ModelRecommendation,
@@ -67,12 +68,7 @@ const getStableCharacterNudgeScope = ({
 }: CharacterExpressionNudgeScopeInput): string | null => {
   if (!character || typeof character !== "object") return null
   const record = character as Record<string, unknown>
-  const characterId = readFirstStableRecordValue(record, [
-    "id",
-    "character_id",
-    "characterId",
-    "slug"
-  ])
+  const characterId = getStableCharacterRouteId(character)
   if (!characterId) return null
 
   const serverId =
@@ -99,6 +95,31 @@ const getStableCharacterNudgeScope = ({
   if (userId) parts.push("user", userId)
   parts.push("character", characterId)
   return parts.join(":")
+}
+
+const getStableCharacterRouteId = (character: unknown): string | null => {
+  if (!character || typeof character !== "object") return null
+  return readFirstStableRecordValue(character as Record<string, unknown>, [
+    "id",
+    "character_id",
+    "characterId",
+    "slug"
+  ])
+}
+
+const getSessionCharacterNudgeScope = (
+  selectedCharacter: unknown,
+  selectedCharacterName: string | null
+): string | null => {
+  const name = normalizeStableScopeValue(selectedCharacterName)
+  if (name) return name
+  if (!selectedCharacter || typeof selectedCharacter !== "object") return null
+  return readFirstStableRecordValue(selectedCharacter as Record<string, unknown>, [
+    "name",
+    "title",
+    "display_name",
+    "displayName"
+  ])
 }
 
 const buildCharacterExpressionNudgeDismissKey = (
@@ -247,7 +268,9 @@ function CharacterExpressionSetupNudge({
     [scope]
   )
   const [dismissedKey, setDismissedKey] = React.useState<string | null>(null)
-  const [sessionDismissed, setSessionDismissed] = React.useState(false)
+  const [sessionDismissedScopes, setSessionDismissedScopes] = React.useState<
+    Set<string>
+  >(() => new Set())
 
   const persistedDismissed = React.useMemo(() => {
     if (!dismissKey) return false
@@ -256,15 +279,40 @@ function CharacterExpressionSetupNudge({
   }, [dismissKey, dismissedKey])
 
   const characterName = normalizeStableScopeValue(selectedCharacterName)
+  const characterRouteId = React.useMemo(
+    () => getStableCharacterRouteId(selectedCharacter),
+    [selectedCharacter]
+  )
+  const editExpressionsRoute = React.useMemo(
+    () =>
+      buildCharactersRoute({
+        from: "chat-emote-nudge",
+        focus: "expressions",
+        characterId: characterRouteId
+      }),
+    [characterRouteId]
+  )
+  const sessionDismissScope = React.useMemo(
+    () => getSessionCharacterNudgeScope(selectedCharacter, selectedCharacterName),
+    [selectedCharacter, selectedCharacterName]
+  )
+  const sessionDismissed =
+    Boolean(sessionDismissScope) && sessionDismissedScopes.has(sessionDismissScope)
 
   const handleDismiss = React.useCallback(() => {
     if (!dismissKey) {
-      setSessionDismissed(true)
+      if (sessionDismissScope) {
+        setSessionDismissedScopes((current) => {
+          const next = new Set(current)
+          next.add(sessionDismissScope)
+          return next
+        })
+      }
       return
     }
     persistCharacterExpressionNudgeDismissedState(dismissKey)
     setDismissedKey(dismissKey)
-  }, [dismissKey])
+  }, [dismissKey, sessionDismissScope])
 
   if (
     !selectedCharacter ||
@@ -295,7 +343,7 @@ function CharacterExpressionSetupNudge({
       </span>
       <div className="flex items-center gap-2">
         <Link
-          to="/characters?from=chat-emote-nudge&focus=expressions"
+          to={editExpressionsRoute}
           className="rounded border border-primary/30 bg-surface px-2 py-0.5 text-[11px] font-medium text-primaryStrong hover:bg-primary/10"
         >
           {t("playground:composer.expressionNudgeAction", "Edit expressions")}

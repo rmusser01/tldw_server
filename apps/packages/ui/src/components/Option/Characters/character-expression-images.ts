@@ -54,11 +54,10 @@ const expressionImageSource = (image: AvatarFieldValue): string | null => {
   if (typeof source !== "string") return null
   const trimmed = source.trim()
   if (!trimmed) return null
-  if (
-    trimmed.startsWith("data:image/") ||
-    trimmed.startsWith("http://") ||
-    trimmed.startsWith("https://")
-  ) {
+  if (trimmed.startsWith("data:image/")) {
+    return createImageDataUrl(trimmed)
+  }
+  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
     return trimmed
   }
   return createImageDataUrl(trimmed)

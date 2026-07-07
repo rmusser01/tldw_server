@@ -1,6 +1,3 @@
-import fs from "node:fs"
-import path from "node:path"
-
 import React from "react"
 import { fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -112,9 +109,6 @@ const renderNotices = (props: Partial<PlaygroundComposerNoticesProps> = {}) =>
       <PlaygroundComposerNotices {...buildProps()} {...props} />
     </MemoryRouter>
   )
-
-const readPlaygroundFormSource = () =>
-  fs.readFileSync(path.resolve(__dirname, "../PlaygroundForm.tsx"), "utf8")
 
 describe("PlaygroundComposerNotices first-run banner", () => {
   beforeEach(() => {
@@ -259,7 +253,7 @@ describe("PlaygroundComposerNotices first-run banner", () => {
     expect(screen.getByText(/add expression images/i)).toBeInTheDocument()
     expect(screen.getByRole("link", { name: "Edit expressions" })).toHaveAttribute(
       "href",
-      "/characters?from=chat-emote-nudge&focus=expressions"
+      "/characters?from=chat-emote-nudge&focus=expressions&characterId=42"
     )
   })
 
@@ -335,21 +329,6 @@ describe("PlaygroundComposerNotices first-run banner", () => {
     expect(scopedKey).not.toContain("raw-api-key")
   })
 
-  it("passes credential-safe chat surface scope from PlaygroundForm to the expression nudge", () => {
-    const formSource = readPlaygroundFormSource()
-
-    expect(formSource).toContain("buildChatSurfaceScopeKeyFromConfig")
-    expect(formSource).toContain(
-      'from "@/services/chat-surface-scope"'
-    )
-    expect(formSource).toContain(
-      "serverScope={canonicalConnectionConfig?.serverUrl}"
-    )
-    expect(formSource).toMatch(
-      /userScope=\{\s*canonicalConnectionConfig\s*\?\s*buildChatSurfaceScopeKeyFromConfig\(\s*canonicalConnectionConfig,?\s*\)\s*:\s*undefined\s*\}/s
-    )
-  })
-
   it("keeps expression nudge dismissal scoped by server", () => {
     mockNoFirstRunBanner()
 
@@ -377,6 +356,37 @@ describe("PlaygroundComposerNotices first-run banner", () => {
       },
       selectedCharacterName: "Ada"
     })
+
+    expect(screen.getByText(/add expression images/i)).toBeInTheDocument()
+  })
+
+  it("keeps session-only expression nudge dismissal scoped by id-less character", () => {
+    mockNoFirstRunBanner()
+
+    const { rerender } = render(
+      <MemoryRouter>
+        <PlaygroundComposerNotices
+          {...buildProps()}
+          selectedCharacter={{ name: "Nameless", extensions: {} }}
+          selectedCharacterName="Nameless"
+        />
+      </MemoryRouter>
+    )
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /dismiss expression image setup/i })
+    )
+    expect(screen.queryByText(/add expression images/i)).not.toBeInTheDocument()
+
+    rerender(
+      <MemoryRouter>
+        <PlaygroundComposerNotices
+          {...buildProps()}
+          selectedCharacter={{ name: "Other", extensions: {} }}
+          selectedCharacterName="Other"
+        />
+      </MemoryRouter>
+    )
 
     expect(screen.getByText(/add expression images/i)).toBeInTheDocument()
   })

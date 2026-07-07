@@ -6,7 +6,10 @@ import {
   expressionRowsToMoodImages,
   normalizeExpressionImageRows
 } from "../character-expression-images"
-import { applyCharacterMetadataToExtensions } from "../utils"
+import {
+  applyCharacterMetadataToExtensions,
+  buildCharacterPayload
+} from "../utils"
 
 describe("character expression image rows", () => {
   it("creates starter rows plus configured custom rows", () => {
@@ -138,6 +141,26 @@ describe("character expression image rows", () => {
     ])
   })
 
+  it("blocks non-allowlisted image data URLs", () => {
+    const result = normalizeExpressionImageRows([
+      {
+        id: "svg",
+        state: "smirk",
+        image: {
+          mode: "url",
+          url: "data:image/svg+xml;base64,PHN2Zy8+",
+          base64: ""
+        },
+        starter: false
+      }
+    ])
+
+    expect(result.rows).toEqual([])
+    expect(result.errors).toEqual([
+      expect.objectContaining({ id: "svg", reason: "invalid-image" })
+    ])
+  })
+
   it("requires an image when a starter row is renamed to a custom expression", () => {
     const result = normalizeExpressionImageRows([
       {
@@ -234,5 +257,77 @@ describe("character expression image rows", () => {
         }
       }
     })
+  })
+
+  it("returns an empty extensions object when clearing previously saved mood images", () => {
+    const result = applyCharacterMetadataToExtensions(
+      { tldw: { mood_images: { happy: "https://example.test/happy.png" } } },
+      {
+        preset: DEFAULT_CHARACTER_PROMPT_PRESET,
+        expressionRows: expressionRowsFromExtensions({})
+      }
+    )
+
+    expect(result).toEqual({})
+  })
+
+  it("separates expression row validation errors from extensions JSON errors", () => {
+    try {
+      buildCharacterPayload({
+        name: "Ada",
+        system_prompt: "Stay in character.",
+        greeting: "Hello.",
+        extensions: "{}",
+        expression_images: [
+          {
+            id: "missing-image",
+            state: "smirk",
+            image: { mode: "url", url: "", base64: "" },
+            starter: false
+          }
+        ]
+      })
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error)
+      expect((error as Error).message).toBe(
+        "Fix expression image rows before saving."
+      )
+      expect((error as { code?: string }).code).toBe("invalid-expression-images")
+      return
+    }
+
+    throw new Error("Expected expression row validation to fail")
+  })
+
+  it("marks invalid extensions JSON errors with a structured code", () => {
+    try {
+      buildCharacterPayload({
+        name: "Ada",
+        system_prompt: "Stay in character.",
+        greeting: "Hello.",
+        extensions: "{not valid json",
+        expression_images: [
+          {
+            id: "thinking",
+            state: "thinking",
+            image: {
+              mode: "url",
+              url: "https://example.test/thinking.png",
+              base64: ""
+            },
+            starter: false
+          }
+        ]
+      })
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error)
+      expect((error as Error).message).toBe(
+        "Fix Extensions JSON before saving expression images."
+      )
+      expect((error as { code?: string }).code).toBe("invalid-extensions-json")
+      return
+    }
+
+    throw new Error("Expected extensions JSON validation to fail")
   })
 })

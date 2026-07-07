@@ -6,7 +6,10 @@ import type { TFunction } from "i18next"
 import type { CharacterField } from "@/services/character-generation"
 import { CHARACTER_PROMPT_PRESETS } from "@/data/character-prompt-presets"
 import { AvatarField, extractAvatarValues } from "./AvatarField"
-import { CharacterExpressionImagesSection } from "./CharacterExpressionImagesSection"
+import {
+  CharacterExpressionImagesSection,
+  CharacterExpressionImagesValidationItem
+} from "./CharacterExpressionImagesSection"
 import { CharacterPreview } from "./CharacterPreview"
 import { GenerateFieldButton } from "./GenerateFieldButton"
 import { VisualIdentityPackPanel } from "@/components/Common/VisualIdentity/VisualIdentityPackPanel"
@@ -1063,6 +1066,7 @@ export const CharacterEditorForm: React.FC<CharacterEditorFormProps> = ({
       {renderDescriptionField()}
       {renderTagsField()}
       {renderAvatarField()}
+      <CharacterExpressionImagesValidationItem />
       {renderAdvancedFields()}
 
       <button

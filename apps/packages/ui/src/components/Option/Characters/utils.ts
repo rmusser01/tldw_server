@@ -1340,6 +1340,34 @@ export const removeLegacyGenerationKeys = (target: Record<string, any>) => {
   delete target.stopSequences
 }
 
+export type CharacterPayloadValidationErrorCode =
+  | "invalid-extensions-json"
+  | "invalid-expression-images"
+
+export class CharacterPayloadValidationError extends Error {
+  code: CharacterPayloadValidationErrorCode
+
+  constructor(code: CharacterPayloadValidationErrorCode, message: string) {
+    super(message)
+    this.name = "CharacterPayloadValidationError"
+    this.code = code
+  }
+}
+
+type CharacterMetadataMergeFailure = {
+  __characterMetadataError: "invalid-expression-images"
+}
+
+const invalidExpressionImagesFailure = (): CharacterMetadataMergeFailure => ({
+  __characterMetadataError: "invalid-expression-images"
+})
+
+const isCharacterMetadataMergeFailure = (
+  value: unknown
+): value is CharacterMetadataMergeFailure =>
+  isPlainObject(value) &&
+  value.__characterMetadataError === "invalid-expression-images"
+
 export const applyCharacterMetadataToExtensions = (
   rawExtensions: unknown,
   params: {
@@ -1348,7 +1376,12 @@ export const applyCharacterMetadataToExtensions = (
     generation?: CharacterGenerationSettings
     expressionRows?: ExpressionImageRow[]
   }
-): Record<string, any> | string | undefined | null => {
+):
+  | Record<string, any>
+  | string
+  | undefined
+  | null
+  | CharacterMetadataMergeFailure => {
   const parsed = parseExtensionsObject(rawExtensions)
   const normalizedExpressionRows = Array.isArray(params.expressionRows)
     ? normalizeExpressionImageRows(params.expressionRows)
@@ -1370,6 +1403,9 @@ export const applyCharacterMetadataToExtensions = (
     rawExtensions.trim().length > 0 &&
     parsed === null
 
+  if (shouldMergeExpressionImages && normalizedExpressionRows?.errors.length) {
+    return invalidExpressionImagesFailure()
+  }
   if (hadRawString && shouldMergeExpressionImages) return null
   if (hadRawString) {
     return rawExtensions as string
@@ -1440,9 +1476,6 @@ export const applyCharacterMetadataToExtensions = (
   }
 
   if (shouldMergeExpressionImages) {
-    if (!normalizedExpressionRows || normalizedExpressionRows.errors.length > 0) {
-      return null
-    }
     next = mergeCharacterMoodImagesIntoExtensions(next, expressionMoodImages)
   }
 
@@ -1450,7 +1483,7 @@ export const applyCharacterMetadataToExtensions = (
     return next
   }
 
-  return undefined
+  return shouldMergeExpressionImages ? {} : undefined
 }
 
 export const hasAdvancedData = (record: any, extensionsValue: string): boolean => {
@@ -1549,8 +1582,17 @@ export const buildCharacterPayload = (values: any): Record<string, any> => {
     generation: generationSettings,
     expressionRows: values.expression_images
   })
+  if (isCharacterMetadataMergeFailure(mergedExtensions)) {
+    throw new CharacterPayloadValidationError(
+      "invalid-expression-images",
+      "Fix expression image rows before saving."
+    )
+  }
   if (mergedExtensions === null) {
-    throw new Error("Invalid extensions JSON. Fix metadata before saving expression images.")
+    throw new CharacterPayloadValidationError(
+      "invalid-extensions-json",
+      "Fix Extensions JSON before saving expression images."
+    )
   }
   if (typeof mergedExtensions !== "undefined") {
     payload.extensions = mergedExtensions

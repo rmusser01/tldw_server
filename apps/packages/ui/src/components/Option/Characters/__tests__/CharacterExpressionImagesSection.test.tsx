@@ -4,7 +4,10 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
-import { CharacterExpressionImagesSection } from "../CharacterExpressionImagesSection"
+import {
+  CharacterExpressionImagesSection,
+  CharacterExpressionImagesValidationItem
+} from "../CharacterExpressionImagesSection"
 import { expressionRowsFromExtensions } from "../character-expression-images"
 import type { ExpressionImageRow } from "../character-expression-images"
 
@@ -218,6 +221,26 @@ describe("CharacterExpressionImagesSection", () => {
     expect(screen.getByText("Custom expressions need an image.")).toBeInTheDocument()
   })
 
+  it("does not preview non-allowlisted image data URLs in URL mode", () => {
+    renderSection([
+      {
+        id: "smirk",
+        state: "smirk",
+        starter: false,
+        image: {
+          mode: "url",
+          url: "data:image/svg+xml;base64,PHN2Zy8+",
+          base64: ""
+        }
+      }
+    ])
+
+    expect(
+      screen.queryByRole("img", { name: "smirk thumbnail" })
+    ).not.toBeInTheDocument()
+    expect(screen.getAllByText("No image").length).toBeGreaterThan(0)
+  })
+
   it("blocks expression form submit when rows are invalid", async () => {
     const onFinish = vi.fn()
     const onFinishFailed = vi.fn()
@@ -238,6 +261,7 @@ describe("CharacterExpressionImagesSection", () => {
         onFinishFailed={onFinishFailed}
       >
         <CharacterExpressionImagesSection characterName="Mira" />
+        <CharacterExpressionImagesValidationItem />
         <button type="submit">Save</button>
       </Form>
     )
@@ -276,6 +300,7 @@ describe("CharacterExpressionImagesSection", () => {
           <input />
         </Form.Item>
         <CharacterExpressionImagesSection characterName="Mira" />
+        <CharacterExpressionImagesValidationItem />
         <button type="submit">Save</button>
       </Form>
     )
@@ -355,6 +380,34 @@ describe("CharacterExpressionImagesSection", () => {
       url: "https://example.test/smirk.png",
       base64: ""
     })
+  })
+
+  it("does not refill the generation prompt after the user clears it", async () => {
+    getImageBackendsMock.mockResolvedValue([
+      { id: "mock-image", name: "Mock image", is_configured: true }
+    ] as any)
+
+    renderSection([
+      {
+        id: "smirk",
+        state: "smirk",
+        starter: false,
+        image: { mode: "url", url: "", base64: "" }
+      }
+    ])
+
+    fireEvent.click(screen.getByText("Generate"))
+
+    const prompt = (await screen.findByLabelText(
+      "Generation prompt for smirk"
+    )) as HTMLTextAreaElement
+    await waitFor(() =>
+      expect(prompt).toHaveValue("Portrait of Mira, showing smirk")
+    )
+
+    await userEvent.clear(prompt)
+
+    await waitFor(() => expect(prompt).toHaveValue(""))
   })
 
   it("applies uploaded images by stable row id after earlier rows are removed", async () => {
