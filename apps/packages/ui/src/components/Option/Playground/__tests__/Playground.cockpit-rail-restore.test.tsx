@@ -161,6 +161,17 @@ describe("Playground cockpit rail restore tabs", () => {
     const runtimeTab = screen.getByRole("tab", {
       name: /restore runtime sidechannel/i,
     });
+    const contextPanel = document.getElementById(
+      contextTab.getAttribute("aria-controls") ?? "",
+    );
+    const runtimePanel = document.getElementById(
+      runtimeTab.getAttribute("aria-controls") ?? "",
+    );
+
+    expect(contextPanel).toHaveAttribute("role", "tabpanel");
+    expect(contextPanel).not.toBeVisible();
+    expect(runtimePanel).toHaveAttribute("role", "tabpanel");
+    expect(runtimePanel).not.toBeVisible();
 
     fireEvent.click(contextTab);
     fireEvent.click(runtimeTab);

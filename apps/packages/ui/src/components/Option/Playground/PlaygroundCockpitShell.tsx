@@ -268,7 +268,7 @@ export const PlaygroundCockpitShell = ({
               type="button"
               role="tab"
               aria-selected={leftRailVisible && visibleMobilePanel === "context"}
-              aria-controls={leftRailVisible ? mobileContextPanelId : undefined}
+              aria-controls={mobileContextPanelId}
               aria-expanded={leftRailVisible}
               onClick={() => {
                 if (!leftRailVisible) {
@@ -291,7 +291,7 @@ export const PlaygroundCockpitShell = ({
               type="button"
               role="tab"
               aria-selected={rightRailVisible && visibleMobilePanel === "runtime"}
-              aria-controls={rightRailVisible ? mobileRuntimePanelId : undefined}
+              aria-controls={mobileRuntimePanelId}
               aria-expanded={rightRailVisible}
               onClick={() => {
                 if (!rightRailVisible) {
@@ -351,36 +351,32 @@ export const PlaygroundCockpitShell = ({
           >
             {mobilePanelSummary}
           </p>
-          {leftRailVisible ? (
-            <section
-              id={mobileContextPanelId}
-              role="tabpanel"
-              aria-labelledby={mobileContextTabId}
-              aria-describedby={mobilePanelSummaryId}
-              hidden={visibleMobilePanel !== "context"}
-              aria-hidden={visibleMobilePanel !== "context"}
-              className={`max-h-[30vh] overflow-y-auto rounded-md border border-border bg-surface p-2 ${
-                visibleMobilePanel !== "context" ? "hidden" : ""
-              }`}
-            >
-              {leftRail}
-            </section>
-          ) : null}
-          {rightRailVisible ? (
-            <section
-              id={mobileRuntimePanelId}
-              role="tabpanel"
-              aria-labelledby={mobileRuntimeTabId}
-              aria-describedby={mobilePanelSummaryId}
-              hidden={visibleMobilePanel !== "runtime"}
-              aria-hidden={visibleMobilePanel !== "runtime"}
-              className={`max-h-[30vh] overflow-y-auto rounded-md border border-border bg-surface p-2 ${
-                visibleMobilePanel !== "runtime" ? "hidden" : ""
-              }`}
-            >
-              {rightRail}
-            </section>
-          ) : null}
+          <section
+            id={mobileContextPanelId}
+            role="tabpanel"
+            aria-labelledby={mobileContextTabId}
+            aria-describedby={mobilePanelSummaryId}
+            hidden={!leftRailVisible || visibleMobilePanel !== "context"}
+            aria-hidden={!leftRailVisible || visibleMobilePanel !== "context"}
+            className={`max-h-[30vh] overflow-y-auto rounded-md border border-border bg-surface p-2 ${
+              !leftRailVisible || visibleMobilePanel !== "context" ? "hidden" : ""
+            }`}
+          >
+            {leftRail}
+          </section>
+          <section
+            id={mobileRuntimePanelId}
+            role="tabpanel"
+            aria-labelledby={mobileRuntimeTabId}
+            aria-describedby={mobilePanelSummaryId}
+            hidden={!rightRailVisible || visibleMobilePanel !== "runtime"}
+            aria-hidden={!rightRailVisible || visibleMobilePanel !== "runtime"}
+            className={`max-h-[30vh] overflow-y-auto rounded-md border border-border bg-surface p-2 ${
+              !rightRailVisible || visibleMobilePanel !== "runtime" ? "hidden" : ""
+            }`}
+          >
+            {rightRail}
+          </section>
         </div>
       )}
 
