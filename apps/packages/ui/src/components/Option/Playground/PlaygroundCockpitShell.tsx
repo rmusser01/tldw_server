@@ -128,13 +128,12 @@ export const PlaygroundCockpitShell = ({
   const { t } = useTranslation("playground");
   const [uncontrolledMobilePanel, setUncontrolledMobilePanel] =
     React.useState<PlaygroundCockpitMobilePanel>("context");
-  const mobilePanelIdPrefix = React.useId();
   const focusMode = mode === "focus";
-  const mobileContextTabId = `${mobilePanelIdPrefix}-mobile-context-tab`;
-  const mobileRuntimeTabId = `${mobilePanelIdPrefix}-mobile-runtime-tab`;
-  const mobileContextPanelId = `${mobilePanelIdPrefix}-mobile-context-panel`;
-  const mobileRuntimePanelId = `${mobilePanelIdPrefix}-mobile-runtime-panel`;
-  const mobilePanelSummaryId = `${mobilePanelIdPrefix}-mobile-panel-summary`;
+  const mobileContextTabId = "playground-cockpit-mobile-context-tab";
+  const mobileRuntimeTabId = "playground-cockpit-mobile-runtime-tab";
+  const mobileContextPanelId = "playground-cockpit-mobile-context-panel";
+  const mobileRuntimePanelId = "playground-cockpit-mobile-runtime-panel";
+  const mobilePanelSummaryId = "playground-cockpit-mobile-panel-summary";
   const showLeftRail = !focusMode && leftRailVisible;
   const showRightRail = !focusMode && rightRailVisible;
   const resolvedMobilePanel =
@@ -236,6 +235,14 @@ export const PlaygroundCockpitShell = ({
     : ({
         "--cockpit-grid-columns": cockpitGridColumns,
       } as React.CSSProperties);
+  const showLeftRestore = !focusMode && !leftRailVisible;
+  const showRightRestore = !focusMode && !rightRailVisible;
+  const leftRestoreWrapperClassName = showLeftRestore
+    ? COCKPIT_LEFT_RESTORE_WRAPPER_CLASS
+    : "absolute left-0 top-[clamp(18rem,36vh,24rem)] z-50 hidden";
+  const rightRestoreWrapperClassName = showRightRestore
+    ? "absolute right-0 top-1/2 z-50 hidden -translate-y-1/2 lg:inline-flex"
+    : "absolute right-0 top-1/2 z-50 hidden -translate-y-1/2";
 
   return (
     <div
@@ -450,45 +457,43 @@ export const PlaygroundCockpitShell = ({
           </aside>
         )}
 
-        {!focusMode && !leftRailVisible ? (
-          <CockpitTooltipButton
-            type="button"
-            data-testid="playground-cockpit-left-rail-restore"
-            aria-label={restoreContextSidechannelLabel}
-            aria-controls="playground-cockpit-left-rail"
-            aria-expanded="false"
-            onClick={() => onLeftRailVisibleChange?.(true)}
-            tooltip={restoreContextSidechannelLabel}
-            tooltipPlacement="right"
-            wrapperClassName={COCKPIT_LEFT_RESTORE_WRAPPER_CLASS}
-            className="inline-flex h-24 w-8 flex-col items-center justify-center gap-1.5 rounded-r-md border-y border-r border-border bg-surface2/95 py-1.5 text-[10px] font-semibold text-text shadow-md backdrop-blur-sm hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
-          >
-            <PanelLeftOpen className="h-3.5 w-3.5" aria-hidden="true" />
-            <span className="rotate-180 whitespace-nowrap leading-none [writing-mode:vertical-rl]">
-              {contextRailTabLabel}
-            </span>
-          </CockpitTooltipButton>
-        ) : null}
+        <CockpitTooltipButton
+          type="button"
+          data-testid="playground-cockpit-left-rail-restore"
+          aria-label={restoreContextSidechannelLabel}
+          aria-controls="playground-cockpit-left-rail"
+          aria-expanded="false"
+          hidden={!showLeftRestore}
+          onClick={() => onLeftRailVisibleChange?.(true)}
+          tooltip={restoreContextSidechannelLabel}
+          tooltipPlacement="right"
+          wrapperClassName={leftRestoreWrapperClassName}
+          className="inline-flex h-24 w-8 flex-col items-center justify-center gap-1.5 rounded-r-md border-y border-r border-border bg-surface2/95 py-1.5 text-[10px] font-semibold text-text shadow-md backdrop-blur-sm hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+        >
+          <PanelLeftOpen className="h-3.5 w-3.5" aria-hidden="true" />
+          <span className="rotate-180 whitespace-nowrap leading-none [writing-mode:vertical-rl]">
+            {contextRailTabLabel}
+          </span>
+        </CockpitTooltipButton>
 
-        {!focusMode && !rightRailVisible ? (
-          <CockpitTooltipButton
-            type="button"
-            data-testid="playground-cockpit-right-rail-restore"
-            aria-label={restoreRuntimeSidechannelLabel}
-            aria-controls="playground-cockpit-right-rail"
-            aria-expanded="false"
-            onClick={() => onRightRailVisibleChange?.(true)}
-            tooltip={restoreRuntimeSidechannelLabel}
-            tooltipPlacement="left"
-            wrapperClassName="absolute right-0 top-1/2 z-50 hidden -translate-y-1/2 lg:inline-flex"
-            className="inline-flex h-32 w-9 flex-col items-center justify-center gap-2 rounded-l-md border-y border-l border-border bg-surface2/95 py-2 text-[11px] font-semibold text-text shadow-md backdrop-blur-sm hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
-          >
-            <span className="whitespace-nowrap leading-none [writing-mode:vertical-rl]">
-              {runtimeRailTabLabel}
-            </span>
-            <PanelRightOpen className="h-3.5 w-3.5" aria-hidden="true" />
-          </CockpitTooltipButton>
-        ) : null}
+        <CockpitTooltipButton
+          type="button"
+          data-testid="playground-cockpit-right-rail-restore"
+          aria-label={restoreRuntimeSidechannelLabel}
+          aria-controls="playground-cockpit-right-rail"
+          aria-expanded="false"
+          hidden={!showRightRestore}
+          onClick={() => onRightRailVisibleChange?.(true)}
+          tooltip={restoreRuntimeSidechannelLabel}
+          tooltipPlacement="left"
+          wrapperClassName={rightRestoreWrapperClassName}
+          className="inline-flex h-32 w-9 flex-col items-center justify-center gap-2 rounded-l-md border-y border-l border-border bg-surface2/95 py-2 text-[11px] font-semibold text-text shadow-md backdrop-blur-sm hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+        >
+          <span className="whitespace-nowrap leading-none [writing-mode:vertical-rl]">
+            {runtimeRailTabLabel}
+          </span>
+          <PanelRightOpen className="h-3.5 w-3.5" aria-hidden="true" />
+        </CockpitTooltipButton>
       </div>
 
     </div>
