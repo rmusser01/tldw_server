@@ -88,9 +88,10 @@ const DEFAULT_QUESTION_PLAN_ROWS: QuestionPlanRowState[] = [
   { question_type: "matching", label: "Matching", enabled: false, count: 1, pair_count: 4 }
 ]
 
-const coerceInputNumber = (value: number | string | null): number | null => {
+const sanitizeInputNumber = (value: number | string | null, min: number, max: number): number | null => {
   const next = typeof value === "number" ? value : typeof value === "string" ? Number(value) : null
-  return next != null && Number.isFinite(next) ? next : null
+  if (next == null || !Number.isFinite(next)) return null
+  return Math.min(max, Math.max(min, Math.round(next)))
 }
 
 const DIFFICULTY_OPTIONS: Array<{
@@ -1227,11 +1228,14 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({ onNavigateToTake, onNa
                       <InputNumber
                         min={1}
                         max={100}
+                        precision={0}
+                        step={1}
                         value={row.count}
+                        aria-label={`${row.label} count`}
                         className="w-full"
                         disabled={generationInFlight || !row.enabled}
                         onChange={(value) => {
-                          const next = coerceInputNumber(value)
+                          const next = sanitizeInputNumber(value, 1, 100)
                           if (next != null) {
                             updateQuestionPlanRow(row.question_type, { count: next })
                           }
@@ -1249,11 +1253,14 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({ onNavigateToTake, onNa
                         <InputNumber
                           min={2}
                           max={6}
+                          precision={0}
+                          step={1}
                           value={row.option_count}
+                          aria-label={`${row.label} options`}
                           className="w-full"
                           disabled={generationInFlight || !row.enabled}
                           onChange={(value) => {
-                            const next = coerceInputNumber(value)
+                            const next = sanitizeInputNumber(value, 2, 6)
                             if (next != null) {
                               updateQuestionPlanRow(row.question_type, { option_count: next })
                             }
@@ -1270,11 +1277,14 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({ onNavigateToTake, onNa
                         <InputNumber
                           min={2}
                           max={6}
+                          precision={0}
+                          step={1}
                           value={row.pair_count}
+                          aria-label={`${row.label} pairs`}
                           className="w-full"
                           disabled={generationInFlight || !row.enabled}
                           onChange={(value) => {
-                            const next = coerceInputNumber(value)
+                            const next = sanitizeInputNumber(value, 2, 6)
                             if (next != null) {
                               updateQuestionPlanRow(row.question_type, { pair_count: next })
                             }

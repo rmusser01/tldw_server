@@ -107,6 +107,10 @@ const setNumber = (testId: string, value: number) => {
   fireEvent.change(getInput(testId), { target: { value: String(value) } })
 }
 
+const setNumberText = (testId: string, value: string) => {
+  fireEvent.change(getInput(testId), { target: { value } })
+}
+
 const selectDefaultMedia = async () => {
   await waitFor(() => {
     expect(screen.getByText("1 media items available")).toBeInTheDocument()
@@ -176,6 +180,15 @@ describe("GenerateTab question plan controls", () => {
     expect(getInput("generate-question-plan-pair-count-matching")).toHaveValue("4")
 
     expect(screen.getByTestId("generate-question-plan-total")).toHaveTextContent("Total: 10")
+  })
+
+  it("gives repeated numeric controls row-specific accessible names", () => {
+    renderWithQueryClient()
+
+    expect(screen.getByRole("spinbutton", { name: /Multiple Choice count/i })).toHaveValue("5")
+    expect(screen.getByRole("spinbutton", { name: /Multiple Choice options/i })).toHaveValue("4")
+    expect(screen.getByRole("spinbutton", { name: /True\/False count/i })).toHaveValue("3")
+    expect(screen.getByRole("spinbutton", { name: /Matching pairs/i })).toHaveValue("4")
   })
 
   it("updates total when counts and rows change", () => {
@@ -271,5 +284,48 @@ describe("GenerateTab question plan controls", () => {
       })
     )
     expect(mutateAsync.mock.calls[0]?.[0]?.request).not.toHaveProperty("question_types")
+  }, 20000)
+
+  it("keeps submitted numeric edits as integers inside backend ranges", async () => {
+    const mutateAsync = vi.fn(async () => ({
+      quiz: { id: 1, name: "Generated Quiz" },
+      questions: Array.from({ length: 8 }, (_, index) => ({ id: index + 1 }))
+    }))
+    vi.mocked(useGenerateQuizMutation).mockReturnValue({
+      mutateAsync,
+      isPending: false
+    } as any)
+
+    renderWithQueryClient()
+    await selectDefaultMedia()
+
+    expect(screen.getByRole("spinbutton", { name: /Multiple Choice count/i })).toHaveAttribute("aria-valuemin", "1")
+    expect(screen.getByRole("spinbutton", { name: /Multiple Choice count/i })).toHaveAttribute("aria-valuemax", "100")
+    expect(screen.getByRole("spinbutton", { name: /Multiple Choice count/i })).toHaveAttribute("step", "1")
+    expect(screen.getByRole("spinbutton", { name: /Multiple Choice options/i })).toHaveAttribute("aria-valuemin", "2")
+    expect(screen.getByRole("spinbutton", { name: /Multiple Choice options/i })).toHaveAttribute("aria-valuemax", "6")
+    expect(screen.getByRole("spinbutton", { name: /Multiple Choice options/i })).toHaveAttribute("step", "1")
+
+    setNumberText("generate-question-plan-count-multiple_choice", "4.7")
+    setNumberText("generate-question-plan-option-count-multiple_choice", "9")
+    setNumberText("generate-question-plan-count-true_false", "-2")
+    fireEvent.click(screen.getByRole("button", { name: /Generate Quiz/i }))
+
+    await waitFor(() => {
+      expect(mutateAsync).toHaveBeenCalledTimes(1)
+    })
+
+    expect(mutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        request: expect.objectContaining({
+          num_questions: 10,
+          question_plan: [
+            { question_type: "multiple_choice", count: 5, option_count: 4 },
+            { question_type: "true_false", count: 3 },
+            { question_type: "fill_blank", count: 2 }
+          ]
+        })
+      })
+    )
   }, 20000)
 })
