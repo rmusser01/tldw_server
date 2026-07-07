@@ -4,7 +4,7 @@ title: Fix PR 2679 chat cockpit UX smoke failure
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-07-07 16:39'
+updated_date: '2026-07-07 19:42'
 labels: []
 dependencies: []
 ---
@@ -32,6 +32,8 @@ PR #2679 current-head CI follow-up after the 0.1.38 release. Current failures fo
 
 <!-- SECTION:NOTES:BEGIN -->
 Current-head PR #2679 failures investigated: UX Smoke Gate still saw the desktop right-rail restore button detach during click retries and mobile tab aria-controls referenced a missing generated id; root cause is shell nodes/ids changing during cockpit state transitions. Fix keeps mobile cockpit ids deterministic and keeps desktop restore controls mounted while toggling hidden state. Guardian full-suite gap-verified-7 failed test_generic_notify_adds_timestamp because notify_generic added ts only to the recorded copy, while the test and prior behavior expect the caller payload to be mutated. Fix restores in-place payload timestamping before copying/sanitizing. OpenAPI contract drift gate reported current CI fingerprint sha256=2276c3777b96d19e6359719464ede2a4f0843e6efa7cbc3f86dbaa0d41d4c5fa, paths=1963, schemas=2828; local Python 3.12 regeneration was blocked by uv dependency solving for optional tts-chatterbox-lang/russian-text-stresser, so the checked fingerprint was updated from the exact CI-reported values. Verification run before staging: cockpit vitest 3 files / 20 tests passed; apps/tldw-frontend bun run typecheck passed; Guardian targeted pytest passed; Bandit on notification_service.py reported zero findings; git diff --check passed.
+
+Fresh current-head UX Smoke Gate failure after push ecc0818e65b3c6ed0a2bf9ab00c14ce7fa97407f: run 28882830983, job 85675276972. The focused real-server cockpit spec caught restore-control clicks retrying against detached button nodes while tooltip aria-describedby IDs changed across retries; the mobile retry also hit a transient non-measurable mobile rails target before the artifact snapshot showed the rails visible. Follow-up fix stabilizes cockpit shell sibling keys, assigns deterministic tooltip IDs to the desktop restore buttons, and removes the button-level hidden attribute so only the wrapper controls visibility. Fresh verification before staging: bunx vitest run Playground.cockpit-rail-restore/shell/maturity passed 3 files / 54 tests; apps/tldw-frontend bun run typecheck passed; git diff --check passed. Bandit is not applicable for this follow-up because only frontend TS/TSX files changed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

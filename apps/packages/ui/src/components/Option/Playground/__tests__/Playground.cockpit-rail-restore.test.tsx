@@ -41,6 +41,61 @@ const renderShell = ({
 };
 
 describe("Playground cockpit rail restore tabs", () => {
+  it("keeps restore controls mounted across rail visibility changes", () => {
+    const { rerender } = render(
+      <PlaygroundCockpitShell
+        mode="cockpit"
+        leftRailVisible={false}
+        rightRailVisible={false}
+        leftRail={<div>Context tools</div>}
+        rightRail={<div>Runtime tools</div>}
+      >
+        <div>Chat transcript</div>
+      </PlaygroundCockpitShell>,
+    );
+
+    const contextRestore = screen.getByTestId(
+      "playground-cockpit-left-rail-restore",
+    );
+    const runtimeRestore = screen.getByTestId(
+      "playground-cockpit-right-rail-restore",
+    );
+    expect(contextRestore).not.toHaveAttribute("hidden");
+    expect(runtimeRestore).not.toHaveAttribute("hidden");
+
+    rerender(
+      <PlaygroundCockpitShell
+        mode="cockpit"
+        leftRailVisible
+        rightRailVisible={false}
+        leftRail={<div>Context tools</div>}
+        rightRail={<div>Runtime tools</div>}
+      >
+        <div>Chat transcript</div>
+      </PlaygroundCockpitShell>,
+    );
+    rerender(
+      <PlaygroundCockpitShell
+        mode="cockpit"
+        leftRailVisible
+        rightRailVisible
+        leftRail={<div>Context tools</div>}
+        rightRail={<div>Runtime tools</div>}
+      >
+        <div>Chat transcript</div>
+      </PlaygroundCockpitShell>,
+    );
+
+    expect(screen.getByTestId("playground-cockpit-left-rail-restore")).toBe(
+      contextRestore,
+    );
+    expect(screen.getByTestId("playground-cockpit-right-rail-restore")).toBe(
+      runtimeRestore,
+    );
+    expect(contextRestore).not.toHaveAttribute("hidden");
+    expect(runtimeRestore).not.toHaveAttribute("hidden");
+  });
+
   it("mounts the context restore control on the chat content edge while runtime stays expanded", () => {
     const { onLeftRailVisibleChange } = renderShell({
       leftRailVisible: false,

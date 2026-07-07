@@ -261,6 +261,7 @@ export const PlaygroundCockpitShell = ({
 
       {!focusMode && (
         <div
+          key="mobile-rails"
           data-testid="playground-cockpit-mobile-rails"
           data-mobile-panel={visibleMobilePanel ?? "none"}
           className="grid shrink-0 grid-cols-1 gap-2 border-b border-border bg-surface2/40 p-2 text-xs lg:hidden"
@@ -390,6 +391,7 @@ export const PlaygroundCockpitShell = ({
       <div className={`${bodyClassName} relative`} style={cockpitGridStyle}>
         {showLeftRail && (
           <aside
+            key="left-rail"
             id="playground-cockpit-left-rail"
             data-testid="playground-cockpit-left-rail"
             aria-label={t("cockpit.contextLandmark", "Chat cockpit context")}
@@ -417,6 +419,7 @@ export const PlaygroundCockpitShell = ({
         )}
 
         <main
+          key="main"
           data-testid="playground-cockpit-main"
           className={`min-h-0 min-w-0 overflow-hidden bg-bg ${
             focusMode
@@ -431,6 +434,7 @@ export const PlaygroundCockpitShell = ({
 
         {showRightRail && (
           <aside
+            key="right-rail"
             id="playground-cockpit-right-rail"
             data-testid="playground-cockpit-right-rail"
             aria-label={t("cockpit.runtimeLandmark", "Chat cockpit runtime")}
@@ -458,14 +462,15 @@ export const PlaygroundCockpitShell = ({
         )}
 
         <CockpitTooltipButton
+          key="left-restore"
           type="button"
           data-testid="playground-cockpit-left-rail-restore"
           aria-label={restoreContextSidechannelLabel}
           aria-controls="playground-cockpit-left-rail"
           aria-expanded="false"
-          hidden={!showLeftRestore}
           onClick={() => onLeftRailVisibleChange?.(true)}
           tooltip={restoreContextSidechannelLabel}
+          tooltipId="playground-cockpit-left-rail-restore-tooltip"
           tooltipPlacement="right"
           wrapperClassName={leftRestoreWrapperClassName}
           className="inline-flex h-24 w-8 flex-col items-center justify-center gap-1.5 rounded-r-md border-y border-r border-border bg-surface2/95 py-1.5 text-[10px] font-semibold text-text shadow-md backdrop-blur-sm hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
@@ -477,14 +482,15 @@ export const PlaygroundCockpitShell = ({
         </CockpitTooltipButton>
 
         <CockpitTooltipButton
+          key="right-restore"
           type="button"
           data-testid="playground-cockpit-right-rail-restore"
           aria-label={restoreRuntimeSidechannelLabel}
           aria-controls="playground-cockpit-right-rail"
           aria-expanded="false"
-          hidden={!showRightRestore}
           onClick={() => onRightRailVisibleChange?.(true)}
           tooltip={restoreRuntimeSidechannelLabel}
+          tooltipId="playground-cockpit-right-rail-restore-tooltip"
           tooltipPlacement="left"
           wrapperClassName={rightRestoreWrapperClassName}
           className="inline-flex h-32 w-9 flex-col items-center justify-center gap-2 rounded-l-md border-y border-l border-border bg-surface2/95 py-2 text-[11px] font-semibold text-text shadow-md backdrop-blur-sm hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
