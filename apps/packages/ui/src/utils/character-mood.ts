@@ -290,7 +290,7 @@ export const upsertCharacterMoodImage = (
   moodLabel: unknown,
   imageSource: unknown
 ): Record<string, unknown> => {
-  const normalizedMood = normalizeCharacterMoodLabel(moodLabel)
+  const normalizedMood = normalizeCharacterEmoteState(moodLabel)
   const normalizedImage = normalizeMoodImageSource(imageSource)
   const existing = getCharacterMoodImagesFromExtensions(extensions)
 
@@ -308,7 +308,7 @@ export const removeCharacterMoodImage = (
   extensions: unknown,
   moodLabel: unknown
 ): Record<string, unknown> => {
-  const normalizedMood = normalizeCharacterMoodLabel(moodLabel)
+  const normalizedMood = normalizeCharacterEmoteState(moodLabel)
   if (!normalizedMood) {
     return parseCharacterExtensions(extensions)
   }

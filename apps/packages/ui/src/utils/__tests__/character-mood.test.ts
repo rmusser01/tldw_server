@@ -163,4 +163,14 @@ describe("character mood utilities", () => {
     )
     expect(imageAfterRemove).toBe("")
   })
+
+  it("upserts and removes custom expression state images", () => {
+    const withImage = upsertCharacterMoodImage({}, "smirk", TINY_PNG_BASE64)
+    expect(resolveCharacterMoodImageUrl({ extensions: withImage }, "smirk")).toMatch(
+      /^data:image\/png;base64,/
+    )
+
+    const withoutImage = removeCharacterMoodImage(withImage, "smirk")
+    expect(resolveCharacterMoodImageUrl({ extensions: withoutImage }, "smirk")).toBe("")
+  })
 })
