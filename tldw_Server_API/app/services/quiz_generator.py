@@ -191,6 +191,19 @@ def _plan_value(item: Any, key: str, default: Any = None) -> Any:
     return getattr(value, "value", value)
 
 
+def _plan_has_value(item: Any, key: str) -> bool:
+    if isinstance(item, dict):
+        return key in item and item.get(key) is not None
+    return getattr(item, key, None) is not None
+
+
+def _plan_int(item: Any, key: str, default: int) -> int:
+    value = _plan_value(item, key, default)
+    if value is None:
+        value = default
+    return int(value)
+
+
 def _coerce_generation_plan(
     *,
     num_questions: int,
@@ -199,19 +212,37 @@ def _coerce_generation_plan(
 ) -> list[dict[str, Any]]:
     if question_plan:
         plan: list[dict[str, Any]] = []
+        seen_types: set[str] = set()
         for item in question_plan:
             q_type = _normalize_question_type(_plan_value(item, "question_type"))
             if q_type not in SUPPORTED_GENERATED_QUESTION_TYPES:
                 raise ValueError(f"Unsupported generated question type: {q_type}")
-            count = int(_plan_value(item, "count", 0) or 0)
+            if q_type in seen_types:
+                raise ValueError("question_plan cannot contain duplicate question_type rows")
+            seen_types.add(q_type)
+            count = _plan_int(item, "count", 0)
             if count <= 0:
                 raise ValueError("question_plan count must be positive")
             row: dict[str, Any] = {"question_type": q_type, "count": count}
             if q_type in {"multiple_choice", "multi_select"}:
-                row["option_count"] = int(_plan_value(item, "option_count", 4) or 4)
+                if _plan_has_value(item, "pair_count"):
+                    raise ValueError("pair_count is only valid for matching questions")
+                option_count = _plan_int(item, "option_count", 4)
+                if not 2 <= option_count <= 6:
+                    raise ValueError("option_count must be between 2 and 6")
+                row["option_count"] = option_count
             elif q_type == "matching":
-                row["pair_count"] = int(_plan_value(item, "pair_count", 4) or 4)
+                if _plan_has_value(item, "option_count"):
+                    raise ValueError("option_count is not valid for matching questions")
+                pair_count = _plan_int(item, "pair_count", 4)
+                if not 2 <= pair_count <= 6:
+                    raise ValueError("pair_count must be between 2 and 6")
+                row["pair_count"] = pair_count
+            elif _plan_has_value(item, "option_count") or _plan_has_value(item, "pair_count"):
+                raise ValueError("option_count and pair_count are not valid for this question_type")
             plan.append(row)
+        if sum(item["count"] for item in plan) != int(num_questions):
+            raise ValueError("question_plan counts must sum to num_questions")
         return plan
 
     types = _coerce_question_types(question_types)
@@ -581,9 +612,10 @@ def _normalize_planned_questions(
     default_source_id: str,
 ) -> list[dict[str, Any]]:
     grouped: dict[str, list[dict[str, Any]]] = {item["question_type"]: [] for item in plan}
+    first_error: tuple[int, str, str] | None = None
     expected_total = sum(int(item["count"]) for item in plan)
 
-    for raw in raw_questions:
+    for index, raw in enumerate(raw_questions, start=1):
         if not isinstance(raw, dict):
             continue
         q_type = _normalize_question_type(raw.get("question_type"))
@@ -599,7 +631,9 @@ def _normalize_planned_questions(
                     default_source_id=default_source_id,
                 )
             )
-        except ValueError:
+        except ValueError as exc:
+            if first_error is None:
+                first_error = (index, str(q_type), str(exc))
             continue
 
     for item in plan:
@@ -607,6 +641,9 @@ def _normalize_planned_questions(
         expected = int(item["count"])
         got = len(grouped[q_type])
         if got != expected:
+            if first_error is not None:
+                error_index, error_type, error_detail = first_error
+                raise ValueError(f"Question {error_index} {error_type} invalid: {error_detail}")
             raise ValueError(f"Generated {q_type} count mismatch: expected {expected}, got {got}")
 
     got_total = sum(len(items) for items in grouped.values())

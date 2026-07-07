@@ -20,6 +20,79 @@ def test_normalize_mc_answer_supports_five_options():
     assert quiz_generator._normalize_mc_answer("E", options) == 4
 
 
+@pytest.mark.parametrize(
+    ("plan", "message"),
+    [
+        (
+            [
+                {"question_type": "multiple_choice", "count": 1},
+                {"question_type": "multiple_choice", "count": 1},
+            ],
+            "duplicate question_type",
+        ),
+        ([{"question_type": "multiple_choice", "count": 1}], "counts must sum to num_questions"),
+        ([{"question_type": "multiple_choice", "count": 2, "option_count": 7}], "option_count must be between 2 and 6"),
+        ([{"question_type": "multi_select", "count": 2, "pair_count": 2}], "pair_count is only valid for matching"),
+        ([{"question_type": "matching", "count": 2, "option_count": 4}], "option_count is not valid for matching"),
+        ([{"question_type": "matching", "count": 2, "pair_count": 7}], "pair_count must be between 2 and 6"),
+        ([{"question_type": "fill_blank", "count": 2, "option_count": 4}], "option_count and pair_count are not valid"),
+        ([{"question_type": "true_false", "count": 2, "pair_count": 2}], "option_count and pair_count are not valid"),
+    ],
+)
+def test_coerce_generation_plan_rejects_invalid_service_plan_invariants(plan, message):
+    with pytest.raises(ValueError, match=message):
+        quiz_generator._coerce_generation_plan(num_questions=2, question_plan=plan)
+
+
+def test_coerce_generation_plan_defaults_planned_shape_counts():
+    plan = quiz_generator._coerce_generation_plan(
+        num_questions=2,
+        question_plan=[
+            {"question_type": "multi_select", "count": 1},
+            {"question_type": "matching", "count": 1},
+        ],
+    )
+
+    assert plan == [
+        {"question_type": "multi_select", "count": 1, "option_count": 4},
+        {"question_type": "matching", "count": 1, "pair_count": 4},
+    ]
+
+
+@pytest.mark.parametrize(
+    ("raw_question", "plan_item", "message"),
+    [
+        (
+            {
+                "question_type": "multiple_choice",
+                "question_text": "What does CPU mean?",
+                "options": ["Processor", "Memory", "Storage", "Display"],
+                "correct_answer": 0,
+            },
+            {"question_type": "multiple_choice", "count": 1, "option_count": 5},
+            "Question 1 multiple_choice invalid: Expected 5 options, got 4",
+        ),
+        (
+            {
+                "question_type": "fill_blank",
+                "question_text": "The CPU executes instructions.",
+                "correct_answer": "CPU",
+            },
+            {"question_type": "fill_blank", "count": 1},
+            "Question 1 fill_blank invalid: fill_blank question_text must contain ___",
+        ),
+    ],
+)
+def test_normalize_planned_questions_reports_original_normalization_error(raw_question, plan_item, message):
+    with pytest.raises(ValueError, match=message):
+        quiz_generator._normalize_planned_questions(
+            [raw_question],
+            [plan_item],
+            default_source_type="note",
+            default_source_id="note-1",
+        )
+
+
 @pytest.mark.parametrize("answer", [[], [1, 1], [0, 4]])
 def test_planned_multi_select_rejects_invalid_indices(answer):
     with pytest.raises(ValueError):
