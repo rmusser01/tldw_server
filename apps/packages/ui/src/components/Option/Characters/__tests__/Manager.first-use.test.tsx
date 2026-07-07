@@ -103,6 +103,7 @@ const {
       page_size: 25,
       has_more: false
     })),
+    getCharacter: vi.fn(async () => null),
     listChats: vi.fn(async () => []),
     createChat: vi.fn(async () => ({ id: "quick-chat-session-default" })),
     createCharacter: vi.fn(
@@ -1018,6 +1019,59 @@ describe("CharactersManager first-use onboarding", () => {
       "true"
     )
     expect(createScope.getByText("Expression images")).toBeInTheDocument()
+  }, 10000)
+
+  it("opens a route-focused character editor when the character is not on the visible page", async () => {
+    const hiddenCharacterRecord = {
+      id: "char-off-page",
+      name: "Off Page Character",
+      system_prompt: "Existing system prompt.",
+      greeting: "Hi",
+      description: "Existing description",
+      tags: ["existing"],
+      version: 1
+    }
+
+    tldwClientMock.getCharacter.mockResolvedValue(hiddenCharacterRecord)
+    useQueryMock.mockImplementation((opts: any) => {
+      const key = Array.isArray(opts?.queryKey) ? opts.queryKey[0] : undefined
+      if (key === "tldw:listCharacters") {
+        return makeUseQueryResult({ data: [], status: "success" })
+      }
+      if (key === "getModelsForFieldGeneration") {
+        return makeUseQueryResult({ data: [] })
+      }
+      if (key === "getAllModelsForGeneration") {
+        return makeUseQueryResult({ data: [] })
+      }
+      if (key === "tldw:characterConversationCounts") {
+        return makeUseQueryResult({ data: {} })
+      }
+      return makeUseQueryResult({})
+    })
+
+    render(
+      <CharactersManager
+        routeCharacterId="char-off-page"
+        routeFocus="expressions"
+      />
+    )
+
+    await waitFor(() => {
+      expect(tldwClientMock.getCharacter).toHaveBeenCalledWith("char-off-page")
+    })
+
+    const saveButton = await findEditSubmitButton(5000)
+    const editFormElement = saveButton.closest("form")
+    expect(editFormElement).not.toBeNull()
+    const editScope = within(editFormElement as HTMLElement)
+
+    expect(editScope.getByDisplayValue("Off Page Character")).toBeInTheDocument()
+    expect(editScope.getByRole("button", { name: "Metadata" })).toHaveAttribute(
+      "aria-expanded",
+      "true"
+    )
+    expect(editScope.getByText("Expression images")).toBeInTheDocument()
   }, 10000)
 
   it("preloads world-book attachments in edit mode and syncs attachments on save", async () => {

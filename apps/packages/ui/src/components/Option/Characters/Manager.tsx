@@ -32,6 +32,7 @@ import { useNavigate } from "react-router-dom"
 import { useSelectedCharacter } from "@/hooks/useSelectedCharacter"
 import { useIsConnected } from "@/hooks/useConnectionState"
 import { useAntdNotification } from "@/hooks/useAntdNotification"
+import { tldwClient } from "@/services/tldw/TldwApiClient"
 import {
   DEFAULT_CHARACTER_STORAGE_KEY,
   defaultCharacterStorage,
@@ -951,15 +952,31 @@ export const CharactersManager: React.FC<CharactersManagerProps> = ({
       return
     }
 
+    const openFocusedEdit = (record: any) => {
+      if (!record) return
+      handleEditWithPrefetch(record)
+      setShowEditAdvanced(true)
+      setEditAdvancedSections((current) => ({ ...current, metadata: true }))
+    }
+
     const focusedCharacter = data.find((record) =>
       routeCharacterIdMatches(record, requestedCharacterId)
     )
-    if (!focusedCharacter) return
 
     routeFocusHandledRef.current = requestKey
-    handleEditWithPrefetch(focusedCharacter)
-    setShowEditAdvanced(true)
-    setEditAdvancedSections((current) => ({ ...current, metadata: true }))
+    if (focusedCharacter) {
+      openFocusedEdit(focusedCharacter)
+      return
+    }
+
+    void tldwClient
+      .getCharacter(requestedCharacterId)
+      .then(openFocusedEdit)
+      .catch(() => {
+        if (routeFocusHandledRef.current === requestKey) {
+          routeFocusHandledRef.current = null
+        }
+      })
   }, [
     conversationsOpen,
     data,
