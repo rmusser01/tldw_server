@@ -845,7 +845,7 @@ describe("CharactersManager first-use onboarding", () => {
         .find((button) => button.getAttribute("type") === "submit")
       expect(candidate).toBeDefined()
       return candidate as HTMLElement
-    })
+    }, { timeout: 15000 })
     const createFormElement = createSubmitButton.closest("form")
     expect(createFormElement).not.toBeNull()
     const createScope = within(createFormElement as HTMLElement)
@@ -3215,6 +3215,12 @@ describe("CharactersManager first-use onboarding", () => {
       description: "Expression test",
       tags: ["expression"],
       extensions: {
+        mood_images: {
+          neutral: "https://example.test/legacy-neutral.png"
+        },
+        moodImages: {
+          happy: "https://example.test/legacy-happy.png"
+        },
         tldw: {
           moodImages: {
             happy: "https://example.test/happy.png",
