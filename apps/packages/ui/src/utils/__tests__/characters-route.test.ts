@@ -21,6 +21,18 @@ describe("characters-route", () => {
     ).toBe("/characters?from=header-select&create=true")
   })
 
+  it("builds characters route with expression focus", () => {
+    expect(
+      buildCharactersRoute({
+        from: "sidepanel-character-controls",
+        focus: "expressions",
+        characterId: 42
+      })
+    ).toBe(
+      "/characters?from=sidepanel-character-controls&focus=expressions&characterId=42"
+    )
+  })
+
   it("builds hash route for extension options navigation", () => {
     expect(
       buildCharactersHash({

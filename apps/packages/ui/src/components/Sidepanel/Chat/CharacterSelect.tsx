@@ -8,7 +8,6 @@ import { useTranslation } from "react-i18next"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import { useStorage } from "@plasmohq/storage/hook"
-import { browser } from "wxt/browser"
 import { collectGreetings, pickGreeting } from "@/utils/character-greetings"
 import {
   CHARACTER_MOOD_OPTIONS,
@@ -32,11 +31,8 @@ import { useSelectedCharacter } from "@/hooks/useSelectedCharacter"
 import { useSelectedAssistant } from "@/hooks/useSelectedAssistant"
 import { useClearChat } from "@/hooks/chat/useClearChat"
 import { useStoreMessageOption } from "@/store/option"
-import { getBrowserRuntime, isExtensionRuntime } from "@/utils/browser-runtime"
 import {
-  buildCharactersHash as buildCharactersHashUrl,
-  buildCharactersRoute as buildCharactersRouteUrl,
-  resolveCharactersDestinationMode
+  openCharactersWorkspace as openCharactersWorkspaceRoute
 } from "@/utils/characters-route"
 import type { PersonaInfo } from "@/routes/personaTypes"
 import type {
@@ -1317,61 +1313,14 @@ export const CharacterSelect: React.FC<Props> = ({
     t
   ])
 
-  const buildCharactersRoute = React.useCallback((create?: boolean) => {
-    return buildCharactersRouteUrl({ from: "sidepanel-character-select", create })
-  }, [])
-
-  const buildCharactersHash = React.useCallback((create?: boolean) => {
-    return buildCharactersHashUrl({ from: "sidepanel-character-select", create })
-  }, [])
-
   const openCharactersWorkspace = React.useCallback(
     async (options?: { create?: boolean }) => {
-      if (typeof window === "undefined") return
-      const route = buildCharactersRoute(options?.create)
-      const hash = buildCharactersHash(options?.create)
-      const pathname = window.location.pathname || ""
-      const optionsPath = `/options.html${hash}`
-      const runtime = getBrowserRuntime()
-      const mode = resolveCharactersDestinationMode({
-        pathname,
-        extensionRuntime: isExtensionRuntime(runtime)
+      await openCharactersWorkspaceRoute({
+        from: "sidepanel-character-select",
+        create: options?.create
       })
-
-      if (mode === "options-in-place") {
-        const base = window.location.href.replace(/#.*$/, "")
-        window.location.href = `${base}${hash}`
-        return
-      }
-
-      if (mode === "options-tab") {
-        const url = runtime?.getURL ? runtime.getURL(optionsPath) : optionsPath
-        try {
-          if (browser.tabs?.create) {
-            await browser.tabs.create({ url })
-            return
-          }
-        } catch (error) {
-          console.debug(
-            "[CharacterSelect] Failed to open characters workspace tab:",
-            error
-          )
-        }
-
-        window.open(url, "_blank")
-        return
-      }
-
-      try {
-        window.open(route, "_blank")
-      } catch (error) {
-        console.debug(
-          "[CharacterSelect] Failed to open characters workspace route:",
-          error
-        )
-      }
     },
-    [buildCharactersHash, buildCharactersRoute]
+    []
   )
 
   const createCharacterItem = React.useCallback(
