@@ -44,6 +44,12 @@ def test_quiz_generate_request_accepts_question_plan():
         },
         {
             "sources": [{"source_type": "note", "source_id": "note-1"}],
+            "num_questions": 1,
+            "question_types": None,
+            "question_plan": [{"question_type": "multiple_choice", "count": 1}],
+        },
+        {
+            "sources": [{"source_type": "note", "source_id": "note-1"}],
             "question_plan": [{"question_type": "multiple_choice", "count": 1}],
         },
         {

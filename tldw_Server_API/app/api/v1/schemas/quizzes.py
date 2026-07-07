@@ -347,7 +347,7 @@ class QuizGenerateRequest(BaseModel):
         if self.question_plan is not None:
             if "num_questions" not in self.model_fields_set:
                 raise ValueError("num_questions must be provided when question_plan is used")
-            if self.question_types is not None:
+            if "question_types" in self.model_fields_set:
                 raise ValueError("question_types cannot be used with question_plan")
             if sum(item.count for item in self.question_plan) != self.num_questions:
                 raise ValueError("question_plan counts must sum to num_questions")
