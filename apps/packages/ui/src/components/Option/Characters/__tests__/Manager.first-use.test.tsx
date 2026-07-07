@@ -949,6 +949,77 @@ describe("CharactersManager first-use onboarding", () => {
     expect(editScope.getByText("Expression images")).toBeInTheDocument()
   }, 60000)
 
+  it("opens a focused character editor with expression images visible from route hints", async () => {
+    const characterRecord = {
+      id: "char-edit-1",
+      name: "Focused Character",
+      system_prompt: "Existing system prompt.",
+      greeting: "Hi",
+      description: "Existing description",
+      tags: ["existing"],
+      version: 1
+    }
+
+    useQueryMock.mockImplementation((opts: any) => {
+      const key = Array.isArray(opts?.queryKey) ? opts.queryKey[0] : undefined
+      if (key === "tldw:listCharacters") {
+        return makeUseQueryResult({ data: [characterRecord], status: "success" })
+      }
+      if (key === "getModelsForFieldGeneration") {
+        return makeUseQueryResult({ data: [] })
+      }
+      if (key === "getAllModelsForGeneration") {
+        return makeUseQueryResult({ data: [] })
+      }
+      if (key === "tldw:characterConversationCounts") {
+        return makeUseQueryResult({ data: {} })
+      }
+      return makeUseQueryResult({})
+    })
+
+    render(
+      <CharactersManager
+        routeCharacterId="char-edit-1"
+        routeFocus="expressions"
+      />
+    )
+
+    const saveButton = await findEditSubmitButton(5000)
+    const editFormElement = saveButton.closest("form")
+    expect(editFormElement).not.toBeNull()
+    const editScope = within(editFormElement as HTMLElement)
+
+    expect(editScope.getByDisplayValue("Focused Character")).toBeInTheDocument()
+    expect(editScope.getByRole("button", { name: "Metadata" })).toHaveAttribute(
+      "aria-expanded",
+      "true"
+    )
+    expect(editScope.getByText("Expression images")).toBeInTheDocument()
+  }, 10000)
+
+  it("opens the create editor with expression images visible from a route focus hint", async () => {
+    window.localStorage.setItem(TEMPLATE_CHOOSER_SEEN_KEY, "true")
+
+    render(<CharactersManager routeFocus="expressions" />)
+
+    const createSubmitButton = await waitFor(() => {
+      const candidate = screen
+        .getAllByRole("button", { name: "Create character" })
+        .find((button) => button.getAttribute("type") === "submit")
+      expect(candidate).toBeDefined()
+      return candidate as HTMLElement
+    }, { timeout: 5000 })
+    const createFormElement = createSubmitButton.closest("form")
+    expect(createFormElement).not.toBeNull()
+    const createScope = within(createFormElement as HTMLElement)
+
+    expect(createScope.getByRole("button", { name: "Metadata" })).toHaveAttribute(
+      "aria-expanded",
+      "true"
+    )
+    expect(createScope.getByText("Expression images")).toBeInTheDocument()
+  }, 10000)
+
   it("preloads world-book attachments in edit mode and syncs attachments on save", async () => {
     const characterRecord = {
       id: 101,

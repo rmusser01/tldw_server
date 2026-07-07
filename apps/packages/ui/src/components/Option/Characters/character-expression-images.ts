@@ -18,6 +18,9 @@ export const EXPRESSION_IMAGE_STARTER_STATES = [
   "thinking",
   "surprised"
 ] as const
+const EXPRESSION_IMAGE_STARTER_STATE_SET = new Set<string>(
+  EXPRESSION_IMAGE_STARTER_STATES
+)
 
 export type ExpressionImageRow = {
   id: string
@@ -105,6 +108,11 @@ export const normalizeExpressionImageRows = (
     const normalizedState = normalizeCharacterEmoteState(row.state)
     const hasImage = hasExpressionImage(row.image)
     const imageSource = expressionImageSource(row.image)
+    const isStarterSuggestion =
+      row.starter &&
+      (!rawState ||
+        (normalizedState !== null &&
+          EXPRESSION_IMAGE_STARTER_STATE_SET.has(normalizedState)))
 
     if (!rawState) {
       errors.push({ id: row.id, reason: "missing-state" })
@@ -116,7 +124,7 @@ export const normalizeExpressionImageRows = (
       errors.push({ id: row.id, reason: "invalid-image" })
     }
 
-    if (!hasImage && !row.starter) {
+    if (!hasImage && !isStarterSuggestion) {
       errors.push({ id: row.id, reason: "missing-image" })
     }
 

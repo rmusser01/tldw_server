@@ -65,6 +65,8 @@ const LazyCharacterEditorForm = React.lazy(() =>
 type CharactersManagerProps = {
   forwardedNewButtonRef?: React.RefObject<HTMLButtonElement | null>
   autoOpenCreate?: boolean
+  routeFocus?: "expressions" | null
+  routeCharacterId?: string | null
 }
 
 type SharedCharacterFormProps = {
@@ -86,9 +88,28 @@ type SharedCharacterFormProps = {
   onFinish: (values: Record<string, any>) => void
 }
 
+const normalizeRouteCharacterId = (value: string | null | undefined): string | null => {
+  const trimmed = typeof value === "string" ? value.trim() : ""
+  return trimmed || null
+}
+
+const routeCharacterIdMatches = (record: any, routeCharacterId: string): boolean => {
+  const candidateIds = [record?.id, record?.slug, record?.name]
+    .map((value) => {
+      if (typeof value === "string") return value.trim()
+      if (typeof value === "number" && Number.isFinite(value)) return String(value)
+      return ""
+    })
+    .filter(Boolean)
+
+  return candidateIds.includes(routeCharacterId)
+}
+
 export const CharactersManager: React.FC<CharactersManagerProps> = ({
   forwardedNewButtonRef,
-  autoOpenCreate = false
+  autoOpenCreate = false,
+  routeFocus = null,
+  routeCharacterId = null
 }) => {
   const { t } = useTranslation(["settings", "common"])
   const qc = useQueryClient()
@@ -110,6 +131,7 @@ export const CharactersManager: React.FC<CharactersManagerProps> = ({
   const createNameRef = React.useRef<InputRef>(null)
   const editNameRef = React.useRef<InputRef>(null)
   const hasPreloadedCharacterEditorRef = React.useRef(false)
+  const routeFocusHandledRef = React.useRef<string | null>(null)
 
   // --- Extracted hooks ---
   const filtering = useCharacterFiltering({ t })
@@ -908,6 +930,50 @@ export const CharactersManager: React.FC<CharactersManagerProps> = ({
     },
     [handleEdit]
   )
+
+  React.useEffect(() => {
+    if (routeFocus !== "expressions") return
+
+    const requestedCharacterId = normalizeRouteCharacterId(routeCharacterId)
+    const requestKey = requestedCharacterId
+      ? `edit:${requestedCharacterId}:expressions`
+      : "create:expressions"
+
+    if (routeFocusHandledRef.current === requestKey) return
+
+    if (!requestedCharacterId) {
+      routeFocusHandledRef.current = requestKey
+      if (!open && !openEdit && !conversationsOpen) {
+        openCreateModal()
+        setShowCreateAdvanced(true)
+        setCreateAdvancedSections((current) => ({ ...current, metadata: true }))
+      }
+      return
+    }
+
+    const focusedCharacter = data.find((record) =>
+      routeCharacterIdMatches(record, requestedCharacterId)
+    )
+    if (!focusedCharacter) return
+
+    routeFocusHandledRef.current = requestKey
+    handleEditWithPrefetch(focusedCharacter)
+    setShowEditAdvanced(true)
+    setEditAdvancedSections((current) => ({ ...current, metadata: true }))
+  }, [
+    conversationsOpen,
+    data,
+    handleEditWithPrefetch,
+    open,
+    openCreateModal,
+    openEdit,
+    routeCharacterId,
+    routeFocus,
+    setCreateAdvancedSections,
+    setEditAdvancedSections,
+    setShowCreateAdvanced,
+    setShowEditAdvanced
+  ])
 
   React.useEffect(() => {
     if (open) {

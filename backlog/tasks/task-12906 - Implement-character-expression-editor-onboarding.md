@@ -4,7 +4,7 @@ title: Implement character expression editor onboarding
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-07-07 19:11'
+updated_date: '2026-07-07 19:30'
 labels:
   - frontend
   - characters
@@ -75,6 +75,10 @@ Final verification completed from apps/packages/ui unless noted:
 - Bandit: touched implementation is frontend TypeScript/docs only; per-task Bandit attempts produced results=[] with expected TypeScript parse errors. No Python files were touched.
 
 Final review fix completed. Expression image row validation now rejects image sources that the canonical mood-image persistence layer cannot save, using the same supported source rule: HTTP(S), data:image URL, or valid uploaded/base64 image payload. Added regression coverage for relative URL input (`/foo.png`) so unsupported sources no longer pass validation and disappear on save. Verification from apps/packages/ui: focused red check failed before the helper fix; `bunx vitest run src/components/Option/Characters/__tests__/character-expression-images.test.ts -t "dropped by metadata persistence"` passed after the fix; `bunx vitest run src/components/Option/Characters/__tests__/character-expression-images.test.ts src/components/Option/Characters/__tests__/CharacterExpressionImagesSection.test.tsx` passed 19 tests.
+
+Post-PR code review fix completed. Addressed two important review findings: renamed starter expression rows now validate as custom rows when the current state is no longer a starter state, preventing silent drops on save; Characters route hints now open the create editor for focus=expressions or the focused edit editor for focus=expressions&characterId=<id>, with the advanced Metadata section expanded so Expression images are visible. Minor validation copy now clarifies that spaces normalize to hyphens. Verification from apps/packages/ui: red checks failed for the renamed-starter and route-focus regressions before implementation; focused green checks passed; `bunx vitest run src/components/Option/Characters/__tests__/character-expression-images.test.ts src/components/Option/Characters/__tests__/CharacterExpressionImagesSection.test.tsx` passed 20 tests; `bunx vitest run src/components/Option/Characters/__tests__/Manager.first-use.test.tsx -t "advanced section structure|route hints|route focus|seeds expression images"` passed 4 tests; `bunx vitest run src/utils/__tests__/characters-route.test.ts src/components/Sidepanel/Chat/__tests__/CharacterControlsSheet.test.tsx src/components/Option/Playground/__tests__/PlaygroundComposerNotices.first-run.test.tsx` passed 26 tests; `bun run typecheck` from apps/tldw-frontend passed; `git diff --check` passed.
+
+Security validation for the post-PR review fix: Bandit was run with the shared repo venv against the touched frontend TypeScript files and wrote `/tmp/bandit_task12906_review_focus.json`; `results=[]` with expected TypeScript AST parse errors for `.ts`/`.tsx` inputs.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

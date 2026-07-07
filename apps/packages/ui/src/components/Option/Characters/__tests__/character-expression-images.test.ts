@@ -138,6 +138,22 @@ describe("character expression image rows", () => {
     ])
   })
 
+  it("requires an image when a starter row is renamed to a custom expression", () => {
+    const result = normalizeExpressionImageRows([
+      {
+        id: "happy",
+        state: "smirk",
+        image: { mode: "url", url: "", base64: "" },
+        starter: true
+      }
+    ])
+
+    expect(result.rows).toEqual([])
+    expect(result.errors).toEqual([
+      expect.objectContaining({ id: "happy", reason: "missing-image" })
+    ])
+  })
+
   it("drops empty starter rows and returns mood image map", () => {
     expect(
       expressionRowsToMoodImages([

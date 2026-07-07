@@ -22,6 +22,15 @@ export const CharactersWorkspace: React.FC = () => {
     if (value == null) return false
     return value === "" || value === "true" || value === "1"
   }, [location.search])
+  const routeFocus = React.useMemo<"expressions" | null>(() => {
+    const params = new URLSearchParams(location.search)
+    return params.get("focus") === "expressions" ? "expressions" : null
+  }, [location.search])
+  const routeCharacterId = React.useMemo(() => {
+    const params = new URLSearchParams(location.search)
+    const value = params.get("characterId")?.trim()
+    return value || null
+  }, [location.search])
   const fromPersistenceError = React.useMemo(
     () => location.search.includes("from=server-chat-persistence-error"),
     [location.search]
@@ -163,6 +172,8 @@ export const CharactersWorkspace: React.FC = () => {
             <CharactersManager
               forwardedNewButtonRef={newButtonRef}
               autoOpenCreate={createRequested}
+              routeFocus={routeFocus}
+              routeCharacterId={routeCharacterId}
             />
           )}
         </PageShell>
