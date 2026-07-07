@@ -171,7 +171,9 @@ Unrelated `extensions` data must be preserved.
 
 If more than one mood image location exists, canonical
 `extensions.tldw.mood_images` wins. This gives deterministic loading and avoids
-surprising overwrites from stale legacy data.
+surprising overwrites from stale legacy data. Precedence is whole-map
+precedence: when canonical mood images exist, legacy maps are ignored rather
+than merged per state.
 
 Saving writes the current editor rows to `extensions.tldw.mood_images` and
 removes legacy aliases for the same data:
@@ -196,6 +198,8 @@ Rules:
 
 - Empty starter rows are not saved.
 - Empty custom rows are invalid once created.
+- Custom rows with a valid state but no image are incomplete and block save
+  until the user adds an image or removes the row.
 - Duplicate states are blocked.
 - Renaming a state moves the image value to the new key and does not leave a
   stale key behind.
@@ -223,6 +227,9 @@ Dismissal keys should include every available stable scope value in this order:
 server, user, character id. If no stable character identifier exists, the nudge
 can be dismissed only for the current page session instead of using a broad
 global key.
+
+Nudge dismissal is a client-side UI preference in V1. Do not add backend
+persistence for it.
 
 The browser extension should expose an **Edit character expressions** entry that
 opens the shared WebUI editor route or the Characters fallback. It should not
@@ -263,8 +270,12 @@ Metadata helper tests:
 - read all supported mood image locations
 - apply deterministic precedence when multiple locations exist
 - save only non-empty rows to `extensions.tldw.mood_images`
+- remove legacy mood image aliases when saving canonical expression rows
+- remove mood image keys instead of writing an empty object when no configured
+  expressions remain
 - preserve unrelated extension data
 - reject duplicate and invalid states
+- preserve arbitrary valid custom state slugs such as `smirk`
 - rename state without leaving stale keys
 
 Editor/component tests:
@@ -274,7 +285,7 @@ Editor/component tests:
 - URL/upload/generate source behavior updates only the target row
 - create/edit round trip preserves expression rows after save and reload
 - preview picker swaps image and handles image `onError` fallback
-- copy sample reports success and failure
+- copy selected preview state reports success and failure
 - invalid metadata blocks expression merge with a clear message
 - role/name queries cover the main controls to catch missing labels
 

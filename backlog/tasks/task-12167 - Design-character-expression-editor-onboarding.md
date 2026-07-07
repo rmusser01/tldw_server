@@ -31,7 +31,7 @@ Create the approved design spec for a shared WebUI/browser-extension character e
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-Brainstorming-approved design doc for shared character expression editor/onboarding. Spec written at Docs/superpowers/specs/2026-07-07-character-expression-editor-onboarding-design.md. Spec review loop passed with Status: Approved and no blocking issues. Implementation plan will be created only after user review approval.
+Brainstorming-approved design doc for shared character expression editor/onboarding. Spec written at Docs/superpowers/specs/2026-07-07-character-expression-editor-onboarding-design.md. Spec review loop passed with Status: Approved and no blocking issues. Follow-up self-review patches clarified copy behavior test wording, canonical-save test coverage, custom-row image requirements, client-side nudge dismissal, whole-map precedence, and arbitrary custom state coverage. Implementation plan will be created only after user review approval.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
