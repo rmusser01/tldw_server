@@ -648,6 +648,9 @@ def _normalize_planned_questions(
 
     got_total = sum(len(items) for items in grouped.values())
     if got_total != expected_total or len(raw_questions) != expected_total:
+        if first_error is not None:
+            error_index, error_type, error_detail = first_error
+            raise ValueError(f"Question {error_index} {error_type} invalid: {error_detail}")
         raise ValueError(f"Generated question plan mismatch: expected {expected_total}, got {len(raw_questions)}")
 
     return [question for item in plan for question in grouped[item["question_type"]]]

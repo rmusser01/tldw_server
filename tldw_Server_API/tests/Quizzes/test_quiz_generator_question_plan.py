@@ -93,6 +93,29 @@ def test_normalize_planned_questions_reports_original_normalization_error(raw_qu
         )
 
 
+def test_normalize_planned_questions_reports_invalid_extra_question_detail():
+    with pytest.raises(ValueError, match="Question 2 multiple_choice invalid: Expected 5 options, got 4"):
+        quiz_generator._normalize_planned_questions(
+            [
+                {
+                    "question_type": "multiple_choice",
+                    "question_text": "What does CPU mean?",
+                    "options": ["Processor", "Memory", "Storage", "Display", "Network"],
+                    "correct_answer": 0,
+                },
+                {
+                    "question_type": "multiple_choice",
+                    "question_text": "What does RAM mean?",
+                    "options": ["Memory", "Storage", "Display", "Network"],
+                    "correct_answer": 0,
+                },
+            ],
+            [{"question_type": "multiple_choice", "count": 1, "option_count": 5}],
+            default_source_type="note",
+            default_source_id="note-1",
+        )
+
+
 @pytest.mark.parametrize("answer", [[], [1, 1], [0, 4]])
 def test_planned_multi_select_rejects_invalid_indices(answer):
     with pytest.raises(ValueError):
