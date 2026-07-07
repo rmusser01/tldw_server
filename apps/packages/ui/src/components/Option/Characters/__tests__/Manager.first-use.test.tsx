@@ -879,7 +879,7 @@ describe("CharactersManager first-use onboarding", () => {
     await user.click(createScope.getByRole("button", { name: "Metadata" }))
     expect(createScope.getByText("Extensions (JSON)")).toBeInTheDocument()
     expect(createScope.getByText("Expression packs available after save")).toBeInTheDocument()
-    expect(createScope.getByText("Legacy mood images")).toBeInTheDocument()
+    expect(createScope.getByText("Expression images")).toBeInTheDocument()
   }, 60000)
 
   it("renders the same advanced section structure in edit mode", async () => {
@@ -942,7 +942,7 @@ describe("CharactersManager first-use onboarding", () => {
 
     await user.click(editScope.getByRole("button", { name: "Metadata" }))
     expect(editScope.getByText("Expression packs available after save")).toBeInTheDocument()
-    expect(editScope.getByText("Legacy mood images")).toBeInTheDocument()
+    expect(editScope.getByText("Expression images")).toBeInTheDocument()
   }, 60000)
 
   it("preloads world-book attachments in edit mode and syncs attachments on save", async () => {
@@ -3202,6 +3202,95 @@ describe("CharactersManager first-use onboarding", () => {
           description: "Updated description from edit flow test."
         })
       )
+    })
+  }, 30000)
+
+  it("seeds expression images in edit mode and saves canonical mood image metadata", async () => {
+    const user = userEvent.setup()
+    const characterRecord = {
+      id: "char-expression-edit",
+      name: "Expression Character",
+      system_prompt: "Stay expressive.",
+      greeting: "Hello",
+      description: "Expression test",
+      tags: ["expression"],
+      extensions: {
+        tldw: {
+          moodImages: {
+            happy: "https://example.test/happy.png",
+            smirk: "https://example.test/smirk.png"
+          }
+        }
+      },
+      version: 2
+    }
+
+    useMutationMock.mockImplementation((opts: any) => ({
+      mutate: async (variables: any) => {
+        const result = await opts?.mutationFn?.(variables)
+        await opts?.onSuccess?.(result, variables, undefined)
+        return result
+      },
+      mutateAsync: async (variables: any) => {
+        const result = await opts?.mutationFn?.(variables)
+        await opts?.onSuccess?.(result, variables, undefined)
+        return result
+      },
+      isPending: false
+    }))
+
+    useQueryMock.mockImplementation((opts: any) => {
+      const key = Array.isArray(opts?.queryKey) ? opts.queryKey[0] : undefined
+      if (key === "tldw:listCharacters") {
+        return makeUseQueryResult({ data: [characterRecord], status: "success" })
+      }
+      if (key === "getModelsForFieldGeneration") {
+        return makeUseQueryResult({ data: [] })
+      }
+      if (key === "getAllModelsForGeneration") {
+        return makeUseQueryResult({ data: [] })
+      }
+      if (key === "tldw:characterConversationCounts") {
+        return makeUseQueryResult({ data: {} })
+      }
+      return makeUseQueryResult({})
+    })
+
+    render(<CharactersManager />)
+
+    await user.click(await screen.findByRole("button", { name: /Edit character/i }))
+    const saveButton = await findEditSubmitButton()
+    const editFormElement = saveButton.closest("form")
+    expect(editFormElement).not.toBeNull()
+    const editScope = within(editFormElement as HTMLElement)
+
+    const advancedToggle = editScope.getByRole("button", {
+      name: /advanced fields/i
+    })
+    if (advancedToggle.textContent?.includes("Show")) {
+      await user.click(advancedToggle)
+    }
+    await user.click(editScope.getByRole("button", { name: "Metadata" }))
+
+    expect(
+      await editScope.findByLabelText("Expression image URL for happy")
+    ).toHaveValue("https://example.test/happy.png")
+    expect(
+      editScope.getByLabelText("Expression image URL for smirk")
+    ).toHaveValue("https://example.test/smirk.png")
+
+    fireEvent.submit(editFormElement as HTMLFormElement)
+
+    await waitFor(() => {
+      const payload = tldwClientMock.updateCharacter.mock.calls.at(-1)?.[1] as any
+      expect(payload?.extensions).toEqual({
+        tldw: {
+          mood_images: {
+            happy: "https://example.test/happy.png",
+            smirk: "https://example.test/smirk.png"
+          }
+        }
+      })
     })
   }, 30000)
 

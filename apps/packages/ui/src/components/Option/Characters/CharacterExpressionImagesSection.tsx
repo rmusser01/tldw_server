@@ -53,6 +53,25 @@ const modeOptions = [
   { label: "Generate", value: "generate" }
 ]
 
+const INVALID_EXTENSIONS_JSON_MESSAGE =
+  "Fix Extensions JSON before saving expression images."
+
+const hasInvalidExtensionsJsonForMerge = (
+  rawExtensions: unknown,
+  rowsToMerge: ExpressionImageRow[]
+): boolean => {
+  if (!rowsToMerge.length) return false
+  if (typeof rawExtensions !== "string") return false
+  const trimmed = rawExtensions.trim()
+  if (!trimmed) return false
+  try {
+    JSON.parse(trimmed)
+    return false
+  } catch {
+    return true
+  }
+}
+
 const readFileAsDataUrl = (file: File): Promise<string> =>
   new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -265,6 +284,9 @@ function ExpressionRowEditor({
       <Form.Item name={[field.name, "id"]} hidden>
         <Input />
       </Form.Item>
+      <Form.Item name={[field.name, "starter"]} valuePropName="checked" hidden>
+        <input type="checkbox" />
+      </Form.Item>
       <Form.Item name={[field.name, "image", "mode"]} hidden>
         <Input />
       </Form.Item>
@@ -426,19 +448,28 @@ export function CharacterExpressionImagesSection({
   const watchedRows = Form.useWatch("expression_images", form) as
     | Partial<ExpressionImageRow>[]
     | undefined
+  const watchedExtensions = Form.useWatch("extensions", form)
   const rows = (watchedRows || []).map(toEffectiveRow)
   const [previewState, setPreviewState] = React.useState("")
   const [failedPreviewImages, setFailedPreviewImages] = React.useState<Set<string>>(
     () => new Set()
   )
 
+  const normalizedRows = React.useMemo(
+    () => normalizeExpressionImageRows(rows),
+    [rows]
+  )
   const errorsById = React.useMemo(() => {
     const map = new Map<string, ExpressionImageRowErrorReason[]>()
-    normalizeExpressionImageRows(rows).errors.forEach((error) => {
+    normalizedRows.errors.forEach((error) => {
       map.set(error.id, [...(map.get(error.id) || []), error.reason])
     })
     return map
-  }, [rows])
+  }, [normalizedRows])
+  const invalidExtensionsJson = hasInvalidExtensionsJsonForMerge(
+    watchedExtensions,
+    normalizedRows.rows
+  )
 
   const previewRows = rows.filter((row) => row?.id && row?.state?.trim())
   const selectedPreviewRow =
@@ -519,6 +550,43 @@ export function CharacterExpressionImagesSection({
           </div>
         )}
       </Form.List>
+
+      <Form.Item
+        name="_expression_images_validation"
+        dependencies={["expression_images", "extensions"]}
+        hidden
+        rules={[
+          {
+            validator: async () => {
+              const currentRows = (
+                (form.getFieldValue("expression_images") || []) as Partial<
+                  ExpressionImageRow
+                >[]
+              ).map(toEffectiveRow)
+              const currentNormalizedRows = normalizeExpressionImageRows(currentRows)
+              if (currentNormalizedRows.errors.length > 0) {
+                throw new Error("Fix expression image rows before saving.")
+              }
+              if (
+                hasInvalidExtensionsJsonForMerge(
+                  form.getFieldValue("extensions"),
+                  currentNormalizedRows.rows
+                )
+              ) {
+                throw new Error(INVALID_EXTENSIONS_JSON_MESSAGE)
+              }
+            }
+          }
+        ]}
+      >
+        <Input />
+      </Form.Item>
+
+      {invalidExtensionsJson ? (
+        <p role="alert" className="text-xs text-danger">
+          {INVALID_EXTENSIONS_JSON_MESSAGE}
+        </p>
+      ) : null}
 
       <div className="flex flex-wrap items-end gap-3 rounded-md border border-border p-3">
         <label className="flex min-w-48 flex-col gap-1 text-sm">

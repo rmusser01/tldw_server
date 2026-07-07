@@ -218,6 +218,77 @@ describe("CharacterExpressionImagesSection", () => {
     expect(screen.getByText("Custom expressions need an image.")).toBeInTheDocument()
   })
 
+  it("blocks expression form submit when rows are invalid", async () => {
+    const onFinish = vi.fn()
+    const onFinishFailed = vi.fn()
+
+    render(
+      <Form
+        initialValues={{
+          expression_images: [
+            {
+              id: "empty-image",
+              state: "smirk",
+              starter: false,
+              image: { mode: "url", url: "", base64: "" }
+            }
+          ]
+        }}
+        onFinish={onFinish}
+        onFinishFailed={onFinishFailed}
+      >
+        <CharacterExpressionImagesSection characterName="Mira" />
+        <button type="submit">Save</button>
+      </Form>
+    )
+
+    await userEvent.click(screen.getByRole("button", { name: "Save" }))
+
+    await waitFor(() => expect(onFinishFailed).toHaveBeenCalled())
+    expect(onFinish).not.toHaveBeenCalled()
+  })
+
+  it("blocks expression form submit when invalid extensions JSON must be merged", async () => {
+    const onFinish = vi.fn()
+    const onFinishFailed = vi.fn()
+
+    render(
+      <Form
+        initialValues={{
+          extensions: "{not valid json",
+          expression_images: [
+            {
+              id: "smirk",
+              state: "smirk",
+              starter: false,
+              image: {
+                mode: "url",
+                url: "https://example.test/smirk.png",
+                base64: ""
+              }
+            }
+          ]
+        }}
+        onFinish={onFinish}
+        onFinishFailed={onFinishFailed}
+      >
+        <Form.Item name="extensions" hidden>
+          <input />
+        </Form.Item>
+        <CharacterExpressionImagesSection characterName="Mira" />
+        <button type="submit">Save</button>
+      </Form>
+    )
+
+    await userEvent.click(screen.getByRole("button", { name: "Save" }))
+
+    await waitFor(() => expect(onFinishFailed).toHaveBeenCalled())
+    expect(onFinish).not.toHaveBeenCalled()
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Fix Extensions JSON before saving expression images."
+    )
+  })
+
   it("falls back to the base avatar when the selected preview has no image or fails to load", async () => {
     const baseAvatar = {
       mode: "upload" as const,
