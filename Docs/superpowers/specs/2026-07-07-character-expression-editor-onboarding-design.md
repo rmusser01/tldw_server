@@ -2,7 +2,7 @@
 
 Date: 2026-07-07
 Status: Ready for spec review
-Backlog: TASK-12167
+Backlog: TASK-12905
 Related: TASK-12164
 
 ## Summary

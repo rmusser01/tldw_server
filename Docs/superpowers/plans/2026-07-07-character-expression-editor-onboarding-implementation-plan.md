@@ -13,7 +13,7 @@
 ## Source Documents
 
 - Spec: `Docs/superpowers/specs/2026-07-07-character-expression-editor-onboarding-design.md`
-- Backlog: `TASK-12168`
+- Backlog: `TASK-12906`
 - Related parser/runtime follow-up: `TASK-12164`
 
 ## Scope Check
@@ -982,7 +982,7 @@ Prefer:
 bun -C apps/tldw-frontend run typecheck
 ```
 
-If the package script is unavailable or too broad for the current environment, run the closest existing frontend typecheck script and record the exact command/output in `TASK-12168`.
+If the package script is unavailable or too broad for the current environment, run the closest existing frontend typecheck script and record the exact command/output in `TASK-12906`.
 
 - [ ] **Step 3: Run final changed-scope diff checks**
 
@@ -995,10 +995,10 @@ Expected: no whitespace errors; only intentional task files and feature files ar
 
 - [ ] **Step 4: Bandit scope decision**
 
-This implementation should touch TypeScript/frontend files only. Record in `TASK-12168`:
+This implementation should touch TypeScript/frontend files only. Record in `TASK-12906`:
 
 ```text
-Bandit: skipped; TASK-12168 touched frontend TypeScript/docs only and no Python code.
+Bandit: skipped; TASK-12906 touched frontend TypeScript/docs only and no Python code.
 ```
 
 If Python files are touched despite the plan, run:

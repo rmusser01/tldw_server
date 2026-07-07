@@ -1,5 +1,5 @@
 ---
-id: TASK-12168
+id: TASK-12906
 title: Implement character expression editor onboarding
 status: In Progress
 labels:
@@ -9,7 +9,7 @@ labels:
 - implementation
 priority: Medium
 references:
-- TASK-12167
+- TASK-12905
 - TASK-12164
 - Docs/superpowers/specs/2026-07-07-character-expression-editor-onboarding-design.md
 documentation:
@@ -17,7 +17,7 @@ documentation:
 - Docs/superpowers/plans/2026-07-07-character-expression-editor-onboarding-implementation-plan.md
 modified_files:
 - Docs/superpowers/plans/2026-07-07-character-expression-editor-onboarding-implementation-plan.md
-- backlog/tasks/task-12168 - Implement-character-expression-editor-onboarding.md
+- backlog/tasks/task-12906 - Implement-character-expression-editor-onboarding.md
 ---
 
 ## Description

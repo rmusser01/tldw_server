@@ -1,5 +1,5 @@
 ---
-id: TASK-12167
+id: TASK-12905
 title: Design character expression editor onboarding
 status: In Progress
 labels:
@@ -15,7 +15,7 @@ documentation:
 - Docs/superpowers/specs/2026-07-07-character-expression-editor-onboarding-design.md
 modified_files:
 - Docs/superpowers/specs/2026-07-07-character-expression-editor-onboarding-design.md
-- backlog/tasks/task-12167 - Design-character-expression-editor-onboarding.md
+- backlog/tasks/task-12905 - Design-character-expression-editor-onboarding.md
 ---
 
 ## Description
