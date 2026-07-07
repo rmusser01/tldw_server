@@ -5,8 +5,10 @@ status: In Progress
 references:
 - Spec review approved by subagent 019f3dfe-9e1d-7762-8bf9-88a8e354e13f
 - Final spec review approved by subagent 019f3e03-825a-7d80-aa7d-3c5c27de712f
+- Plan review approved by subagent 019f3e20-d73f-70d2-8bf9-1074c1c4c5bc
 modified_files:
 - Docs/superpowers/specs/2026-07-07-advanced-quiz-generation-controls-design.md
+- Docs/superpowers/plans/2026-07-07-advanced-quiz-generation-controls-implementation-plan.md
 ---
 
 ## Description
@@ -29,7 +31,7 @@ Acceptance criteria:
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-Docs/superpowers/specs/2026-07-07-advanced-quiz-generation-controls-design.md
+Docs/superpowers/plans/2026-07-07-advanced-quiz-generation-controls-implementation-plan.md
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
