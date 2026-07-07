@@ -333,7 +333,7 @@ class PasswordService:
                     """
                     SELECT password_hash FROM password_history
                     WHERE user_id = $1
-                    ORDER BY created_at DESC
+                    ORDER BY created_at DESC, id DESC
                     LIMIT $2
                     """,
                     user_id, history_count
@@ -345,7 +345,7 @@ class PasswordService:
                     """
                     SELECT password_hash FROM password_history
                     WHERE user_id = ?
-                    ORDER BY created_at DESC
+                    ORDER BY created_at DESC, id DESC
                     LIMIT ?
                     """,
                     (user_id, history_count)
@@ -422,7 +422,7 @@ class PasswordService:
                     WHERE user_id = $1 AND id NOT IN (
                         SELECT id FROM password_history
                         WHERE user_id = $1
-                        ORDER BY created_at DESC
+                        ORDER BY created_at DESC, id DESC
                         LIMIT $2
                     )
                     """,
@@ -445,7 +445,7 @@ class PasswordService:
                     WHERE user_id = ? AND id NOT IN (
                         SELECT id FROM password_history
                         WHERE user_id = ?
-                        ORDER BY created_at DESC
+                        ORDER BY created_at DESC, id DESC
                         LIMIT ?
                     )
                     """,
