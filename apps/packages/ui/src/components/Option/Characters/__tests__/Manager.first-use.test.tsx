@@ -1,6 +1,7 @@
 import React from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -1072,6 +1073,89 @@ describe("CharactersManager first-use onboarding", () => {
       "true"
     )
     expect(editScope.getByText("Expression images")).toBeInTheDocument()
+  }, 10000)
+
+  it("ignores stale route-focused character fetches after the route target changes", async () => {
+    const resolvers: Record<string, (record: any) => void> = {}
+    tldwClientMock.getCharacter.mockImplementation(
+      (id: string | number) =>
+        new Promise((resolve) => {
+          resolvers[String(id)] = resolve
+        })
+    )
+    useQueryMock.mockImplementation((opts: any) => {
+      const key = Array.isArray(opts?.queryKey) ? opts.queryKey[0] : undefined
+      if (key === "tldw:listCharacters") {
+        return makeUseQueryResult({ data: [], status: "success" })
+      }
+      if (key === "getModelsForFieldGeneration") {
+        return makeUseQueryResult({ data: [] })
+      }
+      if (key === "getAllModelsForGeneration") {
+        return makeUseQueryResult({ data: [] })
+      }
+      if (key === "tldw:characterConversationCounts") {
+        return makeUseQueryResult({ data: {} })
+      }
+      return makeUseQueryResult({})
+    })
+
+    const { rerender } = render(
+      <CharactersManager
+        routeCharacterId="char-a"
+        routeFocus="expressions"
+      />
+    )
+
+    await waitFor(() => {
+      expect(tldwClientMock.getCharacter).toHaveBeenCalledWith("char-a")
+    })
+
+    rerender(
+      <CharactersManager
+        routeCharacterId="char-b"
+        routeFocus="expressions"
+      />
+    )
+
+    await waitFor(() => {
+      expect(tldwClientMock.getCharacter).toHaveBeenCalledWith("char-b")
+    })
+
+    await act(async () => {
+      resolvers["char-b"]?.({
+        id: "char-b",
+        name: "Current Route Character",
+        system_prompt: "Existing system prompt.",
+        greeting: "Hi",
+        description: "Current route description",
+        tags: ["current"],
+        version: 1
+      })
+      await Promise.resolve()
+    })
+
+    const saveButton = await findEditSubmitButton(5000)
+    const editFormElement = saveButton.closest("form")
+    expect(editFormElement).not.toBeNull()
+    const editScope = within(editFormElement as HTMLElement)
+    expect(editScope.getByDisplayValue("Current Route Character")).toBeInTheDocument()
+
+    await act(async () => {
+      resolvers["char-a"]?.({
+        id: "char-a",
+        name: "Stale Route Character",
+        system_prompt: "Existing system prompt.",
+        greeting: "Hi",
+        description: "Stale route description",
+        tags: ["stale"],
+        version: 1
+      })
+      await Promise.resolve()
+    })
+
+    expect(editScope.getByDisplayValue("Current Route Character")).toBeInTheDocument()
+    expect(editScope.queryByDisplayValue("Stale Route Character")).not.toBeInTheDocument()
   }, 10000)
 
   it("preloads world-book attachments in edit mode and syncs attachments on save", async () => {

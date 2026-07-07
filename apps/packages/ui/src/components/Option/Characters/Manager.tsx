@@ -971,7 +971,11 @@ export const CharactersManager: React.FC<CharactersManagerProps> = ({
 
     void tldwClient
       .getCharacter(requestedCharacterId)
-      .then(openFocusedEdit)
+      .then((record) => {
+        if (routeFocusHandledRef.current === requestKey) {
+          openFocusedEdit(record)
+        }
+      })
       .catch(() => {
         if (routeFocusHandledRef.current === requestKey) {
           routeFocusHandledRef.current = null
