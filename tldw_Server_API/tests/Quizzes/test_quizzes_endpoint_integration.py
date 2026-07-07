@@ -2012,7 +2012,7 @@ def test_generate_quiz_from_quiz_attempt_question_sources(
     question_source_id = f"{attempt_id}:{question_ids[0]}"
     quizzes_db.upsert_workspace("ws-1", "Workspace One")
 
-    async def fake_generate_llm(*, prompt: str, model: str | None = None):
+    async def fake_generate_llm(*, prompt: str, model: str | None = None, **_kwargs):
         assert "Which structure filters blood?" in prompt
         return {
             "questions": [
@@ -2069,7 +2069,7 @@ def test_generate_quiz_from_multiple_missed_questions_in_one_attempt(
     attempt_id, question_ids = _create_attempt_with_missed_questions(quizzes_db)
     source_ids = [f"{attempt_id}:{question_id}" for question_id in question_ids]
 
-    async def fake_generate_llm(*, prompt: str, model: str | None = None):
+    async def fake_generate_llm(*, prompt: str, model: str | None = None, **_kwargs):
         assert "Which structure filters blood?" in prompt
         assert "Which structure concentrates urine?" in prompt
         return {
@@ -2200,6 +2200,47 @@ def test_generate_quiz_maps_database_error_to_contextual_500(
 
     assert response.status_code == 500
     assert response.json()["detail"] == "Failed to generate quiz"
+
+
+def test_generate_quiz_endpoint_forwards_question_plan(
+    client_with_quizzes_db: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    captured: dict = {}
+
+    async def fake_generate_quiz_from_sources(**kwargs):
+        captured.update(kwargs)
+        return {
+            "quiz": {
+                "id": 1,
+                "name": "Planned Quiz",
+                "total_questions": 0,
+                "deleted": False,
+                "client_id": "test",
+                "version": 1,
+            },
+            "questions": [],
+        }
+
+    monkeypatch.setattr(quiz_endpoints, "generate_quiz_from_sources", fake_generate_quiz_from_sources)
+
+    response = client_with_quizzes_db.post(
+        "/api/v1/quizzes/generate",
+        json={
+            "num_questions": 2,
+            "sources": [{"source_type": "note", "source_id": "note-plan"}],
+            "question_plan": [
+                {"question_type": "multiple_choice", "count": 1, "option_count": 5},
+                {"question_type": "matching", "count": 1, "pair_count": 2},
+            ],
+        },
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 200
+    assert [item.question_type.value for item in captured["question_plan"]] == ["multiple_choice", "matching"]
+    assert captured["question_plan"][0].option_count == 5
+    assert captured["question_plan"][1].pair_count == 2
 
 
 def test_quiz_json_import_roundtrip(client_with_quizzes_db: TestClient):

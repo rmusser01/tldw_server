@@ -574,6 +574,48 @@ def _normalize_questions(
     return normalized
 
 
+def _normalize_planned_questions(
+    raw_questions: Sequence[Any],
+    plan: Sequence[dict[str, Any]],
+    default_source_type: str,
+    default_source_id: str,
+) -> list[dict[str, Any]]:
+    grouped: dict[str, list[dict[str, Any]]] = {item["question_type"]: [] for item in plan}
+    expected_total = sum(int(item["count"]) for item in plan)
+
+    for raw in raw_questions:
+        if not isinstance(raw, dict):
+            continue
+        q_type = _normalize_question_type(raw.get("question_type"))
+        plan_item = next((item for item in plan if item["question_type"] == q_type), None)
+        if plan_item is None:
+            continue
+        try:
+            grouped[q_type].append(
+                _normalize_planned_question(
+                    raw,
+                    plan_item,
+                    default_source_type=default_source_type,
+                    default_source_id=default_source_id,
+                )
+            )
+        except ValueError:
+            continue
+
+    for item in plan:
+        q_type = item["question_type"]
+        expected = int(item["count"])
+        got = len(grouped[q_type])
+        if got != expected:
+            raise ValueError(f"Generated {q_type} count mismatch: expected {expected}, got {got}")
+
+    got_total = sum(len(items) for items in grouped.values())
+    if got_total != expected_total or len(raw_questions) != expected_total:
+        raise ValueError(f"Generated question plan mismatch: expected {expected_total}, got {len(raw_questions)}")
+
+    return [question for item in plan for question in grouped[item["question_type"]]]
+
+
 def _normalize_sources(sources: Sequence[Any]) -> list[dict[str, str]]:
     normalized: list[dict[str, str]] = []
     for item in sources:
@@ -666,10 +708,28 @@ def _build_test_mode_questions(
     normalized_sources: Sequence[dict[str, str]],
     num_questions: int,
     question_types: Sequence[Any] | None,
+    question_plan: Sequence[Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Build deterministic quiz questions that preserve evidence provenance in test mode."""
-    normalized_types = _coerce_question_types(question_types)
-    total_questions = max(1, num_questions)
+    if question_plan:
+        plan = _coerce_generation_plan(
+            num_questions=num_questions,
+            question_types=question_types,
+            question_plan=question_plan,
+        )
+        planned_types = [
+            (item["question_type"], copy_index, item)
+            for item in plan
+            for copy_index in range(int(item["count"]))
+        ]
+        total_questions = len(planned_types)
+    else:
+        normalized_types = _coerce_question_types(question_types)
+        total_questions = max(1, num_questions)
+        planned_types = [
+            (normalized_types[index % len(normalized_types)], index, {})
+            for index in range(total_questions)
+        ]
     questions: list[dict[str, Any]] = []
 
     for index in range(total_questions):
@@ -689,9 +749,10 @@ def _build_test_mode_questions(
             "label": f"Source {index + 1}",
             "quote": excerpt,
         }
-        question_type = normalized_types[index % len(normalized_types)]
+        question_type, copy_index, plan_item = planned_types[index]
 
         if question_type == "multiple_choice":
+            option_count = int(plan_item.get("option_count", 4) or 4)
             questions.append(
                 {
                     "question_type": "multiple_choice",
@@ -704,10 +765,55 @@ def _build_test_mode_questions(
                         "A conflicting claim with no evidence.",
                         "An empty workspace selection.",
                         "A discarded draft artifact.",
-                    ],
+                    ][:option_count] + [f"Unused distractor {option_idx}" for option_idx in range(5, option_count + 1)],
                     "correct_answer": 0,
                     "explanation": "The first option quotes the selected source evidence.",
                     "hint": "Look for the excerpt copied from the selected source.",
+                    "hint_penalty_points": 0,
+                    "source_citations": [citation],
+                    "points": 1,
+                }
+            )
+            continue
+
+        if question_type == "multi_select":
+            option_count = int(plan_item.get("option_count", 4) or 4)
+            questions.append(
+                {
+                    "question_type": "multi_select",
+                    "question_text": (
+                        f"Which statements are supported by {citation_source_type}:{citation_source_id}?"
+                    ),
+                    "options": [
+                        excerpt,
+                        f"{citation_source_type}:{citation_source_id} is one selected source.",
+                        "A claim from an unselected source.",
+                        "A statement with no citation.",
+                    ][:option_count] + [f"Unused distractor {option_idx}" for option_idx in range(5, option_count + 1)],
+                    "correct_answer": [0, 1],
+                    "explanation": "The first two options are grounded in the selected source.",
+                    "hint": "Choose only options tied to the citation.",
+                    "hint_penalty_points": 0,
+                    "source_citations": [citation],
+                    "points": 1,
+                }
+            )
+            continue
+
+        if question_type == "matching":
+            pair_count = int(plan_item.get("pair_count", 4) or 4)
+            options = [f"Term {copy_index + 1}.{pair_index + 1}" for pair_index in range(pair_count)]
+            questions.append(
+                {
+                    "question_type": "matching",
+                    "question_text": f"Match each term supported by {citation_source_type}:{citation_source_id}.",
+                    "options": options,
+                    "correct_answer": {
+                        option: f"Match {copy_index + 1}.{pair_index + 1}"
+                        for pair_index, option in enumerate(options)
+                    },
+                    "explanation": "Deterministic matching placeholder for planned test-mode coverage.",
+                    "hint": "Pair each term with the same numbered match.",
                     "hint_penalty_points": 0,
                     "source_citations": [citation],
                     "points": 1,
@@ -753,6 +859,7 @@ async def _call_quiz_generation_llm(
     prompt: str,
     model: str | None = None,
     api_provider: str | None = None,
+    max_tokens: int = 2000,
 ) -> Any:
     provider = (api_provider or DEFAULT_LLM_PROVIDER or "openai").strip().lower()
     api_key, _debug = resolve_provider_api_key(provider, prefer_module_keys_in_tests=True)
@@ -774,7 +881,7 @@ async def _call_quiz_generation_llm(
                 "api_key": api_key,
                 "model": model_to_use,
                 "temperature": 0.3,
-                "max_tokens": 2000,
+                "max_tokens": max_tokens,
                 "response_format": response_format,
                 "app_config": app_config,
             }
@@ -892,6 +999,7 @@ async def generate_quiz_from_sources(
     question_types: list[Any] | None = None,
     difficulty: str = "mixed",
     focus_topics: list[str] | None = None,
+    question_plan: Sequence[Any] | None = None,
     model: str | None = None,
     api_provider: str | None = None,
     workspace_id: str | None = None,
@@ -906,7 +1014,12 @@ async def generate_quiz_from_sources(
         media_db=media_db,
     )
 
-    normalized_types = _coerce_question_types(question_types)
+    plan = _coerce_generation_plan(
+        num_questions=num_questions,
+        question_types=question_types,
+        question_plan=question_plan,
+    )
+    normalized_types = [item["question_type"] for item in plan]
     focus_instruction = ""
     if focus_topics:
         focus_instruction = f"- Focus on these topics: {', '.join(t for t in focus_topics if t)}"
@@ -925,6 +1038,7 @@ async def generate_quiz_from_sources(
             normalized_sources=normalized_sources,
             num_questions=num_questions,
             question_types=normalized_types,
+            question_plan=plan if question_plan else None,
         )
         _validate_strict_provenance(questions, normalized_sources)
         return await asyncio.to_thread(
@@ -941,16 +1055,21 @@ async def generate_quiz_from_sources(
 
     content = _build_content_from_evidence(evidence)
 
-    prompt = QUIZ_GENERATION_PROMPT.format(
+    prompt = _format_quiz_generation_prompt(
         num_questions=num_questions,
         content=content,
         difficulty=difficulty,
-        question_types=", ".join(normalized_types),
+        question_types=normalized_types,
         focus_instruction=focus_instruction,
         source_contract=source_contract,
+        question_plan=plan if question_plan else None,
     )
 
-    llm_kwargs: dict[str, Any] = {"prompt": prompt, "model": model}
+    llm_kwargs: dict[str, Any] = {
+        "prompt": prompt,
+        "model": model,
+        "max_tokens": min(8000, max(2000, num_questions * 220)),
+    }
     if api_provider:
         llm_kwargs["api_provider"] = api_provider
     raw_response = await _call_quiz_generation_llm(**llm_kwargs)
@@ -961,13 +1080,21 @@ async def generate_quiz_from_sources(
         raise ValueError("LLM response did not include a questions list")
 
     default_source = normalized_sources[0]
-    questions = _normalize_questions(
-        raw_questions,
-        default_source_type=default_source["source_type"],
-        default_source_id=default_source["source_id"],
-    )
-    if num_questions and len(questions) > num_questions:
-        questions = questions[:num_questions]
+    if question_plan:
+        questions = _normalize_planned_questions(
+            raw_questions,
+            plan,
+            default_source_type=default_source["source_type"],
+            default_source_id=default_source["source_id"],
+        )
+    else:
+        questions = _normalize_questions(
+            raw_questions,
+            default_source_type=default_source["source_type"],
+            default_source_id=default_source["source_id"],
+        )
+        if num_questions and len(questions) > num_questions:
+            questions = questions[:num_questions]
     if not questions:
         raise ValueError("No valid questions generated")
     _validate_strict_provenance(questions, normalized_sources)
