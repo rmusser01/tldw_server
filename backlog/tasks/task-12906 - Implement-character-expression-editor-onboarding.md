@@ -17,6 +17,9 @@ documentation:
 - Docs/superpowers/plans/2026-07-07-character-expression-editor-onboarding-implementation-plan.md
 modified_files:
 - Docs/superpowers/plans/2026-07-07-character-expression-editor-onboarding-implementation-plan.md
+- apps/packages/ui/src/components/Option/Characters/character-expression-images.ts
+- apps/packages/ui/src/components/Option/Characters/__tests__/character-expression-images.test.ts
+- apps/packages/ui/src/components/Option/Characters/utils.ts
 - backlog/tasks/task-12906 - Implement-character-expression-editor-onboarding.md
 ---
 
@@ -44,6 +47,8 @@ Implementation plan written at Docs/superpowers/plans/2026-07-07-character-expre
 Task 1 metadata helper contract completed in commit e5ec2d45cb. Added regression coverage for arbitrary safe expression state image keys, canonical mood image precedence over legacy aliases, canonical write cleanup, empty-map removal, and legacy alias resolution fallback. Verification: initial focused Vitest run failed on nested legacy alias cleanup and legacy resolver fallback; final `bunx vitest run src/utils/__tests__/character-mood.test.ts` from apps/packages/ui passed 11 tests. `git diff --check` passed. Bandit was attempted against touched TypeScript files with the project venv and produced no findings, with expected TypeScript parse errors because Bandit is Python-only.
 
 Task 1 review fix: `upsertCharacterMoodImage` and `removeCharacterMoodImage` now normalize image-map keys with `normalizeCharacterEmoteState`, matching the arbitrary safe state contract. Added regression coverage for upserting/removing `smirk`. Red check failed because `smirk` upsert resolved to an empty string; final `bunx vitest run src/utils/__tests__/character-mood.test.ts` from apps/packages/ui passed 12 tests and `git diff --check` passed. Bandit was attempted against touched TypeScript files with the project venv and produced no findings, with expected TypeScript parse errors because Bandit is Python-only.
+
+Task 2 pure editor row helpers completed. Added `character-expression-images.ts` with starter row loading, legacy metadata loading, row normalization errors for invalid/duplicate/incomplete custom rows, and canonical mood image map conversion. Wired `applyCharacterMetadataToExtensions()` and `buildCharacterPayload()` to merge expression rows through canonical `tldw.mood_images` only when rows or existing mood metadata require a write; invalid raw extensions are preserved for untouched empty starter rows and return null when expression metadata must be written. Verification: red check `bunx vitest run src/components/Option/Characters/__tests__/character-expression-images.test.ts` failed on missing helper module as expected. Final focused tests from `apps/packages/ui`: `bunx vitest run src/components/Option/Characters/__tests__/character-expression-images.test.ts src/utils/__tests__/character-mood.test.ts` passed 20 tests. `git diff --check` passed. Bandit was run with the shared repo venv at `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r apps/packages/ui/src/components/Option/Characters/character-expression-images.ts apps/packages/ui/src/components/Option/Characters/utils.ts -f json -o /tmp/bandit_character_expression_images.json`; it produced no findings, with expected TypeScript AST parse errors because Bandit is Python-only. Direct UI package `bunx tsc --noEmit --pretty false --project tsconfig.json` first OOMed at the default Node heap, then completed with `NODE_OPTIONS=--max-old-space-size=8192` and failed on existing unrelated test type errors outside the touched files.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

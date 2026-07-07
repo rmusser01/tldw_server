@@ -14,7 +14,13 @@ import {
 export { resolveCharacterSelectionId } from "@/utils/default-character-preference"
 import { CHARACTER_TEMPLATES } from "@/data/character-templates"
 import { extractAvatarValues } from "./AvatarField"
+import {
+  expressionRowsToMoodImages,
+  normalizeExpressionImageRows,
+  type ExpressionImageRow
+} from "./character-expression-images"
 import { validateAndCreateImageDataUrl } from "@/utils/image-utils"
+import { mergeCharacterMoodImagesIntoExtensions } from "@/utils/character-mood"
 import { buildCharacterChatPath } from "@/routes/route-paths"
 
 // ---------------------------------------------------------------------------
@@ -1340,14 +1346,31 @@ export const applyCharacterMetadataToExtensions = (
     preset: CharacterPromptPresetId
     defaultAuthorNote?: unknown
     generation?: CharacterGenerationSettings
+    expressionRows?: ExpressionImageRow[]
   }
-): Record<string, any> | string | undefined => {
+): Record<string, any> | string | undefined | null => {
   const parsed = parseExtensionsObject(rawExtensions)
+  const normalizedExpressionRows = Array.isArray(params.expressionRows)
+    ? normalizeExpressionImageRows(params.expressionRows)
+    : null
+  const expressionMoodImages = normalizedExpressionRows
+    ? expressionRowsToMoodImages(normalizedExpressionRows.rows)
+    : {}
+  const parsedTldw = parsed && isPlainObject(parsed.tldw) ? parsed.tldw : null
+  const hadMoodImageKeys =
+    Boolean(parsedTldw && ("mood_images" in parsedTldw || "moodImages" in parsedTldw)) ||
+    Boolean(parsed && ("mood_images" in parsed || "moodImages" in parsed))
+  const shouldMergeExpressionImages =
+    Boolean(normalizedExpressionRows) &&
+    (normalizedExpressionRows!.errors.length > 0 ||
+      Object.keys(expressionMoodImages).length > 0 ||
+      hadMoodImageKeys)
   const hadRawString =
     typeof rawExtensions === "string" &&
     rawExtensions.trim().length > 0 &&
     parsed === null
 
+  if (hadRawString && shouldMergeExpressionImages) return null
   if (hadRawString) {
     return rawExtensions as string
   }
@@ -1414,6 +1437,13 @@ export const applyCharacterMetadataToExtensions = (
     next.tldw = tldw
   } else {
     delete next.tldw
+  }
+
+  if (shouldMergeExpressionImages) {
+    if (!normalizedExpressionRows || normalizedExpressionRows.errors.length > 0) {
+      return null
+    }
+    next = mergeCharacterMoodImagesIntoExtensions(next, expressionMoodImages)
   }
 
   if (Object.keys(next).length > 0) {
@@ -1516,8 +1546,12 @@ export const buildCharacterPayload = (values: any): Record<string, any> => {
   const mergedExtensions = applyCharacterMetadataToExtensions(values.extensions, {
     preset: resolvedPreset,
     defaultAuthorNote: values.default_author_note,
-    generation: generationSettings
+    generation: generationSettings,
+    expressionRows: values.expression_images
   })
+  if (mergedExtensions === null) {
+    throw new Error("Invalid extensions JSON. Fix metadata before saving expression images.")
+  }
   if (typeof mergedExtensions !== "undefined") {
     payload.extensions = mergedExtensions
   }
