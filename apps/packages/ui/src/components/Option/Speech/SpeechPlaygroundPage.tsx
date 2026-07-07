@@ -57,6 +57,10 @@ import {
   setResponseSplitting as persistResponseSplitting
 } from "@/services/tts"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
+import {
+  buildAudioWebSocketUrl,
+  sendAudioWebSocketAuthFrame
+} from "@/services/tldw/audio-websocket-auth"
 import { copyToClipboard } from "@/utils/clipboard"
 import { estimateTtsDurationSeconds, splitMessageContent } from "@/utils/tts"
 import { markdownToText } from "@/utils/markdown-to-text"
@@ -1493,59 +1497,67 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
       return
     }
 
-    const base = serverUrl.replace(/^http/i, "ws").replace(/\/$/, "")
-    const wsUrl = `${base}/api/v1/audio/stream/tts?token=${encodeURIComponent(token)}`
+    const wsUrl = buildAudioWebSocketUrl(serverUrl, "/api/v1/audio/stream/tts")
     const ws = new WebSocket(wsUrl)
     ws.binaryType = "arraybuffer"
     wsRef.current = ws
 
     ws.onopen = () => {
       void (async () => {
-        const requestedFormat = (tldwFormat || ttsSettings?.tldwTtsResponseFormat || "mp3").toLowerCase()
-        const format = STREAMING_FORMATS.has(requestedFormat) ? requestedFormat : "mp3"
-        if (format !== requestedFormat) {
-          notification.warning({
-            message: "Streaming format adjusted",
-            description: `WebSocket streaming supports mp3, opus, aac, flac, wav, or pcm. Falling back to ${format.toUpperCase()}.`
-          })
-        }
-        const model =
-          tldwModel || ttsSettings?.tldwTtsModel || DEFAULT_TLDW_TTS_MODEL
-        const voice =
-          tldwVoice || ttsSettings?.tldwTtsVoice || DEFAULT_TLDW_TTS_VOICE
-        const speed = ttsSettings?.tldwTtsSpeed ?? 1
-        const langCode = tldwLanguage || ttsSettings?.tldwTtsLanguage
-        let utterance = markdownToText(ttsText)
         try {
-          const ctx = await resolveTtsProviderContext(ttsText, {
+          sendAudioWebSocketAuthFrame(ws, token)
+          const requestedFormat = (tldwFormat || ttsSettings?.tldwTtsResponseFormat || "mp3").toLowerCase()
+          const format = STREAMING_FORMATS.has(requestedFormat) ? requestedFormat : "mp3"
+          if (format !== requestedFormat) {
+            notification.warning({
+              message: "Streaming format adjusted",
+              description: `WebSocket streaming supports mp3, opus, aac, flac, wav, or pcm. Falling back to ${format.toUpperCase()}.`
+            })
+          }
+          const model =
+            tldwModel || ttsSettings?.tldwTtsModel || DEFAULT_TLDW_TTS_MODEL
+          const voice =
+            tldwVoice || ttsSettings?.tldwTtsVoice || DEFAULT_TLDW_TTS_VOICE
+          const speed = ttsSettings?.tldwTtsSpeed ?? 1
+          const langCode = tldwLanguage || ttsSettings?.tldwTtsLanguage
+          let utterance = markdownToText(ttsText)
+          try {
+            const ctx = await resolveTtsProviderContext(ttsText, {
+              provider: "tldw",
+              tldwModel: model,
+              tldwVoice: voice,
+              tldwResponseFormat: format
+            })
+            utterance = ctx.utterance
+          } catch {
+            // fallback to markdownToText
+          }
+          streamMetaRef.current = {
             provider: "tldw",
-            tldwModel: model,
-            tldwVoice: voice,
-            tldwResponseFormat: format
-          })
-          utterance = ctx.utterance
-        } catch {
-          // fallback to markdownToText
+            model,
+            voice,
+            format
+          }
+          const payload = {
+            type: "prompt",
+            text: utterance,
+            model,
+            voice,
+            format,
+            speed,
+            lang_code: langCode || undefined,
+            extra_params: extraParams
+          }
+          streamStart(format, true)
+          setStreamStatus("streaming")
+          ws.send(JSON.stringify(payload))
+        } catch (error) {
+          console.error("Failed to initialize WebSocket stream:", error)
+          const classified = classifyAudioError("Failed to initialize WebSocket stream")
+          setStreamStatus("error")
+          setStreamErrorSafe(classified.recovery)
+          ws.close()
         }
-        streamMetaRef.current = {
-          provider: "tldw",
-          model,
-          voice,
-          format
-        }
-        const payload = {
-          type: "prompt",
-          text: utterance,
-          model,
-          voice,
-          format,
-          speed,
-          lang_code: langCode || undefined,
-          extra_params: extraParams
-        }
-        streamStart(format, true)
-        setStreamStatus("streaming")
-        ws.send(JSON.stringify(payload))
       })()
     }
 
