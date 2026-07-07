@@ -30,6 +30,8 @@ interface ToolCallBlockProps {
   className?: string
 }
 
+const RECIPE_CARD_TOOL_NAME = "cooking.recipe_card.render"
+
 // Map tool names to icons
 const TOOL_ICONS: Record<string, React.FC<{ className?: string }>> = {
   fs_list: FolderOpen,
@@ -49,7 +51,7 @@ const TOOL_ICONS: Record<string, React.FC<{ className?: string }>> = {
   exec_run: Terminal,
   web_search: Globe,
   web_fetch: Globe,
-  "cooking.recipe_card.render": ChefHat
+  [RECIPE_CARD_TOOL_NAME]: ChefHat
 }
 
 // Fallback display names
@@ -71,7 +73,7 @@ const TOOL_LABELS: Record<string, string> = {
   exec_run: "Run Command",
   web_search: "Web Search",
   web_fetch: "Fetch URL",
-  "cooking.recipe_card.render": "Recipe Card"
+  [RECIPE_CARD_TOOL_NAME]: "Recipe Card"
 }
 
 // Format tool arguments for compact display
@@ -216,7 +218,7 @@ export const ToolCallBlock: React.FC<ToolCallBlockProps> = ({
         const argsPreview = formatArgsPreview(call.function.name, call.function.arguments)
         const result = resultsMap.get(call.id)
         const recipePayload =
-          call.function.name === "cooking.recipe_card.render"
+          call.function.name === RECIPE_CARD_TOOL_NAME
             ? parseRecipeCardToolResult(result)
             : null
 

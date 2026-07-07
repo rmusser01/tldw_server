@@ -63,6 +63,28 @@ describe("RecipeCard", () => {
     expect(screen.getByText("1 serving")).toBeInTheDocument()
   })
 
+  it("resyncs servings when a new recipe payload changes the base serving count", async () => {
+    const { rerender } = render(<RecipeCard payload={payload} />)
+
+    await userEvent.click(screen.getByRole("button", { name: "Increase servings" }))
+    expect(screen.getByText("3 servings")).toBeInTheDocument()
+
+    rerender(
+      <RecipeCard
+        payload={{
+          ...payload,
+          recipe: {
+            ...payload.recipe,
+            title: "Garlic Alfredo Sauce",
+            servings: { value: 4, label: "4 servings" }
+          }
+        }}
+      />
+    )
+
+    expect(await screen.findByText("4 servings")).toBeInTheDocument()
+  })
+
   it("toggles cooking mode steps and duration text", async () => {
     render(<RecipeCard payload={payload} />)
 

@@ -1,4 +1,8 @@
-import type { RecipeCardPayload } from "@/types/recipe-card"
+import type {
+  RecipeCardIngredient,
+  RecipeCardPayload,
+  RecipeCardStep
+} from "@/types/recipe-card"
 import type { ToolCallResult } from "@/types/tool-calls"
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
@@ -21,7 +25,7 @@ const isFiniteNumber = (value: unknown): value is number =>
 const isIngredientQuantity = (value: unknown): value is number =>
   isFiniteNumber(value) && value > 0 && value <= 100000
 
-const isValidIngredient = (ingredient: unknown) => {
+const isValidIngredient = (ingredient: unknown): ingredient is RecipeCardIngredient => {
   if (!isObject(ingredient) || !isString(ingredient.display, 180)) return false
   if (!isOptionalStringOrNull(ingredient.name, 120)) return false
   if (
@@ -36,7 +40,7 @@ const isValidIngredient = (ingredient: unknown) => {
   return ingredient.scalable === undefined || typeof ingredient.scalable === "boolean"
 }
 
-const isValidStep = (step: unknown) => {
+const isValidStep = (step: unknown): step is RecipeCardStep => {
   if (!isObject(step) || !isString(step.display, 600)) return false
   const timer = step.timer_seconds
   return (
@@ -49,7 +53,7 @@ const isValidStep = (step: unknown) => {
   )
 }
 
-const isValidRecipe = (recipe: unknown) => {
+const isValidRecipe = (recipe: unknown): recipe is RecipeCardPayload["recipe"] => {
   if (!isObject(recipe) || !isString(recipe.title, 120)) return false
   if (!isObject(recipe.servings)) return false
   if (
@@ -109,5 +113,5 @@ export const parseRecipeCardToolResult = (
     return null
   }
 
-  return payload as RecipeCardPayload
+  return { kind: "recipe_card", version: 1, recipe: payload.recipe }
 }

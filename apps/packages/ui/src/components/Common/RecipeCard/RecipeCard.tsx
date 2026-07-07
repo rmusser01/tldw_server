@@ -41,6 +41,10 @@ export function RecipeCard({ payload, className = "" }: RecipeCardProps) {
   const factor = servings / recipe.servings.value
   const servingLabel = formatServingsLabel(servings)
 
+  React.useEffect(() => {
+    setServings(recipe.servings.value)
+  }, [recipe.servings.value])
+
   return (
     <section
       className={classNames(
