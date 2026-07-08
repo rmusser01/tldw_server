@@ -25,6 +25,7 @@ Acceptance criteria:
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Design spec: Docs/superpowers/specs/2026-07-08-planned-flashcard-generation-controls-design.md.
+Implementation plan: Docs/superpowers/plans/2026-07-08-planned-flashcard-generation-controls-implementation-plan.md.
 
 Approved design choices:
 - Add optional `card_plan` to flashcard generation while preserving legacy `num_cards` plus `card_type`.
