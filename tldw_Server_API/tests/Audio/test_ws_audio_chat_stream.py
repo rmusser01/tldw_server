@@ -4,6 +4,7 @@ import asyncio
 import base64
 import importlib.machinery
 import json
+import struct
 import sys
 import time
 from types import SimpleNamespace
@@ -56,6 +57,16 @@ from tldw_Server_API.app.core.Audio.transcription_service import (
     _map_openai_audio_model_to_whisper,
 )
 
+_AUDIO_LABEL_TO_SAMPLE = {
+    "abc": 100,
+    "abcd": 200,
+    "live": 300,
+    "one": 400,
+    "two": 500,
+    "queued": 600,
+}
+_AUDIO_SAMPLE_TO_LABEL = {value: key for key, value in _AUDIO_LABEL_TO_SAMPLE.items()}
+
 
 class DummyWebSocket:
     """In-memory WebSocket stub used for audio chat WebSocket tests."""
@@ -65,7 +76,8 @@ class DummyWebSocket:
         self.query_params: Dict[str, str] = {}
         self.client = SimpleNamespace(host="127.0.0.1")
         self._messages: List[str] = [
-            json.dumps(m) if isinstance(m, dict) else m for m in messages
+            json.dumps(_normalize_ws_test_message(m)) if isinstance(m, dict) else m
+            for m in messages
         ]
         self.sent_bytes: List[bytes] = []
         self.sent_json: List[Dict[str, Any]] = []
@@ -147,7 +159,11 @@ class _EchoTranscriber:
         return None
 
     async def process_audio_chunk(self, audio_bytes: bytes) -> Dict[str, Any]:
-        text = audio_bytes.decode("utf-8")
+        if len(audio_bytes) >= 4:
+            first_sample = int(round(struct.unpack("<f", audio_bytes[:4])[0] * 32768))
+            text = _AUDIO_SAMPLE_TO_LABEL.get(first_sample, f"pcm16:{first_sample}")
+        else:
+            text = "pcm16:empty"
         self.current_chunks.append(text)
         self.processed_history.append(text)
         return {"type": "partial", "text": text}
@@ -292,6 +308,51 @@ def _enable_chat_ws_control_v2(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
+def _pcm16_audio(samples: Iterable[int] = (0,)) -> str:
+    """Return base64-encoded little-endian PCM16 samples."""
+    sample_list = list(samples)
+    raw = struct.pack("<" + "h" * len(sample_list), *sample_list)
+    return base64.b64encode(raw).decode("ascii")
+
+
+def _strict_chat_config(
+    *,
+    mode: str = "voice_chat",
+    stt: Optional[Dict[str, Any]] = None,
+    llm: Optional[Dict[str, Any]] = None,
+    tts: Optional[Dict[str, Any]] = None,
+    **overrides: Any,
+) -> Dict[str, Any]:
+    """Return a strict v1 audio chat config frame."""
+    payload: Dict[str, Any] = {
+        "type": "config",
+        "protocol_version": 1,
+        "mode": mode,
+        "audio_format": "pcm16",
+        "sample_rate": 16000,
+        "channels": 1,
+        "stt": stt if stt is not None else {"model": "parakeet"},
+        "llm": llm if llm is not None else {"provider": "stub", "model": "stub-model"},
+        "tts": tts if tts is not None else {"voice": "af_heart", "format": "pcm"},
+    }
+    payload.update(overrides)
+    return payload
+
+
+def _normalize_ws_test_message(message: Dict[str, Any]) -> Dict[str, Any]:
+    """Upgrade legacy positive-path test config frames to strict v1."""
+    if message.get("type") != "config" or "protocol_version" in message:
+        return message
+    return {
+        "protocol_version": 1,
+        "mode": "voice_chat",
+        "audio_format": "pcm16",
+        "sample_rate": 16000,
+        "channels": 1,
+        **message,
+    }
+
+
 @pytest.fixture(autouse=True)
 def mock_audio_ws_dependencies(monkeypatch: pytest.MonkeyPatch) -> _DummyRegistry:
     """Fixture that sets up common mocks for audio streaming WebSocket tests."""
@@ -333,8 +394,95 @@ def mock_audio_ws_dependencies(monkeypatch: pytest.MonkeyPatch) -> _DummyRegistr
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_audio_chat_ws_rejects_audio_before_strict_config() -> None:
+    ws = DummyWebSocket(
+        [
+            {"type": "audio", "data": _pcm16_audio()},
+            {"type": "stop"},
+        ]
+    )
+
+    await audio.websocket_audio_chat_stream(ws, token=None)
+
+    assert any(msg.get("type") == "error" and msg.get("code") == "bad_request" for msg in ws.sent_json)
+    assert ws.close_code == 4400
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_audio_chat_ws_rejects_transcribe_only_mode() -> None:
+    ws = DummyWebSocket(
+        [
+            _strict_chat_config(mode="dictate"),
+            {"type": "stop"},
+        ]
+    )
+
+    await audio.websocket_audio_chat_stream(ws, token=None)
+
+    assert any("not allowed" in msg.get("message", "") for msg in ws.sent_json)
+    assert ws.close_code == 4400
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_audio_chat_ws_push_to_talk_release_commits_turn(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ws = DummyWebSocket(
+        [
+            _strict_chat_config(mode="push_to_talk"),
+            {"type": "audio", "data": _pcm16_audio([1000])},
+            {"type": "push_to_talk_release"},
+            {"type": "stop"},
+        ]
+    )
+
+    async def _get_tts_service():
+        return _DummyTTSService([b"tts"])
+
+    monkeypatch.setattr(audio, "get_tts_service", _get_tts_service)
+
+    await audio.websocket_audio_chat_stream(ws, token=None)
+
+    full_transcripts = [msg for msg in ws.sent_json if msg.get("type") == "full_transcript"]
+    assert full_transcripts
+    assert full_transcripts[0].get("commit_source") == "push_to_talk_release"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_audio_chat_ws_push_to_talk_ignores_vad_auto_commit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _TriggeringVAD(_DummyVAD):
+        def observe(self, audio_bytes: bytes) -> bool:  # noqa: ARG002
+            self.last_trigger_at = 1234.5
+            return True
+
+    ws = DummyWebSocket(
+        [
+            _strict_chat_config(mode="push_to_talk"),
+            {"type": "audio", "data": _pcm16_audio([1000])},
+            {"type": "stop"},
+        ]
+    )
+
+    async def _get_tts_service():
+        return _DummyTTSService([b"tts"])
+
+    monkeypatch.setattr(audio, "SileroTurnDetector", _TriggeringVAD)
+    monkeypatch.setattr(audio, "get_tts_service", _get_tts_service)
+
+    await audio.websocket_audio_chat_stream(ws, token=None)
+
+    assert not [msg for msg in ws.sent_json if msg.get("type") == "full_transcript"]
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_audio_chat_ws_streams_llm_and_tts(monkeypatch: pytest.MonkeyPatch) -> None:
-    audio_payload = base64.b64encode(b"abc").decode("ascii")
+    audio_payload = _pcm16_audio([_AUDIO_LABEL_TO_SAMPLE["abc"]])
     messages = [
         {
             "type": "config",
@@ -371,7 +519,7 @@ async def test_audio_chat_ws_emits_bounded_stt_metrics(monkeypatch: pytest.Monke
     metrics_manager._metrics_registry = None
     registry = metrics_manager.get_metrics_registry()
 
-    audio_payload = base64.b64encode(b"abc").decode("ascii")
+    audio_payload = _pcm16_audio([_AUDIO_LABEL_TO_SAMPLE["abc"]])
     messages = [
         {
             "type": "config",
@@ -487,41 +635,38 @@ async def test_audio_chat_ws_normalizes_parakeet_variant_before_transcriber_init
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_audio_chat_ws_protocol_version_2_falls_back_to_v1_when_feature_disabled(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_audio_chat_ws_rejects_protocol_version_2() -> None:
     ws = DummyWebSocket(
         [
             {
                 "type": "config",
                 "protocol_version": 2,
+                "mode": "voice_chat",
+                "audio_format": "pcm16",
+                "sample_rate": 16000,
+                "channels": 1,
                 "stt": {"model": "parakeet"},
                 "llm": {"provider": "stub", "model": "stub-model"},
                 "tts": {"voice": "af_heart", "format": "pcm"},
             }
         ]
     )
-    transcriber_init_count = 0
-
-    class _CapturingTranscriber(_DummyTranscriber):
-        def __init__(self, config: Any) -> None:
-            nonlocal transcriber_init_count
-            transcriber_init_count += 1
-            super().__init__(config)
-
-    monkeypatch.setattr(audio, "UnifiedStreamingTranscriber", _CapturingTranscriber)
 
     await audio.websocket_audio_chat_stream(ws, token=None)
 
-    assert transcriber_init_count == 1
-    assert not [msg for msg in ws.sent_json if msg.get("error_type") == "unsupported_protocol_version"]
+    assert any(
+        msg.get("type") == "error"
+        and msg.get("code") == "bad_request"
+        and "protocol_version" in msg.get("message", "")
+        for msg in ws.sent_json
+    )
     assert not [msg for msg in ws.sent_json if msg.get("protocol_version") == 2]
-    assert ws.closed is True
+    assert ws.close_code == 4400
 
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_audio_chat_ws_negotiates_protocol_version_2_when_enabled(
+async def test_audio_chat_ws_rejects_protocol_version_2_when_legacy_control_enabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _enable_chat_ws_control_v2(monkeypatch)
@@ -530,6 +675,10 @@ async def test_audio_chat_ws_negotiates_protocol_version_2_when_enabled(
             {
                 "type": "config",
                 "protocol_version": 2,
+                "mode": "voice_chat",
+                "audio_format": "pcm16",
+                "sample_rate": 16000,
+                "channels": 1,
                 "stt": {"model": "parakeet"},
                 "llm": {"provider": "stub", "model": "stub-model"},
                 "tts": {"voice": "af_heart", "format": "pcm"},
@@ -538,277 +687,16 @@ async def test_audio_chat_ws_negotiates_protocol_version_2_when_enabled(
         ]
     )
 
-    monkeypatch.setattr(audio, "get_tts_service", lambda: _DummyTTSService([b"tts"]))
-
     await audio.websocket_audio_chat_stream(ws, token=None)
 
-    statuses = [msg for msg in ws.sent_json if msg.get("type") == "status"]
-    assert statuses[:2] == [
-        {"type": "status", "state": "configured", "protocol_version": 2},
-        {"type": "status", "state": "closing", "protocol_version": 2},
-    ]
-    assert any(msg.get("type") == "done" for msg in ws.sent_json)
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_audio_chat_ws_v2_pause_cancels_active_turn_without_interrupted_event(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _enable_chat_ws_control_v2(monkeypatch)
-    audio_payload = base64.b64encode(b"live").decode("ascii")
-    ws = DummyWebSocket(
-        [
-            {
-                "type": "config",
-                "protocol_version": 2,
-                "stt": {"model": "parakeet"},
-                "llm": {"provider": "stub", "model": "stub-model"},
-                "tts": {"voice": "af_heart", "format": "pcm"},
-            },
-            {"type": "audio", "data": audio_payload},
-            {"type": "commit"},
-            {"type": "control", "action": "pause"},
-            {"type": "control", "action": "stop"},
-        ]
+    assert any(
+        msg.get("type") == "error"
+        and msg.get("code") == "bad_request"
+        and "protocol_version" in msg.get("message", "")
+        for msg in ws.sent_json
     )
-
-    class _CapturingEchoTranscriber(_EchoTranscriber):
-        instances: List["_CapturingEchoTranscriber"] = []
-
-    async def _slow_llm_stub(**kwargs: Any) -> AsyncIterator[str]:  # noqa: ARG002
-        async def _gen() -> AsyncIterator[str]:
-            await asyncio.sleep(0.05)
-            yield 'data: {"choices":[{"delta":{"content":"This should be cancelled."}}]}\n\n'
-            await asyncio.sleep(0.05)
-            yield 'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n'
-            yield "data: [DONE]\n\n"
-
-        return _gen()
-
-    monkeypatch.setattr(audio, "UnifiedStreamingTranscriber", _CapturingEchoTranscriber)
-    monkeypatch.setattr(audio, "chat_api_call_async", _slow_llm_stub)
-    monkeypatch.setattr(audio, "get_tts_service", lambda: _DummyTTSService([b"tts"]))
-
-    await audio.websocket_audio_chat_stream(ws, token=None)
-
-    statuses = [msg for msg in ws.sent_json if msg.get("type") == "status"]
-    assert statuses[:3] == [
-        {"type": "status", "state": "configured", "protocol_version": 2},
-        {"type": "status", "state": "paused", "protocol_version": 2},
-        {"type": "status", "state": "closing", "protocol_version": 2},
-    ]
-    assert not [msg for msg in ws.sent_json if msg.get("type") == "interrupted"]
-    assert not ws.sent_bytes
-    assert not [msg for msg in ws.sent_json if msg.get("type") == "llm_message"]
-    assert _CapturingEchoTranscriber.instances[0].reset_calls >= 1
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_audio_chat_ws_v2_resume_drains_buffered_audio_fifo_before_commit(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _enable_chat_ws_control_v2(monkeypatch)
-    ws = DummyWebSocket(
-        [
-            {
-                "type": "config",
-                "protocol_version": 2,
-                "stt": {"model": "parakeet"},
-                "llm": {"provider": "stub", "model": "stub-model"},
-                "tts": {"voice": "af_heart", "format": "pcm"},
-            },
-            {"type": "control", "action": "pause"},
-            {"type": "audio", "data": base64.b64encode(b"one").decode("ascii")},
-            {"type": "audio", "data": base64.b64encode(b"two").decode("ascii")},
-            {"type": "control", "action": "resume"},
-            {"type": "commit"},
-            {"type": "control", "action": "stop"},
-        ]
-    )
-
-    class _CapturingEchoTranscriber(_EchoTranscriber):
-        instances: List["_CapturingEchoTranscriber"] = []
-
-    monkeypatch.setattr(audio, "UnifiedStreamingTranscriber", _CapturingEchoTranscriber)
-    monkeypatch.setattr(audio, "get_tts_service", lambda: _DummyTTSService([b"tts"]))
-
-    await audio.websocket_audio_chat_stream(ws, token=None)
-
-    statuses = [msg for msg in ws.sent_json if msg.get("type") == "status"]
-    partials = [msg for msg in ws.sent_json if msg.get("type") == "partial"]
-    full_transcripts = [msg for msg in ws.sent_json if msg.get("type") == "full_transcript"]
-
-    assert statuses[:4] == [
-        {"type": "status", "state": "configured", "protocol_version": 2},
-        {"type": "status", "state": "paused", "protocol_version": 2},
-        {"type": "status", "state": "resumed", "protocol_version": 2},
-        {"type": "status", "state": "closing", "protocol_version": 2},
-    ]
-    assert [msg.get("text") for msg in partials] == ["one", "two"]
-    assert full_transcripts[0].get("text") == "one|two"
-    resumed_index = ws.sent_json.index(statuses[2])
-    assert resumed_index < ws.sent_json.index(partials[0])
-    assert _CapturingEchoTranscriber.instances[0].processed_history == ["one", "two"]
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_audio_chat_ws_v2_resume_auto_commits_buffered_audio_when_vad_triggers(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _enable_chat_ws_control_v2(monkeypatch)
-    ws = DummyWebSocket(
-        [
-            {
-                "type": "config",
-                "protocol_version": 2,
-                "stt": {"model": "parakeet"},
-                "llm": {"provider": "stub", "model": "stub-model"},
-                "tts": {"voice": "af_heart", "format": "pcm"},
-            },
-            {"type": "control", "action": "pause"},
-            {"type": "audio", "data": base64.b64encode(b"one").decode("ascii")},
-            {"type": "audio", "data": base64.b64encode(b"two").decode("ascii")},
-            {"type": "control", "action": "resume"},
-            {"type": "control", "action": "stop"},
-        ]
-    )
-
-    class _CapturingEchoTranscriber(_EchoTranscriber):
-        instances: List["_CapturingEchoTranscriber"] = []
-
-    class _TriggeringVAD(_DummyVAD):
-        def __init__(self, *args: Any, **kwargs: Any) -> None:  # noqa: ARG002
-            super().__init__(*args, **kwargs)
-            self._count = 0
-            self.last_trigger_at = None
-
-        def observe(self, audio_bytes: bytes) -> bool:  # noqa: ARG002
-            self._count += 1
-            if self._count >= 2:
-                self.last_trigger_at = 9876.5
-                return True
-            return False
-
-    monkeypatch.setattr(audio, "UnifiedStreamingTranscriber", _CapturingEchoTranscriber)
-    monkeypatch.setattr(audio, "SileroTurnDetector", _TriggeringVAD)
-    monkeypatch.setattr(audio, "get_tts_service", lambda: _DummyTTSService([b"tts"]))
-
-    await audio.websocket_audio_chat_stream(ws, token=None)
-
-    assert [msg.get("text") for msg in ws.sent_json if msg.get("type") == "partial"] == ["one", "two"]
-    full_transcripts = [msg for msg in ws.sent_json if msg.get("type") == "full_transcript"]
-    assert full_transcripts[0].get("text") == "one|two"
-    assert [msg for msg in ws.sent_json if msg.get("type") == "llm_message"]
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_audio_chat_ws_v2_interrupt_remains_supported_while_paused(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _enable_chat_ws_control_v2(monkeypatch)
-    ws = DummyWebSocket(
-        [
-            {
-                "type": "config",
-                "protocol_version": 2,
-                "stt": {"model": "parakeet"},
-                "llm": {"provider": "stub", "model": "stub-model"},
-                "tts": {"voice": "af_heart", "format": "pcm"},
-            },
-            {"type": "control", "action": "pause"},
-            {"type": "interrupt", "reason": "barge_in"},
-            {"type": "control", "action": "stop"},
-        ]
-    )
-
-    monkeypatch.setattr(audio, "get_tts_service", lambda: _DummyTTSService([b"tts"]))
-
-    await audio.websocket_audio_chat_stream(ws, token=None)
-
-    assert {"type": "status", "state": "paused", "protocol_version": 2} in ws.sent_json
-    assert any(msg.get("type") == "interrupted" for msg in ws.sent_json)
-    assert not [msg for msg in ws.sent_json if msg.get("error_type") == "invalid_control"]
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_audio_chat_ws_v2_stop_drops_paused_audio_queue(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _enable_chat_ws_control_v2(monkeypatch)
-    ws = DummyWebSocket(
-        [
-            {
-                "type": "config",
-                "protocol_version": 2,
-                "stt": {"model": "parakeet"},
-                "llm": {"provider": "stub", "model": "stub-model"},
-                "tts": {"voice": "af_heart", "format": "pcm"},
-            },
-            {"type": "control", "action": "pause"},
-            {"type": "audio", "data": base64.b64encode(b"queued").decode("ascii")},
-            {"type": "control", "action": "stop"},
-        ]
-    )
-
-    class _CapturingEchoTranscriber(_EchoTranscriber):
-        instances: List["_CapturingEchoTranscriber"] = []
-
-    monkeypatch.setattr(audio, "UnifiedStreamingTranscriber", _CapturingEchoTranscriber)
-    monkeypatch.setattr(audio, "get_tts_service", lambda: _DummyTTSService([b"tts"]))
-
-    await audio.websocket_audio_chat_stream(ws, token=None)
-
-    statuses = [msg for msg in ws.sent_json if msg.get("type") == "status"]
-    assert statuses[:3] == [
-        {"type": "status", "state": "configured", "protocol_version": 2},
-        {"type": "status", "state": "paused", "protocol_version": 2},
-        {"type": "status", "state": "closing", "protocol_version": 2},
-    ]
-    assert not [msg for msg in ws.sent_json if msg.get("type") == "partial"]
-    assert not [msg for msg in ws.sent_json if msg.get("type") == "full_transcript"]
-    assert _CapturingEchoTranscriber.instances[0].processed_history == []
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_audio_chat_ws_v2_commit_while_paused_ignores_buffered_audio(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _enable_chat_ws_control_v2(monkeypatch)
-    ws = DummyWebSocket(
-        [
-            {
-                "type": "config",
-                "protocol_version": 2,
-                "stt": {"model": "parakeet"},
-                "llm": {"provider": "stub", "model": "stub-model"},
-                "tts": {"voice": "af_heart", "format": "pcm"},
-            },
-            {"type": "audio", "data": base64.b64encode(b"live").decode("ascii")},
-            {"type": "control", "action": "pause"},
-            {"type": "audio", "data": base64.b64encode(b"queued").decode("ascii")},
-            {"type": "control", "action": "commit"},
-            {"type": "control", "action": "stop"},
-        ]
-    )
-
-    class _CapturingEchoTranscriber(_EchoTranscriber):
-        instances: List["_CapturingEchoTranscriber"] = []
-
-    monkeypatch.setattr(audio, "UnifiedStreamingTranscriber", _CapturingEchoTranscriber)
-    monkeypatch.setattr(audio, "get_tts_service", lambda: _DummyTTSService([b"tts"]))
-
-    await audio.websocket_audio_chat_stream(ws, token=None)
-
-    full_transcripts = [msg for msg in ws.sent_json if msg.get("type") == "full_transcript"]
-    assert full_transcripts[0].get("text") == "live"
-    assert [msg.get("text") for msg in ws.sent_json if msg.get("type") == "partial"] == ["live"]
-    assert _CapturingEchoTranscriber.instances[0].processed_history == ["live"]
+    assert not [msg for msg in ws.sent_json if msg.get("type") == "status"]
+    assert ws.close_code == 4400
 
 
 @pytest.mark.integration
@@ -840,7 +728,7 @@ async def test_audio_chat_ws_interrupt_without_active_turn_is_safe(monkeypatch: 
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_audio_chat_ws_overlap_starts_tts_before_final_llm_message(monkeypatch: pytest.MonkeyPatch) -> None:
-    audio_payload = base64.b64encode(b"abc").decode("ascii")
+    audio_payload = _pcm16_audio([_AUDIO_LABEL_TO_SAMPLE["abc"]])
     ws = DummyWebSocket(
         [
             {
@@ -894,7 +782,7 @@ async def test_audio_chat_ws_overlap_starts_tts_before_final_llm_message(monkeyp
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_audio_chat_ws_overlap_warning_sanitizes_internal_message(monkeypatch: pytest.MonkeyPatch) -> None:
-    audio_payload = base64.b64encode(b"abc").decode("ascii")
+    audio_payload = _pcm16_audio([_AUDIO_LABEL_TO_SAMPLE["abc"]])
     ws = DummyWebSocket(
         [
             {
@@ -934,7 +822,7 @@ async def test_audio_chat_ws_overlap_warning_sanitizes_internal_message(monkeypa
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_audio_chat_ws_interrupt_cancels_inflight_turn(monkeypatch: pytest.MonkeyPatch) -> None:
-    audio_payload = base64.b64encode(b"abc").decode("ascii")
+    audio_payload = _pcm16_audio([_AUDIO_LABEL_TO_SAMPLE["abc"]])
     ws = DummyWebSocket(
         [
             {
@@ -978,7 +866,7 @@ async def test_audio_chat_ws_interrupt_cancels_inflight_turn(monkeypatch: pytest
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_audio_chat_ws_drops_stale_audio_after_interrupt(monkeypatch: pytest.MonkeyPatch) -> None:
-    audio_payload = base64.b64encode(b"abc").decode("ascii")
+    audio_payload = _pcm16_audio([_AUDIO_LABEL_TO_SAMPLE["abc"]])
     ws = DummyWebSocket(
         [
             {
@@ -1040,7 +928,7 @@ async def test_audio_chat_ws_drops_stale_audio_after_interrupt(monkeypatch: pyte
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_audio_chat_ws_auto_commit_uses_eos_timestamp(monkeypatch: pytest.MonkeyPatch) -> None:
-    audio_payload = base64.b64encode(b"abc").decode("ascii")
+    audio_payload = _pcm16_audio([_AUDIO_LABEL_TO_SAMPLE["abc"]])
     messages = [
         {
             "type": "config",
@@ -1084,7 +972,7 @@ async def test_audio_chat_ws_auto_commit_uses_eos_timestamp(monkeypatch: pytest.
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_audio_chat_ws_persists_turn_when_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
-    audio_payload = base64.b64encode(b"abc").decode("ascii")
+    audio_payload = _pcm16_audio([_AUDIO_LABEL_TO_SAMPLE["abc"]])
     ws = DummyWebSocket(
         [
             {
@@ -1159,7 +1047,7 @@ async def test_audio_chat_ws_persists_turn_when_enabled(monkeypatch: pytest.Monk
 async def test_audio_chat_ws_applies_stt_redaction_to_turn_output_and_persistence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    audio_payload = base64.b64encode(b"abc").decode("ascii")
+    audio_payload = _pcm16_audio([_AUDIO_LABEL_TO_SAMPLE["abc"]])
     ws = DummyWebSocket(
         [
             {
@@ -1251,7 +1139,7 @@ async def test_audio_chat_ws_applies_stt_redaction_to_turn_output_and_persistenc
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_audio_chat_ws_persistence_failure_is_fail_soft(monkeypatch: pytest.MonkeyPatch) -> None:
-    audio_payload = base64.b64encode(b"abc").decode("ascii")
+    audio_payload = _pcm16_audio([_AUDIO_LABEL_TO_SAMPLE["abc"]])
     ws = DummyWebSocket(
         [
             {
@@ -1290,7 +1178,7 @@ async def test_audio_chat_ws_persistence_failure_is_fail_soft(monkeypatch: pytes
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_audio_chat_ws_quota_exceeded(monkeypatch: pytest.MonkeyPatch) -> None:
-    audio_payload = base64.b64encode(b"abc").decode("ascii")
+    audio_payload = _pcm16_audio([_AUDIO_LABEL_TO_SAMPLE["abc"]])
     ws = DummyWebSocket(
         [
             {"type": "config", "stt": {"model": "parakeet"}, "llm": {"model": "stub"}, "tts": {"format": "mp3"}},
@@ -1317,7 +1205,7 @@ async def test_audio_chat_ws_quota_exceeded(monkeypatch: pytest.MonkeyPatch) -> 
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_audio_chat_ws_records_metrics(monkeypatch: pytest.MonkeyPatch) -> None:
-    audio_payload = base64.b64encode(b"abcd").decode("ascii")
+    audio_payload = _pcm16_audio([_AUDIO_LABEL_TO_SAMPLE["abcd"]])
     ws = DummyWebSocket(
         [
             {
