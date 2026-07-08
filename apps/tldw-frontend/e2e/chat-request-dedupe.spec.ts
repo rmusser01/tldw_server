@@ -3,9 +3,8 @@ import { test, expect, seedAuth } from "./smoke/smoke.setup"
 /**
  * UAT Finding #6: identical GET requests fire many times concurrently on /chat load.
  * In-flight coalescing in the bgRequest layer collapses concurrent identical GETs to
- * a single network call. (Endpoints fetched via fetchWithAuth — e.g. /persona/profiles
- * — return a single-read Response and are intentionally out of scope: a Response body
- * cannot be safely shared across callers.)
+ * a single network call. Serialized returnResponse GETs used by fetchWithAuth
+ * are also coalesced; binary/streaming response bodies remain out of scope.
  *
  * Baseline before fix: /users/me/profile x5, /config/providers x3, /characters x2,
  * /persona/catalog x2.
