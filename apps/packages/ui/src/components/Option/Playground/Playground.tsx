@@ -3557,7 +3557,6 @@ export const Playground = () => {
         <PlaygroundCockpitShell
           mode={normalizedChatLayoutMode}
           themedBackdrop={Boolean(chatBackgroundImage)}
-          themedBackdropOpacity={chatWindowOpacityAlpha}
           leftRailVisible={normalizedCockpitContextRailVisible}
           rightRailVisible={normalizedCockpitRuntimeRailVisible}
           onLeftRailVisibleChange={setCockpitContextRailVisible}

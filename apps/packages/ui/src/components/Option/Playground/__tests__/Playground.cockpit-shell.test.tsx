@@ -11,6 +11,7 @@ import {
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Playground } from "../Playground";
+import { PlaygroundCockpitShell } from "../PlaygroundCockpitShell";
 
 const messageOptionState = vi.hoisted(() => ({
   value: {
@@ -411,6 +412,23 @@ describe("Playground cockpit shell", () => {
       }),
     );
     characterSessionsPanelState.props = [];
+  });
+
+  it("does not add a second themed wash on the cockpit shell", () => {
+    render(
+      <PlaygroundCockpitShell
+        mode="cockpit"
+        themedBackdrop
+        leftRail={<aside>Context</aside>}
+        rightRail={<aside>Runtime</aside>}
+      >
+        <main>Chat</main>
+      </PlaygroundCockpitShell>,
+    );
+
+    const shell = screen.getByTestId("playground-cockpit-shell");
+    expect(shell).toHaveClass("backdrop-blur-[1px]");
+    expect(shell.style.backgroundColor).toBe("");
   });
 
   it("renders the cockpit rails and main chat surface without a bottom status strip by default", async () => {

@@ -4,7 +4,7 @@ title: Add adjustable chat transparency theming controls
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-07-08 01:28'
+updated_date: '2026-07-08 01:56'
 labels:
   - frontend
   - theming
@@ -56,6 +56,8 @@ Clean PR worktree verification: bunx vitest run src/routes/__tests__/chat-backgr
 TypeScript follow-up: VisualIdentityImage now passes an optional style prop through to its img element so character-image opacity can be applied to animated visual identity portraits without violating the component prop contract.
 
 Final clean-worktree verification after VisualIdentityImage style passthrough: bunx vitest run src/components/Common/VisualIdentity/__tests__/VisualIdentityImage.test.tsx src/routes/__tests__/chat-background-translucency.guard.test.ts src/components/Option/Settings/__tests__/ChatSettings.test.tsx src/components/Option/Playground/__tests__/Playground.cockpit-a11y.test.tsx src/components/Option/Playground/__tests__/Playground.cockpit-rail-restore.test.tsx src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx src/components/Option/Playground/__tests__/Playground.sticky-composer-layout.integration.test.tsx src/components/Option/Playground/__tests__/Playground.cockpit-controls.test.tsx src/components/Option/Playground/__tests__/Playground.cockpit-shell.test.tsx src/components/Option/Playground/__tests__/Playground.search.integration.test.tsx --reporter=dot passed from apps/packages/ui with 10 files and 110 tests. NODE_OPTIONS=--max-old-space-size=8192 ./node_modules/.bin/tsc -p tsconfig.json --noEmit still fails on existing baseline test typing errors outside the touched implementation; the prior touched-file VisualIdentityImage/Message.tsx style-prop error is resolved.
+
+Code review follow-up for PR #2685: removed themedBackdropOpacity from PlaygroundCockpitShell so full Playground applies chatWindowOpacityAlpha only once via the root background wash. Added a cockpit-shell render assertion and source guard to prevent reintroducing a second wash. Verification: bunx vitest run src/routes/__tests__/chat-background-translucency.guard.test.ts src/components/Option/Playground/__tests__/Playground.cockpit-shell.test.tsx --reporter=dot passed with 2 files and 49 tests.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

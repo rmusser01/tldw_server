@@ -71,11 +71,20 @@ describe("chat background image translucency", () => {
 
   it("lets the playground cockpit shell reveal themed backgrounds", () => {
     expect(playgroundSource).toContain("themedBackdrop={Boolean(chatBackgroundImage)}")
-    expect(playgroundSource).toContain("themedBackdropOpacity={chatWindowOpacityAlpha}")
+    expect(playgroundSource).not.toContain("themedBackdropOpacity")
     expect(cockpitShellSource).toContain("themedBackdrop?: boolean")
-    expect(cockpitShellSource).toContain("themedBackdropOpacity?: number")
-    expect(cockpitShellSource).toContain("backgroundColor: `rgb(var(--color-bg) / ${clampedThemedBackdropOpacity})`")
+    expect(cockpitShellSource).not.toContain("themedBackdropOpacity")
+    expect(cockpitShellSource).not.toContain("backgroundColor: `rgb(var(--color-bg)")
     expect(cockpitShellSource).toContain("themedBackdrop ? \"bg-transparent\" : \"bg-bg\"")
+  })
+
+  it("keeps exactly one playground chat window wash layer", () => {
+    const playgroundWashMatches =
+      playgroundSource.match(
+        /backgroundColor: `rgb\(var\(--color-bg\) \/ \$\{chatWindowOpacityAlpha\}\)`/g
+      ) ?? []
+
+    expect(playgroundWashMatches).toHaveLength(1)
   })
 
   it("wires adjustable transparency settings into chat theming surfaces", () => {
@@ -90,7 +99,6 @@ describe("chat background image translucency", () => {
     expect(playgroundSource).toContain("chatWindowOpacity")
     expect(sidepanelSource).toContain("chatWindowOpacity")
     expect(extensionSidepanelSource).toContain("chatWindowOpacity")
-    expect(cockpitShellSource).toContain("themedBackdropOpacity")
 
     expect(messageSource).toContain("chatMessageOpacity")
     expect(messageSource).toContain("chatCharacterImageOpacity")

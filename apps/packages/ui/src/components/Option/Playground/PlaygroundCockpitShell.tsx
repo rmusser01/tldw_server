@@ -15,7 +15,6 @@ export type PlaygroundCockpitMobilePanel = "context" | "runtime" | null;
 export type PlaygroundCockpitShellProps = {
   mode: PlaygroundCockpitMode;
   themedBackdrop?: boolean;
-  themedBackdropOpacity?: number;
   leftRailVisible?: boolean;
   rightRailVisible?: boolean;
   onLeftRailVisibleChange?: (visible: boolean) => void;
@@ -118,7 +117,6 @@ const buildModeSummaryKey = (
 export const PlaygroundCockpitShell = ({
   mode,
   themedBackdrop = false,
-  themedBackdropOpacity = 0.35,
   leftRailVisible = true,
   rightRailVisible = true,
   onLeftRailVisibleChange,
@@ -141,15 +139,6 @@ export const PlaygroundCockpitShell = ({
   const mobilePanelSummaryId = `${mobilePanelIdPrefix}-mobile-panel-summary`;
   const showLeftRail = !focusMode && leftRailVisible;
   const showRightRail = !focusMode && rightRailVisible;
-  const clampedThemedBackdropOpacity = Math.min(
-    1,
-    Math.max(0, themedBackdropOpacity),
-  );
-  const shellStyle = themedBackdrop
-    ? ({
-        backgroundColor: `rgb(var(--color-bg) / ${clampedThemedBackdropOpacity})`,
-      } as React.CSSProperties)
-    : undefined;
   const resolvedMobilePanel =
     mobilePanel !== undefined ? mobilePanel : uncontrolledMobilePanel;
   const setMobilePanel = React.useCallback(
@@ -259,7 +248,6 @@ export const PlaygroundCockpitShell = ({
       className={`flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden text-text ${
         themedBackdrop ? "backdrop-blur-[1px]" : "bg-bg"
       }`}
-      style={shellStyle}
     >
       <p
         data-testid="playground-cockpit-mode-summary"
