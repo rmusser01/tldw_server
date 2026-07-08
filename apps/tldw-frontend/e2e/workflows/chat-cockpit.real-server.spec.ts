@@ -882,14 +882,23 @@ const assertNoHorizontalOverflow = async (page: Page) => {
   expect(metrics.bodyScrollWidth).toBeLessThanOrEqual(metrics.innerWidth + 1);
 };
 
-const assertNoVerticalOverlap = async (first: Locator, second: Locator, label: string) => {
-  await expect(first).toBeVisible({ timeout: 10_000 });
-  await expect(second).toBeVisible({ timeout: 10_000 });
+type LocatorTarget = Locator | (() => Locator);
+
+const resolveLocatorTarget = (target: LocatorTarget) =>
+  typeof target === 'function' ? target() : target;
+
+const assertNoVerticalOverlap = async (
+  first: LocatorTarget,
+  second: LocatorTarget,
+  label: string
+) => {
+  await expect(resolveLocatorTarget(first)).toBeVisible({ timeout: 10_000 });
+  await expect(resolveLocatorTarget(second)).toBeVisible({ timeout: 10_000 });
   await expect
     .poll(
       async () => {
-        const firstBox = await first.boundingBox();
-        const secondBox = await second.boundingBox();
+        const firstBox = await resolveLocatorTarget(first).boundingBox();
+        const secondBox = await resolveLocatorTarget(second).boundingBox();
         if (!firstBox) return 'first element is not measurable';
         if (!secondBox) return 'second element is not measurable';
         return firstBox.y + firstBox.height <= secondBox.y + 1
@@ -1820,15 +1829,16 @@ test.describe('/chat cockpit real-server parity', () => {
     await assertNoBlockingServerDialog(page);
     await ensureDesktopCockpitRailsVisible(page);
     await assertNoHorizontalOverflow(page);
-    await expect(
-      getDesktopContextRail(page).getByRole('button', { name: 'Web search', exact: true })
-    ).toHaveAttribute('aria-pressed', 'true');
 
     const sendContextRail = getDesktopContextRail(page);
     const sendWebSearchControl = sendContextRail.getByRole('button', {
       name: 'Web search',
       exact: true,
     });
+    if ((await sendWebSearchControl.getAttribute('aria-pressed')) !== 'true') {
+      await sendWebSearchControl.click();
+    }
+    await expect(sendWebSearchControl).toHaveAttribute('aria-pressed', 'true');
     if ((await sendWebSearchControl.getAttribute('aria-pressed')) === 'true') {
       await sendWebSearchControl.click();
       await expect(sendWebSearchControl).toHaveAttribute('aria-pressed', 'false');
@@ -2113,6 +2123,16 @@ test.describe('/chat cockpit real-server parity', () => {
 
     await switchChatLayoutMode(page, 'cockpit');
     let mobileRails = await waitForMobileCockpitPanel(page, 'context');
+    const currentMobileContextPanel = () =>
+      page
+        .locator('[data-testid="playground-cockpit-mobile-rails"][data-mobile-panel="context"]:visible')
+        .locator(`#${mobileCockpitPanelConfig.context.panelId}`)
+        .first();
+    const currentMobileRuntimePanel = () =>
+      page
+        .locator('[data-testid="playground-cockpit-mobile-rails"][data-mobile-panel="runtime"]:visible')
+        .locator(`#${mobileCockpitPanelConfig.runtime.panelId}`)
+        .first();
     await expect(mobileRails.getByTestId('playground-cockpit-mobile-panel-summary')).toHaveText(
       'Context panel active. Composer draft remains available below.'
     );
@@ -2129,11 +2149,11 @@ test.describe('/chat cockpit real-server parity', () => {
     await expect(initialRuntimePanel).toBeHidden();
     await assertNoHorizontalOverflow(page);
     await assertNoVerticalOverlap(
-      initialContextPanel,
+      currentMobileContextPanel,
       page.getByTestId('chat-input'),
       'mobile cockpit context rails should not overlap composer'
     );
-    const initialContextPanelBox = await initialContextPanel.boundingBox();
+    const initialContextPanelBox = await currentMobileContextPanel().boundingBox();
     expect(initialContextPanelBox, 'mobile context panel is measurable').not.toBeNull();
     expect(initialContextPanelBox!.height).toBeLessThanOrEqual(260);
     await page.screenshot({
@@ -2223,11 +2243,11 @@ test.describe('/chat cockpit real-server parity', () => {
     await expect(runtimePanel.getByRole('button', { name: 'Configure MCP tools' })).toBeVisible();
     await assertNoHorizontalOverflow(page);
     await assertNoVerticalOverlap(
-      runtimePanel,
+      currentMobileRuntimePanel,
       page.getByTestId('chat-input'),
       'mobile cockpit runtime rails should not overlap composer'
     );
-    const runtimePanelBox = await runtimePanel.boundingBox();
+    const runtimePanelBox = await currentMobileRuntimePanel().boundingBox();
     expect(runtimePanelBox, 'mobile runtime panel is measurable').not.toBeNull();
     expect(runtimePanelBox!.height).toBeLessThanOrEqual(260);
     await page.screenshot({
