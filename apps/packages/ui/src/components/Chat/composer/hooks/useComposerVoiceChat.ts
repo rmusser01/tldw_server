@@ -26,7 +26,7 @@ import type { ChatComposerSurface } from "../types"
  * Both surfaces stitched the same five primitives together with ~300 lines of
  * near-identical wiring:
  *   - `useSpeechRecognition`        (browser SpeechRecognition API)
- *   - `useServerDictation`          (server-side STT via MediaRecorder)
+ *   - `useServerDictation`          (server-side STT via streaming websocket)
  *   - `useDictationStrategy`        (which engine to use + auto-fallback)
  *   - `useAudioSourcePreferences`   ("dictation" feature group)
  *   - `useAudioSourceCatalog`       (enumerated input devices)

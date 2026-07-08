@@ -4,6 +4,7 @@ import asyncio
 import base64
 from collections import deque
 import json
+import struct
 from typing import Any
 
 import pytest
@@ -30,10 +31,22 @@ class _DummyWebSocket:
         self.close_args = (code, reason)
 
 
-def _audio_frame(text: str) -> dict[str, Any]:
+def _strict_config() -> dict[str, Any]:
+    return {
+        "type": "config",
+        "protocol_version": 1,
+        "mode": "dictate",
+        "audio_format": "pcm16",
+        "sample_rate": 16000,
+        "channels": 1,
+    }
+
+
+def _audio_frame(sample: int) -> dict[str, Any]:
+    raw = struct.pack("<h", sample)
     return {
         "type": "audio",
-        "data": base64.b64encode(text.encode("utf-8")).decode("ascii"),
+        "data": base64.b64encode(raw).decode("ascii"),
     }
 
 
@@ -52,46 +65,14 @@ def test_drop_oldest_buffered_audio_rounds_up_to_preserve_frame_alignment() -> N
 
 
 @pytest.mark.asyncio
-async def test_transcribe_ws_v2_control_frames_pause_resume_and_stop(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_transcribe_ws_rejects_protocol_version_2_before_control_negotiation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Streaming_Unified as unified
     from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.ws_control_protocol import (
         WSControlProtocolConfig,
     )
 
-    class _StubTranscriber:
-        instances: list["_StubTranscriber"] = []
-
-        def __init__(self, config: Any) -> None:  # noqa: ARG002
-            self.processed_chunks: list[str] = []
-            type(self).instances.append(self)
-
-        def initialize(self) -> None:
-            return None
-
-        async def process_audio_chunk(self, audio_bytes: bytes) -> dict[str, Any]:
-            text = audio_bytes.decode("utf-8")
-            self.processed_chunks.append(text)
-            return {"type": "partial", "text": text, "is_final": False}
-
-        def get_full_transcript(self) -> str:
-            return "|".join(self.processed_chunks)
-
-        def reset(self) -> None:
-            return None
-
-        def cleanup(self) -> None:
-            return None
-
-    monkeypatch.setattr(unified, "UnifiedStreamingTranscriber", _StubTranscriber)
-    monkeypatch.setattr(
-        unified,
-        "SileroTurnDetector",
-        lambda *args, **kwargs: type(
-            "_NoopTurnDetector",
-            (),
-            {"available": False, "unavailable_reason": "stubbed", "observe": lambda self, _audio: False},
-        )(),
-    )
     monkeypatch.setattr(
         unified,
         "_get_ws_control_protocol_config",
@@ -105,33 +86,30 @@ async def test_transcribe_ws_v2_control_frames_pause_resume_and_stop(monkeypatch
 
     ws = _DummyWebSocket(
         [
-            {"type": "config", "model": "parakeet", "sample_rate": 16000, "protocol_version": 2},
+            {
+                "type": "config",
+                "model": "parakeet",
+                "protocol_version": 2,
+                "mode": "dictate",
+                "audio_format": "pcm16",
+                "sample_rate": 16000,
+                "channels": 1,
+            },
             {"type": "control", "action": "pause"},
-            _audio_frame("one"),
-            _audio_frame("two"),
-            {"type": "control", "action": "resume"},
-            {"type": "control", "action": "stop"},
-            {"type": "stop"},
         ]
     )
 
     await unified.handle_unified_websocket(ws, unified.UnifiedStreamingConfig())
 
-    statuses = [frame for frame in ws.sent if frame.get("type") == "status"]
-    partials = [frame for frame in ws.sent if frame.get("type") == "partial"]
-    full_transcripts = [frame for frame in ws.sent if frame.get("type") == "full_transcript"]
-
-    assert statuses[:4] == [
-        {"type": "status", "state": "configured", "protocol_version": 2},
-        {"type": "status", "state": "paused", "protocol_version": 2},
-        {"type": "status", "state": "resumed", "protocol_version": 2},
-        {"type": "status", "state": "closing", "protocol_version": 2},
+    assert ws.closed is True
+    assert ws.close_args == (4400, None)
+    assert ws.sent == [
+        {
+            "type": "error",
+            "code": "bad_request",
+            "message": "protocol_version must be 1",
+        }
     ]
-    assert [frame["text"] for frame in partials] == ["one", "two"]
-    assert full_transcripts[-1]["text"] == "one|two"
-    resumed_index = ws.sent.index(statuses[2])
-    assert resumed_index < ws.sent.index(partials[0])
-    assert _StubTranscriber.instances[0].processed_chunks == ["one", "two"]
 
 
 @pytest.mark.asyncio
@@ -144,19 +122,23 @@ async def test_transcribe_ws_legacy_stop_still_emits_full_transcript(
     )
 
     class _StubTranscriber:
+        instances: list["_StubTranscriber"] = []
+
         def __init__(self, config: Any) -> None:  # noqa: ARG002
-            self.processed_chunks: list[str] = []
+            self.processed_chunks = 0
+            type(self).instances.append(self)
 
         def initialize(self) -> None:
             return None
 
         async def process_audio_chunk(self, audio_bytes: bytes) -> dict[str, Any]:
-            text = audio_bytes.decode("utf-8")
-            self.processed_chunks.append(text)
+            assert len(audio_bytes) == 4
+            self.processed_chunks += 1
+            text = f"chunk-{self.processed_chunks}"
             return {"type": "partial", "text": text, "is_final": False}
 
         def get_full_transcript(self) -> str:
-            return "|".join(self.processed_chunks)
+            return "|".join(f"chunk-{idx}" for idx in range(1, self.processed_chunks + 1))
 
         def reset(self) -> None:
             return None
@@ -187,9 +169,9 @@ async def test_transcribe_ws_legacy_stop_still_emits_full_transcript(
 
     ws = _DummyWebSocket(
         [
-            {"type": "config", "model": "parakeet", "sample_rate": 16000},
-            _audio_frame("one"),
-            _audio_frame("two"),
+            _strict_config(),
+            _audio_frame(1000),
+            _audio_frame(2000),
             {"type": "stop"},
         ]
     )
@@ -201,7 +183,8 @@ async def test_transcribe_ws_legacy_stop_still_emits_full_transcript(
 
     assert statuses == []
     assert full_transcripts
-    assert full_transcripts[-1]["text"] == "one|two"
+    assert full_transcripts[-1]["text"] == "chunk-1|chunk-2"
+    assert _StubTranscriber.instances[0].processed_chunks == 2
     assert any(frame.get("type") == "done" for frame in ws.sent)
 
 
@@ -257,7 +240,7 @@ async def test_transcribe_ws_control_frame_is_rejected_without_v2_negotiation(
 
     ws = _DummyWebSocket(
         [
-            {"type": "config", "model": "parakeet", "sample_rate": 16000},
+            _strict_config(),
             {"type": "control", "action": "pause"},
             {"type": "stop"},
         ]

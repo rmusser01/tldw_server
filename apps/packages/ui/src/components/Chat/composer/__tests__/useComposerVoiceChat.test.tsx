@@ -5,7 +5,7 @@ import type { DictationToggleIntent } from "@/hooks/useDictationStrategy"
 
 // ---------------------------------------------------------------------------
 // Mocks for the underlying primitives. The shared hook is pure orchestration —
-// real STT requires browser APIs (MediaRecorder, SpeechRecognition) — so we
+// real STT requires browser APIs (WebSocket/WebAudio, SpeechRecognition) — so we
 // replace each primitive with a controllable fake and assert the wiring.
 // ---------------------------------------------------------------------------
 

@@ -880,10 +880,9 @@ async def websocket_transcribe(
     - Multi-user: X-API-KEY header, Authorization: Bearer <JWT>, or an initial auth message.
     - Single-user: API key via header or an initial auth message; an IP allowlist may be enforced.
     - Legacy `token` query-string auth is accepted only when AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH is enabled.
-    Supported incoming message types: "auth" (for token-based auth), "config" (streaming configuration), "audio" (base64-encoded audio chunks), and "commit" (finalize current utterance).
+    Supported incoming message types: "auth" (for token-based auth), "config" (required first post-auth frame), "audio" (base64-encoded PCM16 JSON chunks), and "commit" (finalize current utterance).
     Outgoing message types include partial updates ("partial"), interim/final transcriptions ("transcription"), the final transcript ("full_transcript"), and structured error frames ("error").
     Per-user limits are enforced (concurrent streams and daily minute quotas); when a quota is exceeded the server sends an "error" with `code="quota_exceeded"` and closes the connection with code 4003 (or 1008 when `AUDIO_WS_QUOTA_CLOSE_1008=1`). A compatibility alias `error_type` is included when `AUDIO_WS_COMPAT_ERROR_TYPE=1` (default).
-    A server-side default streaming configuration is used if the client does not provide one before audio arrives.
     Parameters:
         websocket (WebSocket): The active WebSocket connection.
         token (Optional[str]): Legacy API key or JWT query-string token, ignored unless AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH is enabled.
@@ -1780,7 +1779,17 @@ async def websocket_audio_chat_stream(
             await websocket.close(code=4400)
             return
 
-        assert protocol_config is not None
+        if protocol_config is None:
+            if _outer_stream:
+                await _outer_stream.send_json(
+                    _audio_ws_error_payload(
+                        code="bad_request",
+                        message="config frame required",
+                        request_id=request_id,
+                    )
+                )
+            await websocket.close(code=4400)
+            return
         stt_cfg = cfg_data.get("stt") or cfg_data
         llm_cfg = cfg_data.get("llm") or {}
         tts_cfg = cfg_data.get("tts") or {}

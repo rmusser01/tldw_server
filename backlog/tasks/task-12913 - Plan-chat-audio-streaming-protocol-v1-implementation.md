@@ -37,7 +37,7 @@ Created the implementation plan from the approved design and review findings. Se
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Created the chat audio streaming protocol v1 implementation plan. The plan keeps the lazy long-term approach: one strict backend parser, existing websocket endpoints, PCM16 wire audio, server-side Float32 normalization, mode allowlists, push-to-talk release commit handling, streaming dictation, and extension STT JSON frame migration. Implementation is not started.
+Created the chat audio streaming protocol v1 implementation plan. The plan kept the long-term pragmatic approach: one strict backend parser, existing websocket endpoints, PCM16 wire audio, server-side Float32 normalization, mode allowlists, push-to-talk release commit handling, streaming dictation, and extension STT JSON frame migration. Implementation was subsequently completed under TASK-12914.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
@@ -49,3 +49,9 @@ Created the chat audio streaming protocol v1 implementation plan. The plan keeps
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Implementation follow-up complete: chat audio streaming protocol v1 was implemented using one strict parser, existing websocket endpoints, PCM16 wire audio, server-side Float32 normalization, mode allowlists, push-to-talk release commit, streaming dictation, and extension STT JSON frames. Verification commands and known skips are recorded in TASK-12914.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->

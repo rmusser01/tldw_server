@@ -2,9 +2,11 @@
 
 ## Status
 
-Approved through brainstorming on 2026-07-07. Implementation is not started.
+Implemented in the protocol-v1 rollout branch on 2026-07-08 using
+`Docs/superpowers/plans/2026-07-08-chat-audio-streaming-protocol-v1.md`.
 
-Backlog task: TASK-12912
+Backlog tasks: TASK-12912 (design), TASK-12913 (implementation plan),
+TASK-12914 (implementation).
 
 ## Problem
 
@@ -19,7 +21,7 @@ and turn detection then saw unusable audio and could not reliably identify speec
 or end a turn. A short-term compatibility fix can unblock current usage, but the
 long-term fix is an explicit protocol that all chat audio clients must follow.
 
-Related current problems:
+Pre-implementation problems this design addressed:
 
 - The browser extension live STT path still forwards raw binary chunks to the
   transcription websocket with no explicit config.
@@ -304,9 +306,9 @@ This is a strict v1 cutover implemented as one coordinated change:
 - Update both backend websocket endpoints to use the shared parser.
 - Update tests and docs that currently imply config can be omitted or inferred.
 
-The short-term compatibility fix that lets current voice chat use Float32 should
-be treated as a bridge only. The long-term stable contract is PCM16 on the wire
-with server-side Float32 normalization.
+The short-term compatibility fix that let voice chat use Float32 was treated as
+a bridge only. The implemented stable contract is PCM16 on the wire with
+server-side Float32 normalization.
 
 ## Risks And Open Questions
 

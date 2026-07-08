@@ -366,9 +366,10 @@ failopen_cap_minutes = 5.0
   - Multi-user JWT: `Authorization: Bearer <JWT>` on the upgrade request, or first message `{ "type": "auth", "token": "<JWT>" }`.
   - Multi-user API Keys: `X-API-KEY` header supported; keys can be scoped to endpoints (must include `audio.stream.transcribe`) and optionally path-prefixed allowlists. Quotas may be enforced per key.
 - Protocol:
-  - Client may send config after auth: `{ "type": "config", "sample_rate": 16000, "language": "en", "model_variant": "standard|onnx|mlx" }`
-  - Send audio chunks: `{ "type": "audio", "data": "<base64 float32 little-endian mono>" }`
-  - Optional finalize: `{ "type": "commit" }`
+  - First post-auth message must be config: `{ "type": "config", "protocol_version": 1, "mode": "dictate|captions", "audio_format": "pcm16", "sample_rate": 16000, "channels": 1, "language": "en", "model_variant": "standard|onnx|mlx" }`
+  - Send audio chunks as JSON PCM16 frames: `{ "type": "audio", "data": "<base64 pcm16 little-endian mono 16khz>" }`
+  - Raw binary WebSocket frames and Float32 wire audio are invalid in protocol v1.
+  - Finalize/reset/stop controls remain valid after config: `{ "type": "commit" }`, `{ "type": "reset" }`, `{ "type": "stop" }`
 - If no client `model` is provided, the server uses `[STT-Settings].default_streaming_transcription_model` (default: `parakeet-tdt-0.6b-v3-onnx`; legacy alias `parakeet-onnx` remains accepted).
 - Streaming model-init fallback to Whisper is opt-in via `[STT-Settings].streaming_fallback_to_whisper=true`; default is fail-fast.
 - Server messages include:
@@ -379,6 +380,7 @@ failopen_cap_minutes = 5.0
     - `{ "type": "insight", "stage": "live|final", "summary": [...], "action_items": [...], ... }` when live meeting notes are enabled
     - `{ "type": "diarization_summary", "speaker_map": [...], "audio_path": "...", "speakers": [...] }` after `commit` when diarization is enabled
     - `{ "type": "error", "message": "..." }`
+    - protocol errors: `{ "type": "error", "code": "bad_request", "message": "..." }` followed by close with code `4400`
     - Quota exceeded (structured): `{ "type": "error", "error_type": "quota_exceeded", "quota": "daily_minutes" }` followed by close with code `4003`.
 
 #### Observability: Fail-open metrics
@@ -392,6 +394,14 @@ When the quota backing store is unavailable, the server allows a bounded amount 
 Use these to build dashboards/alerts on fail-open frequency and potential quota-store outages.
 
   - Metadata fields (`segment_id`, `segment_start`, `segment_end`, `chunk_start`, `chunk_end`, `overlap`) allow clients to align transcripts on a timeline or build diarization overlays.
+
+#### WS Protocol Contract
+
+- `protocol_version` is required and must be `1`.
+- `mode` must be `dictate` or `captions` for this endpoint.
+- `audio_format` must be `pcm16`, `sample_rate` must be `16000`, and `channels` must be `1`.
+- Audio is normalized server-side to Float32 before STT, VAD, quota duration accounting, or downstream transcript handling.
+- Unsupported protocol versions, omitted strict fields, raw binary audio, and malformed base64 audio are rejected with close code `4400`.
 
 Helper endpoints
 - `GET /api/v1/audio/stream/status` → returns availability and supported models/variants and features

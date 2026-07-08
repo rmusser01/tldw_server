@@ -9,6 +9,13 @@ WebSocket Endpoint
 - Unified endpoint: `/api/v1/audio/stream/transcribe` (primary; includes auth/quotas/fallback)
 - Core demo endpoint: `/core/parakeet/stream` (portable router; no auth/quotas)
 
+The unified endpoint uses strict audio protocol v1: the first post-auth message
+must be a config frame with `protocol_version: 1`, `mode: "dictate"` or
+`"captions"`, `audio_format: "pcm16"`, `sample_rate: 16000`, and
+`channels: 1`. Its audio frames are base64 PCM16 mono JSON frames. The core demo
+endpoint and library-level examples below use the lower-level Parakeet core
+Float32 contract.
+
 Server-side handler (observability-enabled)
 ```python
 from tldw_Server_API.app.core.Streaming.streams import WebSocketStream
@@ -34,8 +41,8 @@ async def handle_audio_ws(websocket):
         await stream.stop()
 ```
 
-Config Frame
-- Send this JSON as the first message to configure the session. All fields are optional unless noted.
+Core Demo Config Frame
+- For `/core/parakeet/stream`, send this JSON as the first message to configure the session. All fields are optional unless noted.
 
 {
   "type": "config",                       // required
@@ -50,8 +57,8 @@ Config Frame
   "diarization": true                      // or "diarize": true; enable speaker diarization
 }
 
-Audio Frame
-- Base64-encoded float32 mono PCM audio samples.
+Core Demo Audio Frame
+- For `/core/parakeet/stream`, send base64-encoded float32 mono PCM audio samples.
 
 {
   "type": "audio",
@@ -133,12 +140,16 @@ import websockets
 async def main():
     url = "ws://127.0.0.1:8000/api/v1/audio/stream/transcribe?token=YOUR_API_KEY"
     async with websockets.connect(url, max_size=2**23) as ws:
-        # 1) Send config
+        # 1) Send strict v1 config for the unified endpoint
         await ws.send(json.dumps({
             "type": "config",
+            "protocol_version": 1,
+            "mode": "dictate",
+            "audio_format": "pcm16",
             "model": "parakeet",
             "model_variant": "onnx",  # or standard|mlx
             "sample_rate": 16000,
+            "channels": 1,
             "chunk_duration": 2.0,
             "overlap_duration": 0.5,
             "enable_partial": True,
@@ -146,9 +157,9 @@ async def main():
             "insights": {"enabled": True}
         }))
 
-        # 2) Send audio frames as base64 float32 mono
+        # 2) Send audio frames as base64 PCM16 mono
         sr = 16000
-        samples = (np.zeros(sr//2, dtype=np.float32)).tobytes()  # 0.5s silence
+        samples = (np.zeros(sr//2, dtype=np.int16)).tobytes()  # 0.5s silence
         payload = base64.b64encode(samples).decode("ascii")
         await ws.send(json.dumps({"type": "audio", "data": payload}))
 
@@ -164,12 +175,13 @@ Node.js (ws) - base64 JSON frames
 
 const WebSocket = require('ws');
 const sr = 16000;
-const zeros = Buffer.alloc((sr/2)*4); // 0.5s float32 zeros
+const zeros = Buffer.alloc((sr/2)*2); // 0.5s PCM16 zeros
 const ws = new WebSocket('ws://127.0.0.1:8000/api/v1/audio/stream/transcribe?token=YOUR_API_KEY');
 
 ws.on('open', () => {
   ws.send(JSON.stringify({
-    type: 'config', model: 'parakeet', model_variant: 'standard', sample_rate: 16000,
+    type: 'config', protocol_version: 1, mode: 'dictate', audio_format: 'pcm16',
+    model: 'parakeet', model_variant: 'standard', sample_rate: 16000, channels: 1,
     chunk_duration: 2.0, overlap_duration: 0.5, enable_partial: true
   }));
   ws.send(JSON.stringify({ type: 'audio', data: zeros.toString('base64') }));
@@ -285,7 +297,7 @@ python Helper_Scripts/voice_latency_harness/examples/ws_tts_realtime_client.py -
 ffplay -f s16le -ar 24000 -ac 1 out_ws_tts_realtime.pcm
 ```
 
-WebSocket Voice Chat v2
+WebSocket Voice Chat v1
 -----------------------
 
 Endpoint: `/api/v1/audio/chat/stream`
@@ -294,9 +306,10 @@ Endpoint: `/api/v1/audio/chat/stream`
   (API key or JWT), `can_start_stream` concurrency guard, per-chunk minute accounting with bounded fail-open; closes
   with code 4003 (or 1008 when `AUDIO_WS_QUOTA_CLOSE_1008=1`) on quota failures.
 - Client → server frames:
-  - `config` (required first): STT knobs (`model|variant|sample_rate|enable_vad|min_silence_ms|turn_stop_secs`), `llm` (`provider|model|temperature|max_tokens|system|extra_params`), `tts` (`voice|model|provider|format|speed|extra_params`), optional `session_id|metadata`.
-  - `audio`: base64 float32/PCM chunks (same shape as `/stream/transcribe`).
-  - `commit`: finalize the current turn (also auto-triggered by VAD when enabled).
+  - `config` (required first post-auth): strict fields (`protocol_version: 1`, `mode: "voice_chat"` or `"push_to_talk"`, `audio_format: "pcm16"`, `sample_rate: 16000`, `channels: 1`), plus STT knobs (`model|variant|enable_vad|min_silence_ms|turn_stop_secs`), `llm` (`provider|model|temperature|max_tokens|system|extra_params`), `tts` (`voice|model|provider|format|speed|extra_params`), optional `session_id|metadata`.
+  - `audio`: base64 PCM16 little-endian mono JSON chunks (same strict v1 shape as `/stream/transcribe`).
+  - `commit`: finalize the current turn (also auto-triggered by VAD in `voice_chat` mode).
+  - `push_to_talk_release`: finalize a push-to-talk turn without depending on VAD.
   - `interrupt`: cancel in-flight generation/synthesis for the active turn without closing the socket.
   - `reset` / `stop`: reset buffers or close the stream.
 - Server → client frames:
