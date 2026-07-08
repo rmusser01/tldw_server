@@ -4,7 +4,7 @@ title: Rebase PR 2577 on latest dev and address review comments
 status: Done
 assignee: []
 created_date: '2026-07-08 03:26'
-updated_date: '2026-07-08 19:23'
+updated_date: '2026-07-08 19:37'
 labels:
   - pr
   - review
@@ -36,12 +36,16 @@ Rebased detached worktree from origin/feat/frontend-audit-round2-followup onto o
 After new CodeRabbit review threads appeared, verified and fixed the still-valid issues: shared dictation append helper, service-worker-safe STT base64, background STT payload normalization, stale dictation websocket isolation, divergent full_transcript correction handling, audio.chat.stream strict-protocol error status/payload alignment, shared AudioProtocolError base, redundant base64 exception catch, unified websocket close suppression, and Backlog task marker/DoD hygiene.
 
 Verification after the review-fix pass: frontend Vitest voice/STT suite 7 files / 46 tests passed; apps/tldw-frontend typecheck passed; backend focused audio/STT/TTS suite 136 tests passed; git diff --check passed; Bandit touched backend scope reported 0 findings in /tmp/bandit_pr2577_review_fixes.json.
+
+After push, investigated failing PR checks. Fixed onboarding docs gate by restoring the CPU guide heading contract, and fixed UX Smoke Gate by keeping the /settings route h1 as Settings while the Setup & Recovery content remains inside the page. Added unit coverage for the root settings route heading.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 PR #2577 was rebased onto current origin/dev 9672abdbe7, review comments were addressed in the rebased tree, and focused verification passed. The latest pass fixed the unresolved CodeRabbit findings for dictation websocket lifecycle/corrections, extension STT service-worker audio encoding, audio.chat.stream strict-protocol error accounting, shared protocol exceptions, unified close suppression, and Backlog task hygiene. Verification: frontend Vitest voice/STT suite 46 tests passed; frontend typecheck passed; backend focused audio/STT/TTS suite 136 tests passed; git diff --check passed; Bandit touched backend scope 0 findings.
+
+Follow-up CI gate fixes: restored the expected CPU audio setup guide Step 2 heading and corrected the /settings route-level h1 to Settings. Verification: targeted onboarding docs test passed, settings layout Vitest test passed, apps/tldw-frontend typecheck passed, git diff --check passed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

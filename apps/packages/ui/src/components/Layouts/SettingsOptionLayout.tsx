@@ -157,7 +157,7 @@ export const SettingsLayout = ({ children }: { children: React.ReactNode }) => {
     location.pathname === "/settings/model"
       ? t("settings:modelSettings.heading", "Model settings")
       : location.pathname === "/settings"
-        ? t("settings:setupRecovery.title", "Setup & Recovery")
+        ? t("settings:heading", "Settings")
         : currentBreadcrumbLabel || t("settings:heading", "Settings");
   const hasVisibleBetaItems = React.useMemo(
     () =>

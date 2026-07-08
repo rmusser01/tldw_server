@@ -57,9 +57,9 @@ vi.mock("@/utils/settings-return", () => ({
   getSettingsReturnTo: () => null
 }))
 
-const renderSettingsLayout = () =>
+const renderSettingsLayout = (initialPath = "/settings/provider-keys") =>
   render(
-    <MemoryRouter initialEntries={["/settings/provider-keys"]}>
+    <MemoryRouter initialEntries={[initialPath]}>
       <Routes>
         <Route
           path="*"
@@ -79,5 +79,13 @@ describe("settings navigation labels", () => {
 
     expect(screen.queryAllByText("settings:providerKeys.navTitle")).toHaveLength(0)
     expect(screen.getByRole("link", { name: /provider keys/i })).toBeVisible()
+  })
+
+  it("keeps the root settings route heading stable", () => {
+    renderSettingsLayout("/settings")
+
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(
+      "Settings"
+    )
   })
 })

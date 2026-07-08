@@ -164,7 +164,7 @@ Important Docker note:
 - Host-side edits to `tldw_Server_API/Config_Files/config.txt` or local model assets require a rebuild, `Dockerfiles/docker-compose.host-storage.yml`, or a custom image path.
 - If you use `/setup` inside the running container, those changes are container-local unless you also persist or reproduce them in your chosen image/storage path.
 
-## Step 2: Pin CPU STT Defaults
+## Step 2: Set the CPU STT Defaults
 
 The shipped `auto` default already resolves to ONNX on Linux/Windows. To pin CPU STT explicitly, edit [config.txt](../../tldw_Server_API/Config_Files/config.txt):
 
