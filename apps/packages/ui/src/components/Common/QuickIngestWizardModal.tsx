@@ -18,6 +18,7 @@ import { WizardResultsStep } from "./QuickIngest/WizardResultsStep"
 import { FloatingProgressWidget } from "./QuickIngest/FloatingProgressWidget"
 import {
   cancelQuickIngestSession,
+  getQuickIngestAnalysisProviderWarning,
   startQuickIngestSession,
   submitQuickIngestBatch,
 } from "@/services/tldw/quick-ingest-batch"
@@ -1404,6 +1405,14 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
           typeDefaults: presetConfig.typeDefaults,
         }
       )
+      const analysisProviderWarning = getQuickIngestAnalysisProviderWarning({
+        common: requestPayload.common,
+        advancedValues: requestPayload.advancedValues,
+      })
+      if (analysisProviderWarning) {
+        finalizeFailure(analysisProviderWarning, "failed")
+        return
+      }
 
       const startAck = await startQuickIngestSession(requestPayload)
       if (!startAck?.ok || !startAck?.sessionId) {

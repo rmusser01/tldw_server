@@ -6,6 +6,21 @@ from tldw_Server_API.app.core.LLM_Calls import Summarization_General_Lib as sgl
 import tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter as openai_mod
 
 
+@pytest.mark.unit
+@pytest.mark.parametrize("api_name", [None, "", "   ", "none", "None"])
+def test_analyze_returns_clear_error_when_api_name_missing(api_name: str | None) -> None:
+    """Missing analysis providers return a clear error instead of leaking dispatch internals."""
+    result = sgl.analyze(
+        api_name=api_name,
+        input_data="hello",
+        custom_prompt_arg="summarize",
+    )
+
+    assert result == "Error: Analysis API provider is required."
+    assert "NoneType" not in result
+    assert "Error calling API" not in result
+
+
 class _FakeResp:
     def __init__(self, *, json_data=None, lines=None):
         self._json = json_data or {}

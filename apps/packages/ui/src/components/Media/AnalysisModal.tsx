@@ -474,7 +474,15 @@ export function AnalysisModal({
       if (isTimeoutError(err)) {
         messageApi.error(buildTimeoutMessage())
       } else {
-        messageApi.error(t('mediaPage.analysisGenerateFailed', 'Failed to generate analysis'))
+        const errorText = String((err as Error)?.message || err || '').toLowerCase()
+        messageApi.error(
+          errorText.includes('analysis api provider is required')
+            ? t(
+                'mediaPage.analysisProviderRequired',
+                'Choose an analysis provider, then retry analysis.'
+              )
+            : t('mediaPage.analysisGenerateFailed', 'Failed to generate analysis')
+        )
       }
       console.error('Generation error:', err)
     } finally {

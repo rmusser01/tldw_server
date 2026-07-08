@@ -119,6 +119,25 @@ type QuickIngestBatchResponse = {
   results?: QuickIngestBatchResult[];
 };
 
+export const QUICK_INGEST_ANALYSIS_PROVIDER_WARNING =
+  "Choose an analysis provider before running ingest analysis.";
+
+const hasAnalysisProviderValue = (value: unknown): boolean => {
+  const normalized = String(value || "").trim();
+  return Boolean(normalized) && normalized.toLowerCase() !== "none";
+};
+
+export const getQuickIngestAnalysisProviderWarning = (
+  input: Pick<QuickIngestBatchInput, "common" | "advancedValues">,
+): string | null => {
+  if (!input?.common?.perform_analysis) return null;
+  const advancedValues = input.advancedValues || {};
+  if (hasAnalysisProviderValue(advancedValues.api_name)) {
+    return null;
+  }
+  return QUICK_INGEST_ANALYSIS_PROVIDER_WARNING;
+};
+
 export type QuickIngestStartAck = {
   ok: boolean;
   sessionId?: string;

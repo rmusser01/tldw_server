@@ -404,7 +404,7 @@ def _dispatch_to_api(
 
 # --- Main Summarization Function ---
 def analyze(
-    api_name: str,
+    api_name: Optional[str],
     input_data: Any,
     custom_prompt_arg: Optional[str],
     api_key: Optional[str] = None,
@@ -443,6 +443,18 @@ def analyze(
     """
     # Load config here if needed for top-level decisions, otherwise let specific funcs handle it
     # loaded_config_data = load_and_log_configs() # Load once if needed globally
+    raw_api_name = api_name
+    api_name = str(raw_api_name).strip() if raw_api_name is not None else ""
+    if not api_name or api_name.lower() == "none":
+        error_msg = "Error: Analysis API provider is required."
+        logging.bind(
+            component="llm_summarization",
+            operation="analyze",
+            api_name_state="missing" if raw_api_name is None else "blank_or_none",
+            input_type=type(input_data).__name__,
+        ).warning(error_msg)
+        return error_msg
+
     logging.info(f"Starting summarization process. API: {api_name}, Recursive: {recursive_summarization}, Chunked: {chunked_summarization}, Streaming: {streaming}")
 
     if recursive_summarization and chunked_summarization:

@@ -30,6 +30,7 @@ vi.mock("@/services/background-proxy", () => ({
 import {
   __resetQuickIngestRuntimeHealthForTests,
   cancelQuickIngestSession,
+  getQuickIngestAnalysisProviderWarning,
   startQuickIngestSession,
   submitQuickIngestBatch
 } from "@/services/tldw/quick-ingest-batch"
@@ -44,6 +45,27 @@ describe("submitQuickIngestBatch", () => {
     mocks.sendMessage.mockReset()
     mocks.bgRequest.mockReset()
     mocks.bgUpload.mockReset()
+  })
+
+  it("warns when analysis is enabled without an analysis provider", () => {
+    expect(
+      getQuickIngestAnalysisProviderWarning({
+        common: { perform_analysis: true },
+        advancedValues: {}
+      } as any)
+    ).toBe("Choose an analysis provider before running ingest analysis.")
+    expect(
+      getQuickIngestAnalysisProviderWarning({
+        common: { perform_analysis: true },
+        advancedValues: { api_name: "openai" }
+      } as any)
+    ).toBeNull()
+    expect(
+      getQuickIngestAnalysisProviderWarning({
+        common: { perform_analysis: true },
+        advancedValues: { api_provider: "openai" }
+      } as any)
+    ).toBe("Choose an analysis provider before running ingest analysis.")
   })
 
   it("uses direct upload path when extension runtime id is unavailable", async () => {

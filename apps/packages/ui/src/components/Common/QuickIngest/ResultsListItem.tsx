@@ -124,6 +124,9 @@ export const ResultsListItem: React.FC<ResultsListItemProps> = React.memo(
           {item.error ? (
             <div className="text-xs text-danger">{item.error}</div>
           ) : null}
+          {item.warning ? (
+            <div className="text-xs text-warn">{item.warning}</div>
+          ) : null}
         </div>
       </List.Item>
     )
