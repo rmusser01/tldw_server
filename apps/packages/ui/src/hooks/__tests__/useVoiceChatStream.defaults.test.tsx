@@ -35,6 +35,7 @@ const audioPlayerState = vi.hoisted(() => ({
 }))
 
 const micState = vi.hoisted(() => ({
+  useMicStream: vi.fn(),
   start: vi.fn(async () => {}),
   stop: vi.fn(() => {}),
   active: false
@@ -116,11 +117,7 @@ vi.mock("@/hooks/chat/useSelectedModel", () => ({
 }))
 
 vi.mock("@/hooks/useMicStream", () => ({
-  useMicStream: () => ({
-    start: micState.start,
-    stop: micState.stop,
-    active: micState.active
-  })
+  useMicStream: micState.useMicStream
 }))
 
 vi.mock("@/hooks/useStreamingAudioPlayer", () => ({
@@ -178,6 +175,11 @@ class MockWebSocket {
     this.readyState = MockWebSocket.CLOSED
     this.onclose?.()
   }
+
+  triggerOpen() {
+    this.readyState = MockWebSocket.OPEN
+    this.onopen?.()
+  }
 }
 
 describe("useVoiceChatStream defaults", () => {
@@ -196,6 +198,12 @@ describe("useVoiceChatStream defaults", () => {
     audioPlayerState.append.mockClear()
     audioPlayerState.finish.mockClear()
     audioPlayerState.stop.mockClear()
+    micState.useMicStream.mockReset()
+    micState.useMicStream.mockReturnValue({
+      start: micState.start,
+      stop: micState.stop,
+      active: micState.active
+    })
     micState.start.mockClear()
     micState.stop.mockClear()
     voiceChatState.voiceChatModel = ""
@@ -238,5 +246,50 @@ describe("useVoiceChatStream defaults", () => {
         tldwTtsVoice: DEFAULT_KITTEN_VOICE
       })
     )
+  })
+
+  it("uses the voice_chat mic owner with default PCM16 capture", () => {
+    renderHook(() =>
+      useVoiceChatStream({
+        active: false
+      })
+    )
+
+    const lastCall = micState.useMicStream.mock.calls.at(-1)
+    expect(lastCall?.[1]).toEqual({ owner: "voice_chat" })
+  })
+
+  it("sends strict v1 voice chat config after auth", async () => {
+    renderHook(() =>
+      useVoiceChatStream({
+        active: true
+      })
+    )
+
+    await waitFor(() => {
+      expect(MockWebSocket.instances[0]).toBeDefined()
+    })
+
+    const ws = MockWebSocket.instances[0]
+    await act(async () => {
+      ws.triggerOpen()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    await waitFor(() => {
+      expect(ws.sent.length).toBeGreaterThan(1)
+    })
+
+    const frames = ws.sent.map((raw) => JSON.parse(raw))
+    expect(frames[0]).toEqual({ type: "auth", token: "test-key" })
+    expect(frames.find((frame) => frame.type === "config")).toMatchObject({
+      type: "config",
+      protocol_version: 1,
+      mode: "voice_chat",
+      audio_format: "pcm16",
+      sample_rate: 16000,
+      channels: 1
+    })
   })
 })

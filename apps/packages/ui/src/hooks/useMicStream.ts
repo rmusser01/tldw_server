@@ -8,6 +8,20 @@ export type MicCaptureOptions = {
   deviceId?: string | null
 }
 
+export type MicStreamFormat = "pcm16" | "float32"
+
+export type MicStreamOwner =
+  | "live_voice"
+  | "voice_chat"
+  | "push_to_talk"
+  | "dictation"
+  | "captions"
+
+export type MicStreamOptions = {
+  format?: MicStreamFormat
+  owner?: MicStreamOwner
+}
+
 const AUDIO_CAPTURE_COORDINATOR_KEY = Symbol.for(
   "tldw.audioCaptureSessionCoordinator"
 )
@@ -44,11 +58,25 @@ function floatTo16BitPCM(float32Array: Float32Array) {
   return buffer
 }
 
-export function useMicStream(onChunk: (pcmChunk: ArrayBuffer) => void) {
+function floatTo32BitPCM(float32Array: Float32Array) {
+  const buffer = new ArrayBuffer(
+    float32Array.length * Float32Array.BYTES_PER_ELEMENT
+  )
+  const copy = new Float32Array(buffer)
+  copy.set(float32Array)
+  return buffer
+}
+
+export function useMicStream(
+  onChunk: (pcmChunk: ArrayBuffer) => void,
+  options: MicStreamOptions = {}
+) {
+  const streamFormat = options.format ?? "pcm16"
+  const captureOwner = options.owner ?? "live_voice"
   const [active, setActive] = useState(false)
   const activeRef = useRef(false)
   const startingRef = useRef(false)
-  const captureOwnerRef = useRef(false)
+  const captureOwnerRef = useRef<MicStreamOwner | null>(null)
   const onChunkRef = useRef(onChunk)
   const startIdRef = useRef(0)
   const mediaStreamRef = useRef<MediaStream | null>(null)
@@ -61,9 +89,10 @@ export function useMicStream(onChunk: (pcmChunk: ArrayBuffer) => void) {
   }, [onChunk])
 
   const releaseCaptureOwner = useCallback(() => {
-    if (!captureOwnerRef.current) return
-    captureOwnerRef.current = false
-    getAudioCaptureSessionCoordinator().release("live_voice")
+    const claimedOwner = captureOwnerRef.current
+    if (!claimedOwner) return
+    captureOwnerRef.current = null
+    getAudioCaptureSessionCoordinator().release(claimedOwner)
   }, [])
 
   const reserveCaptureOwner = useCallback(() => {
@@ -73,9 +102,9 @@ export function useMicStream(onChunk: (pcmChunk: ArrayBuffer) => void) {
     if (activeOwner !== null) {
       throw createCaptureBusyError(activeOwner)
     }
-    coordinator.claim("live_voice")
-    captureOwnerRef.current = true
-  }, [])
+    coordinator.claim(captureOwner)
+    captureOwnerRef.current = captureOwner
+  }, [captureOwner])
 
   const stop = useCallback(() => {
     startIdRef.current += 1
@@ -120,7 +149,10 @@ export function useMicStream(onChunk: (pcmChunk: ArrayBuffer) => void) {
       processor.connect(ctx.destination)
       processor.onaudioprocess = (e) => {
         const input = e.inputBuffer.getChannelData(0)
-        const pcm = floatTo16BitPCM(input)
+        const pcm =
+          streamFormat === "float32"
+            ? floatTo32BitPCM(input)
+            : floatTo16BitPCM(input)
         try {
           onChunkRef.current(pcm)
         } catch {
@@ -135,7 +167,7 @@ export function useMicStream(onChunk: (pcmChunk: ArrayBuffer) => void) {
     } finally {
       startingRef.current = false
     }
-  }, [reserveCaptureOwner, stop])
+  }, [reserveCaptureOwner, stop, streamFormat])
 
   useEffect(() => {
     activeRef.current = active

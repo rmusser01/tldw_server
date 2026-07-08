@@ -9,6 +9,12 @@ export type AudioFeatureGroup =
   | "live_voice"
   | "speech_playground"
 
+export type AudioCaptureOwner =
+  | AudioFeatureGroup
+  | "voice_chat"
+  | "push_to_talk"
+  | "captions"
+
 export type AudioSpeechPath =
   | "browser_dictation"
   | "server_dictation"

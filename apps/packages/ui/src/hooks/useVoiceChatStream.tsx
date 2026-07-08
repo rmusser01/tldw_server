@@ -249,7 +249,8 @@ export const useVoiceChatStream = ({
       } catch {
         // ignore chunk send failures
       }
-    }
+    },
+    { owner: "voice_chat" }
   )
 
   const normalizedTriggers = React.useMemo(
@@ -643,6 +644,11 @@ export const useVoiceChatStream = ({
             ws.send(
               JSON.stringify({
                 type: "config",
+                protocol_version: 1,
+                mode: "voice_chat",
+                audio_format: "pcm16",
+                sample_rate: 16000,
+                channels: 1,
                 stt: sttConfig,
                 llm: preflight.llm,
                 tts: preflight.tts
