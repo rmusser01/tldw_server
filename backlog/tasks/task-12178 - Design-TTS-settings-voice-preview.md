@@ -30,7 +30,7 @@ Design inline TTS voice/backend preview for the shared WebUI and browser-extensi
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-Design-only task. Approved design is captured in Docs/superpowers/specs/2026-07-07-tts-settings-voice-preview-design.md. Next step after user review is writing an implementation plan via the superpowers writing-plans workflow.
+Design-only task. Spec was re-reviewed on 2026-07-08 against the current STT/TTS frontend and backend paths and updated in Docs/superpowers/specs/2026-07-07-tts-settings-voice-preview-design.md. Next step after user review is writing an implementation plan via the superpowers writing-plans workflow.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -42,7 +42,7 @@ Design-only task. Approved design is captured in Docs/superpowers/specs/2026-07-
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Design spec written for inline TTS settings voice/backend preview. Scope keeps implementation in shared TTSModeSettings, reuses existing synthesis paths, previews unsaved form values, avoids new backend endpoints, and documents provider-specific caveats for Browser, tldw, ElevenLabs, and OpenAI-compatible preview.
+Design spec updated after current STT/TTS path review. The spec keeps inline settings voice preview scoped to unsaved TTS form values, browser speech synthesis, and non-streaming /api/v1/audio/speech; it now calls out the audio protocol v1 websocket boundary, AbortSignal cleanup, ElevenLabs unsaved-key handling, and tests to prevent streaming endpoint usage from settings preview. Verification: git diff --check passed. Tests and Bandit were not run because this task only touched Markdown design/task documentation.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
