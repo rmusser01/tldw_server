@@ -76,6 +76,7 @@ const connectionState = vi.hoisted(() => ({
 }));
 
 const confirmDangerMock = vi.hoisted(() => vi.fn(async () => false));
+const getUnreadCountMock = vi.hoisted(() => vi.fn(async () => ({ unread_count: 0 })));
 const storageState = vi.hoisted(() => ({
   stickyChatInput: true,
 }));
@@ -321,7 +322,7 @@ vi.mock('@web/components/layout/BackendUnavailableModalGate', () => ({
 }));
 
 vi.mock('@web/lib/api/notifications', () => ({
-  getUnreadCount: vi.fn(async () => ({ unread_count: 0 })),
+  getUnreadCount: (...args: unknown[]) => getUnreadCountMock(...args),
 }));
 
 vi.mock('@/components/Common/CommandPalette', () => ({
@@ -526,6 +527,18 @@ describe('WebLayout /chat scroll contract', () => {
       expect(html).toContain(className);
     }
     expect(html).not.toContain('px-4 py-10');
+  });
+
+  it('does not poll the notification count while the header is hidden', async () => {
+    render(
+      <OptionLayout hideHeader hideSidebar>
+        <div data-testid="chat-route-content">Chat route</div>
+      </OptionLayout>
+    );
+
+    await act(async () => undefined);
+
+    expect(getUnreadCountMock).not.toHaveBeenCalled();
   });
 
   it('passes openResetKey when the shared ChatSidebar feature is enabled', () => {

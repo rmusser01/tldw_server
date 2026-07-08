@@ -119,7 +119,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
   // Notification unread count for header bell
   const [notificationCount, setNotificationCount] = useState(0);
   useEffect(() => {
-    if (demoEnabled) return;
+    if (demoEnabled || hideHeader) return;
     let cancelled = false;
     const poll = () => {
       getUnreadCount()
@@ -134,7 +134,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
       cancelled = true;
       clearInterval(id);
     };
-  }, [demoEnabled]);
+  }, [demoEnabled, hideHeader]);
   const handleOpenNotifications = useCallback(() => navigate('/notifications'), [navigate]);
   const location = useLocation();
   const historyId = useStoreMessageOption((state) => state.historyId);
