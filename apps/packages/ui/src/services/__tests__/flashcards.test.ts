@@ -126,6 +126,19 @@ describe("flashcards service", () => {
     )
   })
 
+  it("forwards abort signals for flashcard generation", async () => {
+    const signal = new AbortController().signal
+
+    await generateFlashcards({ text: "ATP powers the cell." }, { signal })
+
+    expect(mockBgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/flashcards/generate",
+        abortSignal: signal
+      })
+    )
+  })
+
   it("calls the global tag suggestions endpoint with q and limit", async () => {
     const signal = new AbortController().signal
 

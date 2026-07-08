@@ -389,6 +389,56 @@ describe("GenerateTab scalable media selection and generation flow", () => {
     );
   }, 20000);
 
+  it("clears the study materials toggle when the selected media is removed", async () => {
+    vi.mocked(tldwClient.listMedia).mockResolvedValue({
+      items: [{ id: 10, title: "Biology Notes", type: "pdf" }],
+      pagination: { total_items: 1 },
+    } as any);
+
+    const mutateAsync = vi.fn(async () => ({
+      quiz: { id: 42, name: "Cell Biology Checkpoint" },
+      questions: [{ id: 1 }],
+    }));
+    vi.mocked(useGenerateQuizMutation).mockReturnValue({
+      mutateAsync,
+      isPending: false,
+    } as any);
+
+    renderWithQueryClient();
+
+    await waitFor(() => {
+      expect(screen.getByText("1 media items available")).toBeInTheDocument();
+    });
+
+    fireEvent.mouseDown(screen.getAllByRole("combobox")[0]);
+    fireEvent.click(await screen.findByText("Biology Notes (pdf)"));
+
+    const studyMaterialsToggle = screen.getByRole("checkbox", {
+      name: /Also generate a flashcard deck/i,
+    });
+    fireEvent.click(studyMaterialsToggle);
+    expect(studyMaterialsToggle).toBeChecked();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /Remove Biology Notes/i }),
+    );
+
+    expect(
+      screen.getByRole("checkbox", {
+        name: /Also generate a flashcard deck/i,
+      }),
+    ).not.toBeChecked();
+
+    fireEvent.mouseDown(screen.getAllByRole("combobox")[0]);
+    fireEvent.click(await screen.findByText("Biology Notes (pdf)"));
+    fireEvent.click(screen.getByRole("button", { name: /Generate Quiz/i }));
+
+    await waitFor(() => {
+      expect(mutateAsync).toHaveBeenCalledTimes(1);
+    });
+    expect(generateFlashcards).not.toHaveBeenCalled();
+  }, 20000);
+
   it("shows preview-first flow and passes focus topics in generation payload", async () => {
     vi.mocked(tldwClient.listMedia).mockResolvedValue({
       items: [{ id: 10, title: "Biology Notes", type: "pdf" }],
@@ -502,6 +552,84 @@ describe("GenerateTab scalable media selection and generation flow", () => {
     expect(mutationCall?.signal?.aborted).toBe(true);
   }, 20000);
 
+  it("supports canceling while combined flashcard generation is in flight", async () => {
+    vi.mocked(tldwClient.listMedia).mockResolvedValue({
+      items: [{ id: 77, title: "Biology Source", type: "pdf" }],
+      pagination: { total_items: 1 },
+    } as any);
+    vi.mocked(tldwClient.getMediaDetails).mockImplementation(
+      async (_mediaId, options) => {
+        if (options?.include_content) {
+          return {
+            content: {
+              text: "Mitosis and meiosis are core processes in cell division.",
+            },
+          } as any;
+        }
+        return { content: { word_count: 1200 } } as any;
+      },
+    );
+
+    let flashcardsSignal: AbortSignal | undefined;
+    vi.mocked(generateFlashcards).mockImplementation(
+      (_input: any, options?: { signal?: AbortSignal }) => {
+        flashcardsSignal = options?.signal;
+        return new Promise((_, reject) => {
+          options?.signal?.addEventListener(
+            "abort",
+            () => {
+              const abortError = new Error("aborted");
+              abortError.name = "AbortError";
+              reject(abortError);
+            },
+            { once: true },
+          );
+        }) as any;
+      },
+    );
+
+    const onNavigateToTake = vi.fn();
+    vi.mocked(useGenerateQuizMutation).mockReturnValue({
+      mutateAsync: vi.fn(async () => ({
+        quiz: { id: 99, name: "Biology Mastery" },
+        questions: [{ id: 1 }, { id: 2 }],
+      })),
+      isPending: false,
+    } as any);
+
+    renderWithQueryClient({ onNavigateToTake });
+
+    await waitFor(() => {
+      expect(screen.getByText("1 media items available")).toBeInTheDocument();
+    });
+
+    fireEvent.mouseDown(screen.getAllByRole("combobox")[0]);
+    fireEvent.click(await screen.findByText("Biology Source (pdf)"));
+    fireEvent.click(screen.getByTestId("generate-study-materials-toggle"));
+    fireEvent.click(screen.getByRole("button", { name: /Generate Quiz/i }));
+
+    await waitFor(() => {
+      expect(generateFlashcards).toHaveBeenCalledTimes(1);
+    });
+    expect(flashcardsSignal).toBeInstanceOf(AbortSignal);
+
+    fireEvent.click(await screen.findByTestId("generate-cancel-button"));
+
+    await waitFor(() => {
+      expect(
+        screen.queryByTestId("generate-cancel-button"),
+      ).not.toBeInTheDocument();
+    });
+
+    expect(flashcardsSignal?.aborted).toBe(true);
+    expect(createDeck).not.toHaveBeenCalled();
+    expect(createFlashcard).not.toHaveBeenCalled();
+    expect(
+      screen.queryByTestId("generate-preview-card"),
+    ).not.toBeInTheDocument();
+    expect(onNavigateToTake).not.toHaveBeenCalled();
+  }, 20000);
+
   it("shows question-count recommendation guidance tied to selected media length", async () => {
     vi.mocked(tldwClient.listMedia).mockResolvedValue({
       items: [{ id: 21, title: "Lengthy Source", type: "pdf" }],
@@ -597,11 +725,13 @@ describe("GenerateTab scalable media selection and generation flow", () => {
         num_cards: 10,
         difficulty: "mixed",
       }),
+      { signal: expect.any(AbortSignal) },
     );
     expect(createDeck).toHaveBeenCalledWith(
       expect.objectContaining({
         name: "Biology Mastery - Flashcards",
       }),
+      { signal: expect.any(AbortSignal) },
     );
     expect(createFlashcard).toHaveBeenCalledTimes(2);
 

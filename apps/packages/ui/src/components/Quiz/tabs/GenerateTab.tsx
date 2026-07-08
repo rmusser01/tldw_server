@@ -1043,13 +1043,18 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
           sourceTitle: params.mediaTitle,
         });
 
-        const generated = await generateFlashcards({
-          text: sourceText,
-          num_cards: clampFlashcardsCount(params.numQuestions),
-          difficulty: params.difficulty,
-          focus_topics:
-            params.focusTopics.length > 0 ? params.focusTopics : undefined,
-        });
+        const generated = await generateFlashcards(
+          {
+            text: sourceText,
+            num_cards: clampFlashcardsCount(params.numQuestions),
+            difficulty: params.difficulty,
+            focus_topics:
+              params.focusTopics.length > 0 ? params.focusTopics : undefined,
+          },
+          {
+            signal: params.signal,
+          },
+        );
         throwIfAborted();
 
         const drafts = normalizeGeneratedDrafts(generated.flashcards);
@@ -1066,32 +1071,43 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
           };
         }
 
-        const deck = await createDeck({
-          name: buildGeneratedDeckName(params.quizName),
-          description: t("option:quiz.studyMaterialsDeckDescription", {
-            defaultValue: "Generated from {{title}}",
-            title: params.mediaTitle,
-          }),
-        });
+        const deck = await createDeck(
+          {
+            name: buildGeneratedDeckName(params.quizName),
+            description: t("option:quiz.studyMaterialsDeckDescription", {
+              defaultValue: "Generated from {{title}}",
+              title: params.mediaTitle,
+            }),
+          },
+          {
+            signal: params.signal,
+          },
+        );
         throwIfAborted();
 
         const createResults = await Promise.allSettled(
           drafts.map((draft) =>
-            createFlashcard({
-              deck_id: deck.id,
-              front: draft.front,
-              back: draft.back,
-              tags: draft.tags,
-              notes: draft.notes ?? undefined,
-              extra: draft.extra ?? undefined,
-              model_type: draft.model_type ?? "basic",
-              reverse: draft.model_type === "basic_reverse",
-              is_cloze: draft.model_type === "cloze",
-              source_ref_type: "media",
-              source_ref_id: String(params.mediaId),
-            }),
+            createFlashcard(
+              {
+                deck_id: deck.id,
+                front: draft.front,
+                back: draft.back,
+                tags: draft.tags,
+                notes: draft.notes ?? undefined,
+                extra: draft.extra ?? undefined,
+                model_type: draft.model_type ?? "basic",
+                reverse: draft.model_type === "basic_reverse",
+                is_cloze: draft.model_type === "cloze",
+                source_ref_type: "media",
+                source_ref_id: String(params.mediaId),
+              },
+              {
+                signal: params.signal,
+              },
+            ),
           ),
         );
+        throwIfAborted();
 
         const savedCount = createResults.filter(
           (result) => result.status === "fulfilled",
@@ -1208,6 +1224,8 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
           });
         }
       }
+
+      if (requestAbortController.signal.aborted) return;
 
       setGeneratedPreview({
         quizId: generated.quiz.id,
@@ -1843,12 +1861,12 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
                 />
               </Form.Item>
 
-              <Form.Item
-                name="generateStudyMaterials"
-                valuePropName="checked"
-                className="!mb-0"
-              >
-                <div className="space-y-1">
+              <div className="space-y-1">
+                <Form.Item
+                  name="generateStudyMaterials"
+                  valuePropName="checked"
+                  noStyle
+                >
                   <Checkbox
                     disabled={generationInFlight || selectedMediaId == null}
                     data-testid="generate-study-materials-toggle"
@@ -1858,22 +1876,22 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
                         "Also generate a flashcard deck from this source",
                     })}
                   </Checkbox>
-                  <p
-                    className="text-xs text-text-subtle"
-                    data-testid="generate-study-materials-help"
-                  >
-                    {selectedMediaId == null
-                      ? t("option:quiz.studyMaterialsRequiresMedia", {
-                          defaultValue:
-                            "Flashcard deck generation currently requires one selected media source.",
-                        })
-                      : t("option:quiz.studyMaterialsReadyHint", {
-                          defaultValue:
-                            "Uses the selected media content to create a companion deck.",
-                        })}
-                  </p>
-                </div>
-              </Form.Item>
+                </Form.Item>
+                <p
+                  className="text-xs text-text-subtle"
+                  data-testid="generate-study-materials-help"
+                >
+                  {selectedMediaId == null
+                    ? t("option:quiz.studyMaterialsRequiresMedia", {
+                        defaultValue:
+                          "Flashcard deck generation currently requires one selected media source.",
+                      })
+                    : t("option:quiz.studyMaterialsReadyHint", {
+                        defaultValue:
+                          "Uses the selected media content to create a companion deck.",
+                      })}
+                </p>
+              </div>
             </Form>
           </Card>
 

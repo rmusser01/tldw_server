@@ -828,14 +828,16 @@ export async function endFlashcardReviewSession(
 }
 
 export async function generateFlashcards(
-  input: FlashcardsGenerateRequest
+  input: FlashcardsGenerateRequest,
+  options?: { signal?: AbortSignal }
 ): Promise<FlashcardsGenerateResponse> {
   return await bgRequest<FlashcardsGenerateResponse, AllowedPath, "POST">({
     path: "/api/v1/flashcards/generate",
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: input,
-    timeoutMs: FLASHCARD_GENERATION_TIMEOUT_MS
+    timeoutMs: FLASHCARD_GENERATION_TIMEOUT_MS,
+    abortSignal: options?.signal
   })
 }
 
