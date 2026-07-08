@@ -98,6 +98,16 @@ modules:
         #     key: search_knowledge
         #     title: Search Knowledge
 
+  - id: cooking
+    class: tldw_Server_API.app.core.MCP_unified.modules.implementations.cooking_module:CookingModule
+    enabled: true
+    name: Cooking
+    version: "1.0.0"
+    department: utility
+    max_concurrent: 20
+    description: Read-only cooking recipe card UI payload tools
+    settings: {}
+
   - id: persona_visuals
     class: tldw_Server_API.app.core.MCP_unified.modules.implementations.persona_visuals_module:PersonaVisualsModule
     enabled: false

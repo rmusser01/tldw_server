@@ -9,6 +9,7 @@ MODULE_RISK_TIERS: dict[str, tuple[str, str]] = {
     "media": ("read_only", "Search and retrieve existing media records."),
     "knowledge": ("read_only", "Search and retrieve knowledge records."),
     "rag": ("read_only", "Run grounded retrieval and answer generation over configured knowledge sources."),
+    "cooking": ("read_only", "Render validated cooking recipe card payloads."),
     "chats": ("read_only", "Read chat/session context."),
     "prompts": ("read_only", "Read prompt library entries."),
     "prompts_catalog": ("read_only", "Expose configured prompt catalogs."),
