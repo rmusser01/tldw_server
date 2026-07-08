@@ -4,7 +4,7 @@ title: Fix PR 2679 chat cockpit UX smoke failure
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: 2026-07-07 19:52
+updated_date: 2026-07-07 20:24
 labels: []
 dependencies: []
 modified_files:
@@ -61,4 +61,6 @@ Fresh current-head UX Smoke Gate failure after push ecc0818e65b3c6ed0a2bf9ab00c1
 Follow-up fix for run 28893776631 keeps the real-server spec from racing React/layout churn: desktop cockpit restoration now drives the current restore DOM node and waits for shell data-left/data-right rail attributes plus visible rails, while the mobile overlap helper polls until both targets are measurable and non-overlapping. Verification before staging: apps/tldw-frontend bun run typecheck passed; apps/packages/ui cockpit vitest 3 files / 54 tests passed; git diff --check passed. Bandit is not applicable because this follow-up only changes TypeScript test code.
 
 Current-head run 28905103978/job 85750361808 failed the real-server cockpit gate after head 17ef16a088dae56a34e3812039805b0f6e98a3d4: the shared cockpit mode switch was still trying to restore desktop rails on the mobile viewport, where the desktop restore handles are responsive-hidden, and the mobile overlap assertion could poll before both targets had measurable boxes. Follow-up fix makes desktop rail restoration viewport-aware and non-fatal during mode switching, centralizes required desktop rail restoration in the explicit desktop helper, and waits for overlap targets to become visible before polling bounding boxes. Verification before staging: apps/tldw-frontend bun run typecheck passed; bunx playwright test e2e/workflows/chat-cockpit.real-server.spec.ts --project=chromium --grep "keeps mobile cockpit tabs" --list passed with the expected Node DEP0205 warning; git diff --check passed. Bandit is not applicable because this follow-up only changes TypeScript test code and a Backlog task note.
+
+Current-head run 28913880555/job 85776671972 still failed UX Smoke Gate after head 15f731a19f4797eaf6548cce37b9c22387c18776. The log showed switchChatLayoutMode still had a rail-restore side effect on desktop, so the first desktop test failed before the explicit rail helper could run, and the mobile overlap assertion measured the mobile wrapper instead of the active visible tab panel. Follow-up fix removes rail restoration from the generic mode switch and checks active mobile tab panels for composer overlap. Verification before staging: apps/tldw-frontend bun run typecheck passed; bunx playwright test e2e/workflows/chat-cockpit.real-server.spec.ts --project=chromium --grep "keeps mobile cockpit tabs" --list passed with the expected Node DEP0205 warning; git diff --check passed. Bandit is not applicable because this follow-up only changes TypeScript test code and a Backlog task note.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->

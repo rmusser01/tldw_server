@@ -69,31 +69,20 @@ const desktopCockpitRailConfig: Record<
   },
 };
 
-const isDesktopCockpitViewport = async (page: Page): Promise<boolean> =>
-  page.evaluate(() => window.matchMedia('(min-width: 1024px)').matches);
-
-const restoreDesktopCockpitRail = async (
-  page: Page,
-  rail: DesktopCockpitRail,
-  { required = true }: { required?: boolean } = {}
-): Promise<boolean> => {
+const restoreDesktopCockpitRail = async (page: Page, rail: DesktopCockpitRail) => {
   const shell = page.getByTestId('playground-cockpit-shell');
   const config = desktopCockpitRailConfig[rail];
   const railLocator = page.getByTestId(config.railId);
   if ((await shell.getAttribute(config.attr)) === 'visible') {
     await expect(railLocator).toBeVisible({ timeout: 10_000 });
-    return true;
+    return;
   }
 
   const restoreControl = page.getByTestId(config.restoreId);
-  if (!(await restoreControl.isVisible().catch(() => false))) {
-    if (!required) return false;
-    await expect(restoreControl).toBeVisible({ timeout: 10_000 });
-  }
+  await expect(restoreControl).toBeVisible({ timeout: 10_000 });
   await restoreControl.evaluate((element: HTMLElement) => element.click());
   await expect(shell).toHaveAttribute(config.attr, 'visible', { timeout: 10_000 });
   await expect(railLocator).toBeVisible({ timeout: 10_000 });
-  return true;
 };
 
 const switchChatLayoutMode = async (page: Page, targetMode: 'cockpit' | 'focus') => {
@@ -114,10 +103,6 @@ const switchChatLayoutMode = async (page: Page, targetMode: 'cockpit' | 'focus')
     await expect(shell).toHaveAttribute('data-mode', targetMode);
   }
 
-  if (targetMode === 'cockpit' && (await isDesktopCockpitViewport(page))) {
-    await restoreDesktopCockpitRail(page, 'left', { required: false });
-    await restoreDesktopCockpitRail(page, 'right', { required: false });
-  }
 };
 
 const waitForPlaygroundDraftSaved = async (page: Page) => {
@@ -2036,7 +2021,7 @@ test.describe('/chat cockpit real-server parity', () => {
     await expect(initialRuntimePanel).toBeHidden();
     await assertNoHorizontalOverflow(page);
     await assertNoVerticalOverlap(
-      mobileRails,
+      initialContextPanel,
       page.getByTestId('chat-input'),
       'mobile cockpit context rails should not overlap composer'
     );
@@ -2125,7 +2110,7 @@ test.describe('/chat cockpit real-server parity', () => {
     await expect(runtimePanel.getByRole('button', { name: 'Configure MCP tools' })).toBeVisible();
     await assertNoHorizontalOverflow(page);
     await assertNoVerticalOverlap(
-      mobileRails,
+      runtimePanel,
       page.getByTestId('chat-input'),
       'mobile cockpit runtime rails should not overlap composer'
     );
