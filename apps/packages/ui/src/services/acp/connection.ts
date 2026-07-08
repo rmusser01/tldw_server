@@ -1,5 +1,6 @@
 import type { TldwConfig } from "@/services/tldw/TldwApiClient"
 import { getRuntimeSingleUserApiKeyOverride } from "@/services/tldw/runtime-auth-override"
+import { isPlaceholderApiKey } from "@/utils/api-key"
 
 import type { ACPClientConfig } from "./client"
 
@@ -14,7 +15,8 @@ const resolveSingleUserApiKey = (
   config: TldwConfig | null | undefined
 ): string | null => {
   if (config?.authMode !== "single-user") return null
-  if (config.apiKey) return config.apiKey
+  const apiKey = String(config.apiKey || "").trim()
+  if (apiKey && !isPlaceholderApiKey(apiKey)) return apiKey
   return getRuntimeSingleUserApiKeyOverride()
 }
 

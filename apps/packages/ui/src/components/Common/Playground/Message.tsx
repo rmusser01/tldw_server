@@ -828,7 +828,7 @@ export const PlaygroundMessage = (props: Props) => {
   const resolvedMoodLabel = explicitMoodLabel || inferredMoodLabel
   const moodBadgeLabel = React.useMemo(() => {
     if (!resolvedMoodLabel) return null
-    const normalizedMood = resolvedMoodLabel.replace(/_/g, " ")
+    const normalizedMood = resolvedMoodLabel.replace(/[_-]+/g, " ")
     if (
       showMoodConfidence &&
       typeof props.moodConfidence === "number" &&

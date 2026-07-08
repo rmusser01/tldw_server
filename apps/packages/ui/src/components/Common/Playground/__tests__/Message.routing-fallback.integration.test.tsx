@@ -377,6 +377,21 @@ describe("PlaygroundMessage routing fallback integration", () => {
     expect(moodBadge).toHaveTextContent("Mood: neutral")
   })
 
+  it("formats hyphenated mood labels in the badge", () => {
+    storageOverrides.set("chatShowMoodBadge", true)
+
+    render(
+      <PlaygroundMessage
+        {...baseProps}
+        moodLabel="Thinking Hard"
+      />
+    )
+
+    expect(screen.getByTestId("message-mood-indicator")).toHaveTextContent(
+      "Mood: thinking hard"
+    )
+  })
+
   it("defaults mood confidence to off for non-character chats", () => {
     storageOverrides.set("chatShowMoodBadge", true)
 
