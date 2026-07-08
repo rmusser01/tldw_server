@@ -148,6 +148,42 @@ describe("submitQuickIngestBatch", () => {
     })
   })
 
+  it("surfaces backend ingest job submit errors when no jobs are created", async () => {
+    mocks.bgUpload.mockResolvedValue({
+      batch_id: "batch-upload-error",
+      jobs: [],
+      errors: ["Validation failed: Claimed filename 'upload' has no extension."]
+    })
+
+    const result = await submitQuickIngestBatch({
+      entries: [],
+      files: [
+        {
+          id: "file-invalid-pdf",
+          name: "upload",
+          type: "application/pdf",
+          data: [37, 80, 68, 70]
+        }
+      ],
+      storeRemote: true,
+      processOnly: false,
+      common: {
+        perform_analysis: true,
+        perform_chunking: false,
+        overwrite_existing: false
+      },
+      advancedValues: {}
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.results?.[0]).toMatchObject({
+      id: "file-invalid-pdf",
+      status: "error",
+      fileName: "upload",
+      error: "Validation failed: Claimed filename 'upload' has no extension."
+    })
+  })
+
   it("surfaces completed ingest jobs with backend error payloads as failed results", async () => {
     mocks.bgUpload.mockResolvedValue({
       batch_id: "batch-completed-error",

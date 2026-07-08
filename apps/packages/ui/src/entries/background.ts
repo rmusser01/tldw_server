@@ -55,6 +55,7 @@ import {
 import {
   createIngestJobsTracker,
   pollTrackedIngestJobs,
+  requireSubmittedIngestJobs,
 } from "@/services/tldw/ingest-jobs-orchestrator";
 import {
   completedIngestJobIndicatesFailure,
@@ -1148,13 +1149,6 @@ export default defineBackground({
       return null;
     };
 
-    type UploadResult = {
-      ok: boolean;
-      status?: number;
-      data?: any;
-      error?: string;
-    };
-
     const handleUpload = async (payload: {
       path?: string;
       method?: string;
@@ -1185,7 +1179,7 @@ export default defineBackground({
       timeoutMs?: number;
       responseType?: "json" | "text" | "arrayBuffer";
       quickIngestSessionId?: string;
-    }): Promise<UploadResult> => {
+    }) => {
       const {
         path,
         method = "POST",
@@ -1250,7 +1244,7 @@ export default defineBackground({
           },
           fieldName: string,
           { appendLegacyFileAlias = false }: { appendLegacyFileAlias?: boolean } = {},
-        ): UploadResult => {
+        ): { ok: true } | { ok: false; status: number; error: string } => {
           if (item?.data === undefined || item?.data === null) return { ok: true };
           const bytes = normalizeFileData(item.data);
           if (!bytes || bytes.byteLength === 0) {
@@ -1753,18 +1747,6 @@ export default defineBackground({
       }
     };
 
-    const extractIngestJobIds = (data: any): number[] => {
-      const jobs = Array.isArray(data?.jobs) ? data.jobs : [];
-      const ids: number[] = [];
-      for (const item of jobs) {
-        const id = Number(item?.id);
-        if (Number.isFinite(id) && id > 0) {
-          ids.push(Math.trunc(id));
-        }
-      }
-      return ids;
-    };
-
     const extractMediaIdFromJobStatus = (data: any): number | null => {
       const direct = Number(data?.media_id);
       if (Number.isFinite(direct) && direct > 0) {
@@ -2226,13 +2208,15 @@ export default defineBackground({
         return;
       }
 
-      session.jobIds = extractIngestJobIds(jobsResp.data);
-      session.batchId =
-        typeof jobsResp.data?.batch_id === "string"
-          ? jobsResp.data.batch_id
-          : undefined;
-      if (session.jobIds.length === 0) {
-        const msg = "Ingest job submission returned no job IDs.";
+      try {
+        const submittedJobs = requireSubmittedIngestJobs(jobsResp.data);
+        session.jobIds = submittedJobs.jobIds;
+        session.batchId = submittedJobs.batchId;
+      } catch (error) {
+        const msg =
+          error instanceof Error
+            ? error.message
+            : String(error || "Ingest job submission returned no job IDs.");
         session.lastError = msg;
         await emitIngestStatus(session, {
           status: "failed",
