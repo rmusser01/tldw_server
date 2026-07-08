@@ -522,6 +522,9 @@ class MemoryMonitor:
 
             except asyncio.CancelledError:
                 break
+            except TTSInsufficientMemoryError:
+                logger.warning("Memory cleanup could not reduce usage below critical threshold")
+                await asyncio.sleep(self.check_interval)
             except _TTS_RESOURCE_NONCRITICAL_EXCEPTIONS:
                 logger.error("Error in memory monitoring")
                 await asyncio.sleep(self.check_interval)

@@ -54,6 +54,48 @@ describe("apiSend timeout fallback policy", () => {
     expect(mocks.tldwRequest).toHaveBeenCalledTimes(1)
   })
 
+  it("coalesces concurrent identical GET requests through direct fallback", async () => {
+    vi.useFakeTimers()
+    mocks.sendMessage.mockImplementation(() => new Promise(() => undefined))
+    mocks.tldwRequest.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: [{ id: "research_assistant" }]
+    })
+
+    const { apiSend } = await importApiSend()
+    const first = apiSend({ path: "/api/v1/persona/profiles", method: "GET" })
+    const second = apiSend({ path: "/api/v1/persona/profiles", method: "GET" })
+
+    await vi.advanceTimersByTimeAsync(10001)
+
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      { ok: true, status: 200, data: [{ id: "research_assistant" }] },
+      { ok: true, status: 200, data: [{ id: "research_assistant" }] }
+    ])
+    expect(mocks.tldwRequest).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not coalesce unsafe POST requests", async () => {
+    mocks.sendMessage.mockResolvedValue({ ok: true, status: 200, data: { ok: true } })
+
+    const { apiSend } = await importApiSend()
+    await Promise.all([
+      apiSend({
+        path: "/api/v1/notes/search/",
+        method: "POST",
+        body: { q: "hello" }
+      }),
+      apiSend({
+        path: "/api/v1/notes/search/",
+        method: "POST",
+        body: { q: "hello" }
+      })
+    ])
+
+    expect(mocks.sendMessage).toHaveBeenCalledTimes(2)
+  })
+
   it("does not fall back to direct request for POST timeout", async () => {
     vi.useFakeTimers()
     mocks.sendMessage.mockImplementation(() => new Promise(() => undefined))

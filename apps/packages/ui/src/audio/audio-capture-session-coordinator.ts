@@ -1,19 +1,19 @@
-import type { AudioFeatureGroup } from "./source-types"
+import type { AudioCaptureOwner } from "./source-types"
 
 export type AudioCaptureSessionClaim = {
-  ownerBeforeClaim: AudioFeatureGroup | null
-  ownerAfterClaim: AudioFeatureGroup
+  ownerBeforeClaim: AudioCaptureOwner | null
+  ownerAfterClaim: AudioCaptureOwner
 }
 
 export type AudioCaptureSessionRelease = {
-  ownerBeforeRelease: AudioFeatureGroup | null
+  ownerBeforeRelease: AudioCaptureOwner | null
   released: boolean
 }
 
 export type AudioCaptureSessionCoordinator = {
-  claim: (owner: AudioFeatureGroup) => AudioCaptureSessionClaim
-  release: (owner: AudioFeatureGroup) => AudioCaptureSessionRelease
-  getActiveOwner: () => AudioFeatureGroup | null
+  claim: (owner: AudioCaptureOwner) => AudioCaptureSessionClaim
+  release: (owner: AudioCaptureOwner) => AudioCaptureSessionRelease
+  getActiveOwner: () => AudioCaptureOwner | null
 }
 
 const AUDIO_CAPTURE_COORDINATOR_KEY = Symbol.for(
@@ -21,9 +21,9 @@ const AUDIO_CAPTURE_COORDINATOR_KEY = Symbol.for(
 )
 
 export const createAudioCaptureSessionCoordinator = (
-  initialOwner: AudioFeatureGroup | null = null
+  initialOwner: AudioCaptureOwner | null = null
 ): AudioCaptureSessionCoordinator => {
-  let activeOwner: AudioFeatureGroup | null = initialOwner
+  let activeOwner: AudioCaptureOwner | null = initialOwner
 
   return {
     claim(owner) {
@@ -69,5 +69,5 @@ export const getGlobalAudioCaptureSessionCoordinator =
   }
 
 export const createAudioCaptureBusyError = (
-  activeOwner: AudioFeatureGroup
+  activeOwner: AudioCaptureOwner
 ): Error => new Error(`Audio capture is already active for ${activeOwner}`)

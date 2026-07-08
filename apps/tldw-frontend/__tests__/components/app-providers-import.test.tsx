@@ -91,4 +91,17 @@ describe("AppProviders", () => {
     expect(screen.getByText("child content")).toBeInTheDocument()
     expect(screen.getByTestId("notification-toast-bridge")).toBeInTheDocument()
   })
+
+  it("keeps the notification bridge unmounted when notifications are disabled", async () => {
+    const { AppProviders } = await import("@web/components/AppProviders")
+
+    render(
+      <AppProviders enableNotifications={false}>
+        <div>child content</div>
+      </AppProviders>
+    )
+
+    expect(screen.getByText("child content")).toBeInTheDocument()
+    expect(screen.queryByTestId("notification-toast-bridge")).not.toBeInTheDocument()
+  })
 })

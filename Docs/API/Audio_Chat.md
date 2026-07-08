@@ -52,17 +52,22 @@ Purpose: speech in → transcript → LLM → speech out (optional action execut
 - Integration: `tldw_Server_API/tests/Audio/test_audio_chat_endpoint.py`, `test_speech_chat_service.py`.
 - Harness: `python Helper_Scripts/voice_latency_harness/run.py --out out.json --short` (metrics scrape) or run a real turn (omit `--short`; pass `--api-key`/`--base-url` if needed). Output JSON includes `run_id`, `fixture`, `runs`, and `metrics` with p50/p90 values for STT/TTS/voice-to-voice (and audio_chat when available).
 
-# /api/v1/audio/chat/stream (Streaming Voice Chat v2)
+# /api/v1/audio/chat/stream (Streaming Voice Chat v1)
 
 Purpose: low-latency voice commands with partial STT, streaming LLM deltas, and streaming TTS audio over a single WebSocket.
 
 ## Protocol
-- First frame must be `{"type":"config", ...}`:
+- First post-auth frame must be `{"type":"config", ...}` with strict v1 audio fields:
+  - `protocol_version`: `1`.
+  - `mode`: `"voice_chat"` or `"push_to_talk"`.
+  - `audio_format`: `"pcm16"`.
+  - `sample_rate`: `16000`.
+  - `channels`: `1`.
   - `stt`: `model|variant|sample_rate|enable_vad|vad_threshold|min_silence_ms|turn_stop_secs|min_utterance_secs`.
   - `llm`: `provider|model|temperature|max_tokens|system|extra_params`.
   - `tts`: `voice|model|provider|format|speed|extra_params` (`pcm` default; `mp3|opus|aac|flac|wav` supported).
   - Optional: `session_id`, `metadata`.
-- Stream audio as `{"type":"audio","data":"<base64 float32/PCM>"}`; send `{"type":"commit"}` to finalize (Silero VAD auto-commit also supported). `reset` clears buffers; `stop` closes the socket.
+- Stream audio as `{"type":"audio","data":"<base64 PCM16 little-endian mono>"}`. In `voice_chat` mode, server VAD can auto-commit; clients may also send `{"type":"commit"}`. In `push_to_talk` mode, send `{"type":"push_to_talk_release"}` to commit without depending on VAD. `reset` clears buffers; `stop` closes the socket.
 - Optional interruption: send `{"type":"interrupt","reason":"barge_in|user_stop|..."}` to cancel the in-flight turn synthesis/generation window without closing the socket.
 
 ## Server Frames

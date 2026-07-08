@@ -48,6 +48,7 @@ import { useVoiceChatSettings } from "@/hooks/useVoiceChatSettings"
 import { useVoiceChatStream } from "@/hooks/useVoiceChatStream"
 import { useVoiceChatMessages } from "@/hooks/useVoiceChatMessages"
 import { useComposerEvents } from "@/hooks/useComposerEvents"
+import { appendDictationTranscript } from "@/components/Chat/composer/utils"
 import { useTemporaryChatToggle } from "@/hooks/useTemporaryChatToggle"
 import { useSelectedCharacter } from "@/hooks/useSelectedCharacter"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
@@ -1010,7 +1011,10 @@ export const SidepanelForm = ({
     sttSettings,
     dictationModeOverride,
     dictationAutoFallbackEnabled: Boolean(dictationAutoFallbackEnabled),
-    onTranscript: (text) => form.setFieldValue("message", text)
+    onTranscript: (text) => {
+      const nextMessage = appendDictationTranscript(form.values.message, text)
+      form.setFieldValue("message", nextMessage)
+    }
   })
   const hasVoiceInputControls =
     browserSupportsSpeechRecognition || hasServerStt || hasServerVoiceChat

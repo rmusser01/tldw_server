@@ -28,6 +28,48 @@ const shouldHideForBrowser = (item: SettingsNavItem) =>
   !isChromeTarget && item.to === "/settings/chrome";
 
 const SETTINGS_HIDE_BETA_BADGES_STORAGE_KEY = "tldw:settings:hide-beta-badges";
+const SETTINGS_EXIT_URL_ORIGIN = "https://tldw.local";
+
+const isNextWebAppRuntime = () =>
+  typeof window !== "undefined" && "__NEXT_DATA__" in window;
+
+type SettingsExitNavigationEnvironment = {
+  isNextWebApp?: boolean;
+  assignLocation?: (target: string) => void;
+};
+
+const normalizeSettingsExitTarget = (target: string) => {
+  const trimmedTarget = target.trim();
+  if (!trimmedTarget) return "/";
+
+  try {
+    const url = new URL(trimmedTarget, SETTINGS_EXIT_URL_ORIGIN);
+    if (url.origin !== SETTINGS_EXIT_URL_ORIGIN) return "/";
+    if (url.pathname.startsWith("/settings")) return "/";
+    return `${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    return "/";
+  }
+};
+
+export const navigateFromSettingsExit = (
+  navigate: ReturnType<typeof useNavigate>,
+  target: string,
+  environment?: SettingsExitNavigationEnvironment,
+) => {
+  const isNextWebApp = environment?.isNextWebApp ?? isNextWebAppRuntime();
+  const normalizedTarget = normalizeSettingsExitTarget(target);
+
+  if (isNextWebApp) {
+    const assignLocation =
+      environment?.assignLocation ??
+      window.location.assign.bind(window.location);
+    assignLocation(normalizedTarget);
+    return;
+  }
+
+  navigate(normalizedTarget, { flushSync: true });
+};
 
 const readHideBetaBadgesPreference = (): boolean => {
   try {
@@ -115,7 +157,7 @@ export const SettingsLayout = ({ children }: { children: React.ReactNode }) => {
     location.pathname === "/settings/model"
       ? t("settings:modelSettings.heading", "Model settings")
       : location.pathname === "/settings"
-        ? t("settings:setupRecovery.title", "Setup & Recovery")
+        ? t("settings:heading", "Settings")
         : currentBreadcrumbLabel || t("settings:heading", "Settings");
   const hasVisibleBetaItems = React.useMemo(
     () =>
@@ -333,12 +375,10 @@ export const SettingsLayout = ({ children }: { children: React.ReactNode }) => {
                   title={t("common:close", "Close")}
                   onClick={(e) => {
                     e.preventDefault();
-                    const returnTo = getSettingsReturnTo();
-                    if (returnTo) {
-                      navigate(returnTo);
-                      return;
-                    }
-                    navigate("/");
+                    navigateFromSettingsExit(
+                      navigate,
+                      getSettingsReturnTo() ?? "/",
+                    );
                   }}
                 >
                   <XIcon className="h-4 w-4" />

@@ -5,6 +5,7 @@ import type {
   DictationToggleIntent
 } from "@/hooks/useDictationStrategy"
 import type { SttSettings } from "@/hooks/useSttSettings"
+import { appendDictationTranscript } from "@/components/Chat/composer/utils"
 import { useComposerVoiceChat } from "@/components/Chat/composer/hooks/useComposerVoiceChat"
 import { withTemplateFallback } from "@/utils/template-guards"
 import type { VoiceConversationAvailability } from "@/services/tldw/voice-conversation"
@@ -22,8 +23,8 @@ import type { VoiceConversationAvailability } from "@/services/tldw/voice-conver
  * uses the shared hook directly.
  *
  * Transcripts are written to the message field via Playground's
- * `setMessageValue(text, { collapseLarge: true, forceCollapse: true })` so
- * large pasted-then-redictated payloads stay collapsed in the textarea.
+ * collapse-aware message setter so large pasted-then-redictated payloads stay
+ * collapsed in the textarea.
  */
 
 // ---------------------------------------------------------------------------
@@ -69,6 +70,7 @@ export interface UsePlaygroundVoiceChatDeps {
   /** Language */
   speechToTextLanguage: string
   /** Callbacks */
+  messageValue: string
   setMessageValue: (value: string, options?: any) => void
   submitForm: () => void
   /** Notification API */
@@ -110,6 +112,7 @@ export function usePlaygroundVoiceChat(deps: UsePlaygroundVoiceChatDeps) {
     autoStopTimeout,
     autoSubmitVoiceMessage,
     speechToTextLanguage,
+    messageValue,
     setMessageValue,
     submitForm,
     notificationApi,
@@ -151,9 +154,10 @@ export function usePlaygroundVoiceChat(deps: UsePlaygroundVoiceChatDeps) {
 
   const handleTranscript = React.useCallback(
     (text: string) => {
-      setMessageValue(text, { collapseLarge: true, forceCollapse: true })
+      const nextMessage = appendDictationTranscript(messageValue, text)
+      setMessageValue(nextMessage, { collapseLarge: true, forceCollapse: true })
     },
-    [setMessageValue]
+    [messageValue, setMessageValue]
   )
 
   const handleAutoSubmit = React.useCallback(() => {
@@ -208,7 +212,7 @@ export function usePlaygroundVoiceChat(deps: UsePlaygroundVoiceChatDeps) {
       ) as string
     }
     if (speechUsesServer) {
-      const sttModelLabel = sttModel || "whisper-1"
+      const sttModelLabel = sttModel || t("playground:stt.serverDefaultModel", "server default")
       const sttTaskLabel = sttTask === "translate" ? "translate" : "transcribe"
       const sttFormatLabel = (sttResponseFormat || "json").toUpperCase()
       const speechDetails = withTemplateFallback(

@@ -7,6 +7,7 @@ import configparser
 import contextlib
 import json
 import os
+import platform
 from collections.abc import MutableMapping
 from functools import lru_cache
 from pathlib import Path
@@ -74,6 +75,24 @@ def _safe_json_dict(raw: Optional[str]) -> dict:
 
 CUSTOM_OPENAI_ENDPOINT_ENV_KEYS = custom_openai_endpoint_env_keys(1)
 CUSTOM_OPENAI2_ENDPOINT_ENV_KEYS = custom_openai_endpoint_env_keys(2)
+
+DEFAULT_PARAKEET_ONNX_TRANSCRIPTION_MODEL = "parakeet-tdt-0.6b-v3-onnx"
+DEFAULT_PARAKEET_MLX_TRANSCRIPTION_MODEL = "parakeet-mlx"
+
+
+def get_platform_default_transcription_model() -> str:
+    """Return the local STT default model for the current OS."""
+    if platform.system().lower() == "darwin":
+        return DEFAULT_PARAKEET_MLX_TRANSCRIPTION_MODEL
+    return DEFAULT_PARAKEET_ONNX_TRANSCRIPTION_MODEL
+
+
+def resolve_default_transcription_model_setting(value: Any) -> str:
+    """Resolve an STT default model setting, treating blank/auto as platform default."""
+    raw = str(value or "").strip()
+    if not raw or raw.lower() == "auto":
+        return get_platform_default_transcription_model()
+    return raw
 
 
 def _first_nonempty_env(env_keys: tuple[str, ...]) -> Optional[str]:
@@ -4303,21 +4322,19 @@ def load_and_log_configs():
         tmp_default_transcriber = _normalize_stt_provider_name(raw_default_transcriber)
         # If default_transcriber is not set explicitly, fall back to default_stt_provider
         default_transcriber = tmp_default_transcriber or default_stt_provider
-        default_batch_transcription_model = (
+        default_batch_transcription_model = resolve_default_transcription_model_setting(
             config_parser_object.get(
                 'STT-Settings',
                 'default_batch_transcription_model',
-                fallback='parakeet-tdt-0.6b-v3-onnx',
-            ).strip()
-            or 'parakeet-tdt-0.6b-v3-onnx'
+                fallback='auto',
+            )
         )
-        default_streaming_transcription_model = (
+        default_streaming_transcription_model = resolve_default_transcription_model_setting(
             config_parser_object.get(
                 'STT-Settings',
                 'default_streaming_transcription_model',
-                fallback='parakeet-tdt-0.6b-v3-onnx',
-            ).strip()
-            or 'parakeet-tdt-0.6b-v3-onnx'
+                fallback='auto',
+            )
         )
         nemo_model_variant = config_parser_object.get('STT-Settings', 'nemo_model_variant', fallback='onnx')
         nemo_device = config_parser_object.get('STT-Settings', 'nemo_device', fallback='cuda')

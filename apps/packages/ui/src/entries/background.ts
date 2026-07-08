@@ -70,6 +70,7 @@ import {
   ABSOLUTE_URL_BLOCK_ERROR,
   evaluateAbsoluteUrlAccess,
 } from "@/utils/absolute-url-guard";
+import { arrayBufferToBase64 } from "@/utils/compress";
 import {
   createSerializedSessionStateWriter,
   getSessionStorageArea,
@@ -3405,8 +3406,18 @@ export default defineBackground({
                 // streaming audio (it only sends audio after the "open" event).
                 try {
                   ws?.send(JSON.stringify({ type: "auth", token }));
+                  ws?.send(
+                    JSON.stringify({
+                      type: "config",
+                      protocol_version: 1,
+                      mode: "captions",
+                      audio_format: "pcm16",
+                      sample_rate: 16000,
+                      channels: 1,
+                    }),
+                  );
                 } catch (error) {
-                  logBackgroundError("stt websocket send auth", error);
+                  logBackgroundError("stt websocket send auth/config", error);
                 }
                 safePost({ event: "open" });
               };
@@ -3425,10 +3436,22 @@ export default defineBackground({
               ws &&
               ws.readyState === WebSocket.OPEN
             ) {
-              if (msg.data instanceof ArrayBuffer) {
-                ws.send(msg.data);
-              } else if (msg.data?.buffer) {
-                ws.send(msg.data.buffer);
+              const normalized = normalizeFileData(msg.data);
+              const data = normalized
+                ? new Uint8Array(normalized).buffer
+                : null;
+              if (data) {
+                ws.send(
+                  JSON.stringify({
+                    type: "audio",
+                    data: arrayBufferToBase64(data),
+                  }),
+                );
+              } else {
+                logBackgroundError(
+                  "stt websocket audio payload",
+                  new Error("Unsupported audio payload"),
+                );
               }
             } else if (msg?.action === "close") {
               try {

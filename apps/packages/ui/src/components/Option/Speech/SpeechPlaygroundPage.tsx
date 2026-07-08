@@ -78,6 +78,7 @@ import { RenderStrip } from "@/components/Option/Speech/RenderStrip"
 import { AudioReadinessStrip } from "@/components/Option/Audio/AudioReadinessStrip"
 import { AudioPresetControls } from "@/components/Option/Audio/AudioPresetControls"
 import { buildTtsReadinessItems } from "@/components/Option/Audio/audio-readiness"
+import { STT_DEFAULTS } from "@/config/ui-constants"
 import { classifyAudioError } from "@/components/Option/Audio/audio-error-classification"
 import { VoicePickerModal, type VoiceSelection } from "@/components/Option/Speech/VoicePickerModal"
 import { useAudioSourceCatalog } from "@/hooks/useAudioSourceCatalog"
@@ -309,7 +310,7 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
   )
 
   const [speechToTextLanguage] = useStorage("speechToTextLanguage", "en-US")
-  const [sttModel] = useStorage("sttModel", "whisper-1")
+  const [sttModel] = useStorage("sttModel", STT_DEFAULTS.MODEL)
   const [sttTask] = useStorage("sttTask", "transcribe")
   const [sttResponseFormat] = useStorage("sttResponseFormat", "json")
   const [sttTemperature] = useStorage("sttTemperature", 0)
@@ -333,7 +334,6 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
     activeModel,
     defaultModel: sttModel,
     enabled: effectiveMode !== "listen",
-    onInitialModel: setActiveModel,
     warnLabel: "Speech Playground"
   })
   const [isRecording, setIsRecording] = React.useState(false)
@@ -2688,7 +2688,7 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
                       <Select
                         showSearch
                         allowClear
-                        placeholder={sttModel || "whisper-1"}
+                        placeholder={sttModel || t("playground:stt.serverDefaultModel", "Server default")}
                         loading={serverModelsLoading}
                         value={activeModel}
                         onChange={(value) => setActiveModel(value)}
@@ -2841,13 +2841,13 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
                       "playground:tooltip.speechToTextDetails",
                       "Uses {{model}} · {{task}} · {{format}}. Configure in Settings -> Speech (/settings/speech).",
                       {
-                        model: activeModel || sttModel || "whisper-1",
+                        model: activeModel || sttModel || t("playground:stt.serverDefaultModel", "server default"),
                         task: sttTask === "translate" ? "translate" : "transcribe",
                         format: (sttResponseFormat || "json").toUpperCase()
                       } as any
                     ),
                     `Uses ${
-                      activeModel || sttModel || "whisper-1"
+                      activeModel || sttModel || t("playground:stt.serverDefaultModel", "server default")
                     } · ${sttTask === "translate" ? "translate" : "transcribe"} · ${(
                       sttResponseFormat || "json"
                     ).toUpperCase()}. Configure in Settings -> Speech (/settings/speech).`

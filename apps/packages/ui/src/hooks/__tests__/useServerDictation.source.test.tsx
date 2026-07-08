@@ -1,22 +1,23 @@
-import { act, renderHook } from "@testing-library/react"
+import { act, renderHook, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { createAudioCaptureSessionCoordinator } from "@/audio"
 
-const {
-  mockNotificationError,
-  mockGetUserMedia,
-  mockTrackStop,
-  mockTranscribeAudio
-} = vi.hoisted(() => ({
-  mockNotificationError: vi.fn(),
-  mockGetUserMedia: vi.fn(),
-  mockTrackStop: vi.fn(),
-  mockTranscribeAudio: vi.fn()
+const mockNotificationError = vi.hoisted(() => vi.fn())
+
+const clientState = vi.hoisted(() => ({
+  getConfig: vi.fn(async () => ({
+    serverUrl: "http://localhost:8000",
+    authMode: "single_user",
+    apiKey: "test-key"
+  }))
 }))
 
-const AUDIO_CAPTURE_COORDINATOR_KEY = Symbol.for(
-  "tldw.audioCaptureSessionCoordinator"
-)
+const micState = vi.hoisted(() => ({
+  callback: null as ((chunk: ArrayBuffer) => void) | null,
+  options: undefined as unknown,
+  start: vi.fn(async () => {}),
+  stop: vi.fn(() => {}),
+  active: false
+}))
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -30,44 +31,32 @@ vi.mock("@/hooks/useAntdNotification", () => ({
   })
 }))
 
-vi.mock("@/services/tldw/TldwApiClient", () => ({
-  tldwClient: {
-    transcribeAudio: mockTranscribeAudio
+vi.mock("@/hooks/useMicStream", () => ({
+  useMicStream: (callback: (chunk: ArrayBuffer) => void, options: unknown) => {
+    micState.callback = callback
+    micState.options = options
+    return {
+      start: micState.start,
+      stop: micState.stop,
+      active: micState.active
+    }
   }
 }))
 
-// When set, the next MediaRecorder construction throws (simulates a ctor
-// failure after getUserMedia has already acquired a live stream).
-let recorderCtorShouldThrow = false
-
-class MockMediaRecorder {
-  ondataavailable: ((event: { data: Blob }) => void) | null = null
-  onerror: ((event: Event) => void) | null = null
-  onstop: (() => void | Promise<void>) | null = null
-  mimeType = "audio/webm"
-  state = "inactive"
-
-  constructor() {
-    if (recorderCtorShouldThrow) {
-      recorderCtorShouldThrow = false
-      throw new Error("MediaRecorder construction failed")
-    }
+vi.mock("@/services/tldw/TldwApiClient", () => ({
+  tldwClient: {
+    getConfig: clientState.getConfig
   }
+}))
 
-  start = vi.fn(() => {
-    this.state = "recording"
-  })
+const runtimeAuthState = vi.hoisted(() => ({
+  getRuntimeSingleUserApiKeyOverride: vi.fn(() => null as string | null)
+}))
 
-  stop = vi.fn(() => {
-    this.state = "inactive"
-    this.onstop?.()
-  })
-}
-
-vi.stubGlobal("MediaRecorder", MockMediaRecorder)
-vi.stubGlobal("navigator", {
-  mediaDevices: { getUserMedia: mockGetUserMedia }
-})
+vi.mock("@/services/tldw/runtime-auth-override", () => ({
+  getRuntimeSingleUserApiKeyOverride:
+    runtimeAuthState.getRuntimeSingleUserApiKeyOverride
+}))
 
 import { useServerDictation } from "../useServerDictation"
 import type { SttSettings } from "../useSttSettings"
@@ -88,7 +77,48 @@ const defaultSttSettings: SttSettings = {
   segEmbeddingsModel: ""
 }
 
-const buildHook = (overrides?: Partial<Parameters<typeof useServerDictation>[0]>) =>
+class MockWebSocket {
+  static OPEN = 1
+  static CLOSED = 3
+  static instances: MockWebSocket[] = []
+
+  readyState = 0
+  sentMessages: string[] = []
+  onopen: (() => void) | null = null
+  onmessage: ((event: { data: string | ArrayBuffer }) => void) | null = null
+  onerror: (() => void) | null = null
+  onclose: (() => void) | null = null
+
+  constructor(public url: string) {
+    MockWebSocket.instances.push(this)
+  }
+
+  send(payload: string) {
+    this.sentMessages.push(payload)
+  }
+
+  open() {
+    this.readyState = MockWebSocket.OPEN
+    this.onopen?.()
+  }
+
+  message(payload: unknown) {
+    this.onmessage?.({ data: JSON.stringify(payload) })
+  }
+
+  error() {
+    this.onerror?.()
+  }
+
+  close() {
+    this.readyState = MockWebSocket.CLOSED
+    this.onclose?.()
+  }
+}
+
+const buildHook = (
+  overrides?: Partial<Parameters<typeof useServerDictation>[0]>
+) =>
   useServerDictation({
     canUseServerStt: true,
     speechToTextLanguage: "en-US",
@@ -97,25 +127,88 @@ const buildHook = (overrides?: Partial<Parameters<typeof useServerDictation>[0]>
     ...overrides
   })
 
-const createMockStream = () =>
-  ({
-    getTracks: () => [{ stop: mockTrackStop }]
-  }) as unknown as MediaStream
+const sentFrames = (ws: MockWebSocket) =>
+  ws.sentMessages.map((message) => JSON.parse(message))
 
 describe("useServerDictation selected source handling", () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    recorderCtorShouldThrow = false
-    mockGetUserMedia.mockResolvedValue(createMockStream())
-    mockTranscribeAudio.mockResolvedValue({ text: "transcript" })
-    delete (
-      globalThis as typeof globalThis & {
-        [AUDIO_CAPTURE_COORDINATOR_KEY]?: unknown
-      }
-    )[AUDIO_CAPTURE_COORDINATOR_KEY]
+    MockWebSocket.instances = []
+    ;(globalThis as any).WebSocket = MockWebSocket
+    clientState.getConfig.mockResolvedValue({
+      serverUrl: "http://localhost:8000",
+      authMode: "single_user",
+      apiKey: "test-key"
+    })
+    runtimeAuthState.getRuntimeSingleUserApiKeyOverride.mockReturnValue(null)
+    micState.callback = null
+    micState.options = undefined
+    micState.start.mockResolvedValue(undefined)
+    micState.active = false
   })
 
-  it("records server dictation from the selected mic device", async () => {
+  it("uses the dictation mic owner", () => {
+    renderHook(() => buildHook())
+
+    expect(micState.options).toEqual({ owner: "dictation" })
+  })
+
+  it("sends strict dictate config before audio frames", async () => {
+    const { result } = renderHook(() => buildHook())
+
+    await act(async () => {
+      await result.current.startServerDictation()
+    })
+
+    const ws = MockWebSocket.instances[0]
+    await act(async () => {
+      ws.open()
+      await Promise.resolve()
+      await Promise.resolve()
+      micState.callback?.(new ArrayBuffer(2))
+    })
+
+    const sent = sentFrames(ws)
+    expect(sent[0]).toMatchObject({ type: "auth", token: "test-key" })
+    expect(sent[1]).toMatchObject({
+      type: "config",
+      protocol_version: 1,
+      mode: "dictate",
+      audio_format: "pcm16",
+      sample_rate: 16000,
+      channels: 1
+    })
+    expect(sent[2]).toMatchObject({ type: "audio" })
+  })
+
+  it("uses the runtime single-user API key for websocket auth when stored config omits the key", async () => {
+    clientState.getConfig.mockResolvedValue({
+      serverUrl: "http://localhost:8000",
+      authMode: "single-user",
+      apiKey: ""
+    })
+    runtimeAuthState.getRuntimeSingleUserApiKeyOverride.mockReturnValue(
+      "runtime-key"
+    )
+    const { result } = renderHook(() => buildHook())
+
+    await act(async () => {
+      await result.current.startServerDictation()
+    })
+
+    const ws = MockWebSocket.instances[0]
+    await act(async () => {
+      ws.open()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    const sent = sentFrames(ws)
+    expect(sent[0]).toMatchObject({ type: "auth", token: "runtime-key" })
+    expect(sent[1]).toMatchObject({ type: "config", mode: "dictate" })
+  })
+
+  it("starts the mic with the selected device after websocket config", async () => {
     const { result } = renderHook(() => buildHook())
 
     await act(async () => {
@@ -125,50 +218,103 @@ describe("useServerDictation selected source handling", () => {
       })
     })
 
-    expect(mockGetUserMedia).toHaveBeenCalledWith({
-      audio: { deviceId: { exact: "usb-1" } }
+    const ws = MockWebSocket.instances[0]
+    await act(async () => {
+      ws.open()
+      await Promise.resolve()
+      await Promise.resolve()
     })
+
+    expect(micState.start).toHaveBeenCalledWith({ deviceId: "usb-1" })
   })
 
-  it("falls back to the default microphone when no deviceId is provided", async () => {
-    const { result } = renderHook(() => buildHook())
+  it("emits partial preview separately and final transcript once", async () => {
+    const onPartialTranscript = vi.fn()
+    const onTranscript = vi.fn()
+    const { result } = renderHook(() =>
+      buildHook({ onPartialTranscript, onTranscript })
+    )
 
     await act(async () => {
-      await result.current.startServerDictation({
-        sourceKind: "default_mic",
-        deviceId: null
-      })
+      await result.current.startServerDictation()
     })
 
-    expect(mockGetUserMedia).toHaveBeenCalledWith({ audio: true })
+    const ws = MockWebSocket.instances[0]
+    await act(async () => {
+      ws.open()
+      await Promise.resolve()
+      ws.message({ type: "partial", text: "hel" })
+      ws.message({ type: "full_transcript", text: "hello" })
+    })
+
+    expect(onPartialTranscript).toHaveBeenCalledWith("hel")
+    expect(onTranscript).toHaveBeenCalledTimes(1)
+    expect(onTranscript).toHaveBeenCalledWith("hello")
   })
 
-  it("surfaces a busy-owner error instead of silently returning when another low-level capture is active", async () => {
-    ;(
-      globalThis as typeof globalThis & {
-        [AUDIO_CAPTURE_COORDINATOR_KEY]?: unknown
-      }
-    )[AUDIO_CAPTURE_COORDINATOR_KEY] =
-      createAudioCaptureSessionCoordinator("live_voice")
-    const onError = vi.fn()
-    const { result } = renderHook(() => buildHook({ onError }))
+  it("accepts strict backend final frames as committed dictation text", async () => {
+    const onTranscript = vi.fn()
+    const { result } = renderHook(() => buildHook({ onTranscript }))
 
     await act(async () => {
-      await result.current.startServerDictation({
-        sourceKind: "mic_device",
-        deviceId: "usb-1"
-      })
+      await result.current.startServerDictation()
     })
 
-    expect(mockGetUserMedia).not.toHaveBeenCalled()
-    expect(onError).toHaveBeenCalledTimes(1)
-    expect(mockNotificationError).toHaveBeenCalledTimes(1)
+    const ws = MockWebSocket.instances[0]
+    await act(async () => {
+      ws.open()
+      await Promise.resolve()
+      ws.message({ type: "final", text: "backend final", is_final: true })
+    })
+
+    expect(onTranscript).toHaveBeenCalledTimes(1)
+    expect(onTranscript).toHaveBeenCalledWith("backend final")
+  })
+
+  it("emits only the missing suffix when a cumulative full transcript follows final frames", async () => {
+    const onTranscript = vi.fn()
+    const { result } = renderHook(() => buildHook({ onTranscript }))
+
+    await act(async () => {
+      await result.current.startServerDictation()
+    })
+
+    const ws = MockWebSocket.instances[0]
+    await act(async () => {
+      ws.open()
+      await Promise.resolve()
+      ws.message({ type: "final", text: "hello", is_final: true })
+      ws.message({ type: "full_transcript", text: "hello world" })
+    })
+
+    expect(onTranscript).toHaveBeenNthCalledWith(1, "hello")
+    expect(onTranscript).toHaveBeenNthCalledWith(2, "world")
+  })
+
+  it("surfaces divergent full transcript corrections after committed final frames", async () => {
+    const onTranscript = vi.fn()
+    const { result } = renderHook(() => buildHook({ onTranscript }))
+
+    await act(async () => {
+      await result.current.startServerDictation()
+    })
+
+    const ws = MockWebSocket.instances[0]
+    await act(async () => {
+      ws.open()
+      await Promise.resolve()
+      ws.message({ type: "final", text: "hello", is_final: true })
+      ws.message({ type: "full_transcript", text: "corrected rewrite" })
+    })
+
+    expect(onTranscript).toHaveBeenNthCalledWith(1, "hello")
+    expect(onTranscript).toHaveBeenNthCalledWith(2, "corrected rewrite")
   })
 
   it("reports microphone startup failures through onError", async () => {
     const onError = vi.fn()
     const startupError = new Error("Requested microphone unavailable")
-    mockGetUserMedia.mockRejectedValueOnce(startupError)
+    micState.start.mockRejectedValueOnce(startupError)
     const { result } = renderHook(() => buildHook({ onError }))
 
     await act(async () => {
@@ -178,57 +324,104 @@ describe("useServerDictation selected source handling", () => {
       })
     })
 
+    const ws = MockWebSocket.instances[0]
+    await act(async () => {
+      ws.open()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
     expect(onError).toHaveBeenCalledWith(startupError)
     expect(mockNotificationError).toHaveBeenCalledTimes(1)
-  })
-
-  it("stops the acquired stream when the MediaRecorder constructor throws", async () => {
-    recorderCtorShouldThrow = true
-    const onError = vi.fn()
-    const { result } = renderHook(() => buildHook({ onError }))
-
-    await act(async () => {
-      await result.current.startServerDictation({
-        sourceKind: "default_mic",
-        deviceId: null
-      })
-    })
-
-    // The stream was acquired before the ctor threw; its tracks must be stopped
-    // via the ref-held stream so the mic indicator does not stay on.
-    expect(mockGetUserMedia).toHaveBeenCalledTimes(1)
-    expect(mockTrackStop).toHaveBeenCalled()
-    expect(onError).toHaveBeenCalledTimes(1)
     expect(result.current.isServerDictating).toBe(false)
-
-    // Owner released: a subsequent start acquires the mic again.
-    await act(async () => {
-      await result.current.startServerDictation({
-        sourceKind: "default_mic",
-        deviceId: null
-      })
-    })
-    expect(mockGetUserMedia).toHaveBeenCalledTimes(2)
   })
 
-  it("does not orphan a stream on a rapid double-start", async () => {
+  it("does not create a second websocket on a rapid double-start", async () => {
     const { result } = renderHook(() => buildHook())
 
     await act(async () => {
-      // Fire two starts before the first getUserMedia resolves.
-      const first = result.current.startServerDictation({
-        sourceKind: "default_mic",
-        deviceId: null
-      })
-      const second = result.current.startServerDictation({
-        sourceKind: "default_mic",
-        deviceId: null
-      })
-      await Promise.all([first, second])
+      await Promise.all([
+        result.current.startServerDictation(),
+        result.current.startServerDictation()
+      ])
     })
 
-    // The synchronous re-entry guard must short-circuit the second start.
-    expect(mockGetUserMedia).toHaveBeenCalledTimes(1)
-    expect(result.current.isServerDictating).toBe(true)
+    expect(MockWebSocket.instances).toHaveLength(1)
+    expect(micState.start).not.toHaveBeenCalled()
+  })
+
+  it("stops mic on stop but keeps the websocket alive for final transcript frames", async () => {
+    const onTranscript = vi.fn()
+    const { result } = renderHook(() => buildHook({ onTranscript }))
+
+    await act(async () => {
+      await result.current.startServerDictation()
+    })
+
+    const ws = MockWebSocket.instances[0]
+    await act(async () => {
+      ws.open()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    await waitFor(() => {
+      expect(result.current.isServerDictating).toBe(true)
+    })
+
+    act(() => {
+      result.current.stopServerDictation()
+    })
+
+    expect(sentFrames(ws).at(-1)).toMatchObject({ type: "stop" })
+    expect(micState.stop).toHaveBeenCalled()
+    expect(result.current.isServerDictating).toBe(false)
+    expect(ws.readyState).toBe(MockWebSocket.OPEN)
+    expect(ws.onmessage).not.toBeNull()
+
+    act(() => {
+      ws.message({ type: "full_transcript", text: "late final transcript" })
+      ws.message({ type: "done" })
+    })
+
+    expect(onTranscript).toHaveBeenCalledTimes(1)
+    expect(onTranscript).toHaveBeenCalledWith("late final transcript")
+    expect(ws.readyState).toBe(MockWebSocket.CLOSED)
+  })
+
+  it("closes and isolates a pending websocket before starting a new dictation session", async () => {
+    const onTranscript = vi.fn()
+    const { result } = renderHook(() => buildHook({ onTranscript }))
+
+    await act(async () => {
+      await result.current.startServerDictation()
+    })
+
+    const staleWs = MockWebSocket.instances[0]
+    await act(async () => {
+      staleWs.open()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    act(() => {
+      result.current.stopServerDictation()
+    })
+
+    await act(async () => {
+      await result.current.startServerDictation()
+    })
+
+    const currentWs = MockWebSocket.instances[1]
+    await act(async () => {
+      staleWs.message({ type: "full_transcript", text: "stale transcript" })
+      currentWs.open()
+      await Promise.resolve()
+      currentWs.message({ type: "full_transcript", text: "fresh transcript" })
+    })
+
+    expect(staleWs.readyState).toBe(MockWebSocket.CLOSED)
+    expect(onTranscript).toHaveBeenCalledTimes(1)
+    expect(onTranscript).toHaveBeenCalledWith("fresh transcript")
   })
 })
