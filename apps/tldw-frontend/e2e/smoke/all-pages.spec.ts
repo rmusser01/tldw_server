@@ -652,11 +652,11 @@ test.describe('Smoke Tests - Wayfinding', () => {
     );
 
     await expect(page.getByTestId('settings-navigation')).toBeVisible();
-    await expect(page.getByTestId('settings-current-section')).toBeVisible();
 
     const activeSettingsLink = page.locator(
       '[data-testid^="settings-nav-link-"][aria-current="page"]'
     );
+    await expect(activeSettingsLink).toHaveCount(1);
     await expect(activeSettingsLink.first()).toBeVisible();
 
     const issues = getCriticalIssues(diagnostics);
@@ -667,6 +667,44 @@ test.describe('Smoke Tests - Wayfinding', () => {
       'Uncaught page errors while validating settings wayfinding'
     ).toHaveLength(0);
     assertWarningHardGate('/settings/tldw', classifiedIssues);
+  });
+
+  test('settings alias and mobile section selector keep route context clear', async ({
+    page,
+  }) => {
+    test.setTimeout(ROUTE_TEST_TIMEOUT);
+    await page.goto('/settings/image-gen', {
+      waitUntil: 'domcontentloaded',
+      timeout: LOAD_TIMEOUT,
+    });
+    await waitForAppShell(page, NETWORK_IDLE_TIMEOUT);
+    await page.waitForURL((url) => url.pathname === '/settings/image-generation', {
+      timeout: LOAD_TIMEOUT,
+    });
+
+    await expect(
+      page.getByTestId('settings-nav-link--settings-image-generation')
+    ).toHaveAttribute('aria-current', 'page');
+    await expect(
+      page.locator('[data-testid^="settings-nav-link-"][aria-current="page"]')
+    ).toHaveCount(1);
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('/settings', {
+      waitUntil: 'domcontentloaded',
+      timeout: LOAD_TIMEOUT,
+    });
+    await waitForAppShell(page, NETWORK_IDLE_TIMEOUT);
+
+    await expect(
+      page.getByRole('heading', { level: 1, name: /setup & recovery/i })
+    ).toBeVisible({ timeout: LOAD_TIMEOUT });
+    await expect(page.getByTestId('settings-nav-select')).toBeVisible({
+      timeout: LOAD_TIMEOUT,
+    });
+    await expect(
+      page.getByTestId('settings-nav-link--settings-preferences')
+    ).toBeHidden();
   });
 
   test('legacy alias redirects to canonical destination with params preserved', async ({

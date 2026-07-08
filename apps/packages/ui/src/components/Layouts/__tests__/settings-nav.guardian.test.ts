@@ -1,4 +1,4 @@
-import fs from "node:fs"
+import { readdir, readFile } from "node:fs/promises"
 import path from "node:path"
 import { describe, expect, it, vi } from "vitest"
 
@@ -116,33 +116,43 @@ describe("settings nav guardian gating", () => {
     expect(missingTokens).toEqual([])
   })
 
-  it("keeps settings navigation locale keys present across locale directories", () => {
-    const localeRoot = path.resolve(process.cwd(), "src/assets/locale")
+  it("keeps settings navigation locale keys present across locale directories", async () => {
+    const localeRoot = path.resolve(
+      __dirname,
+      "../../../assets/locale"
+    )
     const requiredSettingsKeys = [
-      "navigation.connect",
-      "navigation.aiModels",
-      "navigation.experience",
-      "navigation.knowledgeWorkspace",
-      "navigation.safetyAdmin",
-      "navigation.dataManagement",
-      "navigation.about",
+      "navigation.setupRecovery",
+      "navigation.preferencesWorkflow",
+      "navigation.dataAdmin",
       "providerKeys.navTitle",
-      "dataManagement.navTitle"
+      "dataManagement.navTitle",
+      "quickIngestSettings.ocrDefaults.title",
+      "quickIngestSettings.ocrDefaults.description",
+      "sidepanelSettings.shortcuts.title",
+      "sidepanelSettings.shortcuts.description",
+      "sidepanelSettings.shortcuts.setupRecovery.label",
+      "sidepanelSettings.shortcuts.setupRecovery.description",
+      "sidepanelSettings.shortcuts.preferences.label",
+      "sidepanelSettings.shortcuts.preferences.description",
+      "sidepanelSettings.shortcuts.ui.label",
+      "sidepanelSettings.shortcuts.ui.description",
+      "sidepanelSettings.shortcuts.dataAdmin.label",
+      "sidepanelSettings.shortcuts.dataAdmin.description",
+      "sidepanelSettings.shortcuts.serverAuth.label",
+      "sidepanelSettings.shortcuts.serverAuth.description",
+      "sidepanelSettings.shortcuts.health.label",
+      "sidepanelSettings.shortcuts.health.description",
+      "sidepanelSettings.local.title"
     ]
 
-    const locales = fs
-      .readdirSync(localeRoot, { withFileTypes: true })
+    const locales = (await readdir(localeRoot, { withFileTypes: true }))
       .filter((entry) => entry.isDirectory())
       .map((entry) => entry.name)
 
     for (const locale of locales) {
       const settingsPath = path.join(localeRoot, locale, "settings.json")
-      expect(
-        fs.existsSync(settingsPath),
-        `Missing settings locale file: ${settingsPath}`
-      ).toBe(true)
-
-      const parsed = JSON.parse(fs.readFileSync(settingsPath, "utf8")) as unknown
+      const parsed = JSON.parse(await readFile(settingsPath, "utf8")) as unknown
       for (const keyPath of requiredSettingsKeys) {
         const value = getPathValue(parsed, keyPath)
         expect(
@@ -161,26 +171,30 @@ describe("settings nav guardian gating", () => {
     )
 
     expect(groups.map((group) => group.key)).toEqual([
-      "connect",
-      "aiModels",
-      "experience",
-      "knowledgeWorkspace",
-      "safetyAdmin",
-      "dataManagement",
-      "about"
+      "setupRecovery",
+      "preferencesWorkflow",
+      "dataAdmin"
     ])
-    expect(pathsByGroup.connect).toEqual(
+    expect(pathsByGroup.setupRecovery).toEqual(
       expect.arrayContaining([
+        "/settings",
         "/settings/tldw",
         "/settings/provider-keys",
+        "/settings/model",
         "/settings/health"
       ])
     )
-    expect(pathsByGroup.aiModels).toContain("/settings/model")
-    expect(pathsByGroup.experience).toEqual(
-      expect.arrayContaining(["/settings", "/settings/chat"])
+    expect(pathsByGroup.preferencesWorkflow).toEqual(
+      expect.arrayContaining([
+        "/settings/preferences",
+        "/settings/chat",
+        "/settings/ui",
+        "/settings/rag"
+      ])
     )
-    expect(pathsByGroup.dataManagement).toEqual(["/settings/data"])
+    expect(pathsByGroup.dataAdmin).toEqual(
+      expect.arrayContaining(["/settings/data", "/settings/about"])
+    )
   })
 
   it("keeps only settings-prefixed routes in settings navigation", () => {

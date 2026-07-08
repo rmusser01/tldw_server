@@ -178,12 +178,22 @@ export const PAGE_MAPPINGS: PageMapping[] = [
   // Session 2: Core Settings
   // ═══════════════════════════════════════════════════════════════════════════
   {
-    name: "General Settings",
+    name: "Setup & Recovery Settings",
     category: "settings",
     webuiPath: "/settings",
     extensionOptionsPath: "/settings",
     extensionSidepanelPath: null,
-    sharedComponent: "GeneralSettings",
+    sharedComponent: "SetupRecoverySettings",
+    session: 2,
+    checklistItems: CHECKLIST_TEMPLATES.settings
+  },
+  {
+    name: "Preferences Settings",
+    category: "settings",
+    webuiPath: "/settings/preferences",
+    extensionOptionsPath: "/settings/preferences",
+    extensionSidepanelPath: null,
+    sharedComponent: "PreferencesSettings",
     session: 2,
     checklistItems: CHECKLIST_TEMPLATES.settings
   },
@@ -681,6 +691,16 @@ export const PAGE_MAPPINGS: PageMapping[] = [
       "Links work",
       "About content renders"
     ]
+  },
+  {
+    name: "Data Management Settings",
+    category: "settings",
+    webuiPath: "/settings/data",
+    extensionOptionsPath: "/settings/data",
+    extensionSidepanelPath: null,
+    sharedComponent: "DataManagementSettings",
+    session: 6,
+    checklistItems: CHECKLIST_TEMPLATES.settings
   },
   {
     name: "Moderation Review",

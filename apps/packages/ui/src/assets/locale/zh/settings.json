@@ -1,5 +1,8 @@
 {
   "navigation": {
+    "setupRecovery": "设置与恢复",
+    "preferencesWorkflow": "偏好与工作流",
+    "dataAdmin": "数据与管理",
     "serverAndAuth": "服务器与认证",
     "knowledgeTools": "知识工具",
     "workspace": "工作区",
@@ -12,6 +15,13 @@
     "dataManagement": "数据管理"
   },
   "healthNav": "健康",
+  "preferencesSettings": {
+    "navTitle": "偏好",
+    "title": "常规偏好"
+  },
+  "setupRecovery": {
+    "title": "设置与恢复"
+  },
   "worldBooksNav": "世界书籍",
   "chatDictionariesNav": "聊天词典",
   "charactersNav": "角色",
@@ -1666,7 +1676,11 @@
   },
   "quickIngestSettings": {
     "title": "快速导入",
-    "subtitle": "配置快速导入的默认值、预设和行为。"
+    "subtitle": "配置快速导入的默认值、预设和行为。",
+    "ocrDefaults": {
+      "title": "OCR 默认设置",
+      "description": "供从图片或扫描文档提取文本的导入流程使用。"
+    }
   },
   "acpPlaygroundNav": "ACP 实验场",
   "skillsNav": "技能",
@@ -1675,5 +1689,38 @@
   },
   "dataManagement": {
     "navTitle": "数据管理"
+  },
+  "sidepanelSettings": {
+    "shortcuts": {
+      "title": "设置快捷方式",
+      "description": "跳转到负责此更改的完整设置页面。",
+      "setupRecovery": {
+        "label": "设置与恢复",
+        "description": "连接、认证、提供商密钥、模型和诊断。"
+      },
+      "preferences": {
+        "label": "偏好",
+        "description": "语言、通知、角色、教程和网页搜索。"
+      },
+      "ui": {
+        "label": "界面自定义",
+        "description": "主题、快捷方式、显示默认值和视觉行为。"
+      },
+      "dataAdmin": {
+        "label": "数据与管理",
+        "description": "数据管理、审核、评估和管理工具。"
+      },
+      "serverAuth": {
+        "label": "服务器与认证",
+        "description": "更改服务器 URL 或 API 密钥。"
+      },
+      "health": {
+        "label": "完整诊断",
+        "description": "打开详细的服务器和子系统检查。"
+      }
+    },
+    "local": {
+      "title": "侧边栏行为"
+    }
   }
 }

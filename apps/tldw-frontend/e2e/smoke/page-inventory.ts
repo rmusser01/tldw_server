@@ -124,7 +124,8 @@ const EXTRA_PAGES: PageEntry[] = [
   // ═══════════════════════════════════════════════════════════════════════════
   // Settings (20+ pages)
   // ═══════════════════════════════════════════════════════════════════════════
-  { path: "/settings", name: "Settings", category: "settings" },
+  { path: "/settings", name: "Setup & Recovery Settings", category: "settings" },
+  { path: "/settings/preferences", name: "Preferences Settings", category: "settings" },
   { path: "/settings/tldw", name: "TLDW Settings", category: "settings" },
   { path: "/settings/model", name: "Model Settings", category: "settings" },
   { path: "/settings/chat", name: "Chat Settings", category: "settings" },
@@ -141,6 +142,7 @@ const EXTRA_PAGES: PageEntry[] = [
   { path: "/settings/chat-dictionaries", name: "Dictionaries Settings", category: "settings" },
   { path: "/settings/health", name: "Health Settings", category: "settings" },
   { path: "/settings/processed", name: "Processed Settings", category: "settings" },
+  { path: "/settings/data", name: "Data Management Settings", category: "settings" },
   { path: "/settings/about", name: "About", category: "settings" },
   { path: "/settings/share", name: "Share Settings", category: "settings" },
   { path: "/settings/quick-ingest", name: "Quick Ingest Settings", category: "settings" },

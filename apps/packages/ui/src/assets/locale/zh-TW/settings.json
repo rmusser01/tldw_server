@@ -1,5 +1,8 @@
 {
   "navigation": {
+    "setupRecovery": "設定與復原",
+    "preferencesWorkflow": "偏好設定與工作流程",
+    "dataAdmin": "資料與管理",
     "serverAndAuth": "伺服器與驗證",
     "knowledgeTools": "知識工具",
     "workspace": "工作區",
@@ -12,6 +15,13 @@
     "dataManagement": "資料管理"
   },
   "healthNav": "健康",
+  "preferencesSettings": {
+    "navTitle": "偏好設定",
+    "title": "一般偏好設定"
+  },
+  "setupRecovery": {
+    "title": "設定與復原"
+  },
   "worldBooksNav": "世界書",
   "chatDictionariesNav": "聊天字典",
   "charactersNav": "角色",
@@ -1677,7 +1687,11 @@
   },
   "quickIngestSettings": {
     "title": "快速匯入",
-    "subtitle": "設定快速匯入的預設值、預設集與行為。"
+    "subtitle": "設定快速匯入的預設值、預設集與行為。",
+    "ocrDefaults": {
+      "title": "OCR 預設值",
+      "description": "供從圖片或掃描文件擷取文字的匯入流程使用。"
+    }
   },
   "acpPlaygroundNav": "ACP 實驗場",
   "skillsNav": "技能",
@@ -1686,5 +1700,38 @@
   },
   "dataManagement": {
     "navTitle": "資料管理"
+  },
+  "sidepanelSettings": {
+    "shortcuts": {
+      "title": "設定捷徑",
+      "description": "前往負責此變更的完整設定頁面。",
+      "setupRecovery": {
+        "label": "設定與復原",
+        "description": "連線、驗證、供應商金鑰、模型與診斷。"
+      },
+      "preferences": {
+        "label": "偏好設定",
+        "description": "語言、通知、角色、教學與網頁搜尋。"
+      },
+      "ui": {
+        "label": "介面自訂",
+        "description": "主題、捷徑、顯示預設值與視覺行為。"
+      },
+      "dataAdmin": {
+        "label": "資料與管理",
+        "description": "資料管理、審核、評估與管理工具。"
+      },
+      "serverAuth": {
+        "label": "伺服器與驗證",
+        "description": "變更伺服器 URL 或 API 金鑰。"
+      },
+      "health": {
+        "label": "完整診斷",
+        "description": "開啟詳細的伺服器與子系統檢查。"
+      }
+    },
+    "local": {
+      "title": "側邊面板行為"
+    }
   }
 }

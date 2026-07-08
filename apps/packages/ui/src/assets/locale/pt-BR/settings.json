@@ -1,5 +1,8 @@
 {
   "navigation": {
+    "setupRecovery": "Configuração e recuperação",
+    "preferencesWorkflow": "Preferências e fluxo de trabalho",
+    "dataAdmin": "Dados e administração",
     "serverAndAuth": "Servidor e Autenticação",
     "knowledgeTools": "Ferramentas de conhecimento",
     "workspace": "Área de trabalho",
@@ -12,6 +15,13 @@
     "dataManagement": "Gerenciamento de dados"
   },
   "healthNav": "Saúde",
+  "preferencesSettings": {
+    "navTitle": "Preferências",
+    "title": "Preferências gerais"
+  },
+  "setupRecovery": {
+    "title": "Configuração e recuperação"
+  },
   "worldBooksNav": "Livros do mundo",
   "chatDictionariesNav": "Dicionários de chat",
   "charactersNav": "Personagens",
@@ -1675,7 +1685,11 @@
   },
   "quickIngestSettings": {
     "title": "Ingestão rápida",
-    "subtitle": "Configure padrões, predefinições e comportamento da Ingestão rápida."
+    "subtitle": "Configure padrões, predefinições e comportamento da Ingestão rápida.",
+    "ocrDefaults": {
+      "title": "Padrões de OCR",
+      "description": "Usado por fluxos de ingestão que extraem texto de imagens ou documentos digitalizados."
+    }
   },
   "acpPlaygroundNav": "Laboratório ACP",
   "skillsNav": "Habilidades",
@@ -1684,5 +1698,38 @@
   },
   "dataManagement": {
     "navTitle": "Gerenciamento de dados"
+  },
+  "sidepanelSettings": {
+    "shortcuts": {
+      "title": "Atalhos de configurações",
+      "description": "Ir para a página completa de configurações responsável pela alteração.",
+      "setupRecovery": {
+        "label": "Configuração e recuperação",
+        "description": "Conexão, autenticação, chaves de provedores, modelos e diagnósticos."
+      },
+      "preferences": {
+        "label": "Preferências",
+        "description": "Idioma, notificações, persona, tutoriais e pesquisa web."
+      },
+      "ui": {
+        "label": "Personalização da interface",
+        "description": "Tema, atalhos, padrões de exibição e comportamento visual."
+      },
+      "dataAdmin": {
+        "label": "Dados e administração",
+        "description": "Gerenciamento de dados, moderação, avaliações e ferramentas administrativas."
+      },
+      "serverAuth": {
+        "label": "Servidor e autenticação",
+        "description": "Alterar a URL do servidor ou a chave de API."
+      },
+      "health": {
+        "label": "Diagnósticos completos",
+        "description": "Abrir verificações detalhadas do servidor e subsistemas."
+      }
+    },
+    "local": {
+      "title": "Comportamento do painel lateral"
+    }
   }
 }

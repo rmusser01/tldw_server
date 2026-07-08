@@ -1,5 +1,8 @@
 {
   "navigation": {
+    "setupRecovery": "Oppsett og gjenoppretting",
+    "preferencesWorkflow": "Innstillinger og arbeidsflyt",
+    "dataAdmin": "Data og administrasjon",
     "serverAndAuth": "Server og Auth",
     "knowledgeTools": "Kunnskapsverktøy",
     "workspace": "Arbeidsområde",
@@ -12,6 +15,13 @@
     "dataManagement": "Dataadministrasjon"
   },
   "healthNav": "Helse",
+  "preferencesSettings": {
+    "navTitle": "Innstillinger",
+    "title": "Generelle innstillinger"
+  },
+  "setupRecovery": {
+    "title": "Oppsett og gjenoppretting"
+  },
   "worldBooksNav": "Verdensbøker",
   "chatDictionariesNav": "Chatordbøker",
   "charactersNav": "Tegn",
@@ -1663,7 +1673,11 @@
   },
   "quickIngestSettings": {
     "title": "Hurtig import",
-    "subtitle": "Konfigurer standardverdier, forhåndsinnstillinger og oppførsel for hurtig import."
+    "subtitle": "Konfigurer standardverdier, forhåndsinnstillinger og oppførsel for hurtig import.",
+    "ocrDefaults": {
+      "title": "OCR-standarder",
+      "description": "Brukes av importflyter som trekker ut tekst fra bilder eller skannede dokumenter."
+    }
   },
   "acpPlaygroundNav": "ACP-lekeplass",
   "skillsNav": "Ferdigheter",
@@ -1672,5 +1686,38 @@
   },
   "dataManagement": {
     "navTitle": "Dataadministrasjon"
+  },
+  "sidepanelSettings": {
+    "shortcuts": {
+      "title": "Innstillingssnarveier",
+      "description": "Gå til den fulle innstillingssiden som eier endringen.",
+      "setupRecovery": {
+        "label": "Oppsett og gjenoppretting",
+        "description": "Tilkobling, autentisering, leverandørnøkler, modeller og diagnostikk."
+      },
+      "preferences": {
+        "label": "Innstillinger",
+        "description": "Språk, varsler, persona, veiledninger og nettsøk."
+      },
+      "ui": {
+        "label": "UI-tilpasning",
+        "description": "Tema, snarveier, visningsstandarder og visuell oppførsel."
+      },
+      "dataAdmin": {
+        "label": "Data og administrasjon",
+        "description": "Datahåndtering, moderering, evalueringer og adminverktøy."
+      },
+      "serverAuth": {
+        "label": "Server og autentisering",
+        "description": "Endre server-URL eller API-nøkkel."
+      },
+      "health": {
+        "label": "Full diagnostikk",
+        "description": "Åpne detaljerte server- og undersystemkontroller."
+      }
+    },
+    "local": {
+      "title": "Sidepaneloppførsel"
+    }
   }
 }

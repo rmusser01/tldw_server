@@ -37,25 +37,35 @@ export const SearchModeSettings = () => {
     }
   })
 
-  if (status === "pending" || status === "error") {
-    return <Skeleton active />
-  }
+  const sectionHeader = (
+    <div className="mb-5">
+      <div className="flex items-center gap-2">
+        <h2 className="text-base font-semibold leading-7 text-text">
+          {t("generalSettings.webSearch.heading")}
+        </h2>
+        {form.isDirty() && (
+          <span className="text-xs px-2 py-0.5 rounded bg-warn/10 text-warn">
+            {t("generalSettings.webSearch.unsavedChanges", "Unsaved changes")}
+          </span>
+        )}
+      </div>
+      <div className="border-b border-border mt-3"></div>
+    </div>
+  )
 
   return (
     <div>
-      <div className="mb-5">
-        <div className="flex items-center gap-2">
-          <h2 className="text-base font-semibold leading-7 text-text">
-            {t("generalSettings.webSearch.heading")}
-          </h2>
-          {form.isDirty() && (
-            <span className="text-xs px-2 py-0.5 rounded bg-warn/10 text-warn">
-              {t("generalSettings.webSearch.unsavedChanges", "Unsaved changes")}
-            </span>
+      {sectionHeader}
+      {status === "pending" && <Skeleton active />}
+      {status === "error" && (
+        <p className="rounded-md border border-border bg-surface p-3 text-sm text-text-muted">
+          {t(
+            "generalSettings.webSearch.unavailable",
+            "Web search settings are unavailable until the server is reachable."
           )}
-        </div>
-        <div className="border-b border-border mt-3"></div>
-      </div>
+        </p>
+      )}
+      {status === "success" && (
       <form
         onSubmit={form.onSubmit(async (values) => {
           await setSearchSettings(values)
@@ -262,6 +272,7 @@ export const SearchModeSettings = () => {
           <SaveButton btnType="submit" />
         </div>
       </form>
+      )}
     </div>
   )
 }
