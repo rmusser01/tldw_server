@@ -73,6 +73,8 @@ export interface UseComposerVoiceChatOptions {
    * while listening.
    */
   onTranscript: (text: string) => void
+  /** Receives streaming server-dictation partials without committing text. */
+  onPartialTranscript?: (text: string) => void
   /**
    * Optional auto-submit on browser-dictation `onEnd`. When provided and
    * `autoStopTimeout` is set, the browser engine stops itself and this fires.
@@ -144,6 +146,7 @@ export function useComposerVoiceChat(
     dictationModeOverride,
     dictationAutoFallbackEnabled,
     onTranscript,
+    onPartialTranscript,
     onAutoSubmit,
     autoStopTimeout,
     autoSubmitVoiceMessage = false
@@ -153,6 +156,8 @@ export function useComposerVoiceChat(
   // recognizer just because the parent re-rendered with a new closure.
   const onTranscriptRef = React.useRef(onTranscript)
   onTranscriptRef.current = onTranscript
+  const onPartialTranscriptRef = React.useRef(onPartialTranscript)
+  onPartialTranscriptRef.current = onPartialTranscript
   const onAutoSubmitRef = React.useRef(onAutoSubmit)
   onAutoSubmitRef.current = onAutoSubmit
 
@@ -342,6 +347,7 @@ export function useComposerVoiceChat(
     canUseServerStt,
     speechToTextLanguage,
     sttSettings,
+    onPartialTranscript: (text) => onPartialTranscriptRef.current?.(text),
     onTranscript: (text) => onTranscriptRef.current(text),
     onError: handleServerDictationError,
     onSuccess: handleServerDictationSuccess
