@@ -30,16 +30,25 @@ vi.mock("next/router", () => ({
 
 const NavigateButton = ({
   to,
-  replace = false
+  replace = false,
+  flushSync = false
 }: {
   to: string | number
   replace?: boolean
+  flushSync?: boolean
 }) => {
   const navigate = useNavigate()
   return (
     <button
       type="button"
-      onClick={() => navigate(to, replace ? { replace: true } : undefined)}
+      onClick={() =>
+        navigate(
+          to,
+          replace || flushSync
+            ? { replace: replace || undefined, flushSync: flushSync || undefined }
+            : undefined
+        )
+      }
     >
       navigate
     </button>
@@ -74,6 +83,8 @@ describe("react-router-dom Next.js shim transitions", () => {
     mockPush.mockReset()
     mockReplace.mockReset()
     mockBack.mockReset()
+    mockPush.mockResolvedValue(true)
+    mockReplace.mockResolvedValue(true)
     mockRouter.asPath = "/current?tab=one"
     mockRouter.pathname = "/current"
     mockRouter.query = {}
@@ -91,6 +102,16 @@ describe("react-router-dom Next.js shim transitions", () => {
     await user.click(screen.getByRole("button", { name: "navigate" }))
 
     expect(startTransitionSpy).toHaveBeenCalled()
+    expect(mockPush).toHaveBeenCalledWith("/destination")
+  })
+
+  it("runs flushSync useNavigate pushes without startTransition", async () => {
+    const user = userEvent.setup()
+    render(<NavigateButton to="/destination" flushSync />)
+
+    await user.click(screen.getByRole("button", { name: "navigate" }))
+
+    expect(startTransitionSpy).not.toHaveBeenCalled()
     expect(mockPush).toHaveBeenCalledWith("/destination")
   })
 
