@@ -4,7 +4,7 @@ title: Fix PR 2679 chat cockpit UX smoke failure
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-07-08 17:41'
+updated_date: '2026-07-08 19:43'
 labels: []
 dependencies: []
 modified_files:
@@ -41,6 +41,8 @@ Current-head PR #2679 failures investigated: UX Smoke Gate still saw the desktop
 Fresh current-head UX Smoke Gate failure after push ecc0818e65b3c6ed0a2bf9ab00c14ce7fa97407f: run 28882830983, job 85675276972. The focused real-server cockpit spec caught restore-control clicks retrying against detached button nodes while tooltip aria-describedby IDs changed across retries; the mobile retry also hit a transient non-measurable mobile rails target before the artifact snapshot showed the rails visible. Follow-up fix stabilizes cockpit shell sibling keys, assigns deterministic tooltip IDs to the desktop restore buttons, and removes the button-level hidden attribute so only the wrapper controls visibility. Fresh verification before staging: bunx vitest run Playground.cockpit-rail-restore/shell/maturity passed 3 files / 54 tests; apps/tldw-frontend bun run typecheck passed; git diff --check passed. Bandit is not applicable for this follow-up because only frontend TS/TSX files changed.
 
 Current-head run 28961605832/job 85934269000 failed UX Smoke Gate after head c5f1c66829c42b79d7dd8a0d7e3e17d8a95fa710. Log shows desktop restore now reaches the DOM click path but still times out waiting for the left rail to become visible, consistent with selecting/clicking a non-visible remounted restore node before state commit. Mobile failures show the rails wrapper is present while tab/panel children are not yet committed, plus stale tab locators captured before reacquiring the current rails root. Follow-up fix remains spec-only: choose visible restore controls, wait for committed mobile tab+tabpanel pairs, and reacquire tabs after remount-triggering transitions. Local verification so far: apps/tldw-frontend bun run typecheck passed; focused Playwright --list passed with expected Node DEP0205 warning; git diff --check passed. Bandit is not applicable because only TypeScript test code and Backlog metadata changed.
+
+Current-head run 28963435481/job 85940472084 failed UX Smoke Gate after head ac5021d53e768a38a44cd2c92449b165c1159569. Desktop retry artifacts show cockpit rails hidden with visible restore controls, but restoreDesktopCockpitRail used document.querySelector plus native click and kept reading hidden or missing control, consistent with a mismatched shell/control or uncommitted React update. Mobile retry artifacts show the context tabpanel rendered in the current mobile rails while assertNoVerticalOverlap repeatedly measured a stale/non-measurable panel locator rooted under a remounted rails container. Follow-up fix is spec-only: reacquire and click the currently visible restore control with a rail-attribute wait, and measure a freshly reacquired visible mobile tabpanel for the overlap check. Verification before staging: apps/tldw-frontend bun run typecheck passed; bunx playwright test e2e/workflows/chat-cockpit.real-server.spec.ts --project=chromium --grep "uses the running server and keeps cockpit/focus controls working|keeps mobile cockpit tabs" --list passed with the expected Node DEP0205 warning; git diff --check passed. Bandit is not applicable because this follow-up only changes TypeScript test code and Backlog task metadata.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

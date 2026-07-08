@@ -81,44 +81,39 @@ const mobileCockpitPanelConfig = {
 } as const;
 
 const restoreDesktopCockpitRail = async (page: Page, rail: DesktopCockpitRail) => {
-  const shell = page.getByTestId('playground-cockpit-shell');
   const config = desktopCockpitRailConfig[rail];
-  const railLocator = page.getByTestId(config.railId);
-  const shellSelector = '[data-testid="playground-cockpit-shell"]';
-  const restoreSelector = `[data-testid="${config.restoreId}"]`;
+  const shell = page
+    .locator('[data-testid="playground-cockpit-shell"][data-mode="cockpit"]')
+    .first();
+  const railLocator = page.locator(`[data-testid="${config.railId}"]:visible`).first();
   await expect(shell).toHaveAttribute('data-mode', 'cockpit', { timeout: 10_000 });
   if ((await shell.getAttribute(config.attr)) === 'visible') {
     await expect(railLocator).toBeVisible({ timeout: 10_000 });
     return;
   }
 
-  await expect(page.getByTestId(config.restoreId)).toBeVisible({ timeout: 10_000 });
   await expect
     .poll(
-      async () =>
-        page.evaluate(
-          ({ attr, restoreSelector, shellSelector }) => {
-            const shell = document.querySelector(shellSelector);
-            if (shell?.getAttribute(attr) === 'visible') return 'visible';
-            const restoreControl = Array.from(
-              document.querySelectorAll<HTMLElement>(restoreSelector)
-            ).find((control) => {
-              const box = control.getBoundingClientRect();
-              const style = window.getComputedStyle(control);
-              return (
-                box.width > 0 &&
-                box.height > 0 &&
-                style.display !== 'none' &&
-                style.visibility !== 'hidden' &&
-                !control.closest('[hidden],[aria-hidden="true"]')
-              );
-            });
-            if (!restoreControl) return 'missing visible restore control';
-            restoreControl.click();
-            return shell?.getAttribute(attr) ?? 'missing shell';
-          },
-          { attr: config.attr, restoreSelector, shellSelector }
-        ),
+      async () => {
+        if ((await shell.getAttribute(config.attr).catch(() => null)) === 'visible') {
+          return 'visible';
+        }
+        const restoreControl = page.locator(`[data-testid="${config.restoreId}"]:visible`).first();
+        if (!(await restoreControl.isVisible().catch(() => false))) {
+          return 'missing visible restore control';
+        }
+        const clickError = await restoreControl
+          .click({ force: true, timeout: 2_000 })
+          .then(() => null)
+          .catch((error) => (error instanceof Error ? error.message : String(error)));
+        if (clickError) {
+          return `click failed: ${clickError}`;
+        }
+        await page.evaluate(
+          () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+        );
+        return (await shell.getAttribute(config.attr).catch(() => null)) ?? 'missing shell';
+      },
       { message: `restore ${rail} cockpit rail`, timeout: 10_000 }
     )
     .toBe('visible');
@@ -2100,7 +2095,9 @@ test.describe('/chat cockpit real-server parity', () => {
     const initialRuntimeTab = mobileRails.getByRole('tab', { name: 'Runtime' });
     await panelControlledByTab(initialContextTab, mobileRails);
     const initialRuntimePanel = await panelControlledByTab(initialRuntimeTab, mobileRails);
-    const initialContextPanel = mobileRails.getByRole('tabpanel', { name: 'Context' });
+    const initialContextPanel = page
+      .locator(`#${mobileCockpitPanelConfig.context.panelId}:visible`)
+      .first();
     await expect(initialContextTab).toHaveAttribute('aria-selected', 'true');
     await expect(initialRuntimeTab).toHaveAttribute('aria-selected', 'false');
     await expect(initialContextPanel).toBeVisible();
