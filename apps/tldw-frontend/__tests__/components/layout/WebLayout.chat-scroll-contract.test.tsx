@@ -311,7 +311,12 @@ vi.mock('@/components/Common/BackendRecoveryUiContext', () => ({
 vi.mock('@web/components/layout/BackendUnavailableModalGate', () => ({
   BackendUnavailableModalGate: (props: Record<string, unknown>) => {
     backendUnavailableGateState.props.push(props);
-    return props.backendUnavailableDetail ? <div data-testid="backend-unavailable-modal" /> : null;
+    return props.backendUnavailableDetail ? (
+      <div
+        data-presentation={String(props.presentation)}
+        data-testid="backend-unavailable-modal"
+      />
+    ) : null;
   },
 }));
 
@@ -401,7 +406,10 @@ describe('WebLayout /chat scroll contract', () => {
     });
 
     expect(connectionState.value.checkOnce).toHaveBeenCalledWith({ force: true });
-    expect(screen.getByTestId('backend-unavailable-modal')).toBeInTheDocument();
+    expect(screen.getByTestId('backend-unavailable-modal')).toHaveAttribute(
+      'data-presentation',
+      'modal'
+    );
 
     connectionState.value.isChecking = true;
     rerender(
@@ -421,6 +429,73 @@ describe('WebLayout /chat scroll contract', () => {
     await waitFor(() => {
       expect(screen.queryByTestId('backend-unavailable-modal')).toBeNull();
     });
+  });
+
+  it('uses the non-blocking backend-unreachable presentation on settings routes', async () => {
+    routerState.location.pathname = '/settings/ui';
+
+    render(
+      <OptionLayout>
+        <div data-testid="route-content">Settings UI route</div>
+      </OptionLayout>
+    );
+
+    await act(async () => undefined);
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent('tldw:backend-unreachable', {
+          detail: {
+            method: 'GET',
+            path: '/api/v1/llm/models/metadata',
+            message: 'Failed to fetch',
+            source: 'direct',
+            timestamp: Date.now(),
+          },
+        })
+      );
+    });
+
+    expect(screen.getByTestId('backend-unavailable-modal')).toHaveAttribute(
+      'data-presentation',
+      'inline'
+    );
+    const latestGateProps =
+      backendUnavailableGateState.props[backendUnavailableGateState.props.length - 1];
+    expect(latestGateProps).toEqual(
+      expect.objectContaining({ presentation: 'inline' })
+    );
+  });
+
+  it('does not treat settings-prefixed non-settings routes as settings routes', async () => {
+    routerState.location.pathname = '/settings-wizard';
+
+    render(
+      <OptionLayout>
+        <div data-testid="route-content">Settings wizard route</div>
+      </OptionLayout>
+    );
+
+    await act(async () => undefined);
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent('tldw:backend-unreachable', {
+          detail: {
+            method: 'GET',
+            path: '/api/v1/llm/models/metadata',
+            message: 'Failed to fetch',
+            source: 'direct',
+            timestamp: Date.now(),
+          },
+        })
+      );
+    });
+
+    expect(screen.getByTestId('backend-unavailable-modal')).toHaveAttribute(
+      'data-presentation',
+      'modal'
+    );
   });
 
   it('marks the /chat route shell as transcript-owned when sticky chat input is active', () => {

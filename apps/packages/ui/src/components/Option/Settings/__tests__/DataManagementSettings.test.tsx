@@ -93,6 +93,9 @@ describe("DataManagementSettings", () => {
     expect(screen.getByRole("button", { name: /export data/i })).toBeInTheDocument()
     expect(screen.getByText(/import data/i)).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /reset all/i })).toBeInTheDocument()
+    expect(screen.getByText(/exports a json backup/i)).toBeInTheDocument()
+    expect(screen.getByText(/import adds or updates local webui and extension data/i)).toBeInTheDocument()
+    expect(screen.getByText(/permanently deletes local chat history/i)).toBeInTheDocument()
   })
 
   it("opens the hidden import file input from a keyboard-focusable button", () => {

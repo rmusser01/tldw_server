@@ -46,6 +46,33 @@ describe("settings route split", () => {
     expect(dataPageSource).toContain("SettingsRoute")
   })
 
+  it("sets document titles on the hosted settings pages", async () => {
+    const pageTitles = [
+      [
+        "../../../../../tldw-frontend/pages/settings/index.tsx",
+        "Setup &amp; Recovery | Settings | tldw"
+      ],
+      [
+        "../../../../../tldw-frontend/pages/settings/preferences.tsx",
+        "Preferences | Settings | tldw"
+      ],
+      [
+        "../../../../../tldw-frontend/pages/settings/ui.tsx",
+        "UI Customization | Settings | tldw"
+      ],
+      [
+        "../../../../../tldw-frontend/pages/settings/data.tsx",
+        "Data Management | Settings | tldw"
+      ]
+    ]
+
+    for (const [pagePath, title] of pageTitles) {
+      const source = await readFile(resolve(__dirname, pagePath), "utf8")
+      expect(source).toContain("next/head")
+      expect(source).toContain(`<title>${title}</title>`)
+    }
+  })
+
   it("lists setup, preferences, and data settings in hosted smoke inventories", async () => {
     const pageMapping = await readFile(
       resolve(__dirname, "../../../../../tldw-frontend/e2e/page-mapping.ts"),

@@ -38,9 +38,66 @@ const orderHeaderShortcutSelection = (selection: HeaderShortcutId[]) => {
   )
 }
 
+type SettingsDisclosureProps = {
+  title: string
+  description: string
+  testId: string
+  summaryMeta?: React.ReactNode
+  children: React.ReactNode
+}
+
+const SettingsDisclosure = ({
+  title,
+  description,
+  testId,
+  summaryMeta,
+  children
+}: SettingsDisclosureProps) => {
+  const { t } = useTranslation(["settings", "common"])
+
+  return (
+    <details
+      className="panel-card group p-4"
+      data-testid={testId}
+    >
+      <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+        <span className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <span className="block space-y-1">
+            <span className="block text-sm font-semibold text-text">
+              {title}
+            </span>
+            <span className="block text-xs text-text-muted">
+              {description}
+            </span>
+            {summaryMeta ? (
+              <span className="block text-xs text-text-muted">
+                {summaryMeta}
+              </span>
+            ) : null}
+          </span>
+          <span className="shrink-0 text-xs font-medium text-primary group-open:hidden">
+            {t("uiCustomization.sections.configure", {
+              defaultValue: "Configure"
+            })}
+          </span>
+          <span className="hidden shrink-0 text-xs font-medium text-text-muted group-open:inline">
+            {t("uiCustomization.sections.expanded", {
+              defaultValue: "Expanded"
+            })}
+          </span>
+        </span>
+      </summary>
+      <div className="mt-4 space-y-3 border-t border-border pt-4">
+        {children}
+      </div>
+    </details>
+  )
+}
+
 type SidebarShortcutSelectorProps = {
   title: string
   description: string
+  testId: string
   selection: SidebarShortcutId[]
   defaultSelection: SidebarShortcutId[]
   onChange: (next: SidebarShortcutId[]) => void
@@ -50,6 +107,7 @@ type SidebarShortcutSelectorProps = {
 const SidebarShortcutSelector = ({
   title,
   description,
+  testId,
   selection,
   defaultSelection,
   onChange,
@@ -88,13 +146,21 @@ const SidebarShortcutSelector = ({
     onChange(next)
   }
 
+  const countLabel = t("uiCustomization.shortcuts.countLabel", {
+    defaultValue: "{{count}} / {{max}} selected",
+    count: selectionCount,
+    max: maxCount
+  })
+
   return (
-    <div className="panel-card p-4 space-y-3">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-        <div className="space-y-1">
-          <h3 className="text-sm font-semibold text-text">{title}</h3>
-          <p className="text-xs text-text-muted">{description}</p>
-        </div>
+    <SettingsDisclosure
+      title={title}
+      description={description}
+      testId={testId}
+      summaryMeta={<span>{countLabel}</span>}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-text-muted">
+        <span>{countLabel}</span>
         {isModified && (
           <button
             type="button"
@@ -107,23 +173,14 @@ const SidebarShortcutSelector = ({
           </button>
         )}
       </div>
-      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-text-muted">
-        <span>
-          {t("uiCustomization.shortcuts.countLabel", {
-            defaultValue: "{{count}} / {{max}} selected",
-            count: selectionCount,
+      {selectionCount >= maxCount && (
+        <p className="text-xs text-text-muted">
+          {t("uiCustomization.shortcuts.maxReached", {
+            defaultValue: "You can select up to {{max}} shortcuts.",
             max: maxCount
           })}
-        </span>
-        {selectionCount >= maxCount && (
-          <span>
-            {t("uiCustomization.shortcuts.maxReached", {
-              defaultValue: "You can select up to {{max}} shortcuts.",
-              max: maxCount
-            })}
-          </span>
-        )}
-      </div>
+        </p>
+      )}
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         {SIDEBAR_SHORTCUT_ACTIONS.map((item) => {
           const selected = selectionSet.has(item.id)
@@ -154,13 +211,14 @@ const SidebarShortcutSelector = ({
           )
         })}
       </div>
-    </div>
+    </SettingsDisclosure>
   )
 }
 
 type HeaderShortcutSelectorProps = {
   title: string
   description: string
+  testId: string
   selection: HeaderShortcutId[]
   defaultSelection: HeaderShortcutId[]
   onChange: (next: HeaderShortcutId[]) => void
@@ -169,6 +227,7 @@ type HeaderShortcutSelectorProps = {
 const HeaderShortcutSelector = ({
   title,
   description,
+  testId,
   selection,
   defaultSelection,
   onChange
@@ -198,13 +257,21 @@ const HeaderShortcutSelector = ({
     onChange(next)
   }
 
+  const countLabel = t("uiCustomization.headerShortcuts.countLabel", {
+    defaultValue: "{{count}} of {{total}} selected",
+    count: selectionCount,
+    total: totalCount
+  })
+
   return (
-    <div className="panel-card p-4 space-y-3">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-        <div className="space-y-1">
-          <h3 className="text-sm font-semibold text-text">{title}</h3>
-          <p className="text-xs text-text-muted">{description}</p>
-        </div>
+    <SettingsDisclosure
+      title={title}
+      description={description}
+      testId={testId}
+      summaryMeta={<span>{countLabel}</span>}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-text-muted">
+        <span>{countLabel}</span>
         {isModified && (
           <button
             type="button"
@@ -216,15 +283,6 @@ const HeaderShortcutSelector = ({
             })}
           </button>
         )}
-      </div>
-      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-text-muted">
-        <span>
-          {t("uiCustomization.headerShortcuts.countLabel", {
-            defaultValue: "{{count}} of {{total}} selected",
-            count: selectionCount,
-            total: totalCount
-          })}
-        </span>
       </div>
       <div className="space-y-3">
         {getHeaderShortcutGroups().map((group) => (
@@ -265,7 +323,7 @@ const HeaderShortcutSelector = ({
           </div>
         ))}
       </div>
-    </div>
+    </SettingsDisclosure>
   )
 }
 
@@ -335,8 +393,10 @@ export const UiCustomizationSettings = () => {
           })}
           description={t("uiCustomization.shortcuts.description", {
             defaultValue:
-              "Choose up to 10 items for the sidebar icons and shortcuts list."
+              "Choose up to {{max}} items for the sidebar icons and shortcuts list.",
+            max: SIDEBAR_SHORTCUT_MAX_COUNT
           })}
+          testId="sidebar-shortcuts-disclosure"
           selection={shortcutSelectionNormalized}
           defaultSelection={DEFAULT_SIDEBAR_SHORTCUT_SELECTION}
           onChange={(next) => void setShortcutSelection(next)}
@@ -350,12 +410,35 @@ export const UiCustomizationSettings = () => {
             defaultValue:
               "Choose which shortcuts appear in the header shortcuts panel."
           })}
+          testId="playground-shortcuts-disclosure"
           selection={headerShortcutSelectionNormalized}
           defaultSelection={DEFAULT_HEADER_SHORTCUT_SELECTION}
           onChange={(next) => void setHeaderShortcutSelection(next)}
         />
-        <ThemePicker />
-        <SystemSettings />
+        <SettingsDisclosure
+          title={t("uiCustomization.theme.title", {
+            defaultValue: "Theme and appearance"
+          })}
+          description={t("uiCustomization.theme.description", {
+            defaultValue:
+              "Choose the app theme, presets, custom palettes, and import or export theme files."
+          })}
+          testId="theme-display-disclosure"
+        >
+          <ThemePicker />
+        </SettingsDisclosure>
+        <SettingsDisclosure
+          title={t("uiCustomization.system.title", {
+            defaultValue: "Display and browser behavior"
+          })}
+          description={t("uiCustomization.system.description", {
+            defaultValue:
+              "Set default layout behavior, text size, code theme, and chat background."
+          })}
+          testId="system-display-disclosure"
+        >
+          <SystemSettings />
+        </SettingsDisclosure>
       </div>
     </div>
   )

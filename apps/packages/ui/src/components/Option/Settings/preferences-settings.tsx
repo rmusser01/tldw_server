@@ -47,7 +47,7 @@ export const PreferencesSettings = () => {
   }
 
   return (
-    <dl className="flex flex-col space-y-6 text-sm">
+    <div className="flex flex-col space-y-6 text-sm">
       <div>
         <h2 className="text-base font-semibold leading-7 text-text">
           {t("preferencesSettings.title", "General preferences")}
@@ -239,7 +239,7 @@ export const PreferencesSettings = () => {
       </div>
 
       <SearchModeSettings />
-    </dl>
+    </div>
   )
 }
 

@@ -203,4 +203,16 @@ describe("settings navigation wayfinding", () => {
       "min-w-max",
     );
   });
+
+  it("does not add main landmarks inside the app shell", () => {
+    const { container } = renderSettingsLayout("/settings/tldw");
+
+    expect(container.querySelector("main")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", {
+        level: 1,
+        name: "settings:tldw.serverNav",
+      }),
+    ).toBeInTheDocument();
+  });
 });

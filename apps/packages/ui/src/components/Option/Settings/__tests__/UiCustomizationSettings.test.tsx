@@ -30,4 +30,22 @@ describe("UiCustomizationSettings", () => {
     expect(screen.getByText("Theme picker")).toBeInTheDocument()
     expect(screen.getByText("System basics")).toBeInTheDocument()
   })
+
+  it("keeps dense shortcut and display controls collapsed by default", () => {
+    render(<UiCustomizationSettings />)
+
+    expect(screen.getByTestId("sidebar-shortcuts-disclosure")).not.toHaveAttribute("open")
+    expect(screen.getByTestId("playground-shortcuts-disclosure")).not.toHaveAttribute("open")
+    expect(screen.getByTestId("theme-display-disclosure")).not.toHaveAttribute("open")
+    expect(screen.getByTestId("system-display-disclosure")).not.toHaveAttribute("open")
+  })
+
+  it("keeps native disclosure summaries free of invalid block markup", () => {
+    const { container } = render(<UiCustomizationSettings />)
+
+    for (const summary of container.querySelectorAll("summary")) {
+      expect(summary.querySelector("div, p")).toBeNull()
+      expect(summary.className).toContain("[&::-webkit-details-marker]:hidden")
+    }
+  })
 })
