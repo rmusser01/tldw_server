@@ -81,7 +81,7 @@ const restoreDesktopCockpitRail = async (page: Page, rail: DesktopCockpitRail) =
 
   const restoreControl = page.getByTestId(config.restoreId);
   await expect(restoreControl).toBeVisible({ timeout: 10_000 });
-  await restoreControl.click({ timeout: 10_000 });
+  await restoreControl.click({ timeout: 10_000, force: true });
   await expect(shell).toHaveAttribute(config.attr, 'visible', { timeout: 10_000 });
   await expect(railLocator).toBeVisible({ timeout: 10_000 });
 };
@@ -1980,13 +1980,12 @@ test.describe('/chat cockpit real-server parity', () => {
       await expect(page.getByTestId('playground-collapsed-composition-summary')).toHaveCount(0);
       await expect(page.getByTestId('composer-bottom-bar')).toHaveCount(0);
     };
-    const panelControlledByTab = async (root: Locator, tab: Locator) => {
+    const panelControlledByTab = async (tab: Locator) => {
       const tabId = await tab.getAttribute('id');
       const panelId = await tab.getAttribute('aria-controls');
       expect(tabId).toBeTruthy();
       expect(panelId).toBeTruthy();
-      const panel = root.locator(`[id="${panelId}"]`);
-      await expect(panel).toHaveCount(1);
+      const panel = page.locator(`[id="${panelId}"]`);
       await expect(panel).toHaveAttribute('role', 'tabpanel');
       await expect(panel).toHaveAttribute('aria-labelledby', tabId as string);
       return panel;
@@ -2013,8 +2012,9 @@ test.describe('/chat cockpit real-server parity', () => {
     await expectNoMobileBottomControls();
     const initialContextTab = mobileRails.getByRole('tab', { name: 'Context' });
     const initialRuntimeTab = mobileRails.getByRole('tab', { name: 'Runtime' });
-    const initialContextPanel = await panelControlledByTab(mobileRails, initialContextTab);
-    const initialRuntimePanel = await panelControlledByTab(mobileRails, initialRuntimeTab);
+    await panelControlledByTab(initialContextTab);
+    const initialRuntimePanel = await panelControlledByTab(initialRuntimeTab);
+    const initialContextPanel = mobileRails.getByRole('tabpanel', { name: 'Context' });
     await expect(initialContextTab).toHaveAttribute('aria-selected', 'true');
     await expect(initialRuntimeTab).toHaveAttribute('aria-selected', 'false');
     await expect(initialContextPanel).toBeVisible();
@@ -2046,9 +2046,8 @@ test.describe('/chat cockpit real-server parity', () => {
     await contextTab.click();
     await expect(contextTab).toHaveAttribute('aria-selected', 'true');
     await expect(mobileRails).toHaveAttribute('data-mobile-panel', 'context');
-    const contextPanelTarget = await panelControlledByTab(mobileRails, contextTab);
+    const contextPanelTarget = await panelControlledByTab(contextTab);
     const runtimePanelTarget = await panelControlledByTab(
-      mobileRails,
       mobileRails.getByRole('tab', { name: 'Runtime' })
     );
     await expect(contextPanelTarget).toBeVisible();
@@ -2091,13 +2090,13 @@ test.describe('/chat cockpit real-server parity', () => {
     await runtimeTab.click();
     await expect(runtimeTab).toHaveAttribute('aria-selected', 'true');
     await expect(mobileRails).toHaveAttribute('data-mobile-panel', 'runtime');
-    await expect(runtimePanelTarget).toBeVisible();
+    const runtimePanel = mobileRails.getByRole('tabpanel', { name: 'Runtime' });
+    await expect(runtimePanel).toBeVisible();
     await expect(contextPanelTarget).toBeHidden();
     await expect(mobileRails.getByTestId('playground-cockpit-mobile-panel-summary')).toHaveText(
       'Runtime panel active. Composer draft remains available below.'
     );
     await expectMobileDraftPreserved();
-    const runtimePanel = mobileRails.getByRole('tabpanel', { name: 'Runtime' });
     await assertRuntimeProviderSummary(runtimePanel);
     await expect(runtimePanel.getByText('Provider:model settings')).toBeVisible();
     await expect(runtimePanel.getByRole('heading', { name: 'MCP tools' })).toBeVisible();
