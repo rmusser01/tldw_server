@@ -164,7 +164,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
     !isMobileViewport;
   const stickyChatLayoutActive = isChatScreen && stickyChatInput;
   const useInlineBackendUnavailableAlert =
-    location.pathname.startsWith('/settings');
+    /^\/settings(\/|$)/.test(location.pathname);
   const isViewportConstrainedRoute =
     stickyChatLayoutActive ||
     (VIEWPORT_CONSTRAINED_PATHS as readonly string[]).includes(location.pathname);

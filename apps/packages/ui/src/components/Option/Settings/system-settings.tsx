@@ -172,11 +172,17 @@ export const DataManagementSettings = () => {
         )
       })
     },
-    onError: () => {
+    onError: (error) => {
+      console.error("Firefox data sync error:", error)
+      const errorMsg = error instanceof Error ? error.message : String(error)
       notification.error({
         message: t(
           "settings:systemNotifications.syncError",
           "Firefox data sync failed"
+        ),
+        description: errorMsg || t(
+          "settings:systemNotifications.syncErrorDetail",
+          "Firefox data could not be synced for private mode."
         )
       })
     }
@@ -310,7 +316,7 @@ export const DataManagementSettings = () => {
 
         <button
           onClick={() => setResetModalOpen(true)}
-          className="w-full rounded-md bg-red-700 px-4 py-2 text-white transition hover:bg-red-800 sm:w-auto">
+          className="w-full rounded-md bg-danger px-4 py-2 text-white transition hover:brightness-90 sm:w-auto">
           {t("generalSettings.systemData.deleteChatHistory.button", { defaultValue: t("generalSettings.system.deleteChatHistory.button", { defaultValue: "Reset All" }) as string })}
         </button>
       </div>

@@ -45,6 +45,7 @@ describe("UiCustomizationSettings", () => {
 
     for (const summary of container.querySelectorAll("summary")) {
       expect(summary.querySelector("div, p")).toBeNull()
+      expect(summary.className).toContain("[&::-webkit-details-marker]:hidden")
     }
   })
 })

@@ -4,12 +4,15 @@ title: Harden settings UX after IA split review
 status: Done
 priority: High
 modified_files:
+- apps/tldw-frontend/extension/routes/settings-route.tsx
+- apps/tldw-frontend/__tests__/extension/settings-route-landmark.test.tsx
+- apps/packages/ui/src/components/Option/Settings/search-mode.tsx
+- apps/packages/ui/src/components/Option/Settings/system-settings.tsx
 - apps/packages/ui/src/components/Option/Settings/ui-customization.tsx
+- apps/tldw-frontend/components/layout/WebLayout.tsx
+- apps/tldw-frontend/__tests__/components/layout/WebLayout.chat-scroll-contract.test.tsx
 - apps/packages/ui/src/components/Option/Settings/__tests__/UiCustomizationSettings.test.tsx
 - apps/packages/ui/src/routes/__tests__/option-settings-route-split.test.tsx
-- apps/tldw-frontend/__tests__/components/layout/WebLayout.chat-scroll-contract.test.tsx
-- apps/tldw-frontend/components/layout/WebLayout.tsx
-- apps/tldw-frontend/components/layout/BackendUnavailableModalGate.tsx
 - backlog/tasks/task-12912 - Harden-settings-UX-after-IA-split-review.md
 ---
 
@@ -58,7 +61,7 @@ Address the senior UX/HCI review findings on the merged settings IA split: reduc
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Hardened the settings UX after the IA split review by removing modal interruption on settings routes, reducing /settings/ui density with collapsed native sections, improving route/page semantics, clarifying data action consequences, and fixing reviewed settings contrast/a11y issues. Follow-up review fixes validated native summary markup, added WebLayout route-level backend-unreachable regression coverage, and asserted exact hosted settings page titles.
+Rebased PR #2689 on latest dev and addressed all open PR review comments: restored a main landmark for extension settings routes, preserved Firefox sync error diagnostics, added web-search aria-label fallbacks, switched reset styling to semantic danger color, hid Safari disclosure markers, and narrowed settings-route matching to /settings and /settings/* only. Verification: focused Vitest passed 23 tests, typecheck passed, eslint on touched files passed with the known Next pages-directory notice, and git diff --check passed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

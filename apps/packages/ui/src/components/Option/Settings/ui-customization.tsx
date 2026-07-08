@@ -60,7 +60,7 @@ const SettingsDisclosure = ({
       className="panel-card group p-4"
       data-testid={testId}
     >
-      <summary className="cursor-pointer list-none">
+      <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden">
         <span className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <span className="block space-y-1">
             <span className="block text-sm font-semibold text-text">
