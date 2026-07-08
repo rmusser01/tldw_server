@@ -3383,7 +3383,8 @@ async def handle_unified_websocket(
 
             except json.JSONDecodeError:
                 await stream.error("validation_error", "Invalid JSON message")
-                await websocket.close(code=4400)
+                with contextlib.suppress(_AUDIO_UNIFIED_NONCRITICAL_EXCEPTIONS):
+                    await websocket.close(code=4400)
                 return
             except QuotaExceeded as qe:
                 # Emit a single standardized error and close via the stream abstraction.

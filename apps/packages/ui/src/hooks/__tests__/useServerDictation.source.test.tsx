@@ -291,6 +291,26 @@ describe("useServerDictation selected source handling", () => {
     expect(onTranscript).toHaveBeenNthCalledWith(2, "world")
   })
 
+  it("surfaces divergent full transcript corrections after committed final frames", async () => {
+    const onTranscript = vi.fn()
+    const { result } = renderHook(() => buildHook({ onTranscript }))
+
+    await act(async () => {
+      await result.current.startServerDictation()
+    })
+
+    const ws = MockWebSocket.instances[0]
+    await act(async () => {
+      ws.open()
+      await Promise.resolve()
+      ws.message({ type: "final", text: "hello", is_final: true })
+      ws.message({ type: "full_transcript", text: "corrected rewrite" })
+    })
+
+    expect(onTranscript).toHaveBeenNthCalledWith(1, "hello")
+    expect(onTranscript).toHaveBeenNthCalledWith(2, "corrected rewrite")
+  })
+
   it("reports microphone startup failures through onError", async () => {
     const onError = vi.fn()
     const startupError = new Error("Requested microphone unavailable")
@@ -367,5 +387,41 @@ describe("useServerDictation selected source handling", () => {
     expect(onTranscript).toHaveBeenCalledTimes(1)
     expect(onTranscript).toHaveBeenCalledWith("late final transcript")
     expect(ws.readyState).toBe(MockWebSocket.CLOSED)
+  })
+
+  it("closes and isolates a pending websocket before starting a new dictation session", async () => {
+    const onTranscript = vi.fn()
+    const { result } = renderHook(() => buildHook({ onTranscript }))
+
+    await act(async () => {
+      await result.current.startServerDictation()
+    })
+
+    const staleWs = MockWebSocket.instances[0]
+    await act(async () => {
+      staleWs.open()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    act(() => {
+      result.current.stopServerDictation()
+    })
+
+    await act(async () => {
+      await result.current.startServerDictation()
+    })
+
+    const currentWs = MockWebSocket.instances[1]
+    await act(async () => {
+      staleWs.message({ type: "full_transcript", text: "stale transcript" })
+      currentWs.open()
+      await Promise.resolve()
+      currentWs.message({ type: "full_transcript", text: "fresh transcript" })
+    })
+
+    expect(staleWs.readyState).toBe(MockWebSocket.CLOSED)
+    expect(onTranscript).toHaveBeenCalledTimes(1)
+    expect(onTranscript).toHaveBeenCalledWith("fresh transcript")
   })
 })

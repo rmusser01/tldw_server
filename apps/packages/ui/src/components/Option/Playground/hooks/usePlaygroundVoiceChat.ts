@@ -5,6 +5,7 @@ import type {
   DictationToggleIntent
 } from "@/hooks/useDictationStrategy"
 import type { SttSettings } from "@/hooks/useSttSettings"
+import { appendDictationTranscript } from "@/components/Chat/composer/utils"
 import { useComposerVoiceChat } from "@/components/Chat/composer/hooks/useComposerVoiceChat"
 import { withTemplateFallback } from "@/utils/template-guards"
 import type { VoiceConversationAvailability } from "@/services/tldw/voice-conversation"
@@ -79,17 +80,6 @@ export interface UsePlaygroundVoiceChatDeps {
   isServerDictating: boolean
   /** i18n */
   t: (key: string, ...args: any[]) => string
-}
-
-const appendDictationTranscript = (
-  currentMessage: string | null | undefined,
-  transcript: string
-): string => {
-  const text = transcript.trim()
-  if (!text) return currentMessage || ""
-  const current = String(currentMessage || "")
-  if (!current.trim()) return text
-  return `${current.trimEnd()} ${text}`
 }
 
 // ---------------------------------------------------------------------------

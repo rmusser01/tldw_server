@@ -4,7 +4,7 @@ title: Plan chat audio streaming protocol v1 implementation
 status: Done
 assignee: []
 created_date: '2026-07-08 01:22'
-updated_date: '2026-07-08 01:30'
+updated_date: '2026-07-08 19:17'
 labels:
   - webui
   - audio
@@ -32,6 +32,8 @@ Create the implementation plan for the approved chat audio streaming protocol v1
 
 <!-- SECTION:NOTES:BEGIN -->
 Created the implementation plan from the approved design and review findings. Self-review covered spec coverage, review-finding coverage, placeholder scan, parser interface consistency, and plan-level corrections for parser base64 errors plus dictation websocket URL/auth construction. Bandit skipped: planning-only documentation change.
+
+Post-implementation follow-up complete: chat audio streaming protocol v1 was implemented using one strict parser, existing websocket endpoints, PCM16 wire audio, server-side Float32 normalization, mode allowlists, push-to-talk release commit, streaming dictation, and extension STT JSON frames. Verification commands and known skips are recorded in TASK-12914.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
@@ -49,9 +51,3 @@ Created the chat audio streaming protocol v1 implementation plan. The plan kept 
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
-
-## Implementation Notes
-
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Implementation follow-up complete: chat audio streaming protocol v1 was implemented using one strict parser, existing websocket endpoints, PCM16 wire audio, server-side Float32 normalization, mode allowlists, push-to-talk release commit, streaming dictation, and extension STT JSON frames. Verification commands and known skips are recorded in TASK-12914.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->

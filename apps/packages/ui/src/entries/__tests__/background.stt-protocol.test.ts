@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const connectListeners = new Set<(port: any) => void>()
 const runtimeMessageListeners = new Set<(message: unknown) => void>()
@@ -203,6 +203,8 @@ const connectRuntimePort = (name: string): RuntimePortHarness => {
 import background from "@/entries/background"
 
 describe("background STT audio protocol", () => {
+  let windowDescriptor: PropertyDescriptor | undefined
+
   beforeEach(() => {
     connectListeners.clear()
     runtimeMessageListeners.clear()
@@ -211,7 +213,20 @@ describe("background STT audio protocol", () => {
     startupListeners.clear()
     MockWebSocket.instances = []
     ;(globalThis as any).WebSocket = MockWebSocket
+    windowDescriptor = Object.getOwnPropertyDescriptor(globalThis, "window")
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: undefined
+    })
     background.main()
+  })
+
+  afterEach(() => {
+    if (windowDescriptor) {
+      Object.defineProperty(globalThis, "window", windowDescriptor)
+    } else {
+      delete (globalThis as any).window
+    }
   })
 
   it("sends captions config before reporting STT open and wraps audio as JSON", async () => {

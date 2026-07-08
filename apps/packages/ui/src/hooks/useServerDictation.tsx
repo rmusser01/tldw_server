@@ -208,6 +208,7 @@ export const useServerDictation = (
       return
     }
 
+    cleanupSocket(wsRef.current)
     startingRef.current = true
     committedTranscriptRef.current = ""
     const requestedDeviceId =
@@ -273,6 +274,7 @@ export const useServerDictation = (
       }
 
       ws.onmessage = (event) => {
+        if (wsRef.current !== ws) return
         if (typeof event.data !== "string") return
         let payload: any
         try {
@@ -312,7 +314,10 @@ export const useServerDictation = (
             committedTranscriptRef.current = text
             return
           }
-          if (text === committed) return
+          if (text === committed) {
+            committedTranscriptRef.current = text
+            return
+          }
           if (text.startsWith(committed)) {
             const suffix = text.slice(committed.length).trim()
             if (suffix) {
@@ -320,7 +325,11 @@ export const useServerDictation = (
               onSuccess?.()
             }
             committedTranscriptRef.current = text
+            return
           }
+          onTranscript(text)
+          onSuccess?.()
+          committedTranscriptRef.current = text
           return
         }
         if (type === "error") {

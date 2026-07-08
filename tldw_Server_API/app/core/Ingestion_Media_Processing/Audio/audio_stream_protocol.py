@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import base64
-import binascii
 from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
+
+from tldw_Server_API.app.core.exceptions import StreamingProtocolError
 
 AUDIO_CHAT_ENDPOINT = "audio.chat.stream"
 AUDIO_TRANSCRIBE_ENDPOINT = "audio.stream.transcribe"
@@ -18,7 +19,7 @@ _ALLOWED_MODES = {
 }
 
 
-class AudioProtocolError(ValueError):
+class AudioProtocolError(StreamingProtocolError):
     """Error raised when a websocket audio frame violates the v1 contract."""
 
     def __init__(self, code: str, message: str, close_code: int = 4400) -> None:
@@ -90,7 +91,7 @@ def decode_audio_frame(frame: dict[str, Any], config: AudioProtocolConfig) -> De
 
     try:
         pcm16_bytes = base64.b64decode(data, validate=True)
-    except (ValueError, binascii.Error) as exc:
+    except ValueError as exc:
         raise AudioProtocolError("bad_request", "Invalid base64 audio frame") from exc
 
     if len(pcm16_bytes) % 2:

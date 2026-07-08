@@ -756,11 +756,78 @@ async def test_audio_chat_ws_closes_on_malformed_json_after_strict_config() -> N
 
     assert any(
         msg.get("type") == "error"
-        and msg.get("code") == "bad_request"
-        and msg.get("message") == "Invalid JSON"
+        and msg.get("code") == "validation_error"
+        and msg.get("message") == "Invalid JSON message"
         for msg in ws.sent_json
     )
     assert ws.close_code == 4400
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_audio_chat_ws_records_failure_metrics_for_invalid_audio_frame(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request_statuses: list[str] = []
+    session_close_reasons: list[str] = []
+    monkeypatch.setattr(
+        audio_streaming_module,
+        "emit_stt_request_total",
+        lambda **kwargs: request_statuses.append(kwargs["status"]),
+    )
+    monkeypatch.setattr(
+        audio_streaming_module,
+        "emit_stt_session_end_total",
+        lambda **kwargs: session_close_reasons.append(kwargs["session_close_reason"]),
+    )
+    ws = DummyWebSocket(
+        [
+            _strict_chat_config(),
+            {"type": "audio", "data": "not base64 ***"},
+        ]
+    )
+
+    await audio.websocket_audio_chat_stream(ws, token=None)
+
+    assert any(msg.get("type") == "error" and msg.get("code") == "bad_request" for msg in ws.sent_json)
+    assert ws.close_code == 4400
+    assert request_statuses[-1] == "bad_request"
+    assert session_close_reasons[-1] == "error"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_audio_chat_ws_records_failure_metrics_for_push_to_talk_violation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request_statuses: list[str] = []
+    session_close_reasons: list[str] = []
+    monkeypatch.setattr(
+        audio_streaming_module,
+        "emit_stt_request_total",
+        lambda **kwargs: request_statuses.append(kwargs["status"]),
+    )
+    monkeypatch.setattr(
+        audio_streaming_module,
+        "emit_stt_session_end_total",
+        lambda **kwargs: session_close_reasons.append(kwargs["session_close_reason"]),
+    )
+    ws = DummyWebSocket(
+        [
+            _strict_chat_config(mode="voice_chat"),
+            {"type": "push_to_talk_release"},
+        ]
+    )
+
+    await audio.websocket_audio_chat_stream(ws, token=None)
+
+    assert any(
+        msg.get("type") == "error" and "only valid in push_to_talk mode" in msg.get("message", "")
+        for msg in ws.sent_json
+    )
+    assert ws.close_code == 4400
+    assert request_statuses[-1] == "bad_request"
+    assert session_close_reasons[-1] == "error"
 
 
 @pytest.mark.integration

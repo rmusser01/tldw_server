@@ -3436,24 +3436,21 @@ export default defineBackground({
               ws &&
               ws.readyState === WebSocket.OPEN
             ) {
-              const data =
-                msg.data instanceof ArrayBuffer
-                  ? msg.data
-                  : ArrayBuffer.isView(msg.data) &&
-                      msg.data.buffer instanceof ArrayBuffer
-                    ? msg.data.buffer.slice(
-                        msg.data.byteOffset,
-                        msg.data.byteOffset + msg.data.byteLength,
-                      )
-                    : msg.data?.buffer instanceof ArrayBuffer
-                      ? msg.data.buffer
-                      : null;
+              const normalized = normalizeFileData(msg.data);
+              const data = normalized
+                ? new Uint8Array(normalized).buffer
+                : null;
               if (data) {
                 ws.send(
                   JSON.stringify({
                     type: "audio",
                     data: arrayBufferToBase64(data),
                   }),
+                );
+              } else {
+                logBackgroundError(
+                  "stt websocket audio payload",
+                  new Error("Unsupported audio payload"),
                 );
               }
             } else if (msg?.action === "close") {

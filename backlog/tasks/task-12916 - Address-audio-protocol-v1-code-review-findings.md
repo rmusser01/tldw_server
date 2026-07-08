@@ -56,10 +56,6 @@ Verification:
 Addressed all validated critical/important review findings for audio protocol v1 follow-up. Dictation handles final frames and deferred stop completion, STT redaction/metrics include final frames, post-config malformed JSON closes 4400, push-to-talk framing is exposed in the frontend hook, and composer dictation appends instead of overwriting user text. Verification: backend audio focused suite 61 passed; frontend/WebUI voice focused suite 52 passed; Bandit touched backend audio scope 0 findings; staged diff check passed. apps/tldw-frontend typecheck remains blocked by unrelated pre-existing errors outside the touched files.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
-<!-- SECTION:FINAL_SUMMARY:END -->
-
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed

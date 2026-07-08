@@ -2,15 +2,18 @@
 id: TASK-12160
 title: Design settings IA recovery preferences and UI split
 status: Done
+assignee: []
+created_date: ''
+updated_date: '2026-07-08 19:17'
 labels:
-- design
-- frontend
-- settings
-- ux
+  - design
+  - frontend
+  - settings
+  - ux
+dependencies: []
 documentation:
-- Docs/superpowers/specs/2026-07-06-settings-ia-recovery-preferences-ui-design.md
-modified_files:
-- Docs/superpowers/specs/2026-07-06-settings-ia-recovery-preferences-ui-design.md
+  - >-
+    Docs/superpowers/specs/2026-07-06-settings-ia-recovery-preferences-ui-design.md
 ---
 
 ## Description
@@ -25,9 +28,11 @@ Write and review a design spec for redesigning WebUI/extension settings around S
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
@@ -37,10 +42,10 @@ Design spec drafted, reviewed, revised, and approved for implementation planning
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

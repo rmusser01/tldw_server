@@ -48,6 +48,7 @@ import { useVoiceChatSettings } from "@/hooks/useVoiceChatSettings"
 import { useVoiceChatStream } from "@/hooks/useVoiceChatStream"
 import { useVoiceChatMessages } from "@/hooks/useVoiceChatMessages"
 import { useComposerEvents } from "@/hooks/useComposerEvents"
+import { appendDictationTranscript } from "@/components/Chat/composer/utils"
 import { useTemporaryChatToggle } from "@/hooks/useTemporaryChatToggle"
 import { useSelectedCharacter } from "@/hooks/useSelectedCharacter"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
@@ -167,17 +168,6 @@ type SidepanelQueuedSourceContext = {
   documents?: ChatDocuments
   imageBackendOverride?: string
   isImageCommand?: boolean
-}
-
-const appendDictationTranscript = (
-  currentMessage: string | null | undefined,
-  transcript: string
-): string => {
-  const text = transcript.trim()
-  if (!text) return currentMessage || ""
-  const current = String(currentMessage || "")
-  if (!current.trim()) return text
-  return `${current.trimEnd()} ${text}`
 }
 
 export const SidepanelForm = ({

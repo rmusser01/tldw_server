@@ -4,6 +4,7 @@ import struct
 import numpy as np
 import pytest
 
+from tldw_Server_API.app.core.exceptions import StreamingProtocolError
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.audio_stream_protocol import (
     AudioProtocolError,
     decode_audio_frame,
@@ -14,6 +15,10 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.audio_stream_prot
 def _pcm16_frame(samples: list[int]) -> dict[str, str]:
     raw = struct.pack("<" + "h" * len(samples), *samples)
     return {"type": "audio", "data": base64.b64encode(raw).decode("ascii")}
+
+
+def test_audio_protocol_error_uses_shared_streaming_exception_base():
+    assert isinstance(AudioProtocolError("bad_request", "Invalid audio"), StreamingProtocolError)
 
 
 def test_validate_chat_voice_config_accepts_strict_v1():

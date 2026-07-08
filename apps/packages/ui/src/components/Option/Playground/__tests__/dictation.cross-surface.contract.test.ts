@@ -30,6 +30,10 @@ const resolveSharedVoiceHookPath = () => {
     ),
     path.resolve(
       process.cwd(),
+      "../packages/ui/src/components/Chat/composer/hooks/useComposerVoiceChat.ts"
+    ),
+    path.resolve(
+      process.cwd(),
       "apps/packages/ui/src/components/Chat/composer/hooks/useComposerVoiceChat.ts"
     )
   ]
@@ -136,12 +140,16 @@ describe("dictation cross-surface contract", () => {
 
     expect(playgroundSource).toContain("appendDictationTranscript(")
     expect(playgroundSource).toContain(
+      'from "@/components/Chat/composer/utils"'
+    )
+    expect(playgroundSource).toContain(
       "setMessageValue(nextMessage, { collapseLarge: true, forceCollapse: true })"
     )
     expect(playgroundSource).not.toContain(
       'setMessageValue(text, { collapseLarge: true, forceCollapse: true })'
     )
     expect(sidepanelDictationBlock).toContain("appendDictationTranscript(")
+    expect(sidepanelSource).toContain('from "@/components/Chat/composer/utils"')
     expect(sidepanelDictationBlock).toContain(
       'form.setFieldValue("message", nextMessage)'
     )

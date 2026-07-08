@@ -2796,14 +2796,16 @@ async def websocket_audio_chat_stream(
                 try:
                     data = json.loads(raw_msg)
                 except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS:
+                    stt_request_status = "bad_request"
+                    stt_session_close_reason = "error"
                     emit_stt_error_total(
                         endpoint="audio.chat.stream",
                         provider=stt_metrics_provider,
                         reason="validation_error",
                     )
                     error_payload = _audio_ws_error_payload(
-                        code="bad_request",
-                        message="Invalid JSON",
+                        code="validation_error",
+                        message="Invalid JSON message",
                         request_id=request_id,
                     )
                     if _outer_stream:
@@ -2818,6 +2820,8 @@ async def websocket_audio_chat_stream(
                     try:
                         decoded = decode_audio_frame(data, protocol_config)
                     except AudioProtocolError as exc:
+                        stt_request_status = exc.code
+                        stt_session_close_reason = "error"
                         emit_stt_error_total(
                             endpoint="audio.chat.stream",
                             provider=stt_metrics_provider,
@@ -2898,6 +2902,8 @@ async def websocket_audio_chat_stream(
                             "bad_request",
                             "push_to_talk_release is only valid in push_to_talk mode",
                         )
+                        stt_request_status = exc.code
+                        stt_session_close_reason = "error"
                         emit_stt_error_total(
                             endpoint="audio.chat.stream",
                             provider=stt_metrics_provider,
