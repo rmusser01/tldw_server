@@ -73,6 +73,7 @@ const restoreDesktopCockpitRail = async (page: Page, rail: DesktopCockpitRail) =
   const shell = page.getByTestId('playground-cockpit-shell');
   const config = desktopCockpitRailConfig[rail];
   const railLocator = page.getByTestId(config.railId);
+  await expect(shell).toHaveAttribute('data-mode', 'cockpit', { timeout: 10_000 });
   if ((await shell.getAttribute(config.attr)) === 'visible') {
     await expect(railLocator).toBeVisible({ timeout: 10_000 });
     return;
@@ -80,16 +81,14 @@ const restoreDesktopCockpitRail = async (page: Page, rail: DesktopCockpitRail) =
 
   const restoreControl = page.getByTestId(config.restoreId);
   await expect(restoreControl).toBeVisible({ timeout: 10_000 });
-  await restoreControl.evaluate((element: HTMLElement) => element.click());
+  await restoreControl.click({ timeout: 10_000 });
   await expect(shell).toHaveAttribute(config.attr, 'visible', { timeout: 10_000 });
   await expect(railLocator).toBeVisible({ timeout: 10_000 });
 };
 
 const switchChatLayoutMode = async (page: Page, targetMode: 'cockpit' | 'focus') => {
   const shell = page.getByTestId('playground-cockpit-shell');
-  if ((await shell.getAttribute('data-mode')) === targetMode) {
-    if (targetMode === 'focus') return;
-  } else {
+  if ((await shell.getAttribute('data-mode')) !== targetMode) {
     const triggerName = targetMode === 'cockpit' ? 'Exit focus' : 'Enter focus chat';
     try {
       await page
@@ -100,9 +99,9 @@ const switchChatLayoutMode = async (page: Page, targetMode: 'cockpit' | 'focus')
         throw error;
       });
     }
-    await expect(shell).toHaveAttribute('data-mode', targetMode);
   }
 
+  await expect(shell).toHaveAttribute('data-mode', targetMode, { timeout: 10_000 });
 };
 
 const waitForPlaygroundDraftSaved = async (page: Page) => {
@@ -1981,12 +1980,13 @@ test.describe('/chat cockpit real-server parity', () => {
       await expect(page.getByTestId('playground-collapsed-composition-summary')).toHaveCount(0);
       await expect(page.getByTestId('composer-bottom-bar')).toHaveCount(0);
     };
-    const panelControlledByTab = async (tab: Locator) => {
+    const panelControlledByTab = async (root: Locator, tab: Locator) => {
       const tabId = await tab.getAttribute('id');
       const panelId = await tab.getAttribute('aria-controls');
       expect(tabId).toBeTruthy();
       expect(panelId).toBeTruthy();
-      const panel = page.locator(`[id="${panelId}"]`);
+      const panel = root.locator(`[id="${panelId}"]`);
+      await expect(panel).toHaveCount(1);
       await expect(panel).toHaveAttribute('role', 'tabpanel');
       await expect(panel).toHaveAttribute('aria-labelledby', tabId as string);
       return panel;
@@ -2013,8 +2013,8 @@ test.describe('/chat cockpit real-server parity', () => {
     await expectNoMobileBottomControls();
     const initialContextTab = mobileRails.getByRole('tab', { name: 'Context' });
     const initialRuntimeTab = mobileRails.getByRole('tab', { name: 'Runtime' });
-    const initialContextPanel = await panelControlledByTab(initialContextTab);
-    const initialRuntimePanel = await panelControlledByTab(initialRuntimeTab);
+    const initialContextPanel = await panelControlledByTab(mobileRails, initialContextTab);
+    const initialRuntimePanel = await panelControlledByTab(mobileRails, initialRuntimeTab);
     await expect(initialContextTab).toHaveAttribute('aria-selected', 'true');
     await expect(initialRuntimeTab).toHaveAttribute('aria-selected', 'false');
     await expect(initialContextPanel).toBeVisible();
@@ -2046,8 +2046,9 @@ test.describe('/chat cockpit real-server parity', () => {
     await contextTab.click();
     await expect(contextTab).toHaveAttribute('aria-selected', 'true');
     await expect(mobileRails).toHaveAttribute('data-mobile-panel', 'context');
-    const contextPanelTarget = await panelControlledByTab(contextTab);
+    const contextPanelTarget = await panelControlledByTab(mobileRails, contextTab);
     const runtimePanelTarget = await panelControlledByTab(
+      mobileRails,
       mobileRails.getByRole('tab', { name: 'Runtime' })
     );
     await expect(contextPanelTarget).toBeVisible();
