@@ -1807,6 +1807,17 @@ test.describe('/chat cockpit real-server parity', () => {
     });
 
     await switchChatLayoutMode(page, 'cockpit');
+    await expect(modeSummary).toHaveText('Cockpit rails hidden. Chat and composer remain active.');
+    await expect(page.getByTestId('playground-cockpit-left-rail-restore')).toBeVisible();
+    await expect(page.getByTestId('playground-cockpit-right-rail-restore')).toBeVisible();
+    await page.evaluate(() => {
+      localStorage.setItem('playgroundChatLayoutMode', JSON.stringify('cockpit'));
+      localStorage.setItem('playgroundChatContextRailVisible', JSON.stringify(true));
+      localStorage.setItem('playgroundChatRuntimeRailVisible', JSON.stringify(true));
+    });
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await expect(page.getByTestId('playground-cockpit-shell')).toBeVisible({ timeout: 60_000 });
+    await assertNoBlockingServerDialog(page);
     await ensureDesktopCockpitRailsVisible(page);
     await assertNoHorizontalOverflow(page);
     await expect(
@@ -2111,9 +2122,7 @@ test.describe('/chat cockpit real-server parity', () => {
     const initialRuntimeTab = mobileRails.getByRole('tab', { name: 'Runtime' });
     await panelControlledByTab(initialContextTab, mobileRails);
     const initialRuntimePanel = page.locator(`#${mobileCockpitPanelConfig.runtime.panelId}`);
-    const initialContextPanel = page
-      .locator(`#${mobileCockpitPanelConfig.context.panelId}:visible`)
-      .first();
+    const initialContextPanel = mobileRails.locator(`#${mobileCockpitPanelConfig.context.panelId}`);
     await expect(initialContextTab).toHaveAttribute('aria-selected', 'true');
     await expect(initialRuntimeTab).toHaveAttribute('aria-selected', 'false');
     await expect(initialContextPanel).toBeVisible();
