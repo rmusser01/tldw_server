@@ -69,6 +69,17 @@ const desktopCockpitRailConfig: Record<
   },
 };
 
+const mobileCockpitPanelConfig = {
+  context: {
+    tabId: 'playground-cockpit-mobile-context-tab',
+    panelId: 'playground-cockpit-mobile-context-panel',
+  },
+  runtime: {
+    tabId: 'playground-cockpit-mobile-runtime-tab',
+    panelId: 'playground-cockpit-mobile-runtime-panel',
+  },
+} as const;
+
 const restoreDesktopCockpitRail = async (page: Page, rail: DesktopCockpitRail) => {
   const shell = page.getByTestId('playground-cockpit-shell');
   const config = desktopCockpitRailConfig[rail];
@@ -89,8 +100,20 @@ const restoreDesktopCockpitRail = async (page: Page, rail: DesktopCockpitRail) =
           ({ attr, restoreSelector, shellSelector }) => {
             const shell = document.querySelector(shellSelector);
             if (shell?.getAttribute(attr) === 'visible') return 'visible';
-            const restoreControl = document.querySelector<HTMLElement>(restoreSelector);
-            if (!restoreControl) return 'missing restore control';
+            const restoreControl = Array.from(
+              document.querySelectorAll<HTMLElement>(restoreSelector)
+            ).find((control) => {
+              const box = control.getBoundingClientRect();
+              const style = window.getComputedStyle(control);
+              return (
+                box.width > 0 &&
+                box.height > 0 &&
+                style.display !== 'none' &&
+                style.visibility !== 'hidden' &&
+                !control.closest('[hidden],[aria-hidden="true"]')
+              );
+            });
+            if (!restoreControl) return 'missing visible restore control';
             restoreControl.click();
             return shell?.getAttribute(attr) ?? 'missing shell';
           },
@@ -104,33 +127,49 @@ const restoreDesktopCockpitRail = async (page: Page, rail: DesktopCockpitRail) =
 };
 
 const waitForMobileCockpitPanel = async (page: Page, panel: 'context' | 'runtime') => {
-  const rails = page.getByTestId('playground-cockpit-mobile-rails');
+  const config = mobileCockpitPanelConfig[panel];
   await expect
     .poll(
       async () =>
         page.evaluate(
-          ({ panel }) => {
+          ({ panel, panelId, tabId }) => {
             const shell = document.querySelector('[data-testid="playground-cockpit-shell"]');
             if (shell?.getAttribute('data-mode') !== 'cockpit') {
               return `mode:${shell?.getAttribute('data-mode') ?? 'missing'}`;
             }
 
-            const rails = document.querySelector<HTMLElement>(
-              '[data-testid="playground-cockpit-mobile-rails"]'
-            );
+            const rails = Array.from(
+              document.querySelectorAll<HTMLElement>('[data-testid="playground-cockpit-mobile-rails"]')
+            ).find((candidate) => {
+              const box = candidate.getBoundingClientRect();
+              return (
+                candidate.getAttribute('data-mobile-panel') === panel &&
+                box.width > 0 &&
+                box.height > 0
+              );
+            });
             if (!rails) return 'missing rails';
-            const activePanel = rails.getAttribute('data-mobile-panel');
-            if (activePanel !== panel) return `panel:${activePanel ?? 'missing'}`;
-            const box = rails.getBoundingClientRect();
-            return box.width > 0 && box.height > 0 ? 'ready' : 'unmeasurable rails';
+            const tab = rails.querySelector<HTMLElement>(`#${tabId}`);
+            const panelNode = rails.querySelector<HTMLElement>(`#${panelId}`);
+            if (!tab || !panelNode) return 'missing tabpanel pair';
+            if (panelNode.getAttribute('role') !== 'tabpanel') return 'missing tabpanel role';
+            if (panelNode.getAttribute('aria-labelledby') !== tabId) return 'wrong panel label';
+            const panelBox = panelNode.getBoundingClientRect();
+            return panelBox.width > 0 && panelBox.height > 0 ? 'ready' : 'unmeasurable panel';
           },
-          { panel }
+          { panel, panelId: config.panelId, tabId: config.tabId }
         ),
       { message: `mobile cockpit ${panel} panel ready`, timeout: 15_000 }
     )
     .toBe('ready');
+  const rails = page
+    .locator(
+      `[data-testid="playground-cockpit-mobile-rails"][data-mobile-panel="${panel}"]:has(#${config.panelId})`
+    )
+    .first();
   await expect(rails).toBeVisible({ timeout: 10_000 });
   await expect(rails).toHaveAttribute('data-mobile-panel', panel);
+  await expect(rails.locator(`#${config.panelId}`)).toHaveAttribute('aria-labelledby', config.tabId);
   return rails;
 };
 
@@ -2088,14 +2127,15 @@ test.describe('/chat cockpit real-server parity', () => {
     );
     await expectMobileDraftPreserved();
     await page.getByRole('button', { name: 'Show context rail' }).click();
-    const contextTab = mobileRails.getByRole('tab', { name: 'Context' });
+    const contextTab = page.locator(`#${mobileCockpitPanelConfig.context.tabId}`);
     await expect(contextTab).toBeVisible();
     await contextTab.click();
     mobileRails = await waitForMobileCockpitPanel(page, 'context');
-    await expect(contextTab).toHaveAttribute('aria-selected', 'true');
-    const contextPanelTarget = await panelControlledByTab(contextTab, mobileRails);
+    const activeContextTab = mobileRails.locator(`#${mobileCockpitPanelConfig.context.tabId}`);
+    await expect(activeContextTab).toHaveAttribute('aria-selected', 'true');
+    const contextPanelTarget = await panelControlledByTab(activeContextTab, mobileRails);
     const runtimePanelTarget = await panelControlledByTab(
-      mobileRails.getByRole('tab', { name: 'Runtime' }),
+      mobileRails.locator(`#${mobileCockpitPanelConfig.runtime.tabId}`),
       mobileRails
     );
     await expect(contextPanelTarget).toBeVisible();
@@ -2134,10 +2174,13 @@ test.describe('/chat cockpit real-server parity', () => {
     await expect(promptSearch).toBeHidden();
     await expect(page.getByTestId('chat-input')).toBeVisible();
     await expectMobileDraftReachable();
-    const runtimeTab = mobileRails.getByRole('tab', { name: 'Runtime' });
+    const runtimeTab = mobileRails.locator(`#${mobileCockpitPanelConfig.runtime.tabId}`);
     await runtimeTab.click();
     mobileRails = await waitForMobileCockpitPanel(page, 'runtime');
-    await expect(runtimeTab).toHaveAttribute('aria-selected', 'true');
+    await expect(mobileRails.locator(`#${mobileCockpitPanelConfig.runtime.tabId}`)).toHaveAttribute(
+      'aria-selected',
+      'true'
+    );
     const runtimePanel = mobileRails.getByRole('tabpanel', { name: 'Runtime' });
     await expect(runtimePanel).toBeVisible();
     await expect(contextPanelTarget).toBeHidden();
