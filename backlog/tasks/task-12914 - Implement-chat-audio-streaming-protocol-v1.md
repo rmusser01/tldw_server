@@ -1,0 +1,48 @@
+---
+id: TASK-12914
+title: Implement chat audio streaming protocol v1
+status: In Progress
+labels:
+- webui
+- audio
+- implementation
+priority: High
+documentation:
+- Docs/superpowers/plans/2026-07-08-chat-audio-streaming-protocol-v1.md
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+Implement the approved v1 protocol plan for WebUI and browser-extension chat audio streaming, dictation, turn detection, and VAD behavior.
+<!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [ ] #1 Backend strict parser validates v1 config and normalizes PCM16 to Float32 before handlers.
+- [ ] #2 Transcribe and chat websocket endpoints enforce endpoint modes and strict config.
+- [ ] #3 Frontend voice chat, dictation, and extension STT send strict JSON PCM16 frames.
+- [ ] #4 Focused backend/frontend tests, Bandit, and diff checks are recorded.
+<!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Task 1 complete: added strict audio protocol parser and parser unit tests. Verification: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Audio/test_audio_stream_protocol_v1.py -q` passed with 10 tests.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+
+<!-- SECTION:FINAL_SUMMARY:END -->
+
+## Definition of Done
+<!-- DOD:BEGIN -->
+- [ ] #1 Acceptance criteria completed
+- [ ] #2 Tests or verification recorded
+- [ ] #3 Documentation updated when relevant
+- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [ ] #5 Final summary added
+- [ ] #6 Known skips or blockers documented
+<!-- DOD:END -->
