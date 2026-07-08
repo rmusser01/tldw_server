@@ -60,6 +60,54 @@ _FALLBACK_UNSUPPORTED_CONTROLS = (
     "include_external",
     "score_threshold",
 )
+_ANALYSIS_PROVIDER_REQUIRED_MESSAGE = "Choose an analysis provider before running ingest analysis."
+
+
+def _has_analysis_provider(api_name: Optional[str]) -> bool:
+    provider = str(api_name or "").strip()
+    return bool(provider) and provider.lower() != "none"
+
+
+def _analysis_error_detail(value: Any) -> Optional[str]:
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text.lower().startswith("error:"):
+        return None
+    return text.split(":", 1)[1].strip() or "Analysis failed."
+
+
+def _mark_analysis_state(
+    article: dict[str, Any],
+    field_name: str,
+    status: str,
+    message: str,
+) -> dict[str, Any]:
+    article[field_name] = None
+    article["analysis_status"] = status
+    article["analysis_error"] = message
+    warnings = article.setdefault("warnings", [])
+    if isinstance(warnings, list) and message not in warnings:
+        warnings.append(message)
+    return article
+
+
+def _sanitize_analysis_result(
+    article: dict[str, Any],
+    field_name: str,
+    value: Any,
+) -> bool:
+    detail = _analysis_error_detail(value)
+    if not detail:
+        return False
+    normalized = detail.lower()
+    status = (
+        "skipped"
+        if "provider is required" in normalized or "no api specified" in normalized
+        else "failed"
+    )
+    _mark_analysis_state(article, field_name, status, detail)
+    return True
 
 
 def _normalize_strategy_value(crawl_strategy: Optional[str]) -> Optional[str]:
@@ -424,17 +472,31 @@ async def process_web_scraping_task(
                 for article in result_list:
                     content = article.get("content", "")
                     if content:
-                        summary = analyze(
-                            input_data=content,
-                            custom_prompt_arg=custom_prompt or "",
-                            api_name=api_name,
-                            api_key=api_key,
-                            temp=temperature,
-                            system_message=system_prompt or "",
-                        )
-                        article["summary"] = summary
+                        if not _has_analysis_provider(api_name):
+                            _mark_analysis_state(
+                                article,
+                                "summary",
+                                "skipped",
+                                _ANALYSIS_PROVIDER_REQUIRED_MESSAGE,
+                            )
+                        else:
+                            summary = analyze(
+                                input_data=content,
+                                custom_prompt_arg=custom_prompt or "",
+                                api_name=api_name,
+                                api_key=api_key,
+                                temp=temperature,
+                                system_message=system_prompt or "",
+                            )
+                            if not _sanitize_analysis_result(article, "summary", summary):
+                                article["summary"] = summary
                     else:
-                        article["summary"] = "No content to summarize."
+                        _mark_analysis_state(article, "summary", "skipped", "No content to summarize.")
+
+            for article in result_list:
+                if isinstance(article, dict):
+                    _sanitize_analysis_result(article, "summary", article.get("summary"))
+                    _sanitize_analysis_result(article, "analysis", article.get("analysis"))
 
             # 3) If "persist" mode, insert into DB; if ephemeral, store ephemeral
             #    (We can store all articles in the DB or ephemeral. Typically you'd store each as a new "media" row.)
@@ -666,17 +728,26 @@ async def ingest_web_content_orchestrate(
 
         content = article.get("content", "")
         if not content:
-            article["analysis"] = "No content to analyze."
-            return article
+            return _mark_analysis_state(article, "analysis", "skipped", "No content to analyze.")
+
+        api_name = getattr(request, "api_name", None)
+        if not _has_analysis_provider(api_name):
+            return _mark_analysis_state(
+                article,
+                "analysis",
+                "skipped",
+                _ANALYSIS_PROVIDER_REQUIRED_MESSAGE,
+            )
 
         analysis_results = analyze(
             input_data=content,
             custom_prompt_arg=getattr(request, "custom_prompt", None) or "Summarize this article.",
-            api_name=getattr(request, "api_name", None),
+            api_name=api_name,
             temp=0.7,
             system_message=getattr(request, "system_prompt", None) or "Act as a professional summarizer.",
         )
-        article["analysis"] = analysis_results
+        if not _sanitize_analysis_result(article, "analysis", analysis_results):
+            article["analysis"] = analysis_results
 
         if getattr(request, "perform_rolling_summarization", False):
             logging.info("Performing rolling summarization (placeholder).")

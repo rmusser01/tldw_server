@@ -43,8 +43,11 @@ export type ProcessingItem = {
   transcript?: string
   transcription?: string
   summary?: string
-  analysis_content?: string
-  analysis?: string
+  analysis_content?: string | null
+  analysis?: string | null
+  analysis_status?: string
+  analysis_error?: string
+  warnings?: string[]
   prompt?: string
   custom_prompt?: string
   title?: string
@@ -73,6 +76,7 @@ export type ResultItem = {
   type: string
   data?: ProcessingResultPayload
   error?: string
+  warning?: string
 }
 
 type ProcessingOptions = {
@@ -186,8 +190,8 @@ const resolveTitle = (item: ProcessingItem, fallback: string): string => {
 }
 
 const resolveAnalysis = (item: ProcessingItem): string | undefined => {
-  if (typeof item?.analysis === "string") return item.analysis
-  if (typeof item?.analysis_content === "string") return item.analysis_content
+  if (typeof item?.analysis === "string" && !analysisWarningFromText(item.analysis)) return item.analysis
+  if (typeof item?.analysis_content === "string" && !analysisWarningFromText(item.analysis_content)) return item.analysis_content
   return undefined
 }
 
@@ -244,6 +248,42 @@ const extractProcessingItems = (data: ProcessingResultPayload): ProcessingItem[]
 const getProcessingStatusLabels = (data: ProcessingResultPayload): string[] =>
   extractProcessingItems(data).map((item) => normalizeStatusLabel(item.status)).filter(Boolean)
 
+const analysisWarningFromText = (value: unknown): string | null => {
+  const text = String(value || "").trim()
+  if (!text) return null
+  const normalized = text.toLowerCase()
+  const reason = text.replace(/^error:\s*/i, "").replace(/^\[|\]$/g, "").trim()
+  if (
+    normalized.includes("analysis api provider is required") ||
+    normalized.includes("no api specified") ||
+    normalized.includes("choose an analysis provider")
+  ) {
+    return "Analysis skipped: choose an analysis provider, then retry analysis."
+  }
+  if (normalized.startsWith("error:")) return `Analysis failed: ${reason || "API error"}`
+  if (normalized.startsWith("[analysis failed")) return `Analysis failed: ${reason || "API error"}`
+  if (normalized.startsWith("[analysis skipped")) return `Analysis skipped: ${reason || "not available"}`
+  return null
+}
+
+export const analysisWarningFromPayload = (data: ProcessingResultPayload): string | undefined => {
+  for (const item of extractProcessingItems(data)) {
+    const status = normalizeStatusLabel(item.analysis_status)
+    const detail = item.analysis_error || item.warnings?.find((warning) => analysisWarningFromText(warning))
+    if (status === "skipped") {
+      return analysisWarningFromText(detail) || `Analysis skipped: ${String(detail || "not available").trim()}`
+    }
+    if (status === "failed") {
+      return analysisWarningFromText(detail) || `Analysis failed: ${String(detail || "API error").trim()}`
+    }
+    const analysisWarning =
+      analysisWarningFromText(item.analysis) ||
+      analysisWarningFromText(item.analysis_content)
+    if (analysisWarning) return analysisWarning
+  }
+  return undefined
+}
+
 export const normalizeResultItem = (
   item: Partial<ResultItem> | null | undefined
 ): ResultItem | null => {
@@ -258,7 +298,8 @@ export const normalizeResultItem = (
     fileName: item.fileName,
     type: String(item.type || "item"),
     data: item.data as ProcessingResultPayload,
-    error: item.error
+    error: item.error,
+    warning: item.warning || analysisWarningFromPayload(item.data as ProcessingResultPayload)
   }
 }
 

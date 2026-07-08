@@ -6,6 +6,7 @@ import { browser } from "wxt/browser"
 import { tldwClient } from '@/services/tldw/TldwApiClient'
 import {
   cancelQuickIngestSession,
+  getQuickIngestAnalysisProviderWarning,
   startQuickIngestSession,
   submitQuickIngestBatch
 } from "@/services/tldw/quick-ingest-batch"
@@ -643,6 +644,15 @@ export const QuickIngestModal: React.FC<Props> = ({
         : `One or more files are too large. Each file must be smaller than ${maxLabel}.`
       messageApi.error(msg)
       setLastRunError(msg)
+      return
+    }
+    const analysisProviderWarning = getQuickIngestAnalysisProviderWarning({
+      common,
+      advancedValues
+    })
+    if (analysisProviderWarning) {
+      messageApi.warning(analysisProviderWarning)
+      setLastRunError(analysisProviderWarning)
       return
     }
     const total = valid.length + attachedFiles.length
