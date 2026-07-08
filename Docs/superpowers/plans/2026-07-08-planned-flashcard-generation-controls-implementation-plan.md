@@ -38,7 +38,7 @@
 - Modify: `tldw_Server_API/app/api/v1/schemas/flashcards.py`
 - Test: `tldw_Server_API/tests/Flashcards/test_flashcards_endpoint_integration.py`
 
-- [ ] **Step 1: Write failing schema/endpoint validation tests**
+- [x] **Step 1: Write failing schema/endpoint validation tests**
 
 Add focused tests near the existing generate endpoint tests:
 
@@ -119,7 +119,7 @@ def test_generate_flashcards_rejects_invalid_card_plan_requests(client_with_flas
     assert response.status_code == 422
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -129,7 +129,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Flashcards/t
 
 Expected: new plan tests fail because `card_plan` and `generation_type` do not exist yet.
 
-- [ ] **Step 3: Add schema models and validators**
+- [x] **Step 3: Add schema models and validators**
 
 In `flashcards.py`, import `ConfigDict` and `model_validator` if not already present. Add:
 
@@ -202,11 +202,11 @@ class GeneratedFlashcard(BaseModel):
     extra: Optional[str] = None
 ```
 
-- [ ] **Step 4: Run schema tests**
+- [x] **Step 4: Run schema tests**
 
 Run the same pytest command. Expected: validation tests pass or fail only because endpoint normalization has not yet been updated.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tldw_Server_API/app/api/v1/schemas/flashcards.py tldw_Server_API/tests/Flashcards/test_flashcards_endpoint_integration.py

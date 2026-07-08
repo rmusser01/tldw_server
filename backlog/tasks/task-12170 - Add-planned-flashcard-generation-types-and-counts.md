@@ -1,7 +1,13 @@
 ---
 id: TASK-12170
 title: Add planned flashcard generation types and counts
-status: To Do
+status: In Progress
+modified_files:
+- tldw_Server_API/app/api/v1/schemas/flashcards.py
+- tldw_Server_API/app/api/v1/endpoints/flashcards.py
+- tldw_Server_API/tests/Flashcards/test_flashcards_endpoint_integration.py
+- Docs/superpowers/plans/2026-07-08-planned-flashcard-generation-controls-implementation-plan.md
+- backlog/tasks/task-12170 - Add-planned-flashcard-generation-types-and-counts.md
 ---
 
 ## Description
@@ -21,6 +27,12 @@ Acceptance criteria:
 <!-- AC:BEGIN -->
 <!-- AC:END -->
 
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Docs/superpowers/plans/2026-07-08-planned-flashcard-generation-controls-implementation-plan.md
+<!-- SECTION:PLAN:END -->
+
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
@@ -38,7 +50,7 @@ Approved design choices:
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Task 1 backend schema contract slice: added card_plan request validation, response-only generation_type schema, focused mixed-plan/invalid-plan endpoint tests, and minimal generate endpoint passthrough/preservation needed for the contract test. Verification: focused generate pytest passed (12 passed, 154 deselected); Bandit on touched backend schema/endpoint files reported 0 findings.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

@@ -1613,6 +1613,79 @@ def test_generate_flashcards_endpoint_returns_generated_cards(
     assert payload["flashcards"][1]["tags"] == ["biology", "metabolism"]
 
 
+def test_generate_flashcards_accepts_mixed_card_plan(client_with_flashcards_db, monkeypatch):
+    async def fake_generate_adapter(config, context):
+        assert config["num_cards"] == 4
+        assert config["card_plan"] == [
+            {"card_type": "basic", "count": 1},
+            {"card_type": "basic_reverse", "count": 1},
+            {"card_type": "cloze", "count": 1},
+            {"card_type": "true_false", "count": 1},
+        ]
+        return {
+            "flashcards": [
+                {"front": "Q1", "back": "A1", "generation_type": "basic", "model_type": "basic"},
+                {"front": "Q2", "back": "A2", "generation_type": "basic_reverse", "model_type": "basic_reverse"},
+                {"front": "{{c1::Q3}}", "back": "Q3", "generation_type": "cloze", "model_type": "cloze"},
+                {"front": "True or false: Q4", "back": "False. A4", "generation_type": "true_false", "model_type": "basic"},
+            ],
+            "count": 4,
+        }
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.endpoints.flashcards.run_flashcard_generate_adapter",
+        fake_generate_adapter,
+    )
+
+    response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/generate",
+        json={
+            "text": "Cell biology",
+            "num_cards": 4,
+            "card_plan": [
+                {"card_type": "basic", "count": 1},
+                {"card_type": "basic_reverse", "count": 1},
+                {"card_type": "cloze", "count": 1},
+                {"card_type": "true_false", "count": 1},
+            ],
+        },
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 200
+    cards = response.json()["flashcards"]
+    assert [card["generation_type"] for card in cards] == [
+        "basic",
+        "basic_reverse",
+        "cloze",
+        "true_false",
+    ]
+    assert cards[-1]["model_type"] == "basic"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"text": "x", "num_cards": 2, "card_type": "basic", "card_plan": [{"card_type": "basic", "count": 2}]},
+        {"text": "x", "card_plan": [{"card_type": "basic", "count": 1}]},
+        {"text": "x", "num_cards": 2, "card_plan": [{"card_type": "basic", "count": 1}]},
+        {"text": "x", "num_cards": 1, "card_plan": []},
+        {"text": "x", "num_cards": 2, "card_plan": [{"card_type": "basic", "count": 1}, {"card_type": "basic", "count": 1}]},
+        {"text": "x", "num_cards": 1, "card_plan": [{"card_type": "basic", "count": 0}]},
+        {"text": "x", "num_cards": 1, "card_plan": [{"card_type": "made_up", "count": 1}]},
+        {"text": "x", "num_cards": 1, "card_plan": [{"card_type": "basic", "count": 1, "extra": True}]},
+        {"text": "x", "num_cards": 1, "card_type": "true_false"},
+    ],
+)
+def test_generate_flashcards_rejects_invalid_card_plan_requests(client_with_flashcards_db, body):
+    response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/generate",
+        json=body,
+        headers=AUTH_HEADERS,
+    )
+    assert response.status_code == 422
+
+
 def test_generate_flashcards_endpoint_uses_default_provider_when_omitted(
     client_with_flashcards_db: TestClient,
     monkeypatch,

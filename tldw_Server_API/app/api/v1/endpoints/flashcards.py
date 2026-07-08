@@ -2266,8 +2266,12 @@ async def generate_flashcards(payload: FlashcardGenerateRequest):
         result = await run_flashcard_generate_adapter(
             {
                 "text": payload.text,
-                "num_cards": payload.num_cards,
-                "card_type": payload.card_type,
+                "num_cards": int(payload.num_cards or 10),
+                "card_type": payload.card_type or "basic",
+                "card_plan": [
+                    {"card_type": item.card_type, "count": item.count}
+                    for item in payload.card_plan or []
+                ] or None,
                 "difficulty": payload.difficulty,
                 "focus_topics": payload.focus_topics,
                 "provider": provider,
@@ -2307,9 +2311,9 @@ async def generate_flashcards(payload: FlashcardGenerateRequest):
             else:
                 tags = []
 
-            model_type = str(raw.get("model_type") or payload.card_type).lower()
+            model_type = str(raw.get("model_type") or payload.card_type or "basic").lower()
             if model_type not in ("basic", "basic_reverse", "cloze"):
-                model_type = payload.card_type
+                model_type = payload.card_type or "basic"
 
             card = {
                 "front": front,
@@ -2317,6 +2321,9 @@ async def generate_flashcards(payload: FlashcardGenerateRequest):
                 "tags": tags,
                 "model_type": model_type,
             }
+            generation_type = str(raw.get("generation_type") or "").lower()
+            if generation_type in ("basic", "basic_reverse", "cloze", "true_false"):
+                card["generation_type"] = generation_type
             notes = raw.get("notes")
             if isinstance(notes, str) and notes.strip():
                 card["notes"] = notes

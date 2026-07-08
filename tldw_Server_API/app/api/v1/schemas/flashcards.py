@@ -2,7 +2,7 @@ import json
 from typing import Any, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 from tldw_Server_API.app.api.v1.schemas.study_packs import (
@@ -18,6 +18,8 @@ DeckVisibility = Literal["private", "team", "org", "public"]
 DeckShareRole = Literal["owner", "editor", "viewer"]
 FlashcardTemplateModelType = Literal["basic", "basic_reverse", "cloze"]
 FlashcardTemplateFieldTarget = Literal["front_template", "back_template", "notes_template", "extra_template"]
+FlashcardCardType = Literal["basic", "basic_reverse", "cloze"]
+FlashcardGenerationType = Literal["basic", "basic_reverse", "cloze", "true_false"]
 
 
 def _default_offset_pagination_aliases(response):
@@ -443,21 +445,60 @@ class FlashcardNextReviewResponse(BaseModel):
     selection_reason: Optional[Literal["learning_due", "review_due", "new", "none"]] = None
 
 
+class FlashcardPlanItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    card_type: FlashcardGenerationType
+    count: int = Field(..., ge=1, le=100)
+
+
 class FlashcardGenerateRequest(BaseModel):
     text: str = Field(..., min_length=1, description="Source text to generate flashcards from")
-    num_cards: int = Field(10, ge=1, le=100, description="Requested number of generated cards")
-    card_type: Literal['basic', 'basic_reverse', 'cloze'] = Field('basic')
+    num_cards: Optional[int] = Field(None, ge=1, le=100, description="Requested number of generated cards")
+    card_type: Optional[FlashcardCardType] = Field(None)
+    card_plan: Optional[list[FlashcardPlanItem]] = None
     difficulty: Literal['easy', 'medium', 'hard', 'mixed'] = Field('mixed')
     focus_topics: list[str] = Field(default_factory=list)
     provider: Optional[str] = Field(None, description="Optional LLM provider override")
     model: Optional[str] = Field(None, description="Optional LLM model override")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _validate_raw_generation_shape(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        has_plan = value.get("card_plan") is not None
+        if has_plan and value.get("card_type") is not None:
+            raise ValueError("card_plan and card_type are mutually exclusive")
+        if has_plan and "num_cards" not in value:
+            raise ValueError("num_cards is required when card_plan is present")
+        return value
+
+    @model_validator(mode="after")
+    def _validate_card_plan(self) -> "FlashcardGenerateRequest":
+        if self.card_plan is not None:
+            if len(self.card_plan) == 0:
+                raise ValueError("card_plan cannot be empty")
+            seen: set[str] = set()
+            for row in self.card_plan:
+                if row.card_type in seen:
+                    raise ValueError("card_plan cannot contain duplicate card_type rows")
+                seen.add(row.card_type)
+            total = sum(row.count for row in self.card_plan)
+            if self.num_cards != total:
+                raise ValueError("num_cards must equal the sum of card_plan counts")
+        else:
+            self.num_cards = self.num_cards or 10
+            self.card_type = self.card_type or "basic"
+        return self
 
 
 class GeneratedFlashcard(BaseModel):
     front: str
     back: str
     tags: list[str] = Field(default_factory=list)
-    model_type: Literal['basic', 'basic_reverse', 'cloze'] = Field('basic')
+    model_type: FlashcardCardType = Field('basic')
+    generation_type: Optional[FlashcardGenerationType] = None
     notes: Optional[str] = None
     extra: Optional[str] = None
 
