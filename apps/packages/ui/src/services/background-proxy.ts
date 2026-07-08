@@ -3,6 +3,7 @@ import { Storage } from "@plasmohq/storage"
 import { createSafeStorage } from "@/utils/safe-storage"
 import { formatErrorMessage } from "@/utils/format-error-message"
 import {
+  parseRetryAfter,
   resolveBrowserRequestTransport,
   tldwRequest
 } from "@/services/tldw/request-core"
@@ -394,9 +395,61 @@ export interface BgRequestInit<
 // In-flight coalescing for idempotent GET requests: when several callers issue
 // the same GET concurrently (a common pattern when many components mount on a
 // page load and each fetches the same resource), share a single network request
-// instead of firing N identical ones. Only concurrent requests are shared — once
-// the promise settles it is removed, so caching/staleness semantics are unchanged.
+// instead of firing N identical ones. Successful requests are not cached; 429s
+// get a brief per-key cooldown so remount/retry loops do not hammer the server.
 const inFlightGetRequests = new Map<string, Promise<unknown>>()
+const rateLimitedGetResults = new Map<
+  string,
+  { expiresAt: number; rejected: boolean; value: unknown }
+>()
+const DEFAULT_RATE_LIMIT_GET_COOLDOWN_MS = 2_000
+const MAX_RATE_LIMIT_GET_COOLDOWN_MS = 60_000
+
+const isRateLimitedResult = (value: unknown): boolean => {
+  const status = extractHttpStatus(value)
+  if (status === 429) return true
+  if (!(value instanceof Error)) return false
+  const message = value.message
+  return /(?:\b429\b|rate limit|too many requests)/i.test(message)
+}
+
+const readRateLimitCooldownMs = (value: unknown): number => {
+  const candidate = value as
+    | {
+        retryAfterMs?: unknown
+        headers?: Record<string, string | undefined>
+      }
+    | null
+    | undefined
+  const retryAfterMs = Number(candidate?.retryAfterMs)
+  if (Number.isFinite(retryAfterMs) && retryAfterMs > 0) {
+    return Math.min(MAX_RATE_LIMIT_GET_COOLDOWN_MS, Math.max(500, retryAfterMs))
+  }
+  const retryAfterHeader =
+    candidate?.headers?.["retry-after"] ?? candidate?.headers?.["Retry-After"]
+  const parsedRetryAfter = parseRetryAfter(retryAfterHeader)
+  if (typeof parsedRetryAfter === "number" && parsedRetryAfter > 0) {
+    return Math.min(
+      MAX_RATE_LIMIT_GET_COOLDOWN_MS,
+      Math.max(500, parsedRetryAfter)
+    )
+  }
+  return DEFAULT_RATE_LIMIT_GET_COOLDOWN_MS
+}
+
+const pruneRateLimitedGetResults = () => {
+  const now = Date.now()
+  for (const [key, entry] of rateLimitedGetResults) {
+    if (entry.expiresAt <= now) {
+      rateLimitedGetResults.delete(key)
+    }
+  }
+  while (rateLimitedGetResults.size > ERROR_LOG_MAX_ENTRIES) {
+    const oldestKey = rateLimitedGetResults.keys().next().value
+    if (!oldestKey) break
+    rateLimitedGetResults.delete(oldestKey)
+  }
+}
 
 type DirectRuntimeStorage = Pick<
   ReturnType<typeof createSafeStorage>,
@@ -484,7 +537,6 @@ export async function bgRequest<
     method === "GET" &&
     !init.body &&
     !init.abortSignal &&
-    !init.returnResponse &&
     !init.responseType &&
     !init.preferDirect &&
     !init.suppressBackendUnavailableEvent &&
@@ -512,6 +564,7 @@ export async function bgRequest<
     noAuth: Object.prototype.hasOwnProperty.call(init, "noAuth")
       ? Boolean(init.noAuth)
       : "__unset__",
+    returnResponse: Boolean(init.returnResponse),
     suppressBackendUnavailableEvent: Boolean(
       init.suppressBackendUnavailableEvent
     ),
@@ -521,13 +574,42 @@ export async function bgRequest<
   if (existing) {
     return existing as Promise<T>
   }
-  const promise = bgRequestImpl<T, P, M>(init).finally(() => {
-    // Only clear the entry if it is still the promise we created — defensive in
-    // case the map handling changes to allow overwrites in the future.
-    if (inFlightGetRequests.get(key) === promise) {
-      inFlightGetRequests.delete(key)
+  const rateLimited = rateLimitedGetResults.get(key)
+  if (rateLimited) {
+    if (rateLimited.expiresAt > Date.now()) {
+      return rateLimited.rejected
+        ? Promise.reject(rateLimited.value)
+        : Promise.resolve(rateLimited.value as T)
     }
-  })
+    rateLimitedGetResults.delete(key)
+  }
+  const rememberRateLimit = (value: unknown, rejected: boolean) => {
+    if (!isRateLimitedResult(value)) return
+    pruneRateLimitedGetResults()
+    rateLimitedGetResults.set(key, {
+      expiresAt: Date.now() + readRateLimitCooldownMs(value),
+      rejected,
+      value
+    })
+  }
+  const promise = bgRequestImpl<T, P, M>(init)
+    .then(
+      (value) => {
+        rememberRateLimit(value, false)
+        return value
+      },
+      (error) => {
+        rememberRateLimit(error, true)
+        throw error
+      }
+    )
+    .finally(() => {
+      // Only clear the entry if it is still the promise we created — defensive in
+      // case the map handling changes to allow overwrites in the future.
+      if (inFlightGetRequests.get(key) === promise) {
+        inFlightGetRequests.delete(key)
+      }
+    })
   inFlightGetRequests.set(key, promise)
   return promise as Promise<T>
 }

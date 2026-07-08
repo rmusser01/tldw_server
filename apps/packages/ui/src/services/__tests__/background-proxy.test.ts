@@ -1996,6 +1996,69 @@ describe("background proxy GET coalescing", () => {
     expect(ra1).toBe(ra2)
   })
 
+  it("coalesces serialized returnResponse GETs", async () => {
+    mocks.sendMessage.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: [{ id: "persona-1" }]
+    })
+    const { bgRequest } = await importProxy()
+
+    const [first, second] = await Promise.all([
+      bgRequest({
+        path: "/api/v1/persona/profiles",
+        method: "GET",
+        returnResponse: true
+      }),
+      bgRequest({
+        path: "/api/v1/persona/profiles",
+        method: "GET",
+        returnResponse: true
+      })
+    ])
+
+    expect(mocks.sendMessage).toHaveBeenCalledTimes(1)
+    expect(first).toBe(second)
+  })
+
+  it("does not coalesce returnResponse GETs with data-only GETs", async () => {
+    mocks.sendMessage.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { ok: true }
+    })
+    const { bgRequest } = await importProxy()
+
+    await Promise.all([
+      bgRequest({
+        path: "/api/v1/persona/profiles",
+        method: "GET",
+        returnResponse: true
+      }),
+      bgRequest({ path: "/api/v1/persona/profiles", method: "GET" })
+    ])
+
+    expect(mocks.sendMessage).toHaveBeenCalledTimes(2)
+  })
+
+  it("reuses a recent rate-limited GET failure instead of bursting", async () => {
+    mocks.sendMessage.mockResolvedValue({
+      ok: false,
+      status: 429,
+      error: "rate_limited"
+    })
+    const { bgRequest } = await importProxy()
+
+    await expect(
+      bgRequest({ path: "/api/v1/persona/profiles", method: "GET" })
+    ).rejects.toMatchObject({ status: 429 })
+    await expect(
+      bgRequest({ path: "/api/v1/persona/profiles", method: "GET" })
+    ).rejects.toMatchObject({ status: 429 })
+
+    expect(mocks.sendMessage).toHaveBeenCalledTimes(1)
+  })
+
   it("does not coalesce POST requests", async () => {
     mocks.sendMessage.mockResolvedValue({ ok: true, status: 200, data: { ok: true } })
     const { bgRequest } = await importProxy()
