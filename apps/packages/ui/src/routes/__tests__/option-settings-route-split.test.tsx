@@ -1,11 +1,11 @@
-import { readFileSync } from "node:fs"
+import { readFile } from "node:fs/promises"
 import { resolve } from "node:path"
 
 import { describe, expect, it } from "vitest"
 
 describe("settings route split", () => {
-  it("registers setup and preferences as separate settings routes", () => {
-    const source = readFileSync(
+  it("registers setup and preferences as separate settings routes", async () => {
+    const source = await readFile(
       resolve(
         __dirname,
         "../option-settings-route-registry.tsx"
@@ -19,12 +19,12 @@ describe("settings route split", () => {
     expect(source).toContain("preferences-settings")
   })
 
-  it("keeps health and processed settings routes inside the shared settings layout", () => {
-    const healthSource = readFileSync(
+  it("keeps health and processed settings routes inside the shared settings layout", async () => {
+    const healthSource = await readFile(
       resolve(__dirname, "../option-settings-health.tsx"),
       "utf8"
     )
-    const processedSource = readFileSync(
+    const processedSource = await readFile(
       resolve(__dirname, "../option-settings-processed.tsx"),
       "utf8"
     )
@@ -33,8 +33,8 @@ describe("settings route split", () => {
     expect(processedSource).toContain("SettingsRoute")
   })
 
-  it("exposes a hosted /settings/data page", () => {
-    const dataPageSource = readFileSync(
+  it("exposes a hosted /settings/data page", async () => {
+    const dataPageSource = await readFile(
       resolve(
         __dirname,
         "../../../../../tldw-frontend/pages/settings/data.tsx"
@@ -46,12 +46,12 @@ describe("settings route split", () => {
     expect(dataPageSource).toContain("SettingsRoute")
   })
 
-  it("lists setup, preferences, and data settings in hosted smoke inventories", () => {
-    const pageMapping = readFileSync(
+  it("lists setup, preferences, and data settings in hosted smoke inventories", async () => {
+    const pageMapping = await readFile(
       resolve(__dirname, "../../../../../tldw-frontend/e2e/page-mapping.ts"),
       "utf8"
     )
-    const pageInventory = readFileSync(
+    const pageInventory = await readFile(
       resolve(
         __dirname,
         "../../../../../tldw-frontend/e2e/smoke/page-inventory.ts"

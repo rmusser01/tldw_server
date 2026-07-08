@@ -1,8 +1,8 @@
 {
   "navigation": {
-    "setupRecovery": "Setup & Recovery",
-    "preferencesWorkflow": "Preferences & Workflow",
-    "dataAdmin": "Data & Administration",
+    "setupRecovery": "Configuration et récupération",
+    "preferencesWorkflow": "Préférences et flux de travail",
+    "dataAdmin": "Données et administration",
     "serverAndAuth": "Serveur et Auth",
     "knowledgeTools": "Outils de connaissances",
     "workspace": "Espace de travail",
@@ -16,11 +16,11 @@
   },
   "healthNav": "Santé",
   "preferencesSettings": {
-    "navTitle": "Preferences",
-    "title": "General preferences"
+    "navTitle": "Préférences",
+    "title": "Préférences générales"
   },
   "setupRecovery": {
-    "title": "Setup & Recovery"
+    "title": "Configuration et récupération"
   },
   "worldBooksNav": "Livres du monde",
   "chatDictionariesNav": "Dictionnaires de chat",
@@ -1673,7 +1673,11 @@
   },
   "quickIngestSettings": {
     "title": "Ingestion rapide",
-    "subtitle": "Configurez les valeurs par défaut, les préréglages et le comportement d'Ingestion rapide."
+    "subtitle": "Configurez les valeurs par défaut, les préréglages et le comportement d'Ingestion rapide.",
+    "ocrDefaults": {
+      "title": "Paramètres OCR par défaut",
+      "description": "Utilisé par les flux d’ingestion qui extraient du texte des images ou documents numérisés."
+    }
   },
   "acpPlaygroundNav": "Atelier ACP",
   "skillsNav": "Compétences",
@@ -1682,5 +1686,38 @@
   },
   "dataManagement": {
     "navTitle": "Gestion des données"
+  },
+  "sidepanelSettings": {
+    "shortcuts": {
+      "title": "Raccourcis des paramètres",
+      "description": "Accédez à la page complète des paramètres qui contrôle ce changement.",
+      "setupRecovery": {
+        "label": "Configuration et récupération",
+        "description": "Connexion, authentification, clés fournisseur, modèles et diagnostics."
+      },
+      "preferences": {
+        "label": "Préférences",
+        "description": "Langue, notifications, persona, tutoriels et recherche web."
+      },
+      "ui": {
+        "label": "Personnalisation de l’interface",
+        "description": "Thème, raccourcis, valeurs d’affichage et comportement visuel."
+      },
+      "dataAdmin": {
+        "label": "Données et administration",
+        "description": "Gestion des données, modération, évaluations et outils d’administration."
+      },
+      "serverAuth": {
+        "label": "Serveur et authentification",
+        "description": "Modifier l’URL du serveur ou la clé API."
+      },
+      "health": {
+        "label": "Diagnostics complets",
+        "description": "Ouvrir les vérifications détaillées du serveur et des sous-systèmes."
+      }
+    },
+    "local": {
+      "title": "Comportement du panneau latéral"
+    }
   }
 }

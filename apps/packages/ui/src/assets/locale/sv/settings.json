@@ -1,8 +1,8 @@
 {
   "navigation": {
-    "setupRecovery": "Setup & Recovery",
-    "preferencesWorkflow": "Preferences & Workflow",
-    "dataAdmin": "Data & Administration",
+    "setupRecovery": "Konfiguration och återställning",
+    "preferencesWorkflow": "Inställningar och arbetsflöde",
+    "dataAdmin": "Data och administration",
     "serverAndAuth": "Server och autentisering",
     "knowledgeTools": "Kunskapsverktyg",
     "workspace": "Arbetsyta",
@@ -16,11 +16,11 @@
   },
   "healthNav": "Hälsa",
   "preferencesSettings": {
-    "navTitle": "Preferences",
-    "title": "General preferences"
+    "navTitle": "Inställningar",
+    "title": "Allmänna inställningar"
   },
   "setupRecovery": {
-    "title": "Setup & Recovery"
+    "title": "Konfiguration och återställning"
   },
   "worldBooksNav": "Världböcker",
   "chatDictionariesNav": "Chatordböcker",
@@ -1672,7 +1672,11 @@
   },
   "quickIngestSettings": {
     "title": "Snabb import",
-    "subtitle": "Konfigurera standardvärden, förinställningar och beteende för snabb import."
+    "subtitle": "Konfigurera standardvärden, förinställningar och beteende för snabb import.",
+    "ocrDefaults": {
+      "title": "OCR-standarder",
+      "description": "Används av importflöden som extraherar text från bilder eller skannade dokument."
+    }
   },
   "acpPlaygroundNav": "ACP-lekplats",
   "skillsNav": "Färdigheter",
@@ -1681,5 +1685,38 @@
   },
   "dataManagement": {
     "navTitle": "Datahantering"
+  },
+  "sidepanelSettings": {
+    "shortcuts": {
+      "title": "Inställningsgenvägar",
+      "description": "Gå till hela inställningssidan som hanterar ändringen.",
+      "setupRecovery": {
+        "label": "Konfiguration och återställning",
+        "description": "Anslutning, autentisering, leverantörsnycklar, modeller och diagnostik."
+      },
+      "preferences": {
+        "label": "Inställningar",
+        "description": "Språk, aviseringar, persona, handledningar och webbsökning."
+      },
+      "ui": {
+        "label": "UI-anpassning",
+        "description": "Tema, genvägar, visningsstandarder och visuellt beteende."
+      },
+      "dataAdmin": {
+        "label": "Data och administration",
+        "description": "Datahantering, moderering, utvärderingar och adminverktyg."
+      },
+      "serverAuth": {
+        "label": "Server och autentisering",
+        "description": "Ändra server-URL eller API-nyckel."
+      },
+      "health": {
+        "label": "Full diagnostik",
+        "description": "Öppna detaljerade server- och undersystemkontroller."
+      }
+    },
+    "local": {
+      "title": "Sidopanelbeteende"
+    }
   }
 }

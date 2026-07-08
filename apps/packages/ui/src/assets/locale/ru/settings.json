@@ -1,8 +1,8 @@
 {
   "navigation": {
-    "setupRecovery": "Setup & Recovery",
-    "preferencesWorkflow": "Preferences & Workflow",
-    "dataAdmin": "Data & Administration",
+    "setupRecovery": "Настройка и восстановление",
+    "preferencesWorkflow": "Предпочтения и рабочий процесс",
+    "dataAdmin": "Данные и администрирование",
     "serverAndAuth": "Сервер и авторизация",
     "knowledgeTools": "Инструменты знаний",
     "workspace": "Рабочее пространство",
@@ -16,11 +16,11 @@
   },
   "healthNav": "Состояние",
   "preferencesSettings": {
-    "navTitle": "Preferences",
-    "title": "General preferences"
+    "navTitle": "Предпочтения",
+    "title": "Общие предпочтения"
   },
   "setupRecovery": {
-    "title": "Setup & Recovery"
+    "title": "Настройка и восстановление"
   },
   "worldBooksNav": "Книги мира",
   "chatDictionariesNav": "Словари чата",
@@ -1672,7 +1672,11 @@
   },
   "quickIngestSettings": {
     "title": "Быстрый импорт",
-    "subtitle": "Настройте значения по умолчанию, пресеты и поведение быстрого импорта."
+    "subtitle": "Настройте значения по умолчанию, пресеты и поведение быстрого импорта.",
+    "ocrDefaults": {
+      "title": "Настройки OCR по умолчанию",
+      "description": "Используется в потоках импорта, которые извлекают текст из изображений или сканированных документов."
+    }
   },
   "acpPlaygroundNav": "Песочница ACP",
   "skillsNav": "Навыки",
@@ -1681,5 +1685,38 @@
   },
   "dataManagement": {
     "navTitle": "Управление данными"
+  },
+  "sidepanelSettings": {
+    "shortcuts": {
+      "title": "Ярлыки настроек",
+      "description": "Перейдите на полную страницу настроек, которая управляет этим изменением.",
+      "setupRecovery": {
+        "label": "Настройка и восстановление",
+        "description": "Подключение, авторизация, ключи провайдеров, модели и диагностика."
+      },
+      "preferences": {
+        "label": "Предпочтения",
+        "description": "Язык, уведомления, персона, обучение и веб-поиск."
+      },
+      "ui": {
+        "label": "Настройка интерфейса",
+        "description": "Тема, ярлыки, параметры отображения и визуальное поведение."
+      },
+      "dataAdmin": {
+        "label": "Данные и администрирование",
+        "description": "Управление данными, модерация, оценки и инструменты администратора."
+      },
+      "serverAuth": {
+        "label": "Сервер и авторизация",
+        "description": "Изменить URL сервера или API-ключ."
+      },
+      "health": {
+        "label": "Полная диагностика",
+        "description": "Открыть подробные проверки сервера и подсистем."
+      }
+    },
+    "local": {
+      "title": "Поведение боковой панели"
+    }
   }
 }

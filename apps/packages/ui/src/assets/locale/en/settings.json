@@ -580,7 +580,11 @@
     "presetHint": "Changes apply the next time you open Quick Ingest.",
     "resetAll": "Reset all presets",
     "advancedHeading": "Advanced options",
-    "advancedHint": "Configure advanced ingest fields for this preset."
+    "advancedHint": "Configure advanced ingest fields for this preset.",
+    "ocrDefaults": {
+      "title": "OCR defaults",
+      "description": "Used by ingest flows that extract text from images or scanned documents."
+    }
   },
   "generalSettings": {
     "title": "General Settings",
@@ -2420,5 +2424,38 @@
     "navTitle": "Data Management",
     "title": "Data Management",
     "description": "Export, import, sync, or reset local extension and WebUI data."
+  },
+  "sidepanelSettings": {
+    "shortcuts": {
+      "title": "Settings shortcuts",
+      "description": "Jump to the full settings page that owns the change.",
+      "setupRecovery": {
+        "label": "Setup & Recovery",
+        "description": "Connection, auth, provider keys, models, and diagnostics."
+      },
+      "preferences": {
+        "label": "Preferences",
+        "description": "Language, notifications, persona, tutorials, and web search."
+      },
+      "ui": {
+        "label": "UI customization",
+        "description": "Theme, shortcuts, display defaults, and visual behavior."
+      },
+      "dataAdmin": {
+        "label": "Data & Administration",
+        "description": "Data management, moderation, evaluations, and admin tools."
+      },
+      "serverAuth": {
+        "label": "Server & auth",
+        "description": "Change the server URL or API key."
+      },
+      "health": {
+        "label": "Full diagnostics",
+        "description": "Open detailed server and subsystem checks."
+      }
+    },
+    "local": {
+      "title": "Sidepanel behavior"
+    }
   }
 }

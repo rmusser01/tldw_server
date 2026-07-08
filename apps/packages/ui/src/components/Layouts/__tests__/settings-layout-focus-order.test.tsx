@@ -13,6 +13,10 @@ vi.mock("react-i18next", () => ({
   }),
 }));
 
+vi.mock("@/config/platform", () => ({
+  isChromeTarget: false,
+}));
+
 vi.mock("../settings-nav", () => ({
   getSettingsNavGroups: () => [
     {
@@ -33,6 +37,11 @@ vi.mock("../settings-nav", () => ({
         {
           to: "/settings/model",
           labelToken: "settings:modelSettings.navTitle",
+          icon: IconStub,
+        },
+        {
+          to: "/settings/chrome",
+          labelToken: "settings:chromeSettingsNav",
           icon: IconStub,
         },
       ],
@@ -142,6 +151,16 @@ describe("settings navigation wayfinding", () => {
     expect(screen.getByTestId("settings-layout-location")).toHaveTextContent(
       "/settings/model",
     );
+  });
+
+  it("does not select a browser-hidden current route in the mobile selector", () => {
+    renderSettingsLayout("/settings/chrome");
+
+    const sectionSelect = screen.getByLabelText("Settings section");
+    expect(sectionSelect).toHaveValue("");
+    expect(
+      screen.getByRole("option", { name: "settings:chromeSettingsNav" }),
+    ).toHaveValue("");
   });
 
   it("renders beta badges by default and lets users dismiss them", async () => {

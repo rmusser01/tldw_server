@@ -1,8 +1,8 @@
 {
   "navigation": {
-    "setupRecovery": "Setup & Recovery",
-    "preferencesWorkflow": "Preferences & Workflow",
-    "dataAdmin": "Data & Administration",
+    "setupRecovery": "설정 및 복구",
+    "preferencesWorkflow": "기본 설정 및 워크플로",
+    "dataAdmin": "데이터 및 관리",
     "serverAndAuth": "서버 및 인증",
     "knowledgeTools": "지식 도구",
     "workspace": "작업 공간",
@@ -16,11 +16,11 @@
   },
   "healthNav": "상태",
   "preferencesSettings": {
-    "navTitle": "Preferences",
-    "title": "General preferences"
+    "navTitle": "기본 설정",
+    "title": "일반 기본 설정"
   },
   "setupRecovery": {
-    "title": "Setup & Recovery"
+    "title": "설정 및 복구"
   },
   "worldBooksNav": "월드북",
   "chatDictionariesNav": "채팅 사전",
@@ -1675,7 +1675,11 @@
   },
   "quickIngestSettings": {
     "title": "빠른 가져오기",
-    "subtitle": "빠른 가져오기의 기본값, 프리셋, 동작을 설정합니다."
+    "subtitle": "빠른 가져오기의 기본값, 프리셋, 동작을 설정합니다.",
+    "ocrDefaults": {
+      "title": "OCR 기본값",
+      "description": "이미지 또는 스캔 문서에서 텍스트를 추출하는 수집 흐름에 사용됩니다."
+    }
   },
   "acpPlaygroundNav": "ACP 플레이그라운드",
   "skillsNav": "스킬",
@@ -1684,5 +1688,38 @@
   },
   "dataManagement": {
     "navTitle": "데이터 관리"
+  },
+  "sidepanelSettings": {
+    "shortcuts": {
+      "title": "설정 바로가기",
+      "description": "변경을 관리하는 전체 설정 페이지로 이동합니다.",
+      "setupRecovery": {
+        "label": "설정 및 복구",
+        "description": "연결, 인증, 공급자 키, 모델 및 진단."
+      },
+      "preferences": {
+        "label": "기본 설정",
+        "description": "언어, 알림, 페르소나, 튜토리얼 및 웹 검색."
+      },
+      "ui": {
+        "label": "UI 사용자 지정",
+        "description": "테마, 바로가기, 표시 기본값 및 시각 동작."
+      },
+      "dataAdmin": {
+        "label": "데이터 및 관리",
+        "description": "데이터 관리, 중재, 평가 및 관리자 도구."
+      },
+      "serverAuth": {
+        "label": "서버 및 인증",
+        "description": "서버 URL 또는 API 키를 변경합니다."
+      },
+      "health": {
+        "label": "전체 진단",
+        "description": "자세한 서버 및 하위 시스템 검사를 엽니다."
+      }
+    },
+    "local": {
+      "title": "사이드패널 동작"
+    }
   }
 }

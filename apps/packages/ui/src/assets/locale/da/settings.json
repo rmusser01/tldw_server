@@ -1,8 +1,8 @@
 {
   "navigation": {
-    "setupRecovery": "Setup & Recovery",
-    "preferencesWorkflow": "Preferences & Workflow",
-    "dataAdmin": "Data & Administration",
+    "setupRecovery": "Opsætning og gendannelse",
+    "preferencesWorkflow": "Præferencer og arbejdsgang",
+    "dataAdmin": "Data og administration",
     "serverAndAuth": "Server og godkendelse",
     "knowledgeTools": "Videnværktøjer",
     "workspace": "Arbejdsområde",
@@ -16,11 +16,11 @@
   },
   "healthNav": "Sundhed",
   "preferencesSettings": {
-    "navTitle": "Preferences",
-    "title": "General preferences"
+    "navTitle": "Præferencer",
+    "title": "Generelle præferencer"
   },
   "setupRecovery": {
-    "title": "Setup & Recovery"
+    "title": "Opsætning og gendannelse"
   },
   "worldBooksNav": "Verdensbøger",
   "chatDictionariesNav": "Chatordbøger",
@@ -1672,7 +1672,11 @@
   },
   "quickIngestSettings": {
     "title": "Hurtig import",
-    "subtitle": "Konfigurer standarder, forudindstillinger og adfærd for hurtig import."
+    "subtitle": "Konfigurer standarder, forudindstillinger og adfærd for hurtig import.",
+    "ocrDefaults": {
+      "title": "OCR-standarder",
+      "description": "Bruges af importflows, der udtrækker tekst fra billeder eller scannede dokumenter."
+    }
   },
   "acpPlaygroundNav": "ACP-legeplads",
   "skillsNav": "Færdigheder",
@@ -1681,5 +1685,38 @@
   },
   "dataManagement": {
     "navTitle": "Datahåndtering"
+  },
+  "sidepanelSettings": {
+    "shortcuts": {
+      "title": "Indstillingsgenveje",
+      "description": "Hop til den fulde indstillingsside, der ejer ændringen.",
+      "setupRecovery": {
+        "label": "Opsætning og gendannelse",
+        "description": "Forbindelse, godkendelse, udbydernøgler, modeller og diagnostik."
+      },
+      "preferences": {
+        "label": "Præferencer",
+        "description": "Sprog, meddelelser, persona, vejledninger og websøgning."
+      },
+      "ui": {
+        "label": "UI-tilpasning",
+        "description": "Tema, genveje, visningsstandarder og visuel adfærd."
+      },
+      "dataAdmin": {
+        "label": "Data og administration",
+        "description": "Datahåndtering, moderation, evalueringer og adminværktøjer."
+      },
+      "serverAuth": {
+        "label": "Server og godkendelse",
+        "description": "Skift server-URL eller API-nøgle."
+      },
+      "health": {
+        "label": "Fuld diagnostik",
+        "description": "Åbn detaljerede server- og undersystemtjek."
+      }
+    },
+    "local": {
+      "title": "Sidepaneladfærd"
+    }
   }
 }

@@ -1,8 +1,8 @@
 {
   "navigation": {
-    "setupRecovery": "Setup & Recovery",
-    "preferencesWorkflow": "Preferences & Workflow",
-    "dataAdmin": "Data & Administration",
+    "setupRecovery": "セットアップと復旧",
+    "preferencesWorkflow": "設定とワークフロー",
+    "dataAdmin": "データと管理",
     "serverAndAuth": "サーバーと認証",
     "knowledgeTools": "ナレッジツール",
     "workspace": "ワークスペース",
@@ -16,11 +16,11 @@
   },
   "healthNav": "ヘルス",
   "preferencesSettings": {
-    "navTitle": "Preferences",
-    "title": "General preferences"
+    "navTitle": "設定",
+    "title": "一般設定"
   },
   "setupRecovery": {
-    "title": "Setup & Recovery"
+    "title": "セットアップと復旧"
   },
   "worldBooksNav": "ワールドブック",
   "chatDictionariesNav": "チャット辞書",
@@ -1675,7 +1675,11 @@
   },
   "quickIngestSettings": {
     "title": "クイック取り込み",
-    "subtitle": "クイック取り込みの既定値、プリセット、動作を設定します。"
+    "subtitle": "クイック取り込みの既定値、プリセット、動作を設定します。",
+    "ocrDefaults": {
+      "title": "OCR の既定値",
+      "description": "画像やスキャン文書からテキストを抽出する取り込みフローで使用されます。"
+    }
   },
   "acpPlaygroundNav": "ACPプレイグラウンド",
   "skillsNav": "スキル",
@@ -1684,5 +1688,38 @@
   },
   "dataManagement": {
     "navTitle": "データ管理"
+  },
+  "sidepanelSettings": {
+    "shortcuts": {
+      "title": "設定ショートカット",
+      "description": "変更を管理する完全な設定ページへ移動します。",
+      "setupRecovery": {
+        "label": "セットアップと復旧",
+        "description": "接続、認証、プロバイダーキー、モデル、診断。"
+      },
+      "preferences": {
+        "label": "設定",
+        "description": "言語、通知、ペルソナ、チュートリアル、Web 検索。"
+      },
+      "ui": {
+        "label": "UI カスタマイズ",
+        "description": "テーマ、ショートカット、表示既定値、視覚的な動作。"
+      },
+      "dataAdmin": {
+        "label": "データと管理",
+        "description": "データ管理、モデレーション、評価、管理ツール。"
+      },
+      "serverAuth": {
+        "label": "サーバーと認証",
+        "description": "サーバー URL または API キーを変更します。"
+      },
+      "health": {
+        "label": "完全な診断",
+        "description": "サーバーとサブシステムの詳細チェックを開きます。"
+      }
+    },
+    "local": {
+      "title": "サイドパネルの動作"
+    }
   }
 }

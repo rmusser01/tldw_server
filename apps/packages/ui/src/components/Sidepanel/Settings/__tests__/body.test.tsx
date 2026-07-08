@@ -1,6 +1,3 @@
-import { readFileSync } from "node:fs"
-import { resolve } from "node:path"
-
 import { render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
@@ -21,18 +18,22 @@ vi.mock("@/components/Common/Settings/ThemePicker", () => ({
   ThemePicker: () => <div>Theme picker</div>
 }))
 
-const originalBrowser = (globalThis as typeof globalThis & { browser?: unknown })
-  .browser
+const runtimeGlobals = globalThis as typeof globalThis & {
+  browser?: unknown
+  chrome?: unknown
+}
+const originalBrowser = runtimeGlobals.browser
+const originalChrome = runtimeGlobals.chrome
 
 describe("SettingsBody", () => {
   afterEach(() => {
-    ;(globalThis as typeof globalThis & { browser?: unknown }).browser =
-      originalBrowser
+    runtimeGlobals.browser = originalBrowser
+    runtimeGlobals.chrome = originalChrome
   })
 
-  it("renders compact operational shortcuts without embedding provider probing", () => {
-    ;(globalThis as typeof globalThis & { browser?: unknown }).browser =
-      undefined
+  it("renders compact operational shortcuts", () => {
+    runtimeGlobals.browser = undefined
+    runtimeGlobals.chrome = undefined
 
     render(<SettingsBody />)
 
@@ -53,17 +54,16 @@ describe("SettingsBody", () => {
       "href",
       "/settings/ui"
     )
-    expect(screen.getByText("Theme picker")).toBeInTheDocument()
-
-    const source = readFileSync(
-      resolve(__dirname, "../body.tsx"),
-      "utf8"
+    expect(screen.getByRole("link", { name: "Data & Administration" })).toHaveAttribute(
+      "href",
+      "/settings/data"
     )
-    expect(source).not.toContain("defaultEmbeddingModelForRag")
+    expect(screen.getByText("Theme picker")).toBeInTheDocument()
+    expect(screen.queryByText(/embedding defaults/i)).not.toBeInTheDocument()
   })
 
   it("opens full options routes when rendered in an extension runtime", () => {
-    ;(globalThis as typeof globalThis & { browser?: unknown }).browser = {
+    runtimeGlobals.browser = {
       runtime: {
         getURL: vi.fn((path: string) => `chrome-extension://test${path}`)
       }
@@ -78,6 +78,22 @@ describe("SettingsBody", () => {
     expect(screen.getByRole("link", { name: "Preferences" })).toHaveAttribute(
       "href",
       "chrome-extension://test/options.html#/settings/preferences"
+    )
+  })
+
+  it("opens full options routes when only chrome.runtime is available", () => {
+    runtimeGlobals.browser = undefined
+    runtimeGlobals.chrome = {
+      runtime: {
+        getURL: vi.fn((path: string) => `chrome-extension://chrome-only${path}`)
+      }
+    }
+
+    render(<SettingsBody />)
+
+    expect(screen.getByRole("link", { name: "Setup & Recovery" })).toHaveAttribute(
+      "href",
+      "chrome-extension://chrome-only/options.html#/settings"
     )
   })
 })

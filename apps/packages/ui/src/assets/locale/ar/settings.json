@@ -1,8 +1,8 @@
 {
   "navigation": {
-    "setupRecovery": "Setup & Recovery",
-    "preferencesWorkflow": "Preferences & Workflow",
-    "dataAdmin": "Data & Administration",
+    "setupRecovery": "الإعداد والاسترداد",
+    "preferencesWorkflow": "التفضيلات وسير العمل",
+    "dataAdmin": "البيانات والإدارة",
     "serverAndAuth": "الخادم والمصادقة",
     "knowledgeTools": "أدوات المعرفة",
     "workspace": "مساحة العمل",
@@ -16,11 +16,11 @@
   },
   "healthNav": "الحالة",
   "preferencesSettings": {
-    "navTitle": "Preferences",
-    "title": "General preferences"
+    "navTitle": "التفضيلات",
+    "title": "التفضيلات العامة"
   },
   "setupRecovery": {
-    "title": "Setup & Recovery"
+    "title": "الإعداد والاسترداد"
   },
   "worldBooksNav": "كتب العوالم",
   "chatDictionariesNav": "قواميس الدردشة",
@@ -1672,7 +1672,11 @@
   },
   "quickIngestSettings": {
     "title": "الإدخال السريع",
-    "subtitle": "اضبط القيم الافتراضية والإعدادات المسبقة وسلوك الإدخال السريع."
+    "subtitle": "اضبط القيم الافتراضية والإعدادات المسبقة وسلوك الإدخال السريع.",
+    "ocrDefaults": {
+      "title": "إعدادات OCR الافتراضية",
+      "description": "تُستخدم في مسارات الإدخال التي تستخرج النص من الصور أو المستندات الممسوحة ضوئيًا."
+    }
   },
   "acpPlaygroundNav": "ساحة ACP",
   "skillsNav": "المهارات",
@@ -1681,5 +1685,38 @@
   },
   "dataManagement": {
     "navTitle": "إدارة البيانات"
+  },
+  "sidepanelSettings": {
+    "shortcuts": {
+      "title": "اختصارات الإعدادات",
+      "description": "انتقل إلى صفحة الإعدادات الكاملة التي تملك هذا التغيير.",
+      "setupRecovery": {
+        "label": "الإعداد والاسترداد",
+        "description": "الاتصال والمصادقة ومفاتيح المزوّدين والنماذج والتشخيصات."
+      },
+      "preferences": {
+        "label": "التفضيلات",
+        "description": "اللغة والإشعارات والشخصية والبرامج التعليمية وبحث الويب."
+      },
+      "ui": {
+        "label": "تخصيص الواجهة",
+        "description": "السمة والاختصارات وافتراضيات العرض والسلوك المرئي."
+      },
+      "dataAdmin": {
+        "label": "البيانات والإدارة",
+        "description": "إدارة البيانات والمراجعة والتقييمات وأدوات الإدارة."
+      },
+      "serverAuth": {
+        "label": "الخادم والمصادقة",
+        "description": "غيّر عنوان URL للخادم أو مفتاح API."
+      },
+      "health": {
+        "label": "التشخيصات الكاملة",
+        "description": "افتح فحوصات مفصلة للخادم والأنظمة الفرعية."
+      }
+    },
+    "local": {
+      "title": "سلوك اللوحة الجانبية"
+    }
   }
 }

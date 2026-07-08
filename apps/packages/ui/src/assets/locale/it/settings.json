@@ -1,8 +1,8 @@
 {
   "navigation": {
-    "setupRecovery": "Setup & Recovery",
-    "preferencesWorkflow": "Preferences & Workflow",
-    "dataAdmin": "Data & Administration",
+    "setupRecovery": "Configurazione e ripristino",
+    "preferencesWorkflow": "Preferenze e flusso di lavoro",
+    "dataAdmin": "Dati e amministrazione",
     "serverAndAuth": "Server e Auth",
     "knowledgeTools": "Strumenti di conoscenza",
     "workspace": "Area di lavoro",
@@ -16,11 +16,11 @@
   },
   "healthNav": "Stato",
   "preferencesSettings": {
-    "navTitle": "Preferences",
-    "title": "General preferences"
+    "navTitle": "Preferenze",
+    "title": "Preferenze generali"
   },
   "setupRecovery": {
-    "title": "Setup & Recovery"
+    "title": "Configurazione e ripristino"
   },
   "worldBooksNav": "Libri del mondo",
   "chatDictionariesNav": "Dizionari chat",
@@ -1683,7 +1683,11 @@
   },
   "quickIngestSettings": {
     "title": "Importazione rapida",
-    "subtitle": "Configura valori predefiniti, preset e comportamento di Importazione rapida."
+    "subtitle": "Configura valori predefiniti, preset e comportamento di Importazione rapida.",
+    "ocrDefaults": {
+      "title": "Impostazioni OCR predefinite",
+      "description": "Usate dai flussi di acquisizione che estraggono testo da immagini o documenti scansionati."
+    }
   },
   "acpPlaygroundNav": "Area ACP",
   "skillsNav": "Competenze",
@@ -1692,5 +1696,38 @@
   },
   "dataManagement": {
     "navTitle": "Gestione dati"
+  },
+  "sidepanelSettings": {
+    "shortcuts": {
+      "title": "Scorciatoie impostazioni",
+      "description": "Vai alla pagina completa delle impostazioni che gestisce la modifica.",
+      "setupRecovery": {
+        "label": "Configurazione e ripristino",
+        "description": "Connessione, autenticazione, chiavi provider, modelli e diagnostica."
+      },
+      "preferences": {
+        "label": "Preferenze",
+        "description": "Lingua, notifiche, persona, tutorial e ricerca web."
+      },
+      "ui": {
+        "label": "Personalizzazione UI",
+        "description": "Tema, scorciatoie, valori di visualizzazione e comportamento visivo."
+      },
+      "dataAdmin": {
+        "label": "Dati e amministrazione",
+        "description": "Gestione dati, moderazione, valutazioni e strumenti admin."
+      },
+      "serverAuth": {
+        "label": "Server e autenticazione",
+        "description": "Modifica URL del server o chiave API."
+      },
+      "health": {
+        "label": "Diagnostica completa",
+        "description": "Apri controlli dettagliati di server e sottosistemi."
+      }
+    },
+    "local": {
+      "title": "Comportamento del pannello laterale"
+    }
   }
 }

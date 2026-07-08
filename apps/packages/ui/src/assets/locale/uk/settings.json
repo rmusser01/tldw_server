@@ -1,8 +1,8 @@
 {
   "navigation": {
-    "setupRecovery": "Setup & Recovery",
-    "preferencesWorkflow": "Preferences & Workflow",
-    "dataAdmin": "Data & Administration",
+    "setupRecovery": "Налаштування та відновлення",
+    "preferencesWorkflow": "Уподобання та робочий процес",
+    "dataAdmin": "Дані та адміністрування",
     "serverAndAuth": "Сервер та автентифікація",
     "knowledgeTools": "Інструменти знань",
     "workspace": "Робочий простір",
@@ -16,11 +16,11 @@
   },
   "healthNav": "Стан",
   "preferencesSettings": {
-    "navTitle": "Preferences",
-    "title": "General preferences"
+    "navTitle": "Уподобання",
+    "title": "Загальні уподобання"
   },
   "setupRecovery": {
-    "title": "Setup & Recovery"
+    "title": "Налаштування та відновлення"
   },
   "worldBooksNav": "Книги світу",
   "chatDictionariesNav": "Словники чату",
@@ -1672,7 +1672,11 @@
   },
   "quickIngestSettings": {
     "title": "Швидке додавання",
-    "subtitle": "Налаштуйте значення за замовчуванням, пресети та поведінку швидкого додавання."
+    "subtitle": "Налаштуйте значення за замовчуванням, пресети та поведінку швидкого додавання.",
+    "ocrDefaults": {
+      "title": "Типові параметри OCR",
+      "description": "Використовується потоками імпорту, які витягують текст із зображень або сканованих документів."
+    }
   },
   "acpPlaygroundNav": "Пісочниця ACP",
   "skillsNav": "Навички",
@@ -1681,5 +1685,38 @@
   },
   "dataManagement": {
     "navTitle": "Керування даними"
+  },
+  "sidepanelSettings": {
+    "shortcuts": {
+      "title": "Ярлики налаштувань",
+      "description": "Перейдіть на повну сторінку налаштувань, яка відповідає за цю зміну.",
+      "setupRecovery": {
+        "label": "Налаштування та відновлення",
+        "description": "Підключення, автентифікація, ключі провайдерів, моделі й діагностика."
+      },
+      "preferences": {
+        "label": "Уподобання",
+        "description": "Мова, сповіщення, персона, навчання та вебпошук."
+      },
+      "ui": {
+        "label": "Налаштування інтерфейсу",
+        "description": "Тема, ярлики, типові параметри відображення та візуальна поведінка."
+      },
+      "dataAdmin": {
+        "label": "Дані та адміністрування",
+        "description": "Керування даними, модерація, оцінювання й адміністративні інструменти."
+      },
+      "serverAuth": {
+        "label": "Сервер та автентифікація",
+        "description": "Змінити URL сервера або ключ API."
+      },
+      "health": {
+        "label": "Повна діагностика",
+        "description": "Відкрити детальні перевірки сервера й підсистем."
+      }
+    },
+    "local": {
+      "title": "Поведінка бокової панелі"
+    }
   }
 }

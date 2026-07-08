@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { SetupRecoverySettings } from "../setup-recovery-settings"
 
 const mocks = vi.hoisted(() => ({
+  modalError: vi.fn(),
   modalConfirm: vi.fn(),
   navigate: vi.fn(),
   restartOnboarding: vi.fn(async () => undefined)
@@ -12,6 +13,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("antd", () => ({
   Modal: {
+    error: mocks.modalError,
     confirm: mocks.modalConfirm
   }
 }))
@@ -65,9 +67,11 @@ vi.mock("@plasmohq/storage/hook", () => ({
 
 describe("SetupRecoverySettings", () => {
   beforeEach(() => {
+    mocks.modalError.mockClear()
     mocks.modalConfirm.mockClear()
     mocks.navigate.mockClear()
     mocks.restartOnboarding.mockClear()
+    mocks.restartOnboarding.mockResolvedValue(undefined)
   })
 
   it("shows recovery rows with specialist links and no raw diagnostics payload", () => {
@@ -116,5 +120,32 @@ describe("SetupRecoverySettings", () => {
 
     expect(mocks.restartOnboarding).toHaveBeenCalledTimes(1)
     expect(mocks.navigate).toHaveBeenCalledWith("/")
+  })
+
+  it("shows an error and stays put when restarting onboarding fails", async () => {
+    mocks.restartOnboarding.mockRejectedValueOnce(new Error("failed"))
+
+    render(
+      <MemoryRouter>
+        <SetupRecoverySettings />
+      </MemoryRouter>
+    )
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /restart onboarding/i })
+    )
+
+    const confirmOptions = mocks.modalConfirm.mock.calls[0]?.[0] as {
+      onOk?: () => Promise<void> | void
+    }
+
+    await confirmOptions.onOk?.()
+
+    expect(mocks.navigate).not.toHaveBeenCalled()
+    expect(mocks.modalError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Restart failed"
+      })
+    )
   })
 })

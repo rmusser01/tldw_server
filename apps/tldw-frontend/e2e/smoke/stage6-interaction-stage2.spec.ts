@@ -395,42 +395,4 @@ test.describe('Stage 6 interaction stage 2 positive regressions', () => {
     await expect(activeSettingsLink).toBeVisible({ timeout: LOAD_TIMEOUT });
   });
 
-  test('settings alias and mobile section selector keep route context clear', async ({
-    page,
-  }) => {
-    await seedAuth(page);
-
-    await page.goto('/settings/image-gen', {
-      waitUntil: 'domcontentloaded',
-      timeout: LOAD_TIMEOUT,
-    });
-    await waitForAppShell(page, LOAD_TIMEOUT);
-    await page.waitForURL((url) => url.pathname === '/settings/image-generation', {
-      timeout: LOAD_TIMEOUT,
-    });
-
-    await expect(
-      page.getByTestId('settings-nav-link--settings-image-generation')
-    ).toHaveAttribute('aria-current', 'page');
-    await expect(
-      page.locator('[data-testid^="settings-nav-link-"][aria-current="page"]')
-    ).toHaveCount(1);
-
-    await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto('/settings', {
-      waitUntil: 'domcontentloaded',
-      timeout: LOAD_TIMEOUT,
-    });
-    await waitForAppShell(page, LOAD_TIMEOUT);
-
-    await expect(
-      page.getByRole('heading', { level: 1, name: /setup & recovery/i })
-    ).toBeVisible({ timeout: LOAD_TIMEOUT });
-    await expect(page.getByTestId('settings-nav-select')).toBeVisible({
-      timeout: LOAD_TIMEOUT,
-    });
-    await expect(
-      page.getByTestId('settings-nav-link--settings-preferences')
-    ).toBeHidden();
-  });
 });

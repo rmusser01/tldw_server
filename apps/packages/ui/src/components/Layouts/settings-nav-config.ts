@@ -91,7 +91,7 @@ export const SETTINGS_ROUTE_NAV_ITEMS: SettingsNavRouteMeta[] = [
     group: "dataAdmin",
     labelToken: "settings:mcpHubNav",
     icon: ServerIcon,
-    order: 5
+    order: 8
   },
   {
     path: "/settings/prompt",
@@ -240,13 +240,13 @@ export const SETTINGS_ROUTE_NAV_ITEMS: SettingsNavRouteMeta[] = [
     group: "dataAdmin",
     labelToken: "settings:familyGuardrailsWizardNav",
     icon: Users,
-    order: 2
+    order: 7
   },
   {
     path: "/settings/guardian",
     group: "dataAdmin",
     labelToken: "settings:guardianNav",
     icon: Eye,
-    order: 1
+    order: 6
   }
 ]

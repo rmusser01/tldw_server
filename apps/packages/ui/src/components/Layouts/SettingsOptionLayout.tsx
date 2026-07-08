@@ -103,6 +103,10 @@ export const SettingsLayout = ({ children }: { children: React.ReactNode }) => {
   const currentNavItem = React.useMemo(() => {
     return resolveCurrentSettingsNavItem(location.pathname, settingsNavGroups);
   }, [location.pathname, settingsNavGroups]);
+  const mobileCurrentNavItem =
+    currentNavItem && !shouldHideForBrowser(currentNavItem)
+      ? currentNavItem
+      : null;
 
   const currentBreadcrumbLabel = currentNavItem
     ? t(currentNavItem.labelToken)
@@ -168,7 +172,7 @@ export const SettingsLayout = ({ children }: { children: React.ReactNode }) => {
                   </label>
                   <select
                     id="settings-nav-select"
-                    value={currentNavItem?.to ?? ""}
+                    value={mobileCurrentNavItem?.to ?? ""}
                     onChange={(event) => {
                       if (event.currentTarget.value) {
                         navigate(event.currentTarget.value);
@@ -177,7 +181,7 @@ export const SettingsLayout = ({ children }: { children: React.ReactNode }) => {
                     className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text"
                     data-testid="settings-nav-select"
                   >
-                    {currentNavItem ? null : (
+                    {mobileCurrentNavItem ? null : (
                       <option value="">{routeHeadingLabel}</option>
                     )}
                     {mobileSettingsNavGroups.map((group) => (

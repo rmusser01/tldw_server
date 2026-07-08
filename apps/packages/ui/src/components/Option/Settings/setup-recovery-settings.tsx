@@ -133,8 +133,21 @@ export const SetupRecoverySettings = () => {
       ),
       okText: t("setupRecovery.restartOnboarding.confirm", "Restart"),
       onOk: async () => {
-        await restartOnboarding()
-        navigate("/")
+        try {
+          await restartOnboarding()
+          navigate("/")
+        } catch {
+          Modal.error({
+            content: t(
+              "setupRecovery.restartOnboarding.errorDescription",
+              "Could not restart onboarding. Please try again."
+            ),
+            title: t(
+              "setupRecovery.restartOnboarding.errorTitle",
+              "Restart failed"
+            )
+          })
+        }
       },
       title: t(
         "setupRecovery.restartOnboarding.confirmTitle",

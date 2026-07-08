@@ -1,8 +1,8 @@
 {
   "navigation": {
-    "setupRecovery": "Setup & Recovery",
-    "preferencesWorkflow": "Preferences & Workflow",
-    "dataAdmin": "Data & Administration",
+    "setupRecovery": "راه‌اندازی و بازیابی",
+    "preferencesWorkflow": "ترجیحات و گردش کار",
+    "dataAdmin": "داده‌ها و مدیریت",
     "serverAndAuth": "سرور و احراز هویت",
     "knowledgeTools": "ابزارهای دانش",
     "workspace": "محیط کار",
@@ -16,11 +16,11 @@
   },
   "healthNav": "سلامت",
   "preferencesSettings": {
-    "navTitle": "Preferences",
-    "title": "General preferences"
+    "navTitle": "ترجیحات",
+    "title": "ترجیحات عمومی"
   },
   "setupRecovery": {
-    "title": "Setup & Recovery"
+    "title": "راه‌اندازی و بازیابی"
   },
   "worldBooksNav": "کتاب‌های جهان",
   "chatDictionariesNav": "واژه‌نامه‌های چت",
@@ -1672,7 +1672,11 @@
   },
   "quickIngestSettings": {
     "title": "ورود سریع",
-    "subtitle": "پیش‌فرض‌ها، پیش‌تنظیم‌ها و رفتار ورود سریع را پیکربندی کنید."
+    "subtitle": "پیش‌فرض‌ها، پیش‌تنظیم‌ها و رفتار ورود سریع را پیکربندی کنید.",
+    "ocrDefaults": {
+      "title": "پیش‌فرض‌های OCR",
+      "description": "در جریان‌های ورود که متن را از تصاویر یا اسناد اسکن‌شده استخراج می‌کنند استفاده می‌شود."
+    }
   },
   "acpPlaygroundNav": "محیط آزمایشی ACP",
   "skillsNav": "مهارت‌ها",
@@ -1681,5 +1685,38 @@
   },
   "dataManagement": {
     "navTitle": "مدیریت داده"
+  },
+  "sidepanelSettings": {
+    "shortcuts": {
+      "title": "میانبرهای تنظیمات",
+      "description": "به صفحه کامل تنظیماتی بروید که مالک این تغییر است.",
+      "setupRecovery": {
+        "label": "راه‌اندازی و بازیابی",
+        "description": "اتصال، احراز هویت، کلیدهای ارائه‌دهنده، مدل‌ها و عیب‌یابی."
+      },
+      "preferences": {
+        "label": "ترجیحات",
+        "description": "زبان، اعلان‌ها، شخصیت، آموزش‌ها و جستجوی وب."
+      },
+      "ui": {
+        "label": "سفارشی‌سازی رابط کاربری",
+        "description": "پوسته، میانبرها، پیش‌فرض‌های نمایش و رفتار بصری."
+      },
+      "dataAdmin": {
+        "label": "داده‌ها و مدیریت",
+        "description": "مدیریت داده، نظارت، ارزیابی‌ها و ابزارهای مدیریتی."
+      },
+      "serverAuth": {
+        "label": "سرور و احراز هویت",
+        "description": "نشانی سرور یا کلید API را تغییر دهید."
+      },
+      "health": {
+        "label": "عیب‌یابی کامل",
+        "description": "بررسی‌های دقیق سرور و زیرسیستم‌ها را باز کنید."
+      }
+    },
+    "local": {
+      "title": "رفتار پنل کناری"
+    }
   }
 }

@@ -3,46 +3,59 @@ import { useTranslation } from "react-i18next"
 import { useStorage } from "@plasmohq/storage/hook"
 
 import { ThemePicker } from "@/components/Common/Settings/ThemePicker"
+import { getBrowserRuntime } from "@/utils/browser-runtime"
 
 const shortcuts = [
   {
     path: "/settings",
-    label: "Setup & Recovery",
-    description: "Connection, auth, provider keys, models, and diagnostics."
+    labelKey: "sidepanelSettings.shortcuts.setupRecovery.label",
+    labelDefault: "Setup & Recovery",
+    descriptionKey: "sidepanelSettings.shortcuts.setupRecovery.description",
+    descriptionDefault:
+      "Connection, auth, provider keys, models, and diagnostics."
   },
   {
     path: "/settings/preferences",
-    label: "Preferences",
-    description: "Language, notifications, persona, tutorials, and web search."
+    labelKey: "sidepanelSettings.shortcuts.preferences.label",
+    labelDefault: "Preferences",
+    descriptionKey: "sidepanelSettings.shortcuts.preferences.description",
+    descriptionDefault:
+      "Language, notifications, persona, tutorials, and web search."
   },
   {
     path: "/settings/ui",
-    label: "UI customization",
-    description: "Theme, shortcuts, display defaults, and visual behavior."
+    labelKey: "sidepanelSettings.shortcuts.ui.label",
+    labelDefault: "UI customization",
+    descriptionKey: "sidepanelSettings.shortcuts.ui.description",
+    descriptionDefault: "Theme, shortcuts, display defaults, and visual behavior."
+  },
+  {
+    path: "/settings/data",
+    labelKey: "sidepanelSettings.shortcuts.dataAdmin.label",
+    labelDefault: "Data & Administration",
+    descriptionKey: "sidepanelSettings.shortcuts.dataAdmin.description",
+    descriptionDefault:
+      "Data management, moderation, evaluations, and admin tools."
   },
   {
     path: "/settings/tldw",
-    label: "Server & auth",
-    description: "Change the server URL or API key."
+    labelKey: "sidepanelSettings.shortcuts.serverAuth.label",
+    labelDefault: "Server & auth",
+    descriptionKey: "sidepanelSettings.shortcuts.serverAuth.description",
+    descriptionDefault: "Change the server URL or API key."
   },
   {
     path: "/settings/health",
-    label: "Full diagnostics",
-    description: "Open detailed server and subsystem checks."
+    labelKey: "sidepanelSettings.shortcuts.health.label",
+    labelDefault: "Full diagnostics",
+    descriptionKey: "sidepanelSettings.shortcuts.health.description",
+    descriptionDefault: "Open detailed server and subsystem checks."
   }
 ] as const
 
-type BrowserRuntimeGlobal = typeof globalThis & {
-  browser?: {
-    runtime?: {
-      getURL?: (path: string) => string
-    }
-  }
-}
-
 const resolveOptionsHref = (path: string) => {
   try {
-    const runtime = (globalThis as BrowserRuntimeGlobal).browser?.runtime
+    const runtime = getBrowserRuntime()
     if (runtime?.getURL) {
       return runtime.getURL(`/options.html#${path}`)
     }
@@ -77,21 +90,29 @@ export const SettingsBody = () => {
           </p>
         </div>
         <div className="space-y-2">
-          {shortcuts.map((shortcut) => (
-            <a
-              aria-label={shortcut.label}
-              className="block rounded-md border border-border bg-surface p-3 text-text transition hover:bg-surface2"
-              href={resolveOptionsHref(shortcut.path)}
-              key={shortcut.path}
-              rel="noreferrer"
-              target="_blank"
-            >
-              <span className="text-sm font-medium">{shortcut.label}</span>
-              <span className="mt-1 block text-xs text-text-muted">
-                {shortcut.description}
-              </span>
-            </a>
-          ))}
+          {shortcuts.map((shortcut) => {
+            const label = t(shortcut.labelKey, shortcut.labelDefault)
+            const description = t(
+              shortcut.descriptionKey,
+              shortcut.descriptionDefault
+            )
+
+            return (
+              <a
+                aria-label={label}
+                className="block rounded-md border border-border bg-surface p-3 text-text transition hover:bg-surface2"
+                href={resolveOptionsHref(shortcut.path)}
+                key={shortcut.path}
+                rel="noreferrer"
+                target="_blank"
+              >
+                <span className="text-sm font-medium">{label}</span>
+                <span className="mt-1 block text-xs text-text-muted">
+                  {description}
+                </span>
+              </a>
+            )
+          })}
         </div>
       </section>
 

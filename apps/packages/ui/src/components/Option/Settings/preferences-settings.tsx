@@ -196,9 +196,15 @@ export const PreferencesSettings = () => {
             const value = event.target.value as string
             handlePersonaChange(
               value === "explorer" ? null : (value as UserPersona)
-            ).catch((error) =>
+            ).catch((error) => {
               console.error("[PreferencesSettings] Failed to change persona", error)
-            )
+              notification.error({
+                message: t(
+                  "generalSettings.persona.changeError",
+                  "Could not update persona"
+                )
+              })
+            })
           }}
           value={userPersona ?? "explorer"}
         >
