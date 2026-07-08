@@ -1,8 +1,16 @@
 ---
 id: TASK-12912
 title: Harden settings UX after IA split review
-status: In Progress
+status: Done
 priority: High
+modified_files:
+- apps/packages/ui/src/components/Option/Settings/ui-customization.tsx
+- apps/packages/ui/src/components/Option/Settings/__tests__/UiCustomizationSettings.test.tsx
+- apps/packages/ui/src/routes/__tests__/option-settings-route-split.test.tsx
+- apps/tldw-frontend/__tests__/components/layout/WebLayout.chat-scroll-contract.test.tsx
+- apps/tldw-frontend/components/layout/WebLayout.tsx
+- apps/tldw-frontend/components/layout/BackendUnavailableModalGate.tsx
+- backlog/tasks/task-12912 - Harden-settings-UX-after-IA-split-review.md
 ---
 
 ## Description
@@ -50,7 +58,7 @@ Address the senior UX/HCI review findings on the merged settings IA split: reduc
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Hardened the settings UX after the IA split review by removing modal interruption on settings routes, reducing `/settings/ui` density with collapsed native sections, improving route/page semantics, clarifying data action consequences, and fixing reviewed settings contrast/a11y issues.
+Hardened the settings UX after the IA split review by removing modal interruption on settings routes, reducing /settings/ui density with collapsed native sections, improving route/page semantics, clarifying data action consequences, and fixing reviewed settings contrast/a11y issues. Follow-up review fixes validated native summary markup, added WebLayout route-level backend-unreachable regression coverage, and asserted exact hosted settings page titles.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

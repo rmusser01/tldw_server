@@ -39,4 +39,12 @@ describe("UiCustomizationSettings", () => {
     expect(screen.getByTestId("theme-display-disclosure")).not.toHaveAttribute("open")
     expect(screen.getByTestId("system-display-disclosure")).not.toHaveAttribute("open")
   })
+
+  it("keeps native disclosure summaries free of invalid block markup", () => {
+    const { container } = render(<UiCustomizationSettings />)
+
+    for (const summary of container.querySelectorAll("summary")) {
+      expect(summary.querySelector("div, p")).toBeNull()
+    }
+  })
 })

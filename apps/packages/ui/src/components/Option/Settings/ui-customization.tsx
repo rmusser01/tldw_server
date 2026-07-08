@@ -60,23 +60,31 @@ const SettingsDisclosure = ({
       className="panel-card group p-4"
       data-testid={testId}
     >
-      <summary className="flex cursor-pointer list-none flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="space-y-1">
-          <span className="block text-sm font-semibold text-text">{title}</span>
-          <p className="text-xs text-text-muted">{description}</p>
-          {summaryMeta ? (
-            <div className="text-xs text-text-muted">{summaryMeta}</div>
-          ) : null}
-        </div>
-        <span className="shrink-0 text-xs font-medium text-primary group-open:hidden">
-          {t("uiCustomization.sections.configure", {
-            defaultValue: "Configure"
-          })}
-        </span>
-        <span className="hidden shrink-0 text-xs font-medium text-text-muted group-open:inline">
-          {t("uiCustomization.sections.expanded", {
-            defaultValue: "Expanded"
-          })}
+      <summary className="cursor-pointer list-none">
+        <span className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <span className="block space-y-1">
+            <span className="block text-sm font-semibold text-text">
+              {title}
+            </span>
+            <span className="block text-xs text-text-muted">
+              {description}
+            </span>
+            {summaryMeta ? (
+              <span className="block text-xs text-text-muted">
+                {summaryMeta}
+              </span>
+            ) : null}
+          </span>
+          <span className="shrink-0 text-xs font-medium text-primary group-open:hidden">
+            {t("uiCustomization.sections.configure", {
+              defaultValue: "Configure"
+            })}
+          </span>
+          <span className="hidden shrink-0 text-xs font-medium text-text-muted group-open:inline">
+            {t("uiCustomization.sections.expanded", {
+              defaultValue: "Expanded"
+            })}
+          </span>
         </span>
       </summary>
       <div className="mt-4 space-y-3 border-t border-border pt-4">
