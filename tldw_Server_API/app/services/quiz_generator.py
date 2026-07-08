@@ -184,6 +184,7 @@ def _normalize_tf_answer(raw: Any) -> str:
 
 
 def _plan_value(item: Any, key: str, default: Any = None) -> Any:
+    """Read a plan field from either a dict or a Pydantic model."""
     if isinstance(item, dict):
         value = item.get(key, default)
     else:
@@ -192,12 +193,14 @@ def _plan_value(item: Any, key: str, default: Any = None) -> Any:
 
 
 def _plan_has_value(item: Any, key: str) -> bool:
+    """Return true when a plan field was explicitly provided."""
     if isinstance(item, dict):
         return key in item and item.get(key) is not None
     return getattr(item, key, None) is not None
 
 
 def _plan_int(item: Any, key: str, default: int) -> int:
+    """Read a plan integer field with the service-level default applied."""
     value = _plan_value(item, key, default)
     if value is None:
         value = default
@@ -210,6 +213,7 @@ def _coerce_generation_plan(
     question_types: Sequence[Any] | None = None,
     question_plan: Sequence[Any] | None = None,
 ) -> list[dict[str, Any]]:
+    """Normalize legacy question types or a structured question plan."""
     if question_plan:
         plan: list[dict[str, Any]] = []
         seen_types: set[str] = set()
@@ -255,6 +259,7 @@ def _coerce_generation_plan(
 
 
 def _normalize_planned_mc_answer(raw: Any, options: list[str]) -> int:
+    """Normalize a planned multiple-choice answer to a zero-based option index."""
     if raw is None or isinstance(raw, bool):
         raise ValueError("multiple_choice correct_answer must be an option index or letter")
     if isinstance(raw, int):
@@ -276,31 +281,51 @@ def _normalize_planned_mc_answer(raw: Any, options: list[str]) -> int:
 
 
 def _normalize_planned_multi_select_answer(raw: Any, options: list[str]) -> list[int]:
+    """Normalize planned multi-select answers to sorted zero-based option indices."""
     if not isinstance(raw, list) or not raw:
         raise ValueError("multi_select correct_answer must be a non-empty index array")
     indices: list[int] = []
     for item in raw:
-        if isinstance(item, bool) or not isinstance(item, int):
-            raise ValueError("multi_select correct_answer indices must be integers")
-        if item < 0 or item >= len(options):
+        if item is None or isinstance(item, bool):
+            raise ValueError("multi_select correct_answer entries must be indices or letters")
+        if isinstance(item, int):
+            idx = item
+        else:
+            text = str(item).strip()
+            if text.isdigit():
+                idx = int(text)
+            elif len(text) == 1 and text.isalpha():
+                idx = ord(text.upper()) - ord("A")
+            else:
+                raise ValueError("multi_select correct_answer entries must be indices or letters")
+        if idx < 0 or idx >= len(options):
             raise ValueError("multi_select correct_answer index is out of range")
-        indices.append(item)
+        indices.append(idx)
     if len(set(indices)) != len(indices):
         raise ValueError("multi_select correct_answer indices must be unique")
     return sorted(indices)
 
 
 def _normalize_planned_matching_answer(raw: Any, options: list[str]) -> dict[str, str]:
+    """Normalize planned matching answers using the canonical option labels."""
     if not isinstance(raw, dict):
         raise ValueError("matching correct_answer must map each option to an answer")
-    if set(raw) != set(options):
+    option_by_key = {option.lower(): option for option in options}
+    if len(option_by_key) != len(options):
+        raise ValueError("matching options must be unique case-insensitively")
+    normalized: dict[str, str] = {}
+    for raw_key, raw_value in raw.items():
+        canonical_key = option_by_key.get(str(raw_key).strip().lower())
+        if canonical_key is None or canonical_key in normalized:
+            raise ValueError("matching correct_answer must include exactly the left-side options")
+        normalized[canonical_key] = str(raw_value).strip()
+    if set(normalized) != set(options):
         raise ValueError("matching correct_answer must include exactly the left-side options")
-    normalized = {option: str(raw[option]).strip() for option in options}
     if any(not value for value in normalized.values()):
         raise ValueError("matching correct_answer values must be non-empty")
     if len(set(normalized.values())) != len(normalized):
         raise ValueError("matching correct_answer values must be unique")
-    return normalized
+    return {option: normalized[option] for option in options}
 
 
 def _normalize_planned_question(
@@ -375,6 +400,7 @@ def _normalize_planned_question(
 
 
 def _format_question_plan_instructions(plan: Sequence[dict[str, Any]]) -> str:
+    """Render extra prompt instructions for exact planned question counts."""
     rows: list[str] = []
     for item in plan:
         q_type = item["question_type"]
@@ -406,6 +432,7 @@ def _format_question_plan_instructions(plan: Sequence[dict[str, Any]]) -> str:
 
 
 def _remove_legacy_shape_hints(prompt: str) -> str:
+    """Replace legacy fixed-shape prompt hints with planned-generation hints."""
     replacements = {
         '"question_type": "multiple_choice" | "true_false" | "fill_blank"': (
             '"question_type": "multiple_choice" | "multi_select" | "matching" | '
@@ -413,7 +440,7 @@ def _remove_legacy_shape_hints(prompt: str) -> str:
         ),
         '"options": ["A", "B", "C", "D"]': '"options": ["A", "..."]',
         '"correct_answer": 0 | 1 | 2 | 3 | "true" | "false" | "the answer"': (
-            '"correct_answer": 0 | [0, 2] | {"left": "right"} | '
+            '"correct_answer": 0 | [0, 2] | {{"left": "right"}} | '
             '"true" | "false" | "the answer"'
         ),
         "- For multiple_choice: options must be array of 4 strings, correct_answer is 0-based index (0-3)": (
@@ -436,12 +463,16 @@ def _format_quiz_generation_prompt(
     source_contract: str,
     question_plan: Sequence[Any] | None = None,
 ) -> str:
+    """Render the quiz generation prompt, including structured plan instructions."""
     plan = _coerce_generation_plan(
         num_questions=num_questions,
         question_types=question_types,
         question_plan=question_plan,
     )
-    prompt = QUIZ_GENERATION_PROMPT.format(
+    template = QUIZ_GENERATION_PROMPT
+    if question_plan:
+        template = _remove_legacy_shape_hints(template)
+    prompt = template.format(
         num_questions=num_questions,
         content=content,
         difficulty=difficulty,
@@ -451,7 +482,6 @@ def _format_quiz_generation_prompt(
     )
     if not question_plan:
         return prompt
-    prompt = _remove_legacy_shape_hints(prompt)
     return f"{prompt}\n\n{_format_question_plan_instructions(plan)}"
 
 

@@ -12,6 +12,8 @@ os.environ.setdefault("READING_DIGEST_JOBS_WORKER_ENABLED", "0")
 os.environ.setdefault("READING_DIGEST_SCHEDULER_ENABLED", "0")
 os.environ.setdefault("TEST_MODE", "1")
 
+pytestmark = pytest.mark.integration
+
 from tldw_Server_API.app.main import app as fastapi_app
 from tldw_Server_API.app.api.v1.endpoints import quizzes as quiz_endpoints
 from tldw_Server_API.app.api.v1.endpoints.quizzes import (

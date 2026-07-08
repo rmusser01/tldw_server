@@ -51,3 +51,20 @@ def test_quiz_generation_prompt_includes_all_planned_question_shapes():
     assert '"question_type": "multi_select"' in rendered_prompt
     assert '"question_type": "matching"' in rendered_prompt
     assert "options must be array of 4 strings" not in rendered_prompt
+
+
+def test_quiz_generation_prompt_preserves_source_content_when_removing_legacy_hints():
+    content = 'Evidence excerpt: keep literal "options": ["A", "B", "C", "D"] from the source.'
+
+    rendered_prompt = quiz_generator._format_quiz_generation_prompt(
+        num_questions=1,
+        content=content,
+        difficulty="mixed",
+        question_types=None,
+        question_plan=[{"question_type": "multiple_choice", "count": 1, "option_count": 5}],
+        focus_instruction="",
+        source_contract="- Allowed sources for source_citations.source_type/source_id: note:note-1",
+    )
+
+    assert content in rendered_prompt
+    assert "Planned question requirements" in rendered_prompt

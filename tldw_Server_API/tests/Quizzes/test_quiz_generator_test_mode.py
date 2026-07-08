@@ -11,6 +11,8 @@ from tldw_Server_API.app.services.quiz_generator import (
     generate_quiz_from_sources,
 )
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.fixture(scope="function")
 def quizzes_db(tmp_path):

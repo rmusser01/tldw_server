@@ -58,6 +58,8 @@ class QuizGenerateSource(BaseModel):
 
 
 class QuizQuestionPlanItem(BaseModel):
+    """One generated quiz question type and count requested by the caller."""
+
     model_config = ConfigDict(extra="forbid")
 
     question_type: QuestionType
@@ -361,11 +363,9 @@ class QuizGenerateRequest(BaseModel):
                 if item.question_type in {QuestionType.MULTIPLE_CHOICE, QuestionType.MULTI_SELECT}:
                     if item.pair_count is not None:
                         raise ValueError("pair_count is only valid for matching questions")
-                    item.option_count = item.option_count or 4
                 elif item.question_type == QuestionType.MATCHING:
                     if item.option_count is not None:
                         raise ValueError("option_count is not valid for matching questions")
-                    item.pair_count = item.pair_count or 4
                 elif item.option_count is not None or item.pair_count is not None:
                     raise ValueError("option_count and pair_count are not valid for this question_type")
         return self

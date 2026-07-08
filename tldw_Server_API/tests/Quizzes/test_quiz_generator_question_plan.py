@@ -144,6 +144,20 @@ def test_planned_multi_select_sorts_indices():
     assert question["correct_answer"] == [0, 1]
 
 
+def test_planned_multi_select_accepts_answer_letters():
+    question = quiz_generator._normalize_planned_question(
+        {
+            "question_type": "multi_select",
+            "question_text": "Which are hardware?",
+            "options": ["CPU", "RAM", "Python", "HTML"],
+            "correct_answer": ["B", "A"],
+        },
+        {"question_type": "multi_select", "option_count": 4},
+    )
+
+    assert question["correct_answer"] == [0, 1]
+
+
 def test_planned_matching_accepts_left_to_right_mapping():
     question = quiz_generator._normalize_planned_question(
         {
@@ -156,6 +170,20 @@ def test_planned_matching_accepts_left_to_right_mapping():
     )
 
     assert question["options"] == ["CPU", "RAM"]
+    assert question["correct_answer"] == {"CPU": "Processor", "RAM": "Memory"}
+
+
+def test_planned_matching_accepts_case_insensitive_left_side_keys():
+    question = quiz_generator._normalize_planned_question(
+        {
+            "question_type": "matching",
+            "question_text": "Match each component.",
+            "options": ["CPU", "RAM"],
+            "correct_answer": {"cpu": "Processor", "ram": "Memory"},
+        },
+        {"question_type": "matching", "pair_count": 2},
+    )
+
     assert question["correct_answer"] == {"CPU": "Processor", "RAM": "Memory"}
 
 

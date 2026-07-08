@@ -86,3 +86,9 @@ Known caveats:
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+PR #2686 review follow-up after rebase onto origin/dev: addressed reviewer comments for planned quiz generation by keeping QuizGenerateRequest validation non-mutating, adding requested docstrings/test markers, accepting planned multi_select letter answers, canonicalizing matching correct_answer keys case-insensitively, and moving legacy prompt hint cleanup to the static template so source evidence is not rewritten. Verification: backend focused quiz suite passed (124 passed, 4 warnings); frontend focused GenerateTab suite passed (17 passed, 2 files); Bandit on touched backend schema/service files exited 0 with 0 findings.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
