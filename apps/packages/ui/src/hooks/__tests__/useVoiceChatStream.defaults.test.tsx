@@ -74,6 +74,10 @@ const resolveProviderState = vi.hoisted(() => ({
   resolveApiProviderForModel: vi.fn(async () => "stub")
 }))
 
+const runtimeAuthState = vi.hoisted(() => ({
+  getRuntimeSingleUserApiKeyOverride: vi.fn(() => null as string | null)
+}))
+
 vi.mock("@plasmohq/storage/hook", () => ({
   useStorage: (key: string, defaultValue: unknown) => [
     storageState.values.has(key) ? storageState.values.get(key) : defaultValue,
@@ -149,6 +153,8 @@ vi.mock("@/utils/resolve-api-provider", () => ({
     ) => unknown)(...args)
 }))
 
+vi.mock("@/services/tldw/runtime-auth-override", () => runtimeAuthState)
+
 class MockWebSocket {
   static instances: MockWebSocket[] = []
 
@@ -216,6 +222,8 @@ describe("useVoiceChatStream defaults", () => {
     selectedModelState.selectedModel = null
     vi.mocked(buildState.buildVoiceConversationPreflight).mockClear()
     vi.mocked(buildState.normalizeVoiceConversationRuntimeError).mockClear()
+    runtimeAuthState.getRuntimeSingleUserApiKeyOverride.mockReset()
+    runtimeAuthState.getRuntimeSingleUserApiKeyOverride.mockReturnValue(null)
     resolveProviderState.resolveApiProviderForModel.mockReset()
     resolveProviderState.resolveApiProviderForModel.mockResolvedValue("stub")
     vi.mocked(tldwClient.getConfig).mockReset()
@@ -244,6 +252,33 @@ describe("useVoiceChatStream defaults", () => {
         ttsProvider: "tldw",
         tldwTtsModel: DEFAULT_KITTEN_MODEL,
         tldwTtsVoice: DEFAULT_KITTEN_VOICE
+      })
+    )
+  })
+
+  it("uses the runtime single-user API key override for voice chat auth", async () => {
+    runtimeAuthState.getRuntimeSingleUserApiKeyOverride.mockReturnValue(
+      "runtime-voice-key"
+    )
+    vi.mocked(tldwClient.getConfig).mockResolvedValue({
+      serverUrl: "http://localhost:8000",
+      authMode: "single_user",
+      apiKey: ""
+    } as any)
+
+    renderHook(() =>
+      useVoiceChatStream({
+        active: true
+      })
+    )
+
+    await waitFor(() => {
+      expect(buildState.buildVoiceConversationPreflight).toHaveBeenCalled()
+    })
+
+    expect(buildState.buildVoiceConversationPreflight).toHaveBeenCalledWith(
+      expect.objectContaining({
+        token: "runtime-voice-key"
       })
     )
   })

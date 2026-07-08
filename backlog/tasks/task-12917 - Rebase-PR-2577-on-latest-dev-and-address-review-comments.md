@@ -4,7 +4,7 @@ title: Rebase PR 2577 on latest dev and address review comments
 status: Done
 assignee: []
 created_date: '2026-07-08 03:26'
-updated_date: '2026-07-08 19:37'
+updated_date: '2026-07-08 19:50'
 labels:
   - pr
   - review
@@ -38,6 +38,10 @@ After new CodeRabbit review threads appeared, verified and fixed the still-valid
 Verification after the review-fix pass: frontend Vitest voice/STT suite 7 files / 46 tests passed; apps/tldw-frontend typecheck passed; backend focused audio/STT/TTS suite 136 tests passed; git diff --check passed; Bandit touched backend scope reported 0 findings in /tmp/bandit_pr2577_review_fixes.json.
 
 After push, investigated failing PR checks. Fixed onboarding docs gate by restoring the CPU guide heading contract, and fixed UX Smoke Gate by keeping the /settings route h1 as Settings while the Setup & Recovery content remains inside the page. Added unit coverage for the root settings route heading.
+
+Code review follow-up found one remaining Important issue: useVoiceChatStream should use the runtime single-user API key override before saved config apiKey, matching dictation and shared request behavior.
+
+Implemented the code-review follow-up with TDD: first added a failing useVoiceChatStream defaults test proving runtime-only single-user auth produced an empty preflight token, then changed useVoiceChatStream to prefer getRuntimeSingleUserApiKeyOverride() before config.apiKey for single-user mode.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
@@ -46,6 +50,8 @@ After push, investigated failing PR checks. Fixed onboarding docs gate by restor
 PR #2577 was rebased onto current origin/dev 9672abdbe7, review comments were addressed in the rebased tree, and focused verification passed. The latest pass fixed the unresolved CodeRabbit findings for dictation websocket lifecycle/corrections, extension STT service-worker audio encoding, audio.chat.stream strict-protocol error accounting, shared protocol exceptions, unified close suppression, and Backlog task hygiene. Verification: frontend Vitest voice/STT suite 46 tests passed; frontend typecheck passed; backend focused audio/STT/TTS suite 136 tests passed; git diff --check passed; Bandit touched backend scope 0 findings.
 
 Follow-up CI gate fixes: restored the expected CPU audio setup guide Step 2 heading and corrected the /settings route-level h1 to Settings. Verification: targeted onboarding docs test passed, settings layout Vitest test passed, apps/tldw-frontend typecheck passed, git diff --check passed.
+
+Code-review follow-up fixed the remaining voice chat auth gap: useVoiceChatStream now uses the runtime single-user API key override before saved config apiKey, matching dictation. Verification: new test failed before the fix, then passed; focused voice/dictation Vitest suite 34 tests passed; apps/tldw-frontend typecheck passed; git diff --check passed. Bandit not applicable; frontend-only code change.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

@@ -17,6 +17,7 @@ import {
   DEFAULT_TTS_PROVIDER
 } from "@/services/tts"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
+import { getRuntimeSingleUserApiKeyOverride } from "@/services/tldw/runtime-auth-override"
 import { resolveApiProviderForModel } from "@/utils/resolve-api-provider"
 import { useStreamingAudioPlayer } from "@/hooks/useStreamingAudioPlayer"
 
@@ -504,7 +505,9 @@ export const useVoiceChatStream = ({
       const token =
         config?.authMode === "multi-user"
           ? String(config?.accessToken || "").trim()
-          : String(config?.apiKey || "").trim()
+          : String(
+              getRuntimeSingleUserApiKeyOverride() || config?.apiKey || ""
+            ).trim()
       const requestedModel = String(voiceChatModel || selectedModel || "").trim()
       const preflight = await buildVoiceConversationPreflight({
         serverUrl: String(config?.serverUrl || ""),
