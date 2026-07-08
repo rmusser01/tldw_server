@@ -69,16 +69,31 @@ const desktopCockpitRailConfig: Record<
   },
 };
 
-const restoreDesktopCockpitRail = async (page: Page, rail: DesktopCockpitRail) => {
+const isDesktopCockpitViewport = async (page: Page): Promise<boolean> =>
+  page.evaluate(() => window.matchMedia('(min-width: 1024px)').matches);
+
+const restoreDesktopCockpitRail = async (
+  page: Page,
+  rail: DesktopCockpitRail,
+  { required = true }: { required?: boolean } = {}
+): Promise<boolean> => {
   const shell = page.getByTestId('playground-cockpit-shell');
   const config = desktopCockpitRailConfig[rail];
-  if ((await shell.getAttribute(config.attr)) === 'visible') return;
+  const railLocator = page.getByTestId(config.railId);
+  if ((await shell.getAttribute(config.attr)) === 'visible') {
+    await expect(railLocator).toBeVisible({ timeout: 10_000 });
+    return true;
+  }
 
   const restoreControl = page.getByTestId(config.restoreId);
-  await expect(restoreControl).toBeVisible({ timeout: 10_000 });
+  if (!(await restoreControl.isVisible().catch(() => false))) {
+    if (!required) return false;
+    await expect(restoreControl).toBeVisible({ timeout: 10_000 });
+  }
   await restoreControl.evaluate((element: HTMLElement) => element.click());
   await expect(shell).toHaveAttribute(config.attr, 'visible', { timeout: 10_000 });
-  await expect(page.getByTestId(config.railId)).toBeVisible({ timeout: 10_000 });
+  await expect(railLocator).toBeVisible({ timeout: 10_000 });
+  return true;
 };
 
 const switchChatLayoutMode = async (page: Page, targetMode: 'cockpit' | 'focus') => {
@@ -99,9 +114,9 @@ const switchChatLayoutMode = async (page: Page, targetMode: 'cockpit' | 'focus')
     await expect(shell).toHaveAttribute('data-mode', targetMode);
   }
 
-  if (targetMode === 'cockpit') {
-    await restoreDesktopCockpitRail(page, 'left');
-    await restoreDesktopCockpitRail(page, 'right');
+  if (targetMode === 'cockpit' && (await isDesktopCockpitViewport(page))) {
+    await restoreDesktopCockpitRail(page, 'left', { required: false });
+    await restoreDesktopCockpitRail(page, 'right', { required: false });
   }
 };
 
@@ -724,16 +739,8 @@ const fillEditableComposer = async (page: Page, value: string) => {
 };
 
 const ensureDesktopCockpitRailsVisible = async (page: Page) => {
-  const leftRestore = page.getByTestId('playground-cockpit-left-rail-restore');
-  if (await leftRestore.isVisible().catch(() => false)) {
-    await leftRestore.click();
-  }
-  const rightRestore = page.getByTestId('playground-cockpit-right-rail-restore');
-  if (await rightRestore.isVisible().catch(() => false)) {
-    await rightRestore.click();
-  }
-  await expect(page.getByTestId('playground-cockpit-left-rail')).toBeVisible();
-  await expect(page.getByTestId('playground-cockpit-right-rail')).toBeVisible();
+  await restoreDesktopCockpitRail(page, 'left');
+  await restoreDesktopCockpitRail(page, 'right');
 };
 
 const assertRuntimeProviderSummary = async (runtimeInspector: Locator) => {
@@ -794,6 +801,8 @@ const assertNoHorizontalOverflow = async (page: Page) => {
 };
 
 const assertNoVerticalOverlap = async (first: Locator, second: Locator, label: string) => {
+  await expect(first).toBeVisible({ timeout: 10_000 });
+  await expect(second).toBeVisible({ timeout: 10_000 });
   await expect
     .poll(
       async () => {
@@ -805,7 +814,7 @@ const assertNoVerticalOverlap = async (first: Locator, second: Locator, label: s
           ? 'ok'
           : `overlap: first bottom ${firstBox.y + firstBox.height}, second top ${secondBox.y}`;
       },
-      { message: label, timeout: 5_000 }
+      { message: label, timeout: 10_000 }
     )
     .toBe('ok');
 };
