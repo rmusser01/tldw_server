@@ -163,6 +163,8 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
     !hideSidebar &&
     !isMobileViewport;
   const stickyChatLayoutActive = isChatScreen && stickyChatInput;
+  const useInlineBackendUnavailableAlert =
+    location.pathname.startsWith('/settings');
   const isViewportConstrainedRoute =
     stickyChatLayoutActive ||
     (VIEWPORT_CONSTRAINED_PATHS as readonly string[]).includes(location.pathname);
@@ -634,6 +636,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
             onConsumeHiddenDetail={closeBackendUnavailableModal}
             onOpenHealth={openHealthDiagnostics}
             onRetry={retryConnectionCheck}
+            presentation={useInlineBackendUnavailableAlert ? 'inline' : 'modal'}
             t={t}
           />
         </main>

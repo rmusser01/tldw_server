@@ -78,6 +78,7 @@ export const SearchModeSettings = () => {
           </span>
           <div>
             <Select
+              aria-label={t("generalSettings.webSearch.provider.label")}
               placeholder={t("generalSettings.webSearch.provider.placeholder")}
               showSearch
               className="w-full mt-4 sm:mt-0 sm:w-[200px]"
@@ -98,6 +99,7 @@ export const SearchModeSettings = () => {
               </span>
               <div>
                 <Input
+                  aria-label={t("generalSettings.webSearch.searxng.url.label")}
                   placeholder="https://searxng.example.com"
                   className="w-full mt-4 sm:mt-0 sm:w-[200px]"
                   required
@@ -115,6 +117,7 @@ export const SearchModeSettings = () => {
               </span>
               <div>
                 <Select
+                  aria-label={t("generalSettings.webSearch.googleDomain.label")}
                   showSearch
                   className="w-full mt-4 sm:mt-0 sm:w-[200px]"
                   options={ALL_GOOGLE_DOMAINS.map((e) => ({
@@ -141,6 +144,7 @@ export const SearchModeSettings = () => {
               </span>
               <div>
                 <Input.Password
+                  aria-label={t("generalSettings.webSearch.braveApi.label")}
                   placeholder={t(
                     "generalSettings.webSearch.braveApi.placeholder"
                   )}
@@ -160,6 +164,7 @@ export const SearchModeSettings = () => {
               </span>
               <div>
                 <Input.Password
+                  aria-label={t("generalSettings.webSearch.tavilyApi.label")}
                   placeholder={t(
                     "generalSettings.webSearch.tavilyApi.placeholder"
                   )}
@@ -180,6 +185,7 @@ export const SearchModeSettings = () => {
               </span>
               <div>
                 <Input.Password
+                  aria-label={t("generalSettings.webSearch.exa.label")}
                   placeholder={t("generalSettings.webSearch.exa.placeholder")}
                   required
                   className="w-full mt-4 sm:mt-0 sm:w-[200px]"
@@ -198,6 +204,7 @@ export const SearchModeSettings = () => {
               </span>
               <div>
                 <Input.Password
+                  aria-label={t("generalSettings.webSearch.firecrawlAPIKey.label")}
                   placeholder={t(
                     "generalSettings.webSearch.firecrawlAPIKey.placeholder"
                   )}
@@ -230,6 +237,7 @@ export const SearchModeSettings = () => {
           </span>
           <div>
             <InputNumber
+              aria-label={t("generalSettings.webSearch.totalSearchResults.label")}
               placeholder={t(
                 "generalSettings.webSearch.totalSearchResults.placeholder"
               )}

@@ -172,7 +172,7 @@ export const DataManagementSettings = () => {
         )
       })
     },
-    onError: (error) => {
+    onError: () => {
       notification.error({
         message: t(
           "settings:systemNotifications.syncError",
@@ -223,7 +223,7 @@ export const DataManagementSettings = () => {
               })
             }}
             disabled={syncFirefoxData.isPending}
-            className="cursor-pointer rounded-md bg-primary px-4 py-2 text-white transition-colors hover:bg-primaryStrong w-full sm:w-auto">
+            className="cursor-pointer rounded-md bg-primaryStrong px-4 py-2 text-white transition hover:brightness-95 w-full sm:w-auto">
             {syncFirefoxData.isPending ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             ) : (
@@ -235,27 +235,43 @@ export const DataManagementSettings = () => {
         </div>
       )}
 
-      <div className="flex flex-col sm:flex-row mb-3 gap-3 sm:gap-0 sm:justify-between sm:items-center">
-        <span className="text-text">
-          {t("generalSettings.systemData.export.label", { defaultValue: t("generalSettings.system.export.label", { defaultValue: "Export Chat History, Knowledge Base, and Prompts" }) as string })}
-        </span>
+      <div className="flex flex-col sm:flex-row mb-4 gap-3 sm:gap-0 sm:justify-between sm:items-center">
+        <div className="space-y-1">
+          <span className="text-text">
+            {t("generalSettings.systemData.export.label", { defaultValue: t("generalSettings.system.export.label", { defaultValue: "Export Chat History, Knowledge Base, and Prompts" }) as string })}
+          </span>
+          <p className="max-w-xl text-xs text-text-muted">
+            {t(
+              "generalSettings.systemData.export.description",
+              "Exports a JSON backup of local chat history, prompts, model nicknames, and custom models."
+            )}
+          </p>
+        </div>
         <button
           onClick={exportPageAssistData}
-          className="cursor-pointer rounded-md bg-primary px-4 py-2 text-white transition-colors hover:bg-primaryStrong w-full sm:w-auto">
+          className="cursor-pointer rounded-md bg-primaryStrong px-4 py-2 text-white transition hover:brightness-95 w-full sm:w-auto">
           {t("generalSettings.systemData.export.button", { defaultValue: t("generalSettings.system.export.button", { defaultValue: "Export Data" }) as string })}
         </button>
       </div>
 
-      <div className="flex flex-col sm:flex-row mb-3 gap-3 sm:gap-0 sm:justify-between sm:items-center">
-        <span className="text-text">
-          {t("generalSettings.systemData.import.label", { defaultValue: t("generalSettings.system.import.label", { defaultValue: "Import Chat History, Knowledge Base, and Prompts" }) as string })}
-        </span>
+      <div className="flex flex-col sm:flex-row mb-4 gap-3 sm:gap-0 sm:justify-between sm:items-center">
+        <div className="space-y-1">
+          <span className="text-text">
+            {t("generalSettings.systemData.import.label", { defaultValue: t("generalSettings.system.import.label", { defaultValue: "Import Chat History, Knowledge Base, and Prompts" }) as string })}
+          </span>
+          <p className="max-w-xl text-xs text-text-muted">
+            {t(
+              "generalSettings.systemData.import.description",
+              "Import adds or updates local WebUI and extension data from the selected JSON backup, then reloads the page."
+            )}
+          </p>
+        </div>
         <button
           type="button"
           disabled={importDataMutation.isPending}
           aria-disabled={importDataMutation.isPending}
           onClick={() => importInputRef.current?.click()}
-          className="flex w-full cursor-pointer items-center justify-center rounded-md bg-primary px-4 py-2 text-white transition-colors hover:bg-primaryStrong disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto">
+          className="flex w-full cursor-pointer items-center justify-center rounded-md bg-primaryStrong px-4 py-2 text-white transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto">
           {importDataMutation.isPending ? (
             <>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -279,14 +295,22 @@ export const DataManagementSettings = () => {
         />
       </div>
 
-      <div className="flex flex-col sm:flex-row mb-3 gap-3 sm:gap-0 sm:justify-between sm:items-center">
-        <span className="text-text">
-          {t("generalSettings.systemData.deleteChatHistory.label", { defaultValue: t("generalSettings.system.deleteChatHistory.label", { defaultValue: "System Reset" }) as string })}
-        </span>
+      <div className="flex flex-col rounded-md border border-danger/40 bg-danger/5 p-4 sm:flex-row mb-3 gap-3 sm:gap-0 sm:justify-between sm:items-center">
+        <div className="space-y-1">
+          <span className="font-medium text-danger">
+            {t("generalSettings.systemData.deleteChatHistory.label", { defaultValue: t("generalSettings.system.deleteChatHistory.label", { defaultValue: "System Reset" }) as string })}
+          </span>
+          <p className="max-w-xl text-xs text-text-muted">
+            {t(
+              "generalSettings.systemData.deleteChatHistory.description",
+              "Permanently deletes local chat history, knowledge base items, prompts, custom models, settings, and session storage."
+            )}
+          </p>
+        </div>
 
         <button
           onClick={() => setResetModalOpen(true)}
-          className="w-full rounded-md bg-danger px-4 py-2 text-white transition-colors hover:bg-danger sm:w-auto">
+          className="w-full rounded-md bg-red-700 px-4 py-2 text-white transition hover:bg-red-800 sm:w-auto">
           {t("generalSettings.systemData.deleteChatHistory.button", { defaultValue: t("generalSettings.system.deleteChatHistory.button", { defaultValue: "Reset All" }) as string })}
         </button>
       </div>
@@ -489,6 +513,7 @@ export const SystemSettings = () => {
           {t("generalSettings.systemBasics.uiMode.label", { defaultValue: "Default UI Mode" })}
         </span>
         <Select
+          aria-label={t("generalSettings.systemBasics.uiMode.label", { defaultValue: "Default UI Mode" })}
           options={[
             { label: t("generalSettings.systemBasics.uiMode.options.sidePanel", { defaultValue: "Sidebar" }), value: "sidePanel" },
             { label: t("generalSettings.systemBasics.uiMode.options.webui", { defaultValue: "Full Screen (Web UI)" }), value: "webui" }
@@ -511,7 +536,10 @@ export const SystemSettings = () => {
         <div className="flex flex-row items-center gap-3 justify-center sm:justify-end">
           <button
             onClick={decrease}
-            className="rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-white transition-colors duration-200 hover:bg-primaryStrong"
+            aria-label={t("generalSettings.systemBasics.fontSize.decrease", {
+              defaultValue: "Decrease font size"
+            })}
+            className="rounded-lg bg-primaryStrong px-3 py-1.5 text-sm font-medium text-white transition duration-200 hover:brightness-95"
           >
             A-
           </button>
@@ -520,7 +548,10 @@ export const SystemSettings = () => {
           </span>
           <button
             onClick={increase}
-            className="rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-white transition-colors duration-200 hover:bg-primaryStrong"
+            aria-label={t("generalSettings.systemBasics.fontSize.increase", {
+              defaultValue: "Increase font size"
+            })}
+            className="rounded-lg bg-primaryStrong px-3 py-1.5 text-sm font-medium text-white transition duration-200 hover:brightness-95"
           >
             A+
           </button>{" "}
@@ -535,6 +566,9 @@ export const SystemSettings = () => {
         </span>
         <div className="w-full sm:w-[320px] flex flex-col gap-2">
           <Select
+            aria-label={t("generalSettings.systemBasics.codeTheme.label", {
+              defaultValue: "Code block theme"
+            })}
             className="w-full"
             value={codeTheme}
             onChange={setCodeTheme}
@@ -565,7 +599,7 @@ export const SystemSettings = () => {
                 </div>
                 <Highlight
                   code={sampleCode}
-                  language={"tsx" as any}
+                  language="tsx"
                   theme={resolvePreviewTheme(opt.value)}>
                   {({ className, style, tokens, getLineProps, getTokenProps }) => (
                     <pre
@@ -601,6 +635,7 @@ export const SystemSettings = () => {
           {t("generalSettings.systemBasics.actionIcon.label", { defaultValue: t("generalSettings.system.actionIcon.label", { defaultValue: "Browser Action Button" }) as string })}
         </span>
         <Select
+          aria-label={t("generalSettings.systemBasics.actionIcon.label", { defaultValue: t("generalSettings.system.actionIcon.label", { defaultValue: "Browser Action Button" }) as string })}
           options={[
             {
               label: "Open Web UI",
@@ -624,6 +659,7 @@ export const SystemSettings = () => {
           {t("generalSettings.systemBasics.contextMenu.label", { defaultValue: t("generalSettings.system.contextMenu.label", { defaultValue: "Context Menu Action" }) as string })}
         </span>
         <Select
+          aria-label={t("generalSettings.systemBasics.contextMenu.label", { defaultValue: t("generalSettings.system.contextMenu.label", { defaultValue: "Context Menu Action" }) as string })}
           options={[
             {
               label: "Open Web UI",
@@ -647,6 +683,7 @@ export const SystemSettings = () => {
         </span>
          <div>
           <Switch
+          aria-label={t("generalSettings.systemBasics.webuiBtnSidePanel.label", { defaultValue: t("generalSettings.system.webuiBtnSidePanel.label", { defaultValue: "Show Web UI button in Sidebar" }) as string })}
           checked={webuiBtnSidePanel}
           onChange={(checked) => {
             setWebuiBtnSidePanel(checked)
@@ -666,13 +703,16 @@ export const SystemSettings = () => {
               onClick={() => {
                 void setChatBackgroundImage(undefined)
               }}
+              aria-label={t("generalSettings.systemBasics.chatBackgroundImage.clear", {
+                defaultValue: "Remove chat background image"
+              })}
               className="text-text">
               <RotateCcw className="size-4" />
             </button>
           ) : null}
           <label
             htmlFor="background-image-upload"
-            className="inline-flex cursor-pointer gap-2 rounded-md bg-primary px-4 py-2 text-white transition-colors hover:bg-primaryStrong">
+            className="inline-flex cursor-pointer gap-2 rounded-md bg-primaryStrong px-4 py-2 text-white transition hover:brightness-95">
             <Upload className="size-4" />
             {t("knowledge:form.uploadFile.label")}
           </label>

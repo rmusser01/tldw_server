@@ -57,7 +57,7 @@ describe("PreferencesSettings", () => {
   })
 
   it("owns personal defaults and web search without setup, theme, OCR, extension promo, or destructive reset", () => {
-    render(
+    const { container } = render(
       <MemoryRouter>
         <PreferencesSettings />
       </MemoryRouter>
@@ -82,5 +82,6 @@ describe("PreferencesSettings", () => {
     expect(
       screen.queryByRole("button", { name: /reset all/i })
     ).not.toBeInTheDocument()
+    expect(container.querySelector("dl")).not.toBeInTheDocument()
   })
 })
