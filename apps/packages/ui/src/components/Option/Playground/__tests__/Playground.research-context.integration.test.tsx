@@ -454,7 +454,14 @@ vi.mock("@/hooks/useSmartScroll", () => ({
 }))
 
 vi.mock("@/services/settings/ui-settings", () => ({
-  CHAT_BACKGROUND_IMAGE_SETTING: "chatBackgroundImage"
+  CHAT_BACKGROUND_IMAGE_SETTING: "chatBackgroundImage",
+  CHAT_WINDOW_OPACITY_SETTING: "chatWindowOpacity",
+  THEME_SETTING: {
+    key: "theme",
+    defaultValue: "dark"
+  },
+  HEADER_SHORTCUT_IDS: [],
+  SIDEBAR_SHORTCUT_IDS: []
 }))
 
 vi.mock("../Knowledge/utils/unsupported-types", () => ({
@@ -473,7 +480,11 @@ vi.mock("@/store/artifacts", () => ({
 }))
 
 vi.mock("@/hooks/useSetting", () => ({
-  useSetting: () => [""]
+  useSetting: (setting: string | { key?: string; defaultValue?: unknown }) => [
+    (typeof setting === "string" ? setting : setting?.key) === "chatWindowOpacity"
+      ? 35
+      : (typeof setting === "string" ? "" : setting?.defaultValue ?? "")
+  ]
 }))
 
 vi.mock("@plasmohq/storage/hook", () => ({

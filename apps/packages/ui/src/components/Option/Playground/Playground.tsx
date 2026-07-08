@@ -74,7 +74,10 @@ import {
   Sun,
   X,
 } from "lucide-react";
-import { CHAT_BACKGROUND_IMAGE_SETTING } from "@/services/settings/ui-settings";
+import {
+  CHAT_BACKGROUND_IMAGE_SETTING,
+  CHAT_WINDOW_OPACITY_SETTING,
+} from "@/services/settings/ui-settings";
 import { otherUnsupportedTypes } from "../Knowledge/utils/unsupported-types";
 import { useTranslation } from "react-i18next";
 import { useStoreMessageOption, type Message } from "@/store/option";
@@ -374,6 +377,8 @@ export const Playground = () => {
   const { mode: themeMode, toggleDarkMode } = useDarkMode();
   const navigate = useNavigate();
   const [chatBackgroundImage] = useSetting(CHAT_BACKGROUND_IMAGE_SETTING);
+  const [chatWindowOpacity] = useSetting(CHAT_WINDOW_OPACITY_SETTING);
+  const chatWindowOpacityAlpha = chatWindowOpacity / 100;
   const [stickyChatInput] = useStorage(
     "stickyChatInput",
     DEFAULT_CHAT_SETTINGS.stickyChatInput,
@@ -3494,11 +3499,13 @@ export const Playground = () => {
           : {}
       }
     >
-      {/* Background overlay for opacity effect */}
+      {/* Keep themed background images visible while preserving text contrast. */}
       {chatBackgroundImage && (
         <div
-          className="absolute inset-0 bg-bg"
-          style={{ opacity: 0.9, pointerEvents: "none" }}
+          className="pointer-events-none absolute inset-0 backdrop-blur-[1px]"
+          style={{
+            backgroundColor: `rgb(var(--color-bg) / ${chatWindowOpacityAlpha})`,
+          }}
         />
       )}
 
@@ -3549,6 +3556,8 @@ export const Playground = () => {
       <div className="relative z-10 flex h-full min-h-0 w-full">
         <PlaygroundCockpitShell
           mode={normalizedChatLayoutMode}
+          themedBackdrop={Boolean(chatBackgroundImage)}
+          themedBackdropOpacity={chatWindowOpacityAlpha}
           leftRailVisible={normalizedCockpitContextRailVisible}
           rightRailVisible={normalizedCockpitRuntimeRailVisible}
           onLeftRailVisibleChange={setCockpitContextRailVisible}

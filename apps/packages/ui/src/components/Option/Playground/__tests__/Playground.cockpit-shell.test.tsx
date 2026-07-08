@@ -247,6 +247,7 @@ vi.mock("@/services/settings/ui-settings", () => ({
   HEADER_SHORTCUT_SELECTION_SETTING: "headerShortcutSelection",
   HEADER_SHORTCUT_IDS: [],
   SIDEBAR_SHORTCUT_IDS: [],
+  CHAT_WINDOW_OPACITY_SETTING: "chatWindowOpacity",
 }));
 
 vi.mock("../Knowledge/utils/unsupported-types", () => ({
@@ -290,7 +291,7 @@ vi.mock("@/store/artifacts", () => ({
 }));
 
 vi.mock("@/hooks/useSetting", () => ({
-  useSetting: () => [""],
+  useSetting: (setting: string) => [setting === "chatWindowOpacity" ? 35 : ""],
 }));
 
 vi.mock("@/hooks/useDarkmode", () => ({

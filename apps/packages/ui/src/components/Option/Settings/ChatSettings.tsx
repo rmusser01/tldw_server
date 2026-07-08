@@ -18,7 +18,10 @@ import { toBase64 } from "@/libs/to-base64"
 import {
   CHAT_BACKGROUND_IMAGE_MAX_BASE64_LENGTH,
   CHAT_BACKGROUND_IMAGE_MAX_SIZE_MB,
-  CHAT_BACKGROUND_IMAGE_SETTING
+  CHAT_BACKGROUND_IMAGE_SETTING,
+  CHAT_CHARACTER_IMAGE_OPACITY_SETTING,
+  CHAT_MESSAGE_OPACITY_SETTING,
+  CHAT_WINDOW_OPACITY_SETTING
 } from "@/services/settings/ui-settings"
 import { RotateCcw, Upload } from "lucide-react"
 import { DiscoSkillsSettings } from "./DiscoSkillsSettings"
@@ -36,11 +39,21 @@ import {
 import { ComposerStyleSettings } from "@/components/Chat/composer/settings/ComposerStyleSettings"
 
 const SELECT_CLASSNAME = "w-[200px]"
+const OPACITY_RANGE_CLASSNAME = "w-40 accent-primary"
 export const ChatSettings = () => {
   const { t } = useTranslation("settings")
   const notification = useAntdNotification()
   const [chatBackgroundImage, setChatBackgroundImage] = useSetting(
     CHAT_BACKGROUND_IMAGE_SETTING
+  )
+  const [chatWindowOpacity, setChatWindowOpacity] = useSetting(
+    CHAT_WINDOW_OPACITY_SETTING
+  )
+  const [chatMessageOpacity, setChatMessageOpacity] = useSetting(
+    CHAT_MESSAGE_OPACITY_SETTING
+  )
+  const [chatCharacterImageOpacity, setChatCharacterImageOpacity] = useSetting(
+    CHAT_CHARACTER_IMAGE_OPACITY_SETTING
   )
   const [quickChatStrictDocsOnly, setQuickChatStrictDocsOnly] = useStorage<boolean>(
     "quickChatStrictDocsOnly",
@@ -461,7 +474,7 @@ export const ChatSettings = () => {
     [notification, setChatBackgroundImage, t]
   )
 
-  const getResetProps = <T extends boolean | string>(
+  const getResetProps = <T extends boolean | number | string>(
     value: T,
     defaultValue: T,
     setter: (next: T | ((prev: T) => T)) => void | Promise<void>
@@ -469,6 +482,28 @@ export const ChatSettings = () => {
     modified: value !== defaultValue,
     onReset: () => void setter(defaultValue)
   })
+
+  const renderOpacityControl = (
+    value: number,
+    setter: (next: number) => void | Promise<void>,
+    label: string
+  ) => (
+    <div className="flex min-w-[220px] items-center gap-3">
+      <input
+        type="range"
+        min={0}
+        max={100}
+        step={5}
+        value={value}
+        onChange={(event) => void setter(Number(event.currentTarget.value))}
+        className={OPACITY_RANGE_CLASSNAME}
+        aria-label={label}
+      />
+      <span className="w-10 text-right tabular-nums text-text-muted">
+        {value}%
+      </span>
+    </div>
+  )
 
   return (
     <div className="flex flex-col space-y-6 text-sm">
@@ -1350,6 +1385,66 @@ export const ChatSettings = () => {
             />
           </div>
         }
+      />
+
+      <SettingRow
+        label={t("chatAppearance.windowOpacity.label", "Chat window opacity")}
+        description={t(
+          "chatAppearance.windowOpacity.description",
+          "Adjusts the chat screen wash over your background image."
+        )}
+        {...getResetProps(
+          chatWindowOpacity,
+          CHAT_WINDOW_OPACITY_SETTING.defaultValue,
+          setChatWindowOpacity
+        )}
+        control={renderOpacityControl(
+          chatWindowOpacity,
+          setChatWindowOpacity,
+          t("chatAppearance.windowOpacity.label", "Chat window opacity")
+        )}
+      />
+
+      <SettingRow
+        label={t("chatAppearance.messageOpacity.label", "Message window opacity")}
+        description={t(
+          "chatAppearance.messageOpacity.description",
+          "Adjusts message bubble backgrounds without fading the message text."
+        )}
+        {...getResetProps(
+          chatMessageOpacity,
+          CHAT_MESSAGE_OPACITY_SETTING.defaultValue,
+          setChatMessageOpacity
+        )}
+        control={renderOpacityControl(
+          chatMessageOpacity,
+          setChatMessageOpacity,
+          t("chatAppearance.messageOpacity.label", "Message window opacity")
+        )}
+      />
+
+      <SettingRow
+        label={t(
+          "chatAppearance.characterImageOpacity.label",
+          "Character image opacity"
+        )}
+        description={t(
+          "chatAppearance.characterImageOpacity.description",
+          "Adjusts character portraits and assistant avatars in chat."
+        )}
+        {...getResetProps(
+          chatCharacterImageOpacity,
+          CHAT_CHARACTER_IMAGE_OPACITY_SETTING.defaultValue,
+          setChatCharacterImageOpacity
+        )}
+        control={renderOpacityControl(
+          chatCharacterImageOpacity,
+          setChatCharacterImageOpacity,
+          t(
+            "chatAppearance.characterImageOpacity.label",
+            "Character image opacity"
+          )
+        )}
       />
 
       <div className="pt-4">

@@ -23,6 +23,8 @@ import { useUiModeStore } from "@/store/ui-mode"
 import { useStoreMessageOption } from "@/store/option"
 import { EDIT_MESSAGE_EVENT } from "@/utils/timeline-actions"
 import { Badge, type BadgeVariant } from "@/components/ui/primitives"
+import { useSetting } from "@/hooks/useSetting"
+import { CHAT_MESSAGE_OPACITY_SETTING } from "@/services/settings/ui-settings"
 
 const ACTION_BUTTON_CLASS =
   "flex items-center justify-center rounded-full border border-border bg-surface2 text-text-muted hover:bg-surface hover:text-text transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-focus min-w-[44px] min-h-[44px]"
@@ -97,6 +99,7 @@ export const PlaygroundUserMessageBubble: React.FC<Props> = (props) => {
   const [userTextFont] = useStorage("chatUserTextFont", "default")
   const [userTextSize] = useStorage("chatUserTextSize", "md")
   const [userDisplayName] = useStorage("chatUserDisplayName", "")
+  const [chatMessageOpacity] = useSetting(CHAT_MESSAGE_OPACITY_SETTING)
   const [isBtnPressed, setIsBtnPressed] = React.useState(false)
   const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
   const [editMode, setEditMode] = React.useState(false)
@@ -185,7 +188,14 @@ export const PlaygroundUserMessageBubble: React.FC<Props> = (props) => {
   )
   const bubbleToneClass = isSystemMessage
     ? "bg-warn/10 border-warn/30 border-dashed"
-    : "bg-surface2/80 border-border"
+    : "border-border"
+  const messageBubbleStyle = isSystemMessage
+    ? undefined
+    : ({
+        backgroundColor: `rgb(var(--color-surface-2) / ${
+          chatMessageOpacity / 100
+        })`
+      } as React.CSSProperties)
 
   return (
     <div
@@ -275,7 +285,8 @@ export const PlaygroundUserMessageBubble: React.FC<Props> = (props) => {
           data-is-not-editable={!editMode}
           className={`message-bubble ${bubbleToneClass} shadow-sm rounded-3xl prose max-w-none dark:prose-invert break-words min-h-7 prose-p:opacity-95 prose-strong:opacity-100 border max-w-[calc(100%-1.75rem)] px-4 py-3 rounded-br-lg ${userTextClass} ${
             props.message_type && !editMode ? "italic" : ""
-          }`}>
+          }`}
+          style={messageBubbleStyle}>
           <HumanMessage message={props.message} />
         </div>
       )}
@@ -285,7 +296,8 @@ export const PlaygroundUserMessageBubble: React.FC<Props> = (props) => {
           dir="auto"
           className={`message-bubble ${bubbleToneClass} shadow-sm rounded-3xl prose max-w-none dark:prose-invert break-words min-h-7 prose-p:opacity-95 prose-strong:opacity-100 border max-w-[calc(100%-1.75rem)] px-4 py-3 rounded-br-lg ${userTextClass} ${
             props.message_type && !editMode ? "italic" : ""
-          }`}>
+          }`}
+          style={messageBubbleStyle}>
           <div className="w-screen max-w-[100%]">
             <EditMessageForm
               value={props.message}

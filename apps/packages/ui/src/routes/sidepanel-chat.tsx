@@ -30,7 +30,11 @@ import { tldwClient } from "@/services/tldw/TldwApiClient"
 import type { ServerChatMessage as ApiServerChatMessage } from "@/services/tldw/TldwApiClient"
 import { createSafeStorage } from "@/utils/safe-storage"
 import { requestQuickIngestOpen } from "@/utils/quick-ingest-open"
-import { CHAT_BACKGROUND_IMAGE_SETTING } from "@/services/settings/ui-settings"
+import {
+  CHAT_BACKGROUND_IMAGE_SETTING,
+  CHAT_WINDOW_OPACITY_SETTING
+} from "@/services/settings/ui-settings"
+import { useSetting } from "@/hooks/useSetting"
 import { useStorage } from "@plasmohq/storage/hook"
 import { ChevronDown, ExternalLink } from "lucide-react"
 import React, { lazy, Suspense } from "react"
@@ -903,6 +907,7 @@ const SidepanelChat = () => {
     key: CHAT_BACKGROUND_IMAGE_SETTING.key,
     instance: backgroundImageStorageRef.current
   })
+  const [chatWindowOpacity] = useSetting(CHAT_WINDOW_OPACITY_SETTING)
   const bgMsg = useBackgroundMessage()
   const lastBgMsgRef = React.useRef<typeof bgMsg | null>(null)
   const pendingWebClipAnalyzeRef = React.useRef<string | null>(null)
@@ -2335,11 +2340,13 @@ const SidepanelChat = () => {
                 }
               : {}
           }>
-          {/* Background overlay for opacity effect */}
+          {/* Keep themed background images visible while preserving text contrast. */}
           {chatBackgroundImage && (
             <div
-              className="absolute inset-0 bg-bg"
-              style={{ opacity: 0.9, pointerEvents: "none" }}
+              className="pointer-events-none absolute inset-0 backdrop-blur-[1px]"
+              style={{
+                backgroundColor: `rgb(var(--color-bg) / ${chatWindowOpacity / 100})`
+              }}
             />
           )}
 

@@ -93,6 +93,11 @@ import {
   DEFAULT_TTS_PROVIDER
 } from "@/services/tts"
 import type { DynamicUISurface } from "@/types/dynamic-ui"
+import { useSetting } from "@/hooks/useSetting"
+import {
+  CHAT_CHARACTER_IMAGE_OPACITY_SETTING,
+  CHAT_MESSAGE_OPACITY_SETTING
+} from "@/services/settings/ui-settings"
 import { DEFAULT_CHAT_SETTINGS } from "@/types/chat-settings"
 import { VisualIdentityImage } from "@/components/Common/VisualIdentity/VisualIdentityImage"
 
@@ -360,6 +365,10 @@ export const PlaygroundMessage = (props: Props) => {
     moodConfidenceDefault
   )
   const [userPersonaImage] = useStorage("chatUserPersonaImage", "")
+  const [chatMessageOpacity] = useSetting(CHAT_MESSAGE_OPACITY_SETTING)
+  const [chatCharacterImageOpacity] = useSetting(
+    CHAT_CHARACTER_IMAGE_OPACITY_SETTING
+  )
   const [renderMermaidDiagrams] = useStorage(
     "renderMermaidDiagrams",
     DEFAULT_CHAT_SETTINGS.renderMermaidDiagrams
@@ -1915,8 +1924,18 @@ export const PlaygroundMessage = (props: Props) => {
   const messageCardClass = isSystemMessage
     ? `flex max-w-[calc(100%-1.75rem)] flex-col rounded-2xl border border-dashed border-warn/30 bg-warn/10 shadow-sm ${messageSpacing}`
     : props.isBot
-      ? `flex max-w-[calc(100%-1.75rem)] flex-col rounded-2xl border border-border/50 bg-surface/60 shadow-sm border-l-2 border-l-primary/20 ${messageSpacing}`
-      : `flex max-w-[calc(100%-1.75rem)] flex-col rounded-2xl border border-border/50 bg-surface2/60 shadow-sm ${messageSpacing}`
+      ? `flex max-w-[calc(100%-1.75rem)] flex-col rounded-2xl border border-border/50 shadow-sm border-l-2 border-l-primary/20 ${messageSpacing}`
+      : `flex max-w-[calc(100%-1.75rem)] flex-col rounded-2xl border border-border/50 shadow-sm ${messageSpacing}`
+  const messageCardStyle = isSystemMessage
+    ? undefined
+    : ({
+        backgroundColor: `rgb(var(${
+          props.isBot ? "--color-surface" : "--color-surface-2"
+        }) / ${chatMessageOpacity / 100})`
+      } as React.CSSProperties)
+  const chatCharacterImageOpacityStyle = {
+    opacity: chatCharacterImageOpacity / 100
+  } as React.CSSProperties
   const portraitPanel = shouldShowPortrait ? (
     <button
       type="button"
@@ -1937,6 +1956,7 @@ export const PlaygroundMessage = (props: Props) => {
         }
         className="h-full w-full object-cover"
         loading="lazy"
+        style={chatCharacterImageOpacityStyle}
       />
       <span className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/35 via-transparent to-transparent" />
     </button>
@@ -1961,6 +1981,7 @@ export const PlaygroundMessage = (props: Props) => {
               src={resolvedModelImage}
               alt={resolvedModelName || props.name}
               className="size-8"
+              style={chatCharacterImageOpacityStyle}
             />
           </button>
         ) : (
@@ -1968,6 +1989,7 @@ export const PlaygroundMessage = (props: Props) => {
             src={resolvedModelImage}
             alt={resolvedModelName || props.name}
             className="size-8"
+            style={chatCharacterImageOpacityStyle}
           />
         )
       ) : isSystemMessage ? (
@@ -2041,7 +2063,7 @@ export const PlaygroundMessage = (props: Props) => {
         {portraitSide === "left" ? portraitPanel : null}
         {portraitSide === "left" ? avatarColumn : null}
         <div className="flex min-w-0 flex-1 flex-col gap-2">
-          <div className={messageCardClass}>
+          <div className={messageCardClass} style={messageCardStyle}>
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex flex-wrap items-center gap-2">
                 {isSystemMessage ? (
