@@ -41,6 +41,7 @@ import {
   type CharacterChatReadiness
 } from "@/utils/chat-model-availability"
 import { buildCharacterChatPath } from "@/routes/route-paths"
+import { expressionRowsFromExtensions } from "../character-expression-images"
 
 export type CharacterChatIntentBlocker = {
   record: any
@@ -622,6 +623,7 @@ export function useCharacterCrud(deps: UseCharacterCrudDeps) {
       generation_repetition_penalty: generationSettings.repetition_penalty,
       generation_stop_strings: generationSettings.stop?.join("\n") || "",
       extensions: extensionsValue,
+      expression_images: expressionRowsFromExtensions(record.extensions),
       world_book_ids: []
     })
     setShowEditAdvanced(hasAdvancedData(record, extensionsValue))
@@ -671,6 +673,7 @@ export function useCharacterCrud(deps: UseCharacterCrudDeps) {
       generation_repetition_penalty: generationSettings.repetition_penalty,
       generation_stop_strings: generationSettings.stop?.join("\n") || "",
       extensions: extensionsValue,
+      expression_images: expressionRowsFromExtensions(record.extensions),
       world_book_ids: []
     })
     setShowCreateAdvanced(hasAdvancedData(record, extensionsValue))

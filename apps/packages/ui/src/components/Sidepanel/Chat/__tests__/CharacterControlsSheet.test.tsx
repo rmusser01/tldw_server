@@ -12,10 +12,16 @@ const mocks = vi.hoisted(() => ({
   setSelectedAssistant: vi.fn(async () => undefined),
   beforeTrackedStart: vi.fn(async () => undefined),
   onRequestClose: vi.fn(),
+  tabsCreate: vi.fn(async () => undefined),
+  windowOpen: vi.fn(),
   assistantSelect: vi.fn((props: Record<string, unknown>) => props)
 }))
 
 const state = vi.hoisted(() => ({
+  runtime: null as {
+    id?: string
+    getURL?: (path: string) => string
+  } | null,
   selectedAssistant: null as Record<string, unknown> | null,
   settings: {
     assistantOverlay: null
@@ -102,11 +108,30 @@ vi.mock("@/hooks/useServerChatHistory", () => ({
   })
 }))
 
+vi.mock("@/utils/browser-runtime", () => ({
+  getBrowserRuntime: () => state.runtime,
+  isExtensionRuntime: (
+    runtime?: {
+      id?: string
+    } | null
+  ) => Boolean(runtime?.id)
+}))
+
+vi.mock("wxt/browser", () => ({
+  browser: {
+    tabs: {
+      create: mocks.tabsCreate
+    }
+  }
+}))
+
 import { CharacterControlsSheet } from "../CharacterControlsSheet"
 
 describe("CharacterControlsSheet", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    window.open = mocks.windowOpen as unknown as typeof window.open
+    state.runtime = null
     state.selectedAssistant = null
     state.settings = {
       assistantOverlay: null
@@ -254,5 +279,53 @@ describe("CharacterControlsSheet", () => {
       })
     )
     expect(mocks.onRequestClose).toHaveBeenCalledTimes(1)
+  })
+
+  it("opens the expression editor route in web fallback mode", async () => {
+    const user = userEvent.setup()
+    state.option = {
+      historyId: "history-1",
+      serverChatId: "chat-1",
+      serverChatAssistantKind: "character",
+      serverChatAssistantId: null,
+      serverChatCharacterId: "42"
+    }
+
+    render(<CharacterControlsSheet />)
+
+    await user.click(
+      screen.getByRole("button", { name: "Edit character expressions" })
+    )
+
+    expect(mocks.windowOpen).toHaveBeenCalledWith(
+      "/characters?from=sidepanel-character-controls&focus=expressions&characterId=42",
+      "_blank"
+    )
+  })
+
+  it("opens the expression editor in an extension options tab", async () => {
+    const user = userEvent.setup()
+    state.runtime = {
+      id: "extension-id",
+      getURL: (path) => `chrome-extension://extension-id${path}`
+    }
+    state.option = {
+      historyId: "history-1",
+      serverChatId: "chat-1",
+      serverChatAssistantKind: "character",
+      serverChatAssistantId: null,
+      serverChatCharacterId: "42"
+    }
+
+    render(<CharacterControlsSheet />)
+
+    await user.click(
+      screen.getByRole("button", { name: "Edit character expressions" })
+    )
+
+    expect(mocks.tabsCreate).toHaveBeenCalledWith({
+      url: "chrome-extension://extension-id/options.html#/characters?from=sidepanel-character-controls&focus=expressions&characterId=42"
+    })
+    expect(mocks.windowOpen).not.toHaveBeenCalled()
   })
 })

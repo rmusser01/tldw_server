@@ -1,6 +1,7 @@
 import React from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -25,6 +26,7 @@ const {
   generateFieldMock,
   cancelGenerationMock,
   clearGenerationErrorMock,
+  useFormDraftMock,
   useStorageMock,
   exportCharacterToJSONMock,
   exportCharacterToPNGMock,
@@ -54,6 +56,7 @@ const {
   ),
   cancelGenerationMock: vi.fn(),
   clearGenerationErrorMock: vi.fn(),
+  useFormDraftMock: vi.fn(),
   useStorageMock: vi.fn(),
   exportCharacterToJSONMock: vi.fn(),
   exportCharacterToPNGMock: vi.fn(),
@@ -101,6 +104,7 @@ const {
       page_size: 25,
       has_more: false
     })),
+    getCharacter: vi.fn(async () => null),
     listChats: vi.fn(async () => []),
     createChat: vi.fn(async () => ({ id: "quick-chat-session-default" })),
     createCharacter: vi.fn(
@@ -233,15 +237,8 @@ vi.mock("@/hooks/useCharacterGeneration", () => ({
 }))
 
 vi.mock("@/hooks/useFormDraft", () => ({
-  useFormDraft: () => ({
-    hasDraft: false,
-    draftData: null,
-    saveDraft: vi.fn(),
-    clearDraft: vi.fn(),
-    applyDraft: vi.fn(() => null),
-    dismissDraft: vi.fn(),
-    lastSaved: null
-  })
+  useFormDraft: (...args: any[]) => useFormDraftMock(...args),
+  formatDraftAge: () => "just now"
 }))
 
 vi.mock("@/hooks/useSelectedCharacter", () => ({
@@ -339,6 +336,15 @@ describe("CharactersManager first-use onboarding", () => {
     useIsConnectedMock.mockReturnValue(true)
     confirmDangerMock.mockResolvedValue(true)
     tldwClientMock.fetchWithAuth.mockReset()
+    useFormDraftMock.mockImplementation(() => ({
+      hasDraft: false,
+      draftData: null,
+      saveDraft: vi.fn(),
+      clearDraft: vi.fn(),
+      applyDraft: vi.fn(() => null),
+      dismissDraft: vi.fn(),
+      lastSaved: null
+    }))
     useStorageMock.mockImplementation(
       (_key: unknown, defaultValue: unknown) => [
         defaultValue ?? null,
@@ -845,7 +851,7 @@ describe("CharactersManager first-use onboarding", () => {
         .find((button) => button.getAttribute("type") === "submit")
       expect(candidate).toBeDefined()
       return candidate as HTMLElement
-    })
+    }, { timeout: 15000 })
     const createFormElement = createSubmitButton.closest("form")
     expect(createFormElement).not.toBeNull()
     const createScope = within(createFormElement as HTMLElement)
@@ -879,7 +885,7 @@ describe("CharactersManager first-use onboarding", () => {
     await user.click(createScope.getByRole("button", { name: "Metadata" }))
     expect(createScope.getByText("Extensions (JSON)")).toBeInTheDocument()
     expect(createScope.getByText("Expression packs available after save")).toBeInTheDocument()
-    expect(createScope.getByText("Legacy mood images")).toBeInTheDocument()
+    expect(createScope.getByText("Expression images")).toBeInTheDocument()
   }, 60000)
 
   it("renders the same advanced section structure in edit mode", async () => {
@@ -942,8 +948,215 @@ describe("CharactersManager first-use onboarding", () => {
 
     await user.click(editScope.getByRole("button", { name: "Metadata" }))
     expect(editScope.getByText("Expression packs available after save")).toBeInTheDocument()
-    expect(editScope.getByText("Legacy mood images")).toBeInTheDocument()
+    expect(editScope.getByText("Expression images")).toBeInTheDocument()
   }, 60000)
+
+  it("opens a focused character editor with expression images visible from route hints", async () => {
+    const characterRecord = {
+      id: "char-edit-1",
+      name: "Focused Character",
+      system_prompt: "Existing system prompt.",
+      greeting: "Hi",
+      description: "Existing description",
+      tags: ["existing"],
+      version: 1
+    }
+
+    useQueryMock.mockImplementation((opts: any) => {
+      const key = Array.isArray(opts?.queryKey) ? opts.queryKey[0] : undefined
+      if (key === "tldw:listCharacters") {
+        return makeUseQueryResult({ data: [characterRecord], status: "success" })
+      }
+      if (key === "getModelsForFieldGeneration") {
+        return makeUseQueryResult({ data: [] })
+      }
+      if (key === "getAllModelsForGeneration") {
+        return makeUseQueryResult({ data: [] })
+      }
+      if (key === "tldw:characterConversationCounts") {
+        return makeUseQueryResult({ data: {} })
+      }
+      return makeUseQueryResult({})
+    })
+
+    render(
+      <CharactersManager
+        routeCharacterId="char-edit-1"
+        routeFocus="expressions"
+      />
+    )
+
+    const saveButton = await findEditSubmitButton(5000)
+    const editFormElement = saveButton.closest("form")
+    expect(editFormElement).not.toBeNull()
+    const editScope = within(editFormElement as HTMLElement)
+
+    expect(editScope.getByDisplayValue("Focused Character")).toBeInTheDocument()
+    expect(editScope.getByRole("button", { name: "Metadata" })).toHaveAttribute(
+      "aria-expanded",
+      "true"
+    )
+    expect(editScope.getByText("Expression images")).toBeInTheDocument()
+  }, 10000)
+
+  it("opens the create editor with expression images visible from a route focus hint", async () => {
+    window.localStorage.setItem(TEMPLATE_CHOOSER_SEEN_KEY, "true")
+
+    render(<CharactersManager routeFocus="expressions" />)
+
+    const createSubmitButton = await waitFor(() => {
+      const candidate = screen
+        .getAllByRole("button", { name: "Create character" })
+        .find((button) => button.getAttribute("type") === "submit")
+      expect(candidate).toBeDefined()
+      return candidate as HTMLElement
+    }, { timeout: 5000 })
+    const createFormElement = createSubmitButton.closest("form")
+    expect(createFormElement).not.toBeNull()
+    const createScope = within(createFormElement as HTMLElement)
+
+    expect(createScope.getByRole("button", { name: "Metadata" })).toHaveAttribute(
+      "aria-expanded",
+      "true"
+    )
+    expect(createScope.getByText("Expression images")).toBeInTheDocument()
+  }, 10000)
+
+  it("opens a route-focused character editor when the character is not on the visible page", async () => {
+    const hiddenCharacterRecord = {
+      id: "char-off-page",
+      name: "Off Page Character",
+      system_prompt: "Existing system prompt.",
+      greeting: "Hi",
+      description: "Existing description",
+      tags: ["existing"],
+      version: 1
+    }
+
+    tldwClientMock.getCharacter.mockResolvedValue(hiddenCharacterRecord)
+    useQueryMock.mockImplementation((opts: any) => {
+      const key = Array.isArray(opts?.queryKey) ? opts.queryKey[0] : undefined
+      if (key === "tldw:listCharacters") {
+        return makeUseQueryResult({ data: [], status: "success" })
+      }
+      if (key === "getModelsForFieldGeneration") {
+        return makeUseQueryResult({ data: [] })
+      }
+      if (key === "getAllModelsForGeneration") {
+        return makeUseQueryResult({ data: [] })
+      }
+      if (key === "tldw:characterConversationCounts") {
+        return makeUseQueryResult({ data: {} })
+      }
+      return makeUseQueryResult({})
+    })
+
+    render(
+      <CharactersManager
+        routeCharacterId="char-off-page"
+        routeFocus="expressions"
+      />
+    )
+
+    await waitFor(() => {
+      expect(tldwClientMock.getCharacter).toHaveBeenCalledWith("char-off-page")
+    })
+
+    const saveButton = await findEditSubmitButton(5000)
+    const editFormElement = saveButton.closest("form")
+    expect(editFormElement).not.toBeNull()
+    const editScope = within(editFormElement as HTMLElement)
+
+    expect(editScope.getByDisplayValue("Off Page Character")).toBeInTheDocument()
+    expect(editScope.getByRole("button", { name: "Metadata" })).toHaveAttribute(
+      "aria-expanded",
+      "true"
+    )
+    expect(editScope.getByText("Expression images")).toBeInTheDocument()
+  }, 10000)
+
+  it("ignores stale route-focused character fetches after the route target changes", async () => {
+    const resolvers: Record<string, (record: any) => void> = {}
+    tldwClientMock.getCharacter.mockImplementation(
+      (id: string | number) =>
+        new Promise((resolve) => {
+          resolvers[String(id)] = resolve
+        })
+    )
+    useQueryMock.mockImplementation((opts: any) => {
+      const key = Array.isArray(opts?.queryKey) ? opts.queryKey[0] : undefined
+      if (key === "tldw:listCharacters") {
+        return makeUseQueryResult({ data: [], status: "success" })
+      }
+      if (key === "getModelsForFieldGeneration") {
+        return makeUseQueryResult({ data: [] })
+      }
+      if (key === "getAllModelsForGeneration") {
+        return makeUseQueryResult({ data: [] })
+      }
+      if (key === "tldw:characterConversationCounts") {
+        return makeUseQueryResult({ data: {} })
+      }
+      return makeUseQueryResult({})
+    })
+
+    const { rerender } = render(
+      <CharactersManager
+        routeCharacterId="char-a"
+        routeFocus="expressions"
+      />
+    )
+
+    await waitFor(() => {
+      expect(tldwClientMock.getCharacter).toHaveBeenCalledWith("char-a")
+    })
+
+    rerender(
+      <CharactersManager
+        routeCharacterId="char-b"
+        routeFocus="expressions"
+      />
+    )
+
+    await waitFor(() => {
+      expect(tldwClientMock.getCharacter).toHaveBeenCalledWith("char-b")
+    })
+
+    await act(async () => {
+      resolvers["char-b"]?.({
+        id: "char-b",
+        name: "Current Route Character",
+        system_prompt: "Existing system prompt.",
+        greeting: "Hi",
+        description: "Current route description",
+        tags: ["current"],
+        version: 1
+      })
+      await Promise.resolve()
+    })
+
+    const saveButton = await findEditSubmitButton(5000)
+    const editFormElement = saveButton.closest("form")
+    expect(editFormElement).not.toBeNull()
+    const editScope = within(editFormElement as HTMLElement)
+    expect(editScope.getByDisplayValue("Current Route Character")).toBeInTheDocument()
+
+    await act(async () => {
+      resolvers["char-a"]?.({
+        id: "char-a",
+        name: "Stale Route Character",
+        system_prompt: "Existing system prompt.",
+        greeting: "Hi",
+        description: "Stale route description",
+        tags: ["stale"],
+        version: 1
+      })
+      await Promise.resolve()
+    })
+
+    expect(editScope.getByDisplayValue("Current Route Character")).toBeInTheDocument()
+    expect(editScope.queryByDisplayValue("Stale Route Character")).not.toBeInTheDocument()
+  }, 10000)
 
   it("preloads world-book attachments in edit mode and syncs attachments on save", async () => {
     const characterRecord = {
@@ -3202,6 +3415,190 @@ describe("CharactersManager first-use onboarding", () => {
           description: "Updated description from edit flow test."
         })
       )
+    })
+  }, 30000)
+
+  it("seeds expression images in edit mode and saves canonical mood image metadata", async () => {
+    const user = userEvent.setup()
+    const characterRecord = {
+      id: "char-expression-edit",
+      name: "Expression Character",
+      system_prompt: "Stay expressive.",
+      greeting: "Hello",
+      description: "Expression test",
+      tags: ["expression"],
+      extensions: {
+        mood_images: {
+          neutral: "https://example.test/legacy-neutral.png"
+        },
+        moodImages: {
+          happy: "https://example.test/legacy-happy.png"
+        },
+        tldw: {
+          moodImages: {
+            happy: "https://example.test/happy.png",
+            smirk: "https://example.test/smirk.png"
+          }
+        }
+      },
+      version: 2
+    }
+
+    useMutationMock.mockImplementation((opts: any) => ({
+      mutate: async (variables: any) => {
+        const result = await opts?.mutationFn?.(variables)
+        await opts?.onSuccess?.(result, variables, undefined)
+        return result
+      },
+      mutateAsync: async (variables: any) => {
+        const result = await opts?.mutationFn?.(variables)
+        await opts?.onSuccess?.(result, variables, undefined)
+        return result
+      },
+      isPending: false
+    }))
+
+    useQueryMock.mockImplementation((opts: any) => {
+      const key = Array.isArray(opts?.queryKey) ? opts.queryKey[0] : undefined
+      if (key === "tldw:listCharacters") {
+        return makeUseQueryResult({ data: [characterRecord], status: "success" })
+      }
+      if (key === "getModelsForFieldGeneration") {
+        return makeUseQueryResult({ data: [] })
+      }
+      if (key === "getAllModelsForGeneration") {
+        return makeUseQueryResult({ data: [] })
+      }
+      if (key === "tldw:characterConversationCounts") {
+        return makeUseQueryResult({ data: {} })
+      }
+      return makeUseQueryResult({})
+    })
+
+    render(<CharactersManager />)
+
+    await user.click(await screen.findByRole("button", { name: /Edit character/i }))
+    const saveButton = await findEditSubmitButton()
+    const editFormElement = saveButton.closest("form")
+    expect(editFormElement).not.toBeNull()
+    const editScope = within(editFormElement as HTMLElement)
+
+    const advancedToggle = editScope.getByRole("button", {
+      name: /advanced fields/i
+    })
+    if (advancedToggle.textContent?.includes("Show")) {
+      await user.click(advancedToggle)
+    }
+    await user.click(editScope.getByRole("button", { name: "Metadata" }))
+
+    expect(
+      await editScope.findByLabelText("Expression image URL for happy")
+    ).toHaveValue("https://example.test/happy.png")
+    expect(
+      editScope.getByLabelText("Expression image URL for smirk")
+    ).toHaveValue("https://example.test/smirk.png")
+
+    fireEvent.submit(editFormElement as HTMLFormElement)
+
+    await waitFor(() => {
+      const payload = tldwClientMock.updateCharacter.mock.calls.at(-1)?.[1] as any
+      expect(payload?.extensions).toEqual({
+        tldw: {
+          mood_images: {
+            happy: "https://example.test/happy.png",
+            smirk: "https://example.test/smirk.png"
+          }
+        }
+      })
+    })
+  }, 30000)
+
+  it("restores draft expression metadata before saving canonical mood image metadata", async () => {
+    const user = userEvent.setup()
+    const draftValues = {
+      name: "Draft Expression Character",
+      system_prompt: "Stay expressive from draft.",
+      greeting: "Hello from draft",
+      description: "Draft expression test",
+      extensions: JSON.stringify({
+        moodImages: {
+          smirk: "https://example.test/draft-smirk.png"
+        }
+      })
+    }
+
+    window.localStorage.setItem(TEMPLATE_CHOOSER_SEEN_KEY, "true")
+    useFormDraftMock.mockImplementation((options?: { formType?: string }) => {
+      if (options?.formType === "create") {
+        return {
+          hasDraft: true,
+          draftData: {
+            formData: draftValues,
+            formType: "create",
+            savedAt: Date.now()
+          },
+          saveDraft: vi.fn(),
+          clearDraft: vi.fn(),
+          applyDraft: vi.fn(() => draftValues),
+          dismissDraft: vi.fn(),
+          lastSaved: null
+        }
+      }
+      return {
+        hasDraft: false,
+        draftData: null,
+        saveDraft: vi.fn(),
+        clearDraft: vi.fn(),
+        applyDraft: vi.fn(() => null),
+        dismissDraft: vi.fn(),
+        lastSaved: null
+      }
+    })
+    useMutationMock.mockImplementation((opts: any) => ({
+      mutate: async (variables: any) => {
+        const result = await opts?.mutationFn?.(variables)
+        await opts?.onSuccess?.(result, variables, undefined)
+        return result
+      },
+      mutateAsync: async (variables: any) => {
+        const result = await opts?.mutationFn?.(variables)
+        await opts?.onSuccess?.(result, variables, undefined)
+        return result
+      },
+      isPending: false
+    }))
+
+    render(<CharactersManager />)
+
+    await user.click(screen.getByRole("button", { name: "New character" }))
+    await user.click(await screen.findByRole("button", { name: "Restore" }))
+    const createSubmitButton = await waitFor(() => {
+      const candidate = screen
+        .getAllByRole("button", { name: "Create character" })
+        .find((button) => button.getAttribute("type") === "submit")
+      expect(candidate).toBeDefined()
+      return candidate as HTMLElement
+    }, { timeout: 15000 })
+    const createFormElement = createSubmitButton.closest("form")
+    expect(createFormElement).not.toBeNull()
+    const createScope = within(createFormElement as HTMLElement)
+
+    await user.click(await createScope.findByRole("button", { name: "Metadata" }))
+    expect(
+      await createScope.findByLabelText("Expression image URL for smirk")
+    ).toHaveValue("https://example.test/draft-smirk.png")
+
+    fireEvent.submit(createFormElement as HTMLFormElement)
+
+    await waitFor(() => {
+      const payload = tldwClientMock.createCharacter.mock.calls.at(-1)?.[0] as any
+      expect(payload?.extensions).toEqual({
+        tldw: {
+          mood_images: {
+            smirk: "https://example.test/draft-smirk.png"
+          }
+        }
+      })
     })
   }, 30000)
 

@@ -14,7 +14,13 @@ import {
 export { resolveCharacterSelectionId } from "@/utils/default-character-preference"
 import { CHARACTER_TEMPLATES } from "@/data/character-templates"
 import { extractAvatarValues } from "./AvatarField"
+import {
+  expressionRowsToMoodImages,
+  normalizeExpressionImageRows,
+  type ExpressionImageRow
+} from "./character-expression-images"
 import { validateAndCreateImageDataUrl } from "@/utils/image-utils"
+import { mergeCharacterMoodImagesIntoExtensions } from "@/utils/character-mood"
 import { buildCharacterChatPath } from "@/routes/route-paths"
 
 // ---------------------------------------------------------------------------
@@ -1334,20 +1340,73 @@ export const removeLegacyGenerationKeys = (target: Record<string, any>) => {
   delete target.stopSequences
 }
 
+export type CharacterPayloadValidationErrorCode =
+  | "invalid-extensions-json"
+  | "invalid-expression-images"
+
+export class CharacterPayloadValidationError extends Error {
+  code: CharacterPayloadValidationErrorCode
+
+  constructor(code: CharacterPayloadValidationErrorCode, message: string) {
+    super(message)
+    this.name = "CharacterPayloadValidationError"
+    this.code = code
+  }
+}
+
+type CharacterMetadataMergeFailure = {
+  __characterMetadataError: "invalid-expression-images"
+}
+
+const invalidExpressionImagesFailure = (): CharacterMetadataMergeFailure => ({
+  __characterMetadataError: "invalid-expression-images"
+})
+
+const isCharacterMetadataMergeFailure = (
+  value: unknown
+): value is CharacterMetadataMergeFailure =>
+  isPlainObject(value) &&
+  value.__characterMetadataError === "invalid-expression-images"
+
 export const applyCharacterMetadataToExtensions = (
   rawExtensions: unknown,
   params: {
     preset: CharacterPromptPresetId
     defaultAuthorNote?: unknown
     generation?: CharacterGenerationSettings
+    expressionRows?: ExpressionImageRow[]
   }
-): Record<string, any> | string | undefined => {
+):
+  | Record<string, any>
+  | string
+  | undefined
+  | null
+  | CharacterMetadataMergeFailure => {
   const parsed = parseExtensionsObject(rawExtensions)
+  const normalizedExpressionRows = Array.isArray(params.expressionRows)
+    ? normalizeExpressionImageRows(params.expressionRows)
+    : null
+  const expressionMoodImages = normalizedExpressionRows
+    ? expressionRowsToMoodImages(normalizedExpressionRows.rows)
+    : {}
+  const parsedTldw = parsed && isPlainObject(parsed.tldw) ? parsed.tldw : null
+  const hadMoodImageKeys =
+    Boolean(parsedTldw && ("mood_images" in parsedTldw || "moodImages" in parsedTldw)) ||
+    Boolean(parsed && ("mood_images" in parsed || "moodImages" in parsed))
+  const shouldMergeExpressionImages =
+    Boolean(normalizedExpressionRows) &&
+    (normalizedExpressionRows!.errors.length > 0 ||
+      Object.keys(expressionMoodImages).length > 0 ||
+      hadMoodImageKeys)
   const hadRawString =
     typeof rawExtensions === "string" &&
     rawExtensions.trim().length > 0 &&
     parsed === null
 
+  if (shouldMergeExpressionImages && normalizedExpressionRows?.errors.length) {
+    return invalidExpressionImagesFailure()
+  }
+  if (hadRawString && shouldMergeExpressionImages) return null
   if (hadRawString) {
     return rawExtensions as string
   }
@@ -1416,11 +1475,15 @@ export const applyCharacterMetadataToExtensions = (
     delete next.tldw
   }
 
+  if (shouldMergeExpressionImages) {
+    next = mergeCharacterMoodImagesIntoExtensions(next, expressionMoodImages)
+  }
+
   if (Object.keys(next).length > 0) {
     return next
   }
 
-  return undefined
+  return shouldMergeExpressionImages ? {} : undefined
 }
 
 export const hasAdvancedData = (record: any, extensionsValue: string): boolean => {
@@ -1516,8 +1579,21 @@ export const buildCharacterPayload = (values: any): Record<string, any> => {
   const mergedExtensions = applyCharacterMetadataToExtensions(values.extensions, {
     preset: resolvedPreset,
     defaultAuthorNote: values.default_author_note,
-    generation: generationSettings
+    generation: generationSettings,
+    expressionRows: values.expression_images
   })
+  if (isCharacterMetadataMergeFailure(mergedExtensions)) {
+    throw new CharacterPayloadValidationError(
+      "invalid-expression-images",
+      "Fix expression image rows before saving."
+    )
+  }
+  if (mergedExtensions === null) {
+    throw new CharacterPayloadValidationError(
+      "invalid-extensions-json",
+      "Fix Extensions JSON before saving expression images."
+    )
+  }
   if (typeof mergedExtensions !== "undefined") {
     payload.extensions = mergedExtensions
   }
