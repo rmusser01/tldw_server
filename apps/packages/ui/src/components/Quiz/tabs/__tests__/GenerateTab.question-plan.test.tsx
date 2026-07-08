@@ -393,7 +393,7 @@ describe("GenerateTab question plan controls", () => {
     );
   }, 20000);
 
-  it("keeps submitted numeric edits as integers inside backend ranges", async () => {
+  it("discards invalid numeric edits and falls back to previous/default values", async () => {
     const mutateAsync = vi.fn(async () => ({
       quiz: { id: 1, name: "Generated Quiz" },
       questions: Array.from({ length: 8 }, (_, index) => ({ id: index + 1 })),
