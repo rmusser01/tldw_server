@@ -23,15 +23,15 @@ Final summary: Fixed the WebUI /chat startup request burst by removing speculati
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Fixed the WebUI /chat startup request burst by coalescing duplicate GET paths, gating first-run checks behind auth readiness, and preventing missing visual identity bindings from replaying on remount churn. Focused verification covered the changed frontend request paths; Bandit was skipped because the implementation scope is frontend TypeScript/TSX only.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

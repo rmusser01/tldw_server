@@ -34,8 +34,6 @@ Root cause: after rebasing onto dev, setup mounted global notification clients b
 Added an auth-controlled AppProviders notification gate, passed it from _app only after auth resolves on non-setup routes, and skipped WebLayout unread-count polling while the header is hidden. Verified focused Vitest coverage and real-backend UAT: zero 429s, zero burst targets, no bad responses, and setup notification CORS errors removed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed
