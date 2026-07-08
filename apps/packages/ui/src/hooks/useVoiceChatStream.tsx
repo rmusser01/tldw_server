@@ -28,6 +28,8 @@ export type VoiceChatState =
   | "speaking"
   | "error"
 
+export type VoiceChatStreamMode = "voice_chat" | "push_to_talk"
+
 type VoiceChatCallbacks = {
   onPartial?: (text: string) => void
   onTranscript?: (text: string, meta?: { autoCommit?: boolean }) => void
@@ -40,6 +42,7 @@ type VoiceChatCallbacks = {
 
 type VoiceChatOptions = VoiceChatCallbacks & {
   active: boolean
+  mode?: VoiceChatStreamMode
 }
 
 // Drop mic frames once the socket's outbound buffer backs up past this many
@@ -107,6 +110,7 @@ const detectTriggerPhrase = (text: string, phrases: string[]): boolean => {
 
 export const useVoiceChatStream = ({
   active,
+  mode = "voice_chat",
   onPartial,
   onTranscript,
   onAssistantDelta,
@@ -175,6 +179,8 @@ export const useVoiceChatStream = ({
   })
   const stateRef = React.useRef<VoiceChatState>(state)
   const activeRef = React.useRef(active)
+  const streamMode: VoiceChatStreamMode =
+    mode === "push_to_talk" ? "push_to_talk" : "voice_chat"
 
   React.useEffect(() => {
     callbacksRef.current = {
@@ -250,7 +256,7 @@ export const useVoiceChatStream = ({
         // ignore chunk send failures
       }
     },
-    { owner: "voice_chat" }
+    { owner: streamMode === "push_to_talk" ? "push_to_talk" : "voice_chat" }
   )
 
   const normalizedTriggers = React.useMemo(
@@ -362,6 +368,14 @@ export const useVoiceChatStream = ({
     if (!ws || ws.readyState !== WebSocket.OPEN) return
     try {
       ws.send(JSON.stringify({ type: "commit" }))
+    } catch {}
+  }, [])
+
+  const sendPushToTalkRelease = React.useCallback(() => {
+    const ws = wsRef.current
+    if (!ws || ws.readyState !== WebSocket.OPEN) return
+    try {
+      ws.send(JSON.stringify({ type: "push_to_talk_release" }))
     } catch {}
   }, [])
 
@@ -645,7 +659,7 @@ export const useVoiceChatStream = ({
               JSON.stringify({
                 type: "config",
                 protocol_version: 1,
-                mode: "voice_chat",
+                mode: streamMode,
                 audio_format: "pcm16",
                 sample_rate: 16000,
                 channels: 1,
@@ -706,6 +720,7 @@ export const useVoiceChatStream = ({
     resolveApiProviderForModel,
     selectedModel,
     speechToTextLanguage,
+    streamMode,
     liveVoiceDeviceId,
     sttSettings.model,
     sttSettings.temperature,
@@ -811,6 +826,7 @@ export const useVoiceChatStream = ({
     micActive,
     start,
     stop,
-    sendCommit
+    sendCommit,
+    sendPushToTalkRelease
   }
 }

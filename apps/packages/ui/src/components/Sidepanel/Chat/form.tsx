@@ -169,6 +169,17 @@ type SidepanelQueuedSourceContext = {
   isImageCommand?: boolean
 }
 
+const appendDictationTranscript = (
+  currentMessage: string | null | undefined,
+  transcript: string
+): string => {
+  const text = transcript.trim()
+  if (!text) return currentMessage || ""
+  const current = String(currentMessage || "")
+  if (!current.trim()) return text
+  return `${current.trimEnd()} ${text}`
+}
+
 export const SidepanelForm = ({
   dropedFile,
   inputRef,
@@ -1010,7 +1021,10 @@ export const SidepanelForm = ({
     sttSettings,
     dictationModeOverride,
     dictationAutoFallbackEnabled: Boolean(dictationAutoFallbackEnabled),
-    onTranscript: (text) => form.setFieldValue("message", text)
+    onTranscript: (text) => {
+      const nextMessage = appendDictationTranscript(form.values.message, text)
+      form.setFieldValue("message", nextMessage)
+    }
   })
   const hasVoiceInputControls =
     browserSupportsSpeechRecognition || hasServerStt || hasServerVoiceChat

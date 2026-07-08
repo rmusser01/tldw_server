@@ -117,7 +117,7 @@ describe("dictation cross-surface contract", () => {
     )
   })
 
-  it("keeps transcript insertion attached to the composer message in both surfaces", () => {
+  it("appends transcript insertion to the existing composer message in both surfaces", () => {
     const playgroundVoiceChatPath = path.resolve(
       __dirname,
       "../hooks/usePlaygroundVoiceChat.ts"
@@ -129,13 +129,23 @@ describe("dictation cross-surface contract", () => {
 
     const playgroundSource = fs.readFileSync(playgroundVoiceChatPath, "utf8")
     const sidepanelSource = fs.readFileSync(sidepanelFormPath, "utf8")
+    const sidepanelDictationBlock = sidepanelSource.slice(
+      sidepanelSource.indexOf("useComposerVoiceChat({"),
+      sidepanelSource.indexOf("const hasVoiceInputControls")
+    )
 
-    // Playground keeps its collapse-aware transcript handler.
+    expect(playgroundSource).toContain("appendDictationTranscript(")
     expect(playgroundSource).toContain(
+      "setMessageValue(nextMessage, { collapseLarge: true, forceCollapse: true })"
+    )
+    expect(playgroundSource).not.toContain(
       'setMessageValue(text, { collapseLarge: true, forceCollapse: true })'
     )
-    // Sidepanel keeps its plain-text transcript handler.
-    expect(sidepanelSource).toContain(
+    expect(sidepanelDictationBlock).toContain("appendDictationTranscript(")
+    expect(sidepanelDictationBlock).toContain(
+      'form.setFieldValue("message", nextMessage)'
+    )
+    expect(sidepanelDictationBlock).not.toContain(
       'form.setFieldValue("message", text)'
     )
   })

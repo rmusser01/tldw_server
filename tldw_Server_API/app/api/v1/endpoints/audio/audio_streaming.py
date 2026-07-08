@@ -1061,6 +1061,7 @@ async def websocket_transcribe(
                 redacted_payload = apply_transcript_payload_policy(payload, policy=effective_stt_policy)
                 if str(redacted_payload.get("type", "")).strip().lower() in {
                     "partial",
+                    "final",
                     "transcription",
                     "full_transcript",
                 }:
@@ -2164,7 +2165,12 @@ async def websocket_audio_chat_stream(
 
         async def _send_stream_payload(payload: dict[str, Any]) -> None:
             redacted_payload = apply_transcript_payload_policy(payload, policy=effective_stt_policy)
-            if str(redacted_payload.get("type", "")).strip().lower() in {"partial", "transcription", "full_transcript"}:
+            if str(redacted_payload.get("type", "")).strip().lower() in {
+                "partial",
+                "final",
+                "transcription",
+                "full_transcript",
+            }:
                 emit_stt_redaction_total(
                     endpoint="audio.chat.stream",
                     redaction_outcome=_stt_redaction_outcome_for_payload(
@@ -2792,15 +2798,17 @@ async def websocket_audio_chat_stream(
                         provider=stt_metrics_provider,
                         reason="validation_error",
                     )
+                    error_payload = _audio_ws_error_payload(
+                        code="bad_request",
+                        message="Invalid JSON",
+                        request_id=request_id,
+                    )
                     if _outer_stream:
-                        await _outer_stream.send_json(
-                            _audio_ws_error_payload(
-                                code="bad_request",
-                                message="Invalid JSON",
-                                request_id=request_id,
-                            )
-                        )
-                    continue
+                        await _outer_stream.send_json(error_payload)
+                    else:
+                        await websocket.send_json(error_payload)
+                    await websocket.close(code=4400)
+                    break
 
                 msg_type = data.get("type")
                 if msg_type == "audio":

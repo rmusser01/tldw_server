@@ -22,8 +22,8 @@ import type { VoiceConversationAvailability } from "@/services/tldw/voice-conver
  * uses the shared hook directly.
  *
  * Transcripts are written to the message field via Playground's
- * `setMessageValue(text, { collapseLarge: true, forceCollapse: true })` so
- * large pasted-then-redictated payloads stay collapsed in the textarea.
+ * collapse-aware message setter so large pasted-then-redictated payloads stay
+ * collapsed in the textarea.
  */
 
 // ---------------------------------------------------------------------------
@@ -69,6 +69,7 @@ export interface UsePlaygroundVoiceChatDeps {
   /** Language */
   speechToTextLanguage: string
   /** Callbacks */
+  messageValue: string
   setMessageValue: (value: string, options?: any) => void
   submitForm: () => void
   /** Notification API */
@@ -78,6 +79,17 @@ export interface UsePlaygroundVoiceChatDeps {
   isServerDictating: boolean
   /** i18n */
   t: (key: string, ...args: any[]) => string
+}
+
+const appendDictationTranscript = (
+  currentMessage: string | null | undefined,
+  transcript: string
+): string => {
+  const text = transcript.trim()
+  if (!text) return currentMessage || ""
+  const current = String(currentMessage || "")
+  if (!current.trim()) return text
+  return `${current.trimEnd()} ${text}`
 }
 
 // ---------------------------------------------------------------------------
@@ -110,6 +122,7 @@ export function usePlaygroundVoiceChat(deps: UsePlaygroundVoiceChatDeps) {
     autoStopTimeout,
     autoSubmitVoiceMessage,
     speechToTextLanguage,
+    messageValue,
     setMessageValue,
     submitForm,
     notificationApi,
@@ -151,9 +164,10 @@ export function usePlaygroundVoiceChat(deps: UsePlaygroundVoiceChatDeps) {
 
   const handleTranscript = React.useCallback(
     (text: string) => {
-      setMessageValue(text, { collapseLarge: true, forceCollapse: true })
+      const nextMessage = appendDictationTranscript(messageValue, text)
+      setMessageValue(nextMessage, { collapseLarge: true, forceCollapse: true })
     },
-    [setMessageValue]
+    [messageValue, setMessageValue]
   )
 
   const handleAutoSubmit = React.useCallback(() => {

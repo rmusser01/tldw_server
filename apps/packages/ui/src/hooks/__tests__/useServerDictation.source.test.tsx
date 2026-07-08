@@ -215,6 +215,45 @@ describe("useServerDictation selected source handling", () => {
     expect(onTranscript).toHaveBeenCalledWith("hello")
   })
 
+  it("accepts strict backend final frames as committed dictation text", async () => {
+    const onTranscript = vi.fn()
+    const { result } = renderHook(() => buildHook({ onTranscript }))
+
+    await act(async () => {
+      await result.current.startServerDictation()
+    })
+
+    const ws = MockWebSocket.instances[0]
+    await act(async () => {
+      ws.open()
+      await Promise.resolve()
+      ws.message({ type: "final", text: "backend final", is_final: true })
+    })
+
+    expect(onTranscript).toHaveBeenCalledTimes(1)
+    expect(onTranscript).toHaveBeenCalledWith("backend final")
+  })
+
+  it("emits only the missing suffix when a cumulative full transcript follows final frames", async () => {
+    const onTranscript = vi.fn()
+    const { result } = renderHook(() => buildHook({ onTranscript }))
+
+    await act(async () => {
+      await result.current.startServerDictation()
+    })
+
+    const ws = MockWebSocket.instances[0]
+    await act(async () => {
+      ws.open()
+      await Promise.resolve()
+      ws.message({ type: "final", text: "hello", is_final: true })
+      ws.message({ type: "full_transcript", text: "hello world" })
+    })
+
+    expect(onTranscript).toHaveBeenNthCalledWith(1, "hello")
+    expect(onTranscript).toHaveBeenNthCalledWith(2, "world")
+  })
+
   it("reports microphone startup failures through onError", async () => {
     const onError = vi.fn()
     const startupError = new Error("Requested microphone unavailable")
@@ -254,8 +293,9 @@ describe("useServerDictation selected source handling", () => {
     expect(micState.start).not.toHaveBeenCalled()
   })
 
-  it("stops mic and websocket on stop", async () => {
-    const { result } = renderHook(() => buildHook())
+  it("stops mic on stop but keeps the websocket alive for final transcript frames", async () => {
+    const onTranscript = vi.fn()
+    const { result } = renderHook(() => buildHook({ onTranscript }))
 
     await act(async () => {
       await result.current.startServerDictation()
@@ -279,5 +319,16 @@ describe("useServerDictation selected source handling", () => {
     expect(sentFrames(ws).at(-1)).toMatchObject({ type: "stop" })
     expect(micState.stop).toHaveBeenCalled()
     expect(result.current.isServerDictating).toBe(false)
+    expect(ws.readyState).toBe(MockWebSocket.OPEN)
+    expect(ws.onmessage).not.toBeNull()
+
+    act(() => {
+      ws.message({ type: "full_transcript", text: "late final transcript" })
+      ws.message({ type: "done" })
+    })
+
+    expect(onTranscript).toHaveBeenCalledTimes(1)
+    expect(onTranscript).toHaveBeenCalledWith("late final transcript")
+    expect(ws.readyState).toBe(MockWebSocket.CLOSED)
   })
 })

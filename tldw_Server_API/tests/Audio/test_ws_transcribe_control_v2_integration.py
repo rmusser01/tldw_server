@@ -11,8 +11,11 @@ import pytest
 
 
 class _DummyWebSocket:
-    def __init__(self, frames: list[dict[str, Any]]) -> None:
-        self._frames = [json.dumps(frame) for frame in frames]
+    def __init__(self, frames: list[dict[str, Any] | str]) -> None:
+        self._frames = [
+            json.dumps(frame) if isinstance(frame, dict) else frame
+            for frame in frames
+        ]
         self.sent: list[dict[str, Any]] = []
         self.closed = False
         self.close_args: tuple[int | None, str | None] | None = None
@@ -186,6 +189,58 @@ async def test_transcribe_ws_legacy_stop_still_emits_full_transcript(
     assert full_transcripts[-1]["text"] == "chunk-1|chunk-2"
     assert _StubTranscriber.instances[0].processed_chunks == 2
     assert any(frame.get("type") == "done" for frame in ws.sent)
+
+
+@pytest.mark.asyncio
+async def test_transcribe_ws_closes_on_malformed_json_after_strict_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Streaming_Unified as unified
+
+    class _StubTranscriber:
+        def __init__(self, config: Any) -> None:  # noqa: ARG002
+            return None
+
+        def initialize(self) -> None:
+            return None
+
+        async def process_audio_chunk(self, audio_bytes: bytes) -> dict[str, Any]:  # noqa: ARG002
+            return {"type": "partial", "text": "processed", "is_final": False}
+
+        def get_full_transcript(self) -> str:
+            return ""
+
+        def reset(self) -> None:
+            return None
+
+        def cleanup(self) -> None:
+            return None
+
+    monkeypatch.setattr(unified, "UnifiedStreamingTranscriber", _StubTranscriber)
+    monkeypatch.setattr(
+        unified,
+        "SileroTurnDetector",
+        lambda *args, **kwargs: type(
+            "_NoopTurnDetector",
+            (),
+            {"available": False, "unavailable_reason": "stubbed", "observe": lambda self, _audio: False},
+        )(),
+    )
+
+    ws = _DummyWebSocket([_strict_config(), "{not valid json"])
+
+    await unified.handle_unified_websocket(ws, unified.UnifiedStreamingConfig())
+
+    assert ws.sent == [
+        {
+            "type": "error",
+            "code": "validation_error",
+            "error_type": "validation_error",
+            "message": "Invalid JSON message",
+        }
+    ]
+    assert ws.closed is True
+    assert ws.close_args == (4400, None)
 
 
 @pytest.mark.asyncio

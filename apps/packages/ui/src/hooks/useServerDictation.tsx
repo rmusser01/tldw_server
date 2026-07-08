@@ -95,7 +95,16 @@ export const useServerDictation = (
 
   const wsRef = React.useRef<WebSocket | null>(null)
   const startingRef = React.useRef(false)
+  const stopCloseTimerRef =
+    React.useRef<ReturnType<typeof setTimeout> | null>(null)
+  const committedTranscriptRef = React.useRef("")
   const [isServerDictating, setIsServerDictating] = React.useState(false)
+
+  const clearStopCloseTimer = React.useCallback(() => {
+    if (!stopCloseTimerRef.current) return
+    clearTimeout(stopCloseTimerRef.current)
+    stopCloseTimerRef.current = null
+  }, [])
 
   const reportError = React.useCallback(
     (error: unknown) => {
@@ -132,27 +141,48 @@ export const useServerDictation = (
     { owner: "dictation" }
   )
 
-  const stopServerDictation = React.useCallback(() => {
-    const ws = wsRef.current
+  const cleanupSocket = React.useCallback((ws: WebSocket | null) => {
+    clearStopCloseTimer()
     startingRef.current = false
-    try {
-      if (ws?.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: "stop" }))
-      }
-    } catch {}
     if (ws) {
+      if (wsRef.current === ws) {
+        wsRef.current = null
+      }
       ws.onopen = null
       ws.onmessage = null
       ws.onerror = null
       ws.onclose = null
+      try {
+        if (ws.readyState !== WebSocket.CLOSED) {
+          ws.close()
+        }
+      } catch {}
     }
-    try {
-      ws?.close()
-    } catch {}
-    wsRef.current = null
     micStop()
     setIsServerDictating(false)
-  }, [micStop])
+  }, [clearStopCloseTimer, micStop])
+
+  const stopServerDictation = React.useCallback(() => {
+    const ws = wsRef.current
+    startingRef.current = false
+    micStop()
+    setIsServerDictating(false)
+    if (!ws) return
+    if (ws.readyState !== WebSocket.OPEN) {
+      cleanupSocket(ws)
+      return
+    }
+    try {
+      ws.send(JSON.stringify({ type: "stop" }))
+    } catch {
+      cleanupSocket(ws)
+      return
+    }
+    clearStopCloseTimer()
+    stopCloseTimerRef.current = setTimeout(() => {
+      cleanupSocket(ws)
+    }, 1500)
+  }, [cleanupSocket, clearStopCloseTimer, micStop])
 
   const startServerDictation = React.useCallback(async (
     source?: AudioCaptureRequestedSource
@@ -178,6 +208,7 @@ export const useServerDictation = (
     }
 
     startingRef.current = true
+    committedTranscriptRef.current = ""
     const requestedDeviceId =
       source?.sourceKind === "mic_device" ? source.deviceId : null
 
@@ -253,11 +284,39 @@ export const useServerDictation = (
           onPartialTranscript?.(String(payload.text || ""))
           return
         }
-        if (type === "full_transcript" || type === "transcription") {
+        if (type === "done") {
+          cleanupSocket(ws)
+          return
+        }
+        if (type === "final" || type === "transcription") {
           const text = String(payload.text || payload.transcript || "").trim()
           if (text) {
             onTranscript(text)
             onSuccess?.()
+            committedTranscriptRef.current = committedTranscriptRef.current
+              ? `${committedTranscriptRef.current.trimEnd()} ${text}`
+              : text
+          }
+          return
+        }
+        if (type === "full_transcript") {
+          const text = String(payload.text || payload.transcript || "").trim()
+          if (!text) return
+          const committed = committedTranscriptRef.current.trim()
+          if (!committed) {
+            onTranscript(text)
+            onSuccess?.()
+            committedTranscriptRef.current = text
+            return
+          }
+          if (text === committed) return
+          if (text.startsWith(committed)) {
+            const suffix = text.slice(committed.length).trim()
+            if (suffix) {
+              onTranscript(suffix)
+              onSuccess?.()
+            }
+            committedTranscriptRef.current = text
           }
           return
         }
@@ -271,12 +330,11 @@ export const useServerDictation = (
         const error = new Error("Dictation websocket error")
         reportError(error)
         notifyError(error.message)
-        try {
-          ws.close()
-        } catch {}
+        cleanupSocket(ws)
       }
 
       ws.onclose = () => {
+        clearStopCloseTimer()
         if (wsRef.current === ws) {
           wsRef.current = null
         }
@@ -298,6 +356,8 @@ export const useServerDictation = (
     }
   }, [
     canUseServerStt,
+    cleanupSocket,
+    clearStopCloseTimer,
     isServerDictating,
     micActive,
     micStart,
@@ -316,9 +376,9 @@ export const useServerDictation = (
 
   React.useEffect(() => {
     return () => {
-      stopServerDictation()
+      cleanupSocket(wsRef.current)
     }
-  }, [stopServerDictation])
+  }, [cleanupSocket])
 
   return {
     isServerDictating: isServerDictating || micActive,

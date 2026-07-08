@@ -570,6 +570,49 @@ async def test_audio_chat_ws_emits_bounded_stt_metrics(monkeypatch: pytest.Monke
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_audio_chat_ws_counts_final_frames_in_redaction_metrics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import tldw_Server_API.app.core.Metrics.metrics_manager as metrics_manager
+
+    metrics_manager._metrics_registry = None
+    registry = metrics_manager.get_metrics_registry()
+
+    class _FinalFrameTranscriber(_DummyTranscriber):
+        async def process_audio_chunk(self, audio_bytes: bytes) -> Dict[str, Any]:  # noqa: ARG002
+            return {"type": "final", "text": "final chunk", "is_final": True}
+
+        def get_full_transcript(self) -> str:
+            return "final chunk"
+
+    ws = DummyWebSocket(
+        [
+            _strict_chat_config(),
+            {"type": "audio", "data": _pcm16_audio([_AUDIO_LABEL_TO_SAMPLE["abc"]])},
+            {"type": "commit"},
+            {"type": "stop"},
+        ]
+    )
+
+    async def _get_tts_service():
+        return _DummyTTSService([b"tts1"])
+
+    monkeypatch.setattr(audio, "UnifiedStreamingTranscriber", _FinalFrameTranscriber)
+    monkeypatch.setattr(audio, "get_tts_service", _get_tts_service)
+
+    try:
+        await audio.websocket_audio_chat_stream(ws, token=None)
+
+        assert registry.get_cumulative_counter(
+            "audio_stt_redaction_total",
+            {"endpoint": "audio.chat.stream", "redaction_outcome": "not_requested"},
+        ) >= 2
+    finally:
+        metrics_manager._metrics_registry = None
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_audio_chat_ws_normalizes_whisper_alias_before_transcriber_init(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -696,6 +739,27 @@ async def test_audio_chat_ws_rejects_protocol_version_2_when_legacy_control_enab
         for msg in ws.sent_json
     )
     assert not [msg for msg in ws.sent_json if msg.get("type") == "status"]
+    assert ws.close_code == 4400
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_audio_chat_ws_closes_on_malformed_json_after_strict_config() -> None:
+    ws = DummyWebSocket(
+        [
+            _strict_chat_config(),
+            "{not valid json",
+        ]
+    )
+
+    await audio.websocket_audio_chat_stream(ws, token=None)
+
+    assert any(
+        msg.get("type") == "error"
+        and msg.get("code") == "bad_request"
+        and msg.get("message") == "Invalid JSON"
+        for msg in ws.sent_json
+    )
     assert ws.close_code == 4400
 
 

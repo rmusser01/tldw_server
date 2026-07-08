@@ -2746,6 +2746,7 @@ export const PlaygroundForm = ({
     autoStopTimeout,
     autoSubmitVoiceMessage,
     speechToTextLanguage,
+    messageValue: form.values.message || "",
     setMessageValue,
     submitForm: () => voiceChatSubmitFormRef.current(),
     notificationApi,

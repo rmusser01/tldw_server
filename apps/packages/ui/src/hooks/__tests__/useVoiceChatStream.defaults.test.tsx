@@ -292,4 +292,46 @@ describe("useVoiceChatStream defaults", () => {
       channels: 1
     })
   })
+
+  it("can start a push-to-talk stream and send the release control frame", async () => {
+    const { result } = renderHook(() =>
+      useVoiceChatStream({
+        active: true,
+        mode: "push_to_talk"
+      })
+    )
+
+    await waitFor(() => {
+      expect(MockWebSocket.instances[0]).toBeDefined()
+    })
+
+    const ws = MockWebSocket.instances[0]
+    await act(async () => {
+      ws.triggerOpen()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    await waitFor(() => {
+      expect(ws.sent.length).toBeGreaterThan(1)
+    })
+
+    expect(micState.useMicStream.mock.calls.at(-1)?.[1]).toEqual({
+      owner: "push_to_talk"
+    })
+    expect(
+      ws.sent.map((raw) => JSON.parse(raw)).find((frame) => frame.type === "config")
+    ).toMatchObject({
+      type: "config",
+      mode: "push_to_talk"
+    })
+
+    act(() => {
+      result.current.sendPushToTalkRelease()
+    })
+
+    expect(JSON.parse(ws.sent.at(-1) || "{}")).toEqual({
+      type: "push_to_talk_release"
+    })
+  })
 })
