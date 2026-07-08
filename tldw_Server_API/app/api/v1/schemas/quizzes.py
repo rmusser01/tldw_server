@@ -57,6 +57,17 @@ class QuizGenerateSource(BaseModel):
     source_id: str = Field(..., min_length=1)
 
 
+class QuizQuestionPlanItem(BaseModel):
+    """One generated quiz question type and count requested by the caller."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    question_type: QuestionType
+    count: int = Field(..., ge=1, le=100)
+    option_count: Optional[int] = Field(None, ge=2, le=6)
+    pair_count: Optional[int] = Field(None, ge=2, le=6)
+
+
 class QuizCreate(BaseModel):
     name: str = Field(..., description="Quiz name")
     description: Optional[str] = Field(None, description="Optional quiz description")
@@ -323,6 +334,7 @@ class QuizGenerateRequest(BaseModel):
     sources: Optional[list[QuizGenerateSource]] = Field(None, min_length=1)
     num_questions: int = Field(10, ge=1, le=100)
     question_types: Optional[list[QuestionType]] = None
+    question_plan: Optional[list[QuizQuestionPlanItem]] = Field(None, min_length=1)
     difficulty: str = Field("mixed", description="easy, medium, hard, mixed")
     focus_topics: Optional[list[str]] = None
     model: Optional[str] = None
@@ -334,6 +346,28 @@ class QuizGenerateRequest(BaseModel):
     def validate_media_id_or_sources(self) -> "QuizGenerateRequest":
         if self.media_id is None and not self.sources:
             raise ValueError("Either media_id or sources must be provided")
+        if self.question_plan is not None:
+            if "num_questions" not in self.model_fields_set:
+                raise ValueError("num_questions must be provided when question_plan is used")
+            if "question_types" in self.model_fields_set:
+                raise ValueError("question_types cannot be used with question_plan")
+            if sum(item.count for item in self.question_plan) != self.num_questions:
+                raise ValueError("question_plan counts must sum to num_questions")
+
+            seen_types: set[QuestionType] = set()
+            for item in self.question_plan:
+                if item.question_type in seen_types:
+                    raise ValueError("question_plan cannot contain duplicate question_type rows")
+                seen_types.add(item.question_type)
+
+                if item.question_type in {QuestionType.MULTIPLE_CHOICE, QuestionType.MULTI_SELECT}:
+                    if item.pair_count is not None:
+                        raise ValueError("pair_count is only valid for matching questions")
+                elif item.question_type == QuestionType.MATCHING:
+                    if item.option_count is not None:
+                        raise ValueError("option_count is not valid for matching questions")
+                elif item.option_count is not None or item.pair_count is not None:
+                    raise ValueError("option_count and pair_count are not valid for this question_type")
         return self
 
 

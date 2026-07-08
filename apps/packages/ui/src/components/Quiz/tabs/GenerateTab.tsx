@@ -19,6 +19,7 @@ import {
 import { buildFlashcardsGenerateRoute } from "@/services/tldw/flashcards-generate-handoff"
 import { buildFlashcardsStudyRouteFromQuiz } from "@/services/tldw/quiz-flashcards-handoff"
 import type { TakeTabNavigationIntent } from "../navigation"
+import type { QuizQuestionPlanItem } from "@/services/quizzes"
 
 interface GenerateTabProps {
   onNavigateToTake: (intent?: TakeTabNavigationIntent) => void
@@ -74,11 +75,24 @@ const MEDIA_PAGE_SIZE = 50
 const MAX_FLASHCARDS_IN_STUDY_FLOW = 30
 const MAX_FLASHCARD_SOURCE_TEXT_CHARS = 20_000
 
-const QUESTION_TYPE_OPTIONS: { label: string; value: QuestionType }[] = [
-  { label: "Multiple Choice", value: "multiple_choice" },
-  { label: "True/False", value: "true_false" },
-  { label: "Fill in the Blank", value: "fill_blank" }
+type QuestionPlanRowState = QuizQuestionPlanItem & {
+  enabled: boolean
+  label: string
+}
+
+const DEFAULT_QUESTION_PLAN_ROWS: QuestionPlanRowState[] = [
+  { question_type: "multiple_choice", label: "Multiple Choice", enabled: true, count: 5, option_count: 4 },
+  { question_type: "true_false", label: "True/False", enabled: true, count: 3 },
+  { question_type: "fill_blank", label: "Fill in the Blank", enabled: true, count: 2 },
+  { question_type: "multi_select", label: "Multi-select", enabled: false, count: 1, option_count: 4 },
+  { question_type: "matching", label: "Matching", enabled: false, count: 1, pair_count: 4 }
 ]
+
+const sanitizeInputNumber = (value: number | string | null, min: number, max: number): number | null => {
+  const next = typeof value === "number" ? value : typeof value === "string" ? Number(value) : null
+  if (next == null || !Number.isFinite(next)) return null
+  return Math.min(max, Math.max(min, Math.round(next)))
+}
 
 const DIFFICULTY_OPTIONS: Array<{
   label: string
@@ -393,6 +407,9 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({ onNavigateToTake, onNa
   const [selectedMediaWordCount, setSelectedMediaWordCount] = React.useState<number | null>(null)
   const [generationInFlight, setGenerationInFlight] = React.useState(false)
   const [generatedPreview, setGeneratedPreview] = React.useState<GeneratedPreview | null>(null)
+  const [questionPlanRows, setQuestionPlanRows] = React.useState<QuestionPlanRowState[]>(() =>
+    DEFAULT_QUESTION_PLAN_ROWS.map((row) => ({ ...row }))
+  )
   const debouncedMediaSearch = useDebounce(mediaSearchInput, 300)
   const debouncedNotesSearch = useDebounce(notesSearchInput, 300)
   const generateAbortRef = React.useRef<AbortController | null>(null)
@@ -651,6 +668,36 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({ onNavigateToTake, onNa
 
   const hasSelectedSources = selectedSources.length > 0
 
+  const enabledPlanRows = React.useMemo<QuizQuestionPlanItem[]>(
+    () =>
+      questionPlanRows
+        .filter((row) => row.enabled)
+        .map((row) => {
+          const item: QuizQuestionPlanItem = {
+            question_type: row.question_type,
+            count: row.count
+          }
+          if (row.option_count != null) item.option_count = row.option_count
+          if (row.pair_count != null) item.pair_count = row.pair_count
+          return item
+        }),
+    [questionPlanRows]
+  )
+
+  const totalQuestions = React.useMemo(
+    () => enabledPlanRows.reduce((sum, row) => sum + row.count, 0),
+    [enabledPlanRows]
+  )
+
+  const updateQuestionPlanRow = React.useCallback(
+    (questionType: QuestionType, patch: Partial<Omit<QuestionPlanRowState, "question_type" | "label">>) => {
+      setQuestionPlanRows((rows) =>
+        rows.map((row) => (row.question_type === questionType ? { ...row, ...patch } : row))
+      )
+    },
+    []
+  )
+
   const selectedMedia = React.useMemo(
     () =>
       selectedMediaId == null
@@ -832,6 +879,10 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({ onNavigateToTake, onNa
       return
     }
 
+    if (totalQuestions === 0 || totalQuestions > 100) {
+      return
+    }
+
     let requestAbortController: AbortController | null = null
 
     try {
@@ -847,8 +898,8 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({ onNavigateToTake, onNa
       const generated = await generateMutation.mutateAsync({
         request: {
           sources: selectedSources,
-          num_questions: values.numQuestions,
-          question_types: values.questionTypes,
+          num_questions: totalQuestions,
+          question_plan: enabledPlanRows,
           difficulty: values.difficulty,
           focus_topics: focusTopics.length > 0 ? focusTopics : undefined
         },
@@ -876,7 +927,7 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({ onNavigateToTake, onNa
             mediaId: selectedMediaId,
             mediaTitle: selectedMedia?.title || `Media #${selectedMediaId}`,
             quizName: generatedQuizName,
-            numQuestions: values.numQuestions ?? (generated.questions.length || 10),
+            numQuestions: totalQuestions,
             difficulty: values.difficulty,
             focusTopics,
             signal: requestAbortController.signal
@@ -1129,31 +1180,123 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({ onNavigateToTake, onNa
           form={form}
           layout="vertical"
           initialValues={{
-            numQuestions: 10,
-            questionTypes: ["multiple_choice", "true_false"],
             difficulty: "mixed",
             focusTopics: [],
             generateStudyMaterials: false
           }}
         >
-          <Form.Item
-            name="numQuestions"
-            label={t("option:quiz.numQuestions", { defaultValue: "Number of Questions" })}
-            extra={
-              <span className="text-xs text-text-subtle" data-testid="generate-question-count-guidance">
-                {questionCountRecommendation}
-              </span>
-            }
-          >
-            <InputNumber min={5} max={50} className="w-full" disabled={generationInFlight} />
-          </Form.Item>
+          <div className="mb-6 space-y-3">
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <div className="text-sm font-medium text-text">
+                  {t("option:quiz.questionPlan", { defaultValue: "Question Mix" })}
+                </div>
+                <div className="text-xs text-text-subtle" data-testid="generate-question-count-guidance">
+                  {questionCountRecommendation}
+                </div>
+              </div>
+              <div className="text-sm font-medium text-text" data-testid="generate-question-plan-total">
+                {t("option:quiz.questionPlanTotal", {
+                  defaultValue: "Total: {{count}}",
+                  count: totalQuestions
+                })}
+              </div>
+            </div>
 
-          <Form.Item
-            name="questionTypes"
-            label={t("option:quiz.questionTypes", { defaultValue: "Question Types" })}
-          >
-            <Checkbox.Group options={QUESTION_TYPE_OPTIONS} disabled={generationInFlight} />
-          </Form.Item>
+            <div className="space-y-2" data-testid="generate-question-plan">
+              {questionPlanRows.map((row) => (
+                <div
+                  key={row.question_type}
+                  className="grid gap-3 rounded border border-border-subtle p-3 sm:grid-cols-[minmax(11rem,1fr)_minmax(8rem,10rem)_minmax(8rem,10rem)] sm:items-end"
+                  data-testid={`generate-question-plan-row-${row.question_type}`}
+                >
+                  <Checkbox
+                    checked={row.enabled}
+                    disabled={generationInFlight}
+                    onChange={(event) =>
+                      updateQuestionPlanRow(row.question_type, { enabled: event.target.checked })
+                    }
+                  >
+                    {row.label}
+                  </Checkbox>
+
+                  <label className="block text-xs font-medium text-text-subtle">
+                    <span className="mb-1 block">
+                      {t("option:quiz.questionPlanCount", { defaultValue: "Count" })}
+                    </span>
+                    <span data-testid={`generate-question-plan-count-${row.question_type}`}>
+                      <InputNumber
+                        min={1}
+                        max={100}
+                        precision={0}
+                        step={1}
+                        value={row.count}
+                        aria-label={`${row.label} count`}
+                        className="w-full"
+                        disabled={generationInFlight || !row.enabled}
+                        onChange={(value) => {
+                          const next = sanitizeInputNumber(value, 1, 100)
+                          if (next != null) {
+                            updateQuestionPlanRow(row.question_type, { count: next })
+                          }
+                        }}
+                      />
+                    </span>
+                  </label>
+
+                  {row.option_count != null ? (
+                    <label className="block text-xs font-medium text-text-subtle">
+                      <span className="mb-1 block">
+                        {t("option:quiz.questionPlanOptions", { defaultValue: "Options" })}
+                      </span>
+                      <span data-testid={`generate-question-plan-option-count-${row.question_type}`}>
+                        <InputNumber
+                          min={2}
+                          max={6}
+                          precision={0}
+                          step={1}
+                          value={row.option_count}
+                          aria-label={`${row.label} options`}
+                          className="w-full"
+                          disabled={generationInFlight || !row.enabled}
+                          onChange={(value) => {
+                            const next = sanitizeInputNumber(value, 2, 6)
+                            if (next != null) {
+                              updateQuestionPlanRow(row.question_type, { option_count: next })
+                            }
+                          }}
+                        />
+                      </span>
+                    </label>
+                  ) : row.pair_count != null ? (
+                    <label className="block text-xs font-medium text-text-subtle">
+                      <span className="mb-1 block">
+                        {t("option:quiz.questionPlanPairs", { defaultValue: "Pairs" })}
+                      </span>
+                      <span data-testid={`generate-question-plan-pair-count-${row.question_type}`}>
+                        <InputNumber
+                          min={2}
+                          max={6}
+                          precision={0}
+                          step={1}
+                          value={row.pair_count}
+                          aria-label={`${row.label} pairs`}
+                          className="w-full"
+                          disabled={generationInFlight || !row.enabled}
+                          onChange={(value) => {
+                            const next = sanitizeInputNumber(value, 2, 6)
+                            if (next != null) {
+                              updateQuestionPlanRow(row.question_type, { pair_count: next })
+                            }
+                          }}
+                        />
+                      </span>
+                    </label>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          </div>
 
           <Form.Item
             name="difficulty"
@@ -1353,7 +1496,7 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({ onNavigateToTake, onNa
         size="large"
         onClick={handleGenerate}
         loading={generationInFlight}
-        disabled={!hasSelectedSources || generationInFlight}
+        disabled={!hasSelectedSources || generationInFlight || totalQuestions === 0 || totalQuestions > 100}
         block
       >
         {t("option:quiz.generateQuiz", { defaultValue: "Generate Quiz" })}

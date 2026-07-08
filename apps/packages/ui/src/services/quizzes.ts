@@ -33,6 +33,12 @@ const getQuizAttemptsClient = (quizId: number) =>
 
 // Question types
 export type QuestionType = "multiple_choice" | "multi_select" | "matching" | "true_false" | "fill_blank"
+export type QuizQuestionPlanItem = {
+  question_type: QuestionType
+  count: number
+  option_count?: number
+  pair_count?: number
+}
 export type AnswerValue = number | string | number[] | Record<string, string>
 export type QuizGenerateSourceType =
   | "media"
@@ -195,6 +201,7 @@ export type QuestionUpdate = {
 type QuizGenerateRequestBase = {
   num_questions?: number
   question_types?: QuestionType[]
+  question_plan?: QuizQuestionPlanItem[]
   difficulty?: "easy" | "medium" | "hard" | "mixed"
   focus_topics?: string[]
   model?: string
