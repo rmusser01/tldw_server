@@ -49,6 +49,15 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   }
 }))
 
+const runtimeAuthState = vi.hoisted(() => ({
+  getRuntimeSingleUserApiKeyOverride: vi.fn(() => null as string | null)
+}))
+
+vi.mock("@/services/tldw/runtime-auth-override", () => ({
+  getRuntimeSingleUserApiKeyOverride:
+    runtimeAuthState.getRuntimeSingleUserApiKeyOverride
+}))
+
 import { useServerDictation } from "../useServerDictation"
 import type { SttSettings } from "../useSttSettings"
 
@@ -131,6 +140,7 @@ describe("useServerDictation selected source handling", () => {
       authMode: "single_user",
       apiKey: "test-key"
     })
+    runtimeAuthState.getRuntimeSingleUserApiKeyOverride.mockReturnValue(null)
     micState.callback = null
     micState.options = undefined
     micState.start.mockResolvedValue(undefined)
@@ -169,6 +179,33 @@ describe("useServerDictation selected source handling", () => {
       channels: 1
     })
     expect(sent[2]).toMatchObject({ type: "audio" })
+  })
+
+  it("uses the runtime single-user API key for websocket auth when stored config omits the key", async () => {
+    clientState.getConfig.mockResolvedValue({
+      serverUrl: "http://localhost:8000",
+      authMode: "single-user",
+      apiKey: ""
+    })
+    runtimeAuthState.getRuntimeSingleUserApiKeyOverride.mockReturnValue(
+      "runtime-key"
+    )
+    const { result } = renderHook(() => buildHook())
+
+    await act(async () => {
+      await result.current.startServerDictation()
+    })
+
+    const ws = MockWebSocket.instances[0]
+    await act(async () => {
+      ws.open()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    const sent = sentFrames(ws)
+    expect(sent[0]).toMatchObject({ type: "auth", token: "runtime-key" })
+    expect(sent[1]).toMatchObject({ type: "config", mode: "dictate" })
   })
 
   it("starts the mic with the selected device after websocket config", async () => {

@@ -26,7 +26,7 @@ For a local-first CPU setup in the current repo:
 
 Important current-repo realities:
 
-- The shipped explicit STT defaults are currently `parakeet-tdt-0.6b-v3-onnx` for batch and streaming. The shorter `parakeet-onnx` alias remains supported for older configs.
+- The shipped STT defaults use `auto`: `parakeet-mlx` on macOS and `parakeet-tdt-0.6b-v3-onnx` on Linux/Windows. The shorter `parakeet-onnx` alias remains supported for older configs.
 - The current `/setup` audio bundle docs still describe a different first-run path in some places.
 - Stock Docker CPU/default audio works with bundled dependencies. Host-side config or model edits are not visible inside the container until you rebuild, use `Dockerfiles/docker-compose.host-storage.yml`, or build a custom image path.
 
@@ -163,9 +163,9 @@ Important Docker note:
 - Host-side edits to `tldw_Server_API/Config_Files/config.txt` or local model assets require a rebuild, `Dockerfiles/docker-compose.host-storage.yml`, or a custom image path.
 - If you use `/setup` inside the running container, those changes are container-local unless you also persist or reproduce them in your chosen image/storage path.
 
-## Step 2: Set the CPU STT Defaults
+## Step 2: Pin CPU STT Defaults
 
-Edit [config.txt](../../../tldw_Server_API/Config_Files/config.txt) and make the STT defaults explicit:
+The shipped `auto` default already resolves to ONNX on Linux/Windows. To pin CPU STT explicitly, edit [config.txt](../../../tldw_Server_API/Config_Files/config.txt):
 
 ```ini
 [STT-Settings]
@@ -415,7 +415,7 @@ Treat it as a second-step upgrade, not the first-run baseline.
 ### STT health shows the wrong model/provider
 
 - re-open [config.txt](../../../tldw_Server_API/Config_Files/config.txt)
-- make sure both `default_batch_transcription_model` and `default_streaming_transcription_model` are set to `parakeet-tdt-0.6b-v3-onnx`
+- make sure both `default_batch_transcription_model` and `default_streaming_transcription_model` are set to `auto` or explicitly to `parakeet-tdt-0.6b-v3-onnx`
 - make sure `default_transcriber = parakeet`
 - restart the server
 

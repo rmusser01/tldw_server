@@ -5,6 +5,7 @@ import { useMicStream } from "@/hooks/useMicStream"
 import { useAntdNotification } from "@/hooks/useAntdNotification"
 import type { SttSettings } from "@/hooks/useSttSettings"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
+import { getRuntimeSingleUserApiKeyOverride } from "@/services/tldw/runtime-auth-override"
 import { arrayBufferToBase64 } from "@/utils/compress"
 
 export interface UseServerDictationOptions {
@@ -221,7 +222,9 @@ export const useServerDictation = (
       const token =
         config?.authMode === "multi-user"
           ? String(config?.accessToken || "").trim()
-          : String(config?.apiKey || "").trim()
+          : String(
+              getRuntimeSingleUserApiKeyOverride() || config?.apiKey || ""
+            ).trim()
 
       const ws = new WebSocket(buildTranscribeWebSocketUrl(serverUrl))
       wsRef.current = ws

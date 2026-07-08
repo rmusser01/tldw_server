@@ -18,6 +18,7 @@ import type { ComparisonResult } from "@/hooks/useComparisonTranscribe"
 import { AudioReadinessStrip } from "@/components/Option/Audio/AudioReadinessStrip"
 import { AudioPresetControls } from "@/components/Option/Audio/AudioPresetControls"
 import { buildSttReadinessItems } from "@/components/Option/Audio/audio-readiness"
+import { STT_DEFAULTS } from "@/config/ui-constants"
 import { sanitizeServerErrorMessage } from "@/utils/server-error-message"
 import {
   saveSttRecording,
@@ -30,7 +31,7 @@ const { Text, Title } = Typography
 export const SttPlaygroundPage: React.FC = () => {
   const { t } = useTranslation(["playground"])
   const notification = useAntdNotification()
-  const [globalModel] = useStorage("sttModel", "whisper-1")
+  const [globalModel] = useStorage("sttModel", STT_DEFAULTS.MODEL)
 
   // ── Server models (fetched on mount) ──────────────────────────────
   const {

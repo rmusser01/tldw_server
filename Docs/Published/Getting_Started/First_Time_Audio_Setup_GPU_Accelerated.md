@@ -27,7 +27,7 @@ Alternatives:
 
 Important current-repo realities:
 
-- current config defaults still ship with explicit STT defaults of `parakeet-tdt-0.6b-v3-onnx`; the shorter `parakeet-onnx` alias remains supported for older configs
+- current config defaults use `auto`: `parakeet-mlx` on macOS and `parakeet-tdt-0.6b-v3-onnx` on Linux/Windows; the shorter `parakeet-onnx` alias remains supported for older configs
 - current `/setup` bundle docs may recommend a different first-run STT path for some hardware classes
 - Stock Docker CPU/default audio works with bundled dependencies, but the stock Docker profile is not a ready-made GPU-accelerated audio path. Host-side config or model edits require a rebuild, `Dockerfiles/docker-compose.host-storage.yml`, or a custom image path.
 

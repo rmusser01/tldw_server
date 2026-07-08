@@ -140,6 +140,25 @@ class TestMemoryMonitor:
         assert "Error in memory monitoring" in log_output
         assert raw_marker not in log_output
 
+    @pytest.mark.asyncio
+    async def test_stop_monitoring_ignores_background_cleanup_memory_error(self, monkeypatch):
+        """A failed best-effort monitor cleanup should not break shutdown."""
+        monitor = MemoryMonitor(check_interval=999)
+        cleanup_attempted = asyncio.Event()
+
+        async def _failing_cleanup():
+            cleanup_attempted.set()
+            raise TTSInsufficientMemoryError("still critical")
+
+        monkeypatch.setattr(monitor, "is_memory_critical", lambda: True)
+        monkeypatch.setattr(monitor, "force_cleanup", _failing_cleanup)
+
+        await monitor.start_monitoring()
+        await asyncio.wait_for(cleanup_attempted.wait(), timeout=1)
+        await monitor.stop_monitoring()
+
+        assert monitor._monitoring is False
+
     def test_memory_check_caching(self):
         """Test that memory checks are cached"""
         monitor = MemoryMonitor(check_interval=1.0)

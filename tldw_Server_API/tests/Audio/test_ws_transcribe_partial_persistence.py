@@ -54,6 +54,7 @@ if "transformers" not in sys.modules:
 
 from tldw_Server_API.app.api.v1.endpoints import audio
 from tldw_Server_API.app.api.v1.endpoints.audio import audio_streaming
+from tldw_Server_API.app.core import config as config_module
 
 
 class DummyWebSocket:
@@ -349,6 +350,34 @@ async def test_stream_transcribe_uses_default_streaming_model_from_config(monkey
 
     assert captured.get("model") == "parakeet"
     assert captured.get("variant") == "onnx"
+
+
+def test_default_streaming_model_auto_uses_mlx_on_macos(monkeypatch: pytest.MonkeyPatch) -> None:
+    cfg = ConfigParser()
+    cfg.add_section("STT-Settings")
+    cfg.set("STT-Settings", "default_streaming_transcription_model", "auto")
+    cfg.set("STT-Settings", "nemo_model_variant", "onnx")
+    monkeypatch.setattr(audio_streaming, "load_comprehensive_config", lambda: cfg)
+    monkeypatch.setattr(config_module.platform, "system", lambda: "Darwin")
+
+    model, variant, _ = audio_streaming._resolve_default_streaming_model()
+
+    assert model == "parakeet"
+    assert variant == "mlx"
+
+
+def test_default_streaming_model_auto_uses_onnx_off_macos(monkeypatch: pytest.MonkeyPatch) -> None:
+    cfg = ConfigParser()
+    cfg.add_section("STT-Settings")
+    cfg.set("STT-Settings", "default_streaming_transcription_model", "auto")
+    cfg.set("STT-Settings", "nemo_model_variant", "mlx")
+    monkeypatch.setattr(audio_streaming, "load_comprehensive_config", lambda: cfg)
+    monkeypatch.setattr(config_module.platform, "system", lambda: "Linux")
+
+    model, variant, _ = audio_streaming._resolve_default_streaming_model()
+
+    assert model == "parakeet"
+    assert variant == "onnx"
 
 
 @pytest.mark.asyncio

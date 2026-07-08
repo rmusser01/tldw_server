@@ -76,7 +76,10 @@ from tldw_Server_API.app.core.Chat.chat_helpers import (
     get_or_create_character_context,
     get_or_create_conversation,
 )
-from tldw_Server_API.app.core.config import load_comprehensive_config
+from tldw_Server_API.app.core.config import (
+    load_comprehensive_config,
+    resolve_default_transcription_model_setting,
+)
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.media_db.legacy_transcripts import (
     upsert_transcript,
@@ -508,7 +511,7 @@ def _resolve_default_streaming_model() -> tuple[str, str, str]:
     Returns:
         tuple[str, str, str]: (model, variant, whisper_model_size)
     """
-    default_model_id = "parakeet-tdt-0.6b-v3-onnx"
+    default_model_id = resolve_default_transcription_model_setting("auto")
     default_variant = "standard"
     default_whisper_model_size = "distil-large-v3"
 
@@ -518,9 +521,9 @@ def _resolve_default_streaming_model() -> tuple[str, str, str]:
             configured_default = cfg.get(
                 "STT-Settings",
                 "default_streaming_transcription_model",
-                fallback=default_model_id,
+                fallback="auto",
             )
-            default_model_id = str(configured_default).strip() or default_model_id
+            default_model_id = resolve_default_transcription_model_setting(configured_default)
             configured_variant = cfg.get(
                 "STT-Settings",
                 "nemo_model_variant",
@@ -551,7 +554,7 @@ def _resolve_default_streaming_model() -> tuple[str, str, str]:
             model = provider_name
         else:
             logger.warning(
-                "Unsupported streaming default model '{}'; falling back to parakeet-tdt-0.6b-v3-onnx"
+                "Unsupported streaming default model '{}'; falling back to platform STT default"
                 .format(default_model_id)
             )
             model = "parakeet"
@@ -564,7 +567,7 @@ def _resolve_default_streaming_model() -> tuple[str, str, str]:
             variant = candidate_variant
     except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as exc:
         logger.warning(
-            "Could not resolve configured streaming model '{}'; falling back to parakeet-tdt-0.6b-v3-onnx. Error: {}"
+            "Could not resolve configured streaming model '{}'; falling back to platform STT default. Error: {}"
             .format(default_model_id, exc)
         )
         model = "parakeet"
