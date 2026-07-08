@@ -17,13 +17,17 @@ import { ToastProvider } from "@web/components/ui/ToastProvider"
 
 type AppProvidersProps = {
   children: React.ReactNode
+  enableNotifications?: boolean
 }
 
 const queryClient = getQueryClient()
 const EMPTY_STYLES = { image: { height: 60 } }
 patchStaticAntdNotificationCompat()
 
-export const AppProviders: React.FC<AppProvidersProps> = ({ children }) => {
+export const AppProviders: React.FC<AppProvidersProps> = ({
+  children,
+  enableNotifications = true
+}) => {
   const { antdTheme } = useTheme()
   const { i18n, t } = useTranslation("common")
   const splash = useSplashScreen()
@@ -84,7 +88,7 @@ export const AppProviders: React.FC<AppProvidersProps> = ({ children }) => {
                 direction={direction}
               >
                 <ToastProvider>
-                  <NotificationToastBridge />
+                  {enableNotifications ? <NotificationToastBridge /> : null}
                   <AntdApp>{children}</AntdApp>
                   {splash.visible && splash.card && (
                     <SplashOverlay
