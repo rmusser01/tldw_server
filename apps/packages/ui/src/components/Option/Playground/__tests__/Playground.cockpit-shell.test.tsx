@@ -11,6 +11,7 @@ import {
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Playground } from "../Playground";
+import { PlaygroundCockpitShell } from "../PlaygroundCockpitShell";
 
 const messageOptionState = vi.hoisted(() => ({
   value: {
@@ -247,6 +248,13 @@ vi.mock("@/services/settings/ui-settings", () => ({
   HEADER_SHORTCUT_SELECTION_SETTING: "headerShortcutSelection",
   HEADER_SHORTCUT_IDS: [],
   SIDEBAR_SHORTCUT_IDS: [],
+  CHAT_WINDOW_OPACITY_SETTING: "chatWindowOpacity",
+  CHAT_MESSAGE_OPACITY_SETTING: "chatMessageOpacity",
+  CHAT_CHARACTER_IMAGE_OPACITY_SETTING: "chatCharacterImageOpacity",
+  resolveOpacityAlpha: (value: unknown, fallback = 35) =>
+    typeof value === "number" && Number.isFinite(value)
+      ? value / 100
+      : fallback / 100,
 }));
 
 vi.mock("../Knowledge/utils/unsupported-types", () => ({
@@ -290,7 +298,12 @@ vi.mock("@/store/artifacts", () => ({
 }));
 
 vi.mock("@/hooks/useSetting", () => ({
-  useSetting: () => [""],
+  useSetting: (setting: string) => {
+    if (setting === "chatWindowOpacity") return [35];
+    if (setting === "chatMessageOpacity") return [60];
+    if (setting === "chatCharacterImageOpacity") return [100];
+    return [""];
+  },
 }));
 
 vi.mock("@/hooks/useDarkmode", () => ({
@@ -410,6 +423,23 @@ describe("Playground cockpit shell", () => {
       }),
     );
     characterSessionsPanelState.props = [];
+  });
+
+  it("does not add a second themed wash on the cockpit shell", () => {
+    render(
+      <PlaygroundCockpitShell
+        mode="cockpit"
+        themedBackdrop
+        leftRail={<aside>Context</aside>}
+        rightRail={<aside>Runtime</aside>}
+      >
+        <main>Chat</main>
+      </PlaygroundCockpitShell>,
+    );
+
+    const shell = screen.getByTestId("playground-cockpit-shell");
+    expect(shell).toHaveClass("backdrop-blur-[1px]");
+    expect(shell.style.backgroundColor).toBe("");
   });
 
   it("renders the cockpit rails and main chat surface without a bottom status strip by default", async () => {

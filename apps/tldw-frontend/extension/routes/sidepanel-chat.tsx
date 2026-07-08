@@ -27,7 +27,14 @@ import { copilotResumeLastChat } from "@/services/app"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import type { ServerChatMessage as ApiServerChatMessage } from "@/services/tldw/TldwApiClient"
 import { createSafeStorage } from "@/utils/safe-storage"
-import { CHAT_BACKGROUND_IMAGE_SETTING } from "@/services/settings/ui-settings"
+import {
+  CHAT_BACKGROUND_IMAGE_SETTING,
+  CHAT_CHARACTER_IMAGE_OPACITY_SETTING,
+  CHAT_MESSAGE_OPACITY_SETTING,
+  CHAT_WINDOW_OPACITY_SETTING,
+  resolveOpacityAlpha
+} from "@/services/settings/ui-settings"
+import { useSetting } from "@/hooks/useSetting"
 import { useStorage } from "@plasmohq/storage/hook"
 import { browser } from "wxt/browser"
 import { ChevronDown } from "lucide-react"
@@ -671,6 +678,23 @@ const SidepanelChat = () => {
       instance: createSafeStorage()
     },
     null
+  )
+  const [chatWindowOpacity] = useSetting(CHAT_WINDOW_OPACITY_SETTING)
+  const [chatMessageOpacity] = useSetting(CHAT_MESSAGE_OPACITY_SETTING)
+  const [chatCharacterImageOpacity] = useSetting(
+    CHAT_CHARACTER_IMAGE_OPACITY_SETTING
+  )
+  const chatWindowOpacityAlpha = resolveOpacityAlpha(
+    chatWindowOpacity,
+    CHAT_WINDOW_OPACITY_SETTING.defaultValue
+  )
+  const chatMessageOpacityAlpha = resolveOpacityAlpha(
+    chatMessageOpacity,
+    CHAT_MESSAGE_OPACITY_SETTING.defaultValue
+  )
+  const chatCharacterImageOpacityAlpha = resolveOpacityAlpha(
+    chatCharacterImageOpacity,
+    CHAT_CHARACTER_IMAGE_OPACITY_SETTING.defaultValue
   )
   const resolvedChatBackgroundImage = chatBackgroundImage ?? null
   const bgMsg = useBackgroundMessage()
@@ -1853,21 +1877,27 @@ const SidepanelChat = () => {
           className={`relative flex min-h-0 flex-1 flex-col items-center bg-bg ${
             dropState === "dragging" ? "bg-surface2" : ""
           }`}
-          style={
-            resolvedChatBackgroundImage
+          style={{
+            "--chat-message-opacity": String(chatMessageOpacityAlpha),
+            "--chat-character-image-opacity": String(
+              chatCharacterImageOpacityAlpha
+            ),
+            ...(resolvedChatBackgroundImage
               ? {
                   backgroundImage: `url(${resolvedChatBackgroundImage})`,
                   backgroundSize: "cover",
                   backgroundPosition: "center",
                   backgroundRepeat: "no-repeat"
                 }
-              : {}
-          }>
-          {/* Background overlay for opacity effect */}
+              : {})
+          } as React.CSSProperties}>
+          {/* Keep themed background images visible while preserving text contrast. */}
           {resolvedChatBackgroundImage && (
             <div
-              className="absolute inset-0 bg-bg"
-              style={{ opacity: 0.9, pointerEvents: "none" }}
+              className="pointer-events-none absolute inset-0 backdrop-blur-[1px]"
+              style={{
+                backgroundColor: `rgb(var(--color-bg) / ${chatWindowOpacityAlpha})`
+              }}
             />
           )}
 

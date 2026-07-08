@@ -90,6 +90,35 @@ export const CHAT_BACKGROUND_IMAGE_MAX_SIZE_MB = 15
 export const CHAT_BACKGROUND_IMAGE_MAX_BASE64_LENGTH =
   CHAT_BACKGROUND_IMAGE_MAX_SIZE_MB * 1_000_000
 
+const coerceOpacityPercent = (value: unknown, fallback: number): number => {
+  const parsed = Math.round(coerceNumber(value, fallback))
+  if (!Number.isFinite(parsed)) return fallback
+  return Math.min(100, Math.max(0, parsed))
+}
+
+export const resolveOpacityAlpha = (
+  value: unknown,
+  fallback: number
+): number => coerceOpacityPercent(value, fallback) / 100
+
+export const CHAT_WINDOW_OPACITY_SETTING = defineSetting(
+  "chatWindowOpacity",
+  35,
+  (value) => coerceOpacityPercent(value, 35)
+)
+
+export const CHAT_MESSAGE_OPACITY_SETTING = defineSetting(
+  "chatMessageOpacity",
+  60,
+  (value) => coerceOpacityPercent(value, 60)
+)
+
+export const CHAT_CHARACTER_IMAGE_OPACITY_SETTING = defineSetting(
+  "chatCharacterImageOpacity",
+  100,
+  (value) => coerceOpacityPercent(value, 100)
+)
+
 const SPLASH_CARD_NAME_SET = new Set(DEFAULT_SPLASH_CARD_NAMES)
 
 const coerceSplashCardNameArray = (value: unknown): string[] => {

@@ -14,6 +14,7 @@ export type PlaygroundCockpitMobilePanel = "context" | "runtime" | null;
 
 export type PlaygroundCockpitShellProps = {
   mode: PlaygroundCockpitMode;
+  themedBackdrop?: boolean;
   leftRailVisible?: boolean;
   rightRailVisible?: boolean;
   onLeftRailVisibleChange?: (visible: boolean) => void;
@@ -115,6 +116,7 @@ const buildModeSummaryKey = (
 
 export const PlaygroundCockpitShell = ({
   mode,
+  themedBackdrop = false,
   leftRailVisible = true,
   rightRailVisible = true,
   onLeftRailVisibleChange,
@@ -243,7 +245,9 @@ export const PlaygroundCockpitShell = ({
       data-mode={mode}
       data-left-rail={showLeftRail ? "visible" : "hidden"}
       data-right-rail={showRightRail ? "visible" : "hidden"}
-      className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden bg-bg text-text"
+      className={`flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden text-text ${
+        themedBackdrop ? "backdrop-blur-[1px]" : "bg-bg"
+      }`}
     >
       <p
         data-testid="playground-cockpit-mode-summary"
@@ -415,7 +419,9 @@ export const PlaygroundCockpitShell = ({
 
         <main
           data-testid="playground-cockpit-main"
-          className={`min-h-0 min-w-0 overflow-hidden bg-bg ${
+          className={`min-h-0 min-w-0 overflow-hidden ${
+            themedBackdrop ? "bg-transparent" : "bg-bg"
+          } ${
             focusMode
               ? "w-full max-w-[72rem]"
               : !showLeftRail && !showRightRail
