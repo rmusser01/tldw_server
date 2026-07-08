@@ -23,11 +23,10 @@ import { useUiModeStore } from "@/store/ui-mode"
 import { useStoreMessageOption } from "@/store/option"
 import { EDIT_MESSAGE_EVENT } from "@/utils/timeline-actions"
 import { Badge, type BadgeVariant } from "@/components/ui/primitives"
-import { useSetting } from "@/hooks/useSetting"
-import { CHAT_MESSAGE_OPACITY_SETTING } from "@/services/settings/ui-settings"
 
 const ACTION_BUTTON_CLASS =
   "flex items-center justify-center rounded-full border border-border bg-surface2 text-text-muted hover:bg-surface hover:text-text transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-focus min-w-[44px] min-h-[44px]"
+const CHAT_MESSAGE_OPACITY_ALPHA = "var(--chat-message-opacity, 0.6)"
 
 const MESSAGE_TYPE_BADGE_VARIANT: Record<string, BadgeVariant> = {
   summary: "info",
@@ -99,7 +98,6 @@ export const PlaygroundUserMessageBubble: React.FC<Props> = (props) => {
   const [userTextFont] = useStorage("chatUserTextFont", "default")
   const [userTextSize] = useStorage("chatUserTextSize", "md")
   const [userDisplayName] = useStorage("chatUserDisplayName", "")
-  const [chatMessageOpacity] = useSetting(CHAT_MESSAGE_OPACITY_SETTING)
   const [isBtnPressed, setIsBtnPressed] = React.useState(false)
   const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
   const [editMode, setEditMode] = React.useState(false)
@@ -192,9 +190,7 @@ export const PlaygroundUserMessageBubble: React.FC<Props> = (props) => {
   const messageBubbleStyle = isSystemMessage
     ? undefined
     : ({
-        backgroundColor: `rgb(var(--color-surface-2) / ${
-          chatMessageOpacity / 100
-        })`
+        backgroundColor: `rgb(var(--color-surface2) / ${CHAT_MESSAGE_OPACITY_ALPHA})`
       } as React.CSSProperties)
 
   return (

@@ -96,6 +96,11 @@ const coerceOpacityPercent = (value: unknown, fallback: number): number => {
   return Math.min(100, Math.max(0, parsed))
 }
 
+export const resolveOpacityAlpha = (
+  value: unknown,
+  fallback: number
+): number => coerceOpacityPercent(value, fallback) / 100
+
 export const CHAT_WINDOW_OPACITY_SETTING = defineSetting(
   "chatWindowOpacity",
   35,

@@ -456,6 +456,12 @@ vi.mock("@/hooks/useSmartScroll", () => ({
 vi.mock("@/services/settings/ui-settings", () => ({
   CHAT_BACKGROUND_IMAGE_SETTING: "chatBackgroundImage",
   CHAT_WINDOW_OPACITY_SETTING: "chatWindowOpacity",
+  CHAT_MESSAGE_OPACITY_SETTING: "chatMessageOpacity",
+  CHAT_CHARACTER_IMAGE_OPACITY_SETTING: "chatCharacterImageOpacity",
+  resolveOpacityAlpha: (value: unknown, fallback = 35) =>
+    typeof value === "number" && Number.isFinite(value)
+      ? value / 100
+      : fallback / 100,
   THEME_SETTING: {
     key: "theme",
     defaultValue: "dark"
@@ -480,11 +486,13 @@ vi.mock("@/store/artifacts", () => ({
 }))
 
 vi.mock("@/hooks/useSetting", () => ({
-  useSetting: (setting: string | { key?: string; defaultValue?: unknown }) => [
-    (typeof setting === "string" ? setting : setting?.key) === "chatWindowOpacity"
-      ? 35
-      : (typeof setting === "string" ? "" : setting?.defaultValue ?? "")
-  ]
+  useSetting: (setting: string | { key?: string; defaultValue?: unknown }) => {
+    const key = typeof setting === "string" ? setting : setting?.key
+    if (key === "chatWindowOpacity") return [35]
+    if (key === "chatMessageOpacity") return [60]
+    if (key === "chatCharacterImageOpacity") return [100]
+    return [typeof setting === "string" ? "" : setting?.defaultValue ?? ""]
+  }
 }))
 
 vi.mock("@plasmohq/storage/hook", () => ({

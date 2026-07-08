@@ -93,15 +93,13 @@ import {
   DEFAULT_TTS_PROVIDER
 } from "@/services/tts"
 import type { DynamicUISurface } from "@/types/dynamic-ui"
-import { useSetting } from "@/hooks/useSetting"
-import {
-  CHAT_CHARACTER_IMAGE_OPACITY_SETTING,
-  CHAT_MESSAGE_OPACITY_SETTING
-} from "@/services/settings/ui-settings"
 import { DEFAULT_CHAT_SETTINGS } from "@/types/chat-settings"
 import { VisualIdentityImage } from "@/components/Common/VisualIdentity/VisualIdentityImage"
 
 const Markdown = React.lazy(() => import("../../Common/Markdown"))
+const CHAT_MESSAGE_OPACITY_ALPHA = "var(--chat-message-opacity, 0.6)"
+const CHAT_CHARACTER_IMAGE_OPACITY_ALPHA =
+  "var(--chat-character-image-opacity, 1)"
 
 const ErrorBubble: React.FC<{
   payload: ChatErrorPayload
@@ -365,10 +363,6 @@ export const PlaygroundMessage = (props: Props) => {
     moodConfidenceDefault
   )
   const [userPersonaImage] = useStorage("chatUserPersonaImage", "")
-  const [chatMessageOpacity] = useSetting(CHAT_MESSAGE_OPACITY_SETTING)
-  const [chatCharacterImageOpacity] = useSetting(
-    CHAT_CHARACTER_IMAGE_OPACITY_SETTING
-  )
   const [renderMermaidDiagrams] = useStorage(
     "renderMermaidDiagrams",
     DEFAULT_CHAT_SETTINGS.renderMermaidDiagrams
@@ -1930,11 +1924,11 @@ export const PlaygroundMessage = (props: Props) => {
     ? undefined
     : ({
         backgroundColor: `rgb(var(${
-          props.isBot ? "--color-surface" : "--color-surface-2"
-        }) / ${chatMessageOpacity / 100})`
+          props.isBot ? "--color-surface" : "--color-surface2"
+        }) / ${CHAT_MESSAGE_OPACITY_ALPHA})`
       } as React.CSSProperties)
   const chatCharacterImageOpacityStyle = {
-    opacity: chatCharacterImageOpacity / 100
+    opacity: CHAT_CHARACTER_IMAGE_OPACITY_ALPHA
   } as React.CSSProperties
   const portraitPanel = shouldShowPortrait ? (
     <button

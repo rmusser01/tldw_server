@@ -487,23 +487,27 @@ export const ChatSettings = () => {
     value: number,
     setter: (next: number) => void | Promise<void>,
     label: string
-  ) => (
-    <div className="flex min-w-[220px] items-center gap-3">
-      <input
-        type="range"
-        min={0}
-        max={100}
-        step={5}
-        value={value}
-        onChange={(event) => void setter(Number(event.currentTarget.value))}
-        className={OPACITY_RANGE_CLASSNAME}
-        aria-label={label}
-      />
-      <span className="w-10 text-right tabular-nums text-text-muted">
-        {value}%
-      </span>
-    </div>
-  )
+  ) => {
+    const safeValue = Number.isFinite(value) ? value : 100
+
+    return (
+      <div className="flex min-w-[220px] items-center gap-3">
+        <input
+          type="range"
+          min={0}
+          max={100}
+          step={5}
+          value={safeValue}
+          onChange={(event) => void setter(Number(event.currentTarget.value))}
+          className={OPACITY_RANGE_CLASSNAME}
+          aria-label={label}
+        />
+        <span className="w-10 text-right tabular-nums text-text-muted">
+          {safeValue}%
+        </span>
+      </div>
+    )
+  }
 
   return (
     <div className="flex flex-col space-y-6 text-sm">
