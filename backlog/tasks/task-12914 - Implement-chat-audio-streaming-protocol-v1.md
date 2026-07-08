@@ -29,6 +29,7 @@ Implement the approved v1 protocol plan for WebUI and browser-extension chat aud
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Task 1 complete: added strict audio protocol parser and parser unit tests. Verification: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Audio/test_audio_stream_protocol_v1.py -q` passed with 10 tests.
+Task 2 complete: `/audio/stream/transcribe` now requires a strict v1 post-auth config frame, rejects wrong endpoint modes with 4400, and normalizes PCM16 JSON audio to Float32 before downstream accounting/processing. Verification: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Audio/test_audio_stream_protocol_v1.py tldw_Server_API/tests/Audio/test_ws_fallbacks.py tldw_Server_API/tests/Audio/test_ws_transcribe_partial_persistence.py -q` passed with 30 tests.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

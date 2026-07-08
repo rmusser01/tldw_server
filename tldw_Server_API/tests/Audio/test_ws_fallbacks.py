@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import importlib.machinery
 import json
 from configparser import ConfigParser
@@ -120,6 +121,20 @@ def _cfg_without_stt_section() -> ConfigParser:
     return ConfigParser()
 
 
+def _strict_transcribe_config(**overrides) -> str:
+    """Return a strict v1 transcribe config frame with optional test overrides."""
+    payload = {
+        "type": "config",
+        "protocol_version": 1,
+        "mode": "dictate",
+        "audio_format": "pcm16",
+        "sample_rate": 16000,
+        "channels": 1,
+    }
+    payload.update(overrides)
+    return json.dumps(payload)
+
+
 class _FakeWhisperModel:
     class _Seg:
         def __init__(self, t: str):
@@ -150,6 +165,71 @@ class _FakeWhisperModel:
         return [self._Seg("ok")], self._Info()
 
 
+class _NoopTranscriber:
+    """Minimal transcriber used when protocol validation should exit first."""
+
+    def __init__(self, _config):
+        pass
+
+    def initialize(self):
+        pass
+
+    async def process_audio_chunk(self, _audio_bytes):
+        return None
+
+    def get_full_transcript(self):
+        return ""
+
+    def reset(self):
+        pass
+
+    def cleanup(self):
+        pass
+
+
+@pytest.mark.asyncio
+async def test_transcribe_ws_rejects_audio_before_config(monkeypatch):
+    """The first post-auth frame must be strict v1 config, not audio."""
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import Audio_Streaming_Unified as unified
+
+    monkeypatch.setattr(unified, "UnifiedStreamingTranscriber", _NoopTranscriber)
+
+    ws = _DummyWebSocket([
+        json.dumps({"type": "audio", "data": base64.b64encode(b"\x00\x00").decode("ascii")}),
+        json.dumps({"type": "stop"}),
+    ])
+
+    await unified.handle_unified_websocket(ws, unified.UnifiedStreamingConfig())
+
+    assert any(msg.get("type") == "error" and msg.get("code") == "bad_request" for msg in ws.sent)
+    assert ws.close_args == (4400, None)
+
+
+@pytest.mark.asyncio
+async def test_transcribe_ws_rejects_wrong_mode(monkeypatch):
+    """The transcription websocket must reject chat-only modes."""
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import Audio_Streaming_Unified as unified
+
+    monkeypatch.setattr(unified, "UnifiedStreamingTranscriber", _NoopTranscriber)
+
+    ws = _DummyWebSocket([
+        json.dumps({
+            "type": "config",
+            "protocol_version": 1,
+            "mode": "voice_chat",
+            "audio_format": "pcm16",
+            "sample_rate": 16000,
+            "channels": 1,
+        }),
+        json.dumps({"type": "stop"}),
+    ])
+
+    await unified.handle_unified_websocket(ws, unified.UnifiedStreamingConfig())
+
+    assert any("not allowed" in msg.get("message", "") for msg in ws.sent)
+    assert ws.close_args == (4400, None)
+
+
 @pytest.mark.asyncio
 async def test_model_unavailable_triggers_fallback_warning(monkeypatch):
     # Force Parakeet core variant builder to return None so adapter initialize fails
@@ -167,7 +247,7 @@ async def test_model_unavailable_triggers_fallback_warning(monkeypatch):
     monkeypatch.setattr(unified, "get_whisper_model", lambda size, device: _FakeWhisperModel())
 
     # Prepare websocket with config (parakeet-onnx) then stop
-    cfg = json.dumps({"type": "config", "model": "parakeet-onnx", "sample_rate": 16000})
+    cfg = _strict_transcribe_config(model="parakeet-onnx")
     stop = json.dumps({"type": "stop"})
     ws = _DummyWebSocket([cfg, stop])
 
@@ -200,7 +280,7 @@ async def test_model_unavailable_without_fallback_emits_error(monkeypatch):
     import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Streaming_Unified as unified
     monkeypatch.setattr(unified, "load_comprehensive_config", lambda: _make_cfg(False))
 
-    cfg = json.dumps({"type": "config", "model": "parakeet-onnx", "sample_rate": 16000})
+    cfg = _strict_transcribe_config(model="parakeet-onnx")
     stop = json.dumps({"type": "stop"})
     ws = _DummyWebSocket([cfg, stop])
 
@@ -233,7 +313,7 @@ async def test_model_unavailable_without_fallback_sanitizes_internal_error(monke
     monkeypatch.setattr(unified, "UnifiedStreamingTranscriber", _FailingTranscriber)
     monkeypatch.setattr(unified, "load_comprehensive_config", lambda: _make_cfg(False))
 
-    cfg = json.dumps({"type": "config", "model": "parakeet-onnx", "sample_rate": 16000})
+    cfg = _strict_transcribe_config(model="parakeet-onnx")
     stop = json.dumps({"type": "stop"})
     ws = _DummyWebSocket([cfg, stop])
 
@@ -271,7 +351,7 @@ async def test_model_fallback_failure_sanitizes_internal_errors(monkeypatch):
     monkeypatch.setattr(unified, "UnifiedStreamingTranscriber", _FailingTranscriber)
     monkeypatch.setattr(unified, "load_comprehensive_config", lambda: _make_cfg(True))
 
-    cfg = json.dumps({"type": "config", "model": "parakeet-onnx", "sample_rate": 16000})
+    cfg = _strict_transcribe_config(model="parakeet-onnx")
     stop = json.dumps({"type": "stop"})
     ws = _DummyWebSocket([cfg, stop])
 
@@ -322,8 +402,8 @@ async def test_stt_error_sentinel_sanitizes_raw_error_payload(monkeypatch):
     monkeypatch.setattr(unified, "UnifiedStreamingTranscriber", _SentinelTranscriber)
     monkeypatch.setattr(unified, "_is_transcription_error_message", lambda _text: True)
 
-    cfg = json.dumps({"type": "config", "model": "whisper", "sample_rate": 16000})
-    audio = json.dumps({"type": "audio", "data": "AA=="})
+    cfg = _strict_transcribe_config(model="whisper")
+    audio = json.dumps({"type": "audio", "data": "AAA="})
     ws = _DummyWebSocket([cfg, audio])
 
     await unified.handle_unified_websocket(ws, unified.UnifiedStreamingConfig())
@@ -362,8 +442,8 @@ async def test_audio_processing_error_sanitizes_internal_error(monkeypatch):
 
     monkeypatch.setattr(unified, "UnifiedStreamingTranscriber", _FailingChunkTranscriber)
 
-    cfg = json.dumps({"type": "config", "model": "whisper", "sample_rate": 16000})
-    audio = json.dumps({"type": "audio", "data": "AA=="})
+    cfg = _strict_transcribe_config(model="whisper")
+    audio = json.dumps({"type": "audio", "data": "AAA="})
     stop = json.dumps({"type": "stop"})
     ws = _DummyWebSocket([cfg, audio, stop])
 
@@ -391,7 +471,7 @@ async def test_outer_websocket_handler_error_sanitizes_internal_error(monkeypatc
 
     monkeypatch.setattr(unified, "WSControlSession", _FailingControlSession)
 
-    cfg = json.dumps({"type": "config", "model": "whisper", "sample_rate": 16000})
+    cfg = _strict_transcribe_config(model="whisper")
     ws = _DummyWebSocket([cfg])
 
     await unified.handle_unified_websocket(ws, unified.UnifiedStreamingConfig())
@@ -435,12 +515,10 @@ async def test_diarization_initialization_warning_sanitizes_details(monkeypatch)
     monkeypatch.setattr(unified, "UnifiedStreamingTranscriber", _ReadyTranscriber)
     monkeypatch.setattr(unified, "StreamingDiarizer", _FailingDiarizer)
 
-    cfg = json.dumps({
-        "type": "config",
-        "model": "whisper",
-        "sample_rate": 16000,
-        "diarization": {"enabled": True},
-    })
+    cfg = _strict_transcribe_config(
+        model="whisper",
+        diarization={"enabled": True},
+    )
     stop = json.dumps({"type": "stop"})
     ws = _DummyWebSocket([cfg, stop])
 
@@ -484,12 +562,10 @@ async def test_live_insights_initialization_warning_sanitizes_details(monkeypatc
     monkeypatch.setattr(unified, "UnifiedStreamingTranscriber", _ReadyTranscriber)
     monkeypatch.setattr(unified, "LiveMeetingInsights", _FailingLiveInsights)
 
-    cfg = json.dumps({
-        "type": "config",
-        "model": "whisper",
-        "sample_rate": 16000,
-        "insights_enabled": True,
-    })
+    cfg = _strict_transcribe_config(
+        model="whisper",
+        insights_enabled=True,
+    )
     stop = json.dumps({"type": "stop"})
     ws = _DummyWebSocket([cfg, stop])
 
@@ -519,7 +595,7 @@ async def test_model_unavailable_defaults_to_no_fallback_when_stt_section_missin
         lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("Whisper fallback should be disabled by default")),
     )
 
-    cfg = json.dumps({"type": "config", "model": "parakeet-onnx", "sample_rate": 16000})
+    cfg = _strict_transcribe_config(model="parakeet-onnx")
     stop = json.dumps({"type": "stop"})
     ws = _DummyWebSocket([cfg, stop])
 
