@@ -85,6 +85,10 @@ The export contract must use these semantics:
 - `content_selections: {}`: export all supported exportable data.
 - Non-empty `content_selections` object: explicit allowlist mode.
 - Empty arrays inside a non-empty object mean export none for that type.
+- A non-empty allowlist that resolves to zero total exportable items is invalid:
+  normal UI flows must block it with a clear validation message, and the API
+  must return a 4xx validation error instead of silently creating an empty
+  backup.
 
 Examples:
 
@@ -114,6 +118,16 @@ Means all supported exportable data.
 
 Means export conversations `1` and `2`, export no notes, and export no other
 content types unless they are explicitly present.
+
+```json
+{
+  "content_selections": {
+    "conversation": []
+  }
+}
+```
+
+Means an invalid zero-item allowlist. It must not be treated as Backup all.
 
 This is a behavior change for clients that previously sent `{}` expecting an
 empty export. The PRD requires API docs and release notes to call it out.
@@ -209,6 +223,8 @@ Acceptance criteria:
 - API export treats `content_selections: {}` as all supported exportable data.
 - Non-empty `content_selections` remains explicit allowlist mode.
 - Empty arrays in allowlist mode mean no items for that type.
+- Zero-item allowlists are rejected with a 4xx validation error instead of
+  creating empty backups.
 - Main UI and extension Backup all use the API all-export contract and show a
   scope summary.
 - Default archive import sends `import_media=false` and
@@ -241,8 +257,8 @@ Add the smallest useful regression coverage for the reviewed failures.
 
 Minimum required tests:
 
-- API all-export contract: omitted selections, `{}`, explicit allowlist, and
-  empty arrays inside allowlist mode.
+- API all-export contract: omitted selections, `{}`, explicit allowlist, empty
+  arrays inside allowlist mode, and zero-item allowlist rejection.
 - Main UI default archive import flags are false.
 - Settings default archive import flags are false or the Settings import shortcut
   is removed/demoted to a safe entry point.
@@ -275,6 +291,8 @@ not fire as acceptable.
 3. Client sends a non-empty `content_selections` allowlist.
 4. API exports exactly the requested types and IDs.
 5. Empty arrays inside the allowlist exclude that type.
+6. If the selected allowlist resolves to zero total exportable items, the UI
+   blocks submission and the API rejects direct requests.
 
 ### Archive Import
 
@@ -301,6 +319,8 @@ not fire as acceptable.
   omission.
 - Metadata-only export limitations must be visible before export where known and
   in job results after export.
+- Selective export with zero total selected/exportable items must fail with a
+  clear 4xx validation message rather than producing an empty archive.
 - Archive import must not fail by default because of unsupported options.
 - Hydration must not create a job until a current preview exists for the visible
   scope.
@@ -319,6 +339,7 @@ Docs must explicitly state:
 
 - omitted or `{}` export selections mean all supported exportable data
 - non-empty selections are allowlists
+- zero-item allowlists are invalid and do not mean "backup all"
 - media binaries are not fully backed up unless explicitly supported
 - archive media/embedding import is not supported by default
 - Settings is not the full backup/restore workflow if the shortcut remains
@@ -333,7 +354,8 @@ Required rollout work:
 - API documentation callout.
 - User guide callout.
 - Release note or migration note for API clients.
-- Tests proving omitted, `{}`, allowlist, and empty-array behavior.
+- Tests proving omitted, `{}`, allowlist, empty-array, and zero-item rejection
+  behavior.
 
 ## Success Criteria
 

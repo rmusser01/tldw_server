@@ -2,21 +2,19 @@
 id: TASK-12098
 title: Create Chatbooks backup import remediation PRD and task set
 status: In Progress
+assignee: []
+created_date: ''
+updated_date: '2026-07-09 14:49'
 labels:
-- chatbooks
-- prd
-- ux
-- uat
-- backup
-- import
+  - chatbooks
+  - prd
+  - ux
+  - uat
+  - backup
+  - import
+dependencies: []
 references:
-- Docs/Reviews/CHATBOOKS_BACKUP_IMPORT_UAT_UX_REVIEW_2026_07_09.md
-modified_files:
-- Docs/superpowers/specs/2026-07-09-chatbooks-backup-import-remediation-prd-design.md
-- backlog/tasks/task-12098 - Create-Chatbooks-backup-import-remediation-PRD-and-task-set.md
-- backlog/tasks/task-12098.1 - P0-Chatbooks-backup-restore-correctness-remediation.md
-- backlog/tasks/task-12098.2 - P1-Chatbooks-backup-import-UX-clarity-remediation.md
-- backlog/tasks/task-12098.3 - P2-Chatbooks-backup-import-acceptance-coverage.md
+  - Docs/Reviews/CHATBOOKS_BACKUP_IMPORT_UAT_UX_REVIEW_2026_07_09.md
 ---
 
 ## Description
@@ -27,6 +25,9 @@ Create an umbrella PRD/spec and milestone Backlog tasks for addressing all findi
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
+- [ ] #1 PRD/spec exists at Docs/superpowers/specs/2026-07-09-chatbooks-backup-import-remediation-prd-design.md and covers all P0/P1/P2 findings from the 2026-07-09 review.
+- [ ] #2 Milestone Backlog tasks exist for P0 correctness, P1 UX clarity, and P2 acceptance coverage.
+- [ ] #3 Spec review records no blocking issues before the user review gate.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -37,14 +38,13 @@ Docs/superpowers/specs/2026-07-09-chatbooks-backup-import-remediation-prd-design
 
 ## Implementation Notes
 
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
+<!-- SECTION:NOTES:BEGIN -->
+Spec review pass recorded after PRD/task package verification. Implementation planning waits for user review and approval.
+<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
