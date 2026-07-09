@@ -1,7 +1,7 @@
 ---
 id: TASK-12170
 title: Add planned flashcard generation types and counts
-status: In Progress
+status: Done
 modified_files:
 - tldw_Server_API/app/api/v1/schemas/flashcards.py
 - tldw_Server_API/app/api/v1/endpoints/flashcards.py
@@ -14,6 +14,9 @@ modified_files:
 - apps/packages/ui/src/components/Flashcards/hooks/useFlashcardQueries.ts
 - apps/packages/ui/src/components/Flashcards/tabs/ImportExport/shared.ts
 - apps/packages/ui/src/components/Flashcards/tabs/ImportExport/__tests__/shared.test.ts
+- apps/packages/ui/src/components/Flashcards/tabs/ImportExport/GeneratePanel.tsx
+- apps/packages/ui/src/components/Flashcards/tabs/__tests__/ImportExportTab.import-results.test.tsx
+- Docs/superpowers/specs/2026-07-08-planned-flashcard-generation-controls-design.md
 - Docs/superpowers/plans/2026-07-08-planned-flashcard-generation-controls-implementation-plan.md
 - backlog/tasks/task-12170 - Add-planned-flashcard-generation-types-and-counts.md
 ---
@@ -33,6 +36,11 @@ Acceptance criteria:
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
+- [x] Flashcard generation accepts per-type counts for basic, reverse/basic_reverse, cloze/fill-in-the-blank, and true/false-style cards.
+- [x] Existing single card_type and num_cards request shape remains backward compatible.
+- [x] Generated true/false cards map cleanly onto existing flashcard storage without a new scheduler model.
+- [x] WebUI `/flashcards` generation can request and preview the selected mix where applicable.
+- [x] Tests cover mixed flashcard generation requests and backward-compatible requests.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -53,6 +61,8 @@ Approved design choices:
 - Use response-only `generation_type` for preview labels and planned-count validation.
 - Store generated true/false cards as existing `basic` flashcards; do not add scheduler or storage models.
 - Do not silently change defaults in sidepanel, quiz companion, or Research Workspace callers.
+
+Commit series: 2303ca0547, ce21e113cf, 3781de9858, da8499f57e, d4643f3e13, f6a8e0e8df, 561c47cf74, 3b17fbfa8d, d3305c427b, 3a70af1266, f327b0ae1a, 8f7cde2659, 5ee0e281a3, 176cb9240b, c56dd0378d, 8797ea3505, 50fb94e9d9, 3fb980e006, 02c6843544, 8f938edce8.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
@@ -85,14 +95,18 @@ Task 4 quality-review follow-up: generated draft normalization now falls back to
 Task 5 WebUI slice: added the /flashcards Advanced mix toggle, fixed four-row card-plan controls, derived total validation, planned-generation payloads, preview generation_type labels, and save-flow coverage confirming generation_type is not persisted. Verification: focused red Vitest failed before implementation on missing Advanced mix controls; focused generate Vitest passed after implementation (3 passed, 38 skipped); requested full ImportExportTab Vitest command now passes the new generate tests but still fails the existing snapshot harness test at line 372 with "SnapshotClient.setup()" missing (40 passed, 1 failed); bun run typecheck passed; git diff --check passed. Bandit skipped because this slice only touched frontend TypeScript and Backlog markdown.
 
 Task 5 accessibility follow-up: named the Advanced mix switch from its visible label, added invalid-total explanatory copy, and connected invalid state with aria-invalid/aria-describedby on the Advanced mix group. Verification: focused red Vitest failed before implementation on missing switch accessible name; focused accessibility Vitest passed after implementation (1 passed, 40 skipped); requested full ImportExportTab Vitest still fails only the existing snapshot harness test at line 372 with "SnapshotClient.setup()" missing (40 passed, 1 failed); bun run typecheck passed; git diff --check passed. Bandit skipped because this follow-up only touched frontend TypeScript and Backlog markdown.
+
+Final verification: backend endpoint pytest passed with the shared project venv (18 passed, 154 deselected); workflow adapter pytest passed (25 passed, 111 deselected); `apps/tldw-frontend` typecheck passed; package-local UI focused Vitest passed (50 passed); Bandit on touched backend Python reported 0 findings in `/tmp/bandit_task_12170_flashcard_plan.json`; `git diff --check` passed. The exact Task 6 frontend command from `apps/tldw-frontend` still fails the pre-existing package-crossing snapshot harness case at `ImportExportTab.import-results.test.tsx:372` (`SnapshotClient.setup()` missing), while the same two focused files pass from the owning `apps/packages/ui` package config.
+
+Known skips: no visual flashcards, no stored generation metadata, no scheduler/spaced-repetition changes, and no hidden default changes for sidepanel, quiz companion, extension, or Research Workspace callers.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

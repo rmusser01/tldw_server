@@ -734,7 +734,7 @@ git commit -m "feat: plumb flashcard generation plans in ui"
 - Modify: `apps/packages/ui/src/components/Flashcards/tabs/ImportExport/GeneratePanel.tsx`
 - Test: `apps/packages/ui/src/components/Flashcards/tabs/__tests__/ImportExportTab.import-results.test.tsx`
 
-- [ ] **Step 1: Write failing UI tests**
+- [x] **Step 1: Write failing UI tests**
 
 Add tests near the existing generate preview test:
 
@@ -829,7 +829,7 @@ it("updates advanced mix total and disables generation outside allowed totals", 
 })
 ```
 
-- [ ] **Step 2: Run UI tests to verify failure**
+- [x] **Step 2: Run UI tests to verify failure**
 
 Run:
 
@@ -839,7 +839,7 @@ cd apps/tldw-frontend && bunx vitest run ../packages/ui/src/components/Flashcard
 
 Expected: tests fail because the Advanced mix toggle and plan rows do not exist.
 
-- [ ] **Step 3: Add minimal advanced mix state**
+- [x] **Step 3: Add minimal advanced mix state**
 
 In `GeneratePanel.tsx`, import `Switch` from `antd` and `type FlashcardPlanItem` from `@/services/flashcards`.
 
@@ -875,7 +875,7 @@ const plannedCardTotal = React.useMemo(
 )
 ```
 
-- [ ] **Step 4: Render toggle and fixed rows**
+- [x] **Step 4: Render toggle and fixed rows**
 
 Add the toggle next to the simple count/type controls:
 
@@ -899,7 +899,7 @@ Plan row counts should allow `0-100` per row so users can omit a type and so the
 
 Disable simple `numCards`/`cardType` controls while advanced mode is enabled or hide them if the layout is cleaner. Keep the source text, difficulty, deck, provider/model, and focus topics unchanged.
 
-- [ ] **Step 5: Send plan from `handleGenerate`**
+- [x] **Step 5: Send plan from `handleGenerate`**
 
 Build mutation params:
 
@@ -927,7 +927,7 @@ const generationParams = advancedMixEnabled
 
 Disable Generate when advanced mode is enabled and `plannedCardTotal < 1 || plannedCardTotal > 100`.
 
-- [ ] **Step 6: Show preview labels**
+- [x] **Step 6: Show preview labels**
 
 Add a tiny label in each preview card title or body:
 
@@ -942,7 +942,7 @@ const generationTypeLabel = {
 
 Do not pass `generation_type` to `createMutation.mutateAsync`; the existing enumerated create payload already strips it. Keep the explicit save-stripping assertion.
 
-- [ ] **Step 7: Run UI tests**
+- [x] **Step 7: Run UI tests**
 
 Run:
 
@@ -952,7 +952,7 @@ cd apps/tldw-frontend && bunx vitest run ../packages/ui/src/components/Flashcard
 
 Expected: import-results tests pass.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add apps/packages/ui/src/components/Flashcards/tabs/ImportExport/GeneratePanel.tsx apps/packages/ui/src/components/Flashcards/tabs/__tests__/ImportExportTab.import-results.test.tsx
@@ -964,7 +964,7 @@ git commit -m "feat: add flashcard advanced mix controls"
 **Files:**
 - Modify: `backlog/tasks/task-12170 - Add-planned-flashcard-generation-types-and-counts.md`
 
-- [ ] **Step 1: Run backend focused tests**
+- [x] **Step 1: Run backend focused tests**
 
 Run:
 
@@ -982,7 +982,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Workflows/ad
 
 Expected: pass.
 
-- [ ] **Step 2: Run frontend focused tests**
+- [x] **Step 2: Run frontend focused tests**
 
 Run:
 
@@ -992,7 +992,9 @@ cd apps/tldw-frontend && bunx vitest run ../packages/ui/src/services/__tests__/f
 
 Expected: pass.
 
-- [ ] **Step 3: Run typecheck if practical**
+Actual: the `apps/tldw-frontend` command still failed the pre-existing package-crossing snapshot harness case at `ImportExportTab.import-results.test.tsx:372`; the same focused files passed from the owning `apps/packages/ui` package config.
+
+- [x] **Step 3: Run typecheck if practical**
 
 Run:
 
@@ -1002,7 +1004,7 @@ cd apps/tldw-frontend && bun run typecheck
 
 Expected: pass. If the repo has unrelated baseline failures, document the exact failure and focused tests above.
 
-- [ ] **Step 4: Run Bandit on touched backend Python**
+- [x] **Step 4: Run Bandit on touched backend Python**
 
 Run:
 
@@ -1012,7 +1014,7 @@ source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/api/v1/sche
 
 Expected: no new findings in touched code. If Bandit is unavailable in the venv, install nothing; document the missing tool.
 
-- [ ] **Step 5: Run diff checks**
+- [x] **Step 5: Run diff checks**
 
 Run:
 
@@ -1023,7 +1025,7 @@ git status --short
 
 Expected: no whitespace errors; only intentional files changed.
 
-- [ ] **Step 6: Update Backlog task**
+- [x] **Step 6: Update Backlog task**
 
 In `backlog/tasks/task-12170 - Add-planned-flashcard-generation-types-and-counts.md`, record:
 
@@ -1033,13 +1035,13 @@ In `backlog/tasks/task-12170 - Add-planned-flashcard-generation-types-and-counts
 - Final summary.
 - Known skips: no visual flashcards, no stored generation metadata, no scheduler changes, no hidden caller default changes.
 
-- [ ] **Step 7: Commit final bookkeeping**
+- [x] **Step 7: Commit final bookkeeping**
 
 ```bash
 git add "backlog/tasks/task-12170 - Add-planned-flashcard-generation-types-and-counts.md"
 git commit -m "docs: close planned flashcard generation task"
 ```
 
-- [ ] **Step 8: Request code review**
+- [x] **Step 8: Request code review**
 
 Use `superpowers:requesting-code-review` after implementation and verification complete.
