@@ -26,9 +26,19 @@ jobs:
 
       - name: Install actionlint
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ACTIONLINT_VERSION: 1.7.12
         run: |
           set -euo pipefail
-          bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+          asset="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          gh release download "v${ACTIONLINT_VERSION}" \
+            --repo rhysd/actionlint \
+            --pattern "${asset}" \
+            --output /tmp/actionlint.tar.gz
+          tar -xzf /tmp/actionlint.tar.gz -C /tmp actionlint
+          install -m 0755 /tmp/actionlint ./actionlint
+          ./actionlint -version
 
       - name: Run actionlint on targeted workflows
         shell: bash
