@@ -143,6 +143,13 @@ def _map_content_selections(raw: Any) -> dict[ContentType, list]:
     return selections
 
 
+def _payload_bool_or_default(payload: dict[str, Any], key: str, default: bool) -> bool:
+    """Return a boolean payload value while preserving source-aware omitted defaults."""
+    if key not in payload or payload.get(key) is None:
+        return default
+    return bool(payload.get(key))
+
+
 def _parse_conflict_resolution(raw: Any) -> ConflictResolution:
     if isinstance(raw, ConflictResolution):
         return raw
@@ -323,7 +330,8 @@ async def _handle_import(service: ChatbookService, payload: dict[str, Any], job_
             return {"skipped": True, "status": existing.status.value}
         raise ChatbooksJobError("import job already claimed", retryable=True, backoff_seconds=5)
 
-    selections = _map_content_selections(payload.get("content_selections") or {})
+    raw_content_selections = payload.get("content_selections")
+    selections = None if raw_content_selections is None else _map_content_selections(raw_content_selections)
     conflict_resolution = _parse_conflict_resolution(payload.get("conflict_resolution", "skip"))
     source_format = str(payload.get("source_format") or "chatbook").strip().lower()
     file_ref = payload.get("file_token") or payload.get("file_path")
@@ -432,8 +440,8 @@ async def _handle_import(service: ChatbookService, payload: dict[str, Any], job_
             selections,
             conflict_resolution,
             bool(payload.get("prefix_imported", False)),
-            bool(payload.get("import_media", False)),
-            bool(payload.get("import_embeddings", False)),
+            _payload_bool_or_default(payload, "import_media", True),
+            _payload_bool_or_default(payload, "import_embeddings", True),
         )
     finally:
         try:
@@ -445,14 +453,53 @@ async def _handle_import(service: ChatbookService, payload: dict[str, Any], job_
     ij = service._get_import_job(job_id)
     if ok:
         if ij and ij.status != ImportStatus.CANCELLED:
+            result_data = result if isinstance(result, dict) else {}
+            imported_items = result_data.get("imported_items") if isinstance(result_data, dict) else {}
+            imported_items = imported_items if isinstance(imported_items, dict) else {}
+            warnings = result_data.get("warnings") if isinstance(result_data, dict) else []
+            warnings = warnings if isinstance(warnings, list) else []
+            skipped_non_restorable = result_data.get("skipped_non_restorable") if isinstance(result_data, dict) else {}
+            skipped_non_restorable = skipped_non_restorable if isinstance(skipped_non_restorable, dict) else {}
+            successful_count = sum(
+                int(count or 0)
+                for count in imported_items.values()
+                if isinstance(count, int) or str(count).isdigit()
+            )
+            skipped_count = sum(
+                int(count or 0)
+                for count in skipped_non_restorable.values()
+                if isinstance(count, int) or str(count).isdigit()
+            )
             ij.status = ImportStatus.COMPLETED
             ij.completed_at = datetime.now(timezone.utc)
+            ij.progress_percentage = 100
+            ij.successful_items = successful_count
+            ij.skipped_items = max(int(getattr(ij, "skipped_items", 0) or 0), skipped_count)
+            ij.processed_items = max(
+                int(getattr(ij, "processed_items", 0) or 0),
+                successful_count + skipped_count,
+            )
+            ij.total_items = max(
+                int(getattr(ij, "total_items", 0) or 0),
+                successful_count + skipped_count,
+            )
+            ij.warnings = warnings
+            ij.metadata = {
+                "imported_items": imported_items,
+                "inventory_summary": result_data.get("inventory_summary"),
+                "skipped_non_restorable": skipped_non_restorable,
+            }
             service._save_import_job(ij)
         if isinstance(result, dict):
-            return {
+            worker_result = {
                 "imported_items": result.get("imported_items") or {},
                 "warnings": result.get("warnings") or [],
             }
+            if result.get("inventory_summary") is not None:
+                worker_result["inventory_summary"] = result.get("inventory_summary")
+            if result.get("skipped_non_restorable"):
+                worker_result["skipped_non_restorable"] = result.get("skipped_non_restorable") or {}
+            return worker_result
         return {"imported_items": {}, "warnings": result or []}
 
     if ij:

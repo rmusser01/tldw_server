@@ -9,7 +9,7 @@ from tldw_Server_API.app.core.Chatbooks.services import jobs_worker
 
 
 @pytest.mark.asyncio
-async def test_handle_import_defaults_import_media_to_false(tmp_path):
+async def test_handle_import_defaults_chatbook_media_and_embeddings_to_true(tmp_path):
     archive_path = tmp_path / "input.chatbook"
     archive_path.write_text("dummy", encoding="utf-8")
 
@@ -64,8 +64,13 @@ async def test_handle_import_defaults_import_media_to_false(tmp_path):
 
     assert result == {"imported_items": {"note": 1}, "warnings": []}
     assert service.called_args is not None
-    assert service.called_args["import_media"] is False
+    assert service.called_args["selections"] is None
+    assert service.called_args["import_media"] is True
+    assert service.called_args["import_embeddings"] is True
     assert service.import_job.status == ImportStatus.COMPLETED
+    assert service.import_job.progress_percentage == 100
+    assert service.import_job.successful_items == 1
+    assert service.import_job.metadata["imported_items"] == {"note": 1}
     assert isinstance(service.import_job.completed_at, datetime)
     assert not archive_path.exists()
 

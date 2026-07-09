@@ -79,8 +79,9 @@ def client(tmp_path_factory, monkeypatch):
                     created_at, started_at, completed_at, error_message,
                     progress_percentage, total_items, processed_items,
                     successful_items, failed_items, skipped_items,
-                    conflicts, warnings,
+                    conflicts, warnings, *rest,
                 ) = params
+                metadata = rest[0] if rest else None
                 self.import_jobs[job_id] = {
                     "job_id": job_id,
                     "user_id": user_id,
@@ -98,6 +99,7 @@ def client(tmp_path_factory, monkeypatch):
                     "skipped_items": skipped_items,
                     "conflicts": conflicts,
                     "warnings": warnings,
+                    "metadata": metadata,
                 }
                 return _DummyCursor([])
 

@@ -483,11 +483,18 @@ Completed in the Task 3 commit.
 **Files:**
 - Modify: `tldw_Server_API/app/api/v1/schemas/chatbook_schemas.py`
 - Modify: `tldw_Server_API/app/api/v1/endpoints/chatbooks.py`
+- Modify: `tldw_Server_API/app/core/Chatbooks/chatbook_account_inventory.py`
+- Modify: `tldw_Server_API/app/core/Chatbooks/chatbook_format_v1_1.py`
+- Modify: `tldw_Server_API/app/core/Chatbooks/chatbook_models.py`
 - Modify: `tldw_Server_API/app/core/Chatbooks/chatbook_service.py`
+- Modify: `tldw_Server_API/app/core/Chatbooks/services/jobs_worker.py`
+- Test: `tldw_Server_API/tests/Chatbooks/test_chatbook_service.py`
+- Test: `tldw_Server_API/tests/Chatbooks/test_chatbooks_cancellation.py`
 - Test: `tldw_Server_API/tests/Chatbooks/test_chatbooks_full_account_import_restore.py`
-- Test: `tldw_Server_API/tests/Chatbooks/test_chatbooks_import_validation.py`
+- Test: `tldw_Server_API/tests/Chatbooks/test_chatbooks_jobs_worker_import_defaults.py`
+- Test: `tldw_Server_API/tests/Chatbooks/test_chatbooks_sync_contracts.py`
 
-- [ ] **Step 1: Write failing full-import restore tests**
+- [x] **Step 1: Write failing full-import restore tests**
 
 Create a `.chatbook` fixture containing media records, stored/derived media data, prompts, evaluations, embeddings, conversations, notes, characters, world books, dictionaries, generated documents, and explainer sessions. Import with default options and assert every restorable category is imported or restored. Assert non-restorable rows produce visible warnings and do not count as silent skips.
 
@@ -498,7 +505,7 @@ Also assert:
 - import fails clearly if the archive contains an inventory category marked restorable but no handler is registered
 - sensitive values are not logged or surfaced in warnings
 
-- [ ] **Step 2: Run import tests and verify failure**
+- [x] **Step 2: Run import tests and verify failure**
 
 Run:
 
@@ -509,7 +516,7 @@ python -m pytest tldw_Server_API/tests/Chatbooks/test_chatbooks_full_account_imp
 
 Expected: fail because media and embedding import paths are rejected or skipped, and prompts/evaluations are not restored.
 
-- [ ] **Step 3: Change archive import defaults and remove Chatbook reject paths**
+- [x] **Step 3: Change archive import defaults and remove Chatbook reject paths**
 
 For `source_format=chatbook`, default to restoring archive media records and embeddings when present. Keep OpenWebUI import behavior separate because OpenWebUI import is not a `.chatbook` archive restore.
 
@@ -555,7 +562,7 @@ if source_format_value in {"openwebui_json", "openwebui_db"} and (import_media o
     return False, "OpenWebUI imports do not use archive media or embedding restore options.", None
 ```
 
-- [ ] **Step 4: Register restore handlers for every restorable inventory row**
+- [x] **Step 4: Register restore handlers for every restorable inventory row**
 
 Extend `supported_types` and add import functions:
 
@@ -567,7 +574,7 @@ Extend `supported_types` and add import functions:
 
 Use the same path index and safe extracted path helpers used by existing importers. Restore stored file artifacts only into account-owned storage paths. Preserve original external pointers as metadata; do not resolve arbitrary local paths from the archive.
 
-- [ ] **Step 5: Stop silent skips**
+- [x] **Step 5: Stop silent skips**
 
 Before importing, compare manifest categories and content item types to the inventory. If a category is restorable but no handler exists, fail with a clear error. If a category is pointer-only or non-restorable, add a warning and count it in the result.
 
@@ -582,7 +589,7 @@ Return sync import results with:
 }
 ```
 
-- [ ] **Step 6: Verify tests pass**
+- [x] **Step 6: Verify tests pass**
 
 Run:
 
@@ -593,7 +600,25 @@ python -m pytest tldw_Server_API/tests/Chatbooks/test_chatbooks_full_account_imp
 
 Expected: pass.
 
-- [ ] **Step 7: Commit**
+Completed with expanded verification:
+
+```bash
+source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Chatbooks -v
+# 360 passed, 6 warnings
+
+source .venv/bin/activate && python -m py_compile tldw_Server_API/app/api/v1/schemas/chatbook_schemas.py tldw_Server_API/app/api/v1/endpoints/chatbooks.py tldw_Server_API/app/core/Chatbooks/chatbook_service.py tldw_Server_API/app/core/Chatbooks/chatbook_format_v1_1.py tldw_Server_API/app/core/Chatbooks/services/jobs_worker.py tldw_Server_API/app/core/Chatbooks/chatbook_models.py tldw_Server_API/app/core/Chatbooks/chatbook_account_inventory.py
+# passed
+
+git diff --check
+# passed
+
+source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/api/v1/schemas/chatbook_schemas.py tldw_Server_API/app/api/v1/endpoints/chatbooks.py tldw_Server_API/app/core/Chatbooks/chatbook_service.py tldw_Server_API/app/core/Chatbooks/chatbook_format_v1_1.py tldw_Server_API/app/core/Chatbooks/services/jobs_worker.py tldw_Server_API/app/core/Chatbooks/chatbook_models.py tldw_Server_API/app/core/Chatbooks/chatbook_account_inventory.py -f json -o /tmp/bandit_chatbooks_full_account_task4.json
+# results: []
+```
+
+Review follow-ups addressed before commit: v1.1 media artifact inventory validation now covers bundled media artifact bytes; Chroma collection embedding restore honors `conflict_resolution=skip`; `tags_categories_relationships` is no longer advertised as silently restorable; rename conflicts for prompt/evaluation/media/generated-document imports use a generic title suffix; async import job status persists imported item, inventory, skipped, warning, and metadata results; generated document restore persists metadata.
+
+- [x] **Step 7: Commit**
 
 ```bash
 git add tldw_Server_API/app/api/v1/schemas/chatbook_schemas.py tldw_Server_API/app/api/v1/endpoints/chatbooks.py tldw_Server_API/app/core/Chatbooks/chatbook_service.py tldw_Server_API/tests/Chatbooks/test_chatbooks_full_account_import_restore.py tldw_Server_API/tests/Chatbooks/test_chatbooks_import_validation.py tldw_Server_API/tests/Chatbooks/test_chatbooks_sensitive_export_redaction.py

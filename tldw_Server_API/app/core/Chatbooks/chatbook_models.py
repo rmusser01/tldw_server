@@ -126,6 +126,8 @@ class ImportStatusData:
     skipped_items: int = 0
     conflicts: list[dict[str, Any]] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
@@ -135,7 +137,8 @@ class ImportStatusData:
             "failed_items": self.failed_items,
             "skipped_items": self.skipped_items,
             "conflicts": self.conflicts,
-            "warnings": self.warnings
+            "warnings": self.warnings,
+            "metadata": self.metadata,
         }
 
 
@@ -518,6 +521,7 @@ class ImportJob:
     skipped_items: int = 0
     conflicts: list[dict[str, Any]] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
@@ -537,7 +541,8 @@ class ImportJob:
             "failed_items": self.failed_items,
             "skipped_items": self.skipped_items,
             "conflicts": self.conflicts,
-            "warnings": self.warnings
+            "warnings": self.warnings,
+            "metadata": self.metadata,
         }
 
     # Provide dict-like access for test compatibility
