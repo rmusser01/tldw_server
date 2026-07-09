@@ -882,28 +882,69 @@ const assertNoHorizontalOverflow = async (page: Page) => {
   expect(metrics.bodyScrollWidth).toBeLessThanOrEqual(metrics.innerWidth + 1);
 };
 
-type LocatorTarget = Locator | (() => Locator);
+type MobilePanelMeasurement =
+  | { status: 'ok'; panelBottom: number; panelHeight: number; composerTop: number }
+  | { status: 'error'; message: string };
 
-const resolveLocatorTarget = (target: LocatorTarget) =>
-  typeof target === 'function' ? target() : target;
+const measureMobilePanelComposer = async (
+  page: Page,
+  panel: 'context' | 'runtime'
+): Promise<MobilePanelMeasurement> => {
+  const config = mobileCockpitPanelConfig[panel];
+  return page.evaluate(
+    ({ panel, panelId }) => {
+      const isVisible = (element: Element) => {
+        const box = element.getBoundingClientRect();
+        const style = window.getComputedStyle(element);
+        return (
+          box.width > 0 &&
+          box.height > 0 &&
+          style.display !== 'none' &&
+          style.visibility !== 'hidden' &&
+          !element.closest('[hidden],[aria-hidden="true"]')
+        );
+      };
+      const rails = Array.from(
+        document.querySelectorAll<HTMLElement>('[data-testid="playground-cockpit-mobile-rails"]')
+      ).find(
+        (candidate) =>
+          candidate.getAttribute('data-mobile-panel') === panel && isVisible(candidate)
+      );
+      if (!rails) return { status: 'error' as const, message: 'missing visible rails' };
+      const panelNode = rails.querySelector<HTMLElement>(`#${panelId}`);
+      if (!panelNode || !isVisible(panelNode)) {
+        return { status: 'error' as const, message: 'first element is not measurable' };
+      }
+      const composer = document.querySelector<HTMLElement>('[data-testid="chat-input"]');
+      if (!composer || !isVisible(composer)) {
+        return { status: 'error' as const, message: 'second element is not measurable' };
+      }
+      const panelBox = panelNode.getBoundingClientRect();
+      const composerBox = composer.getBoundingClientRect();
+      return {
+        status: 'ok' as const,
+        panelBottom: panelBox.y + panelBox.height,
+        panelHeight: panelBox.height,
+        composerTop: composerBox.y,
+      };
+    },
+    { panel, panelId: config.panelId }
+  );
+};
 
-const assertNoVerticalOverlap = async (
-  first: LocatorTarget,
-  second: LocatorTarget,
+const assertNoMobilePanelComposerOverlap = async (
+  page: Page,
+  panel: 'context' | 'runtime',
   label: string
 ) => {
-  await expect(resolveLocatorTarget(first)).toBeVisible({ timeout: 10_000 });
-  await expect(resolveLocatorTarget(second)).toBeVisible({ timeout: 10_000 });
   await expect
     .poll(
       async () => {
-        const firstBox = await resolveLocatorTarget(first).boundingBox();
-        const secondBox = await resolveLocatorTarget(second).boundingBox();
-        if (!firstBox) return 'first element is not measurable';
-        if (!secondBox) return 'second element is not measurable';
-        return firstBox.y + firstBox.height <= secondBox.y + 1
+        const measurement = await measureMobilePanelComposer(page, panel);
+        if (measurement.status === 'error') return measurement.message;
+        return measurement.panelBottom <= measurement.composerTop + 1
           ? 'ok'
-          : `overlap: first bottom ${firstBox.y + firstBox.height}, second top ${secondBox.y}`;
+          : `overlap: first bottom ${measurement.panelBottom}, second top ${measurement.composerTop}`;
       },
       { message: label, timeout: 10_000 }
     )
@@ -2123,16 +2164,6 @@ test.describe('/chat cockpit real-server parity', () => {
 
     await switchChatLayoutMode(page, 'cockpit');
     let mobileRails = await waitForMobileCockpitPanel(page, 'context');
-    const currentMobileContextPanel = () =>
-      page
-        .locator('[data-testid="playground-cockpit-mobile-rails"][data-mobile-panel="context"]:visible')
-        .locator(`#${mobileCockpitPanelConfig.context.panelId}`)
-        .first();
-    const currentMobileRuntimePanel = () =>
-      page
-        .locator('[data-testid="playground-cockpit-mobile-rails"][data-mobile-panel="runtime"]:visible')
-        .locator(`#${mobileCockpitPanelConfig.runtime.panelId}`)
-        .first();
     await expect(mobileRails.getByTestId('playground-cockpit-mobile-panel-summary')).toHaveText(
       'Context panel active. Composer draft remains available below.'
     );
@@ -2148,14 +2179,16 @@ test.describe('/chat cockpit real-server parity', () => {
     await expect(initialContextPanel).toBeVisible();
     await expect(initialRuntimePanel).toBeHidden();
     await assertNoHorizontalOverflow(page);
-    await assertNoVerticalOverlap(
-      currentMobileContextPanel,
-      page.getByTestId('chat-input'),
+    await assertNoMobilePanelComposerOverlap(
+      page,
+      'context',
       'mobile cockpit context rails should not overlap composer'
     );
-    const initialContextPanelBox = await currentMobileContextPanel().boundingBox();
-    expect(initialContextPanelBox, 'mobile context panel is measurable').not.toBeNull();
-    expect(initialContextPanelBox!.height).toBeLessThanOrEqual(260);
+    const initialContextPanelMeasurement = await measureMobilePanelComposer(page, 'context');
+    expect(initialContextPanelMeasurement.status, 'mobile context panel is measurable').toBe('ok');
+    if (initialContextPanelMeasurement.status === 'ok') {
+      expect(initialContextPanelMeasurement.panelHeight).toBeLessThanOrEqual(260);
+    }
     await page.screenshot({
       path: testInfo.outputPath('chat-cockpit-mobile-context.png'),
       fullPage: true,
@@ -2242,14 +2275,16 @@ test.describe('/chat cockpit real-server parity', () => {
     ).toBeVisible();
     await expect(runtimePanel.getByRole('button', { name: 'Configure MCP tools' })).toBeVisible();
     await assertNoHorizontalOverflow(page);
-    await assertNoVerticalOverlap(
-      currentMobileRuntimePanel,
-      page.getByTestId('chat-input'),
+    await assertNoMobilePanelComposerOverlap(
+      page,
+      'runtime',
       'mobile cockpit runtime rails should not overlap composer'
     );
-    const runtimePanelBox = await currentMobileRuntimePanel().boundingBox();
-    expect(runtimePanelBox, 'mobile runtime panel is measurable').not.toBeNull();
-    expect(runtimePanelBox!.height).toBeLessThanOrEqual(260);
+    const runtimePanelMeasurement = await measureMobilePanelComposer(page, 'runtime');
+    expect(runtimePanelMeasurement.status, 'mobile runtime panel is measurable').toBe('ok');
+    if (runtimePanelMeasurement.status === 'ok') {
+      expect(runtimePanelMeasurement.panelHeight).toBeLessThanOrEqual(260);
+    }
     await page.screenshot({
       path: testInfo.outputPath('chat-cockpit-mobile-runtime.png'),
       fullPage: true,
