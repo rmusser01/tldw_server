@@ -14,7 +14,8 @@ Payload fields:
 - action: "export" | "import" (legacy; job_type preferred)
 - chatbooks_job_id: str (required)
 - name, description, author, tags, categories
-- content_selections: {content_type: [ids]}
+- selection_mode: "full_account" | "allowlist"
+- content_selections: null for full_account, or {content_type: [ids]} for allowlist
 - include_media, media_quality, include_embeddings, include_generated_content, format_version
 - file_token (preferred) or file_path (legacy), source_format, selected_openwebui_user_id,
   conflict_resolution, prefix_imported, import_media, import_embeddings
@@ -36,6 +37,7 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.Chatbooks.chatbook_models import (
+    FULL_ACCOUNT_EXPORT_MODE,
     ConflictResolution,
     ContentType,
     ExportStatus,
@@ -238,7 +240,14 @@ async def _handle_export(service: ChatbookService, payload: dict[str, Any], job_
             return {"skipped": True, "status": existing.status.value}
         raise ChatbooksJobError("export job already claimed", retryable=True, backoff_seconds=5)
 
-    selections = _map_content_selections(payload.get("content_selections") or {})
+    raw_selections = payload.get("content_selections")
+    selection_mode = str(
+        payload.get("selection_mode")
+        or (FULL_ACCOUNT_EXPORT_MODE if raw_selections is None else "allowlist")
+    )
+    selections = None if selection_mode == FULL_ACCOUNT_EXPORT_MODE else _map_content_selections(raw_selections or {})
+    if selection_mode != FULL_ACCOUNT_EXPORT_MODE and sum(len(ids or []) for ids in selections.values()) == 0:
+        raise ChatbooksJobError("Export allowlist contains no exportable items.", retryable=False)
     try:
         format_version = coerce_chatbook_export_version(payload.get("format_version"))
     except ValueError as exc:
@@ -265,6 +274,7 @@ async def _handle_export(service: ChatbookService, payload: dict[str, Any], job_
         tags=payload.get("tags") or [],
         categories=payload.get("categories") or [],
         format_version=format_version,
+        selection_mode=selection_mode,
     )
 
     if not ok:

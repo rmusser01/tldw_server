@@ -1446,7 +1446,13 @@ class ChatbookService:
             Tuple of (success, message, job_id or file_path)
         """
         format_version = self._coerce_format_version(format_version)
-        content_selections = content_selections or {}
+        selection_mode = (
+            FULL_ACCOUNT_EXPORT_MODE
+            if content_selections is None or content_selections == {}
+            else "allowlist"
+        )
+        if selection_mode == "allowlist" and sum(len(ids or []) for ids in content_selections.values()) == 0:
+            return False, "Export allowlist contains no exportable items.", None
 
         if not async_mode:
             self._check_chatbook_job_admission_with_lock("export")
@@ -1476,7 +1482,12 @@ class ChatbookService:
                     "chatbooks_job_id": job_id,
                     "name": name,
                     "description": description,
-                    "content_selections": {k.value if hasattr(k, 'value') else str(k): v for k, v in content_selections.items()},
+                    "selection_mode": selection_mode,
+                    "content_selections": (
+                        None
+                        if selection_mode == FULL_ACCOUNT_EXPORT_MODE
+                        else {k.value if hasattr(k, 'value') else str(k): v for k, v in content_selections.items()}
+                    ),
                     "author": author,
                     "include_media": include_media,
                     "media_quality": media_quality,
@@ -1518,6 +1529,7 @@ class ChatbookService:
                 author, include_media, media_quality, include_embeddings,
                 include_generated_content, tags, categories,
                 format_version=format_version,
+                selection_mode=selection_mode,
             )
 
     async def continue_chatbook_export(
@@ -1675,7 +1687,7 @@ class ChatbookService:
         self,
         name: str,
         description: str,
-        content_selections: dict[ContentType, list[str]],
+        content_selections: dict[ContentType, list[str]] | None,
         author: str | None = None,
         include_media: bool = False,
         media_quality: str = "compressed",
@@ -1683,7 +1695,8 @@ class ChatbookService:
         include_generated_content: bool = True,
         tags: list[str] | None = None,
         categories: list[str] | None = None,
-        format_version: ChatbookVersion = ChatbookVersion.V1
+        format_version: ChatbookVersion = ChatbookVersion.V1,
+        selection_mode: str = "allowlist",
     ) -> tuple[bool, str, str | None]:
         """
         Wrapper for synchronous chatbook creation.
@@ -1699,6 +1712,9 @@ class ChatbookService:
             work_dir = self.temp_dir / f"export_{timestamp}_{uuid4().hex[:8]}"
             work_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
 
+            manifest_metadata = self._default_chatbook_template_metadata()
+            manifest_metadata["selection_mode"] = selection_mode
+
             # Initialize manifest
             manifest = ChatbookManifest(
                 version=self._coerce_format_version(format_version),
@@ -1713,7 +1729,7 @@ class ChatbookService:
                 tags=tags or [],
                 categories=categories or [],
                 export_id=str(uuid4()),
-                metadata=self._default_chatbook_template_metadata(),
+                metadata=manifest_metadata,
             )
             manifest.binary_limits = self._get_binary_limits_bytes()
             if manifest.version == ChatbookVersion.V1_1:
@@ -1741,6 +1757,7 @@ class ChatbookService:
 
             # Collect content
             content = ChatbookContent()
+            content_selections = content_selections or {}
 
             # Process each content type
             if ContentType.CONVERSATION in content_selections:
@@ -1877,7 +1894,7 @@ class ChatbookService:
         job_id: str,
         name: str,
         description: str,
-        content_selections: dict[ContentType, list[str]],
+        content_selections: dict[ContentType, list[str]] | None,
         author: str | None,
         include_media: bool,
         media_quality: str,
@@ -1885,7 +1902,8 @@ class ChatbookService:
         include_generated_content: bool,
         tags: list[str],
         categories: list[str],
-        format_version: ChatbookVersion = ChatbookVersion.V1
+        format_version: ChatbookVersion = ChatbookVersion.V1,
+        selection_mode: str = "allowlist",
     ):
         """
         Asynchronously create a chatbook with job tracking.
@@ -1907,6 +1925,7 @@ class ChatbookService:
                 author, include_media, media_quality, include_embeddings,
                 include_generated_content, tags, categories,
                 format_version=format_version,
+                selection_mode=selection_mode,
             )
 
             if success:

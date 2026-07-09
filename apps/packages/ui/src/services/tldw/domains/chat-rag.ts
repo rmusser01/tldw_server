@@ -1747,7 +1747,7 @@ export const chatRagMethods = {
   async exportChatbook(this: TldwApiClientCore, payload: {
     name: string
     description: string
-    content_selections: Record<string, string[]>
+    content_selections?: Record<string, string[]>
     author?: string
     include_media?: boolean
     media_quality?: string

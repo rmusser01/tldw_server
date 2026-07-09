@@ -247,7 +247,7 @@ Completed in commits `e8aab93f869258b67999765dd85297ae89ae651c` and `58f46d9fb9d
 - Test: `tldw_Server_API/tests/Chatbooks/test_chatbooks_full_account_export_contract.py`
 - Test: `apps/packages/ui/src/services/__tests__/tldw-api-client.chatbooks-openwebui.test.ts`
 
-- [ ] **Step 1: Write failing backend contract tests**
+- [x] **Step 1: Write failing backend contract tests**
 
 Cover these cases:
 
@@ -259,7 +259,7 @@ Cover these cases:
 
 Test the schema directly and at the API boundary. For endpoint tests, assert omitted and `{}` do not raise Pydantic validation errors and do call the service with a full-account mode marker or `None`.
 
-- [ ] **Step 2: Run contract tests and verify failure**
+- [x] **Step 2: Run contract tests and verify failure**
 
 Run:
 
@@ -270,7 +270,7 @@ python -m pytest tldw_Server_API/tests/Chatbooks/test_chatbooks_full_account_exp
 
 Expected: fail because `CreateChatbookRequest.content_selections` is required and the endpoint iterates it unconditionally.
 
-- [ ] **Step 3: Make `content_selections` optional and preserve full-account mode**
+- [x] **Step 3: Make `content_selections` optional and preserve full-account mode**
 
 Change `CreateChatbookRequest` to:
 
@@ -305,7 +305,7 @@ selection_mode = "full_account" if content_selections is None or content_selecti
 
 For async export payloads, include `selection_mode` and store `content_selections` as `None` for full account mode. Update the jobs adapter path if it currently assumes a mapping.
 
-- [ ] **Step 4: Reject zero-item allowlists**
+- [x] **Step 4: Reject zero-item allowlists**
 
 In service validation, reject non-empty allowlists with no IDs before creating a job or archive:
 
@@ -316,7 +316,7 @@ if selection_mode == "allowlist" and sum(len(ids) for ids in content_selections.
 
 The API should map this to a 4xx response. Keep selective export with some empty arrays valid as long as at least one selected type has at least one ID.
 
-- [ ] **Step 5: Update TypeScript client type**
+- [x] **Step 5: Update TypeScript client type**
 
 Change:
 
@@ -332,7 +332,7 @@ content_selections?: Record<string, string[]>
 
 Add a client test that `exportChatbook({ name, description, async_mode: true })` sends no `content_selections` field and does not fail type checking.
 
-- [ ] **Step 6: Verify tests pass**
+- [x] **Step 6: Verify tests pass**
 
 Run:
 
@@ -345,12 +345,14 @@ bunx vitest run ../packages/ui/src/services/__tests__/tldw-api-client.chatbooks-
 
 Expected: pass.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add tldw_Server_API/app/api/v1/schemas/chatbook_schemas.py tldw_Server_API/app/api/v1/endpoints/chatbooks.py tldw_Server_API/app/core/Chatbooks/chatbook_service.py apps/packages/ui/src/services/tldw/TldwApiClient.ts tldw_Server_API/tests/Chatbooks/test_chatbooks_full_account_export_contract.py apps/packages/ui/src/services/__tests__/tldw-api-client.chatbooks-openwebui.test.ts
 git commit -m "feat: support chatbooks full account export contract"
 ```
+
+Completed in Task 2 implementation commit. Focused verification: `python -m pytest tldw_Server_API/tests/Chatbooks/test_chatbooks_full_account_export_contract.py -v` passed with 8 tests; `bunx vitest run src/services/__tests__/tldw-api-client.chatbooks-openwebui.test.ts` passed with 8 tests; `python -m pytest tldw_Server_API/tests/Chatbooks/test_chatbooks_manifest_v1_1_contract.py -k core_jobs -v` passed with 8 selected tests; `python -m pytest tldw_Server_API/tests/Chatbooks/test_chatbooks_export_sync.py -v` passed with 6 tests; Bandit on touched backend files reported 0 findings. Full `test_chatbooks_manifest_v1_1_contract.py` still has an unrelated schema failure for pre-existing `statistics.total_explainer_sessions`.
 
 ## Task 3: Full Export Contents, Manifest Summary, And Verification
 

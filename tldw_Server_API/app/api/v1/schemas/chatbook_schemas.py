@@ -79,9 +79,12 @@ class CreateChatbookRequest(BaseModel):
         max_length=5000,
         description="Description of the chatbook"
     )
-    content_selections: dict[ContentType, list[str]] = Field(
-        ...,
-        description="Content to include by type and IDs"
+    content_selections: dict[ContentType, list[str]] | None = Field(
+        None,
+        description=(
+            "Omit or pass {} for full user-account export. "
+            "Pass a non-empty object for explicit allowlist export."
+        )
     )
     author: Optional[str] = Field(
         None,
@@ -122,12 +125,43 @@ class CreateChatbookRequest(BaseModel):
         return coerce_chatbook_export_version(v)
 
     model_config = ConfigDict(json_schema_extra={
+        "examples": [
+            {
+                "name": "Full Account Backup",
+                "description": "Backup all account data",
+                "async_mode": True
+            },
+            {
+                "name": "Full Account Backup",
+                "description": "Backup all account data",
+                "content_selections": {},
+                "async_mode": True
+            },
+            {
+                "name": "My Research Chatbook",
+                "description": "Collection of research conversations and notes",
+                "content_selections": {
+                    "conversation": ["conv123", "conv456"],
+                    "note": [],
+                    "character": ["char001"]
+                },
+                "author": "Jane Doe",
+                "include_media": False,
+                "media_quality": MediaQuality.COMPRESSED.value,
+                "include_embeddings": False,
+                "include_generated_content": True,
+                "tags": ["research", "AI"],
+                "categories": ["Work"],
+                "format_version": ChatbookVersion.V1.value,
+                "async_mode": False
+            }
+        ],
         "example": {
             "name": "My Research Chatbook",
             "description": "Collection of research conversations and notes",
             "content_selections": {
                 "conversation": ["conv123", "conv456"],
-                "note": ["note789"],
+                "note": [],
                 "character": ["char001"]
             },
             "author": "Jane Doe",

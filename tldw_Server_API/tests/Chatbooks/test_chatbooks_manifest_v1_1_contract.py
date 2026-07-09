@@ -12,6 +12,7 @@ from pydantic import ValidationError
 from tldw_Server_API.app.api.v1.schemas.chatbook_schemas import CreateChatbookRequest
 from tldw_Server_API.app.services import core_jobs_worker as active_core_jobs_worker
 from tldw_Server_API.app.core.Chatbooks.chatbook_models import (
+    FULL_ACCOUNT_EXPORT_MODE,
     ChatbookManifest,
     ChatbookVersion,
     ExportJob,
@@ -209,7 +210,8 @@ async def test_core_jobs_export_payload_accepts_none_content_selections(chatbook
 
     assert success is True
     assert captured_payload["chatbooks_job_id"] == job_id
-    assert captured_payload["content_selections"] == {}
+    assert captured_payload["selection_mode"] == FULL_ACCOUNT_EXPORT_MODE
+    assert captured_payload["content_selections"] is None
 
 
 async def test_core_jobs_worker_forwards_format_version_to_archive_creation():
@@ -231,7 +233,8 @@ async def test_core_jobs_worker_forwards_format_version_to_archive_creation():
         {
             "name": "v1.1 queued",
             "description": "v1.1 queued",
-            "content_selections": {},
+            "selection_mode": FULL_ACCOUNT_EXPORT_MODE,
+            "content_selections": None,
             "format_version": "1.1.0",
         },
         "job-1",
@@ -252,7 +255,8 @@ async def test_core_jobs_worker_rejects_unsupported_format_version_nonretryably(
             {
                 "name": "v2 queued",
                 "description": "v2 queued",
-                "content_selections": {},
+                "selection_mode": FULL_ACCOUNT_EXPORT_MODE,
+                "content_selections": None,
                 "format_version": "2.0.0",
             },
             "job-1",
@@ -286,7 +290,8 @@ async def test_core_jobs_worker_marks_export_job_failed_for_unsupported_format_v
             {
                 "name": "v2 queued",
                 "description": "v2 queued",
-                "content_selections": {},
+                "selection_mode": FULL_ACCOUNT_EXPORT_MODE,
+                "content_selections": None,
                 "format_version": "2.0.0",
             },
             "job-1",
@@ -359,7 +364,8 @@ async def test_active_core_jobs_worker_forwards_format_version_to_archive_creati
         {
             "name": "v1.1 active queued",
             "description": "v1.1 active queued",
-            "content_selections": {},
+            "selection_mode": FULL_ACCOUNT_EXPORT_MODE,
+            "content_selections": None,
             "format_version": "1.1.0",
         },
     )
@@ -373,7 +379,8 @@ async def test_active_core_jobs_worker_defaults_format_version_to_v1(monkeypatch
         {
             "name": "v1 active queued",
             "description": "v1 active queued",
-            "content_selections": {},
+            "selection_mode": FULL_ACCOUNT_EXPORT_MODE,
+            "content_selections": None,
         },
     )
 
@@ -386,7 +393,8 @@ async def test_active_core_jobs_worker_fails_unsupported_format_version_nonretry
         {
             "name": "v2 active queued",
             "description": "v2 active queued",
-            "content_selections": {},
+            "selection_mode": FULL_ACCOUNT_EXPORT_MODE,
+            "content_selections": None,
             "format_version": "2.0.0",
         },
         service_captures=False,
