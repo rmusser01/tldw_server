@@ -1,5 +1,8 @@
 import type { ChatDocuments } from "@/models/ChatTypes"
-import type { UploadedFile } from "@/db/dexie/types"
+import type {
+  DocumentProcessingTurnMetadata,
+  UploadedFile
+} from "@/db/dexie/types"
 import type { ConversationState } from "@/services/tldw/TldwApiClient"
 import type { RagPinnedResult } from "@/utils/rag-format"
 import type { ToolCall, ToolCallResult } from "@/types/tool-calls"
@@ -39,6 +42,7 @@ export type MessageMetadataExtra = Record<string, unknown> & {
   dynamic_ui?: DynamicUIEnvelope
   dynamic_ui_action?: DynamicUIActionUserMetadata
   emote_events?: CharacterEmoteEvent[]
+  documentProcessing?: DocumentProcessingTurnMetadata
 }
 
 export type ReplyTarget = {

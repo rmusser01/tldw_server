@@ -13,8 +13,11 @@ import type { SlashCommandItem } from "@/components/Sidepanel/Chat/SlashCommandM
 import { isFirefoxTarget } from "@/config/platform";
 import { STT_DEFAULTS } from "@/config/ui-constants";
 import { getDesignSystemState } from "@/design-system";
-import { getAllPrompts } from "@/db/dexie/helpers";
-import type { UploadedFile } from "@/db/dexie/types";
+import { generateID, getAllPrompts } from "@/db/dexie/helpers";
+import type {
+  DocumentProcessingTurnMetadata,
+  UploadedFile,
+} from "@/db/dexie/types";
 import { useChatSettingsRecord } from "@/hooks/chat/useChatSettingsRecord";
 import { resolveEffectiveAssistantState } from "@/hooks/chat/effective-assistant-state";
 import {
@@ -528,6 +531,7 @@ export const PlaygroundForm = ({
   const {
     onSubmit,
     messages,
+    setMessages,
     selectedModel,
     selectedModelIsLoading,
     setSelectedModel,
@@ -3094,6 +3098,54 @@ export const PlaygroundForm = ({
     [slashHandleSelect, form, textareaRef],
   );
 
+  const reserveDocumentProcessingTurn = React.useCallback(
+    ({
+      message,
+      metadata,
+    }: {
+      message: string;
+      metadata: DocumentProcessingTurnMetadata;
+    }) => {
+      const id = generateID();
+      setMessages((prev) => [
+        ...prev,
+        {
+          isBot: false,
+          role: "user",
+          name: "You",
+          message,
+          sources: [],
+          createdAt: Date.now(),
+          id,
+          metadataExtra: {
+            documentProcessing: metadata,
+          },
+        },
+      ]);
+      return id;
+    },
+    [setMessages],
+  );
+
+  const updateDocumentProcessingTurn = React.useCallback(
+    (userMessageId: string, metadata: DocumentProcessingTurnMetadata) => {
+      setMessages((prev) =>
+        prev.map((message) =>
+          message.id === userMessageId && !message.isBot
+            ? {
+                ...message,
+                metadataExtra: {
+                  ...(message.metadataExtra ?? {}),
+                  documentProcessing: metadata,
+                },
+              }
+            : message,
+        ),
+      );
+    },
+    [setMessages],
+  );
+
   const { submitForm, submitFormRef } = usePlaygroundSubmit({
     form,
     isSending,
@@ -3102,6 +3154,8 @@ export const PlaygroundForm = ({
     compareModeActive,
     compareSelectedModels,
     selectedModel,
+    historyId,
+    serverChatId,
     fileRetrievalEnabled,
     ragPinnedResults,
     selectedDocuments,
@@ -3120,6 +3174,8 @@ export const PlaygroundForm = ({
     clearOpenUIRequestMode: () => setOpenUIRequestMode(false),
     clearSelectedDocuments,
     clearUploadedFiles,
+    reserveDocumentProcessingTurn,
+    updateDocumentProcessingTurn,
     textAreaFocus,
     setLastSubmittedContext,
     estimateTokensForText: estimateTokensForText as any,

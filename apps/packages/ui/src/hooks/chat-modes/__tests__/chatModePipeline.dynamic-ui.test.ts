@@ -171,4 +171,84 @@ describe("runChatPipeline dynamic UI request mode", () => {
     expect(payload).toBeDefined()
     expect(payload?.assistantMetadataExtra).toBeUndefined()
   })
+
+  it("updates a reserved user message instead of appending a duplicate", async () => {
+    await runChatPipeline(
+      mode,
+      "Summarize this file",
+      "",
+      false,
+      [
+        {
+          isBot: false,
+          name: "You",
+          message: "Summarize this file",
+          sources: [],
+          id: "reserved-user",
+          metadataExtra: {
+            documentProcessing: {
+              status: "processing",
+              files: []
+            }
+          }
+        }
+      ],
+      [],
+      new AbortController().signal,
+      buildParams({
+        userMessageId: "reserved-user",
+        assistantMessageId: "assistant-for-reserved",
+        userMetadataExtra: {
+          documentProcessing: {
+            status: "sending_prompt",
+            files: [
+              {
+                id: "file-1",
+                filename: "scan.pdf",
+                mode: "ocr_pages",
+                status: "ready"
+              }
+            ]
+          }
+        }
+      })
+    )
+
+    const setupUpdater = mocks.setMessages.mock.calls.find(
+      ([updater]) => typeof updater === "function"
+    )?.[0] as ((messages: any[]) => any[]) | undefined
+    const nextMessages = setupUpdater?.([
+      {
+        isBot: false,
+        name: "You",
+        message: "Summarize this file",
+        sources: [],
+        id: "reserved-user",
+        metadataExtra: {
+          documentProcessing: {
+            status: "processing",
+            files: []
+          }
+        }
+      }
+    ])
+
+    expect(nextMessages?.filter((message) => !message.isBot)).toHaveLength(1)
+    expect(nextMessages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "reserved-user",
+          metadataExtra: expect.objectContaining({
+            documentProcessing: expect.objectContaining({
+              status: "sending_prompt"
+            })
+          })
+        }),
+        expect.objectContaining({
+          id: "assistant-for-reserved",
+          isBot: true
+        })
+      ])
+    )
+  })
 })

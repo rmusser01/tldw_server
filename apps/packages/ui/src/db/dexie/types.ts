@@ -62,7 +62,8 @@ export type DocumentProcessingRecoveryAction =
   | 'switch_to_add_to_chat'
   | 'switch_to_ocr'
   | 'switch_to_ingest'
-  | 'use_chat_scoped_retrieval';
+  | 'use_chat_scoped_retrieval'
+  | 'remove';
 
 export type DocumentProcessingResultRef = {
   kind: 'chat_context' | 'draft' | 'ingest_job';

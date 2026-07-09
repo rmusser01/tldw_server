@@ -17,10 +17,12 @@ import { HumanMessage } from "./HumanMessge"
 import { ChatDocuments } from "@/models/ChatTypes"
 import { DocumentChip } from "./DocumentChip"
 import { DocumentFile } from "./DocumentFile"
+import { DocumentProcessingTurn } from "./DocumentProcessingTurn"
 import { buildChatTextClass } from "@/utils/chat-style"
 import { IconButton } from "../IconButton"
 import { useUiModeStore } from "@/store/ui-mode"
 import { useStoreMessageOption } from "@/store/option"
+import type { MessageMetadataExtra } from "@/store/option/types"
 import { EDIT_MESSAGE_EVENT } from "@/utils/timeline-actions"
 import { Badge, type BadgeVariant } from "@/components/ui/primitives"
 import { CHAT_MESSAGE_OPACITY_ALPHA } from "@/services/settings/chat-opacity-css-vars"
@@ -89,6 +91,7 @@ type Props = {
   messageId?: string
   serverMessageId?: string | null
   createdAt?: number | string
+  metadataExtra?: MessageMetadataExtra
   onDelete?: () => void
 }
 
@@ -285,6 +288,12 @@ export const PlaygroundUserMessageBubble: React.FC<Props> = (props) => {
           style={messageBubbleStyle}>
           <HumanMessage message={props.message} />
         </div>
+      )}
+
+      {!editMode && props.metadataExtra?.documentProcessing && (
+        <DocumentProcessingTurn
+          metadata={props.metadataExtra.documentProcessing}
+        />
       )}
 
       {editMode && (

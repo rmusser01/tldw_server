@@ -5,6 +5,7 @@ import {
 import type { ImageGenerationEventSyncPolicy } from "@/utils/image-generation-chat";
 import type { Message } from "@/store/option";
 import type { ToolChoice } from "@/store/option";
+import type { UploadedFile } from "@/db/dexie/types";
 import type { ImageGenerationEventSyncMode } from "@/utils/image-generation-chat";
 import type { SaveMessageData } from "@/types/chat-modes";
 import type { ChatModelSettings } from "@/store/model";
@@ -30,6 +31,8 @@ export type ChatModeOverrides = {
   imageEventSyncPolicy?: ImageGenerationEventSyncPolicy;
   ragMediaIds?: number[] | null;
   fileRetrievalEnabled?: boolean;
+  contextFiles?: UploadedFile[];
+  uploadedFiles?: UploadedFile[];
   selectedKnowledge?: unknown;
 } & Record<string, unknown>;
 
@@ -174,6 +177,28 @@ export const resolveTurnFileRetrievalEnabled = ({
   typeof requestOverrides?.fileRetrievalEnabled === "boolean"
     ? requestOverrides.fileRetrievalEnabled
     : fileRetrievalEnabled;
+
+export const resolveTurnContextFiles = ({
+  requestOverrides,
+  contextFiles,
+}: {
+  requestOverrides?: Pick<ChatModeOverrides, "contextFiles"> | null;
+  contextFiles: UploadedFile[];
+}): UploadedFile[] =>
+  Array.isArray(requestOverrides?.contextFiles)
+    ? requestOverrides.contextFiles
+    : contextFiles;
+
+export const resolveTurnUploadedFiles = ({
+  requestOverrides,
+  uploadedFiles,
+}: {
+  requestOverrides?: Pick<ChatModeOverrides, "uploadedFiles"> | null;
+  uploadedFiles: UploadedFile[];
+}): UploadedFile[] =>
+  Array.isArray(requestOverrides?.uploadedFiles)
+    ? requestOverrides.uploadedFiles
+    : uploadedFiles;
 
 export const shouldUseRagForTurn = ({
   selectedKnowledge,

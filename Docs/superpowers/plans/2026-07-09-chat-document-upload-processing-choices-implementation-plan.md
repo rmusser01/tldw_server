@@ -701,7 +701,7 @@ git commit -m "feat: add chat document processing choices"
 - Test: `apps/packages/ui/src/components/Option/Playground/__tests__/PlaygroundForm.document-processing.test.tsx`
 - Test: `apps/packages/ui/src/hooks/chat/__tests__/chat-action-utils.rag-overrides.test.ts`
 
-- [ ] **Step 1: Write failing submit tests**
+- [x] **Step 1: Write failing submit tests**
 
 Add a focused PlaygroundForm test or hook test that verifies:
 
@@ -738,7 +738,7 @@ expect(sendMessage).toHaveBeenCalledWith(
 )
 ```
 
-- [ ] **Step 2: Run submit tests and verify failure**
+- [x] **Step 2: Run submit tests and verify failure**
 
 Run:
 
@@ -748,7 +748,7 @@ cd apps/tldw-frontend && bunx vitest run ../packages/ui/src/components/Option/Pl
 
 Expected: FAIL because send-time processing is not wired.
 
-- [ ] **Step 3: Add explicit turn attachment overrides in `useChatActions.ts`**
+- [x] **Step 3: Add explicit turn attachment overrides in `useChatActions.ts`**
 
 Extend local `ChatModeOverrides`:
 
@@ -772,7 +772,7 @@ Use `turnContextFiles` for the `documentChatMode` branch and `turnUploadedFiles`
 
 If `requestOverrides.ragMediaIds` is non-empty and `requestOverrides.contextFiles` is an explicit empty array, do not fall back to closure `contextFiles`. This preserves the user's Ingest decision even if the composer still has staged files.
 
-- [ ] **Step 4: Add the visible processing turn**
+- [x] **Step 4: Add the visible processing turn**
 
 Create `DocumentProcessingTurn.tsx` for user-message metadata shaped like:
 
@@ -798,16 +798,16 @@ type DocumentProcessingTurnMetadata = {
 }
 ```
 
-Render it from `Message.tsx`/`PlaygroundUserMessage.tsx` when `message.metadata.documentProcessing` exists. Keep it compact: status text, file count, failed/blocked rows, and recovery buttons passed in from the playground layer. Do not add a modal.
+Render it from `Message.tsx`/`PlaygroundUserMessage.tsx` when `message.metadataExtra.documentProcessing` exists. Keep it compact: status text, file count, failed/blocked rows, and recovery buttons passed in from the playground layer. Do not add a modal.
 
-Canonical metadata field: `message.metadata.documentProcessing`. `requestOverrides.userMetadataExtra.documentProcessing` is only the transport path into `chatModePipeline.ts`; the pipeline must merge it back onto `message.metadata.documentProcessing` for the reserved user message.
+Canonical frontend metadata field: `message.metadataExtra.documentProcessing`. `requestOverrides.userMetadataExtra.documentProcessing` is only the transport path into `chatModePipeline.ts`; the pipeline must merge it back onto `message.metadataExtra.documentProcessing` for the reserved user message.
 
-- [ ] **Step 5: Wire send-time processing in `usePlaygroundSubmit.ts`**
+- [x] **Step 5: Wire send-time processing in `usePlaygroundSubmit.ts`**
 
 On Send:
 
 1. Reserve a `userMessageId`.
-2. Append a visible pending user message immediately with the user's typed prompt and `metadata.documentProcessing.status = "waiting_for_files"`.
+2. Append a visible pending user message immediately with the user's typed prompt and `metadataExtra.documentProcessing.status = "waiting_for_files"`.
 3. Update the same message to `processing` while `prepareChatDocumentAttachmentsForSend` runs.
 4. On blocked/failed processing, update the same message to `blocked` or `failed`, leave the form draft/attachments recoverable, and return without dispatching the prompt.
 5. On success, update the same message to `sending_prompt`, call dispatch with the reserved `userMessageId`, and only then reset/clear successful attachments.
@@ -847,21 +847,21 @@ const mergedRequestOverrides = {
 }
 ```
 
-Only reset/clear after preparation succeeds. For ingest-only and mixed sends, `preparedDocuments.requestOverrides.contextFiles` must be `[]`. The pending append and every later update must write `message.metadata.documentProcessing`; the dispatch override carries the same data via `userMetadataExtra.documentProcessing` only so the final pipeline upgrade can preserve it.
+Only reset/clear after preparation succeeds. For ingest-only and mixed sends, `preparedDocuments.requestOverrides.contextFiles` must be `[]`. The pending append and every later update must write `message.metadataExtra.documentProcessing`; the dispatch override carries the same data via `userMetadataExtra.documentProcessing` only so the final pipeline upgrade can preserve it.
 
-- [ ] **Step 6: Upgrade reserved user messages in the chat pipeline**
+- [x] **Step 6: Upgrade reserved user messages in the chat pipeline**
 
 In `chatModePipeline.ts`, when `userMessageId` is provided and a user message with that ID already exists:
 
 - replace or merge that message's content/metadata instead of appending a new user message
 - keep existing created-at ordering
 - append the assistant message normally
-- merge `requestOverrides.userMetadataExtra.documentProcessing` into the existing message's canonical `metadata.documentProcessing`
-- preserve `metadata.documentProcessing` final summary on the user message
+- merge `requestOverrides.userMetadataExtra.documentProcessing` into the existing message's canonical `metadataExtra.documentProcessing`
+- preserve `metadataExtra.documentProcessing` final summary on the user message
 
-Add a regression test that would fail if the transcript contains two user messages after a document-processing send, and assert the surviving user message still has `metadata.documentProcessing.status` plus final per-file summaries.
+Add a regression test that would fail if the transcript contains two user messages after a document-processing send, and assert the surviving user message still has `metadataExtra.documentProcessing.status` plus final per-file summaries.
 
-- [ ] **Step 7: Queue the same processing intent**
+- [x] **Step 7: Queue the same processing intent**
 
 In `usePlaygroundQueueManagement.ts`, widen `requestOverrides` from `{ messageForModel?: string }` to `Record<string, unknown>`. Ensure queued items preserve selected processing modes and replay through the same send-time helper when they run.
 
@@ -879,7 +879,7 @@ Add a queue replay test that queues while the playground is busy/offline, then l
 
 If a legacy/stale queued item cannot process because files are missing from its source context, mark it blocked with a user-safe reason instead of sending a prompt without files.
 
-- [ ] **Step 8: Run send and queue tests**
+- [x] **Step 8: Run send and queue tests**
 
 Run:
 

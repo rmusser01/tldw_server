@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest"
 
 import {
   resolveCompareModelSelection,
+  resolveTurnContextFiles,
   resolveTurnFileRetrievalEnabled,
+  resolveTurnUploadedFiles,
   resolveTurnRagMediaIds,
   shouldUseRagForTurn
 } from "../chat-action-utils"
@@ -106,6 +108,46 @@ describe("turn-level RAG media overrides", () => {
         ragMediaIds: [5]
       })
     ).toBe(false)
+  })
+
+  it("preserves an explicit empty context file override", () => {
+    const inherited = [{ id: "stale", filename: "stale.pdf" }] as any[]
+
+    expect(
+      resolveTurnContextFiles({
+        requestOverrides: { contextFiles: [] },
+        contextFiles: inherited
+      })
+    ).toEqual([])
+  })
+
+  it("uses explicit uploaded file overrides for the turn", () => {
+    const inherited = [{ id: "stale", filename: "stale.pdf" }] as any[]
+    const explicit = [{ id: "fresh", filename: "fresh.pdf" }] as any[]
+
+    expect(
+      resolveTurnUploadedFiles({
+        requestOverrides: { uploadedFiles: explicit },
+        uploadedFiles: inherited
+      })
+    ).toBe(explicit)
+  })
+
+  it("falls back to inherited files when file overrides are absent", () => {
+    const inherited = [{ id: "stale", filename: "stale.pdf" }] as any[]
+
+    expect(
+      resolveTurnContextFiles({
+        requestOverrides: {},
+        contextFiles: inherited
+      })
+    ).toBe(inherited)
+    expect(
+      resolveTurnUploadedFiles({
+        requestOverrides: {},
+        uploadedFiles: inherited
+      })
+    ).toBe(inherited)
   })
 })
 

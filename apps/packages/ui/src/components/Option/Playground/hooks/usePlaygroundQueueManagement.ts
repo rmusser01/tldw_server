@@ -16,6 +16,10 @@ import {
 import { projectTokenBudget } from "../usage-metrics"
 import type { QueuedRequest, QueuedRequestSnapshot } from "@/utils/chat-request-queue"
 import type { ChatDocuments } from "@/models/ChatTypes"
+import type { UploadedFile } from "@/db/dexie/types"
+import {
+  prepareChatDocumentAttachmentsForSend
+} from "@/services/chat-document-processing"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -23,11 +27,10 @@ import type { ChatDocuments } from "@/models/ChatTypes"
 
 type PlaygroundQueuedSourceContext = {
   documents?: ChatDocuments
+  uploadedFiles?: UploadedFile[]
   imageBackendOverride?: string
   isImageCommand?: boolean
-  requestOverrides?: {
-    messageForModel?: string
-  }
+  requestOverrides?: Record<string, unknown>
 }
 
 type SubmissionIntent = {
@@ -105,6 +108,28 @@ export interface UsePlaygroundQueueManagementDeps {
     info: (opts: Record<string, any>) => void
   }
   t: (key: string, defaultValueOrOptions?: any, options?: any) => string
+}
+
+const mergePreparedDocumentOverrides = (
+  baseOverrides: Record<string, unknown>,
+  prepared: Awaited<ReturnType<typeof prepareChatDocumentAttachmentsForSend>>
+) => {
+  const {
+    documentProcessing,
+    userMetadataExtra,
+    ...preparedOverrides
+  } = (prepared.requestOverrides ?? {}) as Record<string, unknown>
+  return {
+    ...baseOverrides,
+    ...preparedOverrides,
+    userMetadataExtra: {
+      ...((baseOverrides.userMetadataExtra as Record<string, unknown> | undefined) ?? {}),
+      ...(userMetadataExtra && typeof userMetadataExtra === "object"
+        ? userMetadataExtra
+        : {}),
+      documentProcessing: documentProcessing ?? prepared.turnMetadata
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -206,13 +231,20 @@ export function usePlaygroundQueueManagement(
     ]
   )
 
-  const isQueuedDispatchBlockedByComposerState = React.useMemo(
-    () =>
-      uploadedFiles.length > 0 ||
-      contextFiles.length > 0 ||
-      (Array.isArray(documentContext) && documentContext.length > 0),
-    [contextFiles.length, documentContext, uploadedFiles.length]
-  )
+  const isQueuedDispatchBlockedByComposerState = React.useMemo(() => {
+    const uploadedFileIds = new Set(uploadedFiles.map((file) => file.id))
+    const hasUnreplayableUploads = uploadedFiles.some(
+      (file) => !file.content || !file.processingMode
+    )
+    const hasUntrackedContextFiles = contextFiles.some(
+      (file) => !uploadedFileIds.has(file.id)
+    )
+    return (
+      hasUnreplayableUploads ||
+      hasUntrackedContextFiles ||
+      (Array.isArray(documentContext) && documentContext.length > 0)
+    )
+  }, [contextFiles, documentContext, uploadedFiles])
 
   const validateQueuedRequest = React.useCallback(
     (item: QueuedRequest) => {
@@ -319,6 +351,9 @@ export function usePlaygroundQueueManagement(
       const documents = Array.isArray(sourceContext?.documents)
         ? sourceContext.documents
         : []
+      const queuedUploadedFiles = Array.isArray(sourceContext?.uploadedFiles)
+        ? sourceContext.uploadedFiles
+        : []
 
       const projectedForSubmission = projectTokenBudget({
         conversationTokens: conversationTokenCount,
@@ -347,6 +382,39 @@ export function usePlaygroundQueueManagement(
       }
 
       setLastSubmittedContext(currentContextSnapshot)
+      let queuedRequestOverrides: Record<string, unknown> = {
+        ...(sourceContext?.requestOverrides ?? {})
+      }
+      if (queuedUploadedFiles.length > 0) {
+        const preparedDocuments = await prepareChatDocumentAttachmentsForSend({
+          files: queuedUploadedFiles,
+          historyId: historyId ?? undefined,
+          sessionId: serverChatId ?? undefined
+        })
+        const firstBlockedOrFailed =
+          preparedDocuments.blockedFiles[0] || preparedDocuments.failedFiles[0]
+        if (firstBlockedOrFailed || !preparedDocuments.requestOverrides) {
+          const message =
+            firstBlockedOrFailed?.processingBlockedReason ||
+            firstBlockedOrFailed?.processingError ||
+            t(
+              "playground:documentProcessing.sendBlockedBody",
+              "Resolve the document processing issue before sending."
+            )
+          notificationApi.error({
+            message: t(
+              "playground:documentProcessing.sendBlockedTitle",
+              "Document processing blocked"
+            ),
+            description: message
+          })
+          throw new Error(String(message))
+        }
+        queuedRequestOverrides = mergePreparedDocumentOverrides(
+          queuedRequestOverrides,
+          preparedDocuments
+        )
+      }
       const submitResult = await sendMessage({
         image: sourceContext?.isImageCommand ? "" : item.image,
         message: item.promptText,
@@ -354,7 +422,7 @@ export function usePlaygroundQueueManagement(
         requestOverrides: {
           selectedModel: item.snapshot.selectedModel,
           selectedSystemPrompt: item.snapshot.selectedSystemPrompt,
-          ...(sourceContext?.requestOverrides ?? {}),
+          ...queuedRequestOverrides,
           toolChoice:
             item.snapshot.toolChoice === "auto" ||
             item.snapshot.toolChoice === "required" ||
@@ -384,9 +452,11 @@ export function usePlaygroundQueueManagement(
       currentContextSnapshot,
       estimateTokensForText,
       form,
+      historyId,
       notificationApi,
       resolvedMaxContext,
       sendMessage,
+      serverChatId,
       setChatMode,
       setCompareMode,
       setCompareSelectedModels,
@@ -488,7 +558,7 @@ export function usePlaygroundQueueManagement(
       intent: SubmissionIntent
       requestOverrides?: {
         messageForModel?: string
-      }
+      } & Record<string, unknown>
     }) => {
       const documents = buildQueuedDocuments()
       return queue.enqueue({
@@ -497,6 +567,7 @@ export function usePlaygroundQueueManagement(
         attachments: documents,
         sourceContext: {
           documents,
+          uploadedFiles: uploadedFiles.map((file) => ({ ...file })),
           imageBackendOverride: intent.isImageCommand
             ? intent.imageBackendOverride
             : undefined,
@@ -508,7 +579,12 @@ export function usePlaygroundQueueManagement(
           : null
       })
     },
-    [buildQueuedDocuments, isQueuedDispatchBlockedByComposerState, queue]
+    [
+      buildQueuedDocuments,
+      isQueuedDispatchBlockedByComposerState,
+      queue,
+      uploadedFiles
+    ]
   )
 
   const validateSelectedChatModelsAvailability = React.useCallback(
