@@ -9,6 +9,10 @@ modified_files:
 - tldw_Server_API/app/core/Workflows/adapters/content/_config.py
 - tldw_Server_API/app/core/Workflows/adapters/content/generation.py
 - tldw_Server_API/tests/Workflows/adapters/test_content_adapters.py
+- apps/packages/ui/src/services/flashcards.ts
+- apps/packages/ui/src/services/__tests__/flashcards.test.ts
+- apps/packages/ui/src/components/Flashcards/hooks/useFlashcardQueries.ts
+- apps/packages/ui/src/components/Flashcards/tabs/ImportExport/shared.ts
 - Docs/superpowers/plans/2026-07-08-planned-flashcard-generation-controls-implementation-plan.md
 - backlog/tasks/task-12170 - Add-planned-flashcard-generation-types-and-counts.md
 ---
@@ -72,6 +76,8 @@ Task 3 raw-config follow-up: invalid raw num_cards now returns invalid_num_cards
 Task 3 strict-num-cards follow-up: raw workflow num_cards now requires an actual positive int, preserving the omitted default while rejecting bools, floats, and numeric strings before LLM calls. Verification: red focused invalid-num-cards test failed on coerced values before implementation; focused invalid-num-cards pytest passed (5 passed, 130 deselected); FlashcardGenerateAdapter pytest passed (24 passed, 111 deselected); Bandit on touched production adapter files reported 0 findings; git diff --check passed.
 
 Task 3 final direct-workflow follow-up: planned adapter output now validates cleaned generation_type counts against card_plan and returns card_plan_mismatch instead of wrong planned mixes. Verification: focused planned mismatch regressions passed (2 passed, 134 deselected); FlashcardGenerateAdapter pytest passed (25 passed, 111 deselected); Bandit on touched production adapter files reported 0 findings; git diff --check passed.
+
+Task 4 frontend service/draft plumbing slice: added shared UI generation-plan types, typed optional card_plan requests, response-only generation_type metadata, hook cardPlan passthrough, generated-draft normalization that preserves true_false generation_type while keeping model_type storage-compatible, and focused service request-body coverage. Initial red test command could not load Vitest config because frontend dependencies were missing; after bun install, verification passed: bunx vitest run ../packages/ui/src/services/__tests__/flashcards.test.ts (9 passed), bun run typecheck, and git diff --check. Bandit skipped because this slice only touched frontend TypeScript and Backlog markdown.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

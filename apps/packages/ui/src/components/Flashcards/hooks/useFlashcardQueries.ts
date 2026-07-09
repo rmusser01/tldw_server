@@ -43,6 +43,7 @@ import {
   type FlashcardBulkUpdateItem,
   type FlashcardBulkUpdateResponse,
   type FlashcardCreate,
+  type FlashcardPlanItem,
   type FlashcardUpdate
 } from "@/services/flashcards"
 import { useServerOnline } from "@/hooks/useServerOnline"
@@ -1008,6 +1009,7 @@ export function useGenerateFlashcardsMutation() {
       text: string
       numCards?: number
       cardType?: "basic" | "basic_reverse" | "cloze"
+      cardPlan?: FlashcardPlanItem[]
       difficulty?: "easy" | "medium" | "hard" | "mixed"
       focusTopics?: string[]
       provider?: string
@@ -1017,6 +1019,7 @@ export function useGenerateFlashcardsMutation() {
         text: params.text,
         num_cards: params.numCards,
         card_type: params.cardType,
+        card_plan: params.cardPlan,
         difficulty: params.difficulty,
         focus_topics: params.focusTopics,
         provider: params.provider,
