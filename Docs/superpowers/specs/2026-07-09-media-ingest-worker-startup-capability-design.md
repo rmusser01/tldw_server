@@ -35,6 +35,8 @@ Extend the existing worker startup policy helper with an optional injected route
 
 When no route checker is passed, the helper keeps its current behavior of consulting the global config route policy. This preserves existing callers while letting declarative lifecycle specs respect the `WorkerLifecycleContext` they are already given.
 
+Injected route checker failures fail closed for in-process worker startup. The existing default-stable fallback remains only for the global config route lookup path.
+
 Use this predicate only for the media ingest lifecycle specs:
 
 - `media_ingest_jobs_task`: `MEDIA_INGEST_JOBS_WORKER_ENABLED`, route `media`, `default_stable=True`.
@@ -73,6 +75,7 @@ The heavy worker remains disabled by default because its route uses `default_sta
 - Unit test sidecar mode disables the normal worker.
 - Unit test the heavy worker remains off by default.
 - Unit test the startup policy helper still works without an injected route checker.
+- Unit test one-argument route callbacks and broken injected route callbacks.
 - Unit test `hasMediaIngestWorker` uses the normal worker flag and honors sidecar mode.
 
 ## Verification

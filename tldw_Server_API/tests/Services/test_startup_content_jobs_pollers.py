@@ -147,6 +147,10 @@ def test_content_jobs_worker_spec_predicates_use_route_enabled_arguments(
 
     context = _context(route_enabled=_route_enabled)
     specs = _specs_by_name(startup_pollers)
+    media_ingest_explicit_flag_specs = {
+        "media_ingest_jobs_task",
+        "media_ingest_heavy_jobs_task",
+    }
 
     for spec_name in [
         "audio_jobs_task",
@@ -175,17 +179,14 @@ def test_content_jobs_worker_spec_predicates_use_route_enabled_arguments(
             }[spec_name],
             "true",
         )
-        assert specs[spec_name].enabled(context) is False
+        assert specs[spec_name].enabled(context) is (
+            spec_name in media_ingest_explicit_flag_specs
+        )
 
     assert calls == [
         (("audio-jobs",), {}),
         (("audiobooks",), {}),
         (("slides",), {}),
-        (("media",), {}),
-        (
-            ("media-ingest-heavy-jobs",),
-            {"default_stable": False},
-        ),
         (("reading",), {}),
         (("llamacpp-acquisition",), {}),
         (("vn-assets",), {"default_stable": True}),

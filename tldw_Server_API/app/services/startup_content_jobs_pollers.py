@@ -18,6 +18,7 @@ from tldw_Server_API.app.services.lifecycle_worker_specs import (
     stop_event_worker_spec,
 )
 from tldw_Server_API.app.services.lifecycle_workers import WorkerRegistry
+from tldw_Server_API.app.services.worker_startup_policy import should_start_inprocess_worker
 
 _STARTUP_GUARD_EXCEPTIONS = (
     AttributeError,
@@ -54,6 +55,27 @@ class ContentJobsPollerHandles:
     vn_asset_generation_jobs_task: Any | None = None
     companion_reflection_jobs_stop_event: Any | None = None
     companion_reflection_jobs_task: Any | None = None
+
+
+def media_ingest_worker_predicate(
+    flag_key: str,
+    route_key: str,
+    *,
+    default_stable: bool,
+) -> Callable[[WorkerLifecycleContext], bool]:
+    """Return an in-process media ingest worker predicate."""
+
+    def _enabled(context: WorkerLifecycleContext) -> bool:
+        return should_start_inprocess_worker(
+            flag_key,
+            route_key,
+            sidecar_mode=context.sidecar_mode,
+            default_stable=default_stable,
+            test_mode=context.test_mode,
+            route_enabled=context.route_enabled,
+        )
+
+    return _enabled
 
 
 def provide_content_jobs_worker_specs(
@@ -94,9 +116,10 @@ def provide_content_jobs_worker_specs(
             worker_service=_run_media_ingest_jobs_worker_service,
             category="jobs",
             phase=ShutdownPhase.JOB_POLLER_QUIESCE,
-            enabled=route_enabled_predicate(
+            enabled=media_ingest_worker_predicate(
                 "MEDIA_INGEST_JOBS_WORKER_ENABLED",
                 "media",
+                default_stable=True,
             ),
         ),
         stop_event_worker_spec(
@@ -104,7 +127,7 @@ def provide_content_jobs_worker_specs(
             worker_service=_run_media_ingest_heavy_jobs_worker_service,
             category="jobs",
             phase=ShutdownPhase.JOB_POLLER_QUIESCE,
-            enabled=route_enabled_predicate(
+            enabled=media_ingest_worker_predicate(
                 "MEDIA_INGEST_HEAVY_JOBS_WORKER_ENABLED",
                 "media-ingest-heavy-jobs",
                 default_stable=False,

@@ -18,6 +18,7 @@
 
 - Modify: `tldw_Server_API/app/services/worker_startup_policy.py`
   - Add optional injected `route_enabled` support while preserving current global-config behavior.
+  - Make injected route callback failures fail closed; keep legacy default fallback only for global config lookup failures.
 - Modify: `tldw_Server_API/app/services/startup_content_jobs_pollers.py`
   - Add a focused media ingest lifecycle predicate that delegates to `should_start_inprocess_worker()`.
   - Replace only the media ingest worker spec predicates.
@@ -42,7 +43,7 @@
 **Files:**
 - Modify: `tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest_startup.py`
 
-- [ ] **Step 1: Add imports for the real spec provider and context**
+- [x] **Step 1: Add imports for the real spec provider and context**
 
 Add:
 
@@ -51,7 +52,7 @@ from tldw_Server_API.app.services.lifecycle_worker_specs import WorkerLifecycleC
 from tldw_Server_API.app.services.startup_content_jobs_pollers import provide_content_jobs_worker_specs
 ```
 
-- [ ] **Step 2: Add a tiny context helper**
+- [x] **Step 2: Add a tiny context helper**
 
 ```python
 def _worker_context(*, sidecar_mode: bool = False, route_allowed: bool = True) -> WorkerLifecycleContext:
@@ -67,7 +68,7 @@ def _worker_context(*, sidecar_mode: bool = False, route_allowed: bool = True) -
     )
 ```
 
-- [ ] **Step 3: Add a spec lookup helper**
+- [x] **Step 3: Add a spec lookup helper**
 
 ```python
 def _content_spec(name: str):
@@ -75,7 +76,7 @@ def _content_spec(name: str):
     return specs[name]
 ```
 
-- [ ] **Step 4: Add failing startup policy tests for injected route checks**
+- [x] **Step 4: Add failing startup policy tests for injected route checks**
 
 ```python
 def test_should_start_inprocess_worker_uses_injected_route_policy_when_flag_unset(
@@ -110,11 +111,48 @@ def test_should_start_inprocess_worker_honors_injected_route_disabled_when_flag_
         test_mode=False,
         route_enabled=lambda *_args, **_kwargs: False,
     )
+
+
+def test_should_start_inprocess_worker_supports_single_arg_injected_route_policy(
+    monkeypatch,
+):
+    from tldw_Server_API.app.services.worker_startup_policy import should_start_inprocess_worker
+
+    monkeypatch.delenv("MEDIA_INGEST_JOBS_WORKER_ENABLED", raising=False)
+
+    assert not should_start_inprocess_worker(
+        "MEDIA_INGEST_JOBS_WORKER_ENABLED",
+        "media",
+        sidecar_mode=False,
+        default_stable=True,
+        test_mode=False,
+        route_enabled=lambda _route_key: False,
+    )
+
+
+def test_should_start_inprocess_worker_does_not_mask_route_policy_type_errors(
+    monkeypatch,
+):
+    from tldw_Server_API.app.services.worker_startup_policy import should_start_inprocess_worker
+
+    def broken_route_enabled(_route_key, **_kwargs):
+        raise TypeError("broken route policy")
+
+    monkeypatch.delenv("MEDIA_INGEST_JOBS_WORKER_ENABLED", raising=False)
+
+    assert not should_start_inprocess_worker(
+        "MEDIA_INGEST_JOBS_WORKER_ENABLED",
+        "media",
+        sidecar_mode=False,
+        default_stable=True,
+        test_mode=False,
+        route_enabled=broken_route_enabled,
+    )
 ```
 
 Expected before implementation: `TypeError` because `route_enabled` is not accepted yet.
 
-- [ ] **Step 5: Add the failing normal-worker route-default lifecycle tests**
+- [x] **Step 5: Add the failing normal-worker route-default lifecycle tests**
 
 ```python
 def test_media_ingest_lifecycle_spec_uses_route_policy_when_flag_unset(monkeypatch):
@@ -135,7 +173,7 @@ def test_media_ingest_lifecycle_spec_disables_when_route_policy_disabled(monkeyp
 
 Expected before implementation: `False`.
 
-- [ ] **Step 6: Add explicit opt-out, sidecar, and heavy default tests**
+- [x] **Step 6: Add explicit opt-out, sidecar, and heavy default tests**
 
 ```python
 def test_media_ingest_lifecycle_spec_respects_explicit_false(monkeypatch):
@@ -162,7 +200,7 @@ def test_media_ingest_heavy_lifecycle_spec_remains_disabled_by_default(monkeypat
     assert spec.enabled(_worker_context(route_allowed=False)) is False
 ```
 
-- [ ] **Step 7: Run tests and confirm the intended failure**
+- [x] **Step 7: Run tests and confirm the intended failure**
 
 Run:
 
@@ -181,12 +219,13 @@ Expected: the injected-route startup policy tests fail before implementation, an
 - Modify: `tldw_Server_API/app/services/worker_startup_policy.py`
 - Modify: `tldw_Server_API/app/services/startup_content_jobs_pollers.py`
 
-- [ ] **Step 1: Extend worker startup policy with optional injected route checks**
+- [x] **Step 1: Extend worker startup policy with optional injected route checks**
 
-In `worker_startup_policy.py`, import `Callable`:
+In `worker_startup_policy.py`, import `Callable`, `Parameter`, and `signature`:
 
 ```python
 from collections.abc import Callable
+from inspect import Parameter, signature
 ```
 
 Then extend the helper signatures:
@@ -224,20 +263,22 @@ def should_start_inprocess_worker(
 ) -> bool:
 ```
 
-In `worker_route_default()`, keep the existing `test_mode` early return. After that, use the injected route checker when provided:
+In `worker_route_default()`, keep the existing `test_mode` early return. After that, use the injected route checker when provided. Use stdlib signature inspection to call one-argument callbacks without `default_stable`; do not use broad `TypeError` fallback as signature detection because it can mask real route callback failures.
 
 ```python
     if route_enabled is not None:
         try:
-            return bool(route_enabled(route_key, default_stable=default_stable))
+            if _route_enabled_accepts_default_stable(route_enabled):
+                return bool(route_enabled(route_key, default_stable=default_stable))
+            return bool(route_enabled(route_key))
         except _WORKER_POLICY_EXCEPTIONS as exc:
             logger.debug("Worker startup policy route check failed for {}: {}", route_key, exc)
-            return bool(default_stable)
+            return False
 ```
 
 Thread `route_enabled=route_enabled` through `worker_path_enabled()` and `should_start_inprocess_worker()`.
 
-- [ ] **Step 2: Import the existing policy helper**
+- [x] **Step 2: Import the existing policy helper**
 
 Change imports near the lifecycle spec imports:
 
@@ -245,7 +286,7 @@ Change imports near the lifecycle spec imports:
 from tldw_Server_API.app.services.worker_startup_policy import should_start_inprocess_worker
 ```
 
-- [ ] **Step 3: Add the focused predicate helper**
+- [x] **Step 3: Add the focused predicate helper**
 
 Add near `provide_content_jobs_worker_specs()`:
 
@@ -273,7 +314,7 @@ def media_ingest_worker_predicate(
 
 Keep this helper local to the content jobs poller module unless another worker family needs the same semantics later.
 
-- [ ] **Step 4: Replace only the media ingest predicates**
+- [x] **Step 4: Replace only the media ingest predicates**
 
 Change normal worker spec:
 
@@ -297,7 +338,7 @@ enabled=media_ingest_worker_predicate(
 
 Leave all other `route_enabled_predicate(...)` usages alone.
 
-- [ ] **Step 5: Run the focused startup tests**
+- [x] **Step 5: Run the focused startup tests**
 
 Run:
 
@@ -308,7 +349,7 @@ python -m pytest tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest
 
 Expected: all tests in that file pass.
 
-- [ ] **Step 6: Run lifecycle catalog guard tests**
+- [x] **Step 6: Run lifecycle catalog guard tests**
 
 Run:
 
@@ -327,7 +368,7 @@ Expected: pass, proving the provider graph still validates.
 - Modify: `tldw_Server_API/tests/Config/test_docs_info_capabilities.py`
 - Modify: `tldw_Server_API/app/api/v1/endpoints/config_info.py`
 
-- [ ] **Step 1: Update the existing capability expectation to fail first**
+- [x] **Step 1: Update the existing capability expectation to fail first**
 
 In `test_docs_info_exposes_bulk_conference_ingest_capabilities`, clear the normal flag and sidecar mode:
 
@@ -344,7 +385,7 @@ assert caps["hasMediaIngestWorker"] is True
 
 Expected before implementation: this fails because the code still checks the heavy worker.
 
-- [ ] **Step 2: Add explicit false and sidecar capability tests**
+- [x] **Step 2: Add explicit false and sidecar capability tests**
 
 ```python
 def test_docs_info_media_ingest_worker_capability_respects_explicit_false(
@@ -379,7 +420,7 @@ def test_docs_info_media_ingest_worker_capability_is_false_in_sidecar_mode(
     assert safe_config["capabilities"]["hasMediaIngestWorker"] is False
 ```
 
-- [ ] **Step 3: Run docs-info tests and confirm failure**
+- [x] **Step 3: Run docs-info tests and confirm failure**
 
 Run:
 
@@ -390,7 +431,7 @@ python -m pytest tldw_Server_API/tests/Config/test_docs_info_capabilities.py -v
 
 Expected before implementation: `hasMediaIngestWorker` route-default expectation fails.
 
-- [ ] **Step 4: Import the correct helpers in config_info**
+- [x] **Step 4: Import the correct helpers in config_info**
 
 Change the worker startup policy import to include `should_start_inprocess_worker`; keep `worker_path_enabled` only if other code still uses it.
 
@@ -401,7 +442,7 @@ from tldw_Server_API.app.core.testing import env_flag_enabled
 from tldw_Server_API.app.services.worker_startup_policy import should_start_inprocess_worker
 ```
 
-- [ ] **Step 5: Compute capability from the normal worker policy**
+- [x] **Step 5: Compute capability from the normal worker policy**
 
 Replace the current heavy-worker block with:
 
@@ -417,7 +458,7 @@ caps["hasMediaIngestWorker"] = bool(
 )
 ```
 
-- [ ] **Step 6: Run docs-info tests**
+- [x] **Step 6: Run docs-info tests**
 
 Run:
 
@@ -438,7 +479,7 @@ Expected: pass.
 - Modify: `Docs/Deployment/Long_Term_Admin_Guide.md`
 - Modify: `Docs/Published/Deployment/Long_Term_Admin_Guide.md`
 
-- [ ] **Step 1: Update API docs worker flag wording**
+- [x] **Step 1: Update API docs worker flag wording**
 
 In both API docs files, replace:
 
@@ -452,7 +493,7 @@ with:
 - `MEDIA_INGEST_JOBS_WORKER_ENABLED`: `true|false` (default follows the `media` route policy; set `false` to disable the in-process worker)
 ```
 
-- [ ] **Step 2: Update deployment guide wording**
+- [x] **Step 2: Update deployment guide wording**
 
 In both deployment guide files, replace the media ingest sentence with:
 
@@ -460,12 +501,13 @@ In both deployment guide files, replace the media ingest sentence with:
 - Background jobs: Chatbooks worker enabled by default (core backend). Control via `CHATBOOKS_CORE_WORKER_ENABLED`. Media ingest jobs worker follows the `media` route policy by default; control via `MEDIA_INGEST_JOBS_WORKER_ENABLED`, or use sidecar workers for multi-worker deployments.
 ```
 
-- [ ] **Step 3: Check for stale contradictory docs**
+- [x] **Step 3: Check for stale contradictory docs**
 
 Run:
 
 ```bash
-rg -n "MEDIA_INGEST_JOBS_WORKER_ENABLED.*default false|Media ingest jobs worker is opt-in" Docs
+rg -n "MEDIA_INGEST_JOBS_WORKER_ENABLED.*default false|Media ingest jobs worker is opt-in" Docs \
+  -g '!**/superpowers/plans/**'
 ```
 
 Expected: no results.
@@ -477,7 +519,7 @@ Expected: no results.
 **Files:**
 - Update: `backlog/tasks/task-12100 - Fix-media-ingest-worker-startup-default-and-capability-reporting.md`
 
-- [ ] **Step 1: Run focused regression tests**
+- [x] **Step 1: Run focused regression tests**
 
 Run:
 
@@ -493,7 +535,7 @@ python -m pytest \
 
 Expected: pass.
 
-- [ ] **Step 2: Run Bandit on touched backend scopes**
+- [x] **Step 2: Run Bandit on touched backend scopes**
 
 Run:
 
@@ -508,7 +550,7 @@ python -m bandit -r \
 
 Expected: no new high or medium findings in touched code.
 
-- [ ] **Step 3: Smoke-check startup policy with the real spec**
+- [x] **Step 3: Smoke-check startup policy with the real spec**
 
 Run a small Python check:
 
@@ -536,7 +578,7 @@ PY
 
 Expected output: `True`.
 
-- [ ] **Step 4: Run the end-to-end YouTube quick-ingest walkthrough**
+- [x] **Step 4: Run the end-to-end YouTube quick-ingest walkthrough**
 
 Use the already established local WebUI/browser-extension walkthrough rather than stopping at unit tests:
 
@@ -545,7 +587,7 @@ Use the already established local WebUI/browser-extension walkthrough rather tha
 - Confirm the job status leaves `queued` and reaches `running`, `completed`, or a real ingestion failure with a specific error.
 - Capture the relevant backend log line or API status payload in the final handoff.
 
-- [ ] **Step 5: Update Backlog task with results**
+- [x] **Step 5: Update Backlog task with results**
 
 Record:
 
@@ -555,7 +597,7 @@ Record:
 - Startup smoke result.
 - Browser walkthrough result.
 
-- [ ] **Step 6: Self-review changed files**
+- [x] **Step 6: Self-review changed files**
 
 Run:
 
@@ -574,7 +616,7 @@ git diff -- tldw_Server_API/app/services/startup_content_jobs_pollers.py \
 
 Expected: no whitespace errors; diff is limited to the planned files.
 
-- [ ] **Step 7: Commit only this task's files**
+- [x] **Step 7: Commit only this task's files**
 
 Run:
 
