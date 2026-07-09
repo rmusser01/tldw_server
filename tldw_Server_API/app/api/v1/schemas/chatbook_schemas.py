@@ -187,8 +187,8 @@ class ChatbookAccountScopeCategory(BaseModel):
     category: str
     label: str
     count: int = Field(default=0, ge=0)
-    restore_status: str
-    sensitivity: str
+    restore_status: Literal["restorable", "pointer_only", "non_restorable"]
+    sensitivity: Literal["public", "personal", "sensitive", "secret"]
     warning: str | None = None
 
 

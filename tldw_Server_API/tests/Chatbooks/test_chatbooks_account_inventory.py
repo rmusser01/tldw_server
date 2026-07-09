@@ -1,5 +1,10 @@
+import pytest
+from pydantic import ValidationError
+
+from tldw_Server_API.app.api.v1.schemas.chatbook_schemas import ChatbookAccountScopeCategory
 from tldw_Server_API.app.core.Chatbooks.chatbook_account_inventory import ACCOUNT_DATA_INVENTORY
 from tldw_Server_API.app.core.Chatbooks.chatbook_service import ChatbookService
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDBError
 
 
 EXPECTED_CATEGORIES = {
@@ -27,6 +32,13 @@ EXPECTED_CATEGORIES = {
 
 class CountingDB:
     def execute_query(self, query, params=()):
+        return []
+
+
+class FailingCountDB:
+    def execute_query(self, query, params=()):
+        if str(query).lstrip().upper().startswith("SELECT"):
+            raise CharactersRAGDBError("optional table is unavailable")
         return []
 
 
@@ -75,7 +87,7 @@ def test_scope_summary_uses_inventory_contract():
     assert EXPECTED_CATEGORIES <= categories.keys()
     assert scope["total_items"] == sum(row["count"] for row in categories.values())
     assert scope["pointer_only_count"] == sum(
-        1 for row in categories.values() if row["restore_status"] == "pointer_only"
+        row["count"] for row in categories.values() if row["restore_status"] == "pointer_only"
     )
     assert scope["sensitive_category_count"] == sum(
         1 for row in categories.values() if row["sensitivity"] in {"sensitive", "secret"}
@@ -89,3 +101,53 @@ def test_scope_summary_uses_inventory_contract():
         "sensitivity",
         "warning",
     }
+
+
+def test_scope_summary_treats_chacha_count_failures_as_zero():
+    service = ChatbookService(user_id="scope-failing-counts", db=FailingCountDB())
+
+    scope = service.get_full_account_export_scope()
+
+    categories = {row["category"]: row for row in scope["categories"]}
+    assert categories["world_books"]["count"] == 0
+    assert categories["dictionaries"]["count"] == 0
+
+
+def test_scope_summary_counts_pointer_only_items():
+    service = ChatbookService(user_id="scope-pointer-count", db=CountingDB())
+    service._scope_count_for_category = lambda category: 25 if category == "media_pointers" else 0
+
+    scope = service.get_full_account_export_scope()
+
+    categories = {row["category"]: row for row in scope["categories"]}
+    assert categories["media_pointers"]["count"] == 25
+    assert scope["pointer_only_count"] == 25
+
+
+def test_scope_summary_skips_missing_optional_prompt_store(monkeypatch):
+    service = ChatbookService(user_id="scope-missing-prompts", db=CountingDB())
+    monkeypatch.setattr(
+        service,
+        "_get_prompts_db",
+        lambda: (_ for _ in ()).throw(AssertionError("prompts DB should not initialize")),
+    )
+
+    scope = service.get_full_account_export_scope()
+    categories = {row["category"]: row for row in scope["categories"]}
+
+    assert categories["prompts"]["count"] == 0
+
+
+def test_scope_category_schema_rejects_unknown_contract_values():
+    valid = {
+        "category": "media_pointers",
+        "label": "Media source references",
+        "count": 1,
+        "restore_status": "pointer_only",
+        "sensitivity": "personal",
+    }
+
+    with pytest.raises(ValidationError):
+        ChatbookAccountScopeCategory(**{**valid, "restore_status": "partial"})
+    with pytest.raises(ValidationError):
+        ChatbookAccountScopeCategory(**{**valid, "sensitivity": "private"})
