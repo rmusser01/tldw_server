@@ -8,7 +8,7 @@ from typing import Any
 
 import numpy as np
 
-from tldw_Server_API.app.core.exceptions import StreamingProtocolError
+from tldw_Server_API.app.core.exceptions import AudioProtocolError
 
 AUDIO_CHAT_ENDPOINT = "audio.chat.stream"
 AUDIO_TRANSCRIBE_ENDPOINT = "audio.stream.transcribe"
@@ -17,17 +17,6 @@ _ALLOWED_MODES = {
     AUDIO_CHAT_ENDPOINT: {"voice_chat", "push_to_talk"},
     AUDIO_TRANSCRIBE_ENDPOINT: {"dictate", "captions"},
 }
-
-
-class AudioProtocolError(StreamingProtocolError):
-    """Error raised when a websocket audio frame violates the v1 contract."""
-
-    def __init__(self, code: str, message: str, close_code: int = 4400) -> None:
-        """Initialize a protocol error with a client-safe code and close code."""
-        super().__init__(message)
-        self.code = code
-        self.message = message
-        self.close_code = close_code
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,8 +39,22 @@ class DecodedAudioFrame:
     sample_rate: int
 
 
-def validate_audio_stream_config(frame: dict[str, Any], endpoint_id: str) -> AudioProtocolConfig:
-    """Validate the required first post-auth config frame for a websocket endpoint."""
+def validate_audio_stream_config(
+    frame: dict[str, Any],
+    endpoint_id: str,
+) -> AudioProtocolConfig:
+    """Validate the required first post-auth config frame.
+
+    Args:
+        frame: Decoded websocket JSON frame expected to contain protocol config.
+        endpoint_id: Audio websocket endpoint accepting the frame.
+
+    Returns:
+        Validated protocol configuration for later audio frames.
+
+    Raises:
+        AudioProtocolError: If the config frame is malformed or unsupported.
+    """
     if not isinstance(frame, dict) or frame.get("type") != "config":
         raise AudioProtocolError("bad_request", "First post-auth frame must be type=config")
     if frame.get("protocol_version") != 1:
@@ -62,7 +65,10 @@ def validate_audio_stream_config(frame: dict[str, Any], endpoint_id: str) -> Aud
     if allowed is None:
         raise AudioProtocolError("bad_request", f"Unsupported audio endpoint {endpoint_id}")
     if mode not in allowed:
-        raise AudioProtocolError("bad_request", f"Mode {mode or 'missing'} is not allowed for {endpoint_id}")
+        raise AudioProtocolError(
+            "bad_request",
+            f"Mode {mode or 'missing'} is not allowed for {endpoint_id}",
+        )
 
     if frame.get("audio_format") != "pcm16":
         raise AudioProtocolError("bad_request", "audio_format must be pcm16")
@@ -80,8 +86,22 @@ def validate_audio_stream_config(frame: dict[str, Any], endpoint_id: str) -> Aud
     )
 
 
-def decode_audio_frame(frame: dict[str, Any], config: AudioProtocolConfig) -> DecodedAudioFrame:
-    """Decode a base64 PCM16 JSON audio frame into Float32 bytes."""
+def decode_audio_frame(
+    frame: dict[str, Any],
+    config: AudioProtocolConfig,
+) -> DecodedAudioFrame:
+    """Decode a base64 PCM16 JSON audio frame into Float32 bytes.
+
+    Args:
+        frame: Decoded websocket JSON frame with base64 PCM16 audio data.
+        config: Validated audio stream configuration for sample-rate metadata.
+
+    Returns:
+        Float32 audio bytes and timing metadata for streaming STT handlers.
+
+    Raises:
+        AudioProtocolError: If the audio frame is malformed or cannot be decoded.
+    """
     if not isinstance(frame, dict) or frame.get("type") != "audio":
         raise AudioProtocolError("bad_request", "Audio frame must be type=audio")
 
@@ -110,7 +130,15 @@ def audio_protocol_error_payload(
     exc: AudioProtocolError,
     request_id: str | None = None,
 ) -> dict[str, Any]:
-    """Build the websocket error payload for a protocol validation failure."""
+    """Build the websocket error payload for a protocol validation failure.
+
+    Args:
+        exc: Audio protocol error raised during frame validation.
+        request_id: Optional client request identifier to echo in the error payload.
+
+    Returns:
+        JSON-serializable websocket error payload.
+    """
     payload: dict[str, Any] = {"type": "error", "code": exc.code, "message": exc.message}
     if request_id:
         payload["request_id"] = request_id

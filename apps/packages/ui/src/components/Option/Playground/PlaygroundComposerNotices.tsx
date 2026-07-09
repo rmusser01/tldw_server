@@ -271,6 +271,7 @@ function CharacterExpressionSetupNudge({
   const [sessionDismissedScopes, setSessionDismissedScopes] = React.useState<
     Set<string>
   >(() => new Set())
+  const [anonymousDismissed, setAnonymousDismissed] = React.useState(false)
 
   const persistedDismissed = React.useMemo(() => {
     if (!dismissKey) return false
@@ -307,6 +308,8 @@ function CharacterExpressionSetupNudge({
           next.add(sessionDismissScope)
           return next
         })
+      } else {
+        setAnonymousDismissed(true)
       }
       return
     }
@@ -318,7 +321,7 @@ function CharacterExpressionSetupNudge({
     !selectedCharacter ||
     typeof selectedCharacter !== "object" ||
     hasExpressionImages(selectedCharacter) ||
-    (dismissKey ? persistedDismissed : sessionDismissed)
+    (dismissKey ? persistedDismissed : sessionDismissed || anonymousDismissed)
   ) {
     return null
   }

@@ -35,8 +35,11 @@ type ExpressionRowEditorProps = {
   field: FormListFieldData
   row?: ExpressionImageRow
   errors: ExpressionImageRowErrorReason[]
+  imageBackends: ImageBackend[]
+  imageBackendsLoading: boolean
   characterName?: string
   characterDescription?: string
+  onRequestImageBackends: () => void
   onRemove: () => void
 }
 
@@ -129,18 +132,18 @@ function ExpressionRowEditor({
   field,
   row,
   errors,
+  imageBackends,
+  imageBackendsLoading,
   characterName,
   characterDescription,
+  onRequestImageBackends,
   onRemove
 }: ExpressionRowEditorProps) {
   const form = Form.useFormInstance()
   const [previewError, setPreviewError] = React.useState(false)
   const [uploading, setUploading] = React.useState(false)
   const [prompt, setPrompt] = React.useState("")
-  const [backends, setBackends] = React.useState<ImageBackend[]>([])
   const [selectedBackend, setSelectedBackend] = React.useState("")
-  const [backendsLoading, setBackendsLoading] = React.useState(false)
-  const [backendsFetched, setBackendsFetched] = React.useState(false)
   const [generating, setGenerating] = React.useState(false)
   const [generationError, setGenerationError] = React.useState<string | null>(null)
   const initializedPromptRowRef = React.useRef<string | null>(null)
@@ -149,33 +152,27 @@ function ExpressionRowEditor({
   const mode = image.mode || "url"
   const imageUrl = getRowImageUrl(image)
   const rowLabel = getRowLabel(row)
-  const configuredBackends = backends.filter((backend) => backend.is_configured)
+  const configuredBackends = React.useMemo(
+    () => imageBackends.filter((backend) => backend.is_configured),
+    [imageBackends]
+  )
 
   React.useEffect(() => {
     setPreviewError(false)
   }, [imageUrl])
 
   React.useEffect(() => {
-    if (mode !== "generate" || backendsLoading || backendsFetched) return
+    if (mode === "generate") {
+      onRequestImageBackends()
+    }
+  }, [mode, onRequestImageBackends])
 
-    setBackendsLoading(true)
-    tldwClient
-      .getImageBackends()
-      .then((result) => {
-        setBackends(result)
-        const firstConfigured = result.find((backend) => backend.is_configured)
-        if (firstConfigured && !selectedBackend) {
-          setSelectedBackend(firstConfigured.id)
-        }
-      })
-      .catch(() => {
-        setBackends([])
-      })
-      .finally(() => {
-        setBackendsLoading(false)
-        setBackendsFetched(true)
-      })
-  }, [mode, backendsFetched, backendsLoading, selectedBackend])
+  React.useEffect(() => {
+    const firstConfigured = configuredBackends[0]
+    if (firstConfigured && !selectedBackend) {
+      setSelectedBackend(firstConfigured.id)
+    }
+  }, [configuredBackends, selectedBackend])
 
   React.useEffect(() => {
     const promptRowKey = row?.id || String(field.key)
@@ -374,7 +371,7 @@ function ExpressionRowEditor({
 
       {mode === "generate" ? (
         <div className="space-y-2">
-          {backendsLoading ? (
+          {imageBackendsLoading ? (
             <p className="text-xs text-text-subtle">Loading image backends...</p>
           ) : configuredBackends.length === 0 ? (
             <p className="text-xs text-text-subtle">No image backends configured.</p>
@@ -469,6 +466,9 @@ export function CharacterExpressionImagesSection({
   const [failedPreviewImages, setFailedPreviewImages] = React.useState<Set<string>>(
     () => new Set()
   )
+  const [imageBackends, setImageBackends] = React.useState<ImageBackend[]>([])
+  const [imageBackendsLoading, setImageBackendsLoading] = React.useState(false)
+  const [imageBackendsFetched, setImageBackendsFetched] = React.useState(false)
 
   const normalizedRows = React.useMemo(
     () => normalizeExpressionImageRows(rows),
@@ -510,6 +510,22 @@ export function CharacterExpressionImagesSection({
     }
   }, [previewRows, previewState])
 
+  const requestImageBackends = React.useCallback(() => {
+    if (imageBackendsLoading || imageBackendsFetched) return
+
+    setImageBackendsLoading(true)
+    tldwClient
+      .getImageBackends()
+      .then(setImageBackends)
+      .catch(() => {
+        setImageBackends([])
+      })
+      .finally(() => {
+        setImageBackendsLoading(false)
+        setImageBackendsFetched(true)
+      })
+  }, [imageBackendsFetched, imageBackendsLoading])
+
   const copyDirective = async () => {
     const state = selectedPreviewRow?.state?.trim()
     if (!state) return
@@ -549,8 +565,11 @@ export function CharacterExpressionImagesSection({
                   field={field}
                   row={row}
                   errors={row?.id ? errorsById.get(row.id) || [] : []}
+                  imageBackends={imageBackends}
+                  imageBackendsLoading={imageBackendsLoading}
                   characterName={characterName}
                   characterDescription={characterDescription}
+                  onRequestImageBackends={requestImageBackends}
                   onRemove={() => remove(field.name)}
                 />
               )

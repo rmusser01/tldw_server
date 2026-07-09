@@ -304,7 +304,8 @@
     "presetExecutiveSummary": "Riepilogo esecutivo",
     "presetCriticalReview": "Revisione critica",
     "presetQAAnalysis": "Analisi Q&A",
-    "presetBulletedNotes": "Bulleted Notes"
+    "presetBulletedNotes": "Bulleted Notes",
+    "analysisProviderRequired": "Choose an analysis provider, then retry analysis."
   },
   "empty": {
     "connectTitle": "Collegati per usare Review",

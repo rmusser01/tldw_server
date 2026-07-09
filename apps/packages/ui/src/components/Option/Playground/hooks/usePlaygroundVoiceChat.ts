@@ -212,7 +212,7 @@ export function usePlaygroundVoiceChat(deps: UsePlaygroundVoiceChatDeps) {
       ) as string
     }
     if (speechUsesServer) {
-      const sttModelLabel = sttModel || t("playground:stt.serverDefaultModel", "server default")
+      const sttModelLabel = sttModel || t("playground:stt.serverDefaultModel", "Server default")
       const sttTaskLabel = sttTask === "translate" ? "translate" : "transcribe"
       const sttFormatLabel = (sttResponseFormat || "json").toUpperCase()
       const speechDetails = withTemplateFallback(

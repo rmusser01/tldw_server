@@ -393,7 +393,6 @@ def mock_audio_ws_dependencies(monkeypatch: pytest.MonkeyPatch) -> _DummyRegistr
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
 async def test_audio_chat_ws_rejects_audio_before_strict_config() -> None:
     ws = DummyWebSocket(
         [
@@ -409,7 +408,6 @@ async def test_audio_chat_ws_rejects_audio_before_strict_config() -> None:
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
 async def test_audio_chat_ws_rejects_transcribe_only_mode() -> None:
     ws = DummyWebSocket(
         [
@@ -425,7 +423,6 @@ async def test_audio_chat_ws_rejects_transcribe_only_mode() -> None:
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
 async def test_audio_chat_ws_push_to_talk_release_commits_turn(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -451,7 +448,6 @@ async def test_audio_chat_ws_push_to_talk_release_commits_turn(
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
 async def test_audio_chat_ws_push_to_talk_ignores_vad_auto_commit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -480,7 +476,6 @@ async def test_audio_chat_ws_push_to_talk_ignores_vad_auto_commit(
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
 async def test_audio_chat_ws_streams_llm_and_tts(monkeypatch: pytest.MonkeyPatch) -> None:
     audio_payload = _pcm16_audio([_AUDIO_LABEL_TO_SAMPLE["abc"]])
     messages = [
@@ -512,7 +507,6 @@ async def test_audio_chat_ws_streams_llm_and_tts(monkeypatch: pytest.MonkeyPatch
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
 async def test_audio_chat_ws_emits_bounded_stt_metrics(monkeypatch: pytest.MonkeyPatch) -> None:
     import tldw_Server_API.app.core.Metrics.metrics_manager as metrics_manager
 
@@ -569,7 +563,6 @@ async def test_audio_chat_ws_emits_bounded_stt_metrics(monkeypatch: pytest.Monke
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
 async def test_audio_chat_ws_counts_final_frames_in_redaction_metrics(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -612,7 +605,6 @@ async def test_audio_chat_ws_counts_final_frames_in_redaction_metrics(
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
 async def test_audio_chat_ws_normalizes_whisper_alias_before_transcriber_init(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -645,7 +637,6 @@ async def test_audio_chat_ws_normalizes_whisper_alias_before_transcriber_init(
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
 async def test_audio_chat_ws_normalizes_parakeet_variant_before_transcriber_init(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -677,7 +668,6 @@ async def test_audio_chat_ws_normalizes_parakeet_variant_before_transcriber_init
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
 async def test_audio_chat_ws_rejects_protocol_version_2() -> None:
     ws = DummyWebSocket(
         [
@@ -708,7 +698,6 @@ async def test_audio_chat_ws_rejects_protocol_version_2() -> None:
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
 async def test_audio_chat_ws_rejects_protocol_version_2_when_legacy_control_enabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -743,7 +732,6 @@ async def test_audio_chat_ws_rejects_protocol_version_2_when_legacy_control_enab
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
 async def test_audio_chat_ws_closes_on_malformed_json_after_strict_config() -> None:
     ws = DummyWebSocket(
         [
@@ -764,7 +752,6 @@ async def test_audio_chat_ws_closes_on_malformed_json_after_strict_config() -> N
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
 async def test_audio_chat_ws_records_failure_metrics_for_invalid_audio_frame(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -796,7 +783,6 @@ async def test_audio_chat_ws_records_failure_metrics_for_invalid_audio_frame(
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
 async def test_audio_chat_ws_records_failure_metrics_for_push_to_talk_violation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -831,7 +817,6 @@ async def test_audio_chat_ws_records_failure_metrics_for_push_to_talk_violation(
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
 async def test_audio_chat_ws_interrupt_without_active_turn_is_safe(monkeypatch: pytest.MonkeyPatch) -> None:
     ws = DummyWebSocket(
         [
@@ -857,7 +842,6 @@ async def test_audio_chat_ws_interrupt_without_active_turn_is_safe(monkeypatch: 
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
 async def test_audio_chat_ws_overlap_starts_tts_before_final_llm_message(monkeypatch: pytest.MonkeyPatch) -> None:
     audio_payload = _pcm16_audio([_AUDIO_LABEL_TO_SAMPLE["abc"]])
     ws = DummyWebSocket(
@@ -911,7 +895,6 @@ async def test_audio_chat_ws_overlap_starts_tts_before_final_llm_message(monkeyp
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
 async def test_audio_chat_ws_overlap_warning_sanitizes_internal_message(monkeypatch: pytest.MonkeyPatch) -> None:
     audio_payload = _pcm16_audio([_AUDIO_LABEL_TO_SAMPLE["abc"]])
     ws = DummyWebSocket(
@@ -951,7 +934,6 @@ async def test_audio_chat_ws_overlap_warning_sanitizes_internal_message(monkeypa
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
 async def test_audio_chat_ws_interrupt_cancels_inflight_turn(monkeypatch: pytest.MonkeyPatch) -> None:
     audio_payload = _pcm16_audio([_AUDIO_LABEL_TO_SAMPLE["abc"]])
     ws = DummyWebSocket(
@@ -995,7 +977,6 @@ async def test_audio_chat_ws_interrupt_cancels_inflight_turn(monkeypatch: pytest
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
 async def test_audio_chat_ws_drops_stale_audio_after_interrupt(monkeypatch: pytest.MonkeyPatch) -> None:
     audio_payload = _pcm16_audio([_AUDIO_LABEL_TO_SAMPLE["abc"]])
     ws = DummyWebSocket(
@@ -1057,7 +1038,6 @@ async def test_audio_chat_ws_drops_stale_audio_after_interrupt(monkeypatch: pyte
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
 async def test_audio_chat_ws_auto_commit_uses_eos_timestamp(monkeypatch: pytest.MonkeyPatch) -> None:
     audio_payload = _pcm16_audio([_AUDIO_LABEL_TO_SAMPLE["abc"]])
     messages = [
@@ -1101,7 +1081,6 @@ async def test_audio_chat_ws_auto_commit_uses_eos_timestamp(monkeypatch: pytest.
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
 async def test_audio_chat_ws_persists_turn_when_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
     audio_payload = _pcm16_audio([_AUDIO_LABEL_TO_SAMPLE["abc"]])
     ws = DummyWebSocket(
@@ -1174,7 +1153,6 @@ async def test_audio_chat_ws_persists_turn_when_enabled(monkeypatch: pytest.Monk
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
 async def test_audio_chat_ws_applies_stt_redaction_to_turn_output_and_persistence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1268,7 +1246,6 @@ async def test_audio_chat_ws_applies_stt_redaction_to_turn_output_and_persistenc
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
 async def test_audio_chat_ws_persistence_failure_is_fail_soft(monkeypatch: pytest.MonkeyPatch) -> None:
     audio_payload = _pcm16_audio([_AUDIO_LABEL_TO_SAMPLE["abc"]])
     ws = DummyWebSocket(
@@ -1307,7 +1284,6 @@ async def test_audio_chat_ws_persistence_failure_is_fail_soft(monkeypatch: pytes
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
 async def test_audio_chat_ws_quota_exceeded(monkeypatch: pytest.MonkeyPatch) -> None:
     audio_payload = _pcm16_audio([_AUDIO_LABEL_TO_SAMPLE["abc"]])
     ws = DummyWebSocket(
@@ -1334,7 +1310,6 @@ async def test_audio_chat_ws_quota_exceeded(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
 async def test_audio_chat_ws_records_metrics(monkeypatch: pytest.MonkeyPatch) -> None:
     audio_payload = _pcm16_audio([_AUDIO_LABEL_TO_SAMPLE["abcd"]])
     ws = DummyWebSocket(

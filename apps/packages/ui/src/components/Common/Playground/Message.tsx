@@ -95,11 +95,12 @@ import {
 import type { DynamicUISurface } from "@/types/dynamic-ui"
 import { DEFAULT_CHAT_SETTINGS } from "@/types/chat-settings"
 import { VisualIdentityImage } from "@/components/Common/VisualIdentity/VisualIdentityImage"
+import {
+  CHAT_CHARACTER_IMAGE_OPACITY_ALPHA,
+  CHAT_MESSAGE_OPACITY_ALPHA
+} from "@/services/settings/chat-opacity-css-vars"
 
 const Markdown = React.lazy(() => import("../../Common/Markdown"))
-const CHAT_MESSAGE_OPACITY_ALPHA = "var(--chat-message-opacity, 0.6)"
-const CHAT_CHARACTER_IMAGE_OPACITY_ALPHA =
-  "var(--chat-character-image-opacity, 1)"
 
 const ErrorBubble: React.FC<{
   payload: ChatErrorPayload

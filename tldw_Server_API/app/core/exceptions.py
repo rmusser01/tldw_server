@@ -487,6 +487,23 @@ class StreamingProtocolError(Exception):
     """Raised for streaming protocol violations (e.g., malformed SSE)."""
 
 
+class AudioProtocolError(StreamingProtocolError):
+    """Raised when a websocket audio frame violates the strict audio contract."""
+
+    def __init__(self, code: str, message: str, close_code: int = 4400) -> None:
+        """Initialize a client-safe audio protocol error.
+
+        Args:
+            code: Machine-readable error code sent to the websocket client.
+            message: Human-readable error message sent to the websocket client.
+            close_code: WebSocket close code used after emitting the error payload.
+        """
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.close_code = close_code
+
+
 class DownloadError(Exception):
     """Raised when a download fails or post-download validation fails (checksum, size)."""
 

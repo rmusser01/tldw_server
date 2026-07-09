@@ -1392,7 +1392,7 @@ export const applyCharacterMetadataToExtensions = (
   const parsedTldw = parsed && isPlainObject(parsed.tldw) ? parsed.tldw : null
   const hadMoodImageKeys =
     Boolean(parsedTldw && ("mood_images" in parsedTldw || "moodImages" in parsedTldw)) ||
-    Boolean(parsed && ("mood_images" in parsed || "moodImages" in parsed))
+    Boolean(parsed && isPlainObject(parsed) && ("mood_images" in parsed || "moodImages" in parsed))
   const shouldMergeExpressionImages =
     Boolean(normalizedExpressionRows) &&
     (normalizedExpressionRows!.errors.length > 0 ||

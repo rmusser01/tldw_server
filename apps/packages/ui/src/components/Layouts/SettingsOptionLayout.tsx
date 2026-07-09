@@ -45,7 +45,7 @@ const normalizeSettingsExitTarget = (target: string) => {
   try {
     const url = new URL(trimmedTarget, SETTINGS_EXIT_URL_ORIGIN);
     if (url.origin !== SETTINGS_EXIT_URL_ORIGIN) return "/";
-    if (url.pathname.startsWith("/settings")) return "/";
+    if (url.pathname === "/settings" || url.pathname.startsWith("/settings/")) return "/";
     return `${url.pathname}${url.search}${url.hash}`;
   } catch {
     return "/";
@@ -68,7 +68,7 @@ export const navigateFromSettingsExit = (
     return;
   }
 
-  navigate(normalizedTarget, { flushSync: true });
+  navigate(normalizedTarget);
 };
 
 const readHideBetaBadgesPreference = (): boolean => {

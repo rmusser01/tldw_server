@@ -119,7 +119,11 @@ export const SetupRecoverySettings = () => {
       id: "health",
       label: t("setupRecovery.health.label", "Health checks"),
       status:
-        connection.knowledgeStatus === "offline" ? "needs-action" : "unknown",
+        connection.knowledgeStatus === "offline"
+          ? "needs-action"
+          : connection.knowledgeStatus === "ready"
+            ? "ok"
+            : "unknown",
       to: "/settings/health"
     }
   ]

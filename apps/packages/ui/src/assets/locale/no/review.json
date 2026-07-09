@@ -305,7 +305,8 @@
     "presetExecutiveSummary": "Lederoppsummering",
     "presetCriticalReview": "Kritisk gjennomgang",
     "presetQAAnalysis": "Spørsmål og svar-analyse",
-    "presetBulletedNotes": "Bulleted Notes"
+    "presetBulletedNotes": "Bulleted Notes",
+    "analysisProviderRequired": "Choose an analysis provider, then retry analysis."
   },
   "empty": {
     "connectTitle": "Koble til for å bruke Review",

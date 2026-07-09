@@ -1,6 +1,6 @@
 import React from "react"
 import { Button, Form, Input, InputNumber, Modal, Select } from "antd"
-import type { FormInstance, InputRef } from "antd"
+import type { FormInstance, FormProps, InputRef } from "antd"
 import { ChevronDown, ChevronUp } from "lucide-react"
 import type { TFunction } from "i18next"
 import type { CharacterField } from "@/services/character-generation"
@@ -105,6 +105,32 @@ export const CharacterEditorForm: React.FC<CharacterEditorFormProps> = ({
         expressionRowsFromExtensions(initialValues?.extensions ?? {})
     }),
     [initialValues]
+  )
+
+  const handleFinishFailed = React.useCallback<NonNullable<FormProps["onFinishFailed"]>>(
+    (errorInfo) => {
+      const hasExpressionImageError = errorInfo.errorFields.some((field) => {
+        const rootName = field.name[0]
+        return (
+          rootName === "_expression_images_validation" ||
+          rootName === "expression_images"
+        )
+      })
+
+      if (!hasExpressionImageError) return
+
+      setShowAdvanced(true)
+      setAdvancedSections((current) => ({ ...current, metadata: true }))
+      const scrollToExpressionImages = () => {
+        form.scrollToField("expression_images", { block: "center" })
+      }
+      if (typeof window.requestAnimationFrame === "function") {
+        window.requestAnimationFrame(scrollToExpressionImages)
+      } else {
+        scrollToExpressionImages()
+      }
+    },
+    [form, setAdvancedSections, setShowAdvanced]
   )
 
   const promptPresetOptions = React.useMemo(
@@ -1059,6 +1085,7 @@ export const CharacterEditorForm: React.FC<CharacterEditorFormProps> = ({
         onValuesChange(allValues)
       }}
       onFinish={onFinish}
+      onFinishFailed={handleFinishFailed}
     >
       {renderNameField()}
       {renderSystemPromptField()}

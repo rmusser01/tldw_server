@@ -1,7 +1,7 @@
 import React from "react"
 import { Form } from "antd"
 import type { FormInstance, InputRef } from "antd"
-import { render, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 import { CharacterEditorForm } from "../CharacterEditorForm"
 
@@ -19,8 +19,13 @@ vi.mock("react-i18next", () => ({
   })
 }))
 
-const renderEditorForm = () => {
+const renderEditorForm = (overrides: {
+  setShowAdvanced?: React.Dispatch<React.SetStateAction<boolean>>
+  setAdvancedSections?: React.Dispatch<React.SetStateAction<any>>
+} = {}) => {
   let formRef: FormInstance | null = null
+  const setShowAdvanced = overrides.setShowAdvanced ?? vi.fn()
+  const setAdvancedSections = overrides.setAdvancedSections ?? vi.fn()
 
   const Harness = () => {
     const [form] = Form.useForm()
@@ -66,13 +71,13 @@ const renderEditorForm = () => {
         characterFolderOptions={[]}
         characterFolderOptionsLoading={false}
         showAdvanced={false}
-        setShowAdvanced={vi.fn()}
+        setShowAdvanced={setShowAdvanced}
         advancedSections={{
           promptControl: false,
           generationSettings: false,
           metadata: false
         }}
-        setAdvancedSections={vi.fn()}
+        setAdvancedSections={setAdvancedSections}
         createNameRef={React.createRef<InputRef>()}
         editNameRef={React.createRef<InputRef>()}
       />
@@ -80,7 +85,7 @@ const renderEditorForm = () => {
   }
 
   render(<Harness />)
-  return { form: () => formRef }
+  return { form: () => formRef, setAdvancedSections, setShowAdvanced }
 }
 
 describe("CharacterEditorForm expression image validation", () => {
@@ -96,5 +101,18 @@ describe("CharacterEditorForm expression image validation", () => {
         })
       ])
     })
+  })
+
+  it("opens metadata fields when collapsed expression images block submit", async () => {
+    const setShowAdvanced = vi.fn()
+    const setAdvancedSections = vi.fn()
+    renderEditorForm({ setAdvancedSections, setShowAdvanced })
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
+
+    await waitFor(() => {
+      expect(setShowAdvanced).toHaveBeenCalledWith(true)
+    })
+    expect(setAdvancedSections).toHaveBeenCalled()
   })
 })

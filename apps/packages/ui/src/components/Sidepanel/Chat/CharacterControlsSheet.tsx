@@ -154,15 +154,17 @@ export const CharacterControlsSheet = ({
             </p>
           ) : null}
         </div>
-        <Button
-          variant="outline"
-          onClick={() => void handleOpenExpressionEditor()}
-        >
-          {t(
-            "playground:characterRail.editExpressions",
-            "Edit character expressions"
-          )}
-        </Button>
+        {expressionCharacterId != null ? (
+          <Button
+            variant="outline"
+            onClick={() => void handleOpenExpressionEditor()}
+          >
+            {t(
+              "playground:characterRail.editExpressions",
+              "Edit character expressions"
+            )}
+          </Button>
+        ) : null}
       </div>
 
       <section className="space-y-2">

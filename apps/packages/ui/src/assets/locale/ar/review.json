@@ -304,7 +304,8 @@
     "presetExecutiveSummary": "ملخص تنفيذي",
     "presetCriticalReview": "مراجعة نقدية",
     "presetQAAnalysis": "تحليل أسئلة وأجوبة",
-    "presetBulletedNotes": "Bulleted Notes"
+    "presetBulletedNotes": "Bulleted Notes",
+    "analysisProviderRequired": "Choose an analysis provider, then retry analysis."
   },
   "empty": {
     "connectTitle": "اتصل لاستخدام المراجعة",

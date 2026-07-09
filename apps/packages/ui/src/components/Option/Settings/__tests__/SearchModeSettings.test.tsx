@@ -11,6 +11,7 @@ vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string, fallback?: string) => {
       if (key === "generalSettings.webSearch.heading") return "Manage Web Search"
+      if (key === "generalSettings.webSearch.provider.label") return "Web Search Provider"
       return fallback ?? key
     }
   })
@@ -33,6 +34,20 @@ vi.mock("@/hooks/useSimpleForm", () => ({
 }))
 
 describe("SearchModeSettings", () => {
+  it("keeps the section identifiable while search settings are loading", () => {
+    queryState.status = "pending"
+
+    const { container } = render(<SearchModeSettings />)
+
+    expect(screen.getByRole("heading", { name: "Manage Web Search" })).toBeInTheDocument()
+    expect(container.querySelector(".ant-skeleton")).toBeInTheDocument()
+    expect(
+      screen.queryByText(
+        "Web search settings are unavailable until the server is reachable."
+      )
+    ).not.toBeInTheDocument()
+  })
+
   it("keeps the section identifiable when search settings cannot load", () => {
     queryState.status = "error"
 
@@ -44,5 +59,19 @@ describe("SearchModeSettings", () => {
         "Web search settings are unavailable until the server is reachable."
       )
     ).toBeInTheDocument()
+  })
+
+  it("renders the editable search form after settings load", () => {
+    queryState.status = "success"
+
+    render(<SearchModeSettings />)
+
+    expect(screen.getByRole("heading", { name: "Manage Web Search" })).toBeInTheDocument()
+    expect(screen.getByText("Web Search Provider")).toBeInTheDocument()
+    expect(
+      screen.queryByText(
+        "Web search settings are unavailable until the server is reachable."
+      )
+    ).not.toBeInTheDocument()
   })
 })

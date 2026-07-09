@@ -1,4 +1,4 @@
-import { useRef } from "react"
+import { useRef, useState } from "react"
 import { Modal, Radio, Select, Switch } from "antd"
 import { useTranslation } from "react-i18next"
 import { useStorage } from "@plasmohq/storage/hook"
@@ -27,6 +27,7 @@ export const PreferencesSettings = () => {
     useTutorialCompletion()
   const [, setShortcutSelection] = useSetting(HEADER_SHORTCUT_SELECTION_SETTING)
   const personaSeqRef = useRef(0)
+  const [isPersonaChanging, setIsPersonaChanging] = useState(false)
 
   const [onboardingAutoFinish, setOnboardingAutoFinish] = useStorage(
     "onboardingAutoFinish",
@@ -41,9 +42,16 @@ export const PreferencesSettings = () => {
 
   const handlePersonaChange = async (nextPersona: UserPersona) => {
     const seq = ++personaSeqRef.current
-    await setUserPersona(nextPersona)
-    if (seq !== personaSeqRef.current) return
-    await setShortcutSelection(getDefaultShortcutsForPersona(nextPersona))
+    setIsPersonaChanging(true)
+    try {
+      await setUserPersona(nextPersona)
+      if (seq !== personaSeqRef.current) return
+      await setShortcutSelection(getDefaultShortcutsForPersona(nextPersona))
+    } finally {
+      if (seq === personaSeqRef.current) {
+        setIsPersonaChanging(false)
+      }
+    }
   }
 
   return (
@@ -192,6 +200,7 @@ export const PreferencesSettings = () => {
         <div className="border-b border-border mb-3" />
         <Radio.Group
           className="flex flex-col gap-2"
+          disabled={isPersonaChanging}
           onChange={(event) => {
             const value = event.target.value as string
             handlePersonaChange(

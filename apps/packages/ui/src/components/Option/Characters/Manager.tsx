@@ -943,8 +943,8 @@ export const CharactersManager: React.FC<CharactersManagerProps> = ({
     if (routeFocusHandledRef.current === requestKey) return
 
     if (!requestedCharacterId) {
-      routeFocusHandledRef.current = requestKey
       if (!open && !openEdit && !conversationsOpen) {
+        routeFocusHandledRef.current = requestKey
         openCreateModal()
         setShowCreateAdvanced(true)
         setCreateAdvancedSections((current) => ({ ...current, metadata: true }))
@@ -959,7 +959,7 @@ export const CharactersManager: React.FC<CharactersManagerProps> = ({
       setEditAdvancedSections((current) => ({ ...current, metadata: true }))
     }
 
-    const focusedCharacter = data.find((record) =>
+    const focusedCharacter = (data || []).find((record) =>
       routeCharacterIdMatches(record, requestedCharacterId)
     )
 

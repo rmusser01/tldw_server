@@ -77,15 +77,49 @@ const MAX_FLASHCARD_SOURCE_TEXT_CHARS = 20_000
 
 type QuestionPlanRowState = QuizQuestionPlanItem & {
   enabled: boolean
-  label: string
+  labelKey: string
+  labelDefault: string
 }
 
 const DEFAULT_QUESTION_PLAN_ROWS: QuestionPlanRowState[] = [
-  { question_type: "multiple_choice", label: "Multiple Choice", enabled: true, count: 5, option_count: 4 },
-  { question_type: "true_false", label: "True/False", enabled: true, count: 3 },
-  { question_type: "fill_blank", label: "Fill in the Blank", enabled: true, count: 2 },
-  { question_type: "multi_select", label: "Multi-select", enabled: false, count: 1, option_count: 4 },
-  { question_type: "matching", label: "Matching", enabled: false, count: 1, pair_count: 4 }
+  {
+    question_type: "multiple_choice",
+    labelKey: "option:quiz.questionTypeMultipleChoice",
+    labelDefault: "Multiple Choice",
+    enabled: true,
+    count: 5,
+    option_count: 4
+  },
+  {
+    question_type: "true_false",
+    labelKey: "option:quiz.questionTypeTrueFalse",
+    labelDefault: "True/False",
+    enabled: true,
+    count: 3
+  },
+  {
+    question_type: "fill_blank",
+    labelKey: "option:quiz.questionTypeFillBlank",
+    labelDefault: "Fill in the Blank",
+    enabled: true,
+    count: 2
+  },
+  {
+    question_type: "multi_select",
+    labelKey: "option:quiz.questionTypeMultiSelect",
+    labelDefault: "Multi-select",
+    enabled: false,
+    count: 1,
+    option_count: 4
+  },
+  {
+    question_type: "matching",
+    labelKey: "option:quiz.questionTypeMatching",
+    labelDefault: "Matching",
+    enabled: false,
+    count: 1,
+    pair_count: 4
+  }
 ]
 
 const sanitizeInputNumber = (value: number | string | null, min: number, max: number): number | null => {
@@ -690,7 +724,12 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({ onNavigateToTake, onNa
   )
 
   const updateQuestionPlanRow = React.useCallback(
-    (questionType: QuestionType, patch: Partial<Omit<QuestionPlanRowState, "question_type" | "label">>) => {
+    (
+      questionType: QuestionType,
+      patch: Partial<
+        Omit<QuestionPlanRowState, "question_type" | "labelKey" | "labelDefault">
+      >
+    ) => {
       setQuestionPlanRows((rows) =>
         rows.map((row) => (row.question_type === questionType ? { ...row, ...patch } : row))
       )
@@ -1204,97 +1243,102 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({ onNavigateToTake, onNa
             </div>
 
             <div className="space-y-2" data-testid="generate-question-plan">
-              {questionPlanRows.map((row) => (
-                <div
-                  key={row.question_type}
-                  className="grid gap-3 rounded border border-border-subtle p-3 sm:grid-cols-[minmax(11rem,1fr)_minmax(8rem,10rem)_minmax(8rem,10rem)] sm:items-end"
-                  data-testid={`generate-question-plan-row-${row.question_type}`}
-                >
-                  <Checkbox
-                    checked={row.enabled}
-                    disabled={generationInFlight}
-                    onChange={(event) =>
-                      updateQuestionPlanRow(row.question_type, { enabled: event.target.checked })
-                    }
+              {questionPlanRows.map((row) => {
+                const rowLabel = String(
+                  t(row.labelKey, { defaultValue: row.labelDefault })
+                )
+                return (
+                  <div
+                    key={row.question_type}
+                    className="grid gap-3 rounded border border-border-subtle p-3 sm:grid-cols-[minmax(11rem,1fr)_minmax(8rem,10rem)_minmax(8rem,10rem)] sm:items-end"
+                    data-testid={`generate-question-plan-row-${row.question_type}`}
                   >
-                    {row.label}
-                  </Checkbox>
+                    <Checkbox
+                      checked={row.enabled}
+                      disabled={generationInFlight}
+                      onChange={(event) =>
+                        updateQuestionPlanRow(row.question_type, { enabled: event.target.checked })
+                      }
+                    >
+                      {rowLabel}
+                    </Checkbox>
 
-                  <label className="block text-xs font-medium text-text-subtle">
-                    <span className="mb-1 block">
-                      {t("option:quiz.questionPlanCount", { defaultValue: "Count" })}
-                    </span>
-                    <span data-testid={`generate-question-plan-count-${row.question_type}`}>
-                      <InputNumber
-                        min={1}
-                        max={100}
-                        precision={0}
-                        step={1}
-                        value={row.count}
-                        aria-label={`${row.label} count`}
-                        className="w-full"
-                        disabled={generationInFlight || !row.enabled}
-                        onChange={(value) => {
-                          const next = sanitizeInputNumber(value, 1, 100)
-                          if (next != null) {
-                            updateQuestionPlanRow(row.question_type, { count: next })
-                          }
-                        }}
-                      />
-                    </span>
-                  </label>
-
-                  {row.option_count != null ? (
                     <label className="block text-xs font-medium text-text-subtle">
                       <span className="mb-1 block">
-                        {t("option:quiz.questionPlanOptions", { defaultValue: "Options" })}
+                        {t("option:quiz.questionPlanCount", { defaultValue: "Count" })}
                       </span>
-                      <span data-testid={`generate-question-plan-option-count-${row.question_type}`}>
+                      <span data-testid={`generate-question-plan-count-${row.question_type}`}>
                         <InputNumber
-                          min={2}
-                          max={6}
+                          min={1}
+                          max={100}
                           precision={0}
                           step={1}
-                          value={row.option_count}
-                          aria-label={`${row.label} options`}
+                          value={row.count}
+                          aria-label={`${rowLabel} count`}
                           className="w-full"
                           disabled={generationInFlight || !row.enabled}
                           onChange={(value) => {
-                            const next = sanitizeInputNumber(value, 2, 6)
+                            const next = sanitizeInputNumber(value, 1, 100)
                             if (next != null) {
-                              updateQuestionPlanRow(row.question_type, { option_count: next })
+                              updateQuestionPlanRow(row.question_type, { count: next })
                             }
                           }}
                         />
                       </span>
                     </label>
-                  ) : row.pair_count != null ? (
-                    <label className="block text-xs font-medium text-text-subtle">
-                      <span className="mb-1 block">
-                        {t("option:quiz.questionPlanPairs", { defaultValue: "Pairs" })}
-                      </span>
-                      <span data-testid={`generate-question-plan-pair-count-${row.question_type}`}>
-                        <InputNumber
-                          min={2}
-                          max={6}
-                          precision={0}
-                          step={1}
-                          value={row.pair_count}
-                          aria-label={`${row.label} pairs`}
-                          className="w-full"
-                          disabled={generationInFlight || !row.enabled}
-                          onChange={(value) => {
-                            const next = sanitizeInputNumber(value, 2, 6)
-                            if (next != null) {
-                              updateQuestionPlanRow(row.question_type, { pair_count: next })
-                            }
-                          }}
-                        />
-                      </span>
-                    </label>
-                  ) : null}
-                </div>
-              ))}
+
+                    {row.option_count != null ? (
+                      <label className="block text-xs font-medium text-text-subtle">
+                        <span className="mb-1 block">
+                          {t("option:quiz.questionPlanOptions", { defaultValue: "Options" })}
+                        </span>
+                        <span data-testid={`generate-question-plan-option-count-${row.question_type}`}>
+                          <InputNumber
+                            min={2}
+                            max={6}
+                            precision={0}
+                            step={1}
+                            value={row.option_count}
+                            aria-label={`${rowLabel} options`}
+                            className="w-full"
+                            disabled={generationInFlight || !row.enabled}
+                            onChange={(value) => {
+                              const next = sanitizeInputNumber(value, 2, 6)
+                              if (next != null) {
+                                updateQuestionPlanRow(row.question_type, { option_count: next })
+                              }
+                            }}
+                          />
+                        </span>
+                      </label>
+                    ) : row.pair_count != null ? (
+                      <label className="block text-xs font-medium text-text-subtle">
+                        <span className="mb-1 block">
+                          {t("option:quiz.questionPlanPairs", { defaultValue: "Pairs" })}
+                        </span>
+                        <span data-testid={`generate-question-plan-pair-count-${row.question_type}`}>
+                          <InputNumber
+                            min={2}
+                            max={6}
+                            precision={0}
+                            step={1}
+                            value={row.pair_count}
+                            aria-label={`${rowLabel} pairs`}
+                            className="w-full"
+                            disabled={generationInFlight || !row.enabled}
+                            onChange={(value) => {
+                              const next = sanitizeInputNumber(value, 2, 6)
+                              if (next != null) {
+                                updateQuestionPlanRow(row.question_type, { pair_count: next })
+                              }
+                            }}
+                          />
+                        </span>
+                      </label>
+                    ) : null}
+                  </div>
+                )
+              })}
             </div>
           </div>
 

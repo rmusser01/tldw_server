@@ -2,10 +2,32 @@
 
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 
 import { RecipeCard } from "../RecipeCard"
 import type { RecipeCardPayload } from "@/types/recipe-card"
+
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    t: (
+      _key: string,
+      fallback?: string | { defaultValue?: string; count?: number },
+      options?: { count?: number }
+    ) => {
+      const template =
+        typeof fallback === "string"
+          ? fallback
+          : fallback?.defaultValue || _key
+      const count =
+        typeof options?.count === "number"
+          ? String(options.count)
+          : typeof fallback === "object" && typeof fallback.count === "number"
+            ? String(fallback.count)
+            : ""
+      return template.replace("{{count}}", count)
+    }
+  })
+}))
 
 const payload: RecipeCardPayload = {
   kind: "recipe_card",

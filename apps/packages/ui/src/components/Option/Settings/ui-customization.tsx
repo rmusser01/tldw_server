@@ -160,7 +160,6 @@ const SidebarShortcutSelector = ({
       summaryMeta={<span>{countLabel}</span>}
     >
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-text-muted">
-        <span>{countLabel}</span>
         {isModified && (
           <button
             type="button"
@@ -271,7 +270,6 @@ const HeaderShortcutSelector = ({
       summaryMeta={<span>{countLabel}</span>}
     >
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-text-muted">
-        <span>{countLabel}</span>
         {isModified && (
           <button
             type="button"

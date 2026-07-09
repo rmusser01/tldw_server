@@ -1,5 +1,6 @@
 import React from "react"
 import { ChefHat, ListChecks, Minus, Plus } from "lucide-react"
+import { useTranslation } from "react-i18next"
 
 import { classNames } from "@/libs/class-name"
 import type { RecipeCardIngredient, RecipeCardPayload } from "@/types/recipe-card"
@@ -12,11 +13,8 @@ type RecipeCardProps = {
 const formatQuantity = (value: number) =>
   Number.isInteger(value) ? String(value) : String(Math.round(value * 100) / 100)
 
-const durationText = (seconds: number) =>
-  seconds >= 60 && seconds % 60 === 0 ? `${seconds / 60} min` : `${seconds} sec`
-
-const formatServingsLabel = (value: number) =>
-  `${formatQuantity(value)} ${value === 1 ? "serving" : "servings"}`
+const MIN_SERVINGS = 1
+const MAX_SERVINGS = 50
 
 const ingredientText = (
   ingredient: RecipeCardIngredient,
@@ -35,15 +33,36 @@ const ingredientText = (
 }
 
 export function RecipeCard({ payload, className = "" }: RecipeCardProps) {
+  const { t } = useTranslation("common")
   const { recipe } = payload
-  const [servings, setServings] = React.useState(recipe.servings.value)
+  const baseServings =
+    Number.isFinite(recipe.servings.value) && recipe.servings.value > 0
+      ? recipe.servings.value
+      : MIN_SERVINGS
+  const [servings, setServings] = React.useState(baseServings)
   const [isCookingMode, setIsCookingMode] = React.useState(false)
-  const factor = servings / recipe.servings.value
-  const servingLabel = formatServingsLabel(servings)
+  const factor = baseServings > 0 ? servings / baseServings : 1
+  const servingLabel =
+    servings === 1
+      ? t("recipeCard.serving", "{{count}} serving", { count: servings })
+      : t("recipeCard.servings", "{{count}} servings", { count: servings })
+  const durationText = React.useCallback(
+    (seconds: number) =>
+      seconds >= 60 && seconds % 60 === 0
+        ? t("recipeCard.durationMinutes", {
+            defaultValue: "{{count}} min",
+            count: seconds / 60
+          })
+        : t("recipeCard.durationSeconds", {
+            defaultValue: "{{count}} sec",
+            count: seconds
+          }),
+    [t]
+  )
 
   React.useEffect(() => {
-    setServings(recipe.servings.value)
-  }, [recipe.servings.value])
+    setServings(baseServings)
+  }, [baseServings])
 
   return (
     <section
@@ -60,8 +79,18 @@ export function RecipeCard({ payload, className = "" }: RecipeCardProps) {
             {recipe.title}
           </h3>
           <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-text-muted">
-            <span>{recipe.ingredients.length} ingredients</span>
-            <span>{recipe.steps.length} steps</span>
+            <span>
+              {t("recipeCard.ingredientsCount", {
+                defaultValue: "{{count}} ingredients",
+                count: recipe.ingredients.length
+              })}
+            </span>
+            <span>
+              {t("recipeCard.stepsCount", {
+                defaultValue: "{{count}} steps",
+                count: recipe.steps.length
+              })}
+            </span>
           </div>
         </div>
       </header>
@@ -77,19 +106,19 @@ export function RecipeCard({ payload, className = "" }: RecipeCardProps) {
         <div className="flex items-center rounded-md border border-border">
           <button
             type="button"
-            aria-label="Decrease servings"
+            aria-label={t("recipeCard.decreaseServings", "Decrease servings")}
             className="flex h-7 w-8 items-center justify-center text-text-muted hover:bg-surface2 hover:text-text disabled:opacity-40"
-            disabled={servings <= 1}
-            onClick={() => setServings((value) => Math.max(1, value - 1))}
+            disabled={servings <= MIN_SERVINGS}
+            onClick={() => setServings((value) => Math.max(MIN_SERVINGS, value - 1))}
           >
             <Minus className="h-3.5 w-3.5" aria-hidden="true" />
           </button>
           <button
             type="button"
-            aria-label="Increase servings"
+            aria-label={t("recipeCard.increaseServings", "Increase servings")}
             className="flex h-7 w-8 items-center justify-center border-l border-border text-text-muted hover:bg-surface2 hover:text-text disabled:opacity-40"
-            disabled={servings >= 50}
-            onClick={() => setServings((value) => Math.min(50, value + 1))}
+            disabled={servings >= MAX_SERVINGS}
+            onClick={() => setServings((value) => Math.min(MAX_SERVINGS, value + 1))}
           >
             <Plus className="h-3.5 w-3.5" aria-hidden="true" />
           </button>
@@ -106,7 +135,7 @@ export function RecipeCard({ payload, className = "" }: RecipeCardProps) {
           onClick={() => setIsCookingMode((value) => !value)}
         >
           <ListChecks className="h-3.5 w-3.5" aria-hidden="true" />
-          Cooking mode
+          {t("recipeCard.cookingMode", "Cooking mode")}
         </button>
       </div>
 

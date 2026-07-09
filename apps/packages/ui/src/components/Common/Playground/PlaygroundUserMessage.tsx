@@ -23,10 +23,10 @@ import { useUiModeStore } from "@/store/ui-mode"
 import { useStoreMessageOption } from "@/store/option"
 import { EDIT_MESSAGE_EVENT } from "@/utils/timeline-actions"
 import { Badge, type BadgeVariant } from "@/components/ui/primitives"
+import { CHAT_MESSAGE_OPACITY_ALPHA } from "@/services/settings/chat-opacity-css-vars"
 
 const ACTION_BUTTON_CLASS =
   "flex items-center justify-center rounded-full border border-border bg-surface2 text-text-muted hover:bg-surface hover:text-text transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-focus min-w-[44px] min-h-[44px]"
-const CHAT_MESSAGE_OPACITY_ALPHA = "var(--chat-message-opacity, 0.6)"
 
 const MESSAGE_TYPE_BADGE_VARIANT: Record<string, BadgeVariant> = {
   summary: "info",
