@@ -313,6 +313,7 @@ def _persist_completed_sync_export_job(
         file_size_bytes=file_size,
         download_url=download_url,
         expires_at=expires_at,
+        metadata=service.build_export_job_metadata(file_path),
     )
     try:
         service._save_export_job(job)  # noqa: SLF001 (internal helper is appropriate here)
@@ -1367,6 +1368,7 @@ async def list_export_jobs(
                     file_size_bytes=job.file_size_bytes,
                     download_url=secure_download_url,  # Use secure URL based on job_id
                     expires_at=job.expires_at,
+                    metadata=job.metadata or {},
                 )
             )
 
@@ -1435,6 +1437,7 @@ async def get_export_job(
             file_size_bytes=job.file_size_bytes,
             download_url=secure_download_url,  # Use secure URL based on job_id
             expires_at=job.expires_at,
+            metadata=job.metadata or {},
         )
 
     except HTTPException:

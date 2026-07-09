@@ -476,6 +476,32 @@ def test_v1_manifest_to_dict_excludes_populated_v1_1_metadata_fields():
                 "role": "readme",
             }
         ],
+        account_inventory=[
+            {
+                "category": "media_pointers",
+                "label": "Media source references",
+                "source": "Media DB",
+                "export_representation": "json/media_pointers.json",
+                "manifest_count_key": "media_pointers",
+                "import_handler_key": "restore_media_pointers",
+                "dependencies": [],
+                "sensitivity": "personal",
+                "restore_status": "pointer_only",
+                "warning": "Pointer-only test warning.",
+            }
+        ],
+        account_inventory_summary={
+            "counts": {
+                "account_profiles": 1,
+                "media_pointers": 1,
+            },
+            "pointer_only_count": 1,
+            "sensitive_category_count": 1,
+            "warning_count": 1,
+            "warnings": ["Pointer-only test warning."],
+            "archive_size_bytes": 0,
+            "post_write_verification": False,
+        },
     )
 
     manifest_dict = manifest.to_dict()
@@ -485,6 +511,10 @@ def test_v1_manifest_to_dict_excludes_populated_v1_1_metadata_fields():
     assert "source_instance" not in manifest_dict
     assert "compatibility" not in manifest_dict
     assert "file_inventory" not in manifest_dict
+    assert "account_inventory" not in manifest_dict
+    assert "account_inventory_summary" not in manifest_dict
+    assert "account_profiles" not in manifest_dict["statistics"]
+    assert "media_pointers" not in manifest_dict["statistics"]
 
 
 def test_v1_1_manifest_to_dict_includes_default_v1_1_metadata_fields():

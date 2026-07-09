@@ -167,6 +167,8 @@ try:
         get_media_prompts,
         get_media_transcripts,
         get_media_by_uuid,
+        get_unvectorized_chunk_count,
+        get_unvectorized_chunks_in_range,
     )
 except _CHATBOOK_NONCRITICAL_EXCEPTIONS:  # pragma: no cover
     create_media_database = None  # type: ignore
@@ -174,6 +176,8 @@ except _CHATBOOK_NONCRITICAL_EXCEPTIONS:  # pragma: no cover
     get_media_by_uuid = None  # type: ignore
     get_media_transcripts = None  # type: ignore
     get_media_prompts = None  # type: ignore
+    get_unvectorized_chunk_count = None  # type: ignore
+    get_unvectorized_chunks_in_range = None  # type: ignore
 
 try:
     from ..DB_Management.Evaluations_DB import EvaluationsDatabase  # type: ignore
@@ -1012,6 +1016,91 @@ class ChatbookService:
             payload[key] = self._normalize_datetime(value)
         return payload
 
+    def _normalize_media_file_row(self, row: dict[str, Any]) -> dict[str, Any]:
+        """Normalize MediaFiles metadata without leaking server-only path details."""
+        return {
+            "id": row.get("id"),
+            "uuid": row.get("uuid"),
+            "file_type": row.get("file_type"),
+            "original_filename": row.get("original_filename"),
+            "file_size": row.get("file_size"),
+            "mime_type": row.get("mime_type"),
+            "checksum": row.get("checksum"),
+            "created_at": self._normalize_datetime(row.get("created_at")),
+            "last_modified": self._normalize_datetime(row.get("last_modified")),
+        }
+
+    def _resolve_owned_media_artifact_path(self, storage_path: Any) -> Path | None:
+        """Resolve stored media bytes only when they live under the account-owned user root."""
+        raw = str(storage_path or "").strip()
+        if not raw:
+            return None
+        try:
+            user_root = DatabasePaths.resolve_user_base_directory(self.user_id_int or self.user_id).resolve()
+        except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
+            return None
+
+        candidates = [Path(raw)] if Path(raw).is_absolute() else [user_root / raw]
+        for candidate in candidates:
+            try:
+                resolved = candidate.resolve()
+                resolved.relative_to(user_root)
+            except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
+                continue
+            if resolved.is_file():
+                return resolved
+        return None
+
+    def _copy_media_artifacts(
+        self,
+        media_db: Any,
+        media_id: int,
+        media_dir: Path,
+        media_id_text: str,
+    ) -> tuple[list[dict[str, Any]], int, int]:
+        list_files = getattr(media_db, "get_media_files", None)
+        if not callable(list_files):
+            return [], 0, 0
+        try:
+            rows = list_files(media_id)
+        except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
+            return [], 0, 0
+
+        files_dir = media_dir / "files" / f"media_{media_id_text}"
+        exported: list[dict[str, Any]] = []
+        bundled_count = 0
+        pointer_count = 0
+        for row in rows or []:
+            if not isinstance(row, dict):
+                continue
+            item = self._normalize_media_file_row(row)
+            source_path = self._resolve_owned_media_artifact_path(row.get("storage_path"))
+            if source_path is None:
+                item["bundled"] = False
+                item["pointer_only"] = True
+                pointer_count += 1
+                exported.append(item)
+                continue
+
+            files_dir.mkdir(parents=True, exist_ok=True)
+            suffix = source_path.suffix or ".bin"
+            file_id = str(row.get("id") or row.get("uuid") or len(exported))
+            dest_name = f"file_{file_id}{suffix}"
+            dest = files_dir / dest_name
+            try:
+                shutil.copy2(source_path, dest)
+            except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
+                item["bundled"] = False
+                item["pointer_only"] = True
+                pointer_count += 1
+            else:
+                item["bundled"] = True
+                item["pointer_only"] = False
+                item["archive_path"] = f"content/media/files/media_{media_id_text}/{dest_name}"
+                bundled_count += 1
+            exported.append(item)
+        return exported, bundled_count, pointer_count
+
     def _normalize_evaluation_record(self, record: dict[str, Any]) -> dict[str, Any]:
         """Normalize evaluation definition for export."""
         payload: dict[str, Any] = {}
@@ -1229,6 +1318,10 @@ class ChatbookService:
                     expires_at TIMESTAMP
                 )
             """)
+            try:
+                self.db.execute_query("ALTER TABLE export_jobs ADD COLUMN metadata TEXT")
+            except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
+                pass
 
             # Import jobs table
             self.db.execute_query("""
@@ -1683,6 +1776,137 @@ class ChatbookService:
                 except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
                     pass
 
+    def _build_account_inventory_summary(
+        self,
+        content: ChatbookContent,
+        archive_size_bytes: int = 0,
+        post_write_verification: bool = False,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        media_source_pointer_count = sum(
+            1 for item in content.media.values() if item.get("url")
+        )
+        media_artifact_pointer_count = sum(
+            1
+            for item in content.media.values()
+            for artifact in item.get("stored_artifacts") or []
+            if artifact.get("pointer_only")
+        )
+        counts = {
+            "account_profiles": 1,
+            "account_settings": 1,
+            "conversations": len(content.conversations),
+            "notes": len(content.notes),
+            "characters": len(content.characters),
+            "world_books": len(content.world_books),
+            "dictionaries": len(content.dictionaries),
+            "prompts": len(content.prompts),
+            "evaluations": len(content.evaluations),
+            "generated_documents": len(content.generated_documents),
+            "explainer_sessions": len(content.explainer_sessions),
+            "media_records": len(content.media),
+            "media_transcripts": sum(len(item.get("transcripts") or []) for item in content.media.values()),
+            "media_chunks": sum(len(item.get("chunks") or []) for item in content.media.values()),
+            "media_stored_artifacts": sum(
+                1
+                for item in content.media.values()
+                for artifact in item.get("stored_artifacts") or []
+                if artifact.get("bundled")
+            ),
+            "media_pointers": media_source_pointer_count + media_artifact_pointer_count,
+            "embeddings": len(content.embeddings),
+            "tags_categories_relationships": len(self._query_ids("SELECT id FROM keywords WHERE deleted = 0")),
+            "sensitive_user_values": 0,
+        }
+        warnings = [row.warning for row in ACCOUNT_DATA_INVENTORY if row.warning]
+        if metadata:
+            warnings.extend(
+                str(warning)
+                for warning in metadata.get("pointer_only_warnings", []) or []
+                if warning
+            )
+        return {
+            "counts": counts,
+            "pointer_only_count": sum(
+                counts.get(row.manifest_count_key, 0)
+                for row in ACCOUNT_DATA_INVENTORY
+                if row.restore_status == "pointer_only"
+            ),
+            "sensitive_category_count": sum(
+                1 for row in ACCOUNT_DATA_INVENTORY if row.sensitivity in {"sensitive", "secret"}
+            ),
+            "warning_count": len(warnings),
+            "warnings": warnings,
+            "archive_size_bytes": archive_size_bytes,
+            "post_write_verification": post_write_verification,
+        }
+
+    @staticmethod
+    def _verify_export_archive(output_path: Path) -> tuple[bool, str | None]:
+        try:
+            archive_size = output_path.stat().st_size
+            with zipfile.ZipFile(output_path, "r") as zf:
+                names = set(zf.namelist())
+                if "manifest.json" not in names:
+                    return False, "manifest.json missing from archive"
+                manifest = json.loads(zf.read("manifest.json"))
+                for item in manifest.get("content_items") or []:
+                    file_path = item.get("file_path")
+                    if file_path and file_path not in names:
+                        return False, f"manifest file_path missing from archive: {file_path}"
+                statistics = manifest.get("statistics") or {}
+                if int(statistics.get("total_size_bytes") or 0) != archive_size:
+                    return False, "manifest total_size_bytes does not match ZIP size"
+                summary = manifest.get("account_inventory_summary") or {}
+                if summary and int(summary.get("archive_size_bytes") or 0) != archive_size:
+                    return False, "manifest archive_size_bytes does not match ZIP size"
+        except _CHATBOOK_NONCRITICAL_EXCEPTIONS as exc:
+            return False, str(exc)
+        return True, None
+
+    @staticmethod
+    def build_export_job_metadata(output_path: str | Path | None) -> dict[str, Any]:
+        """Read redacted completed-export metadata from a Chatbook archive."""
+        if not output_path:
+            return {}
+        try:
+            with zipfile.ZipFile(output_path, "r") as zf:
+                manifest = json.loads(zf.read("manifest.json"))
+        except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
+            return {}
+        summary = manifest.get("account_inventory_summary") or {}
+        return {
+            "account_inventory_summary": summary,
+            "archive_size_bytes": summary.get("archive_size_bytes")
+            or (manifest.get("statistics") or {}).get("total_size_bytes"),
+            "post_write_verification": bool(summary.get("post_write_verification")),
+            "pointer_only_count": int(summary.get("pointer_only_count") or 0),
+            "warning_count": int(summary.get("warning_count") or 0),
+            "sensitive_category_count": int(summary.get("sensitive_category_count") or 0),
+        }
+
+    async def _stabilize_archive_size(
+        self,
+        work_dir: Path,
+        output_path: Path,
+        manifest: ChatbookManifest,
+        content: ChatbookContent,
+        write_manifest: Callable[[], Any],
+    ) -> None:
+        for _ in range(10):
+            archive_size = output_path.stat().st_size
+            if manifest.total_size_bytes == archive_size:
+                break
+            manifest.total_size_bytes = archive_size
+            manifest.account_inventory_summary = self._build_account_inventory_summary(
+                content,
+                archive_size_bytes=archive_size,
+                post_write_verification=bool(manifest.account_inventory_summary.get("post_write_verification")),
+                metadata=manifest.metadata,
+            )
+            await write_manifest()
+            await self._create_zip_archive_async(work_dir, output_path)
+
     async def _create_chatbook_sync_wrapper(
         self,
         name: str,
@@ -1732,6 +1956,14 @@ class ChatbookService:
                 metadata=manifest_metadata,
             )
             manifest.binary_limits = self._get_binary_limits_bytes()
+            if selection_mode == FULL_ACCOUNT_EXPORT_MODE:
+                content_selections = self._expand_full_account_content_selections()
+                include_media = True
+                include_embeddings = True
+                include_generated_content = True
+                manifest.include_media = True
+                manifest.include_embeddings = True
+                manifest.include_generated_content = True
             if manifest.version == ChatbookVersion.V1_1:
                 manifest.features_used = [
                     "content_envelopes",
@@ -1840,6 +2072,11 @@ class ChatbookService:
             manifest.total_dictionaries = len(content.dictionaries)
             manifest.total_documents = len(content.generated_documents)
             manifest.total_explainer_sessions = len(content.explainer_sessions)
+            manifest.account_inventory = [row.to_summary() for row in ACCOUNT_DATA_INVENTORY]
+            manifest.account_inventory_summary = self._build_account_inventory_summary(
+                content,
+                metadata=manifest.metadata,
+            )
 
             # Write manifest asynchronously
             manifest_path = work_dir / "manifest.json"
@@ -1861,13 +2098,22 @@ class ChatbookService:
             await self._create_zip_archive_async(work_dir, output_path)
 
             # Update manifest with final archive size; re-zip if manifest changes size.
-            for _ in range(10):
-                archive_size = output_path.stat().st_size
-                if manifest.total_size_bytes == archive_size:
-                    break
-                manifest.total_size_bytes = archive_size
-                await _write_manifest()
-                await self._create_zip_archive_async(work_dir, output_path)
+            await self._stabilize_archive_size(work_dir, output_path, manifest, content, _write_manifest)
+            verified, verification_error = self._verify_export_archive(output_path)
+            if not verified:
+                raise ExportError(f"Chatbook archive verification failed: {verification_error}")
+            manifest.account_inventory_summary = self._build_account_inventory_summary(
+                content,
+                archive_size_bytes=manifest.total_size_bytes,
+                post_write_verification=True,
+                metadata=manifest.metadata,
+            )
+            await _write_manifest()
+            await self._create_zip_archive_async(work_dir, output_path)
+            await self._stabilize_archive_size(work_dir, output_path, manifest, content, _write_manifest)
+            verified, verification_error = self._verify_export_archive(output_path)
+            if not verified:
+                raise ExportError(f"Chatbook archive verification failed: {verification_error}")
 
             # Store file path in job record (will be retrieved by job_id)
             # No direct filename access for security
@@ -1938,6 +2184,7 @@ class ChatbookService:
                 job.completed_at = now_utc
                 job.output_path = file_path
                 job.file_size_bytes = Path(file_path).stat().st_size if file_path else None
+                job.metadata = self.build_export_job_metadata(file_path)
                 # Build (optionally signed) download URL and expiry
                 job.expires_at = self._get_export_expiry(now_utc)
                 download_expires_at = self._get_download_expiry(now_utc, job.expires_at)
@@ -3606,6 +3853,13 @@ class ChatbookService:
             for row in results:
                 # Handle both dict and tuple formats (for test compatibility)
                 if isinstance(row, dict):
+                    metadata = {}
+                    raw_metadata = row.get("metadata")
+                    if isinstance(raw_metadata, str):
+                        with contextlib.suppress(json.JSONDecodeError):
+                            metadata = json.loads(raw_metadata)
+                    elif isinstance(raw_metadata, dict):
+                        metadata = raw_metadata
                     # Use class method for timestamp parsing
                     job = ExportJob(
                         job_id=row['job_id'],
@@ -3623,13 +3877,18 @@ class ChatbookService:
                         file_size_bytes=row['file_size_bytes'],
                         download_url=row['download_url'],
                         expires_at=ChatbookService._parse_timestamp(row['expires_at']),
-                        metadata={}  # Initialize empty metadata
+                        metadata=metadata
                     )
                 else:
                     # Handle tuple format from mocked tests
                     # (job_id, user_id, status, chatbook_name, output_path, created_at,
                     #  started_at, completed_at, error_message, progress_percentage,
                     #  total_items, processed_items, file_size_bytes, download_url, expires_at)
+                    raw_metadata = row[15] if len(row) > 15 else None
+                    metadata = {}
+                    if isinstance(raw_metadata, str):
+                        with contextlib.suppress(json.JSONDecodeError):
+                            metadata = json.loads(raw_metadata)
                     job = ExportJob(
                         job_id=row[0],
                         user_id=row[1],
@@ -3646,7 +3905,7 @@ class ChatbookService:
                         file_size_bytes=row[12] if len(row) > 12 else 0,
                         download_url=row[13] if len(row) > 13 else None,
                         expires_at=ChatbookService._parse_timestamp(row[14]) if len(row) > 14 else None,
-                        metadata={}  # Initialize empty metadata
+                        metadata=metadata
                     )
                 jobs.append(job)
 
@@ -4161,9 +4420,6 @@ class ChatbookService:
         binary_limits = manifest.binary_limits or {}
         emb_limit = self._resolve_binary_limit(binary_limits, "embeddings", "media_embeddings")
 
-        if include_media:
-            self._note_todo("Binary media asset export is not yet implemented; exporting metadata only.")
-
         for media_identifier in media_ids:
             media_record = self._fetch_media_record(media_db, str(media_identifier))
             if not media_record:
@@ -4193,6 +4449,37 @@ class ChatbookService:
                     logger.debug(f"Failed to fetch media prompts for media {media_id}: {exc}")
                     self._note_todo("Media prompts export encountered failures; inspect logs.")
             normalized["related_prompts"] = media_prompts
+
+            chunks: list[dict[str, Any]] = []
+            if get_unvectorized_chunk_count is not None and get_unvectorized_chunks_in_range is not None:
+                try:
+                    chunk_count = get_unvectorized_chunk_count(media_db, int(media_record["id"])) or 0
+                    if chunk_count:
+                        chunks = [
+                            self._convert_datetimes(row)
+                            for row in get_unvectorized_chunks_in_range(media_db, int(media_record["id"]), 0, chunk_count)
+                        ]
+                except _CHATBOOK_NONCRITICAL_EXCEPTIONS as exc:
+                    logger.debug(f"Failed to fetch media chunks for media {media_id}: {exc}")
+                    self._note_todo("Media chunks export failed for some items; inspect logs.")
+            normalized["chunks"] = chunks
+
+            media_files: list[dict[str, Any]] = []
+            bundled_file_count = 0
+            pointer_file_count = 0
+            if include_media:
+                media_files, bundled_file_count, pointer_file_count = self._copy_media_artifacts(
+                    media_db,
+                    int(media_record["id"]),
+                    media_dir,
+                    media_id,
+                )
+            normalized["stored_artifacts"] = media_files
+            if pointer_file_count:
+                pointer_warnings = manifest.metadata.setdefault("pointer_only_warnings", []) if manifest.metadata is not None else []
+                pointer_warnings.append(
+                    f"{pointer_file_count} stored media artifact pointer(s) for media {media_id} did not resolve under account storage."
+                )
 
             # Handle embeddings when requested and available
             vector_payload = None
@@ -4257,7 +4544,13 @@ class ChatbookService:
                 type=ContentType.MEDIA,
                 title=normalized.get("title", f"Media {media_id}"),
                 description=normalized.get("description"),
-                file_path=f"content/media/{media_file.name}"
+                file_path=f"content/media/{media_file.name}",
+                metadata={
+                    "transcript_count": len(transcripts),
+                    "chunk_count": len(chunks),
+                    "stored_artifact_count": bundled_file_count,
+                    "pointer_only_artifact_count": pointer_file_count,
+                },
             ))
 
         if include_embeddings and not content.embeddings:
@@ -4807,6 +5100,8 @@ class ChatbookService:
         content: ChatbookContent
     ):
         """Collect world books for export."""
+        if not world_book_ids:
+            return
         wb_dir = work_dir / "content" / "world_books"
         wb_dir.mkdir(parents=True, exist_ok=True)
 
@@ -4850,6 +5145,8 @@ class ChatbookService:
         content: ChatbookContent
     ):
         """Collect chat dictionaries for export."""
+        if not dictionary_ids:
+            return
         dict_dir = work_dir / "content" / "dictionaries"
         dict_dir.mkdir(parents=True, exist_ok=True)
         template_settings = self._resolve_template_settings(manifest)
@@ -4935,6 +5232,8 @@ class ChatbookService:
         content: ChatbookContent
     ):
         """Collect generated documents for export."""
+        if not document_ids:
+            return
         docs_dir = work_dir / "content" / "generated_documents"
         docs_dir.mkdir(parents=True, exist_ok=True)
 
@@ -4977,6 +5276,8 @@ class ChatbookService:
         content: ChatbookContent,
     ) -> None:
         """Collect complete Explainer sessions as first-class Chatbook content."""
+        if not session_ids:
+            return
         sessions_dir = work_dir / "content" / "explainer_sessions"
         sessions_dir.mkdir(parents=True, exist_ok=True)
         repo = self._get_explainer_repo()
@@ -5898,8 +6199,8 @@ class ChatbookService:
                     job_id, user_id, status, chatbook_name, output_path,
                     created_at, started_at, completed_at, error_message,
                     progress_percentage, total_items, processed_items,
-                    file_size_bytes, download_url, expires_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    file_size_bytes, download_url, expires_at, metadata
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 job.job_id, job.user_id, job.status.value, job.chatbook_name,
                 job.output_path,
@@ -5908,7 +6209,8 @@ class ChatbookService:
                 job.completed_at.strftime('%Y-%m-%d %H:%M:%S.%f') if job.completed_at else None,
                 job.error_message, job.progress_percentage, job.total_items,
                 job.processed_items, job.file_size_bytes, job.download_url,
-                job.expires_at.strftime('%Y-%m-%d %H:%M:%S.%f') if job.expires_at else None
+                job.expires_at.strftime('%Y-%m-%d %H:%M:%S.%f') if job.expires_at else None,
+                json.dumps(job.metadata or {}, ensure_ascii=False)
             ), commit=commit)
         except _CHATBOOK_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Error saving export job: {e}")
@@ -6018,7 +6320,7 @@ class ChatbookService:
                     'processed_items': row[11] if len(row) > 11 else 0,
                     'file_size_bytes': row[12] if len(row) > 12 else None,
                     'download_url': None if is_json_like else (col13 if len(row) > 13 else None),
-                    'metadata': col13 if is_json_like else None,
+                    'metadata': (row[15] if len(row) > 15 else (col13 if is_json_like else None)),
                     'expires_at': row[14] if len(row) > 14 else None
                 }
 
@@ -6536,6 +6838,100 @@ class ChatbookService:
             return result
         except _CHATBOOK_NONCRITICAL_EXCEPTIONS as e:
             raise DatabaseError(f"Failed to preview export: {e}", cause=e) from e
+
+    def _query_ids(self, query: str, params: tuple[Any, ...] = (), db: Any | None = None) -> list[str]:
+        """Return IDs from a best-effort query."""
+        db_obj = db or self.db
+        execute_query = getattr(db_obj, "execute_query", None)
+        if not callable(execute_query):
+            return []
+        try:
+            rows = self._fetch_results(execute_query(query, params))
+        except _CHATBOOK_SCOPE_COUNT_EXCEPTIONS:
+            return []
+        ids: list[str] = []
+        for row in rows or []:
+            value = row.get("id") if isinstance(row, dict) else (row[0] if row else None)
+            if value is not None:
+                ids.append(str(value))
+        return ids
+
+    def _list_all_prompt_ids(self) -> list[str]:
+        if self._scope_existing_user_path(DatabasePaths.PROMPTS_SUBDIR, DatabasePaths.PROMPTS_DB_NAME) is None:
+            return []
+        prompts_db = self._get_prompts_db()
+        if prompts_db is None:
+            return []
+        try:
+            prompts, _page, _pages, _total = prompts_db.list_prompts(page=1, per_page=100000, sort_by="id", sort_order="asc")
+            return [str(item["id"]) for item in prompts if item.get("id") is not None]
+        except _CHATBOOK_SCOPE_COUNT_EXCEPTIONS:
+            return []
+
+    def _list_all_evaluation_ids(self) -> list[str]:
+        if self._scope_existing_user_path(DatabasePaths.EVALUATIONS_SUBDIR, DatabasePaths.EVALUATIONS_DB_NAME) is None:
+            return []
+        evals_db = self._get_evaluations_db()
+        if evals_db is None:
+            return []
+        try:
+            total = max(1, int(evals_db.count_evaluations_filtered(created_by=self.user_id)))
+            rows = evals_db.list_evaluations_filtered(limit=total, created_by=self.user_id)
+            return [str(item["id"]) for item in rows if item.get("id") is not None]
+        except _CHATBOOK_SCOPE_COUNT_EXCEPTIONS:
+            return []
+
+    def _list_all_explainer_session_ids(self) -> list[str]:
+        if self._scope_existing_user_path(DatabasePaths.EXPLAINER_DB_NAME) is None:
+            return []
+        try:
+            repo = self._get_explainer_repo()
+            limit = 100
+            rows, total = repo.list_session_summaries(owner_user_id=self.user_id, limit=limit, offset=0)
+            all_rows = list(rows or [])
+            offset = len(all_rows)
+            while offset < int(total or 0):
+                page, _total = repo.list_session_summaries(
+                    owner_user_id=self.user_id, limit=limit, offset=offset
+                )
+                if not page:
+                    break
+                all_rows.extend(page)
+                offset += len(page)
+            return [str(getattr(item, "id", "")) for item in all_rows if getattr(item, "id", None)]
+        except _CHATBOOK_SCOPE_COUNT_EXCEPTIONS:
+            return []
+
+    def _list_all_media_ids(self) -> list[str]:
+        if self._scope_existing_user_path(DatabasePaths.MEDIA_DB_NAME) is None:
+            return []
+        media_db = self._get_media_db()
+        if media_db is None:
+            return []
+        return self._query_ids(
+            "SELECT id FROM Media WHERE deleted = 0 AND is_trash = 0 ORDER BY id ASC",
+            db=media_db,
+        )
+
+    def _expand_full_account_content_selections(self) -> dict[ContentType, list[str]]:
+        """Expand full-account export to every content collector this service owns."""
+        selections = {
+            ContentType.CONVERSATION: self._query_ids("SELECT id FROM conversations WHERE deleted = 0 ORDER BY id ASC"),
+            ContentType.NOTE: self._query_ids("SELECT id FROM notes WHERE deleted = 0 ORDER BY id ASC"),
+            ContentType.CHARACTER: self._query_ids("SELECT id FROM character_cards WHERE deleted = 0 ORDER BY id ASC"),
+            ContentType.WORLD_BOOK: self._query_ids("SELECT id FROM world_books WHERE deleted = 0 ORDER BY id ASC"),
+            ContentType.DICTIONARY: self._query_ids("SELECT id FROM chat_dictionaries WHERE deleted = 0 ORDER BY id ASC"),
+            ContentType.PROMPT: self._list_all_prompt_ids(),
+            ContentType.EVALUATION: self._list_all_evaluation_ids(),
+            ContentType.MEDIA: self._list_all_media_ids(),
+            ContentType.GENERATED_DOCUMENT: self._query_ids("SELECT id FROM generated_documents ORDER BY id ASC"),
+            ContentType.EXPLAINER_SESSION: self._list_all_explainer_session_ids(),
+            ContentType.EMBEDDING: [],
+        }
+        chroma_path = self._scope_existing_user_path(DatabasePaths.CHROMA_SUBDIR)
+        if chroma_path is None:
+            selections.pop(ContentType.EMBEDDING)
+        return selections
 
     def _scope_count_query(self, query: str, params: tuple[Any, ...] = (), db: Any | None = None) -> int:
         """Return a best-effort COUNT(*) value from a DB object."""

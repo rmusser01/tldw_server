@@ -305,6 +305,7 @@ async def _handle_export(service: ChatbookService, payload: dict[str, Any], job_
         ej.output_path = file_path
         with contextlib.suppress(Exception):
             ej.file_size_bytes = Path(file_path).stat().st_size if file_path else None
+        ej.metadata = service.build_export_job_metadata(file_path)
         now_utc = datetime.now(timezone.utc)
         ej.expires_at = service._get_export_expiry(now_utc)
         download_expires_at = service._get_download_expiry(now_utc, ej.expires_at)
