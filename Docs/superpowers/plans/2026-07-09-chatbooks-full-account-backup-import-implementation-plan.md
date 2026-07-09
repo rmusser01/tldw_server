@@ -365,7 +365,7 @@ Completed in commits `377338c7aef165aa5c3d2fd5205e174bc096cbff` and `2db382f157`
 - Test: `tldw_Server_API/tests/Chatbooks/test_chatbooks_full_account_export_contract.py`
 - Test: `tldw_Server_API/tests/Chatbooks/test_chatbooks_sensitive_export_redaction.py`
 
-- [ ] **Step 1: Write failing full-export archive tests**
+- [x] **Step 1: Write failing full-export archive tests**
 
 Build a fixture user with conversations, notes, characters, prompts, evaluations, media records with transcripts/derived metadata, and embedding stubs or vectors where local fixtures allow. Export with omitted selections and assert the ZIP contains manifest entries for every restorable inventory category with data.
 
@@ -380,7 +380,7 @@ Assertions:
 - sensitive values are not in `manifest.json`, job result summaries, warnings, or logs captured by `caplog`
 - archive size is present and post-write verification is true
 
-- [ ] **Step 2: Run full-export tests and verify failure**
+- [x] **Step 2: Run full-export tests and verify failure**
 
 Run:
 
@@ -391,7 +391,7 @@ python -m pytest tldw_Server_API/tests/Chatbooks/test_chatbooks_full_account_exp
 
 Expected: fail because full-account mode does not expand to all inventory rows and manifest/job summaries do not carry the required inventory data.
 
-- [ ] **Step 3: Implement full-account expansion**
+- [x] **Step 3: Implement full-account expansion**
 
 Add a helper that returns all export IDs and inventory summaries for the current user:
 
@@ -414,7 +414,7 @@ def _expand_full_account_content_selections(self) -> dict[ContentType, list[str]
 
 Use existing DB abstractions and helper methods. Do not query unrelated users. If a source database is absent, add an inventory warning for that category instead of omitting it silently.
 
-- [ ] **Step 4: Export stored file artifacts and pointer-only media correctly**
+- [x] **Step 4: Export stored file artifacts and pointer-only media correctly**
 
 Replace the current media collector warning that only exports metadata when stored artifacts exist. The implementation should:
 
@@ -424,7 +424,7 @@ Replace the current media collector warning that only exports metadata when stor
 - add pointer-only warnings for unavailable source bytes without claiming the bytes were exported
 - keep archive path traversal checks for copied files
 
-- [ ] **Step 5: Add manifest and job summaries**
+- [x] **Step 5: Add manifest and job summaries**
 
 Extend `ChatbookManifest.to_dict()` with non-secret summary fields:
 
@@ -441,7 +441,7 @@ Extend `ChatbookManifest.to_dict()` with non-secret summary fields:
 
 For completed sync and async jobs, store a redacted summary in job metadata and return it from job status endpoints. Do not put secret values in metadata.
 
-- [ ] **Step 6: Verify archive after final manifest write**
+- [x] **Step 6: Verify archive after final manifest write**
 
 After the final ZIP write, reopen the archive and verify:
 
@@ -452,23 +452,31 @@ After the final ZIP write, reopen the archive and verify:
 
 Set `post_write_verification` to true only after these checks pass. Fail the export if verification fails.
 
-- [ ] **Step 7: Verify tests pass**
+- [x] **Step 7: Verify tests pass**
 
-Run:
+Actual verification:
 
 ```bash
 source .venv/bin/activate
-python -m pytest tldw_Server_API/tests/Chatbooks/test_chatbooks_account_inventory.py tldw_Server_API/tests/Chatbooks/test_chatbooks_full_account_export_contract.py tldw_Server_API/tests/Chatbooks/test_chatbooks_sensitive_export_redaction.py -v
+python -m pytest tldw_Server_API/tests/Chatbooks/test_chatbooks_full_account_export_contract.py -v
+python -m pytest tldw_Server_API/tests/Chatbooks/test_chatbooks_manifest_contract.py tldw_Server_API/tests/Chatbooks/test_chatbooks_manifest_v1_1_contract.py tldw_Server_API/tests/Chatbooks/test_chatbooks_sync_contracts.py -v
+python -m pytest tldw_Server_API/tests/Chatbooks/test_chatbook_service.py tldw_Server_API/tests/Chatbooks/test_chatbooks_export_sync.py tldw_Server_API/tests/Chatbooks/test_chatbooks_cancellation.py tldw_Server_API/tests/Chatbooks/test_chatbooks_account_inventory.py tldw_Server_API/tests/Chatbooks/test_chatbooks_full_account_export_contract.py -q
+python -m json.tool Docs/Schemas/chatbooks_manifest_v1_1.json
+python -m bandit -f json -o /tmp/bandit_chatbooks_full_account_task3.json tldw_Server_API/app/api/v1/endpoints/chatbooks.py tldw_Server_API/app/api/v1/schemas/chatbook_schemas.py tldw_Server_API/app/core/Chatbooks/chatbook_models.py tldw_Server_API/app/core/Chatbooks/chatbook_service.py tldw_Server_API/app/core/Chatbooks/services/jobs_worker.py
 ```
 
 Expected: pass.
 
-- [ ] **Step 8: Commit**
+Completed with focused and regression verification: `python -m pytest tldw_Server_API/tests/Chatbooks/test_chatbooks_full_account_export_contract.py -v` passed with 16 tests; `python -m pytest tldw_Server_API/tests/Chatbooks/test_chatbooks_manifest_contract.py tldw_Server_API/tests/Chatbooks/test_chatbooks_manifest_v1_1_contract.py tldw_Server_API/tests/Chatbooks/test_chatbooks_sync_contracts.py -v` passed with 29 tests; `python -m pytest tldw_Server_API/tests/Chatbooks/test_chatbook_service.py tldw_Server_API/tests/Chatbooks/test_chatbooks_export_sync.py tldw_Server_API/tests/Chatbooks/test_chatbooks_cancellation.py tldw_Server_API/tests/Chatbooks/test_chatbooks_account_inventory.py tldw_Server_API/tests/Chatbooks/test_chatbooks_full_account_export_contract.py -q` passed with 83 tests; `python -m json.tool Docs/Schemas/chatbooks_manifest_v1_1.json` passed; Bandit on touched backend files reported 0 findings.
+
+- [x] **Step 8: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/Chatbooks/chatbook_service.py tldw_Server_API/app/core/Chatbooks/chatbook_models.py tldw_Server_API/app/core/Chatbooks/jobs_adapter.py tldw_Server_API/app/api/v1/schemas/chatbook_schemas.py tldw_Server_API/app/api/v1/endpoints/chatbooks.py tldw_Server_API/tests/Chatbooks/test_chatbooks_full_account_export_contract.py tldw_Server_API/tests/Chatbooks/test_chatbooks_sensitive_export_redaction.py
 git commit -m "feat: export chatbooks full account inventory"
 ```
+
+Completed in the Task 3 commit.
 
 ## Task 4: Full Archive Import Restore Coverage
 

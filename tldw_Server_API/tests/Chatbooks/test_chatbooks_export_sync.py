@@ -61,8 +61,9 @@ class FakeDB:
                 job_id, user_id, status, chatbook_name, output_path,
                 created_at, started_at, completed_at, error_message,
                 progress_percentage, total_items, processed_items,
-                file_size_bytes, download_url, expires_at,
+                file_size_bytes, download_url, expires_at, *rest,
             ) = params
+            metadata = rest[0] if rest else None
             self._export_jobs[job_id] = {
                 "job_id": job_id,
                 "user_id": user_id,
@@ -79,6 +80,7 @@ class FakeDB:
                 "file_size_bytes": file_size_bytes,
                 "download_url": download_url,
                 "expires_at": expires_at,
+                "metadata": metadata,
             }
             return _DummyCursor([])
 

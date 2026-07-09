@@ -310,6 +310,7 @@ class ExportJobResponse(BaseModel):
     file_size_bytes: Optional[int] = Field(default=None, ge=0)
     download_url: Optional[str] = None
     expires_at: Optional[datetime] = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class ImportJobResponse(BaseModel):
