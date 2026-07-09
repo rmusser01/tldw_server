@@ -177,6 +177,7 @@ describe("usePlaygroundQueueManagement document processing", () => {
         uploadedFiles: [],
         ragMediaIds: [42],
         fileRetrievalEnabled: true,
+        documentSnippetForModel: "parsed notes",
         documentProcessing: turnMetadata
       },
       turnMetadata
@@ -226,6 +227,7 @@ describe("usePlaygroundQueueManagement document processing", () => {
           uploadedFiles: [],
           ragMediaIds: [42],
           fileRetrievalEnabled: true,
+          messageForModel: "summarize\n\nparsed notes",
           userMetadataExtra: {
             documentProcessing: turnMetadata
           }

@@ -377,10 +377,22 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
 
         const {
           documentProcessing,
-          messageForModel: preparedMessageForModel,
+          documentSnippetForModel,
           userMetadataExtra,
           ...preparedRequestOverrides
         } = preparedDocuments.requestOverrides as Record<string, unknown>
+        const preparedMessageForModel =
+          typeof documentSnippetForModel === "string" &&
+          documentSnippetForModel.trim()
+            ? [
+                typeof mergedRequestOverrides?.messageForModel === "string"
+                  ? mergedRequestOverrides.messageForModel
+                  : visiblePrompt,
+                documentSnippetForModel
+              ]
+                .filter(Boolean)
+                .join("\n\n")
+            : undefined
         const sendingPromptMetadata = toSendingPromptMetadata(
           documentProcessing,
           preparedDocuments.turnMetadata

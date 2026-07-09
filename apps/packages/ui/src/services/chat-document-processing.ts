@@ -68,7 +68,7 @@ export type PreparedChatDocumentAttachments = {
     uploadedFiles: UploadedFile[]
     ragMediaIds?: Array<string | number>
     fileRetrievalEnabled?: boolean
-    messageForModel?: string
+    documentSnippetForModel?: string
     documentProcessing?: DocumentProcessingTurnMetadata
   }
   turnMetadata: DocumentProcessingTurnMetadata
@@ -604,7 +604,7 @@ export const prepareChatDocumentAttachmentsForSend = async ({
           uploadedFiles: hasIngest ? [] : contextFiles,
           ragMediaIds: hasIngest ? ragMediaIds : undefined,
           fileRetrievalEnabled: hasIngest ? true : undefined,
-          messageForModel: mixedMessage,
+          documentSnippetForModel: mixedMessage,
           documentProcessing: turnMetadata,
         }
 

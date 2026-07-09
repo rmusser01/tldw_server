@@ -1404,38 +1404,41 @@ export const SidepanelForm = ({
         }
         if (nextFiles.length > 0) {
           setContextFiles((prev) => [...prev, ...nextFiles])
-          const nextFileIds = new Set(nextFiles.map((file) => file.id))
-          void tldwClient
-            .preflightDocumentUpload({
-              files: nextFiles.map((file) => ({
-                client_id: file.id,
-                filename: file.filename,
-                mime_type: file.type || null,
-                size_bytes: file.size
-              }))
-            })
-            .then((response) => {
-              setContextFiles((prev) =>
-                normalizeDocumentPreflightResponse(response, prev)
-              )
-            })
-            .catch((error) => {
-              console.error("Sidepanel document preflight failed:", error)
-              setContextFiles((prev) =>
-                prev.map((file) =>
-                  nextFileIds.has(file.id)
-                    ? {
-                        ...file,
-                        processingStatus: "blocked",
-                        processingBlockedReason: t(
-                          "sidepanel:composer.documentPreflightFailed",
-                          "Document preflight failed. Try again or remove the file."
-                        )
-                      }
-                    : file
+          void (async () => {
+            for (let index = 0; index < nextFiles.length; index += 50) {
+              const batch = nextFiles.slice(index, index + 50)
+              const batchFileIds = new Set(batch.map((file) => file.id))
+              try {
+                const response = await tldwClient.preflightDocumentUpload({
+                  files: batch.map((file) => ({
+                    client_id: file.id,
+                    filename: file.filename,
+                    mime_type: file.type || null,
+                    size_bytes: file.size
+                  }))
+                })
+                setContextFiles((prev) =>
+                  normalizeDocumentPreflightResponse(response, prev)
                 )
-              )
-            })
+              } catch (error) {
+                console.error("Sidepanel document preflight failed:", error)
+                setContextFiles((prev) =>
+                  prev.map((file) =>
+                    batchFileIds.has(file.id)
+                      ? {
+                          ...file,
+                          processingStatus: "blocked",
+                          processingBlockedReason: t(
+                            "sidepanel:composer.documentPreflightFailed",
+                            "Document preflight failed. Try again or remove the file."
+                          )
+                        }
+                      : file
+                  )
+                )
+              }
+            }
+          })()
           notification.success({
             message: t("sidepanel:composer.filesAdded", {
               defaultValue: "{{count}} file(s) added to context",

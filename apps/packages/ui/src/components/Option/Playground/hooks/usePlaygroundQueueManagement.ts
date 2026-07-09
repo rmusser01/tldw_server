@@ -112,14 +112,26 @@ export interface UsePlaygroundQueueManagementDeps {
 
 const mergePreparedDocumentOverrides = (
   baseOverrides: Record<string, unknown>,
-  prepared: Awaited<ReturnType<typeof prepareChatDocumentAttachmentsForSend>>
+  prepared: Awaited<ReturnType<typeof prepareChatDocumentAttachmentsForSend>>,
+  promptText: string
 ) => {
   const {
     documentProcessing,
-    messageForModel,
+    documentSnippetForModel,
     userMetadataExtra,
     ...preparedOverrides
   } = (prepared.requestOverrides ?? {}) as Record<string, unknown>
+  const messageForModel =
+    typeof documentSnippetForModel === "string" && documentSnippetForModel.trim()
+      ? [
+          typeof baseOverrides.messageForModel === "string"
+            ? baseOverrides.messageForModel
+            : promptText,
+          documentSnippetForModel
+        ]
+          .filter(Boolean)
+          .join("\n\n")
+      : undefined
   return {
     ...baseOverrides,
     ...preparedOverrides,
@@ -414,7 +426,8 @@ export function usePlaygroundQueueManagement(
         }
         queuedRequestOverrides = mergePreparedDocumentOverrides(
           queuedRequestOverrides,
-          preparedDocuments
+          preparedDocuments,
+          item.promptText
         )
       }
       const submitResult = await sendMessage({

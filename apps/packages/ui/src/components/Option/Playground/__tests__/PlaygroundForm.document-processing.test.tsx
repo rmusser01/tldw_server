@@ -143,6 +143,7 @@ describe("Playground document processing submit", () => {
         uploadedFiles: [],
         ragMediaIds: [42],
         fileRetrievalEnabled: true,
+        documentSnippetForModel: "parsed notes",
         documentProcessing: turnMetadata
       },
       turnMetadata
@@ -173,6 +174,7 @@ describe("Playground document processing submit", () => {
           uploadedFiles: [],
           ragMediaIds: [42],
           fileRetrievalEnabled: true,
+          messageForModel: "summarize\n\nparsed notes",
           userMetadataExtra: {
             documentProcessing: expect.objectContaining({
               ...turnMetadata,

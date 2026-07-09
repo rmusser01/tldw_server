@@ -183,7 +183,8 @@ describe("chat document processing service", () => {
       ragMediaIds: [42],
       fileRetrievalEnabled: true,
     })
-    expect(result.requestOverrides?.messageForModel).toContain("parsed notes")
+    expect("messageForModel" in (result.requestOverrides ?? {})).toBe(false)
+    expect(result.requestOverrides?.documentSnippetForModel).toContain("parsed notes")
   })
 
   it("normalizes backend preflight capabilities onto matching files", () => {

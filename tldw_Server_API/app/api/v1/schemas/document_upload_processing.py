@@ -1,3 +1,5 @@
+"""Schemas for chat document upload processing decisions and handoff drafts."""
+
 from __future__ import annotations
 
 from typing import Any, Literal
@@ -10,6 +12,8 @@ DocumentProcessingStatus = Literal["available", "unavailable", "blocked"]
 
 
 class DocumentUploadPreflightFile(BaseModel):
+    """Client-supplied document metadata used before upload processing."""
+
     client_id: str = Field(..., min_length=1, max_length=128)
     filename: str = Field(..., min_length=1, max_length=512)
     mime_type: str | None = Field(default=None, max_length=255)
@@ -19,16 +23,22 @@ class DocumentUploadPreflightFile(BaseModel):
 
 
 class DocumentUploadPreflightRequest(BaseModel):
+    """Batch request for document processing capability checks."""
+
     files: list[DocumentUploadPreflightFile] = Field(default_factory=list, max_length=50)
 
 
 class DocumentModeCapability(BaseModel):
+    """Availability result for one document processing mode."""
+
     available: bool
     status: DocumentProcessingStatus
     reason: str | None = None
 
 
 class DocumentUploadPreflightItem(BaseModel):
+    """Per-file processing choices returned to the chat UI."""
+
     client_id: str
     filename: str
     media_type: Literal["pdf", "document", "ebook", "unsupported"]
@@ -43,19 +53,27 @@ class DocumentUploadPreflightItem(BaseModel):
 
 
 class DocumentUploadPreflightResponse(BaseModel):
+    """Preflight response for all requested document files."""
+
     files: list[DocumentUploadPreflightItem]
 
 
 class ChatDocumentDraftCreateRequest(BaseModel):
+    """Transient sidepanel-to-WebUI document handoff payload."""
+
     payload: dict[str, Any] = Field(default_factory=dict)
 
 
 class ChatDocumentDraftCreateResponse(BaseModel):
+    """Identifier and expiry for a stored document handoff draft."""
+
     draft_id: str
     expires_at: str
 
 
 class ChatDocumentDraftReadResponse(BaseModel):
+    """Stored document handoff draft payload and timestamps."""
+
     draft_id: str
     created_at: str
     expires_at: str
