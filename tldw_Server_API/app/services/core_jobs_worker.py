@@ -180,7 +180,7 @@ async def run_chatbooks_core_jobs_worker(stop_event: asyncio.Event | None = None
                     raw_selections = payload.get("content_selections")
                     selection_mode = str(
                         payload.get("selection_mode")
-                        or (FULL_ACCOUNT_EXPORT_MODE if raw_selections is None else "allowlist")
+                        or (FULL_ACCOUNT_EXPORT_MODE if raw_selections is None or raw_selections == {} else "allowlist")
                     )
                     cs = None if selection_mode == FULL_ACCOUNT_EXPORT_MODE else {}
                     if cs is not None:
