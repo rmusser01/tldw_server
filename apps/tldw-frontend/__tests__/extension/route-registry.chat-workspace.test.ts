@@ -29,6 +29,11 @@ const optionRouteVisibilitySource = loadSource(
   "../packages/ui/src/routes/option-route-visibility.ts",
   "apps/packages/ui/src/routes/option-route-visibility.ts"
 )
+const routeHostedVisibilitySource = loadSource(
+  "hosted route visibility",
+  "../packages/ui/src/routes/route-hosted-visibility.ts",
+  "apps/packages/ui/src/routes/route-hosted-visibility.ts"
+)
 const uiSettingsSource = loadSource(
   "ui settings",
   "../packages/ui/src/services/settings/ui-settings.ts",
@@ -77,7 +82,7 @@ const getHeaderShortcutIndex = (id: string) =>
   getHeaderShortcutAssignments().find((assignment) => assignment.id === id)
     ?.shortcutIndex
 
-const getDefaultSidebarShortcutSelectionLength = () => {
+const getDefaultSidebarShortcutSelection = () => {
   const match = uiSettingsSource.match(
     /export const DEFAULT_SIDEBAR_SHORTCUT_SELECTION:\s*SidebarShortcutId\[\]\s*=\s*\[([\s\S]*?)\]/
   )
@@ -85,7 +90,11 @@ const getDefaultSidebarShortcutSelectionLength = () => {
     throw new Error("Missing DEFAULT_SIDEBAR_SHORTCUT_SELECTION")
   }
 
-  return Array.from(match[1].matchAll(/"[^"]+"/g)).length
+  return Array.from(match[1].matchAll(/"([^"]+)"/g)).map((entry) => entry[1])
+}
+
+const getDefaultSidebarShortcutSelectionLength = () => {
+  return getDefaultSidebarShortcutSelection().length
 }
 
 const getSidebarShortcutMaxCount = () => {
@@ -104,7 +113,11 @@ describe("chat workspace route registry parity", () => {
   })
 
   it("keeps the chat workspace route visible in hosted mode", () => {
-    expect(optionRouteVisibilitySource).toContain("CHAT_WORKSPACE_PATH")
+    expect(optionRouteVisibilitySource).toContain("HOSTED_VISIBLE_OPTION_PATHS")
+    expect(routeHostedVisibilitySource).toContain("CHAT_WORKSPACE_PATH")
+    expect(routeHostedVisibilitySource).toMatch(
+      /HOSTED_VISIBLE_OPTION_PATHS_LIST[\s\S]*CHAT_WORKSPACE_PATH/
+    )
     expect(headerShortcutItemsSource).toMatch(
       /HOSTED_VISIBLE_SHORTCUT_PATHS[\s\S]*CHAT_WORKSPACE_PATH/
     )
@@ -140,9 +153,9 @@ describe("chat workspace route registry parity", () => {
     expect(uiSettingsSource).toMatch(
       /HEADER_SHORTCUT_IDS\s*=\s*\[[\s\S]*"chat",\s*"chat-workspace"/
     )
-    expect(uiSettingsSource).toMatch(
-      /DEFAULT_SIDEBAR_SHORTCUT_SELECTION[\s\S]*"chat",\s*"chat-workspace"/
-    )
+    const defaultSidebarShortcuts = getDefaultSidebarShortcutSelection()
+    expect(defaultSidebarShortcuts).toContain("chat")
+    expect(defaultSidebarShortcuts).not.toContain("chat-workspace")
     expect(headerShortcutItemsSource).toContain('id: "chat-workspace"')
     expect(headerShortcutItemsSource).toContain("to: CHAT_WORKSPACE_PATH")
     expect(headerShortcutItemsSource).toContain(

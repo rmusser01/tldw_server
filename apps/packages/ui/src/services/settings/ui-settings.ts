@@ -572,6 +572,22 @@ const LEGACY_DEFAULT_SIDEBAR_SHORTCUT_SELECTION: SidebarShortcutId[] = [
 export const DEFAULT_SIDEBAR_SHORTCUT_SELECTION: SidebarShortcutId[] = [
   "quick-ingest",
   "chat",
+  "prompts",
+  "characters",
+  "chat-dictionaries",
+  "world-books",
+  "notes",
+  "knowledge-qa",
+  "media",
+  "document-workspace",
+  "research-workspace",
+  "kanban-playground",
+  "watchlists"
+]
+
+const PREVIOUS_DEFAULT_SIDEBAR_SHORTCUT_SELECTION: SidebarShortcutId[] = [
+  "quick-ingest",
+  "chat",
   "chat-workspace",
   "prompts",
   "characters",
@@ -613,12 +629,10 @@ const coerceSidebarShortcutSelection = (
       unique.add(mapped as SidebarShortcutId)
     }
   }
-  const normalized = SIDEBAR_SHORTCUT_IDS.filter((id) => unique.has(id)).slice(
-    0,
-    SIDEBAR_SHORTCUT_MAX_COUNT
-  )
+  const normalized = Array.from(unique).slice(0, SIDEBAR_SHORTCUT_MAX_COUNT)
   if (
-    areShortcutSelectionsEqual(normalized, LEGACY_DEFAULT_SIDEBAR_SHORTCUT_SELECTION)
+    areShortcutSelectionsEqual(normalized, LEGACY_DEFAULT_SIDEBAR_SHORTCUT_SELECTION) ||
+    areShortcutSelectionsEqual(normalized, PREVIOUS_DEFAULT_SIDEBAR_SHORTCUT_SELECTION)
   ) {
     return DEFAULT_SIDEBAR_SHORTCUT_SELECTION
   }

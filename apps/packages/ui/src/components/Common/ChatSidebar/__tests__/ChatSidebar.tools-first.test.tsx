@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
 import React from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within
+} from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -162,6 +168,27 @@ describe("ChatSidebar tools-first reset", () => {
     ).toHaveAttribute("aria-expanded", "false")
     expect(screen.getByTestId("chat-sidebar-shortcut-quick-ingest")).toBeInTheDocument()
     expect(screen.queryByTestId("server-chat-list")).not.toBeInTheDocument()
+  })
+
+  it("renders shortcuts in the saved sidepanel order", () => {
+    settingState.shortcutsCollapsed = false
+    settingState.shortcutSelection = [
+      "quick-ingest",
+      "kanban-playground",
+      "chat"
+    ]
+
+    renderSidebar()
+
+    const shortcuts = within(
+      document.getElementById("chat-sidebar-shortcuts") as HTMLElement
+    ).getAllByRole("button")
+    expect(shortcuts.map((button) => button.dataset.testid)).toEqual([
+      "chat-sidebar-shortcut-quick-ingest",
+      "chat-sidebar-shortcut-kanban-playground",
+      "chat-sidebar-shortcut-chat"
+    ])
+    expect(screen.getByRole("button", { name: "Kanban" })).toBeInTheDocument()
   })
 
   it("resets to tools-first when collapsed sidebar is expanded", async () => {

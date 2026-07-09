@@ -392,7 +392,7 @@ const BASE_HEADER_SHORTCUT_GROUPS: HeaderShortcutGroup[] = [
         to: "/kanban",
         icon: Kanban,
         labelKey: "option:header.modeKanban",
-        labelDefault: "Kanban Playground"
+        labelDefault: "Kanban"
       },
       {
         id: "flashcards",
