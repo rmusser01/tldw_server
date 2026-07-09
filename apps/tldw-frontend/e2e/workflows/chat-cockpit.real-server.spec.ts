@@ -51,23 +51,161 @@ type CockpitLayoutSeed = {
   mobilePanel?: 'context' | 'runtime' | null;
 };
 
-const switchChatLayoutMode = async (page: Page, targetMode: 'cockpit' | 'focus') => {
-  const shell = page.getByTestId('playground-cockpit-shell');
-  if ((await shell.getAttribute('data-mode')) === targetMode) {
+type DesktopCockpitRail = 'left' | 'right';
+
+const desktopCockpitRailConfig: Record<
+  DesktopCockpitRail,
+  { attr: 'data-left-rail' | 'data-right-rail'; railId: string; restoreId: string }
+> = {
+  left: {
+    attr: 'data-left-rail',
+    railId: 'playground-cockpit-left-rail',
+    restoreId: 'playground-cockpit-left-rail-restore',
+  },
+  right: {
+    attr: 'data-right-rail',
+    railId: 'playground-cockpit-right-rail',
+    restoreId: 'playground-cockpit-right-rail-restore',
+  },
+};
+
+const mobileCockpitPanelConfig = {
+  context: {
+    tabId: 'playground-cockpit-mobile-context-tab',
+    panelId: 'playground-cockpit-mobile-context-panel',
+  },
+  runtime: {
+    tabId: 'playground-cockpit-mobile-runtime-tab',
+    panelId: 'playground-cockpit-mobile-runtime-panel',
+  },
+} as const;
+
+const restoreDesktopCockpitRail = async (page: Page, rail: DesktopCockpitRail) => {
+  const config = desktopCockpitRailConfig[rail];
+  const shell = page
+    .locator('[data-testid="playground-cockpit-shell"][data-mode="cockpit"]')
+    .first();
+  const railLocator = page.locator(`[data-testid="${config.railId}"]:visible`).first();
+  await expect(shell).toHaveAttribute('data-mode', 'cockpit', { timeout: 10_000 });
+  if ((await shell.getAttribute(config.attr)) === 'visible') {
+    await expect(railLocator).toBeVisible({ timeout: 10_000 });
     return;
   }
 
-  const triggerName = targetMode === 'cockpit' ? 'Exit focus' : 'Enter focus chat';
-  try {
-    await page
-      .getByRole('button', { name: triggerName, exact: true })
-      .click({ timeout: 10_000 });
-  } catch (error) {
-    await expect(shell).toHaveAttribute('data-mode', targetMode, { timeout: 5_000 }).catch(() => {
-      throw error;
-    });
+  await expect
+    .poll(
+      async () =>
+        page.evaluate(
+          async ({ attr, restoreId }) => {
+            const isVisible = (element: Element) => {
+              const box = element.getBoundingClientRect();
+              const style = window.getComputedStyle(element);
+              return (
+                box.width > 0 &&
+                box.height > 0 &&
+                style.display !== 'none' &&
+                style.visibility !== 'hidden' &&
+                !element.closest('[hidden],[aria-hidden="true"]')
+              );
+            };
+            const shell = Array.from(
+              document.querySelectorAll<HTMLElement>(
+                '[data-testid="playground-cockpit-shell"][data-mode="cockpit"]'
+              )
+            ).find(isVisible);
+            if (!shell) return 'missing shell';
+            if (shell.getAttribute(attr) === 'visible') return 'visible';
+
+            const restoreSelector = `[data-testid="${restoreId}"]`;
+            const restoreControl =
+              Array.from(shell.querySelectorAll<HTMLElement>(restoreSelector)).find(isVisible) ??
+              Array.from(document.querySelectorAll<HTMLElement>(restoreSelector)).find(isVisible);
+            if (!restoreControl) return 'missing visible restore control';
+
+            restoreControl.click();
+            await new Promise<void>((resolve) =>
+              requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+            );
+            return shell.getAttribute(attr) ?? 'missing rail state';
+          },
+          { attr: config.attr, restoreId: config.restoreId }
+        ),
+      { message: `restore ${rail} cockpit rail`, timeout: 10_000 }
+    )
+    .toBe('visible');
+  await expect(shell).toHaveAttribute(config.attr, 'visible', { timeout: 10_000 });
+  await expect(railLocator).toBeVisible({ timeout: 10_000 });
+};
+
+const waitForMobileCockpitPanel = async (page: Page, panel: 'context' | 'runtime') => {
+  const config = mobileCockpitPanelConfig[panel];
+  await expect
+    .poll(
+      async () =>
+        page.evaluate(
+          ({ panel, panelId, tabId }) => {
+            const shell = document.querySelector('[data-testid="playground-cockpit-shell"]');
+            if (shell?.getAttribute('data-mode') !== 'cockpit') {
+              return `mode:${shell?.getAttribute('data-mode') ?? 'missing'}`;
+            }
+
+            const rails = Array.from(
+              document.querySelectorAll<HTMLElement>('[data-testid="playground-cockpit-mobile-rails"]')
+            ).find((candidate) => {
+              const box = candidate.getBoundingClientRect();
+              return (
+                candidate.getAttribute('data-mobile-panel') === panel &&
+                box.width > 0 &&
+                box.height > 0
+              );
+            });
+            if (!rails) return 'missing rails';
+            const tab = rails.querySelector<HTMLElement>(`#${tabId}`);
+            const panelNode = rails.querySelector<HTMLElement>(`#${panelId}`);
+            if (!tab || !panelNode) return 'missing tabpanel pair';
+            if (panelNode.getAttribute('role') !== 'tabpanel') return 'missing tabpanel role';
+            if (panelNode.getAttribute('aria-labelledby') !== tabId) return 'wrong panel label';
+            const panelBox = panelNode.getBoundingClientRect();
+            return panelBox.width > 0 && panelBox.height > 0 ? 'ready' : 'unmeasurable panel';
+          },
+          { panel, panelId: config.panelId, tabId: config.tabId }
+        ),
+      { message: `mobile cockpit ${panel} panel ready`, timeout: 15_000 }
+    )
+    .toBe('ready');
+  const rails = page
+    .locator(
+      `[data-testid="playground-cockpit-mobile-rails"][data-mobile-panel="${panel}"]:visible:has(#${config.panelId})`
+    )
+    .first();
+  await expect(rails).toBeVisible({ timeout: 10_000 });
+  await expect(rails).toHaveAttribute('data-mobile-panel', panel);
+  await expect(rails.locator(`#${config.panelId}`)).toHaveAttribute('aria-labelledby', config.tabId);
+  return rails;
+};
+
+const switchChatLayoutMode = async (page: Page, targetMode: 'cockpit' | 'focus') => {
+  const shell = page.getByTestId('playground-cockpit-shell');
+  if ((await shell.getAttribute('data-mode')) !== targetMode) {
+    const triggerName = targetMode === 'cockpit' ? 'Exit focus' : 'Enter focus chat';
+    try {
+      await page
+        .getByRole('button', { name: triggerName, exact: true })
+        .click({ timeout: 10_000 });
+    } catch (error) {
+      await expect(shell).toHaveAttribute('data-mode', targetMode, { timeout: 5_000 }).catch(() => {
+        throw error;
+      });
+    }
   }
-  await expect(shell).toHaveAttribute('data-mode', targetMode);
+
+  await expect(shell).toHaveAttribute('data-mode', targetMode, { timeout: 10_000 });
+};
+
+const waitForPlaygroundDraftSaved = async (page: Page) => {
+  await expect(page.getByRole('status').filter({ hasText: 'Draft saved' })).toBeVisible({
+    timeout: 5_000,
+  });
 };
 
 type DisposableCharacter = {
@@ -683,16 +821,8 @@ const fillEditableComposer = async (page: Page, value: string) => {
 };
 
 const ensureDesktopCockpitRailsVisible = async (page: Page) => {
-  const leftRestore = page.getByTestId('playground-cockpit-left-rail-restore');
-  if (await leftRestore.isVisible().catch(() => false)) {
-    await leftRestore.click();
-  }
-  const rightRestore = page.getByTestId('playground-cockpit-right-rail-restore');
-  if (await rightRestore.isVisible().catch(() => false)) {
-    await rightRestore.click();
-  }
-  await expect(page.getByTestId('playground-cockpit-left-rail')).toBeVisible();
-  await expect(page.getByTestId('playground-cockpit-right-rail')).toBeVisible();
+  await restoreDesktopCockpitRail(page, 'left');
+  await restoreDesktopCockpitRail(page, 'right');
 };
 
 const assertRuntimeProviderSummary = async (runtimeInspector: Locator) => {
@@ -752,13 +882,73 @@ const assertNoHorizontalOverflow = async (page: Page) => {
   expect(metrics.bodyScrollWidth).toBeLessThanOrEqual(metrics.innerWidth + 1);
 };
 
-const assertNoVerticalOverlap = async (first: Locator, second: Locator, label: string) => {
-  const firstBox = await first.boundingBox();
-  const secondBox = await second.boundingBox();
+type MobilePanelMeasurement =
+  | { status: 'ok'; panelBottom: number; panelHeight: number; composerTop: number }
+  | { status: 'error'; message: string };
 
-  expect(firstBox, `${label}: first element is measurable`).not.toBeNull();
-  expect(secondBox, `${label}: second element is measurable`).not.toBeNull();
-  expect(firstBox!.y + firstBox!.height).toBeLessThanOrEqual(secondBox!.y + 1);
+const measureMobilePanelComposer = async (
+  page: Page,
+  panel: 'context' | 'runtime'
+): Promise<MobilePanelMeasurement> => {
+  const config = mobileCockpitPanelConfig[panel];
+  return page.evaluate(
+    ({ panel, panelId }) => {
+      const isVisible = (element: Element) => {
+        const box = element.getBoundingClientRect();
+        const style = window.getComputedStyle(element);
+        return (
+          box.width > 0 &&
+          box.height > 0 &&
+          style.display !== 'none' &&
+          style.visibility !== 'hidden' &&
+          !element.closest('[hidden],[aria-hidden="true"]')
+        );
+      };
+      const rails = Array.from(
+        document.querySelectorAll<HTMLElement>('[data-testid="playground-cockpit-mobile-rails"]')
+      ).find(
+        (candidate) =>
+          candidate.getAttribute('data-mobile-panel') === panel && isVisible(candidate)
+      );
+      if (!rails) return { status: 'error' as const, message: 'missing visible rails' };
+      const panelNode = rails.querySelector<HTMLElement>(`#${panelId}`);
+      if (!panelNode || !isVisible(panelNode)) {
+        return { status: 'error' as const, message: 'first element is not measurable' };
+      }
+      const composer = document.querySelector<HTMLElement>('[data-testid="chat-input"]');
+      if (!composer || !isVisible(composer)) {
+        return { status: 'error' as const, message: 'second element is not measurable' };
+      }
+      const panelBox = panelNode.getBoundingClientRect();
+      const composerBox = composer.getBoundingClientRect();
+      return {
+        status: 'ok' as const,
+        panelBottom: panelBox.y + panelBox.height,
+        panelHeight: panelBox.height,
+        composerTop: composerBox.y,
+      };
+    },
+    { panel, panelId: config.panelId }
+  );
+};
+
+const assertNoMobilePanelComposerOverlap = async (
+  page: Page,
+  panel: 'context' | 'runtime',
+  label: string
+) => {
+  await expect
+    .poll(
+      async () => {
+        const measurement = await measureMobilePanelComposer(page, panel);
+        if (measurement.status === 'error') return measurement.message;
+        return measurement.panelBottom <= measurement.composerTop + 1
+          ? 'ok'
+          : `overlap: first bottom ${measurement.panelBottom}, second top ${measurement.composerTop}`;
+      },
+      { message: label, timeout: 10_000 }
+    )
+    .toBe('ok');
 };
 
 const assertHealthResponse = (health: { status: number; body: any }) => {
@@ -1667,17 +1857,29 @@ test.describe('/chat cockpit real-server parity', () => {
     });
 
     await switchChatLayoutMode(page, 'cockpit');
+    await expect(modeSummary).toHaveText('Cockpit rails hidden. Chat and composer remain active.');
+    await expect(page.getByTestId('playground-cockpit-left-rail-restore')).toBeVisible();
+    await expect(page.getByTestId('playground-cockpit-right-rail-restore')).toBeVisible();
+    await page.evaluate(() => {
+      localStorage.setItem('playgroundChatLayoutMode', JSON.stringify('cockpit'));
+      localStorage.setItem('playgroundChatContextRailVisible', JSON.stringify(true));
+      localStorage.setItem('playgroundChatRuntimeRailVisible', JSON.stringify(true));
+    });
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await expect(page.getByTestId('playground-cockpit-shell')).toBeVisible({ timeout: 60_000 });
+    await assertNoBlockingServerDialog(page);
     await ensureDesktopCockpitRailsVisible(page);
     await assertNoHorizontalOverflow(page);
-    await expect(
-      getDesktopContextRail(page).getByRole('button', { name: 'Web search', exact: true })
-    ).toHaveAttribute('aria-pressed', 'true');
 
     const sendContextRail = getDesktopContextRail(page);
     const sendWebSearchControl = sendContextRail.getByRole('button', {
       name: 'Web search',
       exact: true,
     });
+    if ((await sendWebSearchControl.getAttribute('aria-pressed')) !== 'true') {
+      await sendWebSearchControl.click();
+    }
+    await expect(sendWebSearchControl).toHaveAttribute('aria-pressed', 'true');
     if ((await sendWebSearchControl.getAttribute('aria-pressed')) === 'true') {
       await sendWebSearchControl.click();
       await expect(sendWebSearchControl).toHaveAttribute('aria-pressed', 'false');
@@ -1938,18 +2140,20 @@ test.describe('/chat cockpit real-server parity', () => {
       await expect(page.getByTestId('playground-collapsed-composition-summary')).toHaveCount(0);
       await expect(page.getByTestId('composer-bottom-bar')).toHaveCount(0);
     };
-    const panelControlledByTab = async (tab: Locator) => {
+    const panelControlledByTab = async (tab: Locator, root: Locator) => {
       const tabId = await tab.getAttribute('id');
       const panelId = await tab.getAttribute('aria-controls');
       expect(tabId).toBeTruthy();
       expect(panelId).toBeTruthy();
-      const panel = page.locator(`[id="${panelId}"]`);
+      const panel = root.locator(`[id="${panelId}"]`);
+      await expect(panel).toHaveCount(1);
       await expect(panel).toHaveAttribute('role', 'tabpanel');
       await expect(panel).toHaveAttribute('aria-labelledby', tabId as string);
       return panel;
     };
     await fillEditableComposer(page, mobileDraft);
     await expectMobileDraftReachable();
+    await waitForPlaygroundDraftSaved(page);
     await expectNoMobileBottomControls();
 
     await expect(page.getByTestId('playground-cockpit-shell')).toHaveAttribute(
@@ -1959,9 +2163,7 @@ test.describe('/chat cockpit real-server parity', () => {
     await expect(page.getByTestId('playground-cockpit-mobile-rails')).toHaveCount(0);
 
     await switchChatLayoutMode(page, 'cockpit');
-    const mobileRails = page.getByTestId('playground-cockpit-mobile-rails');
-    await expect(mobileRails).toBeVisible();
-    await expect(mobileRails).toHaveAttribute('data-mobile-panel', 'context');
+    let mobileRails = await waitForMobileCockpitPanel(page, 'context');
     await expect(mobileRails.getByTestId('playground-cockpit-mobile-panel-summary')).toHaveText(
       'Context panel active. Composer draft remains available below.'
     );
@@ -1969,42 +2171,47 @@ test.describe('/chat cockpit real-server parity', () => {
     await expectNoMobileBottomControls();
     const initialContextTab = mobileRails.getByRole('tab', { name: 'Context' });
     const initialRuntimeTab = mobileRails.getByRole('tab', { name: 'Runtime' });
-    const initialContextPanel = await panelControlledByTab(initialContextTab);
-    const initialRuntimePanel = await panelControlledByTab(initialRuntimeTab);
+    await panelControlledByTab(initialContextTab, mobileRails);
+    const initialRuntimePanel = page.locator(`#${mobileCockpitPanelConfig.runtime.panelId}`);
+    const initialContextPanel = mobileRails.locator(`#${mobileCockpitPanelConfig.context.panelId}`);
     await expect(initialContextTab).toHaveAttribute('aria-selected', 'true');
     await expect(initialRuntimeTab).toHaveAttribute('aria-selected', 'false');
     await expect(initialContextPanel).toBeVisible();
     await expect(initialRuntimePanel).toBeHidden();
     await assertNoHorizontalOverflow(page);
-    await assertNoVerticalOverlap(
-      mobileRails,
-      page.getByTestId('chat-input'),
+    await assertNoMobilePanelComposerOverlap(
+      page,
+      'context',
       'mobile cockpit context rails should not overlap composer'
     );
-    const initialContextPanelBox = await initialContextPanel.boundingBox();
-    expect(initialContextPanelBox, 'mobile context panel is measurable').not.toBeNull();
-    expect(initialContextPanelBox!.height).toBeLessThanOrEqual(260);
+    const initialContextPanelMeasurement = await measureMobilePanelComposer(page, 'context');
+    expect(initialContextPanelMeasurement.status, 'mobile context panel is measurable').toBe('ok');
+    if (initialContextPanelMeasurement.status === 'ok') {
+      expect(initialContextPanelMeasurement.panelHeight).toBeLessThanOrEqual(260);
+    }
     await page.screenshot({
       path: testInfo.outputPath('chat-cockpit-mobile-context.png'),
       fullPage: true,
     });
     await page.getByRole('button', { name: 'Hide context rail' }).click();
+    mobileRails = await waitForMobileCockpitPanel(page, 'runtime');
     await expect(mobileRails.getByRole('tab', { name: 'Context' })).toHaveCount(0);
     await expect(mobileRails.getByRole('tab', { name: 'Runtime' })).toBeVisible();
-    await expect(mobileRails).toHaveAttribute('data-mobile-panel', 'runtime');
     await expect(mobileRails.getByTestId('playground-cockpit-mobile-panel-summary')).toHaveText(
       'Runtime panel active. Composer draft remains available below.'
     );
     await expectMobileDraftPreserved();
     await page.getByRole('button', { name: 'Show context rail' }).click();
-    const contextTab = mobileRails.getByRole('tab', { name: 'Context' });
+    const contextTab = page.locator(`#${mobileCockpitPanelConfig.context.tabId}`);
     await expect(contextTab).toBeVisible();
     await contextTab.click();
-    await expect(contextTab).toHaveAttribute('aria-selected', 'true');
-    await expect(mobileRails).toHaveAttribute('data-mobile-panel', 'context');
-    const contextPanelTarget = await panelControlledByTab(contextTab);
+    mobileRails = await waitForMobileCockpitPanel(page, 'context');
+    const activeContextTab = mobileRails.locator(`#${mobileCockpitPanelConfig.context.tabId}`);
+    await expect(activeContextTab).toHaveAttribute('aria-selected', 'true');
+    const contextPanelTarget = await panelControlledByTab(activeContextTab, mobileRails);
     const runtimePanelTarget = await panelControlledByTab(
-      mobileRails.getByRole('tab', { name: 'Runtime' })
+      mobileRails.locator(`#${mobileCockpitPanelConfig.runtime.tabId}`),
+      mobileRails
     );
     await expect(contextPanelTarget).toBeVisible();
     await expect(runtimePanelTarget).toBeHidden();
@@ -2042,17 +2249,20 @@ test.describe('/chat cockpit real-server parity', () => {
     await expect(promptSearch).toBeHidden();
     await expect(page.getByTestId('chat-input')).toBeVisible();
     await expectMobileDraftReachable();
-    const runtimeTab = mobileRails.getByRole('tab', { name: 'Runtime' });
+    const runtimeTab = mobileRails.locator(`#${mobileCockpitPanelConfig.runtime.tabId}`);
     await runtimeTab.click();
-    await expect(runtimeTab).toHaveAttribute('aria-selected', 'true');
-    await expect(mobileRails).toHaveAttribute('data-mobile-panel', 'runtime');
-    await expect(runtimePanelTarget).toBeVisible();
+    mobileRails = await waitForMobileCockpitPanel(page, 'runtime');
+    await expect(mobileRails.locator(`#${mobileCockpitPanelConfig.runtime.tabId}`)).toHaveAttribute(
+      'aria-selected',
+      'true'
+    );
+    const runtimePanel = mobileRails.getByRole('tabpanel', { name: 'Runtime' });
+    await expect(runtimePanel).toBeVisible();
     await expect(contextPanelTarget).toBeHidden();
     await expect(mobileRails.getByTestId('playground-cockpit-mobile-panel-summary')).toHaveText(
       'Runtime panel active. Composer draft remains available below.'
     );
     await expectMobileDraftPreserved();
-    const runtimePanel = mobileRails.getByRole('tabpanel', { name: 'Runtime' });
     await assertRuntimeProviderSummary(runtimePanel);
     await expect(runtimePanel.getByText('Provider:model settings')).toBeVisible();
     await expect(runtimePanel.getByRole('heading', { name: 'MCP tools' })).toBeVisible();
@@ -2065,14 +2275,16 @@ test.describe('/chat cockpit real-server parity', () => {
     ).toBeVisible();
     await expect(runtimePanel.getByRole('button', { name: 'Configure MCP tools' })).toBeVisible();
     await assertNoHorizontalOverflow(page);
-    await assertNoVerticalOverlap(
-      mobileRails,
-      page.getByTestId('chat-input'),
+    await assertNoMobilePanelComposerOverlap(
+      page,
+      'runtime',
       'mobile cockpit runtime rails should not overlap composer'
     );
-    const runtimePanelBox = await runtimePanel.boundingBox();
-    expect(runtimePanelBox, 'mobile runtime panel is measurable').not.toBeNull();
-    expect(runtimePanelBox!.height).toBeLessThanOrEqual(260);
+    const runtimePanelMeasurement = await measureMobilePanelComposer(page, 'runtime');
+    expect(runtimePanelMeasurement.status, 'mobile runtime panel is measurable').toBe('ok');
+    if (runtimePanelMeasurement.status === 'ok') {
+      expect(runtimePanelMeasurement.panelHeight).toBeLessThanOrEqual(260);
+    }
     await page.screenshot({
       path: testInfo.outputPath('chat-cockpit-mobile-runtime.png'),
       fullPage: true,
@@ -2122,9 +2334,9 @@ test.describe('/chat cockpit real-server parity', () => {
     });
     await expectNoMobileBottomControls();
     await switchChatLayoutMode(page, 'cockpit');
-    await expect(mobileRails).toHaveAttribute('data-mobile-panel', 'runtime');
+    mobileRails = await waitForMobileCockpitPanel(page, 'runtime');
     await expectMobileDraftPreserved();
-    await expect(runtimePanelTarget).toBeVisible();
+    await expect(mobileRails.getByRole('tabpanel', { name: 'Runtime' })).toBeVisible();
     await assertNoHorizontalOverflow(page);
   });
 

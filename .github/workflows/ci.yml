@@ -1888,8 +1888,8 @@ jobs:
   full-suite-linux-312-summary:
     name: Full Suite (Ubuntu / Python 3.12)
     runs-on: ubuntu-latest
-    needs: [full-suite-linux-312-shards]
-    if: always()
+    needs: [full-suite-linux-312-shards, changes]
+    if: ${{ always() && (github.event_name != 'pull_request' || needs.changes.outputs.backend_changed == 'true') }}
     steps:
       - name: Check Python 3.12 shard result
         shell: bash
@@ -3240,8 +3240,8 @@ jobs:
   full-suite-linux-313-summary:
     name: Full Suite (Ubuntu / Python 3.13)
     runs-on: ubuntu-latest
-    needs: [full-suite-linux-313-shards]
-    if: always()
+    needs: [full-suite-linux-313-shards, changes]
+    if: ${{ always() && (github.event_name != 'pull_request' || needs.changes.outputs.backend_changed == 'true') }}
     steps:
       - name: Check Python 3.13 shard result
         shell: bash
@@ -4444,8 +4444,8 @@ jobs:
   full-suite-macos-312-summary:
     name: Full Suite (macos-latest / Python 3.12)
     runs-on: ubuntu-latest
-    needs: [full-suite-macos-312-shards]
-    if: always()
+    needs: [full-suite-macos-312-shards, changes]
+    if: ${{ always() && (github.event_name != 'pull_request' || needs.changes.outputs.backend_changed == 'true') }}
     steps:
       - name: Check macos-latest Python 3.12 shard result
         shell: bash
@@ -5647,8 +5647,8 @@ jobs:
   full-suite-windows-312-summary:
     name: Full Suite (windows-latest / Python 3.12)
     runs-on: ubuntu-latest
-    needs: [full-suite-windows-312-shards]
-    if: always()
+    needs: [full-suite-windows-312-shards, changes]
+    if: ${{ always() && (github.event_name != 'pull_request' || needs.changes.outputs.backend_changed == 'true') }}
     steps:
       - name: Check windows-latest Python 3.12 shard result
         shell: bash
