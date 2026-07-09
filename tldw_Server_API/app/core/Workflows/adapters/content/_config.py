@@ -86,6 +86,8 @@ class FlashcardGenerateConfig(BaseAdapterConfig):
 
     text: str = Field(..., description="Source text for flashcard generation (templated)")
     num_cards: int = Field(10, ge=1, le=50, description="Number of flashcards to generate")
+    card_type: Literal["basic", "basic_reverse", "cloze"] | None = Field(None, description="Legacy flashcard type")
+    card_plan: list[dict[str, Any]] | None = Field(None, description="Planned generation rows")
     difficulty: Literal["easy", "medium", "hard", "mixed"] = Field("mixed", description="Flashcard difficulty")
     format: Literal["qa", "cloze", "definition"] = Field("qa", description="Flashcard format")
     provider: str | None = Field(None, description="LLM provider")

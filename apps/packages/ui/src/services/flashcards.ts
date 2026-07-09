@@ -396,15 +396,24 @@ export type FlashcardGeneratedDraft = {
   front: string
   back: string
   tags?: string[] | null
-  model_type?: "basic" | "basic_reverse" | "cloze"
+  model_type?: FlashcardCardType
+  generation_type?: FlashcardGenerationType | null
   notes?: string | null
   extra?: string | null
+}
+
+export type FlashcardGenerationType = "basic" | "basic_reverse" | "cloze" | "true_false"
+export type FlashcardCardType = Exclude<FlashcardGenerationType, "true_false">
+export type FlashcardPlanItem = {
+  card_type: FlashcardGenerationType
+  count: number
 }
 
 export type FlashcardsGenerateRequest = {
   text: string
   num_cards?: number
-  card_type?: "basic" | "basic_reverse" | "cloze"
+  card_type?: FlashcardCardType
+  card_plan?: FlashcardPlanItem[] | null
   difficulty?: "easy" | "medium" | "hard" | "mixed"
   focus_topics?: string[] | null
   provider?: string | null
