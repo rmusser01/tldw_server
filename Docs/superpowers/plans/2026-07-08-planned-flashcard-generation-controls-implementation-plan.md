@@ -467,7 +467,7 @@ git commit -m "feat: validate planned flashcard generation"
 - Modify: `tldw_Server_API/app/core/Workflows/adapters/content/generation.py`
 - Test: `tldw_Server_API/tests/Workflows/adapters/test_content_adapters.py`
 
-- [ ] **Step 1: Write failing adapter tests**
+- [x] **Step 1: Write failing adapter tests**
 
 Add to `TestFlashcardGenerateAdapter`:
 
@@ -508,7 +508,7 @@ async def test_flashcard_generate_planned_prompt_and_generation_types(self, base
     assert result["flashcards"][1]["model_type"] == "basic"
 ```
 
-- [ ] **Step 2: Run adapter tests to verify failure**
+- [x] **Step 2: Run adapter tests to verify failure**
 
 Run:
 
@@ -518,7 +518,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Workflows/ad
 
 Expected: planned prompt test fails because adapter ignores `card_plan`.
 
-- [ ] **Step 3: Update workflow config**
+- [x] **Step 3: Update workflow config**
 
 In `FlashcardGenerateConfig`, replace or supplement `format` with:
 
@@ -529,7 +529,7 @@ card_plan: list[dict[str, Any]] | None = Field(None, description="Exact flashcar
 
 Do not add a new dependency or separate config module.
 
-- [ ] **Step 4: Update adapter prompt construction**
+- [x] **Step 4: Update adapter prompt construction**
 
 In `run_flashcard_generate_adapter`, normalize:
 
@@ -562,7 +562,7 @@ system_prompt = (
 
 For legacy requests, keep current behavior but include `generation_type` in normalized output.
 
-- [ ] **Step 5: Preserve generation type and storage model**
+- [x] **Step 5: Preserve generation type and storage model**
 
 After parsing JSON:
 
@@ -585,7 +585,7 @@ for card in flashcards:
 
 Do not coerce missing or invalid planned `generation_type` to `basic`; the endpoint validator must be able to reject malformed planned output.
 
-- [ ] **Step 6: Run adapter tests**
+- [x] **Step 6: Run adapter tests**
 
 Run:
 
@@ -595,7 +595,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Workflows/ad
 
 Expected: all flashcard adapter tests pass.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/Workflows/adapters/content/_config.py tldw_Server_API/app/core/Workflows/adapters/content/generation.py tldw_Server_API/tests/Workflows/adapters/test_content_adapters.py
