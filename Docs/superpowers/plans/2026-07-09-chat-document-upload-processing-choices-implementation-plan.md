@@ -110,7 +110,7 @@ Modify:
 - Modify: `tldw_Server_API/app/api/v1/endpoints/media/__init__.py`
 - Test: `tldw_Server_API/tests/Media/test_document_upload_processing.py`
 
-- [ ] **Step 1: Write failing tests for preflight capabilities**
+- [x] **Step 1: Write failing tests for preflight capabilities**
 
 Add tests that call `POST /api/v1/media/document-upload/preflight` with file metadata only.
 
@@ -152,7 +152,7 @@ Also add tests for:
 - Oversized files remain in the response but are `blocked` with a size-limit reason.
 - Client-supplied `page_count` or `estimated_tokens` over server limits marks direct chat/OCR modes blocked with the specific limit in the response.
 
-- [ ] **Step 2: Run the backend test and verify it fails**
+- [x] **Step 2: Run the backend test and verify it fails**
 
 Run:
 
@@ -162,7 +162,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Media/test_d
 
 Expected: FAIL because the schema and endpoint do not exist.
 
-- [ ] **Step 3: Add Pydantic schemas**
+- [x] **Step 3: Add Pydantic schemas**
 
 Create `document_upload_processing.py` with this shape:
 
@@ -227,7 +227,7 @@ class ChatDocumentDraftReadResponse(BaseModel):
     payload: dict
 ```
 
-- [ ] **Step 4: Add the backend endpoint**
+- [x] **Step 4: Add the backend endpoint**
 
 Create `document_upload_processing.py` under media endpoints. Use extension allowlists already present in processing endpoints:
 
@@ -261,11 +261,11 @@ Add short-lived in-memory draft storage only for sidepanel handoff:
 
 Keep draft payloads bounded to uploaded file metadata, base64 content, selected modes, and user draft text. Include `created_at`, `expires_at`, and owner key derived from the authenticated user dependency. If a draft is expired or owned by another user, reads return 404. Cleanup expired drafts on create/read.
 
-- [ ] **Step 5: Register the router**
+- [x] **Step 5: Register the router**
 
 Add `"document_upload_processing"` to `_MEDIA_ENDPOINT_MODULES` in `tldw_Server_API/app/api/v1/endpoints/media/__init__.py` near the existing process modules.
 
-- [ ] **Step 6: Run backend tests**
+- [x] **Step 6: Run backend tests**
 
 Run:
 
@@ -275,7 +275,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Media/test_d
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add tldw_Server_API/app/api/v1/schemas/document_upload_processing.py tldw_Server_API/app/api/v1/endpoints/media/document_upload_processing.py tldw_Server_API/app/api/v1/endpoints/media/__init__.py tldw_Server_API/tests/Media/test_document_upload_processing.py
