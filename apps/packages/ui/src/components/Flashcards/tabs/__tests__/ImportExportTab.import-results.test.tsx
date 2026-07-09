@@ -1374,7 +1374,8 @@ describe("ImportExportTab import result details", () => {
           front: "Generated front",
           back: "Generated back",
           tags: ["tag-1"],
-          model_type: "basic"
+          model_type: "basic",
+          generation_type: "basic"
         }
       ],
       count: 1
@@ -1420,9 +1421,116 @@ describe("ImportExportTab import result details", () => {
         reverse: false
       })
     )
+    expect(createCardMutateAsync.mock.calls[0][0]).not.toHaveProperty("generation_type")
     await waitFor(() => {
       expect(screen.queryByDisplayValue("Edited front")).not.toBeInTheDocument()
     })
+  })
+
+  it("sends an advanced generation mix and labels true false previews", async () => {
+    const generateMutateAsync = vi.fn().mockResolvedValue({
+      flashcards: [
+        { front: "Basic 1", back: "Back 1", model_type: "basic", generation_type: "basic" },
+        { front: "Basic 2", back: "Back 2", model_type: "basic", generation_type: "basic" },
+        {
+          front: "Reverse",
+          back: "Reverse back",
+          model_type: "basic_reverse",
+          generation_type: "basic_reverse"
+        },
+        { front: "{{c1::Cloze}}", back: "Cloze back", model_type: "cloze", generation_type: "cloze" },
+        {
+          front: "True or false: Water boils at 100C.",
+          back: "True.",
+          model_type: "basic",
+          generation_type: "true_false"
+        }
+      ],
+      count: 5
+    })
+    vi.mocked(useGenerateFlashcardsMutation).mockReturnValue({
+      mutateAsync: generateMutateAsync,
+      isPending: false
+    } as any)
+
+    render(<ImportExportTab />)
+
+    fireEvent.change(screen.getByTestId("flashcards-generate-text"), {
+      target: { value: "Thermodynamics notes..." }
+    })
+    fireEvent.click(screen.getByTestId("flashcards-generate-advanced-toggle"))
+    fireEvent.change(screen.getByTestId("flashcards-generate-plan-basic-count"), {
+      target: { value: "2" }
+    })
+    fireEvent.change(screen.getByTestId("flashcards-generate-plan-basic-reverse-count"), {
+      target: { value: "1" }
+    })
+    fireEvent.change(screen.getByTestId("flashcards-generate-plan-cloze-count"), {
+      target: { value: "1" }
+    })
+
+    fireEvent.click(screen.getByTestId("flashcards-generate-button"))
+
+    await waitFor(() => {
+      expect(generateMutateAsync).toHaveBeenCalledTimes(1)
+    })
+    expect(generateMutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        numCards: 5,
+        cardPlan: [
+          { card_type: "basic", count: 2 },
+          { card_type: "basic_reverse", count: 1 },
+          { card_type: "cloze", count: 1 },
+          { card_type: "true_false", count: 1 }
+        ]
+      })
+    )
+    expect(generateMutateAsync.mock.calls[0][0]).not.toHaveProperty("cardType")
+    await screen.findByDisplayValue("True or false: Water boils at 100C.")
+    expect(screen.getAllByText("True/False").length).toBeGreaterThan(1)
+  })
+
+  it("updates advanced generation totals and disables invalid totals", async () => {
+    const generateMutateAsync = vi.fn().mockResolvedValue({
+      flashcards: [],
+      count: 0
+    })
+    vi.mocked(useGenerateFlashcardsMutation).mockReturnValue({
+      mutateAsync: generateMutateAsync,
+      isPending: false
+    } as any)
+
+    render(<ImportExportTab />)
+
+    fireEvent.change(screen.getByTestId("flashcards-generate-text"), {
+      target: { value: "A source paragraph for advanced totals." }
+    })
+    fireEvent.click(screen.getByTestId("flashcards-generate-advanced-toggle"))
+
+    expect(screen.getByTestId("flashcards-generate-plan-total")).toHaveTextContent("10")
+    expect(screen.getByTestId("flashcards-generate-button")).not.toBeDisabled()
+
+    for (const testId of [
+      "flashcards-generate-plan-basic-count",
+      "flashcards-generate-plan-basic-reverse-count",
+      "flashcards-generate-plan-cloze-count",
+      "flashcards-generate-plan-true-false-count"
+    ]) {
+      fireEvent.change(screen.getByTestId(testId), {
+        target: { value: "0" }
+      })
+    }
+    expect(screen.getByTestId("flashcards-generate-plan-total")).toHaveTextContent("0")
+    expect(screen.getByTestId("flashcards-generate-button")).toBeDisabled()
+
+    fireEvent.change(screen.getByTestId("flashcards-generate-plan-basic-count"), {
+      target: { value: "100" }
+    })
+    fireEvent.change(screen.getByTestId("flashcards-generate-plan-basic-reverse-count"), {
+      target: { value: "1" }
+    })
+    expect(screen.getByTestId("flashcards-generate-plan-total")).toHaveTextContent("101")
+    expect(screen.getByTestId("flashcards-generate-button")).toBeDisabled()
   })
 
   it("retains only failed generated drafts after partial save", async () => {

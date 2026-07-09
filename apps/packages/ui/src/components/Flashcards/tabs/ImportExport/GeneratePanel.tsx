@@ -1,13 +1,13 @@
 import React from "react"
 import { Link } from "react-router-dom"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { Button, Card, Form, Input, Select, Space, Tooltip, Typography } from "antd"
+import { Button, Card, Form, Input, Select, Space, Switch, Tooltip, Typography } from "antd"
 import { useTranslation } from "react-i18next"
 
 import { Alert, type AlertVariant } from "@/components/ui/primitives"
 import { useAntdMessage } from "@/hooks/useAntdMessage"
 import { getLlmProviders } from "@/services/prompt-studio"
-import type { DeckReviewPromptSide } from "@/services/flashcards"
+import type { DeckReviewPromptSide, FlashcardPlanItem } from "@/services/flashcards"
 
 import { NewDeckConfigurationFields } from "../../components/NewDeckConfigurationFields"
 import {
@@ -35,6 +35,31 @@ type GeneratedSaveStatus = {
   title: string
   detail: string
   retryable: boolean
+}
+
+type CardPlanDraftItem = FlashcardPlanItem & {
+  enabled: boolean
+}
+
+const DEFAULT_CARD_PLAN_DRAFT: CardPlanDraftItem[] = [
+  { card_type: "basic", count: 5, enabled: true },
+  { card_type: "basic_reverse", count: 2, enabled: true },
+  { card_type: "cloze", count: 2, enabled: true },
+  { card_type: "true_false", count: 1, enabled: true }
+]
+
+const CARD_PLAN_LABELS: Record<FlashcardPlanItem["card_type"], string> = {
+  basic: "Basic",
+  basic_reverse: "Reverse",
+  cloze: "Cloze",
+  true_false: "True/False"
+}
+
+const CARD_PLAN_COUNT_TEST_IDS: Record<FlashcardPlanItem["card_type"], string> = {
+  basic: "flashcards-generate-plan-basic-count",
+  basic_reverse: "flashcards-generate-plan-basic-reverse-count",
+  cloze: "flashcards-generate-plan-cloze-count",
+  true_false: "flashcards-generate-plan-true-false-count"
 }
 
 /**
@@ -96,6 +121,8 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
   const [sourceText, setSourceText] = React.useState(() => initialIntent?.text || "")
   const [numCards, setNumCards] = React.useState(10)
   const [cardType, setCardType] = React.useState<"basic" | "basic_reverse" | "cloze">("basic")
+  const [advancedMixEnabled, setAdvancedMixEnabled] = React.useState(false)
+  const [cardPlanDraft, setCardPlanDraft] = React.useState<CardPlanDraftItem[]>(DEFAULT_CARD_PLAN_DRAFT)
   const [difficulty, setDifficulty] = React.useState<"easy" | "medium" | "hard" | "mixed">("mixed")
   const [provider, setProvider] = React.useState("")
   const [model, setModel] = React.useState("")
@@ -131,6 +158,21 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
     ],
     [decks, t]
   )
+  const activeCardPlan = React.useMemo<FlashcardPlanItem[]>(
+    () =>
+      cardPlanDraft
+        .filter((item) => item.enabled && item.count > 0)
+        .map(({ card_type, count }) => ({ card_type, count })),
+    [cardPlanDraft]
+  )
+  const plannedCardTotal = React.useMemo(
+    () => activeCardPlan.reduce((total, item) => total + item.count, 0),
+    [activeCardPlan]
+  )
+  const generationDisabled =
+    !sourceText.trim() ||
+    !hasLlmProviders ||
+    (advancedMixEnabled && (plannedCardTotal < 1 || plannedCardTotal > 100))
 
   React.useEffect(() => {
     if (targetDeckId != null) return
@@ -160,14 +202,33 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
     setGeneratedCards((prev) => prev.filter((card) => card.id !== id))
   }, [clearRetryableSaveStatus])
 
+  const updateCardPlanCount = React.useCallback((cardType: FlashcardPlanItem["card_type"], value: string) => {
+    const next = Number(value)
+    if (!Number.isFinite(next)) return
+    setCardPlanDraft((current) =>
+      current.map((item) =>
+        item.card_type === cardType
+          ? { ...item, count: Math.max(0, Math.min(100, Math.round(next))) }
+          : item
+      )
+    )
+  }, [])
+
   const handleGenerate = React.useCallback(async () => {
     try {
       setGenerationError(null)
       setSaveStatus(null)
       const result = await generateMutation.mutateAsync({
         text: sourceText,
-        numCards,
-        cardType,
+        ...(advancedMixEnabled
+          ? {
+              numCards: plannedCardTotal,
+              cardPlan: activeCardPlan
+            }
+          : {
+              numCards,
+              cardType
+            }),
         difficulty,
         focusTopics: focusTopicsInput
           .split(",")
@@ -216,6 +277,8 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
       })
     }
   }, [
+    activeCardPlan,
+    advancedMixEnabled,
     cardType,
     difficulty,
     focusTopicsInput,
@@ -224,6 +287,7 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
     model,
     numCards,
     onTransferAction,
+    plannedCardTotal,
     provider,
     sourceText,
     t
@@ -455,42 +519,87 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
         })}
       </Typography.Text>
       <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
-        <Form.Item
-          label={t("option:flashcards.generateNumCards", {
-            defaultValue: "Number of cards"
-          })}
-          className="!mb-2"
-        >
-          <Input
-            value={String(numCards)}
-            type="number"
-            min={1}
-            max={100}
-            onChange={(event) => {
-              const next = Number(event.target.value)
-              if (!Number.isFinite(next)) return
-              setNumCards(Math.max(1, Math.min(100, Math.round(next))))
-            }}
-            data-testid="flashcards-generate-count"
+        <div className="md:col-span-2 flex flex-wrap items-center gap-2">
+          <Switch
+            checked={advancedMixEnabled}
+            onChange={setAdvancedMixEnabled}
+            data-testid="flashcards-generate-advanced-toggle"
           />
-        </Form.Item>
-        <Form.Item
-          label={t("option:flashcards.generateCardType", {
-            defaultValue: "Card type"
-          })}
-          className="!mb-2"
-        >
-          <Select
-            value={cardType}
-            onChange={(value) => setCardType(value)}
-            data-testid="flashcards-generate-card-type"
-            options={[
-              { value: "basic", label: "Basic" },
-              { value: "basic_reverse", label: "Basic (reverse)" },
-              { value: "cloze", label: "Cloze" }
-            ]}
-          />
-        </Form.Item>
+          <Text>
+            {t("option:flashcards.generateAdvancedMix", {
+              defaultValue: "Advanced mix"
+            })}
+          </Text>
+        </div>
+        {advancedMixEnabled ? (
+          <div className="md:col-span-2 grid grid-cols-1 gap-2 md:grid-cols-4">
+            {cardPlanDraft.map((item) => (
+              <Form.Item
+                key={item.card_type}
+                label={CARD_PLAN_LABELS[item.card_type]}
+                className="!mb-2"
+              >
+                <Input
+                  value={String(item.count)}
+                  type="number"
+                  min={0}
+                  max={100}
+                  onChange={(event) => updateCardPlanCount(item.card_type, event.target.value)}
+                  data-testid={CARD_PLAN_COUNT_TEST_IDS[item.card_type]}
+                />
+              </Form.Item>
+            ))}
+            <Text
+              type={plannedCardTotal < 1 || plannedCardTotal > 100 ? "danger" : "secondary"}
+              className="md:col-span-4 text-xs"
+              data-testid="flashcards-generate-plan-total"
+            >
+              {t("option:flashcards.generatePlanTotal", {
+                defaultValue: "Total: {{count}}",
+                count: plannedCardTotal
+              })}
+            </Text>
+          </div>
+        ) : (
+          <>
+            <Form.Item
+              label={t("option:flashcards.generateNumCards", {
+                defaultValue: "Number of cards"
+              })}
+              className="!mb-2"
+            >
+              <Input
+                value={String(numCards)}
+                type="number"
+                min={1}
+                max={100}
+                onChange={(event) => {
+                  const next = Number(event.target.value)
+                  if (!Number.isFinite(next)) return
+                  setNumCards(Math.max(1, Math.min(100, Math.round(next))))
+                }}
+                data-testid="flashcards-generate-count"
+              />
+            </Form.Item>
+            <Form.Item
+              label={t("option:flashcards.generateCardType", {
+                defaultValue: "Card type"
+              })}
+              className="!mb-2"
+            >
+              <Select
+                value={cardType}
+                onChange={(value) => setCardType(value)}
+                data-testid="flashcards-generate-card-type"
+                options={[
+                  { value: "basic", label: "Basic" },
+                  { value: "basic_reverse", label: "Basic (reverse)" },
+                  { value: "cloze", label: "Cloze" }
+                ]}
+              />
+            </Form.Item>
+          </>
+        )}
         <Form.Item
           label={t("option:flashcards.generateDifficulty", {
             defaultValue: "Difficulty"
@@ -623,7 +732,7 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
             type="primary"
             onClick={handleGenerate}
             loading={generateMutation.isPending}
-            disabled={!sourceText.trim() || !hasLlmProviders}
+            disabled={generationDisabled}
             data-testid="flashcards-generate-button"
           >
             {t("option:flashcards.generateButton", { defaultValue: "Generate cards" })}
@@ -681,6 +790,9 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
               }
             >
               <Space orientation="vertical" className="w-full">
+                <Text type="secondary" className="text-xs">
+                  {CARD_PLAN_LABELS[card.generation_type || card.model_type]}
+                </Text>
                 <Input.TextArea
                   value={card.front}
                   rows={2}
