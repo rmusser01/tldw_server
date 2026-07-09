@@ -1691,6 +1691,99 @@ def test_generate_flashcards_accepts_mixed_card_plan(client_with_flashcards_db, 
     assert cards[-1]["model_type"] == "basic"
 
 
+def test_generate_flashcards_rejects_planned_output_count_mismatch(client_with_flashcards_db, monkeypatch):
+    async def fake_generate_adapter(config, context):
+        return {
+            "flashcards": [
+                {"front": "Q1", "back": "A1", "generation_type": "basic", "model_type": "basic"},
+            ],
+            "count": 1,
+        }
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.endpoints.flashcards.run_flashcard_generate_adapter",
+        fake_generate_adapter,
+    )
+
+    response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/generate",
+        json={
+            "text": "Cell biology",
+            "num_cards": 2,
+            "card_plan": [
+                {"card_type": "basic", "count": 1},
+                {"card_type": "cloze", "count": 1},
+            ],
+        },
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 400
+    assert "Generated flashcards did not satisfy requested card plan" in response.json()["detail"]
+
+
+@pytest.mark.parametrize(
+    "raw_card",
+    [
+        {"front": "Q1", "back": "A1", "model_type": "basic"},
+        {"front": "Q1", "back": "A1", "generation_type": "made_up", "model_type": "basic"},
+    ],
+)
+def test_generate_flashcards_rejects_planned_output_without_valid_generation_type(
+    client_with_flashcards_db,
+    monkeypatch,
+    raw_card,
+):
+    async def fake_generate_adapter(config, context):
+        return {"flashcards": [raw_card], "count": 1}
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.endpoints.flashcards.run_flashcard_generate_adapter",
+        fake_generate_adapter,
+    )
+
+    response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/generate",
+        json={
+            "text": "Cell biology",
+            "num_cards": 1,
+            "card_plan": [{"card_type": "basic", "count": 1}],
+        },
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 400
+    assert "Generated flashcards did not satisfy requested card plan" in response.json()["detail"]
+
+
+def test_generate_flashcards_test_mode_supports_card_plan(client_with_flashcards_db, monkeypatch):
+    async def fake_generate_adapter(config, context):
+        return {"error": "LLM provider is required", "flashcards": [], "count": 0}
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.endpoints.flashcards.run_flashcard_generate_adapter",
+        fake_generate_adapter,
+    )
+
+    response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/generate",
+        json={
+            "text": "Cell biology",
+            "num_cards": 2,
+            "card_plan": [
+                {"card_type": "basic", "count": 1},
+                {"card_type": "true_false", "count": 1},
+            ],
+        },
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 200
+    cards = response.json()["flashcards"]
+    assert [card["generation_type"] for card in cards] == ["basic", "true_false"]
+    assert cards[1]["model_type"] == "basic"
+
+
 @pytest.mark.parametrize(
     "body",
     [
