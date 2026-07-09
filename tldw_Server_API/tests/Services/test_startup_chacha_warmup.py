@@ -39,6 +39,8 @@ async def test_warm_chacha_notes_on_startup_schedules_single_user_warmup(
     logger = _FakeLogger()
     observed: dict[str, object] = {"reset_calls": 0}
 
+    monkeypatch.delenv("TEST_MODE", raising=False)
+    monkeypatch.delenv("TLDW_TEST_MODE", raising=False)
     monkeypatch.setattr(
         warmup,
         "_reset_chacha_shutdown_state",
@@ -72,6 +74,39 @@ async def test_warm_chacha_notes_on_startup_schedules_single_user_warmup(
 
 
 @pytest.mark.asyncio
+async def test_warm_chacha_notes_on_startup_skips_test_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    warmup = _import_startup_chacha_warmup()
+    logger = _FakeLogger()
+    observed: dict[str, object] = {"reset_calls": 0, "scheduled": False}
+
+    monkeypatch.setenv("TEST_MODE", "true")
+    monkeypatch.setattr(
+        warmup,
+        "_reset_chacha_shutdown_state",
+        lambda: observed.__setitem__("reset_calls", int(observed["reset_calls"]) + 1),
+    )
+    monkeypatch.setattr(warmup, "_is_single_user_mode", lambda: True)
+    monkeypatch.setattr(
+        warmup,
+        "_schedule_warm_chacha_task",
+        lambda user_id, client_id: observed.__setitem__("scheduled", True),
+    )
+
+    await warmup.warm_chacha_notes_on_startup(
+        logger=logger,
+        startup_guard_exceptions=(RuntimeError,),
+    )
+
+    assert observed["reset_calls"] == 1
+    assert observed["scheduled"] is False
+    assert logger.info_messages == []
+    assert logger.debug_messages == ["ChaChaNotes warm-up skipped (test mode)"]
+    assert logger.warning_messages == []
+
+
+@pytest.mark.asyncio
 async def test_warm_chacha_notes_on_startup_skips_multi_user_mode(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -79,6 +114,8 @@ async def test_warm_chacha_notes_on_startup_skips_multi_user_mode(
     logger = _FakeLogger()
     observed: dict[str, object] = {"reset_calls": 0, "scheduled": False}
 
+    monkeypatch.delenv("TEST_MODE", raising=False)
+    monkeypatch.delenv("TLDW_TEST_MODE", raising=False)
     monkeypatch.setattr(
         warmup,
         "_reset_chacha_shutdown_state",
