@@ -43,7 +43,7 @@ Prepare a small docs-only pull request against dev containing the current Docs/D
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Created clean PR branch codex/design-link-docs from origin/dev, copied only the Docs/Design link additions from the dev worktree, included this Backlog task record, and fixed staged markdown whitespace reported by git diff --cached --check. Verification before commit: git diff --cached --check passed; targeted secret-pattern scan over staged docs/task files returned no matches. Bandit skipped because this is docs-only plus Backlog metadata.
+Created PR #2694 against dev from clean branch codex/design-link-docs: https://github.com/rmusser01/tldw_server/pull/2694. The branch contains only the current Docs/Design link additions from the dev worktree plus the Backlog task record, with staged markdown whitespace fixed before commit. Verification: git diff --cached --check passed; git diff --check origin/dev..HEAD passed; targeted secret-value scan over touched docs/task files returned no matches. Bandit skipped because this is docs-only plus Backlog metadata.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
