@@ -28,6 +28,7 @@ modified_files:
 - apps/packages/ui/src/components/Sidepanel/Chat/CharacterControlsSheet.tsx
 - apps/packages/ui/src/services/settings/chat-opacity-css-vars.ts
 - tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/audio_stream_protocol.py
+- tldw_Server_API/app/core/Monitoring/notification_service.py
 - tldw_Server_API/app/core/exceptions.py
 - tldw_Server_API/tests/Audio/test_ws_audio_chat_stream.py
 ---
@@ -57,7 +58,7 @@ Created implementation plan and triaged unresolved PR #2692 review threads. Vali
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Local verification recorded: Python audio websocket tests passed (25 passed); Bandit production scope passed and touched test scope passed with B101 excluded for pytest asserts; frontend typecheck passed; focused Vitest passed (RecipeCard, SearchModeSettings, SetupRecoverySettings, CharacterEditorForm expression validation; 13 tests); git diff --check passed. PR metadata/comments still need update after commit/push.
+Local verification recorded: Python audio websocket tests passed (25 passed); notification payload mutation regression test passed; Bandit production scope passed for audio protocol/core exceptions and notification_service.py, and touched test scope passed with B101 excluded for pytest asserts; frontend typecheck passed; focused Vitest passed (RecipeCard, SearchModeSettings, SetupRecoverySettings, CharacterEditorForm expression validation; 13 tests); git diff --check passed. PR metadata was updated with validation and release-risk notes; review threads will be replied/resolved after final push.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
