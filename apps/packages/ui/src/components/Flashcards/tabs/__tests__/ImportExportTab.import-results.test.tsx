@@ -1505,10 +1505,11 @@ describe("ImportExportTab import result details", () => {
     fireEvent.change(screen.getByTestId("flashcards-generate-text"), {
       target: { value: "A source paragraph for advanced totals." }
     })
-    fireEvent.click(screen.getByTestId("flashcards-generate-advanced-toggle"))
+    fireEvent.click(screen.getByRole("switch", { name: /advanced mix/i }))
 
     expect(screen.getByTestId("flashcards-generate-plan-total")).toHaveTextContent("10")
     expect(screen.getByTestId("flashcards-generate-button")).not.toBeDisabled()
+    expect(screen.queryByText("Total must be 1-100 cards.")).not.toBeInTheDocument()
 
     for (const testId of [
       "flashcards-generate-plan-basic-count",
@@ -1521,6 +1522,8 @@ describe("ImportExportTab import result details", () => {
       })
     }
     expect(screen.getByTestId("flashcards-generate-plan-total")).toHaveTextContent("0")
+    expect(screen.getByText("Total must be 1-100 cards.")).toBeInTheDocument()
+    expect(screen.getByRole("group", { name: /advanced mix/i })).toHaveAttribute("aria-invalid", "true")
     expect(screen.getByTestId("flashcards-generate-button")).toBeDisabled()
 
     fireEvent.change(screen.getByTestId("flashcards-generate-plan-basic-count"), {
@@ -1530,6 +1533,7 @@ describe("ImportExportTab import result details", () => {
       target: { value: "1" }
     })
     expect(screen.getByTestId("flashcards-generate-plan-total")).toHaveTextContent("101")
+    expect(screen.getByText("Total must be 1-100 cards.")).toBeInTheDocument()
     expect(screen.getByTestId("flashcards-generate-button")).toBeDisabled()
   })
 

@@ -62,6 +62,9 @@ const CARD_PLAN_COUNT_TEST_IDS: Record<FlashcardPlanItem["card_type"], string> =
   true_false: "flashcards-generate-plan-true-false-count"
 }
 
+const ADVANCED_MIX_LABEL_ID = "flashcards-generate-advanced-label"
+const ADVANCED_MIX_ERROR_ID = "flashcards-generate-plan-error"
+
 /**
  * Generate panel for LLM-assisted card generation from free text.
  */
@@ -169,10 +172,11 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
     () => activeCardPlan.reduce((total, item) => total + item.count, 0),
     [activeCardPlan]
   )
+  const advancedPlanInvalid = advancedMixEnabled && (plannedCardTotal < 1 || plannedCardTotal > 100)
   const generationDisabled =
     !sourceText.trim() ||
     !hasLlmProviders ||
-    (advancedMixEnabled && (plannedCardTotal < 1 || plannedCardTotal > 100))
+    advancedPlanInvalid
 
   React.useEffect(() => {
     if (targetDeckId != null) return
@@ -523,16 +527,23 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
           <Switch
             checked={advancedMixEnabled}
             onChange={setAdvancedMixEnabled}
+            aria-labelledby={ADVANCED_MIX_LABEL_ID}
             data-testid="flashcards-generate-advanced-toggle"
           />
-          <Text>
+          <Text id={ADVANCED_MIX_LABEL_ID}>
             {t("option:flashcards.generateAdvancedMix", {
               defaultValue: "Advanced mix"
             })}
           </Text>
         </div>
         {advancedMixEnabled ? (
-          <div className="md:col-span-2 grid grid-cols-1 gap-2 md:grid-cols-4">
+          <div
+            className="md:col-span-2 grid grid-cols-1 gap-2 md:grid-cols-4"
+            role="group"
+            aria-labelledby={ADVANCED_MIX_LABEL_ID}
+            aria-invalid={advancedPlanInvalid ? "true" : undefined}
+            aria-describedby={advancedPlanInvalid ? ADVANCED_MIX_ERROR_ID : undefined}
+          >
             {cardPlanDraft.map((item) => (
               <Form.Item
                 key={item.card_type}
@@ -559,6 +570,17 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
                 count: plannedCardTotal
               })}
             </Text>
+            {advancedPlanInvalid && (
+              <Text
+                id={ADVANCED_MIX_ERROR_ID}
+                type="danger"
+                className="md:col-span-4 text-xs"
+              >
+                {t("option:flashcards.generatePlanTotalError", {
+                  defaultValue: "Total must be 1-100 cards."
+                })}
+              </Text>
+            )}
           </div>
         ) : (
           <>
