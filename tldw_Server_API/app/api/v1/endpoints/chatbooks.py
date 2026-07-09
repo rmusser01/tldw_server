@@ -48,6 +48,7 @@ from ._pagination_utils import build_offset_pagination_meta
 from ..API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user as get_chacha_db
 from ..schemas.chatbook_schemas import (
     CancelJobResponse,
+    ChatbookAccountScopeResponse,
     ChatbookManifestResponse,
     ChatbookImportSourceFormat,
     CleanupExpiredExportsResponse,
@@ -379,6 +380,22 @@ async def chatbooks_health():
         health["error"] = "Chatbooks health check failed"
 
     return health
+
+
+@router.get(
+    "/export/scope",
+    response_model=ChatbookAccountScopeResponse,
+    dependencies=[Depends(rbac_rate_limit("chatbooks.export"))],
+)
+async def get_chatbook_export_scope(
+    service: ChatbookService = Depends(get_chatbook_service),
+):
+    """Return a redacted full-account export scope summary."""
+    try:
+        return ChatbookAccountScopeResponse(**service.get_full_account_export_scope())
+    except _CHATBOOKS_NONCRITICAL_EXCEPTIONS:
+        logger.exception("Failed to build chatbook export scope")
+        raise HTTPException(status_code=500, detail="An error occurred while building the export scope") from None
 
 
 @router.post(
