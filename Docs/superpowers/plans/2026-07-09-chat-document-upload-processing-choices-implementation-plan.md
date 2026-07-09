@@ -548,7 +548,7 @@ git commit -m "feat: add chat document processing service"
 - Modify: `apps/packages/ui/src/hooks/chat/useFileUpload.ts`
 - Modify: English locale files listed above.
 
-- [ ] **Step 1: Write failing component tests**
+- [x] **Step 1: Write failing component tests**
 
 Test the visible behavior:
 
@@ -585,7 +585,7 @@ Also test:
 - Blocked files show a blocking state and do not hide the remove action.
 - Mixed batch summary collapses to counts like `2 ready, 1 blocked`.
 
-- [ ] **Step 2: Run component tests and verify failure**
+- [x] **Step 2: Run component tests and verify failure**
 
 Run:
 
@@ -595,7 +595,7 @@ cd apps/tldw-frontend && bunx vitest run ../packages/ui/src/components/Option/Pl
 
 Expected: FAIL because the component does not exist.
 
-- [ ] **Step 3: Update upload staging**
+- [x] **Step 3: Update upload staging**
 
 In `useFileUpload.ts`, after the file-size guard and base64 conversion, initialize document metadata:
 
@@ -613,7 +613,7 @@ const uploadedFile: UploadedFile = withDefaultDocumentDecision({
 
 Call the preflight client after setting local state. When it resolves, merge capabilities into matching file IDs only if the file is still attached. On failure, keep files attached with `processingStatus: "blocked"` and a user-safe preflight error.
 
-- [ ] **Step 4: Implement `DocumentProcessingChoices`**
+- [x] **Step 4: Implement `DocumentProcessingChoices`**
 
 Use native buttons and existing design tokens. The three mode labels are:
 
@@ -629,7 +629,7 @@ Use icons from `lucide-react`:
 
 Keep routine flow inline; do not add a modal.
 
-- [ ] **Step 5: Render the decision surface in `PlaygroundForm.tsx`**
+- [x] **Step 5: Render the decision surface in `PlaygroundForm.tsx`**
 
 Place it next to the existing attachment summary so users see mode choices immediately after adding documents. Pass:
 
@@ -639,7 +639,7 @@ Place it next to the existing attachment summary so users see mode choices immed
 
 `contextFiles` here remains a compatibility mirror for chat-scoped attachments only. The authoritative send-time routing still comes from `prepareChatDocumentAttachmentsForSend`; ingest-only sends must later pass `requestOverrides.contextFiles = []`.
 
-- [ ] **Step 6: Add compact status to `AttachmentsSummary.tsx`**
+- [x] **Step 6: Add compact status to `AttachmentsSummary.tsx`**
 
 For each uploaded file chip, include a short status line:
 
@@ -651,7 +651,7 @@ For each uploaded file chip, include a short status line:
 
 Keep text small and inside the chip; do not let chips resize toolbar height unpredictably.
 
-- [ ] **Step 7: Add English strings**
+- [x] **Step 7: Add English strings**
 
 Add keys under `playground.documentProcessing` in both English locale files. Keep copy short and concrete:
 
@@ -666,7 +666,7 @@ Add keys under `playground.documentProcessing` in both English locale files. Kee
 }
 ```
 
-- [ ] **Step 8: Run component and existing composer tests**
+- [x] **Step 8: Run component and existing composer tests**
 
 Run:
 

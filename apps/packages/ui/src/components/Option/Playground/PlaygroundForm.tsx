@@ -14,6 +14,7 @@ import { isFirefoxTarget } from "@/config/platform";
 import { STT_DEFAULTS } from "@/config/ui-constants";
 import { getDesignSystemState } from "@/design-system";
 import { getAllPrompts } from "@/db/dexie/helpers";
+import type { UploadedFile } from "@/db/dexie/types";
 import { useChatSettingsRecord } from "@/hooks/chat/useChatSettingsRecord";
 import { resolveEffectiveAssistantState } from "@/hooks/chat/effective-assistant-state";
 import {
@@ -174,6 +175,7 @@ import { ChatModelSelectorDropdown } from "./ChatModelSelectorDropdown";
 import { CompareToggle } from "./CompareToggle";
 import { ComposerTextarea } from "./ComposerTextarea";
 import { ComposerToolbar } from "./ComposerToolbar";
+import { DocumentProcessingChoices } from "./DocumentProcessingChoices";
 import { MentionsDropdown } from "./MentionsDropdown";
 import { getPresetByKey } from "./ParameterPresets";
 import { PlaygroundComposerNotices } from "./PlaygroundComposerNotices";
@@ -585,6 +587,7 @@ export const PlaygroundForm = ({
     messageSteeringMode,
     messageSteeringForceNarrate,
     contextFiles,
+    setContextFiles,
     documentContext,
     selectedKnowledge,
     ragMediaIds,
@@ -594,6 +597,7 @@ export const PlaygroundForm = ({
       inflightToolCallIds: [],
     },
   } = useMessageOption();
+  const setUploadedFiles = useStoreMessageOption((s) => s.setUploadedFiles);
   const setRagMediaIds = useStoreMessageOption((s) => s.setRagMediaIds);
   const setRagPinnedResults = useStoreMessageOption(
     (s) => s.setRagPinnedResults,
@@ -4222,6 +4226,16 @@ export const PlaygroundForm = ({
     t,
   });
 
+  const handleDocumentProcessingFilesChange = React.useCallback(
+    (files: UploadedFile[]) => {
+      setUploadedFiles(files);
+      setContextFiles(
+        files.filter((file) => file.processingMode !== "ingest_to_library"),
+      );
+    },
+    [setContextFiles, setUploadedFiles],
+  );
+
   const settingsHook = usePlaygroundSettings({
     selectedCharacterName: selectedCharacter?.name || null,
     selectedSystemPrompt,
@@ -5030,6 +5044,15 @@ export const PlaygroundForm = ({
                   readOnly
                 />,
               )}
+              {uploadedFiles.length > 0
+                ? wrapComposerProfile(
+                    "document-processing-choices",
+                    <DocumentProcessingChoices
+                      files={uploadedFiles}
+                      onChangeFiles={handleDocumentProcessingFilesChange}
+                    />,
+                  )
+                : null}
               {/* Link to Model Playground for Compare mode */}
               <div>
                 <div className="flex w-full min-w-0 bg-transparent">

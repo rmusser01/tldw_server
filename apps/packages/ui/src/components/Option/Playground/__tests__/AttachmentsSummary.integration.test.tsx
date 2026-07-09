@@ -96,4 +96,37 @@ describe("AttachmentsSummary integration", () => {
     await user.click(screen.getByRole("button", { name: /Attachments/i }))
     expect(screen.queryByTestId("attachments-large-warning")).toBeNull()
   })
+
+  it("shows document processing status without hiding remove", async () => {
+    const user = userEvent.setup()
+    const onRemoveFile = vi.fn()
+
+    render(
+      <AttachmentsSummary
+        image=""
+        documents={[]}
+        files={[
+          {
+            id: "file-1",
+            filename: "blocked.pdf",
+            size: 1 * 1024 * 1024,
+            processingMode: "ocr_pages",
+            processingStatus: "blocked"
+          }
+        ]}
+        onRemoveImage={vi.fn()}
+        onRemoveDocument={vi.fn()}
+        onClearDocuments={vi.fn()}
+        onRemoveFile={onRemoveFile}
+        onClearFiles={vi.fn()}
+        onOpenKnowledgePanel={vi.fn()}
+      />
+    )
+
+    await user.click(screen.getByRole("button", { name: /Attachments/i }))
+
+    expect(screen.getByText("Blocked")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Remove" }))
+    expect(onRemoveFile).toHaveBeenCalledWith("file-1")
+  })
 })
