@@ -1209,12 +1209,40 @@ class TestFlashcardGenerateAdapter:
                 base_context,
             )
 
-        assert result == {
-            "flashcards": [
-                {"front": "Q1", "back": "A1", "generation_type": "basic", "model_type": "basic"},
-            ],
-            "count": 1,
-        }
+        assert result == {"error": "card_plan_mismatch", "flashcards": [], "count": 0}
+
+    @pytest.mark.asyncio
+    async def test_flashcard_generate_rejects_planned_count_mismatch(self, base_context, sample_long_text):
+        """Test planned output with the wrong valid type distribution is rejected."""
+        from tldw_Server_API.app.core.Workflows.adapters.content import run_flashcard_generate_adapter
+
+        mock_response = mock_chat_response(
+            json.dumps(
+                [
+                    {"front": "Q1", "back": "A1", "generation_type": "basic"},
+                    {"front": "Q2", "back": "A2", "generation_type": "basic"},
+                ]
+            )
+        )
+
+        with patch(
+            "tldw_Server_API.app.core.Workflows.adapters.content.generation.perform_chat_api_call_async",
+            new_callable=AsyncMock,
+            return_value=mock_response,
+        ):
+            result = await run_flashcard_generate_adapter(
+                {
+                    "text": sample_long_text,
+                    "num_cards": 2,
+                    "card_plan": [
+                        {"card_type": "basic", "count": 1},
+                        {"card_type": "cloze", "count": 1},
+                    ],
+                },
+                base_context,
+            )
+
+        assert result == {"error": "card_plan_mismatch", "flashcards": [], "count": 0}
 
     @pytest.mark.asyncio
     async def test_flashcard_generate_cancellation(self, base_context, sample_long_text):

@@ -282,6 +282,14 @@ async def run_flashcard_generate_adapter(config: dict[str, Any], context: dict[s
                 card["generation_type"] = raw_generation_type
             card["model_type"] = "basic" if raw_generation_type == "true_false" else raw_generation_type or "basic"
             cleaned_flashcards.append(card)
+        if planned_request:
+            expected_counts = {row["card_type"]: row["count"] for row in normalized_plan}
+            actual_counts: dict[str, int] = {}
+            for card in cleaned_flashcards:
+                generation_type = card["generation_type"]
+                actual_counts[generation_type] = actual_counts.get(generation_type, 0) + 1
+            if actual_counts != expected_counts:
+                return {"error": "card_plan_mismatch", "flashcards": [], "count": 0}
         return {"flashcards": cleaned_flashcards, "count": len(cleaned_flashcards)}
     except _GENERATION_NONCRITICAL_EXCEPTIONS:
         logger.exception("Flashcard generate adapter error")
