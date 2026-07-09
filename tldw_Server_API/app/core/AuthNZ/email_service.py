@@ -7,6 +7,7 @@ import json
 import os
 import smtplib
 import re
+import secrets
 from datetime import datetime, timezone
 from email import encoders
 from email.mime.base import MIMEBase
@@ -655,13 +656,13 @@ class EmailService:
 
         # Save to file
         if self.mock_output in ["file", "both"]:
-            file_path = self.mock_file_path / f"{email_id}.json"
+            file_path = self._mock_email_path(email_id, ".json")
             with open(file_path, "w") as f:
                 json.dump(email_data, f, indent=2)
 
             # Persist a stub HTML artifact instead of the rendered body so local
             # mock mailboxes do not store sensitive message content at rest.
-            html_path = self.mock_file_path / f"{email_id}.html"
+            html_path = self._mock_email_path(email_id, ".html")
             with open(html_path, "w") as f:
                 f.write(
                     "<!DOCTYPE html><html><body>"
@@ -679,10 +680,24 @@ class EmailService:
     @staticmethod
     def _safe_mock_email_file_id(timestamp: str, to_email: str) -> str:
         """Return a mock-email file stem that is valid across supported platforms."""
-        raw_id = f"{timestamp}_{to_email.replace('@', '_at_')}"
+        del to_email
+        raw_id = f"{timestamp}_{secrets.token_hex(8)}"
         safe_id = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", raw_id)
         safe_id = re.sub(r"_+", "_", safe_id).strip(" ._")
         return safe_id or "mock_email"
+
+    def _mock_email_path(self, email_id: str, suffix: str) -> Path:
+        """Resolve a mock-email artifact path under the configured mock directory."""
+        file_name = f"{email_id}{suffix}"
+        if Path(file_name).name != file_name:
+            raise ValueError("invalid mock email file name")
+        base = self.mock_file_path.resolve(strict=False)
+        path = (base / file_name).resolve(strict=False)
+        try:
+            path.relative_to(base)
+        except ValueError as exc:
+            raise ValueError("invalid mock email path") from exc
+        return path
 
     @staticmethod
     def _redact_mock_email_body(body: str) -> str:

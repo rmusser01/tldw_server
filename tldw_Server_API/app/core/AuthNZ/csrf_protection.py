@@ -59,8 +59,9 @@ class CSRFTokenManager:
     def __init__(self):
         """Initialize CSRF token manager"""
         self.settings = get_settings()
-        self.token_header_name = "X-CSRF-Token"
-        self.token_cookie_name = "csrf_token"
+        # Header and cookie names are public identifiers, not secrets.
+        self.token_header_name = "X-CSRF-Token"  # nosec B105
+        self.token_cookie_name = "csrf_token"  # nosec B105
         self.token_length = 32
 
         # Methods that require CSRF protection
@@ -93,7 +94,7 @@ class CSRFTokenManager:
         s = get_settings()
         if not s.CSRF_BIND_TO_USER or user_id is None:
             return None
-        digest = hmac.new(self._hmac_key(), str(user_id).encode(), hashlib.sha256).digest()
+        digest = hmac.digest(self._hmac_key(), str(user_id).encode(), "sha256")
         return base64.urlsafe_b64encode(digest)[:16].decode()
 
     def generate_token(self, request: Request) -> str:

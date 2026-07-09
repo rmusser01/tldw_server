@@ -33,7 +33,7 @@ def _describe_mineru_backend() -> dict[str, Any]:
     return describe_mineru_backend()
 
 
-def _describe_mineru_backend_error(exc: Exception) -> dict[str, Any]:
+def _describe_mineru_backend_error(_exc: Exception) -> dict[str, Any]:
     """Return a conservative MinerU capability stub when adapter discovery fails."""
     return {
         "available": False,
@@ -42,18 +42,18 @@ def _describe_mineru_backend_error(exc: Exception) -> dict[str, Any]:
         "opt_in_only": True,
         "supports_per_page_metrics": False,
         "mode": "cli",
-        "error": str(exc),
+        "error": "MinerU backend discovery failed",
     }
 
 
 def _record_backend_discovery_error(
     out: dict[str, Any],
     backend_name: str,
-    exc: Exception,
+    _exc: Exception,
 ) -> None:
     logging.error("OCR backend discovery failed for {}", backend_name)
     out.setdefault(backend_name, {})
-    out[backend_name]["error"] = str(exc)
+    out[backend_name]["error"] = f"{backend_name} backend discovery failed"
 
 
 @router.get("/backends", response_model=OCRBackendsResponse)

@@ -160,8 +160,12 @@ async def _fallback_queue_lock(path: Path) -> AsyncGenerator[None, None]:
 
     Uses a file lock when available; otherwise falls back to a process-wide lock.
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    lock_path = _fallback_lock_path(path)
+    path = path.resolve(strict=False)
+    fallback_dir = path.parent.resolve(strict=False)
+    path.relative_to(fallback_dir)
+    fallback_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = _fallback_lock_path(path).resolve(strict=False)
+    lock_path.relative_to(fallback_dir)
 
     if _HAS_FCNTL:
         def _open_and_lock() -> Any:
@@ -1015,7 +1019,7 @@ class UnifiedAuditService:
                 db_dir.mkdir(parents=True, exist_ok=True)
                 db_path = db_dir / "unified_audit.db"
 
-        self.db_path = Path(db_path)
+        self.db_path = Path(db_path).resolve(strict=False)
         try:
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
         except _AUDIT_NONCRITICAL_EXCEPTIONS as e:
@@ -2592,7 +2596,7 @@ class UnifiedAuditService:
                 if dropped > 0:
                     # Persist dropped events to a fallback JSONL queue for durability
                     try:
-                        fb_path = self.db_path.parent / "audit_fallback_queue.jsonl"
+                        fb_path = self._fallback_queue_path()
                         async with _fallback_queue_lock(fb_path):
                             await asyncio.to_thread(
                                 self._append_events_to_fallback, fb_path, combined[max_buffer:]
@@ -2619,10 +2623,20 @@ class UnifiedAuditService:
             os.fsync(fb.fileno())
 
     async def _spill_events_to_fallback(self, events: list[AuditEvent]) -> Path:
-        fb_path = self.db_path.parent / "audit_fallback_queue.jsonl"
+        fb_path = self._fallback_queue_path()
         async with _fallback_queue_lock(fb_path):
             await asyncio.to_thread(self._append_events_to_fallback, fb_path, events)
         return fb_path
+
+    def _fallback_queue_path(self) -> Path:
+        """Return the fallback JSONL path under the resolved audit DB directory."""
+        fallback_dir = self.db_path.parent.resolve(strict=False)
+        path = (fallback_dir / "audit_fallback_queue.jsonl").resolve(strict=False)
+        try:
+            path.relative_to(fallback_dir)
+        except ValueError as exc:
+            raise ValueError("audit fallback queue path escapes database directory") from exc
+        return path
 
     async def _update_daily_stats(self, db: aiosqlite.Connection, events: list[AuditEvent]):
         """Update daily statistics"""
@@ -2806,7 +2820,7 @@ class UnifiedAuditService:
 
     async def replay_fallback_queue(self, max_batch: int = 5000) -> int:
         """Replay events from the fallback queue back into the main audit table."""
-        fb_path = self.db_path.parent / "audit_fallback_queue.jsonl"
+        fb_path = self._fallback_queue_path()
         async with _fallback_queue_lock(fb_path):
             if not fb_path.exists():
                 return 0

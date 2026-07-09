@@ -65,3 +65,12 @@ Answer: Carefully.
         "\n"
         "  2. Return output."
     )
+
+
+def test_parse_structured_qa_preview_accepts_short_labels_with_alt_separators():
+    result = parse_structured_qa_preview("  q. One?\n  a- Two.\n")
+
+    assert len(result.drafts) == 1
+    assert result.drafts[0].front == "One?"
+    assert result.drafts[0].back == "Two."
+    assert result.errors == []

@@ -1719,7 +1719,7 @@ def _get_audio_install_status(*, allow_completed_when_disabled: bool = False) ->
     if not install_status:
         return JSONResponse({"status": "idle"})
 
-    return JSONResponse(install_status)
+    return JSONResponse(_sanitize_setup_payload(install_status))
 
 
 def _ensure_setup_readiness_available(

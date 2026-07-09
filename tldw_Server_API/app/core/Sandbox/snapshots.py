@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import os
+import re
 import shutil
 import tarfile
 import time
@@ -32,6 +34,8 @@ _SNAPSHOTS_NONCRITICAL_EXCEPTIONS = (
     tarfile.TarError,
 )
 
+_SAFE_SNAPSHOT_COMPONENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
+
 
 class SnapshotManager:
     """Manages session snapshots for checkpoint/restore workflows.
@@ -48,25 +52,43 @@ class SnapshotManager:
                          SANDBOX_SNAPSHOT_PATH env var or /tmp/sandbox_snapshots.
         """
         if storage_path:
-            self.storage_path = storage_path
+            self.storage_path = Path(storage_path).resolve(strict=False)
         else:
-            self.storage_path = os.getenv(
-                "SANDBOX_SNAPSHOT_PATH",
-                os.path.join(os.path.dirname(__file__), "..", "..", "..", "tmp_dir", "sandbox_snapshots")
-            )
+            self.storage_path = Path(
+                os.getenv(
+                    "SANDBOX_SNAPSHOT_PATH",
+                    os.path.join(os.path.dirname(__file__), "..", "..", "..", "tmp_dir", "sandbox_snapshots")
+                )
+            ).resolve(strict=False)
         # Ensure storage directory exists
         try:
             os.makedirs(self.storage_path, exist_ok=True)
         except _SNAPSHOTS_NONCRITICAL_EXCEPTIONS as e:
             logger.warning(f"Failed to create snapshot storage path: {e}")
 
+    @staticmethod
+    def _safe_storage_component(value: str, *, label: str) -> str:
+        """Return a filesystem-safe snapshot storage path component."""
+        component = str(value or "").strip()
+        if not component or "/" in component or "\\" in component:
+            raise ValueError(f"Invalid {label}")
+        if not _SAFE_SNAPSHOT_COMPONENT_RE.fullmatch(component):
+            raise ValueError(f"Invalid {label}")
+        return f"{label}_{hashlib.sha256(component.encode('utf-8')).hexdigest()[:32]}"
+
     def _snapshot_dir(self, session_id: str) -> Path:
         """Get the directory for a session's snapshots."""
-        return Path(self.storage_path) / session_id
+        safe_session_id = self._safe_storage_component(session_id, label="session_id")
+        base = Path(self.storage_path).resolve(strict=False)
+        path = (base / safe_session_id).resolve(strict=False)
+        if path != base and base not in path.parents:
+            raise ValueError("Invalid session_id")
+        return path
 
     def _snapshot_path(self, session_id: str, snapshot_id: str) -> Path:
         """Get the full path for a specific snapshot archive."""
-        return self._snapshot_dir(session_id) / f"{snapshot_id}.tar.gz"
+        safe_snapshot_id = self._safe_storage_component(snapshot_id, label="snapshot_id")
+        return self._snapshot_dir(session_id) / f"{safe_snapshot_id}.tar.gz"
 
     @staticmethod
     def _has_symlink_ancestor(path: Path) -> bool:
@@ -74,9 +96,28 @@ class SnapshotManager:
         absolute = Path(os.path.abspath(path))
         return any(parent.is_symlink() for parent in reversed(absolute.parents))
 
+    @classmethod
+    def _resolve_workspace_root(cls, workspace_path: str, *, require_existing_dir: bool) -> Path:
+        """Resolve and validate a sandbox workspace root path."""
+        raw_path = str(workspace_path or "").strip()
+        if not raw_path:
+            raise ValueError("Invalid workspace path")
+        raw_root = Path(raw_path)
+        if raw_root.is_symlink():
+            raise ValueError("Refusing symlink workspace root")
+        if cls._has_symlink_ancestor(raw_root):
+            raise ValueError("Refusing symlink workspace ancestor")
+        root = raw_root.resolve(strict=False)
+        if require_existing_dir and not root.is_dir():
+            raise ValueError(f"Invalid workspace path: {workspace_path}")
+        if root.exists() and not root.is_dir():
+            raise ValueError(f"Invalid workspace path: {workspace_path}")
+        return root
+
     def _metadata_path(self, session_id: str, snapshot_id: str) -> Path:
         """Get the path for a snapshot's metadata file."""
-        return self._snapshot_dir(session_id) / f"{snapshot_id}.meta.json"
+        safe_snapshot_id = self._safe_storage_component(snapshot_id, label="snapshot_id")
+        return self._snapshot_dir(session_id) / f"{safe_snapshot_id}.meta.json"
 
     @staticmethod
     def _validate_tar_member(member: tarfile.TarInfo, extract_root: Path) -> None:
@@ -154,9 +195,7 @@ class SnapshotManager:
             ValueError: If the workspace path doesn't exist or isn't a directory.
             IOError: If there's an error creating the snapshot archive.
         """
-        if not workspace_path or not os.path.isdir(workspace_path):
-            raise ValueError(f"Invalid workspace path: {workspace_path}")
-        workspace_root = Path(workspace_path)
+        workspace_root = self._resolve_workspace_root(workspace_path, require_existing_dir=True)
         self._validate_workspace_tree_for_copy(workspace_root)
 
         snapshot_id = f"snap-{uuid.uuid4().hex[:12]}"
@@ -173,9 +212,8 @@ class SnapshotManager:
         try:
             with tarfile.open(snapshot_path, "w:gz") as tar:
                 # Add workspace contents with relative paths
-                for item in os.listdir(workspace_path):
-                    item_path = Path(workspace_path) / item
-                    self._add_workspace_item_to_tar(tar, item_path, item)
+                for item_path in workspace_root.iterdir():
+                    self._add_workspace_item_to_tar(tar, item_path, item_path.name)
         except _SNAPSHOTS_NONCRITICAL_EXCEPTIONS as e:
             # Clean up on failure
             with contextlib.suppress(_SNAPSHOTS_NONCRITICAL_EXCEPTIONS):
@@ -195,7 +233,7 @@ class SnapshotManager:
             "session_id": session_id,
             "created_at": created_at,
             "size_bytes": size_bytes,
-            "workspace_path": workspace_path,
+            "workspace_path": str(workspace_root),
         }
 
         # Store metadata
@@ -236,14 +274,7 @@ class SnapshotManager:
         if not snapshot_path.exists():
             raise ValueError(f"Snapshot not found: {snapshot_id}")
 
-        if not workspace_path:
-            raise ValueError("Invalid workspace path")
-
-        workspace_root = Path(workspace_path)
-        if workspace_root.is_symlink():
-            raise ValueError("Refusing symlink workspace root")
-        if self._has_symlink_ancestor(workspace_root):
-            raise ValueError("Refusing symlink workspace ancestor")
+        workspace_root = self._resolve_workspace_root(workspace_path, require_existing_dir=False)
         if workspace_root.exists():
             if not workspace_root.is_dir():
                 raise ValueError(f"Invalid workspace path: {workspace_path}")
@@ -253,31 +284,30 @@ class SnapshotManager:
         # Take a backup first so failed restore can roll back atomically.
         try:
             if workspace_root.exists() and workspace_root.is_dir():
-                shutil.copytree(workspace_path, str(backup_path), dirs_exist_ok=False)
+                shutil.copytree(str(workspace_root), str(backup_path), dirs_exist_ok=False)
             else:
-                os.makedirs(workspace_path, exist_ok=True)
+                workspace_root.mkdir(parents=True, exist_ok=True)
         except _SNAPSHOTS_NONCRITICAL_EXCEPTIONS as e:
             raise OSError(f"Failed to backup workspace before restore: {e}") from e
 
         # Clear current workspace (but keep the directory)
         try:
-            if os.path.isdir(workspace_path):
-                for item in os.listdir(workspace_path):
-                    item_path = os.path.join(workspace_path, item)
-                    if os.path.isdir(item_path):
+            if workspace_root.is_dir():
+                for item_path in workspace_root.iterdir():
+                    if item_path.is_dir():
                         shutil.rmtree(item_path, ignore_errors=True)
                     else:
                         with contextlib.suppress(_SNAPSHOTS_NONCRITICAL_EXCEPTIONS):
-                            os.remove(item_path)
+                            item_path.unlink()
             else:
-                os.makedirs(workspace_path, exist_ok=True)
+                workspace_root.mkdir(parents=True, exist_ok=True)
         except _SNAPSHOTS_NONCRITICAL_EXCEPTIONS as e:
             with contextlib.suppress(_SNAPSHOTS_NONCRITICAL_EXCEPTIONS):
                 if backup_path.exists():
-                    if os.path.isdir(workspace_path):
-                        shutil.rmtree(workspace_path, ignore_errors=True)
-                    os.makedirs(workspace_path, exist_ok=True)
-                    shutil.copytree(str(backup_path), workspace_path, dirs_exist_ok=True)
+                    if workspace_root.is_dir():
+                        shutil.rmtree(workspace_root, ignore_errors=True)
+                    workspace_root.mkdir(parents=True, exist_ok=True)
+                    shutil.copytree(str(backup_path), str(workspace_root), dirs_exist_ok=True)
                     shutil.rmtree(backup_path, ignore_errors=True)
             raise OSError(f"Failed to clear workspace: {e}") from e
 
@@ -286,23 +316,23 @@ class SnapshotManager:
             with tarfile.open(snapshot_path, "r:gz") as tar:
                 for member in tar.getmembers():
                     self._validate_tar_member(member, workspace_root)
-                    tar.extract(member, workspace_path)
+                    tar.extract(member, str(workspace_root))
         except ValueError:
             with contextlib.suppress(_SNAPSHOTS_NONCRITICAL_EXCEPTIONS):
                 if backup_path.exists():
-                    if os.path.isdir(workspace_path):
-                        shutil.rmtree(workspace_path, ignore_errors=True)
-                    os.makedirs(workspace_path, exist_ok=True)
-                    shutil.copytree(str(backup_path), workspace_path, dirs_exist_ok=True)
+                    if workspace_root.is_dir():
+                        shutil.rmtree(workspace_root, ignore_errors=True)
+                    workspace_root.mkdir(parents=True, exist_ok=True)
+                    shutil.copytree(str(backup_path), str(workspace_root), dirs_exist_ok=True)
                     shutil.rmtree(backup_path, ignore_errors=True)
             raise
         except _SNAPSHOTS_NONCRITICAL_EXCEPTIONS as e:
             with contextlib.suppress(_SNAPSHOTS_NONCRITICAL_EXCEPTIONS):
                 if backup_path.exists():
-                    if os.path.isdir(workspace_path):
-                        shutil.rmtree(workspace_path, ignore_errors=True)
-                    os.makedirs(workspace_path, exist_ok=True)
-                    shutil.copytree(str(backup_path), workspace_path, dirs_exist_ok=True)
+                    if workspace_root.is_dir():
+                        shutil.rmtree(workspace_root, ignore_errors=True)
+                    workspace_root.mkdir(parents=True, exist_ok=True)
+                    shutil.copytree(str(backup_path), str(workspace_root), dirs_exist_ok=True)
                     shutil.rmtree(backup_path, ignore_errors=True)
             raise OSError(f"Failed to extract snapshot: {e}") from e
         finally:
@@ -335,23 +365,20 @@ class SnapshotManager:
             ValueError: If paths are invalid.
             IOError: If there's an error copying the workspace.
         """
-        if not source_workspace or not os.path.isdir(source_workspace):
-            raise ValueError(f"Invalid source workspace: {source_workspace}")
+        source_root = self._resolve_workspace_root(source_workspace, require_existing_dir=True)
+        new_root = self._resolve_workspace_root(new_workspace, require_existing_dir=False)
 
-        if not new_workspace:
-            raise ValueError("Invalid new workspace path")
-
-        self._validate_workspace_tree_for_copy(Path(source_workspace))
+        self._validate_workspace_tree_for_copy(source_root)
 
         try:
             # Ensure parent directory exists
-            os.makedirs(os.path.dirname(new_workspace), exist_ok=True)
+            new_root.parent.mkdir(parents=True, exist_ok=True)
 
             # Copy the workspace
-            if os.path.exists(new_workspace):
-                shutil.rmtree(new_workspace, ignore_errors=True)
+            if new_root.exists():
+                shutil.rmtree(new_root, ignore_errors=True)
 
-            shutil.copytree(source_workspace, new_workspace, dirs_exist_ok=True)
+            shutil.copytree(str(source_root), str(new_root), dirs_exist_ok=True)
         except _SNAPSHOTS_NONCRITICAL_EXCEPTIONS as e:
             raise OSError(f"Failed to clone workspace: {e}") from e
 

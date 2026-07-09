@@ -344,12 +344,24 @@ def _resample_audio_without_librosa(audio: np.ndarray, sample_rate: int, target_
     return np.interp(x_new, x_old, audio).astype(np.float32, copy=False)
 
 
-def _load_audio_for_parakeet_nemo(audio_file_path: str, target_sr: int = 16000) -> tuple[np.ndarray, int, float]:
+def _load_audio_for_parakeet_nemo(
+    audio_file_path: str,
+    target_sr: int = 16000,
+    *,
+    base_dir: Optional[Path] = None,
+) -> tuple[np.ndarray, int, float]:
     """Load file audio for Nemo-backed Parakeet variants without importing librosa."""
     try:
         import soundfile as sf
     except ImportError as exc:
         raise STTTranscriptionError("Parakeet audio loading requires the soundfile package.") from exc
+
+    safe_audio_path = _resolve_audio_input_path_for_provider(
+        audio_file_path,
+        base_dir=base_dir,
+        label="Parakeet audio input path",
+    )
+    audio_file_path = str(safe_audio_path)
 
     try:
         audio_data, sample_rate = sf.read(audio_file_path, dtype="float32", always_2d=False)
@@ -361,20 +373,29 @@ def _load_audio_for_parakeet_nemo(audio_file_path: str, target_sr: int = 16000) 
             ) from exc
 
         try:
-            wav_file_path = convert_to_wav(audio_file_path, overwrite=True)
+            wav_file_path = convert_to_wav(audio_file_path, overwrite=True, base_dir=base_dir)
         except Exception as conversion_exc:
             logging.debug(f"Parakeet WAV conversion failed: {type(conversion_exc).__name__}")
             raise STTTranscriptionError(
                 "Parakeet audio loading failed: WAV conversion failed for compressed input."
             ) from conversion_exc
 
-        if not wav_file_path or Path(wav_file_path).suffix.lower() != ".wav" or not Path(wav_file_path).exists():
+        if not wav_file_path:
+            raise STTTranscriptionError(
+                "Parakeet audio loading failed: WAV conversion did not produce a usable WAV file."
+            ) from exc
+        wav_path = _resolve_audio_input_path_for_provider(
+            wav_file_path,
+            base_dir=base_dir,
+            label="Converted Parakeet WAV path",
+        )
+        if wav_path.suffix.lower() != ".wav" or not wav_path.exists():
             raise STTTranscriptionError(
                 "Parakeet audio loading failed: WAV conversion did not produce a usable WAV file."
             ) from exc
 
         try:
-            audio_data, sample_rate = sf.read(wav_file_path, dtype="float32", always_2d=False)
+            audio_data, sample_rate = sf.read(str(wav_path), dtype="float32", always_2d=False)
         except Exception as retry_exc:
             logging.debug(f"Soundfile could not load converted Parakeet WAV: {type(retry_exc).__name__}")
             raise STTTranscriptionError(
@@ -3181,7 +3202,11 @@ def speech_to_text_parakeet(
         from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo import (
             transcribe_with_parakeet,
         )
-        audio_data, sample_rate, audio_duration = _load_audio_for_parakeet_nemo(audio_file_path, target_sr=16000)
+        audio_data, sample_rate, audio_duration = _load_audio_for_parakeet_nemo(
+            audio_file_path,
+            target_sr=16000,
+            base_dir=base_dir,
+        )
 
         transcribe_kwargs: dict[str, Any] = {}
         if variant == "onnx":

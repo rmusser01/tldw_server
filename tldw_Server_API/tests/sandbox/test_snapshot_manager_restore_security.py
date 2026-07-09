@@ -51,6 +51,15 @@ def test_restore_snapshot_rejects_path_traversal_member(tmp_path: Path) -> None:
     assert not (workspace.parent / "outside.txt").exists()
 
 
+def test_snapshot_paths_reject_traversal_ids(tmp_path: Path) -> None:
+    manager = SnapshotManager(storage_path=str(tmp_path / "snapshots"))
+
+    with pytest.raises(ValueError, match="Invalid session_id"):
+        manager.list_snapshots("../outside")
+    with pytest.raises(ValueError, match="Invalid snapshot_id"):
+        manager.get_snapshot_info("sess-safe", "../outside")
+
+
 def test_restore_snapshot_rejects_symlink_member(tmp_path: Path) -> None:
     manager = SnapshotManager(storage_path=str(tmp_path / "snapshots"))
     workspace = tmp_path / "workspace"

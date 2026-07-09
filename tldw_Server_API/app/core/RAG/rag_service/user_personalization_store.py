@@ -39,7 +39,13 @@ def _empty_store() -> dict[str, Any]:
 
 class UserPersonalizationStore:
     def __init__(self, user_id: str | None) -> None:
-        self.path = DatabasePaths.get_user_rag_personalization_path(user_id)
+        base = DatabasePaths.get_user_base_directory(user_id).resolve(strict=False)
+        self.path = (base / "rag_personalization.json").resolve(strict=False)
+        try:
+            self.path.relative_to(base)
+        except ValueError as exc:
+            raise ValueError("personalization path escapes user directory") from exc
+        base.mkdir(parents=True, exist_ok=True)
         # Use the sanitized directory name as the canonical user id for storage/logging.
         self.user_id = self.path.parent.name
         self._data: dict[str, Any] = {}

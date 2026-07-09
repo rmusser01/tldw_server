@@ -25,6 +25,7 @@ import hashlib
 import json
 import os
 import shutil
+import tempfile
 import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
@@ -563,6 +564,47 @@ class ChatbookService:
             if not safe_name:
                 safe_name = "chatbook"
         return f"{safe_name}{suffix}"
+
+    @staticmethod
+    def _safe_path_component(value: object, *, fallback: str) -> str:
+        """Return a filesystem-safe component for generated chatbook files."""
+        safe = "".join(c if c.isalnum() or c in "_-" else "_" for c in str(value))
+        safe = safe.strip("._-")
+        return safe or fallback
+
+    def _resolve_export_path(self, name: str, timestamp: str) -> Path:
+        """Resolve an export archive path within the user export directory."""
+        base = self.export_dir.resolve(strict=False)
+        filename = self._build_export_filename(name, timestamp)
+        path = (base / filename).resolve(strict=False)
+        try:
+            path.relative_to(base)
+        except ValueError as exc:
+            raise SecurityError("Chatbook export path escaped export directory") from exc
+        return path
+
+    def _new_work_dir(self, prefix: str, timestamp: str) -> Path:
+        """Create a temporary work directory inside the user chatbook temp directory."""
+        base = self.temp_dir.resolve(strict=False)
+        base.mkdir(parents=True, exist_ok=True, mode=0o700)
+        safe_prefix = self._safe_path_component(prefix, fallback="chatbook")
+        path = Path(tempfile.mkdtemp(prefix=f"{safe_prefix}_{timestamp}_", dir=base))
+        resolved = path.resolve(strict=False)
+        try:
+            resolved.relative_to(base)
+        except ValueError as exc:
+            raise SecurityError("Chatbook work directory escaped temp directory") from exc
+        return resolved
+
+    async def _remove_work_dir(self, work_dir: Path) -> None:
+        """Remove a chatbook work directory after proving it is under temp_dir."""
+        base = self.temp_dir.resolve(strict=False)
+        resolved = work_dir.resolve(strict=False)
+        try:
+            resolved.relative_to(base)
+        except ValueError as exc:
+            raise SecurityError("Refusing to remove work directory outside chatbook temp directory") from exc
+        await asyncio.to_thread(shutil.rmtree, resolved)
 
     def __init__(
         self,
@@ -1542,8 +1584,7 @@ class ChatbookService:
         output_path: Path | None = None
         try:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            work_dir = self.temp_dir / f"continue_{timestamp}_{uuid4().hex[:8]}"
-            work_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+            work_dir = self._new_work_dir("continue", timestamp)
 
             # Determine sequence number from export_id, keeping the base stable
             base_id = export_id.split("_cont_")[0]
@@ -1618,7 +1659,8 @@ class ChatbookService:
                                     "continuation_token": str(last_run_id)
                                 })
 
-                    eval_file = eval_dir / f"evaluation_{eval_id}_cont.json"
+                    safe_eval_id = self._safe_path_component(eval_id, fallback="evaluation")
+                    eval_file = eval_dir / f"evaluation_{safe_eval_id}_cont.json"
                     with open(eval_file, "w", encoding="utf-8") as ef:
                         json.dump(eval_data, ef, indent=2, ensure_ascii=False)
                     content.evaluations[str(eval_id)] = eval_data
@@ -1639,8 +1681,7 @@ class ChatbookService:
                 await f.write(json.dumps(manifest.to_dict(), indent=2, ensure_ascii=False))
 
             # Create archive
-            output_filename = self._build_export_filename(cont_name, timestamp)
-            output_path = self.export_dir / output_filename
+            output_path = self._resolve_export_path(cont_name, timestamp)
             await self._create_zip_archive_async(work_dir, output_path)
 
             manifest.total_size_bytes = output_path.stat().st_size
@@ -1661,7 +1702,7 @@ class ChatbookService:
         finally:
             if work_dir and work_dir.exists():
                 try:
-                    await asyncio.to_thread(shutil.rmtree, work_dir)
+                    await self._remove_work_dir(work_dir)
                 except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
                     pass
 
@@ -1690,8 +1731,7 @@ class ChatbookService:
         try:
             # Create working directory in secure temp location
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            work_dir = self.temp_dir / f"export_{timestamp}_{uuid4().hex[:8]}"
-            work_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+            work_dir = self._new_work_dir("export", timestamp)
 
             # Initialize manifest
             manifest = ChatbookManifest(
@@ -1833,8 +1873,7 @@ class ChatbookService:
                 await _write_manifest()
 
             # Create archive in secure export directory
-            output_filename = self._build_export_filename(name, timestamp)
-            output_path = self.export_dir / output_filename
+            output_path = self._resolve_export_path(name, timestamp)
             await self._create_zip_archive_async(work_dir, output_path)
 
             # Update manifest with final archive size; re-zip if manifest changes size.
@@ -1862,7 +1901,7 @@ class ChatbookService:
         finally:
             if work_dir and work_dir.exists():
                 try:
-                    await asyncio.to_thread(shutil.rmtree, work_dir)
+                    await self._remove_work_dir(work_dir)
                 except _CHATBOOK_NONCRITICAL_EXCEPTIONS as cleanup_err:
                     logger.warning(f"Failed to remove work directory {work_dir}: {cleanup_err}")
 

@@ -100,7 +100,7 @@ class CheckpointManager:
             checkpoint_dir: Directory for storing checkpoints.
                            Defaults to .tldw/checkpoints/
         """
-        self.checkpoint_dir = Path(checkpoint_dir or self.DEFAULT_CHECKPOINT_DIR)
+        self.checkpoint_dir = Path(checkpoint_dir or self.DEFAULT_CHECKPOINT_DIR).resolve(strict=False)
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
     def create(
@@ -122,7 +122,8 @@ class CheckpointManager:
             New CheckpointData instance.
         """
         now = datetime.now(timezone.utc).isoformat()
-        checkpoint_id = f"{task_type}_{uuid.uuid4().hex[:8]}"
+        safe_task_type = self._safe_checkpoint_component(task_type, fallback="task")
+        checkpoint_id = f"{safe_task_type}_{uuid.uuid4().hex[:8]}"
 
         checkpoint = CheckpointData(
             checkpoint_id=checkpoint_id,
@@ -234,7 +235,7 @@ class CheckpointManager:
             FileNotFoundError: If checkpoint file doesn't exist.
             ValueError: If checkpoint file is invalid.
         """
-        path = Path(checkpoint_path)
+        path = self._resolve_checkpoint_path(checkpoint_path)
         if not path.exists():
             msg = f"Checkpoint file not found: {path}"
             raise FileNotFoundError(msg)
@@ -404,11 +405,31 @@ class CheckpointManager:
 
     def _get_checkpoint_path(self, checkpoint_id: str) -> Path:
         """Get the file path for a checkpoint ID."""
-        return self.checkpoint_dir / f"{checkpoint_id}.json"
+        return self._resolve_checkpoint_path(f"{checkpoint_id}.json")
 
     def _get_results_path(self, checkpoint_id: str) -> Path:
         """Get the JSONL sidecar path for checkpoint results."""
-        return self.checkpoint_dir / f"{checkpoint_id}.results.jsonl"
+        return self._resolve_checkpoint_path(f"{checkpoint_id}.results.jsonl")
+
+    @staticmethod
+    def _safe_checkpoint_component(value: str, *, fallback: str) -> str:
+        """Return a checkpoint file component containing only safe filename characters."""
+        safe = "".join(c if c.isalnum() or c in "_.-" else "_" for c in str(value))
+        safe = safe.strip("._")
+        return safe or fallback
+
+    def _resolve_checkpoint_path(self, path_value: Path | str) -> Path:
+        """Resolve a checkpoint file path under the configured checkpoint directory."""
+        raw_path = Path(path_value)
+        if raw_path.is_absolute():
+            path = raw_path.resolve(strict=False)
+        else:
+            path = (self.checkpoint_dir / raw_path).resolve(strict=False)
+        try:
+            path.relative_to(self.checkpoint_dir)
+        except ValueError as exc:
+            raise ValueError("checkpoint path escapes checkpoint directory") from exc
+        return path
 
     def _append_results(
         self, checkpoint_id: str, results: list[dict[str, Any]]
