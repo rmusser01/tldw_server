@@ -99,6 +99,15 @@ Execute the task with $ARGUMENTS detail level.
         assert "Execute the task" in parsed.content
         assert "$ARGUMENTS" in parsed.content
 
+    def test_parse_content_with_crlf_frontmatter(self, parser):
+        """Test parsing YAML frontmatter with Windows line endings."""
+        content = "---\r\nname: crlf-skill\r\n---\r\nBody\r\n"
+
+        parsed = parser.parse_content(content)
+
+        assert parsed.frontmatter.name == "crlf-skill"
+        assert parsed.content == "Body"
+
     def test_parse_content_frontmatter_overrides_default_name(self, parser):
         """Test that frontmatter name overrides default name."""
         content = """---

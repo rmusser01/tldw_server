@@ -77,9 +77,18 @@ const readStoredLocalValue = (key: string): string | null => {
   }
 };
 
+const readRuntimeWindowApiKey = (): string | null => {
+  if (typeof window === "undefined") return null;
+  const runtimeValue = (window as Window & { __tldwRuntimeApiKey?: unknown })
+    .__tldwRuntimeApiKey;
+  return typeof runtimeValue === "string" ? normalizeApiKeyValue(runtimeValue) : null;
+};
+
 export const getApiKey = (): string | null => {
   const configuredValue = normalizeApiKeyValue(process.env.NEXT_PUBLIC_X_API_KEY || null);
   if (runtimeApiKey) return runtimeApiKey;
+  const runtimeWindowKey = readRuntimeWindowApiKey();
+  if (runtimeWindowKey) return runtimeWindowKey;
   if (configuredValue && !suppressEnvApiKeyForSession) return configuredValue;
 
   const storedConfig = readStoredTldwConfig();

@@ -1950,22 +1950,47 @@ class WorkflowsDatabase:
         if created_before:
             sql += " AND created_at <= ?"
             params.append(created_before)
-        # Whitelist order_by to known columns
-        allowed_order = {"created_at", "started_at", "ended_at"}
-        ob = order_by if order_by in allowed_order else "created_at"
+        order_clauses = {
+            ("created_at", True): (
+                " AND ((created_at < ?) OR (created_at = ? AND run_id < ?))",
+                " ORDER BY created_at DESC, run_id DESC LIMIT ?",
+            ),
+            ("created_at", False): (
+                " AND ((created_at > ?) OR (created_at = ? AND run_id > ?))",
+                " ORDER BY created_at ASC, run_id ASC LIMIT ?",
+            ),
+            ("started_at", True): (
+                " AND ((started_at < ?) OR (started_at = ? AND run_id < ?))",
+                " ORDER BY started_at DESC, run_id DESC LIMIT ?",
+            ),
+            ("started_at", False): (
+                " AND ((started_at > ?) OR (started_at = ? AND run_id > ?))",
+                " ORDER BY started_at ASC, run_id ASC LIMIT ?",
+            ),
+            ("ended_at", True): (
+                " AND ((ended_at < ?) OR (ended_at = ? AND run_id < ?))",
+                " ORDER BY ended_at DESC, run_id DESC LIMIT ?",
+            ),
+            ("ended_at", False): (
+                " AND ((ended_at > ?) OR (ended_at = ? AND run_id > ?))",
+                " ORDER BY ended_at ASC, run_id ASC LIMIT ?",
+            ),
+        }
+        seek_clause, cursor_order_clause = order_clauses.get(
+            (order_by, order_desc),
+            order_clauses[("created_at", order_desc)],
+        )
+        offset_order_clause = cursor_order_clause.replace(" LIMIT ?", " LIMIT ? OFFSET ?")
         # Apply cursor seek if provided (seek pagination)
         if cursor_ts and cursor_id:
-            cmp = "<" if order_desc else ">"
-            # Add tie-breaker on run_id; for DESC use run_id < last_id if same ts, for ASC use run_id > last_id
-            tcmp = "<" if order_desc else ">"
-            sql += f" AND (({ob} {cmp} ?) OR ({ob} = ? AND run_id {tcmp} ?))"
+            sql += seek_clause
             params.extend([cursor_ts, cursor_ts, cursor_id])
             # When using cursor, ignore numeric offset to avoid skipping
-            sql += f" ORDER BY {ob} {'DESC' if order_desc else 'ASC'}, run_id {'DESC' if order_desc else 'ASC'} LIMIT ?"
+            sql += cursor_order_clause
             params.extend([int(limit)])
         else:
             # Stable ordering with tie-breaker by run_id
-            sql += f" ORDER BY {ob} {'DESC' if order_desc else 'ASC'}, run_id {'DESC' if order_desc else 'ASC'} LIMIT ? OFFSET ?"
+            sql += offset_order_clause
             params.extend([int(limit), int(offset)])
 
         if self._using_backend():

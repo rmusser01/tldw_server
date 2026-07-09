@@ -80,7 +80,7 @@ class FileSystemStorage(StorageBackend):
             sanitized = "unnamed"
         return sanitized
 
-    def _validate_path(self, path: Path) -> bool:
+    def _validate_path(self, path: Path) -> Path:
         """
         Validate that a path is within the base directory.
 
@@ -88,7 +88,7 @@ class FileSystemStorage(StorageBackend):
             path: Path to validate
 
         Returns:
-            True if valid, raises StorageError otherwise
+            Resolved path if valid, raises StorageError otherwise
         """
         try:
             resolved = path.resolve()
@@ -99,7 +99,7 @@ class FileSystemStorage(StorageBackend):
                     f"Path escapes base directory: {path}",
                     path=str(path),
                 )
-            return True
+            return resolved
         except Exception as e:
             if isinstance(e, StorageError):
                 raise
@@ -126,10 +126,8 @@ class FileSystemStorage(StorageBackend):
         Returns:
             The storage path relative to base_path
         """
-        file_path = self._build_path(user_id, media_id, filename)
-        self._validate_path(file_path)
-        temp_path = file_path.with_name(f".{file_path.name}.{uuid.uuid4().hex}.tmp")
-        self._validate_path(temp_path)
+        file_path = self._validate_path(self._build_path(user_id, media_id, filename))
+        temp_path = self._validate_path(file_path.with_name(f".{file_path.name}.{uuid.uuid4().hex}.tmp"))
 
         try:
             # Ensure parent directory exists
@@ -179,8 +177,7 @@ class FileSystemStorage(StorageBackend):
         Returns:
             A BytesIO object containing the file data
         """
-        full_path = self.base_path / path
-        self._validate_path(full_path)
+        full_path = self._validate_path(self.base_path / path)
 
         if not full_path.exists():
             raise FileNotFoundError(f"File not found: {path}")
@@ -211,8 +208,7 @@ class FileSystemStorage(StorageBackend):
         Yields:
             Chunks of file content as bytes
         """
-        full_path = self.base_path / path
-        self._validate_path(full_path)
+        full_path = self._validate_path(self.base_path / path)
 
         if not full_path.exists():
             raise FileNotFoundError(f"File not found: {path}")
