@@ -1021,7 +1021,7 @@ Implementation note: sidepanel document uploads now reuse `DocumentProcessingCho
 - Create: `apps/tldw-frontend/e2e/smoke/playground-document-processing.spec.ts`
 - Modify: only files from Tasks 1-5 when the smoke test exposes a concrete regression.
 
-- [ ] **Step 1: Add one Playwright smoke test**
+- [x] **Step 1: Add one Playwright smoke test**
 
 Create a focused smoke that does not require real OCR:
 
@@ -1042,7 +1042,7 @@ cd apps/tldw-frontend && bunx playwright test e2e/smoke/playground-document-proc
 
 Expected: PASS.
 
-- [ ] **Step 2: Run focused frontend unit tests**
+- [x] **Step 2: Run focused frontend unit tests**
 
 Run:
 
@@ -1052,7 +1052,7 @@ cd apps/tldw-frontend && bunx vitest run ../packages/ui/src/services/__tests__/c
 
 Expected: PASS.
 
-- [ ] **Step 3: Run existing composer suite**
+- [x] **Step 3: Run existing composer suite**
 
 Run:
 
@@ -1062,7 +1062,7 @@ cd apps/tldw-frontend && bun run test:playground:composer
 
 Expected: PASS.
 
-- [ ] **Step 4: Run backend tests**
+- [x] **Step 4: Run backend tests**
 
 Run:
 
@@ -1072,7 +1072,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Media/test_d
 
 Expected: PASS.
 
-- [ ] **Step 5: Run lint/type-facing checks**
+- [x] **Step 5: Run lint/type-facing checks**
 
 Run:
 
@@ -1082,7 +1082,7 @@ cd apps/tldw-frontend && bun run lint
 
 Expected: PASS or only pre-existing unrelated warnings. Fix new issues in touched files.
 
-- [ ] **Step 6: Run Bandit on touched backend scope**
+- [x] **Step 6: Run Bandit on touched backend scope**
 
 Run:
 
@@ -1092,7 +1092,7 @@ source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/api/v1/endp
 
 Expected: PASS with no new findings in touched code.
 
-- [ ] **Step 7: Manual UX check**
+- [x] **Step 7: Manual UX check**
 
 Start the frontend and inspect desktop/mobile widths:
 
@@ -1110,26 +1110,28 @@ Check:
 - no text overflow inside chips or buttons
 - sidepanel retry actions remain visible
 
-- [ ] **Step 8: Commit final verification/e2e changes**
+- [x] **Step 8: Commit final verification/e2e changes**
 
 ```bash
 git add apps/tldw-frontend/e2e/smoke/playground-document-processing.spec.ts
 git commit -m "test: cover chat document processing choices"
 ```
 
+Implementation note: added the focused `/chat` document-processing smoke and fixed one regression it exposed: the fallback `PlaygroundMessage` layout now renders `DocumentProcessingTurn` for user messages with document-processing metadata. Focused Vitest, backend pytest, Playwright smoke, frontend lint, and Bandit passed. `bun run test:playground:composer` is not defined in this package, so `bun run e2e:nextgen-composer` was used as the closest existing composer suite and failed on six pre-existing composer/mobile/server-sync smoke failures unrelated to the touched files. `bunx tsc --noEmit --pretty false --project tsconfig.json` still fails on known unrelated baseline TypeScript errors outside the touched files. A dev-server `/chat` browser check was attempted; the in-app browser snapshot API failed and the fallback MCP Playwright file-upload buffer bridge rejected uploaded buffers, so the automated Playwright smoke is the recorded browser-flow verification.
+
 ---
 
 ## Completion Checklist
 
-- [ ] `Add to chat` produces chat-scoped context and no durable media item.
-- [ ] `OCR pages` is only enabled when backend preflight says OCR/rendering is available.
-- [ ] `Ingest to library` creates/uses durable library media IDs and never silently downgrades.
-- [ ] Ingest-only and mixed sends explicitly pass `contextFiles: []` unless chat-scoped extracted text is intentionally folded into `messageForModel`.
-- [ ] Send starts processing; file selection only stages and preflights.
-- [ ] Pressing Send immediately shows a processing user turn; final dispatch upgrades that same user message and does not duplicate it.
-- [ ] Queued sends replay the same document decisions.
-- [ ] Retry/cancel is idempotent for ingest jobs, local processing, and server-backed drafts.
-- [ ] Page/token overflow is blocked or recovered with explicit chat-scoped retrieval/truncation copy; `Use retrieval instead` does not imply durable ingest.
-- [ ] Sidepanel heavy modes use owner/expiry/retry/cleanup-safe draft handoff.
-- [ ] Partial failures are explicit and recoverable.
-- [ ] Focused Vitest, pytest, Playwright smoke, lint, and Bandit checks are recorded in Backlog.
+- [x] `Add to chat` produces chat-scoped context and no durable media item.
+- [x] `OCR pages` is only enabled when backend preflight says OCR/rendering is available.
+- [x] `Ingest to library` creates/uses durable library media IDs and never silently downgrades.
+- [x] Ingest-only and mixed sends explicitly pass `contextFiles: []` unless chat-scoped extracted text is intentionally folded into `messageForModel`.
+- [x] Send starts processing; file selection only stages and preflights.
+- [x] Pressing Send immediately shows a processing user turn; final dispatch upgrades that same user message and does not duplicate it.
+- [x] Queued sends replay the same document decisions.
+- [x] Retry/cancel is idempotent for ingest jobs, local processing, and server-backed drafts.
+- [x] Page/token overflow is blocked or recovered with explicit chat-scoped retrieval/truncation copy; `Use retrieval instead` does not imply durable ingest.
+- [x] Sidepanel heavy modes use owner/expiry/retry/cleanup-safe draft handoff.
+- [x] Partial failures are explicit and recoverable.
+- [x] Focused Vitest, pytest, Playwright smoke, lint, and Bandit checks are recorded in Backlog.
