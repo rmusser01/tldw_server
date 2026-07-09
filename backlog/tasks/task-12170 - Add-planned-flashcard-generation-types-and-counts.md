@@ -62,7 +62,7 @@ Approved design choices:
 - Store generated true/false cards as existing `basic` flashcards; do not add scheduler or storage models.
 - Do not silently change defaults in sidepanel, quiz companion, or Research Workspace callers.
 
-Commit series: 2303ca0547, ce21e113cf, 3781de9858, da8499f57e, d4643f3e13, f6a8e0e8df, 561c47cf74, 3b17fbfa8d, d3305c427b, 3a70af1266, f327b0ae1a, 8f7cde2659, 5ee0e281a3, 176cb9240b, c56dd0378d, 8797ea3505, 50fb94e9d9, 3fb980e006, 02c6843544, 8f938edce8.
+Commit series: 2303ca0547, ce21e113cf, 3781de9858, da8499f57e, d4643f3e13, f6a8e0e8df, 561c47cf74, 3b17fbfa8d, d3305c427b, 3a70af1266, f327b0ae1a, 8f7cde2659, 5ee0e281a3, 176cb9240b, c56dd0378d, 8797ea3505, 50fb94e9d9, 3fb980e006, 02c6843544, 8f938edce8, 462ee98858.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
@@ -97,6 +97,8 @@ Task 5 WebUI slice: added the /flashcards Advanced mix toggle, fixed four-row ca
 Task 5 accessibility follow-up: named the Advanced mix switch from its visible label, added invalid-total explanatory copy, and connected invalid state with aria-invalid/aria-describedby on the Advanced mix group. Verification: focused red Vitest failed before implementation on missing switch accessible name; focused accessibility Vitest passed after implementation (1 passed, 40 skipped); requested full ImportExportTab Vitest still fails only the existing snapshot harness test at line 372 with "SnapshotClient.setup()" missing (40 passed, 1 failed); bun run typecheck passed; git diff --check passed. Bandit skipped because this follow-up only touched frontend TypeScript and Backlog markdown.
 
 Final verification: backend endpoint pytest passed with the shared project venv (18 passed, 154 deselected); workflow adapter pytest passed (25 passed, 111 deselected); `apps/tldw-frontend` typecheck passed; package-local UI focused Vitest passed (50 passed); Bandit on touched backend Python reported 0 findings in `/tmp/bandit_task_12170_flashcard_plan.json`; `git diff --check` passed. The exact Task 6 frontend command from `apps/tldw-frontend` still fails the pre-existing package-crossing snapshot harness case at `ImportExportTab.import-results.test.tsx:372` (`SnapshotClient.setup()` missing), while the same two focused files pass from the owning `apps/packages/ui` package config.
+
+Final code-review follow-up: legacy single-type workflow generation now ignores stray model-emitted `generation_type`, planned workflow output filters blank front/back cards before validating requested counts, and API `num_cards`/`card_plan[].count` now require strict JSON integers. Verification: red regressions failed before implementation for the legacy override, planned blank-card count, and strict API integer cases; post-fix endpoint pytest passed (22 passed, 154 deselected); post-fix FlashcardGenerateAdapter pytest passed (27 passed, 111 deselected); Bandit reported 0 findings in `/tmp/bandit_task_12170_flashcard_plan_after_review.json`; `git diff --check` passed.
 
 Known skips: no visual flashcards, no stored generation metadata, no scheduler/spaced-repetition changes, and no hidden default changes for sidepanel, quiz companion, extension, or Research Workspace callers.
 <!-- SECTION:FINAL_SUMMARY:END -->

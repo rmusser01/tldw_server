@@ -1045,3 +1045,5 @@ git commit -m "docs: close planned flashcard generation task"
 - [x] **Step 8: Request code review**
 
 Use `superpowers:requesting-code-review` after implementation and verification complete.
+
+Post-review follow-up: commit `462ee98858` fixed the final review findings by forcing legacy workflow output back to the requested `card_type`, filtering blank direct-workflow cards before planned count validation, and making API planned integer fields strict. Post-fix verification passed: endpoint pytest (22 passed, 154 deselected), FlashcardGenerateAdapter pytest (27 passed, 111 deselected), Bandit 0 findings, and `git diff --check`.
