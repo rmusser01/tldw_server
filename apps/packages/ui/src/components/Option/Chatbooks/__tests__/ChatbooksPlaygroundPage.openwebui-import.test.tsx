@@ -11,6 +11,15 @@ const { capabilitiesMock, useQueryMock, tldwClientMock } = vi.hoisted(() => ({
   useQueryMock: vi.fn(),
   tldwClientMock: {
     initialize: vi.fn(async () => undefined),
+    getChatbookExportScope: vi.fn(async () => ({
+      mode: "full_account",
+      categories: [],
+      total_items: 0,
+      pointer_only_count: 0,
+      sensitive_category_count: 0,
+      warning_count: 0,
+      estimated_size_bytes: null
+    })),
     listChatbookExportJobs: vi.fn(async () => ({ jobs: [] })),
     listChatbookImportJobs: vi.fn(async () => ({ jobs: [] })),
     getChatbookExportJob: vi.fn(),
@@ -195,8 +204,9 @@ describe("ChatbooksPlaygroundPage OpenWebUI import mode", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Import" }))
 
     expect(screen.getByText("Drop a .zip or .chatbook archive or click to browse")).toBeInTheDocument()
-    expect(screen.getByText("Import media")).toBeInTheDocument()
-    expect(screen.getByText("Import embeddings")).toBeInTheDocument()
+    expect(screen.getByText("Archive restore defaults")).toBeInTheDocument()
+    expect(screen.queryByText("Import media")).not.toBeInTheDocument()
+    expect(screen.queryByText("Import embeddings")).not.toBeInTheDocument()
 
     const sourceSelect = screen
       .getAllByRole("combobox")

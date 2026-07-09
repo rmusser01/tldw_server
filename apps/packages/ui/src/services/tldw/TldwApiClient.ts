@@ -255,6 +255,25 @@ export interface ExplainerChatbookExportPayload {
   asyncMode?: boolean
 }
 
+export interface ChatbookAccountScopeCategory {
+  category: string
+  label: string
+  count: number
+  restore_status: "restorable" | "pointer_only" | "non_restorable"
+  sensitivity: "public" | "personal" | "sensitive" | "secret"
+  warning?: string | null
+}
+
+export interface ChatbookAccountScopeResponse {
+  mode: "full_account"
+  categories: ChatbookAccountScopeCategory[]
+  total_items: number
+  pointer_only_count: number
+  sensitive_category_count: number
+  warning_count: number
+  estimated_size_bytes?: number | null
+}
+
 export interface CurrentUserStorageQuotaResponse {
   user_id: number
   storage_used_mb: number
@@ -6096,6 +6115,13 @@ export class TldwApiClientBase {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: payload
+    })
+  }
+
+  async getChatbookExportScope(): Promise<ChatbookAccountScopeResponse> {
+    return await bgRequest<ChatbookAccountScopeResponse>({
+      path: "/api/v1/chatbooks/export/scope",
+      method: "GET"
     })
   }
 

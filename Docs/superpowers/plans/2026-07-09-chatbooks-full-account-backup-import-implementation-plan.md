@@ -635,7 +635,7 @@ git commit -m "feat: restore full chatbook archive contents"
 - Test: `apps/packages/ui/src/components/Option/Chatbooks/__tests__/ChatbooksPlaygroundPage.backup-all.test.tsx`
 - Test: `apps/extension/tests/e2e/chatbooks-export-download.spec.ts`
 
-- [ ] **Step 1: Write failing UI tests**
+- [x] **Step 1: Write failing UI tests**
 
 Add tests that render the Chatbooks page and assert:
 
@@ -647,7 +647,7 @@ Add tests that render the Chatbooks page and assert:
 - default archive import does not send unsupported raw-source-file options as normal enabled options
 - completed job rows show archive size, warning count, and post-write verification status when present
 
-- [ ] **Step 2: Run UI tests and verify failure**
+- [x] **Step 2: Run UI tests and verify failure**
 
 Run:
 
@@ -658,7 +658,7 @@ bunx vitest run ../packages/ui/src/components/Option/Chatbooks/__tests__/Chatboo
 
 Expected: fail because the component requires selections and has no Backup all mode.
 
-- [ ] **Step 3: Add client method and UI state**
+- [x] **Step 3: Add client method and UI state**
 
 Add:
 
@@ -679,11 +679,11 @@ const [exportMode, setExportMode] = React.useState<"full_account" | "selective">
 
 When `exportMode === "full_account"`, load and show the scope summary and send a payload without `content_selections`.
 
-- [ ] **Step 4: Fix archive import defaults**
+- [x] **Step 4: Fix archive import defaults**
 
 For `.chatbook` archive imports, use defaults that restore all archive data. Hide or disable any legacy raw-source-file option. Keep OpenWebUI import flags omitted or false because OpenWebUI import is a different source format.
 
-- [ ] **Step 5: Verify UI and extension tests pass**
+- [x] **Step 5: Verify UI and extension tests pass**
 
 Run:
 
@@ -695,7 +695,28 @@ npx playwright test ../extension/tests/e2e/chatbooks-export-download.spec.ts
 
 Expected: pass against the available local test setup. If Playwright requires a running server, record the required server command and run it before the test.
 
-- [ ] **Step 6: Commit**
+Actual verification:
+
+```bash
+cd apps/tldw-frontend
+bunx vitest run ../packages/ui/src/components/Option/Chatbooks/__tests__/ChatbooksPlaygroundPage.backup-all.test.tsx ../packages/ui/src/components/Option/Chatbooks/__tests__/ChatbooksPlaygroundPage.openwebui-import.test.tsx
+# 2 files passed, 12 tests passed
+
+cd apps/extension
+npx playwright test tests/e2e/chatbooks-export-download.spec.ts
+# extension production build passed; 1 real-server guarded test skipped
+
+git diff --check
+# passed
+
+node -e "JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'))" apps/packages/ui/src/assets/locale/en/settings.json
+node -e "JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'))" apps/packages/ui/src/public/_locales/en/settings.json
+# both passed
+```
+
+Completed in this task: primary WebUI Backup all mode, full-account scope summary, omitted `content_selections` for backup-all export, archive import default-restore payload cleanup, completed export job metadata display, and extension E2E update to use Backup all.
+
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/packages/ui/src/services/tldw/TldwApiClient.ts apps/packages/ui/src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx apps/packages/ui/src/assets/locale/en/settings.json apps/packages/ui/src/public/_locales/en/settings.json apps/packages/ui/src/components/Option/Chatbooks/__tests__/ChatbooksPlaygroundPage.backup-all.test.tsx apps/packages/ui/src/components/Option/Chatbooks/__tests__/ChatbooksPlaygroundPage.openwebui-import.test.tsx apps/extension/tests/e2e/chatbooks-export-download.spec.ts

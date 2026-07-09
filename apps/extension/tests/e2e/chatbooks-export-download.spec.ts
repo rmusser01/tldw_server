@@ -86,7 +86,7 @@ test.describe("Chatbooks export download", () => {
         await forceConnected(page, { serverUrl: normalizedServerUrl }, "chatbooks-connected")
 
         await expect(
-          page.getByRole("heading", { name: /Chatbooks Playground/i })
+          page.getByRole("heading", { name: /Chatbooks Backup & Import/i })
         ).toBeVisible({ timeout: 15000 })
 
         const unavailableAlert = page.getByText(
@@ -103,19 +103,10 @@ test.describe("Chatbooks export download", () => {
           .getByPlaceholder(/Description/i)
           .fill("E2E chatbook export")
 
-        const promptCard = page
-          .locator(".ant-card")
-          .filter({ has: page.getByText(/Prompts/i) })
-          .first()
-        await expect(promptCard).toBeVisible()
-
-        const includeAllSwitch = promptCard.getByRole("switch")
-        const checked = await includeAllSwitch.getAttribute("aria-checked")
-        if (checked !== "true") {
-          await includeAllSwitch.click()
-        }
-
-        await page.getByRole("button", { name: /Export chatbook/i }).click()
+        await expect(page.getByText(/Backup all scope/i)).toBeVisible({
+          timeout: 15000
+        })
+        await page.getByRole("button", { name: /^Backup all$/i }).click()
 
         const errorNotice = page
           .getByText(

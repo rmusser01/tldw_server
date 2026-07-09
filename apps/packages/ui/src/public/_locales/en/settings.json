@@ -20,6 +20,33 @@
   "chatDictionariesNav": {
     "message": "Chat Dictionaries"
   },
+  "chatbooksPlayground_title": {
+    "message": "Chatbooks Backup & Import"
+  },
+  "chatbooksPlayground_subtitle": {
+    "message": "Back up and restore account data, with selective export available when you need a smaller archive."
+  },
+  "chatbooksPlayground_backupAllMode": {
+    "message": "Backup all account data"
+  },
+  "chatbooksPlayground_backupAllScope": {
+    "message": "Backup all scope"
+  },
+  "chatbooksPlayground_backupAllCta": {
+    "message": "Backup all"
+  },
+  "chatbooksPlayground_exportSelectedCta": {
+    "message": "Export selected"
+  },
+  "chatbooksPlayground_archiveRestoreDefaults": {
+    "message": "Archive restore defaults"
+  },
+  "chatbooksPlayground_jobPostWriteVerification": {
+    "message": "Post-write verification"
+  },
+  "chatbooksPlayground_verified": {
+    "message": "Verified"
+  },
   "charactersNav": {
     "message": "Characters"
   },
