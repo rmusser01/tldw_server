@@ -164,14 +164,9 @@ async def run_flashcard_generate_adapter(config: dict[str, Any], context: dict[s
         return {"error": "missing_text", "flashcards": [], "count": 0}
 
     raw_num_cards = config.get("num_cards", 10)
-    if raw_num_cards is None:
+    if type(raw_num_cards) is not int or raw_num_cards <= 0:
         return {"error": "invalid_num_cards", "flashcards": [], "count": 0}
-    try:
-        num_cards = int(raw_num_cards)
-    except (TypeError, ValueError):
-        return {"error": "invalid_num_cards", "flashcards": [], "count": 0}
-    if num_cards <= 0:
-        return {"error": "invalid_num_cards", "flashcards": [], "count": 0}
+    num_cards = raw_num_cards
     format_card_type = {"cloze": "cloze", "definition": "basic", "qa": "basic"}.get(str(config.get("format", "qa")).lower(), "basic")
     card_type = str(config.get("card_type") or format_card_type).lower()
     difficulty = str(config.get("difficulty", "medium")).lower()

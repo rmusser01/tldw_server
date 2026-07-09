@@ -1001,7 +1001,7 @@ class TestFlashcardGenerateAdapter:
         assert result.get("error") == "missing_text"
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("num_cards", [None, "bad"])
+    @pytest.mark.parametrize("num_cards", [None, "bad", True, 1.5, "1"])
     async def test_flashcard_generate_invalid_num_cards_skips_llm(self, base_context, sample_long_text, num_cards):
         """Test malformed num_cards fails before calling the LLM."""
         from tldw_Server_API.app.core.Workflows.adapters.content import run_flashcard_generate_adapter
