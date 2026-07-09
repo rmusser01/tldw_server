@@ -180,6 +180,11 @@ except _CHATBOOK_NONCRITICAL_EXCEPTIONS:  # pragma: no cover
     get_unvectorized_chunks_in_range = None  # type: ignore
 
 try:
+    from ..DB_Management.media_db.legacy_transcripts import upsert_transcript  # type: ignore
+except _CHATBOOK_NONCRITICAL_EXCEPTIONS:  # pragma: no cover
+    upsert_transcript = None  # type: ignore
+
+try:
     from ..DB_Management.Evaluations_DB import EvaluationsDatabase  # type: ignore
 except _CHATBOOK_NONCRITICAL_EXCEPTIONS:  # pragma: no cover
     EvaluationsDatabase = None  # type: ignore
@@ -199,6 +204,11 @@ class ChatbookService:
         ContentType.CHARACTER: "content/characters/character_{id}.json",
         ContentType.WORLD_BOOK: "content/world_books/world_book_{id}.json",
         ContentType.DICTIONARY: "content/dictionaries/dictionary_{id}.json",
+        ContentType.PROMPT: "content/prompts/prompt_{id}.json",
+        ContentType.EVALUATION: "content/evaluations/evaluation_{id}.json",
+        ContentType.MEDIA: "content/media/media_{id}.json",
+        ContentType.EMBEDDING: "content/embeddings/embedding_{id}.json",
+        ContentType.GENERATED_DOCUMENT: "content/generated_documents/document_{id}.json",
     }
 
     @staticmethod
@@ -1101,6 +1111,304 @@ class ChatbookService:
             exported.append(item)
         return exported, bundled_count, pointer_count
 
+    @staticmethod
+    def _coerce_inventory_count(value: Any) -> int:
+        """Return a non-negative inventory count for import summaries."""
+        try:
+            return max(0, int(value or 0))
+        except (TypeError, ValueError):
+            return 0
+
+    def _inspect_manifest_inventory_for_import(
+        self,
+        manifest: ChatbookManifest,
+    ) -> tuple[dict[str, Any] | None, dict[str, int], list[str], list[str]]:
+        """Build redacted inventory import context and fail-closed coverage errors."""
+        summary = manifest.account_inventory_summary or {}
+        redacted_summary = dict(summary) if isinstance(summary, dict) and summary else None
+        counts = summary.get("counts", {}) if isinstance(summary, dict) else {}
+        if not isinstance(counts, dict):
+            counts = {}
+
+        known_categories = {entry.category for entry in ACCOUNT_DATA_INVENTORY}
+        canonical_warnings = {
+            entry.category: entry.warning
+            for entry in ACCOUNT_DATA_INVENTORY
+            if entry.warning
+        }
+        skipped_non_restorable: dict[str, int] = {}
+        warnings: list[str] = []
+        errors: list[str] = []
+        serialized_content_categories = {
+            "conversations",
+            "notes",
+            "characters",
+            "world_books",
+            "dictionaries",
+            "prompts",
+            "evaluations",
+            "generated_documents",
+            "explainer_sessions",
+            "media_records",
+            "media_transcripts",
+            "media_chunks",
+            "media_stored_artifacts",
+            "embeddings",
+        }
+        account_metadata_without_payload = {
+            "account_profile",
+            "account_settings",
+            "tags_categories_relationships",
+        }
+
+        for entry in manifest.account_inventory or []:
+            if not isinstance(entry, dict):
+                continue
+            category = str(entry.get("category") or "").strip()
+            if not category:
+                continue
+            restore_status = str(entry.get("restore_status") or "").strip()
+            count = self._coerce_inventory_count(counts.get(category))
+            if restore_status == "restorable" and category not in known_categories:
+                errors.append(
+                    f"Archive inventory category '{category}' is marked restorable but this importer has no handler."
+                )
+                continue
+            if restore_status in {"pointer_only", "non_restorable"}:
+                if count:
+                    skipped_non_restorable[category] = count
+                warning = canonical_warnings.get(category)
+                if warning:
+                    warnings.append(str(warning))
+                elif category not in known_categories:
+                    warnings.append(
+                        f"Archive inventory category '{category}' is {restore_status} and was not restored."
+                    )
+                continue
+            if (
+                restore_status == "restorable"
+                and count
+                and category in account_metadata_without_payload
+            ):
+                skipped_non_restorable[category] = count
+                warnings.append(
+                    f"Archive inventory category '{category}' has no serialized restore payload; "
+                    "review account settings after import."
+                )
+            elif (
+                restore_status == "restorable"
+                and count
+                and category not in serialized_content_categories
+            ):
+                warnings.append(
+                    f"Archive inventory category '{category}' is known but has no direct content item payload."
+                )
+
+        return redacted_summary, skipped_non_restorable, warnings, errors
+
+    def _safe_import_artifact_destination(
+        self,
+        *,
+        media_id: int,
+        original_filename: Any,
+        fallback_name: str,
+    ) -> tuple[Path, str] | None:
+        """Return an account-owned destination for a bundled media artifact."""
+        try:
+            user_root = DatabasePaths.resolve_user_base_directory(self.user_id_int or self.user_id).resolve()
+        except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
+            return None
+        raw_name = str(original_filename or fallback_name or "artifact.bin")
+        safe_name = Path(raw_name.replace("\\", "/")).name or "artifact.bin"
+        if self._is_unsafe_archive_path(safe_name):
+            safe_name = "artifact.bin"
+        dest_dir = user_root / "imported_media" / f"media_{media_id}"
+        dest_name = f"{uuid4().hex}_{safe_name}"
+        dest = (dest_dir / dest_name).resolve()
+        try:
+            dest.relative_to(user_root)
+        except ValueError:
+            return None
+        return dest, dest.relative_to(user_root).as_posix()
+
+    def _restore_media_artifacts(
+        self,
+        *,
+        media_db: Any,
+        extract_dir: Path,
+        media_id: int,
+        stored_artifacts: list[dict[str, Any]],
+        status: ImportJob,
+    ) -> tuple[int, int]:
+        """Restore bundled media artifact bytes and count pointer-only metadata."""
+        restored = 0
+        pointer_only = 0
+        insert_media_file = getattr(media_db, "insert_media_file", None)
+        if not callable(insert_media_file):
+            status.warnings.append("Media artifact rows skipped: media DB does not support MediaFiles restore.")
+            return restored, len(stored_artifacts or [])
+
+        for index, artifact in enumerate(stored_artifacts or []):
+            if not isinstance(artifact, dict):
+                continue
+            archive_path = artifact.get("archive_path")
+            if not artifact.get("bundled") or not archive_path:
+                pointer_only += 1
+                continue
+            source = self._safe_extracted_content_path(extract_dir, str(archive_path))
+            if source is None or not source.exists() or not source.is_file():
+                pointer_only += 1
+                status.warnings.append(f"Stored media artifact missing from archive: {archive_path}")
+                continue
+            destination = self._safe_import_artifact_destination(
+                media_id=media_id,
+                original_filename=artifact.get("original_filename"),
+                fallback_name=Path(str(archive_path)).name or f"artifact_{index}.bin",
+            )
+            if destination is None:
+                pointer_only += 1
+                status.warnings.append("Stored media artifact skipped: could not resolve account-owned destination.")
+                continue
+            dest_path, storage_path = destination
+            try:
+                dest_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, dest_path)
+                insert_media_file(
+                    media_id=int(media_id),
+                    file_type=str(artifact.get("file_type") or "artifact"),
+                    storage_path=storage_path,
+                    original_filename=artifact.get("original_filename"),
+                    file_size=int(artifact.get("file_size") or source.stat().st_size),
+                    mime_type=artifact.get("mime_type"),
+                    checksum=artifact.get("checksum"),
+                )
+                restored += 1
+            except Exception as exc:
+                pointer_only += 1
+                status.warnings.append(f"Stored media artifact restore failed: {str(exc)}")
+        return restored, pointer_only
+
+    @staticmethod
+    def _media_chunks_for_restore(payload: dict[str, Any]) -> list[dict[str, Any]]:
+        """Convert exported media chunks into the media DB writer shape."""
+        chunks: list[dict[str, Any]] = []
+        for chunk in payload.get("chunks") or []:
+            if not isinstance(chunk, dict):
+                continue
+            text = chunk.get("text")
+            if text is None:
+                text = chunk.get("chunk_text")
+            if text is None:
+                continue
+            chunks.append(
+                {
+                    "text": text,
+                    "start_char": chunk.get("start_char"),
+                    "end_char": chunk.get("end_char"),
+                    "chunk_type": chunk.get("chunk_type"),
+                    "metadata": chunk.get("metadata") if isinstance(chunk.get("metadata"), dict) else {},
+                }
+            )
+        return chunks
+
+    def _restore_media_transcripts(
+        self,
+        *,
+        media_db: Any,
+        media_id: int,
+        payload: dict[str, Any],
+        status: ImportJob,
+    ) -> None:
+        """Restore exported transcript rows for a media item when supported."""
+        if upsert_transcript is None:
+            if payload.get("transcripts"):
+                status.warnings.append("Media transcripts skipped: transcript restore API unavailable.")
+            return
+        for transcript in payload.get("transcripts") or []:
+            if not isinstance(transcript, dict):
+                continue
+            text = (
+                transcript.get("transcription")
+                or transcript.get("text")
+                or transcript.get("content")
+            )
+            if not text:
+                continue
+            try:
+                upsert_transcript(
+                    media_db,
+                    int(media_id),
+                    str(text),
+                    str(transcript.get("whisper_model") or transcript.get("model") or "imported"),
+                    created_at=transcript.get("created_at"),
+                    idempotency_key=f"chatbook:{payload.get('uuid') or payload.get('id')}:{transcript.get('id') or uuid4().hex}",
+                    set_as_latest=True,
+                )
+            except Exception as exc:
+                status.warnings.append(f"Media transcript restore failed: {str(exc)}")
+
+    def _restore_media_vector_embedding(
+        self,
+        media_db: Any,
+        media_id: int,
+        vector_payload: dict[str, Any],
+    ) -> None:
+        """Attach an exported media vector blob back to a restored media row."""
+        if vector_payload.get("encoding") != "base64" or not vector_payload.get("vector"):
+            return
+        vector_bytes = base64.b64decode(str(vector_payload["vector"]))
+        with media_db.transaction() as conn:
+            media_db._execute_with_connection(
+                conn,
+                "UPDATE Media SET vector_embedding = ? WHERE id = ?",
+                (vector_bytes, int(media_id)),
+            )
+
+    def _filter_chroma_ids_for_conflict_resolution(
+        self,
+        *,
+        chroma: Any,
+        collection_name: str,
+        ids: list[str],
+        conflict_resolution: ConflictResolution,
+        status: ImportJob,
+    ) -> set[str]:
+        """Return Chroma ids safe to upsert for the selected conflict mode."""
+        if conflict_resolution != ConflictResolution.SKIP or not ids:
+            return set(ids)
+        try:
+            collection = chroma.get_collection(collection_name)
+        except KeyError:
+            return set(ids)
+        except Exception as exc:
+            status.warnings.append(
+                f"Embedding collection conflict check failed for '{collection_name}': {str(exc)}"
+            )
+            return set()
+
+        try:
+            result = collection.get(ids=ids)
+        except Exception as exc:
+            status.warnings.append(
+                f"Embedding collection conflict check failed for '{collection_name}': {str(exc)}"
+            )
+            return set()
+        existing_ids = {
+            str(item_id)
+            for item_id in (result.get("ids") or [])
+            if item_id is not None
+        }
+        if existing_ids:
+            status.warnings.append(
+                f"Skipped {len(existing_ids)} existing embedding id(s) in collection '{collection_name}'."
+            )
+        return {item_id for item_id in ids if item_id not in existing_ids}
+
+    @staticmethod
+    def _renamed_import_title(base_name: str) -> str:
+        """Return a low-collision title for content types without local name lookup."""
+        return f"{base_name} (Imported {uuid4().hex[:8]})"
+
     def _normalize_evaluation_record(self, record: dict[str, Any]) -> dict[str, Any]:
         """Normalize evaluation definition for export."""
         payload: dict[str, Any] = {}
@@ -1297,6 +1605,35 @@ class ChatbookService:
 
     def _init_job_tables(self):
         """Initialize database tables for job tracking."""
+        def _job_table_has_column(table_name: str, column_name: str) -> bool:
+            if table_name not in {"export_jobs", "import_jobs"}:
+                raise ValueError(f"Unsupported Chatbook job table: {table_name}")
+            if self._uses_postgres_backend():
+                cursor = self.db.execute_query(
+                    """
+                    SELECT 1
+                    FROM information_schema.columns
+                    WHERE table_name = ? AND column_name = ?
+                    """,
+                    (table_name, column_name),
+                )
+            else:
+                cursor = self.db.execute_query(
+                    f"PRAGMA table_info({table_name})"  # nosec B608 - table name is allowlisted above.
+                )
+            for row in self._fetch_results(cursor) or []:
+                if isinstance(row, dict):
+                    candidate = row.get("name") or row.get("column_name")
+                else:
+                    candidate = row[1] if len(row) > 1 else None
+                if candidate == column_name:
+                    return True
+            return False
+
+        def _ensure_job_table_column(table_name: str, column_name: str, definition: str) -> None:
+            if not _job_table_has_column(table_name, column_name):
+                self.db.execute_query(f"ALTER TABLE {table_name} ADD COLUMN {definition}")  # nosec B608
+
         try:
             # Export jobs table
             self.db.execute_query("""
@@ -1315,13 +1652,11 @@ class ChatbookService:
                     processed_items INTEGER DEFAULT 0,
                     file_size_bytes INTEGER,
                     download_url TEXT,
-                    expires_at TIMESTAMP
+                    expires_at TIMESTAMP,
+                    metadata TEXT
                 )
             """)
-            try:
-                self.db.execute_query("ALTER TABLE export_jobs ADD COLUMN metadata TEXT")
-            except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
-                pass
+            _ensure_job_table_column("export_jobs", "metadata", "metadata TEXT")
 
             # Import jobs table
             self.db.execute_query("""
@@ -1341,9 +1676,11 @@ class ChatbookService:
                     failed_items INTEGER DEFAULT 0,
                     skipped_items INTEGER DEFAULT 0,
                     conflicts TEXT,  -- JSON array
-                    warnings TEXT    -- JSON array
+                    warnings TEXT,    -- JSON array
+                    metadata TEXT     -- JSON object
                 )
             """)
+            _ensure_job_table_column("import_jobs", "metadata", "metadata TEXT")
         except _CHATBOOK_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Error initializing job tables: {e}")
 
@@ -2210,8 +2547,8 @@ class ChatbookService:
         conflict_resolution: ConflictResolution | str | None = None,
         conflict_strategy: str | None = None,  # Alias for conflict_resolution (for test compatibility)
         prefix_imported: bool = False,
-        import_media: bool = False,
-        import_embeddings: bool = False,
+        import_media: bool | None = None,
+        import_embeddings: bool | None = None,
         async_mode: bool = False,
         request_id: str | None = None,
         source_format: str = "chatbook",
@@ -2225,8 +2562,8 @@ class ChatbookService:
             content_selections: Specific content to import
             conflict_resolution: How to handle conflicts
             prefix_imported: Add prefix to imported items
-            import_media: Import media files (not supported yet)
-            import_embeddings: Import embeddings (not supported yet)
+            import_media: Import archive media files; defaults to true for Chatbook archives
+            import_embeddings: Import archive embeddings; defaults to true for Chatbook archives
             async_mode: Run as background job
             selected_openwebui_user_id: Selected OpenWebUI source user id for DB imports
 
@@ -2262,43 +2599,28 @@ class ChatbookService:
                 "Use 'skip' or 'rename'."
             ), None
 
-        # Reject media/embedding imports until implemented
-        if import_media or import_embeddings:
-            return False, (
-                "Media/embedding imports are not supported yet. "
-                "Set import_media=false and import_embeddings=false."
-            ), None
-
         source_format_value = getattr(source_format, "value", str(source_format or "chatbook")).strip().lower()
         if source_format_value not in {"chatbook", "openwebui_json", "openwebui_db"}:
             return False, f"Unsupported import source format: {source_format}", None
 
+        effective_import_media = (
+            bool(import_media)
+            if import_media is not None
+            else source_format_value == "chatbook"
+        )
+        effective_import_embeddings = (
+            bool(import_embeddings)
+            if import_embeddings is not None
+            else source_format_value == "chatbook"
+        )
+
         if source_format_value in {"openwebui_json", "openwebui_db"}:
             if content_selections:
                 return False, "OpenWebUI imports do not support content selections; all valid chats are imported.", None
-            if import_media or import_embeddings:
-                return False, "OpenWebUI imports do not support media or embedding import options.", None
+            if effective_import_media or effective_import_embeddings:
+                return False, "OpenWebUI imports do not use archive media or embedding restore options.", None
         if source_format_value == "openwebui_db" and not (selected_openwebui_user_id or "").strip():
             return False, "selected_openwebui_user_id is required for OpenWebUI DB imports", None
-
-        # Reject explicit requests for unsupported content types
-        if content_selections:
-            unsupported_types = {
-                ContentType.MEDIA,
-                ContentType.EMBEDDING,
-                ContentType.PROMPT,
-                ContentType.EVALUATION,
-            }
-            requested = [
-                ct.value if hasattr(ct, "value") else str(ct)
-                for ct in content_selections
-                if ct in unsupported_types
-            ]
-            if requested:
-                return False, (
-                    "Import for content types is not supported yet: "
-                    + ", ".join(sorted(set(requested)))
-                ), None
 
         try:
             if source_format_value in {"openwebui_json", "openwebui_db"}:
@@ -2344,11 +2666,18 @@ class ChatbookService:
                     "file_token": file_token,
                     "source_format": source_format_value,
                     "selected_openwebui_user_id": selected_openwebui_user_id,
-                    "content_selections": {k.value if hasattr(k, 'value') else str(k): v for k, v in (content_selections or {}).items()},
+                    "content_selections": (
+                        None
+                        if content_selections is None
+                        else {
+                            k.value if hasattr(k, 'value') else str(k): v
+                            for k, v in content_selections.items()
+                        }
+                    ),
                     "conflict_resolution": conflict_resolution.value if hasattr(conflict_resolution, 'value') else str(conflict_resolution),
                     "prefix_imported": bool(prefix_imported),
-                    "import_media": bool(import_media),
-                    "import_embeddings": bool(import_embeddings),
+                    "import_media": effective_import_media,
+                    "import_embeddings": effective_import_embeddings,
                 }
                 job_created = self._core_jobs.create_job(
                     domain="chatbooks",
@@ -2397,7 +2726,7 @@ class ChatbookService:
                 self._import_chatbook_sync,
                 str(resolved_path), content_selections,
                 conflict_resolution, prefix_imported,
-                import_media, import_embeddings
+                effective_import_media, effective_import_embeddings
             )
 
     def _import_chatbook_sync(
@@ -2524,6 +2853,18 @@ class ChatbookService:
                 chatbook_path=file_path
             )
             import_status.warnings.extend(import_warnings)
+            inventory_summary, skipped_non_restorable, inventory_warnings, inventory_errors = (
+                self._inspect_manifest_inventory_for_import(manifest)
+            )
+            import_status.warnings.extend(inventory_warnings)
+            if inventory_errors:
+                return False, f"Chatbook inventory restore coverage missing: {inventory_errors[0]}", {
+                    "imported_items": {},
+                    "warnings": list(import_status.warnings or []),
+                    "errors": inventory_errors,
+                    "inventory_summary": inventory_summary,
+                    "skipped_non_restorable": skipped_non_restorable,
+                }
 
             import_status.total_items = sum(len(ids) for ids in content_selections.values())
 
@@ -2535,6 +2876,10 @@ class ChatbookService:
                 ContentType.NOTE,
                 ContentType.EXPLAINER_SESSION,
                 ContentType.GENERATED_DOCUMENT,
+                ContentType.MEDIA,
+                ContentType.EMBEDDING,
+                ContentType.PROMPT,
+                ContentType.EVALUATION,
             }
             unsupported_types = [ct for ct in content_selections if ct not in supported_types]
             for ct in unsupported_types:
@@ -2548,8 +2893,24 @@ class ChatbookService:
                     )
                 content_selections.pop(ct, None)
 
+            if not import_media and ContentType.MEDIA in content_selections:
+                ids = content_selections.pop(ContentType.MEDIA) or []
+                import_status.processed_items += len(ids)
+                import_status.skipped_items += len(ids)
+                import_status.warnings.append(
+                    f"Skipped media restore because import_media=false ({len(ids)} items)"
+                )
+            if not import_embeddings and ContentType.EMBEDDING in content_selections:
+                ids = content_selections.pop(ContentType.EMBEDDING) or []
+                import_status.processed_items += len(ids)
+                import_status.skipped_items += len(ids)
+                import_status.warnings.append(
+                    f"Skipped embedding restore because import_embeddings=false ({len(ids)} items)"
+                )
+
             manifest_path_index = self._build_manifest_import_path_index(manifest)
             character_id_map: dict[str, int] = {}
+            media_id_map: dict[str, int] = {}
             imported_items: dict[str, int] = {}
 
             def _run_import_for_type(
@@ -2601,6 +2962,55 @@ class ChatbookService:
                     manifest_path_index=manifest_path_index,
                 )
 
+            # Import prompts before dependent evaluation definitions.
+            if ContentType.PROMPT in content_selections:
+                _run_import_for_type(
+                    ContentType.PROMPT,
+                    self._import_prompts,
+                    extract_dir, manifest,
+                    content_selections[ContentType.PROMPT],
+                    conflict_resolution, prefix_imported,
+                    import_status,
+                    manifest_path_index=manifest_path_index,
+                )
+
+            # Import media records before embeddings so media vector blobs can reattach.
+            if ContentType.MEDIA in content_selections:
+                _run_import_for_type(
+                    ContentType.MEDIA,
+                    self._import_media_items,
+                    extract_dir, manifest,
+                    content_selections[ContentType.MEDIA],
+                    conflict_resolution, prefix_imported,
+                    import_status,
+                    manifest_path_index=manifest_path_index,
+                    media_id_map=media_id_map,
+                )
+
+            # Import evaluations after prompts/media because archived definitions can reference both.
+            if ContentType.EVALUATION in content_selections:
+                _run_import_for_type(
+                    ContentType.EVALUATION,
+                    self._import_evaluations,
+                    extract_dir, manifest,
+                    content_selections[ContentType.EVALUATION],
+                    conflict_resolution, prefix_imported,
+                    import_status,
+                    manifest_path_index=manifest_path_index,
+                )
+
+            if ContentType.EMBEDDING in content_selections:
+                _run_import_for_type(
+                    ContentType.EMBEDDING,
+                    self._import_embeddings,
+                    extract_dir, manifest,
+                    content_selections[ContentType.EMBEDDING],
+                    conflict_resolution, prefix_imported,
+                    import_status,
+                    manifest_path_index=manifest_path_index,
+                    media_id_map=media_id_map,
+                )
+
             # Import conversations
             if ContentType.CONVERSATION in content_selections:
                 _run_import_for_type(
@@ -2640,14 +3050,39 @@ class ChatbookService:
             # Backward-compatible fallback: generated_document items with
             # metadata.subtype == "explainer_session" restore into Explainer.
             if ContentType.GENERATED_DOCUMENT in content_selections:
-                _run_import_for_type(
-                    ContentType.EXPLAINER_SESSION,
-                    self._import_generated_document_explainer_sessions,
-                    extract_dir, manifest,
-                    content_selections[ContentType.GENERATED_DOCUMENT],
-                    conflict_resolution, prefix_imported,
-                    import_status
-                )
+                explainer_document_ids: list[str] = []
+                generic_document_ids: list[str] = []
+                item_by_id = {
+                    str(item.id): item
+                    for item in manifest.content_items
+                    if item.type == ContentType.GENERATED_DOCUMENT
+                }
+                for document_id in content_selections[ContentType.GENERATED_DOCUMENT]:
+                    item = item_by_id.get(str(document_id))
+                    metadata = item.metadata if item and isinstance(item.metadata, dict) else {}
+                    if metadata.get("subtype") == "explainer_session":
+                        explainer_document_ids.append(str(document_id))
+                    else:
+                        generic_document_ids.append(str(document_id))
+                if explainer_document_ids:
+                    _run_import_for_type(
+                        ContentType.EXPLAINER_SESSION,
+                        self._import_generated_document_explainer_sessions,
+                        extract_dir, manifest,
+                        explainer_document_ids,
+                        conflict_resolution, prefix_imported,
+                        import_status
+                    )
+                if generic_document_ids:
+                    _run_import_for_type(
+                        ContentType.GENERATED_DOCUMENT,
+                        self._import_generated_documents,
+                        extract_dir, manifest,
+                        generic_document_ids,
+                        conflict_resolution, prefix_imported,
+                        import_status,
+                        manifest_path_index=manifest_path_index,
+                    )
 
             # Note: We do NOT delete the original import file - the caller owns it
 
@@ -2657,6 +3092,10 @@ class ChatbookService:
                 "imported_items": imported_items,
                 "warnings": list(import_status.warnings or []),
             }
+            if inventory_summary:
+                sync_result["inventory_summary"] = inventory_summary
+            if skipped_non_restorable:
+                sync_result["skipped_non_restorable"] = skipped_non_restorable
 
             if import_status.successful_items > 0:
                 message = f"Successfully imported {import_status.successful_items}/{import_status.total_items} items"
@@ -2705,7 +3144,7 @@ class ChatbookService:
             self._save_import_job(job)
 
             # Import chatbook synchronously using thread pool
-            success, message, _ = await asyncio.to_thread(
+            success, message, result = await asyncio.to_thread(
                 self._import_chatbook_sync,
                 file_path, content_selections,
                 conflict_resolution, prefix_imported,
@@ -2717,6 +3156,26 @@ class ChatbookService:
                 if latest and latest.status == ImportStatus.CANCELLED:
                     return
                 job.status = ImportStatus.COMPLETED
+                if isinstance(result, dict):
+                    imported_items = result.get("imported_items") if isinstance(result.get("imported_items"), dict) else {}
+                    skipped_non_restorable = (
+                        result.get("skipped_non_restorable")
+                        if isinstance(result.get("skipped_non_restorable"), dict)
+                        else {}
+                    )
+                    successful_count = sum(int(count or 0) for count in imported_items.values())
+                    skipped_count = sum(int(count or 0) for count in skipped_non_restorable.values())
+                    job.progress_percentage = 100
+                    job.successful_items = successful_count
+                    job.skipped_items = max(job.skipped_items, skipped_count)
+                    job.processed_items = max(job.processed_items, successful_count + skipped_count)
+                    job.total_items = max(job.total_items, successful_count + skipped_count)
+                    job.warnings = result.get("warnings") if isinstance(result.get("warnings"), list) else []
+                    job.metadata = {
+                        "imported_items": imported_items,
+                        "inventory_summary": result.get("inventory_summary"),
+                        "skipped_non_restorable": skipped_non_restorable,
+                    }
             else:
                 job.status = ImportStatus.FAILED
                 job.error_message = message
@@ -3979,6 +4438,13 @@ class ChatbookService:
             for row in results:
                 # Handle both dict and tuple formats (for test compatibility)
                 if isinstance(row, dict):
+                    metadata = {}
+                    raw_metadata = row.get("metadata")
+                    if isinstance(raw_metadata, str):
+                        with contextlib.suppress(json.JSONDecodeError):
+                            metadata = json.loads(raw_metadata)
+                    elif isinstance(raw_metadata, dict):
+                        metadata = raw_metadata
                     # Use class method for timestamp parsing
                     job = ImportJob(
                         job_id=row['job_id'],
@@ -3996,14 +4462,20 @@ class ChatbookService:
                         failed_items=row['failed_items'] or 0,
                         skipped_items=row['skipped_items'] or 0,
                         conflicts=json.loads(row['conflicts']) if row['conflicts'] else [],
-                        warnings=json.loads(row['warnings']) if row['warnings'] else []
+                        warnings=json.loads(row['warnings']) if row['warnings'] else [],
+                        metadata=metadata,
                     )
                 else:
                     # Handle tuple format from mocked tests
                     # (job_id, user_id, status, chatbook_path, created_at, started_at,
                     #  completed_at, error_message, progress_percentage, total_items,
                     #  processed_items, successful_items, failed_items, skipped_items,
-                    #  conflicts, warnings)
+                    #  conflicts, warnings, metadata)
+                    metadata = {}
+                    raw_metadata = row[16] if len(row) > 16 else None
+                    if isinstance(raw_metadata, str):
+                        with contextlib.suppress(json.JSONDecodeError):
+                            metadata = json.loads(raw_metadata)
                     job = ImportJob(
                         job_id=row[0],
                         user_id=row[1],
@@ -4020,7 +4492,8 @@ class ChatbookService:
                         failed_items=row[12] if len(row) > 12 else 0,
                         skipped_items=row[13] if len(row) > 13 else 0,
                         conflicts=json.loads(row[14]) if len(row) > 14 and row[14] else [],
-                        warnings=json.loads(row[15]) if len(row) > 15 and row[15] else []
+                        warnings=json.loads(row[15]) if len(row) > 15 and row[15] else [],
+                        metadata=metadata,
                     )
                 jobs.append(job)
 
@@ -5704,6 +6177,509 @@ class ChatbookService:
                     f"Error importing generated Explainer document {document_id_text}: {str(exc)}"
                 )
 
+    def _import_prompts(
+        self,
+        extract_dir: Path,
+        manifest: ChatbookManifest,
+        prompt_ids: list[str],
+        conflict_resolution: ConflictResolution,
+        prefix_imported: bool,
+        status: ImportJob,
+        manifest_path_index: ManifestImportPathIndex | None = None,
+    ) -> None:
+        """Import Prompt DB rows from a chatbook."""
+        prompts_db = self._get_prompts_db()
+        if manifest_path_index is None:
+            manifest_path_index = self._build_manifest_import_path_index(manifest)
+
+        for prompt_id in prompt_ids:
+            prompt_id_text = str(prompt_id)
+            status.processed_items += 1
+            if prompts_db is None:
+                status.failed_items += 1
+                status.warnings.append("Prompt import failed: prompts database is unavailable.")
+                continue
+            prompt_file, prompt_path = self._resolve_manifest_import_file(
+                extract_dir,
+                manifest,
+                ContentType.PROMPT,
+                prompt_id_text,
+                manifest_path_index,
+            )
+            if prompt_file is None:
+                status.failed_items += 1
+                status.warnings.append(f"Unsafe prompt file path: {prompt_path}")
+                continue
+            if not prompt_file.exists():
+                status.failed_items += 1
+                status.warnings.append(f"Prompt file not found: {prompt_path}")
+                continue
+
+            try:
+                with open(prompt_file, encoding="utf-8") as f:
+                    payload = json.load(f)
+                if not isinstance(payload, dict):
+                    raise ValueError("prompt payload must be an object")
+                prompt_name = str(payload.get("name") or payload.get("title") or f"Prompt {prompt_id_text}")
+                if prefix_imported:
+                    prompt_name = f"[Imported] {prompt_name}"
+                get_by_name = getattr(prompts_db, "get_prompt_by_name", None)
+                existing = get_by_name(prompt_name) if callable(get_by_name) else None
+                if existing and conflict_resolution == ConflictResolution.SKIP:
+                    status.skipped_items += 1
+                    continue
+                if existing and conflict_resolution == ConflictResolution.RENAME:
+                    prompt_name = self._renamed_import_title(prompt_name)
+
+                keywords = payload.get("keywords")
+                if not isinstance(keywords, list):
+                    keywords = []
+                prompts_db.add_prompt(
+                    name=prompt_name,
+                    author=payload.get("author"),
+                    details=payload.get("details") or payload.get("description"),
+                    system_prompt=payload.get("system_prompt"),
+                    user_prompt=payload.get("user_prompt"),
+                    prompt_format=str(payload.get("prompt_format") or "legacy"),
+                    prompt_schema_version=payload.get("prompt_schema_version"),
+                    prompt_definition=payload.get("prompt_definition"),
+                    keywords=[str(keyword) for keyword in keywords],
+                    overwrite=False,
+                )
+                status.successful_items += 1
+            except Exception as exc:
+                status.failed_items += 1
+                status.warnings.append(f"Error importing prompt {prompt_id_text}: {str(exc)}")
+
+    def _import_evaluations(
+        self,
+        extract_dir: Path,
+        manifest: ChatbookManifest,
+        evaluation_ids: list[str],
+        conflict_resolution: ConflictResolution,
+        prefix_imported: bool,
+        status: ImportJob,
+        manifest_path_index: ManifestImportPathIndex | None = None,
+    ) -> None:
+        """Import evaluation definitions and their archived runs."""
+        evals_db = self._get_evaluations_db()
+        if manifest_path_index is None:
+            manifest_path_index = self._build_manifest_import_path_index(manifest)
+
+        for evaluation_id in evaluation_ids:
+            evaluation_id_text = str(evaluation_id)
+            status.processed_items += 1
+            if evals_db is None:
+                status.failed_items += 1
+                status.warnings.append("Evaluation import failed: evaluations database is unavailable.")
+                continue
+            eval_file, eval_path = self._resolve_manifest_import_file(
+                extract_dir,
+                manifest,
+                ContentType.EVALUATION,
+                evaluation_id_text,
+                manifest_path_index,
+            )
+            if eval_file is None:
+                status.failed_items += 1
+                status.warnings.append(f"Unsafe evaluation file path: {eval_path}")
+                continue
+            if not eval_file.exists():
+                status.failed_items += 1
+                status.warnings.append(f"Evaluation file not found: {eval_path}")
+                continue
+
+            try:
+                with open(eval_file, encoding="utf-8") as f:
+                    payload = json.load(f)
+                if not isinstance(payload, dict):
+                    raise ValueError("evaluation payload must be an object")
+                eval_name = str(payload.get("name") or f"Evaluation {evaluation_id_text}")
+                if prefix_imported:
+                    eval_name = f"[Imported] {eval_name}"
+                existing = None
+                try:
+                    existing = evals_db.get_evaluation(str(payload.get("id") or evaluation_id_text))
+                except Exception:
+                    existing = None
+                if existing and conflict_resolution == ConflictResolution.SKIP:
+                    status.skipped_items += 1
+                    continue
+                eval_id_for_create = None if existing else str(payload.get("id") or evaluation_id_text)
+                if existing and conflict_resolution == ConflictResolution.RENAME:
+                    eval_name = self._renamed_import_title(eval_name)
+
+                created_eval_id = evals_db.create_evaluation(
+                    name=eval_name,
+                    eval_type=str(payload.get("eval_type") or payload.get("type") or "custom"),
+                    eval_spec=payload.get("eval_spec") if isinstance(payload.get("eval_spec"), dict) else {},
+                    description=payload.get("description"),
+                    dataset_id=payload.get("dataset_id"),
+                    created_by=str(self.user_id),
+                    metadata=payload.get("metadata") if isinstance(payload.get("metadata"), dict) else None,
+                    eval_id=eval_id_for_create,
+                )
+                for run in payload.get("runs") or []:
+                    if not isinstance(run, dict):
+                        continue
+                    try:
+                        run_id = evals_db.create_run(
+                            created_eval_id,
+                            target_model=run.get("target_model"),
+                            config=run.get("config") if isinstance(run.get("config"), dict) else None,
+                            webhook_url=run.get("webhook_url"),
+                            run_id=run.get("id"),
+                        )
+                        with evals_db.get_connection() as conn:
+                            conn.execute(
+                                """
+                                UPDATE evaluation_runs
+                                   SET status = ?, progress = ?, results = ?, error_message = ?,
+                                       started_at = ?, completed_at = ?, usage = ?
+                                 WHERE id = ?
+                                """,
+                                (
+                                    run.get("status") or "pending",
+                                    json.dumps(run.get("progress")) if isinstance(run.get("progress"), dict) else run.get("progress"),
+                                    json.dumps(run.get("results")) if isinstance(run.get("results"), (dict, list)) else run.get("results"),
+                                    run.get("error_message"),
+                                    run.get("started_at"),
+                                    run.get("completed_at"),
+                                    json.dumps(run.get("usage")) if isinstance(run.get("usage"), dict) else run.get("usage"),
+                                    run_id,
+                                ),
+                            )
+                            conn.commit()
+                    except Exception as run_exc:
+                        status.warnings.append(
+                            f"Evaluation run restore failed for {evaluation_id_text}: {str(run_exc)}"
+                        )
+                status.successful_items += 1
+            except Exception as exc:
+                status.failed_items += 1
+                status.warnings.append(f"Error importing evaluation {evaluation_id_text}: {str(exc)}")
+
+    def _import_media_items(
+        self,
+        extract_dir: Path,
+        manifest: ChatbookManifest,
+        media_ids: list[str],
+        conflict_resolution: ConflictResolution,
+        prefix_imported: bool,
+        status: ImportJob,
+        manifest_path_index: ManifestImportPathIndex | None = None,
+        media_id_map: dict[str, int] | None = None,
+    ) -> None:
+        """Import Media DB rows, transcripts, chunks, and bundled stored artifacts."""
+        media_db = self._get_media_db()
+        if manifest_path_index is None:
+            manifest_path_index = self._build_manifest_import_path_index(manifest)
+
+        for media_id in media_ids:
+            media_id_text = str(media_id)
+            status.processed_items += 1
+            if media_db is None:
+                status.failed_items += 1
+                status.warnings.append("Media import failed: media database is unavailable.")
+                continue
+            media_file, media_path = self._resolve_manifest_import_file(
+                extract_dir,
+                manifest,
+                ContentType.MEDIA,
+                media_id_text,
+                manifest_path_index,
+            )
+            if media_file is None:
+                status.failed_items += 1
+                status.warnings.append(f"Unsafe media file path: {media_path}")
+                continue
+            if not media_file.exists():
+                status.failed_items += 1
+                status.warnings.append(f"Media file not found: {media_path}")
+                continue
+
+            try:
+                with open(media_file, encoding="utf-8") as f:
+                    payload = json.load(f)
+                if not isinstance(payload, dict):
+                    raise ValueError("media payload must be an object")
+                media_title = str(payload.get("title") or f"Media {media_id_text}")
+                if prefix_imported:
+                    media_title = f"[Imported] {media_title}"
+                get_by_title = getattr(media_db, "get_media_by_title", None)
+                existing = get_by_title(media_title) if callable(get_by_title) else None
+                if existing and conflict_resolution == ConflictResolution.SKIP:
+                    status.skipped_items += 1
+                    continue
+                if existing and conflict_resolution == ConflictResolution.RENAME:
+                    media_title = self._renamed_import_title(media_title)
+
+                chunks = self._media_chunks_for_restore(payload)
+                new_media_id, _media_uuid, _message = media_db.add_media_with_keywords(
+                    url=payload.get("url"),
+                    title=media_title,
+                    media_type=payload.get("type") or payload.get("media_type") or "unknown",
+                    content=payload.get("content") or "",
+                    keywords=payload.get("keywords") if isinstance(payload.get("keywords"), list) else [],
+                    prompt=payload.get("prompt"),
+                    analysis_content=payload.get("analysis_content"),
+                    safe_metadata=json.dumps(
+                        {
+                            "chatbook_import": {
+                                "source_media_id": payload.get("id") or media_id_text,
+                                "source_uuid": payload.get("uuid"),
+                                "stored_artifacts": payload.get("stored_artifacts") or [],
+                                "related_prompts": payload.get("related_prompts") or [],
+                            }
+                        },
+                        ensure_ascii=False,
+                    ),
+                    source_hash=payload.get("source_hash"),
+                    transcription_model=payload.get("transcription_model"),
+                    author=payload.get("author"),
+                    ingestion_date=payload.get("ingestion_date"),
+                    overwrite=False,
+                    chunks=chunks,
+                    owner_user_id=self.user_id_int,
+                )
+                if not new_media_id:
+                    status.failed_items += 1
+                    continue
+                if media_id_map is not None:
+                    media_id_map[media_id_text] = int(new_media_id)
+                    if payload.get("uuid"):
+                        media_id_map[str(payload["uuid"])] = int(new_media_id)
+                self._restore_media_transcripts(
+                    media_db=media_db,
+                    media_id=int(new_media_id),
+                    payload=payload,
+                    status=status,
+                )
+                restored_artifacts, pointer_only = self._restore_media_artifacts(
+                    media_db=media_db,
+                    extract_dir=extract_dir,
+                    media_id=int(new_media_id),
+                    stored_artifacts=[
+                        item for item in payload.get("stored_artifacts") or [] if isinstance(item, dict)
+                    ],
+                    status=status,
+                )
+                if pointer_only:
+                    status.warnings.append(
+                        f"{pointer_only} stored media artifact pointer(s) for media {media_id_text} were restored as metadata only."
+                    )
+                if restored_artifacts:
+                    status.warnings.append(
+                        f"Restored {restored_artifacts} bundled stored media artifact(s) for media {media_id_text}."
+                    )
+                status.successful_items += 1
+            except Exception as exc:
+                status.failed_items += 1
+                status.warnings.append(f"Error importing media {media_id_text}: {str(exc)}")
+
+    def _import_embeddings(
+        self,
+        extract_dir: Path,
+        manifest: ChatbookManifest,
+        embedding_ids: list[str],
+        conflict_resolution: ConflictResolution,
+        prefix_imported: bool,
+        status: ImportJob,
+        manifest_path_index: ManifestImportPathIndex | None = None,
+        media_id_map: dict[str, int] | None = None,
+    ) -> None:
+        """Import Chroma collection embeddings and media vector blobs."""
+        if manifest_path_index is None:
+            manifest_path_index = self._build_manifest_import_path_index(manifest)
+        chroma = None
+        media_db = None
+
+        for embedding_id in embedding_ids:
+            embedding_id_text = str(embedding_id)
+            status.processed_items += 1
+            embedding_file, embedding_path = self._resolve_manifest_import_file(
+                extract_dir,
+                manifest,
+                ContentType.EMBEDDING,
+                embedding_id_text,
+                manifest_path_index,
+            )
+            if embedding_file is None:
+                status.failed_items += 1
+                status.warnings.append(f"Unsafe embedding file path: {embedding_path}")
+                continue
+            if not embedding_file.exists():
+                status.skipped_items += 1
+                status.warnings.append(f"Embedding payload not bundled: {embedding_id_text}")
+                continue
+            try:
+                with open(embedding_file, encoding="utf-8") as f:
+                    payload = json.load(f)
+                if not isinstance(payload, dict):
+                    raise ValueError("embedding payload must be an object")
+                if payload.get("bundled") is False:
+                    status.skipped_items += 1
+                    status.warnings.append(f"Embedding payload skipped because it was not bundled: {embedding_id_text}")
+                    continue
+
+                if str(payload.get("id") or embedding_id_text).startswith("media:"):
+                    source = payload.get("source") if isinstance(payload.get("source"), dict) else {}
+                    source_media_keys = [
+                        str(source.get("media_id") or ""),
+                        str(source.get("media_uuid") or ""),
+                        str(embedding_id_text).split("media:", 1)[-1],
+                    ]
+                    target_media_id = None
+                    for key in source_media_keys:
+                        if key and media_id_map and key in media_id_map:
+                            target_media_id = media_id_map[key]
+                            break
+                    if target_media_id is None:
+                        status.skipped_items += 1
+                        status.warnings.append(
+                            f"Media embedding skipped because source media was not restored: {embedding_id_text}"
+                        )
+                        continue
+                    media_db = media_db or self._get_media_db()
+                    if media_db is None:
+                        status.failed_items += 1
+                        status.warnings.append("Media embedding import failed: media database is unavailable.")
+                        continue
+                    self._restore_media_vector_embedding(media_db, int(target_media_id), payload)
+                    status.successful_items += 1
+                    continue
+
+                collection_name = str(payload.get("embedding_set_id") or "").strip()
+                chunks = payload.get("chunks") if isinstance(payload.get("chunks"), list) else []
+                if not collection_name or not chunks:
+                    status.skipped_items += 1
+                    status.warnings.append(f"Embedding collection payload had no restorable chunks: {embedding_id_text}")
+                    continue
+                chroma = chroma or self._get_chroma_manager()
+                if chroma is None:
+                    status.failed_items += 1
+                    status.warnings.append("Embedding import failed: ChromaDB manager is unavailable.")
+                    continue
+                ids: list[str] = []
+                texts: list[str] = []
+                embeddings: list[list[float]] = []
+                metadatas: list[dict[str, Any]] = []
+                for chunk in chunks:
+                    if not isinstance(chunk, dict) or not isinstance(chunk.get("embedding"), list):
+                        continue
+                    ids.append(str(chunk.get("id") or uuid4()))
+                    texts.append(str(chunk.get("document") or ""))
+                    embeddings.append(chunk["embedding"])
+                    metadatas.append(chunk.get("metadata") if isinstance(chunk.get("metadata"), dict) else {})
+                if not ids:
+                    status.skipped_items += 1
+                    status.warnings.append(f"Embedding collection payload had no valid vectors: {embedding_id_text}")
+                    continue
+                importable_ids = self._filter_chroma_ids_for_conflict_resolution(
+                    chroma=chroma,
+                    collection_name=collection_name,
+                    ids=ids,
+                    conflict_resolution=conflict_resolution,
+                    status=status,
+                )
+                if not importable_ids:
+                    status.skipped_items += 1
+                    continue
+                filtered_indexes = [
+                    index for index, item_id in enumerate(ids) if item_id in importable_ids
+                ]
+                chroma.store_in_chroma(
+                    collection_name,
+                    [texts[index] for index in filtered_indexes],
+                    [embeddings[index] for index in filtered_indexes],
+                    [ids[index] for index in filtered_indexes],
+                    [metadatas[index] for index in filtered_indexes],
+                )
+                status.successful_items += 1
+            except Exception as exc:
+                status.failed_items += 1
+                status.warnings.append(f"Error importing embedding {embedding_id_text}: {str(exc)}")
+
+    def _import_generated_documents(
+        self,
+        extract_dir: Path,
+        manifest: ChatbookManifest,
+        document_ids: list[str],
+        conflict_resolution: ConflictResolution,
+        prefix_imported: bool,
+        status: ImportJob,
+        manifest_path_index: ManifestImportPathIndex | None = None,
+    ) -> None:
+        """Import generic generated documents from a chatbook."""
+        from ..Chat.document_generator import DocumentGeneratorService, DocumentType
+
+        doc_service = DocumentGeneratorService(self.db, self.user_id)
+        if manifest_path_index is None:
+            manifest_path_index = self._build_manifest_import_path_index(manifest)
+
+        for document_id in document_ids:
+            document_id_text = str(document_id)
+            status.processed_items += 1
+            doc_file, doc_path = self._resolve_manifest_import_file(
+                extract_dir,
+                manifest,
+                ContentType.GENERATED_DOCUMENT,
+                document_id_text,
+                manifest_path_index,
+            )
+            if doc_file is None:
+                status.failed_items += 1
+                status.warnings.append(f"Unsafe generated document file path: {doc_path}")
+                continue
+            if not doc_file.exists():
+                status.failed_items += 1
+                status.warnings.append(f"Generated document file not found: {doc_path}")
+                continue
+            try:
+                with open(doc_file, encoding="utf-8") as f:
+                    payload = json.load(f)
+                if not isinstance(payload, dict):
+                    raise ValueError("generated document payload must be an object")
+                title = str(payload.get("title") or f"Generated document {document_id_text}")
+                if prefix_imported:
+                    title = f"[Imported] {title}"
+                existing = None
+                try:
+                    existing = doc_service.get_document(str(payload.get("id") or document_id_text))
+                except Exception:
+                    existing = None
+                if existing and conflict_resolution == ConflictResolution.SKIP:
+                    status.skipped_items += 1
+                    continue
+                if existing and conflict_resolution == ConflictResolution.RENAME:
+                    title = self._renamed_import_title(title)
+                doc_type_raw = str(payload.get("document_type") or "summary")
+                try:
+                    doc_type = DocumentType(doc_type_raw)
+                except Exception:
+                    doc_type = DocumentType.SUMMARY
+                new_document_id = doc_service._save_generated_document(
+                    conversation_id=payload.get("conversation_id"),
+                    document_type=doc_type,
+                    title=title,
+                    content=str(payload.get("content") or ""),
+                    provider=str(payload.get("provider") or "imported"),
+                    model=str(payload.get("model") or "imported"),
+                    generation_time_ms=int(payload.get("generation_time_ms") or 0),
+                    token_count=payload.get("token_count"),
+                )
+                if isinstance(payload.get("metadata"), dict) and payload["metadata"]:
+                    with self.db.get_connection() as conn:
+                        conn.execute(
+                            "UPDATE generated_documents SET metadata = ? WHERE id = ?",
+                            (json.dumps(payload["metadata"]), new_document_id),
+                        )
+                        conn.commit()
+                status.successful_items += 1
+            except Exception as exc:
+                status.failed_items += 1
+                status.warnings.append(f"Error importing generated document {document_id_text}: {str(exc)}")
+
     def _import_characters(
         self,
         extract_dir: Path,
@@ -6373,8 +7349,8 @@ class ChatbookService:
                     created_at, started_at, completed_at, error_message,
                     progress_percentage, total_items, processed_items,
                     successful_items, failed_items, skipped_items,
-                    conflicts, warnings
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    conflicts, warnings, metadata
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 job.job_id, job.user_id, job.status.value, job.chatbook_path,
                 job.created_at.strftime('%Y-%m-%d %H:%M:%S.%f') if job.created_at else None,
@@ -6382,7 +7358,8 @@ class ChatbookService:
                 job.completed_at.strftime('%Y-%m-%d %H:%M:%S.%f') if job.completed_at else None,
                 job.error_message, job.progress_percentage, job.total_items,
                 job.processed_items, job.successful_items, job.failed_items,
-                job.skipped_items, json.dumps(job.conflicts), json.dumps(job.warnings)
+                job.skipped_items, json.dumps(job.conflicts), json.dumps(job.warnings),
+                json.dumps(job.metadata or {}, ensure_ascii=False)
             ), commit=commit)
         except _CHATBOOK_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Error saving import job: {e}")
@@ -6423,8 +7400,17 @@ class ChatbookService:
                     'failed_items': row[12] if len(row) > 12 else 0,
                     'skipped_items': row[13] if len(row) > 13 else 0,
                     'conflicts': row[14] if len(row) > 14 else '[]',
-                    'warnings': row[15] if len(row) > 15 else '[]'
+                    'warnings': row[15] if len(row) > 15 else '[]',
+                    'metadata': row[16] if len(row) > 16 else '{}',
                 }
+
+            metadata = {}
+            raw_metadata = row.get("metadata")
+            if isinstance(raw_metadata, str):
+                with contextlib.suppress(json.JSONDecodeError):
+                    metadata = json.loads(raw_metadata)
+            elif isinstance(raw_metadata, dict):
+                metadata = raw_metadata
 
             return ImportJob(
                 job_id=row['job_id'],
@@ -6442,7 +7428,8 @@ class ChatbookService:
                 failed_items=row['failed_items'] or 0,
                 skipped_items=row['skipped_items'] or 0,
                 conflicts=json.loads(row['conflicts']) if row['conflicts'] else [],
-                warnings=json.loads(row['warnings']) if row['warnings'] else []
+                warnings=json.loads(row['warnings']) if row['warnings'] else [],
+                metadata=metadata,
             )
         except _CHATBOOK_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Error getting import job: {e}")

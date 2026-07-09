@@ -195,8 +195,20 @@ class ImportChatbookRequest(BaseModel):
         False,
         description="Add [Imported] prefix to items"
     )
-    import_media: bool = Field(False, description="Import media files (not supported yet)")
-    import_embeddings: bool = Field(False, description="Import embeddings (not supported yet)")
+    import_media: Optional[bool] = Field(
+        None,
+        description=(
+            "Omit to restore media data for Chatbook archives and ignore media restore "
+            "for OpenWebUI imports."
+        ),
+    )
+    import_embeddings: Optional[bool] = Field(
+        None,
+        description=(
+            "Omit to restore embeddings for Chatbook archives and ignore embedding restore "
+            "for OpenWebUI imports."
+        ),
+    )
     async_mode: bool = Field(False, description="Run as background job")
     selected_openwebui_user_id: Optional[str] = Field(
         None,
@@ -207,8 +219,8 @@ class ImportChatbookRequest(BaseModel):
         "example": {
             "conflict_resolution": "skip",
             "prefix_imported": True,
-            "import_media": False,
-            "import_embeddings": False,
+            "import_media": None,
+            "import_embeddings": None,
             "async_mode": False
         }
     })
@@ -330,6 +342,10 @@ class ImportJobResponse(BaseModel):
     skipped_items: int = Field(default=0, ge=0)
     conflicts: list[dict[str, Any]] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+    imported_items: Optional[dict[str, int]] = None
+    inventory_summary: Optional[dict[str, Any]] = None
+    skipped_non_restorable: Optional[dict[str, int]] = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class ImportConflictResponse(BaseModel):
@@ -562,6 +578,14 @@ class ImportChatbookResponse(BaseModel):
     warnings: Optional[list[str]] = Field(
         None,
         description="Validator and import warnings (sync imports only)"
+    )
+    inventory_summary: Optional[dict[str, Any]] = Field(
+        None,
+        description="Redacted archive inventory summary for sync Chatbook imports"
+    )
+    skipped_non_restorable: Optional[dict[str, int]] = Field(
+        None,
+        description="Non-restorable or pointer-only inventory categories skipped during sync import"
     )
 
 

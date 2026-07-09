@@ -917,15 +917,14 @@ class TestChatbookService:
         insert_index = next(index for index, query in enumerate(queries) if "INSERT OR REPLACE INTO export_jobs" in query)
         assert lock_index < insert_index
 
-    def test_import_skips_unsupported_content_types(self, service, tmp_path):
-        """Unsupported content types should be skipped with warnings."""
+    def test_import_skips_media_when_restore_flag_is_false(self, service, tmp_path):
+        """Explicitly disabled media restore should skip media content with warnings."""
         manifest = ChatbookManifest(
             version=ChatbookVersion.V1,
-            name="Unsupported Types",
-            description="Media and prompts are skipped",
+            name="Media Disabled",
+            description="Media is skipped when import_media is false",
             content_items=[
                 ContentItem(id="m1", type=ContentType.MEDIA, title="Media 1"),
-                ContentItem(id="p1", type=ContentType.PROMPT, title="Prompt 1"),
             ],
         )
 
@@ -938,7 +937,7 @@ class TestChatbookService:
             content_selections=None,
             conflict_resolution=ConflictResolution.SKIP,
             prefix_imported=False,
-            import_media=True,
+            import_media=False,
             import_embeddings=False,
         )
 
@@ -946,7 +945,7 @@ class TestChatbookService:
         assert "skipped" in message.lower()
         assert details is not None
         assert details["imported_items"] == {}
-        assert any("unsupported content type" in warning.lower() for warning in details["warnings"])
+        assert any("import_media=false" in warning for warning in details["warnings"])
 
     def test_import_conversation_missing_character_falls_back(self, service, mock_db, tmp_path):
         """Missing character_id should fall back to default with a warning."""

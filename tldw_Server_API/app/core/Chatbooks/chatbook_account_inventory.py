@@ -222,7 +222,11 @@ ACCOUNT_DATA_INVENTORY: tuple[AccountInventoryEntry, ...] = (
         import_handler_key="restore_tags_categories_relationships",
         dependencies=("conversations", "notes", "media_records", "prompts"),
         sensitivity="personal",
-        restore_status="restorable",
+        restore_status="non_restorable",
+        warning=(
+            "Tag/category relationship tables are not serialized in this archive version; "
+            "restored content may need tags or relationships rebuilt."
+        ),
     ),
     AccountInventoryEntry(
         category="sensitive_user_values",
