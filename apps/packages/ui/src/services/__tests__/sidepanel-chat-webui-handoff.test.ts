@@ -144,4 +144,25 @@ describe("sidepanel chat WebUI handoff", () => {
       selectedQuickPrompt: null
     })
   })
+
+  it("preserves document-processing handoff fields and filters invalid media ids", () => {
+    const url = new URL(
+      buildSidepanelChatWebUiHandoffUrl({
+        payload: {
+          source: SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE,
+          createdAt: Date.now(),
+          draft: "Summarize this document",
+          chatDocumentDraftId: "draft-123",
+          ragMediaIds: [101, Number.NaN, "bad", 202] as unknown as number[],
+          fileRetrievalEnabled: true
+        }
+      })
+    )
+
+    expect(decodeSidepanelChatWebUiHandoff(getFragmentHandoff(url))).toMatchObject({
+      chatDocumentDraftId: "draft-123",
+      ragMediaIds: [101, 202],
+      fileRetrievalEnabled: true
+    })
+  })
 })

@@ -29,6 +29,8 @@ const messageOptionState = vi.hoisted(() => ({
     toolChoice: "none",
     temporaryChat: false,
     useOCR: false,
+    fileRetrievalEnabled: false,
+    ragMediaIds: null as number[] | null,
     setHistoryId: vi.fn(),
     setHistory: vi.fn(),
     setMessages: vi.fn(),
@@ -41,6 +43,8 @@ const messageOptionState = vi.hoisted(() => ({
     setToolChoice: vi.fn(),
     setTemporaryChat: vi.fn(),
     setUseOCR: vi.fn(),
+    setFileRetrievalEnabled: vi.fn(),
+    setRagMediaIds: vi.fn(),
     setContextFiles: vi.fn(),
     createChatBranch: vi.fn(),
     streaming: false,
@@ -96,7 +100,8 @@ const storeOptionState = vi.hoisted(() => ({
     compareParentByHistory: {} as Record<
       string,
       { parentHistoryId: string; clusterId?: string }
-    >
+    >,
+    setUploadedFiles: vi.fn()
   }
 }))
 
@@ -310,6 +315,8 @@ describe("Playground thread search integration", () => {
     messageOptionState.value.toolChoice = "none"
     messageOptionState.value.temporaryChat = false
     messageOptionState.value.useOCR = false
+    messageOptionState.value.fileRetrievalEnabled = false
+    messageOptionState.value.ragMediaIds = null
     artifactsState.value.isOpen = false
     artifactsState.value.active = null
     artifactsState.value.history = []
@@ -506,7 +513,9 @@ describe("Playground thread search integration", () => {
       webSearch: true,
       toolChoice: "auto",
       temporaryChat: true,
-      useOCR: true
+      useOCR: true,
+      ragMediaIds: [101, 202],
+      fileRetrievalEnabled: true
     })
     const hashParams = new URLSearchParams()
     hashParams.set(SIDEPANEL_CHAT_WEBUI_HANDOFF_PARAM, encodedHandoff)
@@ -541,6 +550,13 @@ describe("Playground thread search integration", () => {
     expect(messageOptionState.value.setToolChoice).toHaveBeenCalledWith("auto")
     expect(messageOptionState.value.setTemporaryChat).toHaveBeenCalledWith(true)
     expect(messageOptionState.value.setUseOCR).toHaveBeenCalledWith(true)
+    expect(messageOptionState.value.setRagMediaIds).toHaveBeenCalledWith([
+      101,
+      202
+    ])
+    expect(
+      messageOptionState.value.setFileRetrievalEnabled
+    ).toHaveBeenCalledWith(true)
     expect(window.location.hash).toBe("")
   })
 })

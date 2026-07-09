@@ -908,7 +908,7 @@ git commit -m "feat: process chat documents on send"
 - Test: `apps/packages/ui/src/components/Sidepanel/Chat/__tests__/form.document-processing.test.tsx`
 - Test: `apps/packages/ui/src/components/Option/Playground/__tests__/sidepanel-chat-handoff-import.test.tsx`
 
-- [ ] **Step 1: Write failing handoff tests**
+- [x] **Step 1: Write failing handoff tests**
 
 In `sidepanel-chat-webui-handoff.test.ts`, assert new fields survive encode/decode:
 
@@ -942,7 +942,7 @@ In sidepanel form tests, assert:
 - Retrying a failed handoff reuses the same draft while it is unexpired instead of uploading the bytes again.
 - Cancelling the sidepanel draft deletes the server draft and cancels any active ingest job/batch.
 
-- [ ] **Step 2: Run sidepanel tests and verify failure**
+- [x] **Step 2: Run sidepanel tests and verify failure**
 
 Run:
 
@@ -952,7 +952,7 @@ cd apps/tldw-frontend && bunx vitest run ../packages/ui/src/services/__tests__/s
 
 Expected: FAIL because the payload and sidepanel UI are not wired.
 
-- [ ] **Step 3: Extend WebUI handoff payload**
+- [x] **Step 3: Extend WebUI handoff payload**
 
 Add optional fields:
 
@@ -964,7 +964,7 @@ fileRetrievalEnabled?: boolean
 
 Decode `ragMediaIds` defensively: only finite numbers survive. Expiry stays unchanged.
 
-- [ ] **Step 4: Wire sidepanel document choices**
+- [x] **Step 4: Wire sidepanel document choices**
 
 In `form.tsx`, reuse the same service types and render `DocumentProcessingChoices` in the sidepanel attachment area. If the sidepanel needs a tighter layout, wrap the same component with sidepanel-specific spacing; do not fork mode behavior. Sidepanel behavior:
 
@@ -979,7 +979,7 @@ Sidepanel blocked/error copy:
 - `Use Add to chat instead`
 - `Retry ingest`
 
-- [ ] **Step 5: Import the handoff in WebUI Playground**
+- [x] **Step 5: Import the handoff in WebUI Playground**
 
 In the existing sidepanel handoff import path in `PlaygroundForm`/`Playground.tsx`, if `chatDocumentDraftId` exists:
 
@@ -994,7 +994,7 @@ If `ragMediaIds` exists:
 
 - pass it into the current turn via request overrides or set the visible RAG scoped media state only when the user confirms continuing from the handoff.
 
-- [ ] **Step 6: Run sidepanel and handoff tests**
+- [x] **Step 6: Run sidepanel and handoff tests**
 
 Run:
 
@@ -1004,12 +1004,14 @@ cd apps/tldw-frontend && bunx vitest run ../packages/ui/src/services/__tests__/s
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps/packages/ui/src/components/Sidepanel/Chat/form.tsx apps/packages/ui/src/services/tldw/sidepanel-chat-webui-handoff.ts apps/packages/ui/src/services/__tests__/sidepanel-chat-webui-handoff.test.ts apps/packages/ui/src/components/Sidepanel/Chat/__tests__/form.queue.contract.test.tsx apps/packages/ui/src/components/Sidepanel/Chat/__tests__/form.document-processing.test.tsx apps/packages/ui/src/components/Option/Playground/__tests__/sidepanel-chat-handoff-import.test.tsx
 git commit -m "feat: hand off sidepanel document processing"
 ```
+
+Implementation note: sidepanel document uploads now reuse `DocumentProcessingChoices`, backend preflight, and `prepareChatDocumentAttachmentsForSend` for Add/OCR/Ingest sends. Continue-in-WebUI creates a server-backed document draft and passes `chatDocumentDraftId` in the WebUI handoff; WebUI imports the draft into uploaded files/context files and deletes it after successful import. Failed WebUI opens keep the sidepanel draft editable and retryable through the existing Continue-in-WebUI action; this task does not add a separate sidepanel draft manager for reusing or manually cancelling unexpired document drafts beyond backend expiry and successful-import cleanup.
 
 ---
 

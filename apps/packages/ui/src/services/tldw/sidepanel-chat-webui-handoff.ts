@@ -27,7 +27,17 @@ export type SidepanelChatWebUiHandoffPayload = {
   temporaryChat?: boolean
   useOCR?: boolean
   title?: string | null
+  chatDocumentDraftId?: string | null
+  ragMediaIds?: number[] | null
+  fileRetrievalEnabled?: boolean
 }
+
+export type SidepanelChatWebUiHandoffOverrides = Partial<
+  Pick<
+    SidepanelChatWebUiHandoffPayload,
+    "chatDocumentDraftId" | "ragMediaIds" | "fileRetrievalEnabled"
+  >
+>
 
 const normalizeOptionalString = (value: unknown): string | null => {
   if (typeof value !== "string") return null
@@ -63,6 +73,20 @@ const normalizeNullableStringField = (
   if (typeof raw !== "string") return undefined
   const trimmed = raw.trim()
   return trimmed.length > 0 ? trimmed : null
+}
+
+const normalizeFiniteNumberArrayField = (
+  record: Record<string, unknown>,
+  key: string
+): number[] | null | undefined => {
+  if (!hasOwn(record, key)) return undefined
+  const raw = record[key]
+  if (raw == null) return null
+  if (!Array.isArray(raw)) return undefined
+  return raw.filter(
+    (value): value is number =>
+      typeof value === "number" && Number.isFinite(value)
+  )
 }
 
 const normalizeWebUiBaseUrl = (
@@ -196,7 +220,16 @@ export const decodeSidepanelChatWebUiHandoff = (
           ? parsed.temporaryChat
           : undefined,
       useOCR: typeof parsed.useOCR === "boolean" ? parsed.useOCR : undefined,
-      title: normalizeNullableStringField(parsed, "title")
+      title: normalizeNullableStringField(parsed, "title"),
+      chatDocumentDraftId: normalizeNullableStringField(
+        parsed,
+        "chatDocumentDraftId"
+      ),
+      ragMediaIds: normalizeFiniteNumberArrayField(parsed, "ragMediaIds"),
+      fileRetrievalEnabled:
+        typeof parsed.fileRetrievalEnabled === "boolean"
+          ? parsed.fileRetrievalEnabled
+          : undefined
     }
   } catch {
     return null

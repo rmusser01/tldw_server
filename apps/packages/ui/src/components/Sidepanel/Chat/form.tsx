@@ -83,6 +83,7 @@ import { ModelParamsPanel } from "@/components/Sidepanel/Chat/ModelParamsPanel"
 import { CurrentChatModelSettings } from "@/components/Common/Settings/CurrentChatModelSettings"
 import { ActorPopout } from "@/components/Common/Settings/ActorPopout"
 import { DocumentGeneratorDrawer } from "@/components/Common/Playground/DocumentGeneratorDrawer"
+import { DocumentProcessingChoices } from "@/components/Option/Playground/DocumentProcessingChoices"
 import { QuickIngestWizardModal as QuickIngestModal } from "@/components/Common/QuickIngestWizardModal"
 import {
   useConnectionState,
@@ -150,14 +151,22 @@ import { AudioSourcePicker } from "@/components/Common/AudioSourcePicker"
 import { CharacterControlsSheet } from "@/components/Sidepanel/Chat/CharacterControlsSheet"
 import { getSidepanelOverlayResumeMarkerKey } from "@/utils/sidepanel-overlay-resume"
 import type { SidepanelChatHandoffPageContext } from "@/services/sidepanel-chat-handoff"
+import type { SidepanelChatWebUiHandoffOverrides } from "@/services/tldw/sidepanel-chat-webui-handoff"
 import { buildVisibleDocumentHandoffSnippetText } from "./sidepanel-chat-handoff-context"
+import {
+  normalizeDocumentPreflightResponse,
+  prepareChatDocumentAttachmentsForSend,
+  withDefaultDocumentDecision
+} from "@/services/chat-document-processing"
 
 type Props = {
   dropedFile: File | undefined
   inputRef?: React.RefObject<HTMLTextAreaElement>
   onHeightChange?: (height: number) => void
   draftKey?: string
-  onOpenChatInWebUi?: () => Promise<void> | void
+  onOpenChatInWebUi?: (
+    overrides?: SidepanelChatWebUiHandoffOverrides
+  ) => Promise<void> | void
 }
 
 type DefaultCharacterPreferenceQueryResult = {
@@ -169,6 +178,8 @@ type SidepanelQueuedSourceContext = {
   imageBackendOverride?: string
   isImageCommand?: boolean
 }
+
+type SidepanelRequestOverrides = Record<string, unknown> | undefined
 
 export const SidepanelForm = ({
   dropedFile,
@@ -410,6 +421,20 @@ export const SidepanelForm = ({
     imageValueRef.current = form.values.image
   }, [form.values.image])
   const [contextFiles, setContextFiles] = React.useState<UploadedFile[]>([])
+  const openChatInWebUiWithDocumentHandoff = React.useCallback(async () => {
+    if (!onOpenChatInWebUi) return
+    if (contextFiles.length === 0) {
+      await onOpenChatInWebUi()
+      return
+    }
+    const draft = await tldwClient.createDocumentUploadDraft({
+      payload: {
+        source: "sidepanel-chat-document-upload",
+        files: contextFiles
+      }
+    })
+    await onOpenChatInWebUi({ chatDocumentDraftId: draft.draft_id })
+  }, [contextFiles, onOpenChatInWebUi])
   const [mentionActiveIndex, setMentionActiveIndex] = React.useState(0)
   const [dictationAutoFallbackEnabled] = useStorage(
     "dictation_auto_fallback",
@@ -1339,13 +1364,16 @@ export const SidepanelForm = ({
               continue
             }
             nextFiles.push({
-              id: generateID(),
-              filename: file.name,
-              type: file.type,
-              content,
-              size: file.size,
-              uploadedAt: Date.now(),
-              processed: false
+              ...withDefaultDocumentDecision({
+                id: generateID(),
+                filename: file.name,
+                type: file.type,
+                content,
+                size: file.size,
+                uploadedAt: Date.now(),
+                processed: false
+              }),
+              processingStatus: "pending"
             })
           } catch {
             failedFiles.push(file.name)
@@ -1353,6 +1381,36 @@ export const SidepanelForm = ({
         }
         if (nextFiles.length > 0) {
           setContextFiles((prev) => [...prev, ...nextFiles])
+          const nextFileIds = new Set(nextFiles.map((file) => file.id))
+          void tldwClient
+            .preflightDocumentUpload({
+              files: nextFiles.map((file) => ({
+                client_id: file.id,
+                filename: file.filename,
+                mime_type: file.type || null,
+                size_bytes: file.size
+              }))
+            })
+            .then((response) => {
+              setContextFiles((prev) =>
+                normalizeDocumentPreflightResponse(response, prev)
+              )
+            })
+            .catch((error) => {
+              console.error("Sidepanel document preflight failed:", error)
+              setContextFiles((prev) =>
+                prev.map((file) =>
+                  nextFileIds.has(file.id)
+                    ? {
+                        ...file,
+                        processingStatus: "blocked",
+                        processingBlockedReason:
+                          "Document preflight failed. Try again or remove the file."
+                      }
+                    : file
+                )
+              )
+            })
           notification.success({
             message: t("sidepanel:composer.filesAdded", {
               defaultValue: "{{count}} file(s) added to context",
@@ -1710,6 +1768,85 @@ export const SidepanelForm = ({
           message: trimmed,
           history
         })
+    let documentUploadedFiles = contextFiles
+    let documentRequestOverrides: SidepanelRequestOverrides =
+      contextSend?.requestOverrides
+
+    if (!intent.isImageCommand && contextFiles.length > 0) {
+      const preparedDocumentAttachments =
+        await prepareChatDocumentAttachmentsForSend({
+          files: contextFiles,
+          historyId: historyId ?? undefined,
+          sessionId: serverChatId ?? undefined
+        })
+      const firstBlockedOrFailed =
+        preparedDocumentAttachments.blockedFiles[0] ||
+        preparedDocumentAttachments.failedFiles[0]
+
+      if (firstBlockedOrFailed || !preparedDocumentAttachments.requestOverrides) {
+        const updatedFiles = [
+          ...preparedDocumentAttachments.blockedFiles,
+          ...preparedDocumentAttachments.failedFiles
+        ]
+        if (updatedFiles.length > 0) {
+          setContextFiles((prev) =>
+            prev.map(
+              (file) => updatedFiles.find((updated) => updated.id === file.id) || file
+            )
+          )
+        }
+        notification.error({
+          message: t(
+            "playground:documentProcessing.sendBlockedTitle",
+            "Document processing blocked"
+          ),
+          description:
+            firstBlockedOrFailed?.processingBlockedReason ||
+            firstBlockedOrFailed?.processingError ||
+            t(
+              "playground:documentProcessing.sendBlockedBody",
+              "Resolve the document processing issue before sending."
+            )
+        })
+        return
+      }
+
+      const {
+        documentProcessing,
+        userMetadataExtra,
+        ...preparedRequestOverrides
+      } = preparedDocumentAttachments.requestOverrides as Record<string, unknown>
+      const baseRequestOverrides =
+        (contextSend?.requestOverrides ?? {}) as Record<string, unknown>
+      const baseUserMetadataExtra =
+        baseRequestOverrides.userMetadataExtra &&
+        typeof baseRequestOverrides.userMetadataExtra === "object" &&
+        !Array.isArray(baseRequestOverrides.userMetadataExtra)
+          ? (baseRequestOverrides.userMetadataExtra as Record<string, unknown>)
+          : {}
+      const preparedUserMetadataExtra =
+        userMetadataExtra &&
+        typeof userMetadataExtra === "object" &&
+        !Array.isArray(userMetadataExtra)
+          ? (userMetadataExtra as Record<string, unknown>)
+          : {}
+      documentRequestOverrides = {
+        ...baseRequestOverrides,
+        ...preparedRequestOverrides,
+        userMetadataExtra: {
+          ...baseUserMetadataExtra,
+          ...preparedUserMetadataExtra,
+          documentProcessing:
+            documentProcessing ?? preparedDocumentAttachments.turnMetadata
+        }
+      }
+      documentUploadedFiles = Array.isArray(
+        preparedRequestOverrides.uploadedFiles
+      )
+        ? (preparedRequestOverrides.uploadedFiles as UploadedFile[])
+        : preparedDocumentAttachments.contextFiles
+    }
+
     await submitDispatch(
       {
         image: intent.isImageCommand ? "" : image,
@@ -1723,11 +1860,11 @@ export const SidepanelForm = ({
               url: doc.url,
               favIconUrl: doc.favIconUrl
             })),
-        uploadedFiles: intent.isImageCommand ? [] : contextFiles,
+        uploadedFiles: intent.isImageCommand ? [] : documentUploadedFiles,
         imageBackendOverride: intent.isImageCommand
           ? intent.imageBackendOverride
           : undefined,
-        requestOverrides: contextSend?.requestOverrides
+        requestOverrides: documentRequestOverrides
       },
       {
         beforeSend: () => {
@@ -2874,6 +3011,15 @@ export const SidepanelForm = ({
                         )}
                       </div>
                     )}
+                    {contextFiles.length > 0
+                      ? wrapComposerProfile(
+                          "sidepanel-document-processing-choices",
+                          <DocumentProcessingChoices
+                            files={contextFiles}
+                            onChangeFiles={setContextFiles}
+                          />
+                        )
+                      : null}
                     {(() => {
                       const composerTextareaShellNode = (
                         <div className="relative min-w-0">
@@ -3080,7 +3226,9 @@ export const SidepanelForm = ({
                               getVisiblePageContextForHandoff={
                                 getVisiblePageContextForHandoff
                               }
-                              onOpenChatInWebUi={onOpenChatInWebUi}
+                              onOpenChatInWebUi={
+                                openChatInWebUiWithDocumentHandoff
+                              }
                             />
                           )}
                           <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
