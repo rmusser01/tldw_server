@@ -35,6 +35,31 @@ runs:
       if: runner.os == 'macOS'
       shell: bash
       run: |
+        if [ "${{ inputs.install-portaudio }}" = "true" ]; then
+          if ! xcrun --find clang >/dev/null 2>&1; then
+            for developer_dir in \
+              /Applications/Xcode.app/Contents/Developer \
+              /Library/Developer/CommandLineTools \
+              /Applications/Xcode_*.app/Contents/Developer; do
+              [ -d "$developer_dir" ] || continue
+              sudo xcode-select -s "$developer_dir" || true
+              if xcrun --find clang >/dev/null 2>&1; then
+                break
+              fi
+            done
+          fi
+          if ! clang_path="$(xcrun --find clang)"; then
+            echo "::error::Unable to locate a working macOS clang toolchain for native Python wheels"
+            exit 1
+          fi
+          if ! sdk_path="$(xcrun --sdk macosx --show-sdk-path)"; then
+            echo "::error::Unable to locate a working macOS SDK for native Python wheels"
+            exit 1
+          fi
+          echo "CC=$clang_path" >> "$GITHUB_ENV"
+          echo "SDKROOT=$sdk_path" >> "$GITHUB_ENV"
+          echo "MACOSX_DEPLOYMENT_TARGET=13.0" >> "$GITHUB_ENV"
+        fi
         if [ "${{ inputs.install-ffmpeg }}" = "true" ]; then
           brew install ffmpeg || true
         fi
@@ -50,6 +75,10 @@ runs:
             fi
           done
           test -f "$(brew --prefix portaudio)/include/portaudio.h"
+          portaudio_prefix="$(brew --prefix portaudio)"
+          echo "CFLAGS=-I$portaudio_prefix/include" >> "$GITHUB_ENV"
+          echo "LDFLAGS=-L$portaudio_prefix/lib" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG_PATH=$portaudio_prefix/lib/pkgconfig:${PKG_CONFIG_PATH:-}" >> "$GITHUB_ENV"
         fi
     - name: Install FFmpeg (Windows)
       if: runner.os == 'Windows' && inputs.install-ffmpeg == 'true'
