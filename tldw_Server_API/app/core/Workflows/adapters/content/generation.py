@@ -163,11 +163,26 @@ async def run_flashcard_generate_adapter(config: dict[str, Any], context: dict[s
     if not text:
         return {"error": "missing_text", "flashcards": [], "count": 0}
 
-    num_cards = int(config.get("num_cards", 10))
+    raw_num_cards = config.get("num_cards", 10)
+    if raw_num_cards is None:
+        return {"error": "invalid_num_cards", "flashcards": [], "count": 0}
+    try:
+        num_cards = int(raw_num_cards)
+    except (TypeError, ValueError):
+        return {"error": "invalid_num_cards", "flashcards": [], "count": 0}
+    if num_cards <= 0:
+        return {"error": "invalid_num_cards", "flashcards": [], "count": 0}
     format_card_type = {"cloze": "cloze", "definition": "basic", "qa": "basic"}.get(str(config.get("format", "qa")).lower(), "basic")
     card_type = str(config.get("card_type") or format_card_type).lower()
     difficulty = str(config.get("difficulty", "medium")).lower()
-    focus_topics = config.get("focus_topics")
+    raw_focus_topics = config.get("focus_topics")
+    if isinstance(raw_focus_topics, (list, tuple, set)):
+        focus_topics = [str(topic).strip() for topic in raw_focus_topics if str(topic).strip()]
+    elif raw_focus_topics:
+        topic = str(raw_focus_topics).strip()
+        focus_topics = [topic] if topic else []
+    else:
+        focus_topics = []
     provider = config.get("provider")
     model = config.get("model")
 
@@ -265,8 +280,7 @@ async def run_flashcard_generate_adapter(config: dict[str, Any], context: dict[s
                 if raw_generation_type in valid_generation_types:
                     card["generation_type"] = raw_generation_type
                 else:
-                    card.pop("generation_type", None)
-                    raw_generation_type = ""
+                    continue
             else:
                 if raw_generation_type not in valid_generation_types:
                     raw_generation_type = card_type

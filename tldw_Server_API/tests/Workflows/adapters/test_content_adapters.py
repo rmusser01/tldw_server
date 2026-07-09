@@ -1001,6 +1001,24 @@ class TestFlashcardGenerateAdapter:
         assert result.get("error") == "missing_text"
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("num_cards", [None, "bad"])
+    async def test_flashcard_generate_invalid_num_cards_skips_llm(self, base_context, sample_long_text, num_cards):
+        """Test malformed num_cards fails before calling the LLM."""
+        from tldw_Server_API.app.core.Workflows.adapters.content import run_flashcard_generate_adapter
+
+        with patch(
+            "tldw_Server_API.app.core.Workflows.adapters.content.generation.perform_chat_api_call_async",
+            new_callable=AsyncMock,
+        ) as mock_call:
+            result = await run_flashcard_generate_adapter(
+                {"text": sample_long_text, "num_cards": num_cards},
+                base_context,
+            )
+
+        assert result == {"error": "invalid_num_cards", "flashcards": [], "count": 0}
+        mock_call.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_flashcard_generate_different_types(self, monkeypatch, base_context, sample_long_text):
         """Test flashcard generation with different card types."""
         from tldw_Server_API.app.core.Workflows.adapters.content import run_flashcard_generate_adapter
@@ -1020,6 +1038,26 @@ class TestFlashcardGenerateAdapter:
                 # Should set model_type on cards
                 if result["flashcards"]:
                     assert result["flashcards"][0].get("model_type") == card_type
+
+    @pytest.mark.asyncio
+    async def test_flashcard_generate_normalizes_focus_topics(self, base_context, sample_long_text):
+        """Test non-string focus topics are normalized before prompt construction."""
+        from tldw_Server_API.app.core.Workflows.adapters.content import run_flashcard_generate_adapter
+
+        mock_response = mock_chat_response(json.dumps([{"front": "Q", "back": "A", "tags": []}]))
+
+        with patch(
+            "tldw_Server_API.app.core.Workflows.adapters.content.generation.perform_chat_api_call_async",
+            new_callable=AsyncMock,
+            return_value=mock_response,
+        ) as mock_call:
+            await run_flashcard_generate_adapter(
+                {"text": sample_long_text, "focus_topics": [1, "", "mitosis"]},
+                base_context,
+            )
+
+        system_prompt = mock_call.call_args.kwargs["system_message"]
+        assert "Focus on: 1, mitosis" in system_prompt
 
     @pytest.mark.asyncio
     async def test_flashcard_generate_planned_card_plan(self, base_context, sample_long_text):
@@ -1137,6 +1175,46 @@ class TestFlashcardGenerateAdapter:
             {"front": "Q1", "back": "A1", "tags": [], "generation_type": "basic", "model_type": "basic"},
             {"front": "Q2", "back": "A2", "tags": [], "generation_type": "basic", "model_type": "basic"},
         ]
+
+    @pytest.mark.asyncio
+    async def test_flashcard_generate_skips_invalid_planned_generation_types(self, base_context, sample_long_text):
+        """Test planned output without valid generation_type is not returned as usable cards."""
+        from tldw_Server_API.app.core.Workflows.adapters.content import run_flashcard_generate_adapter
+
+        mock_response = mock_chat_response(
+            json.dumps(
+                [
+                    {"front": "Q1", "back": "A1", "generation_type": "basic"},
+                    {"front": "Q2", "back": "A2"},
+                    {"front": "Q3", "back": "A3", "generation_type": "made_up"},
+                ]
+            )
+        )
+
+        with patch(
+            "tldw_Server_API.app.core.Workflows.adapters.content.generation.perform_chat_api_call_async",
+            new_callable=AsyncMock,
+            return_value=mock_response,
+        ):
+            result = await run_flashcard_generate_adapter(
+                {
+                    "text": sample_long_text,
+                    "num_cards": 3,
+                    "card_plan": [
+                        {"card_type": "basic", "count": 1},
+                        {"card_type": "cloze", "count": 1},
+                        {"card_type": "true_false", "count": 1},
+                    ],
+                },
+                base_context,
+            )
+
+        assert result == {
+            "flashcards": [
+                {"front": "Q1", "back": "A1", "generation_type": "basic", "model_type": "basic"},
+            ],
+            "count": 1,
+        }
 
     @pytest.mark.asyncio
     async def test_flashcard_generate_cancellation(self, base_context, sample_long_text):
