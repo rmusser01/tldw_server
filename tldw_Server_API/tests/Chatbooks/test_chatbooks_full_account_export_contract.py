@@ -11,9 +11,11 @@ from tldw_Server_API.app.core.Chatbooks.chatbook_models import (
     FULL_ACCOUNT_EXPORT_MODE,
     ChatbookVersion,
     ContentType,
+    ExportJob,
+    ExportStatus,
 )
 from tldw_Server_API.app.core.Chatbooks.chatbook_service import ChatbookService
-from tldw_Server_API.app.core.Chatbooks.services.jobs_worker import _handle_export
+from tldw_Server_API.app.core.Chatbooks.services.jobs_worker import ChatbooksJobError, _handle_export
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 
@@ -193,3 +195,71 @@ async def test_jobs_worker_preserves_full_account_mode_for_archive_creation():
 
     assert captured_kwargs["selection_mode"] == FULL_ACCOUNT_EXPORT_MODE
     assert captured_kwargs["content_selections"] is None
+
+
+@pytest.mark.asyncio
+async def test_jobs_worker_treats_legacy_empty_mapping_payload_as_full_account():
+    captured_kwargs = {}
+
+    class _Service:
+        def _claim_export_job(self, _job_id):
+            return True
+
+        async def _create_chatbook_sync_wrapper(self, **kwargs):
+            captured_kwargs.update(kwargs)
+            return True, "ok", "export.chatbook"
+
+        def _get_export_job(self, _job_id):
+            return None
+
+    await _handle_export(
+        _Service(),
+        {
+            "name": "legacy full account queued",
+            "description": "queued",
+            "content_selections": {},
+        },
+        "job-1",
+    )
+
+    assert captured_kwargs["selection_mode"] == FULL_ACCOUNT_EXPORT_MODE
+    assert captured_kwargs["content_selections"] is None
+
+
+@pytest.mark.asyncio
+async def test_jobs_worker_marks_export_job_failed_for_zero_item_allowlist():
+    saved_jobs = []
+    export_job = ExportJob(
+        job_id="job-1",
+        user_id="user-1",
+        status=ExportStatus.IN_PROGRESS,
+        chatbook_name="empty allowlist",
+    )
+
+    class _Service:
+        def _claim_export_job(self, _job_id):
+            return True
+
+        def _get_export_job(self, _job_id):
+            return export_job
+
+        def _save_export_job(self, job):
+            saved_jobs.append(job)
+
+    with pytest.raises(ChatbooksJobError, match="allowlist") as exc_info:
+        await _handle_export(
+            _Service(),
+            {
+                "name": "empty allowlist",
+                "description": "queued",
+                "selection_mode": "allowlist",
+                "content_selections": {"conversation": []},
+            },
+            "job-1",
+        )
+
+    assert exc_info.value.retryable is False
+    assert len(saved_jobs) == 1
+    assert saved_jobs[0].status is ExportStatus.FAILED
+    assert saved_jobs[0].completed_at is not None
+    assert "allowlist" in saved_jobs[0].error_message

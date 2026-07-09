@@ -25,6 +25,15 @@ vi.mock("@/utils/safe-storage", () => ({
 
 import { TldwApiClient } from "@/services/tldw/TldwApiClient"
 
+function makeUploadFile(content: string, name: string, type: string): File {
+  const bytes = new TextEncoder().encode(content).buffer
+  return {
+    name,
+    type,
+    arrayBuffer: vi.fn(async () => bytes)
+  } as unknown as File
+}
+
 describe("TldwApiClient Chatbooks OpenWebUI import contract", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -58,7 +67,7 @@ describe("TldwApiClient Chatbooks OpenWebUI import contract", () => {
     mocks.bgUpload.mockResolvedValue({ openwebui_preview: { chat_count: 0 } })
 
     const client = new TldwApiClient()
-    const file = new File(["[]"], "openwebui.json", { type: "application/json" })
+    const file = makeUploadFile("[]", "openwebui.json", "application/json")
     await client.previewChatbook(file, { source_format: "openwebui_json" })
 
     expect(mocks.bgUpload).toHaveBeenCalledWith(
@@ -78,7 +87,7 @@ describe("TldwApiClient Chatbooks OpenWebUI import contract", () => {
     mocks.bgUpload.mockResolvedValue({ openwebui_db_preview: { user_count: 0, users: [] } })
 
     const client = new TldwApiClient()
-    const file = new File(["SQLite format 3"], "webui.db", { type: "application/vnd.sqlite3" })
+    const file = makeUploadFile("SQLite format 3", "webui.db", "application/vnd.sqlite3")
     await client.previewChatbook(file, { source_format: "openwebui_db" })
 
     expect(mocks.bgUpload).toHaveBeenCalledWith(
@@ -98,7 +107,7 @@ describe("TldwApiClient Chatbooks OpenWebUI import contract", () => {
     mocks.bgUpload.mockResolvedValue({ success: true })
 
     const client = new TldwApiClient()
-    const file = new File(["[]"], "openwebui.json", { type: "application/json" })
+    const file = makeUploadFile("[]", "openwebui.json", "application/json")
     await client.importChatbook(file, {
       source_format: "openwebui_json",
       conflict_resolution: "rename",
@@ -130,7 +139,7 @@ describe("TldwApiClient Chatbooks OpenWebUI import contract", () => {
     mocks.bgUpload.mockResolvedValue({ success: true })
 
     const client = new TldwApiClient()
-    const file = new File(["SQLite format 3"], "webui.db", { type: "application/vnd.sqlite3" })
+    const file = makeUploadFile("SQLite format 3", "webui.db", "application/vnd.sqlite3")
     await client.importChatbook(file, {
       source_format: "openwebui_db",
       selected_openwebui_user_id: "user-a",

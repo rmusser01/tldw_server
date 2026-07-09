@@ -243,11 +243,22 @@ async def _handle_export(service: ChatbookService, payload: dict[str, Any], job_
     raw_selections = payload.get("content_selections")
     selection_mode = str(
         payload.get("selection_mode")
-        or (FULL_ACCOUNT_EXPORT_MODE if raw_selections is None else "allowlist")
+        or (FULL_ACCOUNT_EXPORT_MODE if raw_selections is None or raw_selections == {} else "allowlist")
     )
     selections = None if selection_mode == FULL_ACCOUNT_EXPORT_MODE else _map_content_selections(raw_selections or {})
     if selection_mode != FULL_ACCOUNT_EXPORT_MODE and sum(len(ids or []) for ids in selections.values()) == 0:
-        raise ChatbooksJobError("Export allowlist contains no exportable items.", retryable=False)
+        message = "Export allowlist contains no exportable items."
+        ej = None
+        try:
+            ej = service._get_export_job(job_id)
+        except Exception as lookup_err:
+            logger.debug(f"Chatbooks Jobs worker: failed to load export job {job_id}: {lookup_err}")
+        if ej:
+            ej.status = ExportStatus.FAILED
+            ej.completed_at = datetime.now(timezone.utc)
+            ej.error_message = message
+            service._save_export_job(ej)
+        raise ChatbooksJobError(message, retryable=False)
     try:
         format_version = coerce_chatbook_export_version(payload.get("format_version"))
     except ValueError as exc:

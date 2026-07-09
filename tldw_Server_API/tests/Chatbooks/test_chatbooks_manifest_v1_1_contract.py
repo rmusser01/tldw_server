@@ -387,6 +387,20 @@ async def test_active_core_jobs_worker_defaults_format_version_to_v1(monkeypatch
     assert captured_kwargs["format_version"] == ChatbookVersion.V1
 
 
+async def test_active_core_jobs_worker_treats_legacy_empty_mapping_payload_as_full_account(monkeypatch):
+    captured_kwargs, _fail_calls = await _run_active_core_jobs_worker_export_once(
+        monkeypatch,
+        {
+            "name": "legacy active queued",
+            "description": "legacy active queued",
+            "content_selections": {},
+        },
+    )
+
+    assert captured_kwargs["selection_mode"] == FULL_ACCOUNT_EXPORT_MODE
+    assert captured_kwargs["content_selections"] is None
+
+
 async def test_active_core_jobs_worker_fails_unsupported_format_version_nonretryably(monkeypatch):
     captured_kwargs, fail_calls = await _run_active_core_jobs_worker_export_once(
         monkeypatch,
