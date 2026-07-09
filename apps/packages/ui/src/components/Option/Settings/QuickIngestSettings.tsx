@@ -8,6 +8,7 @@ import {
   resolvePresetMap,
   type PresetMap
 } from "@/components/Common/QuickIngest/presets"
+import { getDefaultOcrLanguage, ocrLanguages } from "@/data/ocr-language"
 import {
   ensureSelectOption,
   getAdvancedFieldSelectOptions
@@ -59,6 +60,14 @@ export const QuickIngestSettings = () => {
   const [presetConfigs, setPresetConfigs] = useStorage<PresetMap>(
     "quickIngestPresetConfigs",
     resolvePresetMap()
+  )
+  const [defaultOCRLanguage, setDefaultOCRLanguage] = useStorage(
+    "defaultOCRLanguage",
+    getDefaultOcrLanguage()
+  )
+  const [enableOcrAssets, setEnableOcrAssets] = useStorage(
+    "enableOcrAssets",
+    false
   )
   const { data: chatModels = [], isLoading: chatModelsLoading } = useQuery({
     queryKey: ["playground:chatModels"],
@@ -164,6 +173,38 @@ export const QuickIngestSettings = () => {
           {t("quickIngestSettings.resetAll", "Reset all presets")}
         </Button>
       </div>
+
+      <section className="rounded-md border border-border bg-surface p-4 space-y-3">
+        <div>
+          <h3 className="text-sm font-semibold text-text">
+            {t("quickIngestSettings.ocrDefaults.title", "OCR defaults")}
+          </h3>
+          <p className="mt-1 text-xs text-text-muted">
+            {t(
+              "quickIngestSettings.ocrDefaults.description",
+              "Used by ingest flows that extract text from images or scanned documents."
+            )}
+          </p>
+        </div>
+        <ToggleRow
+          checked={enableOcrAssets}
+          label={t("generalSettings.settings.enableOcrAssets.label")}
+          onChange={setEnableOcrAssets}
+        />
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <span className="text-text">
+            {t("generalSettings.settings.ocrLanguage.label")}
+          </span>
+          <Select
+            aria-label={t("generalSettings.settings.ocrLanguage.label")}
+            className="w-full sm:w-[240px]"
+            onChange={setDefaultOCRLanguage}
+            options={ocrLanguages}
+            showSearch
+            value={defaultOCRLanguage}
+          />
+        </div>
+      </section>
 
       {PRESET_KEYS.map((presetKey) => {
         const preset = presets[presetKey]

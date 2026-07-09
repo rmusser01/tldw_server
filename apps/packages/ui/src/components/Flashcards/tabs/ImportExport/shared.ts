@@ -1,4 +1,8 @@
-import type { FlashcardsImportError, StructuredQaImportPreviewDraft } from "@/services/flashcards"
+import type {
+  FlashcardGenerationType,
+  FlashcardsImportError,
+  StructuredQaImportPreviewDraft
+} from "@/services/flashcards"
 import type { FlashcardsGenerateIntent } from "@/services/tldw/flashcards-generate-handoff"
 
 import { getUtf8ByteLength } from "../../utils/field-byte-limit"
@@ -23,6 +27,7 @@ export interface GeneratedCardDraft {
   back: string
   tags: string[]
   model_type: "basic" | "basic_reverse" | "cloze"
+  generation_type?: FlashcardGenerationType | null
   notes?: string | null
   extra?: string | null
 }
@@ -176,6 +181,14 @@ export const normalizeGeneratedCards = (value: unknown): GeneratedCardDraft[] =>
           : modelTypeRaw === "basic_reverse"
             ? "basic_reverse"
             : "basic"
+      const generationTypeRaw = String(item.generation_type || model_type).toLowerCase()
+      const generation_type: GeneratedCardDraft["generation_type"] =
+        generationTypeRaw === "basic" ||
+        generationTypeRaw === "basic_reverse" ||
+        generationTypeRaw === "cloze" ||
+        generationTypeRaw === "true_false"
+          ? generationTypeRaw
+          : null
       const tagsRaw = item.tags
       const tags =
         Array.isArray(tagsRaw)
@@ -193,6 +206,7 @@ export const normalizeGeneratedCards = (value: unknown): GeneratedCardDraft[] =>
         back,
         tags,
         model_type,
+        generation_type,
         notes: typeof item.notes === "string" ? item.notes : null,
         extra: typeof item.extra === "string" ? item.extra : null
       }

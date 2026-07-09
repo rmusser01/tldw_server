@@ -33,6 +33,7 @@ export type VisualIdentityImageProps = {
   isAnimated?: boolean
   alt?: string
   className?: string
+  style?: React.CSSProperties
   loading?: "eager" | "lazy"
   onClick?: () => void
 }
@@ -43,6 +44,7 @@ export const VisualIdentityImage = ({
   isAnimated = false,
   alt = "",
   className = "h-full w-full object-cover",
+  style,
   loading = "lazy",
   onClick
 }: VisualIdentityImageProps) => {
@@ -55,6 +57,7 @@ export const VisualIdentityImage = ({
       src={resolvedSrc}
       alt={alt}
       className={className}
+      style={style}
       loading={loading}
       onClick={onClick}
     />

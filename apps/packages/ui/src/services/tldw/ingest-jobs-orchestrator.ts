@@ -40,6 +40,42 @@ export type PollSingleIngestJobResult = {
 
 const normalizeBatchId = (value: unknown): string => String(value || "").trim()
 
+const formatIngestSubmitDetail = (item: unknown): string => {
+  if (typeof item === "string") return item.trim()
+  if (!item || typeof item !== "object") return ""
+
+  const detail = item as { loc?: unknown; msg?: unknown }
+  const msg = typeof detail.msg === "string" ? detail.msg.trim() : ""
+  const loc = Array.isArray(detail.loc)
+    ? detail.loc
+        .map((part: unknown) => String(part).trim())
+        .filter(Boolean)
+        .join(".")
+    : ""
+
+  return loc && msg ? `${loc}: ${msg}` : msg
+}
+
+export const extractIngestJobSubmitError = (data: any): string | null => {
+  const errors = Array.isArray(data?.errors)
+    ? data.errors
+        .map((item: unknown) => String(item || "").trim())
+        .filter(Boolean)
+    : []
+  if (errors.length > 0) return errors.join("; ")
+
+  const detail = data?.detail
+  if (typeof detail === "string" && detail.trim()) {
+    return detail.trim()
+  }
+  if (Array.isArray(detail)) {
+    const detailMessages = detail.map(formatIngestSubmitDetail).filter(Boolean)
+    if (detailMessages.length > 0) return detailMessages.join("; ")
+  }
+
+  return null
+}
+
 export const extractIngestJobIds = (data: any): number[] => {
   const jobs = Array.isArray(data?.jobs) ? data.jobs : []
   const ids: number[] = []
@@ -50,6 +86,20 @@ export const extractIngestJobIds = (data: any): number[] => {
     }
   }
   return ids
+}
+
+export const requireSubmittedIngestJobs = (
+  submitData: any
+): { batchId: string; jobIds: number[] } => {
+  const batchId = normalizeBatchId(submitData?.batch_id)
+  const jobIds = extractIngestJobIds(submitData)
+  if (!batchId || jobIds.length === 0) {
+    throw new Error(
+      extractIngestJobSubmitError(submitData) ||
+        "Ingest job submission returned no job IDs."
+    )
+  }
+  return { batchId, jobIds }
 }
 
 export const createIngestJobsTracker = <TMeta>() => {
@@ -82,8 +132,7 @@ export const createIngestJobsTracker = <TMeta>() => {
   }
 
   const trackSubmit = (submitData: any, meta: TMeta): number[] => {
-    const batchId = normalizeBatchId(submitData?.batch_id)
-    const jobIds = extractIngestJobIds(submitData)
+    const { batchId, jobIds } = requireSubmittedIngestJobs(submitData)
     return trackJobs(batchId, jobIds, meta)
   }
 

@@ -22,7 +22,7 @@ export const COMPOSER_CONSTANTS = {
  * These match the default values in useStorage calls.
  */
 export const STT_DEFAULTS = {
-  MODEL: "whisper-1",
+  MODEL: "",
   TEMPERATURE: 0,
   TASK: "transcribe",
   RESPONSE_FORMAT: "json",

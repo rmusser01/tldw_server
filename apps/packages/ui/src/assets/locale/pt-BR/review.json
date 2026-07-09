@@ -304,7 +304,8 @@
     "presetExecutiveSummary": "Resumo executivo",
     "presetCriticalReview": "Revisão crítica",
     "presetQAAnalysis": "Análise de perguntas e respostas",
-    "presetBulletedNotes": "Bulleted Notes"
+    "presetBulletedNotes": "Bulleted Notes",
+    "analysisProviderRequired": "Escolha um provedor de análise e tente analisar novamente."
   },
   "empty": {
     "connectTitle": "Conecte-se para usar Review",

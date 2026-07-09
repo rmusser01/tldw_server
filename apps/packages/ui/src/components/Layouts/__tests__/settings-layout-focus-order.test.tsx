@@ -13,6 +13,10 @@ vi.mock("react-i18next", () => ({
   }),
 }));
 
+vi.mock("@/config/platform", () => ({
+  isChromeTarget: false,
+}));
+
 vi.mock("../settings-nav", () => ({
   getSettingsNavGroups: () => [
     {
@@ -33,6 +37,11 @@ vi.mock("../settings-nav", () => ({
         {
           to: "/settings/model",
           labelToken: "settings:modelSettings.navTitle",
+          icon: IconStub,
+        },
+        {
+          to: "/settings/chrome",
+          labelToken: "settings:chromeSettingsNav",
           icon: IconStub,
         },
       ],
@@ -107,12 +116,16 @@ describe("settings navigation wayfinding", () => {
     const user = userEvent.setup();
     renderSettingsLayout("/settings/tldw");
 
+    const sectionSelect = screen.getByLabelText("Settings section");
     const activeLink = screen.getByRole("link", {
       name: "settings:tldw.serverNav",
     });
     const chatLink = screen.getByRole("link", {
       name: "settings:chatSettingsNav",
     });
+
+    await user.tab();
+    expect(sectionSelect).toHaveFocus();
 
     await user.tab();
     expect(activeLink).toHaveFocus();
@@ -124,6 +137,30 @@ describe("settings navigation wayfinding", () => {
     expect(screen.getByTestId("settings-layout-location")).toHaveTextContent(
       "/settings/chat",
     );
+  });
+
+  it("uses a compact section selector for small-screen settings navigation", async () => {
+    const user = userEvent.setup();
+    renderSettingsLayout("/settings/tldw");
+
+    const sectionSelect = screen.getByLabelText("Settings section");
+    expect(sectionSelect).toHaveValue("/settings/tldw");
+
+    await user.selectOptions(sectionSelect, "/settings/model");
+
+    expect(screen.getByTestId("settings-layout-location")).toHaveTextContent(
+      "/settings/model",
+    );
+  });
+
+  it("does not select a browser-hidden current route in the mobile selector", () => {
+    renderSettingsLayout("/settings/chrome");
+
+    const sectionSelect = screen.getByLabelText("Settings section");
+    expect(sectionSelect).toHaveValue("");
+    expect(
+      screen.getByRole("option", { name: "settings:chromeSettingsNav" }),
+    ).toHaveValue("");
   });
 
   it("renders beta badges by default and lets users dismiss them", async () => {
@@ -165,5 +202,17 @@ describe("settings navigation wayfinding", () => {
     expect(screen.getByTestId("settings-nav-group-server")).not.toHaveClass(
       "min-w-max",
     );
+  });
+
+  it("does not add main landmarks inside the app shell", () => {
+    const { container } = renderSettingsLayout("/settings/tldw");
+
+    expect(container.querySelector("main")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", {
+        level: 1,
+        name: "settings:tldw.serverNav",
+      }),
+    ).toBeInTheDocument();
   });
 });

@@ -10,6 +10,7 @@ import { useServerChatHistory, type ServerChatHistoryItem } from "@/hooks/useSer
 import { useSelectedAssistant } from "@/hooks/useSelectedAssistant"
 import { useStoreMessageOption } from "@/store/option"
 import { dispatchOpenAssistantSelect } from "@/utils/assistant-select-events"
+import { openCharactersWorkspace } from "@/utils/characters-route"
 
 type CharacterControlsSheetProps = {
   beforeTrackedStart?: (() => Promise<void>) | (() => void)
@@ -91,6 +92,10 @@ export const CharacterControlsSheet = ({
     effectiveAssistantState.mode === "overlay"
       ? t("playground:characterRail.changeOverlay", "Change overlay")
       : t("playground:characterRail.applyOverlay", "Apply overlay")
+  const expressionCharacterId =
+    effectiveAssistantState.kind === "character"
+      ? effectiveAssistantState.id
+      : null
 
   const handleClearAssistantOverlay = React.useCallback(async () => {
     await updateSettings({
@@ -117,6 +122,14 @@ export const CharacterControlsSheet = ({
     [beforeTrackedStart, clearChat, onRequestClose, setSelectedAssistant, updateSettings]
   )
 
+  const handleOpenExpressionEditor = React.useCallback(async () => {
+    await openCharactersWorkspace({
+      from: "sidepanel-character-controls",
+      focus: "expressions",
+      characterId: expressionCharacterId
+    })
+  }, [expressionCharacterId])
+
   const handleOpenTrackedSession = React.useCallback(
     (item: ServerChatHistoryItem) => {
       onRequestClose?.()
@@ -130,14 +143,27 @@ export const CharacterControlsSheet = ({
       data-testid="chat-character-controls-sheet"
       className="flex flex-col gap-4"
     >
-      <div className="space-y-1">
-        <p className="text-sm text-text">
-          {resolveAssistantModeLabel(effectiveAssistantState.mode)}
-        </p>
-        {effectiveAssistantState.displayName ? (
-          <p className="text-xs text-text-subtle">
-            {effectiveAssistantState.displayName}
+      <div className="space-y-2">
+        <div className="space-y-1">
+          <p className="text-sm text-text">
+            {resolveAssistantModeLabel(effectiveAssistantState.mode)}
           </p>
+          {effectiveAssistantState.displayName ? (
+            <p className="text-xs text-text-subtle">
+              {effectiveAssistantState.displayName}
+            </p>
+          ) : null}
+        </div>
+        {expressionCharacterId != null ? (
+          <Button
+            variant="outline"
+            onClick={() => void handleOpenExpressionEditor()}
+          >
+            {t(
+              "playground:characterRail.editExpressions",
+              "Edit character expressions"
+            )}
+          </Button>
         ) : null}
       </div>
 

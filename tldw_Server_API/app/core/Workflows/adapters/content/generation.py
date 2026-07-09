@@ -163,17 +163,29 @@ async def run_flashcard_generate_adapter(config: dict[str, Any], context: dict[s
     if not text:
         return {"error": "missing_text", "flashcards": [], "count": 0}
 
-    num_cards = int(config.get("num_cards", 10))
-    card_type = str(config.get("card_type", "basic")).lower()
+    raw_num_cards = config.get("num_cards", 10)
+    if type(raw_num_cards) is not int or raw_num_cards <= 0:
+        return {"error": "invalid_num_cards", "flashcards": [], "count": 0}
+    num_cards = raw_num_cards
+    format_card_type = {"cloze": "cloze", "definition": "basic", "qa": "basic"}.get(str(config.get("format", "qa")).lower(), "basic")
+    card_type = str(config.get("card_type") or format_card_type).lower()
     difficulty = str(config.get("difficulty", "medium")).lower()
-    focus_topics = config.get("focus_topics")
+    raw_focus_topics = config.get("focus_topics")
+    if isinstance(raw_focus_topics, (list, tuple, set)):
+        focus_topics = [str(topic).strip() for topic in raw_focus_topics if str(topic).strip()]
+    elif raw_focus_topics:
+        topic = str(raw_focus_topics).strip()
+        focus_topics = [topic] if topic else []
+    else:
+        focus_topics = []
     provider = config.get("provider")
     model = config.get("model")
 
     type_instructions = {
         "basic": "Create standard question/answer flashcards.",
         "cloze": "Create cloze deletion cards.",
-        "basic_reverse": "Create bidirectional cards."
+        "basic_reverse": "Create bidirectional cards.",
+        "true_false": "Create true/false cards with a short explanation in the back.",
     }
     difficulty_hints = {
         "easy": "Focus on basic concepts.",
@@ -181,13 +193,60 @@ async def run_flashcard_generate_adapter(config: dict[str, Any], context: dict[s
         "hard": "Focus on complex details."
     }
     topics_hint = f"\nFocus on: {', '.join(focus_topics)}" if focus_topics else ""
+    valid_generation_types = {"basic", "basic_reverse", "cloze", "true_false"}
+    card_plan = config.get("card_plan")
+    normalized_plan: list[dict[str, Any]] = []
+    invalid_plan = False
+    seen_plan_types: set[str] = set()
+    if isinstance(card_plan, list):
+        for row in card_plan:
+            if not isinstance(row, dict):
+                invalid_plan = True
+                continue
+            if set(row) != {"card_type", "count"}:
+                invalid_plan = True
+            plan_type = str(row.get("card_type") or "").strip().lower()
+            if plan_type not in valid_generation_types:
+                invalid_plan = True
+                continue
+            if plan_type in seen_plan_types:
+                invalid_plan = True
+            seen_plan_types.add(plan_type)
+            count = row.get("count")
+            if type(count) is not int or count <= 0:
+                invalid_plan = True
+                count = 0
+            normalized_plan.append({"card_type": plan_type, "count": count})
+    elif card_plan is not None:
+        invalid_plan = True
+    planned_request = card_plan is not None
+    if planned_request and (
+        invalid_plan
+        or not normalized_plan
+        or sum(row["count"] for row in normalized_plan) != num_cards
+    ):
+        return {"error": "invalid_card_plan", "flashcards": [], "count": 0}
 
-    system_prompt = (
-        f"Generate {num_cards} flashcards.\n"
-        f"{type_instructions.get(card_type, type_instructions['basic'])}\n"
-        f"{difficulty_hints.get(difficulty, difficulty_hints['medium'])}{topics_hint}\n"
-        'Return JSON array: [{"front": "Q", "back": "A", "tags": []}]'
-    )
+    if planned_request:
+        plan_lines = "\n".join(
+            f"- exactly {row['count']} {row['card_type']} flashcard"
+            f"{'' if row['count'] == 1 else 's'}: {type_instructions[row['card_type']]}"
+            for row in normalized_plan
+        )
+        system_prompt = (
+            f"Generate {num_cards} flashcards with these exact counts:\n"
+            f"{plan_lines}\n"
+            f"{difficulty_hints.get(difficulty, difficulty_hints['medium'])}{topics_hint}\n"
+            "Every JSON object must include generation_type set to one of: basic, basic_reverse, cloze, true_false.\n"
+            'Return JSON array: [{"front": "Q", "back": "A", "tags": [], "generation_type": "basic"}]'
+        )
+    else:
+        system_prompt = (
+            f"Generate {num_cards} flashcards.\n"
+            f"{type_instructions.get(card_type, type_instructions['basic'])}\n"
+            f"{difficulty_hints.get(difficulty, difficulty_hints['medium'])}{topics_hint}\n"
+            'Return JSON array: [{"front": "Q", "back": "A", "tags": []}]'
+        )
 
     try:
         messages = [{"role": "user", "content": f"Generate flashcards from:\n\n{text[:8000]}"}]
@@ -205,9 +264,38 @@ async def run_flashcard_generate_adapter(config: dict[str, Any], context: dict[s
             flashcards = json.loads(json_match.group()) if json_match else []
         except json.JSONDecodeError:
             flashcards = []
+        if not isinstance(flashcards, list):
+            flashcards = []
+        cleaned_flashcards = []
         for card in flashcards:
-            card["model_type"] = card_type
-        return {"flashcards": flashcards, "count": len(flashcards)}
+            if not isinstance(card, dict):
+                continue
+            front = str(card.get("front") or "").strip()
+            back = str(card.get("back") or "").strip()
+            if not front or not back:
+                continue
+            card["front"] = front
+            card["back"] = back
+            raw_generation_type = str(card.get("generation_type") or "").strip().lower()
+            if planned_request:
+                if raw_generation_type in valid_generation_types:
+                    card["generation_type"] = raw_generation_type
+                else:
+                    continue
+            else:
+                raw_generation_type = card_type
+                card["generation_type"] = raw_generation_type
+            card["model_type"] = "basic" if raw_generation_type == "true_false" else raw_generation_type or "basic"
+            cleaned_flashcards.append(card)
+        if planned_request:
+            expected_counts = {row["card_type"]: row["count"] for row in normalized_plan}
+            actual_counts: dict[str, int] = {}
+            for card in cleaned_flashcards:
+                generation_type = card["generation_type"]
+                actual_counts[generation_type] = actual_counts.get(generation_type, 0) + 1
+            if actual_counts != expected_counts:
+                return {"error": "card_plan_mismatch", "flashcards": [], "count": 0}
+        return {"flashcards": cleaned_flashcards, "count": len(cleaned_flashcards)}
     except _GENERATION_NONCRITICAL_EXCEPTIONS:
         logger.exception("Flashcard generate adapter error")
         return {"error": "flashcard_generate_error", "flashcards": [], "count": 0}

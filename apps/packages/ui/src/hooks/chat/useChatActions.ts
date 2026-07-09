@@ -94,6 +94,7 @@ import { validateCachedServerChatId } from "@/store/workspace-sync-contract"
 import { trackCompareMetric } from "@/utils/compare-metrics"
 import { MAX_COMPARE_MODELS } from "@/hooks/chat/compare-constants"
 import { useChatSettingsRecord } from "@/hooks/chat/useChatSettingsRecord"
+import { createCharacterEmoteStream } from "@/hooks/chat/character-emote-stream"
 import {
   discardAbortedTurnIfRequested,
   isAbortLikeError
@@ -120,6 +121,7 @@ import {
   type AssistantSelection
 } from "@/types/assistant-selection"
 import type { Character } from "@/types/character"
+import type { CharacterEmoteEvent } from "@/utils/character-emotes"
 import type {
   MessageSteeringMode,
   MessageSteeringPromptTemplates,
@@ -1695,6 +1697,45 @@ export const useChatActions = ({
       clearTimeout(streamingTimer)
       streamingTimer = null
     }
+    const emoteStream = createCharacterEmoteStream()
+    const getExplicitEmoteMoodLabel = () =>
+      emoteStream.events.length > 0
+        ? emoteStream.events[emoteStream.events.length - 1]?.state
+        : undefined
+    const getExplicitEmoteMetadataExtra = (): MessageMetadataExtra | undefined => {
+      const moodLabel = getExplicitEmoteMoodLabel()
+      return moodLabel
+        ? {
+            mood_label: moodLabel,
+            mood_confidence: null,
+            mood_topic: null,
+            emote_events: [...emoteStream.events]
+          }
+        : undefined
+    }
+    const applyEmoteEventsToMessage = (newEvents: CharacterEmoteEvent[]) => {
+      if (newEvents.length === 0) return
+      const moodLabel = getExplicitEmoteMoodLabel()
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === generateMessageId
+            ? updateActiveVariant(m, {
+                moodLabel,
+                metadataExtra: {
+                  ...(m.metadataExtra ?? {}),
+                  emote_events: [...emoteStream.events]
+                }
+              })
+            : m
+        )
+      )
+    }
+    const flushCharacterEmoteStream = () => {
+      const flushedEmotes = emoteStream.flush({ fullText, contentToSave })
+      fullText = flushedEmotes.fullText
+      contentToSave = flushedEmotes.contentToSave
+      applyEmoteEventsToMessage(flushedEmotes.emoteEvents)
+    }
 
     try {
       if (!resolvedModel) {
@@ -2114,15 +2155,18 @@ export const useChatActions = ({
             detail.length > 0 ? detail : streamTransportInterruptionReason
           continue
         }
+        const previousFullText = fullText
         const chunkState = consumeStreamingChunk(
           { fullText, contentToSave, apiReasoning },
           chunk
         )
-        fullText = chunkState.fullText
-        contentToSave = chunkState.contentToSave
-        apiReasoning = chunkState.apiReasoning
+        const sanitizedChunkState = emoteStream.sanitizeChunk(chunkState)
+        fullText = sanitizedChunkState.fullText
+        contentToSave = sanitizedChunkState.contentToSave
+        apiReasoning = sanitizedChunkState.apiReasoning
+        applyEmoteEventsToMessage(sanitizedChunkState.emoteEvents)
 
-        if (chunkState.token) {
+        if (chunkState.token && fullText !== previousFullText) {
           scheduleStreamingUpdate(`${fullText}▋`, timetaken)
         }
         if (count === 0) {
@@ -2150,6 +2194,7 @@ export const useChatActions = ({
       cancelStreamingUpdate()
       flushStreamingUpdate()
       if (inactivityTimer) clearTimeout(inactivityTimer)
+      flushCharacterEmoteStream()
 
       if (inactivityAborted) {
         const timeoutError = new Error(
@@ -2205,7 +2250,7 @@ export const useChatActions = ({
         let resolvedMoodLabel: string | undefined
         let resolvedMoodConfidence: number | undefined
         let resolvedMoodTopic: string | undefined
-        let metadataExtra: Record<string, unknown> | undefined
+        let metadataExtra: MessageMetadataExtra | undefined
         let speakerCharacterName: string | undefined
         let visualIdentityFields: VisualIdentityMessageFields = {}
         try {
@@ -2243,20 +2288,26 @@ export const useChatActions = ({
             directedSpeakerId ?? (activeCharacterMatchesChat
               ? fallbackSpeakerId
               : chatSpeakerId ?? fallbackSpeakerId)
-          detectedMood = detectCharacterMood({
-            assistantText: finalPersistedContent,
-            userText: message
-          })
-          resolvedMoodLabel = detectedMood.label
-          resolvedMoodConfidence =
-            typeof detectedMood.confidence === "number" &&
-            Number.isFinite(detectedMood.confidence)
-              ? detectedMood.confidence
-              : undefined
-          resolvedMoodTopic =
-            typeof detectedMood.topic === "string" && detectedMood.topic.trim()
-              ? detectedMood.topic.trim()
-              : undefined
+          if (emoteStream.events.length > 0) {
+            resolvedMoodLabel =
+              emoteStream.events[emoteStream.events.length - 1]?.state
+          } else {
+            detectedMood = detectCharacterMood({
+              assistantText: finalPersistedContent,
+              userText: message
+            })
+            resolvedMoodLabel = detectedMood.label
+            resolvedMoodConfidence =
+              typeof detectedMood.confidence === "number" &&
+              Number.isFinite(detectedMood.confidence)
+                ? detectedMood.confidence
+                : undefined
+            resolvedMoodTopic =
+              typeof detectedMood.topic === "string" &&
+              detectedMood.topic.trim()
+                ? detectedMood.topic.trim()
+                : undefined
+          }
 
           if (
             speakerCharacterId &&
@@ -2304,6 +2355,9 @@ export const useChatActions = ({
           if (resolvedMoodTopic) {
             persistPayload.mood_topic = resolvedMoodTopic
           }
+          if (emoteStream.events.length > 0) {
+            persistPayload.emote_events = [...emoteStream.events]
+          }
           if (persistedUserServerMessageId) {
             persistPayload.user_message_id = persistedUserServerMessageId
           }
@@ -2313,7 +2367,10 @@ export const useChatActions = ({
             mood_label: resolvedMoodLabel,
             mood_confidence: resolvedMoodConfidence ?? null,
             mood_topic: resolvedMoodTopic ?? null,
-            ...buildVisualIdentityMetadataExtra(visualIdentityFields)
+            ...buildVisualIdentityMetadataExtra(visualIdentityFields),
+            ...(emoteStream.events.length > 0
+              ? { emote_events: [...emoteStream.events] }
+              : {})
           }
 
           const persisted = (await tldwClient.persistCharacterCompletion(
@@ -2384,10 +2441,15 @@ export const useChatActions = ({
             )
           } else {
             try {
-              const createdAsst = (await tldwClient.addChatMessage(chatId, {
-                role: "assistant",
-                content: finalPersistedContent
-              }, scope ? { scope } : undefined)) as {
+              const createdAsst = (await tldwClient.addChatMessage(
+                chatId,
+                {
+                  role: "assistant",
+                  content: finalPersistedContent,
+                  ...(metadataExtra ? { metadata_extra: metadataExtra } : {})
+                },
+                scope ? { scope } : undefined
+              )) as {
                 id?: string | number
                 version?: number
               } | null
@@ -2502,6 +2564,9 @@ export const useChatActions = ({
       }
 
       cancelStreamingUpdate()
+      flushCharacterEmoteStream()
+      const recoveryMoodLabel = getExplicitEmoteMoodLabel()
+      const recoveryMetadataExtra = getExplicitEmoteMetadataExtra()
       await attemptCharacterStreamRecoveryPersist({
         chatId: activeChatId,
         temporaryChat,
@@ -2510,10 +2575,91 @@ export const useChatActions = ({
         error: e,
         persist: async (assistantContent) => {
           if (!activeChatId) return false
-          const createdAsst = (await tldwClient.addChatMessage(activeChatId, {
+          if (recoveryMoodLabel) {
+            try {
+              const persistPayload: Record<string, unknown> = {
+                assistant_content: assistantContent,
+                assistant_message_id: generateMessageId,
+                mood_label: recoveryMoodLabel,
+                emote_events: [...emoteStream.events]
+              }
+              if (persistedUserServerMessageId) {
+                persistPayload.user_message_id = persistedUserServerMessageId
+              }
+              const persisted = (await tldwClient.persistCharacterCompletion(
+                activeChatId,
+                persistPayload
+              )) as {
+                assistant_message_id?: string | number
+                message_id?: string | number
+                id?: string | number
+                version?: number
+              } | null
+              const createdAsstServerId =
+                persisted?.assistant_message_id ??
+                persisted?.message_id ??
+                persisted?.id
+              if (createdAsstServerId != null) {
+                assistantPersistedToServer = true
+                setMessages((prev) =>
+                  ((prev as any[]).map((m) => {
+                    if (m.id !== generateMessageId) return m
+                    return updateActiveVariant(m, {
+                      serverMessageId: String(createdAsstServerId),
+                      serverMessageVersion: persisted?.version,
+                      metadataExtra: {
+                        ...(m.metadataExtra ?? {}),
+                        ...(recoveryMetadataExtra ?? {})
+                      },
+                      moodLabel: recoveryMoodLabel,
+                      moodConfidence: null,
+                      moodTopic: null
+                    })
+                  }) as Message[])
+                )
+                return true
+              }
+            } catch (persistError) {
+              const savedOutcome =
+                resolveSavedDegradedCharacterPersist(persistError)
+              if (savedOutcome?.saved) {
+                assistantPersistedToServer = true
+                setMessages((prev) =>
+                  ((prev as any[]).map((m) => {
+                    if (m.id !== generateMessageId) return m
+                    const serverMessageId =
+                      savedOutcome.assistantMessageId != null
+                        ? String(savedOutcome.assistantMessageId)
+                        : undefined
+                    return updateActiveVariant(m, {
+                      serverMessageId,
+                      serverMessageVersion: savedOutcome.version,
+                      metadataExtra: {
+                        ...(m.metadataExtra ?? {}),
+                        ...(recoveryMetadataExtra ?? {})
+                      },
+                      moodLabel: recoveryMoodLabel,
+                      moodConfidence: null,
+                      moodTopic: null
+                    })
+                  }) as Message[])
+                )
+                return true
+              }
+            }
+          }
+          const payload: Record<string, unknown> = {
             role: "assistant",
             content: assistantContent
-          }, scope ? { scope } : undefined)) as {
+          }
+          if (recoveryMetadataExtra) {
+            payload.metadata_extra = recoveryMetadataExtra
+          }
+          const createdAsst = (await tldwClient.addChatMessage(
+            activeChatId,
+            payload,
+            scope ? { scope } : undefined
+          )) as {
             id?: string | number
             version?: number
           } | null
@@ -2524,7 +2670,18 @@ export const useChatActions = ({
               if (m.id !== generateMessageId) return m
               return updateActiveVariant(m, {
                 serverMessageId: String(createdAsst.id),
-                serverMessageVersion: createdAsst?.version
+                serverMessageVersion: createdAsst?.version,
+                ...(recoveryMetadataExtra
+                  ? {
+                      metadataExtra: {
+                        ...(m.metadataExtra ?? {}),
+                        ...recoveryMetadataExtra
+                      },
+                      moodLabel: recoveryMoodLabel,
+                      moodConfidence: null,
+                      moodTopic: null
+                    }
+                  : {})
               })
             }) as Message[])
           )
@@ -2544,6 +2701,17 @@ export const useChatActions = ({
             msg.id === generateMessageId
               ? updateActiveVariant(msg, {
                   message: assistantContent,
+                  ...(recoveryMetadataExtra
+                    ? {
+                        metadataExtra: {
+                          ...(msg.metadataExtra ?? {}),
+                          ...recoveryMetadataExtra
+                        },
+                        moodLabel: recoveryMoodLabel,
+                        moodConfidence: null,
+                        moodTopic: null
+                      }
+                    : {}),
                   generationInfo: {
                     ...(msg.generationInfo || {}),
                     interrupted: true,

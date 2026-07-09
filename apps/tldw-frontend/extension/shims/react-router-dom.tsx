@@ -20,6 +20,7 @@ type NavLinkProps = Omit<LinkProps, "className"> & {
 type NavigateOptions = {
   replace?: boolean
   state?: unknown
+  flushSync?: boolean
 }
 
 type NavigateTo =
@@ -43,7 +44,14 @@ type ShimBlocker = {
   reset: () => void
 }
 
-const runNavigationTransition = (update: () => void) => {
+const runNavigationTransition = (
+  update: () => void,
+  options?: { flushSync?: boolean }
+) => {
+  if (options?.flushSync) {
+    update()
+    return
+  }
   if (typeof React.startTransition === "function") {
     React.startTransition(update)
     return
@@ -113,9 +121,12 @@ export const useNavigate = () => {
   return (to: NavigateTo, options?: NavigateOptions) => {
     if (typeof to === "number") {
       if (to < 0) {
-        runNavigationTransition(() => {
-          router.back()
-        })
+        runNavigationTransition(
+          () => {
+            router.back()
+          },
+          { flushSync: options?.flushSync }
+        )
       }
       return
     }
@@ -131,15 +142,18 @@ export const useNavigate = () => {
     }
 
     try {
-      runNavigationTransition(() => {
-        const navigation = options?.replace
-          ? router.replace(href)
-          : router.push(href)
-        void navigation.catch((err) => {
-          console.error("[useNavigate shim] Navigation failed:", err)
-          doFallback()
-        })
-      })
+      runNavigationTransition(
+        () => {
+          const navigation = options?.replace
+            ? router.replace(href)
+            : router.push(href)
+          void navigation.catch((err) => {
+            console.error("[useNavigate shim] Navigation failed:", err)
+            doFallback()
+          })
+        },
+        { flushSync: options?.flushSync }
+      )
     } catch (err) {
       console.error("[useNavigate shim] Navigation failed:", err)
       doFallback()
@@ -204,14 +218,17 @@ export const useSearchParams = (): [
       const nextPath = queryString
         ? `${currentPath}?${queryString}`
         : currentPath
-      runNavigationTransition(() => {
-        const navigation = options?.replace
-          ? router.replace(nextPath)
-          : router.push(nextPath)
-        void navigation.catch((error) => {
-          console.error("[useSearchParams shim] Navigation failed:", error)
-        })
-      })
+      runNavigationTransition(
+        () => {
+          const navigation = options?.replace
+            ? router.replace(nextPath)
+            : router.push(nextPath)
+          void navigation.catch((error) => {
+            console.error("[useSearchParams shim] Navigation failed:", error)
+          })
+        },
+        { flushSync: options?.flushSync }
+      )
     },
     [router]
   )

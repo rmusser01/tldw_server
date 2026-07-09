@@ -43,6 +43,7 @@ import {
   type FlashcardBulkUpdateItem,
   type FlashcardBulkUpdateResponse,
   type FlashcardCreate,
+  type FlashcardPlanItem,
   type FlashcardUpdate
 } from "@/services/flashcards"
 import { useServerOnline } from "@/hooks/useServerOnline"
@@ -1008,20 +1009,24 @@ export function useGenerateFlashcardsMutation() {
       text: string
       numCards?: number
       cardType?: "basic" | "basic_reverse" | "cloze"
+      cardPlan?: FlashcardPlanItem[]
       difficulty?: "easy" | "medium" | "hard" | "mixed"
       focusTopics?: string[]
       provider?: string
       model?: string
-    }) =>
-      generateFlashcards({
+    }) => {
+      const hasCardPlan = Array.isArray(params.cardPlan) && params.cardPlan.length > 0
+      return generateFlashcards({
         text: params.text,
         num_cards: params.numCards,
-        card_type: params.cardType,
+        card_type: hasCardPlan ? undefined : params.cardType,
+        card_plan: hasCardPlan ? params.cardPlan : undefined,
         difficulty: params.difficulty,
         focus_topics: params.focusTopics,
         provider: params.provider,
         model: params.model
-      }),
+      })
+    },
     onError: (error) => {
       console.error("Failed to generate flashcards:", error)
     }

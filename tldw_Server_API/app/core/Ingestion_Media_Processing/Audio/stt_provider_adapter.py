@@ -19,7 +19,10 @@ from pathlib import Path
 from typing import Any, Callable
 
 from tldw_Server_API.app.core.Infrastructure.provider_registry import ProviderRegistryBase
-from tldw_Server_API.app.core.config import get_stt_config
+from tldw_Server_API.app.core.config import (
+    get_stt_config,
+    resolve_default_transcription_model_setting,
+)
 from tldw_Server_API.app.core.exceptions import BadRequestError, CancelCheckError, TranscriptionCancelled
 from tldw_Server_API.app.core.Ingestion_Media_Processing.path_utils import resolve_safe_local_path
 
@@ -1046,6 +1049,8 @@ def resolve_default_transcription_model(fallback_whisper_model: str) -> str:
         stt_cfg = {}
 
     configured_batch_model = str(stt_cfg.get("default_batch_transcription_model", "")).strip()
+    if configured_batch_model.lower() == "auto":
+        return resolve_default_transcription_model_setting(configured_batch_model)
     if configured_batch_model:
         return configured_batch_model
 

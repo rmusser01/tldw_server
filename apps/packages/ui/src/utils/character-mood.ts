@@ -1,4 +1,5 @@
 import { createImageDataUrl } from "@/utils/image-utils"
+import { normalizeCharacterEmoteState } from "./character-emotes"
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === "object" && !Array.isArray(value)
@@ -25,7 +26,7 @@ export type CharacterMoodDetection = {
   topic: string | null
 }
 
-type CharacterMoodImages = Partial<Record<CharacterMoodLabel, string>>
+export type CharacterMoodImages = Record<string, string>
 
 type CharacterWithPortraitData = {
   avatar_url?: string | null
@@ -239,7 +240,7 @@ export const getCharacterMoodImagesFromExtensions = (
 
   const result: CharacterMoodImages = {}
   Object.entries(source).forEach(([rawMood, rawImage]) => {
-    const moodLabel = normalizeCharacterMoodLabel(rawMood)
+    const moodLabel = normalizeCharacterEmoteState(rawMood)
     if (!moodLabel) return
     const normalizedImage = normalizeMoodImageSource(rawImage)
     if (!normalizedImage) return
@@ -258,7 +259,7 @@ export const mergeCharacterMoodImagesIntoExtensions = (
 
   const normalizedMap: CharacterMoodImages = {}
   Object.entries(moodImages || {}).forEach(([rawMood, rawImage]) => {
-    const moodLabel = normalizeCharacterMoodLabel(rawMood)
+    const moodLabel = normalizeCharacterEmoteState(rawMood)
     if (!moodLabel) return
     const normalizedImage = normalizeMoodImageSource(rawImage)
     if (!normalizedImage) return
@@ -269,8 +270,8 @@ export const mergeCharacterMoodImagesIntoExtensions = (
     tldw.mood_images = normalizedMap
   } else {
     delete tldw.mood_images
-    delete tldw.moodImages
   }
+  delete tldw.moodImages
 
   if (Object.keys(tldw).length > 0) {
     parsed.tldw = tldw
@@ -289,7 +290,7 @@ export const upsertCharacterMoodImage = (
   moodLabel: unknown,
   imageSource: unknown
 ): Record<string, unknown> => {
-  const normalizedMood = normalizeCharacterMoodLabel(moodLabel)
+  const normalizedMood = normalizeCharacterEmoteState(moodLabel)
   const normalizedImage = normalizeMoodImageSource(imageSource)
   const existing = getCharacterMoodImagesFromExtensions(extensions)
 
@@ -307,7 +308,7 @@ export const removeCharacterMoodImage = (
   extensions: unknown,
   moodLabel: unknown
 ): Record<string, unknown> => {
-  const normalizedMood = normalizeCharacterMoodLabel(moodLabel)
+  const normalizedMood = normalizeCharacterEmoteState(moodLabel)
   if (!normalizedMood) {
     return parseCharacterExtensions(extensions)
   }
@@ -340,11 +341,16 @@ export const resolveCharacterMoodImageUrl = (
 ): string => {
   if (!character) return ""
 
-  const normalizedMood = normalizeCharacterMoodLabel(moodLabel)
-  if (!normalizedMood) return ""
-
+  const normalizedMood = normalizeCharacterEmoteState(moodLabel)
   const moodImages = getCharacterMoodImagesFromExtensions(character.extensions)
-  const image = moodImages[normalizedMood]
+  if (normalizedMood && typeof moodImages[normalizedMood] === "string") {
+    return moodImages[normalizedMood]
+  }
+
+  const legacyMood = normalizeCharacterMoodLabel(moodLabel)
+  if (!legacyMood || legacyMood === normalizedMood) return ""
+
+  const image = moodImages[legacyMood]
   return typeof image === "string" ? image : ""
 }
 

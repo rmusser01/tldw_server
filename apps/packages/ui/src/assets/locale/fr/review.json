@@ -304,7 +304,8 @@
     "presetExecutiveSummary": "Résumé exécutif",
     "presetCriticalReview": "Revue critique",
     "presetQAAnalysis": "Analyse Q&R",
-    "presetBulletedNotes": "Bulleted Notes"
+    "presetBulletedNotes": "Bulleted Notes",
+    "analysisProviderRequired": "Choisissez un fournisseur d'analyse, puis réessayez l'analyse."
   },
   "empty": {
     "connectTitle": "Connectez-vous pour utiliser la Revue",

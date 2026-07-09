@@ -90,6 +90,35 @@ export const CHAT_BACKGROUND_IMAGE_MAX_SIZE_MB = 15
 export const CHAT_BACKGROUND_IMAGE_MAX_BASE64_LENGTH =
   CHAT_BACKGROUND_IMAGE_MAX_SIZE_MB * 1_000_000
 
+const coerceOpacityPercent = (value: unknown, fallback: number): number => {
+  const parsed = Math.round(coerceNumber(value, fallback))
+  if (!Number.isFinite(parsed)) return fallback
+  return Math.min(100, Math.max(0, parsed))
+}
+
+export const resolveOpacityAlpha = (
+  value: unknown,
+  fallback: number
+): number => coerceOpacityPercent(value, fallback) / 100
+
+export const CHAT_WINDOW_OPACITY_SETTING = defineSetting(
+  "chatWindowOpacity",
+  35,
+  (value) => coerceOpacityPercent(value, 35)
+)
+
+export const CHAT_MESSAGE_OPACITY_SETTING = defineSetting(
+  "chatMessageOpacity",
+  60,
+  (value) => coerceOpacityPercent(value, 60)
+)
+
+export const CHAT_CHARACTER_IMAGE_OPACITY_SETTING = defineSetting(
+  "chatCharacterImageOpacity",
+  100,
+  (value) => coerceOpacityPercent(value, 100)
+)
+
 const SPLASH_CARD_NAME_SET = new Set(DEFAULT_SPLASH_CARD_NAMES)
 
 const coerceSplashCardNameArray = (value: unknown): string[] => {
@@ -543,6 +572,22 @@ const LEGACY_DEFAULT_SIDEBAR_SHORTCUT_SELECTION: SidebarShortcutId[] = [
 export const DEFAULT_SIDEBAR_SHORTCUT_SELECTION: SidebarShortcutId[] = [
   "quick-ingest",
   "chat",
+  "prompts",
+  "characters",
+  "chat-dictionaries",
+  "world-books",
+  "notes",
+  "knowledge-qa",
+  "media",
+  "document-workspace",
+  "research-workspace",
+  "kanban-playground",
+  "watchlists"
+]
+
+const PREVIOUS_DEFAULT_SIDEBAR_SHORTCUT_SELECTION: SidebarShortcutId[] = [
+  "quick-ingest",
+  "chat",
   "chat-workspace",
   "prompts",
   "characters",
@@ -584,12 +629,10 @@ const coerceSidebarShortcutSelection = (
       unique.add(mapped as SidebarShortcutId)
     }
   }
-  const normalized = SIDEBAR_SHORTCUT_IDS.filter((id) => unique.has(id)).slice(
-    0,
-    SIDEBAR_SHORTCUT_MAX_COUNT
-  )
+  const normalized = Array.from(unique).slice(0, SIDEBAR_SHORTCUT_MAX_COUNT)
   if (
-    areShortcutSelectionsEqual(normalized, LEGACY_DEFAULT_SIDEBAR_SHORTCUT_SELECTION)
+    areShortcutSelectionsEqual(normalized, LEGACY_DEFAULT_SIDEBAR_SHORTCUT_SELECTION) ||
+    areShortcutSelectionsEqual(normalized, PREVIOUS_DEFAULT_SIDEBAR_SHORTCUT_SELECTION)
   ) {
     return DEFAULT_SIDEBAR_SHORTCUT_SELECTION
   }

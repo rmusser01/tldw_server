@@ -84,7 +84,20 @@ vi.mock("next/dynamic", () => ({
 }))
 
 vi.mock("@web/components/AppProviders", () => ({
-  AppProviders: ({ children }: { children: React.ReactNode }) => <>{children}</>
+  AppProviders: ({
+    children,
+    enableNotifications
+  }: {
+    children: React.ReactNode
+    enableNotifications?: boolean
+  }) => (
+    <div
+      data-testid="app-providers"
+      data-enable-notifications={String(Boolean(enableNotifications))}
+    >
+      {children}
+    </div>
+  )
 }))
 
 vi.mock("@web/components/networking/ServerReadinessGate", () => ({
@@ -357,7 +370,7 @@ describe("App layout routing", () => {
       serverUrl: "http://127.0.0.1:8000",
       authMode: "single-user"
     }
-    setRuntimeApiKey("runtime-api-key")
+    mockRuntimeApiKey = "runtime-api-key"
 
     renderApp("/media")
 
@@ -379,6 +392,23 @@ describe("App layout routing", () => {
       expect(layout).toHaveAttribute("data-hide-header", "true")
     })
     expect(layout).toHaveAttribute("data-hide-sidebar", "true")
+    expect(screen.getByTestId("app-providers")).toHaveAttribute(
+      "data-enable-notifications",
+      "false"
+    )
+  })
+
+  it("enables notification startup after auth resolves on app routes", async () => {
+    process.env.NEXT_PUBLIC_X_API_KEY = "env-api-key"
+
+    renderApp("/media")
+
+    await waitFor(() => {
+      expect(screen.getByTestId("app-providers")).toHaveAttribute(
+        "data-enable-notifications",
+        "true"
+      )
+    })
   })
 
   it("refreshes nav visibility when auth config updates", async () => {

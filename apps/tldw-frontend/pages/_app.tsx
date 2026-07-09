@@ -342,6 +342,8 @@ export default function App({ Component, pageProps }: AppProps) {
     }),
     [hideShellNav, isSettingsRoute, isSetupRoute]
   )
+  const enableNotifications =
+    authResolved && isAuthenticated && !isPublicAuthRoute && !isSetupRoute
 
   const layoutContent = (
     <OptionLayout {...layoutProps}>
@@ -362,7 +364,7 @@ export default function App({ Component, pageProps }: AppProps) {
   )
 
   return (
-    <AppProviders>
+    <AppProviders enableNotifications={enableNotifications}>
       <ConfigurationGuard>
         <BackendRecoveryUiProvider routeRecoveryEnabled>
           <ErrorBoundary>

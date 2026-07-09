@@ -76,7 +76,10 @@ from tldw_Server_API.app.core.Chat.chat_helpers import (
     get_or_create_character_context,
     get_or_create_conversation,
 )
-from tldw_Server_API.app.core.config import load_comprehensive_config
+from tldw_Server_API.app.core.config import (
+    load_comprehensive_config,
+    resolve_default_transcription_model_setting,
+)
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.media_db.legacy_transcripts import (
     upsert_transcript,
@@ -106,6 +109,14 @@ from tldw_Server_API.app.core.TTS.tts_request_resolution import (
     resolve_tts_request_defaults,
 )
 from tldw_Server_API.app.core.TTS.tts_service_v2 import TTSServiceV2
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.audio_stream_protocol import (
+    AUDIO_CHAT_ENDPOINT,
+    AudioProtocolConfig,
+    AudioProtocolError,
+    audio_protocol_error_payload,
+    decode_audio_frame,
+    validate_audio_stream_config,
+)
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.model_utils import normalize_model_and_variant
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_policy import (
     RedactingWebSocketProxy,
@@ -500,7 +511,7 @@ def _resolve_default_streaming_model() -> tuple[str, str, str]:
     Returns:
         tuple[str, str, str]: (model, variant, whisper_model_size)
     """
-    default_model_id = "parakeet-tdt-0.6b-v3-onnx"
+    default_model_id = resolve_default_transcription_model_setting("auto")
     default_variant = "standard"
     default_whisper_model_size = "distil-large-v3"
 
@@ -510,9 +521,9 @@ def _resolve_default_streaming_model() -> tuple[str, str, str]:
             configured_default = cfg.get(
                 "STT-Settings",
                 "default_streaming_transcription_model",
-                fallback=default_model_id,
+                fallback="auto",
             )
-            default_model_id = str(configured_default).strip() or default_model_id
+            default_model_id = resolve_default_transcription_model_setting(configured_default)
             configured_variant = cfg.get(
                 "STT-Settings",
                 "nemo_model_variant",
@@ -543,7 +554,7 @@ def _resolve_default_streaming_model() -> tuple[str, str, str]:
             model = provider_name
         else:
             logger.warning(
-                "Unsupported streaming default model '{}'; falling back to parakeet-tdt-0.6b-v3-onnx"
+                "Unsupported streaming default model '{}'; falling back to platform STT default"
                 .format(default_model_id)
             )
             model = "parakeet"
@@ -556,7 +567,7 @@ def _resolve_default_streaming_model() -> tuple[str, str, str]:
             variant = candidate_variant
     except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as exc:
         logger.warning(
-            "Could not resolve configured streaming model '{}'; falling back to parakeet-tdt-0.6b-v3-onnx. Error: {}"
+            "Could not resolve configured streaming model '{}'; falling back to platform STT default. Error: {}"
             .format(default_model_id, exc)
         )
         model = "parakeet"
@@ -872,10 +883,9 @@ async def websocket_transcribe(
     - Multi-user: X-API-KEY header, Authorization: Bearer <JWT>, or an initial auth message.
     - Single-user: API key via header or an initial auth message; an IP allowlist may be enforced.
     - Legacy `token` query-string auth is accepted only when AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH is enabled.
-    Supported incoming message types: "auth" (for token-based auth), "config" (streaming configuration), "audio" (base64-encoded audio chunks), and "commit" (finalize current utterance).
+    Supported incoming message types: "auth" (for token-based auth), "config" (required first post-auth frame), "audio" (base64-encoded PCM16 JSON chunks), and "commit" (finalize current utterance).
     Outgoing message types include partial updates ("partial"), interim/final transcriptions ("transcription"), the final transcript ("full_transcript"), and structured error frames ("error").
     Per-user limits are enforced (concurrent streams and daily minute quotas); when a quota is exceeded the server sends an "error" with `code="quota_exceeded"` and closes the connection with code 4003 (or 1008 when `AUDIO_WS_QUOTA_CLOSE_1008=1`). A compatibility alias `error_type` is included when `AUDIO_WS_COMPAT_ERROR_TYPE=1` (default).
-    A server-side default streaming configuration is used if the client does not provide one before audio arrives.
     Parameters:
         websocket (WebSocket): The active WebSocket connection.
         token (Optional[str]): Legacy API key or JWT query-string token, ignored unless AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH is enabled.
@@ -1054,6 +1064,7 @@ async def websocket_transcribe(
                 redacted_payload = apply_transcript_payload_policy(payload, policy=effective_stt_policy)
                 if str(redacted_payload.get("type", "")).strip().lower() in {
                     "partial",
+                    "final",
                     "transcription",
                     "full_transcript",
                 }:
@@ -1731,11 +1742,27 @@ async def websocket_audio_chat_stream(
 
         control_session = _new_ws_control_session()
         paused_audio_chunks: deque[tuple[bytes, float]] = deque()
+        protocol_config: AudioProtocolConfig | None = None
 
         # Parse initial config
         try:
             raw_cfg = await wait_for(websocket.receive_text(), timeout=15.0)
             cfg_data = json.loads(raw_cfg)
+            if not isinstance(cfg_data, dict):
+                raise AudioProtocolError("bad_request", "First post-auth frame must be a JSON object")
+            protocol_config = validate_audio_stream_config(cfg_data, AUDIO_CHAT_ENDPOINT)
+        except AudioProtocolError as exc:
+            stt_request_status = "bad_request"
+            stt_session_close_reason = "error"
+            emit_stt_error_total(
+                endpoint="audio.chat.stream",
+                provider=stt_metrics_provider,
+                reason="validation_error",
+            )
+            if _outer_stream:
+                await _outer_stream.send_json(audio_protocol_error_payload(exc, request_id=request_id))
+            await websocket.close(code=exc.close_code)
+            return
         except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as exc:
             stt_request_status = "bad_request"
             stt_session_close_reason = "error"
@@ -1756,21 +1783,17 @@ async def websocket_audio_chat_stream(
             await websocket.close(code=4400)
             return
 
-        if cfg_data.get("type") != "config":
-            stt_request_status = "bad_request"
-            stt_session_close_reason = "error"
-            emit_stt_error_total(
-                endpoint="audio.chat.stream",
-                provider=stt_metrics_provider,
-                reason="validation_error",
-            )
+        if protocol_config is None:
             if _outer_stream:
                 await _outer_stream.send_json(
-                    {"type": "error", "message": "First frame must be type=config"}
+                    _audio_ws_error_payload(
+                        code="bad_request",
+                        message="config frame required",
+                        request_id=request_id,
+                    )
                 )
             await websocket.close(code=4400)
             return
-
         stt_cfg = cfg_data.get("stt") or cfg_data
         llm_cfg = cfg_data.get("llm") or {}
         tts_cfg = cfg_data.get("tts") or {}
@@ -1820,7 +1843,7 @@ async def websocket_audio_chat_stream(
                 current_whisper_model_size=config.whisper_model_size,
                 explicit_whisper_model_size=stt_cfg.get("whisper_model_size"),
             )
-            config.sample_rate = stt_cfg.get("sample_rate", config.sample_rate)
+            config.sample_rate = protocol_config.sample_rate
             config.enable_partial = stt_cfg.get("enable_partial", config.enable_partial)
             config.enable_vad = bool(stt_cfg.get("enable_vad", config.enable_vad))
             config.vad_threshold = float(stt_cfg.get("vad_threshold", config.vad_threshold))
@@ -2145,7 +2168,12 @@ async def websocket_audio_chat_stream(
 
         async def _send_stream_payload(payload: dict[str, Any]) -> None:
             redacted_payload = apply_transcript_payload_policy(payload, policy=effective_stt_policy)
-            if str(redacted_payload.get("type", "")).strip().lower() in {"partial", "transcription", "full_transcript"}:
+            if str(redacted_payload.get("type", "")).strip().lower() in {
+                "partial",
+                "final",
+                "transcription",
+                "full_transcript",
+            }:
                 emit_stt_redaction_total(
                     endpoint="audio.chat.stream",
                     redaction_outcome=_stt_redaction_outcome_for_payload(
@@ -2438,6 +2466,7 @@ async def websocket_audio_chat_stream(
             *,
             auto: bool = False,
             turn_id: Optional[str] = None,
+            commit_source: str = "manual_commit",
         ) -> None:
             nonlocal processing_turn
             nonlocal active_turn_cancelled
@@ -2467,6 +2496,7 @@ async def websocket_audio_chat_stream(
                     # EOS/turn-end anchor used for downstream voice-to-voice metric timing.
                     "voice_to_voice_start": eos_detected_at,
                 }
+                payload["commit_source"] = commit_source
                 payload.update(
                     _build_transcript_diagnostics_payload(
                         auto_commit=auto,
@@ -2643,7 +2673,12 @@ async def websocket_audio_chat_stream(
                     logger.debug(f"audio.chat.stream transcriber.reset() failed in finalize_turn: {exc}")
                 processing_turn = False
 
-        async def _start_turn(commit_at: Optional[float], *, auto: bool) -> Optional[str]:
+        async def _start_turn(
+            commit_at: Optional[float],
+            *,
+            auto: bool,
+            commit_source: str = "manual_commit",
+        ) -> Optional[str]:
             nonlocal active_turn_task
             nonlocal active_turn_id
             nonlocal active_turn_cancelled
@@ -2661,7 +2696,12 @@ async def websocket_audio_chat_stream(
                 nonlocal active_turn_task
                 nonlocal active_turn_id
                 try:
-                    await _finalize_turn(commit_at, auto=auto, turn_id=turn_id)
+                    await _finalize_turn(
+                        commit_at,
+                        auto=auto,
+                        turn_id=turn_id,
+                        commit_source=commit_source,
+                    )
                 except asyncio.CancelledError:
                     logger.debug(f"audio.chat.stream turn cancelled: turn_id={turn_id}")
                 finally:
@@ -2730,6 +2770,7 @@ async def websocket_audio_chat_stream(
                     if turn_detector
                     else commit_at,
                     auto=True,
+                    commit_source="vad",
                 )
 
         async def _drain_paused_audio_queue() -> None:
@@ -2737,7 +2778,10 @@ async def websocket_audio_chat_stream(
             paused_audio_chunks.clear()
             control_session.release_paused_audio()
             for buffered_audio, _buffered_seconds in queued_audio:
-                await _process_chat_audio(buffered_audio, allow_auto_commit=True)
+                await _process_chat_audio(
+                    buffered_audio,
+                    allow_auto_commit=protocol_config.mode == "voice_chat",
+                )
 
         try:
             for event in protocol_decision.events:
@@ -2752,48 +2796,44 @@ async def websocket_audio_chat_stream(
                 try:
                     data = json.loads(raw_msg)
                 except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS:
+                    stt_request_status = "bad_request"
+                    stt_session_close_reason = "error"
                     emit_stt_error_total(
                         endpoint="audio.chat.stream",
                         provider=stt_metrics_provider,
                         reason="validation_error",
                     )
+                    error_payload = _audio_ws_error_payload(
+                        code="validation_error",
+                        message="Invalid JSON message",
+                        request_id=request_id,
+                    )
                     if _outer_stream:
-                        await _outer_stream.send_json(
-                            _audio_ws_error_payload(
-                                code="bad_request",
-                                message="Invalid JSON",
-                                request_id=request_id,
-                            )
-                        )
-                    continue
+                        await _outer_stream.send_json(error_payload)
+                    else:
+                        await websocket.send_json(error_payload)
+                    await websocket.close(code=4400)
+                    break
 
                 msg_type = data.get("type")
                 if msg_type == "audio":
-                    audio_base64 = data.get("data", "")
                     try:
-                        audio_bytes = base64.b64decode(audio_base64)
-                    except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS:
+                        decoded = decode_audio_frame(data, protocol_config)
+                    except AudioProtocolError as exc:
+                        stt_request_status = exc.code
+                        stt_session_close_reason = "error"
                         emit_stt_error_total(
                             endpoint="audio.chat.stream",
                             provider=stt_metrics_provider,
                             reason="validation_error",
                         )
                         if _outer_stream:
-                            await _outer_stream.send_json(
-                                _audio_ws_error_payload(
-                                    code="bad_request",
-                                    message="Invalid base64 audio frame",
-                                    request_id=request_id,
-                                )
-                            )
-                        continue
-
-                    try:
-                        seconds = _estimate_stream_audio_seconds(audio_bytes, int(config.sample_rate or 16000))
-                    except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS:
-                        seconds = float(len(audio_bytes)) / float(
-                            4 * max(1, int(config.sample_rate or 16000))
-                        )
+                            await _outer_stream.send_json(audio_protocol_error_payload(exc, request_id=request_id))
+                        await websocket.close(code=exc.close_code)
+                        break
+                    audio_bytes = decoded.float32_bytes
+                    seconds = decoded.seconds
+                    audio_sample_rate = decoded.sample_rate
 
                     try:
                         await _on_heartbeat()
@@ -2818,7 +2858,7 @@ async def websocket_audio_chat_stream(
 
                     # Bill usage only for audio that will actually be processed (not paused/dropped)
                     try:
-                        await _on_audio_quota(seconds, int(config.sample_rate or 16000))
+                        await _on_audio_quota(seconds, audio_sample_rate)
                     except QuotaExceeded as qe:
                         stt_request_status = "quota_exceeded"
                         stt_session_close_reason = "error"
@@ -2848,11 +2888,38 @@ async def websocket_audio_chat_stream(
                             )
                         break
 
-                    await _process_chat_audio(audio_bytes, allow_auto_commit=True)
+                    await _process_chat_audio(
+                        audio_bytes,
+                        allow_auto_commit=protocol_config.mode == "voice_chat",
+                    )
 
                 elif msg_type == "interrupt":
                     reason = str(data.get("reason") or "client_cancel")
                     await _cancel_active_turn(reason=reason, emit_interrupted=True)
+                elif msg_type == "push_to_talk_release":
+                    if protocol_config.mode != "push_to_talk":
+                        exc = AudioProtocolError(
+                            "bad_request",
+                            "push_to_talk_release is only valid in push_to_talk mode",
+                        )
+                        stt_request_status = exc.code
+                        stt_session_close_reason = "error"
+                        emit_stt_error_total(
+                            endpoint="audio.chat.stream",
+                            provider=stt_metrics_provider,
+                            reason="validation_error",
+                        )
+                        if _outer_stream:
+                            await _outer_stream.send_json(
+                                audio_protocol_error_payload(exc, request_id=request_id)
+                            )
+                        await websocket.close(code=exc.close_code)
+                        break
+                    await _start_turn(
+                        time.time(),
+                        auto=False,
+                        commit_source="push_to_talk_release",
+                    )
                 elif msg_type in {"control", "commit", "reset", "stop"}:
                     decision = control_session.handle_frame(data)
                     if decision.error:
@@ -2880,7 +2947,7 @@ async def websocket_audio_chat_stream(
                         except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as exc:  # noqa: BLE001
                             logger.debug(f"audio.chat.stream transcriber.reset() failed on reset message: {exc}")
                     elif decision.intent == "commit":
-                        await _start_turn(time.time(), auto=False)
+                        await _start_turn(time.time(), auto=False, commit_source="manual_commit")
                     elif decision.intent == "stop":
                         stt_session_close_reason = "client_stop"
                         paused_audio_chunks.clear()

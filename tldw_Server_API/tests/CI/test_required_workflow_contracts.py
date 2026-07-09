@@ -558,6 +558,25 @@ def test_full_suite_test_result_uploads_are_non_blocking() -> None:
         assert step.get("uses") == "actions/upload-artifact@v7"
 
 
+def test_full_suite_summaries_follow_backend_path_filter() -> None:
+    workflow = _load(".github/workflows/ci.yml")
+    expected_if = (
+        "${{ always() && (github.event_name != 'pull_request' || "
+        "needs.changes.outputs.backend_changed == 'true') }}"
+    )
+    summary_to_shards = {
+        "full-suite-linux-312-summary": "full-suite-linux-312-shards",
+        "full-suite-linux-313-summary": "full-suite-linux-313-shards",
+        "full-suite-macos-312-summary": "full-suite-macos-312-shards",
+        "full-suite-windows-312-summary": "full-suite-windows-312-shards",
+    }
+
+    for summary_job, shard_job in summary_to_shards.items():
+        job = workflow["jobs"][summary_job]
+        assert job["needs"] == [shard_job, "changes"]
+        assert job["if"] == expected_if
+
+
 def test_linux_311_smoke_is_sharded_for_timeout_control() -> None:
     workflow = _load(".github/workflows/ci.yml")
     job = workflow["jobs"]["full-suite-linux-311-smoke"]

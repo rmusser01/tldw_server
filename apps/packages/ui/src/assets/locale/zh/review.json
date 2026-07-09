@@ -304,7 +304,8 @@
     "presetExecutiveSummary": "执行摘要",
     "presetCriticalReview": "批判性审阅",
     "presetQAAnalysis": "问答分析",
-    "presetBulletedNotes": "Bulleted Notes"
+    "presetBulletedNotes": "Bulleted Notes",
+    "analysisProviderRequired": "请选择分析提供方，然后重试分析。"
   },
   "empty": {
     "connectTitle": "连接以使用审阅",

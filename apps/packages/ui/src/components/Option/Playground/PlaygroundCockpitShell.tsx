@@ -14,6 +14,7 @@ export type PlaygroundCockpitMobilePanel = "context" | "runtime" | null;
 
 export type PlaygroundCockpitShellProps = {
   mode: PlaygroundCockpitMode;
+  themedBackdrop?: boolean;
   leftRailVisible?: boolean;
   rightRailVisible?: boolean;
   onLeftRailVisibleChange?: (visible: boolean) => void;
@@ -115,6 +116,7 @@ const buildModeSummaryKey = (
 
 export const PlaygroundCockpitShell = ({
   mode,
+  themedBackdrop = false,
   leftRailVisible = true,
   rightRailVisible = true,
   onLeftRailVisibleChange,
@@ -128,13 +130,12 @@ export const PlaygroundCockpitShell = ({
   const { t } = useTranslation("playground");
   const [uncontrolledMobilePanel, setUncontrolledMobilePanel] =
     React.useState<PlaygroundCockpitMobilePanel>("context");
-  const mobilePanelIdPrefix = React.useId();
   const focusMode = mode === "focus";
-  const mobileContextTabId = `${mobilePanelIdPrefix}-mobile-context-tab`;
-  const mobileRuntimeTabId = `${mobilePanelIdPrefix}-mobile-runtime-tab`;
-  const mobileContextPanelId = `${mobilePanelIdPrefix}-mobile-context-panel`;
-  const mobileRuntimePanelId = `${mobilePanelIdPrefix}-mobile-runtime-panel`;
-  const mobilePanelSummaryId = `${mobilePanelIdPrefix}-mobile-panel-summary`;
+  const mobileContextTabId = "playground-cockpit-mobile-context-tab";
+  const mobileRuntimeTabId = "playground-cockpit-mobile-runtime-tab";
+  const mobileContextPanelId = "playground-cockpit-mobile-context-panel";
+  const mobileRuntimePanelId = "playground-cockpit-mobile-runtime-panel";
+  const mobilePanelSummaryId = "playground-cockpit-mobile-panel-summary";
   const showLeftRail = !focusMode && leftRailVisible;
   const showRightRail = !focusMode && rightRailVisible;
   const resolvedMobilePanel =
@@ -236,6 +237,14 @@ export const PlaygroundCockpitShell = ({
     : ({
         "--cockpit-grid-columns": cockpitGridColumns,
       } as React.CSSProperties);
+  const showLeftRestore = !focusMode && !leftRailVisible;
+  const showRightRestore = !focusMode && !rightRailVisible;
+  const leftRestoreWrapperClassName = showLeftRestore
+    ? COCKPIT_LEFT_RESTORE_WRAPPER_CLASS
+    : "absolute left-0 top-[clamp(18rem,36vh,24rem)] z-50 hidden";
+  const rightRestoreWrapperClassName = showRightRestore
+    ? "absolute right-0 top-1/2 z-50 hidden -translate-y-1/2 lg:inline-flex"
+    : "absolute right-0 top-1/2 z-50 hidden -translate-y-1/2";
 
   return (
     <div
@@ -243,7 +252,9 @@ export const PlaygroundCockpitShell = ({
       data-mode={mode}
       data-left-rail={showLeftRail ? "visible" : "hidden"}
       data-right-rail={showRightRail ? "visible" : "hidden"}
-      className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden bg-bg text-text"
+      className={`flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden text-text ${
+        themedBackdrop ? "backdrop-blur-[1px]" : "bg-bg"
+      }`}
     >
       <p
         data-testid="playground-cockpit-mode-summary"
@@ -254,6 +265,7 @@ export const PlaygroundCockpitShell = ({
 
       {!focusMode && (
         <div
+          key="mobile-rails"
           data-testid="playground-cockpit-mobile-rails"
           data-mobile-panel={visibleMobilePanel ?? "none"}
           className="grid shrink-0 grid-cols-1 gap-2 border-b border-border bg-surface2/40 p-2 text-xs lg:hidden"
@@ -268,7 +280,7 @@ export const PlaygroundCockpitShell = ({
               type="button"
               role="tab"
               aria-selected={leftRailVisible && visibleMobilePanel === "context"}
-              aria-controls={leftRailVisible ? mobileContextPanelId : undefined}
+              aria-controls={mobileContextPanelId}
               aria-expanded={leftRailVisible}
               onClick={() => {
                 if (!leftRailVisible) {
@@ -291,7 +303,7 @@ export const PlaygroundCockpitShell = ({
               type="button"
               role="tab"
               aria-selected={rightRailVisible && visibleMobilePanel === "runtime"}
-              aria-controls={rightRailVisible ? mobileRuntimePanelId : undefined}
+              aria-controls={mobileRuntimePanelId}
               aria-expanded={rightRailVisible}
               onClick={() => {
                 if (!rightRailVisible) {
@@ -351,42 +363,39 @@ export const PlaygroundCockpitShell = ({
           >
             {mobilePanelSummary}
           </p>
-          {leftRailVisible ? (
-            <section
-              id={mobileContextPanelId}
-              role="tabpanel"
-              aria-labelledby={mobileContextTabId}
-              aria-describedby={mobilePanelSummaryId}
-              hidden={visibleMobilePanel !== "context"}
-              aria-hidden={visibleMobilePanel !== "context"}
-              className={`max-h-[30vh] overflow-y-auto rounded-md border border-border bg-surface p-2 ${
-                visibleMobilePanel !== "context" ? "hidden" : ""
-              }`}
-            >
-              {leftRail}
-            </section>
-          ) : null}
-          {rightRailVisible ? (
-            <section
-              id={mobileRuntimePanelId}
-              role="tabpanel"
-              aria-labelledby={mobileRuntimeTabId}
-              aria-describedby={mobilePanelSummaryId}
-              hidden={visibleMobilePanel !== "runtime"}
-              aria-hidden={visibleMobilePanel !== "runtime"}
-              className={`max-h-[30vh] overflow-y-auto rounded-md border border-border bg-surface p-2 ${
-                visibleMobilePanel !== "runtime" ? "hidden" : ""
-              }`}
-            >
-              {rightRail}
-            </section>
-          ) : null}
+          <section
+            id={mobileContextPanelId}
+            role="tabpanel"
+            aria-labelledby={mobileContextTabId}
+            aria-describedby={mobilePanelSummaryId}
+            hidden={!leftRailVisible || visibleMobilePanel !== "context"}
+            aria-hidden={!leftRailVisible || visibleMobilePanel !== "context"}
+            className={`max-h-[30vh] overflow-y-auto rounded-md border border-border bg-surface p-2 ${
+              !leftRailVisible || visibleMobilePanel !== "context" ? "hidden" : ""
+            }`}
+          >
+            {leftRail}
+          </section>
+          <section
+            id={mobileRuntimePanelId}
+            role="tabpanel"
+            aria-labelledby={mobileRuntimeTabId}
+            aria-describedby={mobilePanelSummaryId}
+            hidden={!rightRailVisible || visibleMobilePanel !== "runtime"}
+            aria-hidden={!rightRailVisible || visibleMobilePanel !== "runtime"}
+            className={`max-h-[30vh] overflow-y-auto rounded-md border border-border bg-surface p-2 ${
+              !rightRailVisible || visibleMobilePanel !== "runtime" ? "hidden" : ""
+            }`}
+          >
+            {rightRail}
+          </section>
         </div>
       )}
 
       <div className={`${bodyClassName} relative`} style={cockpitGridStyle}>
         {showLeftRail && (
           <aside
+            key="left-rail"
             id="playground-cockpit-left-rail"
             data-testid="playground-cockpit-left-rail"
             aria-label={t("cockpit.contextLandmark", "Chat cockpit context")}
@@ -414,8 +423,11 @@ export const PlaygroundCockpitShell = ({
         )}
 
         <main
+          key="main"
           data-testid="playground-cockpit-main"
-          className={`min-h-0 min-w-0 overflow-hidden bg-bg ${
+          className={`min-h-0 min-w-0 overflow-hidden ${
+            themedBackdrop ? "bg-transparent" : "bg-bg"
+          } ${
             focusMode
               ? "w-full max-w-[72rem]"
               : !showLeftRail && !showRightRail
@@ -428,6 +440,7 @@ export const PlaygroundCockpitShell = ({
 
         {showRightRail && (
           <aside
+            key="right-rail"
             id="playground-cockpit-right-rail"
             data-testid="playground-cockpit-right-rail"
             aria-label={t("cockpit.runtimeLandmark", "Chat cockpit runtime")}
@@ -454,45 +467,45 @@ export const PlaygroundCockpitShell = ({
           </aside>
         )}
 
-        {!focusMode && !leftRailVisible ? (
-          <CockpitTooltipButton
-            type="button"
-            data-testid="playground-cockpit-left-rail-restore"
-            aria-label={restoreContextSidechannelLabel}
-            aria-controls="playground-cockpit-left-rail"
-            aria-expanded="false"
-            onClick={() => onLeftRailVisibleChange?.(true)}
-            tooltip={restoreContextSidechannelLabel}
-            tooltipPlacement="right"
-            wrapperClassName={COCKPIT_LEFT_RESTORE_WRAPPER_CLASS}
-            className="inline-flex h-24 w-8 flex-col items-center justify-center gap-1.5 rounded-r-md border-y border-r border-border bg-surface2/95 py-1.5 text-[10px] font-semibold text-text shadow-md backdrop-blur-sm hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
-          >
-            <PanelLeftOpen className="h-3.5 w-3.5" aria-hidden="true" />
-            <span className="rotate-180 whitespace-nowrap leading-none [writing-mode:vertical-rl]">
-              {contextRailTabLabel}
-            </span>
-          </CockpitTooltipButton>
-        ) : null}
+        <CockpitTooltipButton
+          key="left-restore"
+          type="button"
+          data-testid="playground-cockpit-left-rail-restore"
+          aria-label={restoreContextSidechannelLabel}
+          aria-controls="playground-cockpit-left-rail"
+          aria-expanded="false"
+          onClick={() => onLeftRailVisibleChange?.(true)}
+          tooltip={restoreContextSidechannelLabel}
+          tooltipId="playground-cockpit-left-rail-restore-tooltip"
+          tooltipPlacement="right"
+          wrapperClassName={leftRestoreWrapperClassName}
+          className="inline-flex h-24 w-8 flex-col items-center justify-center gap-1.5 rounded-r-md border-y border-r border-border bg-surface2/95 py-1.5 text-[10px] font-semibold text-text shadow-md backdrop-blur-sm hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+        >
+          <PanelLeftOpen className="h-3.5 w-3.5" aria-hidden="true" />
+          <span className="rotate-180 whitespace-nowrap leading-none [writing-mode:vertical-rl]">
+            {contextRailTabLabel}
+          </span>
+        </CockpitTooltipButton>
 
-        {!focusMode && !rightRailVisible ? (
-          <CockpitTooltipButton
-            type="button"
-            data-testid="playground-cockpit-right-rail-restore"
-            aria-label={restoreRuntimeSidechannelLabel}
-            aria-controls="playground-cockpit-right-rail"
-            aria-expanded="false"
-            onClick={() => onRightRailVisibleChange?.(true)}
-            tooltip={restoreRuntimeSidechannelLabel}
-            tooltipPlacement="left"
-            wrapperClassName="absolute right-0 top-1/2 z-50 hidden -translate-y-1/2 lg:inline-flex"
-            className="inline-flex h-32 w-9 flex-col items-center justify-center gap-2 rounded-l-md border-y border-l border-border bg-surface2/95 py-2 text-[11px] font-semibold text-text shadow-md backdrop-blur-sm hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
-          >
-            <span className="whitespace-nowrap leading-none [writing-mode:vertical-rl]">
-              {runtimeRailTabLabel}
-            </span>
-            <PanelRightOpen className="h-3.5 w-3.5" aria-hidden="true" />
-          </CockpitTooltipButton>
-        ) : null}
+        <CockpitTooltipButton
+          key="right-restore"
+          type="button"
+          data-testid="playground-cockpit-right-rail-restore"
+          aria-label={restoreRuntimeSidechannelLabel}
+          aria-controls="playground-cockpit-right-rail"
+          aria-expanded="false"
+          onClick={() => onRightRailVisibleChange?.(true)}
+          tooltip={restoreRuntimeSidechannelLabel}
+          tooltipId="playground-cockpit-right-rail-restore-tooltip"
+          tooltipPlacement="left"
+          wrapperClassName={rightRestoreWrapperClassName}
+          className="inline-flex h-32 w-9 flex-col items-center justify-center gap-2 rounded-l-md border-y border-l border-border bg-surface2/95 py-2 text-[11px] font-semibold text-text shadow-md backdrop-blur-sm hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+        >
+          <span className="whitespace-nowrap leading-none [writing-mode:vertical-rl]">
+            {runtimeRailTabLabel}
+          </span>
+          <PanelRightOpen className="h-3.5 w-3.5" aria-hidden="true" />
+        </CockpitTooltipButton>
       </div>
 
     </div>

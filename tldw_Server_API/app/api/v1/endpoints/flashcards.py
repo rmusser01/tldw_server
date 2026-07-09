@@ -11,12 +11,10 @@ from fastapi.responses import Response, StreamingResponse
 from loguru import logger
 from pydantic import BaseModel
 
-from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, check_rate_limit, get_auth_principal, get_request_user
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_owner, get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import get_job_manager
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_auth_principal, get_request_user, User
-from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
-from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import DEFAULT_LLM_PROVIDER
 from tldw_Server_API.app.api.v1.schemas.flashcards import (
     Deck,
@@ -39,17 +37,17 @@ from tldw_Server_API.app.api.v1.schemas.flashcards import (
     FlashcardGenerateResponse,
     FlashcardListResponse,
     FlashcardNextReviewResponse,
-    FlashcardTemplate,
-    FlashcardTemplateCreate,
-    FlashcardTemplateListResponse,
-    FlashcardTemplateUpdate,
     FlashcardResetSchedulingRequest,
     FlashcardReviewRequest,
     FlashcardReviewResponse,
     FlashcardReviewSessionSummary,
-    FlashcardTagSuggestionsResponse,
     FlashcardsImportRequest,
+    FlashcardTagSuggestionsResponse,
     FlashcardTagsUpdate,
+    FlashcardTemplate,
+    FlashcardTemplateCreate,
+    FlashcardTemplateListResponse,
+    FlashcardTemplateUpdate,
     FlashcardUpdate,
     StructuredQaImportPreviewRequest,
     StructuredQaImportPreviewResponse,
@@ -64,6 +62,7 @@ from tldw_Server_API.app.api.v1.schemas.study_packs import (
     StudyPackJobStatusResponse,
     StudyPackSummaryResponse,
 )
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.core.AuthNZ.permissions import FLASHCARDS_ADMIN
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.config import loaded_config_data
@@ -82,6 +81,12 @@ from tldw_Server_API.app.core.Flashcards.asset_refs import (
     build_flashcard_asset_markdown,
     build_flashcard_asset_reference,
     extract_flashcard_asset_uuids,
+)
+from tldw_Server_API.app.core.Flashcards.generation import (
+    FlashcardGenerationPlanError,
+    _build_test_mode_flashcards,
+    _get_flashcard_generation_plan,
+    _normalize_generated_flashcards,
 )
 from tldw_Server_API.app.core.Flashcards.scheduler_fsrs import (
     FsrsSettingsError,
@@ -149,44 +154,6 @@ def _parse_scheduler_settings_envelope(raw: Any) -> dict[str, Any]:
     if isinstance(raw, dict):
         return raw
     return {}
-
-
-def _truncate_test_mode_flashcard_text(text: str, limit: int = 220) -> str:
-    normalized = " ".join(str(text or "").split()).strip()
-    if len(normalized) <= limit:
-        return normalized
-    return f"{normalized[: limit - 1].rstrip()}…"
-
-
-def _build_test_mode_flashcards(payload: FlashcardGenerateRequest) -> list[dict[str, Any]]:
-    normalized_text = _truncate_test_mode_flashcard_text(payload.text) or "Workspace study aid coverage."
-    card_type = str(payload.card_type or "basic").strip().lower() or "basic"
-    if card_type not in ("basic", "basic_reverse", "cloze"):
-        card_type = "basic"
-
-    tags = [str(topic).strip() for topic in (payload.focus_topics or []) if str(topic).strip()]
-    if not tags:
-        tags = ["workspace", "study"]
-
-    cards: list[dict[str, Any]] = []
-    for index in range(max(1, int(payload.num_cards or 1))):
-        if card_type == "cloze":
-            front = f"{{{{c1::Study point {index + 1}}}}}: {normalized_text}"
-            back = f"Study point {index + 1}"
-        else:
-            front = f"What study point {index + 1} should you remember?"
-            back = normalized_text
-
-        cards.append(
-            {
-                "front": front,
-                "back": back,
-                "tags": tags,
-                "model_type": card_type,
-                "notes": "Deterministic test-mode flashcard.",
-            }
-        )
-    return cards
 
 
 def _should_return_test_mode_flashcards(error: object) -> bool:
@@ -2258,7 +2225,11 @@ async def respond_flashcard_assistant(
         raise HTTPException(status_code=500, detail="Failed to generate study assistant response") from exc
 
 
-@router.post("/generate", response_model=FlashcardGenerateResponse)
+@router.post(
+    "/generate",
+    response_model=FlashcardGenerateResponse,
+    dependencies=[Depends(check_rate_limit)],
+)
 async def generate_flashcards(payload: FlashcardGenerateRequest):
     """Generate flashcards from free text using the workflows flashcard_generate adapter."""
     try:
@@ -2266,8 +2237,9 @@ async def generate_flashcards(payload: FlashcardGenerateRequest):
         result = await run_flashcard_generate_adapter(
             {
                 "text": payload.text,
-                "num_cards": payload.num_cards,
-                "card_type": payload.card_type,
+                "num_cards": int(payload.num_cards or 10),
+                "card_type": payload.card_type or "basic",
+                "card_plan": _get_flashcard_generation_plan(payload) if payload.card_plan is not None else None,
                 "difficulty": payload.difficulty,
                 "focus_topics": payload.focus_topics,
                 "provider": provider,
@@ -2280,51 +2252,17 @@ async def generate_flashcards(payload: FlashcardGenerateRequest):
             raise HTTPException(status_code=499, detail="Generation cancelled")
 
         error = result.get("error") if isinstance(result, dict) else None
+        raw_flashcards = result.get("flashcards") if isinstance(result, dict) else []
         if error:
             if is_test_mode() and _should_return_test_mode_flashcards(error):
-                generated_cards = _build_test_mode_flashcards(payload)
-                return {
-                    "flashcards": generated_cards,
-                    "count": len(generated_cards),
-                }
-            raise HTTPException(status_code=400, detail=str(error))
-
-        raw_flashcards = result.get("flashcards") if isinstance(result, dict) else []
-        generated_cards: list[dict] = []
-        for raw in raw_flashcards or []:
-            if not isinstance(raw, dict):
-                continue
-            front = str(raw.get("front") or "").strip()
-            back = str(raw.get("back") or "").strip()
-            if not front or not back:
-                continue
-
-            tags_value = raw.get("tags")
-            if isinstance(tags_value, list):
-                tags = [str(tag).strip() for tag in tags_value if str(tag).strip()]
-            elif isinstance(tags_value, str):
-                tags = [token for token in tags_value.replace(",", " ").split() if token]
+                raw_flashcards = _build_test_mode_flashcards(payload)
             else:
-                tags = []
+                raise HTTPException(status_code=400, detail=str(error))
 
-            model_type = str(raw.get("model_type") or payload.card_type).lower()
-            if model_type not in ("basic", "basic_reverse", "cloze"):
-                model_type = payload.card_type
-
-            card = {
-                "front": front,
-                "back": back,
-                "tags": tags,
-                "model_type": model_type,
-            }
-            notes = raw.get("notes")
-            if isinstance(notes, str) and notes.strip():
-                card["notes"] = notes
-            extra = raw.get("extra")
-            if isinstance(extra, str) and extra.strip():
-                card["extra"] = extra
-            generated_cards.append(card)
-
+        try:
+            generated_cards = _normalize_generated_flashcards(raw_flashcards, payload)
+        except FlashcardGenerationPlanError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {
             "flashcards": generated_cards,
             "count": len(generated_cards),

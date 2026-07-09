@@ -5,7 +5,7 @@ import type { DictationToggleIntent } from "@/hooks/useDictationStrategy"
 
 // ---------------------------------------------------------------------------
 // Mocks for the underlying primitives. The shared hook is pure orchestration —
-// real STT requires browser APIs (MediaRecorder, SpeechRecognition) — so we
+// real STT requires browser APIs (WebSocket/WebAudio, SpeechRecognition) — so we
 // replace each primitive with a controllable fake and assert the wiring.
 // ---------------------------------------------------------------------------
 
@@ -47,6 +47,7 @@ const serverDictationState = {
         speechToTextLanguage: string
         sttSettings: any
         onTranscript: (text: string) => void
+        onPartialTranscript: (text: string) => void
         onError: (err: unknown) => void
         onSuccess: () => void
       }
@@ -246,6 +247,22 @@ describe("useComposerVoiceChat", () => {
     expect(serverDictationState.capturedOptions).toBeDefined()
     serverDictationState.capturedOptions!.onTranscript("hello from server")
     expect(onTranscript).toHaveBeenCalledWith("hello from server")
+  })
+
+  it("keeps server dictation partials out of final transcript callback", () => {
+    const onTranscript = vi.fn()
+    const onPartialTranscript = vi.fn()
+    renderHook(() =>
+      useComposerVoiceChat(baseOptions({ onTranscript, onPartialTranscript }))
+    )
+
+    expect(serverDictationState.capturedOptions).toBeDefined()
+    serverDictationState.capturedOptions!.onPartialTranscript("draft")
+    serverDictationState.capturedOptions!.onTranscript("draft final")
+
+    expect(onPartialTranscript).toHaveBeenCalledWith("draft")
+    expect(onTranscript).toHaveBeenCalledTimes(1)
+    expect(onTranscript).toHaveBeenCalledWith("draft final")
   })
 
   it("emits browser-dictation transcripts via the streaming effect", () => {

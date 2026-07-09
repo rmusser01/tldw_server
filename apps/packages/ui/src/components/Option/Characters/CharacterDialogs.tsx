@@ -57,6 +57,12 @@ import type { TFunction } from "i18next"
 import type { NavigateFunction } from "react-router-dom"
 import type { CharacterChatIntentBlocker } from "./hooks/useCharacterCrud"
 import { buildCharacterChatPath } from "@/routes/route-paths"
+import { expressionRowsFromExtensions } from "./character-expression-images"
+
+const draftExpressionImages = (draft: Record<string, any>) =>
+  "expression_images" in draft
+    ? draft.expression_images
+    : expressionRowsFromExtensions(draft.extensions)
 
 // ---------------------------------------------------------------------------
 // Shared props type for the CharacterDialogs component
@@ -1322,6 +1328,7 @@ export const CharacterDialogs: React.FC<CharacterDialogsProps> = (props) => {
                   createForm.setFieldsValue({
                     ...draft,
                     tags: getCharacterVisibleTags(draft.tags),
+                    expression_images: draftExpressionImages(draft),
                     folder_id:
                       normalizeCharacterFolderId(draft.folder_id) ??
                       getCharacterFolderIdFromTags(draft.tags)
@@ -1539,6 +1546,7 @@ export const CharacterDialogs: React.FC<CharacterDialogsProps> = (props) => {
                   editForm.setFieldsValue({
                     ...draft,
                     tags: getCharacterVisibleTags(draft.tags),
+                    expression_images: draftExpressionImages(draft),
                     folder_id:
                       normalizeCharacterFolderId(draft.folder_id) ??
                       getCharacterFolderIdFromTags(draft.tags)

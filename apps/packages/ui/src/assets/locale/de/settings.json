@@ -1,5 +1,8 @@
 {
   "navigation": {
+    "setupRecovery": "Einrichtung & Wiederherstellung",
+    "preferencesWorkflow": "Einstellungen & Arbeitsablauf",
+    "dataAdmin": "Daten & Administration",
     "serverAndAuth": "Server & Authentifizierung",
     "knowledgeTools": "Wissenswerkzeuge",
     "workspace": "Arbeitsbereich",
@@ -12,6 +15,13 @@
     "dataManagement": "Datenverwaltung"
   },
   "healthNav": "Status",
+  "preferencesSettings": {
+    "navTitle": "Einstellungen",
+    "title": "Allgemeine Einstellungen"
+  },
+  "setupRecovery": {
+    "title": "Einrichtung & Wiederherstellung"
+  },
   "worldBooksNav": "Weltbücher",
   "chatDictionariesNav": "Chat‑Wörterbücher",
   "charactersNav": "Charaktere",
@@ -1672,7 +1682,11 @@
   },
   "quickIngestSettings": {
     "title": "Schnellimport",
-    "subtitle": "Konfigurieren Sie Standardwerte, Presets und Verhalten für den Schnellimport."
+    "subtitle": "Konfigurieren Sie Standardwerte, Presets und Verhalten für den Schnellimport.",
+    "ocrDefaults": {
+      "title": "OCR-Standards",
+      "description": "Wird von Aufnahmeabläufen verwendet, die Text aus Bildern oder gescannten Dokumenten extrahieren."
+    }
   },
   "acpPlaygroundNav": "ACP-Spielplatz",
   "skillsNav": "Fähigkeiten",
@@ -1681,5 +1695,38 @@
   },
   "dataManagement": {
     "navTitle": "Datenverwaltung"
+  },
+  "sidepanelSettings": {
+    "shortcuts": {
+      "title": "Einstellungsverknüpfungen",
+      "description": "Springen Sie zur vollständigen Einstellungsseite, die diese Änderung verwaltet.",
+      "setupRecovery": {
+        "label": "Einrichtung & Wiederherstellung",
+        "description": "Verbindung, Authentifizierung, Anbieterschlüssel, Modelle und Diagnosen."
+      },
+      "preferences": {
+        "label": "Einstellungen",
+        "description": "Sprache, Benachrichtigungen, Persona, Tutorials und Websuche."
+      },
+      "ui": {
+        "label": "UI-Anpassung",
+        "description": "Design, Verknüpfungen, Anzeigevorgaben und visuelles Verhalten."
+      },
+      "dataAdmin": {
+        "label": "Daten & Administration",
+        "description": "Datenverwaltung, Moderation, Evaluationen und Admin-Werkzeuge."
+      },
+      "serverAuth": {
+        "label": "Server & Authentifizierung",
+        "description": "Server-URL oder API-Schlüssel ändern."
+      },
+      "health": {
+        "label": "Vollständige Diagnose",
+        "description": "Detaillierte Server- und Subsystemprüfungen öffnen."
+      }
+    },
+    "local": {
+      "title": "Sidepanel-Verhalten"
+    }
   }
 }

@@ -17,6 +17,50 @@ and this project adheres to Some kind of Versioning
 ### Removed
 
 
+## [0.1.39] - 2026-07-09
+
+> Rollup coverage: this entry covers current `dev` work queued for `main`
+> after the `0.1.38` corrective release. It includes PRs #2577, #2658, #2678,
+> #2679, #2680, #2681, #2682, #2683, #2684, #2685, #2686, #2687, #2689,
+> #2691, and the release-review fixes in PR #2692.
+
+### Added
+
+- **Character Expressions And Emotes** — Added character expression image
+  editing, custom state support, emote directive parsing, streamed emote
+  metadata, sidepanel/chat rendering, history recovery, and onboarding nudges.
+- **Cooking Recipe Cards** — Added the cooking recipe MCP module/tool, recipe
+  card parsing, WebUI rendering, timer validation, and review hardening.
+- **TTS Voice Preview And Audio Protocol V1** — Added TTS settings voice
+  preview, strict audio stream protocol parsing, chat/transcription protocol
+  enforcement, server dictation protocol frames, and extension STT migration.
+- **Advanced Quiz Generation** — Added planned quiz generation schemas, exact
+  question-plan generation, mix controls, and plan validation hardening.
+
+### Changed
+
+- **Release Metadata** — Bumped package, FastAPI, README, and MkDocs metadata
+  to `0.1.39` for the next patch release from `dev` into `main`.
+- **Settings And Chat UX** — Split settings information architecture, hardened
+  settings navigation/recovery flows, added chat backdrop transparency controls,
+  and refreshed settings review follow-ups.
+
+### Fixed
+
+- **Release And CI Follow-Ups** — Stabilized chat cockpit smoke/real-server
+  checks, OpenAPI fingerprints, mobile cockpit targets, restore-control
+  actionability, and Docker MCP package inclusion for release gates.
+- **Frontend Review Hardening** — Fixed missing analysis-provider feedback,
+  expression-image validation visibility, recipe serving math, TTS preview
+  review feedback, locale coverage, nullable/primitive guards, and persona
+  settings write races.
+- **Backend Hardening** — Fixed PDF/EPUB ingest error handling, AuthNZ
+  PostgreSQL password history migration, notification payload timestamp
+  mutation, and audio protocol review issues.
+
+### Removed
+
+
 ## [0.1.38] - 2026-07-06
 
 > Corrective release: this patch follows the `0.1.37` release after publishing

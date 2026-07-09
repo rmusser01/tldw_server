@@ -5,8 +5,12 @@ import type { RouteDefinition } from "./route-registry"
 import { createSettingsRoute } from "./settings-route"
 
 const OptionSettings = createSettingsRoute(
-  () => import("~/components/Option/Settings/general-settings"),
-  "GeneralSettings"
+  () => import("~/components/Option/Settings/setup-recovery-settings"),
+  "SetupRecoverySettings"
+)
+const OptionPreferencesSettings = createSettingsRoute(
+  () => import("~/components/Option/Settings/preferences-settings"),
+  "PreferencesSettings"
 )
 const OptionModal = createSettingsRoute(
   () => import("~/components/Option/Models"),
@@ -108,6 +112,11 @@ export const optionSettingsRoutes: RouteDefinition[] = [
     kind: "options",
     path: "/settings",
     element: <OptionSettings />,
+  },
+  {
+    kind: "options",
+    path: "/settings/preferences",
+    element: <OptionPreferencesSettings />,
   },
   {
     kind: "options",

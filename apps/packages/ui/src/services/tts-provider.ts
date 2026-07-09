@@ -98,7 +98,7 @@ export type TtsProviderContext = {
 
 const SUPPORTED_TTS_PROVIDERS = new Set<TtsProviderKey>(TTS_PROVIDER_VALUES)
 
-const formatToMimeType = (format: string): string => {
+export const formatToMimeType = (format: string): string => {
   switch (format) {
     case "wav":
       return "audio/wav"

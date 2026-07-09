@@ -119,6 +119,7 @@ def test_describe_module_surface_groups_enabled_modules_by_risk():
     from tldw_Server_API.app.core.MCP_unified.module_surface import describe_module_surface
 
     modules = {
+        "cooking": {"enabled": True, "status": "healthy"},
         "media": {"enabled": True, "status": "healthy"},
         "filesystem": {"enabled": True, "status": "healthy"},
         "git": {"enabled": True, "status": "healthy"},
@@ -137,7 +138,10 @@ def test_describe_module_surface_groups_enabled_modules_by_risk():
     assert "local_process" in surface["tiers"]
     assert "external_network" in surface["tiers"]
     assert "unknown" not in surface["tiers"]
-    assert [module["id"] for module in surface["tiers"]["read_only"]["modules"]] == ["media"]
+    assert [module["id"] for module in surface["tiers"]["read_only"]["modules"]] == [
+        "cooking",
+        "media",
+    ]
     assert [module["id"] for module in surface["tiers"]["local_files"]["modules"]] == ["filesystem"]
     assert [module["id"] for module in surface["tiers"]["local_process"]["modules"]] == [
         "browser_cdp",
@@ -149,7 +153,7 @@ def test_describe_module_surface_groups_enabled_modules_by_risk():
         "web_research",
         "web_search",
     ]
-    assert surface["enabled_count"] == 8
+    assert surface["enabled_count"] == 9
 
 
 def test_describe_module_surface_reports_disabled_available_high_risk_modules():
@@ -198,6 +202,18 @@ def test_default_mcp_modules_yaml_disables_local_file_and_process_modules():
     assert modules["filesystem"]["enabled"] is False
     assert modules["run_command"]["enabled"] is False
     assert modules["codegraph"]["enabled"] is False
+
+
+def test_default_mcp_modules_yaml_includes_safe_cooking_module():
+    """Checked-in defaults should expose the read-only cooking module."""
+    import yaml
+    from pathlib import Path
+
+    data = yaml.safe_load(Path("tldw_Server_API/Config_Files/mcp_modules.yaml").read_text(encoding="utf-8"))
+    modules = {entry["id"]: entry for entry in data["modules"]}
+
+    assert modules["cooking"]["enabled"] is True  # nosec B101
+    assert modules["cooking"]["class"].endswith("cooking_module:CookingModule")  # nosec B101
 
 
 @pytest.mark.asyncio

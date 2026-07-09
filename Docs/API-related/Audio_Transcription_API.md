@@ -132,7 +132,7 @@ Transcribe audio into text.
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | file | file | Yes | The audio file to transcribe (default max 25MB; actual limit may vary by quota tier) |
-| model | string | No | Model to use. Supported examples: `whisper-1` (`whisper` alias), raw faster-whisper ids like `large-v3` or `distil-whisper-large-v3`; NVIDIA variants such as `parakeet`, `parakeet-tdt-0.6b-v3-onnx`, `parakeet-onnx` (legacy alias), `parakeet-mlx`; Canary via `canary`; Qwen via `qwen2audio` or `qwen2audio-*`; Qwen3-ASR via `qwen3-asr-1.7b`, `qwen3-asr-0.6b`, or `qwen3-asr`; VibeVoice via `vibevoice-asr` (default when omitted: `[STT-Settings].default_batch_transcription_model`, shipping default `parakeet-tdt-0.6b-v3-onnx`). |
+| model | string | No | Model to use. Supported examples: `whisper-1` (`whisper` alias), raw faster-whisper ids like `large-v3` or `distil-whisper-large-v3`; NVIDIA variants such as `parakeet`, `parakeet-tdt-0.6b-v3-onnx`, `parakeet-onnx` (legacy alias), `parakeet-mlx`; Canary via `canary`; Qwen via `qwen2audio` or `qwen2audio-*`; Qwen3-ASR via `qwen3-asr-1.7b`, `qwen3-asr-0.6b`, or `qwen3-asr`; VibeVoice via `vibevoice-asr` (default when omitted: `[STT-Settings].default_batch_transcription_model`, shipping default `auto`, which resolves to `parakeet-mlx` on macOS and `parakeet-tdt-0.6b-v3-onnx` on Linux/Windows). |
 | language | string | No | Language hint. ISO-639-1 codes are always accepted (for example `en`, `es`). BCP-47 locale hints (for example `en-US`, `pt-BR`) are accepted and normalized per provider: providers that require ISO-style hints receive base codes, providers with locale-capable routing keep locale hints. When omitted, Whisper models auto-detect the language and the detected code is included in the JSON response. |
 | prompt | string | No | Optional text to guide the model's style |
 | response_format | string | No | Output format: `json`, `text`, `srt`, `vtt`, `verbose_json` (default: `json`) |
@@ -303,8 +303,8 @@ Add the following section to your `config.txt`:
 ```ini
 [STT-Settings]
 # Explicit defaults when the client omits `model`
-default_batch_transcription_model = parakeet-tdt-0.6b-v3-onnx
-default_streaming_transcription_model = parakeet-tdt-0.6b-v3-onnx
+default_batch_transcription_model = auto
+default_streaming_transcription_model = auto
 
 # Nemo model variant (for Parakeet)
 nemo_model_variant = onnx
@@ -352,9 +352,9 @@ Additional streaming quota/env controls:
 - `AUDIO_STREAM_TTL_SECONDS`: TTL for Redis stream counters (default 120) to mitigate counter leaks on abrupt disconnects
 - `AUDIO_FAILOPEN_CAP_MINUTES`: Bounded fail-open allowance (minutes) per WebSocket connection when the quota backing store (DB/Redis) is unavailable. Defaults to `5.0`. Set to a positive float to change.
 
-STT vNext controls exposed through `get_stt_config()`:
-- `STT_WS_CONTROL_V2_ENABLED`: enable explicit WebSocket control v2 negotiation (`protocol_version=2`)
-- `STT_PAUSED_AUDIO_QUEUE_CAP_SECONDS`: paused-audio queue cap for v2 sessions (default `2.0`)
+Legacy STT control-helper settings exposed through `get_stt_config()`:
+- `STT_WS_CONTROL_V2_ENABLED`: legacy/internal control-v2 helper flag. The public `/api/v1/audio/stream/transcribe` WebSocket now uses strict audio protocol v1 and rejects `protocol_version` values other than `1`.
+- `STT_PAUSED_AUDIO_QUEUE_CAP_SECONDS`: paused-audio queue cap for legacy control-helper sessions (default `2.0`)
 - `STT_OVERFLOW_WARNING_INTERVAL_SECONDS`: rate limit for paused-queue overflow warnings (default `5.0`)
 - `STT_TRANSCRIPT_DIAGNOSTICS_ENABLED`: include deterministic final/full transcript diagnostics
 - `STT_DELETE_AUDIO_AFTER_SUCCESS` / `STT_DELETE_AUDIO_AFTER`: default raw-audio delete-after-success policy
@@ -396,15 +396,14 @@ failopen_cap_minutes = 5.0
   - Multi-user JWT: `Authorization: Bearer <JWT>` on the upgrade request, or first message `{ "type": "auth", "token": "<JWT>" }`.
   - Multi-user API Keys: `X-API-KEY` header supported; keys can be scoped to endpoints (must include `audio.stream.transcribe`) and optionally path-prefixed allowlists. Quotas may be enforced per key.
 - Protocol:
-  - Client may send config after auth: `{ "type": "config", "sample_rate": 16000, "language": "en", "model_variant": "standard|onnx|mlx", "protocol_version": 2 }`
-  - Send audio chunks: `{ "type": "audio", "data": "<base64 float32 little-endian mono>" }`
-  - Legacy finalize/reset/stop remain valid: `{ "type": "commit" }`, `{ "type": "reset" }`, `{ "type": "stop" }`
-  - WebSocket control v2 is opt-in. When the initial config includes `protocol_version: 2` and `STT_WS_CONTROL_V2_ENABLED=true`, clients may also send `{ "type": "control", "action": "pause|resume|commit|stop" }`.
-- If no client `model` is provided, the server uses `[STT-Settings].default_streaming_transcription_model` (default: `parakeet-tdt-0.6b-v3-onnx`; legacy alias `parakeet-onnx` remains accepted).
+  - First post-auth message must be config: `{ "type": "config", "protocol_version": 1, "mode": "dictate|captions", "audio_format": "pcm16", "sample_rate": 16000, "channels": 1, "language": "en", "model_variant": "standard|onnx|mlx" }`
+  - Send audio chunks as JSON PCM16 frames: `{ "type": "audio", "data": "<base64 pcm16 little-endian mono 16khz>" }`
+  - Raw binary WebSocket frames and Float32 wire audio are invalid in protocol v1.
+  - Finalize/reset/stop controls remain valid after config: `{ "type": "commit" }`, `{ "type": "reset" }`, `{ "type": "stop" }`
+- If no client `model` is provided, the server uses `[STT-Settings].default_streaming_transcription_model` (default: `auto`, resolving to `parakeet-mlx` on macOS and `parakeet-tdt-0.6b-v3-onnx` on Linux/Windows; legacy alias `parakeet-onnx` remains accepted).
 - Streaming model-init fallback to Whisper is opt-in via `[STT-Settings].streaming_fallback_to_whisper=true`; default is fail-fast.
 - Server messages include:
     - `{ "type": "status", "message": "Authenticated" }` or `"Authenticated (JWT)"`
-    - v2 lifecycle acknowledgements: `{ "type": "status", "state": "configured|paused|resumed|closing", "protocol_version": 2 }`
     - legacy reset acknowledgement: `{ "type": "status", "state": "reset" }`
     - `{ "type": "partial", "text": "...", "timestamp": ..., "is_final": false, "segment_id": 3, "segment_start": 12.5, "segment_end": 15.0 }`
     - `{ "type": "final", "text": "...", "timestamp": ..., "is_final": true, "segment_id": 3, "segment_start": 12.5, "segment_end": 14.0, "overlap": 0.5, "speaker_id": 1, "speaker_label": "SPEAKER_1" }` (speaker fields appear when diarization is enabled)
@@ -412,8 +411,7 @@ failopen_cap_minutes = 5.0
     - `{ "type": "insight", "stage": "live|final", "summary": [...], "action_items": [...], ... }` when live meeting notes are enabled
     - `{ "type": "diarization_summary", "speaker_map": [...], "audio_path": "...", "speakers": [...] }` after `commit` when diarization is enabled
     - `{ "type": "error", "message": "..." }`
-    - v2 control errors: `{ "type": "error", "error_type": "invalid_control", "message": "..." }`
-    - v2 paused-queue overflow warning: `{ "type": "warning", "warning_type": "audio_dropped_during_pause", "message": "..." }`
+    - protocol errors: `{ "type": "error", "code": "bad_request", "message": "..." }` followed by close with code `4400`
     - Quota exceeded (structured): `{ "type": "error", "error_type": "quota_exceeded", "quota": "daily_minutes" }` followed by close with code `4003`.
 
 #### Observability: Fail-open metrics
@@ -429,14 +427,13 @@ Use these to build dashboards/alerts on fail-open frequency and potential quota-
   - Metadata fields (`segment_id`, `segment_start`, `segment_end`, `chunk_start`, `chunk_end`, `overlap`) allow clients to align transcripts on a timeline or build diarization overlays.
   - WS final/full transcript frames follow the same effective redaction policy as REST responses. Partial frames are only allowed to bypass redaction when the effective policy explicitly permits unredacted partials.
 
-#### WS Protocol Versions
+#### WS Protocol Contract
 
-- `v1` is the default when `protocol_version` is omitted.
-- `v2` requires explicit `protocol_version: 2` in the initial config frame.
-- Control frames are rejected with `invalid_control` unless the session negotiated `v2`.
-- `pause` buffers inbound audio up to the configured cap; overflow uses `drop_oldest` semantics and emits the rate-limited `audio_dropped_during_pause` warning.
-- `resume` drains buffered audio in FIFO order.
-- `stop` drops any still-paused queued audio, emits `closing`, and closes the socket after already-processed audio is finalized.
+- `protocol_version` is required and must be `1`.
+- `mode` must be `dictate` or `captions` for this endpoint.
+- `audio_format` must be `pcm16`, `sample_rate` must be `16000`, and `channels` must be `1`.
+- Audio is normalized server-side to Float32 before STT, VAD, quota duration accounting, or downstream transcript handling.
+- Unsupported protocol versions, omitted strict fields, raw binary audio, and malformed base64 audio are rejected with close code `4400`.
 
 Helper endpoints
 - `GET /api/v1/audio/stream/status` → returns availability and supported models/variants and features

@@ -52,4 +52,31 @@ describe("ResultsListItem status labels", () => {
     expect(screen.getByText("Not submitted")).toBeTruthy()
     expect(screen.queryByText("Failed")).toBeNull()
   })
+
+  it("shows analysis warnings on successful ingest rows", () => {
+    const item: ResultItemWithMediaId = {
+      id: "ingested-1",
+      status: "ok",
+      outcome: "ingested",
+      type: "html",
+      url: "https://example.com/article",
+      mediaId: "42",
+      warning: "Analysis skipped: choose an analysis provider, then retry analysis."
+    } as ResultItemWithMediaId
+
+    render(
+      <ResultsListItem
+        item={item}
+        processOnly={false}
+        onDownloadJson={vi.fn()}
+        onOpenMedia={vi.fn()}
+        onDiscussInChat={vi.fn()}
+        t={t as any}
+      />
+    )
+
+    expect(
+      screen.getByText("Analysis skipped: choose an analysis provider, then retry analysis.")
+    ).toBeTruthy()
+  })
 })

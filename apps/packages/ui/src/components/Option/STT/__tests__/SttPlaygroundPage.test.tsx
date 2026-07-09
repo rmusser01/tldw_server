@@ -233,17 +233,17 @@ describe("SttPlaygroundPage", () => {
     expect(
       await screen.findByRole("status", { name: "STT readiness" })
     ).toHaveTextContent("STT models: Ready")
-    expect(getTranscriptionModelHealthMock).toHaveBeenCalledWith("whisper-1")
+    expect(getTranscriptionModelHealthMock).toHaveBeenCalledWith("distil-v3")
     expect(comparisonPanelProps?.availableModelOptions).toEqual([
       expect.objectContaining({
         id: "distil-v3",
         label: "Distil v3",
-        availability: "unknown"
+        availability: "ready"
       }),
       expect.objectContaining({
         id: "whisper-1",
         label: "Whisper 1",
-        availability: "ready"
+        availability: "unknown"
       })
     ])
   })

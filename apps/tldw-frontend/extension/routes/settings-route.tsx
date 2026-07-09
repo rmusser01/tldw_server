@@ -8,7 +8,9 @@ type SettingsRouteProps = {
 
 export const SettingsRoute = ({ children }: SettingsRouteProps) => (
   <RouteErrorBoundary routeId="settings" routeLabel="Settings">
-    <SettingsLayout>{children}</SettingsLayout>
+    <main>
+      <SettingsLayout>{children}</SettingsLayout>
+    </main>
   </RouteErrorBoundary>
 )
 

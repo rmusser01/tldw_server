@@ -1,25 +1,8 @@
 import { render, screen } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 
 import { GeneralSettings } from "../general-settings"
-
-const setStorageMock = vi.fn()
-const setSettingMock = vi.fn()
-const restartOnboardingMock = vi.fn()
-const setUserPersonaMock = vi.fn()
-const resetTutorialProgressMock = vi.fn()
-const mutateMock = vi.fn()
-const storageOverrides = new Map<string, unknown>()
-
-const expectDesignSystemAlert = (text: string | RegExp) => {
-  const node =
-    typeof text === "string"
-      ? screen.getByText(text, { exact: false })
-      : screen.getByText(text)
-
-  expect(node.closest('[data-ds-component="Alert"]')).toBeInTheDocument()
-}
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -34,14 +17,7 @@ vi.mock("react-i18next", () => ({
 }))
 
 vi.mock("@plasmohq/storage/hook", () => ({
-  useStorage: (key: string, defaultValue: unknown) => [
-    storageOverrides.has(key)
-      ? storageOverrides.get(key)
-      : key === "settingsIntroDismissed"
-        ? true
-        : defaultValue,
-    setStorageMock
-  ]
+  useStorage: (_key: string, defaultValue: unknown) => [defaultValue, vi.fn()]
 }))
 
 vi.mock("@/hooks/useAntdNotification", () => ({
@@ -65,19 +41,17 @@ vi.mock("@/hooks/useServerOnline", () => ({
 
 vi.mock("@/hooks/useConnectionState", () => ({
   useConnectionState: () => ({
-    serverUrl: "http://127.0.0.1:8000",
     userPersona: null
   }),
   useConnectionActions: () => ({
-    restartOnboarding: restartOnboardingMock,
-    setUserPersona: setUserPersonaMock
+    setUserPersona: vi.fn()
   })
 }))
 
 vi.mock("@/store/tutorials", () => ({
   useTutorialCompletion: () => ({
     completedTutorials: [],
-    resetProgress: resetTutorialProgressMock
+    resetProgress: vi.fn()
   })
 }))
 
@@ -86,40 +60,7 @@ vi.mock("@/utils/browser-runtime", () => ({
 }))
 
 vi.mock("@/hooks/useSetting", () => ({
-  useSetting: () => [[], setSettingMock]
-}))
-
-vi.mock("@/context/FontSizeProvider", () => ({
-  useFontSize: () => ({
-    decrease: vi.fn(),
-    increase: vi.fn(),
-    scale: 1
-  })
-}))
-
-vi.mock("@/hooks/useMessageOption", () => ({
-  useMessageOption: () => ({
-    clearChat: vi.fn()
-  })
-}))
-
-vi.mock("@tanstack/react-query", () => ({
-  useMutation: () => ({
-    isPending: false,
-    mutate: mutateMock
-  }),
-  useQueryClient: () => ({
-    invalidateQueries: vi.fn()
-  })
-}))
-
-vi.mock("@/utils/is-private-mode", () => ({
-  isFireFox: false,
-  isFireFoxPrivateMode: false
-}))
-
-vi.mock("@/components/Common/Settings/ThemePicker", () => ({
-  ThemePicker: () => <div>Theme picker</div>
+  useSetting: () => [[], vi.fn()]
 }))
 
 vi.mock("../search-mode", () => ({
@@ -127,49 +68,14 @@ vi.mock("../search-mode", () => ({
 }))
 
 describe("GeneralSettings", () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    storageOverrides.clear()
-  })
-
-  it("keeps routine preferences separate from destructive data actions", () => {
+  it("keeps the legacy export pointing at preferences", () => {
     render(
       <MemoryRouter>
         <GeneralSettings />
       </MemoryRouter>
     )
 
-    expect(screen.getByText("Connection")).toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: /reset all/i })).not.toBeInTheDocument()
-  })
-
-  it("renders extension promotion and disabled OCR assets guidance through design-system alerts", () => {
-    render(
-      <MemoryRouter>
-        <GeneralSettings />
-      </MemoryRouter>
-    )
-
-    expectDesignSystemAlert("Browser Extension Available")
-    expectDesignSystemAlert("Get the tldw browser extension")
-    expect(screen.getByRole("link", { name: "Learn More" })).toHaveAttribute(
-      "href",
-      "https://github.com/rmusser01/tldw_server"
-    )
-    expectDesignSystemAlert(
-      "Enable to download OCR language assets for image text recognition"
-    )
-  })
-
-  it("renders enabled OCR assets guidance through the design-system alert", () => {
-    storageOverrides.set("enableOcrAssets", true)
-
-    render(
-      <MemoryRouter>
-        <GeneralSettings />
-      </MemoryRouter>
-    )
-
-    expectDesignSystemAlert("OCR assets enabled and ready")
+    expect(screen.getByText("General preferences")).toBeInTheDocument()
+    expect(screen.queryByText("Connection")).not.toBeInTheDocument()
   })
 })

@@ -16,7 +16,6 @@
 ####################
 
 import asyncio
-import base64
 import copy
 import importlib
 import json
@@ -42,6 +41,14 @@ from tldw_Server_API.app.core.Streaming.streams import WebSocketStream
 from tldw_Server_API.app.core.testing import is_truthy
 
 from .Audio_Streaming_Parakeet import AudioBuffer, StreamingConfig
+from .audio_stream_protocol import (
+    AUDIO_TRANSCRIBE_ENDPOINT,
+    AudioProtocolConfig,
+    AudioProtocolError,
+    audio_protocol_error_payload,
+    decode_audio_frame,
+    validate_audio_stream_config,
+)
 from .ws_control_protocol import WSControlProtocolConfig, WSControlSession
 
 # Import existing implementations
@@ -2614,7 +2621,7 @@ async def handle_unified_websocket(
     """
     Handle a WebSocket connection to perform unified real-time transcription across Parakeet, Canary, Whisper, and Qwen3-ASR models.
 
-    This handler waits for an optional client configuration message, initializes a model-specific transcriber (with runtime fallback logic), and processes incoming base64-encoded audio messages into partial and final transcription results sent to the client as JSON frames. It optionally integrates streaming diarization and live insights, emits structured status/warning/error frames, supports a commit/reset/stop control messages, and ensures proper cleanup of transcriber, diarizer, and insights resources on exit.
+    This handler requires a strict v1 client configuration message, initializes a model-specific transcriber (with runtime fallback logic), and processes incoming JSON PCM16 audio messages into partial and final transcription results sent to the client as JSON frames. It optionally integrates streaming diarization and live insights, emits structured status/warning/error frames, supports commit/reset/stop control messages, and ensures proper cleanup of transcriber, diarizer, and insights resources on exit.
 
     Parameters:
         websocket: The WebSocket connection object used to receive client messages and send JSON frames.
@@ -2672,168 +2679,186 @@ async def handle_unified_websocket(
         # Always wait for configuration message from client
         config_received = False
         config_payload: dict[str, Any] = {}
+        protocol_config: AudioProtocolConfig | None = None
         try:
-            logger.info("Waiting for configuration message from client...")
+            logger.info("Waiting for required v1 configuration message from client...")
             config_message = await asyncio.wait_for(websocket.receive_text(), timeout=15.0)  # Increased timeout
             # Do not log raw payload contents (may include base64 audio); log metadata only
             logger.info(f"Received message (length={len(config_message)})")
             config_data = json.loads(config_message)
-            if isinstance(config_data, dict):
-                config_payload = config_data
+            if not isinstance(config_data, dict):
+                raise AudioProtocolError("bad_request", "First post-auth frame must be a JSON object")
+            config_payload = config_data
             logger.info(f"Parsed config data type: {config_data.get('type')}")
+            protocol_config = validate_audio_stream_config(config_data, AUDIO_TRANSCRIBE_ENDPOINT)
 
-            if config_data.get("type") == "config":
-                # Update configuration
-                old_variant = config.model_variant
-                raw_model = config_data.get("model", "parakeet")
-                variant_override = config_data.get("variant") or config_data.get("model_variant")
-                new_model, new_variant = normalize_model_and_variant(
-                    raw_model,
-                    current_model=config.model,
-                    current_variant=config.model_variant,
-                    variant_override=variant_override,
+            # Update configuration
+            old_variant = config.model_variant
+            raw_model = config_data.get("model", "parakeet")
+            variant_override = config_data.get("variant") or config_data.get("model_variant")
+            new_model, new_variant = normalize_model_and_variant(
+                raw_model,
+                current_model=config.model,
+                current_variant=config.model_variant,
+                variant_override=variant_override,
+            )
+            config.model = new_model
+            config.model_variant = new_variant
+            config.language = config_data.get("language", "en")
+            config.sample_rate = protocol_config.sample_rate
+            config.auto_detect_language = config_data.get("auto_detect_language", False)
+            config.chunk_duration = config_data.get("chunk_duration", 2.0)
+            config.enable_partial = config_data.get("enable_partial", True)
+            raw_vad = config_data.get("enable_vad", config.enable_vad)
+            if isinstance(raw_vad, str):
+                raw_vad = is_truthy(raw_vad)
+            elif raw_vad is not None and not isinstance(raw_vad, (bool, int)):
+                logger.debug(
+                    f"Unexpected type for enable_vad in config: {type(raw_vad).__name__}; "
+                    f"coercing to bool(raw_vad)={bool(raw_vad)}"
                 )
-                config.model = new_model
-                config.model_variant = new_variant
-                config.language = config_data.get("language", "en")
-                config.sample_rate = config_data.get("sample_rate", 16000)
-                config.auto_detect_language = config_data.get("auto_detect_language", False)
-                config.chunk_duration = config_data.get("chunk_duration", 2.0)
-                config.enable_partial = config_data.get("enable_partial", True)
-                raw_vad = config_data.get("enable_vad", config.enable_vad)
-                if isinstance(raw_vad, str):
-                    raw_vad = is_truthy(raw_vad)
-                elif raw_vad is not None and not isinstance(raw_vad, (bool, int)):
-                    logger.debug(
-                        f"Unexpected type for enable_vad in config: {type(raw_vad).__name__}; "
-                        f"coercing to bool(raw_vad)={bool(raw_vad)}"
-                    )
-                config.enable_vad = bool(raw_vad)
-                config.vad_threshold = _clamp_float(
-                    config_data.get("vad_threshold", config.vad_threshold),
-                    default=config.vad_threshold,
-                    min_value=0.1,
-                    max_value=0.9,
+            config.enable_vad = bool(raw_vad)
+            config.vad_threshold = _clamp_float(
+                config_data.get("vad_threshold", config.vad_threshold),
+                default=config.vad_threshold,
+                min_value=0.1,
+                max_value=0.9,
+            )
+            config.vad_min_silence_ms = _clamp_int(
+                config_data.get("min_silence_ms", config.vad_min_silence_ms),
+                default=config.vad_min_silence_ms,
+                min_value=150,
+                max_value=1500,
+            )
+            config.vad_turn_stop_secs = _clamp_float(
+                config_data.get("turn_stop_secs", config.vad_turn_stop_secs),
+                default=config.vad_turn_stop_secs,
+                min_value=0.1,
+                max_value=0.75,
+            )
+            if "min_utterance_secs" in config_data:
+                config.vad_min_utterance_secs = _clamp_float(
+                    config_data.get("min_utterance_secs", config.vad_min_utterance_secs),
+                    default=config.vad_min_utterance_secs,
+                    min_value=0.25,
+                    max_value=3.0,
                 )
-                config.vad_min_silence_ms = _clamp_int(
-                    config_data.get("min_silence_ms", config.vad_min_silence_ms),
-                    default=config.vad_min_silence_ms,
-                    min_value=150,
-                    max_value=1500,
-                )
-                config.vad_turn_stop_secs = _clamp_float(
-                    config_data.get("turn_stop_secs", config.vad_turn_stop_secs),
-                    default=config.vad_turn_stop_secs,
-                    min_value=0.1,
-                    max_value=0.75,
-                )
-                if "min_utterance_secs" in config_data:
-                    config.vad_min_utterance_secs = _clamp_float(
-                        config_data.get("min_utterance_secs", config.vad_min_utterance_secs),
-                        default=config.vad_min_utterance_secs,
-                        min_value=0.25,
-                        max_value=3.0,
-                    )
-                # High-level task hint used by Whisper and Canary; defaults to
-                # "transcribe" when not provided.
+            # High-level task hint used by Whisper and Canary; defaults to
+            # "transcribe" when not provided.
+            try:
+                raw_task = str(config_data.get("task", config.task or "transcribe")).strip().lower()
+            except _AUDIO_UNIFIED_NONCRITICAL_EXCEPTIONS:
+                raw_task = "transcribe"
+            config.task = raw_task if raw_task in {"transcribe", "translate"} else "transcribe"
+            config.parakeet_use_rnnt_streamer = config_data.get("parakeet_use_rnnt_streamer", config.parakeet_use_rnnt_streamer)
+            config.parakeet_rnnt_model_name = config_data.get("parakeet_rnnt_model_name", config.parakeet_rnnt_model_name)
+            config.parakeet_rnnt_device = config_data.get("parakeet_rnnt_device", config.parakeet_rnnt_device)
+            config.parakeet_rnnt_left_context_s = float(config_data.get("parakeet_rnnt_left_context_s", config.parakeet_rnnt_left_context_s))
+            config.parakeet_rnnt_max_buffer_s = float(config_data.get("parakeet_rnnt_max_buffer_s", config.parakeet_rnnt_max_buffer_s))
+            # Optional partial emission tuning
+            try:
+                if "min_partial_duration" in config_data:
+                    config.min_partial_duration = max(0.0, float(config_data.get("min_partial_duration")))
+            except (TypeError, ValueError):
+                logger.warning("Invalid min_partial_duration in config; keeping previous value")
+
+            # Whisper-specific configuration
+            if config.model.lower() == "whisper":
+                config.whisper_model_size = config_data.get("whisper_model_size", "distil-large-v3")
+                config.beam_size = config_data.get("beam_size", 5)
+                config.vad_filter = config_data.get("vad_filter", False)
+                config.task = config_data.get("task", "transcribe")
+
+            insights_payload = config_data.get("insights") or config_data.get("meeting_insights")
+            if insights_payload is not None:
                 try:
-                    raw_task = str(config_data.get("task", config.task or "transcribe")).strip().lower()
-                except _AUDIO_UNIFIED_NONCRITICAL_EXCEPTIONS:
-                    raw_task = "transcribe"
-                config.task = raw_task if raw_task in {"transcribe", "translate"} else "transcribe"
-                config.parakeet_use_rnnt_streamer = config_data.get("parakeet_use_rnnt_streamer", config.parakeet_use_rnnt_streamer)
-                config.parakeet_rnnt_model_name = config_data.get("parakeet_rnnt_model_name", config.parakeet_rnnt_model_name)
-                config.parakeet_rnnt_device = config_data.get("parakeet_rnnt_device", config.parakeet_rnnt_device)
-                config.parakeet_rnnt_left_context_s = float(config_data.get("parakeet_rnnt_left_context_s", config.parakeet_rnnt_left_context_s))
-                config.parakeet_rnnt_max_buffer_s = float(config_data.get("parakeet_rnnt_max_buffer_s", config.parakeet_rnnt_max_buffer_s))
-                # Optional partial emission tuning
-                try:
-                    if "min_partial_duration" in config_data:
-                        config.min_partial_duration = max(0.0, float(config_data.get("min_partial_duration")))
-                except (TypeError, ValueError):
-                    logger.warning("Invalid min_partial_duration in config; keeping previous value")
-
-                # Whisper-specific configuration
-                if config.model.lower() == "whisper":
-                    config.whisper_model_size = config_data.get("whisper_model_size", "distil-large-v3")
-                    config.beam_size = config_data.get("beam_size", 5)
-                    config.vad_filter = config_data.get("vad_filter", False)
-                    config.task = config_data.get("task", "transcribe")
-
-                insights_payload = config_data.get("insights") or config_data.get("meeting_insights")
-                if insights_payload is not None:
-                    try:
-                        insights_settings = LiveInsightSettings.from_client_payload(insights_payload)
-                    except _AUDIO_UNIFIED_NONCRITICAL_EXCEPTIONS as insight_err:
-                        logger.error(f"Failed to parse live insights config: {insight_err}")
-                        insights_settings = LiveInsightSettings(enabled=False)
-                elif config_data.get("insights_enabled") is True and insights_settings is None:
-                    insights_settings = LiveInsightSettings(enabled=True)
-                elif config_data.get("insights_enabled") is False:
+                    insights_settings = LiveInsightSettings.from_client_payload(insights_payload)
+                except _AUDIO_UNIFIED_NONCRITICAL_EXCEPTIONS as insight_err:
+                    logger.error(f"Failed to parse live insights config: {insight_err}")
                     insights_settings = LiveInsightSettings(enabled=False)
+            elif config_data.get("insights_enabled") is True and insights_settings is None:
+                insights_settings = LiveInsightSettings(enabled=True)
+            elif config_data.get("insights_enabled") is False:
+                insights_settings = LiveInsightSettings(enabled=False)
 
-                diarization_payload = config_data.get("diarization")
-                if diarization_payload is not None:
-                    enabled_field = diarization_payload.get("enabled")
-                    config.diarization_enabled = bool(enabled_field) if enabled_field is not None else True
-                    if "store_audio" in diarization_payload:
-                        config.diarization_store_audio = bool(diarization_payload.get("store_audio"))
-                    storage_dir = diarization_payload.get("storage_dir")
-                    if storage_dir:
-                        safe_dir = _safe_temp_subdir(storage_dir)
-                        if safe_dir:
-                            config.diarization_storage_dir = str(safe_dir)
-                        else:
-                            logger.warning("Ignoring diarization.storage_dir from client; using temp directory only")
-                            config.diarization_storage_dir = None
-                    if "num_speakers" in diarization_payload:
-                        try:
-                            config.diarization_num_speakers = int(diarization_payload.get("num_speakers") or 0) or None
-                        except (TypeError, ValueError):
-                            logger.warning("Invalid diarization.num_speakers value; ignoring.")
-                elif "diarization_enabled" in config_data:
-                    config.diarization_enabled = bool(config_data.get("diarization_enabled"))
-                if "diarization_store_audio" in config_data:
-                    config.diarization_store_audio = bool(config_data.get("diarization_store_audio"))
+            diarization_payload = config_data.get("diarization")
+            if diarization_payload is not None:
+                enabled_field = diarization_payload.get("enabled")
+                config.diarization_enabled = bool(enabled_field) if enabled_field is not None else True
+                if "store_audio" in diarization_payload:
+                    config.diarization_store_audio = bool(diarization_payload.get("store_audio"))
+                storage_dir = diarization_payload.get("storage_dir")
+                if storage_dir:
+                    safe_dir = _safe_temp_subdir(storage_dir)
+                    if safe_dir:
+                        config.diarization_storage_dir = str(safe_dir)
+                    else:
+                        logger.warning("Ignoring diarization.storage_dir from client; using temp directory only")
+                        config.diarization_storage_dir = None
+                if "num_speakers" in diarization_payload:
+                    try:
+                        config.diarization_num_speakers = int(diarization_payload.get("num_speakers") or 0) or None
+                    except (TypeError, ValueError):
+                        logger.warning("Invalid diarization.num_speakers value; ignoring.")
+            elif "diarization_enabled" in config_data:
+                config.diarization_enabled = bool(config_data.get("diarization_enabled"))
+            if "diarization_store_audio" in config_data:
+                config.diarization_store_audio = bool(config_data.get("diarization_store_audio"))
 
-                logger.info(f"Config updated: model={config.model}, variant changed from {old_variant} to {config.model_variant}, "
-                           f"sample_rate={config.sample_rate}, chunk_duration={config.chunk_duration}")
-                config_received = True
+            logger.info(f"Config updated: model={config.model}, variant changed from {old_variant} to {config.model_variant}, "
+                       f"sample_rate={config.sample_rate}, chunk_duration={config.chunk_duration}")
+            config_received = True
 
-                # Prepare acknowledgment (do not send to keep protocol noise-free for tests)
-                status_msg = {
-                    "type": "status",
-                    "state": "configured",
-                    "model": config.model
-                }
+            # Prepare acknowledgment (do not send to keep protocol noise-free for tests)
+            status_msg = {
+                "type": "status",
+                "state": "configured",
+                "model": config.model
+            }
 
-                if config.model.lower() == "parakeet":
-                    status_msg["variant"] = config.model_variant
-                elif config.model.lower() == "canary":
-                    status_msg["language"] = config.language
-                elif config.model.lower() == "whisper":
-                    status_msg["whisper_model"] = config.whisper_model_size
-                    status_msg["task"] = config.task
-                    status_msg["language"] = config.language if config.language else "auto"
+            if config.model.lower() == "parakeet":
+                status_msg["variant"] = config.model_variant
+            elif config.model.lower() == "canary":
+                status_msg["language"] = config.language
+            elif config.model.lower() == "whisper":
+                status_msg["whisper_model"] = config.whisper_model_size
+                status_msg["task"] = config.task
+                status_msg["language"] = config.language if config.language else "auto"
 
-                # Intentionally not sending status frame; log only
-                logger.info(f"Config acknowledged (not sent to client): {status_msg}")
-            else:
-                # Do not log full payload to avoid dumping base64 audio
-                msg_type = config_data.get('type')
-                data_len = len(config_data.get('data', '')) if isinstance(config_data.get('data'), str) else 0
-                logger.warning(f"Received non-config message type: {msg_type} (payload length ~{data_len})")
+            # Intentionally not sending status frame; log only
+            logger.info(f"Config acknowledged (not sent to client): {status_msg}")
+        except AudioProtocolError as exc:
+            await stream.send_json(audio_protocol_error_payload(exc))
+            with contextlib.suppress(_AUDIO_UNIFIED_NONCRITICAL_EXCEPTIONS):
+                await websocket.close(code=exc.close_code)
+            return
         except asyncio.TimeoutError:
-            logger.warning(f"Config message timeout after 15s. Using default configuration: model={config.model}, variant={config.model_variant}")
+            protocol_error = AudioProtocolError("bad_request", "config frame required")
+            await stream.send_json(audio_protocol_error_payload(protocol_error))
+            with contextlib.suppress(_AUDIO_UNIFIED_NONCRITICAL_EXCEPTIONS):
+                await websocket.close(code=protocol_error.close_code)
+            return
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse config message as JSON: {e}")
-            logger.warning("Using default configuration due to JSON parse error")
+            protocol_error = AudioProtocolError("bad_request", "config frame required")
+            await stream.send_json(audio_protocol_error_payload(protocol_error))
+            with contextlib.suppress(_AUDIO_UNIFIED_NONCRITICAL_EXCEPTIONS):
+                await websocket.close(code=protocol_error.close_code)
+            return
         except _AUDIO_UNIFIED_NONCRITICAL_EXCEPTIONS as e:
             logger.exception("Unexpected error receiving config message: {}", e)
-            logger.warning("Using default configuration due to error")
+            protocol_error = AudioProtocolError("bad_request", "config frame required")
+            await stream.send_json(audio_protocol_error_payload(protocol_error))
+            with contextlib.suppress(_AUDIO_UNIFIED_NONCRITICAL_EXCEPTIONS):
+                await websocket.close(code=protocol_error.close_code)
+            return
 
-        if not config_received:
-            logger.warning(f"No valid config received. Proceeding with: model={config.model}, variant={config.model_variant}")
+        if not config_received or protocol_config is None:
+            protocol_error = AudioProtocolError("bad_request", "config frame required")
+            await stream.send_json(audio_protocol_error_payload(protocol_error))
+            with contextlib.suppress(_AUDIO_UNIFIED_NONCRITICAL_EXCEPTIONS):
+                await websocket.close(code=protocol_error.close_code)
+            return
 
         if on_stream_config_resolved is not None:
             try:
@@ -3263,16 +3288,23 @@ async def handle_unified_websocket(
                 data = json.loads(message)
 
                 if data.get("type") == "audio":
-                    # Decode audio data
-                    audio_base64 = data.get("data", "")
-                    audio_bytes = base64.b64decode(audio_base64)
+                    try:
+                        decoded = decode_audio_frame(data, protocol_config)
+                    except AudioProtocolError as exc:
+                        await stream.send_json(audio_protocol_error_payload(exc))
+                        with contextlib.suppress(_AUDIO_UNIFIED_NONCRITICAL_EXCEPTIONS):
+                            await websocket.close(code=exc.close_code)
+                        return
+                    audio_bytes = decoded.float32_bytes
+                    audio_seconds = decoded.seconds
+                    audio_sample_rate = decoded.sample_rate
                     # Optional heartbeat to refresh stream TTL when using Redis counters
                     if on_heartbeat is not None:
                         with contextlib.suppress(_AUDIO_UNIFIED_NONCRITICAL_EXCEPTIONS):
                             await on_heartbeat()
 
                     if control_session.state == "paused":
-                        buffered_seconds = _estimate_audio_seconds(audio_bytes, int(config.sample_rate or 16000))
+                        buffered_seconds = audio_seconds
                         paused_audio_chunks.append((audio_bytes, buffered_seconds))
                         paused_audio_decision = control_session.buffer_paused_audio(
                             buffered_seconds,
@@ -3286,8 +3318,7 @@ async def handle_unified_websocket(
 
                     # Bill usage seconds only for audio that will be processed (not paused/dropped)
                     if on_audio_seconds is not None:
-                        seconds = _estimate_audio_seconds(audio_bytes, int(config.sample_rate or 16000))
-                        await on_audio_seconds(seconds, int(config.sample_rate or 16000))
+                        await on_audio_seconds(audio_seconds, audio_sample_rate)
 
                     auto_commit_triggered = False
                     if turn_detector:
@@ -3352,6 +3383,9 @@ async def handle_unified_websocket(
 
             except json.JSONDecodeError:
                 await stream.error("validation_error", "Invalid JSON message")
+                with contextlib.suppress(_AUDIO_UNIFIED_NONCRITICAL_EXCEPTIONS):
+                    await websocket.close(code=4400)
+                return
             except QuotaExceeded as qe:
                 # Emit a single standardized error and close via the stream abstraction.
                 _quota = getattr(qe, "quota", "daily_minutes")

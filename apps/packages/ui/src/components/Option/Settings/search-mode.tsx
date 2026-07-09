@@ -37,25 +37,35 @@ export const SearchModeSettings = () => {
     }
   })
 
-  if (status === "pending" || status === "error") {
-    return <Skeleton active />
-  }
+  const sectionHeader = (
+    <div className="mb-5">
+      <div className="flex items-center gap-2">
+        <h2 className="text-base font-semibold leading-7 text-text">
+          {t("generalSettings.webSearch.heading")}
+        </h2>
+        {form.isDirty() && (
+          <span className="text-xs px-2 py-0.5 rounded bg-warn/10 text-warn">
+            {t("generalSettings.webSearch.unsavedChanges", "Unsaved changes")}
+          </span>
+        )}
+      </div>
+      <div className="border-b border-border mt-3"></div>
+    </div>
+  )
 
   return (
     <div>
-      <div className="mb-5">
-        <div className="flex items-center gap-2">
-          <h2 className="text-base font-semibold leading-7 text-text">
-            {t("generalSettings.webSearch.heading")}
-          </h2>
-          {form.isDirty() && (
-            <span className="text-xs px-2 py-0.5 rounded bg-warn/10 text-warn">
-              {t("generalSettings.webSearch.unsavedChanges", "Unsaved changes")}
-            </span>
+      {sectionHeader}
+      {status === "pending" && <Skeleton active />}
+      {status === "error" && (
+        <p className="rounded-md border border-border bg-surface p-3 text-sm text-text-muted">
+          {t(
+            "generalSettings.webSearch.unavailable",
+            "Web search settings are unavailable until the server is reachable."
           )}
-        </div>
-        <div className="border-b border-border mt-3"></div>
-      </div>
+        </p>
+      )}
+      {status === "success" && (
       <form
         onSubmit={form.onSubmit(async (values) => {
           await setSearchSettings(values)
@@ -68,6 +78,7 @@ export const SearchModeSettings = () => {
           </span>
           <div>
             <Select
+              aria-label={t("generalSettings.webSearch.provider.label", "Web Search Provider")}
               placeholder={t("generalSettings.webSearch.provider.placeholder")}
               showSearch
               className="w-full mt-4 sm:mt-0 sm:w-[200px]"
@@ -88,6 +99,7 @@ export const SearchModeSettings = () => {
               </span>
               <div>
                 <Input
+                  aria-label={t("generalSettings.webSearch.searxng.url.label", "SearXNG URL")}
                   placeholder="https://searxng.example.com"
                   className="w-full mt-4 sm:mt-0 sm:w-[200px]"
                   required
@@ -105,6 +117,7 @@ export const SearchModeSettings = () => {
               </span>
               <div>
                 <Select
+                  aria-label={t("generalSettings.webSearch.googleDomain.label", "Google Domain")}
                   showSearch
                   className="w-full mt-4 sm:mt-0 sm:w-[200px]"
                   options={ALL_GOOGLE_DOMAINS.map((e) => ({
@@ -131,6 +144,7 @@ export const SearchModeSettings = () => {
               </span>
               <div>
                 <Input.Password
+                  aria-label={t("generalSettings.webSearch.braveApi.label", "Brave API Key")}
                   placeholder={t(
                     "generalSettings.webSearch.braveApi.placeholder"
                   )}
@@ -150,6 +164,7 @@ export const SearchModeSettings = () => {
               </span>
               <div>
                 <Input.Password
+                  aria-label={t("generalSettings.webSearch.tavilyApi.label", "Tavily API Key")}
                   placeholder={t(
                     "generalSettings.webSearch.tavilyApi.placeholder"
                   )}
@@ -170,6 +185,7 @@ export const SearchModeSettings = () => {
               </span>
               <div>
                 <Input.Password
+                  aria-label={t("generalSettings.webSearch.exa.label", "Exa API Key")}
                   placeholder={t("generalSettings.webSearch.exa.placeholder")}
                   required
                   className="w-full mt-4 sm:mt-0 sm:w-[200px]"
@@ -188,6 +204,7 @@ export const SearchModeSettings = () => {
               </span>
               <div>
                 <Input.Password
+                  aria-label={t("generalSettings.webSearch.firecrawlAPIKey.label", "Firecrawl API Key")}
                   placeholder={t(
                     "generalSettings.webSearch.firecrawlAPIKey.placeholder"
                   )}
@@ -207,7 +224,7 @@ export const SearchModeSettings = () => {
           <div>
             <Switch
               className="mt-4 sm:mt-0"
-              aria-label={t("generalSettings.webSearch.searchMode.label")}
+              aria-label={t("generalSettings.webSearch.searchMode.label", "Search Mode")}
               {...form.getInputProps("isSimpleInternetSearch", {
                 type: "checkbox"
               })}
@@ -220,6 +237,7 @@ export const SearchModeSettings = () => {
           </span>
           <div>
             <InputNumber
+              aria-label={t("generalSettings.webSearch.totalSearchResults.label", "Total Search Results")}
               placeholder={t(
                 "generalSettings.webSearch.totalSearchResults.placeholder"
               )}
@@ -236,7 +254,7 @@ export const SearchModeSettings = () => {
           <div>
             <Switch
               className="mt-4 sm:mt-0"
-              aria-label={t("generalSettings.webSearch.visitSpecificWebsite.label")}
+              aria-label={t("generalSettings.webSearch.visitSpecificWebsite.label", "Visit Specific Website")}
               {...form.getInputProps("visitSpecificWebsite", {
                 type: "checkbox"
               })}
@@ -251,7 +269,7 @@ export const SearchModeSettings = () => {
           <div>
             <Switch
               className="mt-4 sm:mt-0"
-              aria-label={t("generalSettings.webSearch.searchOnByDefault.label")}
+              aria-label={t("generalSettings.webSearch.searchOnByDefault.label", "Search On By Default")}
               {...form.getInputProps("defaultInternetSearchOn", {
                 type: "checkbox"
               })}
@@ -262,6 +280,7 @@ export const SearchModeSettings = () => {
           <SaveButton btnType="submit" />
         </div>
       </form>
+      )}
     </div>
   )
 }

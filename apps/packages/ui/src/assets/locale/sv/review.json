@@ -304,7 +304,8 @@
     "presetExecutiveSummary": "Sammanfattning för ledningen",
     "presetCriticalReview": "Kritisk granskning",
     "presetQAAnalysis": "Frågor och svar-analys",
-    "presetBulletedNotes": "Bulleted Notes"
+    "presetBulletedNotes": "Bulleted Notes",
+    "analysisProviderRequired": "Välj en analysleverantör och försök analysera igen."
   },
   "empty": {
     "connectTitle": "Anslut för att använda granskning",

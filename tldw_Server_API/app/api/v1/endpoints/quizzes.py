@@ -684,6 +684,7 @@ async def generate_quiz(
             sources=sources,
             num_questions=request.num_questions,
             question_types=request.question_types,
+            question_plan=request.question_plan,
             difficulty=request.difficulty,
             focus_topics=request.focus_topics,
             model=request.model,

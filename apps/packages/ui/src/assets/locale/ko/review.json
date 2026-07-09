@@ -304,7 +304,8 @@
     "presetExecutiveSummary": "요약 보고",
     "presetCriticalReview": "비판적 검토",
     "presetQAAnalysis": "Q&A 분석",
-    "presetBulletedNotes": "Bulleted Notes"
+    "presetBulletedNotes": "Bulleted Notes",
+    "analysisProviderRequired": "분석 제공자를 선택한 후 분석을 다시 시도하세요."
   },
   "empty": {
     "connectTitle": "리뷰를 사용하려면 연결하세요",

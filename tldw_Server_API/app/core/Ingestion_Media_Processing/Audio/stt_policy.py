@@ -317,7 +317,7 @@ def apply_transcript_text_policy(
 
 def apply_transcript_payload_policy(payload: dict[str, Any], *, policy: STTPolicy) -> dict[str, Any]:
     payload_type = str(payload.get("type", "")).strip().lower()
-    if payload_type not in {"partial", "transcription", "full_transcript"}:
+    if payload_type not in {"partial", "final", "transcription", "full_transcript"}:
         return payload
 
     text = payload.get("text")

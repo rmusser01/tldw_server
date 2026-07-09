@@ -28,6 +28,48 @@ const shouldHideForBrowser = (item: SettingsNavItem) =>
   !isChromeTarget && item.to === "/settings/chrome";
 
 const SETTINGS_HIDE_BETA_BADGES_STORAGE_KEY = "tldw:settings:hide-beta-badges";
+const SETTINGS_EXIT_URL_ORIGIN = "https://tldw.local";
+
+const isNextWebAppRuntime = () =>
+  typeof window !== "undefined" && "__NEXT_DATA__" in window;
+
+type SettingsExitNavigationEnvironment = {
+  isNextWebApp?: boolean;
+  assignLocation?: (target: string) => void;
+};
+
+const normalizeSettingsExitTarget = (target: string) => {
+  const trimmedTarget = target.trim();
+  if (!trimmedTarget) return "/";
+
+  try {
+    const url = new URL(trimmedTarget, SETTINGS_EXIT_URL_ORIGIN);
+    if (url.origin !== SETTINGS_EXIT_URL_ORIGIN) return "/";
+    if (url.pathname === "/settings" || url.pathname.startsWith("/settings/")) return "/";
+    return `${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    return "/";
+  }
+};
+
+export const navigateFromSettingsExit = (
+  navigate: ReturnType<typeof useNavigate>,
+  target: string,
+  environment?: SettingsExitNavigationEnvironment,
+) => {
+  const isNextWebApp = environment?.isNextWebApp ?? isNextWebAppRuntime();
+  const normalizedTarget = normalizeSettingsExitTarget(target);
+
+  if (isNextWebApp) {
+    const assignLocation =
+      environment?.assignLocation ??
+      window.location.assign.bind(window.location);
+    assignLocation(normalizedTarget);
+    return;
+  }
+
+  navigate(normalizedTarget);
+};
 
 const readHideBetaBadgesPreference = (): boolean => {
   try {
@@ -90,9 +132,23 @@ export const SettingsLayout = ({ children }: { children: React.ReactNode }) => {
       }))
       .filter((group) => group.items.length > 0);
   }, [normalizedFilterQuery, settingsNavGroups, showSettingsFilter, t]);
+  const mobileSettingsNavGroups = React.useMemo(
+    () =>
+      settingsNavGroups
+        .map((group) => ({
+          ...group,
+          items: group.items.filter((item) => !shouldHideForBrowser(item)),
+        }))
+        .filter((group) => group.items.length > 0),
+    [settingsNavGroups],
+  );
   const currentNavItem = React.useMemo(() => {
     return resolveCurrentSettingsNavItem(location.pathname, settingsNavGroups);
   }, [location.pathname, settingsNavGroups]);
+  const mobileCurrentNavItem =
+    currentNavItem && !shouldHideForBrowser(currentNavItem)
+      ? currentNavItem
+      : null;
 
   const currentBreadcrumbLabel = currentNavItem
     ? t(currentNavItem.labelToken)
@@ -120,7 +176,7 @@ export const SettingsLayout = ({ children }: { children: React.ReactNode }) => {
 
   return (
     <div className="flex min-h-screen w-full min-w-0 flex-col">
-      <main className="relative w-full min-w-0 flex-1">
+      <div className="relative w-full min-w-0 flex-1">
         <div className="mx-auto w-full h-full custom-scrollbar overflow-y-auto">
           <div className="flex min-w-0 flex-col lg:flex-row lg:gap-x-16 lg:px-24">
             <aside className="lg:sticky lg:mt-0 mt-14 lg:top-0 z-20 min-w-0 bg-surface border-b border-border lg:w-64 lg:shrink-0 lg:border-0 lg:bg-transparent">
@@ -149,8 +205,40 @@ export const SettingsLayout = ({ children }: { children: React.ReactNode }) => {
                     {t("settings:switchToSidebar", "Switch to Sidebar")}
                   </button>
                 </div>
+                <div className="mb-3 lg:hidden">
+                  <label
+                    htmlFor="settings-nav-select"
+                    className="mb-1 block text-xs font-semibold uppercase tracking-wide text-text-muted"
+                  >
+                    {t("settings:navigation.mobileLabel", "Settings section")}
+                  </label>
+                  <select
+                    id="settings-nav-select"
+                    value={mobileCurrentNavItem?.to ?? ""}
+                    onChange={(event) => {
+                      if (event.currentTarget.value) {
+                        navigate(event.currentTarget.value);
+                      }
+                    }}
+                    className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text"
+                    data-testid="settings-nav-select"
+                  >
+                    {mobileCurrentNavItem ? null : (
+                      <option value="">{routeHeadingLabel}</option>
+                    )}
+                    {mobileSettingsNavGroups.map((group) => (
+                      <optgroup key={group.key} label={t(group.titleToken)}>
+                        {group.items.map((item) => (
+                          <option key={item.to} value={item.to}>
+                            {t(item.labelToken)}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </select>
+                </div>
                 {showSettingsFilter ? (
-                  <div className="mb-3">
+                  <div className="mb-3 hidden lg:block">
                     <label htmlFor="settings-nav-filter" className="sr-only">
                       {t(
                         "settings:navigation.filterLabel",
@@ -173,7 +261,7 @@ export const SettingsLayout = ({ children }: { children: React.ReactNode }) => {
                     />
                   </div>
                 ) : null}
-                <div className="flex flex-col gap-6">
+                <div className="hidden flex-col gap-6 lg:flex">
                   {visibleSettingsNavGroups.map((group) => {
                     const items = group.items.filter(
                       (item) => !shouldHideForBrowser(item),
@@ -261,7 +349,7 @@ export const SettingsLayout = ({ children }: { children: React.ReactNode }) => {
                   ) : null}
                 </div>
                 {hasVisibleBetaItems ? (
-                  <div className="mt-4">
+                  <div className="mt-4 hidden lg:block">
                     <button
                       type="button"
                       className="text-xs border rounded px-2 py-1 text-text-muted hover:text-text hover:bg-surface2"
@@ -276,7 +364,10 @@ export const SettingsLayout = ({ children }: { children: React.ReactNode }) => {
                 ) : null}
               </nav>
             </aside>
-            <main className="relative min-w-0 flex-1 px-4 py-8 sm:px-6 lg:px-0 lg:py-20">
+            <section
+              className="relative min-w-0 flex-1 px-4 py-8 sm:px-6 lg:px-0 lg:py-20"
+              aria-labelledby="settings-route-heading"
+            >
               {/* Close button over right of content area */}
               <div className="absolute right-4 top-4 lg:right-0 lg:top-6 lg:translate-x-[-1rem]">
                 <button
@@ -284,12 +375,10 @@ export const SettingsLayout = ({ children }: { children: React.ReactNode }) => {
                   title={t("common:close", "Close")}
                   onClick={(e) => {
                     e.preventDefault();
-                    const returnTo = getSettingsReturnTo();
-                    if (returnTo) {
-                      navigate(returnTo);
-                      return;
-                    }
-                    navigate("/");
+                    navigateFromSettingsExit(
+                      navigate,
+                      getSettingsReturnTo() ?? "/",
+                    );
                   }}
                 >
                   <XIcon className="h-4 w-4" />
@@ -297,7 +386,10 @@ export const SettingsLayout = ({ children }: { children: React.ReactNode }) => {
                 </button>
               </div>
               <div className="mx-auto w-full min-w-0 max-w-4xl space-y-8 sm:space-y-10">
-                <h1 className="text-2xl font-semibold text-text">
+                <h1
+                  id="settings-route-heading"
+                  className="text-2xl font-semibold text-text"
+                >
                   {routeHeadingLabel}
                 </h1>
                 {currentBreadcrumbLabel ? (
@@ -322,10 +414,10 @@ export const SettingsLayout = ({ children }: { children: React.ReactNode }) => {
                 ) : null}
                 {children}
               </div>
-            </main>
+            </section>
           </div>
         </div>
-      </main>
+      </div>
     </div>
   );
 };

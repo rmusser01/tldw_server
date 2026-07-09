@@ -3,6 +3,7 @@ from pathlib import Path
 
 DOCKER_README = Path("tldw_Server_API/app/core/MCP_unified/docker/README.md")
 DOCKERFILE = Path("tldw_Server_API/app/core/MCP_unified/docker/Dockerfile")
+ROOT_DOCKERFILE = Path("Dockerfiles/Dockerfile.prod")
 ENTRYPOINT = Path("tldw_Server_API/app/core/MCP_unified/docker/entrypoint.sh")
 CORE_README = Path("tldw_Server_API/app/core/MCP_unified/README.md")
 
@@ -68,3 +69,14 @@ def test_mcp_entrypoint_script_exists_and_execs_command() -> None:
     entrypoint = ENTRYPOINT.read_text(encoding="utf-8")
     _ensure('exec "$@"' in entrypoint, "Entrypoint does not exec the runtime command")
     _ensure("mkdir -p /data" not in entrypoint, "Entrypoint should not rely on runtime directory creation under /data")
+
+
+def test_root_dockerfile_installs_standalone_mcp_package_source() -> None:
+    _ensure(ROOT_DOCKERFILE.exists(), "Root production Dockerfile is missing")
+    dockerfile = ROOT_DOCKERFILE.read_text(encoding="utf-8")
+    copy_index = dockerfile.find("COPY apps/mcp-unified/src /app/apps/mcp-unified/src")
+    install_index = dockerfile.find("pip install --prefix=/install .")
+
+    _ensure(copy_index >= 0, "Root Docker image must copy standalone MCP Unified source")
+    _ensure(install_index >= 0, "Root Docker image must install the root package")
+    _ensure(copy_index < install_index, "Standalone MCP Unified source must be copied before pip install")

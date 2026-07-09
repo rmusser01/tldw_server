@@ -1,5 +1,6 @@
 import { SaveButton } from "@/components/Common/SaveButton"
-import { getModels, getVoices } from "@/services/elevenlabs"
+import { generateSpeech, getModels, getVoices } from "@/services/elevenlabs"
+import { generateOpenAITTS } from "@/services/openai-tts"
 import {
   DEFAULT_TLDW_TTS_MODEL,
   getTTSSettings,
@@ -9,7 +10,7 @@ import {
   setTTSSettings,
   SUPPORTED_TLDW_TTS_FORMATS
 } from "@/services/tts"
-import { inferTldwProviderFromModel } from "@/services/tts-provider"
+import { formatToMimeType, inferTldwProviderFromModel } from "@/services/tts-provider"
 import { TTS_PROVIDER_OPTIONS } from "@/services/tts-providers"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
@@ -27,6 +28,7 @@ import {
   fetchTldwTtsModels,
   type TldwTtsModel
 } from "@/services/tldw/audio-models"
+import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { normalizeTtsProviderKey, toServerTtsProviderKey } from "@/services/tldw/tts-provider-keys"
 import { listCustomVoices, type TldwCustomVoice } from "@/services/tldw/voice-cloning"
 import { useWebUI } from "@/store/webui"
@@ -36,6 +38,7 @@ import {
   ExclamationCircleOutlined,
   QuestionCircleOutlined
 } from "@ant-design/icons"
+import { Play, Square } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import React, { useState } from "react"
 import { useAntdMessage } from "@/hooks/useAntdMessage"
@@ -43,6 +46,8 @@ import { useSimpleForm } from "@/hooks/useSimpleForm"
 import { isTimeoutLikeError } from "@/utils/request-timeout"
 
 const ELEVENLABS_KEY_DEBOUNCE_MS = 350
+const TTS_PREVIEW_TEXT =
+  "This is a quick voice preview from your current audio settings."
 
 const formatValidationTimestamp = (value?: string | null) => {
   if (!value) return ""
@@ -62,6 +67,11 @@ const getErrorSignature = (error: unknown) => {
   }
 }
 
+const isAbortError = (error: unknown) =>
+  typeof DOMException !== "undefined" && error instanceof DOMException
+    ? error.name === "AbortError"
+    : error instanceof Error && error.name === "AbortError"
+
 export const TTSModeSettings = ({ hideBorder }: { hideBorder?: boolean }) => {
   const { t } = useTranslation("settings")
   const message = useAntdMessage()
@@ -73,6 +83,11 @@ export const TTSModeSettings = ({ hideBorder }: { hideBorder?: boolean }) => {
   const [testingElevenLabs, setTestingElevenLabs] = useState(false)
   const [debouncedElevenLabsApiKey, setDebouncedElevenLabsApiKey] = useState("")
   const lastPersistedElevenLabsValidationRef = React.useRef<string | null>(null)
+  const [previewState, setPreviewState] = useState<"idle" | "loading" | "playing">("idle")
+  const [previewError, setPreviewError] = useState("")
+  const previewAudioRef = React.useRef<HTMLAudioElement | null>(null)
+  const previewUrlRef = React.useRef<string | null>(null)
+  const previewAbortRef = React.useRef<AbortController | null>(null)
 
   const ids = {
     ttsEnabled: "tts-enabled-toggle",
@@ -645,6 +660,199 @@ export const TTSModeSettings = ({ hideBorder }: { hideBorder?: boolean }) => {
     [form]
   )
 
+  const stopPreview = React.useCallback(() => {
+    previewAbortRef.current?.abort()
+    previewAbortRef.current = null
+    previewAudioRef.current?.pause()
+    previewAudioRef.current = null
+    if (previewUrlRef.current) {
+      URL.revokeObjectURL(previewUrlRef.current)
+      previewUrlRef.current = null
+    }
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      try {
+        window.speechSynthesis.cancel()
+      } catch {
+        // Ignore browser speech cleanup failures.
+      }
+    }
+    setPreviewState("idle")
+  }, [])
+
+  React.useEffect(() => stopPreview, [stopPreview, form.values.ttsProvider])
+
+  const handlePreview = React.useCallback(async () => {
+    stopPreview()
+    setPreviewError("")
+
+    const provider = String(form.values.ttsProvider || "").trim().toLowerCase()
+    const requireField = (value: unknown, messageText: string) => {
+      if (String(value || "").trim()) return false
+      setPreviewError(messageText)
+      return true
+    }
+
+    if (provider === "browser") {
+      if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+        setPreviewError(
+          t(
+            "generalSettings.tts.preview.browserUnavailable",
+            "Voice preview is unavailable in this browser."
+          ) as string
+        )
+        return
+      }
+      const utterance = new SpeechSynthesisUtterance(TTS_PREVIEW_TEXT)
+      const voiceName = String(form.values.voice || "").trim()
+      const voice = window.speechSynthesis
+        .getVoices()
+        .find((candidate) => candidate.name === voiceName)
+      if (voice) utterance.voice = voice
+      const rate = Number(form.values.playbackSpeed)
+      utterance.rate = Number.isFinite(rate) && rate > 0 ? rate : 1
+      utterance.onend = () => setPreviewState("idle")
+      utterance.onerror = () => setPreviewState("idle")
+      setPreviewState("playing")
+      window.speechSynthesis.speak(utterance)
+      return
+    }
+
+    const requiredPreviewFieldsByProvider: Record<
+      string,
+      Array<{ value: unknown; message: string }>
+    > = {
+      tldw: [
+        {
+          value: form.values.tldwTtsModel,
+          message: t(
+            "generalSettings.tts.preview.selectTldwModel",
+            "Select a tldw TTS model first."
+          ) as string
+        },
+        {
+          value: form.values.tldwTtsVoice,
+          message: t(
+            "generalSettings.tts.preview.selectTldwVoice",
+            "Select a tldw TTS voice first."
+          ) as string
+        }
+      ],
+      openai: [
+        {
+          value: form.values.openAITTSModel,
+          message: t(
+            "generalSettings.tts.preview.selectOpenAiModel",
+            "Select an OpenAI-compatible TTS model first."
+          ) as string
+        },
+        {
+          value: form.values.openAITTSVoice,
+          message: t(
+            "generalSettings.tts.preview.selectOpenAiVoice",
+            "Select an OpenAI-compatible TTS voice first."
+          ) as string
+        }
+      ],
+      elevenlabs: [
+        {
+          value: form.values.elevenLabsApiKey,
+          message: t(
+            "generalSettings.tts.preview.enterElevenLabsApiKey",
+            "Enter an ElevenLabs API key first."
+          ) as string
+        },
+        {
+          value: form.values.elevenLabsModel,
+          message: t(
+            "generalSettings.tts.preview.selectElevenLabsModel",
+            "Select an ElevenLabs model first."
+          ) as string
+        },
+        {
+          value: form.values.elevenLabsVoiceId,
+          message: t(
+            "generalSettings.tts.preview.selectElevenLabsVoice",
+            "Select an ElevenLabs voice first."
+          ) as string
+        }
+      ]
+    }
+    const requiredPreviewFields = requiredPreviewFieldsByProvider[provider] ?? []
+    if (requiredPreviewFields.some((field) => requireField(field.value, field.message))) {
+      return
+    }
+
+    const controller = new AbortController()
+    previewAbortRef.current = controller
+    setPreviewState("loading")
+
+    try {
+      let buffer: ArrayBuffer
+      let mimeType = "audio/mpeg"
+
+      if (provider === "elevenlabs") {
+        buffer = await generateSpeech(
+          String(form.values.elevenLabsApiKey || "").trim(),
+          TTS_PREVIEW_TEXT,
+          String(form.values.elevenLabsVoiceId || "").trim(),
+          String(form.values.elevenLabsModel || "").trim(),
+          undefined,
+          { signal: controller.signal }
+        )
+      } else if (provider === "openai") {
+        buffer = await generateOpenAITTS({
+          text: TTS_PREVIEW_TEXT,
+          model: String(form.values.openAITTSModel || "").trim(),
+          voice: String(form.values.openAITTSVoice || "").trim(),
+          signal: controller.signal
+        })
+      } else {
+        const responseFormat = String(form.values.tldwTtsResponseFormat || "mp3").trim() || "mp3"
+        mimeType = formatToMimeType(responseFormat)
+        buffer = await tldwClient.synthesizeSpeech(TTS_PREVIEW_TEXT, {
+          model: String(form.values.tldwTtsModel || "").trim(),
+          voice: String(form.values.tldwTtsVoice || "").trim(),
+          responseFormat,
+          speed: Number(form.values.tldwTtsSpeed) || 1,
+          language: String(form.values.tldwTtsLanguage || "").trim() || undefined,
+          normalizationOptions: {
+            normalize: Boolean(form.values.tldwTtsNormalize),
+            unit_normalization: Boolean(form.values.tldwTtsNormalizeUnits),
+            url_normalization: Boolean(form.values.tldwTtsNormalizeUrls),
+            email_normalization: Boolean(form.values.tldwTtsNormalizeEmails),
+            phone_normalization: Boolean(form.values.tldwTtsNormalizePhones),
+            optional_pluralization_normalization: Boolean(form.values.tldwTtsNormalizePlurals)
+          },
+          stream: false,
+          signal: controller.signal
+        })
+      }
+
+      if (controller.signal.aborted) return
+      const url = URL.createObjectURL(new Blob([buffer], { type: mimeType }))
+      previewUrlRef.current = url
+      const audio = new Audio(url)
+      const playbackRate = Number(form.values.playbackSpeed)
+      audio.playbackRate =
+        Number.isFinite(playbackRate) && playbackRate > 0 ? playbackRate : 1
+      previewAudioRef.current = audio
+      audio.onended = stopPreview
+      audio.onerror = stopPreview
+      await audio.play()
+      if (!controller.signal.aborted) setPreviewState("playing")
+    } catch (error) {
+      if (!isAbortError(error)) {
+        setPreviewError(
+          t(
+            "generalSettings.tts.preview.failed",
+            "Unable to preview this voice right now."
+          ) as string
+        )
+      }
+      stopPreview()
+    }
+  }, [form.values, stopPreview, t])
+
   if (status === "pending") {
     return <Skeleton active />
   }
@@ -659,6 +867,14 @@ export const TTSModeSettings = ({ hideBorder }: { hideBorder?: boolean }) => {
       />
     )
   }
+
+  const previewHelpText =
+    form.values.ttsProvider === "openai"
+      ? (t(
+          "generalSettings.tts.preview.openAiHelp",
+          "Preview tests this model and voice through the server speech API; server or provider credentials may still be required."
+        ) as string)
+      : ""
 
   return (
     <div>
@@ -1174,6 +1390,41 @@ export const TTSModeSettings = ({ hideBorder }: { hideBorder?: boolean }) => {
             </div>
           </>
         )}
+        <div className="flex sm:flex-row flex-col space-y-4 sm:space-y-0 sm:justify-between">
+          <div className="flex flex-col gap-0.5">
+            <span className="text-text">
+              {t("generalSettings.tts.preview.label", "Voice preview")}
+            </span>
+            {previewError && (
+              <span className="text-xs text-danger">
+                {previewError}
+              </span>
+            )}
+            {previewHelpText && (
+              <span className="text-xs text-text-subtle">
+                {previewHelpText}
+              </span>
+            )}
+          </div>
+          <Button
+            data-testid="tts-preview-button"
+            type="default"
+            className="mt-4 sm:mt-0"
+            icon={
+              previewState !== "idle" ? (
+                <Square className="h-3.5 w-3.5" />
+              ) : (
+                <Play className="h-3.5 w-3.5" />
+              )
+            }
+            aria-busy={previewState === "loading"}
+            onClick={previewState === "idle" ? handlePreview : stopPreview}
+          >
+            {previewState !== "idle"
+              ? t("generalSettings.tts.preview.stop", "Stop preview")
+              : t("generalSettings.tts.preview.play", "Preview voice")}
+          </Button>
+        </div>
         <div className="flex sm:flex-row flex-col space-y-4 sm:space-y-0 sm:justify-between">
           <span className="text-text ">
             {t("generalSettings.tts.responseSplitting.label")}

@@ -231,4 +231,37 @@ describe('AnalysisModal stage 3 regression coverage', () => {
     expect(mocks.messageSuccess).toHaveBeenCalledWith('Analysis generated and saved')
     expect(onClose).toHaveBeenCalledTimes(1)
   })
+
+  it('shows provider recovery copy when generation fails without a provider', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    mocks.bgStream.mockImplementation(() =>
+      (async function* () {
+        throw new Error('Error: Analysis API provider is required.')
+      })()
+    )
+    mocks.bgRequest.mockRejectedValueOnce(new Error('Error: Analysis API provider is required.'))
+
+    render(
+      <AnalysisModal
+        open
+        onClose={vi.fn()}
+        mediaId={42}
+        mediaContent="media body"
+        onAnalysisGenerated={vi.fn()}
+      />
+    )
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Generate Analysis' })).not.toBeDisabled()
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Analysis' }))
+
+    await waitFor(() => {
+      expect(mocks.messageError).toHaveBeenCalledWith(
+        'Choose an analysis provider, then retry analysis.'
+      )
+    })
+    consoleError.mockRestore()
+  })
 })

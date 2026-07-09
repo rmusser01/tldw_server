@@ -5,6 +5,7 @@ from contextlib import contextmanager
 import pytest
 from fastapi import HTTPException
 
+from tldw_Server_API.app.api.v1.schemas.media_request_models import IngestWebContentRequest
 from tldw_Server_API.app.services import web_scraping_service as ws_service
 from tldw_Server_API.app.services.ephemeral_store import EphemeralStorage
 
@@ -42,6 +43,11 @@ def _force_fallback(monkeypatch):
         raise RuntimeError("enhanced service unavailable in test")
 
     monkeypatch.setattr(ws_service, "get_web_scraping_service", _raise, raising=True)
+
+
+class _UsageLog:
+    def log_event(self, *args, **kwargs):
+        pass
 
 
 @pytest.fixture(autouse=True)
@@ -131,6 +137,84 @@ async def test_fallback_url_level_ephemeral_smoke_applies_max_pages_cap(monkeypa
     assert fallback_context["enabled"] is True
     assert fallback_context["trigger_error_type"] == "RuntimeError"
     assert "max_pages" in fallback_context["degraded_controls_applied"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_ingest_web_content_skips_analysis_without_provider(monkeypatch):
+    async def fake_scrape_article(url, custom_cookies=None):
+        return {
+            "url": url,
+            "title": "Example",
+            "content": "article body",
+            "extraction_successful": True,
+        }
+
+    def fail_analyze(**kwargs):
+        raise AssertionError("analysis should not run without a provider")
+
+    monkeypatch.setattr(ws_service, "scrape_article", fake_scrape_article, raising=True)
+    monkeypatch.setattr(ws_service, "analyze", fail_analyze, raising=True)
+
+    result = await ws_service.ingest_web_content_orchestrate(
+        request=IngestWebContentRequest(
+            urls=["https://example.com/a"],
+            perform_analysis=True,
+            api_name=None,
+        ),
+        db=object(),
+        usage_log=_UsageLog(),
+    )
+
+    assert result is not None
+    assert result[0]["analysis"] is None
+    assert result[0]["analysis_status"] == "skipped"
+    assert result[0]["analysis_error"] == "Choose an analysis provider before running ingest analysis."
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_fallback_summarization_error_is_not_returned_as_summary(monkeypatch):
+    _force_fallback(monkeypatch)
+
+    async def fake_to_thread(func, *args, **kwargs):
+        return [
+            {
+                "url": "https://example.com/a",
+                "title": "A",
+                "content": "content",
+                "extraction_successful": True,
+            }
+        ]
+
+    monkeypatch.setattr(ws_service.asyncio, "to_thread", fake_to_thread, raising=True)
+    monkeypatch.setattr(
+        ws_service,
+        "analyze",
+        lambda **_kwargs: "Error: Analysis API provider is required.",
+        raising=True,
+    )
+    monkeypatch.setattr(
+        ws_service.ephemeral_storage,
+        "store_data",
+        lambda data: "ephemeral-analysis-error-id",
+        raising=True,
+    )
+
+    result = await ws_service.process_web_scraping_task(
+        **_base_kwargs(
+            scrape_method="URL Level",
+            url_level=2,
+            summarize_checkbox=True,
+            api_name="openai",
+            mode="ephemeral",
+        )
+    )
+
+    article = result["results"][0]
+    assert article["summary"] is None
+    assert article["analysis_status"] == "skipped"
+    assert article["analysis_error"] == "Analysis API provider is required."
 
 
 @pytest.mark.unit

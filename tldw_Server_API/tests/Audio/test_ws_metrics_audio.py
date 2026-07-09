@@ -8,8 +8,8 @@ from tldw_Server_API.tests.Audio.ws_test_helpers import ws_client_without_lifesp
 
 
 @pytest.mark.asyncio
-async def test_audio_ws_v2_config_emits_configured_status(monkeypatch: pytest.MonkeyPatch):
-    """Negotiated v2 config should emit the configured status frame."""
+async def test_audio_ws_v2_config_is_rejected_by_strict_protocol(monkeypatch: pytest.MonkeyPatch):
+    """Strict v1 websocket streaming rejects legacy v2 negotiation at the route."""
     from tldw_Server_API.app.main import app
     from tldw_Server_API.app.core.AuthNZ.settings import get_settings
     import tldw_Server_API.app.core.config as app_config
@@ -35,13 +35,21 @@ async def test_audio_ws_v2_config_emits_configured_status(monkeypatch: pytest.Mo
         with ws_session_or_skip(ws) as ws:
             ws.send_text(
                 json.dumps(
-                    {"type": "config", "sample_rate": 16000, "enable_vad": False, "protocol_version": 2}
+                    {
+                        "type": "config",
+                        "protocol_version": 2,
+                        "mode": "dictate",
+                        "audio_format": "pcm16",
+                        "sample_rate": 16000,
+                        "channels": 1,
+                        "enable_vad": False,
+                    }
                 )
             )
             data = ws.receive_json()
-            assert data.get("type") == "status"
-            assert data.get("state") == "configured"
-            assert data.get("protocol_version") == 2
+            assert data.get("type") == "error"
+            assert data.get("code") == "bad_request"
+            assert data.get("message") == "protocol_version must be 1"
 
 
 @pytest.mark.asyncio
@@ -65,7 +73,19 @@ async def test_audio_ws_emits_bounded_stt_session_metrics_on_commit():
                 pytest.skip("audio WebSocket endpoint not available in this build")
 
             with ws_session_or_skip(ws) as ws:
-                ws.send_text(json.dumps({"type": "config", "sample_rate": 16000, "enable_vad": False}))
+                ws.send_text(
+                    json.dumps(
+                        {
+                            "type": "config",
+                            "protocol_version": 1,
+                            "mode": "dictate",
+                            "audio_format": "pcm16",
+                            "sample_rate": 16000,
+                            "channels": 1,
+                            "enable_vad": False,
+                        }
+                    )
+                )
                 ws.send_text(json.dumps({"type": "commit"}))
                 try:
                     _ = ws.receive_json()

@@ -17,6 +17,7 @@ import type { AudioInputDeviceOption } from "@/hooks/useAudioSourceCatalog";
 import { useAudioSourceCatalog } from "@/hooks/useAudioSourceCatalog";
 import { useAudioSourcePreferences } from "@/hooks/useAudioSourcePreferences";
 import { tldwClient } from "@/services/tldw/TldwApiClient";
+import { STT_DEFAULTS } from "@/config/ui-constants";
 import { SUPPORTED_LANGUAGES } from "~/utils/supported-languages";
 
 const AudioSourcePreferenceRow = ({
@@ -75,7 +76,7 @@ export const SSTSettings = ({ hideBorder }: { hideBorder?: boolean }) => {
   const resolvedAutoStopTimeout =
     typeof autoStopTimeout === "number" ? autoStopTimeout : 2000;
 
-  const [sttModel, setSttModel] = useStorage("sttModel", "whisper-1");
+  const [sttModel, setSttModel] = useStorage("sttModel", STT_DEFAULTS.MODEL);
   const [sttUseSegmentation, setSttUseSegmentation] = useStorage(
     "sttUseSegmentation",
     false,
@@ -232,7 +233,7 @@ export const SSTSettings = ({ hideBorder }: { hideBorder?: boolean }) => {
               <Select
                 className="w-full"
                 showSearch
-                placeholder="whisper-1, parakeet, canary..."
+                placeholder={t("generalSettings.stt.model.serverDefaultPlaceholder", "Server default")}
                 loading={serverModelsLoading}
                 value={sttModel}
                 onChange={(value) => setSttModel(value)}

@@ -10,7 +10,7 @@ build-backend = "setuptools.build_meta"
 ###########################
 [project]
 name = "tldw-server"
-version = "0.1.38"
+version = "0.1.39"
 description = "A comprehensive research assistant and media analysis platform - Too Long; Didn't Watch Server"
 requires-python = ">=3.10"
 readme = "README.md"
@@ -513,6 +513,7 @@ tldw_Server_API = [
   "app/Setup_UI/*.html",
   "app/core/Evaluations/data/*.json",
   "app/core/Evaluations/data/**/*.json",
+  "app/core/DB_Management/migrations/*.sql",
   "app/core/Persona/assets/**/*.png",
   "app/core/Slides/revealjs/**/*",
   "Databases/**/*.sql",

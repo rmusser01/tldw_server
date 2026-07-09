@@ -15,8 +15,8 @@ import {
 } from "@/services/tldw/quick-ingest-chunking";
 import {
   createIngestJobsTracker,
-  extractIngestJobIds,
   pollSingleIngestJob,
+  requireSubmittedIngestJobs,
 } from "@/services/tldw/ingest-jobs-orchestrator";
 import {
   completedIngestJobIndicatesSkipped,
@@ -117,6 +117,25 @@ type QuickIngestBatchResponse = {
   ok: boolean;
   error?: string;
   results?: QuickIngestBatchResult[];
+};
+
+export const QUICK_INGEST_ANALYSIS_PROVIDER_WARNING =
+  "Choose an analysis provider before running ingest analysis.";
+
+const hasAnalysisProviderValue = (value: unknown): boolean => {
+  const normalized = String(value || "").trim();
+  return Boolean(normalized) && normalized.toLowerCase() !== "none";
+};
+
+export const getQuickIngestAnalysisProviderWarning = (
+  input: Pick<QuickIngestBatchInput, "common" | "advancedValues">,
+): string | null => {
+  if (!input?.common?.perform_analysis) return null;
+  const advancedValues = input.advancedValues || {};
+  if (hasAnalysisProviderValue(advancedValues.api_name)) {
+    return null;
+  }
+  return QUICK_INGEST_ANALYSIS_PROVIDER_WARNING;
 };
 
 export type QuickIngestStartAck = {
@@ -874,11 +893,7 @@ const runDirectQuickIngestBatch = async (
               timeoutMs: DIRECT_INGEST_TIMEOUT_MS,
               ...DIRECT_QUICK_INGEST_TRANSPORT,
             });
-            const batchId = String(submitData?.batch_id || "").trim();
-            const jobIds = extractIngestJobIds(submitData);
-            if (!batchId || jobIds.length === 0) {
-              throw new Error("Ingest job submission returned no job IDs.");
-            }
+            const { batchId, jobIds } = requireSubmittedIngestJobs(submitData);
             const firstJobId = jobIds[0];
             jobSubmitted = true;
             latestJobId = firstJobId;
@@ -1067,11 +1082,7 @@ const runDirectQuickIngestBatch = async (
               timeoutMs: DIRECT_INGEST_TIMEOUT_MS,
               ...DIRECT_QUICK_INGEST_TRANSPORT,
             });
-            const batchId = String(submitData?.batch_id || "").trim();
-            const jobIds = extractIngestJobIds(submitData);
-            if (!batchId || jobIds.length === 0) {
-              throw new Error("Ingest job submission returned no job IDs.");
-            }
+            const { batchId, jobIds } = requireSubmittedIngestJobs(submitData);
             const directTracker = ensureDirectSessionTracker(directSessionId);
             directTracker?.trackJobs(batchId, jobIds, { sourceId: id });
             input.onTrackingMetadata?.({

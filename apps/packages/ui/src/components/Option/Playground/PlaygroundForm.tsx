@@ -11,6 +11,7 @@ import { ChatQueuePanel } from "@/components/Common/ChatQueuePanel";
 import { type KnowledgeTab } from "@/components/Knowledge";
 import type { SlashCommandItem } from "@/components/Sidepanel/Chat/SlashCommandMenu";
 import { isFirefoxTarget } from "@/config/platform";
+import { STT_DEFAULTS } from "@/config/ui-constants";
 import { getDesignSystemState } from "@/design-system";
 import { getAllPrompts } from "@/db/dexie/helpers";
 import { useChatSettingsRecord } from "@/hooks/chat/useChatSettingsRecord";
@@ -49,6 +50,7 @@ import { useVoiceChatStream } from "@/hooks/useVoiceChatStream";
 // useQueuedRequests moved to usePlaygroundQueueManagement
 import type { ChatDocuments } from "@/models/ChatTypes";
 import { clearSetting, getSetting } from "@/services/settings/registry";
+import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope";
 import {
   DISCUSS_MEDIA_PROMPT_SETTING,
   DISCUSS_WATCHLIST_PROMPT_SETTING,
@@ -977,7 +979,7 @@ export const PlaygroundForm = ({
     "dictationModeOverride",
     null,
   );
-  const [sttModel] = useStorage("sttModel", "whisper-1");
+  const [sttModel] = useStorage("sttModel", STT_DEFAULTS.MODEL);
   const [sttUseSegmentation] = useStorage("sttUseSegmentation", false);
   const [sttTimestampGranularities] = useStorage(
     "sttTimestampGranularities",
@@ -2745,6 +2747,7 @@ export const PlaygroundForm = ({
     autoStopTimeout,
     autoSubmitVoiceMessage,
     speechToTextLanguage,
+    messageValue: form.values.message || "",
     setMessageValue,
     submitForm: () => voiceChatSubmitFormRef.current(),
     notificationApi,
@@ -5762,6 +5765,14 @@ export const PlaygroundForm = ({
                             selectedModel={selectedModel}
                             systemPrompt={systemPrompt}
                             selectedCharacter={selectedCharacter}
+                            serverScope={canonicalConnectionConfig?.serverUrl}
+                            userScope={
+                              canonicalConnectionConfig
+                                ? buildChatSurfaceScopeKeyFromConfig(
+                                    canonicalConnectionConfig,
+                                  )
+                                : undefined
+                            }
                             ragPinnedResultsLength={ragPinnedResults.length}
                             startupTemplateDraftName={startupTemplateDraftName}
                             setStartupTemplateDraftName={

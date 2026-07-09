@@ -103,6 +103,29 @@ describe("flashcards service", () => {
     )
   })
 
+  it("sends planned flashcard generation payloads unchanged", async () => {
+    const cardPlan = [
+      { card_type: "basic" as const, count: 2 },
+      { card_type: "true_false" as const, count: 1 }
+    ]
+
+    await generateFlashcards({
+      text: "ATP powers the cell.",
+      num_cards: 3,
+      card_plan: cardPlan
+    })
+
+    expect(mockBgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: {
+          text: "ATP powers the cell.",
+          num_cards: 3,
+          card_plan: cardPlan
+        }
+      })
+    )
+  })
+
   it("calls the global tag suggestions endpoint with q and limit", async () => {
     const signal = new AbortController().signal
 

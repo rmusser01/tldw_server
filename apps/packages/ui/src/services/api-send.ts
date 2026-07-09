@@ -27,7 +27,65 @@ const isSafeFallbackMethod = (method?: string): boolean => {
   return methodUpper === "GET" || methodUpper === "HEAD" || methodUpper === "OPTIONS"
 }
 
+const inFlightGetRequests = new Map<string, Promise<ApiSendResponse<unknown>>>()
+
+const normalizeHeaders = (
+  headers?: Record<string, string>
+): Record<string, string> | null => {
+  if (!headers) return null
+  return Object.keys(headers)
+    .sort()
+    .reduce<Record<string, string>>((acc, headerKey) => {
+      acc[headerKey.toLowerCase()] = headers[headerKey]
+      return acc
+    }, {})
+}
+
+const getCoalescingKey = (payload: ApiSendPayload): string | null => {
+  const method = String(payload.method || "GET").toUpperCase()
+  if (
+    method !== "GET" ||
+    payload.body ||
+    payload.responseType
+  ) {
+    return null
+  }
+
+  return JSON.stringify({
+    method,
+    path: payload.path,
+    headers: normalizeHeaders(payload.headers),
+    noAuth: Object.prototype.hasOwnProperty.call(payload, "noAuth")
+      ? payload.noAuth
+      : "__omitted__",
+    timeoutMs: payload.timeoutMs ?? null
+  })
+}
+
 export async function apiSend<T = any, P extends PathOrUrl = PathOrUrl, M extends AllowedMethodFor<P> = AllowedMethodFor<P>>(
+  payload: ApiSendPayload<P, M>
+): Promise<ApiSendResponse<T>> {
+  const coalescingKey = getCoalescingKey(payload)
+  if (coalescingKey) {
+    const existing = inFlightGetRequests.get(coalescingKey)
+    if (existing) return existing as Promise<ApiSendResponse<T>>
+
+    const pending = apiSendImpl<T, P, M>(payload).finally(() => {
+      if (inFlightGetRequests.get(coalescingKey) === pending) {
+        inFlightGetRequests.delete(coalescingKey)
+      }
+    })
+    inFlightGetRequests.set(
+      coalescingKey,
+      pending as Promise<ApiSendResponse<unknown>>
+    )
+    return pending
+  }
+
+  return apiSendImpl(payload)
+}
+
+async function apiSendImpl<T = any, P extends PathOrUrl = PathOrUrl, M extends AllowedMethodFor<P> = AllowedMethodFor<P>>(
   payload: ApiSendPayload<P, M>
 ): Promise<ApiSendResponse<T>> {
   const methodIsSafeFallback = isSafeFallbackMethod(

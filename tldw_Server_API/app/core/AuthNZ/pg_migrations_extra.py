@@ -1156,6 +1156,23 @@ _CREATE_AUTHNZ_CORE_TABLES = [
     ("CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id)", ()),
     ("CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at)", ()),
     ("CREATE INDEX IF NOT EXISTS idx_sessions_access_jti ON sessions(access_jti)", ()),
+    # password_history
+    (
+        """
+        CREATE TABLE IF NOT EXISTS password_history (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            password_hash TEXT NOT NULL,
+            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+        (),
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_password_history_user_created_at "
+        "ON password_history(user_id, created_at DESC, id DESC)",
+        (),
+    ),
     # registration_codes
     (
         """

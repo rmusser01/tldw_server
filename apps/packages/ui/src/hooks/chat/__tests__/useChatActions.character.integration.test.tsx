@@ -6,20 +6,22 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { useChatActions } from "../useChatActions"
 
 const {
+  addChatMessageMock,
   createChatMock,
+  detectCharacterMoodMock,
   streamCharacterChatCompletionMock,
   persistCharacterCompletionMock,
-  addChatMessageMock,
   normalChatModeMock,
   resolveVisualIdentityBindingMock
 } = vi.hoisted(() => ({
+  addChatMessageMock: vi.fn(async () => ({ id: "user-server-1", version: 1 })),
   createChatMock: vi.fn(),
+  detectCharacterMoodMock: vi.fn(),
   streamCharacterChatCompletionMock: vi.fn(),
   persistCharacterCompletionMock: vi.fn(async () => ({
     assistant_message_id: "assistant-server-1",
     version: 1
   })),
-  addChatMessageMock: vi.fn(async () => ({ id: "user-server-1", version: 1 })),
   normalChatModeMock: vi.fn(),
   resolveVisualIdentityBindingMock: vi.fn(async () => ({
     actor_kind: "character",
@@ -112,6 +114,10 @@ vi.mock("@/db/dexie/branch", () => ({
 
 vi.mock("@/services/actor-settings", () => ({
   getActorSettingsForChat: vi.fn(async () => null)
+}))
+
+vi.mock("@/utils/character-mood", () => ({
+  detectCharacterMood: detectCharacterMoodMock
 }))
 
 vi.mock("@/utils/selected-character-storage", () => ({
@@ -272,6 +278,11 @@ describe("useChatActions character integration", () => {
           }
         ]
       }
+    })
+    detectCharacterMoodMock.mockReturnValue({
+      label: "neutral",
+      confidence: 0.2,
+      topic: "reply"
     })
     messageStoreState.value = {
       selectedModel: "deepseek-chat",
@@ -661,5 +672,237 @@ describe("useChatActions character integration", () => {
       { scope }
     )
     expect(normalChatModeMock).not.toHaveBeenCalled()
+  })
+
+  it("strips explicit streaming emote directives and persists emote events", async () => {
+    streamCharacterChatCompletionMock.mockImplementationOnce(async function* () {
+      yield "Em"
+      yield "ote: smug\n"
+      yield "Hello "
+      yield "there.\n"
+      yield "Emote: annoyed\n"
+      yield "Fine."
+    })
+    detectCharacterMoodMock.mockReturnValueOnce({
+      label: "happy",
+      confidence: 0.9,
+      topic: "classifier"
+    })
+
+    let messagesState: any[] = []
+    const messageSnapshots: any[][] = []
+    const moodLabels: unknown[] = []
+    const options = {
+      ...createHookOptions(),
+      setMessages: vi.fn((next) => {
+        messagesState = typeof next === "function" ? next(messagesState) : next
+        messageSnapshots.push(messagesState)
+        const assistant = messagesState.find((message) => message?.isBot)
+        moodLabels.push(assistant?.moodLabel)
+      })
+    }
+    const { result } = renderHook(() => useChatActions(options as any))
+
+    await act(async () => {
+      await result.current.onSubmit({
+        message: "Test explicit emotes",
+        image: ""
+      })
+    })
+
+    const persistCall = persistCharacterCompletionMock.mock.calls.at(-1) as
+      | unknown[]
+      | undefined
+    const persistPayload = persistCall?.[1] as
+      | Record<string, unknown>
+      | undefined
+    expect(persistPayload).toMatchObject({
+      assistant_content: "Hello there.\nFine.",
+      mood_label: "annoyed",
+      emote_events: [
+        { state: "smug", at_char: 0 },
+        { state: "annoyed", at_char: 13 }
+      ]
+    })
+    expect(persistPayload).not.toHaveProperty("mood_confidence")
+    expect(persistPayload).not.toHaveProperty("mood_topic")
+    expect(detectCharacterMoodMock).not.toHaveBeenCalled()
+
+    const renderedAssistantMessages = messageSnapshots
+      .flatMap((snapshot) => snapshot.filter((message) => message?.isBot))
+      .map((message) => String(message?.message ?? ""))
+    expect(
+      renderedAssistantMessages.some((message) => message.includes("Emote:"))
+    ).toBe(false)
+    expect(renderedAssistantMessages.at(-1)).toBe("Hello there.\nFine.")
+    expect(moodLabels).toContain("smug")
+    expect(moodLabels).toContain("annoyed")
+  })
+
+  it("preserves explicit emote metadata when recovering a failed stream", async () => {
+    streamCharacterChatCompletionMock.mockImplementationOnce(async function* () {
+      yield "Em"
+      yield "ote: smug\n"
+      yield "Em"
+      throw new Error("stream failed")
+    })
+
+    let messagesState: any[] = []
+    const messageSnapshots: any[][] = []
+    const options = {
+      ...createHookOptions(),
+      setMessages: vi.fn((next) => {
+        messagesState = typeof next === "function" ? next(messagesState) : next
+        messageSnapshots.push(messagesState)
+      })
+    }
+    const { result } = renderHook(() => useChatActions(options as any))
+
+    await act(async () => {
+      await result.current.onSubmit({
+        message: "Recover explicit emote",
+        image: ""
+      })
+    })
+
+    const persistCall = persistCharacterCompletionMock.mock.calls.at(-1) as
+      | unknown[]
+      | undefined
+    const persistPayload = persistCall?.[1] as
+      | Record<string, unknown>
+      | undefined
+    expect(persistPayload).toMatchObject({
+      assistant_content: "Em",
+      mood_label: "smug",
+      emote_events: [{ state: "smug", at_char: 0 }]
+    })
+    expect(persistPayload).not.toHaveProperty("mood_confidence")
+    expect(persistPayload).not.toHaveProperty("mood_topic")
+    expect(detectCharacterMoodMock).not.toHaveBeenCalled()
+
+    const assistantMessages = messageSnapshots
+      .flatMap((snapshot) => snapshot.filter((message) => message?.isBot))
+      .map((message) => ({
+        message: String(message?.message ?? ""),
+        moodLabel: message?.moodLabel,
+        metadataExtra: message?.metadataExtra
+      }))
+    expect(assistantMessages.some((entry) => entry.message.includes("Emote:"))).toBe(
+      false
+    )
+    expect(assistantMessages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          message: "Em",
+          moodLabel: "smug",
+          metadataExtra: expect.objectContaining({
+            emote_events: [{ state: "smug", at_char: 0 }]
+          })
+        })
+      ])
+    )
+  })
+
+  it(
+    "does not duplicate recovery persistence when saved-degraded includes emote metadata",
+    async () => {
+      streamCharacterChatCompletionMock.mockImplementationOnce(
+        async function* () {
+          yield "Em"
+          yield "ote: smug\n"
+          yield "Em"
+          throw new Error("stream failed")
+        }
+      )
+      persistCharacterCompletionMock.mockRejectedValueOnce(
+        Object.assign(new Error("saved degraded"), {
+          status: 503,
+          detail: {
+            code: "persist_validation_degraded",
+            saved: true,
+            assistant_message_id: "assistant-degraded-1",
+            version: 7
+          }
+        })
+      )
+
+      let messagesState: any[] = []
+      const options = {
+        ...createHookOptions(),
+        setMessages: vi.fn((next) => {
+          messagesState =
+            typeof next === "function" ? next(messagesState) : next
+        })
+      }
+      const { result } = renderHook(() => useChatActions(options as any))
+
+      await act(async () => {
+        await result.current.onSubmit({
+          message: "Recover saved degraded emote",
+          image: ""
+        })
+      })
+
+      const tldwAddCalls = addChatMessageMock.mock.calls.filter(
+        ([, payload]: [unknown, any]) => payload?.role === "assistant"
+      )
+      expect(tldwAddCalls).toHaveLength(0)
+      expect(messagesState).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            isBot: true,
+            serverMessageId: "assistant-degraded-1",
+            serverMessageVersion: 7,
+            moodLabel: "smug",
+            metadataExtra: expect.objectContaining({
+              emote_events: [{ state: "smug", at_char: 0 }]
+            })
+          })
+        ])
+      )
+    }
+  )
+
+  it("sends emote metadata when normal persist falls back to addChatMessage", async () => {
+    streamCharacterChatCompletionMock.mockImplementationOnce(async function* () {
+      yield "Em"
+      yield "ote: smug\n"
+      yield "Hello."
+    })
+    persistCharacterCompletionMock.mockRejectedValueOnce(
+      Object.assign(new Error("persist failed"), { status: 500 })
+    )
+    const consoleErrorSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined)
+
+    const options = createHookOptions()
+    const { result } = renderHook(() => useChatActions(options as any))
+
+    try {
+      await act(async () => {
+        await result.current.onSubmit({
+          message: "Fallback explicit emote",
+          image: ""
+        })
+      })
+    } finally {
+      consoleErrorSpy.mockRestore()
+    }
+
+    const tldwAddCalls = addChatMessageMock.mock.calls
+    const assistantAddCall = tldwAddCalls.find(
+      ([, payload]: [unknown, any]) => payload?.role === "assistant"
+    )
+    expect(assistantAddCall?.[1]).toMatchObject({
+      role: "assistant",
+      content: "Hello.",
+      metadata_extra: expect.objectContaining({
+        mood_label: "smug",
+        mood_confidence: null,
+        mood_topic: null,
+        emote_events: [{ state: "smug", at_char: 0 }]
+      })
+    })
   })
 })

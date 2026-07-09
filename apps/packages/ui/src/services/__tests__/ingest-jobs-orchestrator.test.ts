@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest"
 
 import {
   createIngestJobsTracker,
+  extractIngestJobSubmitError,
   pollSingleIngestJob,
   pollTrackedIngestJobs
 } from "@/services/tldw/ingest-jobs-orchestrator"
@@ -41,6 +42,32 @@ describe("ingest-jobs-orchestrator", () => {
 
     expect(tracker.getJobIds().sort((a, b) => a - b)).toEqual([11, 12, 13, 21])
     expect(cancelled.sort()).toEqual(["batch-a", "batch-b"])
+  })
+
+  it("surfaces submit payload errors when no valid jobs are returned", () => {
+    const tracker = createIngestJobsTracker<{ label: string }>()
+
+    expect(() =>
+      tracker.trackSubmit(
+        {
+          batch_id: "batch-error",
+          jobs: [],
+          errors: ["Validation failed: Claimed filename 'upload' has no extension."]
+        },
+        { label: "failed-submit" }
+      )
+    ).toThrow("Validation failed: Claimed filename 'upload' has no extension.")
+  })
+
+  it("formats array detail submit errors", () => {
+    expect(
+      extractIngestJobSubmitError({
+        detail: [
+          { loc: ["body", "file"], msg: "Field required", type: "missing" },
+          "Upload failed"
+        ]
+      })
+    ).toBe("body.file: Field required; Upload failed")
   })
 
   it("polls tracked jobs to terminal statuses and maps results", async () => {

@@ -400,7 +400,8 @@
     "shortcutSelectAll": "Select all visible",
     "shortcutClearSelection": "Clear selection",
     "shortcutRangeSelect": "Range selection",
-    "click": "Click"
+    "click": "Click",
+    "analysisProviderRequired": "Choose an analysis provider, then retry analysis."
   },
   "trashPage": {
     "title": "Trash",

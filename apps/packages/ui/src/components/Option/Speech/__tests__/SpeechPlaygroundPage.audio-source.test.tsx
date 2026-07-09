@@ -77,6 +77,9 @@ class MockMediaRecorder {
 
   stop = vi.fn(() => {
     this.state = "inactive"
+    this.ondataavailable?.({
+      data: new Blob(["test audio"], { type: "audio/webm" })
+    } as BlobEvent)
     this.onstop?.()
   })
 }
@@ -497,5 +500,29 @@ describe("SpeechPlaygroundPage audio source", () => {
         ).length
       ).toBeGreaterThanOrEqual(1)
     })
+  })
+
+  it("omits the transcription model when settings use the server default", async () => {
+    transcribeAudioMock.mockResolvedValue({ text: "hello" })
+    const user = userEvent.setup()
+
+    render(<SpeechPlaygroundPage />)
+
+    await waitFor(() => {
+      expect(getTranscriptionModelsMock).toHaveBeenCalled()
+    })
+
+    await user.click(
+      screen.getByRole("button", { name: /start dictation/i })
+    )
+    await user.click(
+      screen.getByRole("button", { name: /stop dictation/i })
+    )
+
+    await waitFor(() => {
+      expect(transcribeAudioMock).toHaveBeenCalled()
+    })
+
+    expect(transcribeAudioMock.mock.calls[0]?.[1]).not.toHaveProperty("model")
   })
 })

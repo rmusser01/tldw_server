@@ -30,6 +30,7 @@ vi.mock("@/services/background-proxy", () => ({
 import {
   __resetQuickIngestRuntimeHealthForTests,
   cancelQuickIngestSession,
+  getQuickIngestAnalysisProviderWarning,
   startQuickIngestSession,
   submitQuickIngestBatch
 } from "@/services/tldw/quick-ingest-batch"
@@ -44,6 +45,27 @@ describe("submitQuickIngestBatch", () => {
     mocks.sendMessage.mockReset()
     mocks.bgRequest.mockReset()
     mocks.bgUpload.mockReset()
+  })
+
+  it("warns when analysis is enabled without an analysis provider", () => {
+    expect(
+      getQuickIngestAnalysisProviderWarning({
+        common: { perform_analysis: true },
+        advancedValues: {}
+      } as any)
+    ).toBe("Choose an analysis provider before running ingest analysis.")
+    expect(
+      getQuickIngestAnalysisProviderWarning({
+        common: { perform_analysis: true },
+        advancedValues: { api_name: "openai" }
+      } as any)
+    ).toBeNull()
+    expect(
+      getQuickIngestAnalysisProviderWarning({
+        common: { perform_analysis: true },
+        advancedValues: { api_provider: "openai" }
+      } as any)
+    ).toBe("Choose an analysis provider before running ingest analysis.")
   })
 
   it("uses direct upload path when extension runtime id is unavailable", async () => {
@@ -145,6 +167,42 @@ describe("submitQuickIngestBatch", () => {
       outcome: "skipped",
       fileName: "existing.pdf",
       message: DUPLICATE_SKIP_MESSAGE
+    })
+  })
+
+  it("surfaces backend ingest job submit errors when no jobs are created", async () => {
+    mocks.bgUpload.mockResolvedValue({
+      batch_id: "batch-upload-error",
+      jobs: [],
+      errors: ["Validation failed: Claimed filename 'upload' has no extension."]
+    })
+
+    const result = await submitQuickIngestBatch({
+      entries: [],
+      files: [
+        {
+          id: "file-invalid-pdf",
+          name: "upload",
+          type: "application/pdf",
+          data: [37, 80, 68, 70]
+        }
+      ],
+      storeRemote: true,
+      processOnly: false,
+      common: {
+        perform_analysis: true,
+        perform_chunking: false,
+        overwrite_existing: false
+      },
+      advancedValues: {}
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.results?.[0]).toMatchObject({
+      id: "file-invalid-pdf",
+      status: "error",
+      fileName: "upload",
+      error: "Validation failed: Claimed filename 'upload' has no extension."
     })
   })
 

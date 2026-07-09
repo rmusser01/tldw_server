@@ -2382,6 +2382,8 @@ class CollectionsDatabase:
         except _COLLECTIONS_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Collections content_items schema init failed: {e}")
             raise
+        if self.backend.backend_type == BackendType.SQLITE:
+            content_columns = self._sqlite_columns("content_items")
         if fts_available:
             try:
                 self.backend.create_tables(

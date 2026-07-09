@@ -108,10 +108,10 @@ Optional add-ons (apply AFTER your base profile is healthy):
 ## Current Status
 
 Current release line:
-- `0.1.38` Beta status. Expect rough edges and please report issues.
+- `0.1.39` Beta status. Expect rough edges and please report issues.
 - Primary client surfaces are the Next.js WebUI, Admin UI, and browser extension.
 - Package metadata is prepared under the canonical PyPI name `tldw-server`; use a repository checkout until publishing is complete.
-- The `dev` branch carries work beyond `0.1.38`, including post-`0.1.38` branch work, and `main` is prepared for the `0.1.38` release; see [CHANGELOG.md](CHANGELOG.md) for the PR rollup and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for the published release entry point.
+- The `dev` branch carries work beyond `0.1.39`, including post-`0.1.39` branch work, and `main` is prepared for the `0.1.39` release; see [CHANGELOG.md](CHANGELOG.md) for the PR rollup and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for the published release entry point.
 
 <details>
 <summary>Current focus and migration notes from the old Gradio version</summary>
@@ -146,6 +146,22 @@ Current release line:
 ## What's New (in the last few releases)
 
 <details>
+<summary>0.1.39 release</summary>
+
+Included in the `0.1.39` release:
+- Character expression images and emote directives landed across backend metadata, streaming recovery, WebUI editing, onboarding nudges, and sidepanel/chat rendering.
+- Settings UX follow-ups added the split settings IA, chat backdrop transparency controls, setup/recovery hardening, and TTS voice preview.
+- Release hardening stabilized chat cockpit CI gates, strict audio stream protocol flows, OpenAPI fingerprints, frontend review fixes, and notification timestamp handling.
+- Package, FastAPI, README, and MkDocs metadata were bumped to `0.1.39`.
+
+Still active on `dev`:
+- Treat [CHANGELOG.md](CHANGELOG.md) as the authoritative branch-level history for what has entered the release train.
+
+See [CHANGELOG.md](CHANGELOG.md) for the full running history and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for published release notes.
+
+</details>
+
+<details>
 <summary>0.1.38 corrective release</summary>
 
 Included in the `0.1.38` corrective release:
@@ -154,6 +170,7 @@ Included in the `0.1.38` corrective release:
 - Package, FastAPI, README, and MkDocs metadata were bumped to `0.1.38`.
 
 Still active on `dev`:
+- `0.1.38` is superseded by the `0.1.39` release metadata above.
 - Treat [CHANGELOG.md](CHANGELOG.md) as the authoritative branch-level history for what has entered the release train.
 
 See [CHANGELOG.md](CHANGELOG.md) for the full running history and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for published release notes.

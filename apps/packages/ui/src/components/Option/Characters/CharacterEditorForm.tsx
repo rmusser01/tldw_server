@@ -1,14 +1,19 @@
 import React from "react"
 import { Button, Form, Input, InputNumber, Modal, Select } from "antd"
-import type { FormInstance, InputRef } from "antd"
+import type { FormInstance, FormProps, InputRef } from "antd"
 import { ChevronDown, ChevronUp } from "lucide-react"
 import type { TFunction } from "i18next"
 import type { CharacterField } from "@/services/character-generation"
 import { CHARACTER_PROMPT_PRESETS } from "@/data/character-prompt-presets"
 import { AvatarField, extractAvatarValues } from "./AvatarField"
+import {
+  CharacterExpressionImagesSection,
+  CharacterExpressionImagesValidationItem
+} from "./CharacterExpressionImagesSection"
 import { CharacterPreview } from "./CharacterPreview"
 import { GenerateFieldButton } from "./GenerateFieldButton"
 import { VisualIdentityPackPanel } from "@/components/Common/VisualIdentity/VisualIdentityPackPanel"
+import { expressionRowsFromExtensions } from "./character-expression-images"
 import {
   MAX_NAME_LENGTH,
   SYSTEM_PROMPT_EXAMPLE,
@@ -92,6 +97,50 @@ export const CharacterEditorForm: React.FC<CharacterEditorFormProps> = ({
   createNameRef,
   editNameRef,
 }) => {
+  const editorInitialValues = React.useMemo(
+    () => ({
+      ...initialValues,
+      expression_images:
+        initialValues?.expression_images ??
+        expressionRowsFromExtensions(initialValues?.extensions ?? {})
+    }),
+    [initialValues]
+  )
+
+  const handleFinishFailed = React.useCallback<NonNullable<FormProps["onFinishFailed"]>>(
+    (errorInfo) => {
+      const hasExpressionImageError = errorInfo.errorFields.some((field) => {
+        const rootName = field.name[0]
+        return (
+          rootName === "_expression_images_validation" ||
+          rootName === "expression_images"
+        )
+      })
+
+      if (!hasExpressionImageError) return
+
+      setShowAdvanced(true)
+      setAdvancedSections((current) => ({ ...current, metadata: true }))
+      const scrollToExpressionImages = () => {
+        const expressionRows = form.getFieldValue("expression_images")
+        const firstRowIndex = Array.isArray(expressionRows) && expressionRows.length > 0
+          ? 0
+          : undefined
+        const targetField = firstRowIndex === undefined
+          ? "_expression_images_validation"
+          : ["expression_images", firstRowIndex, "state"]
+
+        form.scrollToField(targetField, { block: "center" })
+      }
+      if (typeof window.requestAnimationFrame === "function") {
+        window.requestAnimationFrame(scrollToExpressionImages)
+      } else {
+        scrollToExpressionImages()
+      }
+    },
+    [form, setAdvancedSections, setShowAdvanced]
+  )
+
   const promptPresetOptions = React.useMemo(
     () =>
       CHARACTER_PROMPT_PRESETS.map((preset) => ({
@@ -993,19 +1042,23 @@ export const CharacterEditorForm: React.FC<CharacterEditorFormProps> = ({
                     </p>
                   </div>
                 )}
-                <details className="rounded-md border border-border/70 bg-bg/40 px-3 py-2">
-                  <summary className="cursor-pointer text-xs font-medium text-text">
-                    {t("settings:manageCharacters.form.moodImages.legacyTitle", {
-                      defaultValue: "Legacy mood images",
-                    })}
-                  </summary>
-                  <p className="mt-2 text-xs text-text-muted">
-                    {t("settings:manageCharacters.form.moodImages.legacyBody", {
-                      defaultValue:
-                        "Existing legacy mood image data remains stored in Extensions JSON for compatibility.",
-                    })}
-                  </p>
-                </details>
+                <Form.Item
+                  noStyle
+                  shouldUpdate={(prev, cur) =>
+                    prev?.name !== cur?.name ||
+                    prev?.description !== cur?.description ||
+                    prev?.avatar !== cur?.avatar ||
+                    prev?.extensions !== cur?.extensions
+                  }
+                >
+                  {({ getFieldValue }) => (
+                    <CharacterExpressionImagesSection
+                      characterName={getFieldValue("name")}
+                      characterDescription={getFieldValue("description")}
+                      baseAvatar={getFieldValue("avatar")}
+                    />
+                  )}
+                </Form.Item>
               </>
             )}
           </div>
@@ -1034,12 +1087,13 @@ export const CharacterEditorForm: React.FC<CharacterEditorFormProps> = ({
     <Form
       layout="vertical"
       form={form}
-      initialValues={initialValues}
+      initialValues={editorInitialValues}
       className="space-y-3"
       onValuesChange={(_, allValues) => {
         onValuesChange(allValues)
       }}
       onFinish={onFinish}
+      onFinishFailed={handleFinishFailed}
     >
       {renderNameField()}
       {renderSystemPromptField()}
@@ -1047,6 +1101,7 @@ export const CharacterEditorForm: React.FC<CharacterEditorFormProps> = ({
       {renderDescriptionField()}
       {renderTagsField()}
       {renderAvatarField()}
+      <CharacterExpressionImagesValidationItem />
       {renderAdvancedFields()}
 
       <button

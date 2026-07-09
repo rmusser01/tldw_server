@@ -60,6 +60,14 @@ export const SIDEBAR_SHORTCUT_ACTIONS: SidebarShortcutAction[] =
 export const normalizeSidebarShortcutSelection = (
   selection: SidebarShortcutId[]
 ): SidebarShortcutAction[] => {
-  const selected = new Set(selection)
-  return SIDEBAR_SHORTCUT_ACTIONS.filter((item) => selected.has(item.id))
+  const seen = new Set<SidebarShortcutId>()
+
+  return selection
+    .filter((id) => {
+      if (seen.has(id)) return false
+      seen.add(id)
+      return true
+    })
+    .map((id) => SIDEBAR_SHORTCUT_CONFIG[id])
+    .filter(isShortcutAction)
 }
