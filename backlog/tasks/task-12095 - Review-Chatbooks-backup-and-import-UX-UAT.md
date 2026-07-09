@@ -1,7 +1,7 @@
 ---
 id: TASK-12095
 title: Review Chatbooks backup and import UX/UAT
-status: In Progress
+status: Done
 labels:
 - ux
 - uat
@@ -15,6 +15,7 @@ references:
 - https://www.nngroup.com/articles/cognitive-walkthroughs/
 modified_files:
 - Docs/superpowers/specs/2026-07-09-chatbooks-backup-import-uat-ux-design.md
+- Docs/Reviews/CHATBOOKS_BACKUP_IMPORT_UAT_UX_REVIEW_2026_07_09.md
 - backlog/tasks/task-12095 - Review-Chatbooks-backup-and-import-UX-UAT.md
 ---
 
@@ -43,7 +44,7 @@ Docs/superpowers/specs/2026-07-09-chatbooks-backup-import-uat-ux-design.md
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Completed NN/g-informed UAT/UX review for Chatbooks backup/import. Report written at Docs/Reviews/CHATBOOKS_BACKUP_IMPORT_UAT_UX_REVIEW_2026_07_09.md. Verdict: backup/import is technically possible, but complete backup and archive restore are not straightforward or easy. P0 findings: documented backup-all path conflicts with UI/backend selection semantics; archive restore defaults send unsupported import_media=true. P1 findings: Settings is a conversation-ID-only shortcut, OpenWebUI hydration requires remembered conversation IDs, and the visible Playground naming weakens data-safety trust. Verification: targeted OpenWebUI import/hydration unit test passed 7/7; full live browser UAT skipped because local servers were not running and P0 failures were statically provable. Bandit skipped because this task touched docs/backlog only.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
