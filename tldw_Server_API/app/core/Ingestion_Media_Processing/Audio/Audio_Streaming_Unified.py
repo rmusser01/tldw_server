@@ -2609,6 +2609,28 @@ def _clamp_int(value: Any, default: int, min_value: int, max_value: int) -> int:
         return default
 
 
+def _audio_protocol_frame_for_config(
+    frame: dict[str, Any],
+    config: UnifiedStreamingConfig,
+) -> dict[str, Any]:
+    """Return the strict audio protocol view for a client config frame.
+
+    Legacy unified streaming clients predate the public v1 JSON audio protocol
+    and send only transcription settings. Keep those clients on v1 defaults
+    while leaving explicit protocol frames strict.
+    """
+    if "protocol_version" in frame:
+        return frame
+
+    protocol_frame = dict(frame)
+    protocol_frame.setdefault("protocol_version", 1)
+    protocol_frame.setdefault("mode", "dictate")
+    protocol_frame.setdefault("audio_format", "pcm16")
+    protocol_frame.setdefault("sample_rate", getattr(config, "sample_rate", 16000) or 16000)
+    protocol_frame.setdefault("channels", 1)
+    return protocol_frame
+
+
 async def handle_unified_websocket(
     websocket,
     config: Optional[UnifiedStreamingConfig] = None,
@@ -2690,7 +2712,8 @@ async def handle_unified_websocket(
                 raise AudioProtocolError("bad_request", "First post-auth frame must be a JSON object")
             config_payload = config_data
             logger.info(f"Parsed config data type: {config_data.get('type')}")
-            protocol_config = validate_audio_stream_config(config_data, AUDIO_TRANSCRIBE_ENDPOINT)
+            protocol_frame = _audio_protocol_frame_for_config(config_data, config)
+            protocol_config = validate_audio_stream_config(protocol_frame, AUDIO_TRANSCRIBE_ENDPOINT)
 
             # Update configuration
             old_variant = config.model_variant
