@@ -986,6 +986,8 @@ const assertNoMobilePanelComposerOverlap = async (
     .toBe('ok');
 };
 
+const MAX_MOBILE_PANEL_HEIGHT_PX = 260;
+
 const assertMobilePanelMeasuredHeight = async (
   page: Page,
   panel: 'context' | 'runtime',
@@ -996,7 +998,9 @@ const assertMobilePanelMeasuredHeight = async (
       async () => {
         const measurement = await measureMobilePanelComposer(page, panel);
         if (measurement.status === 'error') return measurement.message;
-        return measurement.panelHeight <= 260 ? 'ok' : `too tall: ${measurement.panelHeight}`;
+        return measurement.panelHeight <= MAX_MOBILE_PANEL_HEIGHT_PX
+          ? 'ok'
+          : `too tall: ${measurement.panelHeight}`;
       },
       { message: label, timeout: 10_000 }
     )

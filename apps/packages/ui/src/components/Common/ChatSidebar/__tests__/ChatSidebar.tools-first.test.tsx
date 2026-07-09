@@ -175,6 +175,9 @@ describe("ChatSidebar tools-first reset", () => {
     settingState.shortcutSelection = [
       "quick-ingest",
       "kanban-playground",
+      "quick-ingest",
+      "chat",
+      "kanban-playground",
       "chat"
     ]
 

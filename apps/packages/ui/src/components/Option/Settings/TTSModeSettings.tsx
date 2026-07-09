@@ -717,68 +717,68 @@ export const TTSModeSettings = ({ hideBorder }: { hideBorder?: boolean }) => {
       return
     }
 
-    if (
-      provider === "tldw" &&
-      (requireField(
-        form.values.tldwTtsModel,
-        t(
-          "generalSettings.tts.preview.selectTldwModel",
-          "Select a tldw TTS model first."
-        ) as string
-      ) ||
-        requireField(
-          form.values.tldwTtsVoice,
-          t(
+    const requiredPreviewFieldsByProvider: Record<
+      string,
+      Array<{ value: unknown; message: string }>
+    > = {
+      tldw: [
+        {
+          value: form.values.tldwTtsModel,
+          message: t(
+            "generalSettings.tts.preview.selectTldwModel",
+            "Select a tldw TTS model first."
+          ) as string
+        },
+        {
+          value: form.values.tldwTtsVoice,
+          message: t(
             "generalSettings.tts.preview.selectTldwVoice",
             "Select a tldw TTS voice first."
           ) as string
-        ))
-    ) {
-      return
-    }
-    if (
-      provider === "openai" &&
-      (requireField(
-        form.values.openAITTSModel,
-        t(
-          "generalSettings.tts.preview.selectOpenAiModel",
-          "Select an OpenAI-compatible TTS model first."
-        ) as string
-      ) ||
-        requireField(
-          form.values.openAITTSVoice,
-          t(
+        }
+      ],
+      openai: [
+        {
+          value: form.values.openAITTSModel,
+          message: t(
+            "generalSettings.tts.preview.selectOpenAiModel",
+            "Select an OpenAI-compatible TTS model first."
+          ) as string
+        },
+        {
+          value: form.values.openAITTSVoice,
+          message: t(
             "generalSettings.tts.preview.selectOpenAiVoice",
             "Select an OpenAI-compatible TTS voice first."
           ) as string
-        ))
-    ) {
-      return
-    }
-    if (
-      provider === "elevenlabs" &&
-      (requireField(
-        form.values.elevenLabsApiKey,
-        t(
-          "generalSettings.tts.preview.enterElevenLabsApiKey",
-          "Enter an ElevenLabs API key first."
-        ) as string
-      ) ||
-        requireField(
-          form.values.elevenLabsModel,
-          t(
+        }
+      ],
+      elevenlabs: [
+        {
+          value: form.values.elevenLabsApiKey,
+          message: t(
+            "generalSettings.tts.preview.enterElevenLabsApiKey",
+            "Enter an ElevenLabs API key first."
+          ) as string
+        },
+        {
+          value: form.values.elevenLabsModel,
+          message: t(
             "generalSettings.tts.preview.selectElevenLabsModel",
             "Select an ElevenLabs model first."
           ) as string
-        ) ||
-        requireField(
-          form.values.elevenLabsVoiceId,
-          t(
+        },
+        {
+          value: form.values.elevenLabsVoiceId,
+          message: t(
             "generalSettings.tts.preview.selectElevenLabsVoice",
             "Select an ElevenLabs voice first."
           ) as string
-        ))
-    ) {
+        }
+      ]
+    }
+    const requiredPreviewFields = requiredPreviewFieldsByProvider[provider] ?? []
+    if (requiredPreviewFields.some((field) => requireField(field.value, field.message))) {
       return
     }
 
