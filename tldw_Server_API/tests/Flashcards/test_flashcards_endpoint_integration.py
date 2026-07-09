@@ -1613,6 +1613,34 @@ def test_generate_flashcards_endpoint_returns_generated_cards(
     assert payload["flashcards"][1]["tags"] == ["biology", "metabolism"]
 
 
+def test_generate_flashcards_uses_legacy_defaults(client_with_flashcards_db, monkeypatch):
+    async def fake_generate_adapter(config, context):
+        assert config["num_cards"] == 10
+        assert config["card_type"] == "basic"
+        assert config.get("card_plan") is None
+        return {
+            "flashcards": [
+                {"front": "Legacy Q", "back": "Legacy A", "model_type": "basic"},
+            ],
+            "count": 1,
+        }
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.endpoints.flashcards.run_flashcard_generate_adapter",
+        fake_generate_adapter,
+    )
+
+    response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/generate",
+        json={"text": "Legacy default source"},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["count"] == 1
+
+
 def test_generate_flashcards_accepts_mixed_card_plan(client_with_flashcards_db, monkeypatch):
     async def fake_generate_adapter(config, context):
         assert config["num_cards"] == 4

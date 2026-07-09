@@ -50,7 +50,7 @@ Approved design choices:
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Task 1 backend schema contract slice: added card_plan request validation, response-only generation_type schema, focused mixed-plan/invalid-plan endpoint tests, and minimal generate endpoint passthrough/preservation needed for the contract test. Verification: focused generate pytest passed (12 passed, 154 deselected); Bandit on touched backend schema/endpoint files reported 0 findings.
+Task 1 backend schema contract slice: added card_plan request validation, response-only generation_type schema, focused mixed-plan/invalid-plan endpoint tests, and minimal generate endpoint passthrough/preservation needed for the contract test. Follow-up review regression added coverage for legacy default generate payloads omitting num_cards/card_type/card_plan. Verification: focused generate pytest passed (13 passed, 154 deselected); Bandit on touched backend schema/endpoint files reported 0 findings.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
