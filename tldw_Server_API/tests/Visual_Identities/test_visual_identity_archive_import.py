@@ -232,7 +232,22 @@ def test_zip_fixture_preserves_backslash_member_names(tmp_path: Path) -> None:
     archive_path = _zip_with_entries(tmp_path / "backslash.zip", {r"sprites\happy.png": b"data"})
 
     with zipfile.ZipFile(archive_path) as archive:
-        assert archive.namelist() == [r"sprites\happy.png"]
+        assert archive.infolist()[0].orig_filename == r"sprites\happy.png"
+
+
+def test_collect_candidates_rejects_raw_backslash_when_zipfile_normalizes_filename() -> None:
+    info = zipfile.ZipInfo("sprites/happy.png")
+    info.orig_filename = r"sprites\happy.png"
+    info.file_size = 4
+    info.compress_size = 4
+    summary = archive_import._empty_summary(source_filename="unsafe.zip")
+
+    class Archive:
+        def infolist(self) -> list[zipfile.ZipInfo]:
+            return [info]
+
+    assert archive_import._collect_candidates(Archive(), summary) == []
+    assert _error_codes(summary) == {"unsafe_archive_path"}
 
 
 @pytest.mark.parametrize("member_name", ["C:happy.png", "sprites/C:happy.png"])
