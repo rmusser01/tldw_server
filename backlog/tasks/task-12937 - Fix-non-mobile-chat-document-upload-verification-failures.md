@@ -28,6 +28,10 @@ Address the non-mobile failures found after chat document upload processing work
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
+- [x] #1 Composer server preference smoke test seeds auth/config and verifies the server-provided value.
+- [x] #2 Composer variants preview smoke test isolates app-wide notification traffic without hiding preview route console/runtime errors.
+- [x] #3 Reported non-mobile TypeScript compile errors are resolved.
+- [x] #4 Mobile viewport composer UI specs remain out of scope.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -64,10 +68,10 @@ Bandit skipped: frontend/test-only TypeScript changes, no Python touched. Known 
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

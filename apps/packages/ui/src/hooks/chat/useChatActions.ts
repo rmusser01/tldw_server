@@ -114,6 +114,7 @@ import {
   resolveTurnUploadedFiles,
   resolveTurnRagMediaIds,
   shouldUseRagForTurn,
+  type ChatModeOverrides,
   type ChatSubmitResult
 } from "@/hooks/chat/chat-action-utils"
 import {
@@ -159,25 +160,6 @@ import { parseVisualIdentityEmoteCommand } from "@/utils/visual-identity-emote"
 type ChatModelSettingsStore = ChatModelSettings & {
   setSystemPrompt?: (prompt: string) => void
 }
-
-type ChatModeOverrides = {
-  historyId?: string | null
-  serverChatId?: string | null
-  selectedModel?: string | null
-  selectedSystemPrompt?: string | null
-  toolChoice?: ToolChoice | null
-  useOCR?: boolean
-  webSearch?: boolean
-  imageEventSyncPolicy?: ImageGenerationEventSyncPolicy
-  researchContext?: ChatResearchContext
-  dynamicUIRequest?: DynamicUIRequest
-  userMetadataExtra?: MessageMetadataExtra
-  ragMediaIds?: number[] | null
-  fileRetrievalEnabled?: boolean
-  contextFiles?: UploadedFile[]
-  uploadedFiles?: UploadedFile[]
-  selectedKnowledge?: Knowledge | null
-} & Record<string, unknown>
 
 type PersonaMemoryMode = "read_only" | "read_write"
 

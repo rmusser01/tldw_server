@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+import time
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -191,6 +193,7 @@ def test_document_upload_preflight_marks_size_page_and_token_limits_blocked(
     assert items["too-many-tokens"]["modes"]["add_to_chat"]["status"] == "blocked"
     assert "exceeds 24000 token direct-chat limit" in items["too-many-tokens"]["modes"]["add_to_chat"]["reason"]
     assert items["too-many-tokens"]["modes"]["ingest_to_library"]["available"] is True
+    assert items["too-many-tokens"]["default_mode"] == "ingest_to_library"
 
 
 def test_document_upload_draft_owner_read_delete_and_expiry(document_upload_app, monkeypatch):
@@ -253,6 +256,108 @@ def test_document_upload_draft_owner_read_delete_and_expiry(document_upload_app,
     )
     assert delete_response.status_code == 204
     assert TestClient(app).get(f"/api/v1/media/document-upload/drafts/{second_draft}").status_code == 404
+
+
+def test_document_upload_draft_rejects_oversized_payload(
+    document_upload_app,
+    monkeypatch,
+):
+    app, document_upload_processing = document_upload_app
+    monkeypatch.setattr(
+        document_upload_processing,
+        "MAX_DRAFT_PAYLOAD_BYTES",
+        32,
+    )
+
+    response = TestClient(app).post(
+        "/api/v1/media/document-upload/drafts",
+        json={"payload": {"draft": "x" * 128, "files": []}},
+    )
+
+    assert response.status_code == 413
+
+
+def test_document_upload_draft_rejects_per_owner_quota(
+    document_upload_app,
+    monkeypatch,
+):
+    app, document_upload_processing = document_upload_app
+    created_at = datetime(2026, 7, 9, tzinfo=timezone.utc)
+    monkeypatch.setattr(document_upload_processing, "_now_utc", lambda: created_at)
+    monkeypatch.setattr(document_upload_processing, "MAX_DRAFTS_PER_OWNER", 1)
+
+    first_response = TestClient(app).post(
+        "/api/v1/media/document-upload/drafts",
+        json={"payload": {"draft": "first", "files": []}},
+    )
+    second_response = TestClient(app).post(
+        "/api/v1/media/document-upload/drafts",
+        json={"payload": {"draft": "second", "files": []}},
+    )
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 429
+
+
+def test_document_upload_draft_store_serializes_cleanup_and_create(
+    document_upload_app,
+    monkeypatch,
+):
+    _app, document_upload_processing = document_upload_app
+    from tldw_Server_API.app.api.v1.schemas.document_upload_processing import (
+        ChatDocumentDraftCreateRequest,
+    )
+
+    created_at = datetime(2026, 7, 9, tzinfo=timezone.utc)
+    expired_at = created_at - timedelta(seconds=1)
+    cleanup_started = threading.Event()
+
+    class SlowDrafts(dict):
+        def items(self):
+            for item in super().items():
+                cleanup_started.set()
+                time.sleep(0.002)
+                yield item
+
+    monkeypatch.setattr(
+        document_upload_processing,
+        "_DRAFTS",
+        SlowDrafts(
+            {
+                str(index): {
+                    "owner": "1",
+                    "created_at": expired_at,
+                    "expires_at": expired_at,
+                    "payload": {},
+                }
+                for index in range(100)
+            }
+        ),
+    )
+    monkeypatch.setattr(document_upload_processing, "_now_utc", lambda: created_at)
+
+    cleanup_errors: list[BaseException] = []
+
+    def cleanup_worker() -> None:
+        try:
+            document_upload_processing._cleanup_expired_drafts(created_at)
+        except BaseException as exc:
+            cleanup_errors.append(exc)
+
+    cleanup_thread = threading.Thread(target=cleanup_worker)
+    cleanup_thread.start()
+    assert cleanup_started.wait(timeout=1)
+
+    response = document_upload_processing.create_document_upload_draft(
+        ChatDocumentDraftCreateRequest(payload={"draft": "race", "files": []}),
+        current_user=type("User", (), {"id": 1})(),
+    )
+
+    cleanup_thread.join(timeout=2)
+
+    assert not cleanup_thread.is_alive()
+    assert cleanup_errors == []
+    assert response.draft_id in document_upload_processing._DRAFTS
 
 
 def test_document_upload_router_registered():

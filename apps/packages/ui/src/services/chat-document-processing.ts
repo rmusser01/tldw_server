@@ -6,6 +6,7 @@ import type {
   UploadedFile,
 } from "@/db/dexie/types"
 import { bgRequest, bgUpload } from "@/services/background-proxy"
+import i18n from "i18next"
 import { extractCompletedIngestJobMediaId } from "@/services/tldw/ingest-job-results"
 import { extractIngestJobIds } from "@/services/tldw/ingest-jobs-orchestrator"
 import {
@@ -119,7 +120,32 @@ export const estimateDirectChatTokens = (text: string): number =>
 const errorMessage = (error: unknown): string =>
   error instanceof Error
     ? error.message
-    : String(error || "Document processing failed")
+    : String(
+        error ||
+          i18n.t(
+            "playground:documentProcessing.genericFailure",
+            "Document processing failed"
+          )
+      )
+
+const processingModeUnavailableReason = (): string =>
+  i18n.t(
+    "playground:documentProcessing.modeUnavailable",
+    "This processing mode is unavailable."
+  )
+
+const unsupportedDocumentReason = (): string =>
+  i18n.t(
+    "playground:documentProcessing.unsupportedDocument",
+    "This document type is unsupported."
+  )
+
+const directChatTooLargeReason = (tokenEstimate: number): string =>
+  i18n.t(
+    "playground:documentProcessing.directChatTooLarge",
+    "Document text is too large for direct chat ({{count}} estimated tokens).",
+    { count: tokenEstimate }
+  )
 
 const isPdf = (file: UploadedFile): boolean =>
   file.type.toLowerCase().includes("pdf") ||
@@ -168,7 +194,7 @@ const applyDocumentProcessingMode = (
       processingMode: mode,
       processingStatus: "blocked",
       processingBlockedReason:
-        capability.reason || "This processing mode is unavailable.",
+        capability.reason || processingModeUnavailableReason(),
     }
   }
   return {
@@ -311,7 +337,7 @@ export const normalizeDocumentPreflightResponse = (
       processingBlockedReason: blocked
         ? capability?.reason ||
           firstReason ||
-          "This document type is unsupported."
+          unsupportedDocumentReason()
         : undefined,
       processingPageEstimate: item.estimated_pages ?? null,
       processingTokenEstimate: item.estimated_tokens ?? null,
@@ -461,7 +487,7 @@ export const prepareChatDocumentAttachmentsForSend = async ({
         processingMode: mode,
         processingStatus: "blocked",
         processingBlockedReason:
-          capability.reason || "This processing mode is unavailable.",
+          capability.reason || processingModeUnavailableReason(),
         processingRecoveryActions: [
           "switch_to_add_to_chat",
           "switch_to_ingest",
@@ -522,7 +548,7 @@ export const prepareChatDocumentAttachmentsForSend = async ({
           processingMode: mode,
           processingStatus: "blocked",
           processingTokenEstimate: tokenEstimate,
-          processingBlockedReason: `Document text is too large for direct chat (${tokenEstimate} estimated tokens).`,
+          processingBlockedReason: directChatTooLargeReason(tokenEstimate),
           processingRecoveryActions: [
             "use_chat_scoped_retrieval",
             "switch_to_ingest",
@@ -622,11 +648,35 @@ export const cancelPreparedDocumentProcessing = async (
         method: "DELETE",
       }))
 
+  const cancelledBatchIds = new Set<string>()
+  const cleanup = async (description: string, action: () => Promise<void> | void) => {
+    try {
+      await action()
+    } catch (error) {
+      console.warn(`Document processing cleanup failed: ${description}`, error)
+    }
+  }
+
   for (const file of files) {
-    if (file.ingestBatchId) await cancelIngestBatch(file.ingestBatchId)
-    if (file.ingestJobId != null) await cancelIngestJob(file.ingestJobId)
+    if (file.ingestBatchId && !cancelledBatchIds.has(file.ingestBatchId)) {
+      cancelledBatchIds.add(file.ingestBatchId)
+      await cleanup(`batch ${file.ingestBatchId}`, () =>
+        cancelIngestBatch(file.ingestBatchId as string)
+      )
+    }
+    if (file.ingestJobId != null) {
+      await cleanup(`job ${file.ingestJobId}`, () =>
+        cancelIngestJob(file.ingestJobId as string | number)
+      )
+    }
     const ref = file.processingResultRef
-    if (ref?.kind === "draft") await deleteDraft(String(ref.id))
-    if (file.documentDraftId) await deleteDraft(file.documentDraftId)
+    if (ref?.kind === "draft") {
+      await cleanup(`draft ${ref.id}`, () => deleteDraft(String(ref.id)))
+    }
+    if (file.documentDraftId) {
+      await cleanup(`draft ${file.documentDraftId}`, () =>
+        deleteDraft(file.documentDraftId as string)
+      )
+    }
   }
 }

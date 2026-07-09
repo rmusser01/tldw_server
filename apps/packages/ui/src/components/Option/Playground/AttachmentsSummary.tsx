@@ -12,6 +12,10 @@ import {
 } from "lucide-react"
 import { Image, Tooltip } from "antd"
 import { DocumentChip } from "@/components/Common/Playground/DocumentChip"
+import {
+  documentProcessingModeLabel,
+  documentProcessingStatusLabel
+} from "@/components/Common/Playground/document-processing-labels"
 import type { UploadedFile as StoredUploadedFile } from "@/db/dexie/types"
 
 interface Document {
@@ -91,26 +95,17 @@ export const AttachmentsSummary: React.FC<AttachmentsSummaryProps> = ({
   }
 
   const fileProcessingLabel = (file: UploadedFile) => {
-    if (file.processingStatus === "blocked") {
-      return t("playground:attachments.processingBlocked", "Blocked")
+    if (
+      file.processingStatus === "blocked" ||
+      file.processingStatus === "failed" ||
+      file.processingStatus === "processing" ||
+      file.processingStatus === "preflighting" ||
+      file.processingStatus === "cancelled"
+    ) {
+      return documentProcessingStatusLabel(file.processingStatus, t)
     }
-    if (file.processingStatus === "failed") {
-      return t("playground:attachments.processingFailed", "Failed")
-    }
-    if (file.processingStatus === "processing") {
-      return t("playground:attachments.processing", "Processing")
-    }
-    if (file.processingStatus === "preflighting") {
-      return t("playground:attachments.processingPreflight", "Checking")
-    }
-    if (file.processingMode === "ocr_pages") {
-      return t("playground:attachments.processingOcr", "OCR")
-    }
-    if (file.processingMode === "ingest_to_library") {
-      return t("playground:attachments.processingIngest", "Library ingest")
-    }
-    if (file.processingMode === "add_to_chat") {
-      return t("playground:attachments.processingChatOnly", "Chat only")
+    if (file.processingMode) {
+      return documentProcessingModeLabel(file.processingMode, t)
     }
     return null
   }
@@ -293,10 +288,18 @@ export const AttachmentsSummary: React.FC<AttachmentsSummaryProps> = ({
                           {formatFileSize(file.size)}
                         </span>
                         {processingLabel && (
-                          <span className="text-[10px] font-medium text-text-subtle">
-                            {processingLabel}
-                          </span>
+                          <Tooltip title={file.processingBlockedReason}>
+                            <span className="text-[10px] font-medium text-text-subtle">
+                              {processingLabel}
+                            </span>
+                          </Tooltip>
                         )}
+                        {file.processingStatus === "blocked" &&
+                          file.processingBlockedReason && (
+                            <span className="max-w-[150px] text-[10px] text-warn line-clamp-2">
+                              {file.processingBlockedReason}
+                            </span>
+                          )}
                       </div>
                       {!readOnly && (
                         <button

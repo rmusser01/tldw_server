@@ -41,10 +41,6 @@ Plan reviewer returned APPROVED after the second revision. Verification before f
 Created the implementation plan at Docs/superpowers/plans/2026-07-09-chat-document-upload-processing-choices-implementation-plan.md and tracked it in TASK-12092. Incorporated reviewer feedback for visible send-time processing turns, canonical documentProcessing message metadata, ingest contextFiles isolation, queue replay with replayable file data, idempotent ingest retry/cancel, page/token overflow recovery, and sidepanel draft lifecycle semantics. The plan reviewer returned APPROVED. Verification: unresolved-marker rg check found no TODO/TBD/ISSUES FOUND/stale setContextFiles(next) markers. Bandit skipped because only planning/backlog files were changed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
-<!-- SECTION:FINAL_SUMMARY:END -->
-
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed

@@ -333,7 +333,27 @@ const normalizeSidepanelDocumentDraftFiles = (
   if (!isRecord(payload) || !Array.isArray(payload.files)) {
     return [];
   }
+  const invalidCount = payload.files.filter(
+    (file) => !isUploadedFileDraft(file),
+  ).length;
+  if (invalidCount > 0) {
+    console.warn(
+      "[Playground] Ignored invalid sidepanel document draft file entries",
+      { invalidCount },
+    );
+  }
   return payload.files.filter(isUploadedFileDraft);
+};
+
+const mergeUploadedFilesById = (
+  existing: UploadedFile[],
+  incoming: UploadedFile[],
+): UploadedFile[] => {
+  const byId = new Map(existing.map((file) => [file.id, file]));
+  for (const file of incoming) {
+    byId.set(file.id, file);
+  }
+  return Array.from(byId.values());
 };
 
 const getRecordString = (value: unknown, keys: string[]): string | null => {
@@ -1946,10 +1966,19 @@ export const Playground = () => {
             documentDraft.payload,
           );
           if (draftFiles.length > 0) {
-            setUploadedFiles(draftFiles);
+            const currentState = useStoreMessageOption.getState();
+            const nextUploadedFiles = mergeUploadedFilesById(
+              currentState.uploadedFiles,
+              draftFiles,
+            );
+            const draftContextFiles = draftFiles.filter(
+              (file) => file.processingMode !== "ingest_to_library",
+            );
+            setUploadedFiles(nextUploadedFiles);
             setContextFiles(
-              draftFiles.filter(
-                (file) => file.processingMode !== "ingest_to_library",
+              mergeUploadedFilesById(
+                currentState.contextFiles,
+                draftContextFiles,
               ),
             );
           }

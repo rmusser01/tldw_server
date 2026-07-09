@@ -52,8 +52,6 @@ Verification:
 Added frontend document-processing metadata/types, pure chat-document-processing helpers, send-time preparation, ingest/draft cancellation helpers, media client preflight/draft methods, OpenAPI guard paths, and focused Vitest coverage for add-to-chat, OCR, ingest, mixed batches, overflow blocking, async ingest processing state, retries, and cancellation.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed

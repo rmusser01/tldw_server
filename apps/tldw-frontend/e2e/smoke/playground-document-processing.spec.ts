@@ -106,18 +106,20 @@ test("chat document upload can stay chat-scoped after send-time processing", asy
   test.setTimeout(90_000)
 
   let releaseDocumentProcessing: (() => void) | null = null
+  let markDocumentProcessingStarted: () => void = () => undefined
   const documentProcessingStarted = new Promise<void>((resolve) => {
-    void page.route("**/api/v1/media/process-documents", async (route) => {
-      resolve()
-      await new Promise<void>((release) => {
-        releaseDocumentProcessing = release
-      })
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          results: [{ content: DOCUMENT_TEXT, source: "upload.md" }]
-        })
+    markDocumentProcessingStarted = resolve
+  })
+  await page.route("**/api/v1/media/process-documents", async (route) => {
+    markDocumentProcessingStarted()
+    await new Promise<void>((release) => {
+      releaseDocumentProcessing = release
+    })
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        results: [{ content: DOCUMENT_TEXT, source: "upload.md" }]
       })
     })
   })
@@ -156,22 +158,17 @@ test("chat document upload can stay chat-scoped after send-time processing", asy
     buffer: Buffer.from("# Upload notes\n\nUse these notes only in chat.")
   })
 
-  await expect(page.getByText("Document handling")).toBeVisible()
-  await expect(page.getByTestId("document-processing-summary")).toContainText(
-    "1 ready"
-  )
-  await expect(
-    page.getByText("OCR unavailable: server cannot render .MD pages")
-  ).toBeVisible()
+  await expect(page.getByRole("button", { name: /Attachments \(1\)/ })).toBeVisible()
 
-  await page.getByRole("button", { name: /Add to chat/i }).first().click()
   await input.fill("Summarize the uploaded notes")
   await page.getByTestId("composer-inline-send-control").click()
 
   await expect(page.getByText("Processing documents")).toBeVisible({
     timeout: 10_000
   })
-  await expect(page.getByText("upload.md")).toBeVisible()
+  await expect(
+    page.getByTestId("chat-message").getByText("upload.md")
+  ).toBeVisible()
   await expect(
     page.getByTestId("chat-message").getByText("Add to chat")
   ).toBeVisible()

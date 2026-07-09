@@ -456,4 +456,41 @@ describe("chat document processing service", () => {
     expect(cancelIngestJob).toHaveBeenCalledWith(77)
     expect(deleteDraft).toHaveBeenCalledWith("draft-1")
   })
+
+  it("continues document cleanup after cancellation failures and dedupes batches", async () => {
+    const cancelIngestJob = vi.fn()
+    const cancelIngestBatch = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("batch unavailable"))
+    const deleteDraft = vi.fn()
+    const consoleWarn = vi
+      .spyOn(console, "warn")
+      .mockImplementation(() => undefined)
+
+    await cancelPreparedDocumentProcessing(
+      [
+        makeUploadedFile({
+          id: "file-1",
+          ingestJobId: 77,
+          ingestBatchId: "batch-1",
+          processingResultRef: { kind: "draft", id: "draft-1" },
+        }),
+        makeUploadedFile({
+          id: "file-2",
+          ingestJobId: 78,
+          ingestBatchId: "batch-1",
+          documentDraftId: "draft-2",
+        }),
+      ],
+      { cancelIngestJob, cancelIngestBatch, deleteDraft },
+    )
+
+    expect(cancelIngestBatch).toHaveBeenCalledTimes(1)
+    expect(cancelIngestJob).toHaveBeenCalledWith(77)
+    expect(cancelIngestJob).toHaveBeenCalledWith(78)
+    expect(deleteDraft).toHaveBeenCalledWith("draft-1")
+    expect(deleteDraft).toHaveBeenCalledWith("draft-2")
+    expect(consoleWarn).toHaveBeenCalled()
+    consoleWarn.mockRestore()
+  })
 })

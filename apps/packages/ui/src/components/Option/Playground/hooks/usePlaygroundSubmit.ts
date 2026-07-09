@@ -377,6 +377,7 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
 
         const {
           documentProcessing,
+          messageForModel: preparedMessageForModel,
           userMetadataExtra,
           ...preparedRequestOverrides
         } = preparedDocuments.requestOverrides as Record<string, unknown>
@@ -393,6 +394,9 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
         mergedRequestOverrides = {
           ...(mergedRequestOverrides ?? {}),
           ...preparedRequestOverrides,
+          ...(typeof preparedMessageForModel === "string"
+            ? { messageForModel: preparedMessageForModel }
+            : {}),
           ...(reservedDocumentUserMessageId
             ? { userMessageId: reservedDocumentUserMessageId }
             : {}),

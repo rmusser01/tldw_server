@@ -67,7 +67,6 @@ describe("ChatComposer", () => {
           { id: "mode", fieldKey: "mode", value: "OCR pages", active: true },
         ]}
         textareaSlot={<textarea data-testid="chat-input" aria-label="Message input" />}
-        inlineSlot={<button type="button">Commands</button>}
         sendSlot={<button type="button">Queue</button>}
         onPaletteTrigger={vi.fn()}
       />
@@ -77,6 +76,7 @@ describe("ChatComposer", () => {
     expect(screen.getByTestId("v5-mobile-text-row")).toBeTruthy()
     expect(screen.getByTestId("v5-mobile-action-row")).toBeTruthy()
     expect(screen.getByTestId("chat-input")).toBeTruthy()
+    expect(screen.getByRole("button", { name: /open command palette/i })).toHaveTextContent("/")
     expect(screen.queryByText("⌘K")).toBeNull()
 
     const root = screen

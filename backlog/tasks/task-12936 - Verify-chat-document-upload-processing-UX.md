@@ -46,7 +46,7 @@ Execute Task 6 from the chat document upload processing plan: add focused Playwr
 
 - PASS: `cd apps/tldw-frontend && bunx playwright test e2e/smoke/playground-document-processing.spec.ts --reporter=line`
 - PASS: `cd apps/tldw-frontend && bunx vitest run ../packages/ui/src/services/__tests__/chat-document-processing.test.ts ../packages/ui/src/components/Option/Playground/__tests__/DocumentProcessingChoices.test.tsx ../packages/ui/src/components/Common/Playground/__tests__/DocumentProcessingTurn.test.tsx ../packages/ui/src/components/Option/Playground/__tests__/PlaygroundForm.document-processing.test.tsx ../packages/ui/src/services/__tests__/sidepanel-chat-webui-handoff.test.ts`
-- PASS: `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Media/test_document_upload_processing.py -q`
+- PASS: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Media/test_document_upload_processing.py -q`
 - PASS: `cd apps/tldw-frontend && bun run lint` exited 0 with 177 existing warnings and no errors.
 - PASS: `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m bandit -r tldw_Server_API/app/api/v1/endpoints/media/document_upload_processing.py tldw_Server_API/app/api/v1/schemas/document_upload_processing.py -f json -o /tmp/bandit_chat_document_upload_processing.json`; JSON results were empty.
 - PASS: `git diff --check`

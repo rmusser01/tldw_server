@@ -188,6 +188,15 @@
   "composer_clearQueueConfirmContent": {
     "message": "This will delete {{count}} queued message(s) that haven't been sent yet."
   },
+  "composer_documentHandoffFailedTitle": {
+    "message": "Could not open documents in chat"
+  },
+  "composer_documentHandoffFailedDescription": {
+    "message": "Try again, or remove the files and open chat without them."
+  },
+  "composer_documentPreflightFailed": {
+    "message": "Document preflight failed. Try again or remove the file."
+  },
   "notification_ingestSent": {
     "message": "Sent to tldw server"
   },

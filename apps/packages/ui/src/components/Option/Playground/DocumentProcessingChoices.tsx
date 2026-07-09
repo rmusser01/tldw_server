@@ -31,11 +31,22 @@ const unavailableReason = (
   files: UploadedFile[],
   mode: DocumentProcessingMode
 ): string | null => {
-  const blocked = files.find((file) => {
+  const reasons = Array.from(
+    new Set(
+      files
+        .map((file) => file.processingCapabilities?.[mode])
+        .filter((capability) => capability && !capability.available)
+        .map((capability) => capability?.reason)
+        .filter((reason): reason is string => Boolean(reason))
+    )
+  )
+  if (reasons.length > 0) return reasons.join("; ")
+  return files.some((file) => {
     const capability = file.processingCapabilities?.[mode]
     return capability && !capability.available
   })
-  return blocked?.processingCapabilities?.[mode]?.reason || null
+    ? "Unavailable for one or more files"
+    : null
 }
 
 const statusSummary = (
@@ -142,6 +153,7 @@ export const DocumentProcessingChoices: React.FC<Props> = ({
         <button
           type="button"
           onClick={() => setShowPerFile((value) => !value)}
+          aria-expanded={showPerFile}
           className="inline-flex min-h-7 items-center gap-1.5 rounded border border-border bg-surface px-2 text-[11px] text-text hover:bg-surface2"
         >
           <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
@@ -160,6 +172,7 @@ export const DocumentProcessingChoices: React.FC<Props> = ({
               <button
                 type="button"
                 disabled={disabled}
+                aria-pressed={selected}
                 onClick={() =>
                   onChangeFiles(
                     setBatchDocumentProcessingMode(files, option.mode)
@@ -209,6 +222,7 @@ export const DocumentProcessingChoices: React.FC<Props> = ({
                       key={option.mode}
                       type="button"
                       disabled={disabled}
+                      aria-pressed={selected}
                       onClick={() =>
                         onChangeFiles(
                           setFileDocumentProcessingMode(

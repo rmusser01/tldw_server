@@ -48,10 +48,6 @@ Verification completed so far:
 Implemented V5-only compact mobile sidepanel composer. V5 compact density now renders separate metadata, text, and action rows; sidepanel V5 no longer injects the legacy control stack as facets; document file count and handling mode are exposed as V5 facets; mobile smoke coverage now treats V5 as the current mobile reference. Verification passed: focused Vitest, frontend typecheck, focused Playwright mobile smoke, and a 360px screenshot capture at /tmp/tldw-v5-sidepanel-360-after.png. Bandit skipped because no Python files changed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
-<!-- SECTION:FINAL_SUMMARY:END -->
-
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed

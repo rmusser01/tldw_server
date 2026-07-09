@@ -125,7 +125,7 @@ describe("AttachmentsSummary integration", () => {
 
     await user.click(screen.getByRole("button", { name: /Attachments/i }))
 
-    expect(screen.getByText("Blocked")).toBeInTheDocument()
+    expect(screen.getByText("Document processing blocked")).toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: "Remove" }))
     expect(onRemoveFile).toHaveBeenCalledWith("file-1")
   })

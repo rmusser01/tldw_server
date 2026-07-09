@@ -2,94 +2,18 @@ import React from "react"
 import { AlertCircle, CheckCircle2, FileText, Loader2 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import type {
-  DocumentProcessingMode,
   DocumentProcessingRecoveryAction,
   DocumentProcessingStatus,
   DocumentProcessingTurnMetadata
 } from "@/db/dexie/types"
+import {
+  documentProcessingModeLabel,
+  documentProcessingStatusLabel,
+  toDisplayText
+} from "./document-processing-labels"
 
 type Props = {
   metadata?: DocumentProcessingTurnMetadata | null
-}
-
-const toDisplayText = (value: unknown): string =>
-  typeof value === "string" ? value : String(value ?? "")
-
-const statusLabel = (
-  status: DocumentProcessingTurnMetadata["status"],
-  t: (key: string, fallback: string) => unknown
-): string => {
-  switch (status) {
-    case "waiting_for_files":
-      return toDisplayText(
-        t("playground:documentProcessing.waiting", "Waiting for files")
-      )
-    case "processing":
-      return toDisplayText(
-        t(
-          "playground:documentProcessing.processing",
-          "Processing documents"
-        )
-      )
-    case "ready":
-      return toDisplayText(
-        t("playground:documentProcessing.ready", "Documents ready")
-      )
-    case "blocked":
-      return toDisplayText(
-        t(
-          "playground:documentProcessing.blocked",
-          "Document processing blocked"
-        )
-      )
-    case "failed":
-      return toDisplayText(
-        t(
-          "playground:documentProcessing.failed",
-          "Document processing failed"
-        )
-      )
-    case "sending_prompt":
-      return toDisplayText(
-        t("playground:documentProcessing.sending", "Sending prompt")
-      )
-    case "cancelled":
-      return toDisplayText(
-        t(
-          "playground:documentProcessing.cancelled",
-          "Processing cancelled"
-        )
-      )
-    default:
-      return toDisplayText(
-        t(
-          "playground:documentProcessing.processing",
-          "Processing documents"
-        )
-      )
-  }
-}
-
-const modeLabel = (
-  mode: DocumentProcessingMode | undefined,
-  t: (key: string, fallback: string) => unknown
-): string => {
-  if (mode === "ocr_pages") {
-    return toDisplayText(
-      t("playground:documentProcessing.ocrPages", "OCR pages")
-    )
-  }
-  if (mode === "ingest_to_library") {
-    return toDisplayText(
-      t(
-        "playground:documentProcessing.ingestToLibrary",
-        "Ingest to library"
-      )
-    )
-  }
-  return toDisplayText(
-    t("playground:documentProcessing.addToChat", "Add to chat")
-  )
 }
 
 const recoveryLabel = (
@@ -168,7 +92,9 @@ export const DocumentProcessingTurn: React.FC<Props> = ({ metadata }) => {
     <div className="w-full max-w-[calc(100%-1.75rem)] rounded-lg border border-border bg-surface/80 px-3 py-2 text-xs text-text">
       <div className="flex flex-wrap items-center gap-2">
         <Icon className="h-3.5 w-3.5 text-text-subtle" aria-hidden="true" />
-        <span className="font-medium">{statusLabel(metadata.status, t)}</span>
+        <span className="font-medium">
+          {documentProcessingStatusLabel(metadata.status, t)}
+        </span>
         <span className="text-text-muted">
           {fileCountLabel(metadata.files.length, t)}
         </span>
@@ -183,7 +109,9 @@ export const DocumentProcessingTurn: React.FC<Props> = ({ metadata }) => {
             <span className="font-medium text-text line-clamp-1">
               {file.filename}
             </span>
-            <span className="text-text-muted">{modeLabel(file.mode, t)}</span>
+            <span className="text-text-muted">
+              {documentProcessingModeLabel(file.mode, t)}
+            </span>
             {(file.summary || file.error) && (
               <span className="basis-full pl-5 text-text-muted">
                 {file.summary || file.error}

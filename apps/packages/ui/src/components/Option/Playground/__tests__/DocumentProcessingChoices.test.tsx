@@ -47,13 +47,25 @@ describe("DocumentProcessingChoices", () => {
       />
     )
 
+    expect(screen.getByRole("button", { name: /Add to chat/i })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    )
+    expect(screen.getByRole("button", { name: /OCR pages/i })).toHaveAttribute(
+      "aria-pressed",
+      "false"
+    )
+
     await user.click(screen.getByRole("button", { name: /OCR pages/i }))
     expect(onChangeFiles).toHaveBeenCalledWith([
       expect.objectContaining({ filename: "a.pdf", processingMode: "ocr_pages" }),
       expect.objectContaining({ filename: "b.pdf", processingMode: "ocr_pages" })
     ])
 
-    await user.click(screen.getByRole("button", { name: /Adjust per file/i }))
+    const adjustButton = screen.getByRole("button", { name: /Adjust per file/i })
+    expect(adjustButton).toHaveAttribute("aria-expanded", "false")
+    await user.click(adjustButton)
+    expect(adjustButton).toHaveAttribute("aria-expanded", "true")
     expect(screen.getByText("a.pdf")).toBeInTheDocument()
     expect(screen.getByText("b.pdf")).toBeInTheDocument()
   })
@@ -81,6 +93,42 @@ describe("DocumentProcessingChoices", () => {
     expect(screen.getByRole("button", { name: /OCR pages/i })).toBeDisabled()
     expect(
       screen.getByText("OCR unavailable: server cannot render .MD pages")
+    ).toBeInTheDocument()
+  })
+
+  it("aggregates unavailable mode reasons across files", () => {
+    render(
+      <DocumentProcessingChoices
+        files={[
+          makeFile("notes.md", "add_to_chat", {
+            processingCapabilities: {
+              add_to_chat: { available: true, status: "available" },
+              ocr_pages: {
+                available: false,
+                status: "unavailable",
+                reason: "OCR unavailable for markdown"
+              },
+              ingest_to_library: { available: true, status: "available" }
+            }
+          }),
+          makeFile("scan.pdf", "add_to_chat", {
+            processingCapabilities: {
+              add_to_chat: { available: true, status: "available" },
+              ocr_pages: {
+                available: false,
+                status: "blocked",
+                reason: "PDF exceeds page limit"
+              },
+              ingest_to_library: { available: true, status: "available" }
+            }
+          })
+        ]}
+        onChangeFiles={vi.fn()}
+      />
+    )
+
+    expect(
+      screen.getByText("OCR unavailable for markdown; PDF exceeds page limit")
     ).toBeInTheDocument()
   })
 

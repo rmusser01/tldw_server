@@ -436,14 +436,28 @@ export const SidepanelForm = ({
       await onOpenChatInWebUi()
       return
     }
-    const draft = await tldwClient.createDocumentUploadDraft({
-      payload: {
-        source: "sidepanel-chat-document-upload",
-        files: contextFiles
-      }
-    })
-    await onOpenChatInWebUi({ chatDocumentDraftId: draft.draft_id })
-  }, [contextFiles, onOpenChatInWebUi])
+    try {
+      const draft = await tldwClient.createDocumentUploadDraft({
+        payload: {
+          source: "sidepanel-chat-document-upload",
+          files: contextFiles
+        }
+      })
+      await onOpenChatInWebUi({ chatDocumentDraftId: draft.draft_id })
+    } catch (error) {
+      console.error("[Sidepanel] Failed to create document handoff draft:", error)
+      notification.error({
+        message: t(
+          "sidepanel:composer.documentHandoffFailedTitle",
+          "Could not open documents in chat"
+        ),
+        description: t(
+          "sidepanel:composer.documentHandoffFailedDescription",
+          "Try again, or remove the files and open chat without them."
+        )
+      })
+    }
+  }, [contextFiles, notification, onOpenChatInWebUi, t])
   const [mentionActiveIndex, setMentionActiveIndex] = React.useState(0)
   const [dictationAutoFallbackEnabled] = useStorage(
     "dictation_auto_fallback",
@@ -1413,8 +1427,10 @@ export const SidepanelForm = ({
                     ? {
                         ...file,
                         processingStatus: "blocked",
-                        processingBlockedReason:
+                        processingBlockedReason: t(
+                          "sidepanel:composer.documentPreflightFailed",
                           "Document preflight failed. Try again or remove the file."
+                        )
                       }
                     : file
                 )

@@ -49,9 +49,4 @@ Completed browser-extension /chat document-processing handoff support for Task 5
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
-- [x] #7 Acceptance criteria completed
-- [x] #8 Tests or verification recorded
-- [x] #9 Documentation updated when relevant
-- [x] #10 Bandit run or non-Python skip documented
-- [x] #11 Final summary added
 <!-- DOD:END -->

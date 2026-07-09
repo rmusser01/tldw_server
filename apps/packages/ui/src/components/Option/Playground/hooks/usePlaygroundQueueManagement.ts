@@ -116,12 +116,14 @@ const mergePreparedDocumentOverrides = (
 ) => {
   const {
     documentProcessing,
+    messageForModel,
     userMetadataExtra,
     ...preparedOverrides
   } = (prepared.requestOverrides ?? {}) as Record<string, unknown>
   return {
     ...baseOverrides,
     ...preparedOverrides,
+    ...(typeof messageForModel === "string" ? { messageForModel } : {}),
     userMetadataExtra: {
       ...((baseOverrides.userMetadataExtra as Record<string, unknown> | undefined) ?? {}),
       ...(userMetadataExtra && typeof userMetadataExtra === "object"

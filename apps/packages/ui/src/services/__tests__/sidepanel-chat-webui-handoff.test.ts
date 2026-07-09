@@ -165,4 +165,31 @@ describe("sidepanel chat WebUI handoff", () => {
       fileRetrievalEnabled: true
     })
   })
+
+  it("does not materialize omitted document-processing handoff fields", () => {
+    const url = new URL(
+      buildSidepanelChatWebUiHandoffUrl({
+        payload: {
+          source: SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE,
+          createdAt: Date.now(),
+          draft: "Summarize this document"
+        }
+      })
+    )
+
+    const decoded = decodeSidepanelChatWebUiHandoff(getFragmentHandoff(url))
+
+    expect(decoded?.chatDocumentDraftId).toBeUndefined()
+    expect(decoded?.ragMediaIds).toBeUndefined()
+    expect(decoded?.fileRetrievalEnabled).toBeUndefined()
+    expect(
+      Object.prototype.hasOwnProperty.call(decoded, "chatDocumentDraftId")
+    ).toBe(false)
+    expect(Object.prototype.hasOwnProperty.call(decoded, "ragMediaIds")).toBe(
+      false
+    )
+    expect(
+      Object.prototype.hasOwnProperty.call(decoded, "fileRetrievalEnabled")
+    ).toBe(false)
+  })
 })

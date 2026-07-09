@@ -118,7 +118,21 @@
     "ingestToLibraryDescription": "Durable library source",
     "readyCount": "{{count}} ready",
     "blockedCount": "{{count}} blocked",
-    "failedCount": "{{count}} failed"
+    "failedCount": "{{count}} failed",
+    "waiting": "Waiting for files",
+    "preflighting": "Checking documents",
+    "pending": "Ready to process",
+    "processing": "Processing documents",
+    "ready": "Documents ready",
+    "blocked": "Document processing blocked",
+    "failed": "Document processing failed",
+    "sending": "Sending prompt",
+    "cancelled": "Processing cancelled",
+    "genericFailure": "Document processing failed",
+    "modeUnavailable": "This processing mode is unavailable.",
+    "unsupportedDocument": "This document type is unsupported.",
+    "directChatTooLarge": "Document text is too large for direct chat ({{count}} estimated tokens).",
+    "preflightFailed": "Document preflight failed. Try again or remove the file."
   },
   "aria": {
     "chatTranscript": "Chat messages"

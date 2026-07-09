@@ -38,6 +38,17 @@ describe("DocumentProcessingTurn", () => {
     expect(screen.getByText("OCR pages")).toBeInTheDocument()
   })
 
+  it("uses specific labels for preflight and pending states", () => {
+    const { rerender } = render(
+      <DocumentProcessingTurn metadata={makeMetadata({ status: "preflighting" })} />
+    )
+
+    expect(screen.getByText("Checking documents")).toBeInTheDocument()
+
+    rerender(<DocumentProcessingTurn metadata={makeMetadata({ status: "pending" })} />)
+    expect(screen.getByText("Ready to process")).toBeInTheDocument()
+  })
+
   it("surfaces blocked and failed file details", () => {
     render(
       <DocumentProcessingTurn

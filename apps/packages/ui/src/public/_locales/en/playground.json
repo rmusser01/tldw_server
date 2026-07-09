@@ -182,6 +182,48 @@
   "documentProcessing_failedCount": {
     "message": "{{count}} failed"
   },
+  "documentProcessing_waiting": {
+    "message": "Waiting for files"
+  },
+  "documentProcessing_preflighting": {
+    "message": "Checking documents"
+  },
+  "documentProcessing_pending": {
+    "message": "Ready to process"
+  },
+  "documentProcessing_processing": {
+    "message": "Processing documents"
+  },
+  "documentProcessing_ready": {
+    "message": "Documents ready"
+  },
+  "documentProcessing_blocked": {
+    "message": "Document processing blocked"
+  },
+  "documentProcessing_failed": {
+    "message": "Document processing failed"
+  },
+  "documentProcessing_sending": {
+    "message": "Sending prompt"
+  },
+  "documentProcessing_cancelled": {
+    "message": "Processing cancelled"
+  },
+  "documentProcessing_genericFailure": {
+    "message": "Document processing failed"
+  },
+  "documentProcessing_modeUnavailable": {
+    "message": "This processing mode is unavailable."
+  },
+  "documentProcessing_unsupportedDocument": {
+    "message": "This document type is unsupported."
+  },
+  "documentProcessing_directChatTooLarge": {
+    "message": "Document text is too large for direct chat ({{count}} estimated tokens)."
+  },
+  "documentProcessing_preflightFailed": {
+    "message": "Document preflight failed. Try again or remove the file."
+  },
   "aria_chatTranscript": {
     "message": "Chat messages"
   },

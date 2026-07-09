@@ -1,7 +1,7 @@
 ---
 id: TASK-12091
 title: Design chat document upload processing choices
-status: In Progress
+status: Done
 labels:
 - design
 - chat
@@ -20,6 +20,9 @@ Design the WebUI and browser-extension /chat document upload UX for Add to chat,
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
+- [x] #1 Design covers Add to chat, OCR pages, and Ingest to library upload choices for WebUI and browser-extension /chat.
+- [x] #2 Design specifies preflight capability states, blocked reasons, and send-time processing behavior.
+- [x] #3 Design records sidepanel handoff and draft lifecycle constraints.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -36,10 +39,10 @@ Design spec written and committed. Spec-document-reviewer returned APPROVED. Ver
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

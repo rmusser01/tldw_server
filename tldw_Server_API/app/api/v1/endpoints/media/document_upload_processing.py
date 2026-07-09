@@ -3,12 +3,13 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from threading import RLock
 from typing import Any, Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, rbac_rate_limit
 from tldw_Server_API.app.api.v1.schemas.document_upload_processing import (
     ChatDocumentDraftCreateRequest,
     ChatDocumentDraftCreateResponse,
@@ -47,9 +48,12 @@ DEFAULT_MAX_CHAT_UPLOAD_PAGES = 200
 DEFAULT_MAX_DIRECT_CHAT_TOKENS = 24_000
 DRAFT_TTL_SECONDS = 15 * 60
 MAX_DRAFT_PAYLOAD_BYTES = DEFAULT_MAX_CHAT_UPLOAD_BYTES
+MAX_DRAFTS_TOTAL = 256
+MAX_DRAFTS_PER_OWNER = 32
 
 # ponytail: process-local handoff store; use shared cache/DB if drafts must survive restarts.
 _DRAFTS: dict[str, dict[str, Any]] = {}
+_DRAFTS_LOCK = RLock()
 
 
 def _now_utc() -> datetime:
@@ -69,13 +73,28 @@ def _owner_key(current_user: Any) -> str:
 
 def _cleanup_expired_drafts(now: datetime | None = None) -> None:
     current_time = now or _now_utc()
-    expired_ids = [
-        draft_id
-        for draft_id, draft in _DRAFTS.items()
-        if draft["expires_at"] <= current_time
-    ]
-    for draft_id in expired_ids:
-        _DRAFTS.pop(draft_id, None)
+    with _DRAFTS_LOCK:
+        expired_ids = [
+            draft_id
+            for draft_id, draft in _DRAFTS.items()
+            if draft["expires_at"] <= current_time
+        ]
+        for draft_id in expired_ids:
+            _DRAFTS.pop(draft_id, None)
+
+
+def _enforce_draft_quota(owner: str) -> None:
+    owner_count = sum(1 for draft in _DRAFTS.values() if draft["owner"] == owner)
+    if owner_count >= MAX_DRAFTS_PER_OWNER:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many active document upload drafts for this user",
+        )
+    if len(_DRAFTS) >= MAX_DRAFTS_TOTAL:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many active document upload drafts",
+        )
 
 
 MediaType = Literal["pdf", "document", "ebook", "unsupported"]
@@ -183,8 +202,13 @@ def _preflight_file(file: DocumentUploadPreflightFile) -> DocumentUploadPrefligh
         "ocr_pages": ocr,
         "ingest_to_library": ingest,
     }
-    default_mode: DocumentProcessingMode | None = (
-        "add_to_chat" if modes["add_to_chat"].available else None
+    default_mode = next(
+        (
+            mode
+            for mode in ("add_to_chat", "ingest_to_library", "ocr_pages")
+            if modes[mode].available
+        ),
+        None,
     )
     return DocumentUploadPreflightItem(
         client_id=file.client_id,
@@ -217,19 +241,22 @@ def _ocr_capability(
 
 
 def _draft_for(draft_id: str, current_user: Any) -> dict[str, Any]:
-    _cleanup_expired_drafts()
-    draft = _DRAFTS.get(draft_id)
-    if draft is None or draft["owner"] != _owner_key(current_user):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Draft not found")
-    return draft
+    with _DRAFTS_LOCK:
+        _cleanup_expired_drafts()
+        draft = _DRAFTS.get(draft_id)
+        if draft is None or draft["owner"] != _owner_key(current_user):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Draft not found")
+        return dict(draft)
 
 
 @router.post(
     "/document-upload/preflight",
     response_model=DocumentUploadPreflightResponse,
+    dependencies=[Depends(rbac_rate_limit("media.read"))],
 )
 def preflight_document_upload(
     request: DocumentUploadPreflightRequest,
+    _current_user: Any = Depends(get_request_user),
 ) -> DocumentUploadPreflightResponse:
     return DocumentUploadPreflightResponse(
         files=[_preflight_file(file) for file in request.files],
@@ -252,15 +279,18 @@ def create_document_upload_draft(
         )
 
     now = _now_utc()
-    _cleanup_expired_drafts(now)
     draft_id = uuid4().hex
     expires_at = now + timedelta(seconds=DRAFT_TTL_SECONDS)
-    _DRAFTS[draft_id] = {
-        "owner": _owner_key(current_user),
-        "created_at": now,
-        "expires_at": expires_at,
-        "payload": request.payload,
-    }
+    owner = _owner_key(current_user)
+    with _DRAFTS_LOCK:
+        _cleanup_expired_drafts(now)
+        _enforce_draft_quota(owner)
+        _DRAFTS[draft_id] = {
+            "owner": owner,
+            "created_at": now,
+            "expires_at": expires_at,
+            "payload": request.payload,
+        }
     return ChatDocumentDraftCreateResponse(
         draft_id=draft_id,
         expires_at=expires_at.isoformat(),
@@ -293,7 +323,8 @@ def delete_document_upload_draft(
     response: Response,
     current_user: Any = Depends(get_request_user),
 ) -> Response:
-    _draft_for(draft_id, current_user)
-    _DRAFTS.pop(draft_id, None)
+    with _DRAFTS_LOCK:
+        _draft_for(draft_id, current_user)
+        _DRAFTS.pop(draft_id, None)
     response.status_code = status.HTTP_204_NO_CONTENT
     return response

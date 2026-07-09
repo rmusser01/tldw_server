@@ -2,6 +2,7 @@ import { useRef } from "react";
 import { generateID } from "@/db/dexie/helpers";
 import { type UploadedFile } from "@/db/dexie/types";
 import {
+  cancelPreparedDocumentProcessing,
   normalizeDocumentPreflightResponse,
   withDefaultDocumentDecision,
 } from "@/services/chat-document-processing";
@@ -51,13 +52,19 @@ export const useFileUpload = ({
   };
 
   const markPreflightFailed = (fileId: string) => {
+    const blockedReason = toText(
+      t(
+        "playground:documentProcessing.preflightFailed",
+        "Document preflight failed. Try again or remove the file.",
+      ),
+      "Document preflight failed. Try again or remove the file.",
+    );
     const nextFiles = uploadedFilesRef.current.map((uploadedFile) =>
       uploadedFile.id === fileId
         ? {
             ...uploadedFile,
             processingStatus: "blocked" as const,
-            processingBlockedReason:
-              "Document preflight failed. Try again or remove the file.",
+            processingBlockedReason: blockedReason,
           }
         : uploadedFile,
     );
@@ -164,6 +171,18 @@ export const useFileUpload = ({
   };
 
   const removeUploadedFile = async (fileId: string) => {
+    const removedFile = uploadedFilesRef.current.find((file) => file.id === fileId);
+    if (
+      removedFile &&
+      (removedFile.ingestJobId != null ||
+        removedFile.ingestBatchId ||
+        removedFile.documentDraftId ||
+        removedFile.processingResultRef?.kind === "draft")
+    ) {
+      await cancelPreparedDocumentProcessing([removedFile]).catch((error) => {
+        console.error("Failed to cancel removed document processing:", error);
+      });
+    }
     commitUploadedFiles(uploadedFilesRef.current.filter((f) => f.id !== fileId));
   };
 

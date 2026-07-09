@@ -6,6 +6,7 @@ import type { UploadedFile } from "@/db/dexie/types"
 import { useFileUpload } from "../useFileUpload"
 
 const preflightDocumentUpload = vi.hoisted(() => vi.fn())
+const cancelPreparedDocumentProcessing = vi.hoisted(() => vi.fn())
 let resolvePreflight: (value: unknown) => void = () => undefined
 
 vi.mock("@/db/dexie/helpers", () => ({
@@ -24,9 +25,26 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   }
 }))
 
-const useHarness = () => {
-  const [uploadedFiles, setUploadedFiles] = React.useState<UploadedFile[]>([])
-  const [contextFiles, setContextFiles] = React.useState<UploadedFile[]>([])
+vi.mock("@/services/chat-document-processing", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/services/chat-document-processing")>()
+  return {
+    ...actual,
+    cancelPreparedDocumentProcessing
+  }
+})
+
+const useHarness = ({
+  initialContextFiles = [],
+  initialUploadedFiles = []
+}: {
+  initialContextFiles?: UploadedFile[]
+  initialUploadedFiles?: UploadedFile[]
+} = {}) => {
+  const [uploadedFiles, setUploadedFiles] =
+    React.useState<UploadedFile[]>(initialUploadedFiles)
+  const [contextFiles, setContextFiles] =
+    React.useState<UploadedFile[]>(initialContextFiles)
   const upload = useFileUpload({
     maxContextFileSizeBytes: 20 * 1024 * 1024,
     maxContextFileSizeLabel: "20 MB",
@@ -48,6 +66,8 @@ const useHarness = () => {
 describe("useFileUpload document processing", () => {
   beforeEach(() => {
     preflightDocumentUpload.mockReset()
+    cancelPreparedDocumentProcessing.mockReset()
+    cancelPreparedDocumentProcessing.mockResolvedValue(undefined)
     preflightDocumentUpload.mockImplementation(
       () =>
         new Promise((resolve) => {
@@ -118,5 +138,62 @@ describe("useFileUpload document processing", () => {
         }
       ]
     })
+  })
+
+  it("marks uploaded documents blocked when backend preflight fails", async () => {
+    preflightDocumentUpload.mockRejectedValueOnce(new Error("preflight down"))
+    const { result } = renderHook(() => useHarness())
+
+    await act(async () => {
+      await result.current.handleFileUpload(
+        new File(["hello"], "notes.pdf", { type: "application/pdf" })
+      )
+    })
+
+    await waitFor(() => {
+      expect(result.current.uploadedFiles[0]).toMatchObject({
+        id: "file-1",
+        filename: "notes.pdf",
+        processingMode: "add_to_chat",
+        processingStatus: "blocked",
+        processingBlockedReason:
+          "Document preflight failed. Try again or remove the file."
+      })
+    })
+    expect(result.current.contextFiles[0]).toMatchObject({
+      id: "file-1",
+      processingStatus: "blocked"
+    })
+  })
+
+  it("cleans up draft-backed document processing when a file is removed", async () => {
+    const draftBackedFile: UploadedFile = {
+      id: "file-1",
+      filename: "notes.pdf",
+      type: "application/pdf",
+      content: "",
+      size: 5,
+      uploadedAt: Date.now(),
+      processed: false,
+      processingMode: "add_to_chat",
+      processingStatus: "processing",
+      processingResultRef: { kind: "draft", id: "draft-1" }
+    }
+    const { result } = renderHook(() =>
+      useHarness({
+        initialContextFiles: [draftBackedFile],
+        initialUploadedFiles: [draftBackedFile]
+      })
+    )
+
+    await act(async () => {
+      await result.current.removeUploadedFile("file-1")
+    })
+
+    expect(cancelPreparedDocumentProcessing).toHaveBeenCalledWith([
+      draftBackedFile
+    ])
+    expect(result.current.uploadedFiles).toEqual([])
+    expect(result.current.contextFiles).toEqual([])
   })
 })
