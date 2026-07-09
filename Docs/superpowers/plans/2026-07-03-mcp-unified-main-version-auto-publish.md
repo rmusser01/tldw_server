@@ -148,6 +148,6 @@ If only YAML/Markdown changes are made, record Bandit as skipped because no Pyth
 Run:
 
 ```bash
-git add .github/workflows/mcp-unified-publish.yml apps/mcp-unified/README.md apps/mcp-unified/src/mcp_unified/README.md "backlog/tasks/task-12118 - Prepare-MCP-Unified-0.2.0-package-release.md" docs/superpowers/plans/2026-07-03-mcp-unified-main-version-auto-publish.md
+git add .github/workflows/mcp-unified-publish.yml apps/mcp-unified/README.md apps/mcp-unified/src/mcp_unified/README.md "backlog/tasks/task-12118 - Prepare-MCP-Unified-0.2.0-package-release.md" Docs/superpowers/plans/2026-07-03-mcp-unified-main-version-auto-publish.md
 git commit -m "Auto publish MCP Unified version bumps"
 ```
