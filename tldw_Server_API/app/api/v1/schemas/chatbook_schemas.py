@@ -20,6 +20,7 @@ from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 # ConflictResolution is intentionally redefined here to constrain API input
 # to only the currently-supported strategies (skip, rename).
 from tldw_Server_API.app.core.Chatbooks.chatbook_models import (
+    FULL_ACCOUNT_EXPORT_MODE,
     ChatbookVersion,
     ContentType,
     ExportStatus,
@@ -180,6 +181,27 @@ class ImportChatbookRequest(BaseModel):
 
 
 # Response Schemas
+
+class ChatbookAccountScopeCategory(BaseModel):
+    """One redacted category row in the full-account export scope preview."""
+    category: str
+    label: str
+    count: int = Field(default=0, ge=0)
+    restore_status: str
+    sensitivity: str
+    warning: str | None = None
+
+
+class ChatbookAccountScopeResponse(BaseModel):
+    """Redacted full-account export scope preview."""
+    mode: Literal["full_account"] = FULL_ACCOUNT_EXPORT_MODE
+    categories: list[ChatbookAccountScopeCategory]
+    total_items: int = Field(default=0, ge=0)
+    pointer_only_count: int = Field(default=0, ge=0)
+    sensitive_category_count: int = Field(default=0, ge=0)
+    warning_count: int = Field(default=0, ge=0)
+    estimated_size_bytes: int | None = Field(default=None, ge=0)
+
 
 class ContentItemResponse(BaseModel):
     """Individual content item in a chatbook."""

@@ -22,6 +22,9 @@ from enum import Enum
 from typing import Any, Optional
 
 
+FULL_ACCOUNT_EXPORT_MODE = "full_account"
+
+
 def _utc_now() -> datetime:
     """Return current UTC time as a timezone-aware datetime."""
     return datetime.now(timezone.utc)

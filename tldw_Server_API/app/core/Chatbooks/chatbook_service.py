@@ -57,6 +57,7 @@ from ..Explainer.chatbook_adapter import (
 
 # Legacy job queue shim removed; using in-process task registry
 from .chatbook_models import (
+    FULL_ACCOUNT_EXPORT_MODE,
     ChatbookContent,
     ChatbookManifest,
     ChatbookVersion,
@@ -70,6 +71,7 @@ from .chatbook_models import (
     ImportStatusData,
     coerce_chatbook_export_version,
 )
+from .chatbook_account_inventory import ACCOUNT_DATA_INVENTORY
 from .chatbook_format_v1_1 import (
     build_file_inventory,
     build_preview_report,
@@ -6511,6 +6513,131 @@ class ChatbookService:
             return result
         except _CHATBOOK_NONCRITICAL_EXCEPTIONS as e:
             raise DatabaseError(f"Failed to preview export: {e}", cause=e) from e
+
+    def _scope_count_query(self, query: str, params: tuple[Any, ...] = (), db: Any | None = None) -> int:
+        """Return a best-effort COUNT(*) value from a DB object."""
+        db_obj = db or self.db
+        execute_query = getattr(db_obj, "execute_query", None)
+        if not callable(execute_query):
+            return 0
+        try:
+            rows = self._fetch_results(execute_query(query, params))
+        except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
+            return 0
+        if not rows:
+            return 0
+        first = rows[0]
+        if isinstance(first, dict):
+            value = first.get("count")
+            if value is None and first:
+                value = next(iter(first.values()))
+        elif isinstance(first, (tuple, list)) and first:
+            value = first[0]
+        else:
+            value = first
+        try:
+            return max(0, int(value or 0))
+        except (TypeError, ValueError):
+            return 0
+
+    def _scope_media_count_query(self, query: str) -> int:
+        media_db = self._get_media_db()
+        if media_db is None:
+            return 0
+        return self._scope_count_query(query, db=media_db)
+
+    def _scope_count_for_category(self, category: str) -> int:
+        """Best-effort category counts for the full-account export preview."""
+        if category in {"account_profile", "account_settings"}:
+            return 1
+        if category == "conversations":
+            return self._scope_count_query("SELECT COUNT(*) AS count FROM conversations WHERE deleted = 0")
+        if category == "notes":
+            return self._scope_count_query("SELECT COUNT(*) AS count FROM notes WHERE deleted = 0")
+        if category == "characters":
+            return self._scope_count_query("SELECT COUNT(*) AS count FROM character_cards WHERE deleted = 0")
+        if category == "world_books":
+            return self._scope_count_query("SELECT COUNT(*) AS count FROM world_books WHERE deleted = 0")
+        if category == "dictionaries":
+            return self._scope_count_query("SELECT COUNT(*) AS count FROM chat_dictionaries WHERE deleted = 0")
+        if category == "prompts":
+            prompts_db = self._get_prompts_db()
+            if prompts_db is None:
+                return 0
+            try:
+                return max(0, int(prompts_db.list_prompts(page=1, per_page=1)[3]))
+            except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
+                return 0
+        if category == "evaluations":
+            evals_db = self._get_evaluations_db()
+            if evals_db is None:
+                return 0
+            try:
+                return max(0, int(evals_db.count_evaluations_filtered(created_by=self.user_id)))
+            except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
+                return 0
+        if category == "generated_documents":
+            if not callable(getattr(self.db, "get_connection", None)):
+                return 0
+            try:
+                from ..Chat.document_generator import DocumentGeneratorService
+
+                return DocumentGeneratorService(self.db, self.user_id).count_generated_documents()
+            except CharactersRAGDBError:
+                return 0
+            except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
+                return 0
+        if category == "explainer_sessions":
+            try:
+                return max(0, int(self._get_explainer_repo().list_session_summaries(owner_user_id=self.user_id, limit=1)[1]))
+            except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
+                return 0
+        if category == "media_records":
+            return self._scope_media_count_query("SELECT COUNT(*) AS count FROM Media WHERE deleted = 0 AND is_trash = 0")
+        if category == "media_transcripts":
+            return self._scope_media_count_query("SELECT COUNT(*) AS count FROM Transcripts WHERE deleted = 0")
+        if category == "media_chunks":
+            return self._scope_media_count_query("SELECT COUNT(*) AS count FROM UnvectorizedMediaChunks WHERE deleted = 0")
+        if category == "media_stored_artifacts":
+            return self._scope_media_count_query("SELECT COUNT(*) AS count FROM MediaFiles WHERE deleted = 0")
+        if category == "media_pointers":
+            return self._scope_media_count_query(
+                "SELECT COUNT(*) AS count FROM Media WHERE deleted = 0 AND is_trash = 0 AND url IS NOT NULL AND url <> ''"
+            )
+        if category == "embeddings":
+            chroma = self._get_chroma_manager()
+            if chroma is None:
+                return 0
+            try:
+                return sum(max(0, int(collection.count())) for collection in chroma.list_collections())
+            except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
+                return 0
+        return 0
+
+    def get_full_account_export_scope(self) -> dict[str, Any]:
+        """Return a redacted full-account Chatbook export scope summary."""
+        categories = [
+            {
+                "category": row.category,
+                "label": row.label,
+                "count": self._scope_count_for_category(row.category),
+                "restore_status": row.restore_status,
+                "sensitivity": row.sensitivity,
+                "warning": row.warning,
+            }
+            for row in ACCOUNT_DATA_INVENTORY
+        ]
+        return {
+            "mode": FULL_ACCOUNT_EXPORT_MODE,
+            "categories": categories,
+            "total_items": sum(item["count"] for item in categories),
+            "pointer_only_count": sum(1 for item in categories if item["restore_status"] == "pointer_only"),
+            "sensitive_category_count": sum(
+                1 for item in categories if item["sensitivity"] in {"sensitive", "secret"}
+            ),
+            "warning_count": sum(1 for item in categories if item["warning"]),
+            "estimated_size_bytes": None,
+        }
 
     def clean_old_exports(self, days_old: int = 7) -> int:
         """
