@@ -94,7 +94,7 @@ Do not narrow "full account export" to selected Chatbook content types. It inclu
 - Modify: `tldw_Server_API/app/api/v1/endpoints/chatbooks.py`
 - Test: `tldw_Server_API/tests/Chatbooks/test_chatbooks_account_inventory.py`
 
-- [ ] **Step 1: Write failing inventory coverage tests**
+- [x] **Step 1: Write failing inventory coverage tests**
 
 Add tests that require every inventory row to declare source, export representation, import handler key, dependency notes, sensitivity, restore status, manifest count key, and user-facing warning behavior.
 
@@ -147,7 +147,7 @@ EXPECTED_CATEGORIES = {
 }
 ```
 
-- [ ] **Step 2: Run the inventory tests and verify failure**
+- [x] **Step 2: Run the inventory tests and verify failure**
 
 Run:
 
@@ -158,7 +158,7 @@ python -m pytest tldw_Server_API/tests/Chatbooks/test_chatbooks_account_inventor
 
 Expected: fail because `chatbook_account_inventory.py` does not exist.
 
-- [ ] **Step 3: Implement the inventory module**
+- [x] **Step 3: Implement the inventory module**
 
 Create `chatbook_account_inventory.py` with small dataclasses and no database calls.
 
@@ -191,7 +191,7 @@ class AccountInventoryEntry:
 
 Populate `ACCOUNT_DATA_INVENTORY` from the PRD scope. Rows for deployment-local or unrecoverable secrets may be `non_restorable`, but each must have a visible warning. Rows for external media source paths/URLs are `pointer_only`, not "missing data".
 
-- [ ] **Step 4: Add scope summary service and API models**
+- [x] **Step 4: Add scope summary service and API models**
 
 Add models such as:
 
@@ -217,7 +217,7 @@ class ChatbookAccountScopeResponse(BaseModel):
 
 Expose `GET /api/v1/chatbooks/export/scope` and implement `ChatbookService.get_full_account_export_scope()` using best-effort counts. Redact secret values; summaries may include labels and counts only.
 
-- [ ] **Step 5: Verify tests pass**
+- [x] **Step 5: Verify tests pass**
 
 Run:
 
@@ -228,12 +228,14 @@ python -m pytest tldw_Server_API/tests/Chatbooks/test_chatbooks_account_inventor
 
 Expected: pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/Chatbooks/chatbook_account_inventory.py tldw_Server_API/app/core/Chatbooks/chatbook_models.py tldw_Server_API/app/core/Chatbooks/chatbook_service.py tldw_Server_API/app/api/v1/schemas/chatbook_schemas.py tldw_Server_API/app/api/v1/endpoints/chatbooks.py tldw_Server_API/tests/Chatbooks/test_chatbooks_account_inventory.py
 git commit -m "feat: add chatbooks account export inventory"
 ```
+
+Completed in commits `e8aab93f869258b67999765dd85297ae89ae651c` and `58f46d9fb9d6879328c441234c4cae78669637e3`. Focused verification: `python -m pytest tldw_Server_API/tests/Chatbooks/test_chatbooks_account_inventory.py -v` passed with 9 tests; Bandit on touched Chatbooks scope reported 0 findings. Independent spec and quality reviews found no blocking Task 1 issues after follow-up.
 
 ## Task 2: Export Contract For Full Account And Explicit Allowlists
 
