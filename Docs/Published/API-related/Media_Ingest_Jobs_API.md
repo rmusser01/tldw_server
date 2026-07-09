@@ -63,7 +63,7 @@ Google Drive and Microsoft OneDrive source sync runs are queued through the conn
 
 - Service: `tldw_Server_API/app/services/media_ingest_jobs_worker.py`
 - Env flags:
-  - `MEDIA_INGEST_JOBS_WORKER_ENABLED`: `true|false` (default false)
+  - `MEDIA_INGEST_JOBS_WORKER_ENABLED`: `true|false` (default follows the `media` route policy; set `false` to disable the in-process worker)
   - `MEDIA_INGEST_JOBS_QUEUE`: queue name (default `default`)
   - `JOBS_DB_URL` or `JOBS_DB_PATH`: Jobs backend (Postgres DSN or SQLite path)
 
