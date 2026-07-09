@@ -115,7 +115,10 @@ import { useStoreMessageOption } from "@/store/option"
 import { shallow } from "zustand/shallow"
 import { Button } from "@/components/Common/Button"
 import { generateID } from "@/db/dexie/helpers"
-import type { UploadedFile } from "@/db/dexie/types"
+import type {
+  DocumentProcessingMode,
+  UploadedFile
+} from "@/db/dexie/types"
 import type { ChatDocuments } from "@/models/ChatTypes"
 import { formatFileSize } from "@/utils/format"
 import { formatPinnedResults } from "@/utils/rag-format"
@@ -154,6 +157,7 @@ import type { SidepanelChatHandoffPageContext } from "@/services/sidepanel-chat-
 import type { SidepanelChatWebUiHandoffOverrides } from "@/services/tldw/sidepanel-chat-webui-handoff"
 import { buildVisibleDocumentHandoffSnippetText } from "./sidepanel-chat-handoff-context"
 import {
+  DEFAULT_DOCUMENT_PROCESSING_MODE,
   normalizeDocumentPreflightResponse,
   prepareChatDocumentAttachmentsForSend,
   withDefaultDocumentDecision
@@ -2768,6 +2772,54 @@ export const SidepanelForm = ({
   const primaryActionAriaLabel = shouldQueuePrimaryAction
     ? (t("playground:composer.queue.primaryAria", "Queue request") as string)
     : (t("playground:composer.submitAria", "Send message") as string)
+  const v5DocumentProcessingFacet = React.useMemo(() => {
+    if (contextFiles.length === 0) return null
+
+    const modes = contextFiles.map(
+      (file) => file.processingMode ?? DEFAULT_DOCUMENT_PROCESSING_MODE
+    )
+    const firstMode = modes[0]
+    const singleMode = modes.every((mode) => mode === firstMode)
+      ? firstMode
+      : null
+    const modeLabels: Record<DocumentProcessingMode, string> = {
+      add_to_chat: String(
+        t("playground:documentProcessing.addToChat", "Add to chat")
+      ),
+      ocr_pages: String(
+        t("playground:documentProcessing.ocrPages", "OCR pages")
+      ),
+      ingest_to_library: String(
+        t("playground:documentProcessing.ingestFacet", "Ingest")
+      )
+    }
+    const modeLabel = singleMode
+      ? modeLabels[singleMode]
+      : String(t("playground:documentProcessing.mixedModes", "Mixed"))
+    const fileCountLabel =
+      contextFiles.length === 1
+        ? String(t("playground:documentProcessing.oneFile", "1 file"))
+        : String(
+            t("playground:documentProcessing.fileCount", "{{count}} files", {
+              count: contextFiles.length
+            })
+          )
+
+    return {
+      fileCountLabel,
+      modeLabel,
+      ariaLabel: String(
+        t(
+          "playground:documentProcessing.v5FacetAria",
+          "{{count}} document attachments, handling mode {{mode}}",
+          {
+            count: contextFiles.length,
+            mode: modeLabel
+          }
+        )
+      )
+    }
+  }, [contextFiles, t])
 
   React.useEffect(() => {
     const handleDrop = (e: DragEvent) => {
@@ -3828,6 +3880,262 @@ export const SidepanelForm = ({
                             ],
                           },
                         ]
+                        const handleV5PaletteTrigger = () => {
+                          const current = form.values.message
+                          form.setFieldValue(
+                            "message",
+                            current.endsWith("/") ? current : `${current}/`
+                          )
+                          textareaRef.current?.focus()
+                        }
+                        const v5ComposerFacets = [
+                          {
+                            id: "model",
+                            fieldKey: "mdl",
+                            value: selectedModel || "—",
+                            active: Boolean(selectedModel),
+                            onClick: handleOpenModelSettings,
+                            "aria-label": selectedModel
+                              ? `Change model (current: ${selectedModel})`
+                              : "Pick a model",
+                          },
+                          {
+                            id: "mode",
+                            fieldKey: "mode",
+                            value: chatMode === "rag" ? "RAG" : "Chat",
+                            active: chatMode !== "normal",
+                            onClick: () =>
+                              setChatMode(chatMode === "rag" ? "normal" : "rag"),
+                            "aria-label":
+                              chatMode === "rag"
+                                ? "Switch to normal chat mode"
+                                : "Switch to chat-with-page (RAG) mode",
+                          },
+                          {
+                            id: "web",
+                            fieldKey: "web",
+                            value: webSearch ? "on" : "off",
+                            active: webSearch,
+                            onClick: handleWebSearchToggle,
+                            "aria-label": webSearch
+                              ? "Turn web search off"
+                              : "Turn web search on",
+                          },
+                          ...(v5DocumentProcessingFacet
+                            ? [
+                                {
+                                  id: "docs",
+                                  fieldKey: "docs",
+                                  value: v5DocumentProcessingFacet.fileCountLabel,
+                                  active: true,
+                                  "aria-label": v5DocumentProcessingFacet.ariaLabel,
+                                },
+                                {
+                                  id: "doc-mode",
+                                  fieldKey: "doc",
+                                  value: v5DocumentProcessingFacet.modeLabel,
+                                  active: true,
+                                  "aria-label": v5DocumentProcessingFacet.ariaLabel,
+                                },
+                              ]
+                            : []),
+                        ]
+                        const v5ActionButtonClass =
+                          "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border bg-surface text-text-muted transition-colors hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-50"
+                        const v5InlineSlot = (
+                          <>
+                            {!streaming ? (
+                              <>
+                                <Tooltip
+                                  title={t("playground:actions.upload", "Attach image")}
+                                >
+                                  <button
+                                    type="button"
+                                    onClick={openUploadDialog}
+                                    data-testid="chat-upload-image-inline"
+                                    className={v5ActionButtonClass}
+                                    aria-label={t(
+                                      "playground:actions.upload",
+                                      "Attach image"
+                                    )}
+                                    title={t(
+                                      "playground:actions.upload",
+                                      "Attach image"
+                                    )}
+                                  >
+                                    <ImageIcon className="h-4 w-4" />
+                                  </button>
+                                </Tooltip>
+                                <Tooltip
+                                  title={t(
+                                    "common:commandPalette.open",
+                                    "Open commands"
+                                  )}
+                                >
+                                  <button
+                                    type="button"
+                                    onClick={handleV5PaletteTrigger}
+                                    className={`${v5ActionButtonClass} font-mono text-sm text-primary`}
+                                    aria-label={t(
+                                      "common:commandPalette.open",
+                                      "Open commands"
+                                    )}
+                                  >
+                                    /
+                                  </button>
+                                </Tooltip>
+                                <Tooltip
+                                  title={
+                                    t("common:currentChatModelSettings") as string
+                                  }
+                                >
+                                  <button
+                                    type="button"
+                                    onClick={handleOpenModelSettings}
+                                    className={v5ActionButtonClass}
+                                    aria-label={t(
+                                      "playground:composer.openModelSettings",
+                                      "Open current chat settings"
+                                    )}
+                                    title={t(
+                                      "playground:composer.openModelSettings",
+                                      "Open current chat settings"
+                                    )}
+                                  >
+                                    <Gauge className="h-4 w-4" />
+                                  </button>
+                                </Tooltip>
+                                {hasVoiceInputControls && (
+                                  <>
+                                    <Tooltip
+                                      title={
+                                        voiceChatAvailable
+                                          ? voiceChatStatusLabel
+                                          : voiceChatUnavailableMessage
+                                      }
+                                    >
+                                      <button
+                                        type="button"
+                                        onClick={handleVoiceChatToggle}
+                                        disabled={!voiceChatAvailable || streaming}
+                                        className={`${v5ActionButtonClass} ${voiceChatToneClass}`}
+                                        aria-label={voiceChatStatusLabel}
+                                      >
+                                        <Headphones className="h-4 w-4" />
+                                      </button>
+                                    </Tooltip>
+                                    <Tooltip
+                                      title={
+                                        !speechAvailable
+                                          ? t(
+                                              "playground:actions.speechUnavailableBody",
+                                              "Connect to a tldw server that exposes the audio transcriptions API to use dictation."
+                                            )
+                                          : speechUsesServer
+                                            ? t(
+                                                "playground:tooltip.speechToTextServer",
+                                                "Dictation via your tldw server"
+                                              )
+                                            : t(
+                                                "playground:tooltip.speechToTextBrowser",
+                                                "Dictation via browser speech recognition"
+                                              )
+                                      }
+                                    >
+                                      <button
+                                        type="button"
+                                        onClick={handleDictationToggle}
+                                        disabled={!speechAvailable || voiceChatEnabled}
+                                        className={`${v5ActionButtonClass} ${
+                                          speechAvailable &&
+                                          ((speechUsesServer && isServerDictating) ||
+                                            (!speechUsesServer && isListening))
+                                            ? "border-primary text-primaryStrong"
+                                            : ""
+                                        }`}
+                                        aria-label={
+                                          !speechAvailable
+                                            ? (t(
+                                                "playground:actions.speechUnavailableTitle",
+                                                "Dictation unavailable"
+                                              ) as string)
+                                            : speechUsesServer
+                                              ? (isServerDictating
+                                                  ? (t("playground:actions.speechStop", "Stop dictation") as string)
+                                                  : (t("playground:actions.speechStart", "Start dictation") as string))
+                                              : (isListening
+                                                  ? (t("playground:actions.speechStop", "Stop dictation") as string)
+                                                  : (t("playground:actions.speechStart", "Start dictation") as string))
+                                        }
+                                      >
+                                        <MicIcon className="h-4 w-4" />
+                                      </button>
+                                    </Tooltip>
+                                  </>
+                                )}
+                                <Tooltip
+                                  title={t(
+                                    "playground:characterRail.title",
+                                    "Character controls"
+                                  )}
+                                >
+                                  <button
+                                    type="button"
+                                    data-testid="chat-character-controls-trigger"
+                                    onClick={() => setCharacterControlsOpen(true)}
+                                    className={v5ActionButtonClass}
+                                    aria-label={t(
+                                      "playground:characterRail.title",
+                                      "Character controls"
+                                    )}
+                                  >
+                                    <UserCircle2 className="h-4 w-4" />
+                                  </button>
+                                </Tooltip>
+                              </>
+                            ) : (
+                              <Tooltip title={t("tooltip.stopStreaming")}>
+                                <button
+                                  type="button"
+                                  onClick={stopStreamingRequest}
+                                  data-testid="chat-stop-streaming"
+                                  className={v5ActionButtonClass}
+                                  aria-label={t(
+                                    "playground:composer.stopStreaming",
+                                    "Stop streaming response"
+                                  )}
+                                  title={t(
+                                    "playground:composer.stopStreaming",
+                                    "Stop streaming response"
+                                  )}
+                                >
+                                  <StopCircleIcon className="h-4 w-4" />
+                                </button>
+                              </Tooltip>
+                            )}
+                          </>
+                        )
+                        const v5SendSlot = (
+                          <Button
+                            type={shouldQueuePrimaryAction ? "button" : "submit"}
+                            onClick={
+                              shouldQueuePrimaryAction
+                                ? () => {
+                                    void submitForm()
+                                  }
+                                : undefined
+                            }
+                            variant="primary"
+                            size="sm"
+                            shape="pill"
+                            ariaLabel={primaryActionAriaLabel}
+                            title={primaryActionTitle}
+                            data-testid="chat-send"
+                            className="min-h-9 whitespace-nowrap px-3 text-[11px] font-semibold uppercase tracking-[0.08em]"
+                          >
+                            {primaryActionLabel}
+                          </Button>
+                        )
 
                         const variantNode =
                           nextgenComposerVariant === "v5" ? (
@@ -3840,18 +4148,12 @@ export const SidepanelForm = ({
                               onSend={() => void submitForm()}
                               sending={isSending}
                               stopStreaming={stopStreamingRequest}
-                              onPaletteTrigger={() => {
-                                // V5 design: ⌘K injects `/` to open the
-                                // textarea's existing slash menu.
-                                const current = form.values.message
-                                form.setFieldValue(
-                                  "message",
-                                  current.endsWith("/") ? current : `${current}/`
-                                )
-                                textareaRef.current?.focus()
-                              }}
+                              density="compact"
+                              onPaletteTrigger={handleV5PaletteTrigger}
                               textareaSlot={composerTextareaShellNode}
-                              facetsSlot={composerControlAreaNode}
+                              facets={v5ComposerFacets}
+                              inlineSlot={v5InlineSlot}
+                              sendSlot={v5SendSlot}
                               noticesSlot={sharedNoticesSlot}
                             />
                           ) : nextgenComposerVariant === "v3" ? (
