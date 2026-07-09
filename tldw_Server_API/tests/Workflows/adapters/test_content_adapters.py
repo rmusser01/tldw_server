@@ -1078,6 +1078,62 @@ class TestFlashcardGenerateAdapter:
         ]
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "card_plan",
+        [
+            [],
+            [{"card_type": "made_up", "count": 2}],
+            [{"card_type": "basic", "count": 0}],
+            [{"card_type": "basic", "count": "nope"}],
+            [{"card_type": "basic", "count": 1}],
+            ["basic"],
+        ],
+    )
+    async def test_flashcard_generate_invalid_card_plan_skips_llm(self, base_context, sample_long_text, card_plan):
+        """Test malformed planned flashcard configs fail before calling the LLM."""
+        from tldw_Server_API.app.core.Workflows.adapters.content import run_flashcard_generate_adapter
+
+        with patch(
+            "tldw_Server_API.app.core.Workflows.adapters.content.generation.perform_chat_api_call_async",
+            new_callable=AsyncMock,
+        ) as mock_call:
+            result = await run_flashcard_generate_adapter(
+                {"text": sample_long_text, "num_cards": 2, "card_plan": card_plan},
+                base_context,
+            )
+
+        assert result == {"error": "invalid_card_plan", "flashcards": [], "count": 0}
+        mock_call.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_flashcard_generate_filters_non_dict_json_entries(self, base_context, sample_long_text):
+        """Test parsed flashcard output returns only dict cards and cleaned count."""
+        from tldw_Server_API.app.core.Workflows.adapters.content import run_flashcard_generate_adapter
+
+        mock_response = mock_chat_response(
+            json.dumps(
+                [
+                    {"front": "Q1", "back": "A1", "tags": []},
+                    "not a card",
+                    {"front": "Q2", "back": "A2", "tags": []},
+                ]
+            )
+        )
+
+        with patch(
+            "tldw_Server_API.app.core.Workflows.adapters.content.generation.perform_chat_api_call_async",
+            new_callable=AsyncMock,
+            return_value=mock_response,
+        ):
+            result = await run_flashcard_generate_adapter({"text": sample_long_text}, base_context)
+
+        assert result["count"] == 2
+        assert result["flashcards"] == [
+            {"front": "Q1", "back": "A1", "tags": [], "generation_type": "basic", "model_type": "basic"},
+            {"front": "Q2", "back": "A2", "tags": [], "generation_type": "basic", "model_type": "basic"},
+        ]
+
+    @pytest.mark.asyncio
     async def test_flashcard_generate_cancellation(self, base_context, sample_long_text):
         """Test flashcard generation respects cancellation."""
         from tldw_Server_API.app.core.Workflows.adapters.content import run_flashcard_generate_adapter

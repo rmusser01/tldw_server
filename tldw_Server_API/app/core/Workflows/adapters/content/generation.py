@@ -186,19 +186,33 @@ async def run_flashcard_generate_adapter(config: dict[str, Any], context: dict[s
     valid_generation_types = {"basic", "basic_reverse", "cloze", "true_false"}
     card_plan = config.get("card_plan")
     normalized_plan: list[dict[str, Any]] = []
+    invalid_plan = False
     if isinstance(card_plan, list):
         for row in card_plan:
             if not isinstance(row, dict):
+                invalid_plan = True
                 continue
             plan_type = str(row.get("card_type") or "").strip().lower()
             if plan_type not in valid_generation_types:
+                invalid_plan = True
                 continue
             try:
                 count = int(row.get("count") or 0)
             except (TypeError, ValueError):
+                invalid_plan = True
                 count = 0
+            if count <= 0:
+                invalid_plan = True
             normalized_plan.append({"card_type": plan_type, "count": count})
+    elif card_plan is not None:
+        invalid_plan = True
     planned_request = card_plan is not None
+    if planned_request and (
+        invalid_plan
+        or not normalized_plan
+        or sum(row["count"] for row in normalized_plan) != num_cards
+    ):
+        return {"error": "invalid_card_plan", "flashcards": [], "count": 0}
 
     if planned_request:
         plan_lines = "\n".join(
@@ -237,6 +251,9 @@ async def run_flashcard_generate_adapter(config: dict[str, Any], context: dict[s
             flashcards = json.loads(json_match.group()) if json_match else []
         except json.JSONDecodeError:
             flashcards = []
+        if not isinstance(flashcards, list):
+            flashcards = []
+        cleaned_flashcards = []
         for card in flashcards:
             if not isinstance(card, dict):
                 continue
@@ -252,7 +269,8 @@ async def run_flashcard_generate_adapter(config: dict[str, Any], context: dict[s
                     raw_generation_type = card_type
                 card["generation_type"] = raw_generation_type
             card["model_type"] = "basic" if raw_generation_type == "true_false" else raw_generation_type or "basic"
-        return {"flashcards": flashcards, "count": len(flashcards)}
+            cleaned_flashcards.append(card)
+        return {"flashcards": cleaned_flashcards, "count": len(cleaned_flashcards)}
     except _GENERATION_NONCRITICAL_EXCEPTIONS:
         logger.exception("Flashcard generate adapter error")
         return {"error": "flashcard_generate_error", "flashcards": [], "count": 0}

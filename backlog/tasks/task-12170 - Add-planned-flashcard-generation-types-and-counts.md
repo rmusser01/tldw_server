@@ -60,6 +60,8 @@ Task 2 endpoint validation slice: added planned-output rejection tests for count
 Task 2 follow-up review fix: preserved planned-generation junk-row skip behavior by checking usable front/back before requiring generation_type, and added a regression where one junk row plus one valid planned basic row returns one card. Verification: red focused generate pytest failed before the endpoint fix; focused generate pytest passed after the fix (18 passed, 154 deselected); Bandit on the production endpoint passed; git diff --check passed.
 
 Task 3 workflow adapter slice: added adapter config support for legacy card_type plus optional card_plan, planned prompt instructions with exact per-type counts and required generation_type, output preservation for generation_type, and true_false storage normalization to basic model_type. Verification: red focused adapter test failed before implementation; focused planned adapter test passed after implementation; FlashcardGenerateAdapter pytest passed (5 passed, 111 deselected); Bandit on touched production adapter files reported 0 findings; git diff --check passed.
+
+Task 3 follow-up review fix: invalid direct workflow card_plan configs now return invalid_card_plan before LLM calls, and parsed adapter output is cleaned to dict flashcards before returning count. Verification: red focused adapter tests failed before implementation; focused regressions passed (7 passed, 116 deselected); FlashcardGenerateAdapter pytest passed (12 passed, 111 deselected); Bandit on touched production adapter files reported 0 findings; git diff --check passed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
