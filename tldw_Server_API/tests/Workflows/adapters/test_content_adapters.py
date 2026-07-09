@@ -1022,6 +1022,62 @@ class TestFlashcardGenerateAdapter:
                     assert result["flashcards"][0].get("model_type") == card_type
 
     @pytest.mark.asyncio
+    async def test_flashcard_generate_planned_card_plan(self, base_context, sample_long_text):
+        """Test planned flashcard generation prompts for exact generation type counts."""
+        from tldw_Server_API.app.core.Workflows.adapters.content import run_flashcard_generate_adapter
+
+        mock_flashcards = json.dumps(
+            [
+                {"front": "What is AI?", "back": "Artificial Intelligence", "generation_type": "basic"},
+                {
+                    "front": "True or false: AI always requires neural networks.",
+                    "back": "False. AI can use many approaches.",
+                    "generation_type": "true_false",
+                    "model_type": "true_false",
+                },
+            ]
+        )
+        mock_response = mock_chat_response(mock_flashcards)
+
+        with patch(
+            "tldw_Server_API.app.core.Workflows.adapters.content.generation.perform_chat_api_call_async",
+            new_callable=AsyncMock,
+            return_value=mock_response,
+        ) as mock_call:
+            result = await run_flashcard_generate_adapter(
+                {
+                    "text": sample_long_text,
+                    "num_cards": 2,
+                    "card_plan": [
+                        {"card_type": "basic", "count": 1},
+                        {"card_type": "true_false", "count": 1},
+                    ],
+                },
+                base_context,
+            )
+
+        system_prompt = mock_call.call_args.kwargs["system_message"]
+        assert "exactly 1 basic flashcard" in system_prompt
+        assert "exactly 1 true_false flashcard" in system_prompt
+        assert "generation_type" in system_prompt
+        assert "basic" in system_prompt
+        assert "true_false" in system_prompt
+        assert result["flashcards"] == [
+            {
+                "front": "What is AI?",
+                "back": "Artificial Intelligence",
+                "generation_type": "basic",
+                "model_type": "basic",
+            },
+            {
+                "front": "True or false: AI always requires neural networks.",
+                "back": "False. AI can use many approaches.",
+                "generation_type": "true_false",
+                "model_type": "basic",
+            },
+        ]
+
+    @pytest.mark.asyncio
     async def test_flashcard_generate_cancellation(self, base_context, sample_long_text):
         """Test flashcard generation respects cancellation."""
         from tldw_Server_API.app.core.Workflows.adapters.content import run_flashcard_generate_adapter

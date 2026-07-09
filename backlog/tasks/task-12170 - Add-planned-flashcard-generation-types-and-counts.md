@@ -6,6 +6,9 @@ modified_files:
 - tldw_Server_API/app/api/v1/schemas/flashcards.py
 - tldw_Server_API/app/api/v1/endpoints/flashcards.py
 - tldw_Server_API/tests/Flashcards/test_flashcards_endpoint_integration.py
+- tldw_Server_API/app/core/Workflows/adapters/content/_config.py
+- tldw_Server_API/app/core/Workflows/adapters/content/generation.py
+- tldw_Server_API/tests/Workflows/adapters/test_content_adapters.py
 - Docs/superpowers/plans/2026-07-08-planned-flashcard-generation-controls-implementation-plan.md
 - backlog/tasks/task-12170 - Add-planned-flashcard-generation-types-and-counts.md
 ---
@@ -55,6 +58,8 @@ Task 1 backend schema contract slice: added card_plan request validation, respon
 Task 2 endpoint validation slice: added planned-output rejection tests for count mismatches and missing/invalid generation_type, added test-mode planned fallback coverage, normalized adapter/test-mode output through one endpoint helper, preserved generation_type, mapped true_false to stored basic model_type, and validated exact planned counts before returning previews. Verification: focused generate pytest passed (17 passed, 154 deselected); Bandit on touched production endpoint reported 0 findings; touched-file Bandit passed with pytest assert rule B101 skipped.
 
 Task 2 follow-up review fix: preserved planned-generation junk-row skip behavior by checking usable front/back before requiring generation_type, and added a regression where one junk row plus one valid planned basic row returns one card. Verification: red focused generate pytest failed before the endpoint fix; focused generate pytest passed after the fix (18 passed, 154 deselected); Bandit on the production endpoint passed; git diff --check passed.
+
+Task 3 workflow adapter slice: added adapter config support for legacy card_type plus optional card_plan, planned prompt instructions with exact per-type counts and required generation_type, output preservation for generation_type, and true_false storage normalization to basic model_type. Verification: red focused adapter test failed before implementation; focused planned adapter test passed after implementation; FlashcardGenerateAdapter pytest passed (5 passed, 111 deselected); Bandit on touched production adapter files reported 0 findings; git diff --check passed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
