@@ -352,7 +352,7 @@ git add tldw_Server_API/app/api/v1/schemas/chatbook_schemas.py tldw_Server_API/a
 git commit -m "feat: support chatbooks full account export contract"
 ```
 
-Completed in Task 2 implementation commit. Focused verification: `python -m pytest tldw_Server_API/tests/Chatbooks/test_chatbooks_full_account_export_contract.py -v` passed with 8 tests; `bunx vitest run src/services/__tests__/tldw-api-client.chatbooks-openwebui.test.ts` passed with 8 tests; `python -m pytest tldw_Server_API/tests/Chatbooks/test_chatbooks_manifest_v1_1_contract.py -k core_jobs -v` passed with 8 selected tests; `python -m pytest tldw_Server_API/tests/Chatbooks/test_chatbooks_export_sync.py -v` passed with 6 tests; Bandit on touched backend files reported 0 findings. Full `test_chatbooks_manifest_v1_1_contract.py` still has an unrelated schema failure for pre-existing `statistics.total_explainer_sessions`.
+Completed in commits `377338c7aef165aa5c3d2fd5205e174bc096cbff` and `2db382f157`. Focused verification after review follow-up: `python -m pytest tldw_Server_API/tests/Chatbooks/test_chatbooks_full_account_export_contract.py -v` passed with 10 tests; `python -m pytest tldw_Server_API/tests/Chatbooks/test_chatbooks_manifest_v1_1_contract.py -k core_jobs -v` passed with 9 selected tests; `bunx vitest run ../packages/ui/src/services/__tests__/tldw-api-client.chatbooks-openwebui.test.ts` passed with 8 tests; Bandit on touched backend files reported 0 findings. Full `test_chatbooks_manifest_v1_1_contract.py` still has an unrelated schema failure for pre-existing `statistics.total_explainer_sessions`.
 
 ## Task 3: Full Export Contents, Manifest Summary, And Verification
 
