@@ -293,7 +293,7 @@ git commit -m "feat: add chat document upload preflight"
 - Modify: `apps/packages/ui/src/services/tldw/domains/media.ts`
 - Modify: `apps/packages/ui/src/services/tldw/openapi-guard.ts`
 
-- [ ] **Step 1: Write failing service tests**
+- [x] **Step 1: Write failing service tests**
 
 Cover pure behavior before wiring UI:
 
@@ -340,7 +340,7 @@ Also test:
 - Direct Add-to-chat overflow returns `processingStatus: "blocked"` with recovery actions including chat-scoped retrieval and explicit Ingest-to-library.
 - Cancel aborts local no-DB processing, deletes any server draft, and calls the existing ingest job/batch cancellation endpoint when a job was started.
 
-- [ ] **Step 2: Run the frontend service test and verify it fails**
+- [x] **Step 2: Run the frontend service test and verify it fails**
 
 Run:
 
@@ -350,7 +350,7 @@ cd apps/tldw-frontend && bunx vitest run ../packages/ui/src/services/__tests__/c
 
 Expected: FAIL because the service does not exist.
 
-- [ ] **Step 3: Add optional metadata to `UploadedFile`**
+- [x] **Step 3: Add optional metadata to `UploadedFile`**
 
 Modify `apps/packages/ui/src/db/dexie/types.ts`:
 
@@ -430,7 +430,7 @@ chatScopedRetrieval?: boolean
 
 Do not store a `File` object in `UploadedFile`; it is not serializable. Use existing base64 `content` when a later upload body needs to be reconstructed.
 
-- [ ] **Step 4: Add media client methods and openapi guard paths**
+- [x] **Step 4: Add media client methods and openapi guard paths**
 
 In `apps/packages/ui/src/services/tldw/domains/media.ts`, add:
 
@@ -456,7 +456,7 @@ Add draft create/read/delete methods that call `/api/v1/media/document-upload/dr
 
 Update `apps/packages/ui/src/services/tldw/openapi-guard.ts` with the new literal paths so background requests are allowed.
 
-- [ ] **Step 5: Implement `chat-document-processing.ts`**
+- [x] **Step 5: Implement `chat-document-processing.ts`**
 
 Keep this file pure where possible:
 
@@ -519,7 +519,7 @@ Routing rules in `prepareChatDocumentAttachmentsForSend`:
 - Direct Add/OCR content over `max_chat_tokens` blocks by default with summary copy like `added, 18k tokens, blocked by 24k token limit`; the `use_chat_scoped_retrieval` recovery switches to the ephemeral chunk scorer and keeps the source chat-scoped.
 - Truncation is never silent. If a recovery path chooses truncation or chunk scoring, set `processingSummary` to copy such as `added, 18k tokens, truncated` and include that metadata in the visible turn.
 
-- [ ] **Step 6: Run service tests**
+- [x] **Step 6: Run service tests**
 
 Run:
 
@@ -529,7 +529,7 @@ cd apps/tldw-frontend && bunx vitest run ../packages/ui/src/services/__tests__/c
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps/packages/ui/src/services/chat-document-processing.ts apps/packages/ui/src/services/__tests__/chat-document-processing.test.ts apps/packages/ui/src/db/dexie/types.ts apps/packages/ui/src/services/tldw/domains/media.ts apps/packages/ui/src/services/tldw/openapi-guard.ts

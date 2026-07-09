@@ -64,6 +64,9 @@ export type ClientPath =
   | "/api/v1/media/{media_id}/reprocess"
   | "/api/v1/media/ingest/jobs"
   | "/api/v1/media/ingest/jobs/{job_id}"
+  | "/api/v1/media/document-upload/preflight"
+  | "/api/v1/media/document-upload/drafts"
+  | "/api/v1/media/document-upload/drafts/{draft_id}"
   | "/api/v1/media/{media_id}/keywords"
   | "/api/v1/media/process-audios"
   | "/api/v1/media/process-documents"
@@ -358,7 +361,9 @@ export type ClientPathRuntimeWithQuery = ClientPathRuntime | `${ClientPathRuntim
 // caught at compile time.
 export const API_PATHS = {
   MEDIA_ADD: "/api/v1/media/add" as const,
-  MEDIA_INGEST_JOBS: "/api/v1/media/ingest/jobs" as const
+  MEDIA_INGEST_JOBS: "/api/v1/media/ingest/jobs" as const,
+  MEDIA_DOCUMENT_UPLOAD_PREFLIGHT: "/api/v1/media/document-upload/preflight" as const,
+  MEDIA_DOCUMENT_UPLOAD_DRAFTS: "/api/v1/media/document-upload/drafts" as const
 } as const satisfies Record<string, ClientPath>
 
 // Allowed relative API path: anything beginning with a slash. We keep

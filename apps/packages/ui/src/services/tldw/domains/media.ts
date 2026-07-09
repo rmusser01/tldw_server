@@ -21,6 +21,7 @@ import {
   type ApiPlaylistPreflightResponse,
   type PlaylistPreflightResult
 } from "@/services/tldw/playlist-preflight"
+import type { DocumentUploadPreflightResponse } from "@/services/chat-document-processing"
 import {
   normalizeMediaCollectionItem,
   normalizeMediaCollectionListResponse,
@@ -32,6 +33,18 @@ import {
   type MediaCollectionItem,
   type MediaCollectionList
 } from "@/services/tldw/conference-collections"
+
+type ChatDocumentDraftCreateResponse = {
+  draft_id: string
+  expires_at: string
+}
+
+type ChatDocumentDraftReadResponse = {
+  draft_id: string
+  created_at?: string
+  expires_at?: string
+  payload: Record<string, unknown>
+}
 
 /**
  * Builds a query string from a record of parameters.
@@ -289,6 +302,54 @@ export const mediaMethods = {
     return await bgRequest<any>({
       path: `/api/v1/media/ingest/jobs${query}`,
       method: "GET",
+      timeoutMs: options?.timeoutMs
+    })
+  },
+
+  async preflightDocumentUpload(
+    payload: Record<string, unknown>,
+    options?: { timeoutMs?: number }
+  ): Promise<DocumentUploadPreflightResponse> {
+    return await bgRequest<DocumentUploadPreflightResponse>({
+      path: "/api/v1/media/document-upload/preflight",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload,
+      timeoutMs: options?.timeoutMs
+    })
+  },
+
+  async createDocumentUploadDraft(
+    payload: Record<string, unknown>,
+    options?: { timeoutMs?: number }
+  ): Promise<ChatDocumentDraftCreateResponse> {
+    return await bgRequest<ChatDocumentDraftCreateResponse>({
+      path: "/api/v1/media/document-upload/drafts",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload,
+      timeoutMs: options?.timeoutMs
+    })
+  },
+
+  async getDocumentUploadDraft(
+    draftId: string,
+    options?: { timeoutMs?: number }
+  ): Promise<ChatDocumentDraftReadResponse> {
+    return await bgRequest<ChatDocumentDraftReadResponse>({
+      path: `/api/v1/media/document-upload/drafts/${encodeURIComponent(draftId)}`,
+      method: "GET",
+      timeoutMs: options?.timeoutMs
+    })
+  },
+
+  async deleteDocumentUploadDraft(
+    draftId: string,
+    options?: { timeoutMs?: number }
+  ): Promise<void> {
+    await bgRequest<void>({
+      path: `/api/v1/media/document-upload/drafts/${encodeURIComponent(draftId)}`,
+      method: "DELETE",
       timeoutMs: options?.timeoutMs
     })
   },

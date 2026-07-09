@@ -31,6 +31,59 @@ export type WebSearch = {
   }[];
 };
 
+export type DocumentProcessingMode =
+  | 'add_to_chat'
+  | 'ocr_pages'
+  | 'ingest_to_library';
+
+export type DocumentProcessingStatus =
+  | 'preflighting'
+  | 'pending'
+  | 'processing'
+  | 'ready'
+  | 'blocked'
+  | 'failed'
+  | 'cancelled';
+
+export type DocumentProcessingCapabilityStatus =
+  | 'available'
+  | 'unavailable'
+  | 'blocked';
+
+export type DocumentProcessingCapability = {
+  available: boolean;
+  status: DocumentProcessingCapabilityStatus;
+  reason?: string | null;
+};
+
+export type DocumentProcessingRecoveryAction =
+  | 'retry'
+  | 'cancel'
+  | 'switch_to_add_to_chat'
+  | 'switch_to_ocr'
+  | 'switch_to_ingest'
+  | 'use_chat_scoped_retrieval';
+
+export type DocumentProcessingResultRef = {
+  kind: 'chat_context' | 'draft' | 'ingest_job';
+  id: string | number;
+};
+
+export type DocumentProcessingTurnMetadata = {
+  status: DocumentProcessingStatus | 'waiting_for_files' | 'sending_prompt';
+  files: {
+    id: string;
+    filename: string;
+    mode?: DocumentProcessingMode;
+    status: DocumentProcessingStatus;
+    summary?: string;
+    error?: string;
+  }[];
+  ragMediaIds?: Array<string | number>;
+  fileRetrievalEnabled?: boolean;
+  recoveryActions?: DocumentProcessingRecoveryAction[];
+};
+
 export type UploadedFile = {
   id: string;
   filename: string;
@@ -40,6 +93,20 @@ export type UploadedFile = {
   uploadedAt: number;
   embedding?: number[];
   processed: boolean;
+  processingMode?: DocumentProcessingMode;
+  processingStatus?: DocumentProcessingStatus;
+  processingCapabilities?: Partial<Record<DocumentProcessingMode, DocumentProcessingCapability>>;
+  processingSummary?: string;
+  processingError?: string;
+  processingBlockedReason?: string;
+  processingRecoveryActions?: DocumentProcessingRecoveryAction[];
+  processingResultRef?: DocumentProcessingResultRef;
+  processingPageEstimate?: number | null;
+  processingTokenEstimate?: number | null;
+  documentDraftId?: string;
+  ingestJobId?: number | string;
+  ingestBatchId?: string;
+  ingestIdempotencyKey?: string;
 };
 
 export type SessionFiles = {
