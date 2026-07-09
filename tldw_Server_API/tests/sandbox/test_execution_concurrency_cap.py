@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable
 
 import pytest
 
@@ -17,7 +17,6 @@ from tldw_Server_API.app.core.Sandbox.service import SandboxService
 pytestmark = pytest.mark.unit
 
 RUNNER_START_TIMEOUT_SEC = 60.0
-TEST_BACKGROUND_WORKERS = 2
 
 
 def _configure_sqlite_store(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -74,14 +73,32 @@ def _wait_for_phase(
     return None
 
 
+class _DeterministicBackgroundExecutor:
+    def __init__(self) -> None:
+        self._threads: list[threading.Thread] = []
+
+    def submit(self, worker_fn: Callable[[], None]) -> None:
+        thread = threading.Thread(
+            target=worker_fn,
+            name="sandbox-test-runner",
+            daemon=True,
+        )
+        self._threads.append(thread)
+        thread.start()
+
+    def shutdown(self, wait: bool = True, cancel_futures: bool = False) -> None:
+        del cancel_futures
+        if not wait:
+            return
+        for thread in self._threads:
+            thread.join(timeout=RUNNER_START_TIMEOUT_SEC)
+
+
 def _install_test_background_executor(
     monkeypatch: pytest.MonkeyPatch,
     svc: SandboxService,
-) -> ThreadPoolExecutor:
-    executor = ThreadPoolExecutor(
-        max_workers=TEST_BACKGROUND_WORKERS,
-        thread_name_prefix="sandbox-test-runner",
-    )
+) -> _DeterministicBackgroundExecutor:
+    executor = _DeterministicBackgroundExecutor()
     monkeypatch.setattr(svc, "_background_executor", lambda: executor)
     return executor
 
