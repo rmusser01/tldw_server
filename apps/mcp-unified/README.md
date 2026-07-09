@@ -74,10 +74,14 @@ Build artifacts and generate the TestPyPI upload plan without uploading:
 make mcp-unified-publish-dry-run
 ```
 
-Live TestPyPI or PyPI upload is not part of normal PR CI. It requires the manual
-workflow, an explicit confirmation input, and the RC helper's publish opt-in
-guard. Production PyPI uploads use the repository's configured trusted
-publishing environment rather than a long-lived PyPI token.
+Merging a package version bump to `main` triggers the guarded PyPI publishing
+workflow. The workflow runs the RC gate, verifies the version is not already on
+PyPI, and then uses the repository's configured trusted publishing environment
+rather than a long-lived PyPI token.
+
+Manual TestPyPI and PyPI workflow dispatch remain available for release
+rehearsals and operator-driven publishes. Manual live uploads require an
+explicit confirmation input and the RC helper's publish opt-in guard.
 
 ## Install From PyPI
 
