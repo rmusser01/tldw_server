@@ -53,6 +53,8 @@ Approved design choices:
 Task 1 backend schema contract slice: added card_plan request validation, response-only generation_type schema, focused mixed-plan/invalid-plan endpoint tests, and minimal generate endpoint passthrough/preservation needed for the contract test. Follow-up review regression added coverage for legacy default generate payloads omitting num_cards/card_type/card_plan. Verification: focused generate pytest passed (13 passed, 154 deselected); Bandit on touched backend schema/endpoint files reported 0 findings.
 
 Task 2 endpoint validation slice: added planned-output rejection tests for count mismatches and missing/invalid generation_type, added test-mode planned fallback coverage, normalized adapter/test-mode output through one endpoint helper, preserved generation_type, mapped true_false to stored basic model_type, and validated exact planned counts before returning previews. Verification: focused generate pytest passed (17 passed, 154 deselected); Bandit on touched production endpoint reported 0 findings; touched-file Bandit passed with pytest assert rule B101 skipped.
+
+Task 2 follow-up review fix: preserved planned-generation junk-row skip behavior by checking usable front/back before requiring generation_type, and added a regression where one junk row plus one valid planned basic row returns one card. Verification: red focused generate pytest failed before the endpoint fix; focused generate pytest passed after the fix (18 passed, 154 deselected); Bandit on the production endpoint passed; git diff --check passed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

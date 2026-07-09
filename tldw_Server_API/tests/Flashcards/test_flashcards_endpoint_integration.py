@@ -1722,6 +1722,42 @@ def test_generate_flashcards_rejects_planned_output_count_mismatch(client_with_f
     assert "Generated flashcards did not satisfy requested card plan" in response.json()["detail"]
 
 
+def test_generate_flashcards_skips_junk_rows_before_planned_type_validation(client_with_flashcards_db, monkeypatch):
+    async def fake_generate_adapter(config, context):
+        return {
+            "flashcards": [
+                {},
+                {
+                    "front": "Q1",
+                    "back": "A1",
+                    "generation_type": "basic",
+                    "model_type": "basic",
+                },
+            ],
+            "count": 2,
+        }
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.endpoints.flashcards.run_flashcard_generate_adapter",
+        fake_generate_adapter,
+    )
+
+    response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/generate",
+        json={
+            "text": "Cell biology",
+            "num_cards": 1,
+            "card_plan": [{"card_type": "basic", "count": 1}],
+        },
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["count"] == 1
+    assert payload["flashcards"][0]["generation_type"] == "basic"
+
+
 @pytest.mark.parametrize(
     "raw_card",
     [

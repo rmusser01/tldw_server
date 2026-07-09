@@ -216,6 +216,11 @@ def _normalize_generated_flashcards(
     for raw in raw_flashcards or []:
         if not isinstance(raw, dict):
             continue
+        front = str(raw.get("front") or "").strip()
+        back = str(raw.get("back") or "").strip()
+        if not front or not back:
+            continue
+
         if payload.card_plan is not None:
             raw_generation_type = str(raw.get("generation_type") or "").lower()
             if raw_generation_type not in valid_generation_types:
@@ -229,11 +234,6 @@ def _normalize_generated_flashcards(
             ).lower()
             if raw_generation_type not in valid_generation_types:
                 raw_generation_type = payload.card_type or "basic"
-
-        front = str(raw.get("front") or "").strip()
-        back = str(raw.get("back") or "").strip()
-        if not front or not back:
-            continue
 
         tags_value = raw.get("tags")
         if isinstance(tags_value, list):
