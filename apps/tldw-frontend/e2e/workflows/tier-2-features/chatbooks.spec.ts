@@ -1,7 +1,7 @@
 /**
- * Chatbooks Playground E2E Tests (Tier 2)
+ * Chatbooks Backup & Import E2E Tests (Tier 2)
  *
- * Tests the Chatbooks Playground page lifecycle:
+ * Tests the Chatbooks Backup & Import page lifecycle:
  * - Page loads with expected elements (heading, tabs, job tracker)
  * - Tab switching between Export, Import, and Jobs
  * - Export button fires POST /api/v1/chatbooks/export (requires server)
@@ -18,7 +18,7 @@ import { ChatbooksPage } from "../../utils/page-objects/ChatbooksPage"
 import { expectApiCall } from "../../utils/api-assertions"
 import { seedAuth } from "../../utils/helpers"
 
-test.describe("Chatbooks Playground", () => {
+test.describe("Chatbooks Backup & Import", () => {
   let chatbooks: ChatbooksPage
 
   test.beforeEach(async ({ page }) => {
@@ -31,7 +31,7 @@ test.describe("Chatbooks Playground", () => {
   // =========================================================================
 
   test.describe("Page Load", () => {
-    test("should render the Chatbooks Playground page with heading and tabs", async ({
+    test("should render the Chatbooks Backup & Import page with heading and tabs", async ({
       authedPage,
       diagnostics,
     }) => {

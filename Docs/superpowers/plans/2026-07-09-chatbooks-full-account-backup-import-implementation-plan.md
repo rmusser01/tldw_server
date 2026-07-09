@@ -737,11 +737,11 @@ git commit -m "feat: add chatbooks backup all flow"
 - Modify: `apps/tldw-frontend/e2e/workflows/tier-2-features/chatbooks.spec.ts`
 - Test: `apps/packages/ui/src/components/Option/Settings/__tests__/chatbooks.test.tsx`
 
-- [ ] **Step 1: Write failing Settings and naming tests**
+- [x] **Step 1: Write failing Settings and naming tests**
 
 Assert Settings shows a primary link/button to `Chatbooks Backup & Import`. If the conversation shortcut remains, assert it is labeled `Conversation export shortcut` and requires conversation IDs. Assert page-object and E2E headings no longer look for `Chatbooks Playground`.
 
-- [ ] **Step 2: Run tests and verify failure**
+- [x] **Step 2: Run tests and verify failure**
 
 Run:
 
@@ -752,15 +752,15 @@ bunx vitest run ../packages/ui/src/components/Option/Settings/__tests__/chatbook
 
 Expected: fail if the test file is new or because Settings still presents Chatbooks controls as a backup-like surface.
 
-- [ ] **Step 3: Demote Settings workflow**
+- [x] **Step 3: Demote Settings workflow**
 
 Make Settings default to a full Backup & Import entry point. Keep a secondary conversation-only shortcut only if it remains valuable and clearly scoped. Set `chatbookImportMedia` default to the same valid archive restore behavior or remove the Settings archive import shortcut if it cannot preview/restore safely.
 
-- [ ] **Step 4: Rename visible copy**
+- [x] **Step 4: Rename visible copy**
 
 Replace visible `Chatbooks Playground` labels with `Chatbooks Backup & Import`. Internal route names and component names can stay if renaming them creates unnecessary churn.
 
-- [ ] **Step 5: Verify tests pass**
+- [x] **Step 5: Verify tests pass**
 
 Run:
 
@@ -772,12 +772,27 @@ npx playwright test e2e/workflows/tier-2-features/chatbooks.spec.ts
 
 Expected: pass with updated headings and Settings behavior.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/packages/ui/src/components/Option/Settings/chatbooks.tsx apps/packages/ui/src/assets/locale/en/option.json apps/packages/ui/src/assets/locale/en/settings.json apps/packages/ui/src/public/_locales/en/option.json apps/packages/ui/src/public/_locales/en/settings.json apps/packages/ui/src/components/Layouts/header-shortcut-items.ts apps/packages/ui/src/routes/route-metadata.ts apps/tldw-frontend/e2e/utils/page-objects/ChatbooksPage.ts apps/tldw-frontend/e2e/workflows/tier-2-features/chatbooks.spec.ts apps/packages/ui/src/components/Option/Settings/__tests__/chatbooks.test.tsx
 git commit -m "feat: clarify chatbooks backup import surfaces"
 ```
+
+Completed implementation before commit:
+- Settings Chatbooks now links to `/chatbooks` as the full Backup & Import workflow and keeps only a selected-conversation export shortcut.
+- Removed unused Settings import/job locale keys and changed visible Settings export copy to conversation-only language.
+- Header shortcut and route metadata now label `/chatbooks` as `Chatbooks Backup & Import`; `/chatbooks-playground` is metadata-only legacy alias to `/chatbooks`.
+- Updated the Chatbooks E2E page object/spec to use `/chatbooks`, Backup & Import heading, backup-all export CTA, and current archive dropzone copy.
+
+Verification:
+- Initial red test: `bunx vitest run ../packages/ui/src/components/Option/Settings/__tests__/chatbooks.test.tsx` failed on missing Backup & Import link, stale Settings export/import UI, and `Chatbooks Playground` shortcut label.
+- Passed: `bunx vitest run ../packages/ui/src/components/Option/Settings/__tests__/chatbooks.test.tsx ../packages/ui/src/components/Layouts/__tests__/header-shortcut-descriptions.test.ts ../packages/ui/src/routes/__tests__/route-metadata.coverage.test.ts ../packages/ui/src/routes/__tests__/route-registry.visibility.test.ts`.
+- Passed: `npx playwright test e2e/workflows/tier-2-features/chatbooks.spec.ts`.
+- Passed: locale JSON parse check for the four changed English locale files.
+- Passed: `git diff --check`.
+- Noted baseline: optional `route-governance.metadata-coverage.test.ts` still fails on existing broad metadata gaps unrelated to Task 6.
+- Bandit skipped: frontend, locale, route metadata, E2E, and documentation-only change set.
 
 ## Task 7: OpenWebUI Import Mapping And Hydration Scope Reuse
 
