@@ -31,7 +31,7 @@ Design the WebUI and browser-extension /chat document upload UX for Add to chat,
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Design spec written and committed. Spec-document-reviewer returned APPROVED. Verification: git diff --check passed. Bandit skipped because this is documentation-only work.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
