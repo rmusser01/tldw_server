@@ -1,85 +1,6 @@
-# Automated Researcher
-
-## Introduction
-- This page is to document efforts towards creating a 'research' agent workflow for use within the project. The goal is to create a system that can automatically generate research reports, summaries, and other research-related tasks.
-
-### Researcher Goals
-1. f
-2. f
-3. f
-4. f
-5. f
-6. f
-7. f
-8.
+#  Research Links
 
 
-### Ideas
-Gated, checkpoints with 'retry, skip, continue' options
-s
-Follow gptresearchers method at first, planner LLM -> query LLM -> analyzer LLM -> summarizer LLM
-
-
-### Researcher Workflow
-
-
-### Researcher Components
-1. **Query/Search Engine**
-    - f
-    - f
-2. **Planner**
-    - f
-    - f
-3. **Analyzer**
-    - f
-    - f
-4. **(Optional: Summarizer)**
-    - f
-    - f
-5. **Report Generator**
-    - f
-    - f
-6. **Knowledge Base Management**
-    - f
-    - f
-
-
-### Researcher Config Definitions
-- `default_search_engine`: The default search engine to use for queries
-
-- Researcher config section
-```
-[researcher]
-# Researcher settings
-default_search_engine = google
-# Supported engines: google, bing, duckduckgo, brave (others are pending implementation)
-default_search_type = web
-# Options are: web, local, both
-default_search_language = en
-# Options are: FIXME
-default_search_report_language = en
-# Options are: FIXME
-default_search_sort = relevance
-# Options are: relevance, date
-default_search_safe_search = moderate
-# Options are: off, moderate, strict
-default_search_planner = openai-o1-full
-# Options are: FIXME
-default_search_planner_max_tokens = 8192
-default_search_analyzer = openai-o1-full
-# Options are: FIXME
-default_search_analyzer_max_tokens = 8192
-default_search_summarization = openai-o1-full
-# Options are: FIXME
-default_search_summarization_max_tokens = 8192
-search_max_results = 100
-search_report_format = markdown
-# Options are: markdown, html, pdf
-search_max_iterations = 5
-search_max_subtopics = 4
-search_custom_user_agent = "CUSTOM_USER_AGENT_HERE"
-search_blacklist_URLs = "URL1,URL2,URL3"
-```
 https://github.com/Arindam200/awesome-ai-apps/tree/main/advance_ai_agents/deep_researcher_agent
 https://github.com/Ayanami0730/deep_research_bench
 Perplexica
@@ -98,7 +19,7 @@ Articles
    https://docs.gptr.dev/docs/gpt-researcher/context/local-docs
    https://docs.gptr.dev/docs/gpt-researcher/context/tailored-research#
    https://docs.gptr.dev/docs/gpt-researcher/gptr/pip-package
-
+https://github.com/forsonny/deep-discovery
 Standford STORM
    https://arxiv.org/abs/2402.14207#
    https://storm.genie.stanford.edu/
@@ -131,6 +52,9 @@ https://github.com/binary-husky/gpt_academic/blob/master/docs/README.English.md
 https://arxiv.org/abs/2409.13741
 https://github.com/codelion/openevolve
 https://github.com/sentient-agi/OpenDeepSearch
+https://github.com/ctoth/research-papers-plugin
+
+
 https://github.com/qx-labs/agents-deep-research
 https://researcher.iqidis.ai
 https://github.com/tegridydev/abstract-agent
@@ -150,7 +74,6 @@ https://github.com/codelion/optillm/tree/main/optillm/plugins/deep_research
 https://github.com/murtaza-nasir/maestro
 https://github.com/bytedance/deer-flow
 https://news.ycombinator.com/item?id=47778306
-https://www.undermind.ai/
 https://eprint.iacr.org/
 https://arxiv.org/abs/2508.14880
 
