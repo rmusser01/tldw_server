@@ -146,6 +146,10 @@ _OPENWEBUI_FOLDER_MIRROR_EXCEPTIONS: tuple[type[BaseException], ...] = (
     *_CHATBOOK_NONCRITICAL_EXCEPTIONS,
     CharactersRAGDBError,
 )
+_CHATBOOK_SCOPE_COUNT_EXCEPTIONS: tuple[type[BaseException], ...] = (
+    *_CHATBOOK_NONCRITICAL_EXCEPTIONS,
+    CharactersRAGDBError,
+)
 
 _CHATBOOK_TEMPLATE_MODES = {"pass_through", "render_on_export", "render_on_import"}
 MAX_OPENWEBUI_HYDRATION_RESPONSE_ITEMS = 1000
@@ -6522,7 +6526,7 @@ class ChatbookService:
             return 0
         try:
             rows = self._fetch_results(execute_query(query, params))
-        except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
+        except _CHATBOOK_SCOPE_COUNT_EXCEPTIONS:
             return 0
         if not rows:
             return 0
@@ -6540,7 +6544,18 @@ class ChatbookService:
         except (TypeError, ValueError):
             return 0
 
+    def _scope_existing_user_path(self, *parts: str) -> Path | None:
+        """Return an existing user-owned path without creating optional stores."""
+        user_id_value = self.user_id_int if self.user_id_int is not None else self.user_id
+        try:
+            path = DatabasePaths.resolve_user_base_directory(user_id_value).joinpath(*parts)
+            return path if path.exists() else None
+        except _CHATBOOK_SCOPE_COUNT_EXCEPTIONS:
+            return None
+
     def _scope_media_count_query(self, query: str) -> int:
+        if self._scope_existing_user_path(DatabasePaths.MEDIA_DB_NAME) is None:
+            return 0
         media_db = self._get_media_db()
         if media_db is None:
             return 0
@@ -6561,36 +6576,33 @@ class ChatbookService:
         if category == "dictionaries":
             return self._scope_count_query("SELECT COUNT(*) AS count FROM chat_dictionaries WHERE deleted = 0")
         if category == "prompts":
+            if self._scope_existing_user_path(DatabasePaths.PROMPTS_SUBDIR, DatabasePaths.PROMPTS_DB_NAME) is None:
+                return 0
             prompts_db = self._get_prompts_db()
             if prompts_db is None:
                 return 0
             try:
                 return max(0, int(prompts_db.list_prompts(page=1, per_page=1)[3]))
-            except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
+            except _CHATBOOK_SCOPE_COUNT_EXCEPTIONS:
                 return 0
         if category == "evaluations":
+            if self._scope_existing_user_path(DatabasePaths.EVALUATIONS_SUBDIR, DatabasePaths.EVALUATIONS_DB_NAME) is None:
+                return 0
             evals_db = self._get_evaluations_db()
             if evals_db is None:
                 return 0
             try:
                 return max(0, int(evals_db.count_evaluations_filtered(created_by=self.user_id)))
-            except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
+            except _CHATBOOK_SCOPE_COUNT_EXCEPTIONS:
                 return 0
         if category == "generated_documents":
-            if not callable(getattr(self.db, "get_connection", None)):
-                return 0
-            try:
-                from ..Chat.document_generator import DocumentGeneratorService
-
-                return DocumentGeneratorService(self.db, self.user_id).count_generated_documents()
-            except CharactersRAGDBError:
-                return 0
-            except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
-                return 0
+            return self._scope_count_query("SELECT COUNT(*) AS count FROM generated_documents")
         if category == "explainer_sessions":
+            if self._scope_existing_user_path(DatabasePaths.EXPLAINER_DB_NAME) is None:
+                return 0
             try:
                 return max(0, int(self._get_explainer_repo().list_session_summaries(owner_user_id=self.user_id, limit=1)[1]))
-            except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
+            except _CHATBOOK_SCOPE_COUNT_EXCEPTIONS:
                 return 0
         if category == "media_records":
             return self._scope_media_count_query("SELECT COUNT(*) AS count FROM Media WHERE deleted = 0 AND is_trash = 0")
@@ -6605,12 +6617,20 @@ class ChatbookService:
                 "SELECT COUNT(*) AS count FROM Media WHERE deleted = 0 AND is_trash = 0 AND url IS NOT NULL AND url <> ''"
             )
         if category == "embeddings":
+            chroma_path = self._scope_existing_user_path(DatabasePaths.CHROMA_SUBDIR)
+            if chroma_path is None:
+                return 0
+            try:
+                if not any(chroma_path.iterdir()):
+                    return 0
+            except _CHATBOOK_SCOPE_COUNT_EXCEPTIONS:
+                return 0
             chroma = self._get_chroma_manager()
             if chroma is None:
                 return 0
             try:
                 return sum(max(0, int(collection.count())) for collection in chroma.list_collections())
-            except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
+            except _CHATBOOK_SCOPE_COUNT_EXCEPTIONS:
                 return 0
         return 0
 
@@ -6631,7 +6651,7 @@ class ChatbookService:
             "mode": FULL_ACCOUNT_EXPORT_MODE,
             "categories": categories,
             "total_items": sum(item["count"] for item in categories),
-            "pointer_only_count": sum(1 for item in categories if item["restore_status"] == "pointer_only"),
+            "pointer_only_count": sum(item["count"] for item in categories if item["restore_status"] == "pointer_only"),
             "sensitive_category_count": sum(
                 1 for item in categories if item["sensitivity"] in {"sensitive", "secret"}
             ),
