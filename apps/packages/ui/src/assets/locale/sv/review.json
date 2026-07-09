@@ -305,7 +305,7 @@
     "presetCriticalReview": "Kritisk granskning",
     "presetQAAnalysis": "Frågor och svar-analys",
     "presetBulletedNotes": "Bulleted Notes",
-    "analysisProviderRequired": "Choose an analysis provider, then retry analysis."
+    "analysisProviderRequired": "Välj en analysleverantör och försök analysera igen."
   },
   "empty": {
     "connectTitle": "Anslut för att använda granskning",

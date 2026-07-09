@@ -26,6 +26,7 @@ const {
   speechSynthesisSpeakMock,
   speechSynthesisCancelMock,
   speechSynthesisGetVoicesMock,
+  audioInstancesMock,
 } = vi.hoisted(() => ({
   getTTSSettingsMock: vi.fn(),
   setTTSSettingsMock: vi.fn(async () => undefined),
@@ -47,6 +48,7 @@ const {
   speechSynthesisSpeakMock: vi.fn(),
   speechSynthesisCancelMock: vi.fn(),
   speechSynthesisGetVoicesMock: vi.fn(() => []),
+  audioInstancesMock: [] as Array<{ playbackRate: number; src: string }>,
 }))
 
 vi.mock("react-i18next", () => ({
@@ -191,16 +193,19 @@ const renderSettings = () => {
 describe("TTSModeSettings", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    audioInstancesMock.length = 0
     synthesizeSpeechMock.mockResolvedValue(new ArrayBuffer(8))
     generateSpeechMock.mockResolvedValue(new ArrayBuffer(8))
     generateOpenAITTSMock.mockResolvedValue(new ArrayBuffer(8))
     class MockAudio {
       src: string
+      playbackRate = 1
       onended: (() => void) | null = null
       onerror: (() => void) | null = null
 
       constructor(src: string) {
         this.src = src
+        audioInstancesMock.push(this)
       }
 
       play = audioPlayMock
@@ -341,6 +346,7 @@ describe("TTSModeSettings", () => {
         tldwTtsSpeed: 1.15,
         tldwTtsLanguage: "en",
         tldwTtsStreaming: true,
+        playbackSpeed: 1.35,
       })
     )
 
@@ -362,6 +368,10 @@ describe("TTSModeSettings", () => {
         })
       )
     })
+    await waitFor(() => {
+      expect(audioPlayMock).toHaveBeenCalled()
+    })
+    expect(audioInstancesMock.at(-1)?.playbackRate).toBe(1.35)
     expect(webSocketSpy).not.toHaveBeenCalled()
     expect(setTTSSettingsMock).not.toHaveBeenCalled()
   })

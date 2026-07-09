@@ -106,13 +106,29 @@ describe("CharacterEditorForm expression image validation", () => {
   it("opens metadata fields when collapsed expression images block submit", async () => {
     const setShowAdvanced = vi.fn()
     const setAdvancedSections = vi.fn()
-    renderEditorForm({ setAdvancedSections, setShowAdvanced })
+    const { form } = renderEditorForm({ setAdvancedSections, setShowAdvanced })
+    await waitFor(() => expect(form()).not.toBeNull())
+    const scrollToField = vi
+      .spyOn(form()!, "scrollToField")
+      .mockImplementation(() => undefined)
 
     fireEvent.click(screen.getByRole("button", { name: "Save" }))
 
     await waitFor(() => {
       expect(setShowAdvanced).toHaveBeenCalledWith(true)
     })
-    expect(setAdvancedSections).toHaveBeenCalled()
+    expect(scrollToField).toHaveBeenCalledWith(
+      ["expression_images", 0, "state"],
+      { block: "center" }
+    )
+    const updateSections = setAdvancedSections.mock.calls.at(-1)?.[0]
+    expect(updateSections).toEqual(expect.any(Function))
+    expect(
+      updateSections({
+        promptControl: false,
+        generationSettings: false,
+        metadata: false
+      })
+    ).toMatchObject({ metadata: true })
   })
 })

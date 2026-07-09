@@ -306,7 +306,7 @@
     "presetCriticalReview": "Kritisk gjennomgang",
     "presetQAAnalysis": "Spørsmål og svar-analyse",
     "presetBulletedNotes": "Bulleted Notes",
-    "analysisProviderRequired": "Choose an analysis provider, then retry analysis."
+    "analysisProviderRequired": "Velg en analyseleverandør, og prøv analysen på nytt."
   },
   "empty": {
     "connectTitle": "Koble til for å bruke Review",

@@ -13,11 +13,11 @@
 ## Stage 3: Frontend Fixes
 **Goal**: Apply narrow React/TypeScript fixes for confirmed review issues without disturbing the recently merged cockpit stability work.
 **Success Criteria**: Guard nullable/primitive access, fix route-focus handling, settings/status UI defects, recipe-card edge cases, and small validated i18n/accessibility issues.
-**Tests**: Frontend typecheck plus targeted Vitest where available.
+**Tests**: Frontend typecheck plus targeted Vitest where available, including TTS preview and expression-image validation coverage.
 **Status**: Complete
 
 ## Stage 4: PR Hygiene
 **Goal**: Update the PR description, respond to or resolve review threads, and push the finalized changes to `dev`.
 **Success Criteria**: PR #2692 reflects the review-fix commit and comments are either fixed or closed with rationale.
 **Tests**: `git diff --check`, targeted checks, PR status/check inspection.
-**Status**: In Progress
+**Status**: Complete

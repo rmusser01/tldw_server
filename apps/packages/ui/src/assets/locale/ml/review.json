@@ -305,7 +305,7 @@
     "presetCriticalReview": "വിമർശനപരമായ റിവ്യൂ",
     "presetQAAnalysis": "Q&A വിശകലനം",
     "presetBulletedNotes": "Bulleted Notes",
-    "analysisProviderRequired": "Choose an analysis provider, then retry analysis."
+    "analysisProviderRequired": "ഒരു വിശകലന ദാതാവിനെ തിരഞ്ഞെടുക്കുക, തുടർന്ന് വിശകലനം വീണ്ടും ശ്രമിക്കുക."
   },
   "empty": {
     "connectTitle": "റിവ്യൂ ഉപയോഗിക്കാൻ കണക്റ്റ് ചെയ്യുക",

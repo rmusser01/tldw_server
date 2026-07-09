@@ -719,23 +719,65 @@ export const TTSModeSettings = ({ hideBorder }: { hideBorder?: boolean }) => {
 
     if (
       provider === "tldw" &&
-      (requireField(form.values.tldwTtsModel, "Select a tldw TTS model first.") ||
-        requireField(form.values.tldwTtsVoice, "Select a tldw TTS voice first."))
+      (requireField(
+        form.values.tldwTtsModel,
+        t(
+          "generalSettings.tts.preview.selectTldwModel",
+          "Select a tldw TTS model first."
+        ) as string
+      ) ||
+        requireField(
+          form.values.tldwTtsVoice,
+          t(
+            "generalSettings.tts.preview.selectTldwVoice",
+            "Select a tldw TTS voice first."
+          ) as string
+        ))
     ) {
       return
     }
     if (
       provider === "openai" &&
-      (requireField(form.values.openAITTSModel, "Select an OpenAI-compatible TTS model first.") ||
-        requireField(form.values.openAITTSVoice, "Select an OpenAI-compatible TTS voice first."))
+      (requireField(
+        form.values.openAITTSModel,
+        t(
+          "generalSettings.tts.preview.selectOpenAiModel",
+          "Select an OpenAI-compatible TTS model first."
+        ) as string
+      ) ||
+        requireField(
+          form.values.openAITTSVoice,
+          t(
+            "generalSettings.tts.preview.selectOpenAiVoice",
+            "Select an OpenAI-compatible TTS voice first."
+          ) as string
+        ))
     ) {
       return
     }
     if (
       provider === "elevenlabs" &&
-      (requireField(form.values.elevenLabsApiKey, "Enter an ElevenLabs API key first.") ||
-        requireField(form.values.elevenLabsModel, "Select an ElevenLabs model first.") ||
-        requireField(form.values.elevenLabsVoiceId, "Select an ElevenLabs voice first."))
+      (requireField(
+        form.values.elevenLabsApiKey,
+        t(
+          "generalSettings.tts.preview.enterElevenLabsApiKey",
+          "Enter an ElevenLabs API key first."
+        ) as string
+      ) ||
+        requireField(
+          form.values.elevenLabsModel,
+          t(
+            "generalSettings.tts.preview.selectElevenLabsModel",
+            "Select an ElevenLabs model first."
+          ) as string
+        ) ||
+        requireField(
+          form.values.elevenLabsVoiceId,
+          t(
+            "generalSettings.tts.preview.selectElevenLabsVoice",
+            "Select an ElevenLabs voice first."
+          ) as string
+        ))
     ) {
       return
     }
@@ -790,6 +832,9 @@ export const TTSModeSettings = ({ hideBorder }: { hideBorder?: boolean }) => {
       const url = URL.createObjectURL(new Blob([buffer], { type: mimeType }))
       previewUrlRef.current = url
       const audio = new Audio(url)
+      const playbackRate = Number(form.values.playbackSpeed)
+      audio.playbackRate =
+        Number.isFinite(playbackRate) && playbackRate > 0 ? playbackRate : 1
       previewAudioRef.current = audio
       audio.onended = stopPreview
       audio.onerror = stopPreview

@@ -305,7 +305,7 @@
     "presetCriticalReview": "批判性审阅",
     "presetQAAnalysis": "问答分析",
     "presetBulletedNotes": "Bulleted Notes",
-    "analysisProviderRequired": "Choose an analysis provider, then retry analysis."
+    "analysisProviderRequired": "请选择分析提供方，然后重试分析。"
   },
   "empty": {
     "connectTitle": "连接以使用审阅",

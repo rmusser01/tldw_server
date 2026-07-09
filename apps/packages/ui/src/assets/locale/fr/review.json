@@ -305,7 +305,7 @@
     "presetCriticalReview": "Revue critique",
     "presetQAAnalysis": "Analyse Q&R",
     "presetBulletedNotes": "Bulleted Notes",
-    "analysisProviderRequired": "Choose an analysis provider, then retry analysis."
+    "analysisProviderRequired": "Choisissez un fournisseur d'analyse, puis réessayez l'analyse."
   },
   "empty": {
     "connectTitle": "Connectez-vous pour utiliser la Revue",

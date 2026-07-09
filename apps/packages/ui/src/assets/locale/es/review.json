@@ -305,7 +305,7 @@
     "presetCriticalReview": "Revisión crítica",
     "presetQAAnalysis": "Análisis de preguntas y respuestas",
     "presetBulletedNotes": "Bulleted Notes",
-    "analysisProviderRequired": "Choose an analysis provider, then retry analysis."
+    "analysisProviderRequired": "Elige un proveedor de análisis y vuelve a intentar el análisis."
   },
   "empty": {
     "connectTitle": "Conéctate para usar Review",

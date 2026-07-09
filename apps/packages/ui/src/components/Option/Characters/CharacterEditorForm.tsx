@@ -122,7 +122,15 @@ export const CharacterEditorForm: React.FC<CharacterEditorFormProps> = ({
       setShowAdvanced(true)
       setAdvancedSections((current) => ({ ...current, metadata: true }))
       const scrollToExpressionImages = () => {
-        form.scrollToField("expression_images", { block: "center" })
+        const expressionRows = form.getFieldValue("expression_images")
+        const firstRowIndex = Array.isArray(expressionRows) && expressionRows.length > 0
+          ? 0
+          : undefined
+        const targetField = firstRowIndex === undefined
+          ? "_expression_images_validation"
+          : ["expression_images", firstRowIndex, "state"]
+
+        form.scrollToField(targetField, { block: "center" })
       }
       if (typeof window.requestAnimationFrame === "function") {
         window.requestAnimationFrame(scrollToExpressionImages)
