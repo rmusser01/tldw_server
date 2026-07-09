@@ -121,7 +121,7 @@ Record that the release PR now includes guarded main-version auto-publish behavi
 - `apps/mcp-unified/README.md`
 - `apps/mcp-unified/src/mcp_unified/README.md`
 - `backlog/tasks/task-12118 - Prepare-MCP-Unified-0.2.0-package-release.md`
-- `docs/superpowers/plans/2026-07-03-mcp-unified-main-version-auto-publish.md`
+- Docs/superpowers/plans/2026-07-03-mcp-unified-main-version-auto-publish.md
 
 - [ ] **Step 1: Run package validation**
 
