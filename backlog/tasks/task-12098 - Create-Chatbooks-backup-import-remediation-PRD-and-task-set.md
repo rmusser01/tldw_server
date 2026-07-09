@@ -4,17 +4,18 @@ title: Create Chatbooks backup import remediation PRD and task set
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-07-09 14:49'
+updated_date: 2026-07-09 14:49
 labels:
-  - chatbooks
-  - prd
-  - ux
-  - uat
-  - backup
-  - import
+- chatbooks
+- prd
+- ux
+- uat
+- backup
+- import
 dependencies: []
 references:
-  - Docs/Reviews/CHATBOOKS_BACKUP_IMPORT_UAT_UX_REVIEW_2026_07_09.md
+- Docs/Reviews/CHATBOOKS_BACKUP_IMPORT_UAT_UX_REVIEW_2026_07_09.md
+- Docs/superpowers/plans/2026-07-09-chatbooks-full-account-backup-import-implementation-plan.md
 ---
 
 ## Description
@@ -34,12 +35,13 @@ Create an umbrella PRD/spec and milestone Backlog tasks for addressing all findi
 
 <!-- SECTION:PLAN:BEGIN -->
 Docs/superpowers/specs/2026-07-09-chatbooks-backup-import-remediation-prd-design.md
+Docs/superpowers/plans/2026-07-09-chatbooks-full-account-backup-import-implementation-plan.md
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Spec review pass recorded after PRD/task package verification. Implementation planning waits for user review and approval.
+Spec review pass recorded after PRD/task package verification. Implementation plan created at Docs/superpowers/plans/2026-07-09-chatbooks-full-account-backup-import-implementation-plan.md.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
