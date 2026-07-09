@@ -270,6 +270,12 @@ async def run_flashcard_generate_adapter(config: dict[str, Any], context: dict[s
         for card in flashcards:
             if not isinstance(card, dict):
                 continue
+            front = str(card.get("front") or "").strip()
+            back = str(card.get("back") or "").strip()
+            if not front or not back:
+                continue
+            card["front"] = front
+            card["back"] = back
             raw_generation_type = str(card.get("generation_type") or "").strip().lower()
             if planned_request:
                 if raw_generation_type in valid_generation_types:
@@ -277,8 +283,7 @@ async def run_flashcard_generate_adapter(config: dict[str, Any], context: dict[s
                 else:
                     continue
             else:
-                if raw_generation_type not in valid_generation_types:
-                    raw_generation_type = card_type
+                raw_generation_type = card_type
                 card["generation_type"] = raw_generation_type
             card["model_type"] = "basic" if raw_generation_type == "true_false" else raw_generation_type or "basic"
             cleaned_flashcards.append(card)

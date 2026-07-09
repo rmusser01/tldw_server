@@ -1040,6 +1040,33 @@ class TestFlashcardGenerateAdapter:
                     assert result["flashcards"][0].get("model_type") == card_type
 
     @pytest.mark.asyncio
+    async def test_flashcard_generate_legacy_card_type_overrides_stray_generation_type(
+        self,
+        base_context,
+        sample_long_text,
+    ):
+        """Test legacy card_type requests ignore model-emitted planned generation metadata."""
+        from tldw_Server_API.app.core.Workflows.adapters.content import run_flashcard_generate_adapter
+
+        mock_response = mock_chat_response(
+            json.dumps([{"front": "Q", "back": "A", "generation_type": "cloze"}])
+        )
+
+        with patch(
+            "tldw_Server_API.app.core.Workflows.adapters.content.generation.perform_chat_api_call_async",
+            new_callable=AsyncMock,
+            return_value=mock_response,
+        ):
+            result = await run_flashcard_generate_adapter(
+                {"text": sample_long_text, "card_type": "basic"},
+                base_context,
+            )
+
+        assert result["flashcards"] == [
+            {"front": "Q", "back": "A", "generation_type": "basic", "model_type": "basic"}
+        ]
+
+    @pytest.mark.asyncio
     async def test_flashcard_generate_normalizes_focus_topics(self, base_context, sample_long_text):
         """Test non-string focus topics are normalized before prompt construction."""
         from tldw_Server_API.app.core.Workflows.adapters.content import run_flashcard_generate_adapter
@@ -1205,6 +1232,31 @@ class TestFlashcardGenerateAdapter:
                         {"card_type": "cloze", "count": 1},
                         {"card_type": "true_false", "count": 1},
                     ],
+                },
+                base_context,
+            )
+
+        assert result == {"error": "card_plan_mismatch", "flashcards": [], "count": 0}
+
+    @pytest.mark.asyncio
+    async def test_flashcard_generate_rejects_planned_blank_cards(self, base_context, sample_long_text):
+        """Test planned output with blank flashcard fields does not satisfy card_plan counts."""
+        from tldw_Server_API.app.core.Workflows.adapters.content import run_flashcard_generate_adapter
+
+        mock_response = mock_chat_response(
+            json.dumps([{"front": "   ", "back": "A", "generation_type": "basic"}])
+        )
+
+        with patch(
+            "tldw_Server_API.app.core.Workflows.adapters.content.generation.perform_chat_api_call_async",
+            new_callable=AsyncMock,
+            return_value=mock_response,
+        ):
+            result = await run_flashcard_generate_adapter(
+                {
+                    "text": sample_long_text,
+                    "num_cards": 1,
+                    "card_plan": [{"card_type": "basic", "count": 1}],
                 },
                 base_context,
             )

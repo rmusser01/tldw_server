@@ -449,12 +449,12 @@ class FlashcardPlanItem(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     card_type: FlashcardGenerationType
-    count: int = Field(..., ge=1, le=100)
+    count: int = Field(..., ge=1, le=100, strict=True)
 
 
 class FlashcardGenerateRequest(BaseModel):
     text: str = Field(..., min_length=1, description="Source text to generate flashcards from")
-    num_cards: Optional[int] = Field(None, ge=1, le=100, description="Requested number of generated cards")
+    num_cards: Optional[int] = Field(None, ge=1, le=100, strict=True, description="Requested number of generated cards")
     card_type: Optional[FlashcardCardType] = Field(None)
     card_plan: Optional[list[FlashcardPlanItem]] = None
     difficulty: Literal['easy', 'medium', 'hard', 'mixed'] = Field('mixed')
