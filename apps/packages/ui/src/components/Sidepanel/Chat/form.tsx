@@ -366,6 +366,11 @@ export const SidepanelForm = ({
   const [toggleEnabled] = useComposerEnabledPreference()
   const nextgenComposerEnabled = urlFlagEnabled || toggleEnabled
   const [nextgenComposerVariant] = useComposerVariantPreference()
+  const isNextgenV5Composer =
+    nextgenComposerEnabled && nextgenComposerVariant === "v5"
+  const composerCardClass = isNextgenV5Composer
+    ? "relative w-full min-w-0 max-w-[64rem] rounded-[22px] duration-100"
+    : `relative w-full min-w-0 max-w-[64rem] rounded-3xl border border-border/80 bg-surface/95 shadow-card backdrop-blur-lg duration-100 ${cardPadding}`
   const { deferredInput: deferredComposerInput } = useDeferredComposerInput(
     form.values.message || ""
   )
@@ -2949,7 +2954,7 @@ export const SidepanelForm = ({
         <div className="relative flex w-full min-w-0 flex-row justify-center gap-2">
           <div
             aria-disabled={!isConnectionReady}
-            className={`relative w-full min-w-0 max-w-[64rem] rounded-3xl border border-border/80 bg-surface/95 shadow-card backdrop-blur-lg duration-100 ${cardPadding}`}>
+            className={composerCardClass}>
             <div>
               {/* Inline Model Parameters Panel (Pro mode only) */}
               {wrapComposerProfile(
@@ -3891,8 +3896,8 @@ export const SidepanelForm = ({
                         const v5ComposerFacets = [
                           {
                             id: "model",
-                            fieldKey: "mdl",
-                            value: selectedModel || "—",
+                            fieldKey: "Model",
+                            value: selectedModel || "Pick",
                             active: Boolean(selectedModel),
                             onClick: handleOpenModelSettings,
                             "aria-label": selectedModel
@@ -3901,7 +3906,7 @@ export const SidepanelForm = ({
                           },
                           {
                             id: "mode",
-                            fieldKey: "mode",
+                            fieldKey: "Mode",
                             value: chatMode === "rag" ? "RAG" : "Chat",
                             active: chatMode !== "normal",
                             onClick: () =>
@@ -3913,8 +3918,8 @@ export const SidepanelForm = ({
                           },
                           {
                             id: "web",
-                            fieldKey: "web",
-                            value: webSearch ? "on" : "off",
+                            fieldKey: "Web",
+                            value: webSearch ? "On" : "Off",
                             active: webSearch,
                             onClick: handleWebSearchToggle,
                             "aria-label": webSearch
@@ -3925,14 +3930,14 @@ export const SidepanelForm = ({
                             ? [
                                 {
                                   id: "docs",
-                                  fieldKey: "docs",
+                                  fieldKey: "Files",
                                   value: v5DocumentProcessingFacet.fileCountLabel,
                                   active: true,
                                   "aria-label": v5DocumentProcessingFacet.ariaLabel,
                                 },
                                 {
                                   id: "doc-mode",
-                                  fieldKey: "doc",
+                                  fieldKey: "Doc",
                                   value: v5DocumentProcessingFacet.modeLabel,
                                   active: true,
                                   "aria-label": v5DocumentProcessingFacet.ariaLabel,
@@ -3941,29 +3946,32 @@ export const SidepanelForm = ({
                             : []),
                         ]
                         const v5ActionButtonClass =
-                          "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border bg-surface text-text-muted transition-colors hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-50"
+                          "inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-border bg-surface text-text-muted transition-colors hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-50"
                         const v5InlineSlot = (
                           <>
                             {!streaming ? (
                               <>
                                 <Tooltip
-                                  title={t("playground:actions.upload", "Attach image")}
+                                  title={t(
+                                    "playground:actions.attachDocument",
+                                    "Attach document"
+                                  )}
                                 >
                                   <button
                                     type="button"
-                                    onClick={openUploadDialog}
-                                    data-testid="chat-upload-image-inline"
+                                    onClick={handleKnowledgeAddFile}
+                                    data-testid="chat-attach-document-inline"
                                     className={v5ActionButtonClass}
                                     aria-label={t(
-                                      "playground:actions.upload",
-                                      "Attach image"
+                                      "playground:actions.attachDocument",
+                                      "Attach document"
                                     )}
                                     title={t(
-                                      "playground:actions.upload",
-                                      "Attach image"
+                                      "playground:actions.attachDocument",
+                                      "Attach document"
                                     )}
                                   >
-                                    <ImageIcon className="h-4 w-4" />
+                                    <FileText className="h-4 w-4" />
                                   </button>
                                 </Tooltip>
                                 <Tooltip
@@ -4131,7 +4139,7 @@ export const SidepanelForm = ({
                             ariaLabel={primaryActionAriaLabel}
                             title={primaryActionTitle}
                             data-testid="chat-send"
-                            className="min-h-9 whitespace-nowrap px-3 text-[11px] font-semibold uppercase tracking-[0.08em]"
+                            className="min-h-10 whitespace-nowrap px-3 text-[11px] font-semibold uppercase tracking-[0.08em]"
                           >
                             {primaryActionLabel}
                           </Button>

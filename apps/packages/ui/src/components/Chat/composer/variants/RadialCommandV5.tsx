@@ -143,7 +143,7 @@ export const RadialCommandV5: React.FC<RadialCommandV5Props> = ({
   forceFocused = false,
 }) => {
   const compact = density === "compact"
-  const wrapperPad = compact ? "p-1" : "px-6 pt-3.5 pb-5"
+  const wrapperPad = compact ? "p-0" : "px-6 pt-3.5 pb-5"
   const boxFocusCls = forceFocused
     ? "border-primary [box-shadow:var(--glow-primary)]"
     : "focus-within:border-primary focus-within:[box-shadow:var(--glow-primary)]"
@@ -232,7 +232,7 @@ export const RadialCommandV5: React.FC<RadialCommandV5Props> = ({
 
     return (
       <div
-        className={`${wrapperPad} border-t border-border bg-bg relative`}
+        className={`${wrapperPad} relative`}
         data-variant="v5"
         data-density={density}
       >

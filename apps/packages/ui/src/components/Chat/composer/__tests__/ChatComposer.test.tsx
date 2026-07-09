@@ -78,6 +78,11 @@ describe("ChatComposer", () => {
     expect(screen.getByTestId("v5-mobile-action-row")).toBeTruthy()
     expect(screen.getByTestId("chat-input")).toBeTruthy()
     expect(screen.queryByText("⌘K")).toBeNull()
+
+    const root = screen
+      .getByTestId("v5-mobile-composer")
+      .closest("[data-variant='v5']")
+    expect(root?.className).not.toContain("border-t")
   })
 
   it("forwards V1-specific props (sourceChip)", async () => {

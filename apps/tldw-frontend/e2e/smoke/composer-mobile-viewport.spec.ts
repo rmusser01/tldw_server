@@ -77,6 +77,21 @@ test.describe("composer · mobile viewport", () => {
       .waitForLoadState("networkidle", { timeout: 30_000 })
       .catch(() => {})
 
+    await expect(
+      page.locator('[data-testid="chat-header-sidebar-toggle"]')
+    ).toHaveCount(0)
+    await expect(
+      page.locator('[data-testid="chat-header-companion-home"]')
+    ).toHaveCount(0)
+    await expect(page.locator('[data-testid="chat-header"]')).toHaveCount(1)
+
+    const emptyState = page.locator('[data-testid="chat-empty-connected"]')
+    await expect(emptyState).toBeVisible()
+    await expect(emptyState.getByText("Connected", { exact: true })).toHaveCount(
+      0
+    )
+    await expect(page.locator('[data-testid="chat-suggestion-3"]')).toHaveCount(0)
+
     const wrapper = page.locator('[data-testid="nextgen-composer-wrapper"]')
     await expect(wrapper).toBeVisible({ timeout: 30_000 })
     await expect(wrapper.locator("[data-variant='v5']")).toBeVisible()
@@ -84,6 +99,18 @@ test.describe("composer · mobile viewport", () => {
     await expect(wrapper.locator('[data-testid="v5-mobile-text-row"]')).toBeVisible()
     await expect(wrapper.locator('[data-testid="v5-mobile-action-row"]')).toBeVisible()
     await expect(wrapper.getByText("⌘K")).toHaveCount(0)
+    await expect(
+      wrapper.locator('[data-testid="chat-upload-image-inline"]')
+    ).toHaveCount(0)
+    await expect(
+      wrapper.locator('[data-testid="chat-attach-document-inline"]')
+    ).toBeVisible()
+
+    const metaText = await wrapper
+      .locator('[data-testid="v5-mobile-meta-row"]')
+      .innerText()
+    expect(metaText).not.toContain("MDL")
+    expect(metaText).not.toContain("—")
 
     const chatInput = wrapper.locator('[data-testid="chat-input"]')
     await expect(chatInput).toBeVisible()
