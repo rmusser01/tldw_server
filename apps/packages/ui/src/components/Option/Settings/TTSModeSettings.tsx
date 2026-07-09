@@ -10,7 +10,7 @@ import {
   setTTSSettings,
   SUPPORTED_TLDW_TTS_FORMATS
 } from "@/services/tts"
-import { inferTldwProviderFromModel } from "@/services/tts-provider"
+import { formatToMimeType, inferTldwProviderFromModel } from "@/services/tts-provider"
 import { TTS_PROVIDER_OPTIONS } from "@/services/tts-providers"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
@@ -766,7 +766,7 @@ export const TTSModeSettings = ({ hideBorder }: { hideBorder?: boolean }) => {
         })
       } else {
         const responseFormat = String(form.values.tldwTtsResponseFormat || "mp3").trim() || "mp3"
-        mimeType = responseFormat === "wav" ? "audio/wav" : "audio/mpeg"
+        mimeType = formatToMimeType(responseFormat)
         buffer = await tldwClient.synthesizeSpeech(TTS_PREVIEW_TEXT, {
           model: String(form.values.tldwTtsModel || "").trim(),
           voice: String(form.values.tldwTtsVoice || "").trim(),
@@ -822,6 +822,14 @@ export const TTSModeSettings = ({ hideBorder }: { hideBorder?: boolean }) => {
       />
     )
   }
+
+  const previewHelpText =
+    form.values.ttsProvider === "openai"
+      ? (t(
+          "generalSettings.tts.preview.openAiHelp",
+          "Preview tests this model and voice through the server speech API; server or provider credentials may still be required."
+        ) as string)
+      : ""
 
   return (
     <div>
@@ -1347,26 +1355,29 @@ export const TTSModeSettings = ({ hideBorder }: { hideBorder?: boolean }) => {
                 {previewError}
               </span>
             )}
+            {previewHelpText && (
+              <span className="text-xs text-text-subtle">
+                {previewHelpText}
+              </span>
+            )}
           </div>
           <Button
             data-testid="tts-preview-button"
             type="default"
             className="mt-4 sm:mt-0"
             icon={
-              previewState === "playing" ? (
+              previewState !== "idle" ? (
                 <Square className="h-3.5 w-3.5" />
               ) : (
                 <Play className="h-3.5 w-3.5" />
               )
             }
-            loading={previewState === "loading"}
+            aria-busy={previewState === "loading"}
             onClick={previewState === "idle" ? handlePreview : stopPreview}
           >
-            {previewState === "playing"
+            {previewState !== "idle"
               ? t("generalSettings.tts.preview.stop", "Stop preview")
-              : previewState === "loading"
-                ? t("generalSettings.tts.preview.generating", "Generating...")
-                : t("generalSettings.tts.preview.play", "Preview voice")}
+              : t("generalSettings.tts.preview.play", "Preview voice")}
           </Button>
         </div>
         <div className="flex sm:flex-row flex-col space-y-4 sm:space-y-0 sm:justify-between">

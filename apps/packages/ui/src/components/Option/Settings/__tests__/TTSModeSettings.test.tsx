@@ -68,7 +68,7 @@ vi.mock("react-i18next", () => ({
 
 vi.mock("@/services/tts", () => ({
   DEFAULT_TLDW_TTS_MODEL: "KittenML/kitten-tts-nano-0.8",
-  SUPPORTED_TLDW_TTS_FORMATS: ["mp3"],
+  SUPPORTED_TLDW_TTS_FORMATS: ["mp3", "wav", "opus"],
   getTTSSettings: getTTSSettingsMock,
   setTTSSettings: setTTSSettingsMock,
   setElevenLabsApiKey: setElevenLabsApiKeyMock,
@@ -115,6 +115,11 @@ vi.mock("@/services/tldw/tts-provider-keys", () => ({
 }))
 
 vi.mock("@/services/tts-provider", () => ({
+  formatToMimeType: vi.fn((format: string) => {
+    if (format === "wav") return "audio/wav"
+    if (format === "opus") return "audio/opus"
+    return "audio/mpeg"
+  }),
   inferTldwProviderFromModel: vi.fn(() => null),
 }))
 
@@ -186,6 +191,9 @@ const renderSettings = () => {
 describe("TTSModeSettings", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    synthesizeSpeechMock.mockResolvedValue(new ArrayBuffer(8))
+    generateSpeechMock.mockResolvedValue(new ArrayBuffer(8))
+    generateOpenAITTSMock.mockResolvedValue(new ArrayBuffer(8))
     class MockAudio {
       src: string
       onended: (() => void) | null = null
@@ -358,6 +366,26 @@ describe("TTSModeSettings", () => {
     expect(setTTSSettingsMock).not.toHaveBeenCalled()
   })
 
+  it("labels tldw preview blobs with the selected response format MIME type", async () => {
+    getTTSSettingsMock.mockResolvedValue(
+      buildTtsSettings({
+        ttsProvider: "tldw",
+        tldwTtsModel: "kitten_tts",
+        tldwTtsVoice: "Luna",
+        tldwTtsResponseFormat: "opus",
+      })
+    )
+
+    renderSettings()
+
+    fireEvent.click(await screen.findByTestId("tts-preview-button"))
+
+    await waitFor(() => {
+      expect(createObjectURLMock).toHaveBeenCalled()
+    })
+    expect((createObjectURLMock.mock.calls[0][0] as Blob).type).toBe("audio/opus")
+  })
+
   it("previews ElevenLabs with the typed API key instead of the saved key", async () => {
     getTTSSettingsMock.mockResolvedValue(
       buildTtsSettings({
@@ -411,6 +439,20 @@ describe("TTSModeSettings", () => {
     expect(setTTSSettingsMock).not.toHaveBeenCalled()
   })
 
+  it("shows that OpenAI-compatible previews still depend on server speech credentials", async () => {
+    getTTSSettingsMock.mockResolvedValue(
+      buildTtsSettings({
+        ttsProvider: "openai",
+      })
+    )
+
+    renderSettings()
+
+    expect(
+      await screen.findByText(/server speech API/i)
+    ).toBeInTheDocument()
+  })
+
   it("blocks preview before synthesis when required provider fields are missing", async () => {
     getTTSSettingsMock.mockResolvedValue(
       buildTtsSettings({
@@ -442,6 +484,69 @@ describe("TTSModeSettings", () => {
     fireEvent.click(await screen.findByTestId("tts-preview-button"))
     await screen.findByRole("button", { name: /Stop preview/i })
     fireEvent.click(screen.getByTestId("tts-preview-button"))
+
+    expect(audioPauseMock).toHaveBeenCalled()
+    expect(revokeObjectURLMock).toHaveBeenCalledWith("blob:preview")
+  })
+
+  it("lets the user stop a pending server preview request", async () => {
+    let capturedSignal: AbortSignal | undefined
+    synthesizeSpeechMock.mockImplementation((_text, options) => {
+      capturedSignal = options?.signal
+      return new Promise<ArrayBuffer>(() => {})
+    })
+    getTTSSettingsMock.mockResolvedValue(
+      buildTtsSettings({
+        ttsProvider: "tldw",
+        tldwTtsModel: "kitten_tts",
+        tldwTtsVoice: "Luna",
+      })
+    )
+
+    renderSettings()
+
+    fireEvent.click(await screen.findByTestId("tts-preview-button"))
+    fireEvent.click(await screen.findByRole("button", { name: /Stop preview/i }))
+
+    expect(capturedSignal?.aborted).toBe(true)
+  })
+
+  it("cleans up active preview playback on unmount", async () => {
+    getTTSSettingsMock.mockResolvedValue(
+      buildTtsSettings({
+        ttsProvider: "tldw",
+        tldwTtsModel: "kitten_tts",
+        tldwTtsVoice: "Luna",
+      })
+    )
+
+    const { unmount } = renderSettings()
+
+    fireEvent.click(await screen.findByTestId("tts-preview-button"))
+    await screen.findByRole("button", { name: /Stop preview/i })
+    unmount()
+
+    expect(audioPauseMock).toHaveBeenCalled()
+    expect(revokeObjectURLMock).toHaveBeenCalledWith("blob:preview")
+  })
+
+  it("cleans up active preview playback when the provider changes", async () => {
+    getTTSSettingsMock.mockResolvedValue(
+      buildTtsSettings({
+        ttsProvider: "tldw",
+        tldwTtsModel: "kitten_tts",
+        tldwTtsVoice: "Luna",
+      })
+    )
+
+    renderSettings()
+
+    fireEvent.click(await screen.findByTestId("tts-preview-button"))
+    await screen.findByRole("button", { name: /Stop preview/i })
+    fireEvent.mouseDown(
+      screen.getByLabelText("generalSettings.tts.ttsProvider.label")
+    )
+    fireEvent.click(await screen.findByText("Browser TTS (no setup needed)"))
 
     expect(audioPauseMock).toHaveBeenCalled()
     expect(revokeObjectURLMock).toHaveBeenCalledWith("blob:preview")
