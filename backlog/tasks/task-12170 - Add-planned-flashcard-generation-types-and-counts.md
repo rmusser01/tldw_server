@@ -5,6 +5,7 @@ status: Done
 modified_files:
 - tldw_Server_API/app/api/v1/schemas/flashcards.py
 - tldw_Server_API/app/api/v1/endpoints/flashcards.py
+- tldw_Server_API/app/core/Flashcards/generation.py
 - tldw_Server_API/tests/Flashcards/test_flashcards_endpoint_integration.py
 - tldw_Server_API/app/core/Workflows/adapters/content/_config.py
 - tldw_Server_API/app/core/Workflows/adapters/content/generation.py
@@ -12,6 +13,7 @@ modified_files:
 - apps/packages/ui/src/services/flashcards.ts
 - apps/packages/ui/src/services/__tests__/flashcards.test.ts
 - apps/packages/ui/src/components/Flashcards/hooks/useFlashcardQueries.ts
+- apps/packages/ui/src/components/Flashcards/hooks/__tests__/useFlashcardQueries.generate.test.tsx
 - apps/packages/ui/src/components/Flashcards/tabs/ImportExport/shared.ts
 - apps/packages/ui/src/components/Flashcards/tabs/ImportExport/__tests__/shared.test.ts
 - apps/packages/ui/src/components/Flashcards/tabs/ImportExport/GeneratePanel.tsx
@@ -99,6 +101,8 @@ Task 5 accessibility follow-up: named the Advanced mix switch from its visible l
 Final verification: backend endpoint pytest passed with the shared project venv (18 passed, 154 deselected); workflow adapter pytest passed (25 passed, 111 deselected); `apps/tldw-frontend` typecheck passed; package-local UI focused Vitest passed (50 passed); Bandit on touched backend Python reported 0 findings in `/tmp/bandit_task_12170_flashcard_plan.json`; `git diff --check` passed. The exact Task 6 frontend command from `apps/tldw-frontend` still fails the pre-existing package-crossing snapshot harness case at `ImportExportTab.import-results.test.tsx:372` (`SnapshotClient.setup()` missing), while the same two focused files pass from the owning `apps/packages/ui` package config.
 
 Final code-review follow-up: legacy single-type workflow generation now ignores stray model-emitted `generation_type`, planned workflow output filters blank front/back cards before validating requested counts, and API `num_cards`/`card_plan[].count` now require strict JSON integers. Verification: red regressions failed before implementation for the legacy override, planned blank-card count, and strict API integer cases; post-fix endpoint pytest passed (22 passed, 154 deselected); post-fix FlashcardGenerateAdapter pytest passed (27 passed, 111 deselected); Bandit reported 0 findings in `/tmp/bandit_task_12170_flashcard_plan_after_review.json`; `git diff --check` passed.
+
+PR #2693 review follow-up after rebase: rebased cleanly onto latest `origin/dev`, moved flashcard generation planning/normalization helpers out of the endpoint into `app/core/Flashcards/generation.py`, added the missing `/flashcards/generate` rate limit dependency, added docstrings for the reviewed helpers/schema validators, kept planned requests strict while restoring legacy `num_cards` coercion, made empty UI `cardPlan` arrays fall back to legacy `card_type`, replaced raw `Text` JSX usages with `Typography.Text`, and added the legacy numeric-string plus empty-cardPlan regressions. Verification: red backend/frontend regressions failed before implementation; backend focused generate pytest passed (23 passed, 154 deselected); focused UI Vitest passed (51 passed); `apps/tldw-frontend` `bun run typecheck` passed; app-file Ruff passed; Bandit on touched scope passed with pytest assert rule B101 skipped and production files reported 0 findings; `git diff --check` passed.
 
 Known skips: no visual flashcards, no stored generation metadata, no scheduler/spaced-repetition changes, and no hidden default changes for sidepanel, quiz companion, extension, or Research Workspace callers.
 <!-- SECTION:FINAL_SUMMARY:END -->

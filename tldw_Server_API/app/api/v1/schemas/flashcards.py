@@ -11,7 +11,6 @@ from tldw_Server_API.app.api.v1.schemas.study_packs import (
     StudyPackSummaryResponse,
 )
 
-
 DeckSchedulerType = Literal["sm2_plus", "fsrs"]
 DeckReviewPromptSide = Literal["front", "back"]
 DeckVisibility = Literal["private", "team", "org", "public"]
@@ -446,6 +445,8 @@ class FlashcardNextReviewResponse(BaseModel):
 
 
 class FlashcardPlanItem(BaseModel):
+    """One requested flashcard generation type and its target count."""
+
     model_config = ConfigDict(extra="forbid")
 
     card_type: FlashcardGenerationType
@@ -454,7 +455,7 @@ class FlashcardPlanItem(BaseModel):
 
 class FlashcardGenerateRequest(BaseModel):
     text: str = Field(..., min_length=1, description="Source text to generate flashcards from")
-    num_cards: Optional[int] = Field(None, ge=1, le=100, strict=True, description="Requested number of generated cards")
+    num_cards: Optional[int] = Field(None, ge=1, le=100, description="Requested number of generated cards")
     card_type: Optional[FlashcardCardType] = Field(None)
     card_plan: Optional[list[FlashcardPlanItem]] = None
     difficulty: Literal['easy', 'medium', 'hard', 'mixed'] = Field('mixed')
@@ -465,6 +466,7 @@ class FlashcardGenerateRequest(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _validate_raw_generation_shape(cls, value: Any) -> Any:
+        """Validate raw fields that must remain strict only for planned requests."""
         if not isinstance(value, dict):
             return value
         has_plan = value.get("card_plan") is not None
@@ -472,10 +474,13 @@ class FlashcardGenerateRequest(BaseModel):
             raise ValueError("card_plan and card_type are mutually exclusive")
         if has_plan and "num_cards" not in value:
             raise ValueError("num_cards is required when card_plan is present")
+        if has_plan and type(value.get("num_cards")) is not int:
+            raise ValueError("num_cards must be an integer when card_plan is present")
         return value
 
     @model_validator(mode="after")
     def _validate_card_plan(self) -> "FlashcardGenerateRequest":
+        """Validate planned generation totals and fill legacy defaults."""
         if self.card_plan is not None:
             if len(self.card_plan) == 0:
                 raise ValueError("card_plan cannot be empty")

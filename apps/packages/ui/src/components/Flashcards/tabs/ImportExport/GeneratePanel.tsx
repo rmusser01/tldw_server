@@ -28,8 +28,6 @@ import {
   normalizeGeneratedCards
 } from "./shared"
 
-const { Text } = Typography
-
 type GeneratedSaveStatus = {
   variant: AlertVariant
   title: string
@@ -480,12 +478,12 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
 
   return (
     <div className="flex flex-col gap-3">
-      <Text type="secondary">
+      <Typography.Text type="secondary">
         {t("option:flashcards.generateHelp", {
           defaultValue:
             "Generate cards from pasted text, review/edit them, then save to a deck."
         })}
-      </Text>
+      </Typography.Text>
       {sourceContext && (
         <Alert
           variant="info"
@@ -530,11 +528,11 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
             aria-labelledby={ADVANCED_MIX_LABEL_ID}
             data-testid="flashcards-generate-advanced-toggle"
           />
-          <Text id={ADVANCED_MIX_LABEL_ID}>
+          <Typography.Text id={ADVANCED_MIX_LABEL_ID}>
             {t("option:flashcards.generateAdvancedMix", {
               defaultValue: "Advanced mix"
             })}
-          </Text>
+          </Typography.Text>
         </div>
         {advancedMixEnabled ? (
           <div
@@ -560,7 +558,7 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
                 />
               </Form.Item>
             ))}
-            <Text
+            <Typography.Text
               type={plannedCardTotal < 1 || plannedCardTotal > 100 ? "danger" : "secondary"}
               className="md:col-span-4 text-xs"
               data-testid="flashcards-generate-plan-total"
@@ -569,9 +567,9 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
                 defaultValue: "Total: {{count}}",
                 count: plannedCardTotal
               })}
-            </Text>
+            </Typography.Text>
             {advancedPlanInvalid && (
-              <Text
+              <Typography.Text
                 id={ADVANCED_MIX_ERROR_ID}
                 type="danger"
                 className="md:col-span-4 text-xs"
@@ -579,7 +577,7 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
                 {t("option:flashcards.generatePlanTotalError", {
                   defaultValue: "Total must be 1-100 cards."
                 })}
-              </Text>
+              </Typography.Text>
             )}
           </div>
         ) : (
@@ -662,13 +660,13 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
             nameTestId="flashcards-generate-new-deck-name"
           />
         ) : selectedDeck?.scheduler_settings ? (
-          <Text
+          <Typography.Text
             type="secondary"
             className="block text-xs -mt-2 mb-2"
             data-testid="flashcards-generate-selected-deck-summary"
           >
             {formatSchedulerSummary(selectedDeck.scheduler_type, selectedDeck.scheduler_settings)}
-          </Text>
+          </Typography.Text>
         ) : null}
         {!hasLlmProviders && (
           <Alert
@@ -787,11 +785,11 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
 
       {generatedCards.length > 0 && (
         <div className="space-y-2">
-          <Text strong>
+          <Typography.Text strong>
             {t("option:flashcards.generatePreviewTitle", {
               defaultValue: "Generated cards (editable before save)"
             })}
-          </Text>
+          </Typography.Text>
           {generatedCards.map((card, index) => (
             <Card
               key={card.id}
@@ -812,9 +810,9 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
               }
             >
               <Space orientation="vertical" className="w-full">
-                <Text type="secondary" className="text-xs">
+                <Typography.Text type="secondary" className="text-xs">
                   {CARD_PLAN_LABELS[card.generation_type || card.model_type]}
-                </Text>
+                </Typography.Text>
                 <Input.TextArea
                   value={card.front}
                   rows={2}
