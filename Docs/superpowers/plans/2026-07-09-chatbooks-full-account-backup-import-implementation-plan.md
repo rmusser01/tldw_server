@@ -911,7 +911,7 @@ Verification:
 - Modify: `backlog/tasks/task-12098.2 - P1-Chatbooks-backup-import-UX-clarity-remediation.md`
 - Modify: `backlog/tasks/task-12098.3 - P2-Chatbooks-backup-import-acceptance-coverage.md`
 
-- [ ] **Step 1: Update docs and migration notes**
+- [x] **Step 1: Update docs and migration notes**
 
 Docs must state:
 
@@ -927,11 +927,11 @@ Docs must state:
 
 Update `CHANGELOG.md` and `Docs/RELEASE_NOTES.md` with the compatibility note that omitted or `{}` export selections now mean full user-account export.
 
-- [ ] **Step 2: Update E2E tests**
+- [x] **Step 2: Update E2E tests**
 
 Update WebUI and extension E2E so a backup-all export that does not fire is a failure. Assert the browser extension route inherits the Backup all behavior.
 
-- [ ] **Step 3: Run targeted backend tests**
+- [x] **Step 3: Run targeted backend tests**
 
 Run:
 
@@ -942,7 +942,7 @@ python -m pytest tldw_Server_API/tests/Chatbooks/test_chatbooks_account_inventor
 
 Expected: pass.
 
-- [ ] **Step 4: Run targeted frontend tests**
+- [x] **Step 4: Run targeted frontend tests**
 
 Run:
 
@@ -953,7 +953,7 @@ bunx vitest run ../packages/ui/src/components/Option/Chatbooks/__tests__/Chatboo
 
 Expected: pass.
 
-- [ ] **Step 5: Run E2E where environment is available**
+- [x] **Step 5: Run E2E where environment is available**
 
 Start the backend and frontend according to repo instructions, then run:
 
@@ -965,7 +965,7 @@ npx playwright test ../extension/tests/e2e/chatbooks-export-download.spec.ts
 
 Expected: pass. If the local server cannot be started in the environment, record the exact blocker and keep the unit/integration coverage passing.
 
-- [ ] **Step 6: Run Bandit on touched backend scope**
+- [x] **Step 6: Run Bandit on touched backend scope**
 
 Run:
 
@@ -976,31 +976,42 @@ python -m bandit -r tldw_Server_API/app/api/v1/endpoints/chatbooks.py tldw_Serve
 
 Expected: no new findings in touched code. Fix new findings before finalizing.
 
-- [ ] **Step 7: Update Backlog tasks**
+- [x] **Step 7: Update Backlog tasks**
 
 Using Backlog.md MCP or CLI if available, update TASK-12098.1, TASK-12098.2, and TASK-12098.3 with implemented files, verification results, known skips, and final summary. If MCP/CLI is unavailable, edit only the existing task files for these tasks and mention the fallback in the commit message.
 
-- [ ] **Step 8: Commit final docs and verification records**
+- [x] **Step 8: Commit final docs and verification records**
 
 ```bash
 git add Docs/User_Guides/WebUI_Extension/Chatbook_User_Guide.md Docs/API-related/Chatbook_API_Documentation.md CHANGELOG.md Docs/RELEASE_NOTES.md apps/extension/tests/e2e/chatbooks-export-download.spec.ts apps/tldw-frontend/e2e/workflows/tier-2-features/chatbooks.spec.ts backlog/tasks/task-12098.1\\ -\\ P0-Chatbooks-backup-restore-correctness-remediation.md backlog/tasks/task-12098.2\\ -\\ P1-Chatbooks-backup-import-UX-clarity-remediation.md backlog/tasks/task-12098.3\\ -\\ P2-Chatbooks-backup-import-acceptance-coverage.md
 git commit -m "docs: document chatbooks full account backup restore"
 ```
 
+Completed before commit:
+- Updated the Chatbook user guide, API documentation, changelog, and release notes for the full-account export contract, source-aware archive import defaults, pointer-only media behavior, redacted sensitive-value surfaces, Settings demotion, OpenWebUI import scopes, and migration compatibility note.
+- Updated WebUI and extension Playwright coverage so Backup all must fire `POST /api/v1/chatbooks/export` and the request body must omit `content_selections`.
+- Initial backend command failed before collection because the plan referenced the stale filename `test_chatbooks_sensitive_export_redaction.py`; current sensitive/redaction coverage is in `test_chatbooks_full_account_export_contract.py`, `test_chatbooks_full_account_import_restore.py`, and `test_chatbooks_sanitizers.py`.
+- Passed: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Chatbooks/test_chatbooks_account_inventory.py tldw_Server_API/tests/Chatbooks/test_chatbooks_full_account_export_contract.py tldw_Server_API/tests/Chatbooks/test_chatbooks_full_account_import_restore.py tldw_Server_API/tests/Chatbooks/test_chatbooks_sanitizers.py tldw_Server_API/tests/Chatbooks/test_openwebui_hydration_service.py tldw_Server_API/tests/Chatbooks/test_openwebui_hydration_api.py -v` => 72 passed, 5 warnings.
+- Passed after temporary worktree `antd` symlink repair, then symlink restored: `bunx vitest run ../packages/ui/src/components/Option/Chatbooks/__tests__/ChatbooksPlaygroundPage.backup-all.test.tsx ../packages/ui/src/components/Option/Chatbooks/__tests__/ChatbooksPlaygroundPage.openwebui-import.test.tsx ../packages/ui/src/services/__tests__/tldw-api-client.chatbooks-openwebui.test.ts` => 3 files passed, 24 tests passed.
+- Passed: `npx playwright test e2e/workflows/tier-2-features/chatbooks.spec.ts` => 4 passed.
+- Completed with environment skip: `cd apps/extension && npx playwright test tests/e2e/chatbooks-export-download.spec.ts` built the production Chrome MV3 extension successfully, then skipped the one live-server test because `TLDW_E2E_SERVER_URL` and `TLDW_E2E_API_KEY` were not configured.
+- Passed: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/api/v1/endpoints/chatbooks.py tldw_Server_API/app/api/v1/schemas/chatbook_schemas.py tldw_Server_API/app/core/Chatbooks -f json -o /tmp/bandit_chatbooks_full_account_backup.json` => 0 findings.
+- Passed: `git diff --check`.
+
 ## Final Verification Checklist
 
-- [ ] Backend account inventory tests pass.
-- [ ] Backend full export contract tests pass.
-- [ ] Backend full import restore tests pass.
-- [ ] Backend sensitive-data redaction tests pass.
-- [ ] OpenWebUI mapping and hydration tests pass.
-- [ ] WebUI Backup all tests pass.
-- [ ] Settings clarity tests pass.
-- [ ] Extension `/chatbooks` Backup all E2E passes or environment blocker is documented.
-- [ ] WebUI Chatbooks E2E passes or environment blocker is documented.
-- [ ] Bandit touched-scope scan reports no new findings.
-- [ ] API docs, user guide, and release notes match runtime behavior.
-- [ ] Backlog task notes include implementation summary, verification, and known skips.
+- [x] Backend account inventory tests pass.
+- [x] Backend full export contract tests pass.
+- [x] Backend full import restore tests pass.
+- [x] Backend sensitive-data redaction tests pass.
+- [x] OpenWebUI mapping and hydration tests pass.
+- [x] WebUI Backup all tests pass.
+- [x] Settings clarity tests pass.
+- [x] Extension `/chatbooks` Backup all E2E passes or environment blocker is documented.
+- [x] WebUI Chatbooks E2E passes or environment blocker is documented.
+- [x] Bandit touched-scope scan reports no new findings.
+- [x] API docs, user guide, and release notes match runtime behavior.
+- [x] Backlog task notes include implementation summary, verification, and known skips.
 
 ## Review Guardrails
 

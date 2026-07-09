@@ -106,7 +106,21 @@ test.describe("Chatbooks export download", () => {
         await expect(page.getByText(/Backup all scope/i)).toBeVisible({
           timeout: 15000
         })
+        const exportRequestPromise = page.waitForRequest(
+          (request) =>
+            request.method() === "POST" &&
+            /\/api\/v1\/chatbooks\/export(?:$|\?)/.test(request.url()),
+          { timeout: 15000 }
+        )
+
         await page.getByRole("button", { name: /^Backup all$/i }).click()
+
+        const exportRequest = await exportRequestPromise
+        const exportPayload = exportRequest.postDataJSON() as Record<string, unknown>
+        expect(exportPayload).not.toHaveProperty("content_selections")
+        const exportResponse = await exportRequest.response()
+        expect(exportResponse).not.toBeNull()
+        expect(exportResponse!.status()).toBeLessThan(500)
 
         const errorNotice = page
           .getByText(
