@@ -1018,7 +1018,7 @@ export function useGenerateFlashcardsMutation() {
       generateFlashcards({
         text: params.text,
         num_cards: params.numCards,
-        card_type: params.cardType,
+        card_type: params.cardPlan ? undefined : params.cardType,
         card_plan: params.cardPlan,
         difficulty: params.difficulty,
         focus_topics: params.focusTopics,

@@ -13,6 +13,7 @@ modified_files:
 - apps/packages/ui/src/services/__tests__/flashcards.test.ts
 - apps/packages/ui/src/components/Flashcards/hooks/useFlashcardQueries.ts
 - apps/packages/ui/src/components/Flashcards/tabs/ImportExport/shared.ts
+- apps/packages/ui/src/components/Flashcards/tabs/ImportExport/__tests__/shared.test.ts
 - Docs/superpowers/plans/2026-07-08-planned-flashcard-generation-controls-implementation-plan.md
 - backlog/tasks/task-12170 - Add-planned-flashcard-generation-types-and-counts.md
 ---
@@ -78,6 +79,8 @@ Task 3 strict-num-cards follow-up: raw workflow num_cards now requires an actual
 Task 3 final direct-workflow follow-up: planned adapter output now validates cleaned generation_type counts against card_plan and returns card_plan_mismatch instead of wrong planned mixes. Verification: focused planned mismatch regressions passed (2 passed, 134 deselected); FlashcardGenerateAdapter pytest passed (25 passed, 111 deselected); Bandit on touched production adapter files reported 0 findings; git diff --check passed.
 
 Task 4 frontend service/draft plumbing slice: added shared UI generation-plan types, typed optional card_plan requests, response-only generation_type metadata, hook cardPlan passthrough, generated-draft normalization that preserves true_false generation_type while keeping model_type storage-compatible, and focused service request-body coverage. Initial red test command could not load Vitest config because frontend dependencies were missing; after bun install, verification passed: bunx vitest run ../packages/ui/src/services/__tests__/flashcards.test.ts (9 passed), bun run typecheck, and git diff --check. Bandit skipped because this slice only touched frontend TypeScript and Backlog markdown.
+
+Task 4 quality-review follow-up: generated draft normalization now falls back to normalized model_type when generation_type is absent while preserving explicit true_false, and the generation hook omits legacy card_type whenever cardPlan is provided. Added focused normalization regression coverage. Verification: red shared normalization Vitest failed before the fix; after the fix, shared normalization Vitest passed (1 passed), service Vitest passed (9 passed), bun run typecheck passed, and git diff --check passed. Bandit skipped because this follow-up only touched frontend TypeScript and Backlog markdown.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

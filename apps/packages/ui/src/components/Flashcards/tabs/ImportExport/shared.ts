@@ -181,7 +181,7 @@ export const normalizeGeneratedCards = (value: unknown): GeneratedCardDraft[] =>
           : modelTypeRaw === "basic_reverse"
             ? "basic_reverse"
             : "basic"
-      const generationTypeRaw = String(item.generation_type || "").toLowerCase()
+      const generationTypeRaw = String(item.generation_type || model_type).toLowerCase()
       const generation_type: GeneratedCardDraft["generation_type"] =
         generationTypeRaw === "basic" ||
         generationTypeRaw === "basic_reverse" ||
