@@ -219,7 +219,7 @@ git commit -m "feat: add flashcard generation plan schema"
 - Modify: `tldw_Server_API/app/api/v1/endpoints/flashcards.py`
 - Test: `tldw_Server_API/tests/Flashcards/test_flashcards_endpoint_integration.py`
 
-- [ ] **Step 1: Write failing endpoint behavior tests**
+- [x] **Step 1: Write failing endpoint behavior tests**
 
 Add exact-count failure coverage:
 
@@ -323,7 +323,7 @@ def test_generate_flashcards_test_mode_supports_card_plan(client_with_flashcards
     assert cards[1]["model_type"] == "basic"
 ```
 
-- [ ] **Step 2: Run endpoint tests to verify they fail**
+- [x] **Step 2: Run endpoint tests to verify they fail**
 
 Run:
 
@@ -333,7 +333,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Flashcards/t
 
 Expected: new tests fail until endpoint passes and validates plans.
 
-- [ ] **Step 3: Add small endpoint helpers**
+- [x] **Step 3: Add small endpoint helpers**
 
 Near `_build_test_mode_flashcards`, add:
 
@@ -372,7 +372,7 @@ def _normalize_generated_flashcards(
 
 For planned requests, this helper must reject missing or invalid `generation_type` with HTTP 400. It must not coerce malformed planned output to `basic`. For legacy requests only, it may fall back to `payload.card_type or "basic"` to preserve current compatibility.
 
-- [ ] **Step 4: Pass plan data into the adapter**
+- [x] **Step 4: Pass plan data into the adapter**
 
 In `generate_flashcards`, call the adapter with:
 
@@ -382,7 +382,7 @@ In `generate_flashcards`, call the adapter with:
 "card_plan": _get_flashcard_generation_plan(payload) if payload.card_plan else None,
 ```
 
-- [ ] **Step 5: Route test-mode fallback through the same normalizer**
+- [x] **Step 5: Route test-mode fallback through the same normalizer**
 
 Change the current test-mode error branch from early return:
 
@@ -407,7 +407,7 @@ generated_cards = _normalize_generated_flashcards(raw_flashcards, payload)
 
 This keeps deterministic test mode on the same strict path as real planned generation.
 
-- [ ] **Step 6: Preserve `generation_type` and validate planned output**
+- [x] **Step 6: Preserve `generation_type` and validate planned output**
 
 While normalizing `raw_flashcards`, derive:
 
@@ -443,7 +443,7 @@ raise HTTPException(
 )
 ```
 
-- [ ] **Step 7: Run endpoint tests**
+- [x] **Step 7: Run endpoint tests**
 
 Run:
 
@@ -453,7 +453,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Flashcards/t
 
 Expected: all generate endpoint tests pass.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add tldw_Server_API/app/api/v1/endpoints/flashcards.py tldw_Server_API/tests/Flashcards/test_flashcards_endpoint_integration.py
