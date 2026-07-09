@@ -30,6 +30,30 @@ describe("TldwApiClient Chatbooks OpenWebUI import contract", () => {
     vi.clearAllMocks()
   })
 
+  it("sends full-account exports without content_selections", async () => {
+    mocks.bgRequest.mockResolvedValue({ job_id: "export-1" })
+
+    const client = new TldwApiClient()
+    await client.exportChatbook({
+      name: "Backup all",
+      description: "Full account backup",
+      async_mode: true
+    })
+
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/chatbooks/export",
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: {
+          name: "Backup all",
+          description: "Full account backup",
+          async_mode: true
+        }
+      })
+    )
+  })
+
   it("sends source_format for OpenWebUI preview uploads", async () => {
     mocks.bgUpload.mockResolvedValue({ openwebui_preview: { chat_count: 0 } })
 

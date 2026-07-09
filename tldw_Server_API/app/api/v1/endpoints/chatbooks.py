@@ -460,12 +460,14 @@ async def create_chatbook(
         if not allowed:
             raise HTTPException(status_code=429, detail=message)
 
-        # Convert content selections to use core ContentType enums
-        content_selections = {}
-        for content_type, ids in request_data.content_selections.items():
-            # Handle both schema enums and strings robustly
-            ct_val = content_type.value if hasattr(content_type, "value") else str(content_type)
-            content_selections[ContentType(ct_val)] = ids
+        # Convert explicit allowlists to core ContentType enums. None/{} is full-account mode.
+        content_selections = None
+        if request_data.content_selections:
+            content_selections = {}
+            for content_type, ids in request_data.content_selections.items():
+                # Handle both schema enums and strings robustly
+                ct_val = content_type.value if hasattr(content_type, "value") else str(content_type)
+                content_selections[ContentType(ct_val)] = ids
 
         # Create chatbook
         rid = ensure_request_id(request)
