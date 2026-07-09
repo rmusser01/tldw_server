@@ -603,12 +603,12 @@ class ChatbookService:
             raise SecurityError("Chatbook export path escaped export directory") from exc
         return path
 
-    def _new_work_dir(self, prefix: str, timestamp: str) -> Path:
+    async def _new_work_dir(self, prefix: str, timestamp: str) -> Path:
         """Create a temporary work directory inside the user chatbook temp directory."""
         base = self.temp_dir.resolve(strict=False)
-        base.mkdir(parents=True, exist_ok=True, mode=0o700)
+        await asyncio.to_thread(base.mkdir, parents=True, exist_ok=True, mode=0o700)
         safe_prefix = self._safe_path_component(prefix, fallback="chatbook")
-        path = Path(tempfile.mkdtemp(prefix=f"{safe_prefix}_{timestamp}_", dir=base))
+        path = Path(await asyncio.to_thread(tempfile.mkdtemp, prefix=f"{safe_prefix}_{timestamp}_", dir=base))
         resolved = path.resolve(strict=False)
         try:
             resolved.relative_to(base)
@@ -2032,7 +2032,7 @@ class ChatbookService:
         output_path: Path | None = None
         try:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            work_dir = self._new_work_dir("continue", timestamp)
+            work_dir = await self._new_work_dir("continue", timestamp)
 
             # Determine sequence number from export_id, keeping the base stable
             base_id = export_id.split("_cont_")[0]
@@ -2311,7 +2311,7 @@ class ChatbookService:
         try:
             # Create working directory in secure temp location
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            work_dir = self._new_work_dir("export", timestamp)
+            work_dir = await self._new_work_dir("export", timestamp)
 
             manifest_metadata = self._default_chatbook_template_metadata()
             manifest_metadata["selection_mode"] = selection_mode

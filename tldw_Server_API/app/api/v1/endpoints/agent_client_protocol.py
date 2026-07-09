@@ -2076,7 +2076,8 @@ async def acp_health(
                     runner_probe["agent_capabilities"] = caps
             else:
                 runner_probe = {"status": "not_running", "detail": "Runner process is not started"}
-        except _ACP_ENDPOINT_NONCRITICAL_EXCEPTIONS:
+        except _ACP_ENDPOINT_NONCRITICAL_EXCEPTIONS as exc:
+            logger.warning("ACP runner probe failed: {}", exc)
             runner_probe = {"status": "error", "detail": "ACP runner probe failed"}
     result["runner_probe"] = runner_probe
 

@@ -67,13 +67,19 @@ class SnapshotManager:
             logger.warning(f"Failed to create snapshot storage path: {e}")
 
     @staticmethod
-    def _safe_storage_component(value: str, *, label: str) -> str:
-        """Return a filesystem-safe snapshot storage path component."""
+    def _raw_storage_component(value: str, *, label: str) -> str:
+        """Return a validated legacy snapshot storage path component."""
         component = str(value or "").strip()
         if not component or "/" in component or "\\" in component:
             raise ValueError(f"Invalid {label}")
         if not _SAFE_SNAPSHOT_COMPONENT_RE.fullmatch(component):
             raise ValueError(f"Invalid {label}")
+        return component
+
+    @classmethod
+    def _safe_storage_component(cls, value: str, *, label: str) -> str:
+        """Return a filesystem-safe snapshot storage path component."""
+        component = cls._raw_storage_component(value, label=label)
         return f"{label}_{hashlib.sha256(component.encode('utf-8')).hexdigest()[:32]}"
 
     def _snapshot_dir(self, session_id: str) -> Path:
@@ -85,10 +91,37 @@ class SnapshotManager:
             raise ValueError("Invalid session_id")
         return path
 
+    def _legacy_snapshot_dir(self, session_id: str) -> Path:
+        """Get the legacy raw-id directory for a session's snapshots."""
+        raw_session_id = self._raw_storage_component(session_id, label="session_id")
+        base = Path(self.storage_path).resolve(strict=False)
+        path = (base / raw_session_id).resolve(strict=False)
+        if path != base and base not in path.parents:
+            raise ValueError("Invalid session_id")
+        return path
+
+    def _snapshot_dirs(self, session_id: str) -> list[Path]:
+        """Return current and legacy snapshot directories for lookup."""
+        current = self._snapshot_dir(session_id)
+        legacy = self._legacy_snapshot_dir(session_id)
+        return [current] if current == legacy else [current, legacy]
+
     def _snapshot_path(self, session_id: str, snapshot_id: str) -> Path:
         """Get the full path for a specific snapshot archive."""
         safe_snapshot_id = self._safe_storage_component(snapshot_id, label="snapshot_id")
         return self._snapshot_dir(session_id) / f"{safe_snapshot_id}.tar.gz"
+
+    def _legacy_snapshot_path(self, session_id: str, snapshot_id: str) -> Path:
+        """Get the legacy raw-id path for a specific snapshot archive."""
+        raw_snapshot_id = self._raw_storage_component(snapshot_id, label="snapshot_id")
+        return self._legacy_snapshot_dir(session_id) / f"{raw_snapshot_id}.tar.gz"
+
+    def _existing_snapshot_path(self, session_id: str, snapshot_id: str) -> Path:
+        """Return the existing current or legacy archive path, preferring current."""
+        current = self._snapshot_path(session_id, snapshot_id)
+        if current.exists():
+            return current
+        return self._legacy_snapshot_path(session_id, snapshot_id)
 
     @staticmethod
     def _has_symlink_ancestor(path: Path) -> bool:
@@ -118,6 +151,18 @@ class SnapshotManager:
         """Get the path for a snapshot's metadata file."""
         safe_snapshot_id = self._safe_storage_component(snapshot_id, label="snapshot_id")
         return self._snapshot_dir(session_id) / f"{safe_snapshot_id}.meta.json"
+
+    def _legacy_metadata_path(self, session_id: str, snapshot_id: str) -> Path:
+        """Get the legacy raw-id path for a snapshot's metadata file."""
+        raw_snapshot_id = self._raw_storage_component(snapshot_id, label="snapshot_id")
+        return self._legacy_snapshot_dir(session_id) / f"{raw_snapshot_id}.meta.json"
+
+    def _existing_metadata_path(self, session_id: str, snapshot_id: str) -> Path:
+        """Return the existing current or legacy metadata path, preferring current."""
+        current = self._metadata_path(session_id, snapshot_id)
+        if current.exists():
+            return current
+        return self._legacy_metadata_path(session_id, snapshot_id)
 
     @staticmethod
     def _validate_tar_member(member: tarfile.TarInfo, extract_root: Path) -> None:
@@ -269,7 +314,7 @@ class SnapshotManager:
             ValueError: If the snapshot or workspace path is invalid.
             IOError: If there's an error extracting the snapshot.
         """
-        snapshot_path = self._snapshot_path(session_id, snapshot_id)
+        snapshot_path = self._existing_snapshot_path(session_id, snapshot_id)
 
         if not snapshot_path.exists():
             raise ValueError(f"Snapshot not found: {snapshot_id}")
@@ -394,29 +439,31 @@ class SnapshotManager:
         Returns:
             A list of snapshot metadata dictionaries, sorted by created_at (newest first).
         """
-        snapshot_dir = self._snapshot_dir(session_id)
-
-        if not snapshot_dir.exists():
-            return []
-
         snapshots: list[dict] = []
+        seen: set[str] = set()
         import json
 
-        for meta_file in snapshot_dir.glob("*.meta.json"):
-            try:
-                with open(meta_file) as f:
-                    metadata = json.load(f)
-                    # Verify the actual archive exists
-                    snapshot_id = metadata.get("snapshot_id")
-                    if snapshot_id:
-                        archive_path = self._snapshot_path(session_id, snapshot_id)
-                        if archive_path.exists():
-                            # Update size in case it changed
-                            with contextlib.suppress(_SNAPSHOTS_NONCRITICAL_EXCEPTIONS):
-                                metadata["size_bytes"] = archive_path.stat().st_size
-                            snapshots.append(metadata)
-            except _SNAPSHOTS_NONCRITICAL_EXCEPTIONS as e:
-                logger.debug(f"Failed to read snapshot metadata {meta_file}: {e}")
+        for snapshot_dir in self._snapshot_dirs(session_id):
+            if not snapshot_dir.exists():
+                continue
+            for meta_file in snapshot_dir.glob("*.meta.json"):
+                try:
+                    with open(meta_file) as f:
+                        metadata = json.load(f)
+                        # Verify the actual archive exists
+                        snapshot_id = metadata.get("snapshot_id")
+                        if snapshot_id and snapshot_id not in seen:
+                            archive_path = self._snapshot_path(session_id, snapshot_id)
+                            if snapshot_dir != self._snapshot_dir(session_id):
+                                archive_path = self._legacy_snapshot_path(session_id, snapshot_id)
+                            if archive_path.exists():
+                                # Update size in case it changed
+                                with contextlib.suppress(_SNAPSHOTS_NONCRITICAL_EXCEPTIONS):
+                                    metadata["size_bytes"] = archive_path.stat().st_size
+                                snapshots.append(metadata)
+                                seen.add(snapshot_id)
+                except _SNAPSHOTS_NONCRITICAL_EXCEPTIONS as e:
+                    logger.debug(f"Failed to read snapshot metadata {meta_file}: {e}")
 
         # Sort by created_at, newest first
         snapshots.sort(key=lambda x: x.get("created_at", ""), reverse=True)
@@ -432,30 +479,29 @@ class SnapshotManager:
         Returns:
             True if deletion was successful or snapshot didn't exist.
         """
-        snapshot_path = self._snapshot_path(session_id, snapshot_id)
-        metadata_path = self._metadata_path(session_id, snapshot_id)
-
         deleted = False
 
-        try:
-            if snapshot_path.exists():
-                snapshot_path.unlink()
-                deleted = True
-        except _SNAPSHOTS_NONCRITICAL_EXCEPTIONS as e:
-            logger.warning(f"Failed to delete snapshot archive {snapshot_id}: {e}")
+        for snapshot_path in {self._snapshot_path(session_id, snapshot_id), self._legacy_snapshot_path(session_id, snapshot_id)}:
+            try:
+                if snapshot_path.exists():
+                    snapshot_path.unlink()
+                    deleted = True
+            except _SNAPSHOTS_NONCRITICAL_EXCEPTIONS as e:
+                logger.warning(f"Failed to delete snapshot archive {snapshot_id}: {e}")
 
-        try:
-            if metadata_path.exists():
-                metadata_path.unlink()
-                deleted = True
-        except _SNAPSHOTS_NONCRITICAL_EXCEPTIONS as e:
-            logger.warning(f"Failed to delete snapshot metadata {snapshot_id}: {e}")
+        for metadata_path in {self._metadata_path(session_id, snapshot_id), self._legacy_metadata_path(session_id, snapshot_id)}:
+            try:
+                if metadata_path.exists():
+                    metadata_path.unlink()
+                    deleted = True
+            except _SNAPSHOTS_NONCRITICAL_EXCEPTIONS as e:
+                logger.warning(f"Failed to delete snapshot metadata {snapshot_id}: {e}")
 
         # Clean up empty session snapshot directory
         try:
-            snapshot_dir = self._snapshot_dir(session_id)
-            if snapshot_dir.exists() and not any(snapshot_dir.iterdir()):
-                snapshot_dir.rmdir()
+            for snapshot_dir in self._snapshot_dirs(session_id):
+                if snapshot_dir.exists() and not any(snapshot_dir.iterdir()):
+                    snapshot_dir.rmdir()
         except _SNAPSHOTS_NONCRITICAL_EXCEPTIONS:
             pass
 
@@ -470,19 +516,17 @@ class SnapshotManager:
         Returns:
             The number of snapshots deleted.
         """
-        snapshot_dir = self._snapshot_dir(session_id)
-
-        if not snapshot_dir.exists():
-            return 0
-
         count = 0
-        try:
-            # Count archives before deletion
-            count = len(list(snapshot_dir.glob("*.tar.gz")))
-            # Remove the entire directory
-            shutil.rmtree(snapshot_dir, ignore_errors=True)
-        except _SNAPSHOTS_NONCRITICAL_EXCEPTIONS as e:
-            logger.warning(f"Failed to cleanup session snapshots: {e}")
+        for snapshot_dir in self._snapshot_dirs(session_id):
+            if not snapshot_dir.exists():
+                continue
+            try:
+                # Count archives before deletion
+                count += len(list(snapshot_dir.glob("*.tar.gz")))
+                # Remove the entire directory
+                shutil.rmtree(snapshot_dir, ignore_errors=True)
+            except _SNAPSHOTS_NONCRITICAL_EXCEPTIONS as e:
+                logger.warning(f"Failed to cleanup session snapshots: {e}")
 
         return count
 
@@ -496,8 +540,8 @@ class SnapshotManager:
         Returns:
             Snapshot metadata dictionary or None if not found.
         """
-        metadata_path = self._metadata_path(session_id, snapshot_id)
-        snapshot_path = self._snapshot_path(session_id, snapshot_id)
+        metadata_path = self._existing_metadata_path(session_id, snapshot_id)
+        snapshot_path = self._existing_snapshot_path(session_id, snapshot_id)
 
         if not metadata_path.exists() or not snapshot_path.exists():
             return None
@@ -523,15 +567,13 @@ class SnapshotManager:
         Returns:
             Total size in bytes.
         """
-        snapshot_dir = self._snapshot_dir(session_id)
-
-        if not snapshot_dir.exists():
-            return 0
-
         total = 0
-        for archive in snapshot_dir.glob("*.tar.gz"):
-            with contextlib.suppress(_SNAPSHOTS_NONCRITICAL_EXCEPTIONS):
-                total += archive.stat().st_size
+        for snapshot_dir in self._snapshot_dirs(session_id):
+            if not snapshot_dir.exists():
+                continue
+            for archive in snapshot_dir.glob("*.tar.gz"):
+                with contextlib.suppress(_SNAPSHOTS_NONCRITICAL_EXCEPTIONS):
+                    total += archive.stat().st_size
 
         return total
 

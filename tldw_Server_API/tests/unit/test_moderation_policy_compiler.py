@@ -120,7 +120,8 @@ def test_nested_quantifier_scanner_flags_nested_repetition_only():
     compiler = PolicyCompiler()
 
     assert compiler.has_nested_quantifiers("(a+)+")
-    assert compiler.has_nested_quantifiers(r"(foo\\*)*") is False
+    assert compiler.has_nested_quantifiers(r"(foo\\*)*") is True
+    assert compiler.has_nested_quantifiers(r"(foo\\\*)*") is False
     assert compiler.has_nested_quantifiers("(foo)+") is False
 
 

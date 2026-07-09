@@ -4,6 +4,7 @@ import contextlib
 import hashlib
 import json
 import os
+import re
 import shutil
 import stat
 import threading
@@ -46,6 +47,7 @@ _SANDBOX_ORCH_NONCRITICAL_EXCEPTIONS = (
 _ARTIFACT_OPENAT_SUPPORTED = os.open in os.supports_dir_fd and os.mkdir in os.supports_dir_fd
 
 _OWNER_ONLY_DIR_MODE = stat.S_IRWXU
+_SAFE_LEGACY_WORKSPACE_COMPONENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 
 
 class IdempotencyConflict(Exception):
@@ -1485,6 +1487,15 @@ class SandboxOrchestrator:
         digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
         return f"{label}_{digest}"
 
+    @staticmethod
+    def _legacy_workspace_component(value: Any, *, label: str) -> str:
+        raw = str(value or "").strip()
+        if not raw or "/" in raw or "\\" in raw:
+            raise ValueError(f"{label} is required")
+        if not _SAFE_LEGACY_WORKSPACE_COMPONENT_RE.fullmatch(raw):
+            raise ValueError(f"invalid {label}")
+        return raw
+
     def _workspace_root(self) -> Path:
         try:
             root = getattr(app_settings, "SANDBOX_ROOT_DIR", None)
@@ -1502,6 +1513,17 @@ class SandboxOrchestrator:
         root = self._workspace_root()
         user_component = self._safe_workspace_component(user_id, label="user")
         session_component = self._safe_workspace_component(session_id, label="session")
+        path = (root / user_component / "sessions" / session_component / "workspace").resolve(strict=False)
+        try:
+            path.relative_to(root)
+        except ValueError as exc:
+            raise ValueError("workspace path escapes sandbox root") from exc
+        return path
+
+    def _legacy_workspace_path(self, user_id: Any, session_id: str) -> Path:
+        root = self._workspace_root()
+        user_component = self._legacy_workspace_component(user_id, label="user")
+        session_component = self._legacy_workspace_component(session_id, label="session")
         path = (root / user_component / "sessions" / session_component / "workspace").resolve(strict=False)
         try:
             path.relative_to(root)
@@ -1565,7 +1587,10 @@ class SandboxOrchestrator:
         if not ws_path:
             owner = row.get("user_id")
             if owner:
-                ws_path = str(self._workspace_path(owner, sid))
+                legacy_ws = None
+                with contextlib.suppress(_SANDBOX_ORCH_NONCRITICAL_EXCEPTIONS):
+                    legacy_ws = self._legacy_workspace_path(owner, sid)
+                ws_path = str(legacy_ws if legacy_ws and legacy_ws.exists() else self._workspace_path(owner, sid))
         if not ws_path:
             self._drop_cached_session(sid)
             return None

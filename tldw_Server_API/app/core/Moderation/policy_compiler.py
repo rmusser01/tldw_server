@@ -355,8 +355,6 @@ class PolicyCompiler:
                     stack[-1] = True
                 continue
             if char in {"+", "*"} and stack:
-                if index > 0 and expr[index - 1] == "\\":
-                    continue
                 stack[-1] = True
         return False
 

@@ -492,7 +492,7 @@ class FileArtifactsService:
         filename = f"file_{file_id}.{export_format}"
         storage_path = self._cdb.resolve_temp_output_storage_path(filename)
         outputs_dir = DatabasePaths.get_user_temp_outputs_dir(self._user_id_int).resolve(strict=False)
-        outputs_dir.mkdir(parents=True, exist_ok=True)
+        await asyncio.to_thread(outputs_dir.mkdir, parents=True, exist_ok=True)
         file_path = (outputs_dir / storage_path).resolve(strict=False)
         try:
             file_path.relative_to(outputs_dir)

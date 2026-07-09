@@ -163,7 +163,7 @@ async def _fallback_queue_lock(path: Path) -> AsyncGenerator[None, None]:
     path = path.resolve(strict=False)
     fallback_dir = path.parent.resolve(strict=False)
     path.relative_to(fallback_dir)
-    fallback_dir.mkdir(parents=True, exist_ok=True)
+    await asyncio.to_thread(fallback_dir.mkdir, parents=True, exist_ok=True)
     lock_path = _fallback_lock_path(path).resolve(strict=False)
     lock_path.relative_to(fallback_dir)
 
