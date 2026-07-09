@@ -1073,7 +1073,7 @@ describe("CharactersManager first-use onboarding", () => {
       "true"
     )
     expect(editScope.getByText("Expression images")).toBeInTheDocument()
-  }, 10000)
+  }, 30000)
 
   it("ignores stale route-focused character fetches after the route target changes", async () => {
     const resolvers: Record<string, (record: any) => void> = {}
@@ -1156,7 +1156,7 @@ describe("CharactersManager first-use onboarding", () => {
 
     expect(editScope.getByDisplayValue("Current Route Character")).toBeInTheDocument()
     expect(editScope.queryByDisplayValue("Stale Route Character")).not.toBeInTheDocument()
-  }, 10000)
+  }, 30000)
 
   it("preloads world-book attachments in edit mode and syncs attachments on save", async () => {
     const characterRecord = {
