@@ -184,6 +184,41 @@ const waitForMobileCockpitPanel = async (page: Page, panel: 'context' | 'runtime
   return rails;
 };
 
+const clickVisibleMobileCockpitControl = async (
+  page: Page,
+  selector: string,
+  label: string
+) => {
+  await expect
+    .poll(
+      async () =>
+        page.evaluate(
+          ({ selector }) => {
+            const isVisible = (element: HTMLElement) => {
+              const box = element.getBoundingClientRect();
+              const style = window.getComputedStyle(element);
+              return (
+                box.width > 0 &&
+                box.height > 0 &&
+                style.display !== 'none' &&
+                style.visibility !== 'hidden' &&
+                !element.closest('[hidden],[aria-hidden="true"]')
+              );
+            };
+            const target = Array.from(document.querySelectorAll<HTMLElement>(selector)).find(
+              isVisible
+            );
+            if (!target) return 'missing visible control';
+            target.click();
+            return 'clicked';
+          },
+          { selector }
+        ),
+      { message: label, timeout: 10_000 }
+    )
+    .toBe('clicked');
+};
+
 const switchChatLayoutMode = async (page: Page, targetMode: 'cockpit' | 'focus') => {
   const shell = page.getByTestId('playground-cockpit-shell');
   if ((await shell.getAttribute('data-mode')) !== targetMode) {
@@ -945,6 +980,23 @@ const assertNoMobilePanelComposerOverlap = async (
         return measurement.panelBottom <= measurement.composerTop + 1
           ? 'ok'
           : `overlap: first bottom ${measurement.panelBottom}, second top ${measurement.composerTop}`;
+      },
+      { message: label, timeout: 10_000 }
+    )
+    .toBe('ok');
+};
+
+const assertMobilePanelMeasuredHeight = async (
+  page: Page,
+  panel: 'context' | 'runtime',
+  label: string
+) => {
+  await expect
+    .poll(
+      async () => {
+        const measurement = await measureMobilePanelComposer(page, panel);
+        if (measurement.status === 'error') return measurement.message;
+        return measurement.panelHeight <= 260 ? 'ok' : `too tall: ${measurement.panelHeight}`;
       },
       { message: label, timeout: 10_000 }
     )
@@ -2140,16 +2192,28 @@ test.describe('/chat cockpit real-server parity', () => {
       await expect(page.getByTestId('playground-collapsed-composition-summary')).toHaveCount(0);
       await expect(page.getByTestId('composer-bottom-bar')).toHaveCount(0);
     };
-    const panelControlledByTab = async (tab: Locator, root: Locator) => {
-      const tabId = await tab.getAttribute('id');
-      const panelId = await tab.getAttribute('aria-controls');
-      expect(tabId).toBeTruthy();
-      expect(panelId).toBeTruthy();
-      const panel = root.locator(`[id="${panelId}"]`);
-      await expect(panel).toHaveCount(1);
-      await expect(panel).toHaveAttribute('role', 'tabpanel');
-      await expect(panel).toHaveAttribute('aria-labelledby', tabId as string);
-      return panel;
+    const panelControlledByTab = async (panel: 'context' | 'runtime') => {
+      const config = mobileCockpitPanelConfig[panel];
+      await expect
+        .poll(
+          async () =>
+            page.evaluate(
+              ({ tabId, panelId }) => {
+                const tab = document.getElementById(tabId);
+                const panelNode = document.getElementById(panelId);
+                if (!tab || !panelNode) return 'missing tabpanel pair';
+                if (tab.getAttribute('aria-controls') !== panelId) return 'wrong tab target';
+                if (panelNode.getAttribute('role') !== 'tabpanel') return 'missing tabpanel role';
+                return panelNode.getAttribute('aria-labelledby') === tabId
+                  ? 'ready'
+                  : 'wrong panel label';
+              },
+              { tabId: config.tabId, panelId: config.panelId }
+            ),
+          { message: `mobile ${panel} tab controls its panel`, timeout: 10_000 }
+        )
+        .toBe('ready');
+      return page.locator(`#${config.panelId}`);
     };
     await fillEditableComposer(page, mobileDraft);
     await expectMobileDraftReachable();
@@ -2171,9 +2235,9 @@ test.describe('/chat cockpit real-server parity', () => {
     await expectNoMobileBottomControls();
     const initialContextTab = mobileRails.getByRole('tab', { name: 'Context' });
     const initialRuntimeTab = mobileRails.getByRole('tab', { name: 'Runtime' });
-    await panelControlledByTab(initialContextTab, mobileRails);
+    await panelControlledByTab('context');
     const initialRuntimePanel = page.locator(`#${mobileCockpitPanelConfig.runtime.panelId}`);
-    const initialContextPanel = mobileRails.locator(`#${mobileCockpitPanelConfig.context.panelId}`);
+    const initialContextPanel = page.locator(`#${mobileCockpitPanelConfig.context.panelId}`);
     await expect(initialContextTab).toHaveAttribute('aria-selected', 'true');
     await expect(initialRuntimeTab).toHaveAttribute('aria-selected', 'false');
     await expect(initialContextPanel).toBeVisible();
@@ -2184,16 +2248,16 @@ test.describe('/chat cockpit real-server parity', () => {
       'context',
       'mobile cockpit context rails should not overlap composer'
     );
-    const initialContextPanelMeasurement = await measureMobilePanelComposer(page, 'context');
-    expect(initialContextPanelMeasurement.status, 'mobile context panel is measurable').toBe('ok');
-    if (initialContextPanelMeasurement.status === 'ok') {
-      expect(initialContextPanelMeasurement.panelHeight).toBeLessThanOrEqual(260);
-    }
+    await assertMobilePanelMeasuredHeight(page, 'context', 'mobile context panel is measurable');
     await page.screenshot({
       path: testInfo.outputPath('chat-cockpit-mobile-context.png'),
       fullPage: true,
     });
-    await page.getByRole('button', { name: 'Hide context rail' }).click();
+    await clickVisibleMobileCockpitControl(
+      page,
+      `button[aria-controls="${mobileCockpitPanelConfig.context.panelId}"]:not([role="tab"])`,
+      'hide mobile context rail'
+    );
     mobileRails = await waitForMobileCockpitPanel(page, 'runtime');
     await expect(mobileRails.getByRole('tab', { name: 'Context' })).toHaveCount(0);
     await expect(mobileRails.getByRole('tab', { name: 'Runtime' })).toBeVisible();
@@ -2201,22 +2265,27 @@ test.describe('/chat cockpit real-server parity', () => {
       'Runtime panel active. Composer draft remains available below.'
     );
     await expectMobileDraftPreserved();
-    await page.getByRole('button', { name: 'Show context rail' }).click();
+    await clickVisibleMobileCockpitControl(
+      page,
+      `button[aria-controls="${mobileCockpitPanelConfig.context.panelId}"]:not([role="tab"])`,
+      'show mobile context rail'
+    );
     const contextTab = page.locator(`#${mobileCockpitPanelConfig.context.tabId}`);
     await expect(contextTab).toBeVisible();
-    await contextTab.click();
+    await clickVisibleMobileCockpitControl(
+      page,
+      `#${mobileCockpitPanelConfig.context.tabId}`,
+      'activate mobile context tab'
+    );
     mobileRails = await waitForMobileCockpitPanel(page, 'context');
     const activeContextTab = mobileRails.locator(`#${mobileCockpitPanelConfig.context.tabId}`);
     await expect(activeContextTab).toHaveAttribute('aria-selected', 'true');
-    const contextPanelTarget = await panelControlledByTab(activeContextTab, mobileRails);
-    const runtimePanelTarget = await panelControlledByTab(
-      mobileRails.locator(`#${mobileCockpitPanelConfig.runtime.tabId}`),
-      mobileRails
-    );
+    const contextPanelTarget = await panelControlledByTab('context');
+    const runtimePanelTarget = await panelControlledByTab('runtime');
     await expect(contextPanelTarget).toBeVisible();
     await expect(runtimePanelTarget).toBeHidden();
     await expectMobileDraftPreserved();
-    const contextPanel = mobileRails.getByRole('tabpanel', { name: 'Context' });
+    const contextPanel = contextPanelTarget;
     await expect(contextPanel.getByRole('button', { name: 'Open Search & Context' })).toBeVisible();
     const mobileWebSearchControl = contextPanel.getByRole('button', {
       name: 'Web search',
@@ -2280,11 +2349,7 @@ test.describe('/chat cockpit real-server parity', () => {
       'runtime',
       'mobile cockpit runtime rails should not overlap composer'
     );
-    const runtimePanelMeasurement = await measureMobilePanelComposer(page, 'runtime');
-    expect(runtimePanelMeasurement.status, 'mobile runtime panel is measurable').toBe('ok');
-    if (runtimePanelMeasurement.status === 'ok') {
-      expect(runtimePanelMeasurement.panelHeight).toBeLessThanOrEqual(260);
-    }
+    await assertMobilePanelMeasuredHeight(page, 'runtime', 'mobile runtime panel is measurable');
     await page.screenshot({
       path: testInfo.outputPath('chat-cockpit-mobile-runtime.png'),
       fullPage: true,

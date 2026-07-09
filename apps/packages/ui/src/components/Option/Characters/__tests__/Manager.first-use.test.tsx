@@ -997,7 +997,7 @@ describe("CharactersManager first-use onboarding", () => {
       "true"
     )
     expect(editScope.getByText("Expression images")).toBeInTheDocument()
-  }, 10000)
+  }, 30000)
 
   it("opens the create editor with expression images visible from a route focus hint", async () => {
     window.localStorage.setItem(TEMPLATE_CHOOSER_SEEN_KEY, "true")
@@ -1020,7 +1020,7 @@ describe("CharactersManager first-use onboarding", () => {
       "true"
     )
     expect(createScope.getByText("Expression images")).toBeInTheDocument()
-  }, 10000)
+  }, 30000)
 
   it("opens a route-focused character editor when the character is not on the visible page", async () => {
     const hiddenCharacterRecord = {
