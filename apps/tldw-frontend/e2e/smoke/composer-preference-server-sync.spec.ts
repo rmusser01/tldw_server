@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test"
+import { seedAuth } from "./smoke.setup"
 
 /**
  * End-to-end verification of the Phase-4 server preference sync.
@@ -7,6 +8,7 @@ import { expect, test, type Page } from "@playwright/test"
  */
 
 const bypassOnboarding = async (page: Page) => {
+  await seedAuth(page)
   await page.addInitScript(() => {
     try {
       window.localStorage.setItem("assistant_setup_dismissed", "true")

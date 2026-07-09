@@ -195,6 +195,7 @@ export type ClientPath =
   | "/api/v1/mcp/tool_catalogs"
   | "/api/v1/mcp/status"
   | "/api/v1/mcp/tools/execute"
+  | "/api/v1/mcp/hub/readiness"
   | "/api/v1/mcp/hub/acp-profiles"
   | "/api/v1/mcp/hub/acp-profiles/{profile_id}"
   | "/api/v1/mcp/hub/external-servers"

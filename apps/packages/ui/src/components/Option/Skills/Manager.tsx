@@ -12,7 +12,7 @@ import {
   Modal,
   Switch
 } from "antd"
-import type { MenuProps } from "antd"
+import type { CheckboxProps, MenuProps } from "antd"
 import type { ColumnsType, TableProps } from "antd/es/table"
 import type { SortOrder } from "antd/es/table/interface"
 import React from "react"

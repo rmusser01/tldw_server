@@ -345,7 +345,7 @@ export const ScheduledTaskAutomationDefinitionEditor: React.FC<
     setSaving(true)
     setErrorMessage(null)
     try {
-      let result: ScheduledTaskDefinitionResponse
+      let result: unknown
       if (mode === "create") {
         if (!onCreate) {
           throw new Error("Create handler is not configured")
