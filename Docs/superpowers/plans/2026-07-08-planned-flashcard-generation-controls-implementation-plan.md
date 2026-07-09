@@ -610,7 +610,7 @@ git commit -m "feat: prompt planned flashcard generation"
 - Modify: `apps/packages/ui/src/components/Flashcards/hooks/useFlashcardQueries.ts`
 - Modify: `apps/packages/ui/src/components/Flashcards/tabs/ImportExport/shared.ts`
 
-- [ ] **Step 1: Write failing service and normalization tests**
+- [x] **Step 1: Write failing service and normalization tests**
 
 In `apps/packages/ui/src/services/__tests__/flashcards.test.ts`, add:
 
@@ -641,7 +641,7 @@ it("sends planned flashcard generation payloads unchanged", async () => {
 
 If no direct test exists for `normalizeGeneratedCards`, add one in the nearest existing test file or export-free UI test in Task 5. Keep it to one assertion: `generation_type: "true_false"` survives normalization.
 
-- [ ] **Step 2: Run frontend service test to verify failure**
+- [x] **Step 2: Run frontend service test to verify failure**
 
 Run:
 
@@ -651,7 +651,7 @@ cd apps/tldw-frontend && bunx vitest run ../packages/ui/src/services/__tests__/f
 
 Expected: TypeScript fails or test fails because `card_plan` is not typed yet.
 
-- [ ] **Step 3: Add shared TypeScript types**
+- [x] **Step 3: Add shared TypeScript types**
 
 In `flashcards.ts`, add:
 
@@ -689,11 +689,11 @@ export type FlashcardsGenerateRequest = {
 }
 ```
 
-- [ ] **Step 4: Update generate hook params**
+- [x] **Step 4: Update generate hook params**
 
 In `useFlashcardQueries.ts`, import `type FlashcardPlanItem` and add `cardPlan?: FlashcardPlanItem[]` to mutation params. Pass `card_plan: params.cardPlan`.
 
-- [ ] **Step 5: Preserve response-only generation type in drafts**
+- [x] **Step 5: Preserve response-only generation type in drafts**
 
 In `shared.ts`, import `type FlashcardGenerationType`, add `generation_type?: FlashcardGenerationType | null` to `GeneratedCardDraft`, and normalize:
 
@@ -711,7 +711,7 @@ const generation_type: FlashcardGenerationType =
 
 Set `generation_type` on the draft.
 
-- [ ] **Step 6: Run service test**
+- [x] **Step 6: Run service test**
 
 Run:
 
@@ -721,7 +721,7 @@ cd apps/tldw-frontend && bunx vitest run ../packages/ui/src/services/__tests__/f
 
 Expected: service test passes.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps/packages/ui/src/services/flashcards.ts apps/packages/ui/src/services/__tests__/flashcards.test.ts apps/packages/ui/src/components/Flashcards/hooks/useFlashcardQueries.ts apps/packages/ui/src/components/Flashcards/tabs/ImportExport/shared.ts
