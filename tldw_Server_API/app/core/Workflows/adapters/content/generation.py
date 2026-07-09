@@ -187,15 +187,21 @@ async def run_flashcard_generate_adapter(config: dict[str, Any], context: dict[s
     card_plan = config.get("card_plan")
     normalized_plan: list[dict[str, Any]] = []
     invalid_plan = False
+    seen_plan_types: set[str] = set()
     if isinstance(card_plan, list):
         for row in card_plan:
             if not isinstance(row, dict):
                 invalid_plan = True
                 continue
+            if set(row) != {"card_type", "count"}:
+                invalid_plan = True
             plan_type = str(row.get("card_type") or "").strip().lower()
             if plan_type not in valid_generation_types:
                 invalid_plan = True
                 continue
+            if plan_type in seen_plan_types:
+                invalid_plan = True
+            seen_plan_types.add(plan_type)
             try:
                 count = int(row.get("count") or 0)
             except (TypeError, ValueError):

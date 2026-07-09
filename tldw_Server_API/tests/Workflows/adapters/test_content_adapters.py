@@ -1086,6 +1086,8 @@ class TestFlashcardGenerateAdapter:
             [{"card_type": "basic", "count": 0}],
             [{"card_type": "basic", "count": "nope"}],
             [{"card_type": "basic", "count": 1}],
+            [{"card_type": "basic", "count": 1}, {"card_type": "basic", "count": 1}],
+            [{"card_type": "basic", "count": 2, "extra": True}],
             ["basic"],
         ],
     )
