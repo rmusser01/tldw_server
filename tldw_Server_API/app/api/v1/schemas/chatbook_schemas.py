@@ -425,8 +425,40 @@ class OpenWebUIDatabaseImportResult(OpenWebUIImportResult):
     folder_links: int = Field(default=0, ge=0)
 
 
+class OpenWebUIImportScopeConversationSummary(BaseModel):
+    """One imported OpenWebUI conversation available for attachment hydration."""
+    source_conversation_id: Optional[str] = None
+    conversation_id: str
+    title: str
+    attachment_reference_count: int = Field(default=0, ge=0)
+
+
+class OpenWebUIImportScopeSummary(BaseModel):
+    """User-safe summary of an OpenWebUI import scope that can be hydrated."""
+    scope_id: str
+    source_format: str
+    source_user_id: Optional[str] = None
+    source_user_label: Optional[str] = None
+    conversation_count: int = Field(default=0, ge=0)
+    attachment_reference_count: int = Field(default=0, ge=0)
+    created_at: Optional[datetime] = None
+    conversation_ids: list[str] = Field(default_factory=list)
+    conversations: list[OpenWebUIImportScopeConversationSummary] = Field(default_factory=list)
+
+
+class OpenWebUIImportScopesResponse(BaseModel):
+    """Response listing imported OpenWebUI scopes available for hydration."""
+    scopes: list[OpenWebUIImportScopeSummary] = Field(default_factory=list)
+
+
 class OpenWebUIHydrationScopeRequest(BaseModel):
     """Scope for OpenWebUI attachment hydration over imported tldw conversations."""
+    import_scope_id: Optional[str] = Field(
+        default=None,
+        min_length=1,
+        max_length=255,
+        description="Optional OpenWebUI import scope id. Manual conversation_ids override it when provided.",
+    )
     conversation_ids: list[str] = Field(
         default_factory=list,
         max_length=1000,
@@ -450,6 +482,17 @@ class OpenWebUIHydrationScopeRequest(BaseModel):
                 raise ValueError("conversation_ids must not contain empty values")
             cleaned.append(text)
         return cleaned
+
+    @field_validator("import_scope_id")
+    @classmethod
+    def validate_import_scope_id(cls, value: Optional[str]) -> Optional[str]:
+        """Trim and reject blank OpenWebUI import scope ids."""
+        if value is None:
+            return None
+        text = str(value).strip()
+        if not text:
+            raise ValueError("import_scope_id must not be empty")
+        return text
 
     @field_validator("source_user_id")
     @classmethod

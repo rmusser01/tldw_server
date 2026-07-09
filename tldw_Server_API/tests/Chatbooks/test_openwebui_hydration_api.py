@@ -25,9 +25,36 @@ class _DummyChatbookService:
     def __init__(self) -> None:
         self.preview_calls: list[dict[str, Any]] = []
 
+    def list_openwebui_import_scopes(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "scope_id": "scope-user-a",
+                "source_format": "openwebui_db",
+                "source_user_id": "user-a",
+                "source_user_label": "Alice",
+                "conversation_count": 1,
+                "attachment_reference_count": 1,
+                "created_at": None,
+                "conversation_ids": ["conv-a"],
+                "conversations": [
+                    {
+                        "source_conversation_id": "chat-a",
+                        "conversation_id": "conv-a",
+                        "title": "Alice DB chat",
+                        "attachment_reference_count": 1,
+                    }
+                ],
+            }
+        ]
+
     def preview_openwebui_attachment_hydration(self, **kwargs) -> dict[str, Any]:
         self.preview_calls.append(kwargs)
         return {
+            "scope": {
+                "import_scope_id": kwargs["scope"].get("import_scope_id"),
+                "conversation_ids": ["conv-a"],
+                "source_user_id": "user-a",
+            },
             "summary": {
                 "referenced_files": 1,
                 "resolved_files": 1,
@@ -138,6 +165,16 @@ def _hydration_payload() -> dict[str, Any]:
     }
 
 
+def _import_scope_payload() -> dict[str, Any]:
+    return {
+        "openwebui_data_root": "/srv/openwebui",
+        "scope": {
+            "import_scope_id": "scope-user-a",
+        },
+        "process_supported_files": False,
+    }
+
+
 def test_hydration_schema_rejects_empty_conversation_ids():
     with pytest.raises(ValidationError):
         chatbook_schemas.OpenWebUIHydrationPreviewRequest(
@@ -152,6 +189,33 @@ def test_hydration_schema_rejects_blank_source_user_id():
             openwebui_data_root="/srv/openwebui",
             scope={"conversation_ids": ["conv-a"], "source_user_id": "   "},
         )
+
+
+def test_hydration_schema_rejects_blank_import_scope_id():
+    with pytest.raises(ValidationError):
+        chatbook_schemas.OpenWebUIHydrationPreviewRequest(
+            openwebui_data_root="/srv/openwebui",
+            scope={"import_scope_id": "   "},
+        )
+
+
+def test_list_openwebui_import_scopes_returns_user_safe_summaries():
+    service = _DummyChatbookService()
+    app = _make_app(service=service, principal_override=_single_user_principal)
+
+    with TestClient(app) as client:
+        resp = client.get("/api/v1/chatbooks/openwebui/import-scopes")
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["scopes"][0]["scope_id"] == "scope-user-a"
+    assert body["scopes"][0]["source_format"] == "openwebui_db"
+    assert body["scopes"][0]["source_user_id"] == "user-a"
+    assert body["scopes"][0]["source_user_label"] == "Alice"
+    assert body["scopes"][0]["conversation_count"] == 1
+    assert body["scopes"][0]["attachment_reference_count"] == 1
+    assert body["scopes"][0]["conversations"][0]["source_conversation_id"] == "chat-a"
+    assert "/private/openwebui" not in resp.text
 
 
 def test_preview_allows_single_user_and_redacts_source_paths():
@@ -169,6 +233,25 @@ def test_preview_allows_single_user_and_redacts_source_paths():
     assert service.preview_calls[0]["scope"]["conversation_ids"] == ["conv-a"]
     assert service.preview_calls[0]["scope"]["source_user_id"] == "ow-user"
     assert service.preview_calls[0]["process_supported_files"] is False
+
+
+def test_preview_accepts_import_scope_id_without_manual_conversation_ids():
+    service = _DummyChatbookService()
+    app = _make_app(service=service, principal_override=_single_user_principal)
+
+    with TestClient(app) as client:
+        resp = client.post("/api/v1/chatbooks/openwebui/hydration/preview", json=_import_scope_payload())
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["scope"]["import_scope_id"] == "scope-user-a"
+    assert body["scope"]["conversation_ids"] == ["conv-a"]
+    assert body["scope"]["source_user_id"] == "user-a"
+    assert service.preview_calls[0]["scope"] == {
+        "import_scope_id": "scope-user-a",
+        "conversation_ids": [],
+        "source_user_id": None,
+    }
 
 
 def test_preview_rejects_multi_user_non_admin():
@@ -193,6 +276,21 @@ def test_hydration_job_creation_enqueues_core_job():
     assert jobs.created[0]["job_type"] == "openwebui_attachment_hydration"
     assert jobs.created[0]["owner_user_id"] == "1"
     assert jobs.created[0]["payload"]["scope"]["conversation_ids"] == ["conv-a"]
+
+
+def test_hydration_job_creation_preserves_import_scope_id():
+    jobs = _FakeJobsManager()
+    app = _make_app(jobs=jobs, principal_override=_admin_flag_principal)
+
+    with TestClient(app) as client:
+        resp = client.post("/api/v1/chatbooks/openwebui/hydration/jobs", json=_import_scope_payload())
+
+    assert resp.status_code == 200, resp.text
+    assert jobs.created[0]["payload"]["scope"] == {
+        "import_scope_id": "scope-user-a",
+        "conversation_ids": [],
+        "source_user_id": None,
+    }
 
 
 def test_hydration_job_status_rejects_multi_user_non_admin():

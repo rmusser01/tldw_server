@@ -26,7 +26,8 @@ import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import { useAntdNotification } from "@/hooks/useAntdNotification"
 import {
   tldwClient,
-  type ChatbookAccountScopeResponse
+  type ChatbookAccountScopeResponse,
+  type OpenWebUIImportScopeSummary
 } from "@/services/tldw/TldwApiClient"
 import { bgRequest } from "@/services/background-proxy"
 import { PageShell } from "@/components/Common/PageShell"
@@ -166,6 +167,27 @@ type OpenWebUIHydrationJobState = {
   status?: string
   result?: any
   error?: string | null
+}
+
+const openWebUISourceFormatLabel = (sourceFormat?: string | null) => {
+  if (sourceFormat === "openwebui_db") return "OpenWebUI database"
+  if (sourceFormat === "openwebui_json") return "OpenWebUI JSON"
+  return sourceFormat || "OpenWebUI"
+}
+
+const pluralize = (count: number, singular: string, plural: string) =>
+  `${count} ${count === 1 ? singular : plural}`
+
+const formatOpenWebUIImportScopeSummary = (scope: OpenWebUIImportScopeSummary) => {
+  const pieces = [
+    openWebUISourceFormatLabel(scope.source_format),
+    pluralize(scope.conversation_count || 0, "conversation", "conversations"),
+    pluralize(scope.attachment_reference_count || 0, "attachment ref", "attachment refs")
+  ]
+  if (scope.source_user_label || scope.source_user_id) {
+    pieces.splice(1, 0, scope.source_user_label || scope.source_user_id || "")
+  }
+  return pieces.filter(Boolean).join(" · ")
 }
 
 const parseIdList = (raw: string) =>
@@ -1140,6 +1162,10 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
   const [openwebuiPreview, setOpenwebuiPreview] = React.useState<any | null>(null)
   const [openwebuiDbPreview, setOpenwebuiDbPreview] = React.useState<any | null>(null)
   const [selectedOpenWebUIUserId, setSelectedOpenWebUIUserId] = React.useState("")
+  const [openwebuiImportScopes, setOpenwebuiImportScopes] = React.useState<OpenWebUIImportScopeSummary[]>([])
+  const [selectedOpenWebUIImportScopeId, setSelectedOpenWebUIImportScopeId] = React.useState("")
+  const [openwebuiImportScopesLoading, setOpenwebuiImportScopesLoading] = React.useState(false)
+  const [openwebuiImportScopesError, setOpenwebuiImportScopesError] = React.useState<string | null>(null)
   const [previewError, setPreviewError] = React.useState<string | null>(null)
   const [previewLoading, setPreviewLoading] = React.useState(false)
   const [conflictResolution, setConflictResolution] = React.useState("skip")
@@ -1155,6 +1181,7 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
   const [hydrationDataRoot, setHydrationDataRoot] = React.useState("")
   const [hydrationConversationIdsRaw, setHydrationConversationIdsRaw] = React.useState("")
   const [hydrationSourceUserId, setHydrationSourceUserId] = React.useState("")
+  const [hydrationUseManualScope, setHydrationUseManualScope] = React.useState(false)
   const [hydrationProcessSupportedFiles, setHydrationProcessSupportedFiles] = React.useState(false)
   const [hydrationPreview, setHydrationPreview] =
     React.useState<OpenWebUIHydrationPreviewState | null>(null)
@@ -1187,6 +1214,10 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
     setOpenwebuiDbPreview(null)
     setImportPreviewVersion(0)
     setSelectedOpenWebUIUserId("")
+    setOpenwebuiImportScopes([])
+    setSelectedOpenWebUIImportScopeId("")
+    setOpenwebuiImportScopesError(null)
+    setOpenwebuiImportScopesLoading(false)
     setPreviewError(null)
     setPreviewLoading(false)
     setImportSelections(buildSelectionState(() => [] as string[]))
@@ -1197,6 +1228,7 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
     setHydrationPreviewLoading(false)
     setHydrationJob(null)
     setHydrationJobError(null)
+    setHydrationUseManualScope(false)
     if (importSourceFormat === "openwebui_json" || importSourceFormat === "openwebui_db") {
       setConflictResolution((current) =>
         current === "rename" || current === "skip" ? current : "skip"
@@ -1238,12 +1270,31 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
     [openwebuiDbUsers, selectedOpenWebUIUserId]
   )
 
+  const selectedOpenWebUIImportScope = React.useMemo(
+    () =>
+      openwebuiImportScopes.find(
+        (scope) => scope.scope_id === selectedOpenWebUIImportScopeId
+      ) || null,
+    [openwebuiImportScopes, selectedOpenWebUIImportScopeId]
+  )
+
+  const showManualHydrationScope = hydrationUseManualScope || !selectedOpenWebUIImportScope
+
   const effectiveHydrationSourceUserId =
     isOpenWebUIDatabaseImport && selectedOpenWebUIUserId
       ? selectedOpenWebUIUserId
       : hydrationSourceUserId.trim()
 
   const hydrationPayload = React.useMemo(() => {
+    if (selectedOpenWebUIImportScope && !hydrationUseManualScope) {
+      return {
+        openwebui_data_root: hydrationDataRoot.trim(),
+        scope: {
+          import_scope_id: selectedOpenWebUIImportScope.scope_id
+        },
+        process_supported_files: hydrationProcessSupportedFiles
+      }
+    }
     const scope: {
       conversation_ids: string[]
       source_user_id?: string
@@ -1260,9 +1311,11 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
     }
   }, [
     effectiveHydrationSourceUserId,
+    hydrationUseManualScope,
     hydrationConversationIdsRaw,
     hydrationDataRoot,
-    hydrationProcessSupportedFiles
+    hydrationProcessSupportedFiles,
+    selectedOpenWebUIImportScope
   ])
 
   const hydrationPayloadSignature = React.useMemo(
@@ -1314,6 +1367,31 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
     }
   }, [canUseChatbooks])
 
+  const loadOpenWebUIImportScopes = React.useCallback(async () => {
+    if (!canUseChatbooks) return []
+    setOpenwebuiImportScopesLoading(true)
+    setOpenwebuiImportScopesError(null)
+    try {
+      await tldwClient.initialize().catch(() => null)
+      const res = await tldwClient.listOpenWebUIImportScopes()
+      const scopes = Array.isArray(res?.scopes) ? res.scopes : []
+      setOpenwebuiImportScopes(scopes)
+      setSelectedOpenWebUIImportScopeId((current) =>
+        scopes.some((scope) => scope.scope_id === current)
+          ? current
+          : scopes[0]?.scope_id || ""
+      )
+      setHydrationUseManualScope(false)
+      return scopes
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error)
+      setOpenwebuiImportScopesError(msg)
+      return []
+    } finally {
+      setOpenwebuiImportScopesLoading(false)
+    }
+  }, [canUseChatbooks])
+
   const loadJobs = React.useCallback(async () => {
     if (!canUseChatbooks) return
     setJobsLoading(true)
@@ -1348,6 +1426,9 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
     const importUpdates = await Promise.all(
       importActive.map((job) => tldwClient.getChatbookImportJob(job.job_id).catch(() => job))
     )
+    const completedImportRefreshNeeded =
+      isOpenWebUIImport &&
+      importUpdates.some((job) => job?.status && !isActiveJobStatus(job.status))
 
     const mergeJobs = (prev: ChatbookJob[], updates: ChatbookJob[]) => {
       const map = new Map(prev.map((job) => [job.job_id, job]))
@@ -1359,9 +1440,12 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
     const nextImport = mergeJobs(importJobs, importUpdates)
     setExportJobs(nextExport)
     setImportJobs(nextImport)
+    if (completedImportRefreshNeeded) {
+      await loadOpenWebUIImportScopes()
+    }
 
     return buildJobSignature([...nextExport, ...nextImport])
-  }, [canUseChatbooks, exportJobs, importJobs])
+  }, [canUseChatbooks, exportJobs, importJobs, isOpenWebUIImport, loadOpenWebUIImportScopes])
 
   React.useEffect(() => {
     if (!canUseChatbooks) return
@@ -1766,6 +1850,9 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
       })
       clearFetchAllItemsCache()
       resetPolling()
+      if (isOpenWebUIImport) {
+        await loadOpenWebUIImportScopes()
+      }
       await loadJobs()
     } catch (error) {
       notification.error({
@@ -2525,58 +2612,151 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
                     disabled={!canUseChatbooks || hydrationPreviewLoading || hydrationJobLoading}
                   />
                 </div>
-                <div>
-                  <Text type="secondary">
-                    {t(
-                      "settings:chatbooksPlayground.openwebuiHydrationSourceUser",
-                      "Source user"
-                    )}
-                  </Text>
-                  <Input
-                    aria-label={t(
-                      "settings:chatbooksPlayground.openwebuiHydrationSourceUserLabel",
-                      "OpenWebUI source user id"
-                    ) as string}
-                    value={
-                      isOpenWebUIDatabaseImport && selectedOpenWebUIUserId
-                        ? selectedOpenWebUIUserId
-                        : hydrationSourceUserId
-                    }
-                    onChange={(event) => setHydrationSourceUserId(event.target.value)}
-                    placeholder={t(
-                      "settings:chatbooksPlayground.openwebuiHydrationSourceUserPlaceholder",
-                      "Optional source user id"
-                    ) as string}
-                    disabled={
-                      !canUseChatbooks ||
-                      hydrationPreviewLoading ||
-                      hydrationJobLoading ||
-                      (isOpenWebUIDatabaseImport && Boolean(selectedOpenWebUIUserId))
-                    }
-                  />
-                </div>
+
                 <div className="md:col-span-2">
-                  <Text type="secondary">
-                    {t(
-                      "settings:chatbooksPlayground.openwebuiHydrationConversationIds",
-                      "Imported conversation IDs"
+                  <div className="flex flex-col gap-2 rounded border border-border p-3">
+                    <Space wrap className="justify-between">
+                      <Text strong>
+                        {t(
+                          "settings:chatbooksPlayground.openwebuiImportScope",
+                          "Last import scope"
+                        )}
+                      </Text>
+                      <Button
+                        size="small"
+                        onClick={() => void loadOpenWebUIImportScopes()}
+                        loading={openwebuiImportScopesLoading}
+                        disabled={!canUseChatbooks || hydrationPreviewLoading || hydrationJobLoading}
+                      >
+                        {t("settings:chatbooksPlayground.refresh", "Refresh")}
+                      </Button>
+                    </Space>
+                    {openwebuiImportScopes.length ? (
+                      <>
+                        <Select
+                          value={selectedOpenWebUIImportScopeId || undefined}
+                          onChange={(value) => {
+                            setSelectedOpenWebUIImportScopeId(String(value || ""))
+                            setHydrationUseManualScope(false)
+                          }}
+                          placeholder={t(
+                            "settings:chatbooksPlayground.openwebuiImportScopeSelect",
+                            "Select import scope"
+                          )}
+                          className="w-full"
+                          disabled={!canUseChatbooks || hydrationPreviewLoading || hydrationJobLoading}
+                          options={openwebuiImportScopes.map((scope) => ({
+                            value: scope.scope_id,
+                            label: formatOpenWebUIImportScopeSummary(scope)
+                          }))}
+                        />
+                        {selectedOpenWebUIImportScope && (
+                          <Text type="secondary">
+                            {t(
+                              "settings:chatbooksPlayground.openwebuiImportScopeDefault",
+                              "Hydration uses this import scope by default."
+                            )}
+                          </Text>
+                        )}
+                      </>
+                    ) : (
+                      <Text type="secondary">
+                        {t(
+                          "settings:chatbooksPlayground.openwebuiImportScopeEmpty",
+                          "No imported OpenWebUI scope is selected yet."
+                        )}
+                      </Text>
                     )}
-                  </Text>
-                  <Input.TextArea
-                    aria-label={t(
-                      "settings:chatbooksPlayground.openwebuiHydrationConversationIdsLabel",
-                      "Imported conversation IDs"
-                    ) as string}
-                    value={hydrationConversationIdsRaw}
-                    onChange={(event) => setHydrationConversationIdsRaw(event.target.value)}
-                    autoSize={{ minRows: 2, maxRows: 4 }}
-                    placeholder={t(
-                      "settings:chatbooksPlayground.openwebuiHydrationConversationIdsPlaceholder",
-                      "Paste tldw conversation ids, one per line or comma-separated"
-                    ) as string}
-                    disabled={!canUseChatbooks || hydrationPreviewLoading || hydrationJobLoading}
-                  />
+                    {openwebuiImportScopesError && (
+                      <DesignSystemAlert
+                        variant="warning"
+                        {...passiveAlertProps}
+                        title={t(
+                          "settings:chatbooksPlayground.openwebuiImportScopeError",
+                          "Unable to load import scopes"
+                        )}
+                      >
+                        {openwebuiImportScopesError}
+                      </DesignSystemAlert>
+                    )}
+                    {selectedOpenWebUIImportScope && (
+                      <Space>
+                        <Switch
+                          aria-label={t(
+                            "settings:chatbooksPlayground.openwebuiHydrationManualScope",
+                            "Manual hydration scope"
+                          ) as string}
+                          checked={hydrationUseManualScope}
+                          onChange={setHydrationUseManualScope}
+                          disabled={!canUseChatbooks || hydrationPreviewLoading || hydrationJobLoading}
+                        />
+                        <Text>
+                          {t(
+                            "settings:chatbooksPlayground.openwebuiHydrationManualScope",
+                            "Manual hydration scope"
+                          )}
+                        </Text>
+                      </Space>
+                    )}
+                  </div>
                 </div>
+
+                {showManualHydrationScope && (
+                  <div>
+                    <Text type="secondary">
+                      {t(
+                        "settings:chatbooksPlayground.openwebuiHydrationSourceUser",
+                        "Source user"
+                      )}
+                    </Text>
+                    <Input
+                      aria-label={t(
+                        "settings:chatbooksPlayground.openwebuiHydrationSourceUserLabel",
+                        "OpenWebUI source user id"
+                      ) as string}
+                      value={
+                        isOpenWebUIDatabaseImport && selectedOpenWebUIUserId
+                          ? selectedOpenWebUIUserId
+                          : hydrationSourceUserId
+                      }
+                      onChange={(event) => setHydrationSourceUserId(event.target.value)}
+                      placeholder={t(
+                        "settings:chatbooksPlayground.openwebuiHydrationSourceUserPlaceholder",
+                        "Optional source user id"
+                      ) as string}
+                      disabled={
+                        !canUseChatbooks ||
+                        hydrationPreviewLoading ||
+                        hydrationJobLoading ||
+                        (isOpenWebUIDatabaseImport && Boolean(selectedOpenWebUIUserId))
+                      }
+                    />
+                  </div>
+                )}
+                {showManualHydrationScope && (
+                  <div className="md:col-span-2">
+                    <Text type="secondary">
+                      {t(
+                        "settings:chatbooksPlayground.openwebuiHydrationConversationIds",
+                        "Imported conversation IDs"
+                      )}
+                    </Text>
+                    <Input.TextArea
+                      aria-label={t(
+                        "settings:chatbooksPlayground.openwebuiHydrationConversationIdsLabel",
+                        "Imported conversation IDs"
+                      ) as string}
+                      value={hydrationConversationIdsRaw}
+                      onChange={(event) => setHydrationConversationIdsRaw(event.target.value)}
+                      autoSize={{ minRows: 2, maxRows: 4 }}
+                      placeholder={t(
+                        "settings:chatbooksPlayground.openwebuiHydrationConversationIdsPlaceholder",
+                        "Paste tldw conversation ids, one per line or comma-separated"
+                      ) as string}
+                      disabled={!canUseChatbooks || hydrationPreviewLoading || hydrationJobLoading}
+                    />
+                  </div>
+                )}
               </div>
 
               <div className="mt-3 flex flex-wrap items-center gap-3">

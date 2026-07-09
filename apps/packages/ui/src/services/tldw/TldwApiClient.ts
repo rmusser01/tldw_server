@@ -318,6 +318,7 @@ export interface OpenAICredentialSourceSwitchResponse {
 }
 
 export type OpenWebUIHydrationScopeRequest = {
+  import_scope_id?: string | null
   conversation_ids?: string[]
   source_user_id?: string | null
 }
@@ -326,6 +327,29 @@ export type OpenWebUIHydrationRequest = {
   openwebui_data_root: string
   scope?: OpenWebUIHydrationScopeRequest
   process_supported_files?: boolean
+}
+
+export type OpenWebUIImportScopeConversationSummary = {
+  source_conversation_id?: string | null
+  conversation_id: string
+  title: string
+  attachment_reference_count: number
+}
+
+export type OpenWebUIImportScopeSummary = {
+  scope_id: string
+  source_format: string
+  source_user_id?: string | null
+  source_user_label?: string | null
+  conversation_count: number
+  attachment_reference_count: number
+  created_at?: string | null
+  conversation_ids?: string[]
+  conversations?: OpenWebUIImportScopeConversationSummary[]
+}
+
+export type OpenWebUIImportScopesResponse = {
+  scopes: OpenWebUIImportScopeSummary[]
 }
 
 const getCurrentBrowserSurface = (): BrowserSurface => {
@@ -6180,6 +6204,13 @@ export class TldwApiClientBase {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: payload
+    })
+  }
+
+  async listOpenWebUIImportScopes(): Promise<OpenWebUIImportScopesResponse> {
+    return await bgRequest<OpenWebUIImportScopesResponse>({
+      path: "/api/v1/chatbooks/openwebui/import-scopes",
+      method: "GET"
     })
   }
 

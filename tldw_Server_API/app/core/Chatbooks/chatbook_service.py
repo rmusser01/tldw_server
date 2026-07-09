@@ -3241,6 +3241,116 @@ class ChatbookService:
             logger.warning(f"OpenWebUI DB preview rejected file path: {exc}")
             return None, "Invalid or potentially malicious import file"
 
+    def list_openwebui_import_scopes(self) -> list[dict[str, Any]]:
+        """Return user-safe hydration scopes discovered from imported OpenWebUI conversations."""
+        scopes: dict[str, dict[str, Any]] = {}
+        client_id = getattr(self.db, "client_id", None)
+        if client_id is None or not hasattr(self.db, "get_conversations_for_user"):
+            return []
+
+        offset = 0
+        page_size = 500
+        while True:
+            conversations = self.db.get_conversations_for_user(
+                client_id,
+                limit=page_size,
+                offset=offset,
+            )
+            if not conversations:
+                break
+            for conversation in conversations:
+                conversation_id = str(conversation.get("id") or "").strip()
+                if not conversation_id:
+                    continue
+                import_meta = self._openwebui_conversation_import_metadata(conversation_id)
+                if not import_meta:
+                    continue
+
+                metadata = import_meta["metadata"]
+                source_format = str(metadata.get("source_kind") or "openwebui_json").strip() or "openwebui_json"
+                source_user_id = self._clean_optional_text(metadata.get("source_user_id"))
+                source_user_label = self._clean_optional_text(metadata.get("source_user_label"))
+                scope_id = self._openwebui_scope_id_from_metadata(metadata, source_format, source_user_id)
+                created_at = self._clean_optional_text(metadata.get("imported_at"))
+                attachment_count = self._count_openwebui_attachment_refs(conversation_id)
+                source_conversation_id = (
+                    self._clean_optional_text(metadata.get("row_id"))
+                    or self._clean_optional_text(import_meta.get("external_ref"))
+                    or self._clean_optional_text(conversation.get("external_ref"))
+                )
+                scope = scopes.setdefault(
+                    scope_id,
+                    {
+                        "scope_id": scope_id,
+                        "source_format": source_format,
+                        "source_user_id": source_user_id,
+                        "source_user_label": source_user_label,
+                        "conversation_count": 0,
+                        "attachment_reference_count": 0,
+                        "created_at": created_at,
+                        "conversation_ids": [],
+                        "conversations": [],
+                    },
+                )
+                if scope.get("created_at") is None and created_at is not None:
+                    scope["created_at"] = created_at
+                if scope.get("source_user_id") is None and source_user_id is not None:
+                    scope["source_user_id"] = source_user_id
+                if scope.get("source_user_label") is None and source_user_label is not None:
+                    scope["source_user_label"] = source_user_label
+                scope["conversation_ids"].append(conversation_id)
+                scope["conversations"].append(
+                    {
+                        "source_conversation_id": source_conversation_id,
+                        "conversation_id": conversation_id,
+                        "title": str(conversation.get("title") or ""),
+                        "attachment_reference_count": attachment_count,
+                    }
+                )
+                scope["conversation_count"] += 1
+                scope["attachment_reference_count"] += attachment_count
+
+            if len(conversations) < page_size:
+                break
+            offset += page_size
+
+        return sorted(
+            scopes.values(),
+            key=lambda item: str(item.get("created_at") or ""),
+            reverse=True,
+        )
+
+    def resolve_openwebui_hydration_scope(self, scope: dict[str, Any]) -> dict[str, Any]:
+        """Resolve an import-scope id to concrete tldw conversation ids for hydration."""
+        import_scope_id = self._clean_optional_text(scope.get("import_scope_id"))
+        source_user_id = self._clean_optional_text(scope.get("source_user_id") or scope.get("openwebui_user_id"))
+        conversation_ids = [
+            text
+            for text in (self._clean_optional_text(item) for item in (scope.get("conversation_ids") or []))
+            if text is not None
+        ]
+        if conversation_ids:
+            return {
+                "import_scope_id": import_scope_id,
+                "conversation_ids": conversation_ids,
+                "source_user_id": source_user_id,
+            }
+        if import_scope_id:
+            for imported_scope in self.list_openwebui_import_scopes():
+                if imported_scope["scope_id"] != import_scope_id:
+                    continue
+                return {
+                    "import_scope_id": import_scope_id,
+                    "conversation_ids": list(imported_scope.get("conversation_ids") or []),
+                    "source_user_id": source_user_id or imported_scope.get("source_user_id"),
+                }
+            raise ValueError("OpenWebUI import scope was not found.")
+        return {
+            "import_scope_id": None,
+            "conversation_ids": [],
+            "source_user_id": source_user_id,
+        }
+
     def preview_openwebui_attachment_hydration(
         self,
         *,
@@ -3249,8 +3359,9 @@ class ChatbookService:
         process_supported_files: bool = False,
     ) -> dict[str, Any]:
         """Preview OpenWebUI attachment hydration for already imported conversations."""
-        source_user_id = scope.get("source_user_id") or scope.get("openwebui_user_id")
-        conversation_ids = tuple(str(item).strip() for item in (scope.get("conversation_ids") or []) if str(item).strip())
+        resolved_scope = self.resolve_openwebui_hydration_scope(scope)
+        source_user_id = resolved_scope.get("source_user_id")
+        conversation_ids = tuple(resolved_scope.get("conversation_ids") or [])
         data_root = validate_openwebui_data_root(openwebui_data_root, require_uploads=False)
 
         items: list[dict[str, Any]] = []
@@ -3313,10 +3424,7 @@ class ChatbookService:
         summary["returned_items"] = len(returned_items)
         summary["omitted_items"] = omitted_items
         return {
-            "scope": {
-                "conversation_ids": list(conversation_ids),
-                "source_user_id": str(source_user_id).strip() if source_user_id else None,
-            },
+            "scope": resolved_scope,
             "process_supported_files": bool(process_supported_files),
             "summary": summary,
             "items": returned_items,
@@ -3335,8 +3443,9 @@ class ChatbookService:
         if self.user_id_int is None:
             raise ValueError("OpenWebUI attachment hydration requires a numeric user id.")
 
-        source_user_id = scope.get("source_user_id") or scope.get("openwebui_user_id")
-        conversation_ids = tuple(str(item).strip() for item in (scope.get("conversation_ids") or []) if str(item).strip())
+        resolved_scope = self.resolve_openwebui_hydration_scope(scope)
+        source_user_id = resolved_scope.get("source_user_id")
+        conversation_ids = tuple(resolved_scope.get("conversation_ids") or [])
         data_root = validate_openwebui_data_root(openwebui_data_root, require_uploads=True)
         media_db = self._get_media_db()
         storage_root = self._openwebui_attachment_storage_root()
@@ -3459,10 +3568,7 @@ class ChatbookService:
         summary["returned_items"] = len(returned_items)
         summary["omitted_items"] = omitted_items
         return {
-            "scope": {
-                "conversation_ids": list(conversation_ids),
-                "source_user_id": str(source_user_id).strip() if source_user_id else None,
-            },
+            "scope": resolved_scope,
             "process_supported_files": bool(process_supported_files),
             "summary": summary,
             "items": returned_items,
@@ -3486,6 +3592,73 @@ class ChatbookService:
         with contextlib.suppress(OSError):
             storage_root.chmod(0o700)
         return storage_root
+
+    @staticmethod
+    def _clean_optional_text(value: Any) -> str | None:
+        """Return stripped text, or None for blank/null values."""
+        if value is None:
+            return None
+        text = str(value).strip()
+        return text or None
+
+    @staticmethod
+    def _openwebui_scope_id_from_metadata(
+        metadata: dict[str, Any],
+        source_format: str,
+        source_user_id: str | None,
+    ) -> str:
+        """Return stored scope id, with a deterministic legacy fallback."""
+        stored = ChatbookService._clean_optional_text(metadata.get("import_scope_id"))
+        if stored:
+            return stored
+        user_part = source_user_id or "all"
+        return f"{source_format}:{user_part}"
+
+    def _openwebui_conversation_import_metadata(self, conversation_id: str) -> dict[str, Any] | None:
+        """Load OpenWebUI conversation import settings in a normalized envelope."""
+        if not hasattr(self.db, "get_conversation_settings"):
+            return None
+        settings_row = self.db.get_conversation_settings(conversation_id)
+        settings = settings_row.get("settings") if isinstance(settings_row, dict) else None
+        if not isinstance(settings, dict):
+            return None
+        openwebui_import = settings.get("openwebui_import")
+        if not isinstance(openwebui_import, dict):
+            return None
+        metadata = openwebui_import.get("metadata")
+        if not isinstance(metadata, dict):
+            metadata = {}
+        return {
+            **openwebui_import,
+            "metadata": metadata,
+        }
+
+    def _count_openwebui_attachment_refs(self, conversation_id: str) -> int:
+        """Count preserved OpenWebUI attachment references for one imported conversation."""
+        count = 0
+        offset = 0
+        page_size = 500
+        while True:
+            messages = self.db.get_messages_for_conversation(
+                conversation_id,
+                limit=page_size,
+                offset=offset,
+            )
+            if not messages:
+                break
+            message_ids = [str(message["id"]) for message in messages if message.get("id") is not None]
+            metadata_by_message_id = self.db.get_message_metadata_map(message_ids)
+            for message_id in message_ids:
+                metadata = metadata_by_message_id.get(message_id)
+                extra = metadata.get("extra") if isinstance(metadata, dict) else None
+                openwebui_import = extra.get("openwebui_import") if isinstance(extra, dict) else None
+                refs = openwebui_import.get("attachment_refs") if isinstance(openwebui_import, dict) else None
+                if isinstance(refs, list):
+                    count += len(refs)
+            if len(messages) < page_size:
+                break
+            offset += page_size
+        return count
 
     @staticmethod
     def _openwebui_hydration_item_to_dict(item: Any) -> dict[str, Any]:
@@ -3680,6 +3853,42 @@ class ChatbookService:
         }
         return bool(self.db.upsert_conversation_settings(conversation_id, merged))
 
+    def _record_openwebui_import_mapping(
+        self,
+        conversation_id: str,
+        *,
+        import_scope_id: str,
+        source_format: str,
+        source_user_id: str | None = None,
+        source_user_label: str | None = None,
+        imported_at: str | None = None,
+    ) -> bool:
+        """Persist hydration-scope metadata for an imported OpenWebUI conversation."""
+        current = self.db.get_conversation_settings(conversation_id) or {}
+        settings = current.get("settings") if isinstance(current, dict) else {}
+        if not isinstance(settings, dict):
+            settings = {}
+        openwebui_import = settings.get("openwebui_import")
+        if not isinstance(openwebui_import, dict):
+            return False
+        metadata = openwebui_import.get("metadata")
+        if not isinstance(metadata, dict):
+            metadata = {}
+        merged_metadata = dict(metadata)
+        merged_metadata["import_scope_id"] = str(import_scope_id)
+        merged_metadata["source_kind"] = str(source_format)
+        merged_metadata["imported_at"] = imported_at or datetime.now(timezone.utc).isoformat()
+        if source_user_id is not None:
+            merged_metadata["source_user_id"] = str(source_user_id)
+        if source_user_label is not None:
+            merged_metadata["source_user_label"] = str(source_user_label)
+
+        merged_openwebui_import = dict(openwebui_import)
+        merged_openwebui_import["metadata"] = merged_metadata
+        merged_settings = dict(settings)
+        merged_settings["openwebui_import"] = merged_openwebui_import
+        return bool(self.db.upsert_conversation_settings(conversation_id, merged_settings))
+
     def _rollback_openwebui_conversation(
         self,
         conversation_id: str,
@@ -3742,6 +3951,8 @@ class ChatbookService:
             "duplicate_chats": 0,
             "warnings": list(parsed.warnings),
         }
+        import_scope_id = f"openwebui_json:{uuid4().hex}"
+        imported_at = datetime.now(timezone.utc).isoformat()
 
         for chat in parsed.chats:
             import_external_ref = chat.external_ref
@@ -3805,6 +4016,15 @@ class ChatbookService:
                 if not self._store_openwebui_conversation_settings(conversation_id, chat, import_external_ref):
                     raise DatabaseError(
                         f"OpenWebUI chat {chat.external_ref} conversation metadata was not stored."
+                    )
+                if not self._record_openwebui_import_mapping(
+                    conversation_id,
+                    import_scope_id=import_scope_id,
+                    source_format="openwebui_json",
+                    imported_at=imported_at,
+                ):
+                    raise DatabaseError(
+                        f"OpenWebUI chat {chat.external_ref} import mapping was not stored."
                     )
 
                 message_id_map: dict[str, str] = {}
@@ -3926,6 +4146,8 @@ class ChatbookService:
             "folder_links": 0,
             "warnings": list(extracted.warnings),
         }
+        import_scope_id = f"openwebui_db:{extracted.selected_user_id}:{uuid4().hex}"
+        imported_at = datetime.now(timezone.utc).isoformat()
         mirrored_folder_ids: set[int] = set()
         namespace_segments = build_openwebui_namespace_segments(
             extracted.selected_user_label,
@@ -4008,6 +4230,17 @@ class ChatbookService:
                 ):
                     raise DatabaseError(
                         f"OpenWebUI chat {chat.external_ref} conversation metadata was not stored."
+                    )
+                if not self._record_openwebui_import_mapping(
+                    conversation_id,
+                    import_scope_id=import_scope_id,
+                    source_format="openwebui_db",
+                    source_user_id=extracted.selected_user_id,
+                    source_user_label=extracted.selected_user_label,
+                    imported_at=imported_at,
+                ):
+                    raise DatabaseError(
+                        f"OpenWebUI chat {chat.external_ref} import mapping was not stored."
                     )
 
                 message_id_map: dict[str, str] = {}

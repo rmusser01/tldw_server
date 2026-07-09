@@ -1,6 +1,6 @@
 import React from "react"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { useQuery } from "@tanstack/react-query"
 import { ChatbooksPlaygroundPage } from "../ChatbooksPlaygroundPage"
 
@@ -33,6 +33,7 @@ const { capabilitiesMock, useQueryMock, tldwClientMock } = vi.hoisted(() => ({
     exportChatbook: vi.fn(),
     previewChatbook: vi.fn(),
     importChatbook: vi.fn(),
+    listOpenWebUIImportScopes: vi.fn(),
     previewOpenWebUIHydration: vi.fn(),
     createOpenWebUIHydrationJob: vi.fn(),
     getOpenWebUIHydrationJob: vi.fn()
@@ -184,6 +185,10 @@ describe("ChatbooksPlaygroundPage OpenWebUI import mode", () => {
       writable: true,
       value: originalMatchMedia
     })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
   beforeEach(() => {
@@ -469,6 +474,175 @@ describe("ChatbooksPlaygroundPage OpenWebUI import mode", () => {
       })
     })
     expect(screen.getByText("queued")).toBeInTheDocument()
+  })
+
+  it("uses the latest OpenWebUI import scope for hydration preview and job creation", async () => {
+    tldwClientMock.previewChatbook.mockResolvedValueOnce({
+      openwebui_preview: {
+        chat_count: 1,
+        message_count: 3,
+        branched_chat_count: 0,
+        duplicate_chat_count: 0,
+        attachment_reference_count: 2,
+        malformed_chat_count: 0,
+        warnings: []
+      }
+    })
+    tldwClientMock.importChatbook.mockResolvedValueOnce({ success: true })
+    tldwClientMock.listOpenWebUIImportScopes.mockResolvedValueOnce({
+      scopes: [
+        {
+          scope_id: "scope-json",
+          source_format: "openwebui_json",
+          source_user_id: null,
+          source_user_label: null,
+          conversation_count: 1,
+          attachment_reference_count: 2,
+          conversation_ids: ["conv-a"],
+          conversations: [
+            {
+              source_conversation_id: "chat-a",
+              conversation_id: "conv-a",
+              title: "Imported chat",
+              attachment_reference_count: 2
+            }
+          ]
+        }
+      ]
+    })
+    tldwClientMock.previewOpenWebUIHydration.mockResolvedValueOnce({
+      scope: {
+        import_scope_id: "scope-json",
+        conversation_ids: ["conv-a"],
+        source_user_id: null
+      },
+      summary: {
+        referenced_files: 2,
+        resolved_files: 2,
+        image_files: 1,
+        media_files: 1,
+        missing_files: 0,
+        unsupported_files: 0,
+        warning_count: 0
+      },
+      warnings: []
+    })
+    tldwClientMock.createOpenWebUIHydrationJob.mockResolvedValueOnce({
+      job_id: "hydration-job-1",
+      status: "queued"
+    })
+
+    const { container } = render(<ChatbooksPlaygroundPage />)
+
+    fireEvent.click(screen.getByRole("tab", { name: "Import" }))
+    const sourceSelect = screen
+      .getAllByRole("combobox")
+      .find((element) => (element as HTMLSelectElement).value === "chatbook")
+    fireEvent.change(sourceSelect!, { target: { value: "openwebui_json" } })
+
+    const uploadInput = container.querySelector(".ant-upload-drag input[type=\"file\"]") as HTMLInputElement
+    fireEvent.change(uploadInput, {
+      target: {
+        files: [new File(["[]"], "openwebui.json", { type: "application/json" })]
+      }
+    })
+    await waitFor(() => {
+      expect(screen.getByText("OpenWebUI preview")).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Import chatbook" }))
+
+    await waitFor(() => {
+      expect(tldwClientMock.listOpenWebUIImportScopes).toHaveBeenCalled()
+    })
+    expect(screen.getByText("Last import scope")).toBeInTheDocument()
+    expect(screen.getByText("OpenWebUI JSON · 1 conversation · 2 attachment refs")).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText("OpenWebUI data root"), {
+      target: { value: "/srv/openwebui" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Preview attachments" }))
+
+    await waitFor(() => {
+      expect(tldwClientMock.previewOpenWebUIHydration).toHaveBeenCalledWith({
+        openwebui_data_root: "/srv/openwebui",
+        scope: {
+          import_scope_id: "scope-json"
+        },
+        process_supported_files: false
+      })
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Run hydration job" }))
+
+    await waitFor(() => {
+      expect(tldwClientMock.createOpenWebUIHydrationJob).toHaveBeenCalledWith({
+        openwebui_data_root: "/srv/openwebui",
+        scope: {
+          import_scope_id: "scope-json"
+        },
+        process_supported_files: false
+      })
+    })
+  })
+
+  it("refreshes OpenWebUI import scopes when a background import job completes", async () => {
+    vi.useFakeTimers()
+    tldwClientMock.listChatbookImportJobs.mockResolvedValueOnce({
+      jobs: [
+        {
+          job_id: "import-job-1",
+          status: "in_progress",
+          chatbook_name: "OpenWebUI import",
+          created_at: "2026-07-09T12:00:00Z"
+        }
+      ]
+    })
+    tldwClientMock.getChatbookImportJob.mockResolvedValueOnce({
+      job_id: "import-job-1",
+      status: "completed",
+      chatbook_name: "OpenWebUI import",
+      completed_at: "2026-07-09T12:00:03Z"
+    })
+    tldwClientMock.listOpenWebUIImportScopes.mockResolvedValueOnce({
+      scopes: [
+        {
+          scope_id: "scope-completed",
+          source_format: "openwebui_db",
+          source_user_id: "user-a",
+          source_user_label: "Alice",
+          conversation_count: 1,
+          attachment_reference_count: 1,
+          conversation_ids: ["conv-a"],
+          conversations: []
+        }
+      ]
+    })
+
+    render(<ChatbooksPlaygroundPage />)
+
+    fireEvent.click(screen.getByRole("tab", { name: "Import" }))
+    const sourceSelect = screen
+      .getAllByRole("combobox")
+      .find((element) => (element as HTMLSelectElement).value === "chatbook")
+    fireEvent.change(sourceSelect!, { target: { value: "openwebui_db" } })
+
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(tldwClientMock.listChatbookImportJobs).toHaveBeenCalled()
+
+    await act(async () => {
+      await vi.runOnlyPendingTimersAsync()
+      await vi.runOnlyPendingTimersAsync()
+    })
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(tldwClientMock.listOpenWebUIImportScopes).toHaveBeenCalled()
+    expect(screen.getByText("OpenWebUI database · Alice · 1 conversation · 1 attachment ref")).toBeInTheDocument()
   })
 
   it("requires a fresh hydration preview after selecting a new OpenWebUI preview file", async () => {

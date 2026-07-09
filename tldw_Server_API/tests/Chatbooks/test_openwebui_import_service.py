@@ -225,6 +225,38 @@ def test_import_openwebui_json_preserves_branch_parent_links_and_metadata(openwe
     ]
 
 
+def test_import_openwebui_json_persists_hydration_scope_mapping(openwebui_service):
+    path = _write_export(openwebui_service, _branched_export())
+
+    success, message, result = openwebui_service.import_openwebui_json(path, ConflictResolution.SKIP)
+
+    assert success is True, message
+    assert result is not None
+    assert result["imported_chats"] == 1
+
+    scopes = openwebui_service.list_openwebui_import_scopes()
+
+    assert len(scopes) == 1
+    scope = scopes[0]
+    assert scope["scope_id"]
+    assert scope["source_format"] == "openwebui_json"
+    assert scope["source_user_id"] is None
+    assert scope["source_user_label"] is None
+    assert scope["conversation_count"] == 1
+    assert scope["attachment_reference_count"] == 1
+    assert scope["created_at"] is not None
+    assert scope["conversations"] == [
+        {
+            "source_conversation_id": "chat-branched",
+            "conversation_id": scope["conversation_ids"][0],
+            "title": "Branch preserving import",
+            "attachment_reference_count": 1,
+        }
+    ]
+    assert scope["conversation_ids"] == [scope["conversations"][0]["conversation_id"]]
+    assert "openwebui.json" not in json.dumps(scope)
+
+
 def test_preview_openwebui_db_lists_source_users(openwebui_service):
     path = _write_openwebui_db(openwebui_service)
 
@@ -279,6 +311,58 @@ def test_import_openwebui_db_imports_only_selected_user(openwebui_service):
         keyword["id"] for keyword in db.get_keywords_for_conversation(imported["id"])
     }
     assert collection_keyword_ids & conversation_keyword_ids
+
+
+def test_import_openwebui_db_persists_selected_user_hydration_scope_mapping(openwebui_service):
+    path = _write_openwebui_db(openwebui_service)
+
+    success, message, result = openwebui_service.import_openwebui_db(
+        path,
+        selected_user_id="user-a",
+        conflict_resolution=ConflictResolution.SKIP,
+    )
+
+    assert success is True, message
+    assert result is not None
+    assert result["imported_chats"] == 1
+
+    scopes = openwebui_service.list_openwebui_import_scopes()
+
+    assert len(scopes) == 1
+    scope = scopes[0]
+    assert scope["scope_id"]
+    assert scope["source_format"] == "openwebui_db"
+    assert scope["source_user_id"] == "user-a"
+    assert scope["source_user_label"] == "Alice"
+    assert scope["conversation_count"] == 1
+    assert scope["attachment_reference_count"] == 1
+    assert scope["created_at"] is not None
+    assert scope["conversations"][0] == {
+        "source_conversation_id": "chat-a",
+        "conversation_id": scope["conversation_ids"][0],
+        "title": "Alice DB chat",
+        "attachment_reference_count": 1,
+    }
+
+
+def test_resolve_openwebui_hydration_scope_uses_selected_import_mapping(openwebui_service):
+    path = _write_openwebui_db(openwebui_service)
+    success, message, result = openwebui_service.import_openwebui_db(
+        path,
+        selected_user_id="user-a",
+        conflict_resolution=ConflictResolution.SKIP,
+    )
+    assert success is True, message
+    assert result is not None
+    scope_id = openwebui_service.list_openwebui_import_scopes()[0]["scope_id"]
+
+    resolved = openwebui_service.resolve_openwebui_hydration_scope({"import_scope_id": scope_id})
+
+    assert resolved == {
+        "import_scope_id": scope_id,
+        "conversation_ids": openwebui_service.list_openwebui_import_scopes()[0]["conversation_ids"],
+        "source_user_id": "user-a",
+    }
 
 
 @pytest.mark.asyncio

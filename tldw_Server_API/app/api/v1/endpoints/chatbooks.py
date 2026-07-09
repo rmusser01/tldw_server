@@ -63,6 +63,7 @@ from ..schemas.chatbook_schemas import (
     ImportJobResponse,
     ListExportJobsResponse,
     ListImportJobsResponse,
+    OpenWebUIImportScopesResponse,
     OpenWebUIHydrationJobRequest,
     OpenWebUIHydrationJobResponse,
     OpenWebUIHydrationPreviewRequest,
@@ -1259,6 +1260,33 @@ async def preview_chatbook(
                     labels={"component": "chatbooks", "event": "preview_cleanup_failed"},
                     error_context="chatbooks preview_cleanup_failed",
                 )
+
+
+@router.get(
+    "/openwebui/import-scopes",
+    response_model=OpenWebUIImportScopesResponse,
+    dependencies=[Depends(rbac_rate_limit("chatbooks.openwebui_import_scopes.list"))],
+)
+async def list_openwebui_import_scopes(
+    request: Request,
+    service: ChatbookService = Depends(get_chatbook_service),
+    user: User = Depends(get_request_user),
+):
+    """List imported OpenWebUI conversation scopes available for hydration."""
+    try:
+        scopes = await asyncio.to_thread(service.list_openwebui_import_scopes)
+        return OpenWebUIImportScopesResponse(scopes=scopes)
+    except _CHATBOOKS_NONCRITICAL_EXCEPTIONS:
+        get_ps_logger(
+            request_id=ensure_request_id(request),
+            ps_component="endpoint",
+            ps_job_kind="chatbooks",
+            traceparent=ensure_traceparent(request),
+        ).exception(f"Error listing OpenWebUI import scopes for user {user.id}")
+        raise HTTPException(
+            status_code=500,
+            detail="An error occurred while listing OpenWebUI import scopes",
+        ) from None
 
 
 @router.post(

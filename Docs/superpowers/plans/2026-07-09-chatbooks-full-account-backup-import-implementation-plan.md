@@ -808,7 +808,7 @@ Verification:
 - Test: `tldw_Server_API/tests/Chatbooks/test_openwebui_hydration_api.py`
 - Test: `apps/packages/ui/src/components/Option/Chatbooks/__tests__/ChatbooksPlaygroundPage.openwebui-import.test.tsx`
 
-- [ ] **Step 1: Write failing backend mapping tests**
+- [x] **Step 1: Write failing backend mapping tests**
 
 After an OpenWebUI JSON or DB import, assert the result persists:
 
@@ -821,7 +821,7 @@ After an OpenWebUI JSON or DB import, assert the result persists:
 
 Then assert hydration preview can use the last or selected import scope without manual `conversation_ids`.
 
-- [ ] **Step 2: Run backend OpenWebUI tests and verify failure**
+- [x] **Step 2: Run backend OpenWebUI tests and verify failure**
 
 Run:
 
@@ -832,7 +832,7 @@ python -m pytest tldw_Server_API/tests/Chatbooks/test_openwebui_hydration_servic
 
 Expected: fail because hydration currently depends on manually supplied imported tldw conversation IDs.
 
-- [ ] **Step 3: Persist import mappings**
+- [x] **Step 3: Persist import mappings**
 
 Reuse existing OpenWebUI metadata when possible. If a dedicated table is needed, create it through the existing Chatbooks DB initialization path and store owner user ID with every row. Expose helpers:
 
@@ -844,7 +844,7 @@ def resolve_openwebui_hydration_scope(...)
 
 Do not store raw local file paths in user-facing scope summaries.
 
-- [ ] **Step 4: Add API for scope listing and hydration selection**
+- [x] **Step 4: Add API for scope listing and hydration selection**
 
 Add models:
 
@@ -860,11 +860,11 @@ class OpenWebUIImportScopeSummary(BaseModel):
 
 Add `GET /api/v1/chatbooks/openwebui/import-scopes` and extend hydration requests with `import_scope_id` while preserving manual IDs as an advanced override.
 
-- [ ] **Step 5: Update UI hydration flow**
+- [x] **Step 5: Update UI hydration flow**
 
 After an OpenWebUI import, show the last import scope as the default hydration scope. Show source format, source user, conversation count, and attachment-reference summary. Keep manual conversation ID entry under an advanced control.
 
-- [ ] **Step 6: Verify backend and UI tests pass**
+- [x] **Step 6: Verify backend and UI tests pass**
 
 Run:
 
@@ -877,12 +877,26 @@ bunx vitest run ../packages/ui/src/components/Option/Chatbooks/__tests__/Chatboo
 
 Expected: pass.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/Chatbooks/chatbook_service.py tldw_Server_API/app/core/Chatbooks/openwebui_hydration.py tldw_Server_API/app/core/Chatbooks/openwebui_hydration_jobs.py tldw_Server_API/app/api/v1/schemas/chatbook_schemas.py tldw_Server_API/app/api/v1/endpoints/chatbooks.py apps/packages/ui/src/services/tldw/TldwApiClient.ts apps/packages/ui/src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx tldw_Server_API/tests/Chatbooks/test_openwebui_hydration_service.py tldw_Server_API/tests/Chatbooks/test_openwebui_hydration_api.py apps/packages/ui/src/components/Option/Chatbooks/__tests__/ChatbooksPlaygroundPage.openwebui-import.test.tsx apps/packages/ui/src/services/__tests__/tldw-api-client.chatbooks-openwebui.test.ts
 git commit -m "feat: reuse openwebui import scope for hydration"
 ```
+
+Completed implementation before commit:
+- OpenWebUI JSON and database imports now persist an import scope id and import timestamp in existing per-conversation OpenWebUI metadata; scope summaries are rebuilt from user-owned ChaCha conversation/settings/message metadata without storing or exposing source filesystem paths.
+- Added `list_openwebui_import_scopes()` and `resolve_openwebui_hydration_scope()` so preview/run hydration can use `import_scope_id` while preserving manual `conversation_ids` as an override.
+- Added `GET /api/v1/chatbooks/openwebui/import-scopes`, `import_scope_id` request support, and response schemas for user-safe scope summaries.
+- Updated the WebUI client and Chatbooks Backup & Import OpenWebUI hydration UI to default to the latest import scope after sync import or background import completion, with manual conversation IDs kept behind a manual-scope control.
+
+Verification:
+- Initial red backend run failed on missing scope listing/resolution/schema/endpoint support: `python -m pytest tldw_Server_API/tests/Chatbooks/test_openwebui_import_service.py tldw_Server_API/tests/Chatbooks/test_openwebui_hydration_service.py tldw_Server_API/tests/Chatbooks/test_openwebui_hydration_api.py -v`.
+- Initial red frontend run failed on missing `listOpenWebUIImportScopes`; the UI test also failed until background import completion refreshed scopes.
+- Passed: `python -m pytest tldw_Server_API/tests/Chatbooks/test_openwebui_hydration_service.py tldw_Server_API/tests/Chatbooks/test_openwebui_hydration_api.py tldw_Server_API/tests/Chatbooks/test_openwebui_import_service.py -v` => 51 passed, 5 warnings.
+- Passed: `bunx vitest run ../packages/ui/src/components/Option/Chatbooks/__tests__/ChatbooksPlaygroundPage.openwebui-import.test.tsx ../packages/ui/src/services/__tests__/tldw-api-client.chatbooks-openwebui.test.ts` => 19 passed.
+- Passed: `git diff --check`.
+- Passed: `python -m bandit -r tldw_Server_API/app/core/Chatbooks/chatbook_service.py tldw_Server_API/app/api/v1/endpoints/chatbooks.py tldw_Server_API/app/api/v1/schemas/chatbook_schemas.py -f json -o /tmp/bandit_chatbooks_task7.json` => 0 findings.
 
 ## Task 8: Documentation, E2E, Security, And Final Review
 

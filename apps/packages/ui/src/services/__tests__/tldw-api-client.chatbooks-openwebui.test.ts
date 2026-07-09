@@ -192,6 +192,44 @@ describe("TldwApiClient Chatbooks OpenWebUI import contract", () => {
     )
   })
 
+  it("lists OpenWebUI import scopes", async () => {
+    mocks.bgRequest.mockResolvedValue({ scopes: [] })
+
+    const client = new TldwApiClient()
+    await client.listOpenWebUIImportScopes()
+
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/chatbooks/openwebui/import-scopes",
+        method: "GET"
+      })
+    )
+  })
+
+  it("previews OpenWebUI attachment hydration with an import scope id", async () => {
+    mocks.bgRequest.mockResolvedValue({ summary: { referenced_files: 1 } })
+
+    const client = new TldwApiClient()
+    const payload = {
+      openwebui_data_root: "/srv/openwebui",
+      scope: {
+        import_scope_id: "scope-json"
+      },
+      process_supported_files: false
+    }
+
+    await client.previewOpenWebUIHydration(payload)
+
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/chatbooks/openwebui/hydration/preview",
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: payload
+      })
+    )
+  })
+
   it("creates an OpenWebUI attachment hydration job with a JSON request", async () => {
     mocks.bgRequest.mockResolvedValue({ job_id: "42", status: "queued" })
 
