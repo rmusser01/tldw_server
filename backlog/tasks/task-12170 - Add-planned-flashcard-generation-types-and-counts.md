@@ -64,6 +64,8 @@ Task 3 workflow adapter slice: added adapter config support for legacy card_type
 Task 3 follow-up review fix: invalid direct workflow card_plan configs now return invalid_card_plan before LLM calls, and parsed adapter output is cleaned to dict flashcards before returning count. Verification: red focused adapter tests failed before implementation; focused regressions passed (7 passed, 116 deselected); FlashcardGenerateAdapter pytest passed (12 passed, 111 deselected); Bandit on touched production adapter files reported 0 findings; git diff --check passed.
 
 Task 3 spec re-review fix: direct workflow card_plan validation now rejects duplicate card_type rows and rows with fields other than card_type/count before LLM calls. Verification: red focused invalid-plan adapter test failed on duplicate/extra-field cases before implementation; focused invalid-plan pytest passed (8 passed, 117 deselected); FlashcardGenerateAdapter pytest passed (14 passed, 111 deselected); Bandit on touched production adapter files reported 0 findings; git diff --check passed.
+
+Task 3 strict-count follow-up: direct workflow card_plan counts now require actual positive int values, rejecting floats, bools, and numeric strings before LLM calls. Verification: red focused invalid-plan adapter test failed on coerced count cases before implementation; focused invalid-plan pytest passed (11 passed, 117 deselected); FlashcardGenerateAdapter pytest passed (17 passed, 111 deselected); Bandit on touched production adapter files reported 0 findings; git diff --check passed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

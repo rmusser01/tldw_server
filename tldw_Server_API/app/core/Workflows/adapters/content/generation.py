@@ -202,13 +202,10 @@ async def run_flashcard_generate_adapter(config: dict[str, Any], context: dict[s
             if plan_type in seen_plan_types:
                 invalid_plan = True
             seen_plan_types.add(plan_type)
-            try:
-                count = int(row.get("count") or 0)
-            except (TypeError, ValueError):
+            count = row.get("count")
+            if type(count) is not int or count <= 0:
                 invalid_plan = True
                 count = 0
-            if count <= 0:
-                invalid_plan = True
             normalized_plan.append({"card_type": plan_type, "count": count})
     elif card_plan is not None:
         invalid_plan = True
