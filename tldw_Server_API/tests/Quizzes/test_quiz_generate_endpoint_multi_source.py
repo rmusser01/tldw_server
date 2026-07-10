@@ -5,7 +5,6 @@ from fastapi import HTTPException
 
 from tldw_Server_API.app.api.v1.endpoints import quizzes as quizzes_endpoint
 from tldw_Server_API.app.api.v1.schemas.quizzes import QuizGenerateRequest
-from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
 from tldw_Server_API.app.services.quiz_generator import QuizProvenanceValidationError
 
 
@@ -14,6 +13,17 @@ def test_generation_profiles_endpoint_lists_available_best_of_five_profile():
 
     assert any(
         profile["id"] == "best_of_five"
+        and profile["status"] == "available"
+        and profile["default_question_types"] == ["multiple_choice"]
+        for profile in profiles
+    )
+
+
+def test_generation_profiles_endpoint_lists_available_assertion_reasoning_profile():
+    profiles = quizzes_endpoint.list_quiz_generation_profiles()
+
+    assert any(
+        profile["id"] == "assertion_reasoning"
         and profile["status"] == "available"
         and profile["default_question_types"] == ["multiple_choice"]
         for profile in profiles

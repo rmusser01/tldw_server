@@ -39,6 +39,50 @@ def _valid_emq_questions(*, group_id: str = "emq-1") -> list[dict]:
     ]
 
 
+ASSERTION_REASONING_OPTIONS = (
+    "Both the assertion and reason are true, and the reason correctly explains the assertion.",
+    "Both the assertion and reason are true, but the reason does not explain the assertion.",
+    "The assertion is true, but the reason is false.",
+    "The assertion is false, but the reason is true.",
+    "Both the assertion and reason are false.",
+)
+
+
+def _valid_assertion_reasoning_question(**overrides: object) -> dict:
+    question = {
+        "question_type": "multiple_choice",
+        "assertion": "The review board meets every Friday.",
+        "reason": "The selected note states that Friday review boards are required.",
+        "options": ["LLM-supplied option"],
+        "correct_answer": 0,
+        "explanation": "The citation directly supports both statements and their relationship.",
+        "source_citations": [
+            {
+                "source_type": "note",
+                "source_id": "note-ar",
+                "quote": "Review boards meet every Friday.",
+            }
+        ],
+    }
+    question.update(overrides)
+    return question
+
+
+def _normalize_assertion_reasoning_questions(**overrides: object) -> list[dict]:
+    return _normalize_questions(
+        [_valid_assertion_reasoning_question(**overrides)],
+        default_source_type="note",
+        default_source_id="note-ar",
+        generation_profile="assertion_reasoning",
+    )
+
+
+def _normalize_assertion_reasoning_question(**overrides: object) -> dict:
+    questions = _normalize_assertion_reasoning_questions(**overrides)
+    assert len(questions) == 1
+    return questions[0]
+
+
 @pytest.fixture(scope="function")
 def quizzes_db(tmp_path):
     db_path = tmp_path / "quiz-generator-test-mode.db"
@@ -603,47 +647,6 @@ async def test_generate_quiz_does_not_persist_emq_invalidated_after_limiting(
 
 
 @pytest.mark.asyncio
-async def test_generate_quiz_from_sources_uses_test_mode_fallback_for_metadata_only_evidence(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    monkeypatch.setenv("TEST_MODE", "1")
-    monkeypatch.setattr(
-        quiz_generator,
-        "resolve_quiz_sources",
-        lambda *_args, **_kwargs: [{"source_type": "note", "source_id": "note-meta", "text": ""}],
-    )
-    monkeypatch.setattr(
-        quiz_generator,
-        "_resolve_generated_quiz_metadata",
-        lambda **_kwargs: ("Metadata Fallback Quiz", "Generated from metadata-only evidence."),
-    )
-    monkeypatch.setattr(
-        quiz_generator,
-        "_persist_generated_quiz",
-        lambda **kwargs: {
-            "quiz": {
-                "title": kwargs["quiz_title"],
-                "description": kwargs["quiz_description"],
-                "workspace_tag": kwargs["workspace_tag"],
-            },
-            "questions": kwargs["questions"],
-        },
-    )
-
-    result = await generate_quiz_from_sources(
-        db=Mock(),
-        media_db=Mock(),
-        sources=[{"source_type": "note", "source_id": "note-meta"}],
-        num_questions=1,
-        question_types=["multiple_choice"],
-        workspace_tag="workspace:test",
-    )
-
-    assert result["quiz"]["workspace_tag"] == "workspace:test"
-    assert result["questions"][0]["source_citations"][0]["quote"] == "Study point from note:note-meta."
-
-
-@pytest.mark.asyncio
 async def test_generate_quiz_from_sources_persists_exact_planned_type_counts_in_test_mode(
     monkeypatch: pytest.MonkeyPatch,
     quizzes_db: CharactersRAGDB,
@@ -788,3 +791,385 @@ async def test_generate_quiz_from_sources_planned_shortfall_fails_before_persist
         )
 
     assert quizzes_db.list_quizzes(limit=10, offset=0)["count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_generate_quiz_from_sources_uses_test_mode_fallback_for_metadata_only_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setenv("TEST_MODE", "1")
+    monkeypatch.setattr(
+        quiz_generator,
+        "resolve_quiz_sources",
+        lambda *_args, **_kwargs: [{"source_type": "note", "source_id": "note-meta", "text": ""}],
+    )
+    monkeypatch.setattr(
+        quiz_generator,
+        "_resolve_generated_quiz_metadata",
+        lambda **_kwargs: ("Metadata Fallback Quiz", "Generated from metadata-only evidence."),
+    )
+    monkeypatch.setattr(
+        quiz_generator,
+        "_persist_generated_quiz",
+        lambda **kwargs: {
+            "quiz": {
+                "title": kwargs["quiz_title"],
+                "description": kwargs["quiz_description"],
+                "workspace_tag": kwargs["workspace_tag"],
+            },
+            "questions": kwargs["questions"],
+        },
+    )
+
+    result = await generate_quiz_from_sources(
+        db=Mock(),
+        media_db=Mock(),
+        sources=[{"source_type": "note", "source_id": "note-meta"}],
+        num_questions=1,
+        question_types=["multiple_choice"],
+        workspace_tag="workspace:test",
+    )
+
+    assert result["quiz"]["workspace_tag"] == "workspace:test"
+    assert result["questions"][0]["source_citations"][0]["quote"] == "Study point from note:note-meta."
+
+
+def test_assertion_reasoning_constants_define_canonical_scale() -> None:
+    assert quiz_generator.ASSERTION_REASONING_TAG == "assertion_reasoning"
+    assert quiz_generator.ASSERTION_REASONING_OPTIONS == ASSERTION_REASONING_OPTIONS
+
+
+def test_normalize_assertion_reasoning_owns_options_and_canonicalizes_one_subtype_tag() -> None:
+    question = _normalize_assertion_reasoning_question(
+        tags=[
+            "cardiology",
+            "Assertion Reasoning",
+            "assertion-reasoning",
+            "assertion_reasoning",
+            "ASSERTION/REASONING",
+        ]
+    )
+
+    assert question["options"] == list(ASSERTION_REASONING_OPTIONS)
+    assert question["tags"] == ["cardiology", "assertion_reasoning"]
+    assert question["tags"].count("assertion_reasoning") == 1
+    assert question["group_id"] is None
+    assert question["group_prompt"] is None
+
+
+@pytest.mark.parametrize("raw_answer", range(5))
+def test_normalize_assertion_reasoning_accepts_zero_based_integer_answers(raw_answer: int) -> None:
+    question = _normalize_assertion_reasoning_question(correct_answer=raw_answer)
+
+    assert question["correct_answer"] == raw_answer
+
+
+@pytest.mark.parametrize(
+    ("raw_answer", "expected_index"),
+    [(letter, index) for index, letter in enumerate((" A ", " b ", " C ", " d ", " E "))],
+)
+def test_normalize_assertion_reasoning_accepts_trimmed_case_insensitive_letters(
+    raw_answer: str,
+    expected_index: int,
+) -> None:
+    question = _normalize_assertion_reasoning_question(correct_answer=raw_answer)
+
+    assert question["correct_answer"] == expected_index
+
+
+@pytest.mark.parametrize(
+    ("raw_answer", "expected_index"),
+    [(f"  {label.swapcase()}  ", index) for index, label in enumerate(ASSERTION_REASONING_OPTIONS)],
+)
+def test_normalize_assertion_reasoning_accepts_trimmed_case_insensitive_labels(
+    raw_answer: str,
+    expected_index: int,
+) -> None:
+    question = _normalize_assertion_reasoning_question(correct_answer=raw_answer)
+
+    assert question["correct_answer"] == expected_index
+
+
+@pytest.mark.parametrize(
+    "raw_answer",
+    [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4",
+        "A.",
+        "a.",
+        True,
+        False,
+        0.0,
+        4.0,
+        -1,
+        5,
+        "unknown outcome",
+        None,
+    ],
+)
+def test_normalize_assertion_reasoning_rejects_noncanonical_answers(raw_answer: object) -> None:
+    with pytest.raises(ValueError, match="correct_answer"):
+        _normalize_assertion_reasoning_questions(correct_answer=raw_answer)
+
+
+@pytest.mark.parametrize(
+    ("field", "invalid_value"),
+    [
+        ("assertion", None),
+        ("assertion", "   "),
+        ("reason", None),
+        ("reason", "   "),
+        ("explanation", None),
+        ("explanation", "   "),
+        ("assertion", "a" * 2001),
+        ("reason", "r" * 2001),
+        ("explanation", "e" * 2001),
+    ],
+)
+def test_normalize_assertion_reasoning_requires_bounded_text_fields(
+    field: str,
+    invalid_value: object,
+) -> None:
+    with pytest.raises(ValueError, match=field):
+        _normalize_assertion_reasoning_questions(**{field: invalid_value})
+
+
+def test_normalize_assertion_reasoning_accepts_exact_text_limits() -> None:
+    question = _normalize_assertion_reasoning_question(
+        assertion="a" * 2000,
+        reason="r" * 2000,
+        explanation="e" * 2000,
+    )
+
+    assert question["question_text"] == (f"**Assertion:** {'a' * 2000}\n\n**Reason:** {'r' * 2000}")
+    assert question["explanation"] == "e" * 2000
+
+
+def test_normalize_assertion_reasoning_rejects_non_mcq_question() -> None:
+    with pytest.raises(ValueError, match="multiple_choice"):
+        _normalize_assertion_reasoning_questions(
+            question_type="true_false",
+            correct_answer="true",
+        )
+
+
+def test_normalize_assertion_reasoning_discards_raw_and_unknown_fields() -> None:
+    question = _normalize_assertion_reasoning_question(
+        question_text="LLM-supplied text must not win.",
+        reasoning_steps=["private step"],
+        chain_of_thought="private reasoning",
+        unknown_payload={"private": True},
+    )
+
+    assert question["question_text"] == (
+        "**Assertion:** The review board meets every Friday.\n\n"
+        "**Reason:** The selected note states that Friday review boards are required."
+    )
+    assert not {
+        "assertion",
+        "reason",
+        "reasoning_steps",
+        "chain_of_thought",
+        "unknown_payload",
+    }.intersection(question)
+
+
+def test_build_test_mode_assertion_reasoning_is_source_grounded() -> None:
+    questions = _build_test_mode_questions(
+        evidence=[
+            {
+                "source_type": "note",
+                "source_id": "note-ar",
+                "text": "Friday review boards verify every cited claim.",
+            }
+        ],
+        normalized_sources=[{"source_type": "note", "source_id": "note-ar"}],
+        num_questions=1,
+        question_types=None,
+        generation_profile="assertion_reasoning",
+    )
+
+    question = questions[0]
+    assert question["question_type"] == "multiple_choice"
+    assert question["question_text"].startswith("**Assertion:**")
+    assert "Friday review boards verify every cited claim." in question["question_text"]
+    assert "**Reason:**" in question["question_text"]
+    assert question["options"] == list(ASSERTION_REASONING_OPTIONS)
+    assert question["correct_answer"] == 0
+    assert question["tags"] == ["assertion_reasoning"]
+    assert question["explanation"]
+    assert question["source_citations"] == [
+        {
+            "source_type": "note",
+            "source_id": "note-ar",
+            "label": "Source 1",
+            "quote": "Friday review boards verify every cited claim.",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_generate_quiz_persists_assertion_reasoning_payload_in_test_mode(
+    monkeypatch: pytest.MonkeyPatch,
+    quizzes_db: CharactersRAGDB,
+    media_db: MediaDatabase,
+) -> None:
+    monkeypatch.setenv("TEST_MODE", "1")
+    note_id = quizzes_db.add_note(
+        title="Assertion reasoning note",
+        content="Friday review boards verify every cited claim.",
+    )
+
+    result = await generate_quiz_from_sources(
+        db=quizzes_db,
+        media_db=media_db,
+        sources=[{"source_type": "note", "source_id": note_id}],
+        num_questions=1,
+        generation_profile="assertion_reasoning",
+    )
+
+    question = result["questions"][0]
+    assert question["tags"] == ["assertion_reasoning"]
+    assert question["question_text"].startswith("**Assertion:**")
+    assert "**Reason:**" in question["question_text"]
+    assert question["explanation"]
+    assert question["source_citations"][0]["source_id"] == note_id
+
+
+@pytest.mark.asyncio
+async def test_generate_quiz_normalizes_assertion_reasoning_llm_payload_before_persistence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict = {}
+
+    async def fake_llm(**_kwargs):
+        return {
+            "questions": [
+                _valid_assertion_reasoning_question(
+                    tags=["evidence", "assertion reasoning", "assertion_reasoning"],
+                    reasoning_steps=["hidden"],
+                    chain_of_thought="hidden",
+                    unknown_payload="hidden",
+                )
+            ]
+        }
+
+    monkeypatch.setattr(
+        quiz_generator,
+        "resolve_quiz_sources",
+        lambda *_args, **_kwargs: [
+            {
+                "source_type": "note",
+                "source_id": "note-ar",
+                "text": "Review boards meet every Friday.",
+            }
+        ],
+    )
+    monkeypatch.setattr(quiz_generator, "_call_quiz_generation_llm", fake_llm)
+    monkeypatch.setattr(quiz_generator, "extract_response_content", lambda raw: raw)
+    monkeypatch.setattr(
+        quiz_generator,
+        "_persist_generated_quiz",
+        lambda **kwargs: captured.update(kwargs) or {"quiz": {"id": 1}, "questions": kwargs["questions"]},
+    )
+
+    result = await generate_quiz_from_sources(
+        db=Mock(),
+        media_db=Mock(),
+        sources=[{"source_type": "note", "source_id": "note-ar"}],
+        num_questions=1,
+        generation_profile="assertion_reasoning",
+    )
+
+    question = result["questions"][0]
+    assert captured["questions"] == result["questions"]
+    assert question["tags"] == ["evidence", "assertion_reasoning"]
+    assert question["options"] == list(ASSERTION_REASONING_OPTIONS)
+    assert question["question_text"].startswith("**Assertion:**")
+    assert question["explanation"]
+    assert question["source_citations"][0]["source_id"] == "note-ar"
+    assert not {"reasoning_steps", "chain_of_thought", "unknown_payload"}.intersection(question)
+
+
+@pytest.mark.asyncio
+async def test_generate_quiz_revalidates_test_mode_assertion_reasoning_before_persistence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("TEST_MODE", "1")
+    invalid_question = {
+        "question_type": "multiple_choice",
+        "question_text": "**Assertion:** A\n\n**Reason:** B",
+        "group_id": None,
+        "group_prompt": None,
+        "options": list(ASSERTION_REASONING_OPTIONS),
+        "correct_answer": "0",
+        "explanation": "Evidence-backed explanation.",
+        "source_citations": [{"source_type": "note", "source_id": "note-ar", "quote": "Evidence."}],
+        "tags": ["assertion_reasoning"],
+        "points": 1,
+    }
+    persistence = Mock()
+    monkeypatch.setattr(
+        quiz_generator,
+        "resolve_quiz_sources",
+        lambda *_args, **_kwargs: [{"source_type": "note", "source_id": "note-ar", "text": "Evidence."}],
+    )
+    monkeypatch.setattr(
+        quiz_generator,
+        "_build_test_mode_questions",
+        lambda **_kwargs: [invalid_question],
+    )
+    monkeypatch.setattr(quiz_generator, "_persist_generated_quiz", persistence)
+
+    with pytest.raises(ValueError, match="correct_answer"):
+        await generate_quiz_from_sources(
+            db=Mock(),
+            media_db=Mock(),
+            sources=[{"source_type": "note", "source_id": "note-ar"}],
+            num_questions=1,
+            generation_profile="assertion_reasoning",
+        )
+
+    persistence.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_generate_quiz_revalidates_llm_assertion_reasoning_immediately_before_persistence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_llm(**_kwargs):
+        return {"questions": [_valid_assertion_reasoning_question()]}
+
+    def mutate_after_provenance(questions, _selected_sources):
+        questions[0]["correct_answer"] = "0"
+
+    persistence = Mock()
+    monkeypatch.setattr(
+        quiz_generator,
+        "resolve_quiz_sources",
+        lambda *_args, **_kwargs: [
+            {
+                "source_type": "note",
+                "source_id": "note-ar",
+                "text": "Review boards meet every Friday.",
+            }
+        ],
+    )
+    monkeypatch.setattr(quiz_generator, "_call_quiz_generation_llm", fake_llm)
+    monkeypatch.setattr(quiz_generator, "extract_response_content", lambda raw: raw)
+    monkeypatch.setattr(quiz_generator, "_validate_strict_provenance", mutate_after_provenance)
+    monkeypatch.setattr(quiz_generator, "_persist_generated_quiz", persistence)
+
+    with pytest.raises(ValueError, match="correct_answer"):
+        await generate_quiz_from_sources(
+            db=Mock(),
+            media_db=Mock(),
+            sources=[{"source_type": "note", "source_id": "note-ar"}],
+            num_questions=1,
+            generation_profile="assertion_reasoning",
+        )
+
+    persistence.assert_not_called()

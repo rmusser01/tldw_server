@@ -33,10 +33,19 @@ SUPPORTED_GENERATED_QUESTION_TYPES = [
 ]
 DEFAULT_GENERATION_PROFILE = "standard_recall"
 BEST_OF_FIVE_TAG = "best_of_five"
+ASSERTION_REASONING_TAG = "assertion_reasoning"
+ASSERTION_REASONING_OPTIONS = (
+    "Both the assertion and reason are true, and the reason correctly explains the assertion.",
+    "Both the assertion and reason are true, but the reason does not explain the assertion.",
+    "The assertion is true, but the reason is false.",
+    "The assertion is false, but the reason is true.",
+    "Both the assertion and reason are false.",
+)
 MAX_CONTENT_CHARS = 15000
 MAX_EMQ_GROUP_ID_LENGTH = 128
 MAX_EMQ_GROUP_PROMPT_LENGTH = 2000
 MAX_EMQ_OPTIONS = 10
+MAX_ASSERTION_REASONING_TEXT_LENGTH = 2000
 
 _QUIZ_GENERATION_PROFILES: list[dict[str, Any]] = [
     {
@@ -93,12 +102,19 @@ _QUIZ_GENERATION_PROFILES: list[dict[str, Any]] = [
         "id": "assertion_reasoning",
         "label": "Assertion / Reasoning",
         "description": "Assertion and reason pairs with concise evidence-backed rationales.",
-        "status": "planned",
+        "status": "available",
         "default_num_questions": 5,
         "default_difficulty": "mixed",
         "default_question_types": ["multiple_choice"],
         "allowed_question_types": ["multiple_choice"],
-        "prompt_instruction": "",
+        "prompt_instruction": (
+            "Provide separate assertion and reason fields, then classify each pair using exactly one "
+            "canonical outcome: A. Both the assertion and reason are true, and the reason correctly "
+            "explains the assertion. B. Both the assertion and reason are true, but the reason does not "
+            "explain the assertion. C. The assertion is true, but the reason is false. D. The assertion "
+            "is false, but the reason is true. E. Both the assertion and reason are false. Include a "
+            "concise evidence-backed rationale. Do not provide hidden chain-of-thought."
+        ),
     },
     {
         "id": "osce_scenario",
@@ -137,6 +153,8 @@ Return a JSON object in this exact format:
     {{
       "question_type": "multiple_choice" | "true_false" | "fill_blank",
       "question_text": "The question text",
+      "assertion": "Optional assertion for assertion_reasoning",
+      "reason": "Optional reason for assertion_reasoning",
       "group_id": "Optional EMQ group identifier",
       "group_prompt": "Optional shared EMQ group prompt",
       "options": ["A", "B", "C", "D", "E if required by the profile"],
@@ -164,6 +182,7 @@ Important:
 - For multiple_choice: options must be an array of answer strings, correct_answer is the 0-based index
 - For Best of Five: multiple_choice options must be exactly 5 strings
 - For EMQ: create at least two stems per group; repeat one nonempty group_id, group_prompt, and shared bank of 2-10 options on every stem; correct_answer is a 0-based index into that bank
+- For Assertion / Reasoning: use multiple_choice, provide separate assertion and reason fields, use the canonical A-E outcomes from the profile instruction, and include a concise evidence-backed explanation. Do not provide hidden chain-of-thought, reasoning_steps, or chain_of_thought fields
 - For true_false: correct_answer must be exactly "true" or "false"
 - For fill_blank: question_text should contain ___ where answer goes, correct_answer is the word/phrase
 - hint_penalty_points must be a non-negative integer
@@ -304,17 +323,23 @@ def _coerce_question_tags(raw: Any, *, generation_profile: Any) -> list[str] | N
         tag = str(candidate).strip()
         if not tag:
             continue
-        normalized = tag.lower().replace("-", "_").replace(" ", "_")
+        normalized = tag.lower().replace("-", "_").replace(" ", "_").replace("/", "_")
         if normalized in {BEST_OF_FIVE_TAG, "bof"}:
             tag = BEST_OF_FIVE_TAG
             normalized = BEST_OF_FIVE_TAG
+        elif normalized == ASSERTION_REASONING_TAG:
+            tag = ASSERTION_REASONING_TAG
+            normalized = ASSERTION_REASONING_TAG
         if normalized in seen:
             continue
         seen.add(normalized)
         tags.append(tag)
 
-    if _normalize_generation_profile(generation_profile) == "best_of_five" and BEST_OF_FIVE_TAG not in seen:
+    profile_id = _normalize_generation_profile(generation_profile)
+    if profile_id == "best_of_five" and BEST_OF_FIVE_TAG not in seen:
         tags.append(BEST_OF_FIVE_TAG)
+    elif profile_id == ASSERTION_REASONING_TAG and ASSERTION_REASONING_TAG not in seen:
+        tags.append(ASSERTION_REASONING_TAG)
 
     return tags or None
 
@@ -370,6 +395,74 @@ def _normalize_emq_mc_answer(raw: Any, options: list[str]) -> int:
     if candidates:
         raise ValueError("EMQ correct_answer is ambiguous")
     raise ValueError("EMQ correct_answer must be a valid option index, letter, or exact label")
+
+
+def _normalize_assertion_reasoning_answer(raw: Any) -> int:
+    if isinstance(raw, bool):
+        raise ValueError("Assertion / Reasoning correct_answer must be an integer, A-E letter, or exact label")
+    if isinstance(raw, int):
+        if 0 <= raw < len(ASSERTION_REASONING_OPTIONS):
+            return raw
+        raise ValueError("Assertion / Reasoning correct_answer index is out of range")
+    if not isinstance(raw, str):
+        raise ValueError("Assertion / Reasoning correct_answer must be an integer, A-E letter, or exact label")
+
+    text = raw.strip()
+    if len(text) == 1 and "A" <= text.upper() <= "E":
+        return ord(text.upper()) - ord("A")
+
+    normalized = text.casefold()
+    for index, option in enumerate(ASSERTION_REASONING_OPTIONS):
+        if option.casefold() == normalized:
+            return index
+    raise ValueError("Assertion / Reasoning correct_answer must be an integer, A-E letter, or exact label")
+
+
+def _require_assertion_reasoning_text(raw: Any, field: str) -> str:
+    if not isinstance(raw, str):
+        raise ValueError(f"Assertion / Reasoning {field} must contain 1-2000 characters")
+    text = raw.strip()
+    if not text or len(text) > MAX_ASSERTION_REASONING_TEXT_LENGTH:
+        raise ValueError(f"Assertion / Reasoning {field} must contain 1-2000 characters")
+    return text
+
+
+def _validate_assertion_reasoning_questions(questions: Sequence[dict[str, Any]]) -> None:
+    if not questions:
+        raise ValueError("Assertion / Reasoning generation must include at least one question")
+
+    assertion_prefix = "**Assertion:** "
+    reason_separator = "\n\n**Reason:** "
+    for question in questions:
+        if question.get("question_type") != "multiple_choice":
+            raise ValueError("Assertion / Reasoning questions must use the multiple_choice question type")
+
+        question_text = question.get("question_text")
+        if not isinstance(question_text, str) or not question_text.startswith(assertion_prefix):
+            raise ValueError("Assertion / Reasoning question_text must contain labeled assertion and reason text")
+        assertion, separator, reason = question_text[len(assertion_prefix) :].partition(reason_separator)
+        if not separator:
+            raise ValueError("Assertion / Reasoning question_text must contain labeled assertion and reason text")
+        _require_assertion_reasoning_text(assertion, "assertion")
+        _require_assertion_reasoning_text(reason, "reason")
+        _require_assertion_reasoning_text(question.get("explanation"), "explanation")
+
+        if question.get("options") != list(ASSERTION_REASONING_OPTIONS):
+            raise ValueError("Assertion / Reasoning options must use the canonical A-E scale")
+        correct_answer = question.get("correct_answer")
+        if (
+            isinstance(correct_answer, bool)
+            or not isinstance(correct_answer, int)
+            or not 0 <= correct_answer < len(ASSERTION_REASONING_OPTIONS)
+        ):
+            raise ValueError("Assertion / Reasoning correct_answer must be a zero-based integer from 0 to 4")
+        if question.get("group_id") is not None or question.get("group_prompt") is not None:
+            raise ValueError("Assertion / Reasoning group_id and group_prompt must be null")
+
+        tags = question.get("tags")
+        normalized_tags = _coerce_question_tags(tags, generation_profile=ASSERTION_REASONING_TAG)
+        if tags != normalized_tags:
+            raise ValueError("Assertion / Reasoning questions must include exactly one canonical subtype tag")
 
 
 def _validate_emq_groups(questions: Sequence[dict[str, Any]]) -> None:
@@ -832,21 +925,34 @@ def _normalize_questions(
 ) -> list[dict[str, Any]]:
     profile_id = _normalize_generation_profile(generation_profile)
     is_emq = profile_id == "emq"
+    is_assertion_reasoning = profile_id == ASSERTION_REASONING_TAG
     mc_option_count = None if is_emq else 5 if profile_id == "best_of_five" else 4
     normalized: list[dict[str, Any]] = []
     for raw in raw_questions:
         if not isinstance(raw, dict):
-            if is_emq:
-                raise ValueError("Each EMQ stem must be a JSON object")
+            if is_emq or is_assertion_reasoning:
+                raise ValueError(f"Each {profile_id} question must be a JSON object")
             continue
         q_type = _normalize_question_type(raw.get("question_type"))
+        if is_assertion_reasoning and q_type != "multiple_choice":
+            raise ValueError("Assertion / Reasoning questions must use the multiple_choice question type")
         if q_type not in DEFAULT_QUESTION_TYPES and not is_emq:
             continue
-        question_text = str(raw.get("question_text") or raw.get("question") or "").strip()
-        if not question_text:
-            if is_emq:
-                raise ValueError("Each EMQ stem must include question_text")
-            continue
+        if is_assertion_reasoning:
+            assertion = _require_assertion_reasoning_text(raw.get("assertion"), "assertion")
+            reason = _require_assertion_reasoning_text(raw.get("reason"), "reason")
+            question_text = f"**Assertion:** {assertion}\n\n**Reason:** {reason}"
+            explanation = _require_assertion_reasoning_text(
+                raw.get("explanation"),
+                "explanation",
+            )
+        else:
+            question_text = str(raw.get("question_text") or raw.get("question") or "").strip()
+            if not question_text:
+                if is_emq:
+                    raise ValueError("Each EMQ stem must include question_text")
+                continue
+            explanation = str(raw.get("explanation") or "").strip() or None
         points = raw.get("points", 1)
         try:
             points_val = int(points)
@@ -868,14 +974,18 @@ def _normalize_questions(
         options: list[str] | None = None
         correct_answer: Any
         if q_type == "multiple_choice":
-            options = _coerce_options(raw.get("options"), max_options=mc_option_count)
-            if profile_id == "best_of_five" and len(options) != 5:
-                continue
-            correct_answer = (
-                raw.get("correct_answer")
-                if is_emq
-                else _normalize_mc_answer(raw.get("correct_answer"), options)
-            )
+            if is_assertion_reasoning:
+                options = list(ASSERTION_REASONING_OPTIONS)
+                correct_answer = _normalize_assertion_reasoning_answer(raw.get("correct_answer"))
+            else:
+                options = _coerce_options(raw.get("options"), max_options=mc_option_count)
+                if profile_id == "best_of_five" and len(options) != 5:
+                    continue
+                correct_answer = (
+                    raw.get("correct_answer")
+                    if is_emq
+                    else _normalize_mc_answer(raw.get("correct_answer"), options)
+                )
         elif q_type == "true_false":
             correct_answer = _normalize_tf_answer(raw.get("correct_answer"))
         elif q_type == "fill_blank":
@@ -890,7 +1000,7 @@ def _normalize_questions(
             "group_prompt": (str(raw.get("group_prompt") or "").strip() or None) if is_emq else None,
             "options": options,
             "correct_answer": correct_answer,
-            "explanation": str(raw.get("explanation") or "").strip() or None,
+            "explanation": explanation,
             "hint": hint,
             "hint_penalty_points": hint_penalty_points,
             "source_citations": source_citations,
@@ -899,6 +1009,8 @@ def _normalize_questions(
         if tags:
             question_payload["tags"] = tags
         normalized.append(question_payload)
+    if is_assertion_reasoning:
+        _validate_assertion_reasoning_questions(normalized)
     if is_emq:
         _validate_emq_groups(normalized)
     return normalized
@@ -1127,7 +1239,16 @@ def _build_test_mode_questions(
         question_type, copy_index, plan_item = planned_types[index]
 
         if question_type == "multiple_choice":
-            if profile_id == "emq":
+            if profile_id == ASSERTION_REASONING_TAG:
+                options = list(ASSERTION_REASONING_OPTIONS)
+                question_text = (
+                    f"**Assertion:** {excerpt}\n\n**Reason:** The selected source directly supports this assertion."
+                )
+                explanation = (
+                    "Both statements are true and the reason explains the assertion because the "
+                    "citation quotes the selected source evidence."
+                )
+            elif profile_id == "emq":
                 options = list(emq_options)
                 question_text = (
                     f"Stem {index + 1}: how is this claim characterized by "
@@ -1460,6 +1581,8 @@ async def generate_quiz_from_sources(
         if normalized_profile == "emq":
             _validate_emq_groups(questions)
         _validate_strict_provenance(questions, normalized_sources)
+        if normalized_profile == ASSERTION_REASONING_TAG:
+            _validate_assertion_reasoning_questions(questions)
         return await asyncio.to_thread(
             _persist_generated_quiz,
             db=db,
@@ -1524,6 +1647,8 @@ async def generate_quiz_from_sources(
     if normalized_profile == "emq":
         _validate_emq_groups(questions)
     _validate_strict_provenance(questions, normalized_sources)
+    if normalized_profile == ASSERTION_REASONING_TAG:
+        _validate_assertion_reasoning_questions(questions)
 
     return await asyncio.to_thread(
         _persist_generated_quiz,

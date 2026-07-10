@@ -108,3 +108,33 @@ def test_emq_profile_exposes_shared_bank_multiple_choice_contract():
     instruction = _build_generation_profile_instruction("emq")
     assert "shared option bank" in instruction.lower()
     assert "at least two stems" in instruction.lower()
+
+
+def test_assertion_reasoning_profile_exposes_mcq_prompt_contract():
+    profiles = get_quiz_generation_profiles()
+    assertion_reasoning = next(profile for profile in profiles if profile["id"] == "assertion_reasoning")
+
+    assert assertion_reasoning["status"] == "available"
+    assert assertion_reasoning["default_question_types"] == ["multiple_choice"]
+    assert _coerce_question_types(None, generation_profile="assertion_reasoning") == ["multiple_choice"]
+    assert _coerce_question_types(
+        ["true_false", "fill_blank"],
+        generation_profile="assertion_reasoning",
+    ) == ["multiple_choice"]
+
+    instruction = _build_generation_profile_instruction("assertion_reasoning")
+    assert "separate assertion and reason fields" in instruction
+    assert "A. Both the assertion and reason are true, and the reason correctly explains the assertion." in instruction
+    assert "B. Both the assertion and reason are true, but the reason does not explain the assertion." in instruction
+    assert "C. The assertion is true, but the reason is false." in instruction
+    assert "D. The assertion is false, but the reason is true." in instruction
+    assert "E. Both the assertion and reason are false." in instruction
+    assert "concise evidence-backed rationale" in instruction
+    assert "Do not provide hidden chain-of-thought" in instruction
+
+
+def test_common_prompt_supports_assertion_reasoning_fields_and_rules():
+    assert '"assertion": "Optional assertion for assertion_reasoning"' in QUIZ_GENERATION_PROMPT
+    assert '"reason": "Optional reason for assertion_reasoning"' in QUIZ_GENERATION_PROMPT
+    assert "For Assertion / Reasoning" in QUIZ_GENERATION_PROMPT
+    assert "Do not provide hidden chain-of-thought" in QUIZ_GENERATION_PROMPT
