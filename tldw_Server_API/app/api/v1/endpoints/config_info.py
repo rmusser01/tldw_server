@@ -146,7 +146,8 @@ def load_safe_config() -> dict:
         caps["hasMediaIngestJobs"] = has_media_routes
         caps["hasMediaIngestJobEvents"] = has_media_routes
         caps["hasMediaIngestWorker"] = bool(
-            should_start_inprocess_worker(
+            has_media_routes
+            and should_start_inprocess_worker(
                 "MEDIA_INGEST_JOBS_WORKER_ENABLED",
                 "media",
                 sidecar_mode=env_flag_enabled("TLDW_WORKERS_SIDECAR_MODE"),

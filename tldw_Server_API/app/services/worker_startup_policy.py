@@ -24,11 +24,13 @@ def env_flag(name: str, default: bool) -> bool:
     return is_truthy(raw)
 
 
-def _route_enabled_accepts_default_stable(route_enabled: Callable[..., bool]) -> bool:
+def _route_enabled_accepts_default_stable(route_enabled: Callable[..., bool]) -> bool | None:
+    """Return whether a route callback advertises default_stable support."""
+
     try:
         parameters = signature(route_enabled).parameters.values()
     except (TypeError, ValueError):
-        return True
+        return None
 
     return any(
         parameter.kind is Parameter.VAR_KEYWORD
@@ -49,7 +51,8 @@ def worker_route_default(
 
     if route_enabled is not None:
         try:
-            if _route_enabled_accepts_default_stable(route_enabled):
+            accepts_default_stable = _route_enabled_accepts_default_stable(route_enabled)
+            if accepts_default_stable is True:
                 return bool(route_enabled(route_key, default_stable=default_stable))
             else:
                 return bool(route_enabled(route_key))

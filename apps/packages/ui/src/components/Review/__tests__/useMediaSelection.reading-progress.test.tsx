@@ -87,8 +87,9 @@ describe('useMediaSelection reading progress', () => {
     })
 
     rerender({ displayResults: [createMediaItem('101')] })
-    await new Promise((resolve) => setTimeout(resolve, 0))
 
-    expect((tldwClient as any).getReadingProgress).toHaveBeenCalledTimes(1)
+    await waitFor(() => {
+      expect((tldwClient as any).getReadingProgress).toHaveBeenCalledTimes(1)
+    })
   })
 })

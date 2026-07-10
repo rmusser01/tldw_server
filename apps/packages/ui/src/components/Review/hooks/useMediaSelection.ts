@@ -15,6 +15,7 @@ import type { MediaLibraryStorageUsage } from '@/components/Media/MediaLibrarySt
 import { getErrorStatusCode } from './useMediaSearch'
 
 const MEDIA_COLLECTIONS_STORAGE_KEY = 'media:collections:v1'
+const READING_PROGRESS_MEDIA_ID_SEPARATOR = '\u001f'
 
 const toNonNegativeFiniteNumber = (value: unknown): number | null => {
   if (typeof value === 'number' && Number.isFinite(value) && value >= 0) return value
@@ -140,7 +141,7 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
     const mediaIds = displayResults
       .filter((r) => supportsReadingProgressForResult(r))
       .map((r) => String(r.id))
-    return JSON.stringify(mediaIds)
+    return mediaIds.join(READING_PROGRESS_MEDIA_ID_SEPARATOR)
   }, [displayResults])
   const updateReadingProgressMap = useCallback((entries: Array<[string, number]>) => {
     const next = new Map(entries)
@@ -215,12 +216,9 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
       updateReadingProgressMap([])
       return
     }
-    let mediaIds: string[] = []
-    try {
-      mediaIds = JSON.parse(readingProgressMediaIdsKey)
-    } catch {
-      mediaIds = []
-    }
+    const mediaIds = readingProgressMediaIdsKey === ''
+      ? []
+      : readingProgressMediaIdsKey.split(READING_PROGRESS_MEDIA_ID_SEPARATOR)
     if (mediaIds.length === 0) {
       updateReadingProgressMap([])
       return

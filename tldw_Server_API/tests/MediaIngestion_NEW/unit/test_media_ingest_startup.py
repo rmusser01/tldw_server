@@ -95,6 +95,31 @@ def test_should_start_inprocess_worker_supports_single_arg_injected_route_policy
     )
 
 
+def test_should_start_inprocess_worker_supports_non_introspectable_single_arg_route_policy(
+    monkeypatch,
+):
+    from tldw_Server_API.app.services.worker_startup_policy import should_start_inprocess_worker
+
+    class NonIntrospectableRoutePolicy:
+        @property
+        def __signature__(self):
+            raise ValueError("signature unavailable")
+
+        def __call__(self, route_key):
+            return route_key == "media"
+
+    monkeypatch.delenv("MEDIA_INGEST_JOBS_WORKER_ENABLED", raising=False)
+
+    assert should_start_inprocess_worker(
+        "MEDIA_INGEST_JOBS_WORKER_ENABLED",
+        "media",
+        sidecar_mode=False,
+        default_stable=True,
+        test_mode=False,
+        route_enabled=NonIntrospectableRoutePolicy(),
+    )
+
+
 def test_should_start_inprocess_worker_does_not_mask_route_policy_type_errors(
     monkeypatch,
 ):

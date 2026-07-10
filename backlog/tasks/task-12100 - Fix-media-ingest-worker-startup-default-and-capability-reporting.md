@@ -15,6 +15,11 @@ references:
 documentation:
 - 'Review follow-up: generated Docs/Docs/site HTML was stale but ignored by .gitignore'
 - so not a merge artifact; adding route-disabled docs-info regression coverage.
+- 'PR #2700 dev rebase follow-up: addressed Qodo review comments for deterministic
+  UI test wait'
+- JSON parse fallback removal
+- non-introspectable route callbacks
+- and route-disabled capability consistency.
 modified_files:
 - tldw_Server_API/app/services/worker_startup_policy.py
 - tldw_Server_API/app/services/startup_content_jobs_pollers.py
@@ -54,7 +59,7 @@ Plan review: Approved locally after correcting the route-policy design to inject
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Fixed media ingest jobs staying queued indefinitely by wiring the normal media ingest lifecycle spec through the shared in-process worker startup policy with the `media` route default enabled. Kept the heavy media ingest worker opt-in, made docs-info report the normal worker capability with sidecar awareness, and updated API/deployment docs to match. Verification: focused backend pytest passed (39 passed after review follow-up); Bandit on touched backend app code completed with no findings; startup smoke returned `True`; full WebUI Quick Ingest walkthrough submitted a YouTube URL, observed the job leave queued 0%, and verified API job 277 transitioned to `quarantined` with the concrete yt-dlp error `ERROR: [youtube] E2ETLDW26AB: Video unavailable` instead of remaining queued. Code review follow-up: generated Docs/Docs/site HTML was stale but ignored by .gitignore and not part of the merge artifact; added docs-info coverage for `ROUTES_DISABLE=media` with the worker flag unset.
+Fixed media ingest jobs staying queued indefinitely by wiring the normal media ingest lifecycle spec through the shared in-process worker startup policy with the `media` route default enabled. Kept the heavy media ingest worker opt-in, made docs-info report the normal worker capability with sidecar and route-disable awareness, and updated API/deployment docs to match. Verification after dev rebase and PR review follow-up: focused backend pytest passed (41 passed); UI hook Vitest regression passed (1 passed); Bandit on touched backend app code completed with no findings; startup smoke returned `True`; full WebUI Quick Ingest walkthrough submitted a YouTube URL, observed the job leave queued 0%, and verified API job 277 transitioned to `quarantined` with the concrete yt-dlp error `ERROR: [youtube] E2ETLDW26AB: Video unavailable` instead of remaining queued. Code review follow-up: removed nondeterministic test sleep, removed JSON.parse fallback, made non-introspectable injected route callbacks prefer the one-arg route policy form, and kept media worker capability false when the media route is disabled even if the worker flag is explicitly true.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
