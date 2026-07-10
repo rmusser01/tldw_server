@@ -80,7 +80,8 @@ The existing `tldwConfig` object remains the connection metadata source of truth
 Normalize the configured server URL with `new URL(value).origin`. Every manual key is stored with that origin.
 
 - Credential lookup returns no key when the active origin differs from the stored origin.
-- Saving or connecting to a different origin clears both manual key stores before any request can use the previous key.
+- A new-origin connection probe uses only the key currently submitted in the form. It must bypass the shared credential resolver so the old stored key cannot be inherited by the request.
+- The active server configuration does not change until the explicit new-origin probe succeeds. After success, commit the origin transition as one ordered operation: clear both old manual key stores, write the new credential to its selected scope, then publish the new server metadata and in-memory config.
 - The key field is cleared when a populated form changes to a different valid origin.
 - Cosmetic URL changes that preserve the origin, such as a trailing slash or path normalization, do not clear the key.
 - Invalid URLs never cause a stored key to be attached to a request.
@@ -114,14 +115,15 @@ Existing manual credentials retain their current scope during migration. A sessi
 ### Manual Save
 
 1. Validate the server URL and derive its origin.
-2. Validate the API key against that server.
-3. Clear credential data associated with a different origin.
-4. Write the manual credential to the selected storage scope.
-5. Write non-secret connection metadata and the persistence preference.
-6. Hydrate the in-memory request client from the selected scope.
-7. Emit the existing config-updated event so other WebUI tabs or extension contexts refresh.
+2. Compare the derived origin with the active credential origin. If it differs, require a freshly entered key and keep the old server configuration active during the probe.
+3. Validate the freshly submitted API key against the candidate server using an explicit unaffiliated request that cannot inject stored auth.
+4. After successful validation, clear credential data associated with the old origin.
+5. Write the manual credential to the selected storage scope.
+6. Write non-secret connection metadata and the persistence preference.
+7. Hydrate the in-memory request client from the selected scope.
+8. Emit the existing config-updated event so other WebUI tabs or extension contexts refresh.
 
-If the selected persistent write fails, do not claim that the key was remembered. Keep the successful connection session-only and show a warning that the user will need to enter the key after closing the browser.
+If the selected device write fails, do not claim that the key was remembered. Fall back in this exact order: device-local storage, browser-session storage, then in-memory only. Show a warning that accurately names the achieved scope. Never silently fall back from session storage to persistent storage.
 
 ### Startup
 
@@ -145,8 +147,9 @@ Network errors, timeouts, and server `5xx` responses do not clear credentials. A
 ## Migration
 
 - Existing valid manual keys already stored persistently remain `device` credentials and gain origin metadata on the next successful load or save.
-- Existing session-only runtime bridges remain `session` credentials for the current browser session.
+- A legacy `tldwRuntimeSessionSingleUserApiKey` bridge is migrated as a manual `session` credential only when all of the following hold: the stored config is single-user, it has a valid server URL, no current runtime-config/build-time/environment key is available, and runtime ownership metadata does not fingerprint-match the bridge key. Derive the credential origin from the stored server URL.
 - Existing runtime-owned keys identified by runtime ownership metadata remain runtime-owned and are never reclassified as manual.
+- If legacy ownership cannot be distinguished confidently or the server origin cannot be derived, do not migrate or persist the bridge key. Runtime-provisioned auth may still use its existing in-memory path for that load.
 - Placeholder keys are ignored.
 - Configurations with an unparseable server URL do not hydrate a manual key until the URL is corrected.
 
@@ -218,4 +221,3 @@ An HttpOnly cookie session remains the appropriate future design if the product 
 - Ship WebUI and extension support together so shared onboarding copy does not promise behavior one surface lacks.
 - Document the device-persistence security trade-off in setup/help text.
 - Do not remove legacy readers until the migration has shipped and regression coverage confirms both upgraded and fresh profiles.
-

@@ -31,6 +31,7 @@ Provision same-origin single-user WebUI auth from runtime configuration, add exp
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Approved design: runtime-provisioned same-origin auth remains automatic; manual single-user setup defaults Remember on this device to enabled; unchecked credentials are session-only; keys are origin-bound; runtime keys are never persisted; extension device storage must remain local rather than synced.
 Design specification: docs/superpowers/specs/2026-07-10-single-user-api-key-device-persistence-design.md
+Spec review iteration 1 found origin-transition and legacy session-bridge ownership ambiguities. Revised the design to require explicit no-inherited-auth candidate probes, an ordered post-validation origin transition, a strict legacy manual-session classifier, and device → session → memory fallback semantics.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
