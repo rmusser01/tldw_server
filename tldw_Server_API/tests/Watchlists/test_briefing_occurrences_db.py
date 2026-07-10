@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from concurrent.futures import ThreadPoolExecutor
-from threading import Barrier
+from threading import Barrier, Event
 from typing import Any
 
 import pytest
@@ -259,6 +259,135 @@ def test_attempt_terminal_and_occurrence_stage_roll_back_together(tmp_path, monk
     assert db.get_briefing_attempt(int(attempt.id)).state == "sending"
     persisted = json.loads(db.get_briefing_occurrence(int(occurrence.id)).stages_json)
     assert persisted["deliver:email"]["outcome"] == "sending"
+
+
+def test_delivery_aggregate_uses_sibling_stage_committed_after_caller_snapshot(tmp_path):
+    from tldw_Server_API.app.core.Watchlists.briefing_delivery import (
+        reconcile_successful_delivery_attempt,
+    )
+
+    db = _make_db(tmp_path)
+    job_id, run_id = _create_job_run(db, label="atomic-delivery-aggregate")
+    occurrence = db.create_or_get_briefing_occurrence(
+        run_id=run_id,
+        occurrence_key=f"user:1:job:{job_id}:run:{run_id}:atomic-delivery-aggregate",
+        contract_json=json.dumps(
+            {
+                "version": 1,
+                "delivery": {
+                    "email": {"enabled": True},
+                    "chatbook": {"enabled": True},
+                },
+            }
+        ),
+    )
+    db.update_briefing_occurrence(
+        int(occurrence.id),
+        stages={
+            "persist_text": {"status": "ready", "output_version": 1},
+            "deliver": {"status": "running", "code": "delivering"},
+            "deliver:email": {"status": "running", "outcome": "sending", "attempt_count": 1},
+            "deliver:chatbook": {"status": "running", "outcome": "sending", "attempt_count": 1},
+        },
+        delivery_status="delivering",
+    )
+    email_attempt = db.claim_briefing_attempt(occurrence_id=int(occurrence.id), artifact_version=1, adapter="email")
+    chatbook_attempt = db.claim_briefing_attempt(
+        occurrence_id=int(occurrence.id), artifact_version=1, adapter="chatbook"
+    )
+    db.transition_briefing_attempt(int(email_attempt.id), expected_states={"intent"}, state="successful")
+    db.transition_briefing_attempt(int(chatbook_attempt.id), expected_states={"intent"}, state="sending")
+    snapshot_barrier = Barrier(2)
+    sibling_committed = Event()
+
+    def reconcile_email():
+        stale_occurrence = db.get_briefing_occurrence(int(occurrence.id))
+        snapshot_barrier.wait()
+        assert sibling_committed.wait(timeout=5)
+        return reconcile_successful_delivery_attempt(
+            watchlists_db=db,
+            occurrence=stale_occurrence,
+            adapter="email",
+        )
+
+    def finalize_chatbook():
+        snapshot_barrier.wait()
+        try:
+            return db.finalize_briefing_attempt(
+                int(chatbook_attempt.id),
+                expected_states={"sending"},
+                state="successful",
+                stage_updates={
+                    "deliver:chatbook": {
+                        "status": "ready",
+                        "outcome": "successful",
+                        "attempt_count": 1,
+                    }
+                },
+                delivery_status="partially_delivered",
+            )
+        finally:
+            sibling_committed.set()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        email_future = executor.submit(reconcile_email)
+        chatbook_future = executor.submit(finalize_chatbook)
+        assert chatbook_future.result(timeout=10) is not None
+        assert email_future.result(timeout=10) is not None
+
+    persisted = db.get_briefing_occurrence(int(occurrence.id))
+    stages = json.loads(persisted.stages_json)
+    assert stages["deliver:email"]["outcome"] == "successful"
+    assert stages["deliver:chatbook"]["outcome"] == "successful"
+    assert persisted.delivery_status == "delivered"
+    assert stages["deliver"]["status"] == "ready"
+
+
+@pytest.mark.parametrize(
+    ("chatbook_outcome", "expected_status"),
+    [("unknown", "unknown"), ("failed", "partially_delivered")],
+)
+def test_finalize_briefing_attempt_recomputes_delivery_aggregate_in_transaction(
+    tmp_path,
+    chatbook_outcome,
+    expected_status,
+):
+    db = _make_db(tmp_path)
+    job_id, run_id = _create_job_run(db, label=f"aggregate-{chatbook_outcome}")
+    occurrence = db.create_or_get_briefing_occurrence(
+        run_id=run_id,
+        occurrence_key=f"user:1:job:{job_id}:run:{run_id}:aggregate:{chatbook_outcome}",
+        contract_json='{"version":1}',
+    )
+    db.update_briefing_occurrence(
+        int(occurrence.id),
+        stages={
+            "deliver:email": {"status": "running", "outcome": "sending", "attempt_count": 1},
+            "deliver:chatbook": {"status": "failed", "outcome": chatbook_outcome, "attempt_count": 1},
+        },
+        delivery_status="delivering",
+    )
+    attempt = db.claim_briefing_attempt(occurrence_id=int(occurrence.id), artifact_version=1, adapter="email")
+    db.transition_briefing_attempt(int(attempt.id), expected_states={"intent"}, state="sending")
+
+    finalized = db.finalize_briefing_attempt(
+        int(attempt.id),
+        expected_states={"sending"},
+        state="successful",
+        stage_updates={
+            "deliver:email": {
+                "status": "ready",
+                "outcome": "successful",
+                "attempt_count": 1,
+            }
+        },
+        configured_delivery_adapters={"email", "chatbook"},
+    )
+
+    stages = json.loads(finalized.stages_json)
+    assert finalized.delivery_status == expected_status
+    assert stages["deliver"]["status"] == "failed"
+    assert stages["deliver"]["code"] == expected_status
 
 
 @pytest.mark.parametrize("terminal_state", ["successful", "failed", "cancelled"])

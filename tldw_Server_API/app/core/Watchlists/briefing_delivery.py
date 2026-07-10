@@ -14,6 +14,10 @@ from typing import Any
 
 from tldw_Server_API.app.core.Notifications import NotificationsService
 from tldw_Server_API.app.core.Watchlists.audio_artifact_projection import build_audio_projection
+from tldw_Server_API.app.core.Watchlists.briefing_delivery_state import (
+    aggregate_delivery_stage,
+    aggregate_delivery_status,
+)
 from tldw_Server_API.app.services.outputs_service import _resolve_output_path_for_user
 
 _EXTERNAL_ADAPTERS = ("email", "chatbook")
@@ -153,22 +157,20 @@ def reconcile_successful_delivery_attempt(
         "outcome": "successful",
         "attempt_count": int(attempt.attempt),
     }
-    stages[stage_name] = stage
-    delivery_status = _aggregate_status(
-        external_delivery_adapters(_json_object(occurrence.contract_json)),
-        stages,
-    )
-    aggregate_stage = _aggregate_stage(delivery_status)
+    adapters = external_delivery_adapters(_json_object(occurrence.contract_json))
     finalize = getattr(watchlists_db, "finalize_briefing_attempt", None)
     if callable(finalize):
         return finalize(
             int(attempt.id),
             expected_states={"successful"},
             state="successful",
-            stage_updates={stage_name: stage, "deliver": aggregate_stage},
-            delivery_status=delivery_status,
+            stage_updates={stage_name: stage},
+            configured_delivery_adapters=set(adapters),
             code=stage["code"],
         )
+    stages[stage_name] = stage
+    delivery_status = _aggregate_status(adapters, stages)
+    aggregate_stage = _aggregate_stage(delivery_status)
     stages["deliver"] = aggregate_stage
     return watchlists_db.update_briefing_occurrence(
         int(occurrence.id),
@@ -178,42 +180,12 @@ def reconcile_successful_delivery_attempt(
 
 
 def _aggregate_status(adapters: Mapping[str, Mapping[str, Any]], stages: Mapping[str, Mapping[str, Any]]) -> str:
-    if not adapters:
-        return "not_configured"
-    outcomes = [_adapter_outcome(stages, adapter) for adapter in adapters]
-    if any(outcome == "sending" for outcome in outcomes):
-        return "delivering"
-    if any(outcome == "unknown" for outcome in outcomes):
-        return "unknown"
-    if all(outcome == "successful" for outcome in outcomes):
-        return "delivered"
-    if any(outcome in {"successful", "partial"} for outcome in outcomes):
-        return "partially_delivered"
-    if any(outcome == "failed" for outcome in outcomes):
-        return "failed"
-    return "waiting_for_artifacts"
+    return aggregate_delivery_status(adapters, stages)
 
 
 def _aggregate_stage(delivery_status: str) -> dict[str, Any]:
     """Build the persisted aggregate delivery stage."""
-    return {
-        "status": {
-            "not_configured": "skipped",
-            "waiting_for_artifacts": "not_started",
-            "delivering": "running",
-            "delivered": "ready",
-            "partially_delivered": "failed",
-            "failed": "failed",
-            "unknown": "failed",
-        }[delivery_status],
-        "code": None if delivery_status == "delivered" else delivery_status,
-        "retryable": delivery_status in {"failed", "partially_delivered"},
-        "finished_at": (
-            _utcnow_iso()
-            if delivery_status in {"not_configured", "delivered", "partially_delivered", "failed", "unknown"}
-            else None
-        ),
-    }
+    return aggregate_delivery_stage(delivery_status, finished_at=_utcnow_iso())
 
 
 def _save_stages(
@@ -457,7 +429,7 @@ async def schedule_briefing_delivery(
                             expected_states={"sending"},
                             state="unknown",
                             stage_updates={stage_name: unknown_stage},
-                            delivery_status="unknown",
+                            configured_delivery_adapters=set(configured),
                             code="delivery_outcome_unknown",
                         ) or watchlists_db.get_briefing_occurrence(int(occurrence.id))
                         stages = _read_stages(occurrence)
@@ -863,7 +835,7 @@ async def deliver_briefing_occurrence(
                         expected_states={"sending"},
                         state="unknown",
                         stage_updates={f"deliver:{adapter}": stages[f"deliver:{adapter}"]},
-                        delivery_status="unknown",
+                        configured_delivery_adapters=set(adapters),
                         code="delivery_outcome_unknown",
                     ) or watchlists_db.get_briefing_occurrence(int(occurrence.id))
                     stages = _read_stages(occurrence)
@@ -939,18 +911,14 @@ async def deliver_briefing_occurrence(
                 "attempt_count": attempt_count,
             }
             stages[f"deliver:{adapter}"] = terminal_stage
-            delivery_status = _aggregate_status(adapters, stages)
             finalize = getattr(watchlists_db, "finalize_briefing_attempt", None)
             if attempt is not None and callable(finalize):
                 finalize(
                     int(attempt.id),
                     expected_states={"sending"},
                     state="unknown",
-                    stage_updates={
-                        f"deliver:{adapter}": terminal_stage,
-                        "deliver": _aggregate_stage(delivery_status),
-                    },
-                    delivery_status=delivery_status,
+                    stage_updates={f"deliver:{adapter}": terminal_stage},
+                    configured_delivery_adapters=set(adapters),
                     code=code,
                 )
             else:
@@ -980,18 +948,14 @@ async def deliver_briefing_occurrence(
             "attempt_count": attempt_count,
         }
         stages[f"deliver:{adapter}"] = terminal_stage
-        delivery_status = _aggregate_status(adapters, stages)
         finalize = getattr(watchlists_db, "finalize_briefing_attempt", None)
         if attempt is not None and callable(finalize):
             occurrence = finalize(
                 int(attempt.id),
                 expected_states={"sending"},
                 state=outcome,
-                stage_updates={
-                    f"deliver:{adapter}": terminal_stage,
-                    "deliver": _aggregate_stage(delivery_status),
-                },
-                delivery_status=delivery_status,
+                stage_updates={f"deliver:{adapter}": terminal_stage},
+                configured_delivery_adapters=set(adapters),
                 code=code,
                 artifact_id=str(details.get("document_id")) if details.get("document_id") is not None else None,
             ) or watchlists_db.get_briefing_occurrence(int(occurrence.id))

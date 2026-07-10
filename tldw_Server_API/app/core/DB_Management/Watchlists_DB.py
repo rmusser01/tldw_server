@@ -58,6 +58,10 @@ from tldw_Server_API.app.core.DB_Management.content_backend import (
     get_content_backend,
     load_content_db_settings,
 )
+from tldw_Server_API.app.core.Watchlists.briefing_delivery_state import (
+    aggregate_delivery_stage,
+    aggregate_delivery_status,
+)
 
 from .backends.base import BackendType, DatabaseBackend, DatabaseConfig, DatabaseError as _DatabaseError
 from .backends.factory import DatabaseBackendFactory
@@ -3466,6 +3470,7 @@ class WatchlistsDatabase:
         stage_updates: dict[str, Any],
         artifact_status: str | None = None,
         delivery_status: str | None = None,
+        configured_delivery_adapters: set[str] | None = None,
         workflow_run_id: str | None = None,
         artifact_id: str | None = None,
         code: str | None = None,
@@ -3549,6 +3554,15 @@ class WatchlistsDatabase:
             for name, stage in stage_updates.items():
                 if isinstance(stage, dict):
                     stages[str(name)] = stage
+            if configured_delivery_adapters is not None:
+                delivery_status = aggregate_delivery_status(
+                    configured_delivery_adapters,
+                    stages,
+                )
+                stages["deliver"] = aggregate_delivery_stage(
+                    delivery_status,
+                    finished_at=now,
+                )
             occurrence_fields = ["stages_json = ?", "updated_at = ?"]
             occurrence_params: list[Any] = [json.dumps(stages), now]
             if artifact_status is not None:
