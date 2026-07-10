@@ -5,7 +5,7 @@ import contextlib
 import json
 import time
 from collections.abc import Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
@@ -20,6 +20,9 @@ from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requir
 from tldw_Server_API.app.core.testing import is_test_mode
 from tldw_Server_API.app.services.quiz_source_resolver import resolve_quiz_sources
 
+if TYPE_CHECKING:
+    from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
+
 DEFAULT_QUESTION_TYPES = ["multiple_choice", "true_false", "fill_blank"]
 SUPPORTED_GENERATED_QUESTION_TYPES = [
     "multiple_choice",
@@ -31,6 +34,9 @@ SUPPORTED_GENERATED_QUESTION_TYPES = [
 DEFAULT_GENERATION_PROFILE = "standard_recall"
 BEST_OF_FIVE_TAG = "best_of_five"
 MAX_CONTENT_CHARS = 15000
+MAX_EMQ_GROUP_ID_LENGTH = 128
+MAX_EMQ_GROUP_PROMPT_LENGTH = 2000
+MAX_EMQ_OPTIONS = 10
 
 _QUIZ_GENERATION_PROFILES: list[dict[str, Any]] = [
     {
@@ -73,12 +79,15 @@ _QUIZ_GENERATION_PROFILES: list[dict[str, Any]] = [
         "id": "emq",
         "label": "EMQ",
         "description": "Extended matching questions with shared option banks.",
-        "status": "planned",
+        "status": "available",
         "default_num_questions": 5,
         "default_difficulty": "mixed",
-        "default_question_types": ["matching"],
-        "allowed_question_types": ["matching"],
-        "prompt_instruction": "",
+        "default_question_types": ["multiple_choice"],
+        "allowed_question_types": ["multiple_choice"],
+        "prompt_instruction": (
+            "Create each group with one shared option bank and at least two stems; repeat the same "
+            "group_id, group_prompt, and options on every multiple_choice stem."
+        ),
     },
     {
         "id": "assertion_reasoning",
@@ -128,6 +137,8 @@ Return a JSON object in this exact format:
     {{
       "question_type": "multiple_choice" | "true_false" | "fill_blank",
       "question_text": "The question text",
+      "group_id": "Optional EMQ group identifier",
+      "group_prompt": "Optional shared EMQ group prompt",
       "options": ["A", "B", "C", "D", "E if required by the profile"],
       "correct_answer": 0 | 1 | 2 | 3 | 4 | "true" | "false" | "the answer",
       "explanation": "Brief explanation of why this is correct",
@@ -152,6 +163,7 @@ Return a JSON object in this exact format:
 Important:
 - For multiple_choice: options must be an array of answer strings, correct_answer is the 0-based index
 - For Best of Five: multiple_choice options must be exactly 5 strings
+- For EMQ: create at least two stems per group; repeat one nonempty group_id, group_prompt, and shared bank of 2-10 options on every stem
 - For true_false: correct_answer must be exactly "true" or "false"
 - For fill_blank: question_text should contain ___ where answer goes, correct_answer is the word/phrase
 - hint_penalty_points must be a non-negative integer
@@ -331,6 +343,76 @@ def _normalize_mc_answer(raw: Any, options: list[str]) -> int:
             if option.strip().lower() == text.lower():
                 return idx
     return 0
+
+
+def _normalize_emq_mc_answer(raw: Any, options: list[str]) -> int:
+    if isinstance(raw, bool):
+        raise ValueError("EMQ correct_answer must be a valid option index, letter, or exact label")
+    if isinstance(raw, int):
+        index = raw
+    elif isinstance(raw, str):
+        text = raw.strip()
+        if text.isdigit():
+            index = int(text)
+        elif len(text) == 1 and "A" <= text.upper() <= chr(ord("A") + len(options) - 1):
+            index = ord(text.upper()) - ord("A")
+        else:
+            try:
+                return options.index(text)
+            except ValueError as exc:
+                raise ValueError(
+                    "EMQ correct_answer must be a valid option index, letter, or exact label"
+                ) from exc
+    else:
+        raise ValueError("EMQ correct_answer must be a valid option index, letter, or exact label")
+
+    if 0 <= index < len(options):
+        return index
+    raise ValueError("EMQ correct_answer index is out of range")
+
+
+def _validate_emq_groups(questions: Sequence[dict[str, Any]]) -> None:
+    groups: dict[str, dict[str, Any]] = {}
+    for question in questions:
+        if question.get("question_type") != "multiple_choice":
+            raise ValueError("EMQ questions must use the multiple_choice question type")
+
+        group_id = str(question.get("group_id") or "").strip()
+        if not group_id or len(group_id) > MAX_EMQ_GROUP_ID_LENGTH:
+            raise ValueError(f"EMQ group_id must contain 1-{MAX_EMQ_GROUP_ID_LENGTH} characters")
+
+        group_prompt = str(question.get("group_prompt") or "").strip()
+        if not group_prompt or len(group_prompt) > MAX_EMQ_GROUP_PROMPT_LENGTH:
+            raise ValueError(
+                f"EMQ group_prompt must contain 1-{MAX_EMQ_GROUP_PROMPT_LENGTH} characters"
+            )
+
+        explanation = str(question.get("explanation") or "").strip()
+        if not explanation:
+            raise ValueError("Each EMQ stem must include a nonempty explanation")
+
+        options = question.get("options")
+        if not isinstance(options, list) or not 2 <= len(options) <= MAX_EMQ_OPTIONS:
+            raise ValueError(f"EMQ options must contain 2-{MAX_EMQ_OPTIONS} entries")
+
+        question["correct_answer"] = _normalize_emq_mc_answer(
+            question.get("correct_answer"),
+            options,
+        )
+        group = groups.setdefault(
+            group_id,
+            {"group_prompt": group_prompt, "options": options, "count": 0},
+        )
+        if group["group_prompt"] != group_prompt:
+            raise ValueError("Every stem in an EMQ group must use the same group_prompt")
+        if group["options"] != options:
+            raise ValueError("Every stem in an EMQ group must use the same option bank")
+        group["count"] += 1
+
+    if not groups:
+        raise ValueError("EMQ generation must include at least one group")
+    if any(group["count"] < 2 for group in groups.values()):
+        raise ValueError("Every EMQ group must include at least two stems")
 
 
 def _normalize_tf_answer(raw: Any) -> str:
@@ -746,16 +828,21 @@ def _normalize_questions(
     generation_profile: Any = DEFAULT_GENERATION_PROFILE,
 ) -> list[dict[str, Any]]:
     profile_id = _normalize_generation_profile(generation_profile)
-    mc_option_count = 5 if profile_id == "best_of_five" else 4
+    is_emq = profile_id == "emq"
+    mc_option_count = None if is_emq else 5 if profile_id == "best_of_five" else 4
     normalized: list[dict[str, Any]] = []
     for raw in raw_questions:
         if not isinstance(raw, dict):
+            if is_emq:
+                raise ValueError("Each EMQ stem must be a JSON object")
             continue
         q_type = _normalize_question_type(raw.get("question_type"))
-        if q_type not in DEFAULT_QUESTION_TYPES:
+        if q_type not in DEFAULT_QUESTION_TYPES and not is_emq:
             continue
         question_text = str(raw.get("question_text") or raw.get("question") or "").strip()
         if not question_text:
+            if is_emq:
+                raise ValueError("Each EMQ stem must include question_text")
             continue
         points = raw.get("points", 1)
         try:
@@ -776,20 +863,28 @@ def _normalize_questions(
         tags = _coerce_question_tags(raw.get("tags"), generation_profile=profile_id)
 
         options: list[str] | None = None
-        correct_answer: int | str
+        correct_answer: Any
         if q_type == "multiple_choice":
             options = _coerce_options(raw.get("options"), max_options=mc_option_count)
             if profile_id == "best_of_five" and len(options) != 5:
                 continue
-            correct_answer = _normalize_mc_answer(raw.get("correct_answer"), options)
+            correct_answer = (
+                raw.get("correct_answer")
+                if is_emq
+                else _normalize_mc_answer(raw.get("correct_answer"), options)
+            )
         elif q_type == "true_false":
             correct_answer = _normalize_tf_answer(raw.get("correct_answer"))
-        else:
+        elif q_type == "fill_blank":
             correct_answer = str(raw.get("correct_answer") or "").strip()
+        else:
+            correct_answer = raw.get("correct_answer")
 
         question_payload = {
             "question_type": q_type,
             "question_text": question_text,
+            "group_id": str(raw.get("group_id") or "").strip() or None,
+            "group_prompt": str(raw.get("group_prompt") or "").strip() or None,
             "options": options,
             "correct_answer": correct_answer,
             "explanation": str(raw.get("explanation") or "").strip() or None,
@@ -801,6 +896,8 @@ def _normalize_questions(
         if tags:
             question_payload["tags"] = tags
         normalized.append(question_payload)
+    if is_emq:
+        _validate_emq_groups(normalized)
     return normalized
 
 
@@ -853,6 +950,29 @@ def _normalize_planned_questions(
         raise ValueError(f"Generated question plan mismatch: expected {expected_total}, got {len(raw_questions)}")
 
     return [question for item in plan for question in grouped[item["question_type"]]]
+
+
+def _limit_questions_by_profile(
+    questions: Sequence[dict[str, Any]],
+    *,
+    num_questions: int,
+    generation_profile: Any,
+) -> list[dict[str, Any]]:
+    limited = list(questions)
+    if not num_questions or len(limited) <= num_questions:
+        return limited
+    if _normalize_generation_profile(generation_profile) != "emq":
+        return limited[:num_questions]
+
+    selected_group_ids = {
+        str(question.get("group_id") or "").strip()
+        for question in limited[:num_questions]
+    }
+    return [
+        question
+        for question in limited
+        if str(question.get("group_id") or "").strip() in selected_group_ids
+    ]
 
 
 def _normalize_sources(sources: Sequence[Any]) -> list[dict[str, str]]:
@@ -970,12 +1090,19 @@ def _build_test_mode_questions(
             question_types,
             generation_profile=profile_id,
         )
-        total_questions = max(1, num_questions)
+        total_questions = max(2 if profile_id == "emq" else 1, num_questions)
         planned_types = [
             (normalized_types[index % len(normalized_types)], index, {})
             for index in range(total_questions)
         ]
     questions: list[dict[str, Any]] = []
+    emq_options = [
+        "Supported by the selected source evidence.",
+        "Contradicted by the selected source evidence.",
+        "Not addressed by the selected source evidence.",
+        "Requires evidence from a different source.",
+    ]
+    emq_group_prompt = "Choose the option that best characterizes the evidence for each stem."
 
     for index in range(total_questions):
         source = normalized_sources[index % len(normalized_sources)]
@@ -997,33 +1124,48 @@ def _build_test_mode_questions(
         question_type, copy_index, plan_item = planned_types[index]
 
         if question_type == "multiple_choice":
-            option_count = (
-                5
-                if profile_id == "best_of_five"
-                else int(plan_item.get("option_count", 4) or 4)
-            )
-            options = [
-                excerpt,
-                "A conflicting claim with no evidence.",
-                "An empty workspace selection.",
-                "A discarded draft artifact.",
-            ]
-            if option_count >= 5:
-                options.append("A plausible but unsupported alternate answer.")
-            if option_count > len(options):
-                options.extend(
-                    f"Unused distractor {option_idx}"
-                    for option_idx in range(len(options) + 1, option_count + 1)
+            if profile_id == "emq":
+                options = list(emq_options)
+                question_text = (
+                    f"Stem {index + 1}: how is this claim characterized by "
+                    f"{citation_source_type}:{citation_source_id}?"
                 )
-            question_payload = {
-                "question_type": "multiple_choice",
-                "question_text": (
+                explanation = (
+                    f"Stem {index + 1} is supported because its citation quotes the selected source evidence."
+                )
+            else:
+                option_count = (
+                    5
+                    if profile_id == "best_of_five"
+                    else int(plan_item.get("option_count", 4) or 4)
+                )
+                options = [
+                    excerpt,
+                    "A conflicting claim with no evidence.",
+                    "An empty workspace selection.",
+                    "A discarded draft artifact.",
+                ]
+                if option_count >= 5:
+                    options.append("A plausible but unsupported alternate answer.")
+                if option_count > len(options):
+                    options.extend(
+                        f"Unused distractor {option_idx}"
+                        for option_idx in range(len(options) + 1, option_count + 1)
+                    )
+                options = options[:option_count]
+                question_text = (
                     f"Which statement is the best answer supported by "
                     f"{citation_source_type}:{citation_source_id}?"
-                ),
-                "options": options[:option_count],
+                )
+                explanation = "The first option is the best answer because it quotes the selected source evidence."
+            question_payload = {
+                "question_type": "multiple_choice",
+                "question_text": question_text,
+                "group_id": "emq-test-1" if profile_id == "emq" else None,
+                "group_prompt": emq_group_prompt if profile_id == "emq" else None,
+                "options": options,
                 "correct_answer": 0,
-                "explanation": "The first option is the best answer because it quotes the selected source evidence.",
+                "explanation": explanation,
                 "hint": "Look for the excerpt copied from the selected source.",
                 "hint_penalty_points": 0,
                 "source_citations": [citation],
@@ -1238,6 +1380,8 @@ def _persist_generated_quiz(
             points=question.get("points", 1),
             order_index=idx,
             tags=question.get("tags"),
+            group_id=question.get("group_id"),
+            group_prompt=question.get("group_prompt"),
         )
 
     quiz = db.get_quiz(quiz_id)
@@ -1305,6 +1449,13 @@ async def generate_quiz_from_sources(
             question_plan=plan if question_plan else None,
             generation_profile=normalized_profile,
         )
+        questions = _limit_questions_by_profile(
+            questions,
+            num_questions=num_questions,
+            generation_profile=normalized_profile,
+        )
+        if normalized_profile == "emq":
+            _validate_emq_groups(questions)
         _validate_strict_provenance(questions, normalized_sources)
         return await asyncio.to_thread(
             _persist_generated_quiz,
@@ -1359,10 +1510,15 @@ async def generate_quiz_from_sources(
             default_source_id=default_source["source_id"],
             generation_profile=normalized_profile,
         )
-        if num_questions and len(questions) > num_questions:
-            questions = questions[:num_questions]
+        questions = _limit_questions_by_profile(
+            questions,
+            num_questions=num_questions,
+            generation_profile=normalized_profile,
+        )
     if not questions:
         raise ValueError("No valid questions generated")
+    if normalized_profile == "emq":
+        _validate_emq_groups(questions)
     _validate_strict_provenance(questions, normalized_sources)
 
     return await asyncio.to_thread(

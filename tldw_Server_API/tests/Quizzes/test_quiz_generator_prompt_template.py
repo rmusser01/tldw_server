@@ -26,6 +26,10 @@ def test_quiz_generation_prompt_template_formats_with_literal_citation_object():
 
     assert '"label": "Optional citation label"' in rendered_prompt
     assert '"source_type": "media" | "note" | "flashcard_deck" | "flashcard_card"' in rendered_prompt
+    assert '"group_id": "Optional EMQ group identifier"' in rendered_prompt
+    assert '"group_prompt": "Optional shared EMQ group prompt"' in rendered_prompt
+    assert "For EMQ" in rendered_prompt
+    assert "at least two stems" in rendered_prompt
     assert "Allowed sources for source_citations.source_type/source_id: note:note-1" in rendered_prompt
     assert "{num_questions}" not in rendered_prompt
     assert "{content}" not in rendered_prompt
@@ -86,3 +90,20 @@ def test_best_of_five_profile_exposes_prompt_contract_and_question_defaults():
     instruction = _build_generation_profile_instruction("best_of_five")
     assert "Best of Five" in instruction
     assert "exactly five answer options" in instruction
+
+
+def test_emq_profile_exposes_shared_bank_multiple_choice_contract():
+    profiles = get_quiz_generation_profiles()
+    emq = next(profile for profile in profiles if profile["id"] == "emq")
+
+    assert emq["status"] == "available"
+    assert emq["default_question_types"] == ["multiple_choice"]
+    assert _coerce_question_types(None, generation_profile="emq") == ["multiple_choice"]
+    assert _coerce_question_types(
+        ["true_false", "multiple_choice", "fill_blank"],
+        generation_profile="emq",
+    ) == ["multiple_choice"]
+
+    instruction = _build_generation_profile_instruction("emq")
+    assert "shared option bank" in instruction.lower()
+    assert "at least two stems" in instruction.lower()
