@@ -4,7 +4,7 @@ title: Fix advanced WebUI Quick Ingest transport without persisted server URL
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-07-10 05:20'
+updated_date: '2026-07-10 05:27'
 labels:
   - frontend
   - quick-ingest
@@ -36,6 +36,8 @@ UAT on release 0.1.40 found that Quick Ingest direct uploads fail before reachin
 
 <!-- SECTION:NOTES:BEGIN -->
 Full-stack CDP UAT remains valid: with localStorage.tldwConfig removed immediately before submission, Quick preset sent an authenticated POST to the runtime API origin; batch 05dd45df-9788-4618-91e3-63328861aade / job 1 completed with 1 succeeded and 0 failed, and SQLite stored media ID 1 (Me at the zoo) with 210 content characters. PR #2703 review follow-up addressed all three inline findings: narrowly matched client configuration errors, deduplicated test fixtures, and centralized foreground/background advanced transport validation. Verification: 35 request/classification tests and 63 networking/background-proxy tests passed; frontend typecheck passed; touched-file ESLint had 0 errors with existing warnings only; git diff --check passed. Bandit remains not applicable because only TypeScript, tests, and Backlog metadata changed.
+
+Post-push Qodo feedback was also addressed: classifyError documentation now describes table-order precedence including job-limit and client-configuration categories. The 26 classifier tests and touched-file ESLint passed after this documentation update.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

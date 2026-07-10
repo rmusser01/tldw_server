@@ -141,8 +141,9 @@ const PATTERN_TABLE: PatternEntry[] = [
 /**
  * Classify an error message string into a structured `ErrorCategory`.
  *
- * Pattern matching is applied in priority order (timeout > auth > validation >
- * server > network) so that overlapping keywords resolve deterministically.
+ * Pattern matching follows `PATTERN_TABLE` order so timeout, job-limit, and
+ * client-configuration errors win before broader auth, validation, server, and
+ * network patterns.
  * If nothing matches, the error is classified as `"unknown"` (retryable).
  */
 export function classifyError(error: string | undefined): ErrorCategory {
