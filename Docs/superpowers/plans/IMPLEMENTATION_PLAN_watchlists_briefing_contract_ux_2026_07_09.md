@@ -113,7 +113,7 @@
 
 **Tests:** Contract normalization, legacy compatibility, unknown-field preservation, setup-builder parity, receipt inputs, and validation.
 
-**Status:** Not Started
+**Status:** In Progress
 
 ### Task 1: Add the backend versioned briefing contract
 
@@ -128,7 +128,7 @@
 - Produces: `BRIEFING_PIPELINE_KEY`, `BRIEFING_PIPELINE_VERSION`, `PROGRAM_FORMATS`, `NormalizedBriefingContract`, `normalize_briefing_output_prefs(raw, scheduled)`, `get_briefing_contract(raw, scheduled)`, and `briefing_selection_limit(contract)`.
 - Consumes: existing `output_prefs` dictionaries and `WATCHLIST_BRIEFING_MAX_ITEMS` configuration.
 
-- [ ] **Step 1: Write failing contract tests**
+- [x] **Step 1: Write failing contract tests**
 
 Add tests with these concrete expectations:
 
@@ -171,7 +171,7 @@ def test_selection_limit_uses_one_bounded_value(monkeypatch):
     assert briefing_selection_limit(contract) == 1000
 ```
 
-- [ ] **Step 2: Run the tests and verify RED**
+- [x] **Step 2: Run the tests and verify RED**
 
 Run:
 
@@ -181,7 +181,7 @@ Run:
 
 Expected: collection fails because `briefing_contract.py` does not exist.
 
-- [ ] **Step 3: Implement the normalizer and compatibility reader**
+- [x] **Step 3: Implement the normalizer and compatibility reader**
 
 Create these exact public shapes:
 
@@ -227,7 +227,7 @@ def briefing_selection_limit(contract: Mapping[str, Any]) -> int:
 
 Canonical normalization must remove recognized flat briefing keys from canonical writes, retain unrelated keys such as `ingest`, `history`, `collections_schedule`, and future extension fields, and record `legacy_briefing_preferences_normalized` when compatibility data was consumed.
 
-- [ ] **Step 4: Route backend readers through the helper**
+- [x] **Step 4: Route backend readers through the helper**
 
 In job create and update endpoints, normalize `output_prefs` after ingest preference merging and before JSON persistence. In `pipeline.py` and `audio_briefing_workflow.py`, replace direct reads of `auto_output`, `generate_audio`, target duration, cast, template, and deliveries with `get_briefing_contract` projections.
 
@@ -242,7 +242,7 @@ text_enabled = bool(contract["text"]["enabled"])
 audio_enabled = bool(contract["audio"]["enabled"])
 ```
 
-- [ ] **Step 5: Verify GREEN and compatibility suites**
+- [x] **Step 5: Verify GREEN and compatibility suites**
 
 Run:
 
@@ -252,7 +252,7 @@ Run:
 
 Expected: all selected tests pass.
 
-- [ ] **Step 6: Commit Task 1**
+- [x] **Step 6: Commit Task 1**
 
 ```bash
 git add tldw_Server_API/app/core/Watchlists/briefing_contract.py tldw_Server_API/app/api/v1/endpoints/watchlists.py tldw_Server_API/app/core/Watchlists/pipeline.py tldw_Server_API/app/core/Watchlists/audio_briefing_workflow.py tldw_Server_API/tests/Watchlists/test_briefing_contract.py
