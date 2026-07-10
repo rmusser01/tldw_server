@@ -108,10 +108,10 @@ Optional add-ons (apply AFTER your base profile is healthy):
 ## Current Status
 
 Current release line:
-- `0.1.39` Beta status. Expect rough edges and please report issues.
+- `0.1.40` Beta status. Expect rough edges and please report issues.
 - Primary client surfaces are the Next.js WebUI, Admin UI, and browser extension.
 - Package metadata is prepared under the canonical PyPI name `tldw-server`; use a repository checkout until publishing is complete.
-- The `dev` branch carries work beyond `0.1.39`, including post-`0.1.39` branch work, and `main` is prepared for the `0.1.39` release; see [CHANGELOG.md](CHANGELOG.md) for the PR rollup and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for the published release entry point.
+- The `dev` branch carries work beyond `0.1.40`, including post-`0.1.40` branch work, and `main` is prepared for the `0.1.40` release; see [CHANGELOG.md](CHANGELOG.md) for the PR rollup and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for the published release entry point.
 
 <details>
 <summary>Current focus and migration notes from the old Gradio version</summary>
@@ -146,6 +146,22 @@ Current release line:
 ## What's New (in the last few releases)
 
 <details>
+<summary>0.1.40 release</summary>
+
+Included in the `0.1.40` release:
+- Chatbooks Backup & Import now covers full user-account backup/restore flows with redacted inventory previews, bundled tldw-stored artifacts, embeddings, generated documents, OpenWebUI hydration reuse, and post-write verification metadata.
+- Chat document uploads gained explicit processing choices, queue replay support, sidepanel/WebUI handoff plumbing, backend preflight contracts, and client/service coverage.
+- Release hardening fixed Guardian timestamp mutation, visual identity ZIP path validation on Windows, legacy audio WebSocket config handling, macOS PyAudio setup, sandbox concurrency tests, CodeQL alert paths, and YouTube/media ingest worker startup defaults.
+- Package, FastAPI, README, and MkDocs metadata were bumped to `0.1.40`.
+
+Still active on `dev`:
+- Treat [CHANGELOG.md](CHANGELOG.md) as the authoritative branch-level history for what has entered the release train.
+
+See [CHANGELOG.md](CHANGELOG.md) for the full running history and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for published release notes.
+
+</details>
+
+<details>
 <summary>0.1.39 release</summary>
 
 Included in the `0.1.39` release:
@@ -155,6 +171,7 @@ Included in the `0.1.39` release:
 - Package, FastAPI, README, and MkDocs metadata were bumped to `0.1.39`.
 
 Still active on `dev`:
+- `0.1.39` is superseded by the `0.1.40` release metadata above.
 - Treat [CHANGELOG.md](CHANGELOG.md) as the authoritative branch-level history for what has entered the release train.
 
 See [CHANGELOG.md](CHANGELOG.md) for the full running history and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for published release notes.

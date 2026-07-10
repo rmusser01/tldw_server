@@ -4,6 +4,10 @@ This page is the release notes index placeholder for published versions.
 
 ## Unreleased
 
+No published changes yet.
+
+## 0.1.40 - 2026-07-10
+
 ### Chatbooks
 
 - Chatbooks Backup & Import now treats omitted `content_selections` or `content_selections: {}` as a full user-account export. Non-empty selections are explicit allowlists, and zero-item allowlists are rejected.
@@ -19,5 +23,12 @@ This page is the release notes index placeholder for published versions.
   are directed to `Docs/Operations/ChaChaNotes_DB_Recovery.md` for recovery
   steps. This removes the release-blocking R11 backend recovery gap for
   first-class character chat.
+
+### Release hardening
+
+- Fixed Guardian notification timestamp handling, visual identity ZIP unsafe-path
+  detection on Windows, legacy audio WebSocket config handling, macOS PyAudio CI
+  setup, sandbox concurrency test stability, CodeQL alert paths, and media
+  ingest worker startup defaults.
 
 For release process details, see `Docs/Release_Checklist.md`.

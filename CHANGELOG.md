@@ -10,16 +10,60 @@ and this project adheres to Some kind of Versioning
 
 ### Added
 
-- Chatbooks Backup & Import now has an explicit full user-account backup contract and WebUI/extension Backup all flow, including account inventory scope preview, media records, derived media data, bundled tldw-stored account file artifacts, embeddings, redacted inventory summaries, OpenWebUI import-scope hydration reuse, and post-write verification metadata.
-
 ### Changed
-
-- Chatbooks export compatibility changed intentionally: omitted `content_selections` and `content_selections: {}` now mean full user-account export. Non-empty `content_selections` objects are explicit allowlists, and zero-item allowlists are rejected instead of producing empty backups.
-- Chatbook archive import now restores restorable archive media data, embeddings, prompts, evaluations, generated documents, and stored account artifacts by default. OpenWebUI imports still preserve attachment references first and use the separate hydration workflow for copied files.
 
 ### Fixed
 
-- Chatbooks Settings copy and navigation now direct full backup/restore work to Chatbooks Backup & Import while keeping Settings as an entry point or selected-conversation shortcut, reducing the risk of users mistaking a narrow export shortcut for a full backup.
+### Removed
+
+
+## [0.1.40] - 2026-07-10
+
+> Rollup coverage: this entry covers current `dev` work queued for `main`
+> after the `0.1.39` release metadata. It includes PRs #2688, #2694,
+> #2696, #2697, #2698, #2699, and #2700.
+
+### Added
+
+- **Chatbooks Full-Account Backup And Restore** — Added an explicit full
+  user-account backup contract and WebUI/extension Backup all flow, including
+  account inventory scope preview, media records, derived media data, bundled
+  tldw-stored account file artifacts, embeddings, redacted inventory summaries,
+  OpenWebUI import-scope hydration reuse, and post-write verification metadata.
+- **Chat Document Processing** — Added chat document upload processing choices,
+  queue replay support, sidepanel/WebUI handoff plumbing, backend preflight
+  contracts, and client/service tests for document-aware chat sends.
+- **Design Link Docs And Quiz Follow-Through** — Added generated design-link
+  docs for key product areas and carried the advanced quiz generation controls
+  and review hardening into the release train.
+
+### Changed
+
+- **Release Metadata** — Bumped package, FastAPI, README, and MkDocs metadata
+  to `0.1.40` for the next patch release from `dev` into `main`.
+- **Chatbooks Export Compatibility** — Changed omitted `content_selections` and
+  `content_selections: {}` to mean full user-account export. Non-empty
+  `content_selections` objects are explicit allowlists, and zero-item allowlists
+  are rejected instead of producing empty backups.
+- **Chatbook Import Defaults** — Chatbook archive import now restores restorable
+  archive media data, embeddings, prompts, evaluations, generated documents,
+  and stored account artifacts by default. OpenWebUI imports still preserve
+  attachment references first and use the separate hydration workflow for
+  copied files.
+
+### Fixed
+
+- **Release And CI Follow-Ups** — Fixed Guardian notification timestamp
+  handling, visual identity ZIP unsafe-path detection on Windows, legacy audio
+  WebSocket config handling, macOS PyAudio CI setup, and sandbox concurrency
+  test stabilization.
+- **CodeQL And Security Hardening** — Hardened current CodeQL alert paths on
+  `dev`, including parser, storage, sandbox snapshot, auth/email, moderation,
+  and filesystem validation edges.
+- **Chatbooks And Media Ingest UX** — Directed Chatbooks Settings copy and
+  navigation to Chatbooks Backup & Import while keeping Settings as an entry
+  point, and fixed YouTube/media ingest worker startup route defaults and
+  capability reporting.
 
 ### Removed
 

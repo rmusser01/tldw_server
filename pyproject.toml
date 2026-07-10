@@ -10,7 +10,7 @@ build-backend = "setuptools.build_meta"
 ###########################
 [project]
 name = "tldw-server"
-version = "0.1.39"
+version = "0.1.40"
 description = "A comprehensive research assistant and media analysis platform - Too Long; Didn't Watch Server"
 requires-python = ">=3.10"
 readme = "README.md"
