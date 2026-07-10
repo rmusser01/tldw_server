@@ -1695,6 +1695,7 @@ export const chatRagMethods = {
     media_quality?: string
     include_embeddings?: boolean
     include_generated_content?: boolean
+    format_version?: "1.0.0" | "1.1.0"
     tags?: string[]
     categories?: string[]
     async_mode?: boolean

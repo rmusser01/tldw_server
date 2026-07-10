@@ -239,7 +239,8 @@ describe("ChatbooksPlaygroundPage backup-all flow", () => {
         include_media: true,
         include_embeddings: true,
         include_generated_content: true,
-        media_quality: "original"
+        media_quality: "original",
+        format_version: "1.1.0"
       })
     )
   })

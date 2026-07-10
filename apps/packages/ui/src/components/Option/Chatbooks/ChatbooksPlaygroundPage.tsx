@@ -1959,6 +1959,7 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
         media_quality: string
         include_embeddings: boolean
         include_generated_content: boolean
+        format_version: "1.1.0"
         async_mode: boolean
       } = {
         name: effectiveName,
@@ -1970,6 +1971,7 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
         media_quality: isFullAccountExport ? "original" : mediaQuality,
         include_embeddings: isFullAccountExport ? true : includeEmbeddings,
         include_generated_content: isFullAccountExport ? true : includeGenerated,
+        format_version: "1.1.0",
         async_mode: exportAsync
       }
       if (!isFullAccountExport && contentSelections) {
