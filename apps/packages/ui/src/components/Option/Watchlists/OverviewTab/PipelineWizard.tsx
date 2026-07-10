@@ -224,6 +224,7 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
   const actionLockRef = useRef(false)
   const actionControllerRef = useRef<AbortController | null>(null)
   const schedulePreviewGenerationRef = useRef(0)
+  const schedulePreviewControllerRef = useRef<AbortController | null>(null)
   const emailRecipientSearchRef = useRef("")
   const validationRef = useRef<HTMLDivElement | null>(null)
   const advancedBriefingRef = useRef<HTMLDetailsElement | null>(null)
@@ -245,6 +246,9 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
       requestGenerationRef.current += 1
       actionControllerRef.current?.abort()
       actionControllerRef.current = null
+      schedulePreviewGenerationRef.current += 1
+      schedulePreviewControllerRef.current?.abort()
+      schedulePreviewControllerRef.current = null
       saveGenerationRef.current += 1
       actionLockRef.current = false
       const next = initial
@@ -269,6 +273,12 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
       requestGenerationRef.current += 1
       actionControllerRef.current?.abort()
       actionControllerRef.current = null
+      schedulePreviewGenerationRef.current += 1
+      schedulePreviewControllerRef.current?.abort()
+      schedulePreviewControllerRef.current = null
+      setSchedulePreview(null)
+      setSchedulePreviewLoading(false)
+      setSchedulePreviewError(null)
     }
     wasOpenRef.current = open
   }, [initial, initialStep, open, sessionKey])
@@ -277,6 +287,9 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
     requestGenerationRef.current += 1
     actionControllerRef.current?.abort()
     actionControllerRef.current = null
+    schedulePreviewGenerationRef.current += 1
+    schedulePreviewControllerRef.current?.abort()
+    schedulePreviewControllerRef.current = null
   }, [])
 
   useEffect(() => {
@@ -298,17 +311,24 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
     }
 
     const controller = new AbortController()
+    schedulePreviewControllerRef.current = controller
     setSchedulePreview(null)
     setSchedulePreviewLoading(true)
     const timeoutId = window.setTimeout(() => {
       void onPreviewSchedule(candidate, { signal: controller.signal })
         .then((result) => {
           if (generation !== schedulePreviewGenerationRef.current) return
+          if (schedulePreviewControllerRef.current === controller) {
+            schedulePreviewControllerRef.current = null
+          }
           setSchedulePreview(result)
           setSchedulePreviewLoading(false)
         })
         .catch((error) => {
           if (generation !== schedulePreviewGenerationRef.current || isAbortError(error)) return
+          if (schedulePreviewControllerRef.current === controller) {
+            schedulePreviewControllerRef.current = null
+          }
           setSchedulePreviewLoading(false)
           setSchedulePreviewError(schedulePreviewErrorCopy)
         })
@@ -318,6 +338,9 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
       schedulePreviewGenerationRef.current += 1
       window.clearTimeout(timeoutId)
       controller.abort()
+      if (schedulePreviewControllerRef.current === controller) {
+        schedulePreviewControllerRef.current = null
+      }
     }
   }, [
     draft.scheduleAdvancedCron,
@@ -325,7 +348,8 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
     draft.timezone,
     onPreviewSchedule,
     open,
-    schedulePreviewErrorCopy
+    schedulePreviewErrorCopy,
+    sessionKey
   ])
 
   useEffect(() => {

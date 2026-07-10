@@ -204,6 +204,47 @@ describe("PipelineWizard", () => {
     expect(screen.getByTestId("watchlists-pipeline-receipt")).not.toHaveTextContent("Manual only")
   })
 
+  it("isolates identical advanced previews across setup sessions", async () => {
+    let resolveSessionA: ((value: { nextRunAt?: string }) => void) | undefined
+    const onPreviewSchedule = vi.fn()
+      .mockImplementationOnce((_draft, _options) => new Promise((resolve) => {
+        resolveSessionA = resolve
+      }))
+      .mockResolvedValueOnce({
+        nextRunAt: "2026-08-03T08:00:00Z",
+        followingRunAt: "2026-09-01T08:00:00Z"
+      })
+    const initialDraft = {
+      ...sportscastDraft,
+      scheduleMode: "advanced" as const,
+      scheduleAdvancedCron: "0 8 1 * MON",
+      timezone: "UTC",
+      nextRunAt: undefined,
+      followingRunAt: undefined
+    }
+    const commonProps = {
+      open: true,
+      initialStep: "cadence" as const,
+      initialDraft,
+      sources,
+      onCancel: vi.fn(),
+      onPreviewSchedule
+    }
+    const view = render(<PipelineWizard {...commonProps} sessionKey="session-a" />)
+
+    await waitFor(() => expect(onPreviewSchedule).toHaveBeenCalledTimes(1), { timeout: 2_000 })
+    const sessionASignal = onPreviewSchedule.mock.calls[0]?.[1]?.signal as AbortSignal
+
+    view.rerender(<PipelineWizard {...commonProps} sessionKey="session-b" />)
+
+    await waitFor(() => expect(onPreviewSchedule).toHaveBeenCalledTimes(2), { timeout: 2_000 })
+    expect(sessionASignal.aborted).toBe(true)
+    resolveSessionA?.({ nextRunAt: "2026-07-01T08:00:00Z" })
+
+    expect(await inDialog().findByText(/Monday, August 3 at 8:00 AM UTC/)).toBeInTheDocument()
+    expect(inDialog().queryByText(/Wednesday, July 1/)).not.toBeInTheDocument()
+  })
+
   it("does not preview manual schedules and surfaces advanced preview failures", async () => {
     const manualPreview = vi.fn()
     const manualView = render(
