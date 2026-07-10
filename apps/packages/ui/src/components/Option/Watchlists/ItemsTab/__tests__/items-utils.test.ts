@@ -190,14 +190,24 @@ describe("stripHtmlToText", () => {
 })
 
 describe("extractImageUrl", () => {
-  it("extracts first image URL from html", () => {
-    const html = '<p>One</p><img src="https://example.com/image.jpg" alt="img" />'
-    expect(extractImageUrl(html)).toBe("https://example.com/image.jpg")
+  it.each([
+    ["https://example.com/image.jpg", "https://example.com/image.jpg"],
+    ["/images/image.jpg", "/images/image.jpg"],
+    ["javascript:alert(1)", null],
+    ["data:image/svg+xml;base64,PHN2Zy8+", null]
+  ])("validates html image candidate %s", (candidate, expected) => {
+    expect(extractImageUrl(`<img src="${candidate}" alt="img" />`)).toBe(
+      expected
+    )
   })
 
-  it("extracts first image URL from markdown", () => {
-    const markdown = "Text ![hero](https://example.com/hero.png) after"
-    expect(extractImageUrl(markdown)).toBe("https://example.com/hero.png")
+  it.each([
+    ["http://example.com/hero.png", "http://example.com/hero.png"],
+    ["../images/hero.png", "../images/hero.png"],
+    ["mailto:image@example.com", null],
+    ["data:text/html;base64,PHNjcmlwdD4=", null]
+  ])("validates markdown image candidate %s", (candidate, expected) => {
+    expect(extractImageUrl(`Text ![hero](${candidate}) after`)).toBe(expected)
   })
 
   it("returns null when no image exists", () => {

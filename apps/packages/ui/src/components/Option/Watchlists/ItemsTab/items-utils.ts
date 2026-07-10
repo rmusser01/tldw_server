@@ -5,6 +5,7 @@ import type {
   WatchlistItemSavedViewFilters,
   WatchlistSource
 } from "@/types/watchlists"
+import { safeImageUrl } from "@/utils/image-utils"
 
 export const SOURCE_LOAD_PAGE_SIZE = 200
 export const SOURCE_LOAD_MAX_ITEMS = 1000
@@ -486,10 +487,10 @@ export const extractImageUrl = (value: string | null | undefined): string | null
   if (!value) return null
 
   const htmlMatch = value.match(/<img[^>]+src=["']([^"']+)["']/i)
-  if (htmlMatch?.[1]) return htmlMatch[1]
+  if (htmlMatch?.[1]) return safeImageUrl(htmlMatch[1])
 
-  const markdownMatch = value.match(/!\[[^\]]*]\((https?:\/\/[^)\s]+)\)/i)
-  if (markdownMatch?.[1]) return markdownMatch[1]
+  const markdownMatch = value.match(/!\[[^\]]*]\(([^)\s]+)\)/i)
+  if (markdownMatch?.[1]) return safeImageUrl(markdownMatch[1])
 
   return null
 }
