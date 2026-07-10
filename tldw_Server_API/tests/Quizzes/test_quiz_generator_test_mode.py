@@ -8,6 +8,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGD
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 from tldw_Server_API.app.services.quiz_generator import (
     _build_test_mode_questions,
+    _normalize_questions,
     generate_quiz_from_sources,
 )
 
@@ -135,6 +136,61 @@ def test_build_test_mode_questions_emits_five_options_for_best_of_five_profile()
     assert question["question_type"] == "multiple_choice"
     assert len(question["options"]) == 5
     assert question["correct_answer"] == 0
+    assert question["tags"] == ["best_of_five"]
+
+
+def test_normalize_questions_marks_best_of_five_with_existing_tags() -> None:
+    questions = _normalize_questions(
+        [
+            {
+                "question_type": "multiple_choice",
+                "question_text": "Which is the best next step?",
+                "options": ["A", "B", "C", "D", "E"],
+                "correct_answer": 2,
+                "explanation": "C is best supported by the citation.",
+                "tags": ["cardiology", "best_of_five"],
+                "source_citations": [
+                    {
+                        "source_type": "note",
+                        "source_id": "note-bof",
+                        "quote": "Best answer evidence.",
+                    }
+                ],
+            }
+        ],
+        default_source_type="note",
+        default_source_id="note-bof",
+        generation_profile="best_of_five",
+    )
+
+    assert len(questions) == 1
+    assert questions[0]["tags"] == ["cardiology", "best_of_five"]
+
+
+@pytest.mark.asyncio
+async def test_generate_quiz_from_sources_persists_best_of_five_tags_in_test_mode(
+    monkeypatch: pytest.MonkeyPatch,
+    quizzes_db: CharactersRAGDB,
+    media_db: MediaDatabase,
+):
+    monkeypatch.setenv("TEST_MODE", "1")
+    note_id = quizzes_db.add_note(
+        title="Best of Five Note",
+        content="The patient needs the best supported answer from five plausible options.",
+    )
+
+    result = await generate_quiz_from_sources(
+        db=quizzes_db,
+        media_db=media_db,
+        sources=[{"source_type": "note", "source_id": note_id}],
+        num_questions=1,
+        question_types=None,
+        generation_profile="best_of_five",
+    )
+
+    question = result["questions"][0]
+    assert question["tags"] == ["best_of_five"]
+    assert len(question["options"]) == 5
 
 
 @pytest.mark.asyncio

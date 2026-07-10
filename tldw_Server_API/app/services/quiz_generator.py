@@ -29,6 +29,7 @@ SUPPORTED_GENERATED_QUESTION_TYPES = [
     "fill_blank",
 ]
 DEFAULT_GENERATION_PROFILE = "standard_recall"
+BEST_OF_FIVE_TAG = "best_of_five"
 MAX_CONTENT_CHARS = 15000
 
 _QUIZ_GENERATION_PROFILES: list[dict[str, Any]] = [
@@ -142,6 +143,7 @@ Return a JSON object in this exact format:
           "timestamp_seconds": 0
         }}
       ],
+      "tags": ["optional topic or difficulty tag"],
       "points": 1
     }}
   ]
@@ -273,6 +275,36 @@ def _coerce_options(
     if max_options is not None and len(options) > max_options:
         options = options[:max_options]
     return options
+
+
+def _coerce_question_tags(raw: Any, *, generation_profile: Any) -> list[str] | None:
+    tags: list[str] = []
+    seen: set[str] = set()
+
+    if isinstance(raw, list):
+        candidates = raw
+    elif isinstance(raw, str) and raw.strip():
+        candidates = [part.strip() for part in raw.replace(";", ",").split(",")]
+    else:
+        candidates = []
+
+    for candidate in candidates:
+        tag = str(candidate).strip()
+        if not tag:
+            continue
+        normalized = tag.lower().replace("-", "_").replace(" ", "_")
+        if normalized in {BEST_OF_FIVE_TAG, "bof"}:
+            tag = BEST_OF_FIVE_TAG
+            normalized = BEST_OF_FIVE_TAG
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        tags.append(tag)
+
+    if _normalize_generation_profile(generation_profile) == "best_of_five" and BEST_OF_FIVE_TAG not in seen:
+        tags.append(BEST_OF_FIVE_TAG)
+
+    return tags or None
 
 
 def _normalize_mc_answer(raw: Any, options: list[str]) -> int:
@@ -741,6 +773,7 @@ def _normalize_questions(
             default_source_type=default_source_type,
             default_source_id=default_source_id,
         )
+        tags = _coerce_question_tags(raw.get("tags"), generation_profile=profile_id)
 
         options: list[str] | None = None
         correct_answer: int | str
@@ -754,19 +787,20 @@ def _normalize_questions(
         else:
             correct_answer = str(raw.get("correct_answer") or "").strip()
 
-        normalized.append(
-            {
-                "question_type": q_type,
-                "question_text": question_text,
-                "options": options,
-                "correct_answer": correct_answer,
-                "explanation": str(raw.get("explanation") or "").strip() or None,
-                "hint": hint,
-                "hint_penalty_points": hint_penalty_points,
-                "source_citations": source_citations,
-                "points": points_val if points_val >= 0 else 1,
-            }
-        )
+        question_payload = {
+            "question_type": q_type,
+            "question_text": question_text,
+            "options": options,
+            "correct_answer": correct_answer,
+            "explanation": str(raw.get("explanation") or "").strip() or None,
+            "hint": hint,
+            "hint_penalty_points": hint_penalty_points,
+            "source_citations": source_citations,
+            "points": points_val if points_val >= 0 else 1,
+        }
+        if tags:
+            question_payload["tags"] = tags
+        normalized.append(question_payload)
     return normalized
 
 
@@ -981,22 +1015,24 @@ def _build_test_mode_questions(
                     f"Unused distractor {option_idx}"
                     for option_idx in range(len(options) + 1, option_count + 1)
                 )
-            questions.append(
-                {
-                    "question_type": "multiple_choice",
-                    "question_text": (
-                        f"Which statement is the best answer supported by "
-                        f"{citation_source_type}:{citation_source_id}?"
-                    ),
-                    "options": options[:option_count],
-                    "correct_answer": 0,
-                    "explanation": "The first option is the best answer because it quotes the selected source evidence.",
-                    "hint": "Look for the excerpt copied from the selected source.",
-                    "hint_penalty_points": 0,
-                    "source_citations": [citation],
-                    "points": 1,
-                }
-            )
+            question_payload = {
+                "question_type": "multiple_choice",
+                "question_text": (
+                    f"Which statement is the best answer supported by "
+                    f"{citation_source_type}:{citation_source_id}?"
+                ),
+                "options": options[:option_count],
+                "correct_answer": 0,
+                "explanation": "The first option is the best answer because it quotes the selected source evidence.",
+                "hint": "Look for the excerpt copied from the selected source.",
+                "hint_penalty_points": 0,
+                "source_citations": [citation],
+                "points": 1,
+            }
+            tags = _coerce_question_tags(None, generation_profile=profile_id)
+            if tags:
+                question_payload["tags"] = tags
+            questions.append(question_payload)
             continue
 
         if question_type == "multi_select":
@@ -1201,6 +1237,7 @@ def _persist_generated_quiz(
             source_citations=question.get("source_citations"),
             points=question.get("points", 1),
             order_index=idx,
+            tags=question.get("tags"),
         )
 
     quiz = db.get_quiz(quiz_id)

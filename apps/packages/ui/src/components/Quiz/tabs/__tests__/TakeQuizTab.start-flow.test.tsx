@@ -342,6 +342,49 @@ describe("TakeQuizTab start flow", () => {
     expect(completionProgress).toHaveAttribute("aria-valuemax", "100")
   }, 15000)
 
+  it("labels best-of-five questions from generated metadata", async () => {
+    const questionId = 41
+    vi.mocked(useStartAttemptMutation).mockReturnValue({
+      mutateAsync: vi.fn(async () => ({
+        id: 141,
+        quiz_id: 7,
+        started_at: "2026-02-18T10:00:00Z",
+        total_possible: 1,
+        answers: [],
+        questions: [
+          {
+            id: questionId,
+            quiz_id: 7,
+            question_type: "multiple_choice",
+            question_text: "Which option is the best supported answer?",
+            options: ["A", "B", "C", "D", "E"],
+            points: 1,
+            order_index: 0,
+            tags: ["best_of_five"],
+            deleted: false,
+            client_id: "test",
+            version: 1
+          }
+        ]
+      }))
+    } as any)
+
+    render(
+      <MemoryRouter>
+        <TakeQuizTab
+          onNavigateToGenerate={() => {}}
+          onNavigateToCreate={() => {}}
+        />
+      </MemoryRouter>
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: /Start Quiz/i }))
+    fireEvent.click(screen.getByRole("button", { name: "Begin Quiz" }))
+
+    await screen.findByTestId(`quiz-question-${questionId}`)
+    expect(screen.getByText("Best of Five")).toBeInTheDocument()
+  }, 15000)
+
   it("announces danger-zone timer updates in assertive live region", async () => {
     vi.mocked(useQuizTimer).mockReturnValue({
       minutes: 0,

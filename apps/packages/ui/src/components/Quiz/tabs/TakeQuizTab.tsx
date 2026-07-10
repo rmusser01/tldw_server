@@ -97,6 +97,14 @@ type TakeSessionMode = "graded" | "practice" | "review"
 type StudyPoolSizePreference = "all" | number
 type PracticeQuestionTimerPreference = "off" | number
 const TOUCH_TARGET_CLASS = "min-h-11 px-4"
+const BEST_OF_FIVE_QUESTION_TAG = "best_of_five"
+
+const hasBestOfFiveQuestionTag = (question: QuestionPublic): boolean => {
+  if (!Array.isArray(question.tags)) return false
+  return question.tags.some((tag) => (
+    String(tag).trim().toLowerCase().replace(/[\s-]+/g, "_") === BEST_OF_FIVE_QUESTION_TAG
+  ))
+}
 
 const normalizeMultiSelectAnswer = (value: unknown): number[] => {
   if (Array.isArray(value)) {
@@ -863,6 +871,22 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
     return Array.isArray(raw) ? raw : null
   }
 
+  const renderQuestionHeader = (question: QuestionPublic, index: number) => (
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="text-xs text-text-muted">
+        {t("option:quiz.questionNumberLabel", {
+          defaultValue: "Question {{number}}",
+          number: index + 1
+        })}
+      </span>
+      {hasBestOfFiveQuestionTag(question) && (
+        <Tag color="blue" className="m-0">
+          {t("option:quiz.bestOfFiveTag", { defaultValue: "Best of Five" })}
+        </Tag>
+      )}
+    </div>
+  )
+
   const isPracticeAnswerCorrect = (
     question: QuestionPublic,
     answer: AnswerValue | null | undefined
@@ -1323,12 +1347,7 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
                 <div className="w-full space-y-2">
                   <div className="flex items-start justify-between gap-3">
                     <div className="font-medium">
-                      <span className="block text-xs text-text-muted">
-                        {t("option:quiz.questionNumberLabel", {
-                          defaultValue: "Question {{number}}",
-                          number: index + 1
-                        })}
-                      </span>
+                      {renderQuestionHeader(question, index)}
                       <QuizMarkdown content={question.question_text} className="[&>p]:my-1" />
                     </div>
                     <DesignSystemBadge
@@ -1914,12 +1933,7 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
                   <List.Item>
                     <div className="w-full space-y-2">
                       <div className="font-medium">
-                        <span className="block text-xs text-text-muted">
-                          {t("option:quiz.questionNumberLabel", {
-                            defaultValue: "Question {{number}}",
-                            number: index + 1
-                          })}
-                        </span>
+                        {renderQuestionHeader(question, index)}
                         <QuizMarkdown content={question.question_text} className="[&>p]:my-1" />
                       </div>
                       {renderHintSupport(question)}
@@ -2076,12 +2090,7 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
                       }`}
                     >
                       <div className="font-medium">
-                        <span className="block text-xs text-text-muted">
-                          {t("option:quiz.questionNumberLabel", {
-                            defaultValue: "Question {{number}}",
-                            number: index + 1
-                          })}
-                        </span>
+                        {renderQuestionHeader(question, index)}
                         <QuizMarkdown content={question.question_text} className="[&>p]:my-1" />
                       </div>
                       {renderAnswerInput(question)}
@@ -2234,12 +2243,7 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
                     }`}
                   >
                     <div className="font-medium">
-                      <span className="block text-xs text-text-muted">
-                        {t("option:quiz.questionNumberLabel", {
-                          defaultValue: "Question {{number}}",
-                          number: index + 1
-                        })}
-                      </span>
+                      {renderQuestionHeader(question, index)}
                       <QuizMarkdown content={question.question_text} className="[&>p]:my-1" />
                     </div>
                     {renderAnswerInput(question)}
