@@ -28,6 +28,8 @@ Implement the confirmed UAT-driven Watchlists remediation: route every setup pat
 - Confirmed design specification: `Docs/superpowers/specs/2026-07-09-watchlists-briefing-contract-ux-hardening-design.md`.
 - Clean baseline before implementation planning: frontend contract/setup suite 35 passed; backend Watchlists briefing/audio suite 56 passed and 4 external-feed tests skipped.
 - Spec review broadened the audience and editorial model beyond news/OSINT. The same contract now supports concise briefings, solo updates, multi-host discussions, sportscasts, culture roundtables, and custom source-grounded programs. Added durable script stages, show identity/notes, 60-second sample tests, honest target-duration copy, prompt-injection/copyright/disclosure/impersonation safeguards, and explicit podcast publishing non-goals.
+- Approved implementation plan: `Docs/superpowers/plans/IMPLEMENTATION_PLAN_watchlists_briefing_contract_ux_2026_07_09.md`. Five stages cover canonical contract, durable fulfillment/delivery, editorial programs, outcome-first UI/accessibility, and matched-revision UAT/polish.
+- Plan review corrected external-delivery semantics: providers without durable idempotency can return an unknown outcome after timeout, so acknowledged or uncertain sends are never automatically replayed and reviewed retry is required.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

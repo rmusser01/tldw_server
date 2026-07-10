@@ -49,7 +49,7 @@ The primary scene is a researcher or creator in a normally lit home office check
 5. All qualifying newly collected items are candidates after monitor filters and deduplication. One deterministic backend-configured safety cap applies to both text and audio. The result discloses included and omitted counts.
 6. Reports is the required storage destination. Existing supported delivery adapters remain optional. No new delivery integration is introduced by this work.
 7. Delivery starts after all selected artifacts are ready. A delivery failure does not delete or hide the artifacts.
-8. Retries resume failed stages and must not duplicate reports, audio artifacts, Chatbooks, or external messages.
+8. Retries resume failed stages, do not duplicate reports, audio artifacts, or Chatbooks, and never automatically replay acknowledged or uncertain external messages.
 9. Test exercises the real collection, selection, rendering, persistence, and optional audio path. It does not activate a schedule or contact external recipients by default.
 10. Existing advanced fields and unknown output preference keys survive normalization and edits.
 11. Editorial format is independent of watchlist domain. A general watchlist can produce a sportscast or culture roundtable without adding a new source domain or parallel audio pipeline.
@@ -180,6 +180,7 @@ Delivery state is separate:
 - `delivered`
 - `partially_delivered`
 - `failed`
+- `unknown`, when the provider may have accepted a message but did not return a durable acknowledgment
 
 The UI may describe a ready briefing with failed delivery as “Briefing ready, email failed.” It must not call the occurrence fully delivered.
 
@@ -211,6 +212,8 @@ Retries must:
 - reuse the occurrence key;
 - avoid repeating successful deliveries;
 - create a new attempt record without creating a new logical artifact unless the user explicitly chooses Regenerate as a new version.
+
+For external delivery, the system passes a stable idempotency key when the provider supports one. It never automatically replays a successful or `unknown` attempt. If a timeout or process interruption leaves acceptance uncertain, the UI says “Delivery outcome unknown,” explains the duplicate risk, and requires the user to review the destination before choosing Retry. This is the honest boundary for providers that do not expose idempotent delivery.
 
 ### 7.5 Failure handling
 
@@ -449,7 +452,7 @@ The migration is additive:
 2. Scheduled text and selected audio are required fulfillment stages, including no-material-update occurrences.
 3. A collection run cannot create a false user-facing briefing success when required output work failed or was skipped.
 4. Text, audio, and delivery state are durable, independently visible, and narrowly retryable.
-5. Repeating a retry does not duplicate reports, audio, Chatbooks, or email.
+5. Repeating a retry does not duplicate reports, audio, Chatbooks, or acknowledged email; uncertain external delivery is never replayed automatically and requires a reviewed retry.
 6. The primary setup flow is Sources, Cadence, Briefing, Delivery, Test and ends with an exact natural-language receipt.
 7. Test uses the production contract without activating the schedule or sending external delivery by default.
 8. Latest briefing exposes playback, text/audio readiness, delivery, provenance, next run, and recovery on WebUI and extension layouts.
