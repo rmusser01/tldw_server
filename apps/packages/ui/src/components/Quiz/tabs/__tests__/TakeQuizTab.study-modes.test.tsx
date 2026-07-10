@@ -386,7 +386,7 @@ describe("TakeQuizTab study modes", () => {
         id: 51,
         quiz_id: 7,
         question_type: "true_false",
-        question_text: "A tagged true/false question.",
+        question_text: "**Assertion:** A tagged true/false question.\n\n**Reason:** This isolates the type guard.",
         options: ASSERTION_REASONING_OPTIONS,
         correct_answer: "true",
         tags: ["assertion_reasoning"]
@@ -398,7 +398,7 @@ describe("TakeQuizTab study modes", () => {
         id: 52,
         quiz_id: 7,
         question_type: "multiple_choice",
-        question_text: "A tagged EMQ stem.",
+        question_text: "**Assertion:** A tagged EMQ stem.\n\n**Reason:** This isolates the grouping guard.",
         options: ASSERTION_REASONING_OPTIONS,
         correct_answer: 0,
         group_id: "manual-emq",
@@ -412,7 +412,7 @@ describe("TakeQuizTab study modes", () => {
         id: 53,
         quiz_id: 7,
         question_type: "multiple_choice",
-        question_text: "A tagged question with the wrong scale size.",
+        question_text: "**Assertion:** A tagged question has four options.\n\n**Reason:** This isolates the scale-size guard.",
         options: ASSERTION_REASONING_OPTIONS.slice(0, 4),
         correct_answer: 0,
         tags: ["assertion_reasoning"]
@@ -430,7 +430,7 @@ describe("TakeQuizTab study modes", () => {
           id: 50,
           quiz_id: 7,
           question_type: "multiple_choice",
-          question_text: "A valid tagged question.",
+          question_text: "**Assertion:** A valid tagged question is present.\n\n**Reason:** Its body and scale are canonical.",
           options: ASSERTION_REASONING_OPTIONS,
           correct_answer: 0,
           tags: ["assertion_reasoning"]
@@ -444,7 +444,48 @@ describe("TakeQuizTab study modes", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Open Review/i }))
 
-    expect(await screen.findByText(question.question_text)).toBeInTheDocument()
+    expect(await screen.findByText(/Review mode is read-only/)).toBeInTheDocument()
+    expect(screen.queryByTestId("assertion-reasoning-scale")).not.toBeInTheDocument()
+    expect(screen.queryByText("Assertion / Reasoning")).not.toBeInTheDocument()
+  }, 15000)
+
+  it.each([
+    {
+      label: "noncanonical five-option scale",
+      questionText: "**Assertion:** A tagged question has five options.\n\n**Reason:** The options are not the canonical scale.",
+      options: ["One", "Two", "Three", "Four", "Five"]
+    },
+    {
+      label: "unlabeled question body",
+      questionText: "A tagged question without explicit assertion and reason labels.",
+      options: ASSERTION_REASONING_OPTIONS
+    }
+  ])("does not apply Assertion / Reasoning UI to a $label", async ({ questionText, options }) => {
+    window.sessionStorage.setItem(
+      TAKE_QUIZ_LIST_PREFS_KEY,
+      JSON.stringify({ modePreference: "review" })
+    )
+
+    vi.mocked(listQuestions).mockResolvedValue({
+      items: [
+        {
+          id: 54,
+          quiz_id: 7,
+          question_type: "multiple_choice",
+          question_text: questionText,
+          options,
+          correct_answer: 0,
+          tags: ["assertion_reasoning"]
+        }
+      ],
+      count: 1
+    } as any)
+
+    render(<MemoryRouter><TakeQuizTab onNavigateToGenerate={() => {}} onNavigateToCreate={() => {}} /></MemoryRouter>)
+
+    fireEvent.click(screen.getByRole("button", { name: /Open Review/i }))
+
+    expect(await screen.findByText(/Review mode is read-only/)).toBeInTheDocument()
     expect(screen.queryByTestId("assertion-reasoning-scale")).not.toBeInTheDocument()
     expect(screen.queryByText("Assertion / Reasoning")).not.toBeInTheDocument()
   }, 15000)
@@ -461,7 +502,7 @@ describe("TakeQuizTab study modes", () => {
           id: 61,
           quiz_id: 7,
           question_type: "multiple_choice",
-          question_text: "First tagged question.",
+          question_text: "**Assertion:** The first tagged question is valid.\n\n**Reason:** Its labels are explicit.",
           options: ASSERTION_REASONING_OPTIONS,
           correct_answer: 0,
           tags: ["assertion_reasoning"]
@@ -470,7 +511,7 @@ describe("TakeQuizTab study modes", () => {
           id: 62,
           quiz_id: 7,
           question_type: "multiple_choice",
-          question_text: "Second tagged question.",
+          question_text: "**Assertion:** The second tagged question is valid.\n\n**Reason:** Its labels are explicit.",
           options: [...ASSERTION_REASONING_OPTIONS].reverse(),
           correct_answer: 4,
           tags: ["assertion_reasoning"]
@@ -483,7 +524,7 @@ describe("TakeQuizTab study modes", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Open Review/i }))
 
-    expect(await screen.findByText("First tagged question.")).toBeInTheDocument()
+    expect(await screen.findByText(/Review mode is read-only/)).toBeInTheDocument()
     expect(screen.queryByTestId("assertion-reasoning-scale")).not.toBeInTheDocument()
     expect(screen.queryByText("Assertion / Reasoning")).not.toBeInTheDocument()
   }, 15000)

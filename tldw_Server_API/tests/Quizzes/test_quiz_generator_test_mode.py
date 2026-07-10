@@ -897,6 +897,7 @@ def test_non_assertion_profiles_strip_assertion_reasoning_reserved_tags(
             "assertion_reasoning",
             "assertion reasoning",
             "assertion/reasoning",
+            "Assertion / Reasoning",
             "topic/area",
         ],
         generation_profile=generation_profile,
@@ -913,6 +914,7 @@ def test_normalize_assertion_reasoning_owns_options_and_canonicalizes_one_subtyp
             "assertion-reasoning",
             "assertion_reasoning",
             "ASSERTION/REASONING",
+            "Assertion / Reasoning",
         ]
     )
 

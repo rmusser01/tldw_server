@@ -99,6 +99,13 @@ type PracticeQuestionTimerPreference = "off" | number
 const TOUCH_TARGET_CLASS = "min-h-11 px-4"
 const BEST_OF_FIVE_QUESTION_TAG = "best_of_five"
 const ASSERTION_REASONING_QUESTION_TAG = "assertion_reasoning"
+const ASSERTION_REASONING_OPTIONS = [
+  "Both the assertion and reason are true, and the reason correctly explains the assertion.",
+  "Both the assertion and reason are true, but the reason does not explain the assertion.",
+  "The assertion is true, but the reason is false.",
+  "The assertion is false, but the reason is true.",
+  "Both the assertion and reason are false."
+] as const
 
 const normalizeQuestionTag = (tag: unknown): string =>
   String(tag).trim().toLowerCase().replace(/[\s/-]+/g, "_")
@@ -120,12 +127,24 @@ const getQuestionGroupId = (question: QuestionPublic): string | null => {
   return normalized.length > 0 ? normalized : null
 }
 
+const hasLabeledAssertionReasoningBody = (question: QuestionPublic): boolean => {
+  const questionText = question.question_text
+  if (typeof questionText !== "string") return false
+  const assertionIndex = questionText.search(/^[ \t]*\*\*Assertion:\*\*[ \t]*\S/im)
+  const reasonIndex = questionText.search(/^[ \t]*\*\*Reason:\*\*[ \t]*\S/im)
+  return assertionIndex >= 0 && reasonIndex > assertionIndex
+}
+
 const hasCompatibleAssertionReasoningShape = (question: QuestionPublic): boolean =>
   hasAssertionReasoningQuestionTag(question) &&
   question.question_type === "multiple_choice" &&
   getQuestionGroupId(question) == null &&
   Array.isArray(question.options) &&
-  question.options.length === 5
+  question.options.length === ASSERTION_REASONING_OPTIONS.length &&
+  question.options.every(
+    (option, index) => option === ASSERTION_REASONING_OPTIONS[index]
+  ) &&
+  hasLabeledAssertionReasoningBody(question)
 
 const getAssertionReasoningScaleOptions = (questions: QuestionPublic[]): string[] | null => {
   const taggedQuestions = questions.filter(hasAssertionReasoningQuestionTag)
@@ -136,11 +155,7 @@ const getAssertionReasoningScaleOptions = (questions: QuestionPublic[]): string[
     return null
   }
 
-  const firstOptions = taggedQuestions[0].options as string[]
-  const hasConsistentScale = taggedQuestions.every((question) =>
-    question.options?.every((option, index) => option === firstOptions[index])
-  )
-  return hasConsistentScale ? firstOptions : null
+  return [...ASSERTION_REASONING_OPTIONS]
 }
 
 const normalizeMultiSelectAnswer = (value: unknown): number[] => {

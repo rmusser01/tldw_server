@@ -325,10 +325,13 @@ def _coerce_question_tags(raw: Any, *, generation_profile: Any) -> list[str] | N
         if not tag:
             continue
         normalized = tag.lower().replace("-", "_").replace(" ", "_")
-        if normalized in {BEST_OF_FIVE_TAG, "bof"}:
+        reserved_normalized = "_".join(
+            tag.lower().replace("-", " ").replace("_", " ").replace("/", " ").split()
+        )
+        if reserved_normalized in {BEST_OF_FIVE_TAG, "bof"}:
             tag = BEST_OF_FIVE_TAG
             normalized = BEST_OF_FIVE_TAG
-        elif normalized in {ASSERTION_REASONING_TAG, "assertion/reasoning"}:
+        elif reserved_normalized == ASSERTION_REASONING_TAG:
             if profile_id != ASSERTION_REASONING_TAG:
                 continue
             tag = ASSERTION_REASONING_TAG

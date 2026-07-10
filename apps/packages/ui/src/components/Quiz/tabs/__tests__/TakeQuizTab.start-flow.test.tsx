@@ -583,7 +583,7 @@ describe("TakeQuizTab start flow", () => {
   }, 15000)
 
   it("shuffles multiple-choice option order per graded attempt while preserving answer mapping", async () => {
-    const optionLabels = ["Alpha", "Beta", "Gamma", "Delta", "Epsilon"]
+    const optionLabels = ASSERTION_REASONING_OPTIONS
     const questionId = 11
 
     const firstAttemptId = 200
@@ -613,7 +613,7 @@ describe("TakeQuizTab start flow", () => {
             id: questionId,
             quiz_id: 7,
             question_type: "multiple_choice",
-            question_text: "Pick the second Greek letter.",
+            question_text: "**Assertion:** Alpha is first.\n\n**Reason:** Greek letters are ordered.",
             options: optionLabels,
             points: 1,
             order_index: 0,
@@ -635,7 +635,7 @@ describe("TakeQuizTab start flow", () => {
             id: questionId,
             quiz_id: 7,
             question_type: "multiple_choice",
-            question_text: "Pick the second Greek letter.",
+            question_text: "**Assertion:** Alpha is first.\n\n**Reason:** Greek letters are ordered.",
             options: optionLabels,
             points: 1,
             order_index: 0,
