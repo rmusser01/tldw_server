@@ -8,7 +8,10 @@ import type {
 import { bgRequest, bgUpload } from "@/services/background-proxy"
 import i18n from "i18next"
 import { extractCompletedIngestJobMediaId } from "@/services/tldw/ingest-job-results"
-import { extractIngestJobIds } from "@/services/tldw/ingest-jobs-orchestrator"
+import {
+  extractIngestJobIds,
+  pollSingleIngestJob,
+} from "@/services/tldw/ingest-jobs-orchestrator"
 import {
   getProcessPathForType,
   inferUploadMediaTypeFromFile,
@@ -49,6 +52,9 @@ type PrepareDependencies = {
     options: { enableOcr: boolean },
   ) => Promise<ProcessedDocumentText>
   ingestDocument?: (file: UploadedFile) => Promise<IngestDocumentResult>
+  waitForIngestJob?: (
+    jobId: string | number,
+  ) => Promise<IngestDocumentResult>
 }
 
 export type PrepareChatDocumentAttachmentsInput = PrepareDependencies & {
@@ -461,6 +467,50 @@ export const ingestDocumentToLibrary = async (
   }
 }
 
+export const waitForIngestDocumentJob = async (
+  jobId: string | number,
+  options: { timeoutMs?: number; pollIntervalMs?: number } = {},
+): Promise<IngestDocumentResult> => {
+  const normalizedJobId = Number(jobId)
+  if (!Number.isFinite(normalizedJobId) || normalizedJobId <= 0) {
+    throw new Error("Ingest job returned an invalid job id.")
+  }
+  const terminal = await pollSingleIngestJob({
+    jobId: Math.trunc(normalizedJobId),
+    timeoutMs: options.timeoutMs || DIRECT_INGEST_TIMEOUT_MS,
+    pollIntervalMs: options.pollIntervalMs,
+    isCancelled: () => false,
+    onCancel: () => undefined,
+    fetchJob: async (id) => {
+      try {
+        return {
+          ok: true,
+          data: await bgRequest<unknown>({
+            path: `/api/v1/media/ingest/jobs/${encodeURIComponent(String(id))}`,
+            method: "GET",
+          }),
+        }
+      } catch (error) {
+        return { ok: false, error: errorMessage(error) }
+      }
+    },
+  })
+  if (terminal.terminalStatus !== "completed") {
+    throw new Error(
+      terminal.error || `Ingest ${terminal.terminalStatus || "failed"}.`,
+    )
+  }
+  const mediaId = extractCompletedIngestJobMediaId(terminal.data)
+  if (mediaId == null) {
+    throw new Error("Ingest completed without a media id.")
+  }
+  return {
+    mediaId,
+    jobId: Math.trunc(normalizedJobId),
+    status: "completed",
+  }
+}
+
 export const prepareChatDocumentAttachmentsForSend = async ({
   files,
   historyId,
@@ -470,6 +520,7 @@ export const prepareChatDocumentAttachmentsForSend = async ({
   processPdf = processPdfForChat,
   ingestDocument = (file) =>
     ingestDocumentToLibrary(file, { historyId, sessionId }),
+  waitForIngestJob = waitForIngestDocumentJob,
 }: PrepareChatDocumentAttachmentsInput): Promise<PreparedChatDocumentAttachments> => {
   const contextFiles: UploadedFile[] = []
   const failedFiles: UploadedFile[] = []
@@ -500,7 +551,7 @@ export const prepareChatDocumentAttachmentsForSend = async ({
 
     try {
       if (mode === "ingest_to_library") {
-        const result = await ingestDocument(file)
+        let result = await ingestDocument(file)
         if (result.mediaId == null) {
           const status = normalizeJobStatus(result.status)
           if (
@@ -508,18 +559,15 @@ export const prepareChatDocumentAttachmentsForSend = async ({
             status !== "completed" &&
             !TERMINAL_RETRY_STATUSES.has(status)
           ) {
-            processedFiles.push({
-              ...file,
-              processingMode: mode,
-              processingStatus: "processing",
-              processed: false,
-              ingestJobId: result.jobId,
-              ingestBatchId: result.batchId,
-              processingResultRef: { kind: "ingest_job", id: result.jobId },
-              processingRecoveryActions: ["cancel"],
-            })
-            continue
+            const pendingResult = result
+            const completedResult = await waitForIngestJob(result.jobId)
+            result = {
+              ...completedResult,
+              batchId: pendingResult.batchId ?? completedResult.batchId,
+            }
           }
+        }
+        if (result.mediaId == null) {
           throw new Error("Ingest completed without a media id.")
         }
         ragMediaIds.push(result.mediaId)

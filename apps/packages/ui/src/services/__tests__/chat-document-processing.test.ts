@@ -26,6 +26,7 @@ import {
   prepareChatDocumentAttachmentsForSend,
   setBatchDocumentProcessingMode,
   setFileDocumentProcessingMode,
+  waitForIngestDocumentJob,
   withDefaultDocumentDecision,
 } from "@/services/chat-document-processing"
 
@@ -378,12 +379,18 @@ describe("chat document processing service", () => {
     expect(result.requestOverrides).toBeUndefined()
   })
 
-  it("keeps accepted ingest jobs processing until a media id is available", async () => {
+  it("waits for accepted ingest jobs before building retrieval overrides", async () => {
     const deps = makeDeps()
     deps.ingestDocument.mockResolvedValueOnce({
       jobId: 77,
       batchId: "batch-1",
       status: "processing",
+    })
+    const waitForIngestJob = vi.fn().mockResolvedValue({
+      mediaId: 42,
+      jobId: 77,
+      batchId: "batch-1",
+      status: "completed",
     })
 
     const result = await prepareChatDocumentAttachmentsForSend({
@@ -391,16 +398,21 @@ describe("chat document processing service", () => {
       processDocument: deps.processDocument,
       processPdf: deps.processPdf,
       ingestDocument: deps.ingestDocument,
+      waitForIngestJob,
     })
 
     expect(result.contextFiles).toEqual([])
     expect(result.failedFiles).toEqual([])
-    expect(result.requestOverrides).toBeUndefined()
+    expect(waitForIngestJob).toHaveBeenCalledWith(77)
+    expect(result.requestOverrides).toMatchObject({
+      ragMediaIds: [42],
+      fileRetrievalEnabled: true,
+    })
     expect(result.turnMetadata).toMatchObject({
-      status: "processing",
+      status: "ready",
       files: [
         {
-          status: "processing",
+          status: "ready",
           mode: "ingest_to_library",
         },
       ],
@@ -434,6 +446,25 @@ describe("chat document processing service", () => {
       jobId: 77,
       batchId: "batch-1",
       status: "processing",
+    })
+  })
+
+  it("polls an accepted ingest job to its completed media id", async () => {
+    mocks.bgRequest.mockResolvedValueOnce({
+      status: "completed",
+      result: { media_id: 42 },
+    })
+
+    const result = await waitForIngestDocumentJob(77, { pollIntervalMs: 1 })
+
+    expect(mocks.bgRequest).toHaveBeenCalledWith({
+      path: "/api/v1/media/ingest/jobs/77",
+      method: "GET",
+    })
+    expect(result).toEqual({
+      mediaId: 42,
+      jobId: 77,
+      status: "completed",
     })
   })
 

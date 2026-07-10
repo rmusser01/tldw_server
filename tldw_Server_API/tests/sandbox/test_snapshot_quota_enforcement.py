@@ -10,6 +10,7 @@ import pytest
 from tldw_Server_API.app.core.config import clear_config_cache, settings as app_settings
 from tldw_Server_API.app.core.Sandbox.models import RuntimeType, SessionSpec
 from tldw_Server_API.app.core.Sandbox.service import SandboxService
+from tldw_Server_API.app.core.Sandbox.snapshots import SnapshotManager
 
 pytestmark = pytest.mark.unit
 
@@ -169,6 +170,28 @@ def test_maintenance_enforces_snapshot_quota_for_existing_sessions(
     assert len(snapshots) == 1
     assert summary.get("snapshot_evicted_sessions", 0) >= 1
     assert summary.get("snapshot_deleted_snapshots", 0) >= 2
+
+
+def test_global_quota_enforcement_handles_hashed_session_directories(tmp_path: Path) -> None:
+    """Maintenance must not hash an already-hashed session directory name."""
+    manager = SnapshotManager(storage_path=str(tmp_path / "snapshots"))
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    state = workspace / "state.txt"
+    session_id = "session-raw-id"
+
+    for value in ("v1", "v2", "v3"):
+        state.write_text(value, encoding="utf-8")
+        manager.create_snapshot(session_id, str(workspace))
+
+    summary = manager.enforce_quota_all_sessions(max_snapshots=1, max_size_mb=256)
+
+    assert len(manager.list_snapshots(session_id)) == 1
+    assert summary == {
+        "scanned_sessions": 1,
+        "evicted_sessions": 1,
+        "deleted_snapshots": 2,
+    }
 
 
 def test_create_snapshot_is_serialized_per_session(

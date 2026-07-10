@@ -48,6 +48,7 @@ def preflight_document_upload_files(
 
 
 def _media_type_for(filename: str) -> MediaType:
+    """Classify a filename into the supported upload media groups."""
     suffix = Path(filename).suffix.lower()
     if suffix in SUPPORTED_PDF_EXTENSIONS:
         return "pdf"
@@ -63,6 +64,7 @@ def _capability(
     status_value: DocumentProcessingStatus,
     reason: str | None = None,
 ) -> DocumentModeCapability:
+    """Build a processing capability response."""
     return DocumentModeCapability(
         available=available,
         status=status_value,
@@ -71,18 +73,22 @@ def _capability(
 
 
 def _available(reason: str | None = None) -> DocumentModeCapability:
+    """Return an available processing capability."""
     return _capability(True, "available", reason)
 
 
 def _unavailable(reason: str) -> DocumentModeCapability:
+    """Return an unavailable processing capability with its reason."""
     return _capability(False, "unavailable", reason)
 
 
 def _blocked(reason: str) -> DocumentModeCapability:
+    """Return a policy-blocked processing capability with its reason."""
     return _capability(False, "blocked", reason)
 
 
 def _ocr_available(list_ocr_backends: ListOcrBackends) -> bool:
+    """Return whether any registered OCR backend is currently available."""
     backends = list_ocr_backends()
     return any(
         isinstance(details, dict) and details.get("available") is True
@@ -91,6 +97,7 @@ def _ocr_available(list_ocr_backends: ListOcrBackends) -> bool:
 
 
 def _size_limit_reason(file: DocumentUploadPreflightFile) -> str | None:
+    """Return the size-limit failure reason for a file, when applicable."""
     if file.size_bytes <= DEFAULT_MAX_CHAT_UPLOAD_BYTES:
         return None
     size_mb = DEFAULT_MAX_CHAT_UPLOAD_BYTES // (1024 * 1024)
@@ -98,18 +105,21 @@ def _size_limit_reason(file: DocumentUploadPreflightFile) -> str | None:
 
 
 def _page_limit_reason(file: DocumentUploadPreflightFile) -> str | None:
+    """Return the page-limit failure reason for a file, when applicable."""
     if file.page_count is None or file.page_count <= DEFAULT_MAX_CHAT_UPLOAD_PAGES:
         return None
     return f"{file.filename} exceeds {DEFAULT_MAX_CHAT_UPLOAD_PAGES} page limit"
 
 
 def _token_limit_reason(file: DocumentUploadPreflightFile) -> str | None:
+    """Return the direct-chat token-limit reason, when applicable."""
     if file.estimated_tokens is None or file.estimated_tokens <= DEFAULT_MAX_DIRECT_CHAT_TOKENS:
         return None
     return f"{file.filename} exceeds {DEFAULT_MAX_DIRECT_CHAT_TOKENS} token direct-chat limit"
 
 
 def _unsupported_modes() -> dict[DocumentProcessingMode, DocumentModeCapability]:
+    """Return uniformly unavailable modes for unsupported file types."""
     reason = "Unsupported document type"
     return {
         "add_to_chat": _unavailable(reason),
@@ -122,6 +132,7 @@ def _preflight_file(
     file: DocumentUploadPreflightFile,
     list_ocr_backends: ListOcrBackends,
 ) -> DocumentUploadPreflightItem:
+    """Build the processing decision and limits for one upload candidate."""
     media_type = _media_type_for(file.filename)
     if media_type == "unsupported":
         return DocumentUploadPreflightItem(
@@ -181,6 +192,7 @@ def _ocr_capability(
     blocked_reason: str | None,
     list_ocr_backends: ListOcrBackends,
 ) -> DocumentModeCapability:
+    """Return OCR availability after media, limit, and backend checks."""
     if media_type != "pdf":
         suffix = Path(file.filename).suffix.upper() or "file"
         return _unavailable(f"OCR unavailable: server cannot render {suffix} pages")
