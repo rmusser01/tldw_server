@@ -13,6 +13,8 @@ import type { TakeTabNavigationIntent } from "./navigation"
 import { RESULTS_FILTER_PREFS_KEY, TAKE_QUIZ_LIST_PREFS_KEY } from "./stateKeys"
 import { useAttemptsQuery, useQuizzesQuery } from "./hooks"
 import { parseQuizAssessmentIntentFromLocation } from "@/services/tldw/quiz-flashcards-handoff"
+import { loadSourceReviewHandoff } from "@/services/tldw/source-review-handoff"
+import type { SourceReviewQuizIntent } from "./tabs/GenerateTab"
 
 type QuizTabKey = "take" | "generate" | "create" | "manage" | "results"
 
@@ -22,6 +24,23 @@ const INITIAL_TAB_RESET_VERSION: Record<QuizTabKey, number> = {
   create: 0,
   manage: 0,
   results: 0
+}
+
+const parseSourceReviewQuizIntentFromLocation = (
+  location: Pick<Location, "search">
+): SourceReviewQuizIntent | null => {
+  const params = new URLSearchParams(location.search)
+  if (params.get("source_review") !== "1") return null
+
+  const handoffToken = params.get("source_review_token")?.trim()
+  if (!handoffToken) {
+    return { payload: null, error: "missing_token" }
+  }
+
+  const payload = loadSourceReviewHandoff(handoffToken)
+  return payload
+    ? { payload, error: null }
+    : { payload: null, error: "expired_or_missing" }
 }
 
 const LazyGenerateTab = React.lazy(() =>
@@ -50,7 +69,23 @@ export const QuizPlayground: React.FC = () => {
         : null,
     []
   )
-  const [activeTab, setActiveTab] = React.useState<QuizTabKey>("take")
+  const initialSourceReviewIntent = React.useMemo(
+    () =>
+      typeof window !== "undefined"
+        ? parseSourceReviewQuizIntentFromLocation(window.location)
+        : null,
+    []
+  )
+  const initialGenerateRequested = React.useMemo(
+    () =>
+      initialSourceReviewIntent !== null ||
+      (typeof window !== "undefined" &&
+        new URLSearchParams(window.location.search).get("tab") === "generate"),
+    [initialSourceReviewIntent]
+  )
+  const [activeTab, setActiveTab] = React.useState<QuizTabKey>(() =>
+    initialGenerateRequested ? "generate" : "take"
+  )
   const [createTabDirty, setCreateTabDirty] = React.useState(false)
   const [takeTabIntent, setTakeTabIntent] = React.useState<TakeTabNavigationIntent | null>(() =>
     initialAssessmentIntent
@@ -84,7 +119,7 @@ export const QuizPlayground: React.FC = () => {
   )
   const [loadedTabs, setLoadedTabs] = React.useState<Record<QuizTabKey, boolean>>({
     take: true,
-    generate: false,
+    generate: initialGenerateRequested,
     create: false,
     manage: false,
     results: false
@@ -354,6 +389,9 @@ export const QuizPlayground: React.FC = () => {
                 "generate",
                 <LazyGenerateTab
                   key={`generate-${tabResetVersion.generate}`}
+                  initialSourceReviewIntent={
+                    tabResetVersion.generate === 0 ? initialSourceReviewIntent : null
+                  }
                   onNavigateToTake={(intent) => navigateToTake(intent)}
                   onNavigateToManage={() => setActiveTab("manage")}
                 />

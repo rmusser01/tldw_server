@@ -33,16 +33,24 @@ import {
   listDecks,
   listFlashcards,
   type FlashcardGeneratedDraft,
+  type StudyPackSourceSelection,
 } from "@/services/flashcards";
 import { buildFlashcardsGenerateRoute } from "@/services/tldw/flashcards-generate-handoff";
 import { buildFlashcardsStudyRouteFromQuiz } from "@/services/tldw/quiz-flashcards-handoff";
+import type { SourceReviewHandoffPayload } from "@/services/tldw/source-review-handoff";
 import type { TakeTabNavigationIntent } from "../navigation";
 import type { QuizQuestionPlanItem } from "@/services/quizzes";
 
 interface GenerateTabProps {
+  initialSourceReviewIntent?: SourceReviewQuizIntent | null;
   onNavigateToTake: (intent?: TakeTabNavigationIntent) => void;
   onNavigateToManage?: () => void;
 }
+
+export type SourceReviewQuizIntent = {
+  payload: SourceReviewHandoffPayload | null;
+  error: "missing_token" | "expired_or_missing" | null;
+};
 
 interface MediaItem {
   id: number;
@@ -104,6 +112,61 @@ type SelectedSourceSummary = {
   typeLabel: string;
   label: string;
   onRemove: () => void;
+};
+
+type InitialSourceReviewSelection = {
+  mediaId: number | null;
+  noteIds: string[];
+  snapshots: StudyPackSourceSelection[];
+  labels: Map<string, string>;
+};
+
+const sourceReviewString = (value: unknown): string =>
+  typeof value === "string" ? value.trim() : "";
+
+const sourceReviewItemLabel = (item: StudyPackSourceSelection): string =>
+  sourceReviewString(item.label) ||
+  sourceReviewString(item.source_title) ||
+  `${String(item.source_type || "snapshot")} ${String(item.source_id || "")}`.trim();
+
+const parseMediaSourceId = (sourceId: string): number | null => {
+  if (!/^[1-9]\d*$/.test(sourceId)) return null;
+  const id = Number(sourceId);
+  return Number.isSafeInteger(id) ? id : null;
+};
+
+const buildInitialSourceReviewSelection = (
+  payload: SourceReviewHandoffPayload | null | undefined,
+): InitialSourceReviewSelection => {
+  let mediaId: number | null = null;
+  const noteIds: string[] = [];
+  const snapshots: StudyPackSourceSelection[] = [];
+  const labels = new Map<string, string>();
+
+  for (const item of payload?.source_bundle.items ?? []) {
+    const sourceType = String(item.source_type);
+    const sourceId = String(item.source_id ?? "").trim();
+    labels.set(`${sourceType}:${sourceId}`, sourceReviewItemLabel(item));
+
+    if (sourceType === "media") {
+      const candidateId = parseMediaSourceId(sourceId);
+      if (candidateId != null && mediaId == null) {
+        mediaId = candidateId;
+      } else if (candidateId !== mediaId) {
+        snapshots.push(item);
+      }
+      continue;
+    }
+
+    if (sourceType === "note" && sourceId) {
+      if (!noteIds.includes(sourceId)) noteIds.push(sourceId);
+      continue;
+    }
+
+    snapshots.push(item);
+  }
+
+  return { mediaId, noteIds, snapshots, labels };
 };
 
 const DEFAULT_QUESTION_PLAN_ROWS: QuestionPlanRowState[] = [
@@ -487,16 +550,23 @@ const buildGeneratedDeckName = (quizName: string): string => {
 };
 
 export const GenerateTab: React.FC<GenerateTabProps> = ({
+  initialSourceReviewIntent,
   onNavigateToTake,
   onNavigateToManage,
 }) => {
   const { t } = useTranslation(["option", "common", "settings"]);
   const navigate = useNavigate();
   const [form] = Form.useForm();
-  const [selectedMediaId, setSelectedMediaId] = React.useState<number | null>(
-    null,
+  const initialSourceReviewSelection = React.useMemo(
+    () => buildInitialSourceReviewSelection(initialSourceReviewIntent?.payload),
+    [initialSourceReviewIntent?.payload],
   );
-  const [selectedNoteIds, setSelectedNoteIds] = React.useState<string[]>([]);
+  const [selectedMediaId, setSelectedMediaId] = React.useState<number | null>(
+    initialSourceReviewSelection.mediaId,
+  );
+  const [selectedNoteIds, setSelectedNoteIds] = React.useState<string[]>(
+    initialSourceReviewSelection.noteIds,
+  );
   const [selectedDeckIds, setSelectedDeckIds] = React.useState<number[]>([]);
   const [selectedCardIds, setSelectedCardIds] = React.useState<string[]>([]);
   const [messageApi, contextHolder] = message.useMessage();
@@ -739,14 +809,23 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
     return options;
   }, [loadedMediaItems, selectedMediaId, t]);
 
-  const noteOptions = React.useMemo(
-    () =>
-      notesData.map((item) => ({
+  const noteOptions = React.useMemo(() => {
+    const options = notesData.map((item) => ({
         value: item.id,
         label: item.title,
-      })),
-    [notesData],
-  );
+      }));
+    const knownIds = new Set(options.map((option) => option.value));
+    selectedNoteIds.forEach((noteId) => {
+      if (knownIds.has(noteId)) return;
+      options.push({
+        value: noteId,
+        label:
+          initialSourceReviewSelection.labels.get(`note:${noteId}`) ??
+          `Note ${noteId}`,
+      });
+    });
+    return options;
+  }, [initialSourceReviewSelection.labels, notesData, selectedNoteIds]);
 
   const deckOptions = React.useMemo(
     () =>
@@ -842,7 +921,10 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
     const items: SelectedSourceSummary[] = [];
 
     if (selectedMediaId != null) {
-      const label = selectedMedia?.title || `Media #${selectedMediaId}`;
+      const label =
+        selectedMedia?.title ||
+        initialSourceReviewSelection.labels.get(`media:${selectedMediaId}`) ||
+        `Media #${selectedMediaId}`;
       items.push({
         key: `media:${selectedMediaId}`,
         typeLabel: t("option:quiz.mediaSources", { defaultValue: "Media" }),
@@ -896,6 +978,7 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
   }, [
     cardOptions,
     deckOptions,
+    initialSourceReviewSelection.labels,
     noteOptions,
     selectedCardIds,
     selectedDeckIds,
@@ -1293,6 +1376,42 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
     <div className="mx-auto max-w-6xl">
       {contextHolder}
 
+      {initialSourceReviewIntent?.error ? (
+        <Alert
+          className="mb-4"
+          type="warning"
+          showIcon
+          data-testid="generate-source-review-handoff-error"
+          title={
+            initialSourceReviewIntent.error === "missing_token"
+              ? t("option:quiz.sourceReviewHandoffMissingToken", {
+                  defaultValue:
+                    "This source review link is incomplete. Select sources to continue.",
+                })
+              : t("option:quiz.sourceReviewHandoffUnavailable", {
+                  defaultValue:
+                    "This source review link expired or is unavailable. Select sources to continue.",
+                })
+          }
+        />
+      ) : initialSourceReviewIntent?.payload ? (
+        <Alert
+          className="mb-4"
+          type="info"
+          showIcon
+          data-testid="generate-source-review-handoff-summary"
+          title={t("option:quiz.sourceReviewHandoffLoaded", {
+            defaultValue: "Scheduled review sources loaded",
+          })}
+          description={
+            initialSourceReviewIntent.payload.plan_title?.trim() ||
+            t("option:quiz.sourceReviewHandoffDefaultTitle", {
+              defaultValue: "Review the selected source context before generating.",
+            })
+          }
+        />
+      ) : null}
+
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1.35fr)_minmax(22rem,0.85fr)] lg:items-start">
         <div className="space-y-6">
           <Card
@@ -1379,6 +1498,46 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
                   </p>
                 )}
               </div>
+
+              {initialSourceReviewSelection.snapshots.length > 0 ? (
+                <div
+                  className="rounded-md border border-border-subtle bg-surface2/50 p-3"
+                  data-testid="generate-source-review-snapshots"
+                >
+                  <div className="text-xs font-semibold uppercase tracking-wide text-text-subtle">
+                    {t("option:quiz.sourceReviewSnapshotContext", {
+                      defaultValue: "Snapshot context",
+                    })}
+                  </div>
+                  <p className="mt-1 text-xs text-text-muted">
+                    {t("option:quiz.sourceReviewSnapshotHelp", {
+                      defaultValue: "Reference only; not included in generation.",
+                    })}
+                  </p>
+                  <div className="mt-3 space-y-2">
+                    {initialSourceReviewSelection.snapshots.map((item, index) => (
+                      <div
+                        key={`${String(item.source_type)}:${item.source_id}:${index}`}
+                        className="rounded border border-border bg-surface px-3 py-2"
+                      >
+                        <div className="flex flex-wrap items-center gap-2 text-xs">
+                          <span className="font-medium text-text">
+                            {sourceReviewItemLabel(item)}
+                          </span>
+                          <span className="text-text-subtle">
+                            {String(item.source_type)}
+                          </span>
+                        </div>
+                        {sourceReviewString(item.excerpt_text) ? (
+                          <p className="mt-2 max-h-32 overflow-y-auto whitespace-pre-wrap break-words text-xs text-text-muted">
+                            {sourceReviewString(item.excerpt_text)}
+                          </p>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
 
               <div className="space-y-2">
                 <div className="text-xs font-medium text-text-subtle">
