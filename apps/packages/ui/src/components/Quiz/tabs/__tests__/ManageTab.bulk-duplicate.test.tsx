@@ -663,9 +663,23 @@ describe("ManageTab bulk and duplicate actions", () => {
           deleted: false,
           client_id: "test",
           version: 1
+        },
+        {
+          id: 302,
+          quiz_id: 1,
+          question_type: "true_false",
+          question_text: "Question two",
+          options: null,
+          correct_answer: "false",
+          explanation: "",
+          points: 2,
+          order_index: 1,
+          deleted: false,
+          client_id: "test",
+          version: 1
         }
       ],
-      count: 1
+      count: 2
     } as any)
 
     const printSpy = vi.fn()
@@ -706,6 +720,7 @@ describe("ManageTab bulk and duplicate actions", () => {
     expect(writtenHtml).toContain("<style>")
     expect(writtenHtml).toContain("<body>")
     expect(writtenHtml).toContain("Points: 0")
+    expect(writtenHtml).toContain("Points: 2")
     expect(writtenHtml).not.toContain("onerror")
     expect(writtenHtml).not.toContain("__quizXss")
     expect(writtenHtml).not.toContain("data-quiz-marker")
