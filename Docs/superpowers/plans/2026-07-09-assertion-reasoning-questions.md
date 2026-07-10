@@ -155,7 +155,7 @@ git commit -m "feat: generate assertion reasoning questions"
 **Goal:** Explain the specialized answer model once and preserve stable A-E semantics throughout taking and review.
 **Success Criteria:** The profile is selectable; tagged questions show a subtype label; options never shuffle; one scale guide appears in graded, practice, review, and results; answers and evidence remain per-question.
 **Tests:** Profile payload, graded submission/results, practice feedback, review evidence, and legacy MCQ/EMQ regressions.
-**Status:** In Progress
+**Status:** Complete
 
 **Files:**
 - Modify: `apps/packages/ui/src/services/quizzes.ts`
@@ -164,7 +164,7 @@ git commit -m "feat: generate assertion reasoning questions"
 - Modify: `apps/packages/ui/src/components/Quiz/tabs/__tests__/TakeQuizTab.start-flow.test.tsx`
 - Modify: `apps/packages/ui/src/components/Quiz/tabs/__tests__/TakeQuizTab.study-modes.test.tsx`
 
-- [ ] **Step 1: Write failing WebUI tests**
+- [x] **Step 1: Write failing WebUI tests**
 
 Add tests proving:
 
@@ -175,7 +175,7 @@ Add tests proving:
 - Review mode renders exactly one guide plus per-question rationale/citations.
 - A normal MCQ still shuffles, Best of Five still shuffles while submitting the original numeric index, and EMQ still uses its shared bank/select path.
 
-- [ ] **Step 2: Run the focused frontend tests and verify RED**
+- [x] **Step 2: Run the focused frontend tests and verify RED**
 
 From `apps/packages/ui`:
 
@@ -188,7 +188,7 @@ bun run test \
 
 Expected: profile availability, scale guide, fixed ordering, and subtype-label assertions fail.
 
-- [ ] **Step 3: Add the minimal frontend implementation**
+- [x] **Step 3: Add the minimal frontend implementation**
 
 - Mark the fallback profile available in `services/quizzes.ts`.
 - Normalize question-tag detection through the existing tag convention and identify `assertion_reasoning` without adding a new API field.
@@ -199,7 +199,7 @@ Expected: profile availability, scale guide, fixed ordering, and subtype-label a
 - In practice mode only for this subtype, show the concise explanation and citations after either a correct or incorrect answer. Preserve the existing feedback policy for every other question subtype.
 - Do not add a route, dependency, extension-only UI, or duplicated attempt state.
 
-- [ ] **Step 4: Run focused and neighboring frontend tests**
+- [x] **Step 4: Run focused and neighboring frontend tests**
 
 From `apps/packages/ui`:
 
@@ -216,7 +216,7 @@ bun run test \
 
 Expected: all selected tests pass.
 
-- [ ] **Step 5: Commit Task 2**
+- [x] **Step 5: Commit Task 2**
 
 ```bash
 git add apps/packages/ui/src/services/quizzes.ts \
@@ -233,7 +233,7 @@ git commit -m "feat: present assertion reasoning scale"
 **Goal:** Prove the specialized profile does not regress existing quiz generation, attempts, or study modes.
 **Success Criteria:** Focused backend/frontend suites, syntax/lint/security checks, independent review, and Backlog acceptance criteria are complete.
 **Tests:** Combined generator, endpoint, taking, review, migration-adjacent, and static checks.
-**Status:** Not Started
+**Status:** In Progress
 
 **Files:**
 - Modify through Backlog CLI/MCP only: `backlog/tasks/task-12102.3.4 - Implement-assertion-and-reasoning-questions.md`
