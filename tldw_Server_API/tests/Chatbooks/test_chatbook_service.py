@@ -689,12 +689,13 @@ class TestChatbookService:
     @pytest.mark.asyncio
     async def test_export_manifest_total_size_bytes_matches_archive(self, service):
         """Exported manifest should report the final archive size."""
-        success, _message, export_path = await service.create_chatbook(
-            name="Size Check",
-            description="Ensure manifest size is accurate",
-            content_selections={},
-            async_mode=False
-        )
+        with patch.object(service, "_collect_conversations"):
+            success, _message, export_path = await service.create_chatbook(
+                name="Size Check",
+                description="Ensure manifest size is accurate",
+                content_selections={ContentType.CONVERSATION: ["size-check"]},
+                async_mode=False
+            )
         assert success is True
         assert export_path is not None
 
@@ -754,12 +755,13 @@ class TestChatbookService:
     async def test_export_filename_truncates_long_names(self, service):
         """Export filenames should stay within filesystem limits for long names."""
         long_name = "a" * 300
-        success, _message, export_path = await service.create_chatbook(
-            name=long_name,
-            description="Long name export",
-            content_selections={},
-            async_mode=False,
-        )
+        with patch.object(service, "_collect_conversations"):
+            success, _message, export_path = await service.create_chatbook(
+                name=long_name,
+                description="Long name export",
+                content_selections={ContentType.CONVERSATION: ["filename-check"]},
+                async_mode=False,
+            )
         assert success is True
         assert export_path is not None
 
