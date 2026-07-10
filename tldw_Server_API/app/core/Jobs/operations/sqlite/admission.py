@@ -7,6 +7,8 @@ import sqlite3
 from datetime import UTC, datetime
 from typing import Any
 
+from loguru import logger
+
 from tldw_Server_API.app.core.Jobs.operations.contracts import (
     AdmissionRejectionReason,
     AdmissionResult,
@@ -15,6 +17,13 @@ from tldw_Server_API.app.core.Jobs.operations.contracts import (
 
 _MAX_QUEUED_MESSAGE = "Quota exceeded: max queued per user/domain"
 _SUBMITS_PER_MINUTE_MESSAGE = "Quota exceeded: submits per minute"
+_COUNTER_NONCRITICAL_ERRORS: tuple[type[BaseException], ...] = (
+    AttributeError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+    sqlite3.Error,
+)
 
 
 def _sqlite_timestamp(value: datetime) -> str:
@@ -119,6 +128,24 @@ def _bump_counters(
     )
 
 
+def _bump_counters_best_effort(
+    conn: sqlite3.Connection,
+    *,
+    command: CreateJobCommand,
+    available_at_sql: str | None,
+) -> None:
+    try:
+        _bump_counters(conn, command=command, available_at_sql=available_at_sql)
+    except _COUNTER_NONCRITICAL_ERRORS as exc:
+        logger.warning(
+            "Non-critical SQLite jobs counter update failed for {}:{}:{}: {}",
+            command.domain,
+            command.queue,
+            command.job_type,
+            exc,
+        )
+
+
 def _quota_rejection(
     conn: sqlite3.Connection,
     *,
@@ -154,7 +181,14 @@ def _quota_rejection(
                     AdmissionRejectionReason.QUOTA_EXCEEDED,
                     message=_SUBMITS_PER_MINUTE_MESSAGE,
                 )
-    except sqlite3.Error:
+    except sqlite3.Error as exc:
+        logger.warning(
+            "SQLite jobs quota check failed for {}:{}:{}; continuing without quota rejection: {}",
+            command.domain,
+            command.queue,
+            command.job_type,
+            exc,
+        )
         return None
 
     return None
@@ -269,7 +303,7 @@ def create_job_admission(
                     "job_type": command.job_type,
                 }
             if inserted and counters_enabled:
-                _bump_counters(conn, command=command, available_at_sql=available_at_sql)
+                _bump_counters_best_effort(conn, command=command, available_at_sql=available_at_sql)
             event = _insert_created_event(
                 conn,
                 row=row,
@@ -301,7 +335,7 @@ def create_job_admission(
                 "job_type": command.job_type,
             }
         if counters_enabled:
-            _bump_counters(conn, command=command, available_at_sql=available_at_sql)
+            _bump_counters_best_effort(conn, command=command, available_at_sql=available_at_sql)
         event = _insert_created_event(
             conn,
             row=row,

@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
-from contextlib import AbstractContextManager, suppress
+from contextlib import AbstractContextManager
 from datetime import datetime
 from typing import Any
+
+from loguru import logger
 
 from tldw_Server_API.app.core.Jobs.operations.contracts import (
     AdmissionRejectionReason,
@@ -122,6 +124,24 @@ def _bump_counters(
     )
 
 
+def _bump_counters_best_effort(
+    cur: Any,
+    *,
+    command: CreateJobCommand,
+    available_at: datetime | None,
+) -> None:
+    try:
+        _bump_counters(cur, command=command, available_at=available_at)
+    except _COUNTER_NONCRITICAL_ERRORS as exc:
+        logger.warning(
+            "Non-critical Postgres jobs counter update failed for {}:{}:{}: {}",
+            command.domain,
+            command.queue,
+            command.job_type,
+            exc,
+        )
+
+
 def _quota_rejection(
     cur: Any,
     *,
@@ -155,7 +175,14 @@ def _quota_rejection(
                     AdmissionRejectionReason.QUOTA_EXCEEDED,
                     message=_SUBMITS_PER_MINUTE_MESSAGE,
                 )
-    except _PG_ERRORS:
+    except _PG_ERRORS as exc:
+        logger.warning(
+            "Postgres jobs quota check failed for {}:{}:{}; continuing without quota rejection: {}",
+            command.domain,
+            command.queue,
+            command.job_type,
+            exc,
+        )
         return None
 
     return None
@@ -254,8 +281,7 @@ def create_job_admission(
                         "job_type": command.job_type,
                     }
                 if inserted and counters_enabled:
-                    with suppress(*_COUNTER_NONCRITICAL_ERRORS):
-                        _bump_counters(cur, command=command, available_at=command.available_at)
+                    _bump_counters_best_effort(cur, command=command, available_at=command.available_at)
                 event = _insert_created_event(
                     cur,
                     row=row,
@@ -283,8 +309,7 @@ def create_job_admission(
                     "job_type": command.job_type,
                 }
             if counters_enabled:
-                with suppress(*_COUNTER_NONCRITICAL_ERRORS):
-                    _bump_counters(cur, command=command, available_at=command.available_at)
+                _bump_counters_best_effort(cur, command=command, available_at=command.available_at)
             event = _insert_created_event(
                 cur,
                 row=row,

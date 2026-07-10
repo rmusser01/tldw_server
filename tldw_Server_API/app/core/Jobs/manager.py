@@ -1179,42 +1179,39 @@ class JobManager:
             trace_id = event.get("trace_id")
             outbox_enabled = JobManager._is_truthy(os.getenv("JOBS_EVENTS_OUTBOX", ""))
 
+            def _run_create_side_effect(operation: str, job: dict[str, Any], emit_func: Any) -> None:
+                try:
+                    emit_func("job.created", job=job, attrs=attrs)
+                except _JOB_NONCRITICAL_EXCEPTIONS as exc:
+                    logger.warning(
+                        "Non-critical Jobs create side effect {} failed for backend={} job_id={} domain={} queue={} job_type={}: {}",
+                        operation,
+                        backend,
+                        job.get("id"),
+                        job.get("domain"),
+                        job.get("queue"),
+                        job.get("job_type"),
+                        exc,
+                    )
+
             if backend == "sqlite":
+                emitted_job = {**row, "request_id": request_id, "trace_id": trace_id}
                 if idempotency_key:
                     if outbox_enabled:
-                        with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
-                            submit_job_audit_event(
-                                "job.created",
-                                job={**row, "request_id": request_id, "trace_id": trace_id},
-                                attrs=attrs,
-                            )
+                        _run_create_side_effect("submit_job_audit_event", emitted_job, submit_job_audit_event)
                     else:
-                        with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
-                            emit_job_event(
-                                "job.created",
-                                job={**row, "request_id": request_id, "trace_id": trace_id},
-                                attrs=attrs,
-                            )
+                        _run_create_side_effect("emit_job_event", emitted_job, emit_job_event)
                     continue
 
-                emitted_job = {**row, "request_id": request_id, "trace_id": trace_id}
                 if not outbox_enabled:
-                    with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
-                        emit_job_event("job.created", job=emitted_job, attrs=attrs)
-                with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
-                    submit_job_audit_event("job.created", job=emitted_job, attrs=attrs)
+                    _run_create_side_effect("emit_job_event", emitted_job, emit_job_event)
+                _run_create_side_effect("submit_job_audit_event", emitted_job, submit_job_audit_event)
                 continue
 
-            emitted_job = {
-                **row,
-                "request_id": row.get("request_id") or request_id,
-                "trace_id": row.get("trace_id") or trace_id,
-            }
+            emitted_job = {**row, "request_id": request_id, "trace_id": trace_id}
             if not outbox_enabled:
-                with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
-                    emit_job_event("job.created", job=emitted_job, attrs=attrs)
-            with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
-                submit_job_audit_event("job.created", job=emitted_job, attrs=attrs)
+                _run_create_side_effect("emit_job_event", emitted_job, emit_job_event)
+            _run_create_side_effect("submit_job_audit_event", emitted_job, submit_job_audit_event)
 
     # --- Advisory lock helpers (Postgres) ---
     def _pg_advisory_key(self, *parts: str) -> int:

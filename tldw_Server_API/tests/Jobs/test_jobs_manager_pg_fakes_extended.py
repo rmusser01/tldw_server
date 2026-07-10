@@ -278,6 +278,68 @@ def test_pg_idempotent_create_uses_current_request_context_for_job_created_event
 
 
 @pytest.mark.unit
+def test_pg_idempotent_replay_side_effects_use_current_event_context(monkeypatch, tmp_path):
+    import tldw_Server_API.app.core.Jobs.manager as mgr
+
+    monkeypatch.setenv("JOBS_DB_URL", "postgresql://fake")
+    monkeypatch.setenv("JOBS_EVENTS_OUTBOX", "false")
+    emitted: list[dict] = []
+    audited: list[dict] = []
+
+    def _emit(_event_type, **kwargs):
+        emitted.append(dict(kwargs))
+
+    def _audit(_event_type, **kwargs):
+        audited.append(dict(kwargs))
+
+    monkeypatch.setattr(mgr, "emit_job_event", _emit)
+    monkeypatch.setattr(mgr, "submit_job_audit_event", _audit)
+
+    jm = JobManager(db_path=tmp_path / "dummy.db")
+    jm.backend = "postgres"
+
+    jobs = {
+        1: {
+            "id": 1,
+            "domain": "pg",
+            "queue": "default",
+            "job_type": "x",
+            "idempotency_key": "K",
+            "status": "queued",
+            "priority": 5,
+            "available_at": None,
+            "owner_user_id": "owner-1",
+            "request_id": "old-request",
+            "trace_id": "old-trace",
+            "retry_count": 0,
+        }
+    }
+    cursor = FakePGCursor(jobs)
+    monkeypatch.setattr(jm, "_connect", lambda: FakePGConn())
+    monkeypatch.setattr(jm, "_pg_cursor", lambda conn: cursor)
+
+    row = jm.create_job(
+        domain="pg",
+        queue="default",
+        job_type="x",
+        payload={},
+        owner_user_id=None,
+        idempotency_key="K",
+        request_id="new-request",
+        trace_id="new-trace",
+    )
+
+    assert row["request_id"] == "old-request"
+    assert row["trace_id"] == "old-trace"
+    assert emitted
+    assert emitted[-1]["job"]["request_id"] == "new-request"
+    assert emitted[-1]["job"]["trace_id"] == "new-trace"
+    assert audited
+    assert audited[-1]["job"]["request_id"] == "new-request"
+    assert audited[-1]["job"]["trace_id"] == "new-trace"
+
+
+@pytest.mark.unit
 def test_pg_non_idempotent_create_uses_command_context_for_job_created_event(monkeypatch, tmp_path):
     monkeypatch.setenv("JOBS_DB_URL", "postgresql://fake")
     jm = JobManager(db_path=tmp_path / "dummy.db")

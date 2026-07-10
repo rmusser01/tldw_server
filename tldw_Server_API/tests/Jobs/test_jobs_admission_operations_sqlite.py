@@ -41,6 +41,28 @@ class _FailJobEventsInsertConnection:
         return getattr(self._inner, name)
 
 
+class _FailJobCountersConnection:
+    """Connection wrapper that fails non-critical job_counters upserts."""
+
+    def __init__(self, inner: sqlite3.Connection):
+        self._inner = inner
+
+    def __enter__(self) -> "_FailJobCountersConnection":
+        self._inner.__enter__()
+        return self
+
+    def __exit__(self, exc_type: type[BaseException] | None, exc: BaseException | None, tb: Any) -> bool | None:
+        return self._inner.__exit__(exc_type, exc, tb)
+
+    def execute(self, sql: str, params: tuple[Any, ...] = ()) -> sqlite3.Cursor:
+        if "INSERT INTO job_counters" in str(sql):
+            raise sqlite3.OperationalError("forced job_counters upsert failure")
+        return self._inner.execute(sql, params)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+
 def _open_jobs_db(tmp_path: Path, name: str = "jobs.db") -> tuple[Path, sqlite3.Connection]:
     db_path = ensure_jobs_tables(tmp_path / name)
     conn = sqlite3.connect(db_path)
@@ -113,6 +135,31 @@ def test_sqlite_admission_inserts_job_event_and_counter(tmp_path: Path) -> None:
         ("admission", "default", "insert"),
     ).fetchone()
     assert dict(counter) == {"ready_count": 1, "scheduled_count": 0}
+
+
+def test_sqlite_admission_counter_failure_does_not_abort_job_creation(tmp_path: Path) -> None:
+    _db_path, inner = _open_jobs_db(tmp_path)
+    wrapped = _FailJobCountersConnection(inner)
+
+    result = create_job_admission(
+        wrapped,
+        command=_command(job_type="counter-fail"),
+        uuid_value="uuid-counter-fail",
+        now=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        max_queued_quota=0,
+        submits_per_minute_quota=0,
+        counters_enabled=True,
+    )
+
+    assert result.outcome is OperationOutcome.APPLIED
+    assert result.inserted is True
+    assert result.row is not None
+    assert result.row["job_type"] == "counter-fail"
+
+    events = _created_events(inner, "counter-fail")
+    assert len(events) == 1
+    assert events[0]["request_id"] == "req-1"
+    assert events[0]["trace_id"] == "trace-1"
 
 
 def test_sqlite_admission_idempotent_existing_writes_replay_event_with_current_context(tmp_path: Path) -> None:
