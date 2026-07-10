@@ -478,6 +478,16 @@ source-storage paths; both regressions are included in the 10 runner tests.
 The implementation and deterministic gate are recorded in `a0e177228a`; this
 is not the Step 5 browser certification, which remains open.
 
+2026-07-10 host UAT update: the exact WebUI command passed and imported the
+actual browser-downloaded archive into clean user 2. Destination verification
+matched account profile/settings, stored media SHA-256, transcript/chunk
+counts, and both expected vector identifiers. The packaged-extension command
+remains blocked before application code executes: after deterministic ID
+staging, both headless and headed persistent-context launches failed to expose
+a usable extension target, and the final headed launch timed out after 120
+seconds. Per the repository's three-attempt limit, no fourth launcher variant
+was attempted. Step 5 remains open because it requires both surfaces.
+
 ## Task 7: Repair Stale Integration And Documentation Contracts
 
 **Files:**
@@ -557,7 +567,7 @@ Verification evidence: source user 1 produced the archive and expected-state
 file; destination user 2 reset with zero characters, media records, stored
 artifacts, and Chroma embeddings.
 
-- [ ] **Step 2: Run exact backend suites and two-user restore verification**
+- [x] **Step 2: Run exact backend suites and two-user restore verification**
 
 Run:
 
@@ -578,13 +588,15 @@ python -m pytest -q \
 
 Expected: PASS. Environment-dependent tests may skip only with their documented prerequisite missing. `test_chatbooks_full_account_media_roundtrip.py` must not skip and must verify a clean destination user's artifact hash and embedding/vector records.
 
-Current evidence: the complete 445-test in-process subset passed 436 tests with
+Final evidence: the complete 445-test in-process subset passed 436 tests with
 9 documented prerequisite skips, including the non-skipping full-account
 media/profile/settings/vector round trip. The initial exact matrix exposed five
 legacy manifest/filesystem tests that still used `{}` as an empty archive;
 those tests now use explicit allowlists without weakening full-account
-semantics and are committed in `6404115595`. Three server-spawning tests remain
-open because this sandbox rejects local socket binding before fixture startup.
+semantics and are committed in `6404115595`. The three server-spawning files
+were rerun on the host after fixing their App Router readiness detector; all
+three reached their documented skip for the absent Python Playwright Chromium
+binary. There were no server-startup, fixture, or product errors.
 
 - [x] **Step 3: Run exact WebUI unit suites**
 
@@ -608,7 +620,7 @@ passed. Frontend TypeScript and extension production compile checks passed,
 the Chrome MV3 production build completed, and both Playwright configurations
 collect the intended Chatbooks UAT phases.
 
-- [ ] **Step 4: Run the exact WebUI-exported archive round trip**
+- [x] **Step 4: Run the exact WebUI-exported archive round trip**
 
 ```bash
 source .venv/bin/activate
@@ -620,6 +632,14 @@ python Helper_Scripts/Testing-related/chatbooks_full_account_browser_uat.py run 
 ```
 
 Expected: runner reports the actual WebUI-downloaded archive path, distinct source/destination roots, completed import, matching destination media SHA-256, and restored embedding/vector identifiers.
+
+Verification evidence: PASS. The browser downloaded
+`/private/tmp/chatbooks-full-account-browser-uat/webui/browser-downloads/webui-full-account.chatbook`.
+The v1.1 archive passed post-write and sensitive-data inspection. Clean user 2
+restored the expected profile email, locale/theme settings, character, media
+record, transcript, two chunks, exact stored-media SHA-256
+`6fc4135fef28f9c56af8e075adb6275f55000736c44e8a3551b97b55e730375f`,
+and vector IDs `uat-chunk-001` and `uat-chunk-002`.
 
 - [ ] **Step 5: Run the exact extension-exported archive round trip**
 
@@ -636,6 +656,13 @@ Expected: runner reports the actual extension-downloaded archive path, distinct 
 - [ ] **Step 6: Inspect the produced archive**
 
 Inspect the WebUI and extension archive paths reported by Steps 4 and 5. Verify `manifest.json`, `file_inventory`, account inventory summary, bundled media artifact bytes, pointer-only warnings, and no raw server storage paths or secrets.
+
+WebUI evidence is complete: archive SHA-256
+`45fd5c40f5ff8cdb8226fc35fe7e68fb511bdc26efb673613986b2ef5b25ad1d`,
+manifest version `1.1.0`, verified account profile/settings and bundled-media
+inventory, and no sensitive/source-path leaks. Extension archive inspection is
+pending because the extension did not launch far enough to create a browser
+download.
 
 - [x] **Step 7: Run Bandit on touched backend scope**
 
@@ -654,33 +681,37 @@ Verification evidence: zero findings across 15,541 lines in the exact final
 Chatbooks worker/service/endpoint scope, plus zero findings across the new
 browser runner and configuration-precedence scope.
 
-- [ ] **Step 8: Update tracking honestly**
+- [x] **Step 8: Update tracking honestly**
 
 Reopen the stale checked P0 items before implementation. Mark them complete only after the live WebUI and extension round trips pass. Append the post-merge evidence to the review report instead of overwriting the original pre-remediation findings.
 
-- [ ] **Step 9: Commit final evidence**
+- [x] **Step 9: Commit final evidence**
 
 ```bash
 git add Docs/Reviews/CHATBOOKS_BACKUP_IMPORT_UAT_UX_REVIEW_2026_07_09.md backlog/tasks/task-12098.1\ -\ P0-Chatbooks-backup-restore-correctness-remediation.md backlog/tasks/task-12098.2\ -\ P1-Chatbooks-backup-import-UX-clarity-remediation.md backlog/tasks/task-12098.3\ -\ P2-Chatbooks-backup-import-acceptance-coverage.md
 git commit -m "docs: close chatbooks post-merge UAT"
 ```
 
+Code and regression fixes are recorded in `616bf1292e`. The evidence commit
+records WebUI certification and leaves the packaged-extension gate open; this
+task is not closed as fully certified.
+
 ## Release Gate
 
-- [ ] Full-account export from the WebUI completes and downloads a valid archive.
-- [ ] A media-bearing full-account archive imported through the WebUI into a clean destination completes with media and embedding restore enabled by archive defaults.
-- [ ] A fixture with bundled media bytes proves those bytes are restored under user-owned storage.
-- [ ] Destination verification proves restored media bytes match the source SHA-256 and embedding/vector records exist; job completion alone is insufficient.
-- [ ] Destination verification proves account profile/settings values present in the source archive are restored according to the approved sensitive-data policy; inventory counts without payloads are insufficient.
-- [ ] Completed jobs never display `0%`.
-- [ ] Backup all can start without requiring invented metadata, while generated name/description remain editable.
-- [ ] Import preview shows the full account-impact summary and never combines Include all with `Selected: 0`.
-- [ ] Dropzone, progress, and empty-state text meet WCAG AA in light and dark themes; all switches and selects have accessible names.
-- [ ] Jobs uses the full content width, identifies imports by archive name, offers plain-language recovery, and confirms destructive cleanup.
-- [ ] Completed archives show verification state and timestamps with correct timezone semantics.
+- [x] Full-account export from the WebUI completes and downloads a valid archive.
+- [x] A media-bearing full-account archive imported through the WebUI into a clean destination completes with media and embedding restore enabled by archive defaults.
+- [x] A fixture with bundled media bytes proves those bytes are restored under user-owned storage.
+- [x] Destination verification proves restored media bytes match the source SHA-256 and embedding/vector records exist; job completion alone is insufficient.
+- [x] Destination verification proves account profile/settings values present in the source archive are restored according to the approved sensitive-data policy; inventory counts without payloads are insufficient.
+- [x] Completed jobs never display `0%`.
+- [x] Backup all can start without requiring invented metadata, while generated name/description remain editable.
+- [x] Import preview shows the full account-impact summary and never combines Include all with `Selected: 0`.
+- [x] Dropzone, progress, and empty-state text meet WCAG AA in light and dark themes; all switches and selects have accessible names.
+- [x] Jobs uses the full content width, identifies imports by archive name, offers plain-language recovery, and confirms destructive cleanup.
+- [x] Completed archives show verification state and timestamps with correct timezone semantics.
 - [ ] The packaged extension completes the same backup/download/import round trip without a service-worker-discovery skip.
-- [ ] Focused backend, frontend, integration, docs, and extension suites are green or have explicit non-product environment skips.
-- [ ] Bandit reports no new findings.
+- [x] Focused backend, frontend, integration, docs, and extension suites are green or have explicit non-product environment skips.
+- [x] Bandit reports no new findings.
 
 ## UX Review Addendum
 

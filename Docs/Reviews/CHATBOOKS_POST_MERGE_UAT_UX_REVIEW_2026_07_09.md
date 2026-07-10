@@ -212,3 +212,123 @@ Fix: make the extension harness seed configuration from an extension page when a
 6. Align stale integration/docs contracts and rerun the full UAT matrix.
 
 The detailed TDD steps and release gate are in `Docs/superpowers/plans/2026-07-09-chatbooks-post-merge-uat-remediation-plan.md`.
+
+## Remediation UAT Addendum - 2026-07-10
+
+### Updated Verdict
+
+The WebUI full-account backup and restore workflow is now possible,
+straightforward, and sufficiently low-friction for routine use. The exact
+browser workflow exported a v1.1 archive, downloaded it through the WebUI,
+stopped the source services, started a distinct clean destination, imported
+that exact download, and verified destination state rather than trusting job
+completion alone.
+
+The packaged browser extension is not certified. Its production Chrome MV3
+build and focused unit tests pass, but Playwright cannot establish a usable
+persistent extension context on this host. The failure occurs before the
+Chatbooks page executes, so it is not evidence that extension backup/restore is
+broken; it is also not acceptable evidence that extension parity works.
+
+Updated status:
+
+- WebUI Backup all: **easy enough for routine safety backups**. Metadata can be
+  generated, scope is explicit, terminal state is truthful, and the archive is
+  downloadable and verified.
+- WebUI restore: **straightforward and predictable**. Preview now includes
+  account profile, account settings, stored media artifacts, and verification
+  state before commitment.
+- Jobs: **usable as an operational history and recovery surface**. Completed
+  state, identity, cleanup consequences, and recovery actions are no longer
+  contradictory.
+- Packaged extension: **unknown pending a working host launch path**.
+
+### Acceptance Evidence
+
+- Exact archive:
+  `/private/tmp/chatbooks-full-account-browser-uat/webui/browser-downloads/webui-full-account.chatbook`
+- Archive version: `1.1.0`; post-write verification passed.
+- Archive SHA-256:
+  `45fd5c40f5ff8cdb8226fc35fe7e68fb511bdc26efb673613986b2ef5b25ad1d`.
+- Stored media SHA-256 matched after restore:
+  `6fc4135fef28f9c56af8e075adb6275f55000736c44e8a3551b97b55e730375f`.
+- Clean destination restored account profile, locale/theme settings, character,
+  media record, transcript, two chunks, bundled media bytes, and vectors
+  `uat-chunk-001` and `uat-chunk-002`.
+- Sensitive-data inspection found no fixture password hash, raw server storage
+  path, or unredacted sensitive payload in browser-visible metadata/log output.
+- Backend in-process matrix: 436 passed, 9 documented prerequisite skips.
+- Host-spawning legacy E2E subset: 3 documented skips because the Python
+  Playwright Chromium binary is absent; no startup or product error remained.
+- Focused remediation regressions: 18 Python, 29 runtime-bootstrap, and 7
+  extension-path tests passed. WebUI typecheck, extension compile, production
+  Chrome MV3 build, token sync, `git diff --check`, and production-scope Bandit
+  all passed.
+
+Live UAT also found and corrected four acceptance-harness/product-contract
+defects: manual multi-user tokens were removed during WebUI bootstrap, the
+preview API omitted account inventory fields that the UI already knew how to
+render, loose preview dictionaries could echo undeclared manifest fields, and
+the frontend readiness fixture read only the first 4 KiB of a larger Next.js
+document. The final exact browser round trip was rerun after the redacted
+preview response models were added.
+
+### Updated Nielsen Score - WebUI
+
+The score below applies to the remediated WebUI workflow. The extension is not
+scored because its current screen/workflow could not be reached reliably.
+
+| # | Heuristic | Score | Current evidence |
+|---|---|---:|---|
+| 1 | Visibility of system status | 3 | Progress and verification are truthful; notification requests still fail silently during bootstrap. |
+| 2 | Match between system and real world | 4 | Backup, restore-impact, archive identity, and cleanup language describe user outcomes. |
+| 3 | User control and freedom | 4 | Advanced options are disclosed, recovery is available, and destructive actions confirm scope. |
+| 4 | Consistency and standards | 4 | Completion, counts, Include all, and archive verification now agree. |
+| 5 | Error prevention | 4 | The default full-archive path restores media and embeddings instead of queuing a predictable failure. |
+| 6 | Recognition rather than recall | 4 | Preview categories and human-readable archive identity remove UUID/flag translation. |
+| 7 | Flexibility and efficiency | 4 | Backup all supports generated metadata while selective and advanced workflows remain available. |
+| 8 | Aesthetic and minimalist design | 3 | The common path is clearer, though this remains a dense operational surface. |
+| 9 | Error recognition and recovery | 3 | Known failures have recovery actions; extension launch and notification authorization lack in-product diagnosis. |
+| 10 | Help and documentation | 3 | Source-specific contracts are aligned; environment prerequisites remain fragmented across runners. |
+| **Total** |  | **36/40** | **Good; WebUI acceptance-ready, extension not certified.** |
+
+### Remaining Findings
+
+#### P1: Packaged-Extension Parity Is Still Unproven
+
+Three evidence-based launch attempts exhausted the repository retry limit. The
+initial headless run exposed no service worker or extension target. After
+deterministic manifest-key staging, the extension URL was blocked because the
+extension still was not loaded. Headed persistent-context launches then timed
+out, including a final 120-second attempt, before Playwright established its
+debugging pipe.
+
+Recommendation: separate extension-process certification from Chatbooks UAT.
+Create a small host capability gate that proves Chrome loads the unpacked MV3
+package, exposes an extension page, and can read/write the storage sentinel.
+Only then run the existing Chatbooks export/import phases. Preserve the current
+fail-closed rule: build success or a derived extension ID must not count as UAT.
+
+#### P2: Notification Authorization Fails Without User Feedback
+
+The exact source WebUI run issued four notification list/count/stream requests,
+all returning `403`, and did not later show a successful notification request.
+The Chatbooks workflow still passed, but the shell gives no visible explanation
+that notification status may be unavailable.
+
+Recommendation: defer notification startup until authentication bootstrap is
+ready, or stop/retry with bounded backoff after an authorization transition.
+If notifications remain unavailable, expose a compact nonblocking status in
+the notification surface instead of failing only in logs.
+
+#### P2: Extension Build Warnings Remain A Runtime Risk
+
+The production build succeeds but reports duplicate imports, circular
+cross-chunk re-exports, unresolved runtime font URLs, and large chunks. These
+warnings predate the Chatbooks changes and do not explain the failed debugging
+pipe, but the circular execution-order warnings are material for extension
+reliability and startup performance.
+
+Recommendation: track these separately from Chatbooks. Resolve direct imports
+for the warned `tldwClient`/`tldwModels` consumers, then establish a startup
+budget and a smoke test for options-page first interaction.
