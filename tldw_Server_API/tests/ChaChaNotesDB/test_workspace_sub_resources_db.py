@@ -1,5 +1,6 @@
 """Tests for workspace sub-resource tables: sources, artifacts, notes."""
 import sqlite3
+from datetime import datetime
 
 import pytest
 
@@ -130,7 +131,6 @@ class TestWorkspaceSources:
             "src-1",
             {"review_state": "needs_review"},
             expected_version=reviewed["version"],
-            actor_user_id="reviewer-1",
         )
 
         assert needs_review["review_state"] == "needs_review"
@@ -138,6 +138,30 @@ class TestWorkspaceSources:
         assert needs_review["reviewed_at"] is None
         assert needs_review["reviewed_by_user_id"] is None
         assert needs_review["version"] == reviewed["version"] + 1
+
+    @pytest.mark.parametrize(
+        "actor_user_id",
+        [None, "", "   ", 123],
+        ids=["none", "empty", "blank", "non-string"],
+    )
+    def test_update_source_reviewed_requires_non_empty_string_actor(self, db, actor_user_id):
+        created = db.add_workspace_source("ws-1", {
+            "id": "src-1", "media_id": 1, "title": "X",
+            "source_type": "video", "review_state": "needs_review",
+        })
+
+        with pytest.raises(InputError):
+            db.update_workspace_source(
+                "ws-1",
+                "src-1",
+                {"review_state": "reviewed"},
+                expected_version=created["version"],
+                actor_user_id=actor_user_id,
+            )
+
+        unchanged = db.get_workspace_source("ws-1", "src-1")
+        assert unchanged["review_state"] == "needs_review"
+        assert unchanged["version"] == created["version"]
 
     def test_update_source_rejects_invalid_review_state(self, db):
         created = db.add_workspace_source("ws-1", {
@@ -217,6 +241,29 @@ class TestWorkspaceSources:
         assert unchanged["review_state"] == "needs_review"
         assert unchanged["version"] == created["version"]
 
+    @pytest.mark.parametrize(
+        "actor_user_id",
+        [None, "", "   ", 123],
+        ids=["none", "empty", "blank", "non-string"],
+    )
+    def test_batch_update_reviewed_requires_non_empty_string_actor(self, db, actor_user_id):
+        created = db.add_workspace_source("ws-1", {
+            "id": "src-1", "media_id": 1, "title": "X",
+            "source_type": "video", "review_state": "needs_review",
+        })
+
+        with pytest.raises(InputError):
+            db.update_workspace_source_review_states(
+                "ws-1",
+                ["src-1"],
+                "reviewed",
+                actor_user_id,
+            )
+
+        unchanged = db.get_workspace_source("ws-1", "src-1")
+        assert unchanged["review_state"] == "needs_review"
+        assert unchanged["version"] == created["version"]
+
     def test_batch_reorder(self, db):
         db.add_workspace_source("ws-1", {
             "id": "src-a", "media_id": 1, "title": "A",
@@ -256,11 +303,14 @@ class TestWorkspaceSources:
                     PRIMARY KEY (workspace_id, id)
                 )
             """)
-            conn.execute(
+            conn.executemany(
                 "INSERT INTO workspace_sources "
                 "(id, workspace_id, media_id, title, source_type, added_at) "
                 "VALUES (?, ?, ?, ?, ?, ?)",
-                ("src-1", "ws-1", 1, "Existing", "pdf", "2026-01-02T03:04:05.000Z"),
+                [
+                    ("src-1", "ws-1", 1, "Existing", "pdf", "2026-01-02T03:04:05.000Z"),
+                    ("src-blank-added-at", "ws-1", 2, "Malformed", "pdf", "   "),
+                ],
             )
 
         migrated = CharactersRAGDB(db_path=str(db_path), client_id="user-1")
@@ -270,8 +320,26 @@ class TestWorkspaceSources:
             assert source["review_state_updated_at"] == source["added_at"]
             assert source["reviewed_at"] is None
             assert source["reviewed_by_user_id"] is None
+
+            malformed = migrated.get_workspace_source("ws-1", "src-blank-added-at")
+            assert malformed["review_state_updated_at"].strip()
+            assert malformed["review_state_updated_at"] != malformed["added_at"]
+            assert datetime.fromisoformat(
+                malformed["review_state_updated_at"].replace("Z", "+00:00")
+            ).tzinfo is not None
         finally:
             migrated.close_all_connections()
+
+    def test_workspace_source_schema_ensure_is_operationally_idempotent(self, db):
+        db.add_workspace_source("ws-1", {
+            "id": "src-1", "media_id": 1, "title": "X",
+            "source_type": "video",
+        })
+
+        with db.transaction() as conn:
+            changes_before = conn.total_changes
+            db._ensure_workspace_subresource_schema_sqlite(conn)
+            assert conn.total_changes == changes_before
 
 
 class TestWorkspaceArtifacts:

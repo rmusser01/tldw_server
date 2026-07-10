@@ -3447,14 +3447,15 @@ UPDATE workspace_sources
 UPDATE workspace_sources
    SET review_state_updated_at = COALESCE(
        NULLIF(btrim(review_state_updated_at), ''),
-       added_at::text,
+       NULLIF(btrim(added_at::text), ''),
        (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::text
    )
  WHERE review_state_updated_at IS NULL OR btrim(review_state_updated_at) = '';
 UPDATE workspace_sources
    SET reviewed_at = NULL,
        reviewed_by_user_id = NULL
- WHERE review_state <> 'reviewed';
+ WHERE review_state <> 'reviewed'
+   AND (reviewed_at IS NOT NULL OR reviewed_by_user_id IS NOT NULL);
 
 CREATE TABLE IF NOT EXISTS workspace_artifacts (
     id              TEXT    NOT NULL,
@@ -9719,13 +9720,15 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             )
             conn.execute(
                 "UPDATE workspace_sources "
-                "SET review_state_updated_at = COALESCE(NULLIF(trim(review_state_updated_at), ''), added_at, ?) "
+                "SET review_state_updated_at = COALESCE(NULLIF(trim(review_state_updated_at), ''), "
+                "NULLIF(trim(added_at), ''), ?) "
                 "WHERE review_state_updated_at IS NULL OR trim(review_state_updated_at) = ''",
                 (self._get_current_utc_timestamp_iso(),),
             )
             conn.execute(
                 "UPDATE workspace_sources SET reviewed_at = NULL, reviewed_by_user_id = NULL "
-                "WHERE review_state <> 'reviewed'"
+                "WHERE review_state <> 'reviewed' "
+                "AND (reviewed_at IS NOT NULL OR reviewed_by_user_id IS NOT NULL)"
             )
 
             conn.execute("""
@@ -10041,10 +10044,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "OR review_state NOT IN ('unset', 'needs_review', 'reviewed')",
             "UPDATE workspace_sources "
             "SET review_state_updated_at = COALESCE(NULLIF(btrim(review_state_updated_at), ''), "
-            "added_at::text, (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::text) "
+            "NULLIF(btrim(added_at::text), ''), (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::text) "
             "WHERE review_state_updated_at IS NULL OR btrim(review_state_updated_at) = ''",
             "UPDATE workspace_sources SET reviewed_at = NULL, reviewed_by_user_id = NULL "
-            "WHERE review_state <> 'reviewed'",
+            "WHERE review_state <> 'reviewed' "
+            "AND (reviewed_at IS NOT NULL OR reviewed_by_user_id IS NOT NULL)",
             """
             CREATE TABLE IF NOT EXISTS workspace_artifacts (
                 id              TEXT    NOT NULL,
@@ -19336,9 +19340,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         for_create: bool = False,
     ) -> dict[str, Any]:
         state = self._normalize_workspace_source_review_state(review_state, for_create=for_create)
+        actor = None
+        if state == "reviewed":
+            if not isinstance(actor_user_id, str) or not actor_user_id.strip():
+                raise InputError("A non-empty actor_user_id is required to review a workspace source.")  # noqa: TRY003
+            actor = actor_user_id.strip()
         now = self._get_current_utc_timestamp_iso()
-        actor = str(actor_user_id).strip() if actor_user_id is not None else None
-        actor = actor or None
         return {
             "review_state": state,
             "review_state_updated_at": now,
