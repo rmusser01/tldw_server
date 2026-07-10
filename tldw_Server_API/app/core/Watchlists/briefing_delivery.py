@@ -153,17 +153,28 @@ def reconcile_successful_delivery_attempt(
         "outcome": "successful",
         "attempt_count": int(attempt.attempt),
     }
+    stages[stage_name] = stage
+    delivery_status = _aggregate_status(
+        external_delivery_adapters(_json_object(occurrence.contract_json)),
+        stages,
+    )
+    aggregate_stage = _aggregate_stage(delivery_status)
     finalize = getattr(watchlists_db, "finalize_briefing_attempt", None)
     if callable(finalize):
         return finalize(
             int(attempt.id),
             expected_states={"successful"},
             state="successful",
-            stage_updates={stage_name: stage},
+            stage_updates={stage_name: stage, "deliver": aggregate_stage},
+            delivery_status=delivery_status,
             code=stage["code"],
         )
-    stages[stage_name] = stage
-    return watchlists_db.update_briefing_occurrence(int(occurrence.id), stages=stages)
+    stages["deliver"] = aggregate_stage
+    return watchlists_db.update_briefing_occurrence(
+        int(occurrence.id),
+        stages=stages,
+        delivery_status=delivery_status,
+    )
 
 
 def _aggregate_status(adapters: Mapping[str, Mapping[str, Any]], stages: Mapping[str, Mapping[str, Any]]) -> str:

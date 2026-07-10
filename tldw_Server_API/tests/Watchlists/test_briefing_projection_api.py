@@ -336,6 +336,10 @@ def test_successful_attempt_ledger_blocks_retry_when_stage_is_stale_sending(proj
         adapter="email",
     )
     assert latest is not None and latest.id == attempt.id and latest.attempt == 1
+    repaired = watchlists_db.get_briefing_occurrence(seeded.occurrence_id)
+    repaired_stages = json.loads(repaired.stages_json)
+    assert repaired.delivery_status == "delivered"
+    assert repaired_stages["deliver"]["status"] == "ready"
 
 
 @pytest.mark.asyncio
@@ -386,6 +390,73 @@ async def test_delivery_scheduler_reconciles_successful_ledger_without_resend(pr
     scheduler.submit.assert_not_awaited()
     persisted = json.loads(watchlists_db.get_briefing_occurrence(seeded.occurrence_id).stages_json)
     assert persisted["deliver:email"]["outcome"] == "successful"
+    repaired = watchlists_db.get_briefing_occurrence(seeded.occurrence_id)
+    assert repaired.delivery_status == "delivered"
+    assert persisted["deliver"]["status"] == "ready"
+
+
+@pytest.mark.parametrize(
+    ("chatbook_stage", "expected_status", "expected_aggregate_stage"),
+    [
+        ({"status": "ready", "outcome": "successful"}, "delivered", "ready"),
+        ({"status": "not_started"}, "partially_delivered", "failed"),
+        ({"status": "failed", "outcome": "failed"}, "partially_delivered", "failed"),
+        ({"status": "failed", "outcome": "unknown"}, "unknown", "failed"),
+    ],
+)
+def test_successful_ledger_reconciliation_updates_multi_adapter_aggregate(
+    projection_case,
+    chatbook_stage,
+    expected_status,
+    expected_aggregate_stage,
+):
+    from tldw_Server_API.app.core.Watchlists.briefing_delivery import (
+        reconcile_successful_delivery_attempt,
+    )
+
+    _client, seeded, watchlists_db, _collections_db = projection_case
+    occurrence = watchlists_db.get_briefing_occurrence(seeded.occurrence_id)
+    contract = json.loads(occurrence.contract_json)
+    contract["delivery"]["chatbook"] = {"enabled": True}
+    stages = json.loads(occurrence.stages_json)
+    stages["persist_text"]["output_version"] = 1
+    stages["deliver:email"] = {
+        "status": "running",
+        "outcome": "sending",
+        "attempt_count": 1,
+    }
+    stages["deliver:chatbook"] = chatbook_stage
+    occurrence = watchlists_db.update_briefing_occurrence(
+        seeded.occurrence_id,
+        stages=stages,
+        delivery_status="delivering",
+    )
+    occurrence.contract_json = json.dumps(contract)
+    attempt = watchlists_db.claim_briefing_attempt(
+        occurrence_id=seeded.occurrence_id,
+        artifact_version=1,
+        adapter="email",
+    )
+    watchlists_db.transition_briefing_attempt(
+        int(attempt.id),
+        expected_states={"intent"},
+        state="successful",
+        code="delivery_acknowledged",
+    )
+
+    repaired = reconcile_successful_delivery_attempt(
+        watchlists_db=watchlists_db,
+        occurrence=occurrence,
+        adapter="email",
+    )
+
+    assert repaired is not None
+    repaired_stages = json.loads(repaired.stages_json)
+    assert repaired.delivery_status == expected_status
+    assert repaired_stages["deliver"]["status"] == expected_aggregate_stage
+    assert repaired_stages["deliver"]["code"] == (
+        None if expected_status == "delivered" else expected_status
+    )
 
 
 def test_completed_audio_does_not_override_failed_text(projection_case):
