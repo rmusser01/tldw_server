@@ -515,11 +515,88 @@ class TestDocumentGeneratorService:
         assert index_row is not None
 
     @pytest.mark.asyncio
-    async def test_bulk_generation(self, service, real_db):
+    async def test_bulk_generation(
+        self,
+        service: DocumentGeneratorService,
+        real_db: CharactersRAGDB,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """Test generating multiple document types at once."""
-        # Skip if method doesn't exist
-        if not hasattr(service, 'bulk_generate'):
-            pytest.skip("bulk_generate not implemented")
+        calls: list[tuple[str, DocumentType, str, str, str, dict[str, Any] | None]] = []
+
+        def fake_generate_document(
+            conversation_id: str,
+            document_type: DocumentType,
+            provider: str,
+            model: str,
+            api_key: str,
+            app_config: dict[str, Any] | None = None,
+            **_kwargs: Any,
+        ) -> str:
+            calls.append((conversation_id, document_type, provider, model, api_key, app_config))
+            return f"{document_type.value} result"
+
+        monkeypatch.setattr(service, "generate_document", fake_generate_document)
+        service.llm_config = {
+            "provider": "openai",
+            "model": "gpt-4o-mini",
+            "api_key": "test-key",
+            "app_config": {"timeout": 30},
+        }
+
+        results = await service.bulk_generate(
+            str(real_db.test_conversation_id),
+            [DocumentType.SUMMARY, DocumentType.QA],
+        )
+
+        assert results == ["summary result", "q_and_a result"]
+        assert calls == [
+            (
+                str(real_db.test_conversation_id),
+                DocumentType.SUMMARY,
+                "openai",
+                "gpt-4o-mini",
+                "test-key",
+                {"timeout": 30},
+            ),
+            (
+                str(real_db.test_conversation_id),
+                DocumentType.QA,
+                "openai",
+                "gpt-4o-mini",
+                "test-key",
+                {"timeout": 30},
+            ),
+        ]
+
+        calls.clear()
+        service.llm_config = {
+            "provider": "configured-provider",
+            "model": "configured-model",
+            "api_key": "configured-key",
+            "app_config": {"timeout": 30},
+        }
+
+        override_results = await service.bulk_generate(
+            str(real_db.test_conversation_id),
+            [DocumentType.BRIEFING],
+            provider="override-provider",
+            model="override-model",
+            api_key="override-key",
+            app_config={"timeout": 5},
+        )
+
+        assert override_results == ["briefing result"]
+        assert calls == [
+            (
+                str(real_db.test_conversation_id),
+                DocumentType.BRIEFING,
+                "override-provider",
+                "override-model",
+                "override-key",
+                {"timeout": 5},
+            ),
+        ]
 
     def test_get_statistics(self, service, real_db):
 

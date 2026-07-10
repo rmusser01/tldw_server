@@ -22,6 +22,7 @@ Key Adaptations from Single-User:
 - Background job support for long generations
 """
 
+import asyncio
 import base64
 import json
 import time
@@ -157,6 +158,7 @@ class DocumentGeneratorService:
 
         # Request-scoped cache for prompts
         self._prompt_cache: dict[DocumentType, dict[str, Any]] = {}
+        self.llm_config: dict[str, Any] = {}
 
         # No longer need provider mapping - using adapter registry
     @staticmethod
@@ -1391,8 +1393,12 @@ class DocumentGeneratorService:
     async def bulk_generate(
         self,
         conversation_id: str,
-        document_types: list[DocumentType]
-    ) -> list[dict[str, Any]]:
+        document_types: list[DocumentType],
+        provider: Optional[str] = None,
+        model: Optional[str] = None,
+        api_key: Optional[str] = None,
+        app_config: Optional[dict[str, Any]] = None,
+    ) -> list[Any]:
         """
         Generate multiple document types at once.
 
@@ -1403,13 +1409,26 @@ class DocumentGeneratorService:
         Returns:
             List of generation results
         """
+        config = getattr(self, "llm_config", {}) or {}
+        effective_provider = provider or config.get("provider") or config.get("api_provider")
+        effective_model = model or config.get("model")
+        effective_api_key = api_key if api_key is not None else config.get("api_key", "")
+        effective_app_config = app_config if app_config is not None else config.get("app_config")
+
+        if not effective_provider or not effective_model:
+            raise ValueError("provider and model are required for bulk document generation")
+
         results = []
         for doc_type in document_types:
-            result = self.generate_document(
+            normalized_doc_type = doc_type if isinstance(doc_type, DocumentType) else DocumentType(str(doc_type))
+            result = await asyncio.to_thread(
+                self.generate_document,
                 conversation_id,
-                doc_type,
-                self.llm_config['provider'],
-                self.llm_config['model']
+                normalized_doc_type,
+                str(effective_provider),
+                str(effective_model),
+                str(effective_api_key or ""),
+                app_config=effective_app_config,
             )
             results.append(result)
         return results
