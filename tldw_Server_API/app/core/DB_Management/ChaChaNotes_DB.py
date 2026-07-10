@@ -19311,7 +19311,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     # --- Workspace Source Methods ---
 
     def _normalize_workspace_source_review_state(self, value: Any, *, for_create: bool) -> str:
-        state = str(value or "").strip().lower()
+        if value is None:
+            state = ""
+        elif isinstance(value, str):
+            state = value.strip().lower()
+        else:
+            raise InputError("Workspace source review state must be a string.")  # noqa: TRY003
         if for_create and not state:
             state = "unset"
         allowed_states = (

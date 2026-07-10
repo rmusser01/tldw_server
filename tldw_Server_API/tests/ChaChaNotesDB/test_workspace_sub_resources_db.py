@@ -58,6 +58,22 @@ class TestWorkspaceSources:
                 "source_type": "video", "review_state": review_state,
             })
 
+    @pytest.mark.parametrize(
+        ("review_state", "source_id"),
+        [
+            (False, "src-false"),
+            (0, "src-zero"),
+            ([], "src-list"),
+            ({}, "src-dict"),
+        ],
+    )
+    def test_add_source_rejects_falsey_non_string_review_states(self, db, review_state, source_id):
+        with pytest.raises(InputError):
+            db.add_workspace_source("ws-1", {
+                "id": source_id, "media_id": 42, "title": "My Video",
+                "source_type": "video", "review_state": review_state,
+            })
+
     def test_list_sources_ordered_by_position(self, db):
         db.add_workspace_source("ws-1", {
             "id": "src-a", "media_id": 1, "title": "A",
