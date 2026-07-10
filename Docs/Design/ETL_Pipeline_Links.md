@@ -13,15 +13,21 @@ https://github.com/kreuzberg-dev/kreuzberg
 https://github.com/whyhow-ai/knowledge-table
 https://olmocr.allenai.org/papers/olmocr.pdf
 https://github.com/NanoNets/docstrange
+https://arxiv.org/pdf/2604.12047v1
+https://arxiv.org/abs/2604.12352v1
+https://arxiv.org/html/2604.10745v1
+https://arxiv.org/abs/2601.19827
+https://arxiv.org/abs/2602.03442
+https://github.com/Ontos-AI/knowledge-graph-traversal-semantic-rag-research
+https://github.com/aiptimizer/TurboOCR
+https://github.com/OxRML/MADQA
+
 https://github.com/steipete/discrawl
 https://github.com/breezedeus/Pix2Text
 https://github.com/uxiew/epub2MD
 https://huggingface.co/papers/2409.01704
 https://huggingface.co/abhinand/GOT-OCR-2.0
 https://huggingface.co/papers/2412.07626
-https://github.com/rcarmo/python-office-mcp-server
-https://github.com/kklimuk/docx-cli
-https://github.com/oxbshw/watch-skill
 https://towardsdatascience.com/ai-powered-information-extraction-and-matchmaking-0408c93ec1b9/
 https://github.com/databridge-org/databridge-core
 https://github.com/cocoindex-io/cocoindex
@@ -106,9 +112,7 @@ On the size cap, a rolling index that streams in/out sections on demand is light
     - doc2txt
     - pypandoc
 - **RSS Feeds**:
-    - f
-- **Videos**
-    - f
+- **Videos**:
 - **Websites**:
     - playwright
     - bs4
@@ -118,7 +122,6 @@ On the size cap, a rolling index that streams in/out sections on demand is light
 - **3rd-Party Services**
     - Sharepoint
         * https://llamahub.ai/l/readers/llama-index-readers-microsoft-sharepoint
-        *
 
 ### Tools
 https://github.com/ucbepic/docetl
