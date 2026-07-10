@@ -22,6 +22,9 @@ from enum import Enum
 from typing import Any, Optional
 
 
+FULL_ACCOUNT_EXPORT_MODE = "full_account"
+
+
 def _utc_now() -> datetime:
     """Return current UTC time as a timezone-aware datetime."""
     return datetime.now(timezone.utc)
@@ -123,6 +126,7 @@ class ImportStatusData:
     skipped_items: int = 0
     conflicts: list[dict[str, Any]] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
@@ -132,7 +136,8 @@ class ImportStatusData:
             "failed_items": self.failed_items,
             "skipped_items": self.skipped_items,
             "conflicts": self.conflicts,
-            "warnings": self.warnings
+            "warnings": self.warnings,
+            "metadata": self.metadata,
         }
 
 
@@ -264,6 +269,8 @@ class ChatbookManifest:
     source_instance: dict[str, Any] = field(default_factory=dict)
     compatibility: dict[str, Any] = field(default_factory=dict)
     file_inventory: list[dict[str, Any]] = field(default_factory=list)
+    account_inventory: list[dict[str, Any]] = field(default_factory=list)
+    account_inventory_summary: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         """Convert manifest to dictionary for JSON serialization."""
@@ -282,6 +289,43 @@ class ChatbookManifest:
 
         version_value = self.version.value if hasattr(self.version, 'value') else str(self.version)
         is_v1_1_manifest = version_value == ChatbookVersion.V1_1.value
+        statistics: dict[str, Any] = {
+            "total_conversations": self.total_conversations,
+            "total_notes": self.total_notes,
+            "total_characters": self.total_characters,
+            "total_media_items": self.total_media_items,
+            "total_prompts": self.total_prompts,
+            "total_evaluations": self.total_evaluations,
+            "total_embeddings": self.total_embeddings,
+            "total_world_books": self.total_world_books,
+            "total_dictionaries": self.total_dictionaries,
+            "total_documents": self.total_documents,
+            "total_explainer_sessions": self.total_explainer_sessions,
+            "total_size_bytes": self.total_size_bytes,
+        }
+        if is_v1_1_manifest:
+            summary_counts = self.account_inventory_summary.get("counts", {})
+            statistics.update({
+                "account_profiles": summary_counts.get("account_profiles", 0),
+                "account_settings": summary_counts.get("account_settings", 0),
+                "conversations": self.total_conversations,
+                "notes": self.total_notes,
+                "characters": self.total_characters,
+                "media_records": self.total_media_items,
+                "prompts": self.total_prompts,
+                "evaluations": self.total_evaluations,
+                "embeddings": self.total_embeddings,
+                "world_books": self.total_world_books,
+                "dictionaries": self.total_dictionaries,
+                "generated_documents": self.total_documents,
+                "explainer_sessions": self.total_explainer_sessions,
+                "media_transcripts": summary_counts.get("media_transcripts", 0),
+                "media_chunks": summary_counts.get("media_chunks", 0),
+                "media_stored_artifacts": summary_counts.get("media_stored_artifacts", 0),
+                "media_pointers": summary_counts.get("media_pointers", 0),
+                "tags_categories_relationships": summary_counts.get("tags_categories_relationships", 0),
+                "sensitive_user_values": summary_counts.get("sensitive_user_values", 0),
+            })
 
         payload = {
             "version": version_value,
@@ -300,25 +344,16 @@ class ChatbookManifest:
                 "media_quality": self.media_quality,
                 "max_file_size_mb": self.max_file_size_mb
             },
-            "statistics": {
-                "total_conversations": self.total_conversations,
-                "total_notes": self.total_notes,
-                "total_characters": self.total_characters,
-                "total_media_items": self.total_media_items,
-                "total_prompts": self.total_prompts,
-                "total_evaluations": self.total_evaluations,
-                "total_embeddings": self.total_embeddings,
-                "total_world_books": self.total_world_books,
-                "total_dictionaries": self.total_dictionaries,
-                "total_documents": self.total_documents,
-                "total_explainer_sessions": self.total_explainer_sessions,
-                "total_size_bytes": self.total_size_bytes
-            },
+            "statistics": statistics,
             "metadata": metadata,
             "user_info": {
                 "user_id": self.user_id
             }
         }
+        if is_v1_1_manifest and self.account_inventory:
+            payload["account_inventory"] = self.account_inventory
+        if is_v1_1_manifest and self.account_inventory_summary:
+            payload["account_inventory_summary"] = self.account_inventory_summary
         if self.truncation:
             payload["truncation"] = self.truncation
         if is_v1_1_manifest:
@@ -384,6 +419,8 @@ class ChatbookManifest:
             source_instance=data.get("source_instance", {}),
             compatibility=data.get("compatibility", {}),
             file_inventory=data.get("file_inventory", []),
+            account_inventory=data.get("account_inventory", []),
+            account_inventory_summary=data.get("account_inventory_summary", {}),
         )
 
 
@@ -483,6 +520,7 @@ class ImportJob:
     skipped_items: int = 0
     conflicts: list[dict[str, Any]] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
@@ -502,7 +540,8 @@ class ImportJob:
             "failed_items": self.failed_items,
             "skipped_items": self.skipped_items,
             "conflicts": self.conflicts,
-            "warnings": self.warnings
+            "warnings": self.warnings,
+            "metadata": self.metadata,
         }
 
     # Provide dict-like access for test compatibility

@@ -1,0 +1,340 @@
+import React from "react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { beforeEach, describe, expect, it, vi } from "vitest"
+import { useQuery } from "@tanstack/react-query"
+import { ChatbooksPlaygroundPage } from "../ChatbooksPlaygroundPage"
+
+const fullAccountScope = {
+  mode: "full_account" as const,
+  total_items: 12,
+  pointer_only_count: 2,
+  sensitive_category_count: 3,
+  warning_count: 1,
+  estimated_size_bytes: 2 * 1024 * 1024,
+  categories: [
+    {
+      category: "notes",
+      label: "Notes",
+      count: 3,
+      restore_status: "restorable" as const,
+      sensitivity: "personal" as const,
+      warning: null
+    },
+    {
+      category: "media_pointers",
+      label: "Media pointers",
+      count: 2,
+      restore_status: "pointer_only" as const,
+      sensitivity: "personal" as const,
+      warning: "External source bytes are not stored by tldw."
+    },
+    {
+      category: "sensitive_user_values",
+      label: "Sensitive user values",
+      count: 1,
+      restore_status: "restorable" as const,
+      sensitivity: "secret" as const,
+      warning: null
+    }
+  ]
+}
+
+const { capabilitiesMock, useQueryMock, tldwClientMock } = vi.hoisted(() => ({
+  capabilitiesMock: {
+    hasChatbooks: true
+  },
+  useQueryMock: vi.fn(),
+  tldwClientMock: {
+    initialize: vi.fn(async () => undefined),
+    getChatbookExportScope: vi.fn(),
+    listChatbookExportJobs: vi.fn(async () => ({ jobs: [] })),
+    listChatbookImportJobs: vi.fn(async () => ({ jobs: [] })),
+    getChatbookExportJob: vi.fn(),
+    getChatbookImportJob: vi.fn(),
+    downloadChatbookExport: vi.fn(),
+    cancelChatbookExportJob: vi.fn(),
+    cancelChatbookImportJob: vi.fn(),
+    cleanupChatbooks: vi.fn(),
+    removeChatbookExportJob: vi.fn(),
+    removeChatbookImportJob: vi.fn(),
+    exportChatbook: vi.fn(),
+    previewChatbook: vi.fn(),
+    importChatbook: vi.fn(),
+    previewOpenWebUIHydration: vi.fn(),
+    createOpenWebUIHydrationJob: vi.fn(),
+    getOpenWebUIHydrationJob: vi.fn()
+  }
+}))
+
+vi.mock("@tanstack/react-query", () => ({
+  useQuery: useQueryMock
+}))
+
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    t: (
+      key: string,
+      defaultValueOrOptions?:
+        | string
+        | {
+            defaultValue?: string
+            count?: number
+            seconds?: number
+          }
+    ) => {
+      if (typeof defaultValueOrOptions === "string") return defaultValueOrOptions
+      if (defaultValueOrOptions?.defaultValue) {
+        return defaultValueOrOptions.defaultValue
+          .replace("{{count}}", String(defaultValueOrOptions.count ?? ""))
+          .replace("{{seconds}}", String(defaultValueOrOptions.seconds ?? ""))
+      }
+      return key
+    }
+  })
+}))
+
+vi.mock("antd", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("antd")>()
+  const React = await import("react")
+  const Select = ({
+    value,
+    onChange,
+    options = [],
+    disabled,
+    className,
+    mode,
+    placeholder
+  }: any) => (
+    <select
+      aria-label={placeholder || "select"}
+      className={className}
+      disabled={disabled}
+      value={Array.isArray(value) ? value[0] || "" : value || ""}
+      onChange={(event) => {
+        const nextValue = event.target.value
+        onChange?.(mode === "tags" ? (nextValue ? [nextValue] : []) : nextValue)
+      }}
+    >
+      {(options as Array<{ value: string; label: React.ReactNode }>).map((option) => (
+        <option key={option.value} value={option.value}>
+          {option.label}
+        </option>
+      ))}
+    </select>
+  )
+  return {
+    ...actual,
+    Select
+  }
+})
+
+vi.mock("@/hooks/useServerOnline", () => ({
+  useServerOnline: () => true
+}))
+
+vi.mock("@/hooks/useServerCapabilities", () => ({
+  useServerCapabilities: () => ({
+    capabilities: capabilitiesMock
+  })
+}))
+
+vi.mock("@/hooks/useAntdNotification", () => ({
+  useAntdNotification: () => ({
+    success: vi.fn(),
+    error: vi.fn(),
+    info: vi.fn(),
+    warning: vi.fn()
+  })
+}))
+
+vi.mock("@/services/tldw/TldwApiClient", () => ({
+  tldwClient: tldwClientMock
+}))
+
+vi.mock("@/services/background-proxy", () => ({
+  bgRequest: vi.fn()
+}))
+
+vi.mock("@/components/Common/PageShell", () => ({
+  PageShell: ({ children }: { children: React.ReactNode }) => <>{children}</>
+}))
+
+vi.mock("@/components/Common/WorkspaceConnectionGate", () => ({
+  default: ({ children }: { children: React.ReactNode }) => <>{children}</>
+}))
+
+if (!(globalThis as any).ResizeObserver) {
+  ;(globalThis as any).ResizeObserver = class ResizeObserver {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+}
+
+const selectExportMode = (value: "full_account" | "selective") => {
+  const modeSelect = screen
+    .getAllByRole("combobox")
+    .find((element) => (element as HTMLSelectElement).value === "full_account")
+  expect(modeSelect).toBeDefined()
+  fireEvent.change(modeSelect!, { target: { value } })
+}
+
+describe("ChatbooksPlaygroundPage backup-all flow", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    capabilitiesMock.hasChatbooks = true
+    tldwClientMock.getChatbookExportScope.mockResolvedValue(fullAccountScope)
+    tldwClientMock.listChatbookExportJobs.mockResolvedValue({ jobs: [] })
+    tldwClientMock.listChatbookImportJobs.mockResolvedValue({ jobs: [] })
+    vi.mocked(useQuery).mockReturnValue({
+      data: { items: [], total: 0 },
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn()
+    } as any)
+  })
+
+  it("shows the Backup & Import heading and full-account scope summary", async () => {
+    render(<ChatbooksPlaygroundPage />)
+
+    expect(
+      screen.getByRole("heading", { name: "Chatbooks Backup & Import" })
+    ).toBeInTheDocument()
+    expect(screen.getAllByText("Backup all account data").length).toBeGreaterThan(0)
+
+    await waitFor(() => {
+      expect(screen.getByText("Backup all scope")).toBeInTheDocument()
+    })
+    expect(screen.getByText("Notes · 3")).toBeInTheDocument()
+    expect(screen.getByText("Media pointers · 2")).toBeInTheDocument()
+    expect(screen.getByText("Total items")).toBeInTheDocument()
+    expect(screen.getByText("Pointer-only items")).toBeInTheDocument()
+    expect(screen.getByText("Sensitive categories")).toBeInTheDocument()
+    expect(screen.getByText("Warnings")).toBeInTheDocument()
+    expect(screen.getByText("Estimated size")).toBeInTheDocument()
+    expect(screen.getByText("2.00 MB")).toBeInTheDocument()
+    expect(screen.getByText("External source bytes are not stored by tldw.")).toBeInTheDocument()
+  })
+
+  it("starts Backup all without content selections", async () => {
+    tldwClientMock.exportChatbook.mockResolvedValueOnce({ job_id: "export-job-1" })
+
+    render(<ChatbooksPlaygroundPage />)
+
+    fireEvent.change(screen.getByPlaceholderText("Name"), {
+      target: { value: "Full account backup" }
+    })
+    fireEvent.change(screen.getByPlaceholderText("Description"), {
+      target: { value: "Full account acceptance backup" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Backup all" }))
+
+    await waitFor(() => {
+      expect(tldwClientMock.exportChatbook).toHaveBeenCalledTimes(1)
+    })
+    expect(tldwClientMock.exportChatbook).toHaveBeenCalledWith(
+      expect.not.objectContaining({ content_selections: expect.anything() })
+    )
+    expect(tldwClientMock.exportChatbook).toHaveBeenCalledWith(
+      expect.objectContaining({
+        include_media: true,
+        include_embeddings: true,
+        include_generated_content: true,
+        media_quality: "original"
+      })
+    )
+  })
+
+  it("keeps selective export blocking zero-item allowlists", async () => {
+    render(<ChatbooksPlaygroundPage />)
+
+    selectExportMode("selective")
+    fireEvent.change(screen.getByPlaceholderText("Name"), {
+      target: { value: "Selective export" }
+    })
+    fireEvent.change(screen.getByPlaceholderText("Description"), {
+      target: { value: "No items selected" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Export selected" }))
+
+    await waitFor(() => {
+      expect(tldwClientMock.exportChatbook).not.toHaveBeenCalled()
+    })
+  })
+
+  it("omits archive import media and embedding flags so default restore handles all archive data", async () => {
+    tldwClientMock.previewChatbook.mockResolvedValueOnce({
+      manifest: {
+        name: "Full archive",
+        author: "Tester",
+        description: "Archive restore",
+        total_size_bytes: 2048,
+        total_notes: 1,
+        content_items: []
+      }
+    })
+    tldwClientMock.importChatbook.mockResolvedValueOnce({ success: true })
+
+    const { container } = render(<ChatbooksPlaygroundPage />)
+
+    fireEvent.click(screen.getByRole("tab", { name: "Import" }))
+    const uploadInput = container.querySelector(
+      ".ant-upload-drag input[type=\"file\"]"
+    ) as HTMLInputElement
+    fireEvent.change(uploadInput, {
+      target: {
+        files: [new File(["archive"], "backup.chatbook", { type: "application/zip" })]
+      }
+    })
+
+    await waitFor(() => {
+      expect(tldwClientMock.previewChatbook).toHaveBeenCalledWith(
+        expect.objectContaining({ name: "backup.chatbook" }),
+        { source_format: "chatbook" }
+      )
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Import chatbook" }))
+
+    await waitFor(() => {
+      expect(tldwClientMock.importChatbook).toHaveBeenCalledTimes(1)
+    })
+    expect(tldwClientMock.importChatbook).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "backup.chatbook" }),
+      expect.not.objectContaining({
+        import_media: expect.anything(),
+        import_embeddings: expect.anything()
+      })
+    )
+  })
+
+  it("shows completed job archive size, warning count, and verification status", async () => {
+    tldwClientMock.listChatbookExportJobs.mockResolvedValueOnce({
+      jobs: [
+        {
+          job_id: "job-1",
+          status: "completed",
+          chatbook_name: "Full account backup",
+          created_at: "2026-07-09T12:00:00Z",
+          file_size_bytes: 12 * 1024,
+          metadata: {
+            warning_count: 4,
+            post_write_verification: true,
+            archive_size_bytes: 12 * 1024
+          }
+        }
+      ]
+    })
+
+    render(<ChatbooksPlaygroundPage />)
+
+    fireEvent.click(screen.getByRole("tab", { name: "Jobs" }))
+
+    await waitFor(() => {
+      expect(screen.getByText("Full account backup")).toBeInTheDocument()
+    })
+    expect(screen.getByText("12.0 KB")).toBeInTheDocument()
+    expect(screen.getByText("4")).toBeInTheDocument()
+    expect(screen.getByText("Verified")).toBeInTheDocument()
+  })
+})

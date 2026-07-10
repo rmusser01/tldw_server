@@ -473,9 +473,9 @@ const BASE_HEADER_SHORTCUT_GROUPS: HeaderShortcutGroup[] = [
         to: "/chatbooks",
         icon: BookOpen,
         labelKey: "option:header.chatbooksPlayground",
-        labelDefault: "Chatbooks Playground",
+        labelDefault: "Chatbooks Backup & Import",
         descriptionKey: "option:header.chatbooksPlaygroundDesc",
-        descriptionDefault: "Export and import chat sessions as portable bundles"
+        descriptionDefault: "Back up and restore account data with selective export options"
       },
       {
         id: "chunking-playground",

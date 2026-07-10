@@ -15,7 +15,7 @@
 
 ### What is a Chatbook?
 
-A Chatbook is your personal content archive - a portable file that contains your conversations, notes, characters, and other content from the tldw_server platform. Think of it as a comprehensive backup or a way to share curated collections of your work. The same import area can also migrate normal OpenWebUI "Export Chats" JSON files and uploaded OpenWebUI `webui.db` databases into tldw conversations.
+A Chatbook is your personal content archive - a portable file that contains your conversations, notes, characters, media records, stored account artifacts, and other account data from the tldw_server platform. Think of it as a comprehensive backup or a way to share curated collections of your work. The same import area can also migrate normal OpenWebUI "Export Chats" JSON files and uploaded OpenWebUI `webui.db` databases into tldw conversations.
 
 ### Why Use Chatbooks?
 
@@ -35,8 +35,11 @@ Chatbooks can contain:
 - 🌍 **World Books**: Lore and context for creative projects
 - 📚 **Dictionaries**: Text replacement rules
 - 📄 **Documents**: Generated summaries and reports
-- 🎨 **Media**: Images, audio, and video files (optional)
-- 🔢 **Embeddings**: Vector representations for search (optional)
+- 🎨 **Media data**: Media records, transcripts, chunks, derived metadata, and tldw-stored account file artifacts
+- 🔢 **Embeddings**: Stored vector/search data when included in the archive
+- 🔐 **Account data**: Settings, prompts, evaluations, relationships, and sensitive account values required for restore
+
+Full-account exports are defined by the Chatbooks account-data inventory. If tldw stores a file artifact for your account, Backup all exports those bytes. If tldw only stores an external URL, local path, or provenance pointer, the Chatbook exports that stored pointer and shows a pointer-only warning; it does not recreate source bytes that tldw never stored.
 
 OpenWebUI imports are handled as conversation imports: each valid OpenWebUI chat becomes a tldw conversation with message branches, timestamps, models, file references, folder metadata, and source metadata preserved where available. Database imports also mirror source folders into tldw folders under `OpenWebUI / <selected user>`.
 
@@ -54,21 +57,25 @@ Before using Chatbooks, ensure you have:
 Chatbooks use the `.chatbook` extension and are essentially ZIP archives containing:
 - `manifest.json`: Metadata about the chatbook
 - `content/`: Directory containing exported content
-- `media/`: Directory containing media files (if included)
+- `content/media/files/`: Directory containing bundled tldw-stored media artifacts when present
 - `README.md`: Human-readable description
 
 ## Exporting Content
 
-### Quick Export (Everything)
+### Backup All Account Data
 
 To export all your content:
 
-1. Navigate to the Chatbooks section
-2. Click "Create New Export"
+1. Navigate to Chatbooks Backup & Import
+2. Keep export mode set to "Backup all account data"
 3. Enter a name (e.g., "Complete Backup - January 2024")
 4. Add a description for future reference
-5. Leave content selections empty (exports everything)
-6. Click "Export"
+5. Review the Backup all scope summary, including total items, pointer-only counts, sensitive categories, warnings, and estimated size
+6. Click "Backup all"
+
+In the API, omitting `content_selections` or sending `"content_selections": {}` means full user-account export. This is the right mode for backups and account migration.
+
+Settings may link to Chatbooks Backup & Import or offer a selected-conversation export shortcut, but Settings is not the full backup/restore workflow. Use Chatbooks Backup & Import for account backups and archive imports.
 
 ### Selective Export
 
@@ -84,10 +91,11 @@ For more control over what to export:
 2. **Select Specific Items**:
    - Click "Select Items" for each content type
    - Use checkboxes to choose individual items
-   - Or leave empty to include all items of that type
+   - Empty arrays mean no items for that type
+   - At least one selected item is required; zero-item allowlists are invalid
 
 3. **Configure Options**:
-   - **Include Media**: Adds images, audio, video (increases file size)
+   - **Include Media**: Adds media data and eligible stored artifacts (increases file size)
    - **Media Quality**:
      - `thumbnail`: Smallest size, preview quality
      - `compressed`: Balanced size and quality (recommended)
@@ -120,10 +128,11 @@ For more control over what to export:
 {
   "name": "Weekly Backup - Week 4",
   "description": "Regular weekly backup of all content",
-  "content_selections": {},  // Empty = everything
   "tags": ["backup", "weekly", "automatic"]
 }
 ```
+
+Sending `"content_selections": {}` is equivalent to omitting it and also creates a full user-account export.
 
 #### Project Archive
 ```json
@@ -145,8 +154,8 @@ For more control over what to export:
   "name": "AI Research Papers Discussion",
   "description": "Conversations about recent AI papers",
   "content_selections": {
-    "conversation": [],  // All conversations
-    "note": []  // All notes
+    "conversation": ["conv_paper_1"],
+    "note": ["note_paper_1"]
   },
   "include_generated_content": true,
   "categories": ["research", "ai"]
@@ -161,7 +170,10 @@ For more control over what to export:
 2. Select "Chatbook archive" as the source
 3. Select your `.chatbook` file
 4. Choose conflict resolution strategy
-5. Click "Import"
+5. Preview the archive and review inventory warnings
+6. Click "Import"
+
+For Chatbook archives, leaving media and embedding import options unset restores all restorable account data present in the archive by default, including media records, derived media data, bundled stored account file artifacts, embeddings, prompts, evaluations, generated documents, and supported relationships. Inventory categories that cannot be restored are reported with visible warnings instead of being silently skipped.
 
 ### OpenWebUI Chat Import
 
@@ -214,7 +226,7 @@ To hydrate from the WebUI:
 1. Import the OpenWebUI JSON or database first.
 2. In the Chatbooks import tab, use the OpenWebUI attachment hydration panel.
 3. Enter the server-local OpenWebUI data root.
-4. Enter the imported tldw conversation IDs to scan. For database imports, keep the selected OpenWebUI source user when shown.
+4. Use the last imported OpenWebUI scope, or select a saved import scope. Manual conversation IDs are available as an advanced override.
 5. Click "Preview attachments" and review referenced, resolved, missing, image, media, and warning counts.
 6. Leave "Process supported files" off unless you want supported non-image files processed after registration.
 7. Click "Run hydration job" only after the preview matches the intended root and scope.
@@ -259,15 +271,13 @@ When importing content that already exists:
   - Example: "Research Note" becomes "[Imported] Research Note"
   - Useful for identifying imported content
 
-- **Import Media**: Not supported yet
-  - Default: false
-  - Keep this set to false; the server rejects true values in v1
-  - OpenWebUI JSON and database imports preserve attachment references first; use OpenWebUI attachment hydration after import to copy referenced images and register supported files
+- **Import Media**:
+  - Chatbook archives: omit this option to restore all restorable media data and bundled stored artifacts present in the archive
+  - OpenWebUI JSON and database imports: attachment references are preserved first; use OpenWebUI attachment hydration after import to copy referenced images and register supported files
 
-- **Import Embeddings**: Not supported yet
-  - Default: false
-  - Keep this set to false; the server rejects true values in v1
-  - OpenWebUI JSON and database imports do not import embeddings
+- **Import Embeddings**:
+  - Chatbook archives: omit this option to restore embeddings present in the archive
+  - OpenWebUI JSON and database imports: embeddings are not imported
 
 ### Preview Before Import
 
@@ -280,6 +290,7 @@ Always preview a chatbook or OpenWebUI export before importing:
    - OpenWebUI chat/message/branch counts when importing JSON
    - OpenWebUI database users, folder counts, and selected-user destination namespace when importing `webui.db`
    - OpenWebUI hydration referenced/resolved file counts before running a hydration job
+   - Account inventory, pointer-only counts, sensitive-category counts, and restore warnings when present
    - Duplicate and malformed-chat counts
    - Creation date
    - Author information
@@ -360,7 +371,7 @@ To cancel a running job:
 1. **Large Exports**:
    - Use async mode
    - Export during off-peak hours
-   - Exclude media if not needed
+   - Use selective export only when a smaller, non-backup archive is intentional
    - Split into multiple smaller exports
 
 2. **Selective Exports**:
@@ -400,7 +411,7 @@ To cancel a running job:
 - **Cause**: Large amount of content
 - **Solution**:
   - Use async mode
-  - Exclude media files
+  - Use selective export for a smaller non-backup archive
   - Export in smaller chunks
   - Check server status
 
@@ -429,12 +440,13 @@ To cancel a running job:
   - Clean up duplicates manually
 
 #### Missing Content in Export
-- **Cause**: Incorrect selection, permissions, or filters
+- **Cause**: Incorrect selection, permissions, filters, or pointer-only source data
 - **Solution**:
-  - Verify content selections
+  - Use Backup all for full account backups
+  - Review the Backup all scope summary and pointer-only warnings
   - Check permissions
   - Remove filters
-  - Try exporting everything
+  - Remember that external source bytes are not exported unless tldw stored them as account artifacts
 
 ### Error Messages
 
@@ -483,7 +495,7 @@ A: You can share the file, but they need their own account to import. Direct sha
 ### Export Questions
 
 **Q: What happens if I export everything?**
-A: All your content is included. This may create a large file and take time to process.
+A: The account-data inventory is exported for your user: conversations, notes, characters, prompts, evaluations, media records, derived media data, stored account artifacts, embeddings, settings, relationships, and sensitive account values required for restore. External URL/local-path sources remain pointer metadata unless tldw stored the file bytes.
 
 **Q: Can I export only recent content?**
 A: Date filtering is planned. Currently, you must select specific items.
@@ -503,7 +515,7 @@ A: Depends on conflict resolution. Use "skip" to avoid duplicates. OpenWebUI JSO
 A: Yes, use the preview endpoint to see contents without importing.
 
 **Q: What happens to media files during import?**
-A: Chatbook media import is not supported yet; keep `import_media=false`. OpenWebUI JSON and database imports preserve file, image, and artifact references first. Run OpenWebUI attachment hydration after import when you have the server-local OpenWebUI data root and want to copy referenced images or register supported files.
+A: Chatbook archive import restores media records, derived media data, and bundled tldw-stored artifacts present in the archive by default. Pointer-only external sources remain metadata only. OpenWebUI JSON and database imports preserve file, image, and artifact references first; run OpenWebUI attachment hydration after import when you have the server-local OpenWebUI data root and want to copy referenced images or register supported files.
 
 **Q: Can I undo an import?**
 A: No automatic undo. Keep backups before importing.
@@ -520,7 +532,7 @@ A: ZIP archive with JSON metadata and content files.
 A: Yes, but be careful. Invalid edits may prevent import.
 
 **Q: What are embeddings?**
-A: Vector representations used for semantic search. Most users don't need to export these.
+A: Vector representations used for semantic search. Backup all includes restorable embedding data when it is present so archive import can restore search state where supported.
 
 **Q: Is the API REST or GraphQL?**
 A: REST with JSON payloads.
@@ -566,6 +578,8 @@ A: Yes, S3/GCS/Azure integration is planned.
 
 - **Chatbook**: Portable archive of your content
 - **Manifest**: Metadata file describing chatbook contents
+- **Account inventory**: The authoritative list of account-owned categories included in full backups
+- **Pointer-only**: Stored URL, local path, or provenance metadata for a source file whose bytes are not stored by tldw
 - **Job**: Background task for processing exports/imports
 - **Conflict Resolution**: Strategy for handling duplicate content
 - **Quota**: Usage limits based on your account tier

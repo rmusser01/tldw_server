@@ -38,6 +38,10 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.chunk_ops import (
     process_unvectorized_chunks,
     update_chunking_template,
 )
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.chatbook_scope_counts import (
+    count_chatbook_scope_category,
+    list_chatbook_scope_ids,
+)
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.connection_lifecycle import (
     _dec_tx_depth,
     _get_persistent_conn,
@@ -1787,6 +1791,8 @@ MediaDatabase.get_media_status_by_id = get_media_status_by_id
 MediaDatabase.get_media_by_title = get_media_by_title
 MediaDatabase.get_media_by_url = get_media_by_url
 MediaDatabase.get_media_by_uuid = get_media_by_uuid
+MediaDatabase.count_chatbook_scope_category = count_chatbook_scope_category
+MediaDatabase.list_chatbook_scope_ids = list_chatbook_scope_ids
 MediaDatabase.search_media_db = run_search_media_db
 MediaDatabase.get_paginated_media_list = get_paginated_media_list
 MediaDatabase.get_paginated_files = get_paginated_files

@@ -147,6 +147,8 @@ def test_sync_import_endpoint_returns_imported_items_and_warnings(
         "openwebui_result": None,
         "openwebui_db_result": None,
         "warnings": ["renamed note"],
+        "inventory_summary": None,
+        "skipped_non_restorable": None,
     }
 
 
@@ -196,9 +198,11 @@ def test_sync_import_endpoint_propagates_wrapper_result(
         "openwebui_result": None,
         "openwebui_db_result": None,
         "warnings": ["from-wrapper"],
+        "inventory_summary": None,
+        "skipped_non_restorable": None,
     }
-    assert captured["import_media"] is False
-    assert captured["import_embeddings"] is False
+    assert captured["import_media"] is True
+    assert captured["import_embeddings"] is True
 
 
 @pytest.mark.unit

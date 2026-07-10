@@ -10,9 +10,16 @@ and this project adheres to Some kind of Versioning
 
 ### Added
 
+- Chatbooks Backup & Import now has an explicit full user-account backup contract and WebUI/extension Backup all flow, including account inventory scope preview, media records, derived media data, bundled tldw-stored account file artifacts, embeddings, redacted inventory summaries, OpenWebUI import-scope hydration reuse, and post-write verification metadata.
+
 ### Changed
 
+- Chatbooks export compatibility changed intentionally: omitted `content_selections` and `content_selections: {}` now mean full user-account export. Non-empty `content_selections` objects are explicit allowlists, and zero-item allowlists are rejected instead of producing empty backups.
+- Chatbook archive import now restores restorable archive media data, embeddings, prompts, evaluations, generated documents, and stored account artifacts by default. OpenWebUI imports still preserve attachment references first and use the separate hydration workflow for copied files.
+
 ### Fixed
+
+- Chatbooks Settings copy and navigation now direct full backup/restore work to Chatbooks Backup & Import while keeping Settings as an entry point or selected-conversation shortcut, reducing the risk of users mistaking a narrow export shortcut for a full backup.
 
 ### Removed
 

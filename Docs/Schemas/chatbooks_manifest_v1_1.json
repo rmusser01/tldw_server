@@ -79,7 +79,8 @@
               "evaluation",
               "world_book",
               "dictionary",
-              "generated_document"
+              "generated_document",
+              "explainer_session"
             ]
           },
           "title": {
@@ -242,6 +243,82 @@
         "total_size_bytes": {
           "type": "integer",
           "minimum": 0
+        },
+        "account_profiles": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "account_settings": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "conversations": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "notes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "characters": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "media_records": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "prompts": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "evaluations": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "embeddings": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "world_books": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "dictionaries": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "generated_documents": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "explainer_sessions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "media_transcripts": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "media_chunks": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "media_stored_artifacts": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "media_pointers": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tags_categories_relationships": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sensitive_user_values": {
+          "type": "integer",
+          "minimum": 0
         }
       }
     },
@@ -387,6 +464,193 @@
               "type": "string"
             }
           }
+        }
+      }
+    },
+    "account_inventory": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "category",
+          "label",
+          "source",
+          "export_representation",
+          "manifest_count_key",
+          "import_handler_key",
+          "dependencies",
+          "sensitivity",
+          "restore_status",
+          "warning"
+        ],
+        "properties": {
+          "category": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "export_representation": {
+            "type": "string"
+          },
+          "manifest_count_key": {
+            "type": "string"
+          },
+          "import_handler_key": {
+            "type": "string"
+          },
+          "dependencies": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "sensitivity": {
+            "type": "string",
+            "enum": [
+              "public",
+              "personal",
+              "sensitive",
+              "secret"
+            ]
+          },
+          "restore_status": {
+            "type": "string",
+            "enum": [
+              "restorable",
+              "pointer_only",
+              "non_restorable"
+            ]
+          },
+          "warning": {
+            "type": ["string", "null"]
+          }
+        }
+      }
+    },
+    "account_inventory_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "counts",
+        "pointer_only_count",
+        "sensitive_category_count",
+        "warning_count",
+        "warnings",
+        "archive_size_bytes",
+        "post_write_verification"
+      ],
+      "properties": {
+        "counts": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "account_profiles": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "account_settings": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "conversations": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "notes": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "characters": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "world_books": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "dictionaries": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "prompts": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "evaluations": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "generated_documents": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "explainer_sessions": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "media_records": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "media_transcripts": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "media_chunks": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "media_stored_artifacts": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "media_pointers": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "embeddings": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "tags_categories_relationships": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "sensitive_user_values": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "pointer_only_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sensitive_category_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "warning_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "archive_size_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "post_write_verification": {
+          "type": "boolean"
         }
       }
     },

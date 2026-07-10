@@ -24,7 +24,11 @@ import { useDebounce } from "@/hooks/useDebounce"
 import { useServerOnline } from "@/hooks/useServerOnline"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import { useAntdNotification } from "@/hooks/useAntdNotification"
-import { tldwClient } from "@/services/tldw/TldwApiClient"
+import {
+  tldwClient,
+  type ChatbookAccountScopeResponse,
+  type OpenWebUIImportScopeSummary
+} from "@/services/tldw/TldwApiClient"
 import { bgRequest } from "@/services/background-proxy"
 import { PageShell } from "@/components/Common/PageShell"
 import WorkspaceConnectionGate from "@/components/Common/WorkspaceConnectionGate"
@@ -96,6 +100,7 @@ type FetchParams = {
 }
 
 type JobKind = "export" | "import"
+type ExportMode = "full_account" | "selective"
 type ImportSourceFormat = "chatbook" | "openwebui_json" | "openwebui_db"
 
 type ChatbookJob = {
@@ -118,6 +123,7 @@ type ChatbookJob = {
   skipped_items?: number
   warnings?: string[]
   conflicts?: any[]
+  metadata?: Record<string, any>
 }
 
 type OpenWebUIDatabasePreviewUser = {
@@ -161,6 +167,27 @@ type OpenWebUIHydrationJobState = {
   status?: string
   result?: any
   error?: string | null
+}
+
+const openWebUISourceFormatLabel = (sourceFormat?: string | null) => {
+  if (sourceFormat === "openwebui_db") return "OpenWebUI database"
+  if (sourceFormat === "openwebui_json") return "OpenWebUI JSON"
+  return sourceFormat || "OpenWebUI"
+}
+
+const pluralize = (count: number, singular: string, plural: string) =>
+  `${count} ${count === 1 ? singular : plural}`
+
+const formatOpenWebUIImportScopeSummary = (scope: OpenWebUIImportScopeSummary) => {
+  const pieces = [
+    openWebUISourceFormatLabel(scope.source_format),
+    pluralize(scope.conversation_count || 0, "conversation", "conversations"),
+    pluralize(scope.attachment_reference_count || 0, "attachment ref", "attachment refs")
+  ]
+  if (scope.source_user_label || scope.source_user_id) {
+    pieces.splice(1, 0, scope.source_user_label || scope.source_user_id || "")
+  }
+  return pieces.filter(Boolean).join(" · ")
 }
 
 const parseIdList = (raw: string) =>
@@ -996,6 +1023,48 @@ const computeProgress = (job: ChatbookJob) => {
   return undefined
 }
 
+const getJobMetadata = (job: ChatbookJob): Record<string, any> =>
+  job.metadata && typeof job.metadata === "object" && !Array.isArray(job.metadata)
+    ? job.metadata
+    : {}
+
+const toOptionalFiniteNumber = (value: unknown) => {
+  if (typeof value === "number" && Number.isFinite(value)) return value
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : undefined
+  }
+  return undefined
+}
+
+const getJobArchiveSize = (job: ChatbookJob) => {
+  const metadata = getJobMetadata(job)
+  const inventorySummary = metadata.account_inventory_summary
+  return (
+    toOptionalFiniteNumber(metadata.archive_size_bytes) ??
+    toOptionalFiniteNumber(inventorySummary?.archive_size_bytes) ??
+    toOptionalFiniteNumber(job.file_size_bytes)
+  )
+}
+
+const getJobWarningCount = (job: ChatbookJob) => {
+  const metadata = getJobMetadata(job)
+  const inventorySummary = metadata.account_inventory_summary
+  return (
+    toOptionalFiniteNumber(metadata.warning_count) ??
+    toOptionalFiniteNumber(inventorySummary?.warning_count) ??
+    (job.warnings?.length ? job.warnings.length : undefined)
+  )
+}
+
+const getJobPostWriteVerification = (job: ChatbookJob) => {
+  const metadata = getJobMetadata(job)
+  const inventorySummary = metadata.account_inventory_summary
+  const value =
+    metadata.post_write_verification ?? inventorySummary?.post_write_verification
+  return typeof value === "boolean" ? value : undefined
+}
+
 const formatTimestamp = (value?: string) => {
   if (!value) return "—"
   const date = new Date(value)
@@ -1068,6 +1137,11 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
   const [exportAuthor, setExportAuthor] = React.useState("")
   const [exportTags, setExportTags] = React.useState<string[]>([])
   const [exportCategories, setExportCategories] = React.useState<string[]>([])
+  const [exportMode, setExportMode] = React.useState<ExportMode>("full_account")
+  const [exportScope, setExportScope] =
+    React.useState<ChatbookAccountScopeResponse | null>(null)
+  const [exportScopeLoading, setExportScopeLoading] = React.useState(false)
+  const [exportScopeError, setExportScopeError] = React.useState<string | null>(null)
   const [includeMedia, setIncludeMedia] = React.useState(true)
   const [mediaQuality, setMediaQuality] = React.useState("compressed")
   const [includeEmbeddings, setIncludeEmbeddings] = React.useState(false)
@@ -1088,12 +1162,14 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
   const [openwebuiPreview, setOpenwebuiPreview] = React.useState<any | null>(null)
   const [openwebuiDbPreview, setOpenwebuiDbPreview] = React.useState<any | null>(null)
   const [selectedOpenWebUIUserId, setSelectedOpenWebUIUserId] = React.useState("")
+  const [openwebuiImportScopes, setOpenwebuiImportScopes] = React.useState<OpenWebUIImportScopeSummary[]>([])
+  const [selectedOpenWebUIImportScopeId, setSelectedOpenWebUIImportScopeId] = React.useState("")
+  const [openwebuiImportScopesLoading, setOpenwebuiImportScopesLoading] = React.useState(false)
+  const [openwebuiImportScopesError, setOpenwebuiImportScopesError] = React.useState<string | null>(null)
   const [previewError, setPreviewError] = React.useState<string | null>(null)
   const [previewLoading, setPreviewLoading] = React.useState(false)
   const [conflictResolution, setConflictResolution] = React.useState("skip")
   const [prefixImported, setPrefixImported] = React.useState(false)
-  const [importMedia, setImportMedia] = React.useState(true)
-  const [importEmbeddings, setImportEmbeddings] = React.useState(false)
   const [importAsync, setImportAsync] = React.useState(true)
   const [importSelections, setImportSelections] = React.useState(
     buildSelectionState(() => [] as string[])
@@ -1105,6 +1181,7 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
   const [hydrationDataRoot, setHydrationDataRoot] = React.useState("")
   const [hydrationConversationIdsRaw, setHydrationConversationIdsRaw] = React.useState("")
   const [hydrationSourceUserId, setHydrationSourceUserId] = React.useState("")
+  const [hydrationUseManualScope, setHydrationUseManualScope] = React.useState(false)
   const [hydrationProcessSupportedFiles, setHydrationProcessSupportedFiles] = React.useState(false)
   const [hydrationPreview, setHydrationPreview] =
     React.useState<OpenWebUIHydrationPreviewState | null>(null)
@@ -1124,6 +1201,7 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
   const previewRequestIdRef = React.useRef(0)
 
   const canUseChatbooks = capabilities?.hasChatbooks !== false
+  const isFullAccountExport = exportMode === "full_account"
   const isOpenWebUIJsonImport = importSourceFormat === "openwebui_json"
   const isOpenWebUIDatabaseImport = importSourceFormat === "openwebui_db"
   const isOpenWebUIImport = isOpenWebUIJsonImport || isOpenWebUIDatabaseImport
@@ -1136,6 +1214,10 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
     setOpenwebuiDbPreview(null)
     setImportPreviewVersion(0)
     setSelectedOpenWebUIUserId("")
+    setOpenwebuiImportScopes([])
+    setSelectedOpenWebUIImportScopeId("")
+    setOpenwebuiImportScopesError(null)
+    setOpenwebuiImportScopesLoading(false)
     setPreviewError(null)
     setPreviewLoading(false)
     setImportSelections(buildSelectionState(() => [] as string[]))
@@ -1146,9 +1228,8 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
     setHydrationPreviewLoading(false)
     setHydrationJob(null)
     setHydrationJobError(null)
+    setHydrationUseManualScope(false)
     if (importSourceFormat === "openwebui_json" || importSourceFormat === "openwebui_db") {
-      setImportMedia(false)
-      setImportEmbeddings(false)
       setConflictResolution((current) =>
         current === "rename" || current === "skip" ? current : "skip"
       )
@@ -1189,12 +1270,31 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
     [openwebuiDbUsers, selectedOpenWebUIUserId]
   )
 
+  const selectedOpenWebUIImportScope = React.useMemo(
+    () =>
+      openwebuiImportScopes.find(
+        (scope) => scope.scope_id === selectedOpenWebUIImportScopeId
+      ) || null,
+    [openwebuiImportScopes, selectedOpenWebUIImportScopeId]
+  )
+
+  const showManualHydrationScope = hydrationUseManualScope || !selectedOpenWebUIImportScope
+
   const effectiveHydrationSourceUserId =
     isOpenWebUIDatabaseImport && selectedOpenWebUIUserId
       ? selectedOpenWebUIUserId
       : hydrationSourceUserId.trim()
 
   const hydrationPayload = React.useMemo(() => {
+    if (selectedOpenWebUIImportScope && !hydrationUseManualScope) {
+      return {
+        openwebui_data_root: hydrationDataRoot.trim(),
+        scope: {
+          import_scope_id: selectedOpenWebUIImportScope.scope_id
+        },
+        process_supported_files: hydrationProcessSupportedFiles
+      }
+    }
     const scope: {
       conversation_ids: string[]
       source_user_id?: string
@@ -1211,9 +1311,11 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
     }
   }, [
     effectiveHydrationSourceUserId,
+    hydrationUseManualScope,
     hydrationConversationIdsRaw,
     hydrationDataRoot,
-    hydrationProcessSupportedFiles
+    hydrationProcessSupportedFiles,
+    selectedOpenWebUIImportScope
   ])
 
   const hydrationPayloadSignature = React.useMemo(
@@ -1250,6 +1352,46 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
     setPollIndex(0)
   }, [])
 
+  const loadExportScope = React.useCallback(async () => {
+    if (!canUseChatbooks) return
+    setExportScopeLoading(true)
+    setExportScopeError(null)
+    try {
+      await tldwClient.initialize().catch(() => null)
+      const scope = await tldwClient.getChatbookExportScope()
+      setExportScope(scope)
+    } catch (error) {
+      setExportScopeError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setExportScopeLoading(false)
+    }
+  }, [canUseChatbooks])
+
+  const loadOpenWebUIImportScopes = React.useCallback(async () => {
+    if (!canUseChatbooks) return []
+    setOpenwebuiImportScopesLoading(true)
+    setOpenwebuiImportScopesError(null)
+    try {
+      await tldwClient.initialize().catch(() => null)
+      const res = await tldwClient.listOpenWebUIImportScopes()
+      const scopes = Array.isArray(res?.scopes) ? res.scopes : []
+      setOpenwebuiImportScopes(scopes)
+      setSelectedOpenWebUIImportScopeId((current) =>
+        scopes.some((scope) => scope.scope_id === current)
+          ? current
+          : scopes[0]?.scope_id || ""
+      )
+      setHydrationUseManualScope(false)
+      return scopes
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error)
+      setOpenwebuiImportScopesError(msg)
+      return []
+    } finally {
+      setOpenwebuiImportScopesLoading(false)
+    }
+  }, [canUseChatbooks])
+
   const loadJobs = React.useCallback(async () => {
     if (!canUseChatbooks) return
     setJobsLoading(true)
@@ -1284,6 +1426,9 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
     const importUpdates = await Promise.all(
       importActive.map((job) => tldwClient.getChatbookImportJob(job.job_id).catch(() => job))
     )
+    const completedImportRefreshNeeded =
+      isOpenWebUIImport &&
+      importUpdates.some((job) => job?.status && !isActiveJobStatus(job.status))
 
     const mergeJobs = (prev: ChatbookJob[], updates: ChatbookJob[]) => {
       const map = new Map(prev.map((job) => [job.job_id, job]))
@@ -1295,14 +1440,22 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
     const nextImport = mergeJobs(importJobs, importUpdates)
     setExportJobs(nextExport)
     setImportJobs(nextImport)
+    if (completedImportRefreshNeeded) {
+      await loadOpenWebUIImportScopes()
+    }
 
     return buildJobSignature([...nextExport, ...nextImport])
-  }, [canUseChatbooks, exportJobs, importJobs])
+  }, [canUseChatbooks, exportJobs, importJobs, isOpenWebUIImport, loadOpenWebUIImportScopes])
 
   React.useEffect(() => {
     if (!canUseChatbooks) return
     void loadJobs()
   }, [canUseChatbooks, loadJobs])
+
+  React.useEffect(() => {
+    if (!canUseChatbooks || !isFullAccountExport) return
+    void loadExportScope()
+  }, [canUseChatbooks, isFullAccountExport, loadExportScope])
 
   React.useEffect(() => {
     if (!activeJobs.all.length) return
@@ -1479,30 +1632,47 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
     setExportSubmitting(true)
     try {
       await tldwClient.initialize().catch(() => null)
-      const contentSelections = await resolveExportSelections()
-      const totalSelected = Object.values(contentSelections).reduce(
-        (sum, ids) => sum + ids.length,
-        0
-      )
-      if (!Object.keys(contentSelections).length || totalSelected === 0) {
-        notification.error({
-          message: t("settings:chatbooksPlayground.exportMissing", "Select at least one item to export.")
-        })
-        return
+      let contentSelections: Record<ContentTypeKey, string[]> | undefined
+      if (!isFullAccountExport) {
+        contentSelections = await resolveExportSelections()
+        const totalSelected = Object.values(contentSelections).reduce(
+          (sum, ids) => sum + ids.length,
+          0
+        )
+        if (!Object.keys(contentSelections).length || totalSelected === 0) {
+          notification.error({
+            message: t("settings:chatbooksPlayground.exportMissing", "Select at least one item to export.")
+          })
+          return
+        }
       }
 
-      const payload = {
+      const payload: {
+        name: string
+        description: string
+        author?: string
+        tags: string[]
+        categories: string[]
+        content_selections?: Record<string, string[]>
+        include_media: boolean
+        media_quality: string
+        include_embeddings: boolean
+        include_generated_content: boolean
+        async_mode: boolean
+      } = {
         name: exportName.trim(),
         description: exportDescription.trim(),
         author: exportAuthor.trim() || undefined,
         tags: exportTags,
         categories: exportCategories,
-        content_selections: contentSelections,
-        include_media: includeMedia,
-        media_quality: mediaQuality,
-        include_embeddings: includeEmbeddings,
-        include_generated_content: includeGenerated,
+        include_media: isFullAccountExport ? true : includeMedia,
+        media_quality: isFullAccountExport ? "original" : mediaQuality,
+        include_embeddings: isFullAccountExport ? true : includeEmbeddings,
+        include_generated_content: isFullAccountExport ? true : includeGenerated,
         async_mode: exportAsync
+      }
+      if (!isFullAccountExport && contentSelections) {
+        payload.content_selections = contentSelections
       }
 
       const res = await tldwClient.exportChatbook(payload)
@@ -1514,6 +1684,7 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
       clearFetchAllItemsCache()
       resetPolling()
       await loadJobs()
+      if (isFullAccountExport) void loadExportScope()
     } catch (error) {
       notification.error({
         message: t("settings:chatbooksPlayground.exportError", "Export failed"),
@@ -1647,18 +1818,30 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
           return
         }
       }
-      const res = await tldwClient.importChatbook(importFile, {
+      const importOptions: {
+        source_format: ImportSourceFormat
+        conflict_resolution: string
+        prefix_imported: boolean
+        import_media?: boolean
+        import_embeddings?: boolean
+        async_mode: boolean
+        content_selections?: Record<string, string[]>
+        selected_openwebui_user_id?: string
+      } = {
         source_format: importSourceFormat,
         conflict_resolution: conflictResolution,
         prefix_imported: prefixImported,
-        import_media: isOpenWebUIImport ? false : importMedia,
-        import_embeddings: isOpenWebUIImport ? false : importEmbeddings,
         async_mode: importAsync,
         content_selections: normalizedSelections,
         selected_openwebui_user_id: isOpenWebUIDatabaseImport
           ? selectedOpenWebUIUserId
           : undefined
-      })
+      }
+      if (isOpenWebUIImport) {
+        importOptions.import_media = false
+        importOptions.import_embeddings = false
+      }
+      const res = await tldwClient.importChatbook(importFile, importOptions)
 
       notification.success({
         message: res?.job_id
@@ -1667,6 +1850,9 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
       })
       clearFetchAllItemsCache()
       resetPolling()
+      if (isOpenWebUIImport) {
+        await loadOpenWebUIImportScopes()
+      }
       await loadJobs()
     } catch (error) {
       notification.error({
@@ -1777,11 +1963,19 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
     [contentLabels]
   )
 
+  const visibleExportScopeCategories = React.useMemo(
+    () =>
+      (exportScope?.categories || []).filter(
+        (category) => category.count > 0 || category.warning
+      ),
+    [exportScope]
+  )
+
   const exportTab = (
     <>
       <Card
         className="border-border"
-        title={t("settings:chatbooksPlayground.exportTitle", "Export chatbook")}
+        title={t("settings:chatbooksPlayground.exportTitle", "Create backup")}
         extra={
           <Text type="secondary">
             {t("settings:chatbooksPlayground.asyncDefault", "Async by default")}
@@ -1822,39 +2016,84 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
             />
           </div>
 
-          <Divider />
-
           <Space wrap>
-            <Switch checked={includeMedia} onChange={setIncludeMedia} />
-            <Text>{t("settings:chatbooksPlayground.includeMedia", "Include media")}</Text>
+            <Text>{t("settings:chatbooksPlayground.exportMode", "Export mode")}</Text>
             <Select
-              aria-label={t("settings:chatbooksPlayground.mediaQuality", "Media quality")}
-              value={mediaQuality}
-              onChange={setMediaQuality}
+              value={exportMode}
+              onChange={(value) => setExportMode(value as ExportMode)}
+              placeholder={t("settings:chatbooksPlayground.exportMode", "Export mode")}
+              className="min-w-[240px]"
               options={[
-                { value: "thumbnail", label: t("settings:chatbooksPlayground.mediaThumbnail", "Thumbnail") },
-                { value: "compressed", label: t("settings:chatbooksPlayground.mediaCompressed", "Compressed") },
-                { value: "original", label: t("settings:chatbooksPlayground.mediaOriginal", "Original") }
+                {
+                  value: "full_account",
+                  label: t(
+                    "settings:chatbooksPlayground.backupAllMode",
+                    "Backup all account data"
+                  )
+                },
+                {
+                  value: "selective",
+                  label: t(
+                    "settings:chatbooksPlayground.selectiveMode",
+                    "Selective export"
+                  )
+                }
               ]}
-              disabled={!includeMedia}
-              className="min-w-[160px]"
+              disabled={!canUseChatbooks || exportSubmitting}
             />
           </Space>
 
-          <Space wrap>
-            <Switch checked={includeEmbeddings} onChange={setIncludeEmbeddings} />
-            <Text>{t("settings:chatbooksPlayground.includeEmbeddings", "Include embeddings")}</Text>
-          </Space>
+          <Divider />
 
-          <Space wrap>
-            <Switch checked={includeGenerated} onChange={setIncludeGenerated} />
-            <Text>
-              {t(
-                "settings:chatbooksPlayground.includeGenerated",
-                "Include generated content"
+          {isFullAccountExport ? (
+            <DesignSystemAlert
+              variant="info"
+              {...passiveAlertProps}
+              title={t(
+                "settings:chatbooksPlayground.backupAllTitle",
+                "Backup all account data"
               )}
-            </Text>
-          </Space>
+            >
+              {t(
+                "settings:chatbooksPlayground.backupAllDescription",
+                "Includes all restorable account records, stored media artifacts, embeddings, generated content, and pointer metadata tracked by tldw."
+              )}
+            </DesignSystemAlert>
+          ) : (
+            <>
+              <Space wrap>
+                <Switch checked={includeMedia} onChange={setIncludeMedia} />
+                <Text>{t("settings:chatbooksPlayground.includeMedia", "Include media")}</Text>
+                <Select
+                  aria-label={t("settings:chatbooksPlayground.mediaQuality", "Media quality")}
+                  value={mediaQuality}
+                  onChange={setMediaQuality}
+                  options={[
+                    { value: "thumbnail", label: t("settings:chatbooksPlayground.mediaThumbnail", "Thumbnail") },
+                    { value: "compressed", label: t("settings:chatbooksPlayground.mediaCompressed", "Compressed") },
+                    { value: "original", label: t("settings:chatbooksPlayground.mediaOriginal", "Original") }
+                  ]}
+                  disabled={!includeMedia}
+                  className="min-w-[160px]"
+                />
+              </Space>
+
+              <Space wrap>
+                <Switch checked={includeEmbeddings} onChange={setIncludeEmbeddings} />
+                <Text>{t("settings:chatbooksPlayground.includeEmbeddings", "Include embeddings")}</Text>
+              </Space>
+
+              <Space wrap>
+                <Switch checked={includeGenerated} onChange={setIncludeGenerated} />
+                <Text>
+                  {t(
+                    "settings:chatbooksPlayground.includeGenerated",
+                    "Include generated content"
+                  )}
+                </Text>
+              </Space>
+            </>
+          )}
 
           <Space wrap>
             <Switch checked={exportAsync} onChange={setExportAsync} />
@@ -1863,7 +2102,116 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
         </div>
       </Card>
 
-      <div className="flex flex-col gap-4">
+      {isFullAccountExport && (
+        <Card
+          size="small"
+          className="border-border"
+          title={t("settings:chatbooksPlayground.backupAllScope", "Backup all scope")}
+          extra={
+            <Button
+              size="small"
+              onClick={() => void loadExportScope()}
+              loading={exportScopeLoading}
+              disabled={!canUseChatbooks}
+            >
+              {t("settings:chatbooksPlayground.refresh", "Refresh")}
+            </Button>
+          }
+        >
+          <div className="flex flex-col gap-3">
+            {exportScopeError && (
+              <DesignSystemAlert
+                variant="warning"
+                title={t(
+                  "settings:chatbooksPlayground.scopeLoadError",
+                  "Unable to load backup scope"
+                )}
+              >
+                {exportScopeError}
+              </DesignSystemAlert>
+            )}
+            {exportScope ? (
+              <>
+                <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+                  <div>
+                    <Text type="secondary">
+                      {t("settings:chatbooksPlayground.scopeTotal", "Total items")}
+                    </Text>
+                    <div>{exportScope.total_items}</div>
+                  </div>
+                  <div>
+                    <Text type="secondary">
+                      {t(
+                        "settings:chatbooksPlayground.scopePointerOnly",
+                        "Pointer-only items"
+                      )}
+                    </Text>
+                    <div>{exportScope.pointer_only_count}</div>
+                  </div>
+                  <div>
+                    <Text type="secondary">
+                      {t(
+                        "settings:chatbooksPlayground.scopeSensitive",
+                        "Sensitive categories"
+                      )}
+                    </Text>
+                    <div>{exportScope.sensitive_category_count}</div>
+                  </div>
+                  <div>
+                    <Text type="secondary">
+                      {t("settings:chatbooksPlayground.scopeWarnings", "Warnings")}
+                    </Text>
+                    <div>{exportScope.warning_count}</div>
+                  </div>
+                  <div>
+                    <Text type="secondary">
+                      {t(
+                        "settings:chatbooksPlayground.scopeEstimatedSize",
+                        "Estimated size"
+                      )}
+                    </Text>
+                    <div>
+                      {exportScope.estimated_size_bytes != null
+                        ? formatFileSize(exportScope.estimated_size_bytes)
+                        : "—"}
+                    </div>
+                  </div>
+                </div>
+                {visibleExportScopeCategories.length > 0 && (
+                  <Space wrap>
+                    {visibleExportScopeCategories.map((category) => (
+                      <Tag key={category.category}>
+                        {category.label} · {category.count}
+                      </Tag>
+                    ))}
+                  </Space>
+                )}
+                {visibleExportScopeCategories
+                  .filter((category) => category.warning)
+                  .map((category) => (
+                    <DesignSystemAlert
+                      key={`${category.category}-warning`}
+                      variant="warning"
+                      {...passiveAlertProps}
+                      title={category.label}
+                    >
+                      {category.warning}
+                    </DesignSystemAlert>
+                  ))}
+              </>
+            ) : (
+              <Text type="secondary">
+                {exportScopeLoading
+                  ? t("settings:chatbooksPlayground.scopeLoading", "Loading backup scope...")
+                  : t("settings:chatbooksPlayground.scopeEmpty", "Backup scope is not loaded yet.")}
+              </Text>
+            )}
+          </div>
+        </Card>
+      )}
+
+      {!isFullAccountExport && (
+        <div className="flex flex-col gap-4">
         {!isOnline && (
           <DesignSystemAlert
             variant="info"
@@ -1924,7 +2272,8 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
             />
           )
         })}
-      </div>
+        </div>
+      )}
 
       <div className="flex justify-end">
         <Button
@@ -1933,7 +2282,9 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
           loading={exportSubmitting}
           disabled={!canUseChatbooks}
         >
-          {t("settings:chatbooksPlayground.exportCta", "Export chatbook")}
+          {isFullAccountExport
+            ? t("settings:chatbooksPlayground.backupAllCta", "Backup all")
+            : t("settings:chatbooksPlayground.exportSelectedCta", "Export selected")}
         </Button>
       </div>
     </>
@@ -2261,58 +2612,151 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
                     disabled={!canUseChatbooks || hydrationPreviewLoading || hydrationJobLoading}
                   />
                 </div>
-                <div>
-                  <Text type="secondary">
-                    {t(
-                      "settings:chatbooksPlayground.openwebuiHydrationSourceUser",
-                      "Source user"
-                    )}
-                  </Text>
-                  <Input
-                    aria-label={t(
-                      "settings:chatbooksPlayground.openwebuiHydrationSourceUserLabel",
-                      "OpenWebUI source user id"
-                    ) as string}
-                    value={
-                      isOpenWebUIDatabaseImport && selectedOpenWebUIUserId
-                        ? selectedOpenWebUIUserId
-                        : hydrationSourceUserId
-                    }
-                    onChange={(event) => setHydrationSourceUserId(event.target.value)}
-                    placeholder={t(
-                      "settings:chatbooksPlayground.openwebuiHydrationSourceUserPlaceholder",
-                      "Optional source user id"
-                    ) as string}
-                    disabled={
-                      !canUseChatbooks ||
-                      hydrationPreviewLoading ||
-                      hydrationJobLoading ||
-                      (isOpenWebUIDatabaseImport && Boolean(selectedOpenWebUIUserId))
-                    }
-                  />
-                </div>
+
                 <div className="md:col-span-2">
-                  <Text type="secondary">
-                    {t(
-                      "settings:chatbooksPlayground.openwebuiHydrationConversationIds",
-                      "Imported conversation IDs"
+                  <div className="flex flex-col gap-2 rounded border border-border p-3">
+                    <Space wrap className="justify-between">
+                      <Text strong>
+                        {t(
+                          "settings:chatbooksPlayground.openwebuiImportScope",
+                          "Last import scope"
+                        )}
+                      </Text>
+                      <Button
+                        size="small"
+                        onClick={() => void loadOpenWebUIImportScopes()}
+                        loading={openwebuiImportScopesLoading}
+                        disabled={!canUseChatbooks || hydrationPreviewLoading || hydrationJobLoading}
+                      >
+                        {t("settings:chatbooksPlayground.refresh", "Refresh")}
+                      </Button>
+                    </Space>
+                    {openwebuiImportScopes.length ? (
+                      <>
+                        <Select
+                          value={selectedOpenWebUIImportScopeId || undefined}
+                          onChange={(value) => {
+                            setSelectedOpenWebUIImportScopeId(String(value || ""))
+                            setHydrationUseManualScope(false)
+                          }}
+                          placeholder={t(
+                            "settings:chatbooksPlayground.openwebuiImportScopeSelect",
+                            "Select import scope"
+                          )}
+                          className="w-full"
+                          disabled={!canUseChatbooks || hydrationPreviewLoading || hydrationJobLoading}
+                          options={openwebuiImportScopes.map((scope) => ({
+                            value: scope.scope_id,
+                            label: formatOpenWebUIImportScopeSummary(scope)
+                          }))}
+                        />
+                        {selectedOpenWebUIImportScope && (
+                          <Text type="secondary">
+                            {t(
+                              "settings:chatbooksPlayground.openwebuiImportScopeDefault",
+                              "Hydration uses this import scope by default."
+                            )}
+                          </Text>
+                        )}
+                      </>
+                    ) : (
+                      <Text type="secondary">
+                        {t(
+                          "settings:chatbooksPlayground.openwebuiImportScopeEmpty",
+                          "No imported OpenWebUI scope is selected yet."
+                        )}
+                      </Text>
                     )}
-                  </Text>
-                  <Input.TextArea
-                    aria-label={t(
-                      "settings:chatbooksPlayground.openwebuiHydrationConversationIdsLabel",
-                      "Imported conversation IDs"
-                    ) as string}
-                    value={hydrationConversationIdsRaw}
-                    onChange={(event) => setHydrationConversationIdsRaw(event.target.value)}
-                    autoSize={{ minRows: 2, maxRows: 4 }}
-                    placeholder={t(
-                      "settings:chatbooksPlayground.openwebuiHydrationConversationIdsPlaceholder",
-                      "Paste tldw conversation ids, one per line or comma-separated"
-                    ) as string}
-                    disabled={!canUseChatbooks || hydrationPreviewLoading || hydrationJobLoading}
-                  />
+                    {openwebuiImportScopesError && (
+                      <DesignSystemAlert
+                        variant="warning"
+                        {...passiveAlertProps}
+                        title={t(
+                          "settings:chatbooksPlayground.openwebuiImportScopeError",
+                          "Unable to load import scopes"
+                        )}
+                      >
+                        {openwebuiImportScopesError}
+                      </DesignSystemAlert>
+                    )}
+                    {selectedOpenWebUIImportScope && (
+                      <Space>
+                        <Switch
+                          aria-label={t(
+                            "settings:chatbooksPlayground.openwebuiHydrationManualScope",
+                            "Manual hydration scope"
+                          ) as string}
+                          checked={hydrationUseManualScope}
+                          onChange={setHydrationUseManualScope}
+                          disabled={!canUseChatbooks || hydrationPreviewLoading || hydrationJobLoading}
+                        />
+                        <Text>
+                          {t(
+                            "settings:chatbooksPlayground.openwebuiHydrationManualScope",
+                            "Manual hydration scope"
+                          )}
+                        </Text>
+                      </Space>
+                    )}
+                  </div>
                 </div>
+
+                {showManualHydrationScope && (
+                  <div>
+                    <Text type="secondary">
+                      {t(
+                        "settings:chatbooksPlayground.openwebuiHydrationSourceUser",
+                        "Source user"
+                      )}
+                    </Text>
+                    <Input
+                      aria-label={t(
+                        "settings:chatbooksPlayground.openwebuiHydrationSourceUserLabel",
+                        "OpenWebUI source user id"
+                      ) as string}
+                      value={
+                        isOpenWebUIDatabaseImport && selectedOpenWebUIUserId
+                          ? selectedOpenWebUIUserId
+                          : hydrationSourceUserId
+                      }
+                      onChange={(event) => setHydrationSourceUserId(event.target.value)}
+                      placeholder={t(
+                        "settings:chatbooksPlayground.openwebuiHydrationSourceUserPlaceholder",
+                        "Optional source user id"
+                      ) as string}
+                      disabled={
+                        !canUseChatbooks ||
+                        hydrationPreviewLoading ||
+                        hydrationJobLoading ||
+                        (isOpenWebUIDatabaseImport && Boolean(selectedOpenWebUIUserId))
+                      }
+                    />
+                  </div>
+                )}
+                {showManualHydrationScope && (
+                  <div className="md:col-span-2">
+                    <Text type="secondary">
+                      {t(
+                        "settings:chatbooksPlayground.openwebuiHydrationConversationIds",
+                        "Imported conversation IDs"
+                      )}
+                    </Text>
+                    <Input.TextArea
+                      aria-label={t(
+                        "settings:chatbooksPlayground.openwebuiHydrationConversationIdsLabel",
+                        "Imported conversation IDs"
+                      ) as string}
+                      value={hydrationConversationIdsRaw}
+                      onChange={(event) => setHydrationConversationIdsRaw(event.target.value)}
+                      autoSize={{ minRows: 2, maxRows: 4 }}
+                      placeholder={t(
+                        "settings:chatbooksPlayground.openwebuiHydrationConversationIdsPlaceholder",
+                        "Paste tldw conversation ids, one per line or comma-separated"
+                      ) as string}
+                      disabled={!canUseChatbooks || hydrationPreviewLoading || hydrationJobLoading}
+                    />
+                  </div>
+                )}
               </div>
 
               <div className="mt-3 flex flex-wrap items-center gap-3">
@@ -2575,17 +3019,19 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
           </Space>
 
           {!isOpenWebUIImport && (
-            <>
-              <Space wrap>
-                <Switch checked={importMedia} onChange={setImportMedia} />
-                <Text>{t("settings:chatbooksPlayground.importMedia", "Import media")}</Text>
-              </Space>
-
-              <Space wrap>
-                <Switch checked={importEmbeddings} onChange={setImportEmbeddings} />
-                <Text>{t("settings:chatbooksPlayground.importEmbeddings", "Import embeddings")}</Text>
-              </Space>
-            </>
+            <DesignSystemAlert
+              variant="info"
+              {...passiveAlertProps}
+              title={t(
+                "settings:chatbooksPlayground.archiveRestoreDefaults",
+                "Archive restore defaults"
+              )}
+            >
+              {t(
+                "settings:chatbooksPlayground.archiveRestoreDefaultsDescription",
+                "Chatbook archives restore all restorable archive data by default, including stored media artifacts and embeddings when present."
+              )}
+            </DesignSystemAlert>
           )}
 
           <Space wrap>
@@ -2720,6 +3166,32 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
               }
             },
             {
+              title: t("settings:chatbooksPlayground.jobArchiveSize", "Archive size"),
+              render: (job: ChatbookJob) => {
+                const size = getJobArchiveSize(job)
+                return size != null ? formatFileSize(size) : "—"
+              }
+            },
+            {
+              title: t(
+                "settings:chatbooksPlayground.jobPostWriteVerification",
+                "Post-write verification"
+              ),
+              render: (job: ChatbookJob) => {
+                const verified = getJobPostWriteVerification(job)
+                if (verified === undefined) return "—"
+                return verified ? (
+                  <Tag color="green">
+                    {t("settings:chatbooksPlayground.verified", "Verified")}
+                  </Tag>
+                ) : (
+                  <Tag color="red">
+                    {t("settings:chatbooksPlayground.notVerified", "Not verified")}
+                  </Tag>
+                )
+              }
+            },
+            {
               title: t("settings:chatbooksPlayground.jobCreated", "Created"),
               dataIndex: "created_at",
               render: (value: string) => formatTimestamp(value)
@@ -2731,8 +3203,10 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
             },
             {
               title: t("settings:chatbooksPlayground.jobWarnings", "Warnings"),
-              render: (job: ChatbookJob) =>
-                job.warnings?.length ? job.warnings.length : "—"
+              render: (job: ChatbookJob) => {
+                const count = getJobWarningCount(job)
+                return count != null ? count : "—"
+              }
             },
             {
               title: t("settings:chatbooksPlayground.jobConflicts", "Conflicts"),
@@ -2863,7 +3337,7 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
 
   return (
     <WorkspaceConnectionGate
-      featureName={t("settings:chatbooksPlayground.title", "Chatbooks")}
+      featureName={t("settings:chatbooksPlayground.title", "Chatbooks Backup & Import")}
       setupDescription={t(
         "settings:chatbooksPlayground.offline",
         "Connect to your tldw server to use Chatbooks."
@@ -2873,11 +3347,13 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
       <PageShell maxWidthClassName="max-w-6xl">
       <div className="flex flex-col gap-6">
         <div>
-          <Title level={3}>{t("settings:chatbooksPlayground.title", "Chatbooks Playground")}</Title>
+          <Title level={3}>
+            {t("settings:chatbooksPlayground.title", "Chatbooks Backup & Import")}
+          </Title>
           <Paragraph type="secondary">
             {t(
               "settings:chatbooksPlayground.subtitle",
-              "Export and import chatbooks with full control over content selection and job tracking."
+              "Back up and restore account data, with selective export available when you need a smaller archive."
             )}
           </Paragraph>
         </div>
