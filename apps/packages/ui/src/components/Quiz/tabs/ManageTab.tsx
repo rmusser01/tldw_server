@@ -427,7 +427,7 @@ const buildPrintableQuizHtml = (entry: QuizExportEntry): string => {
       return `
         <article class="question">
           <h2>${index + 1}. ${escapeHtml(question.question_text)}</h2>
-          <p class="meta">Type: ${escapeHtml(question.question_type)} · Points: ${question.points}</p>
+          <p class="meta">Type: ${escapeHtml(question.question_type)} · Points: ${Number.isFinite(question.points) ? question.points : 0}</p>
           ${optionsMarkup}
           ${hintMarkup}
           ${hintPenaltyMarkup}
