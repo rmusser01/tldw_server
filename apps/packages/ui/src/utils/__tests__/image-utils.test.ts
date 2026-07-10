@@ -32,6 +32,12 @@ describe("image utils", () => {
     expect(safeImageUrl("../images/a.png")).toBe("../images/a.png")
   })
 
+  it("canonicalizes protocol-relative image URLs to HTTPS", () => {
+    expect(safeImageUrl("//cdn.example/a.png")).toBe(
+      "https://cdn.example/a.png"
+    )
+  })
+
   it("makes bare relative image paths explicit", () => {
     expect(safeImageUrl("images/a.png")).toBe("./images/a.png")
   })
