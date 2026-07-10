@@ -726,6 +726,7 @@ type ContentTypePickerProps = {
   manualPlaceholder?: string
   emptyHint?: string
   truncationLimit?: number
+  includeAllSummary?: string
   /** When true, suppress per-section error alerts for auth/connection errors (a consolidated banner is shown above). */
   suppressAuthErrors?: boolean
 }
@@ -746,6 +747,7 @@ export const ContentTypePicker: React.FC<ContentTypePickerProps> = ({
   manualPlaceholder,
   emptyHint,
   truncationLimit,
+  includeAllSummary,
   suppressAuthErrors = false
 }) => {
   const { t } = useTranslation(["settings", "common"])
@@ -882,6 +884,10 @@ export const ContentTypePicker: React.FC<ContentTypePickerProps> = ({
         <div className="flex flex-wrap items-center justify-between gap-3">
           <Space wrap>
             <Switch
+              aria-label={`${label}: ${t(
+                "settings:chatbooksPlayground.includeAll",
+                "Include all"
+              )}`}
               checked={includeAll}
               disabled={!allowIncludeAll || disabled}
               onChange={(checked) => onIncludeAllChange(checked)}
@@ -891,10 +897,16 @@ export const ContentTypePicker: React.FC<ContentTypePickerProps> = ({
             </Text>
           </Space>
           <Text type="secondary" className="text-xs">
-            {t("settings:chatbooksPlayground.selectedCount", {
-              defaultValue: "Selected: {{count}}",
-              count: selectedIds.length
-            })}
+            {includeAll
+              ? includeAllSummary ||
+                t("settings:chatbooksPlayground.allIncluded", {
+                  defaultValue: "All {{label}}",
+                  label: label.toLowerCase()
+                })
+              : t("settings:chatbooksPlayground.selectedCount", {
+                  defaultValue: "Selected: {{count}}",
+                  count: selectedIds.length
+                })}
           </Text>
         </div>
 
@@ -1145,6 +1157,23 @@ const formatTimestamp = (value?: string) => {
   return date.toLocaleString()
 }
 
+const buildDefaultBackupMetadata = () => {
+  const date = new Date().toISOString().slice(0, 10)
+  return {
+    name: `Full account backup - ${date}`,
+    description:
+      "Complete account backup created from Chatbooks Backup & Import."
+  }
+}
+
+const formatInventoryCategory = (category: string) =>
+  category
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase())
+
+const SEMANTIC_PROGRESS_CLASS =
+  "chatbooks-semantic-progress [&_.ant-progress-text]:!text-text"
+
 const getPreviewCount = (manifest: any, key: ContentTypeKey) => {
   if (!manifest) return 0
   switch (key) {
@@ -1335,6 +1364,29 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
       : []
     return Array.from(new Set([...fromCounts, ...fromItems]))
   }, [previewManifest, previewItemsByType])
+
+  const previewInventory = React.useMemo(() => {
+    const summary = previewManifest?.account_inventory_summary
+    const counts = summary?.counts
+    if (!summary || !counts || typeof counts !== "object") return null
+    const labels = new Map<string, string>()
+    for (const row of previewManifest?.account_inventory || []) {
+      if (row?.category) {
+        labels.set(String(row.category), String(row.label || ""))
+      }
+    }
+    const categories = Object.entries(counts)
+      .map(([category, value]) => ({
+        category,
+        label: labels.get(category) || formatInventoryCategory(category),
+        count: Number(value) || 0
+      }))
+      .filter((row) => row.count > 0)
+    const warnings = Array.isArray(summary.warnings)
+      ? summary.warnings.filter(Boolean).map(String)
+      : []
+    return { summary, categories, warnings }
+  }, [previewManifest])
 
   const openwebuiDbUsers = React.useMemo<OpenWebUIDatabasePreviewUser[]>(() => {
     const users = openwebuiDbPreview?.users
@@ -1713,12 +1765,22 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
   }
 
   const handleExport = async () => {
-    if (!exportName.trim() || !exportDescription.trim()) {
+    if (
+      !isFullAccountExport &&
+      (!exportName.trim() || !exportDescription.trim())
+    ) {
       notification.error({
         message: t("settings:chatbooksPlayground.exportValidation", "Name and description are required.")
       })
       return
     }
+
+    const generatedMetadata = buildDefaultBackupMetadata()
+    const effectiveName = exportName.trim() || generatedMetadata.name
+    const effectiveDescription =
+      exportDescription.trim() || generatedMetadata.description
+    if (!exportName.trim()) setExportName(effectiveName)
+    if (!exportDescription.trim()) setExportDescription(effectiveDescription)
 
     setExportSubmitting(true)
     try {
@@ -1751,8 +1813,8 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
         include_generated_content: boolean
         async_mode: boolean
       } = {
-        name: exportName.trim(),
-        description: exportDescription.trim(),
+        name: effectiveName,
+        description: effectiveDescription,
         author: exportAuthor.trim() || undefined,
         tags: exportTags,
         categories: exportCategories,
@@ -2067,49 +2129,49 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
       <Card
         className="border-border"
         title={t("settings:chatbooksPlayground.exportTitle", "Create backup")}
-        extra={
-          <Text type="secondary">
-            {t("settings:chatbooksPlayground.asyncDefault", "Async by default")}
-          </Text>
-        }
       >
         <div className="flex flex-col gap-4">
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <Input
-              value={exportName}
-              onChange={(event) => setExportName(event.target.value)}
-              placeholder={t("settings:chatbooksPlayground.exportName", "Name")}
-            />
-            <Input
-              value={exportAuthor}
-              onChange={(event) => setExportAuthor(event.target.value)}
-              placeholder={t("settings:chatbooksPlayground.exportAuthor", "Author (optional)")}
-            />
-          </div>
+          <Input
+            aria-label={t("settings:chatbooksPlayground.exportName", "Name")}
+            value={exportName}
+            onChange={(event) => setExportName(event.target.value)}
+            placeholder={
+              isFullAccountExport
+                ? t(
+                    "settings:chatbooksPlayground.exportNameOptional",
+                    "Name (optional)"
+                  )
+                : t("settings:chatbooksPlayground.exportName", "Name")
+            }
+          />
           <Input.TextArea
+            aria-label={t(
+              "settings:chatbooksPlayground.exportDescription",
+              "Description"
+            )}
             rows={3}
             value={exportDescription}
             onChange={(event) => setExportDescription(event.target.value)}
-            placeholder={t("settings:chatbooksPlayground.exportDescription", "Description")}
+            placeholder={
+              isFullAccountExport
+                ? t(
+                    "settings:chatbooksPlayground.exportDescriptionOptional",
+                    "Description (optional)"
+                  )
+                : t(
+                    "settings:chatbooksPlayground.exportDescription",
+                    "Description"
+                  )
+            }
           />
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <Select
-              mode="tags"
-              placeholder={t("settings:chatbooksPlayground.tagsPlaceholder", "Tags")}
-              value={exportTags}
-              onChange={(values) => setExportTags(values)}
-            />
-            <Select
-              mode="tags"
-              placeholder={t("settings:chatbooksPlayground.categoriesPlaceholder", "Categories")}
-              value={exportCategories}
-              onChange={(values) => setExportCategories(values)}
-            />
-          </div>
 
           <Space wrap>
             <Text>{t("settings:chatbooksPlayground.exportMode", "Export mode")}</Text>
             <Select
+              aria-label={t(
+                "settings:chatbooksPlayground.exportMode",
+                "Export mode"
+              )}
               value={exportMode}
               onChange={(value) => setExportMode(value as ExportMode)}
               placeholder={t("settings:chatbooksPlayground.exportMode", "Export mode")}
@@ -2153,7 +2215,14 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
           ) : (
             <>
               <Space wrap>
-                <Switch checked={includeMedia} onChange={setIncludeMedia} />
+                <Switch
+                  aria-label={t(
+                    "settings:chatbooksPlayground.includeMedia",
+                    "Include media"
+                  )}
+                  checked={includeMedia}
+                  onChange={setIncludeMedia}
+                />
                 <Text>{t("settings:chatbooksPlayground.includeMedia", "Include media")}</Text>
                 <Select
                   aria-label={t("settings:chatbooksPlayground.mediaQuality", "Media quality")}
@@ -2170,12 +2239,26 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
               </Space>
 
               <Space wrap>
-                <Switch checked={includeEmbeddings} onChange={setIncludeEmbeddings} />
+                <Switch
+                  aria-label={t(
+                    "settings:chatbooksPlayground.includeEmbeddings",
+                    "Include embeddings"
+                  )}
+                  checked={includeEmbeddings}
+                  onChange={setIncludeEmbeddings}
+                />
                 <Text>{t("settings:chatbooksPlayground.includeEmbeddings", "Include embeddings")}</Text>
               </Space>
 
               <Space wrap>
-                <Switch checked={includeGenerated} onChange={setIncludeGenerated} />
+                <Switch
+                  aria-label={t(
+                    "settings:chatbooksPlayground.includeGenerated",
+                    "Include generated content"
+                  )}
+                  checked={includeGenerated}
+                  onChange={setIncludeGenerated}
+                />
                 <Text>
                   {t(
                     "settings:chatbooksPlayground.includeGenerated",
@@ -2186,10 +2269,72 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
             </>
           )}
 
-          <Space wrap>
-            <Switch checked={exportAsync} onChange={setExportAsync} />
-            <Text>{t("settings:chatbooksPlayground.runAsync", "Run as background job")}</Text>
-          </Space>
+          <details className="rounded border border-border px-3 py-2">
+            <summary className="cursor-pointer text-sm font-medium text-text">
+              {t(
+                "settings:chatbooksPlayground.advancedOptions",
+                "Advanced options"
+              )}
+            </summary>
+            <div className="mt-3 flex flex-col gap-3">
+              <Input
+                aria-label={t(
+                  "settings:chatbooksPlayground.exportAuthor",
+                  "Author (optional)"
+                )}
+                value={exportAuthor}
+                onChange={(event) => setExportAuthor(event.target.value)}
+                placeholder={t(
+                  "settings:chatbooksPlayground.exportAuthor",
+                  "Author (optional)"
+                )}
+              />
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                <Select
+                  aria-label={t(
+                    "settings:chatbooksPlayground.tagsPlaceholder",
+                    "Tags"
+                  )}
+                  mode="tags"
+                  placeholder={t(
+                    "settings:chatbooksPlayground.tagsPlaceholder",
+                    "Tags"
+                  )}
+                  value={exportTags}
+                  onChange={(values) => setExportTags(values)}
+                />
+                <Select
+                  aria-label={t(
+                    "settings:chatbooksPlayground.categoriesPlaceholder",
+                    "Categories"
+                  )}
+                  mode="tags"
+                  placeholder={t(
+                    "settings:chatbooksPlayground.categoriesPlaceholder",
+                    "Categories"
+                  )}
+                  value={exportCategories}
+                  onChange={(values) => setExportCategories(values)}
+                />
+              </div>
+              <Space wrap>
+                <Switch
+                  aria-label={t(
+                    "settings:chatbooksPlayground.runAsync",
+                    "Run as background job"
+                  )}
+                  checked={exportAsync}
+                  onChange={setExportAsync}
+                />
+                <Text>
+                  {t(
+                    "settings:chatbooksPlayground.runAsync",
+                    "Run as background job"
+                  )}
+                </Text>
+              </Space>
+            </div>
+          </details>
         </div>
       </Card>
 
@@ -2277,18 +2422,32 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
                     ))}
                   </Space>
                 )}
-                {visibleExportScopeCategories
-                  .filter((category) => category.warning)
-                  .map((category) => (
-                    <DesignSystemAlert
-                      key={`${category.category}-warning`}
-                      variant="warning"
-                      {...passiveAlertProps}
-                      title={category.label}
-                    >
-                      {category.warning}
-                    </DesignSystemAlert>
-                  ))}
+                {visibleExportScopeCategories.some(
+                  (category) => category.warning
+                ) && (
+                  <details className="rounded border border-border px-3 py-2">
+                    <summary className="cursor-pointer text-sm font-medium text-text">
+                      {t("settings:chatbooksPlayground.reviewWarnings", {
+                        defaultValue: "Review {{count}} warnings",
+                        count: visibleExportScopeCategories.filter(
+                          (category) => category.warning
+                        ).length
+                      })}
+                    </summary>
+                    <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-text-muted">
+                      {visibleExportScopeCategories
+                        .filter((category) => category.warning)
+                        .map((category) => (
+                          <li key={`${category.category}-warning`}>
+                            <span className="font-medium text-text">
+                              {category.label}:
+                            </span>{" "}
+                            {category.warning}
+                          </li>
+                        ))}
+                    </ul>
+                  </details>
+                )}
               </>
             ) : (
               <Text type="secondary">
@@ -2368,6 +2527,7 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
 
       <div className="flex justify-end">
         <Button
+          className="min-h-11 w-full sm:w-auto"
           type="primary"
           onClick={handleExport}
           loading={exportSubmitting}
@@ -2416,11 +2576,6 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
       <Card
         className="border-border"
         title={t("settings:chatbooksPlayground.importTitle", "Import chatbook")}
-        extra={
-          <Text type="secondary">
-            {t("settings:chatbooksPlayground.asyncDefault", "Async by default")}
-          </Text>
-        }
       >
         <div className="flex flex-col gap-4">
           <Space wrap>
@@ -2461,10 +2616,10 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
             <p className="ant-upload-drag-icon">
               <InboxOutlined />
             </p>
-            <p className="ant-upload-text">
+            <p className="ant-upload-text !text-text">
               {importDropText}
             </p>
-            <p className="ant-upload-hint">
+            <p className="ant-upload-hint !text-text-muted">
               {importFile?.name || t("settings:chatbooksPlayground.importHint", "Preview before import")}
             </p>
           </Upload.Dragger>
@@ -2487,19 +2642,49 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
           )}
 
           {previewManifest && (
-            <Card
-              size="small"
-              className="border-border"
-              title={t("settings:chatbooksPlayground.previewSummary", "Manifest summary")}
+            <section
+              aria-labelledby="chatbooks-restore-summary"
+              className="border-y border-border py-4"
             >
+              <h2
+                id="chatbooks-restore-summary"
+                className="m-0 text-base font-semibold text-text"
+              >
+                {t(
+                  "settings:chatbooksPlayground.restoreSummary",
+                  "What will be restored"
+                )}
+              </h2>
               <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                 <div>
                   <Text type="secondary">{t("settings:chatbooksPlayground.previewName", "Name")}</Text>
                   <div>{previewManifest.name || "—"}</div>
                 </div>
                 <div>
-                  <Text type="secondary">{t("settings:chatbooksPlayground.previewAuthor", "Author")}</Text>
-                  <div>{previewManifest.author || "—"}</div>
+                  <Text type="secondary">
+                    {t(
+                      "settings:chatbooksPlayground.previewVerification",
+                      "Verification"
+                    )}
+                  </Text>
+                  <div>
+                    {previewInventory?.summary?.post_write_verification ===
+                    true ? (
+                      <Tag color="green">
+                        {t("settings:chatbooksPlayground.verified", "Verified")}
+                      </Tag>
+                    ) : previewInventory?.summary?.post_write_verification ===
+                      false ? (
+                      <Tag color="red">
+                        {t(
+                          "settings:chatbooksPlayground.notVerified",
+                          "Not verified"
+                        )}
+                      </Tag>
+                    ) : (
+                      "—"
+                    )}
+                  </div>
                 </div>
                 <div>
                   <Text type="secondary">{t("settings:chatbooksPlayground.previewDescription", "Description")}</Text>
@@ -2513,8 +2698,35 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
                       : "—"}
                   </div>
                 </div>
+                <div>
+                  <Text type="secondary">
+                    {t(
+                      "settings:chatbooksPlayground.scopeSensitive",
+                      "Sensitive categories"
+                    )}
+                  </Text>
+                  <div>
+                    {previewInventory?.summary?.sensitive_category_count ?? "—"}
+                  </div>
+                </div>
               </div>
-              {previewTypes.length > 0 && (
+              {previewInventory && previewInventory.categories.length > 0 ? (
+                <div className="mt-3">
+                  <Text type="secondary">
+                    {t(
+                      "settings:chatbooksPlayground.accountInventory",
+                      "Account inventory"
+                    )}
+                  </Text>
+                  <Space wrap className="mt-2">
+                    {previewInventory.categories.map((row) => (
+                      <Tag key={row.category}>
+                        {row.label} · {row.count}
+                      </Tag>
+                    ))}
+                  </Space>
+                </div>
+              ) : previewTypes.length > 0 ? (
                 <div className="mt-3">
                   <Text type="secondary">
                     {t("settings:chatbooksPlayground.previewContents", "Contents")}
@@ -2527,8 +2739,42 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
                     ))}
                   </Space>
                 </div>
-              )}
-            </Card>
+              ) : null}
+              {previewInventory &&
+                (previewInventory.warnings.length > 0 ||
+                  Number(previewInventory.summary.warning_count || 0) > 0) && (
+                  <details className="mt-3 rounded border border-border px-3 py-2">
+                    <summary className="cursor-pointer text-sm font-medium text-text">
+                      {Number(previewInventory.summary.warning_count || 0) === 1
+                        ? t(
+                            "settings:chatbooksPlayground.reviewOneWarning",
+                            "Review 1 warning"
+                          )
+                        : t("settings:chatbooksPlayground.reviewWarnings", {
+                            defaultValue: "Review {{count}} warnings",
+                            count: Number(
+                              previewInventory.summary.warning_count || 0
+                            )
+                          })}
+                    </summary>
+                    {previewInventory.warnings.length > 0 && (
+                      <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-text-muted">
+                        {previewInventory.warnings.map((warning) => (
+                          <li key={warning}>{warning}</li>
+                        ))}
+                      </ul>
+                    )}
+                    {previewInventory.warnings.length === 0 && (
+                      <p className="mt-2 text-sm text-text-muted">
+                        {t(
+                          "settings:chatbooksPlayground.warningDetailsUnavailable",
+                          "This archive reports warnings but did not include warning details."
+                        )}
+                      </p>
+                    )}
+                  </details>
+                )}
+            </section>
           )}
 
           {openwebuiPreview && (
@@ -3085,29 +3331,165 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
 
           <Divider />
 
-          <Space wrap>
-            <Select
-              aria-label={t("settings:chatbooksPlayground.conflictResolution", "Conflict resolution")}
-              value={conflictResolution}
-              onChange={setConflictResolution}
-              options={
-                isOpenWebUIImport
-                  ? [
-                      { value: "skip", label: t("settings:chatbooksPlayground.conflictSkip", "Skip") },
-                      { value: "rename", label: t("settings:chatbooksPlayground.conflictRename", "Rename") }
-                    ]
-                  : [
-                      { value: "skip", label: t("settings:chatbooksPlayground.conflictSkip", "Skip") },
-                      { value: "overwrite", label: t("settings:chatbooksPlayground.conflictOverwrite", "Overwrite") },
-                      { value: "rename", label: t("settings:chatbooksPlayground.conflictRename", "Rename") },
-                      { value: "merge", label: t("settings:chatbooksPlayground.conflictMerge", "Merge") }
-                    ]
-              }
-              className="min-w-[160px]"
-            />
-            <Switch checked={prefixImported} onChange={setPrefixImported} />
-            <Text>{t("settings:chatbooksPlayground.prefixImported", "Prefix imported")}</Text>
-          </Space>
+          {isOpenWebUIImport ? (
+            <div className="flex flex-col gap-3">
+              <Space wrap>
+                <Text>
+                  {t(
+                    "settings:chatbooksPlayground.conflictResolution",
+                    "Conflict resolution"
+                  )}
+                </Text>
+                <Select
+                  aria-label={t(
+                    "settings:chatbooksPlayground.conflictResolution",
+                    "Conflict resolution"
+                  )}
+                  value={conflictResolution}
+                  onChange={setConflictResolution}
+                  options={[
+                    {
+                      value: "skip",
+                      label: t(
+                        "settings:chatbooksPlayground.conflictSkip",
+                        "Skip"
+                      )
+                    },
+                    {
+                      value: "rename",
+                      label: t(
+                        "settings:chatbooksPlayground.conflictRename",
+                        "Rename"
+                      )
+                    }
+                  ]}
+                  className="min-w-[160px]"
+                />
+              </Space>
+              <Space wrap>
+                <Switch
+                  aria-label={t(
+                    "settings:chatbooksPlayground.prefixImported",
+                    "Prefix imported"
+                  )}
+                  checked={prefixImported}
+                  onChange={setPrefixImported}
+                />
+                <Text>
+                  {t(
+                    "settings:chatbooksPlayground.prefixImported",
+                    "Prefix imported"
+                  )}
+                </Text>
+              </Space>
+              <Space wrap>
+                <Switch
+                  aria-label={t(
+                    "settings:chatbooksPlayground.runAsync",
+                    "Run as background job"
+                  )}
+                  checked={importAsync}
+                  onChange={setImportAsync}
+                />
+                <Text>
+                  {t(
+                    "settings:chatbooksPlayground.runAsync",
+                    "Run as background job"
+                  )}
+                </Text>
+              </Space>
+            </div>
+          ) : (
+            <details className="rounded border border-border px-3 py-2">
+              <summary className="cursor-pointer text-sm font-medium text-text">
+                {t(
+                  "settings:chatbooksPlayground.advancedOptions",
+                  "Advanced options"
+                )}
+              </summary>
+              <div className="mt-3 flex flex-col gap-3">
+                <Space wrap>
+                  <Text>
+                    {t(
+                      "settings:chatbooksPlayground.conflictResolution",
+                      "Conflict resolution"
+                    )}
+                  </Text>
+                  <Select
+                    aria-label={t(
+                      "settings:chatbooksPlayground.conflictResolution",
+                      "Conflict resolution"
+                    )}
+                    value={conflictResolution}
+                    onChange={setConflictResolution}
+                    options={[
+                      {
+                        value: "skip",
+                        label: t(
+                          "settings:chatbooksPlayground.conflictSkip",
+                          "Skip"
+                        )
+                      },
+                      {
+                        value: "overwrite",
+                        label: t(
+                          "settings:chatbooksPlayground.conflictOverwrite",
+                          "Overwrite"
+                        )
+                      },
+                      {
+                        value: "rename",
+                        label: t(
+                          "settings:chatbooksPlayground.conflictRename",
+                          "Rename"
+                        )
+                      },
+                      {
+                        value: "merge",
+                        label: t(
+                          "settings:chatbooksPlayground.conflictMerge",
+                          "Merge"
+                        )
+                      }
+                    ]}
+                    className="min-w-[160px]"
+                  />
+                </Space>
+                <Space wrap>
+                  <Switch
+                    aria-label={t(
+                      "settings:chatbooksPlayground.prefixImported",
+                      "Prefix imported"
+                    )}
+                    checked={prefixImported}
+                    onChange={setPrefixImported}
+                  />
+                  <Text>
+                    {t(
+                      "settings:chatbooksPlayground.prefixImported",
+                      "Prefix imported"
+                    )}
+                  </Text>
+                </Space>
+                <Space wrap>
+                  <Switch
+                    aria-label={t(
+                      "settings:chatbooksPlayground.runAsync",
+                      "Run as background job"
+                    )}
+                    checked={importAsync}
+                    onChange={setImportAsync}
+                  />
+                  <Text>
+                    {t(
+                      "settings:chatbooksPlayground.runAsync",
+                      "Run as background job"
+                    )}
+                  </Text>
+                </Space>
+              </div>
+            </details>
+          )}
 
           {!isOpenWebUIImport && (
             <DesignSystemAlert
@@ -3124,11 +3506,6 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
               )}
             </DesignSystemAlert>
           )}
-
-          <Space wrap>
-            <Switch checked={importAsync} onChange={setImportAsync} />
-            <Text>{t("settings:chatbooksPlayground.runAsync", "Run as background job")}</Text>
-          </Space>
         </div>
       </Card>
 
@@ -3140,6 +3517,10 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
               typeKey={key}
               label={contentLabels[key]}
               includeAll={importIncludeAll[key]}
+              includeAllSummary={t(
+                "settings:chatbooksPlayground.allInArchive",
+                "All in archive"
+              )}
               onIncludeAllChange={(next) =>
                 setImportIncludeAll((prev) => ({ ...prev, [key]: next }))
               }
@@ -3164,7 +3545,10 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
         </div>
       )}
 
-      {!isOpenWebUIImport && previewManifest && previewTypes.length === 0 && (
+      {!isOpenWebUIImport &&
+        previewManifest &&
+        previewTypes.length === 0 &&
+        !previewInventory?.categories.length && (
         <DesignSystemAlert
           variant="info"
           {...passiveAlertProps}
@@ -3177,6 +3561,7 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
 
       <div className="flex justify-end">
         <Button
+          className="min-h-11 w-full sm:w-auto"
           type="primary"
           onClick={handleImport}
           loading={importSubmitting}
@@ -3253,7 +3638,15 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
               title: t("settings:chatbooksPlayground.jobProgress", "Progress"),
               render: (job: ChatbookJob) => {
                 const progress = computeProgress(job)
-                return progress != null ? <Progress percent={progress} size="small" /> : "—"
+                return progress != null ? (
+                  <Progress
+                    className={SEMANTIC_PROGRESS_CLASS}
+                    percent={progress}
+                    size="small"
+                  />
+                ) : (
+                  "—"
+                )
               }
             },
             {
@@ -3363,7 +3756,15 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
               title: t("settings:chatbooksPlayground.jobProgress", "Progress"),
               render: (job: ChatbookJob) => {
                 const progress = computeProgress(job)
-                return progress != null ? <Progress percent={progress} size="small" /> : "—"
+                return progress != null ? (
+                  <Progress
+                    className={SEMANTIC_PROGRESS_CLASS}
+                    percent={progress}
+                    size="small"
+                  />
+                ) : (
+                  "—"
+                )
               }
             },
             {
@@ -3438,7 +3839,7 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
       <PageShell maxWidthClassName="max-w-6xl">
       <div className="flex flex-col gap-6">
         <div>
-          <Title level={3}>
+          <Title level={1} className="!text-2xl !leading-8">
             {t("settings:chatbooksPlayground.title", "Chatbooks Backup & Import")}
           </Title>
           <Paragraph type="secondary">
@@ -3483,6 +3884,7 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
             >
               {jobTrackerList.length === 0 ? (
                 <Empty
+                  className="chatbooks-semantic-empty [&_.ant-empty-description]:!text-text-muted"
                   description={t(
                     "settings:chatbooksPlayground.noJobs",
                     "No chatbook jobs yet."
@@ -3503,7 +3905,13 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
                           </Text>
                           <Tag color={statusColor(job.status)}>{job.status}</Tag>
                         </div>
-                        {progress != null && <Progress percent={progress} size="small" />}
+                        {progress != null && (
+                          <Progress
+                            className={SEMANTIC_PROGRESS_CLASS}
+                            percent={progress}
+                            size="small"
+                          />
+                        )}
                         {job.error_message && (
                           <Text type="danger" className="text-xs">
                             {job.error_message}

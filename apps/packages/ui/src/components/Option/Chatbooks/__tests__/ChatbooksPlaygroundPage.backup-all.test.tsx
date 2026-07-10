@@ -210,7 +210,7 @@ describe("ChatbooksPlaygroundPage backup-all flow", () => {
     expect(screen.getByText("Media pointers · 2")).toBeInTheDocument()
     expect(screen.getByText("Total items")).toBeInTheDocument()
     expect(screen.getByText("Pointer-only items")).toBeInTheDocument()
-    expect(screen.getByText("Sensitive categories")).toBeInTheDocument()
+    expect(screen.getAllByText("Sensitive categories").length).toBeGreaterThan(0)
     expect(screen.getByText("Warnings")).toBeInTheDocument()
     expect(screen.getByText("Estimated size")).toBeInTheDocument()
     expect(screen.getByText("2.00 MB")).toBeInTheDocument()
@@ -222,12 +222,6 @@ describe("ChatbooksPlaygroundPage backup-all flow", () => {
 
     render(<ChatbooksPlaygroundPage />)
 
-    fireEvent.change(screen.getByPlaceholderText("Name"), {
-      target: { value: "Full account backup" }
-    })
-    fireEvent.change(screen.getByPlaceholderText("Description"), {
-      target: { value: "Full account acceptance backup" }
-    })
     fireEvent.click(screen.getByRole("button", { name: "Backup all" }))
 
     await waitFor(() => {
@@ -238,6 +232,8 @@ describe("ChatbooksPlaygroundPage backup-all flow", () => {
     )
     expect(tldwClientMock.exportChatbook).toHaveBeenCalledWith(
       expect.objectContaining({
+        name: expect.stringMatching(/backup/i),
+        description: expect.stringMatching(/account/i),
         include_media: true,
         include_embeddings: true,
         include_generated_content: true,
@@ -271,7 +267,27 @@ describe("ChatbooksPlaygroundPage backup-all flow", () => {
         description: "Archive restore",
         total_size_bytes: 2048,
         total_notes: 1,
-        content_items: []
+        total_characters: 2,
+        content_items: [
+          { id: "character-1", type: "character", title: "Character one" },
+          { id: "character-2", type: "character", title: "Character two" }
+        ],
+        account_inventory: [
+          { category: "account_profiles", label: "Account profile" },
+          { category: "account_settings", label: "Account settings" },
+          { category: "characters", label: "Characters" }
+        ],
+        account_inventory_summary: {
+          counts: {
+            account_profiles: 1,
+            account_settings: 1,
+            characters: 2
+          },
+          sensitive_category_count: 1,
+          warning_count: 1,
+          warnings: ["Review imported provider settings."],
+          post_write_verification: true
+        }
       }
     })
     tldwClientMock.importChatbook.mockResolvedValueOnce({ success: true })
@@ -294,6 +310,17 @@ describe("ChatbooksPlaygroundPage backup-all flow", () => {
         { source_format: "chatbook" }
       )
     })
+    expect(screen.getByText("What will be restored")).toBeInTheDocument()
+    expect(screen.getByText("Account profile · 1")).toBeInTheDocument()
+    expect(screen.getByText("Account settings · 1")).toBeInTheDocument()
+    expect(screen.getByText("Verified")).toBeInTheDocument()
+    expect(screen.getAllByText("Sensitive categories").length).toBeGreaterThan(0)
+    expect(screen.getAllByText("All in archive").length).toBeGreaterThan(0)
+    expect(screen.queryByText("Selected: 0")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByText("Review 1 warning"))
+    expect(
+      screen.getByText("Review imported provider settings.")
+    ).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Import chatbook" }))
 
     await waitFor(() => {
