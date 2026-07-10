@@ -484,11 +484,15 @@ export const shouldReloadItemsAfterReviewMutation = (
 export const extractImageUrl = (value: string | null | undefined): string | null => {
   if (!value) return null
 
-  const htmlMatch = value.match(/<img\b[^>]*?\s+src=["']([^"']+)["']/i)
-  if (htmlMatch?.[1]) return safeImageUrl(htmlMatch[1])
+  for (const match of value.matchAll(/<img\b[^>]*?\s+src\s*=\s*["']([^"']+)["']/gi)) {
+    const safeUrl = safeImageUrl(match[1])
+    if (safeUrl) return safeUrl
+  }
 
-  const markdownMatch = value.match(/!\[[^\]]*]\(([^)\s]+)\)/i)
-  if (markdownMatch?.[1]) return safeImageUrl(markdownMatch[1])
+  for (const match of value.matchAll(/!\[[^\]]*]\(([^)\s]+)\)/gi)) {
+    const safeUrl = safeImageUrl(match[1])
+    if (safeUrl) return safeUrl
+  }
 
   return null
 }
