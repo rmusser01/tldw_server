@@ -7,12 +7,10 @@ from datetime import datetime, timezone
 import pytest
 from fastapi.testclient import TestClient
 
-from tldw_Server_API.app.main import app
 from tldw_Server_API.app.api.v1.schemas.user_profile_schemas import (
     UserProfileUpdateEntry,
     UserProfileUpdateRequest,
 )
-from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
     add_org_member,
     add_team_member,
@@ -21,12 +19,14 @@ from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
     list_memberships_for_user,
     list_org_memberships_for_user,
 )
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.rate_limiter import get_rate_limiter
 from tldw_Server_API.app.core.UserProfiles import update_service as update_service_module
 from tldw_Server_API.app.core.UserProfiles.contracts import ProfileContractMode
 from tldw_Server_API.app.core.UserProfiles.response_mappers import (
     LegacyProfileCommandResult,
 )
+from tldw_Server_API.app.main import app
 
 
 def _run_async(coro):
@@ -37,6 +37,31 @@ def _get_user_id(client: TestClient, auth_headers) -> int:
     resp = client.get("/api/v1/users/me/profile", headers=auth_headers)
     assert resp.status_code == 200
     return resp.json()["user"]["id"]
+
+
+@pytest.mark.asyncio
+async def test_user_profile_update_accepts_valid_identity_email_with_pydantic_v2(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    updates: list[tuple[int, str, str]] = []
+
+    async def _capture_update(_db_conn, user_id: int, field: str, value: str) -> None:
+        updates.append((user_id, field, value))
+
+    monkeypatch.setattr(update_service_module, "_update_user_field", _capture_update)
+
+    result = await update_service_module.UserProfileUpdateService(db_pool=object()).apply_updates(
+        user_id=7,
+        updates=(("identity.email", "Restored.Profile@example.com"),),
+        roles={"user"},
+        dry_run=False,
+        db_conn=object(),
+        updated_by=7,
+    )
+
+    assert result.applied == ["identity.email"]
+    assert result.skipped == []
+    assert updates == [(7, "email", "restored.profile@example.com")]
 
 
 def test_user_profile_update_preferences(auth_headers) -> None:

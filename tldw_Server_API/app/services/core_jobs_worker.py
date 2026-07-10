@@ -386,6 +386,7 @@ async def run_chatbooks_core_jobs_worker(stop_event: asyncio.Event | None = None
                             import_media,
                             import_embeddings,
                         )
+                        ok, msg, result = await svc.finalize_account_restore(ok, msg, result)
                     ij = svc._get_import_job(chatbooks_job_id)
                     if ok:
                         # Mid-flight cancel check (honor cancellation request or terminal state)

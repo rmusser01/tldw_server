@@ -55,6 +55,9 @@ async def test_handle_import_defaults_chatbook_media_and_embeddings_to_true(tmp_
             }
             return True, "ok", {"imported_items": {"note": 1}, "warnings": []}
 
+        async def finalize_account_restore(self, success, message, result):
+            return success, message, result
+
     service = FakeService()
 
     result = await jobs_worker._handle_import(

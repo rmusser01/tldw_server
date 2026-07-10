@@ -107,6 +107,9 @@ async def test_completed_import_restores_chatbook_media_and_embeddings(tmp_path,
         def _resolve_import_archive_path(self, _file_ref):
             return Path(archive_path)
 
+        async def finalize_account_restore(self, success, message, result):
+            return success, message, result
+
     monkeypatch.setattr(core_jobs_worker, "JobManager", FakeJobManager)
     monkeypatch.setattr(core_jobs_worker, "_build_chacha_db_for_user", lambda _owner: object())
     monkeypatch.setattr(core_jobs_worker, "ChatbookService", FakeChatbookService)

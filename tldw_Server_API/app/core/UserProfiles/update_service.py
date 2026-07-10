@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from loguru import logger
-from pydantic import EmailStr, ValidationError
+from pydantic import EmailStr, TypeAdapter, ValidationError
 
 from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
     add_team_member,
@@ -166,7 +166,7 @@ class UserProfileUpdateService:
     ) -> bool:
         if key == "identity.email":
             try:
-                email = EmailStr(value)
+                email = TypeAdapter(EmailStr).validate_python(value)
             except ValidationError as exc:
                 logger.debug("Invalid email update for user {}: {}", user_id, exc)
                 raise ValueError("invalid_email") from exc

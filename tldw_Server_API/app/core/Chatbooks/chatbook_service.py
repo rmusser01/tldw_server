@@ -156,6 +156,11 @@ _CHATBOOK_TEMPLATE_MODES = {"pass_through", "render_on_export", "render_on_impor
 MAX_OPENWEBUI_HYDRATION_RESPONSE_ITEMS = 1000
 ManifestImportPathIndex = dict[tuple[str, str], tuple[str | None, str]]
 
+_ACCOUNT_STATE_SCHEMA_VERSION = "1.0"
+_ACCOUNT_PROFILE_ARCHIVE_PATH = "json/account_profile.json"
+_ACCOUNT_SETTINGS_ARCHIVE_PATH = "json/account_settings.json"
+_ACCOUNT_RESTORE_PAYLOAD_KEY = "_account_restore_payload"
+
 try:  # Prompts database is optional in some deployments
     from ..DB_Management.Prompts_DB import PromptsDatabase  # type: ignore
 except _CHATBOOK_NONCRITICAL_EXCEPTIONS:  # pragma: no cover - defensive guard for stripped builds
@@ -1197,6 +1202,7 @@ class ChatbookService:
             counts = {}
 
         known_categories = {entry.category for entry in ACCOUNT_DATA_INVENTORY}
+        inventory_definitions = {entry.category: entry for entry in ACCOUNT_DATA_INVENTORY}
         canonical_warnings = {
             entry.category: entry.warning
             for entry in ACCOUNT_DATA_INVENTORY
@@ -1221,11 +1227,8 @@ class ChatbookService:
             "media_stored_artifacts",
             "embeddings",
         }
-        account_metadata_without_payload = {
-            "account_profile",
-            "account_settings",
-            "tags_categories_relationships",
-        }
+        account_metadata_without_payload = {"tags_categories_relationships"}
+        serialized_account_categories = {"account_profile", "account_settings"}
 
         for entry in manifest.account_inventory or []:
             if not isinstance(entry, dict):
@@ -1234,7 +1237,11 @@ class ChatbookService:
             if not category:
                 continue
             restore_status = str(entry.get("restore_status") or "").strip()
-            count = self._coerce_inventory_count(counts.get(category))
+            definition = inventory_definitions.get(category)
+            manifest_count_key = definition.manifest_count_key if definition else category
+            count = self._coerce_inventory_count(
+                counts.get(manifest_count_key, counts.get(category))
+            )
             if restore_status == "restorable" and category not in known_categories:
                 errors.append(
                     f"Archive inventory category '{category}' is marked restorable but this importer has no handler."
@@ -1265,12 +1272,108 @@ class ChatbookService:
                 restore_status == "restorable"
                 and count
                 and category not in serialized_content_categories
+                and category not in serialized_account_categories
             ):
                 warnings.append(
                     f"Archive inventory category '{category}' is known but has no direct content item payload."
                 )
 
         return redacted_summary, skipped_non_restorable, warnings, errors
+
+    def _load_account_restore_payloads(
+        self,
+        extract_dir: Path,
+        manifest: ChatbookManifest,
+    ) -> tuple[dict[str, dict[str, Any]], list[str]]:
+        """Load and validate versioned account payloads declared by inventory counts."""
+        summary = manifest.account_inventory_summary or {}
+        counts = summary.get("counts", {}) if isinstance(summary, dict) else {}
+        counts = counts if isinstance(counts, dict) else {}
+        manifest_inventory = {
+            str(row.get("category") or ""): row
+            for row in manifest.account_inventory or []
+            if isinstance(row, dict)
+        }
+        definitions = {entry.category: entry for entry in ACCOUNT_DATA_INVENTORY}
+        inventory_paths = {
+            normalized_path
+            for entry in manifest.file_inventory or []
+            if isinstance(entry, dict)
+            and (
+                normalized_path := self._normalize_manifest_archive_path(
+                    str(entry.get("path") or "")
+                )
+            )
+        }
+        payloads: dict[str, dict[str, Any]] = {}
+        errors: list[str] = []
+
+        for category, canonical_path in (
+            ("account_profile", _ACCOUNT_PROFILE_ARCHIVE_PATH),
+            ("account_settings", _ACCOUNT_SETTINGS_ARCHIVE_PATH),
+        ):
+            definition = definitions[category]
+            count = self._coerce_inventory_count(
+                counts.get(definition.manifest_count_key, counts.get(category))
+            )
+            inventory_row = manifest_inventory.get(category, {})
+            declared_path = str(inventory_row.get("export_representation") or canonical_path)
+            normalized_path = self._normalize_manifest_archive_path(declared_path)
+            if normalized_path != canonical_path:
+                errors.append(
+                    f"Archive inventory category '{category}' has an invalid account payload path."
+                )
+                continue
+            payload_path = extract_dir / canonical_path
+            if count == 0:
+                if payload_path.exists():
+                    errors.append(
+                        f"Archive account payload '{canonical_path}' is present but its inventory count is zero."
+                    )
+                continue
+            if count != 1:
+                errors.append(
+                    f"Archive inventory category '{category}' must declare exactly one account payload."
+                )
+                continue
+            if not payload_path.is_file():
+                errors.append(
+                    f"Archive inventory category '{category}' is missing its serialized restore payload."
+                )
+                continue
+            if (
+                manifest.version == ChatbookVersion.V1_1
+                and canonical_path not in inventory_paths
+            ):
+                errors.append(
+                    f"Archive inventory category '{category}' is missing verified file inventory entry."
+                )
+                continue
+            try:
+                payload = json.loads(payload_path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                errors.append(f"Archive inventory category '{category}' has an unreadable payload.")
+                continue
+            if not isinstance(payload, dict):
+                errors.append(f"Archive inventory category '{category}' payload must be an object.")
+                continue
+            if payload.get("schema_version") != _ACCOUNT_STATE_SCHEMA_VERSION:
+                errors.append(
+                    f"Archive inventory category '{category}' uses an unsupported account payload version."
+                )
+                continue
+            if payload.get("category") != category:
+                errors.append(f"Archive inventory category '{category}' payload type does not match.")
+                continue
+            if category == "account_profile" and not isinstance(payload.get("profile"), dict):
+                errors.append("Archive account profile payload is missing its profile object.")
+                continue
+            if category == "account_settings" and not isinstance(payload.get("overrides"), dict):
+                errors.append("Archive account settings payload is missing its overrides object.")
+                continue
+            payloads[category] = payload
+
+        return payloads, errors
 
     def _safe_import_artifact_destination(
         self,
@@ -1424,10 +1527,49 @@ class ChatbookService:
             return
         vector_bytes = base64.b64decode(str(vector_payload["vector"]))
         with media_db.transaction() as conn:
-            media_db._execute_with_connection(
+            if not hasattr(media_db, "_fetchone_with_connection"):
+                media_db._execute_with_connection(
+                    conn,
+                    "UPDATE Media SET vector_embedding = ? WHERE id = ?",
+                    (vector_bytes, int(media_id)),
+                )
+                return
+            media_row = media_db._fetchone_with_connection(
                 conn,
-                "UPDATE Media SET vector_embedding = ? WHERE id = ?",
-                (vector_bytes, int(media_id)),
+                "SELECT uuid, version FROM Media WHERE id = ? AND deleted = 0",
+                (int(media_id),),
+            )
+            if not media_row:
+                raise ValueError("Restored media row was not found for vector attachment")
+            current_version = int(media_row.get("version") or 1)
+            next_version = current_version + 1
+            now = media_db._get_current_utc_timestamp_str()
+            client_id = media_db.client_id
+            cursor = media_db._execute_with_connection(
+                conn,
+                """
+                UPDATE Media
+                   SET vector_embedding = ?, last_modified = ?, version = ?, client_id = ?
+                 WHERE id = ? AND version = ? AND deleted = 0
+                """,
+                (vector_bytes, now, next_version, client_id, int(media_id), current_version),
+            )
+            if getattr(cursor, "rowcount", 0) != 1:
+                raise ValueError("Restored media row changed during vector attachment")
+            media_db._log_sync_event(
+                conn,
+                "Media",
+                str(media_row["uuid"]),
+                "update",
+                next_version,
+                {
+                    "id": int(media_id),
+                    "uuid": str(media_row["uuid"]),
+                    "version": next_version,
+                    "last_modified": now,
+                    "client_id": client_id,
+                    "vector_embedding_restored": True,
+                },
             )
 
     def _filter_chroma_ids_for_conflict_resolution(
@@ -2178,6 +2320,111 @@ class ChatbookService:
                 except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
                     pass
 
+    async def _write_full_account_state_payloads(
+        self,
+        work_dir: Path,
+        manifest: ChatbookManifest,
+    ) -> None:
+        """Serialize portable AuthNZ profile state and user-owned settings overrides."""
+        if self.user_id_int is None:
+            raise ExportError("Full-account profile export requires a numeric user id")
+
+        from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+        from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
+        from tldw_Server_API.app.core.UserProfiles.overrides_repo import UserProfileOverridesRepo
+        from tldw_Server_API.app.core.UserProfiles.user_profile_catalog import (
+            load_user_profile_catalog,
+        )
+
+        db_pool = await get_db_pool()
+        user = await AuthnzUsersRepo(db_pool=db_pool).get_user_by_id(self.user_id_int)
+        if user is None:
+            raise ExportError("Full-account profile export could not resolve the account record")
+
+        catalog = load_user_profile_catalog()
+        catalog_entries = {str(entry.key): entry for entry in catalog.entries}
+        profile: dict[str, Any] = {}
+        email = str(user.get("email") or "").strip()
+        if email:
+            profile["identity.email"] = email
+
+        overrides_repo = UserProfileOverridesRepo(db_pool)
+        await overrides_repo.ensure_tables()
+        override_rows = await overrides_repo.list_overrides_for_user(self.user_id_int)
+        overrides: dict[str, Any] = {}
+        unrecognized_overrides: list[dict[str, Any]] = []
+        for row in override_rows:
+            key = str(row.get("key") or "").strip()
+            if not key:
+                continue
+            entry = catalog_entries.get(key)
+            if entry is None or "user" not in set(entry.editable_by or []):
+                unrecognized_overrides.append({"key": key, "value": row.get("value")})
+                continue
+            overrides[key] = row.get("value")
+
+        policy = {
+            "destination_owned_fields": [
+                "identity.id",
+                "identity.uuid",
+                "identity.username",
+                "identity.role",
+                "identity.is_active",
+                "identity.is_verified",
+            ],
+            "excluded_secret_categories": [
+                "password_hashes",
+                "sessions",
+                "api_keys",
+                "provider_credentials",
+                "deployment_secrets",
+            ],
+            "exclusion_reason": "Authentication, authorization, and deployment-bound secrets require destination reconfiguration.",
+        }
+        profile_payload = {
+            "schema_version": _ACCOUNT_STATE_SCHEMA_VERSION,
+            "category": "account_profile",
+            "profile": profile,
+            "policy": policy,
+        }
+        settings_payload = {
+            "schema_version": _ACCOUNT_STATE_SCHEMA_VERSION,
+            "category": "account_settings",
+            "catalog_version": catalog.version,
+            "overrides": overrides,
+            "unrecognized_overrides": unrecognized_overrides,
+            "policy": {
+                "restore_contract": "catalog_controlled_user_overrides",
+                "unrecognized_override_behavior": "preserved_in_archive_not_restored",
+            },
+        }
+
+        json_dir = work_dir / "json"
+        json_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        for path, payload in (
+            (json_dir / "account_profile.json", profile_payload),
+            (json_dir / "account_settings.json", settings_payload),
+        ):
+            async with aiofiles.open(path, "w", encoding="utf-8") as handle:
+                await handle.write(json.dumps(payload, indent=2, ensure_ascii=False))
+            with contextlib.suppress(OSError):
+                path.chmod(0o600)
+
+        manifest.metadata["account_state_counts"] = {
+            "account_profiles": 1,
+            "account_settings": 1,
+        }
+        manifest.metadata["account_state_policy"] = {
+            "schema_version": _ACCOUNT_STATE_SCHEMA_VERSION,
+            "destination_owned_identity": True,
+            "authentication_secrets_restored": False,
+            "unrecognized_setting_count": len(unrecognized_overrides),
+        }
+        if unrecognized_overrides:
+            manifest.metadata.setdefault("pointer_only_warnings", []).append(
+                f"{len(unrecognized_overrides)} unrecognized account setting override(s) were preserved but cannot be restored by this version."
+            )
+
     def _build_account_inventory_summary(
         self,
         content: ChatbookContent,
@@ -2194,9 +2441,18 @@ class ChatbookService:
             for artifact in item.get("stored_artifacts") or []
             if artifact.get("pointer_only")
         )
+        account_state_counts = (
+            metadata.get("account_state_counts", {})
+            if isinstance(metadata, dict)
+            else {}
+        )
         counts = {
-            "account_profiles": 1,
-            "account_settings": 1,
+            "account_profiles": self._coerce_inventory_count(
+                account_state_counts.get("account_profiles")
+            ),
+            "account_settings": self._coerce_inventory_count(
+                account_state_counts.get("account_settings")
+            ),
             "conversations": len(content.conversations),
             "notes": len(content.notes),
             "characters": len(content.characters),
@@ -2372,6 +2628,7 @@ class ChatbookService:
                 manifest.include_media = True
                 manifest.include_embeddings = True
                 manifest.include_generated_content = True
+                await self._write_full_account_state_payloads(work_dir, manifest)
             if manifest.version == ChatbookVersion.V1_1:
                 manifest.features_used = [
                     "content_envelopes",
@@ -2812,12 +3069,13 @@ class ChatbookService:
                 )
             # Run synchronously (wrapped in executor for async compatibility)
             # Return (success, message, structured sync import result)
-            return await asyncio.to_thread(
+            sync_result = await asyncio.to_thread(
                 self._import_chatbook_sync,
                 str(resolved_path), content_selections,
                 conflict_resolution, prefix_imported,
                 effective_import_media, effective_import_embeddings
             )
+            return await self.finalize_account_restore(*sync_result)
 
     def _import_chatbook_sync(
         self,
@@ -2952,6 +3210,19 @@ class ChatbookService:
                     "imported_items": {},
                     "warnings": list(import_status.warnings or []),
                     "errors": inventory_errors,
+                    "inventory_summary": inventory_summary,
+                    "skipped_non_restorable": skipped_non_restorable,
+                }
+
+            account_restore_payload, account_payload_errors = self._load_account_restore_payloads(
+                extract_dir,
+                manifest,
+            )
+            if account_payload_errors:
+                return False, f"Chatbook account restore payload invalid: {account_payload_errors[0]}", {
+                    "imported_items": {},
+                    "warnings": list(import_status.warnings or []),
+                    "errors": account_payload_errors,
                     "inventory_summary": inventory_summary,
                     "skipped_non_restorable": skipped_non_restorable,
                 }
@@ -3186,6 +3457,8 @@ class ChatbookService:
                 sync_result["inventory_summary"] = inventory_summary
             if skipped_non_restorable:
                 sync_result["skipped_non_restorable"] = skipped_non_restorable
+            if account_restore_payload:
+                sync_result[_ACCOUNT_RESTORE_PAYLOAD_KEY] = account_restore_payload
 
             if import_status.successful_items > 0:
                 message = f"Successfully imported {import_status.successful_items}/{import_status.total_items} items"
@@ -3208,6 +3481,99 @@ class ChatbookService:
         finally:
             if extract_dir and extract_dir.exists():
                 shutil.rmtree(extract_dir, ignore_errors=True)
+
+    async def finalize_account_restore(
+        self,
+        success: bool,
+        message: str,
+        result: dict[str, Any] | None,
+    ) -> tuple[bool, str, dict[str, Any] | None]:
+        """Apply private account payloads and remove them before results can be persisted."""
+        if not isinstance(result, dict):
+            return success, message, result
+        account_payloads = result.pop(_ACCOUNT_RESTORE_PAYLOAD_KEY, None)
+        if not success or not account_payloads:
+            return success, message, result
+        if not isinstance(account_payloads, dict):
+            result.setdefault("errors", []).append("Account restore payload was invalid.")
+            return False, "Account profile and settings restore failed", result
+
+        try:
+            restored = await self._restore_account_state_payloads(account_payloads)
+        except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
+            logger.error("Chatbooks account profile/settings restore failed; details redacted")
+            result.setdefault("errors", []).append(
+                "Account profile and settings could not be restored to the destination account."
+            )
+            return False, "Account profile and settings restore failed", result
+
+        imported_items = result.setdefault("imported_items", {})
+        for category, count in restored.items():
+            imported_items[category] = int(count)
+        restored_count = sum(restored.values())
+        if restored_count:
+            message = f"{message}; restored {restored_count} account profile/settings payload(s)"
+        return True, message, result
+
+    async def _restore_account_state_payloads(
+        self,
+        payloads: dict[str, dict[str, Any]],
+    ) -> dict[str, int]:
+        """Restore portable account state through AuthNZ and UserProfiles services."""
+        if self.user_id_int is None:
+            raise ValidationError("Account restore requires a numeric destination user id")
+
+        from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+        from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
+        from tldw_Server_API.app.core.UserProfiles.command_service import ProfileCommandService
+        from tldw_Server_API.app.core.UserProfiles.contracts import (
+            ProfileContractMode,
+            ProfileUpdateCommand,
+        )
+
+        db_pool = await get_db_pool()
+        destination_user = await AuthnzUsersRepo(db_pool=db_pool).get_user_by_id(self.user_id_int)
+        if destination_user is None:
+            raise ValidationError("Destination account record does not exist")
+
+        updates: list[tuple[str, Any]] = []
+        profile_payload = payloads.get("account_profile")
+        settings_payload = payloads.get("account_settings")
+        if profile_payload:
+            profile = profile_payload.get("profile") or {}
+            if not isinstance(profile, dict):
+                raise ValidationError("Account profile payload is invalid")
+            email = profile.get("identity.email")
+            if email is not None:
+                updates.append(("identity.email", email))
+        if settings_payload:
+            overrides = settings_payload.get("overrides") or {}
+            if not isinstance(overrides, dict):
+                raise ValidationError("Account settings payload is invalid")
+            updates.extend((str(key), value) for key, value in sorted(overrides.items()))
+
+        if updates:
+            command = ProfileUpdateCommand(
+                actor_user_id=self.user_id_int,
+                target_user_id=self.user_id_int,
+                updates=tuple(updates),
+                roles=frozenset({"user"}),
+                dry_run=False,
+                contract_mode=ProfileContractMode.LEGACY_V1,
+            )
+            async with db_pool.transaction() as db_conn:
+                command_result = await ProfileCommandService(db_pool=db_pool).apply(
+                    command,
+                    db_conn=db_conn,
+                    scope=None,
+                )
+            if command_result.status_code >= 400 or command_result.skipped:
+                raise ValidationError("Destination rejected one or more account profile/settings values")
+
+        return {
+            "account_profile": 1 if profile_payload else 0,
+            "account_settings": 1 if settings_payload else 0,
+        }
 
     async def _import_chatbook_async(
         self,
@@ -3239,6 +3605,11 @@ class ChatbookService:
                 file_path, content_selections,
                 conflict_resolution, prefix_imported,
                 import_media, import_embeddings
+            )
+            success, message, result = await self.finalize_account_restore(
+                success,
+                message,
+                result,
             )
 
             if success:
@@ -5456,7 +5827,11 @@ class ChatbookService:
                         break
                     documents = result.get("documents", [])
                     metadatas = result.get("metadatas", [])
-                    embeddings_data = result.get("embeddings", [])
+                    embeddings_data = result.get("embeddings")
+                    if hasattr(embeddings_data, "tolist"):
+                        embeddings_data = embeddings_data.tolist()
+                    if embeddings_data is None:
+                        embeddings_data = []
 
                     for i, chunk_id in enumerate(ids):
                         if max_chunks_per_collection > 0 and len(chunks) >= max_chunks_per_collection:
@@ -5467,7 +5842,7 @@ class ChatbookService:
                             chunk["document"] = documents[i]
                         if metadatas and i < len(metadatas):
                             chunk["metadata"] = metadatas[i]
-                        if embeddings_data and i < len(embeddings_data):
+                        if i < len(embeddings_data):
                             chunk["embedding"] = embeddings_data[i]
                         chunks.append(chunk)
 

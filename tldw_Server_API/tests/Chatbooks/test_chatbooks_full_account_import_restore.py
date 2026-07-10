@@ -351,6 +351,63 @@ def _write_full_account_restore_fixture(
     return path
 
 
+def _write_account_state_contract_fixture(
+    path: Path,
+    *,
+    include_profile_payload: bool,
+    include_profile_inventory: bool,
+) -> Path:
+    profile_path = "json/account_profile.json"
+    profile_payload = json.dumps(
+        {
+            "schema_version": "1.0",
+            "category": "account_profile",
+            "profile": {"identity.email": "source-account@example.com"},
+            "policy": {},
+        }
+    ).encode("utf-8")
+    manifest = {
+        "version": "1.1.0",
+        "name": "Account state contract",
+        "description": "fail-closed account state fixture",
+        "created_at": "2026-07-09T12:00:00+00:00",
+        "updated_at": "2026-07-09T12:00:00+00:00",
+        "content_items": [],
+        "relationships": [],
+        "configuration": {},
+        "statistics": {"total_size_bytes": len(profile_payload)},
+        "metadata": {"tags": [], "categories": [], "language": "en", "license": None},
+        "user_info": {"user_id": "redacted"},
+        "features_used": ["file_inventory"],
+        "producer": {"name": "tldw_server"},
+        "source_instance": {},
+        "compatibility": {
+            "min_reader_version": "1.0.0",
+            "recommended_reader_version": "1.1.0",
+        },
+        "file_inventory": (
+            [_hash_entry(profile_path, profile_payload)]
+            if include_profile_inventory
+            else []
+        ),
+        "account_inventory": [
+            {
+                "category": "account_profile",
+                "restore_status": "restorable",
+                "export_representation": profile_path,
+            }
+        ],
+        "account_inventory_summary": {
+            "counts": {"account_profiles": 1, "account_settings": 0}
+        },
+    }
+    with zipfile.ZipFile(path, "w") as zf:
+        if include_profile_payload:
+            zf.writestr(profile_path, profile_payload)
+        zf.writestr("manifest.json", json.dumps(manifest))
+    return path
+
+
 @pytest.mark.asyncio
 async def test_service_default_archive_import_restores_restorable_full_account_payloads(tmp_path, monkeypatch):
     monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path))
@@ -512,6 +569,79 @@ def test_v1_1_import_rejects_bundled_media_artifact_missing_inventory(tmp_path, 
     assert success is False
     assert "File inventory validation failed for content/media/files/media_m1/file_1.txt" in message
     assert result["imported_items"] == {}
+
+
+@pytest.mark.parametrize(
+    ("include_profile_payload", "include_profile_inventory", "expected_error"),
+    [
+        (False, False, "missing its serialized restore payload"),
+        (True, False, "missing verified file inventory entry"),
+    ],
+)
+def test_sync_import_rejects_unverified_or_missing_account_profile_payload(
+    tmp_path,
+    monkeypatch,
+    include_profile_payload,
+    include_profile_inventory,
+    expected_error,
+):
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path))
+    db = CharactersRAGDB(db_path=str(tmp_path / "account_contract.db"), client_id="account-contract")
+    service = ChatbookService(user_id="1", db=db, user_id_int=1)
+    archive_path = _write_account_state_contract_fixture(
+        Path(service.import_dir) / "account_contract.chatbook",
+        include_profile_payload=include_profile_payload,
+        include_profile_inventory=include_profile_inventory,
+    )
+
+    success, message, result = service._import_chatbook_sync(
+        file_path=str(archive_path),
+        content_selections=None,
+        conflict_resolution=ConflictResolution.SKIP,
+        prefix_imported=False,
+        import_media=True,
+        import_embeddings=True,
+    )
+
+    assert success is False
+    assert expected_error in message
+    assert result["imported_items"] == {}
+
+
+@pytest.mark.asyncio
+async def test_finalize_account_restore_removes_private_payload_before_return(tmp_path, monkeypatch):
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path))
+    db = CharactersRAGDB(db_path=str(tmp_path / "account_finalize.db"), client_id="account-finalize")
+    service = ChatbookService(user_id="1", db=db, user_id_int=1)
+    source_email = "source-account@example.com"
+    private_key = chatbook_service_module._ACCOUNT_RESTORE_PAYLOAD_KEY
+    private_payload = {
+        "account_profile": {
+            "schema_version": "1.0",
+            "category": "account_profile",
+            "profile": {"identity.email": source_email},
+        }
+    }
+    observed_payload = None
+
+    async def _restore(payload):
+        nonlocal observed_payload
+        observed_payload = payload
+        return {"account_profile": 1, "account_settings": 0}
+
+    monkeypatch.setattr(service, "_restore_account_state_payloads", _restore)
+    success, message, result = await service.finalize_account_restore(
+        True,
+        "Import completed",
+        {"imported_items": {}, private_key: private_payload},
+    )
+
+    assert success is True
+    assert observed_payload == private_payload
+    assert result["imported_items"]["account_profile"] == 1
+    assert private_key not in result
+    assert source_email not in json.dumps(result)
+    assert source_email not in message
 
 
 @pytest.mark.asyncio
