@@ -984,7 +984,7 @@ git commit -m "feat: unify watchlists outcome setup"
 - `LatestBriefing` consumes `WatchlistBriefingProjection` and callbacks for play, open report, inspect run, retry stage, regenerate, Test now, and view all reports.
 - `transitionAnnouncement(previous, next, t)` returns one deduplicated message or `null`.
 
-- [ ] **Step 1: Write failing state and action tests**
+- [x] **Step 1: Write failing state and action tests**
 
 ```typescript
 it("keeps ready text usable when audio fails", async () => {
@@ -1010,7 +1010,7 @@ it("announces stage transitions once", () => {
 })
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 ```bash
 ./node_modules/.bin/vitest run ../packages/ui/src/components/Option/Watchlists/OverviewTab/__tests__/LatestBriefing.test.tsx ../packages/ui/src/components/Option/Watchlists/shared/__tests__/watchlists-announcements.test.ts
@@ -1018,19 +1018,19 @@ it("announces stage transitions once", () => {
 
 Expected: new component and announcement helper are missing.
 
-- [ ] **Step 3: Implement semantic, responsive layout**
+- [x] **Step 3: Implement semantic, responsive layout**
 
 Use a section with a heading, one dominant content column, and a compact status/action rail. Use a one-column base layout and a container-driven two-column enhancement when enough inline space exists. Avoid fixed widths and nested cards. Playback controls expose Play/Pause/Resume, native seek, elapsed/target duration, and loading/error states. At coarse pointer input, every action has a 44 pixel target.
 
-- [ ] **Step 4: Implement truthful state and recovery copy**
+- [x] **Step 4: Implement truthful state and recovery copy**
 
 Display text, script, audio, and each delivery adapter separately. Use exact next-run time with timezone; relative time may appear only as secondary text. Use Included for persisted selection, Unread for unreviewed items, and New for newly ingested items. Do not reuse one count under multiple labels.
 
-- [ ] **Step 5: Add one polite and one assertive live region**
+- [x] **Step 5: Add one polite and one assertive live region**
 
 Place the regions once in Overview. Polite announces queued/running/ready state changes and next-run updates. Assertive announces a newly blocking failure. Do not announce polling refreshes that preserve the same semantic state. AbortError from stale/superseded requests does not enter either region.
 
-- [ ] **Step 6: Verify GREEN and narrow layouts**
+- [x] **Step 6: Verify GREEN and narrow layouts**
 
 ```bash
 ./node_modules/.bin/vitest run ../packages/ui/src/components/Option/Watchlists/OverviewTab/__tests__/LatestBriefing.test.tsx ../packages/ui/src/components/Option/Watchlists/shared/__tests__/watchlists-announcements.test.ts ../packages/ui/src/components/Option/Watchlists/OverviewTab/__tests__/OverviewTab.alerts-health.test.tsx ../packages/ui/src/components/Option/Watchlists/OutputsTab/__tests__/OutputPreviewDrawer.audio.test.tsx
@@ -1038,7 +1038,7 @@ Place the regions once in Overview. Polite announces queued/running/ready state 
 
 Expected: latest, announcements, overview, and output audio suites pass.
 
-- [ ] **Step 7: Commit Task 8**
+- [x] **Step 7: Commit Task 8**
 
 ```bash
 git add apps/packages/ui/src/components/Option/Watchlists/OverviewTab/LatestBriefing.tsx apps/packages/ui/src/components/Option/Watchlists/OverviewTab/__tests__/LatestBriefing.test.tsx apps/packages/ui/src/components/Option/Watchlists/shared/watchlists-announcements.ts apps/packages/ui/src/components/Option/Watchlists/shared/__tests__/watchlists-announcements.test.ts apps/packages/ui/src/components/Option/Watchlists/OverviewTab/OverviewTab.tsx apps/packages/ui/src/components/Option/Watchlists/OutputsTab/OutputPreviewDrawer.tsx apps/packages/ui/src/assets/locale/en/watchlists.json apps/packages/ui/src/public/_locales/en/watchlists.json
