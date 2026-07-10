@@ -15,6 +15,7 @@ import {
   RefreshCw,
   Info,
   Eye,
+  ClipboardCheck,
   ChevronUp,
   ChevronDown
 } from "lucide-react"
@@ -26,7 +27,8 @@ import {
   Tooltip,
   message,
   Popconfirm,
-  Modal
+  Modal,
+  Dropdown
 } from "antd"
 import { READY_STATE_LABEL, getDesignSystemState } from "@/design-system"
 import { safeExternalUrl } from "@/utils/safe-external-url"
@@ -38,11 +40,13 @@ import { useWorkspaceStore } from "@/store/workspace"
 import type {
   WorkspaceSource,
   WorkspaceSourceReadiness,
+  WorkspaceSourceReviewState,
   WorkspaceSourceStatusDetails,
   WorkspaceSourceType
 } from "@/types/workspace"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import type { WorkspaceSourcePreviewResponse } from "@/services/tldw/domains/workspace-api"
+import { mapServerSourceReviewFields } from "@/store/workspace-api"
 import {
   WORKSPACE_SOURCE_DRAG_TYPE,
   serializeWorkspaceSourceDragPayload
@@ -98,6 +102,24 @@ const SOURCE_PREVIEW_MAX_CHARS = 3000
 const SOURCE_PREVIEW_CHUNK_LIMIT = 3
 const SOURCE_ANNOTATIONS_STORAGE_KEY =
   "tldw:research-workspace:source-annotations:v1"
+
+const SOURCE_REVIEW_BADGES: Record<
+  WorkspaceSourceReviewState,
+  { label: string; className: string }
+> = {
+  unset: {
+    label: "Unreviewed",
+    className: "border-border bg-surface2 text-text-muted"
+  },
+  needs_review: {
+    label: "Needs review",
+    className: "border-warning/30 bg-warning/10 text-warning"
+  },
+  reviewed: {
+    label: "Reviewed",
+    className: "border-success/30 bg-success/10 text-success"
+  }
+}
 
 type SourcePreviewLoadState = {
   sourceId: string | null
@@ -444,6 +466,9 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
   const removeSources = useWorkspaceStore((s) => s.removeSources)
   const restoreSource = useWorkspaceStore((s) => s.restoreSource)
   const reorderSource = useWorkspaceStore((s) => s.reorderSource)
+  const mergeSourceReviewUpdates = useWorkspaceStore(
+    (s) => s.mergeSourceReviewUpdates
+  )
   const createSourceFolder = useWorkspaceStore((s) => s.createSourceFolder) || null
   const renameSourceFolder =
     useWorkspaceStore((s) => s.renameSourceFolder) || (() => undefined)
@@ -487,6 +512,9 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
   >(null)
   const [quickUrlValue, setQuickUrlValue] = React.useState("")
   const [quickUrlLoading, setQuickUrlLoading] = React.useState(false)
+  const [reviewUpdateLoading, setReviewUpdateLoading] = React.useState(false)
+  const reviewApiAvailable =
+    typeof tldwClient.updateWorkspaceSourceReviewState === "function"
 
   const handleQuickUrlPaste = React.useCallback(
     async (url: string) => {
@@ -896,6 +924,63 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
     ineligibleSelectedCount,
     onOpenTransferSources
   ])
+
+  const handleReviewStateUpdate = React.useCallback(
+    async (
+      sourceIds: string[],
+      reviewState: Exclude<WorkspaceSourceReviewState, "unset">
+    ) => {
+      if (sourceIds.length === 0 || !workspaceId) return
+      if (!reviewApiAvailable) {
+        messageApi.error(
+          t(
+            "playground:sources.reviewApiUnavailable",
+            "Source review actions are unavailable on this server."
+          )
+        )
+        return
+      }
+
+      setReviewUpdateLoading(true)
+      try {
+        const updatedSources =
+          await tldwClient.updateWorkspaceSourceReviewState(
+            workspaceId,
+            sourceIds,
+            reviewState
+          )
+        mergeSourceReviewUpdates(
+          updatedSources.map((source) => ({
+            id: source.id,
+            ...mapServerSourceReviewFields(source)
+          }))
+        )
+        messageApi.success(
+          reviewState === "reviewed"
+            ? t("playground:sources.markedReviewed", "Marked reviewed")
+            : t("playground:sources.markedNeedsReview", "Marked needs review")
+        )
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : "Unknown error"
+        messageApi.error(
+          t(
+            "playground:sources.reviewUpdateFailed",
+            "Could not update review state: {{detail}}",
+            { detail }
+          )
+        )
+      } finally {
+        setReviewUpdateLoading(false)
+      }
+    },
+    [
+      mergeSourceReviewUpdates,
+      messageApi,
+      reviewApiAvailable,
+      t,
+      workspaceId
+    ]
+  )
   const previewSource = previewSourceId
     ? sources.find((source) => source.id === previewSourceId) || null
     : null
@@ -1496,6 +1581,8 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
       : isError
         ? "border-error/30 bg-error/10 text-error"
         : "border-success/30 bg-success/10 text-success"
+    const reviewState = source.reviewState ?? "unset"
+    const reviewBadge = SOURCE_REVIEW_BADGES[reviewState]
 
     return (
       <div
@@ -1603,6 +1690,12 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
               >
                 {sourceStatusLabel}
               </span>
+              <span
+                data-testid={`source-review-state-${source.id}`}
+                className={`rounded-full border px-1.5 py-0.5 font-medium ${reviewBadge.className}`}
+              >
+                {reviewBadge.label}
+              </span>
               {selectionOrigin === "direct" && (
                 <span className="rounded-full border border-primary/30 bg-primary/10 px-1.5 py-0.5 font-medium text-primary">
                   {t("playground:sources.selectedDirectBadge", "Direct")}
@@ -1681,6 +1774,55 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
             selectedFolderIds={assignedFolderIds}
             onChange={(folderIds) => assignSourceToFolders(source.id, folderIds)}
           />
+          <Dropdown
+            disabled={!reviewApiAvailable || reviewUpdateLoading}
+            trigger={["click"]}
+            menu={{
+              items: [
+                {
+                  key: "reviewed",
+                  label: t("playground:sources.markReviewed", "Mark reviewed"),
+                  disabled: reviewState === "reviewed"
+                },
+                {
+                  key: "needs_review",
+                  label: t("playground:sources.markNeedsReview", "Needs review"),
+                  disabled: reviewState === "needs_review"
+                }
+              ],
+              onClick: ({ key }) => {
+                void handleReviewStateUpdate(
+                  [source.id],
+                  key as "reviewed" | "needs_review"
+                )
+              }
+            }}
+          >
+            <Tooltip
+              title={
+                reviewApiAvailable
+                  ? t("playground:sources.changeReviewState", "Change review state")
+                  : t(
+                      "playground:sources.reviewApiUnavailable",
+                      "Source review actions are unavailable on this server."
+                    )
+              }
+            >
+              <button
+                type="button"
+                data-testid={`source-review-actions-${source.id}`}
+                aria-label={t(
+                  "playground:sources.changeReviewStateForSource",
+                  "Change review state for {{title}}",
+                  { title: source.title }
+                )}
+                disabled={!reviewApiAvailable || reviewUpdateLoading}
+                className="rounded p-1 text-text-muted transition hover:bg-surface hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <ClipboardCheck className="h-3.5 w-3.5" />
+              </button>
+            </Tooltip>
+          </Dropdown>
           <Tooltip title={t("playground:sources.previewAnnotate", "Preview & annotate")}>
             <button
               type="button"
@@ -1975,6 +2117,48 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
                 )}
                 <button
                   type="button"
+                  onClick={() =>
+                    void handleReviewStateUpdate(
+                      effectiveSelectedSourceEntries.map((source) => source.id),
+                      "reviewed"
+                    )
+                  }
+                  disabled={!reviewApiAvailable || reviewUpdateLoading}
+                  title={
+                    reviewApiAvailable
+                      ? undefined
+                      : t(
+                          "playground:sources.reviewApiUnavailable",
+                          "Source review actions are unavailable on this server."
+                        )
+                  }
+                  className="rounded border border-success/30 bg-success/10 px-2 py-0.5 text-[11px] font-medium text-success transition hover:bg-success/20 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {t("playground:sources.markReviewed", "Mark reviewed")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    void handleReviewStateUpdate(
+                      effectiveSelectedSourceEntries.map((source) => source.id),
+                      "needs_review"
+                    )
+                  }
+                  disabled={!reviewApiAvailable || reviewUpdateLoading}
+                  title={
+                    reviewApiAvailable
+                      ? undefined
+                      : t(
+                          "playground:sources.reviewApiUnavailable",
+                          "Source review actions are unavailable on this server."
+                        )
+                  }
+                  className="rounded border border-warning/30 bg-warning/10 px-2 py-0.5 text-[11px] font-medium text-warning transition hover:bg-warning/20 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {t("playground:sources.markNeedsReview", "Needs review")}
+                </button>
+                <button
+                  type="button"
                   onClick={() => {
                     if (!singleSelectedSource) return
                     handleOpenPreview(singleSelectedSource.id)
@@ -2182,6 +2366,8 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
               (typeof details?.job?.id === "number"
                 ? String(details.job.id)
                 : null)
+            const reviewState = statusDetailsSource.reviewState ?? "unset"
+            const reviewBadge = SOURCE_REVIEW_BADGES[reviewState]
 
             return (
               <div
@@ -2245,6 +2431,31 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
                     label={t("playground:sources.lastRefreshLabel", "Last refresh")}
                   >
                     {formatStatusDateTime(details?.updatedAt)}
+                  </StatusDetailRow>
+                  <StatusDetailRow
+                    label={t("playground:sources.reviewLabel", "Review")}
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span
+                        className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${reviewBadge.className}`}
+                      >
+                        {reviewBadge.label}
+                      </span>
+                      {statusDetailsSource.reviewedByUserId != null && (
+                        <span className="text-xs text-text-muted">
+                          {t(
+                            "playground:sources.reviewedByUser",
+                            "Reviewer: {{userId}}",
+                            { userId: statusDetailsSource.reviewedByUserId }
+                          )}
+                        </span>
+                      )}
+                      {statusDetailsSource.reviewedAt && (
+                        <span className="text-xs text-text-muted">
+                          {formatStatusDateTime(statusDetailsSource.reviewedAt)}
+                        </span>
+                      )}
+                    </div>
                   </StatusDetailRow>
                   <StatusDetailRow
                     label={t("playground:sources.progressLabel", "Progress")}

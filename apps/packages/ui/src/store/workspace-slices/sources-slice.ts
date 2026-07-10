@@ -2,7 +2,8 @@ import type { WorkspaceSlice } from './types'
 import type { WorkspaceState } from '../workspace'
 import type {
   WorkspaceSource,
-  WorkspaceSourceFolder
+  WorkspaceSourceFolder,
+  WorkspaceSourceReviewUpdate
 } from '@/types/workspace'
 
 // TODO: These helpers need to be exported from workspace.ts
@@ -34,6 +35,7 @@ type SourcesActions = Pick<
   | 'addSources'
   | 'removeSource'
   | 'removeSources'
+  | 'mergeSourceReviewUpdates'
   | 'reorderSource'
   | 'toggleSourceSelection'
   | 'selectAllSources'
@@ -312,6 +314,17 @@ export const createSourcesSlice: WorkspaceSlice<SourcesActions> = (set, get) => 
         sourceFolderMemberships: state.sourceFolderMemberships.filter(
           (membership) => !idsSet.has(membership.sourceId)
         )
+      }
+    }),
+
+  mergeSourceReviewUpdates: (updates: WorkspaceSourceReviewUpdate[]) =>
+    set((state) => {
+      const updatesById = new Map(updates.map((update) => [update.id, update]))
+      return {
+        sources: state.sources.map((source) => {
+          const update = updatesById.get(source.id)
+          return update ? { ...source, ...update } : source
+        })
       }
     }),
 
