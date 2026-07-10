@@ -99,14 +99,14 @@ git commit -m "feat: persist emq question groups"
 **Goal:** Make the EMQ profile available and fail closed on malformed groups.  
 **Success Criteria:** Deterministic and LLM normalization paths emit grouped MCQ stems with an identical bank, per-stem citations, and no partial persistence of invalid groups.  
 **Tests:** Generator profile, normalization, deterministic generation, and persistence tests.  
-**Status:** In Progress
+**Status:** Complete
 
 **Files:**
 - Modify: `tldw_Server_API/app/services/quiz_generator.py`
 - Modify: `tldw_Server_API/tests/Quizzes/test_quiz_generator_prompt_template.py`
 - Modify: `tldw_Server_API/tests/Quizzes/test_quiz_generator_test_mode.py`
 
-- [ ] **Step 1: Write failing profile and group-validation tests**
+- [x] **Step 1: Write failing profile and group-validation tests**
 
 Cover these behaviors:
 
@@ -117,7 +117,7 @@ Cover these behaviors:
 - The final question limiter preserves complete groups when the LLM returns more stems than requested, then validates the limited list again.
 - `generate_quiz_from_sources` persists the group fields.
 
-- [ ] **Step 2: Run generator tests and verify RED**
+- [x] **Step 2: Run generator tests and verify RED**
 
 ```bash
 /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest \
@@ -127,7 +127,7 @@ Cover these behaviors:
 
 Expected: failures because EMQ is still planned and normalization has no group contract.
 
-- [ ] **Step 3: Implement the minimal EMQ profile and validation**
+- [x] **Step 3: Implement the minimal EMQ profile and validation**
 
 - Mark the EMQ profile available, default/allow `multiple_choice`, and add a prompt instruction requesting one shared bank and at least two stems per group.
 - Extend the prompt JSON example with optional `group_id` and `group_prompt` fields and EMQ-specific constraints.
@@ -140,11 +140,11 @@ Expected: failures because EMQ is still planned and normalization has no group c
 
 The validation boundary should remain one small helper reused after normalization and after final limiting; do not add a new service or question type.
 
-- [ ] **Step 4: Run generator tests and verify GREEN**
+- [x] **Step 4: Run generator tests and verify GREEN**
 
 Run the command from Step 2. Expected: all selected tests pass.
 
-- [ ] **Step 5: Commit Task 2**
+- [x] **Step 5: Commit Task 2**
 
 ```bash
 git add tldw_Server_API/app/services/quiz_generator.py \
@@ -159,7 +159,7 @@ git commit -m "feat: generate validated emq groups"
 **Goal:** Show each EMQ option bank once while preserving independent stem answers.  
 **Success Criteria:** The profile is selectable; practice, graded, review, and result views identify the group and show one bank; each stem uses a separate selection control and submits its own numeric option index.  
 **Tests:** Generate-tab request and TakeQuizTab grouped rendering/interaction tests.  
-**Status:** Not Started
+**Status:** In Progress
 
 **Files:**
 - Modify: `apps/packages/ui/src/services/quizzes.ts`
