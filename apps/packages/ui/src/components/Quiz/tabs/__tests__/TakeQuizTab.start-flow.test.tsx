@@ -13,6 +13,14 @@ import { useQuizAutoSave } from "../../hooks/useQuizAutoSave"
 import { useQuizTimer } from "../../hooks/useQuizTimer"
 import { buildShuffledOptionEntries } from "../../utils/optionShuffle"
 
+const ASSERTION_REASONING_OPTIONS = [
+  "Both the assertion and reason are true, and the reason correctly explains the assertion.",
+  "Both the assertion and reason are true, but the reason does not explain the assertion.",
+  "The assertion is true, but the reason is false.",
+  "The assertion is false, but the reason is true.",
+  "Both the assertion and reason are false."
+]
+
 vi.mock("react-router-dom", async (importOriginal) => {
   const actual = await importOriginal<typeof import("react-router-dom")>()
   return {
@@ -343,11 +351,30 @@ describe("TakeQuizTab start flow", () => {
     expect(completionProgress).toHaveAttribute("aria-valuemax", "100")
   }, 15000)
 
-  it("labels best-of-five questions from generated metadata", async () => {
+  it("labels and shuffles Best of Five questions while preserving answer mapping", async () => {
     const questionId = 41
+    let attemptId = 141
+    let shuffledEntries = buildShuffledOptionEntries(
+      ["A", "B", "C", "D", "E"],
+      questionId,
+      attemptId
+    )
+    for (
+      let attempts = 0;
+      shuffledEntries.every((entry, index) => entry.originalIndex === index) && attempts < 128;
+      attempts += 1
+    ) {
+      attemptId += 1
+      shuffledEntries = buildShuffledOptionEntries(
+        ["A", "B", "C", "D", "E"],
+        questionId,
+        attemptId
+      )
+    }
+    expect(shuffledEntries.some((entry, index) => entry.originalIndex !== index)).toBe(true)
     vi.mocked(useStartAttemptMutation).mockReturnValue({
       mutateAsync: vi.fn(async () => ({
-        id: 141,
+        id: attemptId,
         quiz_id: 7,
         started_at: "2026-02-18T10:00:00Z",
         total_possible: 1,
@@ -369,6 +396,27 @@ describe("TakeQuizTab start flow", () => {
         ]
       }))
     } as any)
+    const submitMutate = vi.fn(async ({ answers }: {
+      answers: Array<{ question_id: number; user_answer: number; hint_used?: boolean }>
+    }) => ({
+      id: attemptId,
+      quiz_id: 7,
+      started_at: "2026-02-18T10:00:00Z",
+      completed_at: "2026-02-18T10:03:00Z",
+      score: 1,
+      total_possible: 1,
+      answers: [{
+        question_id: questionId,
+        user_answer: answers[0]?.user_answer,
+        is_correct: true,
+        correct_answer: answers[0]?.user_answer,
+        points_awarded: 1
+      }]
+    }))
+    vi.mocked(useSubmitAttemptMutation).mockReturnValue({
+      mutateAsync: submitMutate,
+      isPending: false
+    } as any)
 
     render(
       <MemoryRouter>
@@ -384,6 +432,127 @@ describe("TakeQuizTab start flow", () => {
 
     await screen.findByTestId(`quiz-question-${questionId}`)
     expect(screen.getByText("Best of Five")).toBeInTheDocument()
+    const radioOrder = screen.getAllByRole("radio").map((node) => Number((node as HTMLInputElement).value))
+    expect(radioOrder).toEqual(shuffledEntries.map((entry) => entry.originalIndex))
+
+    fireEvent.click(screen.getAllByRole("radio")[0])
+    fireEvent.click(screen.getByRole("button", { name: "Submit" }))
+
+    await waitFor(() => {
+      expect(submitMutate).toHaveBeenCalledWith({
+        attemptId,
+        answers: [{
+          question_id: questionId,
+          user_answer: shuffledEntries[0]?.originalIndex,
+          hint_used: false
+        }]
+      })
+    })
+  }, 15000)
+
+  it("keeps Assertion / Reasoning order fixed and renders one cited guide in taking and results", async () => {
+    const questionId = 51
+    let attemptId = 251
+    let shuffledEntries = buildShuffledOptionEntries(
+      ASSERTION_REASONING_OPTIONS,
+      questionId,
+      attemptId
+    )
+    for (
+      let attempts = 0;
+      shuffledEntries.every((entry, index) => entry.originalIndex === index) && attempts < 128;
+      attempts += 1
+    ) {
+      attemptId += 1
+      shuffledEntries = buildShuffledOptionEntries(
+        ASSERTION_REASONING_OPTIONS,
+        questionId,
+        attemptId
+      )
+    }
+    expect(shuffledEntries.some((entry, index) => entry.originalIndex !== index)).toBe(true)
+
+    vi.mocked(useStartAttemptMutation).mockReturnValue({
+      mutateAsync: vi.fn(async () => ({
+        id: attemptId,
+        quiz_id: 7,
+        started_at: "2026-02-18T10:00:00Z",
+        total_possible: 1,
+        answers: [],
+        questions: [
+          {
+            id: questionId,
+            quiz_id: 7,
+            question_type: "multiple_choice",
+            question_text: "**Assertion:** The drug lowers blood pressure.\n\n**Reason:** It reduces vascular resistance.",
+            options: ASSERTION_REASONING_OPTIONS,
+            points: 1,
+            order_index: 0,
+            tags: ["Assertion / Reasoning"],
+            deleted: false,
+            client_id: "test",
+            version: 1
+          }
+        ]
+      }))
+    } as any)
+
+    const submitMutate = vi.fn(async ({ answers }: {
+      answers: Array<{ question_id: number; user_answer: number; hint_used?: boolean }>
+    }) => ({
+      id: attemptId,
+      quiz_id: 7,
+      started_at: "2026-02-18T10:00:00Z",
+      completed_at: "2026-02-18T10:03:00Z",
+      score: 1,
+      total_possible: 1,
+      answers: [
+        {
+          question_id: questionId,
+          user_answer: answers[0]?.user_answer,
+          is_correct: true,
+          correct_answer: 3,
+          points_awarded: 1,
+          explanation: "The assertion is false, while reduced vascular resistance is true.",
+          source_citations: [{ label: "Pharmacology source" }]
+        }
+      ]
+    }))
+    vi.mocked(useSubmitAttemptMutation).mockReturnValue({
+      mutateAsync: submitMutate,
+      isPending: false
+    } as any)
+
+    render(
+      <MemoryRouter>
+        <TakeQuizTab onNavigateToGenerate={() => {}} onNavigateToCreate={() => {}} />
+      </MemoryRouter>
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: /Start Quiz/i }))
+    fireEvent.click(screen.getByRole("button", { name: "Begin Quiz" }))
+
+    await screen.findByTestId(`quiz-question-${questionId}`)
+    expect(screen.getAllByTestId("assertion-reasoning-scale")).toHaveLength(1)
+    expect(screen.getByText("Assertion / Reasoning")).toBeInTheDocument()
+    expect(within(screen.getByTestId("assertion-reasoning-scale")).getByText(
+      `A. ${ASSERTION_REASONING_OPTIONS[0]}`
+    )).toBeInTheDocument()
+    expect(screen.getAllByRole("radio").map((node) => Number((node as HTMLInputElement).value))).toEqual([0, 1, 2, 3, 4])
+    expect(shuffledEntries.map((entry) => entry.originalIndex)).not.toEqual([0, 1, 2, 3, 4])
+
+    fireEvent.click(screen.getByRole("radio", { name: ASSERTION_REASONING_OPTIONS[3] }))
+    fireEvent.click(screen.getByRole("button", { name: "Submit" }))
+
+    await waitFor(() => {
+      expect(submitMutate).toHaveBeenCalledWith({
+        attemptId,
+        answers: [{ question_id: questionId, user_answer: 3, hint_used: false }]
+      })
+    })
+    expect(await screen.findByText("The assertion is false, while reduced vascular resistance is true.")).toBeInTheDocument()
+    expect(screen.getByText("Pharmacology source")).toBeInTheDocument()
+    expect(screen.getAllByTestId("assertion-reasoning-scale")).toHaveLength(1)
   }, 15000)
 
   it("announces danger-zone timer updates in assertive live region", async () => {
@@ -414,17 +583,22 @@ describe("TakeQuizTab start flow", () => {
   }, 15000)
 
   it("shuffles multiple-choice option order per graded attempt while preserving answer mapping", async () => {
-    const optionLabels = ["Alpha", "Beta", "Gamma", "Delta"]
+    const optionLabels = ["Alpha", "Beta", "Gamma", "Delta", "Epsilon"]
     const questionId = 11
 
     const firstAttemptId = 200
     let secondAttemptId = 201
     const firstOrder = buildShuffledOptionEntries(optionLabels, questionId, firstAttemptId).map((entry) => entry.originalIndex)
     let secondOrder = buildShuffledOptionEntries(optionLabels, questionId, secondAttemptId).map((entry) => entry.originalIndex)
-    while (secondOrder.join(",") === firstOrder.join(",")) {
+    for (
+      let attempts = 0;
+      secondOrder.join(",") === firstOrder.join(",") && attempts < 128;
+      attempts += 1
+    ) {
       secondAttemptId += 1
       secondOrder = buildShuffledOptionEntries(optionLabels, questionId, secondAttemptId).map((entry) => entry.originalIndex)
     }
+    expect(secondOrder).not.toEqual(firstOrder)
 
     const startMutate = vi
       .fn()
@@ -443,7 +617,7 @@ describe("TakeQuizTab start flow", () => {
             options: optionLabels,
             points: 1,
             order_index: 0,
-            tags: null,
+            tags: ["assertion/reasoning-extra"],
             deleted: false,
             client_id: "test",
             version: 1
@@ -465,7 +639,7 @@ describe("TakeQuizTab start flow", () => {
             options: optionLabels,
             points: 1,
             order_index: 0,
-            tags: null,
+            tags: ["assertion/reasoning-extra"],
             deleted: false,
             client_id: "test",
             version: 1

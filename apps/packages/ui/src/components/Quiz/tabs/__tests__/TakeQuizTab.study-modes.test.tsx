@@ -15,6 +15,14 @@ import { listQuestions } from "@/services/quizzes"
 import { TAKE_QUIZ_LIST_PREFS_KEY } from "../../stateKeys"
 import { drawDeterministicQuestionPool } from "../../utils/optionShuffle"
 
+const ASSERTION_REASONING_OPTIONS = [
+  "Both the assertion and reason are true, and the reason correctly explains the assertion.",
+  "Both the assertion and reason are true, but the reason does not explain the assertion.",
+  "The assertion is true, but the reason is false.",
+  "The assertion is false, but the reason is true.",
+  "Both the assertion and reason are false."
+]
+
 vi.mock("react-router-dom", async (importOriginal) => {
   const actual = await importOriginal<typeof import("react-router-dom")>()
   return {
@@ -244,6 +252,49 @@ describe("TakeQuizTab study modes", () => {
     expect(await screen.findByText("Correct")).toBeInTheDocument()
   }, 15000)
 
+  it("keeps Assertion / Reasoning practice order fixed and shows evidence after incorrect and correct answers", async () => {
+    window.sessionStorage.setItem(
+      TAKE_QUIZ_LIST_PREFS_KEY,
+      JSON.stringify({ modePreference: "practice" })
+    )
+
+    vi.mocked(listQuestions).mockResolvedValue({
+      items: [
+        {
+          id: 21,
+          quiz_id: 7,
+          question_type: "multiple_choice",
+          question_text: "**Assertion:** Insulin lowers blood glucose.\n\n**Reason:** Insulin promotes cellular glucose uptake.",
+          options: ASSERTION_REASONING_OPTIONS,
+          correct_answer: 0,
+          explanation: "Both statements are true, and increased glucose uptake explains the effect.",
+          source_citations: [{ label: "Endocrinology source" }],
+          tags: ["assertion_reasoning"]
+        }
+      ],
+      count: 1
+    } as any)
+
+    render(<MemoryRouter><TakeQuizTab onNavigateToGenerate={() => {}} onNavigateToCreate={() => {}} /></MemoryRouter>)
+
+    fireEvent.click(screen.getByRole("button", { name: /Start Practice/i }))
+
+    expect(await screen.findAllByTestId("assertion-reasoning-scale")).toHaveLength(1)
+    expect(screen.getByText("Assertion / Reasoning")).toBeInTheDocument()
+    expect(screen.getAllByRole("radio").map((node) => Number((node as HTMLInputElement).value))).toEqual([0, 1, 2, 3, 4])
+
+    fireEvent.click(screen.getByRole("radio", { name: ASSERTION_REASONING_OPTIONS[2] }))
+    expect(await screen.findByText("Incorrect")).toBeInTheDocument()
+    expect(screen.getByText("Both statements are true, and increased glucose uptake explains the effect.")).toBeInTheDocument()
+    expect(screen.getByText("Endocrinology source")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("radio", { name: ASSERTION_REASONING_OPTIONS[0] }))
+    expect(await screen.findByText("Correct")).toBeInTheDocument()
+    expect(screen.getByText("Both statements are true, and increased glucose uptake explains the effect.")).toBeInTheDocument()
+    expect(screen.getByText("Endocrinology source")).toBeInTheDocument()
+    expect(screen.getAllByTestId("assertion-reasoning-scale")).toHaveLength(1)
+  }, 15000)
+
   it("opens review mode as read-only with answers and explanations", async () => {
     window.sessionStorage.setItem(
       TAKE_QUIZ_LIST_PREFS_KEY,
@@ -280,6 +331,161 @@ describe("TakeQuizTab study modes", () => {
     expect(screen.getByText("Cells are the basic structural and functional unit of life.")).toBeInTheDocument()
     expect(startAttempt).not.toHaveBeenCalled()
     expect(screen.queryByRole("button", { name: "Submit" })).not.toBeInTheDocument()
+  }, 15000)
+
+  it("renders one Assertion / Reasoning guide with per-question evidence in review mode", async () => {
+    window.sessionStorage.setItem(
+      TAKE_QUIZ_LIST_PREFS_KEY,
+      JSON.stringify({ modePreference: "review" })
+    )
+
+    vi.mocked(listQuestions).mockResolvedValue({
+      items: [
+        {
+          id: 41,
+          quiz_id: 7,
+          question_type: "multiple_choice",
+          question_text: "**Assertion:** Vaccines stimulate adaptive immunity.\n\n**Reason:** They expose the immune system to antigen.",
+          options: ASSERTION_REASONING_OPTIONS,
+          correct_answer: 0,
+          explanation: "Antigen exposure explains the adaptive immune response.",
+          source_citations: [{ label: "Immunology source" }],
+          tags: ["assertion_reasoning"]
+        },
+        {
+          id: 42,
+          quiz_id: 7,
+          question_type: "multiple_choice",
+          question_text: "**Assertion:** Antibiotics treat influenza.\n\n**Reason:** Influenza is caused by bacteria.",
+          options: ASSERTION_REASONING_OPTIONS,
+          correct_answer: 4,
+          explanation: "Both statements are false because influenza is viral.",
+          source_citations: [{ label: "Virology source" }],
+          tags: ["assertion_reasoning"]
+        }
+      ],
+      count: 2
+    } as any)
+
+    render(<MemoryRouter><TakeQuizTab onNavigateToGenerate={() => {}} onNavigateToCreate={() => {}} /></MemoryRouter>)
+
+    fireEvent.click(screen.getByRole("button", { name: /Open Review/i }))
+
+    expect(await screen.findAllByTestId("assertion-reasoning-scale")).toHaveLength(1)
+    expect(screen.getByText("Antigen exposure explains the adaptive immune response.")).toBeInTheDocument()
+    expect(screen.getByText("Both statements are false because influenza is viral.")).toBeInTheDocument()
+    expect(screen.getByText("Immunology source")).toBeInTheDocument()
+    expect(screen.getByText("Virology source")).toBeInTheDocument()
+    expect(screen.getAllByText("Assertion / Reasoning")).toHaveLength(2)
+  }, 15000)
+
+  it.each([
+    {
+      label: "non-MCQ type",
+      question: {
+        id: 51,
+        quiz_id: 7,
+        question_type: "true_false",
+        question_text: "A tagged true/false question.",
+        options: ASSERTION_REASONING_OPTIONS,
+        correct_answer: "true",
+        tags: ["assertion_reasoning"]
+      }
+    },
+    {
+      label: "grouped question",
+      question: {
+        id: 52,
+        quiz_id: 7,
+        question_type: "multiple_choice",
+        question_text: "A tagged EMQ stem.",
+        options: ASSERTION_REASONING_OPTIONS,
+        correct_answer: 0,
+        group_id: "manual-emq",
+        group_prompt: "Choose from the shared bank.",
+        tags: ["assertion_reasoning"]
+      }
+    },
+    {
+      label: "non-five-option scale",
+      question: {
+        id: 53,
+        quiz_id: 7,
+        question_type: "multiple_choice",
+        question_text: "A tagged question with the wrong scale size.",
+        options: ASSERTION_REASONING_OPTIONS.slice(0, 4),
+        correct_answer: 0,
+        tags: ["assertion_reasoning"]
+      }
+    }
+  ])("does not apply Assertion / Reasoning UI to a $label", async ({ question }) => {
+    window.sessionStorage.setItem(
+      TAKE_QUIZ_LIST_PREFS_KEY,
+      JSON.stringify({ modePreference: "review" })
+    )
+
+    vi.mocked(listQuestions).mockResolvedValue({
+      items: [
+        {
+          id: 50,
+          quiz_id: 7,
+          question_type: "multiple_choice",
+          question_text: "A valid tagged question.",
+          options: ASSERTION_REASONING_OPTIONS,
+          correct_answer: 0,
+          tags: ["assertion_reasoning"]
+        },
+        question
+      ],
+      count: 2
+    } as any)
+
+    render(<MemoryRouter><TakeQuizTab onNavigateToGenerate={() => {}} onNavigateToCreate={() => {}} /></MemoryRouter>)
+
+    fireEvent.click(screen.getByRole("button", { name: /Open Review/i }))
+
+    expect(await screen.findByText(question.question_text)).toBeInTheDocument()
+    expect(screen.queryByTestId("assertion-reasoning-scale")).not.toBeInTheDocument()
+    expect(screen.queryByText("Assertion / Reasoning")).not.toBeInTheDocument()
+  }, 15000)
+
+  it("fails closed when tagged questions disagree on the answer scale", async () => {
+    window.sessionStorage.setItem(
+      TAKE_QUIZ_LIST_PREFS_KEY,
+      JSON.stringify({ modePreference: "review" })
+    )
+
+    vi.mocked(listQuestions).mockResolvedValue({
+      items: [
+        {
+          id: 61,
+          quiz_id: 7,
+          question_type: "multiple_choice",
+          question_text: "First tagged question.",
+          options: ASSERTION_REASONING_OPTIONS,
+          correct_answer: 0,
+          tags: ["assertion_reasoning"]
+        },
+        {
+          id: 62,
+          quiz_id: 7,
+          question_type: "multiple_choice",
+          question_text: "Second tagged question.",
+          options: [...ASSERTION_REASONING_OPTIONS].reverse(),
+          correct_answer: 4,
+          tags: ["assertion_reasoning"]
+        }
+      ],
+      count: 2
+    } as any)
+
+    render(<MemoryRouter><TakeQuizTab onNavigateToGenerate={() => {}} onNavigateToCreate={() => {}} /></MemoryRouter>)
+
+    fireEvent.click(screen.getByRole("button", { name: /Open Review/i }))
+
+    expect(await screen.findByText("First tagged question.")).toBeInTheDocument()
+    expect(screen.queryByTestId("assertion-reasoning-scale")).not.toBeInTheDocument()
+    expect(screen.queryByText("Assertion / Reasoning")).not.toBeInTheDocument()
   }, 15000)
 
   it("persists mode preference updates to session storage", async () => {

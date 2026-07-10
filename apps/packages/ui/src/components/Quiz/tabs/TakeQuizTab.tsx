@@ -98,18 +98,49 @@ type StudyPoolSizePreference = "all" | number
 type PracticeQuestionTimerPreference = "off" | number
 const TOUCH_TARGET_CLASS = "min-h-11 px-4"
 const BEST_OF_FIVE_QUESTION_TAG = "best_of_five"
+const ASSERTION_REASONING_QUESTION_TAG = "assertion_reasoning"
 
-const hasBestOfFiveQuestionTag = (question: QuestionPublic): boolean => {
+const normalizeQuestionTag = (tag: unknown): string =>
+  String(tag).trim().toLowerCase().replace(/[\s/-]+/g, "_")
+
+const hasQuestionTag = (question: QuestionPublic, reservedTag: string): boolean => {
   if (!Array.isArray(question.tags)) return false
-  return question.tags.some((tag) => (
-    String(tag).trim().toLowerCase().replace(/[\s-]+/g, "_") === BEST_OF_FIVE_QUESTION_TAG
-  ))
+  return question.tags.some((tag) => normalizeQuestionTag(tag) === reservedTag)
 }
+
+const hasBestOfFiveQuestionTag = (question: QuestionPublic): boolean =>
+  hasQuestionTag(question, BEST_OF_FIVE_QUESTION_TAG)
+
+const hasAssertionReasoningQuestionTag = (question: QuestionPublic): boolean =>
+  hasQuestionTag(question, ASSERTION_REASONING_QUESTION_TAG)
 
 const getQuestionGroupId = (question: QuestionPublic): string | null => {
   if (typeof question.group_id !== "string") return null
   const normalized = question.group_id.trim()
   return normalized.length > 0 ? normalized : null
+}
+
+const hasCompatibleAssertionReasoningShape = (question: QuestionPublic): boolean =>
+  hasAssertionReasoningQuestionTag(question) &&
+  question.question_type === "multiple_choice" &&
+  getQuestionGroupId(question) == null &&
+  Array.isArray(question.options) &&
+  question.options.length === 5
+
+const getAssertionReasoningScaleOptions = (questions: QuestionPublic[]): string[] | null => {
+  const taggedQuestions = questions.filter(hasAssertionReasoningQuestionTag)
+  if (
+    taggedQuestions.length === 0 ||
+    !taggedQuestions.every(hasCompatibleAssertionReasoningShape)
+  ) {
+    return null
+  }
+
+  const firstOptions = taggedQuestions[0].options as string[]
+  const hasConsistentScale = taggedQuestions.every((question) =>
+    question.options?.every((option, index) => option === firstOptions[index])
+  )
+  return hasConsistentScale ? firstOptions : null
 }
 
 const normalizeMultiSelectAnswer = (value: unknown): number[] => {
@@ -304,6 +335,20 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
   const isOnline = useServerOnline()
   const wasOnlineRef = React.useRef(isOnline)
   const offset = (page - 1) * pageSize
+
+  const assertionReasoningScaleOptions = React.useMemo(
+    () => getAssertionReasoningScaleOptions(questions),
+    [questions]
+  )
+  const isAssertionReasoningQuestion = React.useCallback(
+    (question: QuestionPublic): boolean =>
+      assertionReasoningScaleOptions != null &&
+      hasCompatibleAssertionReasoningShape(question) &&
+      question.options?.every(
+        (option, index) => option === assertionReasoningScaleOptions[index]
+      ) === true,
+    [assertionReasoningScaleOptions]
+  )
 
   const normalizedSearchQuery = searchQuery.trim()
   const { data, isLoading } = useQuizzesQuery({
@@ -915,6 +960,32 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
     )
   }
 
+  const renderAssertionReasoningScale = () => {
+    if (!assertionReasoningScaleOptions) return null
+
+    const scaleLabel = t("option:quiz.assertionReasoningScale", {
+      defaultValue: "Assertion / Reasoning answer scale"
+    })
+    return (
+      <section
+        aria-label={scaleLabel}
+        className="mb-3 space-y-2 rounded-md bg-surface2 p-3"
+        data-testid="assertion-reasoning-scale"
+      >
+        <Typography.Text className="block text-xs font-medium text-text-muted">
+          {scaleLabel}
+        </Typography.Text>
+        <ol className="space-y-1 text-sm text-text">
+          {assertionReasoningScaleOptions.map((label, optionIndex) => (
+            <li key={optionIndex} className="break-words">
+              {formatEmqOptionLabel(label, optionIndex)}
+            </li>
+          ))}
+        </ol>
+      </section>
+    )
+  }
+
   const renderQuestionHeader = (question: QuestionPublic, index: number) => (
     <div className="flex flex-wrap items-center gap-2">
       <span className="text-xs text-text-muted">
@@ -926,6 +997,11 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
       {hasBestOfFiveQuestionTag(question) && (
         <Tag color="blue" className="m-0">
           {t("option:quiz.bestOfFiveTag", { defaultValue: "Best of Five" })}
+        </Tag>
+      )}
+      {isAssertionReasoningQuestion(question) && (
+        <Tag className="m-0">
+          {t("option:quiz.assertionReasoningTag", { defaultValue: "Assertion / Reasoning" })}
         </Tag>
       )}
       {getQuestionGroupId(question) && (
@@ -1019,11 +1095,15 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
   const getOptionEntriesForQuestion = React.useCallback((question: QuestionPublic): ShuffledOptionEntry[] => {
     if (question.question_type !== "multiple_choice" && question.question_type !== "multi_select") return []
     const options = question.options ?? []
-    if (optionShuffleSeed == null || options.length <= 1) {
+    if (
+      optionShuffleSeed == null ||
+      options.length <= 1 ||
+      (question.question_type === "multiple_choice" && isAssertionReasoningQuestion(question))
+    ) {
       return options.map((label, originalIndex) => ({ originalIndex, label }))
     }
     return buildShuffledOptionEntries(options, question.id, optionShuffleSeed)
-  }, [optionShuffleSeed])
+  }, [isAssertionReasoningQuestion, optionShuffleSeed])
 
   const formatQuestionAnswer = React.useCallback((question: QuestionPublic, value: AnswerValue | undefined) => {
     if (value == null) {
@@ -1396,6 +1476,7 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
               })}
         </DesignSystemAlert>
 
+        {renderAssertionReasoningScale()}
         <List
           dataSource={questions}
           renderItem={(question, index) => {
@@ -1991,6 +2072,7 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
                   })
                 : null}
             </DesignSystemAlert>
+            {renderAssertionReasoningScale()}
             <List
               dataSource={questions}
               renderItem={(question, index) => {
@@ -2141,6 +2223,7 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
             >
               <Progress percent={progress} />
             </div>
+            {renderAssertionReasoningScale()}
             <List
               dataSource={questions}
               renderItem={(question, index) => {
@@ -2170,13 +2253,15 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
                             ? t("option:quiz.correct", { defaultValue: "Correct" })
                             : t("option:quiz.incorrect", { defaultValue: "Incorrect" })}
                         >
-                          {!feedback && (
+                          {(!feedback || isAssertionReasoningQuestion(question)) && (
                             <div className="space-y-1">
-                              <Typography.Text className="block text-sm">
-                                {t("option:quiz.correctAnswerLabel", {
-                                  defaultValue: "Correct answer"
-                                })}: {formatQuestionAnswer(question, correctAnswer)}
-                              </Typography.Text>
+                              {!feedback && (
+                                <Typography.Text className="block text-sm">
+                                  {t("option:quiz.correctAnswerLabel", {
+                                    defaultValue: "Correct answer"
+                                  })}: {formatQuestionAnswer(question, correctAnswer)}
+                                </Typography.Text>
+                              )}
                               {(question as QuestionPublic & { explanation?: string | null }).explanation && (
                                 <QuizMarkdown
                                   content={(question as QuestionPublic & { explanation?: string | null }).explanation || ""}
@@ -2298,6 +2383,7 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
             >
               <Progress percent={progress} />
             </div>
+            {renderAssertionReasoningScale()}
             <List
               dataSource={questions}
               renderItem={(question, index) => (

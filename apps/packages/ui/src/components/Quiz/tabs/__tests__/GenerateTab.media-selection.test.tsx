@@ -552,6 +552,64 @@ describe("GenerateTab scalable media selection and generation flow", () => {
     )
   }, 20000)
 
+  it("exposes the available Assertion / Reasoning fallback profile", () => {
+    expect(QUIZ_GENERATION_PROFILES.find((profile) => profile.id === "assertion_reasoning")).toMatchObject({
+      label: "Assertion / Reasoning",
+      status: "available",
+      default_num_questions: 5,
+      default_difficulty: "mixed",
+      default_question_types: ["multiple_choice"]
+    })
+  })
+
+  it("applies Assertion / Reasoning profile defaults in generation payload", async () => {
+    vi.mocked(tldwClient.listMedia).mockResolvedValue({
+      items: [{ id: 10, title: "Clinical Notes", type: "pdf" }],
+      pagination: { total_items: 1 }
+    } as any)
+
+    const mutateAsync = vi.fn(async () => ({
+      quiz: { id: 42, name: "Clinical Assertion / Reasoning" },
+      questions: [{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }, { id: 5 }]
+    }))
+
+    vi.mocked(useGenerateQuizMutation).mockReturnValue({
+      mutateAsync,
+      isPending: false
+    } as any)
+
+    renderWithQueryClient()
+
+    await waitFor(() => {
+      expect(screen.getByText("1 media items available")).toBeInTheDocument()
+    })
+
+    fireEvent.mouseDown(screen.getAllByRole("combobox")[0])
+    fireEvent.click(await screen.findByText("Clinical Notes (pdf)"))
+
+    const profileSelect = screen.getByTestId("generate-profile-select")
+    fireEvent.mouseDown(profileSelect.querySelector(".ant-select-selector") ?? profileSelect)
+    fireEvent.click(await screen.findByText("Assertion / Reasoning"))
+
+    fireEvent.click(screen.getByRole("button", { name: /Generate Quiz/i }))
+
+    await waitFor(() => {
+      expect(mutateAsync).toHaveBeenCalledTimes(1)
+    })
+    expect(mutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        request: expect.objectContaining({
+          sources: [{ source_type: "media", source_id: "10" }],
+          generation_profile: "assertion_reasoning",
+          num_questions: 5,
+          difficulty: "mixed",
+          question_types: ["multiple_choice"]
+        }),
+        signal: expect.any(AbortSignal)
+      })
+    )
+  }, 20000)
+
   it("exposes the available EMQ profile and grouped question contract", () => {
     const questionBase: QuestionBase = {
       id: 1,

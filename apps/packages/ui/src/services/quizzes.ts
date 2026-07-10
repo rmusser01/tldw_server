@@ -91,6 +91,15 @@ export const QUIZ_GENERATION_PROFILES: QuizGenerationProfileDefinition[] = [
     default_num_questions: 5,
     default_difficulty: "mixed",
     default_question_types: ["multiple_choice"]
+  },
+  {
+    id: "assertion_reasoning",
+    label: "Assertion / Reasoning",
+    description: "Assertion and reason pairs with concise evidence-backed rationales.",
+    status: "available",
+    default_num_questions: 5,
+    default_difficulty: "mixed",
+    default_question_types: ["multiple_choice"]
   }
 ]
 export type AnswerValue = number | string | number[] | Record<string, string>
