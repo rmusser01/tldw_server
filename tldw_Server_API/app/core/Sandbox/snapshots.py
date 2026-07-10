@@ -1,3 +1,5 @@
+"""Create, restore, and maintain sandbox workspace snapshots."""
+
 from __future__ import annotations
 
 import contextlib
@@ -615,6 +617,69 @@ class SnapshotManager:
 
         return deleted
 
+    @staticmethod
+    def _quota_entries_for_directory(
+        snapshot_dir: Path,
+    ) -> list[tuple[dict, Path, Path]]:
+        """Return quota metadata with paths resolved from one discovered directory."""
+        import json
+
+        entries: list[tuple[dict, Path, Path]] = []
+        for metadata_path in snapshot_dir.glob("*.meta.json"):
+            try:
+                archive_stem = metadata_path.name.removesuffix(".meta.json")
+                archive_path = snapshot_dir / f"{archive_stem}.tar.gz"
+                if not archive_path.is_file():
+                    continue
+                with open(metadata_path) as metadata_file:
+                    metadata = json.load(metadata_file)
+                metadata["size_bytes"] = archive_path.stat().st_size
+                entries.append((metadata, archive_path, metadata_path))
+            except _SNAPSHOTS_NONCRITICAL_EXCEPTIONS as exc:
+                logger.debug(f"Failed to read snapshot metadata {metadata_path}: {exc}")
+        entries.sort(key=lambda entry: entry[0].get("created_at", ""), reverse=True)
+        return entries
+
+    def _enforce_quota_for_directory(
+        self,
+        snapshot_dir: Path,
+        *,
+        max_snapshots: int,
+        max_size_mb: int,
+    ) -> list[str]:
+        """Enforce quotas without re-hashing a discovered session directory name."""
+        entries = self._quota_entries_for_directory(snapshot_dir)
+        deleted: list[str] = []
+        max_size_bytes = max_size_mb * 1024 * 1024
+
+        def delete_oldest() -> None:
+            metadata, archive_path, metadata_path = entries.pop()
+            snapshot_id = str(metadata.get("snapshot_id") or "")
+            removed = False
+            for path in (archive_path, metadata_path):
+                try:
+                    if path.exists():
+                        path.unlink()
+                        removed = True
+                except _SNAPSHOTS_NONCRITICAL_EXCEPTIONS as exc:
+                    logger.warning(f"Failed to delete snapshot file {path}: {exc}")
+            if removed and snapshot_id:
+                deleted.append(snapshot_id)
+
+        while len(entries) > max_snapshots:
+            delete_oldest()
+
+        total_size = sum(entry[0].get("size_bytes", 0) for entry in entries)
+        while total_size > max_size_bytes and entries:
+            oldest_size = entries[-1][0].get("size_bytes", 0)
+            delete_oldest()
+            total_size -= oldest_size
+
+        with contextlib.suppress(_SNAPSHOTS_NONCRITICAL_EXCEPTIONS):
+            if snapshot_dir.exists() and not any(snapshot_dir.iterdir()):
+                snapshot_dir.rmdir()
+        return deleted
+
     def enforce_quota_all_sessions(
         self,
         *,
@@ -625,7 +690,7 @@ class SnapshotManager:
         scanned_sessions = 0
         evicted_sessions = 0
         deleted_snapshots = 0
-        root = Path(self.storage_path)
+        root = Path(self.storage_path).resolve(strict=False)
         if not root.exists():
             return {
                 "scanned_sessions": 0,
@@ -634,12 +699,14 @@ class SnapshotManager:
             }
         with contextlib.suppress(_SNAPSHOTS_NONCRITICAL_EXCEPTIONS):
             for session_dir in root.iterdir():
-                if not session_dir.is_dir():
+                if session_dir.is_symlink() or not session_dir.is_dir():
                     continue
-                session_id = session_dir.name
+                resolved_session_dir = session_dir.resolve(strict=False)
+                if resolved_session_dir.parent != root:
+                    continue
                 scanned_sessions += 1
-                deleted = self.enforce_quota(
-                    session_id,
+                deleted = self._enforce_quota_for_directory(
+                    resolved_session_dir,
                     max_snapshots=max_snapshots,
                     max_size_mb=max_size_mb,
                 )
