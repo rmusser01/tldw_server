@@ -1,9 +1,11 @@
 import { readFileSync } from "node:fs"
-import { resolve } from "node:path"
+import { dirname, resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 
+const testDir = dirname(fileURLToPath(import.meta.url))
 const readSource = (relativePath: string) =>
-  readFileSync(resolve(process.cwd(), relativePath), "utf8")
+  readFileSync(resolve(testDir, "../../../", relativePath), "utf8")
 
 describe("CodeQL source contracts", () => {
   it("keeps the document job identifier out of the console format argument", () => {
