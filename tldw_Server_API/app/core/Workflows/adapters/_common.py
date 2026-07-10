@@ -9,10 +9,11 @@ from __future__ import annotations
 import os
 import re
 import time
+import unicodedata
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qsl, urlsplit
+from urllib.parse import parse_qsl, unquote, urlsplit
 
 from loguru import logger
 
@@ -153,20 +154,42 @@ _SENSITIVE_URL_QUERY_KEYS = {
     "apikey",
     "auth",
     "authorization",
+    "client_secret",
     "code",
     "credential",
+    "id_token",
     "jwt",
     "key_pair_id",
     "password",
     "policy",
+    "refresh_token",
     "secret",
     "signature",
     "sig",
+    "session_token",
     "token",
     "x_amz_credential",
     "x_amz_security_token",
     "x_amz_signature",
 }
+_SENSITIVE_URL_QUERY_KEY_TERMS = {"auth", "credential", "password", "secret", "signature", "token"}
+_URL_VALUE_QUERY_KEYS = {
+    "callback",
+    "continue",
+    "destination",
+    "next",
+    "redirect",
+    "redirect_uri",
+    "redirect_url",
+    "return",
+    "return_to",
+    "return_url",
+    "target",
+    "url",
+}
+_URL_INSPECTION_MAX_CHARS = 2048
+_URL_INSPECTION_MAX_DEPTH = 3
+_URL_INSPECTION_MAX_QUERY_FIELDS = 100
 _PRIVATE_LOCATION_RE = re.compile(
     r"(?i)(?:file:/{0,2}|(?:^|\s)[a-z]:[\\/]|\\\\|(?:^|\s)/(?:[^\s]+)|(?:^|\s)~[\\/])"
 )
@@ -180,12 +203,88 @@ _PROGRAM_FORMATS = {
     "custom",
 }
 _PROGRAM_OUTCOME_NOUNS = {"briefing", "episode"}
+_SPEAKER_MARKER_MAX_CHARS = 64
+
+
+def canonical_speaker_markers(values: list[Any]) -> list[str]:
+    """Return unique parser-safe ASCII speaker markers in input order."""
+    markers: list[str] = []
+    seen: set[str] = set()
+    for position, value in enumerate(values, 1):
+        ascii_value = unicodedata.normalize("NFKD", str(value or "")).encode("ascii", "ignore").decode("ascii")
+        base = re.sub(r"[^A-Za-z0-9]+", "_", ascii_value).strip("_").upper()
+        base = base[:_SPEAKER_MARKER_MAX_CHARS] or f"SPEAKER_{position}"
+        marker = base
+        suffix = 2
+        while marker in seen:
+            suffix_text = f"_{suffix}"
+            marker = f"{base[: _SPEAKER_MARKER_MAX_CHARS - len(suffix_text)]}{suffix_text}"
+            suffix += 1
+        seen.add(marker)
+        markers.append(marker)
+    return markers
+
+
+def _normalized_query_key(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", str(value or "").lower()).strip("_")
+
+
+def _is_sensitive_query_key(key: str) -> bool:
+    if key in _SENSITIVE_URL_QUERY_KEYS or key.startswith("x_amz_") or key.startswith("x_goog_"):
+        return True
+    padded = f"_{key}_"
+    return any(
+        key == term or key.endswith(f"_{term}") or key.startswith(f"{term}_") or f"_{term}_" in padded
+        for term in _SENSITIVE_URL_QUERY_KEY_TERMS
+    )
+
+
+def _fully_unquote(value: str) -> str:
+    decoded = value
+    for _ in range(_URL_INSPECTION_MAX_DEPTH):
+        next_value = unquote(decoded)
+        if next_value == decoded:
+            break
+        decoded = next_value
+    return decoded
+
+
+def _url_contains_sensitive_data(value: str, *, depth: int = 0) -> bool:
+    """Inspect nested URL-valued query parameters for credentials and signatures."""
+    if depth > _URL_INSPECTION_MAX_DEPTH or len(value) > _URL_INSPECTION_MAX_CHARS:
+        return True
+    decoded = value.strip() if depth == 0 else _fully_unquote(value.strip())
+    if any(ord(char) < 32 for char in decoded):
+        return True
+    parse_value = f"https:{decoded}" if decoded.startswith("//") else decoded
+    try:
+        parsed = urlsplit(parse_value)
+        _ = parsed.port
+        query = parse_qsl(
+            parsed.query,
+            keep_blank_values=True,
+            max_num_fields=_URL_INSPECTION_MAX_QUERY_FIELDS,
+        )
+    except (ValueError, UnicodeError):
+        return True
+    if parsed.username or parsed.password or parsed.fragment:
+        return True
+    for raw_key, raw_value in query:
+        key = _normalized_query_key(raw_key)
+        if _is_sensitive_query_key(key):
+            return True
+        nested = _fully_unquote(raw_value.strip())
+        looks_url_like = nested.startswith(("http://", "https://", "//", "/")) or "?" in nested
+        if (key in _URL_VALUE_QUERY_KEYS or looks_url_like) and nested:
+            if depth >= _URL_INSPECTION_MAX_DEPTH or _url_contains_sensitive_data(nested, depth=depth + 1):
+                return True
+    return False
 
 
 def safe_public_source_url(value: Any) -> str:
     """Return a bounded public HTTP(S) URL with no credentials or signatures."""
     raw = str(value or "").strip()
-    if not raw or len(raw) > 2048 or any(ord(char) < 32 for char in raw):
+    if not raw or len(raw) > _URL_INSPECTION_MAX_CHARS or any(ord(char) < 32 for char in raw):
         return ""
     try:
         parsed = urlsplit(raw)
@@ -200,19 +299,7 @@ def safe_public_source_url(value: Any) -> str:
         or parsed.fragment
     ):
         return ""
-    try:
-        query_keys = {
-            re.sub(r"[^a-z0-9]+", "_", key.lower()).strip("_")
-            for key, _value in parse_qsl(parsed.query, keep_blank_values=True)
-        }
-    except ValueError:
-        return ""
-    if any(
-        key in _SENSITIVE_URL_QUERY_KEYS
-        or key.startswith("x_amz_")
-        or key.startswith("x_goog_")
-        for key in query_keys
-    ):
+    if _url_contains_sensitive_data(raw):
         return ""
     return raw
 

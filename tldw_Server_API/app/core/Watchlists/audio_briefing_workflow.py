@@ -21,6 +21,7 @@ from tldw_Server_API.app.core.Watchlists.briefing_contract import (
     briefing_selection_limit,
     get_briefing_contract,
 )
+from tldw_Server_API.app.core.Workflows.adapters._common import canonical_speaker_markers
 
 AudioBriefingTriggerStatus = Literal[
     "disabled",
@@ -194,19 +195,14 @@ def _normalize_audio_cast_voice_map(audio_cast: Any) -> dict[str, str] | None:
     if not isinstance(speakers, list):
         return None
 
+    valid_speakers = [speaker for speaker in speakers[:4] if isinstance(speaker, dict)]
+    markers = canonical_speaker_markers([speaker.get("id") or speaker.get("label") for speaker in valid_speakers])
     voice_map: dict[str, str] = {}
-    for speaker in speakers:
-        if not isinstance(speaker, dict):
-            continue
+    for speaker, marker in zip(valid_speakers, markers, strict=True):
         voice = speaker.get("voice")
         if not isinstance(voice, str) or not voice.strip():
             continue
-        raw_key = speaker.get("id") or speaker.get("label")
-        if not isinstance(raw_key, str) or not raw_key.strip():
-            continue
-        normalized_key = "".join(char.upper() if char.isalnum() else "_" for char in raw_key.strip()).strip("_")
-        if normalized_key:
-            voice_map[normalized_key] = voice.strip()
+        voice_map[marker] = voice.strip()
 
     return voice_map or None
 

@@ -424,6 +424,28 @@ class TestBuildWorkflowInputs:
                 ],
             )
 
+    def test_derived_voice_map_uses_canonical_collision_suffixes(self):
+        from tldw_Server_API.app.core.Watchlists.audio_briefing_workflow import (
+            _build_workflow_inputs,
+        )
+
+        audio_cast = {
+            "speaker_count": 2,
+            "speakers": [
+                {"id": "a-b", "label": "One", "voice": "voice-one"},
+                {"id": "a_b", "label": "Two", "voice": "voice-two"},
+            ],
+        }
+
+        derived = _build_workflow_inputs([{"title": "Item", "summary": "Summary"}], {"audio_cast": audio_cast})
+        explicit = _build_workflow_inputs(
+            [{"title": "Item", "summary": "Summary"}],
+            {"audio_cast": audio_cast, "voice_map": {"A_B": "override-one"}},
+        )
+
+        assert derived["voice_map"] == {"A_B": "voice-one", "A_B_2": "voice-two"}
+        assert explicit["voice_map"] == {"A_B": "override-one"}
+
     def test_audio_cast_requires_unique_speaker_ids(self):
         from pydantic import ValidationError
 
