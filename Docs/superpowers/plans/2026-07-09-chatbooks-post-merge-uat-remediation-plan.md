@@ -166,7 +166,7 @@ git commit -m "fix: report completed chatbook jobs accurately"
 - Test: `apps/packages/ui/src/components/Option/Chatbooks/__tests__/ChatbooksPlaygroundPage.backup-all.test.tsx`
 - Create: `apps/packages/ui/src/components/Option/Chatbooks/__tests__/ChatbooksPlaygroundPage.accessibility.test.tsx`
 
-- [ ] **Step 1: Add failing accessibility assertions**
+- [x] **Step 1: Add failing accessibility assertions**
 
 Write tests for the complete common path:
 
@@ -178,7 +178,7 @@ Write tests for the complete common path:
 - Dropzone title/hint, progress text, and empty-state text use shared semantic foreground tokens in dark theme.
 - The 390px viewport has no horizontal overflow, clipped labels, or sub-44px primary touch target.
 
-- [ ] **Step 2: Run the UI tests and confirm failure**
+- [x] **Step 2: Run the UI tests and confirm failure**
 
 Run:
 
@@ -192,7 +192,7 @@ bunx vitest run \
 
 Expected: FAIL on required backup metadata, incomplete archive-impact preview, contradictory Include all count, missing programmatic labels, and dark-theme token violations.
 
-- [ ] **Step 3: Apply shared design tokens**
+- [x] **Step 3: Apply shared design tokens**
 
 For full-account mode, generate a useful localized backup name and plain description when fields are empty. Treat those fields as optional customization. Preserve explicit values when the user enters them.
 
@@ -200,24 +200,34 @@ After preview, show a compact `What will be restored` summary from the manifest/
 
 Move conflict resolution, prefixing, and background execution under an `Advanced options` disclosure for the normal archive path, using the existing safe defaults. Selective export and OpenWebUI-specific controls remain available without competing with Backup all.
 
-- [ ] **Step 4: Verify keyboard, focus, and contrast behavior**
+- [x] **Step 4: Verify keyboard, focus, and contrast behavior**
 
 Apply shared text tokens to the upload, progress, and empty-state descendants that currently inherit Ant Design black. Associate visible labels with all switches and selects using `aria-label`, `aria-labelledby`, or native label structure. Keep the upload area a keyboard-operable button.
 
 Use the live page in both themes at desktop and 390px mobile widths. Require WCAG AA text contrast, visible focus, no horizontal overflow, and stable layout at 200% zoom.
 
-- [ ] **Step 5: Re-run the complete Task 3 UI suite**
+- [x] **Step 5: Re-run the complete Task 3 UI suite**
 
 Run the same three-file Vitest command from Step 2.
 
 Expected: PASS with generated Backup all metadata, complete restore-impact preview, truthful Include all labels, named controls, and semantic dark-theme foreground tokens.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/packages/ui/src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx apps/packages/ui/src/components/Option/Chatbooks/__tests__/ChatbooksPlaygroundPage.openwebui-import.test.tsx apps/packages/ui/src/components/Option/Chatbooks/__tests__/ChatbooksPlaygroundPage.backup-all.test.tsx apps/packages/ui/src/components/Option/Chatbooks/__tests__/ChatbooksPlaygroundPage.accessibility.test.tsx
 git commit -m "fix: streamline accessible chatbook backup restore"
 ```
+
+Verification evidence: 20 focused Vitest cases passed, the frontend TypeScript
+check passed, and `git diff --check` passed. Live dark/light checks at 1440px,
+390px, and a 720px effective-width 200% reflow showed no horizontal overflow;
+the primary mobile action measured 358x44px. Upload text/hint contrast measured
+13.1:1/8.2:1 in dark mode and 15.1:1/5.7:1 in light mode. The final local
+quality review also corrected heading hierarchy, inventory-only preview copy,
+and warning-count disclosures without details. External subagent review was
+unavailable because the multi-agent service quota remained exhausted; no
+external approval is claimed.
 
 ## Task 4: Make Jobs Scannable, Trustworthy, And Recoverable
 
