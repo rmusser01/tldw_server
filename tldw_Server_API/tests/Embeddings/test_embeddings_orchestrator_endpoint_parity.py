@@ -70,7 +70,24 @@ def _ok_response(model: str = "patched-model") -> CreateEmbeddingResponse:
 
 class FakePrepared:
     def __init__(self, total_tokens: int = 2) -> None:
-        self.normalized_input = SimpleNamespace(total_tokens=total_tokens)
+        self.normalized_input = SimpleNamespace(
+            texts=["prepared input"],
+            total_tokens=total_tokens,
+        )
+        self.policy_decision = SimpleNamespace(
+            fallback_allowed=True,
+            fallback_chain=["huggingface"],
+        )
+        self.execution_plan = SimpleNamespace(
+            provider="huggingface",
+            model="sentence-transformers/all-MiniLM-L6-v2",
+            dimensions=None,
+            fallback_chain=["huggingface"],
+            execution_path="legacy",
+            cache_namespace=None,
+        )
+        self.prompt_tokens = total_tokens
+        self.total_tokens = total_tokens
 
 
 class FakeOrchestrator:
@@ -690,6 +707,76 @@ def test_flag_true_calls_orchestrator_path(client, monkeypatch):
     assert response.json()["model"] == "orchestrator-model"
     assert legacy.await_count == 0
     assert orchestrator.await_count == 1
+
+
+def test_orchestrator_path_uses_inline_workflow_runner_and_preserves_rg_reservation(client, monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import embeddings_v5_production_enhanced as mod
+
+    monkeypatch.setenv("EMBEDDINGS_ORCHESTRATOR_ENABLED", "true")
+    fake_orchestrator = FakeOrchestrator(
+        result=EmbeddingExecutionResult(
+            vectors=[[0.25, 0.75]],
+            provider="huggingface",
+            model="sentence-transformers/all-MiniLM-L6-v2",
+            prompt_tokens=3,
+            total_tokens=3,
+            cache_hits=0,
+            cache_misses=1,
+        )
+    )
+    runner_calls: list[tuple[str, object]] = []
+
+    monkeypatch.setattr(
+        mod,
+        "_build_embedding_request_orchestrator",
+        lambda *_args, **_kwargs: fake_orchestrator,
+        raising=False,
+    )
+
+    async def fake_reserve_embedding_rg_tokens(*, request, current_user, token_total):
+        del request, current_user
+        runner_calls.append(("reserved", token_total))
+        return None, None, None, token_total
+
+    monkeypatch.setattr(
+        mod,
+        "_reserve_embedding_rg_tokens",
+        fake_reserve_embedding_rg_tokens,
+        raising=False,
+    )
+
+    class RunnerProbe:
+        def __init__(self, orchestrator, *, trace_collector=None, pre_execute=None):
+            assert trace_collector is None
+            self.orchestrator = orchestrator
+            self.pre_execute = pre_execute
+
+        async def run(self, raw_input, context):
+            runner_calls.append(("runner_started", raw_input))
+            prepared = self.orchestrator.prepare(raw_input, context)
+            runner_calls.append(("prepared", prepared.normalized_input.total_tokens))
+            assert self.pre_execute is not None
+            await self.pre_execute(prepared)
+            result = await self.orchestrator.execute(prepared)
+            runner_calls.append(("executed", result.provider))
+            return result
+
+    monkeypatch.setattr(mod, "EmbeddingInlineWorkflowRunner", RunnerProbe, raising=False)
+
+    response = client.post(
+        "/api/v1/embeddings",
+        headers={"x-provider": "huggingface"},
+        json={"model": "sentence-transformers/all-MiniLM-L6-v2", "input": "workflow facade"},
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json()["data"][0]["index"] == 0
+    assert runner_calls == [
+        ("runner_started", "workflow facade"),
+        ("prepared", 3),
+        ("reserved", 3),
+        ("executed", "huggingface"),
+    ]
 
 
 def test_orchestrator_input_error_maps_to_current_400_shape(client, monkeypatch):
