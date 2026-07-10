@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections import Counter
 from collections.abc import Callable
 
@@ -96,6 +97,63 @@ def run_idempotent_create_preserves_original_request_ids_scenario(make_manager: 
     assert replay["request_id"] == "request-first"
     assert first["trace_id"] == "trace-first"
     assert replay["trace_id"] == "trace-first"
+
+
+def run_idempotent_create_replay_event_uses_current_request_ids_scenario(make_manager: ManagerFactory) -> None:
+    """Verify idempotent replay writes a current-context durable create event."""
+
+    jm = make_manager()
+    key = "idem-replay-event-key"
+
+    first = jm.create_job(
+        domain="parity",
+        queue="default",
+        job_type="idem-replay-event",
+        payload={},
+        owner_user_id="owner-1",
+        idempotency_key=key,
+        request_id="request-first",
+        trace_id="trace-first",
+    )
+    replay = jm.create_job(
+        domain="parity",
+        queue="default",
+        job_type="idem-replay-event",
+        payload={},
+        owner_user_id="owner-1",
+        idempotency_key=key,
+        request_id="request-replay",
+        trace_id="trace-replay",
+    )
+
+    assert int(first["id"]) == int(replay["id"])
+    assert replay["request_id"] == "request-first"
+    assert replay["trace_id"] == "trace-first"
+
+    events = jm.list_job_events_after(
+        after_id=0,
+        domain="parity",
+        queue="default",
+        job_type="idem-replay-event",
+        limit=20,
+    )
+    created_events = [event for event in events if event.get("event_type") == "job.created"]
+
+    assert len(created_events) == 2
+    assert created_events[0]["request_id"] == "request-first"
+    assert created_events[0]["trace_id"] == "trace-first"
+    assert created_events[1]["request_id"] == "request-replay"
+    assert created_events[1]["trace_id"] == "trace-replay"
+
+    first_attrs = created_events[0].get("attrs_json")
+    replay_attrs = created_events[1].get("attrs_json")
+    if isinstance(first_attrs, str):
+        first_attrs = json.loads(first_attrs)
+    if isinstance(replay_attrs, str):
+        replay_attrs = json.loads(replay_attrs)
+
+    assert first_attrs["idempotent"] is False
+    assert replay_attrs["idempotent"] is True
 
 
 def run_acquire_complete_lifecycle_scenario(make_manager: ManagerFactory) -> None:

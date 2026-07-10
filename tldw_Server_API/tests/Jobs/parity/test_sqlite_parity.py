@@ -13,6 +13,7 @@ from tldw_Server_API.tests.Jobs.parity.scenarios import (
     run_acquire_complete_lifecycle_scenario,
     run_cancel_terminal_noop_scenario,
     run_events_outbox_create_complete_scenario,
+    run_idempotent_create_replay_event_uses_current_request_ids_scenario,
     run_idempotent_create_preserves_original_request_ids_scenario,
     run_idempotent_create_scope_scenario,
     run_renew_stale_lease_noop_scenario,
@@ -44,6 +45,14 @@ def test_sqlite_idempotent_create_preserves_request_ids(sqlite_manager_factory: 
     """Run the request-id preservation scenario against SQLite."""
 
     run_idempotent_create_preserves_original_request_ids_scenario(sqlite_manager_factory)
+
+
+def test_sqlite_idempotent_create_replay_event_uses_current_request_ids(
+    sqlite_manager_factory: Callable[[], JobManager],
+) -> None:
+    """Run the idempotent replay event context scenario against SQLite."""
+
+    run_idempotent_create_replay_event_uses_current_request_ids_scenario(sqlite_manager_factory)
 
 
 def test_sqlite_acquire_complete_lifecycle(sqlite_manager_factory: Callable[[], JobManager]) -> None:

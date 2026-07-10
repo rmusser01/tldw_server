@@ -56,7 +56,7 @@ class CreateJobCommand:
     priority: int = 100
     max_retries: int = 3
     available_at: datetime | None = None
-    project_id: str | None = None
+    project_id: int | str | None = None
     batch_group: str | None = None
     request_id: str | None = None
     trace_id: str | None = None
@@ -91,8 +91,12 @@ class AdmissionResult:
             raise ValueError("only no-transition admission results may include a no-transition reason")
         if self.outcome is not OperationOutcome.ADMISSION_REJECTED and self.admission_rejection_reason is not None:
             raise ValueError("only rejected admission results may include a rejection reason")
-        if self.outcome is not OperationOutcome.APPLIED and self.durable_events:
-            raise ValueError("only applied admission results may include durable events")
+        can_include_durable_events = self.outcome is OperationOutcome.APPLIED or (
+            self.outcome is OperationOutcome.NO_TRANSITION
+            and self.no_transition_reason is NoTransitionReason.IDEMPOTENT_EXISTING
+        )
+        if not can_include_durable_events and self.durable_events:
+            raise ValueError("only applied or idempotent-existing admission results may include durable events")
         object.__setattr__(self, "row", copy.deepcopy(self.row) if self.row is not None else None)
         object.__setattr__(self, "durable_events", tuple(copy.deepcopy(event) for event in self.durable_events))
 
@@ -114,7 +118,12 @@ class AdmissionResult:
         )
 
     @classmethod
-    def existing(cls, *, row: dict[str, Any]) -> "AdmissionResult":
+    def existing(
+        cls,
+        *,
+        row: dict[str, Any],
+        durable_events: Sequence[dict[str, Any]] = (),
+    ) -> "AdmissionResult":
         """Build a no-transition result for an idempotent existing row."""
 
         return cls(
@@ -122,6 +131,7 @@ class AdmissionResult:
             row=row,
             was_inserted=False,
             no_transition_reason=NoTransitionReason.IDEMPOTENT_EXISTING,
+            durable_events=durable_events,
         )
 
     @classmethod

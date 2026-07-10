@@ -200,6 +200,51 @@ def test_idempotent_existing_create_fails_when_job_created_event_insert_fails_sq
         raise AssertionError("failing idempotent create-existing call must not add a new job row")
 
 
+def test_idempotent_replay_in_process_event_uses_current_context_sqlite(monkeypatch, tmp_path):
+    import tldw_Server_API.app.core.Jobs.manager as mgr
+
+    monkeypatch.setenv("JOBS_EVENTS_OUTBOX", "false")
+    emitted: list[dict] = []
+
+    def _emit(_event_type, **kwargs):
+        emitted.append(dict(kwargs))
+
+    monkeypatch.setattr(mgr, "emit_job_event", _emit)
+
+    db_path = tmp_path / "jobs_create_idem_current_context.db"
+    ensure_jobs_tables(db_path)
+    jm = JobManager(db_path)
+
+    jm.create_job(
+        domain="ps",
+        queue="default",
+        job_type="event-idem-current-context",
+        payload={"x": 1},
+        owner_user_id="u",
+        idempotency_key="stable-idem-current-context",
+        request_id="request-first",
+        trace_id="trace-first",
+    )
+    emitted.clear()
+
+    replay = jm.create_job(
+        domain="ps",
+        queue="default",
+        job_type="event-idem-current-context",
+        payload={"x": 2},
+        owner_user_id="u",
+        idempotency_key="stable-idem-current-context",
+        request_id="request-replay",
+        trace_id="trace-replay",
+    )
+
+    assert replay["request_id"] == "request-first"
+    assert replay["trace_id"] == "trace-first"
+    assert len(emitted) == 1
+    assert emitted[0]["job"]["request_id"] == "request-replay"
+    assert emitted[0]["job"]["trace_id"] == "trace-replay"
+
+
 def test_create_failure_does_not_increment_created_metric_sqlite(monkeypatch, tmp_path):
     import tldw_Server_API.app.core.Jobs.manager as mgr
 
