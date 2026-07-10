@@ -4,7 +4,7 @@ title: Prepare 0.1.40 release to main
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-07-10 03:25'
+updated_date: '2026-07-10 03:29'
 labels: []
 dependencies: []
 ---
@@ -34,12 +34,14 @@ Created isolated worktree .worktrees/release-main-0.1.40 from origin/dev on bran
 Prepared release branch codex/release-main-0.1.40 from origin/dev for main. Bumped package, FastAPI, README, and MkDocs release metadata to 0.1.40. Promoted current unreleased Chatbooks, chat document processing, CodeQL/security, media ingest, Guardian/audio/CI, and quiz/design-doc follow-up notes into 0.1.40 release notes and reset Unreleased.
 
 Verification: git diff --check passed; pyproject.toml and Docs/mkdocs.yml parsed successfully with project venv Python; python -m py_compile tldw_Server_API/app/main.py passed; Bandit on tldw_Server_API/app/main.py wrote /tmp/bandit_task_12943.json with 0 findings.
+
+PR opened against main: https://github.com/rmusser01/tldw_server/pull/2702
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Prepared the 0.1.40 release branch for a dev-to-main PR. Updated release metadata, changelog, README, published release notes, and Backlog tracking; verification and Bandit passed.
+Prepared the 0.1.40 release branch for a dev-to-main PR. Updated release metadata, changelog, README, published release notes, and Backlog tracking; verification and Bandit passed. PR: https://github.com/rmusser01/tldw_server/pull/2702
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
