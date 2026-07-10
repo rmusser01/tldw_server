@@ -1,4 +1,12 @@
 {
+  "accessibilityHardening": {
+    "source": { "toggleActive": "切换启用状态：{{name}}", "checkNow": "立即检查：{{name}}", "openWebsite": "打开来源网站：{{name}}", "openHealth": "打开来源状态：{{name}}", "edit": "编辑来源：{{name}}", "delete": "删除来源：{{name}}" },
+    "item": { "open": "打开更新：{{title}}", "select": "选择更新：{{title}}", "description": "{{state}}。来源：{{source}}。" },
+    "output": { "openNewTab": "在新标签页中打开 {{title}}", "chat": "讨论 {{title}}", "download": "下载 {{title}}", "close": "关闭预览：{{title}}" },
+    "health": { "show": "显示监视列表状态详情", "hide": "隐藏监视列表状态详情", "refresh": "刷新监视列表状态", "settings": "打开监视列表设置" },
+    "delivery": { "email": "启用后，将每份报告发送给已配置的收件人。", "chatbook": "启用后，将每份报告发布到 Chatbook。" },
+    "help": { "open": "打开监视列表帮助", "title": "监视列表帮助" }
+  },
   "items": {
     "queuedForBriefing": "已加入简报队列",
     "includeInNextBriefing": "加入下一次简报",

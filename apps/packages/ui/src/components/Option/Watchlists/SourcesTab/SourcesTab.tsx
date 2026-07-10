@@ -1217,10 +1217,15 @@ export const SourcesTab: React.FC = () => {
                   href={safeUrl}
                   target="_blank"
                   rel="noopener noreferrer"
+                  aria-label={t(
+                    "watchlists:accessibilityHardening.source.openWebsite",
+                    "Open source website: {{name}}",
+                    { name: record.name }
+                  )}
                   className="text-text-subtle hover:text-text-muted"
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <ExternalLink className="h-3.5 w-3.5" />
+                  <ExternalLink className="h-3.5 w-3.5" aria-hidden />
                 </a>
               </Tooltip>
             )}
@@ -1313,7 +1318,11 @@ export const SourcesTab: React.FC = () => {
               "Check now for {{count}} selected sources",
               { count: targetIds.length }
             )
-          : t("watchlists:sources.checkNowTooltip", "Check now")
+          : t(
+              "watchlists:accessibilityHardening.source.checkNow",
+              "Check now: {{name}}",
+              { name: record.name }
+            )
 
         return (
           <div className="flex items-center gap-1.5">
@@ -1331,7 +1340,7 @@ export const SourcesTab: React.FC = () => {
                 type="text"
                 size="small"
                 shape="circle"
-                icon={<RefreshCw className="h-3.5 w-3.5" />}
+                icon={<RefreshCw className="h-3.5 w-3.5" aria-hidden />}
                 loading={checkNowLoading}
                 aria-label={checkNowTooltip}
                 onClick={(event) => {
@@ -1355,7 +1364,7 @@ export const SourcesTab: React.FC = () => {
           <Switch
             checked={active}
             size="small"
-            aria-label={t("watchlists:sources.toggleActiveAria", "Toggle active for {{name}}", { name: record.name })}
+            aria-label={t("watchlists:accessibilityHardening.source.toggleActive", "Toggle active: {{name}}", { name: record.name })}
             onChange={() => handleToggleActive(record)}
           />
           <span className="text-xs text-text-muted">
@@ -1377,8 +1386,8 @@ export const SourcesTab: React.FC = () => {
             <Button
               type="text"
               size="small"
-              aria-label={t("common:edit", "Edit")}
-              icon={<Edit2 className="h-4 w-4" />}
+              aria-label={t("watchlists:accessibilityHardening.source.edit", "Edit source: {{name}}", { name: record.name })}
+              icon={<Edit2 className="h-4 w-4" aria-hidden />}
               onClick={() => handleOpenExistingSourceForm(record.id)}
             />
           </Tooltip>
@@ -1386,8 +1395,8 @@ export const SourcesTab: React.FC = () => {
             <Button
               type="text"
               size="small"
-              aria-label={t("watchlists:sources.seenInfo", "Source Health & Dedup Stats")}
-              icon={<Eye className="h-4 w-4" />}
+              aria-label={t("watchlists:accessibilityHardening.source.openHealth", "Open source health: {{name}}", { name: record.name })}
+              icon={<Eye className="h-4 w-4" aria-hidden />}
               onClick={() => setSeenDrawerSourceId(record.id)}
             />
           </Tooltip>
@@ -1405,8 +1414,8 @@ export const SourcesTab: React.FC = () => {
               type="text"
               size="small"
               danger
-              aria-label={t("common:delete", "Delete")}
-              icon={<Trash2 className="h-4 w-4" />}
+              aria-label={t("watchlists:accessibilityHardening.source.delete", "Delete source: {{name}}", { name: record.name })}
+              icon={<Trash2 className="h-4 w-4" aria-hidden />}
               onClick={() => void requestDeleteConfirmation(record)}
             />
           </Tooltip>
@@ -1526,7 +1535,7 @@ export const SourcesTab: React.FC = () => {
                 <Switch
                   checked={source.active}
                   size="small"
-                  aria-label={t("watchlists:sources.toggleActiveAria", "Toggle active for {{name}}", { name: source.name })}
+                  aria-label={t("watchlists:accessibilityHardening.source.toggleActive", "Toggle active: {{name}}", { name: source.name })}
                   onChange={() => handleToggleActive(source)}
                 />
                 <span className="text-xs text-text-muted">
@@ -1537,16 +1546,16 @@ export const SourcesTab: React.FC = () => {
                 <Button
                   type="text"
                   size="small"
-                  aria-label={t("watchlists:sources.checkNowForSourceAria", "Check now for {{name}}", { name: source.name })}
-                  icon={<RefreshCw className="h-4 w-4" />}
+                  aria-label={t("watchlists:accessibilityHardening.source.checkNow", "Check now: {{name}}", { name: source.name })}
+                  icon={<RefreshCw className="h-4 w-4" aria-hidden />}
                   loading={checkNowLoading}
                   onClick={() => requestCheckNow(targetIds)}
                 />
                 <Button
                   type="text"
                   size="small"
-                  aria-label={t("watchlists:sources.seenInfoForSourceAria", "Source Health & Dedup Stats for {{name}}", { name: source.name })}
-                  icon={<Eye className="h-4 w-4" />}
+                  aria-label={t("watchlists:accessibilityHardening.source.openHealth", "Open source health: {{name}}", { name: source.name })}
+                  icon={<Eye className="h-4 w-4" aria-hidden />}
                   onClick={() => setSeenDrawerSourceId(source.id)}
                 />
                 <Button
@@ -1559,16 +1568,16 @@ export const SourcesTab: React.FC = () => {
                 <Button
                   type="text"
                   size="small"
-                  aria-label={t("watchlists:sources.editSourceAria", "Edit {{name}}", { name: source.name })}
-                  icon={<Edit2 className="h-4 w-4" />}
+                  aria-label={t("watchlists:accessibilityHardening.source.edit", "Edit source: {{name}}", { name: source.name })}
+                  icon={<Edit2 className="h-4 w-4" aria-hidden />}
                   onClick={() => handleOpenExistingSourceForm(source.id)}
                 />
                 <Button
                   type="text"
                   size="small"
                   danger
-                  aria-label={t("watchlists:sources.deleteSourceAria", "Delete {{name}}", { name: source.name })}
-                  icon={<Trash2 className="h-4 w-4" />}
+                  aria-label={t("watchlists:accessibilityHardening.source.delete", "Delete source: {{name}}", { name: source.name })}
+                  icon={<Trash2 className="h-4 w-4" aria-hidden />}
                   onClick={() => void requestDeleteConfirmation(source)}
                 />
               </Space>

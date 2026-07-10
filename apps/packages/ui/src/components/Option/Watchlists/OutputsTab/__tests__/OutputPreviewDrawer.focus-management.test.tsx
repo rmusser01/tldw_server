@@ -11,20 +11,26 @@ const serviceMocks = vi.hoisted(() => ({
   downloadWatchlistOutputBinary: vi.fn(),
   getWatchlistOutputEvidence: vi.fn()
 }))
+const viewportMocks = vi.hoisted(() => ({ isConstrained: false }))
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (
       key: string,
-      fallbackOrOptions?: string | { defaultValue?: string }
+      fallbackOrOptions?: string | { defaultValue?: string },
+      maybeOptions?: Record<string, unknown>
     ) => {
-      if (typeof fallbackOrOptions === "string") return fallbackOrOptions
+      const interpolate = (template: string) => template.replace(/\{\{(\w+)\}\}/g, (_match, token) => {
+        const value = maybeOptions?.[token]
+        return value == null ? "" : String(value)
+      })
+      if (typeof fallbackOrOptions === "string") return interpolate(fallbackOrOptions)
       if (
         fallbackOrOptions &&
         typeof fallbackOrOptions === "object" &&
         typeof fallbackOrOptions.defaultValue === "string"
       ) {
-        return fallbackOrOptions.defaultValue
+        return interpolate(fallbackOrOptions.defaultValue)
       }
       return key
     }
@@ -32,7 +38,7 @@ vi.mock("react-i18next", () => ({
 }))
 
 vi.mock("antd", () => {
-  const Drawer = ({ open, title, extra, children, onClose, afterOpenChange }: any) => {
+  const Drawer = ({ open, title, extra, children, onClose, afterOpenChange, size, closable }: any) => {
     const closeRef = React.useRef<HTMLButtonElement | null>(null)
     React.useEffect(() => {
       afterOpenChange?.(open)
@@ -43,21 +49,26 @@ vi.mock("antd", () => {
 
     if (!open) return null
     return (
-      <div>
+      <div data-testid="output-preview-drawer" data-size={size} data-closable={String(closable)}>
         <div>{title}</div>
         {extra}
-        <button type="button" ref={closeRef} onClick={() => onClose?.()}>
-          Close drawer
-        </button>
+        {closable !== false ? (
+          <button type="button" ref={closeRef} onClick={() => onClose?.()}>
+            Close drawer
+          </button>
+        ) : null}
         {children}
       </div>
     )
   }
 
-  const Button = ({ children, onClick, disabled }: any) => (
-    <button type="button" disabled={Boolean(disabled)} onClick={() => onClick?.()}>
-      {children}
-    </button>
+  const Button = React.forwardRef<HTMLButtonElement, any>(
+    ({ children, onClick, disabled, icon, ...rest }, ref) => (
+      <button ref={ref} type="button" disabled={Boolean(disabled)} onClick={() => onClick?.()} {...rest}>
+        {icon}
+        {children}
+      </button>
+    )
   )
 
   return {
@@ -103,6 +114,10 @@ vi.mock("@/services/watchlists", () => ({
     serviceMocks.getWatchlistOutputEvidence(...args)
 }))
 
+vi.mock("../../shared/useWatchlistsViewport", () => ({
+  useWatchlistsViewport: () => ({ isConstrained: viewportMocks.isConstrained })
+}))
+
 const buildOutput = (overrides: Partial<WatchlistOutput> = {}): WatchlistOutput => ({
   id: 77,
   run_id: 3,
@@ -123,7 +138,34 @@ const buildOutput = (overrides: Partial<WatchlistOutput> = {}): WatchlistOutput 
 })
 
 describe("OutputPreviewDrawer focus management", () => {
+  it("names preview actions, focuses close, and fits the constrained drawer", async () => {
+    viewportMocks.isConstrained = true
+    serviceMocks.downloadWatchlistOutput.mockResolvedValue("<p>Morning brief</p>")
+    serviceMocks.downloadWatchlistOutputBinary.mockResolvedValue(new ArrayBuffer(0))
+    serviceMocks.getWatchlistOutputEvidence.mockResolvedValue({
+      output_id: 77,
+      immutable_snapshot: false,
+      snapshot: null,
+      readiness: { state: "legacy_live_only", score: 0, warnings: [] }
+    })
+
+    render(
+      <OutputPreviewDrawer
+        open
+        output={buildOutput({ format: "html" })}
+        onClose={vi.fn()}
+      />
+    )
+
+    expect(await screen.findByRole("button", { name: "Close preview: Morning Brief" })).toHaveFocus()
+    expect(screen.getByRole("button", { name: "Open Morning Brief in new tab" })).toBeVisible()
+    expect(screen.getByRole("button", { name: "Chat about Morning Brief" })).toBeVisible()
+    expect(screen.getByRole("button", { name: "Download Morning Brief" })).toBeVisible()
+    expect(screen.getByTestId("output-preview-drawer")).toHaveAttribute("data-size", "100%")
+  })
+
   it("restores focus to the launch control after the drawer closes", async () => {
+    viewportMocks.isConstrained = false
     serviceMocks.downloadWatchlistOutput.mockResolvedValue("# Morning brief")
     serviceMocks.downloadWatchlistOutputBinary.mockResolvedValue(new ArrayBuffer(0))
     serviceMocks.getWatchlistOutputEvidence.mockResolvedValue({
@@ -152,7 +194,7 @@ describe("OutputPreviewDrawer focus management", () => {
     )
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Close drawer" })).toHaveFocus()
+      expect(screen.getByRole("button", { name: "Close preview: Morning Brief" })).toHaveFocus()
     })
 
     rerender(

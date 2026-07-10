@@ -132,10 +132,29 @@ describe("WatchlistsHealthBar", () => {
     })
 
     fireEvent.click(screen.getByTestId("watchlists-health-setup-feeds"))
-    fireEvent.click(screen.getByTestId("watchlists-health-setup-monitors"))
-
     expect(onNavigate).toHaveBeenCalledWith("sources")
-    expect(onNavigate).toHaveBeenCalledWith("jobs")
+  })
+
+  it("names global health controls and offers one setup recovery action", async () => {
+    const onNavigate = vi.fn()
+    const onOpenSettings = vi.fn()
+    render(
+      <WatchlistsHealthBar
+        onNavigate={onNavigate}
+        onOpenSettings={onOpenSettings}
+      />
+    )
+
+    await screen.findByText("No watchlist data yet")
+
+    const disclosure = screen.getByRole("button", {
+      name: "Show Watchlists health details"
+    })
+    expect(disclosure).toHaveAttribute("aria-describedby", "watchlists-health-bar-summary")
+    expect(screen.getByRole("button", { name: "Refresh Watchlists health" })).toBeVisible()
+    expect(screen.getByRole("button", { name: "Open Watchlists settings" })).toBeVisible()
+    expect(screen.getByTestId("watchlists-health-setup-feeds")).toBeVisible()
+    expect(screen.queryByTestId("watchlists-health-setup-monitors")).not.toBeInTheDocument()
   })
 
   it("places failed run recovery next to the Activity health state", async () => {
@@ -189,7 +208,7 @@ describe("WatchlistsHealthBar", () => {
       expect(screen.getByTestId("watchlists-health-bar-summary")).toHaveTextContent("2 failed")
     })
 
-    fireEvent.click(screen.getByLabelText("Toggle health bar"))
+    fireEvent.click(screen.getByLabelText("Show Watchlists health details"))
     fireEvent.click(screen.getByTestId("watchlists-health-open-activity"))
 
     expect(onNavigate).toHaveBeenCalledWith("runs")

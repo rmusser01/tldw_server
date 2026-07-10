@@ -1069,5 +1069,68 @@
   },
   "overview_latest_status_partial": {
     "message": "部分完成"
+  },
+  "accessibilityHardening_source_toggleActive": {
+    "message": "切換啟用狀態：{{name}}"
+  },
+  "accessibilityHardening_source_checkNow": {
+    "message": "立即檢查：{{name}}"
+  },
+  "accessibilityHardening_source_openWebsite": {
+    "message": "開啟來源網站：{{name}}"
+  },
+  "accessibilityHardening_source_openHealth": {
+    "message": "開啟來源狀態：{{name}}"
+  },
+  "accessibilityHardening_source_edit": {
+    "message": "編輯來源：{{name}}"
+  },
+  "accessibilityHardening_source_delete": {
+    "message": "刪除來源：{{name}}"
+  },
+  "accessibilityHardening_item_open": {
+    "message": "開啟更新：{{title}}"
+  },
+  "accessibilityHardening_item_select": {
+    "message": "選取更新：{{title}}"
+  },
+  "accessibilityHardening_item_description": {
+    "message": "{{state}}。來源：{{source}}。"
+  },
+  "accessibilityHardening_output_openNewTab": {
+    "message": "在新分頁中開啟 {{title}}"
+  },
+  "accessibilityHardening_output_chat": {
+    "message": "討論 {{title}}"
+  },
+  "accessibilityHardening_output_download": {
+    "message": "下載 {{title}}"
+  },
+  "accessibilityHardening_output_close": {
+    "message": "關閉預覽：{{title}}"
+  },
+  "accessibilityHardening_health_show": {
+    "message": "顯示監看清單狀態詳情"
+  },
+  "accessibilityHardening_health_hide": {
+    "message": "隱藏監看清單狀態詳情"
+  },
+  "accessibilityHardening_health_refresh": {
+    "message": "重新整理監看清單狀態"
+  },
+  "accessibilityHardening_health_settings": {
+    "message": "開啟監看清單設定"
+  },
+  "accessibilityHardening_delivery_email": {
+    "message": "啟用後，將每份報告傳送給已設定的收件者。"
+  },
+  "accessibilityHardening_delivery_chatbook": {
+    "message": "啟用後，將每份報告發佈到 Chatbook。"
+  },
+  "accessibilityHardening_help_open": {
+    "message": "開啟監看清單說明"
+  },
+  "accessibilityHardening_help_title": {
+    "message": "監看清單說明"
   }
 }

@@ -1087,5 +1087,68 @@
   },
   "overview_latest_status_partial": {
     "message": "Частично"
+  },
+  "accessibilityHardening_source_toggleActive": {
+    "message": "Переключить активность: {{name}}"
+  },
+  "accessibilityHardening_source_checkNow": {
+    "message": "Проверить сейчас: {{name}}"
+  },
+  "accessibilityHardening_source_openWebsite": {
+    "message": "Открыть сайт источника: {{name}}"
+  },
+  "accessibilityHardening_source_openHealth": {
+    "message": "Открыть состояние источника: {{name}}"
+  },
+  "accessibilityHardening_source_edit": {
+    "message": "Изменить источник: {{name}}"
+  },
+  "accessibilityHardening_source_delete": {
+    "message": "Удалить источник: {{name}}"
+  },
+  "accessibilityHardening_item_open": {
+    "message": "Открыть обновление: {{title}}"
+  },
+  "accessibilityHardening_item_select": {
+    "message": "Выбрать обновление: {{title}}"
+  },
+  "accessibilityHardening_item_description": {
+    "message": "{{state}}. Источник: {{source}}."
+  },
+  "accessibilityHardening_output_openNewTab": {
+    "message": "Открыть {{title}} в новой вкладке"
+  },
+  "accessibilityHardening_output_chat": {
+    "message": "Обсудить {{title}}"
+  },
+  "accessibilityHardening_output_download": {
+    "message": "Скачать {{title}}"
+  },
+  "accessibilityHardening_output_close": {
+    "message": "Закрыть предпросмотр: {{title}}"
+  },
+  "accessibilityHardening_health_show": {
+    "message": "Показать сведения о состоянии списков наблюдения"
+  },
+  "accessibilityHardening_health_hide": {
+    "message": "Скрыть сведения о состоянии списков наблюдения"
+  },
+  "accessibilityHardening_health_refresh": {
+    "message": "Обновить состояние списков наблюдения"
+  },
+  "accessibilityHardening_health_settings": {
+    "message": "Открыть настройки списков наблюдения"
+  },
+  "accessibilityHardening_delivery_email": {
+    "message": "При включении отправлять каждый отчёт настроенным получателям."
+  },
+  "accessibilityHardening_delivery_chatbook": {
+    "message": "При включении публиковать каждый отчёт в Chatbook."
+  },
+  "accessibilityHardening_help_open": {
+    "message": "Открыть справку по спискам наблюдения"
+  },
+  "accessibilityHardening_help_title": {
+    "message": "Справка по спискам наблюдения"
   }
 }

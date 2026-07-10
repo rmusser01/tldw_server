@@ -638,6 +638,26 @@ describe("JobFormModal live summary", () => {
     expect(payload.output_prefs).not.toHaveProperty("auto_output")
   }, 15_000)
 
+  it("names report, delivery, and audio switches with their consequences", async () => {
+    render(<JobFormModal open onClose={vi.fn()} onSuccess={vi.fn()} />)
+
+    await waitFor(() => {
+      expect(servicesMock.fetchWatchlistSources).toHaveBeenCalled()
+    })
+    fireEvent.click(screen.getByTestId("job-form-mode-advanced"))
+    fireEvent.click(screen.getByText("Output & Delivery"))
+
+    expect(screen.getByRole("switch", { name: "Reports storage" }))
+      .toHaveAttribute("aria-describedby", "job-form-report-output-description")
+    expect(screen.getByRole("switch", { name: "Email delivery" }))
+      .toHaveAttribute("aria-describedby", "job-form-email-delivery-description")
+    expect(screen.getByRole("switch", { name: "Attach output file" })).toBeInTheDocument()
+    expect(screen.getByRole("switch", { name: "Chatbook delivery" }))
+      .toHaveAttribute("aria-describedby", "job-form-chatbook-delivery-description")
+    expect(screen.getByRole("switch", { name: "Audio briefing" }))
+      .toHaveAttribute("aria-describedby", "job-form-audio-description")
+  }, 15_000)
+
   it("keeps required scheduled reports enabled in the canonical contract", async () => {
     render(<JobFormModal open onClose={vi.fn()} onSuccess={vi.fn()} />)
 

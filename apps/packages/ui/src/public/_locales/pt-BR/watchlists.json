@@ -1078,5 +1078,68 @@
   },
   "overview_latest_status_partial": {
     "message": "Parcial"
+  },
+  "accessibilityHardening_source_toggleActive": {
+    "message": "Alternar estado ativo: {{name}}"
+  },
+  "accessibilityHardening_source_checkNow": {
+    "message": "Verificar agora: {{name}}"
+  },
+  "accessibilityHardening_source_openWebsite": {
+    "message": "Abrir site da fonte: {{name}}"
+  },
+  "accessibilityHardening_source_openHealth": {
+    "message": "Abrir estado da fonte: {{name}}"
+  },
+  "accessibilityHardening_source_edit": {
+    "message": "Editar fonte: {{name}}"
+  },
+  "accessibilityHardening_source_delete": {
+    "message": "Excluir fonte: {{name}}"
+  },
+  "accessibilityHardening_item_open": {
+    "message": "Abrir atualização: {{title}}"
+  },
+  "accessibilityHardening_item_select": {
+    "message": "Selecionar atualização: {{title}}"
+  },
+  "accessibilityHardening_item_description": {
+    "message": "{{state}}. Fonte: {{source}}."
+  },
+  "accessibilityHardening_output_openNewTab": {
+    "message": "Abrir {{title}} em uma nova guia"
+  },
+  "accessibilityHardening_output_chat": {
+    "message": "Conversar sobre {{title}}"
+  },
+  "accessibilityHardening_output_download": {
+    "message": "Baixar {{title}}"
+  },
+  "accessibilityHardening_output_close": {
+    "message": "Fechar visualização: {{title}}"
+  },
+  "accessibilityHardening_health_show": {
+    "message": "Mostrar detalhes de status das listas de acompanhamento"
+  },
+  "accessibilityHardening_health_hide": {
+    "message": "Ocultar detalhes de status das listas de acompanhamento"
+  },
+  "accessibilityHardening_health_refresh": {
+    "message": "Atualizar status das listas de acompanhamento"
+  },
+  "accessibilityHardening_health_settings": {
+    "message": "Abrir configurações das listas de acompanhamento"
+  },
+  "accessibilityHardening_delivery_email": {
+    "message": "Enviar cada relatório aos destinatários configurados quando ativado."
+  },
+  "accessibilityHardening_delivery_chatbook": {
+    "message": "Publicar cada relatório no Chatbook quando ativado."
+  },
+  "accessibilityHardening_help_open": {
+    "message": "Abrir ajuda das listas de acompanhamento"
+  },
+  "accessibilityHardening_help_title": {
+    "message": "Ajuda das listas de acompanhamento"
   }
 }

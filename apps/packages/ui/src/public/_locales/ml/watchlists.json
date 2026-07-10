@@ -1069,5 +1069,68 @@
   },
   "overview_latest_status_partial": {
     "message": "ഭാഗികം"
+  },
+  "accessibilityHardening_source_toggleActive": {
+    "message": "സജീവ നില മാറ്റുക: {{name}}"
+  },
+  "accessibilityHardening_source_checkNow": {
+    "message": "ഇപ്പോൾ പരിശോധിക്കുക: {{name}}"
+  },
+  "accessibilityHardening_source_openWebsite": {
+    "message": "ഉറവിട വെബ്‌സൈറ്റ് തുറക്കുക: {{name}}"
+  },
+  "accessibilityHardening_source_openHealth": {
+    "message": "ഉറവിട നില തുറക്കുക: {{name}}"
+  },
+  "accessibilityHardening_source_edit": {
+    "message": "ഉറവിടം തിരുത്തുക: {{name}}"
+  },
+  "accessibilityHardening_source_delete": {
+    "message": "ഉറവിടം ഇല്ലാതാക്കുക: {{name}}"
+  },
+  "accessibilityHardening_item_open": {
+    "message": "അപ്‌ഡേറ്റ് തുറക്കുക: {{title}}"
+  },
+  "accessibilityHardening_item_select": {
+    "message": "അപ്‌ഡേറ്റ് തിരഞ്ഞെടുക്കുക: {{title}}"
+  },
+  "accessibilityHardening_item_description": {
+    "message": "{{state}}. ഉറവിടം: {{source}}."
+  },
+  "accessibilityHardening_output_openNewTab": {
+    "message": "{{title}} പുതിയ ടാബിൽ തുറക്കുക"
+  },
+  "accessibilityHardening_output_chat": {
+    "message": "{{title}} സംബന്ധിച്ച് ചാറ്റ് ചെയ്യുക"
+  },
+  "accessibilityHardening_output_download": {
+    "message": "{{title}} ഡൗൺലോഡ് ചെയ്യുക"
+  },
+  "accessibilityHardening_output_close": {
+    "message": "പ്രിവ്യൂ അടയ്ക്കുക: {{title}}"
+  },
+  "accessibilityHardening_health_show": {
+    "message": "വാച്ച്‌ലിസ്റ്റ് നിലയുടെ വിശദാംശങ്ങൾ കാണിക്കുക"
+  },
+  "accessibilityHardening_health_hide": {
+    "message": "വാച്ച്‌ലിസ്റ്റ് നിലയുടെ വിശദാംശങ്ങൾ മറയ്ക്കുക"
+  },
+  "accessibilityHardening_health_refresh": {
+    "message": "വാച്ച്‌ലിസ്റ്റ് നില പുതുക്കുക"
+  },
+  "accessibilityHardening_health_settings": {
+    "message": "വാച്ച്‌ലിസ്റ്റ് ക്രമീകരണങ്ങൾ തുറക്കുക"
+  },
+  "accessibilityHardening_delivery_email": {
+    "message": "പ്രവർത്തനക്ഷമമാക്കിയാൽ ഓരോ റിപ്പോർട്ടും ക്രമീകരിച്ച സ്വീകർത്താക്കൾക്ക് അയയ്ക്കുക."
+  },
+  "accessibilityHardening_delivery_chatbook": {
+    "message": "പ്രവർത്തനക്ഷമമാക്കിയാൽ ഓരോ റിപ്പോർട്ടും Chatbook-ൽ പ്രസിദ്ധീകരിക്കുക."
+  },
+  "accessibilityHardening_help_open": {
+    "message": "വാച്ച്‌ലിസ്റ്റ് സഹായം തുറക്കുക"
+  },
+  "accessibilityHardening_help_title": {
+    "message": "വാച്ച്‌ലിസ്റ്റ് സഹായം"
   }
 }

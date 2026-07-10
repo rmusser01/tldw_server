@@ -1,4 +1,12 @@
 {
+  "accessibilityHardening": {
+    "source": { "toggleActive": "Aktivstatus umschalten: {{name}}", "checkNow": "Jetzt prüfen: {{name}}", "openWebsite": "Quellwebsite öffnen: {{name}}", "openHealth": "Quellstatus öffnen: {{name}}", "edit": "Quelle bearbeiten: {{name}}", "delete": "Quelle löschen: {{name}}" },
+    "item": { "open": "Aktualisierung öffnen: {{title}}", "select": "Aktualisierung auswählen: {{title}}", "description": "{{state}}. Quelle: {{source}}." },
+    "output": { "openNewTab": "{{title}} in neuem Tab öffnen", "chat": "Über {{title}} chatten", "download": "{{title}} herunterladen", "close": "Vorschau schließen: {{title}}" },
+    "health": { "show": "Statusdetails der Watchlists anzeigen", "hide": "Statusdetails der Watchlists ausblenden", "refresh": "Watchlists-Status aktualisieren", "settings": "Watchlists-Einstellungen öffnen" },
+    "delivery": { "email": "Bei Aktivierung jeden Bericht an die konfigurierten Empfänger senden.", "chatbook": "Bei Aktivierung jeden Bericht in Chatbook veröffentlichen." },
+    "help": { "open": "Watchlists-Hilfe öffnen", "title": "Watchlists-Hilfe" }
+  },
   "items": {
     "queuedForBriefing": "Für Briefing vorgemerkt",
     "includeInNextBriefing": "In nächstes Briefing aufnehmen",

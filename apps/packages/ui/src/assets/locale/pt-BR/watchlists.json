@@ -1,4 +1,12 @@
 {
+  "accessibilityHardening": {
+    "source": { "toggleActive": "Alternar estado ativo: {{name}}", "checkNow": "Verificar agora: {{name}}", "openWebsite": "Abrir site da fonte: {{name}}", "openHealth": "Abrir estado da fonte: {{name}}", "edit": "Editar fonte: {{name}}", "delete": "Excluir fonte: {{name}}" },
+    "item": { "open": "Abrir atualização: {{title}}", "select": "Selecionar atualização: {{title}}", "description": "{{state}}. Fonte: {{source}}." },
+    "output": { "openNewTab": "Abrir {{title}} em uma nova guia", "chat": "Conversar sobre {{title}}", "download": "Baixar {{title}}", "close": "Fechar visualização: {{title}}" },
+    "health": { "show": "Mostrar detalhes de status das listas de acompanhamento", "hide": "Ocultar detalhes de status das listas de acompanhamento", "refresh": "Atualizar status das listas de acompanhamento", "settings": "Abrir configurações das listas de acompanhamento" },
+    "delivery": { "email": "Enviar cada relatório aos destinatários configurados quando ativado.", "chatbook": "Publicar cada relatório no Chatbook quando ativado." },
+    "help": { "open": "Abrir ajuda das listas de acompanhamento", "title": "Ajuda das listas de acompanhamento" }
+  },
   "items": {
     "queuedForBriefing": "Na fila para briefing",
     "includeInNextBriefing": "Incluir no próximo briefing",

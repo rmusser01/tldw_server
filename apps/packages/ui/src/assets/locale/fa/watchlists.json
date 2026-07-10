@@ -1,4 +1,12 @@
 {
+  "accessibilityHardening": {
+    "source": { "toggleActive": "تغییر وضعیت فعال: {{name}}", "checkNow": "اکنون بررسی شود: {{name}}", "openWebsite": "باز کردن وب‌سایت منبع: {{name}}", "openHealth": "باز کردن وضعیت منبع: {{name}}", "edit": "ویرایش منبع: {{name}}", "delete": "حذف منبع: {{name}}" },
+    "item": { "open": "باز کردن به‌روزرسانی: {{title}}", "select": "انتخاب به‌روزرسانی: {{title}}", "description": "{{state}}. منبع: {{source}}." },
+    "output": { "openNewTab": "باز کردن {{title}} در زبانه جدید", "chat": "گفتگو درباره {{title}}", "download": "بارگیری {{title}}", "close": "بستن پیش‌نمایش: {{title}}" },
+    "health": { "show": "نمایش جزئیات وضعیت فهرست‌های پایش", "hide": "پنهان کردن جزئیات وضعیت فهرست‌های پایش", "refresh": "تازه‌سازی وضعیت فهرست‌های پایش", "settings": "باز کردن تنظیمات فهرست‌های پایش" },
+    "delivery": { "email": "در صورت فعال بودن، هر گزارش به گیرندگان تنظیم‌شده ارسال شود.", "chatbook": "در صورت فعال بودن، هر گزارش در Chatbook منتشر شود." },
+    "help": { "open": "باز کردن راهنمای فهرست‌های پایش", "title": "راهنمای فهرست‌های پایش" }
+  },
   "items": {
     "queuedForBriefing": "در صف گزارش",
     "includeInNextBriefing": "افزودن به گزارش بعدی",

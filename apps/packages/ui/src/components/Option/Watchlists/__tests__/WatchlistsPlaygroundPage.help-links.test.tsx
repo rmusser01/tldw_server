@@ -346,14 +346,17 @@ describe("WatchlistsPlaygroundPage help surfaces", () => {
 
   it("shows persistent docs links and tab-context help link", () => {
     render(<WatchlistsPlaygroundPage />)
+    fireEvent.click(screen.getByTestId("watchlists-help-icon"))
 
     expect(screen.getByTestId("watchlists-main-docs-link")).toHaveAttribute("href", WATCHLISTS_MAIN_DOCS_URL)
     expect(screen.getByTestId("watchlists-context-docs-link")).toHaveAttribute(
       "href",
       WATCHLISTS_TAB_HELP_DOCS.sources
     )
-    expect(screen.getByTestId("watchlists-beta-docs-link")).toHaveAttribute("href", WATCHLISTS_MAIN_DOCS_URL)
-    expect(screen.getByTestId("watchlists-beta-report-link")).toHaveAttribute("href", WATCHLISTS_ISSUE_REPORT_URL)
+    expect(screen.getByRole("link", { name: "Report an issue" })).toHaveAttribute(
+      "href",
+      WATCHLISTS_ISSUE_REPORT_URL
+    )
   })
 
   it("keeps context docs routing aligned with each canonical tab help label", () => {
@@ -373,6 +376,7 @@ describe("WatchlistsPlaygroundPage help surfaces", () => {
     ]
 
     const { rerender } = render(<WatchlistsPlaygroundPage />)
+    fireEvent.click(screen.getByTestId("watchlists-help-icon"))
     const link = () => screen.getByTestId("watchlists-context-docs-link")
 
     for (const expectation of expectations) {
@@ -393,32 +397,29 @@ describe("WatchlistsPlaygroundPage help surfaces", () => {
     expect(screen.getByTestId("watchlists-tab-items")).toHaveTextContent("Updates")
     expect(screen.getByTestId("watchlists-tab-outputs")).toHaveTextContent("Reports")
 
-    expect(screen.getByTestId("watchlists-task-open-sources")).toHaveTextContent("Set up feeds")
-    expect(screen.getByTestId("watchlists-task-open-jobs")).toHaveTextContent("Configure monitors")
-    expect(screen.getByTestId("watchlists-task-open-runs")).toHaveTextContent("Check activity")
-    expect(screen.getByTestId("watchlists-task-open-items")).toHaveTextContent("Review updates")
-    expect(screen.getByTestId("watchlists-task-open-outputs")).toHaveTextContent("View reports")
+    expect(screen.queryByTestId("watchlists-task-open-sources")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("watchlists-repeat-actions")).not.toBeInTheDocument()
   })
 
-  it("keeps beta banner dismissible and persisted by storage key", () => {
-    const { rerender } = render(<WatchlistsPlaygroundPage />)
-
-    expect(screen.getByText("Beta Feature")).toBeInTheDocument()
-    const betaBanner = screen.getByText("Beta Feature").parentElement
-    expect(betaBanner).not.toBeNull()
-    if (!betaBanner) throw new Error("Expected beta banner container to exist")
-    fireEvent.click(within(betaBanner).getByRole("button", { name: "Dismiss" }))
+  it("keeps beta guidance out of the first viewport and available through Help", () => {
+    render(<WatchlistsPlaygroundPage />)
 
     expect(screen.queryByText("Beta Feature")).not.toBeInTheDocument()
-    expect(localStorage.getItem("beta-dismissed:watchlists")).toBe("1")
-
-    rerender(<WatchlistsPlaygroundPage />)
-    expect(screen.queryByText("Beta Feature")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("watchlists-help-icon"))
+    expect(screen.getByTestId("watchlists-main-docs-link")).toHaveAttribute(
+      "href",
+      WATCHLISTS_MAIN_DOCS_URL
+    )
+    expect(screen.getByRole("link", { name: "Report an issue" })).toHaveAttribute(
+      "href",
+      WATCHLISTS_ISSUE_REPORT_URL
+    )
   })
 
   it("supports guided-tour start and resume with persisted progress", () => {
     const { unmount } = render(<WatchlistsPlaygroundPage />)
 
+    fireEvent.click(screen.getByTestId("watchlists-help-icon"))
     fireEvent.click(screen.getByTestId("watchlists-start-guide"))
     expect(screen.getByText("Watchlists guided tour")).toBeInTheDocument()
     expect(screen.getByText("Step 1 of 5")).toBeInTheDocument()
@@ -446,6 +447,7 @@ describe("WatchlistsPlaygroundPage help surfaces", () => {
     unmount()
     render(<WatchlistsPlaygroundPage />)
 
+    fireEvent.click(screen.getByTestId("watchlists-help-icon"))
     expect(screen.getByTestId("watchlists-resume-guide")).toBeInTheDocument()
     fireEvent.click(screen.getByTestId("watchlists-resume-guide"))
     expect(screen.getByText("Watchlists guided tour")).toBeInTheDocument()
@@ -459,26 +461,27 @@ describe("WatchlistsPlaygroundPage help surfaces", () => {
   it("shows first-time teach points for jobs/templates and persists dismissal", () => {
     mocks.state.activeTab = "jobs"
     const { rerender } = render(<WatchlistsPlaygroundPage />)
+    fireEvent.click(screen.getByTestId("watchlists-help-icon"))
 
-    expect(screen.getByTestId("watchlists-teach-point-title")).toHaveTextContent("Monitor setup tip")
-    expect(screen.getByTestId("watchlists-teach-point-description")).toHaveTextContent(
+    expect(screen.getByText("Monitor setup tip")).toBeInTheDocument()
+    expect(screen.getByText(
       "Start with schedule presets first. Use cron and advanced filters only after your first successful Activity check."
-    )
+    )).toBeInTheDocument()
     fireEvent.click(
-      within(screen.getByTestId("watchlists-teach-point-alert")).getByRole("button", { name: "Dismiss" })
+      within(screen.getByTestId("watchlists-help-panel")).getByRole("button", { name: "Dismiss" })
     )
 
     const persisted = JSON.parse(localStorage.getItem("watchlists:teach-points:v1") || "{}")
     expect(persisted.jobsCronFilters).toBe(true)
 
     rerender(<WatchlistsPlaygroundPage />)
-    expect(screen.queryByTestId("watchlists-teach-point-title")).not.toBeInTheDocument()
+    expect(screen.queryByText("Monitor setup tip")).not.toBeInTheDocument()
 
     mocks.state.activeTab = "templates"
     rerender(<WatchlistsPlaygroundPage />)
-    expect(screen.getByTestId("watchlists-teach-point-title")).toHaveTextContent("Template setup tip")
+    expect(screen.getByText("Template setup tip")).toBeInTheDocument()
     fireEvent.click(
-      within(screen.getByTestId("watchlists-teach-point-alert")).getByRole("button", { name: "Dismiss" })
+      within(screen.getByTestId("watchlists-help-panel")).getByRole("button", { name: "Dismiss" })
     )
     const nextPersisted = JSON.parse(localStorage.getItem("watchlists:teach-points:v1") || "{}")
     expect(nextPersisted.templatesAuthoring).toBe(true)
@@ -487,6 +490,7 @@ describe("WatchlistsPlaygroundPage help surfaces", () => {
   it("marks guided tour complete and shows completion notice", () => {
     render(<WatchlistsPlaygroundPage />)
 
+    fireEvent.click(screen.getByTestId("watchlists-help-icon"))
     fireEvent.click(screen.getByTestId("watchlists-start-guide"))
     fireEvent.click(screen.getByRole("button", { name: "Next" }))
     fireEvent.click(screen.getByRole("button", { name: "Next" }))

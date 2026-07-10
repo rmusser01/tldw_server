@@ -9,7 +9,7 @@ import {
   Tooltip,
   message
 } from "antd"
-import { Download, ExternalLink, MessageSquare } from "lucide-react"
+import { Download, ExternalLink, MessageSquare, X } from "lucide-react"
 import DOMPurify from "dompurify"
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "react-router-dom"
@@ -31,6 +31,7 @@ import {
   getFocusableActiveElement,
   restoreFocusToElement
 } from "../shared/focus-management"
+import { useWatchlistsViewport } from "../shared/useWatchlistsViewport"
 import {
   type AudioArtifactSummary,
   getDeliveryStatusColor,
@@ -80,6 +81,7 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
   const tRef = useRef(t)
   tRef.current = t
   const navigate = useSafeNavigate()
+  const { isConstrained } = useWatchlistsViewport()
 
   const [loading, setLoading] = useState(false)
   const [content, setContent] = useState<string | null>(null)
@@ -90,6 +92,7 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
   const [liveAudioStatus, setLiveAudioStatus] = useState<WatchlistRunAudioStatus | null>(null)
   const outputIsAudio = useMemo(() => isAudioOutput(output), [output])
   const restoreFocusTargetRef = useRef<HTMLElement | null>(null)
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null)
   const wasOpenRef = useRef(false)
 
   const navigateHome = useCallback(() => {
@@ -393,7 +396,7 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
           <Button
             type="link"
             className="min-h-11 p-0"
-            aria-label={t("watchlists:outputs.downloadAria", "Download {{title}}", {
+            aria-label={t("watchlists:accessibilityHardening.output.download", "Download {{title}}", {
               title: artifact.label
             })}
             onClick={() => void downloadArtifact(artifact)}
@@ -450,7 +453,7 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
             })}
           </div>
         )}
-        <div className="grid gap-2 text-xs text-text-muted sm:grid-cols-2">
+        <div className={`grid grid-cols-1 gap-2 text-xs text-text-muted ${isConstrained ? "" : "sm:grid-cols-2"}`}>
           {audioSummary.scriptArtifact && (
             renderArtifact(audioSummary.scriptArtifact, "script")
           )}
@@ -471,18 +474,22 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
       placement="right"
       onClose={onClose}
       open={open}
-      size="min(100vw, 48rem)"
+      closable={false}
+      size={isConstrained ? "100%" : "min(100vw, 48rem)"}
+      afterOpenChange={(isOpen) => {
+        if (isOpen) closeButtonRef.current?.focus()
+      }}
       extra={
         <div className="flex items-center gap-2">
           {output?.format === "html" && (
             <Tooltip title={t("watchlists:outputs.openInNewTab", "Open in new tab")}>
               <Button
                 type="text"
-                icon={<ExternalLink className="h-4 w-4" />}
+                icon={<ExternalLink className="h-4 w-4" aria-hidden />}
                 onClick={handleOpenInNewTab}
                 disabled={!content}
                 className="min-h-11 min-w-11"
-                aria-label={t("watchlists:outputs.openInNewTabAria", "Open {{title}} in new tab", {
+                aria-label={t("watchlists:accessibilityHardening.output.openNewTab", "Open {{title}} in new tab", {
                   title: output?.title || t("watchlists:outputs.preview", "Output Preview")
                 })}
               />
@@ -491,12 +498,12 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
           <Tooltip title={t("watchlists:outputs.chatAbout", "Chat about this")}>
             <Button
               type="text"
-              icon={<MessageSquare className="h-4 w-4" />}
+              icon={<MessageSquare className="h-4 w-4" aria-hidden />}
               onClick={handleChatAboutOutput}
               disabled={!content}
               data-testid="watchlists-output-chat-about"
               className="min-h-11 min-w-11"
-              aria-label={t("watchlists:outputs.chatAboutAria", "Chat about {{title}}", {
+              aria-label={t("watchlists:accessibilityHardening.output.chat", "Chat about {{title}}", {
                 title: output?.title || t("watchlists:outputs.preview", "Output Preview")
               })}
             />
@@ -504,10 +511,22 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
           <Tooltip title={t("watchlists:outputs.download", "Download")}>
             <Button
               type="text"
-              icon={<Download className="h-4 w-4" />}
+              icon={<Download className="h-4 w-4" aria-hidden />}
               onClick={handleDownload}
               className="min-h-11 min-w-11"
-              aria-label={t("watchlists:outputs.downloadAria", "Download {{title}}", {
+              aria-label={t("watchlists:accessibilityHardening.output.download", "Download {{title}}", {
+                title: output?.title || t("watchlists:outputs.preview", "Output Preview")
+              })}
+            />
+          </Tooltip>
+          <Tooltip title={t("common:close", "Close")}>
+            <Button
+              ref={closeButtonRef}
+              type="text"
+              icon={<X className="h-4 w-4" aria-hidden />}
+              onClick={onClose}
+              className="min-h-11 min-w-11"
+              aria-label={t("watchlists:accessibilityHardening.output.close", "Close preview: {{title}}", {
                 title: output?.title || t("watchlists:outputs.preview", "Output Preview")
               })}
             />

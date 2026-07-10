@@ -4675,5 +4675,68 @@
   },
   "overview_latest_status_partial": {
     "message": "Partial"
+  },
+  "accessibilityHardening_source_toggleActive": {
+    "message": "Toggle active: {{name}}"
+  },
+  "accessibilityHardening_source_checkNow": {
+    "message": "Check now: {{name}}"
+  },
+  "accessibilityHardening_source_openWebsite": {
+    "message": "Open source website: {{name}}"
+  },
+  "accessibilityHardening_source_openHealth": {
+    "message": "Open source health: {{name}}"
+  },
+  "accessibilityHardening_source_edit": {
+    "message": "Edit source: {{name}}"
+  },
+  "accessibilityHardening_source_delete": {
+    "message": "Delete source: {{name}}"
+  },
+  "accessibilityHardening_item_open": {
+    "message": "Open update: {{title}}"
+  },
+  "accessibilityHardening_item_select": {
+    "message": "Select update: {{title}}"
+  },
+  "accessibilityHardening_item_description": {
+    "message": "{{state}}. Source: {{source}}."
+  },
+  "accessibilityHardening_output_openNewTab": {
+    "message": "Open {{title}} in new tab"
+  },
+  "accessibilityHardening_output_chat": {
+    "message": "Chat about {{title}}"
+  },
+  "accessibilityHardening_output_download": {
+    "message": "Download {{title}}"
+  },
+  "accessibilityHardening_output_close": {
+    "message": "Close preview: {{title}}"
+  },
+  "accessibilityHardening_health_show": {
+    "message": "Show Watchlists health details"
+  },
+  "accessibilityHardening_health_hide": {
+    "message": "Hide Watchlists health details"
+  },
+  "accessibilityHardening_health_refresh": {
+    "message": "Refresh Watchlists health"
+  },
+  "accessibilityHardening_health_settings": {
+    "message": "Open Watchlists settings"
+  },
+  "accessibilityHardening_delivery_email": {
+    "message": "Send each report to the configured recipients when enabled."
+  },
+  "accessibilityHardening_delivery_chatbook": {
+    "message": "Publish each report to Chatbook when enabled."
+  },
+  "accessibilityHardening_help_open": {
+    "message": "Open Watchlists help"
+  },
+  "accessibilityHardening_help_title": {
+    "message": "Watchlists help"
   }
 }

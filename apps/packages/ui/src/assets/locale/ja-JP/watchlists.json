@@ -1,4 +1,12 @@
 {
+  "accessibilityHardening": {
+    "source": { "toggleActive": "有効状態を切り替え: {{name}}", "checkNow": "今すぐ確認: {{name}}", "openWebsite": "ソースのウェブサイトを開く: {{name}}", "openHealth": "ソースの状態を開く: {{name}}", "edit": "ソースを編集: {{name}}", "delete": "ソースを削除: {{name}}" },
+    "item": { "open": "更新を開く: {{title}}", "select": "更新を選択: {{title}}", "description": "{{state}}。ソース: {{source}}。" },
+    "output": { "openNewTab": "{{title}}を新しいタブで開く", "chat": "{{title}}についてチャット", "download": "{{title}}をダウンロード", "close": "プレビューを閉じる: {{title}}" },
+    "health": { "show": "ウォッチリストの状態詳細を表示", "hide": "ウォッチリストの状態詳細を非表示", "refresh": "ウォッチリストの状態を更新", "settings": "ウォッチリスト設定を開く" },
+    "delivery": { "email": "有効にすると、各レポートを設定済みの受信者へ送信します。", "chatbook": "有効にすると、各レポートをChatbookに公開します。" },
+    "help": { "open": "ウォッチリストのヘルプを開く", "title": "ウォッチリストのヘルプ" }
+  },
   "items": {
     "queuedForBriefing": "ブリーフィングキュー",
     "includeInNextBriefing": "次のブリーフィングに含める",

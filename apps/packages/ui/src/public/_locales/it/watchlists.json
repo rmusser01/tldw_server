@@ -1078,5 +1078,68 @@
   },
   "overview_latest_status_partial": {
     "message": "Parziale"
+  },
+  "accessibilityHardening_source_toggleActive": {
+    "message": "Cambia stato attivo: {{name}}"
+  },
+  "accessibilityHardening_source_checkNow": {
+    "message": "Controlla ora: {{name}}"
+  },
+  "accessibilityHardening_source_openWebsite": {
+    "message": "Apri il sito della fonte: {{name}}"
+  },
+  "accessibilityHardening_source_openHealth": {
+    "message": "Apri lo stato della fonte: {{name}}"
+  },
+  "accessibilityHardening_source_edit": {
+    "message": "Modifica fonte: {{name}}"
+  },
+  "accessibilityHardening_source_delete": {
+    "message": "Elimina fonte: {{name}}"
+  },
+  "accessibilityHardening_item_open": {
+    "message": "Apri aggiornamento: {{title}}"
+  },
+  "accessibilityHardening_item_select": {
+    "message": "Seleziona aggiornamento: {{title}}"
+  },
+  "accessibilityHardening_item_description": {
+    "message": "{{state}}. Fonte: {{source}}."
+  },
+  "accessibilityHardening_output_openNewTab": {
+    "message": "Apri {{title}} in una nuova scheda"
+  },
+  "accessibilityHardening_output_chat": {
+    "message": "Chatta su {{title}}"
+  },
+  "accessibilityHardening_output_download": {
+    "message": "Scarica {{title}}"
+  },
+  "accessibilityHardening_output_close": {
+    "message": "Chiudi anteprima: {{title}}"
+  },
+  "accessibilityHardening_health_show": {
+    "message": "Mostra dettagli sullo stato delle liste di controllo"
+  },
+  "accessibilityHardening_health_hide": {
+    "message": "Nascondi dettagli sullo stato delle liste di controllo"
+  },
+  "accessibilityHardening_health_refresh": {
+    "message": "Aggiorna lo stato delle liste di controllo"
+  },
+  "accessibilityHardening_health_settings": {
+    "message": "Apri le impostazioni delle liste di controllo"
+  },
+  "accessibilityHardening_delivery_email": {
+    "message": "Invia ogni rapporto ai destinatari configurati quando l’opzione è attiva."
+  },
+  "accessibilityHardening_delivery_chatbook": {
+    "message": "Pubblica ogni rapporto in Chatbook quando l’opzione è attiva."
+  },
+  "accessibilityHardening_help_open": {
+    "message": "Apri la guida delle liste di controllo"
+  },
+  "accessibilityHardening_help_title": {
+    "message": "Guida delle liste di controllo"
   }
 }

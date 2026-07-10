@@ -1,4 +1,12 @@
 {
+  "accessibilityHardening": {
+    "source": { "toggleActive": "Växla aktiv status: {{name}}", "checkNow": "Kontrollera nu: {{name}}", "openWebsite": "Öppna källans webbplats: {{name}}", "openHealth": "Öppna källstatus: {{name}}", "edit": "Redigera källa: {{name}}", "delete": "Ta bort källa: {{name}}" },
+    "item": { "open": "Öppna uppdatering: {{title}}", "select": "Välj uppdatering: {{title}}", "description": "{{state}}. Källa: {{source}}." },
+    "output": { "openNewTab": "Öppna {{title}} i en ny flik", "chat": "Chatta om {{title}}", "download": "Hämta {{title}}", "close": "Stäng förhandsvisning: {{title}}" },
+    "health": { "show": "Visa statusdetaljer för bevakningslistor", "hide": "Dölj statusdetaljer för bevakningslistor", "refresh": "Uppdatera status för bevakningslistor", "settings": "Öppna inställningar för bevakningslistor" },
+    "delivery": { "email": "Skicka varje rapport till de konfigurerade mottagarna när funktionen är aktiverad.", "chatbook": "Publicera varje rapport i Chatbook när funktionen är aktiverad." },
+    "help": { "open": "Öppna hjälp för bevakningslistor", "title": "Hjälp för bevakningslistor" }
+  },
   "items": {
     "queuedForBriefing": "I kö för briefing",
     "includeInNextBriefing": "Inkludera i nästa briefing",

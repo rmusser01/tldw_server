@@ -1069,5 +1069,68 @@
   },
   "overview_latest_status_partial": {
     "message": "Delvis"
+  },
+  "accessibilityHardening_source_toggleActive": {
+    "message": "Bytt aktiv status: {{name}}"
+  },
+  "accessibilityHardening_source_checkNow": {
+    "message": "Kontroller nå: {{name}}"
+  },
+  "accessibilityHardening_source_openWebsite": {
+    "message": "Åpne kildens nettsted: {{name}}"
+  },
+  "accessibilityHardening_source_openHealth": {
+    "message": "Åpne kildestatus: {{name}}"
+  },
+  "accessibilityHardening_source_edit": {
+    "message": "Rediger kilde: {{name}}"
+  },
+  "accessibilityHardening_source_delete": {
+    "message": "Slett kilde: {{name}}"
+  },
+  "accessibilityHardening_item_open": {
+    "message": "Åpne oppdatering: {{title}}"
+  },
+  "accessibilityHardening_item_select": {
+    "message": "Velg oppdatering: {{title}}"
+  },
+  "accessibilityHardening_item_description": {
+    "message": "{{state}}. Kilde: {{source}}."
+  },
+  "accessibilityHardening_output_openNewTab": {
+    "message": "Åpne {{title}} i en ny fane"
+  },
+  "accessibilityHardening_output_chat": {
+    "message": "Chat om {{title}}"
+  },
+  "accessibilityHardening_output_download": {
+    "message": "Last ned {{title}}"
+  },
+  "accessibilityHardening_output_close": {
+    "message": "Lukk forhåndsvisning: {{title}}"
+  },
+  "accessibilityHardening_health_show": {
+    "message": "Vis statusdetaljer for overvåkningslister"
+  },
+  "accessibilityHardening_health_hide": {
+    "message": "Skjul statusdetaljer for overvåkningslister"
+  },
+  "accessibilityHardening_health_refresh": {
+    "message": "Oppdater status for overvåkningslister"
+  },
+  "accessibilityHardening_health_settings": {
+    "message": "Åpne innstillinger for overvåkningslister"
+  },
+  "accessibilityHardening_delivery_email": {
+    "message": "Send hver rapport til de konfigurerte mottakerne når funksjonen er aktivert."
+  },
+  "accessibilityHardening_delivery_chatbook": {
+    "message": "Publiser hver rapport i Chatbook når funksjonen er aktivert."
+  },
+  "accessibilityHardening_help_open": {
+    "message": "Åpne hjelp for overvåkningslister"
+  },
+  "accessibilityHardening_help_title": {
+    "message": "Hjelp for overvåkningslister"
   }
 }

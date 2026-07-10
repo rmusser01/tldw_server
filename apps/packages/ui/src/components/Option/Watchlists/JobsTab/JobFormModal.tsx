@@ -1922,7 +1922,7 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
                 <div className="text-sm font-medium">
                   {t("watchlists:jobs.form.createScheduledOutput", "Reports storage")}
                 </div>
-                <div className="text-xs text-text-muted">
+                <div id="job-form-report-output-description" className="text-xs text-text-muted">
                   {t(
                     "watchlists:jobs.form.createScheduledOutputHint",
                     "Every briefing includes a required text report saved in Reports."
@@ -1936,6 +1936,7 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
                   "watchlists:jobs.form.createScheduledOutput",
                   "Reports storage"
                 )}
+                aria-describedby="job-form-report-output-description"
                 data-testid="job-form-create-scheduled-output-switch"
               />
             </div>
@@ -2096,10 +2097,20 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
 
           <div className="rounded-lg border border-border p-3">
             <div className="mb-3 flex items-center justify-between gap-3">
-              <div className="text-sm font-medium">
+              <div>
+                <div id="job-form-email-delivery-label" className="text-sm font-medium">
                 {t("watchlists:jobs.form.emailDelivery", "Email delivery")}
+                </div>
+                <div id="job-form-email-delivery-description" className="text-xs text-text-muted">
+                  {t("watchlists:accessibilityHardening.delivery.email", "Send each report to the configured recipients when enabled.")}
+                </div>
               </div>
-              <Switch checked={deliveryEmailEnabled} onChange={setDeliveryEmailEnabled} />
+              <Switch
+                checked={deliveryEmailEnabled}
+                onChange={setDeliveryEmailEnabled}
+                aria-labelledby="job-form-email-delivery-label"
+                aria-describedby="job-form-email-delivery-description"
+              />
             </div>
             <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
               <div>
@@ -2154,20 +2165,31 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
               </div>
             </div>
             <div className="mt-3 flex items-center justify-between rounded-md bg-surface px-3 py-2 text-sm">
-              <span>{t("watchlists:jobs.form.emailAttachFile", "Attach output file")}</span>
+              <span id="job-form-email-attach-label">{t("watchlists:jobs.form.emailAttachFile", "Attach output file")}</span>
               <Switch
                 checked={deliveryEmailAttachFile}
                 onChange={setDeliveryEmailAttachFile}
+                aria-labelledby="job-form-email-attach-label"
               />
             </div>
               </div>
 
               <div className="rounded-lg border border-border p-3">
             <div className="mb-3 flex items-center justify-between gap-3">
-              <div className="text-sm font-medium">
+              <div>
+                <div id="job-form-chatbook-delivery-label" className="text-sm font-medium">
                 {t("watchlists:jobs.form.chatbookDelivery", "Chatbook delivery")}
+                </div>
+                <div id="job-form-chatbook-delivery-description" className="text-xs text-text-muted">
+                  {t("watchlists:accessibilityHardening.delivery.chatbook", "Publish each report to Chatbook when enabled.")}
+                </div>
               </div>
-              <Switch checked={deliveryChatbookEnabled} onChange={setDeliveryChatbookEnabled} />
+              <Switch
+                checked={deliveryChatbookEnabled}
+                onChange={setDeliveryChatbookEnabled}
+                aria-labelledby="job-form-chatbook-delivery-label"
+                aria-describedby="job-form-chatbook-delivery-description"
+              />
             </div>
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
               <Input
@@ -2201,12 +2223,14 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
 
           <div className="rounded-lg border border-border p-3">
             <div className="mb-3 flex items-center justify-between gap-3">
-              <div className="text-sm font-medium">
+              <div id="job-form-audio-label" className="text-sm font-medium">
                 {t("watchlists:jobs.form.audioBriefing", "Audio briefing")}
               </div>
               <Switch
                 checked={audioBriefingEnabled}
                 onChange={handleAudioBriefingToggle}
+                aria-labelledby="job-form-audio-label"
+                aria-describedby="job-form-audio-description"
                 data-testid="job-form-audio-enabled-switch"
               />
             </div>
@@ -2261,7 +2285,7 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
                 />
               </div>
             </div>
-            <div className="mt-2 text-xs text-text-muted">
+            <div id="job-form-audio-description" className="mt-2 text-xs text-text-muted">
               {t(
                 "watchlists:jobs.form.audioHint",
                 "Enable spoken briefings alongside text outputs. Keep defaults for fastest setup."

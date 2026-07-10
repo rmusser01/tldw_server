@@ -1,4 +1,12 @@
 {
+  "accessibilityHardening": {
+    "source": { "toggleActive": "Cambia stato attivo: {{name}}", "checkNow": "Controlla ora: {{name}}", "openWebsite": "Apri il sito della fonte: {{name}}", "openHealth": "Apri lo stato della fonte: {{name}}", "edit": "Modifica fonte: {{name}}", "delete": "Elimina fonte: {{name}}" },
+    "item": { "open": "Apri aggiornamento: {{title}}", "select": "Seleziona aggiornamento: {{title}}", "description": "{{state}}. Fonte: {{source}}." },
+    "output": { "openNewTab": "Apri {{title}} in una nuova scheda", "chat": "Chatta su {{title}}", "download": "Scarica {{title}}", "close": "Chiudi anteprima: {{title}}" },
+    "health": { "show": "Mostra dettagli sullo stato delle liste di controllo", "hide": "Nascondi dettagli sullo stato delle liste di controllo", "refresh": "Aggiorna lo stato delle liste di controllo", "settings": "Apri le impostazioni delle liste di controllo" },
+    "delivery": { "email": "Invia ogni rapporto ai destinatari configurati quando l’opzione è attiva.", "chatbook": "Pubblica ogni rapporto in Chatbook quando l’opzione è attiva." },
+    "help": { "open": "Apri la guida delle liste di controllo", "title": "Guida delle liste di controllo" }
+  },
   "items": {
     "queuedForBriefing": "In coda per briefing",
     "includeInNextBriefing": "Includi nel prossimo briefing",

@@ -2783,14 +2783,19 @@ export const ItemsTab: React.FC = () => {
                   const alertSummary = item.alert_summary
                   const alertSeverity = getHighestSeverity(alertSummary)
                   const rowAriaLabel = t(
-                    "watchlists:items.rowAriaLabel",
-                    "{{title}} from {{source}}. {{state}}.",
+                    "watchlists:accessibilityHardening.item.open",
+                    "Open update: {{title}}",
+                    { title: rowTitle }
+                  )
+                  const rowDescription = t(
+                    "watchlists:accessibilityHardening.item.description",
+                    "{{state}}. Source: {{source}}.",
                     {
-                      title: rowTitle,
                       source: sourceLabel,
                       state: reviewStateLabel
                     }
                   )
+                  const rowDescriptionId = `watchlists-item-row-description-${item.id}`
 
                   return (
                     <button
@@ -2798,6 +2803,7 @@ export const ItemsTab: React.FC = () => {
                       type="button"
                       data-testid={`watchlists-item-row-${item.id}`}
                       aria-label={rowAriaLabel}
+                      aria-describedby={rowDescriptionId}
                       className={`flex w-full items-start gap-3 rounded-xl border px-3 py-3 text-left transition ${
                         selected
                           ? "border-primary bg-primary/15"
@@ -2808,6 +2814,11 @@ export const ItemsTab: React.FC = () => {
                       <div className="pt-0.5">
                         <Checkbox
                           checked={selectedItemIdSet.has(item.id)}
+                          aria-label={t(
+                            "watchlists:accessibilityHardening.item.select",
+                            "Select update: {{title}}",
+                            { title: rowTitle }
+                          )}
                           onChange={(event) =>
                             handleToggleItemSelected(item.id, event.target.checked)
                           }
@@ -2844,6 +2855,9 @@ export const ItemsTab: React.FC = () => {
                       )}
 
                       <div className="min-w-0 flex-1 space-y-1">
+                        <span id={rowDescriptionId} className="sr-only">
+                          {rowDescription}
+                        </span>
                         <div className="flex items-start justify-between gap-2">
                           <h4 className="line-clamp-2 text-base font-semibold text-text">
                             {rowTitle}

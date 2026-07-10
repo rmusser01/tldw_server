@@ -1069,5 +1069,68 @@
   },
   "overview_latest_status_partial": {
     "message": "부분 완료"
+  },
+  "accessibilityHardening_source_toggleActive": {
+    "message": "활성 상태 전환: {{name}}"
+  },
+  "accessibilityHardening_source_checkNow": {
+    "message": "지금 확인: {{name}}"
+  },
+  "accessibilityHardening_source_openWebsite": {
+    "message": "소스 웹사이트 열기: {{name}}"
+  },
+  "accessibilityHardening_source_openHealth": {
+    "message": "소스 상태 열기: {{name}}"
+  },
+  "accessibilityHardening_source_edit": {
+    "message": "소스 편집: {{name}}"
+  },
+  "accessibilityHardening_source_delete": {
+    "message": "소스 삭제: {{name}}"
+  },
+  "accessibilityHardening_item_open": {
+    "message": "업데이트 열기: {{title}}"
+  },
+  "accessibilityHardening_item_select": {
+    "message": "업데이트 선택: {{title}}"
+  },
+  "accessibilityHardening_item_description": {
+    "message": "{{state}}. 소스: {{source}}."
+  },
+  "accessibilityHardening_output_openNewTab": {
+    "message": "{{title}} 새 탭에서 열기"
+  },
+  "accessibilityHardening_output_chat": {
+    "message": "{{title}}에 대해 채팅"
+  },
+  "accessibilityHardening_output_download": {
+    "message": "{{title}} 다운로드"
+  },
+  "accessibilityHardening_output_close": {
+    "message": "미리보기 닫기: {{title}}"
+  },
+  "accessibilityHardening_health_show": {
+    "message": "관심 목록 상태 세부정보 표시"
+  },
+  "accessibilityHardening_health_hide": {
+    "message": "관심 목록 상태 세부정보 숨기기"
+  },
+  "accessibilityHardening_health_refresh": {
+    "message": "관심 목록 상태 새로고침"
+  },
+  "accessibilityHardening_health_settings": {
+    "message": "관심 목록 설정 열기"
+  },
+  "accessibilityHardening_delivery_email": {
+    "message": "사용 설정하면 각 보고서를 지정된 수신자에게 보냅니다."
+  },
+  "accessibilityHardening_delivery_chatbook": {
+    "message": "사용 설정하면 각 보고서를 Chatbook에 게시합니다."
+  },
+  "accessibilityHardening_help_open": {
+    "message": "관심 목록 도움말 열기"
+  },
+  "accessibilityHardening_help_title": {
+    "message": "관심 목록 도움말"
   }
 }

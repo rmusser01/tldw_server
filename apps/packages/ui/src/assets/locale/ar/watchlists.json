@@ -1,4 +1,12 @@
 {
+  "accessibilityHardening": {
+    "source": { "toggleActive": "تبديل الحالة النشطة: {{name}}", "checkNow": "التحقق الآن: {{name}}", "openWebsite": "فتح موقع المصدر: {{name}}", "openHealth": "فتح حالة المصدر: {{name}}", "edit": "تعديل المصدر: {{name}}", "delete": "حذف المصدر: {{name}}" },
+    "item": { "open": "فتح التحديث: {{title}}", "select": "تحديد التحديث: {{title}}", "description": "{{state}}. المصدر: {{source}}." },
+    "output": { "openNewTab": "فتح {{title}} في علامة تبويب جديدة", "chat": "الدردشة حول {{title}}", "download": "تنزيل {{title}}", "close": "إغلاق المعاينة: {{title}}" },
+    "health": { "show": "إظهار تفاصيل حالة قوائم المراقبة", "hide": "إخفاء تفاصيل حالة قوائم المراقبة", "refresh": "تحديث حالة قوائم المراقبة", "settings": "فتح إعدادات قوائم المراقبة" },
+    "delivery": { "email": "إرسال كل تقرير إلى المستلمين المحددين عند التفعيل.", "chatbook": "نشر كل تقرير في Chatbook عند التفعيل." },
+    "help": { "open": "فتح مساعدة قوائم المراقبة", "title": "مساعدة قوائم المراقبة" }
+  },
   "items": {
     "queuedForBriefing": "في قائمة انتظار الإحاطة",
     "includeInNextBriefing": "أدرج في الإحاطة التالية",

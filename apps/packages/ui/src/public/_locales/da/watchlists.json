@@ -1069,5 +1069,68 @@
   },
   "overview_latest_status_partial": {
     "message": "Delvis"
+  },
+  "accessibilityHardening_source_toggleActive": {
+    "message": "Skift aktiv status: {{name}}"
+  },
+  "accessibilityHardening_source_checkNow": {
+    "message": "Kontrollér nu: {{name}}"
+  },
+  "accessibilityHardening_source_openWebsite": {
+    "message": "Åbn kildens websted: {{name}}"
+  },
+  "accessibilityHardening_source_openHealth": {
+    "message": "Åbn kildestatus: {{name}}"
+  },
+  "accessibilityHardening_source_edit": {
+    "message": "Rediger kilde: {{name}}"
+  },
+  "accessibilityHardening_source_delete": {
+    "message": "Slet kilde: {{name}}"
+  },
+  "accessibilityHardening_item_open": {
+    "message": "Åbn opdatering: {{title}}"
+  },
+  "accessibilityHardening_item_select": {
+    "message": "Vælg opdatering: {{title}}"
+  },
+  "accessibilityHardening_item_description": {
+    "message": "{{state}}. Kilde: {{source}}."
+  },
+  "accessibilityHardening_output_openNewTab": {
+    "message": "Åbn {{title}} i en ny fane"
+  },
+  "accessibilityHardening_output_chat": {
+    "message": "Chat om {{title}}"
+  },
+  "accessibilityHardening_output_download": {
+    "message": "Download {{title}}"
+  },
+  "accessibilityHardening_output_close": {
+    "message": "Luk forhåndsvisning: {{title}}"
+  },
+  "accessibilityHardening_health_show": {
+    "message": "Vis statusdetaljer for overvågningslister"
+  },
+  "accessibilityHardening_health_hide": {
+    "message": "Skjul statusdetaljer for overvågningslister"
+  },
+  "accessibilityHardening_health_refresh": {
+    "message": "Opdater status for overvågningslister"
+  },
+  "accessibilityHardening_health_settings": {
+    "message": "Åbn indstillinger for overvågningslister"
+  },
+  "accessibilityHardening_delivery_email": {
+    "message": "Send hver rapport til de valgte modtagere, når funktionen er aktiveret."
+  },
+  "accessibilityHardening_delivery_chatbook": {
+    "message": "Udgiv hver rapport i Chatbook, når funktionen er aktiveret."
+  },
+  "accessibilityHardening_help_open": {
+    "message": "Åbn hjælp til overvågningslister"
+  },
+  "accessibilityHardening_help_title": {
+    "message": "Hjælp til overvågningslister"
   }
 }

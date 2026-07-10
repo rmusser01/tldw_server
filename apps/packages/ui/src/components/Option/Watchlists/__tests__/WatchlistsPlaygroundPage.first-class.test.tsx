@@ -111,7 +111,7 @@ vi.mock("antd", async () => {
       {children}
     </div>
   )
-  const Button = ({ children, icon, onClick, disabled, ...rest }: any) => (
+  const Button = ({ children, icon, onClick, disabled, loading: _loading, ...rest }: any) => (
     <button type="button" onClick={() => onClick?.({ preventDefault: vi.fn(), stopPropagation: vi.fn() })} disabled={Boolean(disabled)} {...rest}>
       {icon}
       {children}
@@ -381,7 +381,7 @@ describe("WatchlistsPlaygroundPage first-class Watchlist shell", () => {
     expect(screen.getByText("Backend is offline")).toBeInTheDocument()
   })
 
-  it("creates a topic-only Watchlist from the shell wizard, selects it, and opens Feeds", async () => {
+  it("creates a News Watchlist through the canonical container-first flow and opens Feeds", async () => {
     const created = {
       ...container,
       id: 77,
@@ -397,19 +397,12 @@ describe("WatchlistsPlaygroundPage first-class Watchlist shell", () => {
 
     fireEvent.click(await screen.findByTestId("watchlists-create-container"))
     const wizard = within(screen.getByRole("dialog", { name: "Create Watchlist" }))
-    fireEvent.click(wizard.getByRole("button", { name: "News" }))
-    fireEvent.click(wizard.getByRole("button", { name: "Start from topic" }))
-    fireEvent.click(wizard.getByRole("button", { name: "Next" }))
+    fireEvent.change(wizard.getByLabelText("Domain preset"), { target: { value: "news" } })
     fireEvent.change(wizard.getByLabelText("Watchlist name"), { target: { value: "Election integrity" } })
     fireEvent.change(wizard.getByLabelText("Objective"), {
       target: { value: "Track source diversity and recency" }
     })
-    fireEvent.change(wizard.getByLabelText("Tracked scope"), {
-      target: { value: "election officials, state courts" }
-    })
-    fireEvent.click(wizard.getByRole("button", { name: "Next" }))
-    fireEvent.click(wizard.getByRole("button", { name: "Next" }))
-    fireEvent.click(wizard.getByRole("button", { name: "Create Watchlist" }))
+    fireEvent.click(wizard.getByRole("button", { name: "Continue to Sources" }))
 
     await waitFor(() =>
       expect(mocks.createWatchlistMock).toHaveBeenCalledWith(
@@ -419,90 +412,57 @@ describe("WatchlistsPlaygroundPage first-class Watchlist shell", () => {
           domain: "news",
           priority: "medium",
           status: "active",
-          tags: expect.arrayContaining(["news", "election officials", "state courts"])
+          tags: ["news"]
         })
       )
     )
+    const pipeline = within(await screen.findByRole("dialog", { name: "Set up briefing" }))
+    fireEvent.click(pipeline.getAllByRole("button", { name: "Cancel" }).at(-1)!)
+
+    await waitFor(() => expect(mocks.state.addWatchlist).toHaveBeenCalledWith(created))
     expect(mocks.state.addWatchlist).toHaveBeenCalledWith(created)
     expect(mocks.state.setSelectedWatchlistId).toHaveBeenCalledWith(77)
     expect(mocks.state.setActiveTab).toHaveBeenCalledWith("sources")
   })
 
-  it("creates source-backed setup payloads with watchlist_id and opens Monitors", async () => {
+  it("creates a CTI Watchlist through the canonical container-first flow", async () => {
     const created = {
       ...container,
       id: 88,
       name: "Healthcare ransomware"
     }
     mocks.createWatchlistMock.mockResolvedValue(created)
-    mocks.bulkCreateSourcesMock.mockResolvedValue({
-      items: [
-        { url: "https://example.com/feed.xml", id: 901, status: "created" },
-        { url: "https://advisories.example.org/rss", id: 902, status: "created" }
-      ],
-      total: 2,
-      created: 2,
-      errors: 0
-    })
-    mocks.createWatchlistJobMock.mockResolvedValue({
-      id: 990,
-      name: "Healthcare ransomware monitor",
-      watchlist_id: 88,
-      scope: { sources: [901, 902] },
-      active: true,
-      created_at: "2026-05-15T00:00:00Z",
-      updated_at: "2026-05-15T00:00:00Z"
-    })
     mocks.state.activeTab = "overview"
 
     render(<WatchlistsPlaygroundPage />)
 
     fireEvent.click(await screen.findByTestId("watchlists-create-container"))
     const wizard = within(screen.getByRole("dialog", { name: "Create Watchlist" }))
-    fireEvent.click(wizard.getByRole("button", { name: "CTI / OSINT" }))
-    fireEvent.click(wizard.getByRole("button", { name: "Start from sources" }))
-    fireEvent.click(wizard.getByRole("button", { name: "Next" }))
+    fireEvent.change(wizard.getByLabelText("Domain preset"), { target: { value: "cti_osint" } })
     fireEvent.change(wizard.getByLabelText("Watchlist name"), {
       target: { value: "Healthcare ransomware" }
     })
     fireEvent.change(wizard.getByLabelText("Objective"), {
       target: { value: "Find ransomware reports affecting hospitals" }
     })
-    fireEvent.change(wizard.getByLabelText("Tracked scope"), {
-      target: { value: "hospitals, Germany" }
-    })
-    fireEvent.click(wizard.getByRole("button", { name: "Next" }))
-    fireEvent.change(wizard.getByLabelText("Source URLs"), {
-      target: { value: "https://example.com/feed.xml\nhttps://advisories.example.org/rss" }
-    })
-    fireEvent.change(wizard.getByLabelText("Monitor name"), {
-      target: { value: "Healthcare ransomware monitor" }
-    })
-    fireEvent.click(wizard.getByRole("button", { name: "Next" }))
-    fireEvent.click(wizard.getByRole("button", { name: "Create Watchlist" }))
+    fireEvent.click(wizard.getByRole("button", { name: "Continue to Sources" }))
 
     await waitFor(() =>
-      expect(mocks.bulkCreateSourcesMock).toHaveBeenCalledWith(
-        expect.arrayContaining([
-          expect.objectContaining({
-            url: "https://example.com/feed.xml",
-            watchlist_id: 88
-          }),
-          expect.objectContaining({
-            url: "https://advisories.example.org/rss",
-            watchlist_id: 88
-          })
-        ])
+      expect(mocks.createWatchlistMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: "Healthcare ransomware",
+          objective: "Find ransomware reports affecting hospitals",
+          domain: "cti_osint",
+          priority: "high",
+          tags: ["cti", "osint"]
+        })
       )
     )
-    expect(mocks.createWatchlistJobMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        name: "Healthcare ransomware monitor",
-        watchlist_id: 88,
-        scope: { sources: [901, 902] }
-      })
-    )
+    const pipeline = within(await screen.findByRole("dialog", { name: "Set up briefing" }))
+    fireEvent.click(pipeline.getAllByRole("button", { name: "Cancel" }).at(-1)!)
+
+    await waitFor(() => expect(mocks.state.addWatchlist).toHaveBeenCalledWith(created))
     expect(mocks.state.setSelectedWatchlistId).toHaveBeenCalledWith(88)
-    expect(mocks.state.setActiveTab).toHaveBeenCalledWith("jobs")
+    expect(mocks.state.setActiveTab).toHaveBeenCalledWith("sources")
   })
 })

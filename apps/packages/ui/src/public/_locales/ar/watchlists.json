@@ -1105,5 +1105,68 @@
   },
   "overview_latest_status_partial": {
     "message": "جزئي"
+  },
+  "accessibilityHardening_source_toggleActive": {
+    "message": "تبديل الحالة النشطة: {{name}}"
+  },
+  "accessibilityHardening_source_checkNow": {
+    "message": "التحقق الآن: {{name}}"
+  },
+  "accessibilityHardening_source_openWebsite": {
+    "message": "فتح موقع المصدر: {{name}}"
+  },
+  "accessibilityHardening_source_openHealth": {
+    "message": "فتح حالة المصدر: {{name}}"
+  },
+  "accessibilityHardening_source_edit": {
+    "message": "تعديل المصدر: {{name}}"
+  },
+  "accessibilityHardening_source_delete": {
+    "message": "حذف المصدر: {{name}}"
+  },
+  "accessibilityHardening_item_open": {
+    "message": "فتح التحديث: {{title}}"
+  },
+  "accessibilityHardening_item_select": {
+    "message": "تحديد التحديث: {{title}}"
+  },
+  "accessibilityHardening_item_description": {
+    "message": "{{state}}. المصدر: {{source}}."
+  },
+  "accessibilityHardening_output_openNewTab": {
+    "message": "فتح {{title}} في علامة تبويب جديدة"
+  },
+  "accessibilityHardening_output_chat": {
+    "message": "الدردشة حول {{title}}"
+  },
+  "accessibilityHardening_output_download": {
+    "message": "تنزيل {{title}}"
+  },
+  "accessibilityHardening_output_close": {
+    "message": "إغلاق المعاينة: {{title}}"
+  },
+  "accessibilityHardening_health_show": {
+    "message": "إظهار تفاصيل حالة قوائم المراقبة"
+  },
+  "accessibilityHardening_health_hide": {
+    "message": "إخفاء تفاصيل حالة قوائم المراقبة"
+  },
+  "accessibilityHardening_health_refresh": {
+    "message": "تحديث حالة قوائم المراقبة"
+  },
+  "accessibilityHardening_health_settings": {
+    "message": "فتح إعدادات قوائم المراقبة"
+  },
+  "accessibilityHardening_delivery_email": {
+    "message": "إرسال كل تقرير إلى المستلمين المحددين عند التفعيل."
+  },
+  "accessibilityHardening_delivery_chatbook": {
+    "message": "نشر كل تقرير في Chatbook عند التفعيل."
+  },
+  "accessibilityHardening_help_open": {
+    "message": "فتح مساعدة قوائم المراقبة"
+  },
+  "accessibilityHardening_help_title": {
+    "message": "مساعدة قوائم المراقبة"
   }
 }

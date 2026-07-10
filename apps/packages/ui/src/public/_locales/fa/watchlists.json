@@ -1069,5 +1069,68 @@
   },
   "overview_latest_status_partial": {
     "message": "جزئی"
+  },
+  "accessibilityHardening_source_toggleActive": {
+    "message": "تغییر وضعیت فعال: {{name}}"
+  },
+  "accessibilityHardening_source_checkNow": {
+    "message": "اکنون بررسی شود: {{name}}"
+  },
+  "accessibilityHardening_source_openWebsite": {
+    "message": "باز کردن وب‌سایت منبع: {{name}}"
+  },
+  "accessibilityHardening_source_openHealth": {
+    "message": "باز کردن وضعیت منبع: {{name}}"
+  },
+  "accessibilityHardening_source_edit": {
+    "message": "ویرایش منبع: {{name}}"
+  },
+  "accessibilityHardening_source_delete": {
+    "message": "حذف منبع: {{name}}"
+  },
+  "accessibilityHardening_item_open": {
+    "message": "باز کردن به‌روزرسانی: {{title}}"
+  },
+  "accessibilityHardening_item_select": {
+    "message": "انتخاب به‌روزرسانی: {{title}}"
+  },
+  "accessibilityHardening_item_description": {
+    "message": "{{state}}. منبع: {{source}}."
+  },
+  "accessibilityHardening_output_openNewTab": {
+    "message": "باز کردن {{title}} در زبانه جدید"
+  },
+  "accessibilityHardening_output_chat": {
+    "message": "گفتگو درباره {{title}}"
+  },
+  "accessibilityHardening_output_download": {
+    "message": "بارگیری {{title}}"
+  },
+  "accessibilityHardening_output_close": {
+    "message": "بستن پیش‌نمایش: {{title}}"
+  },
+  "accessibilityHardening_health_show": {
+    "message": "نمایش جزئیات وضعیت فهرست‌های پایش"
+  },
+  "accessibilityHardening_health_hide": {
+    "message": "پنهان کردن جزئیات وضعیت فهرست‌های پایش"
+  },
+  "accessibilityHardening_health_refresh": {
+    "message": "تازه‌سازی وضعیت فهرست‌های پایش"
+  },
+  "accessibilityHardening_health_settings": {
+    "message": "باز کردن تنظیمات فهرست‌های پایش"
+  },
+  "accessibilityHardening_delivery_email": {
+    "message": "در صورت فعال بودن، هر گزارش به گیرندگان تنظیم‌شده ارسال شود."
+  },
+  "accessibilityHardening_delivery_chatbook": {
+    "message": "در صورت فعال بودن، هر گزارش در Chatbook منتشر شود."
+  },
+  "accessibilityHardening_help_open": {
+    "message": "باز کردن راهنمای فهرست‌های پایش"
+  },
+  "accessibilityHardening_help_title": {
+    "message": "راهنمای فهرست‌های پایش"
   }
 }

@@ -1,4 +1,12 @@
 {
+  "accessibilityHardening": {
+    "source": { "toggleActive": "Basculer l’état actif : {{name}}", "checkNow": "Vérifier maintenant : {{name}}", "openWebsite": "Ouvrir le site de la source : {{name}}", "openHealth": "Ouvrir l’état de la source : {{name}}", "edit": "Modifier la source : {{name}}", "delete": "Supprimer la source : {{name}}" },
+    "item": { "open": "Ouvrir la mise à jour : {{title}}", "select": "Sélectionner la mise à jour : {{title}}", "description": "{{state}}. Source : {{source}}." },
+    "output": { "openNewTab": "Ouvrir {{title}} dans un nouvel onglet", "chat": "Discuter de {{title}}", "download": "Télécharger {{title}}", "close": "Fermer l’aperçu : {{title}}" },
+    "health": { "show": "Afficher les détails d’état des listes de suivi", "hide": "Masquer les détails d’état des listes de suivi", "refresh": "Actualiser l’état des listes de suivi", "settings": "Ouvrir les paramètres des listes de suivi" },
+    "delivery": { "email": "Envoyer chaque rapport aux destinataires configurés lorsque cette option est activée.", "chatbook": "Publier chaque rapport dans Chatbook lorsque cette option est activée." },
+    "help": { "open": "Ouvrir l’aide des listes de suivi", "title": "Aide des listes de suivi" }
+  },
   "items": {
     "queuedForBriefing": "En file pour briefing",
     "includeInNextBriefing": "Inclure dans le prochain briefing",

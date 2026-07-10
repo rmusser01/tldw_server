@@ -1,4 +1,12 @@
 {
+  "accessibilityHardening": {
+    "source": { "toggleActive": "활성 상태 전환: {{name}}", "checkNow": "지금 확인: {{name}}", "openWebsite": "소스 웹사이트 열기: {{name}}", "openHealth": "소스 상태 열기: {{name}}", "edit": "소스 편집: {{name}}", "delete": "소스 삭제: {{name}}" },
+    "item": { "open": "업데이트 열기: {{title}}", "select": "업데이트 선택: {{title}}", "description": "{{state}}. 소스: {{source}}." },
+    "output": { "openNewTab": "{{title}} 새 탭에서 열기", "chat": "{{title}}에 대해 채팅", "download": "{{title}} 다운로드", "close": "미리보기 닫기: {{title}}" },
+    "health": { "show": "관심 목록 상태 세부정보 표시", "hide": "관심 목록 상태 세부정보 숨기기", "refresh": "관심 목록 상태 새로고침", "settings": "관심 목록 설정 열기" },
+    "delivery": { "email": "사용 설정하면 각 보고서를 지정된 수신자에게 보냅니다.", "chatbook": "사용 설정하면 각 보고서를 Chatbook에 게시합니다." },
+    "help": { "open": "관심 목록 도움말 열기", "title": "관심 목록 도움말" }
+  },
   "items": {
     "queuedForBriefing": "브리핑 대기열",
     "includeInNextBriefing": "다음 브리핑에 포함",

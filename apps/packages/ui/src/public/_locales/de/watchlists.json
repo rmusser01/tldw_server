@@ -1069,5 +1069,68 @@
   },
   "overview_latest_status_partial": {
     "message": "Teilweise"
+  },
+  "accessibilityHardening_source_toggleActive": {
+    "message": "Aktivstatus umschalten: {{name}}"
+  },
+  "accessibilityHardening_source_checkNow": {
+    "message": "Jetzt prüfen: {{name}}"
+  },
+  "accessibilityHardening_source_openWebsite": {
+    "message": "Quellwebsite öffnen: {{name}}"
+  },
+  "accessibilityHardening_source_openHealth": {
+    "message": "Quellstatus öffnen: {{name}}"
+  },
+  "accessibilityHardening_source_edit": {
+    "message": "Quelle bearbeiten: {{name}}"
+  },
+  "accessibilityHardening_source_delete": {
+    "message": "Quelle löschen: {{name}}"
+  },
+  "accessibilityHardening_item_open": {
+    "message": "Aktualisierung öffnen: {{title}}"
+  },
+  "accessibilityHardening_item_select": {
+    "message": "Aktualisierung auswählen: {{title}}"
+  },
+  "accessibilityHardening_item_description": {
+    "message": "{{state}}. Quelle: {{source}}."
+  },
+  "accessibilityHardening_output_openNewTab": {
+    "message": "{{title}} in neuem Tab öffnen"
+  },
+  "accessibilityHardening_output_chat": {
+    "message": "Über {{title}} chatten"
+  },
+  "accessibilityHardening_output_download": {
+    "message": "{{title}} herunterladen"
+  },
+  "accessibilityHardening_output_close": {
+    "message": "Vorschau schließen: {{title}}"
+  },
+  "accessibilityHardening_health_show": {
+    "message": "Statusdetails der Watchlists anzeigen"
+  },
+  "accessibilityHardening_health_hide": {
+    "message": "Statusdetails der Watchlists ausblenden"
+  },
+  "accessibilityHardening_health_refresh": {
+    "message": "Watchlists-Status aktualisieren"
+  },
+  "accessibilityHardening_health_settings": {
+    "message": "Watchlists-Einstellungen öffnen"
+  },
+  "accessibilityHardening_delivery_email": {
+    "message": "Bei Aktivierung jeden Bericht an die konfigurierten Empfänger senden."
+  },
+  "accessibilityHardening_delivery_chatbook": {
+    "message": "Bei Aktivierung jeden Bericht in Chatbook veröffentlichen."
+  },
+  "accessibilityHardening_help_open": {
+    "message": "Watchlists-Hilfe öffnen"
+  },
+  "accessibilityHardening_help_title": {
+    "message": "Watchlists-Hilfe"
   }
 }

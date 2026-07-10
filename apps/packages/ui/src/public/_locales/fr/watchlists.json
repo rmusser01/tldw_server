@@ -1078,5 +1078,68 @@
   },
   "overview_latest_status_partial": {
     "message": "Partiel"
+  },
+  "accessibilityHardening_source_toggleActive": {
+    "message": "Basculer l’état actif : {{name}}"
+  },
+  "accessibilityHardening_source_checkNow": {
+    "message": "Vérifier maintenant : {{name}}"
+  },
+  "accessibilityHardening_source_openWebsite": {
+    "message": "Ouvrir le site de la source : {{name}}"
+  },
+  "accessibilityHardening_source_openHealth": {
+    "message": "Ouvrir l’état de la source : {{name}}"
+  },
+  "accessibilityHardening_source_edit": {
+    "message": "Modifier la source : {{name}}"
+  },
+  "accessibilityHardening_source_delete": {
+    "message": "Supprimer la source : {{name}}"
+  },
+  "accessibilityHardening_item_open": {
+    "message": "Ouvrir la mise à jour : {{title}}"
+  },
+  "accessibilityHardening_item_select": {
+    "message": "Sélectionner la mise à jour : {{title}}"
+  },
+  "accessibilityHardening_item_description": {
+    "message": "{{state}}. Source : {{source}}."
+  },
+  "accessibilityHardening_output_openNewTab": {
+    "message": "Ouvrir {{title}} dans un nouvel onglet"
+  },
+  "accessibilityHardening_output_chat": {
+    "message": "Discuter de {{title}}"
+  },
+  "accessibilityHardening_output_download": {
+    "message": "Télécharger {{title}}"
+  },
+  "accessibilityHardening_output_close": {
+    "message": "Fermer l’aperçu : {{title}}"
+  },
+  "accessibilityHardening_health_show": {
+    "message": "Afficher les détails d’état des listes de suivi"
+  },
+  "accessibilityHardening_health_hide": {
+    "message": "Masquer les détails d’état des listes de suivi"
+  },
+  "accessibilityHardening_health_refresh": {
+    "message": "Actualiser l’état des listes de suivi"
+  },
+  "accessibilityHardening_health_settings": {
+    "message": "Ouvrir les paramètres des listes de suivi"
+  },
+  "accessibilityHardening_delivery_email": {
+    "message": "Envoyer chaque rapport aux destinataires configurés lorsque cette option est activée."
+  },
+  "accessibilityHardening_delivery_chatbook": {
+    "message": "Publier chaque rapport dans Chatbook lorsque cette option est activée."
+  },
+  "accessibilityHardening_help_open": {
+    "message": "Ouvrir l’aide des listes de suivi"
+  },
+  "accessibilityHardening_help_title": {
+    "message": "Aide des listes de suivi"
   }
 }

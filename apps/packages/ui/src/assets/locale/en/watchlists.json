@@ -1,4 +1,12 @@
 {
+  "accessibilityHardening": {
+    "source": { "toggleActive": "Toggle active: {{name}}", "checkNow": "Check now: {{name}}", "openWebsite": "Open source website: {{name}}", "openHealth": "Open source health: {{name}}", "edit": "Edit source: {{name}}", "delete": "Delete source: {{name}}" },
+    "item": { "open": "Open update: {{title}}", "select": "Select update: {{title}}", "description": "{{state}}. Source: {{source}}." },
+    "output": { "openNewTab": "Open {{title}} in new tab", "chat": "Chat about {{title}}", "download": "Download {{title}}", "close": "Close preview: {{title}}" },
+    "health": { "show": "Show Watchlists health details", "hide": "Hide Watchlists health details", "refresh": "Refresh Watchlists health", "settings": "Open Watchlists settings" },
+    "delivery": { "email": "Send each report to the configured recipients when enabled.", "chatbook": "Publish each report to Chatbook when enabled." },
+    "help": { "open": "Open Watchlists help", "title": "Watchlists help" }
+  },
   "title": "Watchlists",
   "description": "Monitor RSS feeds, websites, and forums. Create scheduled monitors to automatically scrape and process content.",
   "offline": "Server is offline. Please connect to use Watchlists.",

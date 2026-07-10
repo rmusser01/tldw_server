@@ -23,7 +23,8 @@ vi.mock("react-i18next", () => ({
       if (typeof defaultValue !== "string") return _key
       if (!options) return defaultValue
       return defaultValue.replace(/\{\{(\w+)\}\}/g, (_, token) => String(options[token] ?? ""))
-    }
+    },
+    i18n: { resolvedLanguage: "en", language: "en" }
   })
 }))
 

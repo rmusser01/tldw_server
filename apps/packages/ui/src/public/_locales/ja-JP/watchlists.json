@@ -1069,5 +1069,68 @@
   },
   "overview_latest_status_partial": {
     "message": "部分的"
+  },
+  "accessibilityHardening_source_toggleActive": {
+    "message": "有効状態を切り替え: {{name}}"
+  },
+  "accessibilityHardening_source_checkNow": {
+    "message": "今すぐ確認: {{name}}"
+  },
+  "accessibilityHardening_source_openWebsite": {
+    "message": "ソースのウェブサイトを開く: {{name}}"
+  },
+  "accessibilityHardening_source_openHealth": {
+    "message": "ソースの状態を開く: {{name}}"
+  },
+  "accessibilityHardening_source_edit": {
+    "message": "ソースを編集: {{name}}"
+  },
+  "accessibilityHardening_source_delete": {
+    "message": "ソースを削除: {{name}}"
+  },
+  "accessibilityHardening_item_open": {
+    "message": "更新を開く: {{title}}"
+  },
+  "accessibilityHardening_item_select": {
+    "message": "更新を選択: {{title}}"
+  },
+  "accessibilityHardening_item_description": {
+    "message": "{{state}}。ソース: {{source}}。"
+  },
+  "accessibilityHardening_output_openNewTab": {
+    "message": "{{title}}を新しいタブで開く"
+  },
+  "accessibilityHardening_output_chat": {
+    "message": "{{title}}についてチャット"
+  },
+  "accessibilityHardening_output_download": {
+    "message": "{{title}}をダウンロード"
+  },
+  "accessibilityHardening_output_close": {
+    "message": "プレビューを閉じる: {{title}}"
+  },
+  "accessibilityHardening_health_show": {
+    "message": "ウォッチリストの状態詳細を表示"
+  },
+  "accessibilityHardening_health_hide": {
+    "message": "ウォッチリストの状態詳細を非表示"
+  },
+  "accessibilityHardening_health_refresh": {
+    "message": "ウォッチリストの状態を更新"
+  },
+  "accessibilityHardening_health_settings": {
+    "message": "ウォッチリスト設定を開く"
+  },
+  "accessibilityHardening_delivery_email": {
+    "message": "有効にすると、各レポートを設定済みの受信者へ送信します。"
+  },
+  "accessibilityHardening_delivery_chatbook": {
+    "message": "有効にすると、各レポートをChatbookに公開します。"
+  },
+  "accessibilityHardening_help_open": {
+    "message": "ウォッチリストのヘルプを開く"
+  },
+  "accessibilityHardening_help_title": {
+    "message": "ウォッチリストのヘルプ"
   }
 }

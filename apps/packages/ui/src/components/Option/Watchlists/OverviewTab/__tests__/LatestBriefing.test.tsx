@@ -8,6 +8,10 @@ import type {
 } from "@/types/watchlists"
 import { formatWatchlistOccurrenceDate, LatestBriefing } from "../LatestBriefing"
 
+const finishLeavingDialog = async () => {
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+}
+
 const artifactMocks = vi.hoisted(() => ({
   fetchBlob: vi.fn(),
   fetchText: vi.fn(),
@@ -41,6 +45,19 @@ vi.mock("react-i18next", () => ({
     }
   })
 }))
+
+vi.mock("antd", async () => {
+  const actual = await vi.importActual<typeof import("antd")>("antd")
+  const react = await vi.importActual<typeof import("react")>("react")
+  return {
+    ...actual,
+    Modal: (props: React.ComponentProps<typeof actual.Modal>) => react.createElement(actual.Modal, {
+      ...props,
+      transitionName: "",
+      maskTransitionName: ""
+    })
+  }
+})
 
 const readyEpisode = (
   overrides: Partial<WatchlistBriefingProjection> = {}
@@ -262,7 +279,7 @@ describe("LatestBriefing", () => {
     const confirmRetry = screen.getByRole("button", { name: "Retry email delivery" })
     expect(confirmRetry).toBeDisabled()
     await user.keyboard("{Escape}")
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+    await finishLeavingDialog()
     expect(trigger).toHaveFocus()
 
     await user.click(trigger)
@@ -311,7 +328,7 @@ describe("LatestBriefing", () => {
       }
     })} {...callbacks} />)
 
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+    await finishLeavingDialog()
     expect(callbacks.onRetryStage).not.toHaveBeenCalled()
     await user.click(screen.getByRole("button", {
       name: "Review and retry email delivery for New occurrence"

@@ -1,9 +1,12 @@
 // @vitest-environment jsdom
 
 import React from "react"
+import i18next from "i18next"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { SourcesTab } from "../SourcesTab"
+import commonEn from "@/assets/locale/en/common.json"
+import watchlistsEn from "@/assets/locale/en/watchlists.json"
 
 const ADVANCED_COLUMNS_STORAGE_KEY = "watchlists:sources:advanced-columns:v1"
 
@@ -37,17 +40,17 @@ const mocks = vi.hoisted(() => ({
   updateWatchlistSourceMock: vi.fn(),
   sourceFormModalProps: { current: null as any },
   showUndoNotificationMock: vi.fn(),
-  tMock: (key: string, defaultValue?: unknown, options?: Record<string, unknown>) => {
-    if (typeof defaultValue !== "string") return key
-    if (!options) return defaultValue
-    return defaultValue.replace(/\{\{(\w+)\}\}/g, (_, token) => String(options[token] ?? ""))
+  i18nRef: { current: null as ReturnType<typeof i18next.createInstance> | null },
+  translate: (key: string, defaultValue?: unknown, options?: Record<string, unknown>) => {
+    const fallback = typeof defaultValue === "string" ? defaultValue : undefined
+    return mocks.i18nRef.current?.t(key, { defaultValue: fallback, ...options }) ?? key
   },
   storeStateRef: { current: {} as Record<string, any> }
 }))
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: mocks.tMock
+    t: mocks.translate
   })
 }))
 
@@ -134,7 +137,15 @@ vi.mock("antd", () => {
     Modal: { confirm: vi.fn() },
     Select,
     Space: ({ children }: any) => <>{children}</>,
-    Switch: () => null,
+    Switch: ({ checked, onChange, ...rest }: any) => (
+      <button
+        type="button"
+        role="switch"
+        aria-checked={Boolean(checked)}
+        onClick={() => onChange?.(!checked)}
+        {...rest}
+      />
+    ),
     Table,
     Tag: ({ children }: any) => <span>{children}</span>,
     Tooltip: ({ children }: any) => <>{children}</>,
@@ -283,6 +294,24 @@ const baseState = (overrides: Record<string, unknown> = {}) => ({
 })
 
 describe("SourcesTab advanced details disclosure", () => {
+  beforeAll(async () => {
+    const instance = i18next.createInstance()
+    await instance.init({
+      lng: "en",
+      fallbackLng: false,
+      resources: {
+        en: {
+          common: commonEn,
+          watchlists: watchlistsEn
+        }
+      },
+      ns: ["watchlists", "common"],
+      defaultNS: "watchlists",
+      interpolation: { escapeValue: false }
+    })
+    mocks.i18nRef.current = instance
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     localStorage.removeItem(ADVANCED_COLUMNS_STORAGE_KEY)
@@ -329,6 +358,31 @@ describe("SourcesTab advanced details disclosure", () => {
     })
     expect(screen.queryByTestId("source-compact-summary-101")).not.toBeInTheDocument()
     expect(localStorage.getItem(ADVANCED_COLUMNS_STORAGE_KEY)).toBe("1")
+  })
+
+  it("binds source actions to each record name", async () => {
+    const sources = [
+      { ...buildSource(101), name: "BBC" },
+      { ...buildSource(102), name: "NPR" },
+      { ...buildSource(103), name: "The Guardian" }
+    ]
+    mocks.storeStateRef.current = baseState({ sources, sourcesTotal: sources.length })
+    mocks.fetchWatchlistSourcesMock.mockResolvedValue({
+      items: sources,
+      total: sources.length,
+      page: 1,
+      size: 20,
+      has_more: false
+    })
+
+    render(<SourcesTab />)
+
+    for (const name of ["BBC", "NPR", "The Guardian"]) {
+      expect(await screen.findByRole("switch", { name: `Toggle active: ${name}` })).toBeVisible()
+      expect(screen.getByRole("button", { name: `Edit source: ${name}` })).toBeVisible()
+      expect(screen.getByRole("button", { name: `Open source health: ${name}` })).toBeVisible()
+      expect(screen.getByRole("button", { name: `Delete source: ${name}` })).toBeVisible()
+    }
   })
 
   it.each([1, 10, 50])(

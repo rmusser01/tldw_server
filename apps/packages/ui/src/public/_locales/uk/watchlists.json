@@ -1087,5 +1087,68 @@
   },
   "overview_latest_status_partial": {
     "message": "Частково"
+  },
+  "accessibilityHardening_source_toggleActive": {
+    "message": "Перемкнути активність: {{name}}"
+  },
+  "accessibilityHardening_source_checkNow": {
+    "message": "Перевірити зараз: {{name}}"
+  },
+  "accessibilityHardening_source_openWebsite": {
+    "message": "Відкрити сайт джерела: {{name}}"
+  },
+  "accessibilityHardening_source_openHealth": {
+    "message": "Відкрити стан джерела: {{name}}"
+  },
+  "accessibilityHardening_source_edit": {
+    "message": "Змінити джерело: {{name}}"
+  },
+  "accessibilityHardening_source_delete": {
+    "message": "Видалити джерело: {{name}}"
+  },
+  "accessibilityHardening_item_open": {
+    "message": "Відкрити оновлення: {{title}}"
+  },
+  "accessibilityHardening_item_select": {
+    "message": "Вибрати оновлення: {{title}}"
+  },
+  "accessibilityHardening_item_description": {
+    "message": "{{state}}. Джерело: {{source}}."
+  },
+  "accessibilityHardening_output_openNewTab": {
+    "message": "Відкрити {{title}} у новій вкладці"
+  },
+  "accessibilityHardening_output_chat": {
+    "message": "Обговорити {{title}}"
+  },
+  "accessibilityHardening_output_download": {
+    "message": "Завантажити {{title}}"
+  },
+  "accessibilityHardening_output_close": {
+    "message": "Закрити попередній перегляд: {{title}}"
+  },
+  "accessibilityHardening_health_show": {
+    "message": "Показати відомості про стан списків спостереження"
+  },
+  "accessibilityHardening_health_hide": {
+    "message": "Сховати відомості про стан списків спостереження"
+  },
+  "accessibilityHardening_health_refresh": {
+    "message": "Оновити стан списків спостереження"
+  },
+  "accessibilityHardening_health_settings": {
+    "message": "Відкрити налаштування списків спостереження"
+  },
+  "accessibilityHardening_delivery_email": {
+    "message": "Коли ввімкнено, надсилати кожен звіт налаштованим одержувачам."
+  },
+  "accessibilityHardening_delivery_chatbook": {
+    "message": "Коли ввімкнено, публікувати кожен звіт у Chatbook."
+  },
+  "accessibilityHardening_help_open": {
+    "message": "Відкрити довідку списків спостереження"
+  },
+  "accessibilityHardening_help_title": {
+    "message": "Довідка списків спостереження"
   }
 }

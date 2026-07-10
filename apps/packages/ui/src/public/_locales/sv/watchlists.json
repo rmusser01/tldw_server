@@ -1069,5 +1069,68 @@
   },
   "overview_latest_status_partial": {
     "message": "Delvis"
+  },
+  "accessibilityHardening_source_toggleActive": {
+    "message": "Växla aktiv status: {{name}}"
+  },
+  "accessibilityHardening_source_checkNow": {
+    "message": "Kontrollera nu: {{name}}"
+  },
+  "accessibilityHardening_source_openWebsite": {
+    "message": "Öppna källans webbplats: {{name}}"
+  },
+  "accessibilityHardening_source_openHealth": {
+    "message": "Öppna källstatus: {{name}}"
+  },
+  "accessibilityHardening_source_edit": {
+    "message": "Redigera källa: {{name}}"
+  },
+  "accessibilityHardening_source_delete": {
+    "message": "Ta bort källa: {{name}}"
+  },
+  "accessibilityHardening_item_open": {
+    "message": "Öppna uppdatering: {{title}}"
+  },
+  "accessibilityHardening_item_select": {
+    "message": "Välj uppdatering: {{title}}"
+  },
+  "accessibilityHardening_item_description": {
+    "message": "{{state}}. Källa: {{source}}."
+  },
+  "accessibilityHardening_output_openNewTab": {
+    "message": "Öppna {{title}} i en ny flik"
+  },
+  "accessibilityHardening_output_chat": {
+    "message": "Chatta om {{title}}"
+  },
+  "accessibilityHardening_output_download": {
+    "message": "Hämta {{title}}"
+  },
+  "accessibilityHardening_output_close": {
+    "message": "Stäng förhandsvisning: {{title}}"
+  },
+  "accessibilityHardening_health_show": {
+    "message": "Visa statusdetaljer för bevakningslistor"
+  },
+  "accessibilityHardening_health_hide": {
+    "message": "Dölj statusdetaljer för bevakningslistor"
+  },
+  "accessibilityHardening_health_refresh": {
+    "message": "Uppdatera status för bevakningslistor"
+  },
+  "accessibilityHardening_health_settings": {
+    "message": "Öppna inställningar för bevakningslistor"
+  },
+  "accessibilityHardening_delivery_email": {
+    "message": "Skicka varje rapport till de konfigurerade mottagarna när funktionen är aktiverad."
+  },
+  "accessibilityHardening_delivery_chatbook": {
+    "message": "Publicera varje rapport i Chatbook när funktionen är aktiverad."
+  },
+  "accessibilityHardening_help_open": {
+    "message": "Öppna hjälp för bevakningslistor"
+  },
+  "accessibilityHardening_help_title": {
+    "message": "Hjälp för bevakningslistor"
   }
 }

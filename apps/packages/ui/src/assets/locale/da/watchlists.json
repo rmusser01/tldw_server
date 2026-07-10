@@ -1,4 +1,12 @@
 {
+  "accessibilityHardening": {
+    "source": { "toggleActive": "Skift aktiv status: {{name}}", "checkNow": "Kontrollér nu: {{name}}", "openWebsite": "Åbn kildens websted: {{name}}", "openHealth": "Åbn kildestatus: {{name}}", "edit": "Rediger kilde: {{name}}", "delete": "Slet kilde: {{name}}" },
+    "item": { "open": "Åbn opdatering: {{title}}", "select": "Vælg opdatering: {{title}}", "description": "{{state}}. Kilde: {{source}}." },
+    "output": { "openNewTab": "Åbn {{title}} i en ny fane", "chat": "Chat om {{title}}", "download": "Download {{title}}", "close": "Luk forhåndsvisning: {{title}}" },
+    "health": { "show": "Vis statusdetaljer for overvågningslister", "hide": "Skjul statusdetaljer for overvågningslister", "refresh": "Opdater status for overvågningslister", "settings": "Åbn indstillinger for overvågningslister" },
+    "delivery": { "email": "Send hver rapport til de valgte modtagere, når funktionen er aktiveret.", "chatbook": "Udgiv hver rapport i Chatbook, når funktionen er aktiveret." },
+    "help": { "open": "Åbn hjælp til overvågningslister", "title": "Hjælp til overvågningslister" }
+  },
   "items": {
     "queuedForBriefing": "I kø til briefing",
     "includeInNextBriefing": "Inkluder i næste briefing",
