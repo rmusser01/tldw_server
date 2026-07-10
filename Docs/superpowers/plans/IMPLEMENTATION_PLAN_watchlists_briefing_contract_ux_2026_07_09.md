@@ -113,7 +113,7 @@
 
 **Tests:** Contract normalization, legacy compatibility, unknown-field preservation, setup-builder parity, receipt inputs, and validation.
 
-**Status:** In Progress
+**Status:** Complete
 
 ### Task 1: Add the backend versioned briefing contract
 
@@ -277,7 +277,7 @@ git commit -m "feat: normalize watchlists briefing contracts"
 - Produces: `BriefingPipelineContractV1`, `BriefingSetupDraft`, `buildBriefingPipelineContract`, `toCanonicalWatchlistJobPayload`, `normalizeLegacyBriefingContract`, `buildBriefingReceiptModel`, and compatibility re-exports from `pipeline-contract.ts`.
 - Consumes: existing cadence utilities, source scope, template names, cast, and delivery settings.
 
-- [ ] **Step 1: Write parity and receipt tests**
+- [x] **Step 1: Write parity and receipt tests**
 
 ```typescript
 it("produces the same contract from every setup adapter", () => {
@@ -306,7 +306,7 @@ it("describes a two-host sportscast with target duration and timezone", () => {
 })
 ```
 
-- [ ] **Step 2: Run the tests and verify RED**
+- [x] **Step 2: Run the tests and verify RED**
 
 Run from `apps/tldw-frontend`:
 
@@ -316,7 +316,7 @@ Run from `apps/tldw-frontend`:
 
 Expected: imports fail because the shared modules do not exist.
 
-- [ ] **Step 3: Add exact frontend contract types**
+- [x] **Step 3: Add exact frontend contract types**
 
 ```typescript
 export type WatchlistProgramFormat =
@@ -373,7 +373,7 @@ export interface BriefingPipelineContractV1 {
 
 Add `briefing_pipeline?: BriefingPipelineContractV1` to `JobOutputPrefs` and add fulfillment response types used in Task 5.
 
-- [ ] **Step 4: Implement one builder and adapt all callers**
+- [x] **Step 4: Implement one builder and adapt all callers**
 
 `toCanonicalWatchlistJobPayload(draft)` must be the only function that creates a briefing job payload. Existing exported builders become small adapters that call it. `JobFormModal` normalizes initial legacy preferences and emits the canonical key while preserving unrelated preference fields.
 
@@ -393,7 +393,7 @@ return {
 }
 ```
 
-- [ ] **Step 5: Verify GREEN and existing builder suites**
+- [x] **Step 5: Verify GREEN and existing builder suites**
 
 ```bash
 ./node_modules/.bin/vitest run ../packages/ui/src/components/Option/Watchlists/shared/__tests__/briefing-contract.test.ts ../packages/ui/src/components/Option/Watchlists/shared/__tests__/briefing-receipt.test.ts ../packages/ui/src/components/Option/Watchlists/OverviewTab/__tests__/pipeline-contract.test.ts ../packages/ui/src/components/Option/Watchlists/OverviewTab/__tests__/quick-setup.test.ts ../packages/ui/src/components/Option/Watchlists/SetupWizard/__tests__/watchlist-setup-model.test.ts ../packages/ui/src/components/Option/Watchlists/JobsTab/__tests__/JobFormModal.live-summary.test.tsx
@@ -401,7 +401,7 @@ return {
 
 Expected: all selected tests pass and equivalent intent snapshots contain `briefing_pipeline`.
 
-- [ ] **Step 6: Commit Task 2**
+- [x] **Step 6: Commit Task 2**
 
 ```bash
 git add apps/packages/ui/src/types/watchlists.ts apps/packages/ui/src/components/Option/Watchlists/shared/briefing-contract.ts apps/packages/ui/src/components/Option/Watchlists/shared/briefing-receipt.ts apps/packages/ui/src/components/Option/Watchlists/shared/__tests__/briefing-contract.test.ts apps/packages/ui/src/components/Option/Watchlists/shared/__tests__/briefing-receipt.test.ts apps/packages/ui/src/components/Option/Watchlists/OverviewTab/pipeline-contract.ts apps/packages/ui/src/components/Option/Watchlists/OverviewTab/quick-setup.ts apps/packages/ui/src/components/Option/Watchlists/SetupWizard/watchlist-setup-model.ts apps/packages/ui/src/components/Option/Watchlists/JobsTab/JobFormModal.tsx apps/packages/ui/src/components/Option/Watchlists/JobsTab/job-summaries.ts
