@@ -353,7 +353,20 @@ def merge_audio_projection_metadata(existing: dict[str, Any], projection: dict[s
     """Merge a durable audio projection into run/output metadata without dropping unrelated fields."""
     merged = dict(existing or {})
     merged["audio"] = dict(projection)
-    merged["audio_briefing_status"] = projection.get("status")
+    status = str(projection.get("status") or "unknown").strip().lower()
+    has_final_artifact = bool(projection.get("final_artifact"))
+    merged["audio_briefing_status"] = status
+    merged["ai_generated_speech"] = has_final_artifact
+    if has_final_artifact:
+        merged["speech_disclosure"] = "Synthetic AI-generated speech"
+    elif status == "failed":
+        merged["speech_disclosure"] = "Synthetic speech generation failed"
+    elif status == "cancelled":
+        merged["speech_disclosure"] = "Synthetic speech generation cancelled"
+    elif status in {"queued", "running", "pending"}:
+        merged["speech_disclosure"] = "Synthetic speech generation pending"
+    else:
+        merged["speech_disclosure"] = "Synthetic speech unavailable"
     if projection.get("audio_request_id"):
         merged["audio_request_id"] = projection.get("audio_request_id")
     else:

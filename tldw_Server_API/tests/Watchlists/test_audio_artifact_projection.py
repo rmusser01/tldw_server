@@ -342,6 +342,8 @@ def test_merge_and_stale_helpers_preserve_unrelated_metadata():
     assert merged["audio"] == projection
     assert merged["audio_briefing_status"] == "completed"
     assert merged["audio_request_id"] == "wla_current"
+    assert merged["ai_generated_speech"] is True
+    assert merged["speech_disclosure"] == "Synthetic AI-generated speech"
 
     stale = mark_audio_projection_stale(merged, superseded_by="wla_next")
 
@@ -349,6 +351,59 @@ def test_merge_and_stale_helpers_preserve_unrelated_metadata():
     assert stale["previous_audio"]["stale"] is True
     assert stale["previous_audio"]["superseded_by"] == "wla_next"
     assert stale["previous_audio"]["final_artifact"]["artifact_id"] == "art_final"
+
+
+@pytest.mark.parametrize("status", ["queued", "running"])
+def test_merge_audio_projection_keeps_incomplete_speech_pending(status: str):
+    from tldw_Server_API.app.core.Watchlists.audio_artifact_projection import (
+        merge_audio_projection_metadata,
+    )
+
+    merged = merge_audio_projection_metadata(
+        {"ai_generated_speech": True, "speech_disclosure": "stale"},
+        {"status": status, "final_artifact": None},
+    )
+
+    assert merged["ai_generated_speech"] is False
+    assert merged["speech_disclosure"] == "Synthetic speech generation pending"
+
+
+@pytest.mark.parametrize(
+    ("status", "disclosure"),
+    [
+        ("failed", "Synthetic speech generation failed"),
+        ("cancelled", "Synthetic speech generation cancelled"),
+    ],
+)
+def test_merge_audio_projection_records_terminal_speech_failure_without_final_artifact(
+    status: str,
+    disclosure: str,
+):
+    from tldw_Server_API.app.core.Watchlists.audio_artifact_projection import (
+        merge_audio_projection_metadata,
+    )
+
+    merged = merge_audio_projection_metadata(
+        {"ai_generated_speech": True, "speech_disclosure": "stale"},
+        {"status": status, "final_artifact": None},
+    )
+
+    assert merged["ai_generated_speech"] is False
+    assert merged["speech_disclosure"] == disclosure
+
+
+def test_merge_audio_projection_does_not_claim_completed_speech_without_final_artifact():
+    from tldw_Server_API.app.core.Watchlists.audio_artifact_projection import (
+        merge_audio_projection_metadata,
+    )
+
+    merged = merge_audio_projection_metadata(
+        {},
+        {"status": "completed", "final_artifact": None},
+    )
+
+    assert merged["ai_generated_speech"] is False
+    assert merged["speech_disclosure"] == "Synthetic speech unavailable"
 
 
 def test_mirror_audio_projection_updates_run_and_canonical_output_metadata():

@@ -180,14 +180,24 @@ class TestBuildWorkflowInputs:
             _build_workflow_inputs,
         )
 
+        items = [
+            {
+                "title": "No material updates",
+                "summary": (
+                    "No qualifying new material was found. Sources succeeded: 2. "
+                    "Sources failed: 1. Sources deferred: 3. Checked: now. Next run: tomorrow."
+                ),
+            }
+        ]
         inputs = _build_workflow_inputs(
-            [{"title": "No material updates", "summary": "No qualifying new material."}],
+            items,
             {"generate_audio": True},
             status_audio=True,
         )
 
         assert inputs["is_no_material_update"] is True
         assert inputs["target_audio_minutes"] == 1
+        assert inputs["items"] == items
 
     def test_legacy_tts_keys_feed_default_resolution(self):
         from tldw_Server_API.app.core.TTS.tts_request_resolution import ResolvedTTSRequestDefaults

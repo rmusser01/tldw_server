@@ -278,6 +278,12 @@ async def test_zero_items_persists_text_and_requests_short_audio(
     assert metadata["no_material_updates"] is True
     assert metadata["source_counts"] == {"succeeded": 1, "failed": 1, "deferred": 1}
     assert audio_requests[0]["items"][0]["status_kind"] == "no_material_updates"
+    assert audio_requests[0]["items"][0]["summary"] == (
+        "No qualifying new material was found. "
+        "Sources succeeded: 1. Sources failed: 1. Sources deferred: 1. "
+        "Checked: 2026-07-10T08:01:00+00:00. "
+        "Next run: 2026-07-11T08:00:00+00:00."
+    )
     assert audio_requests[0]["status_audio"] is True
     assert audio_requests[0]["occurrence_id"] == result.occurrence_id
     assert audio_requests[0]["output_id"] == result.output_id
@@ -611,6 +617,70 @@ async def test_failed_text_persistence_retries_same_occurrence(
     assert retried.stages["persist_text"]["status"] == "ready"
     assert retried.output_id is not None
     assert collections_db.create_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_persist_retry_reuses_durable_render_without_rerendering(
+    monkeypatch: pytest.MonkeyPatch,
+    output_paths: Path,
+) -> None:
+    from tldw_Server_API.app.core.Watchlists import briefing_fulfillment as module
+
+    job = _job()
+    contract = _contract()
+    contract["text"]["template_name"] = "mutable-template"
+    job.output_prefs_json = json.dumps({"briefing_pipeline": contract})
+    run = _run()
+    watchlists_db = FakeWatchlistsDB(job=job, run=run, items=make_items(2))
+    collections_db = FakeCollectionsDB()
+    template = SimpleNamespace(content="# Original render")
+    render_calls = 0
+
+    def load_template(_name: str) -> SimpleNamespace:
+        nonlocal render_calls
+        render_calls += 1
+        return template
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Watchlists.template_store.load_template",
+        load_template,
+    )
+    persist = module._persist_text_output
+    persist_calls = 0
+
+    async def fail_once(**kwargs: Any) -> int:
+        nonlocal persist_calls
+        persist_calls += 1
+        if persist_calls == 1:
+            raise OSError("disk full")
+        return await persist(**kwargs)
+
+    monkeypatch.setattr(module, "_persist_text_output", fail_once)
+    failed = await fulfill_watchlist_briefing(
+        user_id=1,
+        job=job,
+        run=run,
+        watchlists_db=watchlists_db,
+        collections_db=collections_db,
+    )
+    render_stage_before = deepcopy(failed.stages["render_text"])
+    template.content = "# Changed render"
+    job.next_run_at = "2026-07-12T08:00:00+00:00"
+
+    retried = await retry_briefing_stage(
+        user_id=1,
+        occurrence_id=failed.occurrence_id,
+        stage="persist_text",
+        watchlists_db=watchlists_db,
+        collections_db=collections_db,
+    )
+
+    row = collections_db.get_output_artifact(retried.output_id)
+    metadata = json.loads(row.metadata_json)
+    assert render_calls == 1
+    assert retried.stages["render_text"] == render_stage_before
+    assert metadata["next_run_at"] == "2026-07-11T08:00:00+00:00"
+    assert (output_paths / row.storage_path).read_text() == "# Original render"
 
 
 @pytest.mark.asyncio
@@ -1001,13 +1071,26 @@ async def test_enqueue_failure_keeps_speech_truth_pending_and_uses_canonical_pre
 
 
 @pytest.mark.asyncio
-async def test_explicit_text_regeneration_uses_new_version_and_key(
+async def test_explicit_render_regeneration_uses_new_content_version_and_key(
+    monkeypatch: pytest.MonkeyPatch,
     output_paths: Path,
 ) -> None:
     job = _job()
     run = _run()
     watchlists_db = FakeWatchlistsDB(job=job, run=run, items=make_items(2))
     collections_db = FakeCollectionsDB()
+    rendered_content = "# Version one"
+    render_calls = 0
+
+    def render(**_kwargs: Any) -> str:
+        nonlocal render_calls
+        render_calls += 1
+        return rendered_content
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Watchlists.briefing_fulfillment._render_briefing_text",
+        render,
+    )
     first = await fulfill_watchlist_briefing(
         user_id=1,
         job=job,
@@ -1015,11 +1098,12 @@ async def test_explicit_text_regeneration_uses_new_version_and_key(
         watchlists_db=watchlists_db,
         collections_db=collections_db,
     )
+    rendered_content = "# Version two"
 
     regenerated = await retry_briefing_stage(
         user_id=1,
         occurrence_id=first.occurrence_id,
-        stage="persist_text",
+        stage="render_text",
         watchlists_db=watchlists_db,
         collections_db=collections_db,
         regenerate=True,
@@ -1031,11 +1115,13 @@ async def test_explicit_text_regeneration_uses_new_version_and_key(
     assert regenerated.stages["persist_text"]["output_version"] == 2
     assert json.loads(regenerated_row.metadata_json)["output_version"] == 2
     assert regenerated_row.idempotency_key != first_row.idempotency_key
+    assert render_calls == 2
+    assert (output_paths / first_row.storage_path).read_text() == "# Version one"
+    assert (output_paths / regenerated_row.storage_path).read_text() == "# Version two"
 
 
 @pytest.mark.asyncio
-async def test_select_retry_reselects_then_advances_downstream(
-    monkeypatch: pytest.MonkeyPatch,
+async def test_select_retry_is_rejected_without_mutating_ready_occurrence(
     output_paths: Path,
 ) -> None:
     job = _job(limit=2)
@@ -1044,13 +1130,62 @@ async def test_select_retry_reselects_then_advances_downstream(
     watchlists_db = FakeWatchlistsDB(job=job, run=run, items=original)
     collections_db = FakeCollectionsDB()
 
-    def fail_render(**_kwargs: Any) -> str:
-        raise RuntimeError("render failed")
-
-    monkeypatch.setattr(
-        "tldw_Server_API.app.core.Watchlists.briefing_fulfillment._render_briefing_text",
-        fail_render,
+    ready = await fulfill_watchlist_briefing(
+        user_id=1,
+        job=job,
+        run=run,
+        watchlists_db=watchlists_db,
+        collections_db=collections_db,
     )
+    row = collections_db.get_output_artifact(ready.output_id)
+    path = output_paths / row.storage_path
+    before = {
+        "occurrence": deepcopy(vars(watchlists_db.occurrence)),
+        "create_calls": collections_db.create_calls,
+        "list_calls": deepcopy(watchlists_db.list_calls),
+        "stage_snapshots": deepcopy(watchlists_db.stage_snapshots),
+        "content": path.read_text(),
+    }
+    watchlists_db.items = [*original, _item(99, "2026-07-11T00:00:00+00:00")]
+
+    with pytest.raises(ValueError, match="unsupported_briefing_retry_stage"):
+        await retry_briefing_stage(
+            user_id=1,
+            occurrence_id=ready.occurrence_id,
+            stage="select",
+            watchlists_db=watchlists_db,
+            collections_db=collections_db,
+        )
+
+    assert vars(watchlists_db.occurrence) == before["occurrence"]
+    assert collections_db.create_calls == before["create_calls"]
+    assert watchlists_db.list_calls == before["list_calls"]
+    assert watchlists_db.stage_snapshots == before["stage_snapshots"]
+    assert path.read_text() == before["content"]
+
+
+@pytest.mark.asyncio
+async def test_failed_initial_selection_recovers_via_ordinary_fulfillment_replay(
+    monkeypatch: pytest.MonkeyPatch,
+    output_paths: Path,
+) -> None:
+    from tldw_Server_API.app.core.Watchlists import briefing_fulfillment as module
+
+    job = _job()
+    run = _run()
+    watchlists_db = FakeWatchlistsDB(job=job, run=run, items=make_items(2))
+    collections_db = FakeCollectionsDB()
+    load_selection = module._load_selection
+    attempts = 0
+
+    async def fail_once(*args: Any, **kwargs: Any):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("selection unavailable")
+        return await load_selection(*args, **kwargs)
+
+    monkeypatch.setattr(module, "_load_selection", fail_once)
     failed = await fulfill_watchlist_briefing(
         user_id=1,
         job=job,
@@ -1058,24 +1193,18 @@ async def test_select_retry_reselects_then_advances_downstream(
         watchlists_db=watchlists_db,
         collections_db=collections_db,
     )
-    watchlists_db.items = [*original, _item(99, "2026-07-11T00:00:00+00:00")]
-    monkeypatch.setattr(
-        "tldw_Server_API.app.core.Watchlists.briefing_fulfillment._render_briefing_text",
-        lambda **_kwargs: "# reselected",
-    )
-
-    retried = await retry_briefing_stage(
+    replay = await fulfill_watchlist_briefing(
         user_id=1,
-        occurrence_id=failed.occurrence_id,
-        stage="select",
+        job=job,
+        run=run,
         watchlists_db=watchlists_db,
         collections_db=collections_db,
     )
 
-    assert retried.artifact_status == "ready"
-    assert retried.stages["select"]["selected_item_ids"] == [99, 1]
-    assert retried.stages["render_text"]["status"] == "ready"
-    assert retried.stages["persist_text"]["status"] == "ready"
+    assert failed.stages["select"]["status"] == "failed"
+    assert replay.artifact_status == "ready"
+    assert replay.stages["select"]["selected_item_ids"]
+    assert collections_db.create_calls == 1
 
 
 @pytest.mark.asyncio

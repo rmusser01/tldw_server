@@ -1842,9 +1842,15 @@ class CollectionsDatabase:
                 else:
                     raise
         try:
+            self.backend.execute("DROP INDEX IF EXISTS ux_outputs_user_idempotency", ())
+            active_output_predicate = (
+                "idempotency_key IS NOT NULL AND deleted = FALSE"
+                if self.backend.backend_type == BackendType.POSTGRESQL
+                else "idempotency_key IS NOT NULL AND deleted = 0"
+            )
             self.backend.execute(
-                "CREATE UNIQUE INDEX IF NOT EXISTS ux_outputs_user_idempotency "
-                "ON outputs(user_id, idempotency_key)",
+                "CREATE UNIQUE INDEX IF NOT EXISTS ux_outputs_user_idempotency_active "
+                f"ON outputs(user_id, idempotency_key) WHERE {active_output_predicate}",
                 (),
             )
         except _COLLECTIONS_NONCRITICAL_EXCEPTIONS as exc:
@@ -4772,8 +4778,15 @@ class CollectionsDatabase:
             normalized_idempotency_key,
         )
         if normalized_idempotency_key is not None:
+            active_output_predicate = (
+                "idempotency_key IS NOT NULL AND deleted = FALSE"
+                if self.backend.backend_type == BackendType.POSTGRESQL
+                else "idempotency_key IS NOT NULL AND deleted = 0"
+            )
             self.backend.execute(
-                q + " ON CONFLICT (user_id, idempotency_key) DO NOTHING",
+                q
+                + " ON CONFLICT (user_id, idempotency_key) "
+                + f"WHERE {active_output_predicate} DO NOTHING",
                 params,
             )
             return self.get_output_artifact_by_idempotency_key(normalized_idempotency_key)

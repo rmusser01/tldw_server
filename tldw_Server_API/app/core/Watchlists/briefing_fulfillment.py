@@ -75,7 +75,6 @@ class FulfillmentResult:
 @dataclass(frozen=True)
 class _TextFlowResult:
     occurrence: Any
-    selection: BriefingSelection | None
     items: list[dict[str, Any]]
     output_id: int | None
 
@@ -347,6 +346,30 @@ def no_material_updates_markdown(
             "",
         )
     )
+
+
+def _no_material_updates_spoken_summary(
+    *,
+    checked_at: str,
+    next_run_at: str | None,
+    source_counts: Mapping[str, int],
+) -> str:
+    return (
+        "No qualifying new material was found. "
+        f"Sources succeeded: {int(source_counts.get('succeeded', 0))}. "
+        f"Sources failed: {int(source_counts.get('failed', 0))}. "
+        f"Sources deferred: {int(source_counts.get('deferred', 0))}. "
+        f"Checked: {checked_at}. "
+        f"Next run: {next_run_at or 'Not scheduled'}."
+    )
+
+
+def _next_run_at(watchlists_db: Any, job: Any) -> str | None:
+    try:
+        refreshed_job = watchlists_db.get_job(int(job.id))
+    except (AttributeError, KeyError, RuntimeError, TypeError, ValueError):
+        refreshed_job = job
+    return getattr(refreshed_job, "next_run_at", None) or getattr(job, "next_run_at", None)
 
 
 def _render_briefing_text(
@@ -646,11 +669,24 @@ async def _submit_audio(
         output_version=output_version,
     )
     no_material = not items
+    render_stage = stages["render_text"]
+    checked_at = str(render_stage.get("checked_at") or getattr(run, "finished_at", None) or _utcnow_iso())
+    next_run_at = (
+        render_stage.get("next_run_at")
+        if "next_run_at" in render_stage
+        else _next_run_at(watchlists_db, job)
+    )
+    stored_source_counts = render_stage.get("source_counts")
+    source_counts = stored_source_counts if isinstance(stored_source_counts, Mapping) else _source_counts(run)
     audio_items = items or [
         {
             "id": f"status:{occurrence.id}",
             "title": "No material updates",
-            "summary": "No qualifying new material was found during this source check.",
+            "summary": _no_material_updates_spoken_summary(
+                checked_at=checked_at,
+                next_run_at=next_run_at,
+                source_counts=source_counts,
+            ),
             "url": "",
             "status_kind": "no_material_updates",
         }
@@ -762,14 +798,12 @@ async def _run_text_flow(
     watchlists_db: Any,
     collections_db: Any,
     output_version: int,
-    force_reselect: bool = False,
+    rerender: bool = False,
 ) -> _TextFlowResult:
     """Select once, then render and persist from that durable ordered snapshot."""
     selection: BriefingSelection
-    durable_selection = (
-        not force_reselect
-        and stages["select"].get("status") == "ready"
-        and isinstance(stages["select"].get("selected_item_ids"), list)
+    durable_selection = stages["select"].get("status") == "ready" and isinstance(
+        stages["select"].get("selected_item_ids"), list
     )
     if durable_selection:
         try:
@@ -786,7 +820,7 @@ async def _run_text_flow(
                 stages,
                 artifact_status="failed",
             )
-            return _TextFlowResult(occurrence, None, [], None)
+            return _TextFlowResult(occurrence, [], None)
     else:
         _transition(stages, "select", "running")
         occurrence = _save_occurrence(
@@ -813,7 +847,7 @@ async def _run_text_flow(
                 stages,
                 artifact_status="failed",
             )
-            return _TextFlowResult(occurrence, None, [], None)
+            return _TextFlowResult(occurrence, [], None)
         selected_item_ids = [
             int(item.get("id") if isinstance(item, Mapping) else getattr(item, "id"))
             for item in selection.items
@@ -837,42 +871,57 @@ async def _run_text_flow(
 
     items = _normalize_items(selection.items)
     checked_at = str(getattr(run, "finished_at", None) or _utcnow_iso())
-    try:
-        refreshed_job = watchlists_db.get_job(int(job.id))
-    except (AttributeError, KeyError, RuntimeError, TypeError, ValueError):
-        refreshed_job = job
-    next_run_at = getattr(refreshed_job, "next_run_at", None) or getattr(job, "next_run_at", None)
+    next_run_at = _next_run_at(watchlists_db, job)
     source_counts = _source_counts(run)
     title = str(contract["editorial"].get("show_name") or getattr(job, "name", "Watchlist briefing"))
 
-    _transition(stages, "render_text", "running")
-    occurrence = _save_occurrence(watchlists_db, int(occurrence.id), stages, artifact_status="running")
-    try:
-        content = _render_briefing_text(
-            title=title,
-            items=items,
-            contract=contract,
+    stored_content = stages["render_text"].get("content")
+    if not rerender and stages["render_text"].get("status") == "ready" and isinstance(stored_content, str):
+        content = stored_content
+        checked_at = str(stages["render_text"].get("checked_at") or checked_at)
+        if "next_run_at" in stages["render_text"]:
+            next_run_at = stages["render_text"].get("next_run_at")
+        stored_source_counts = stages["render_text"].get("source_counts")
+        if isinstance(stored_source_counts, Mapping):
+            source_counts = {key: int(stored_source_counts.get(key, 0)) for key in source_counts}
+    else:
+        _transition(stages, "render_text", "running")
+        occurrence = _save_occurrence(watchlists_db, int(occurrence.id), stages, artifact_status="running")
+        try:
+            content = _render_briefing_text(
+                title=title,
+                items=items,
+                contract=contract,
+                checked_at=checked_at,
+                next_run_at=next_run_at,
+                source_counts=source_counts,
+                selection=selection,
+                selection_cap=briefing_selection_limit(contract),
+            )
+        except asyncio.CancelledError:
+            _transition(stages, "render_text", "cancelled", code="text_render_cancelled", retryable=True)
+            _save_occurrence(watchlists_db, int(occurrence.id), stages, artifact_status="cancelled")
+            raise
+        except Exception:  # noqa: BLE001 - orchestration boundary persists renderer failures
+            _transition(stages, "render_text", "failed", code="text_render_failed", retryable=True)
+            occurrence = _save_occurrence(
+                watchlists_db,
+                int(occurrence.id),
+                stages,
+                artifact_status="failed",
+            )
+            return _TextFlowResult(occurrence, items, None)
+        _transition(
+            stages,
+            "render_text",
+            "ready",
+            content=content,
+            content_sha256=hashlib.sha256(content.encode("utf-8")).hexdigest(),
             checked_at=checked_at,
             next_run_at=next_run_at,
-            source_counts=source_counts,
-            selection=selection,
-            selection_cap=briefing_selection_limit(contract),
+            source_counts=dict(source_counts),
         )
-    except asyncio.CancelledError:
-        _transition(stages, "render_text", "cancelled", code="text_render_cancelled", retryable=True)
-        _save_occurrence(watchlists_db, int(occurrence.id), stages, artifact_status="cancelled")
-        raise
-    except Exception:  # noqa: BLE001 - orchestration boundary persists renderer failures
-        _transition(stages, "render_text", "failed", code="text_render_failed", retryable=True)
-        occurrence = _save_occurrence(
-            watchlists_db,
-            int(occurrence.id),
-            stages,
-            artifact_status="failed",
-        )
-        return _TextFlowResult(occurrence, selection, items, None)
-    _transition(stages, "render_text", "ready")
-    occurrence = _save_occurrence(watchlists_db, int(occurrence.id), stages)
+        occurrence = _save_occurrence(watchlists_db, int(occurrence.id), stages)
 
     metadata = _metadata(
         occurrence=occurrence,
@@ -912,7 +961,7 @@ async def _run_text_flow(
             stages,
             artifact_status="failed",
         )
-        return _TextFlowResult(occurrence, selection, items, None)
+        return _TextFlowResult(occurrence, items, None)
 
     # The row is now the durable idempotency anchor. A crash in this link update is
     # deliberately allowed to propagate; replay recovers the row by its stable key.
@@ -930,7 +979,7 @@ async def _run_text_flow(
         output_id=output_id,
         artifact_status="running" if contract["audio"]["enabled"] else "ready",
     )
-    return _TextFlowResult(occurrence, selection, items, output_id)
+    return _TextFlowResult(occurrence, items, output_id)
 
 
 async def fulfill_watchlist_briefing(
@@ -1071,7 +1120,7 @@ async def retry_briefing_stage(
     regenerate: bool = False,
 ) -> FulfillmentResult:
     """Retry one failed/missing artifact stage while reusing durable outputs."""
-    if stage not in {"select", "render_text", "persist_text", "compose_audio_script"}:
+    if stage not in {"render_text", "persist_text", "compose_audio_script"}:
         raise ValueError("unsupported_briefing_retry_stage")
     occurrence = watchlists_db.get_briefing_occurrence(occurrence_id)
     job = watchlists_db.get_job(int(occurrence.job_id))
@@ -1090,10 +1139,10 @@ async def retry_briefing_stage(
         delivery_configured=_delivery_configured(contract),
     )
     current_status = stages[stage]["status"]
-    if stage != "select" and not regenerate and current_status not in {"failed", "not_started"}:
+    if not regenerate and current_status not in {"failed", "not_started"}:
         return _result(occurrence, stages)
 
-    if stage in {"select", "render_text", "persist_text"}:
+    if stage in {"render_text", "persist_text"}:
         current_version = int(stages["persist_text"].get("output_version") or 1)
         output_version = current_version + 1 if regenerate else current_version
         text_flow = await _run_text_flow(
@@ -1106,7 +1155,7 @@ async def retry_briefing_stage(
             watchlists_db=watchlists_db,
             collections_db=collections_db,
             output_version=output_version,
-            force_reselect=stage == "select",
+            rerender=stage == "render_text",
         )
         occurrence = text_flow.occurrence
         if text_flow.output_id is None or not audio_enabled:

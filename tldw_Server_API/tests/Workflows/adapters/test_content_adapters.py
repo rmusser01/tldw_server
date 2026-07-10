@@ -2565,7 +2565,17 @@ class TestAudioBriefingComposeAdapter:
         artifacts: list[dict[str, Any]] = []
         base_context["add_artifact"] = lambda **kwargs: artifacts.append(kwargs)
         config = {
-            "items": [{"title": "No material updates", "summary": "No qualifying new material."}],
+            "items": [
+                {
+                    "title": "No material updates",
+                    "summary": (
+                        "No qualifying new material was found. Sources succeeded: 2. "
+                        "Sources failed: 1. Sources deferred: 3. "
+                        "Checked: 2026-07-10T08:01:00+00:00. "
+                        "Next run: 2026-07-11T08:00:00+00:00."
+                    ),
+                }
+            ],
             "is_no_material_update": True,
             "provider": "openai",
             "persona_summarize": True,
@@ -2584,15 +2594,18 @@ class TestAudioBriefingComposeAdapter:
 
         llm.assert_not_awaited()
         assert result["script"] == (
-            "[ANNOUNCER]: No qualifying new material was found during this source check. "
-            "Your next briefing will run as scheduled."
+            "[ANNOUNCER]: No qualifying new material was found. Sources succeeded: 2. "
+            "Sources failed: 1. Sources deferred: 3. Checked: 2026-07-10T08:01:00+00:00. "
+            "Next run: 2026-07-11T08:00:00+00:00."
         )
         assert result["sections"] == [
             {
                 "voice": "ANNOUNCER",
                 "text": (
-                    "No qualifying new material was found during this source check. "
-                    "Your next briefing will run as scheduled."
+                    "No qualifying new material was found. Sources succeeded: 2. "
+                    "Sources failed: 1. Sources deferred: 3. "
+                    "Checked: 2026-07-10T08:01:00+00:00. "
+                    "Next run: 2026-07-11T08:00:00+00:00."
                 ),
             }
         ]

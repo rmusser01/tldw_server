@@ -410,10 +410,7 @@ async def run_audio_briefing_compose_adapter(config: dict[str, Any], context: di
         voice_map_cfg = cast_voice_map
 
     if bool(config.get("is_no_material_update", False)):
-        spoken_text = (
-            "No qualifying new material was found during this source check. "
-            "Your next briefing will run as scheduled."
-        )
+        spoken_text = normalized_items[0].get("summary") or normalized_items[0].get("title") or "No material updates."
         marker = audio_cast_speakers[0]["marker"] if audio_cast_speakers else "HOST"
         script = f"[{marker}]: {spoken_text}" if multi_voice else spoken_text
         sections = [{"voice": marker, "text": spoken_text}]
