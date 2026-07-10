@@ -697,6 +697,29 @@ git commit -m "docs: finalize source review task record"
 
 ---
 
+### Task 9: Rebase and Address Final PR Review
+
+**Goal:** Rebase PR #2705 onto current `dev` and close all CodeRabbit findings without adding a root-level API.
+
+- [x] **Step 1: Rebase onto current dev**
+  - Rebasing all 19 feature commits onto `c588c3b8b521f9411e9ae08c42b3365e886846c8` completed without conflicts.
+- [x] **Step 2: Validate and reproduce review findings**
+  - Added regressions for thin due polling, resume hydration, optimistic-state reconciliation, handoff guards, error telemetry, provenance cleanup, source selection, and typed not-found errors.
+  - Red runs produced 6 backend and 13 frontend failures matching the reviewed gaps.
+- [x] **Step 3: Implement reviewed fixes**
+  - Reused the idempotent nested start action for resume hydration, keeping full source bundles out of the polled due response without adding another route.
+  - Added typed not-found errors, shared offset caps, schema docstrings, controlled stored-metadata failures, and PostgreSQL test-role teardown.
+  - Preserved optimistic UI state, guarded malformed handoffs, tracked mutation failures, cleared stale generation provenance, activated source-review generation tasks, and retained invalid media IDs as snapshots.
+- [x] **Step 4: Verify and close review threads**
+  - Backend: 95 passed, 2 live-PostgreSQL tests skipped because no test service/DSN was available.
+  - Frontend: 114 passed across 9 source-review test files.
+  - Focused Ruff, ChaCha critical Ruff checks, compileall, OpenAPI verification, and diff checks passed.
+  - Bandit reported 0 findings in `/tmp/bandit_task_12932_rebase_review_final.json` with test assertions excluded.
+  - Full UI TypeScript reached diagnostics with an 8 GB heap and reported only unrelated repository baseline errors; no touched source-review file appeared.
+  - All 15 CodeRabbit threads were answered inline and resolved. The launch-metadata error remains a controlled server error because invalid persisted metadata is not client input.
+
+---
+
 ## Execution Notes
 
 - Use `source .venv/bin/activate` before Python test, Bandit, or pytest commands.
