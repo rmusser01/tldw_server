@@ -1,7 +1,7 @@
 ---
 id: TASK-12946
 title: Address remaining frontend CodeQL alerts for dev
-status: In Progress
+status: Done
 labels:
 - security
 - codeql
@@ -10,11 +10,10 @@ priority: High
 references:
 - https://github.com/rmusser01/tldw_server/security/code-scanning
 - https://github.com/rmusser01/tldw_server/pull/2696
+- https://github.com/rmusser01/tldw_server/pull/2706
 documentation:
 - Docs/superpowers/specs/2026-07-10-remaining-frontend-codeql-alerts-design.md
-- Docs/superpowers/plans/IMPLEMENTATION_PLAN_2026-07-10_remaining_frontend_codeql_alerts.md
 modified_files:
-- Docs/superpowers/plans/IMPLEMENTATION_PLAN_2026-07-10_remaining_frontend_codeql_alerts.md
 - Docs/superpowers/specs/2026-07-10-remaining-frontend-codeql-alerts-design.md
 - apps/packages/ui/src/components/Common/CharacterSelect.tsx
 - apps/packages/ui/src/components/Common/Playground/DocumentGeneratorDrawer.tsx
@@ -52,15 +51,14 @@ Address the 12 JavaScript/TypeScript CodeQL alerts #2251-#2262 that remain unpat
 - [x] #1 All remaining CodeQL alert classes #2251-#2262 are addressed in source on a branch based on origin/dev.
 - [x] #2 Focused regression tests cover unsafe HTML/URLs, OPML-free group filtering, provider inference, and logging behavior.
 - [x] #3 Frontend typechecking and targeted tests pass; skipped checks are documented.
-- [ ] #4 A pull request is opened against dev with alert mapping and verification results.
+- [x] #4 A pull request is opened against dev with alert mapping and verification results.
 <!-- AC:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Pre-implementation review refined the design in four material ways: use the existing server-side `groups` source query instead of OPML/client filtering; centralize an image-specific URL validator with an analyzer-visible safe prefix and embedded-image fallback; sanitize article HTML before the non-DOM text scanner; and preserve the printable quiz document shell with DOMPurify `WHOLE_DOCUMENT` plus a trusted doctype. Verification limitation: the dev-targeted PR is not expected to receive JavaScript default-setup CodeQL because dev is unprotected and the repository advanced workflow is Python-only. Independent spec review approved the revised approach.
+Pre-implementation review selected four root-cause changes: use the existing server-side `groups` source query instead of OPML/client filtering; centralize an image-specific URL validator with analyzer-visible safe prefixes and embedded-image fallback; sanitize article HTML before the non-DOM text scanner; and preserve the printable quiz shell with DOMPurify `WHOLE_DOCUMENT` plus a trusted doctype. The task-specific implementation plan was executed with required red-green and two-stage review gates, then removed after all stages completed per repository instructions.
 
-Implementation plan: `Docs/superpowers/plans/IMPLEMENTATION_PLAN_2026-07-10_remaining_frontend_codeql_alerts.md`, with alert-to-source/test traceability and mandatory red-green steps.
 Implementation completed through commit a288abad0e. The fixes centralize safe raster/URL handling across alerted and sibling image sinks; remove untrusted HTML/XML parser paths while using the existing server-side groups query; escape/validate printable quiz fields and sanitize the whole document immediately before document.write; convert tainted console format strings to constant-first calls (including sibling timeline sinks); and rename the provider predicate member from match to matches without changing rule order or behavior.
 
 Fresh verification on 2026-07-10: 10 focused Vitest files passed (132/132 tests); the CodeQL source-contract suite also passed from the required apps/tldw-frontend CI working directory (3/3); `NODE_OPTIONS=--max-old-space-size=8192 bun run typecheck` passed; `git diff --check origin/dev...HEAD` passed; final independent whole-branch review reported no remaining findings and Ready: Yes. Bandit is not applicable because no Python source changed.
@@ -71,15 +69,15 @@ Known verification limitation: alerts 2251-2262 remain open in the live default-
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Resolved frontend CodeQL alerts 2251-2262 in PR #2706 against dev. The branch adds one shared image-source trust boundary, removes the reported HTML/XML parser paths, sanitizes the printable quiz document at its write sink, hardens tainted console format calls, and makes provider predicates analyzer-safe without changing inference behavior. Fresh verification passed 132/132 focused tests, 3/3 source contracts from the CI working directory, full frontend typechecking, and diff checks; independent final review found no remaining issues. Bandit was not applicable because no Python changed. JavaScript alert closure must be confirmed after the fixes reach a JavaScript-analyzed branch because dev currently has no CodeQL analysis.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
+- [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
+- [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
