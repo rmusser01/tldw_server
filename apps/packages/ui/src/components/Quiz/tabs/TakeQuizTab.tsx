@@ -57,7 +57,7 @@ import type { TakeTabNavigationSource } from "../navigation"
 import { TAKE_QUIZ_LIST_PREFS_KEY } from "../stateKeys"
 import {
   buildShuffledOptionEntries,
-  drawDeterministicQuestionPool,
+  drawDeterministicGroupedQuestionPool,
   type ShuffledOptionEntry
 } from "../utils/optionShuffle"
 import {
@@ -97,6 +97,66 @@ type TakeSessionMode = "graded" | "practice" | "review"
 type StudyPoolSizePreference = "all" | number
 type PracticeQuestionTimerPreference = "off" | number
 const TOUCH_TARGET_CLASS = "min-h-11 px-4"
+const BEST_OF_FIVE_QUESTION_TAG = "best_of_five"
+const ASSERTION_REASONING_QUESTION_TAG = "assertion_reasoning"
+export const ASSERTION_REASONING_OPTIONS = [
+  "Both the assertion and reason are true, and the reason correctly explains the assertion.",
+  "Both the assertion and reason are true, but the reason does not explain the assertion.",
+  "The assertion is true, but the reason is false.",
+  "The assertion is false, but the reason is true.",
+  "Both the assertion and reason are false."
+] as const
+
+const normalizeQuestionTag = (tag: unknown): string =>
+  String(tag).trim().toLowerCase().replace(/[\s/-]+/g, "_")
+
+const hasQuestionTag = (question: QuestionPublic, reservedTag: string): boolean => {
+  if (!Array.isArray(question.tags)) return false
+  return question.tags.some((tag) => normalizeQuestionTag(tag) === reservedTag)
+}
+
+const hasBestOfFiveQuestionTag = (question: QuestionPublic): boolean =>
+  hasQuestionTag(question, BEST_OF_FIVE_QUESTION_TAG)
+
+const hasAssertionReasoningQuestionTag = (question: QuestionPublic): boolean =>
+  hasQuestionTag(question, ASSERTION_REASONING_QUESTION_TAG)
+
+const getQuestionGroupId = (question: QuestionPublic): string | null => {
+  if (typeof question.group_id !== "string") return null
+  const normalized = question.group_id.trim()
+  return normalized.length > 0 ? normalized : null
+}
+
+const hasLabeledAssertionReasoningBody = (question: QuestionPublic): boolean => {
+  const questionText = question.question_text
+  if (typeof questionText !== "string") return false
+  const assertionIndex = questionText.search(/^[ \t]*\*\*Assertion:\*\*[ \t]*\S/im)
+  const reasonIndex = questionText.search(/^[ \t]*\*\*Reason:\*\*[ \t]*\S/im)
+  return assertionIndex >= 0 && reasonIndex > assertionIndex
+}
+
+const hasCompatibleAssertionReasoningShape = (question: QuestionPublic): boolean =>
+  hasAssertionReasoningQuestionTag(question) &&
+  question.question_type === "multiple_choice" &&
+  getQuestionGroupId(question) == null &&
+  Array.isArray(question.options) &&
+  question.options.length === ASSERTION_REASONING_OPTIONS.length &&
+  question.options.every(
+    (option, index) => option === ASSERTION_REASONING_OPTIONS[index]
+  ) &&
+  hasLabeledAssertionReasoningBody(question)
+
+const getAssertionReasoningScaleOptions = (questions: QuestionPublic[]): string[] | null => {
+  const taggedQuestions = questions.filter(hasAssertionReasoningQuestionTag)
+  if (
+    taggedQuestions.length === 0 ||
+    !taggedQuestions.every(hasCompatibleAssertionReasoningShape)
+  ) {
+    return null
+  }
+
+  return [...ASSERTION_REASONING_OPTIONS]
+}
 
 const normalizeMultiSelectAnswer = (value: unknown): number[] => {
   if (Array.isArray(value)) {
@@ -290,6 +350,20 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
   const isOnline = useServerOnline()
   const wasOnlineRef = React.useRef(isOnline)
   const offset = (page - 1) * pageSize
+
+  const assertionReasoningScaleOptions = React.useMemo(
+    () => getAssertionReasoningScaleOptions(questions),
+    [questions]
+  )
+  const isAssertionReasoningQuestion = React.useCallback(
+    (question: QuestionPublic): boolean =>
+      assertionReasoningScaleOptions != null &&
+      hasCompatibleAssertionReasoningShape(question) &&
+      question.options?.every(
+        (option, index) => option === assertionReasoningScaleOptions[index]
+      ) === true,
+    [assertionReasoningScaleOptions]
+  )
 
   const normalizedSearchQuery = searchQuery.trim()
   const { data, isLoading } = useQuizzesQuery({
@@ -580,10 +654,11 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
       const drawCount = studyPoolSizePreference === "all"
         ? loadedQuestions.length
         : studyPoolSizePreference
-      const pooledQuestions = drawDeterministicQuestionPool(
+      const pooledQuestions = drawDeterministicGroupedQuestionPool(
         loadedQuestions,
         drawCount,
-        nextSessionSeed
+        nextSessionSeed,
+        getQuestionGroupId
       )
       setStudySessionShuffleSeed(nextSessionSeed === 0 ? quizId : nextSessionSeed)
       setQuestions(pooledQuestions)
@@ -863,6 +938,95 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
     return Array.isArray(raw) ? raw : null
   }
 
+  const formatEmqOptionLabel = (label: string, index: number) => {
+    const optionLabel = label || `${t("option:quiz.option", { defaultValue: "Option" })} ${index + 1}`
+    return `${String.fromCharCode(65 + index)}. ${optionLabel}`
+  }
+
+  const renderEmqGroupBank = (question: QuestionPublic, index: number) => {
+    const groupId = getQuestionGroupId(question)
+    if (!groupId) return null
+    const firstGroupIndex = questions.findIndex((candidate) => getQuestionGroupId(candidate) === groupId)
+    if (firstGroupIndex !== index) return null
+
+    const groupPrompt = typeof question.group_prompt === "string" ? question.group_prompt.trim() : ""
+    const optionBank = question.options ?? []
+    return (
+      <section
+        aria-label={t("option:quiz.emqSharedBank", { defaultValue: "Shared option bank" })}
+        className="mb-3 space-y-2 rounded-md border border-border bg-surface2 p-3"
+        data-testid="emq-group-bank"
+        data-emq-group-id={groupId}
+      >
+        {groupPrompt && (
+          <QuizMarkdown content={groupPrompt} className="text-sm text-text [&>p]:my-1" />
+        )}
+        <Typography.Text className="block text-xs font-medium text-text-muted">
+          {t("option:quiz.emqSharedBank", { defaultValue: "Shared option bank" })}
+        </Typography.Text>
+        <ol className="space-y-1 text-sm text-text">
+          {optionBank.map((label, optionIndex) => (
+            <li key={optionIndex} className="break-words">
+              {formatEmqOptionLabel(label, optionIndex)}
+            </li>
+          ))}
+        </ol>
+      </section>
+    )
+  }
+
+  const renderAssertionReasoningScale = () => {
+    if (!assertionReasoningScaleOptions) return null
+
+    const scaleLabel = t("option:quiz.assertionReasoningScale", {
+      defaultValue: "Assertion / Reasoning answer scale"
+    })
+    return (
+      <section
+        aria-label={scaleLabel}
+        className="mb-3 space-y-2 rounded-md bg-surface2 p-3"
+        data-testid="assertion-reasoning-scale"
+      >
+        <Typography.Text className="block text-xs font-medium text-text-muted">
+          {scaleLabel}
+        </Typography.Text>
+        <ol className="space-y-1 text-sm text-text">
+          {assertionReasoningScaleOptions.map((label, optionIndex) => (
+            <li key={optionIndex} className="break-words">
+              {formatEmqOptionLabel(label, optionIndex)}
+            </li>
+          ))}
+        </ol>
+      </section>
+    )
+  }
+
+  const renderQuestionHeader = (question: QuestionPublic, index: number) => (
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="text-xs text-text-muted">
+        {t("option:quiz.questionNumberLabel", {
+          defaultValue: "Question {{number}}",
+          number: index + 1
+        })}
+      </span>
+      {hasBestOfFiveQuestionTag(question) && (
+        <Tag color="blue" className="m-0">
+          {t("option:quiz.bestOfFiveTag", { defaultValue: "Best of Five" })}
+        </Tag>
+      )}
+      {isAssertionReasoningQuestion(question) && (
+        <Tag className="m-0">
+          {t("option:quiz.assertionReasoningTag", { defaultValue: "Assertion / Reasoning" })}
+        </Tag>
+      )}
+      {getQuestionGroupId(question) && (
+        <Tag className="m-0">
+          {t("option:quiz.emqTag", { defaultValue: "EMQ" })}
+        </Tag>
+      )}
+    </div>
+  )
+
   const isPracticeAnswerCorrect = (
     question: QuestionPublic,
     answer: AnswerValue | null | undefined
@@ -946,11 +1110,15 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
   const getOptionEntriesForQuestion = React.useCallback((question: QuestionPublic): ShuffledOptionEntry[] => {
     if (question.question_type !== "multiple_choice" && question.question_type !== "multi_select") return []
     const options = question.options ?? []
-    if (optionShuffleSeed == null || options.length <= 1) {
+    if (
+      optionShuffleSeed == null ||
+      options.length <= 1 ||
+      (question.question_type === "multiple_choice" && isAssertionReasoningQuestion(question))
+    ) {
       return options.map((label, originalIndex) => ({ originalIndex, label }))
     }
     return buildShuffledOptionEntries(options, question.id, optionShuffleSeed)
-  }, [optionShuffleSeed])
+  }, [isAssertionReasoningQuestion, optionShuffleSeed])
 
   const formatQuestionAnswer = React.useCallback((question: QuestionPublic, value: AnswerValue | undefined) => {
     if (value == null) {
@@ -1121,6 +1289,25 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
   }
 
   const renderAnswerInput = (question: QuestionPublic) => {
+    if (
+      question.question_type === "multiple_choice" &&
+      getQuestionGroupId(question)
+    ) {
+      const optionBank = question.options ?? []
+      return (
+        <Select
+          aria-label={question.question_text}
+          className="min-h-11 w-full max-w-xl [&_.ant-select-selector]:min-h-11"
+          onChange={(value) => updateAnswer(question.id, value)}
+          options={optionBank.map((label, index) => ({
+            label: formatEmqOptionLabel(label, index),
+            value: index
+          }))}
+          placeholder={t("option:quiz.selectOption", { defaultValue: "Select an option" })}
+          value={typeof answers[question.id] === "number" ? answers[question.id] : undefined}
+        />
+      )
+    }
     if (question.question_type === "multiple_choice") {
       const optionEntries = getOptionEntriesForQuestion(question)
       return (
@@ -1307,6 +1494,7 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
               })}
         </DesignSystemAlert>
 
+        {renderAssertionReasoningScale()}
         <List
           dataSource={questions}
           renderItem={(question, index) => {
@@ -1321,14 +1509,10 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
             return (
               <List.Item>
                 <div className="w-full space-y-2">
+                  {renderEmqGroupBank(question, index)}
                   <div className="flex items-start justify-between gap-3">
                     <div className="font-medium">
-                      <span className="block text-xs text-text-muted">
-                        {t("option:quiz.questionNumberLabel", {
-                          defaultValue: "Question {{number}}",
-                          number: index + 1
-                        })}
-                      </span>
+                      {renderQuestionHeader(question, index)}
                       <QuizMarkdown content={question.question_text} className="[&>p]:my-1" />
                     </div>
                     <DesignSystemBadge
@@ -1906,6 +2090,7 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
                   })
                 : null}
             </DesignSystemAlert>
+            {renderAssertionReasoningScale()}
             <List
               dataSource={questions}
               renderItem={(question, index) => {
@@ -1913,13 +2098,9 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
                 return (
                   <List.Item>
                     <div className="w-full space-y-2">
+                      {renderEmqGroupBank(question, index)}
                       <div className="font-medium">
-                        <span className="block text-xs text-text-muted">
-                          {t("option:quiz.questionNumberLabel", {
-                            defaultValue: "Question {{number}}",
-                            number: index + 1
-                          })}
-                        </span>
+                        {renderQuestionHeader(question, index)}
                         <QuizMarkdown content={question.question_text} className="[&>p]:my-1" />
                       </div>
                       {renderHintSupport(question)}
@@ -2060,6 +2241,7 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
             >
               <Progress percent={progress} />
             </div>
+            {renderAssertionReasoningScale()}
             <List
               dataSource={questions}
               renderItem={(question, index) => {
@@ -2075,13 +2257,9 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
                         focusedQuestionId === question.id ? "border border-warning/60 bg-warning/10" : ""
                       }`}
                     >
+                      {renderEmqGroupBank(question, index)}
                       <div className="font-medium">
-                        <span className="block text-xs text-text-muted">
-                          {t("option:quiz.questionNumberLabel", {
-                            defaultValue: "Question {{number}}",
-                            number: index + 1
-                          })}
-                        </span>
+                        {renderQuestionHeader(question, index)}
                         <QuizMarkdown content={question.question_text} className="[&>p]:my-1" />
                       </div>
                       {renderAnswerInput(question)}
@@ -2093,13 +2271,15 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
                             ? t("option:quiz.correct", { defaultValue: "Correct" })
                             : t("option:quiz.incorrect", { defaultValue: "Incorrect" })}
                         >
-                          {!feedback && (
+                          {(!feedback || isAssertionReasoningQuestion(question)) && (
                             <div className="space-y-1">
-                              <Typography.Text className="block text-sm">
-                                {t("option:quiz.correctAnswerLabel", {
-                                  defaultValue: "Correct answer"
-                                })}: {formatQuestionAnswer(question, correctAnswer)}
-                              </Typography.Text>
+                              {!feedback && (
+                                <Typography.Text className="block text-sm">
+                                  {t("option:quiz.correctAnswerLabel", {
+                                    defaultValue: "Correct answer"
+                                  })}: {formatQuestionAnswer(question, correctAnswer)}
+                                </Typography.Text>
+                              )}
                               {(question as QuestionPublic & { explanation?: string | null }).explanation && (
                                 <QuizMarkdown
                                   content={(question as QuestionPublic & { explanation?: string | null }).explanation || ""}
@@ -2221,6 +2401,7 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
             >
               <Progress percent={progress} />
             </div>
+            {renderAssertionReasoningScale()}
             <List
               dataSource={questions}
               renderItem={(question, index) => (
@@ -2233,13 +2414,9 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
                       focusedQuestionId === question.id ? "border border-warning/60 bg-warning/10" : ""
                     }`}
                   >
+                    {renderEmqGroupBank(question, index)}
                     <div className="font-medium">
-                      <span className="block text-xs text-text-muted">
-                        {t("option:quiz.questionNumberLabel", {
-                          defaultValue: "Question {{number}}",
-                          number: index + 1
-                        })}
-                      </span>
+                      {renderQuestionHeader(question, index)}
                       <QuizMarkdown content={question.question_text} className="[&>p]:my-1" />
                     </div>
                     {renderAnswerInput(question)}

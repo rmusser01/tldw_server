@@ -616,7 +616,7 @@ class CharactersRAGDB:
         is_memory_db (bool): True if the database is in-memory.
         db_path_str (str): String representation of the database path for SQLite connection.
     """
-    _CURRENT_SCHEMA_VERSION = 52  # Schema v52 adds source review plan storage
+    _CURRENT_SCHEMA_VERSION = 53  # Schema v53 adds EMQ question group metadata
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _SQLITE_SCHEMA_INIT_LOCKS_GUARD: ClassVar[threading.RLock] = threading.RLock()
     _SQLITE_SCHEMA_INIT_LOCKS: ClassVar[dict[str, threading.RLock]] = {}
@@ -726,6 +726,7 @@ class CharactersRAGDB:
         "persona_profiles": "PRAGMA table_info('persona_profiles')",
         "persona_memory_entries": "PRAGMA table_info('persona_memory_entries')",
         "persona_visual_candidates": "PRAGMA table_info('persona_visual_candidates')",
+        "quiz_questions": "PRAGMA table_info('quiz_questions')",
     }
     _SQLITE_SCHEMA_INDEX_LIST_STATEMENTS: dict[str, str] = {
         "persona_profiles": "PRAGMA index_list('persona_profiles')",
@@ -5992,6 +5993,13 @@ UPDATE db_schema_version
    AND version < 52;
 """
 
+    _MIGRATION_SQL_V52_TO_V53 = """
+UPDATE db_schema_version
+   SET version = 53
+ WHERE schema_name = 'rag_char_chat_schema'
+   AND version < 53;
+"""
+
     _MIGRATION_SQL_V47_TO_V48_POSTGRES = """
 /*───────────────────────────────────────────────────────────────
   Migration to Version 48 — Notes task-backed checklist storage (2026-06-05) [Postgres]
@@ -6357,6 +6365,16 @@ UPDATE db_schema_version
    SET version = 51
  WHERE schema_name = 'rag_char_chat_schema'
    AND version < 51;
+"""
+
+    _MIGRATION_SQL_V52_TO_V53_POSTGRES = """
+ALTER TABLE quiz_questions ADD COLUMN IF NOT EXISTS group_id TEXT;
+ALTER TABLE quiz_questions ADD COLUMN IF NOT EXISTS group_prompt TEXT;
+
+UPDATE db_schema_version
+   SET version = 53
+ WHERE schema_name = 'rag_char_chat_schema'
+   AND version < 53;
 """
 
     _MIGRATION_SQL_V10_TO_V11_POSTGRES = """
@@ -7376,6 +7394,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             (49, "_migrate_from_v49_to_v50"),
             (50, "_migrate_from_v50_to_v51"),
             (51, "_migrate_from_v51_to_v52"),
+            (52, "_migrate_from_v52_to_v53"),
         ):
             method = getattr(self, method_name, None)
             if method is not None:
@@ -8805,6 +8824,33 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V51->V52: {exc}", exc_info=True)
             raise SchemaError(
                 f"Unexpected error migrating to V52 for '{self._SCHEMA_NAME}': {exc}"
+            ) from exc  # noqa: TRY003
+
+    def _migrate_from_v52_to_v53(self, conn: sqlite3.Connection) -> None:
+        """Migrate schema from V52 to V53 (EMQ question group metadata)."""
+        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V52 to V53 for DB: {self.db_path_str}...")
+        try:
+            columns = self._sqlite_column_names(conn, "quiz_questions")
+            if "group_id" not in columns:
+                conn.execute("ALTER TABLE quiz_questions ADD COLUMN group_id TEXT")
+            if "group_prompt" not in columns:
+                conn.execute("ALTER TABLE quiz_questions ADD COLUMN group_prompt TEXT")
+            conn.executescript(self._MIGRATION_SQL_V52_TO_V53)
+            final_version = self._get_db_version(conn)
+            if final_version != 53:
+                raise SchemaError(  # noqa: TRY003, TRY301
+                    f"[{self._SCHEMA_NAME}] Migration V52->V53 failed version check. Expected 53, got: {final_version}"
+                )
+            logger.info(f"[{self._SCHEMA_NAME}] Migration to V53 completed.")
+        except sqlite3.Error as exc:
+            logger.error(f"[{self._SCHEMA_NAME}] Migration V52->V53 failed: {exc}", exc_info=True)
+            raise SchemaError(f"Migration V52->V53 failed for '{self._SCHEMA_NAME}': {exc}") from exc  # noqa: TRY003
+        except SchemaError:
+            raise
+        except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:
+            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V52->V53: {exc}", exc_info=True)
+            raise SchemaError(
+                f"Unexpected error migrating to V53 for '{self._SCHEMA_NAME}': {exc}"
             ) from exc  # noqa: TRY003
 
     def _ensure_persona_persistence_schema_sqlite(self, conn: sqlite3.Connection) -> None:
@@ -11287,6 +11333,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     if target_version >= 52 and current_db_version == 51:
                         self._migrate_from_v51_to_v52(conn)
                         current_db_version = self._get_db_version(conn)
+                    if target_version >= 53 and current_db_version == 52:
+                        self._migrate_from_v52_to_v53(conn)
+                        current_db_version = self._get_db_version(conn)
                 # Ensure helpful indexes that may have been introduced post-creation
                 try:
                     conn.execute("CREATE INDEX IF NOT EXISTS idx_flashcards_created_at ON flashcards(created_at)")
@@ -11691,6 +11740,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     current_db_version = self._get_db_version(conn)
                 if target_version >= 52 and current_db_version == 51:
                     self._migrate_from_v51_to_v52(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 53 and current_db_version == 52:
+                    self._migrate_from_v52_to_v53(conn)
                     current_db_version = self._get_db_version(conn)
 
                 self._ensure_recent_persona_schema_sqlite(conn)
@@ -15597,6 +15649,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._set_schema_version_postgres(conn, 52)
                 self._sync_postgres_sequences(conn)
                 current_version = 52
+            if current_version < 53:
+                self._apply_postgres_migration_script(
+                    self._MIGRATION_SQL_V52_TO_V53_POSTGRES,
+                    conn,
+                    expected_version=53,
+                )
+                current_version = 53
 
             if current_version > target_version:
                 raise SchemaError(  # noqa: TRY003
@@ -28560,6 +28619,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         order_index: int = 0,
         tags: list[str] | None = None,
         client_id: str = "unknown",
+        group_id: str | None = None,
+        group_prompt: str | None = None,
     ) -> int:
         """Create a question for a quiz and increment total_questions."""
         now = self._get_current_utc_timestamp_iso()
@@ -28575,15 +28636,17 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 if not quiz_row:
                     raise ConflictError("Quiz not found", entity="quizzes", identifier=quiz_id)  # noqa: TRY003
                 insert_sql = (
-                    "INSERT INTO quiz_questions(quiz_id, question_type, question_text, options, correct_answer, "
+                    "INSERT INTO quiz_questions(quiz_id, question_type, question_text, group_id, group_prompt, options, correct_answer, "
                     "explanation, hint, hint_penalty_points, source_citations_json, points, order_index, tags_json, deleted, client_id, "
                     "version, created_at, last_modified) "
-                    "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                    "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
                 )
                 params = (
                     quiz_id,
                     question_type,
                     question_text,
+                    group_id,
+                    group_prompt,
                     options_json,
                     norm_correct,
                     explanation,
@@ -28619,7 +28682,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         """Get question by ID."""
         deleted_clause = "" if include_deleted else "AND deleted = 0"
         query = (
-            "SELECT id, quiz_id, question_type, question_text, options, correct_answer, explanation, hint, "  # nosec B608
+            "SELECT id, quiz_id, question_type, question_text, group_id, group_prompt, options, correct_answer, explanation, hint, "  # nosec B608
             "hint_penalty_points, source_citations_json, points, "
             "order_index, tags_json, deleted, client_id, version, created_at, last_modified "
             "FROM quiz_questions WHERE id = ? " + deleted_clause
@@ -28666,7 +28729,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             query_params.extend([int(limit), int(offset)])
 
         query = (
-            "SELECT id, quiz_id, question_type, question_text, options, correct_answer, explanation, hint, "  # nosec B608
+            "SELECT id, quiz_id, question_type, question_text, group_id, group_prompt, options, correct_answer, explanation, hint, "  # nosec B608
             "hint_penalty_points, source_citations_json, points, "
             "order_index, tags_json, deleted, client_id, version, created_at, last_modified "
             f"FROM quiz_questions WHERE {where_sql} {fts_filter} "
@@ -28696,6 +28759,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         allowed = {
             "question_type",
             "question_text",
+            "group_id",
+            "group_prompt",
             "options",
             "correct_answer",
             "explanation",

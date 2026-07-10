@@ -1,7 +1,16 @@
 import pytest
 from pydantic import ValidationError
 
-from tldw_Server_API.app.api.v1.schemas.quizzes import QuizGenerateRequest, SourceCitation
+from tldw_Server_API.app.api.v1.schemas.quizzes import (
+    AvailableQuizGenerationProfile,
+    QuestionCreate,
+    QuestionPublicResponse,
+    QuestionUpdate,
+    QuizGenerateRequest,
+    QuizGenerationProfile,
+    QuizImportQuestion,
+    SourceCitation,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -106,6 +115,37 @@ def test_quiz_generate_request_rejects_invalid_question_plan(payload):
         QuizGenerateRequest.model_validate(payload)
 
 
+def test_quiz_generate_request_accepts_generation_profile():
+    payload = QuizGenerateRequest.model_validate(
+        {
+            "num_questions": 5,
+            "sources": [{"source_type": "note", "source_id": "note-1"}],
+            "generation_profile": "best_of_five",
+        }
+    )
+
+    assert payload.generation_profile == QuizGenerationProfile.BEST_OF_FIVE
+
+
+def test_quiz_generate_request_rejects_planned_generation_profile():
+    with pytest.raises(ValidationError, match="osce_scenario"):
+        QuizGenerateRequest.model_validate(
+            {
+                "num_questions": 5,
+                "sources": [{"source_type": "note", "source_id": "note-1"}],
+                "generation_profile": "osce_scenario",
+            }
+        )
+
+
+def test_available_generation_profiles_match_non_planned_catalog_profiles() -> None:
+    assert {profile.value for profile in AvailableQuizGenerationProfile} == {
+        profile.value
+        for profile in QuizGenerationProfile
+        if profile is not QuizGenerationProfile.OSCE_SCENARIO
+    }
+
+
 def test_quiz_generate_request_rejects_unknown_source_type():
     with pytest.raises(ValidationError):
         QuizGenerateRequest.model_validate(
@@ -131,3 +171,53 @@ def test_source_citation_accepts_canonical_source_fields():
 
     assert citation.source_type == "flashcard_card"
     assert citation.source_id == "card-uuid"
+
+
+_QUESTION_MODEL_PAYLOADS = (
+    (
+        QuestionCreate,
+        {"question_type": "multiple_choice", "question_text": "Stem", "correct_answer": 0},
+    ),
+    (QuestionUpdate, {}),
+    (
+        QuestionPublicResponse,
+        {
+            "id": 1,
+            "quiz_id": 2,
+            "question_type": "multiple_choice",
+            "question_text": "Stem",
+            "points": 1,
+            "order_index": 0,
+            "deleted": False,
+            "client_id": "test",
+            "version": 1,
+        },
+    ),
+    (
+        QuizImportQuestion,
+        {"question_type": "multiple_choice", "question_text": "Stem", "correct_answer": 0},
+    ),
+)
+
+
+@pytest.mark.parametrize(("model_type", "payload"), _QUESTION_MODEL_PAYLOADS)
+def test_question_contracts_default_emq_group_metadata_to_none(model_type, payload):
+    question = model_type.model_validate(payload)
+
+    assert question.group_id is None
+    assert question.group_prompt is None
+
+
+@pytest.mark.parametrize(("model_type", "payload"), _QUESTION_MODEL_PAYLOADS)
+@pytest.mark.parametrize(("field_name", "max_length"), (("group_id", 128), ("group_prompt", 2000)))
+def test_question_contracts_enforce_emq_group_metadata_max_lengths(
+    model_type,
+    payload,
+    field_name,
+    max_length,
+):
+    accepted = model_type.model_validate({**payload, field_name: "x" * max_length})
+    assert getattr(accepted, field_name) == "x" * max_length
+
+    with pytest.raises(ValidationError):
+        model_type.model_validate({**payload, field_name: "x" * (max_length + 1)})

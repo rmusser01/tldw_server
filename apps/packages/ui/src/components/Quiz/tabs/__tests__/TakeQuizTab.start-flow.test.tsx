@@ -1,7 +1,7 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { MemoryRouter } from "react-router-dom"
-import { TakeQuizTab } from "../TakeQuizTab"
+import { ASSERTION_REASONING_OPTIONS, TakeQuizTab } from "../TakeQuizTab"
 import {
   useAttemptsQuery,
   useQuizzesQuery,
@@ -115,6 +115,7 @@ describe("TakeQuizTab start flow", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     window.localStorage.clear()
+    Element.prototype.scrollIntoView = vi.fn()
 
     vi.mocked(useAttemptsQuery).mockReturnValue({
       data: {
@@ -342,6 +343,210 @@ describe("TakeQuizTab start flow", () => {
     expect(completionProgress).toHaveAttribute("aria-valuemax", "100")
   }, 15000)
 
+  it("labels and shuffles Best of Five questions while preserving answer mapping", async () => {
+    const questionId = 41
+    let attemptId = 141
+    let shuffledEntries = buildShuffledOptionEntries(
+      ["A", "B", "C", "D", "E"],
+      questionId,
+      attemptId
+    )
+    for (
+      let attempts = 0;
+      shuffledEntries.every((entry, index) => entry.originalIndex === index) && attempts < 128;
+      attempts += 1
+    ) {
+      attemptId += 1
+      shuffledEntries = buildShuffledOptionEntries(
+        ["A", "B", "C", "D", "E"],
+        questionId,
+        attemptId
+      )
+    }
+    expect(shuffledEntries.some((entry, index) => entry.originalIndex !== index)).toBe(true)
+    vi.mocked(useStartAttemptMutation).mockReturnValue({
+      mutateAsync: vi.fn(async () => ({
+        id: attemptId,
+        quiz_id: 7,
+        started_at: "2026-02-18T10:00:00Z",
+        total_possible: 1,
+        answers: [],
+        questions: [
+          {
+            id: questionId,
+            quiz_id: 7,
+            question_type: "multiple_choice",
+            question_text: "Which option is the best supported answer?",
+            options: ["A", "B", "C", "D", "E"],
+            points: 1,
+            order_index: 0,
+            tags: ["best_of_five"],
+            deleted: false,
+            client_id: "test",
+            version: 1
+          }
+        ]
+      }))
+    } as any)
+    const submitMutate = vi.fn(async ({ answers }: {
+      answers: Array<{ question_id: number; user_answer: number; hint_used?: boolean }>
+    }) => ({
+      id: attemptId,
+      quiz_id: 7,
+      started_at: "2026-02-18T10:00:00Z",
+      completed_at: "2026-02-18T10:03:00Z",
+      score: 1,
+      total_possible: 1,
+      answers: [{
+        question_id: questionId,
+        user_answer: answers[0]?.user_answer,
+        is_correct: true,
+        correct_answer: answers[0]?.user_answer,
+        points_awarded: 1
+      }]
+    }))
+    vi.mocked(useSubmitAttemptMutation).mockReturnValue({
+      mutateAsync: submitMutate,
+      isPending: false
+    } as any)
+
+    render(
+      <MemoryRouter>
+        <TakeQuizTab
+          onNavigateToGenerate={() => {}}
+          onNavigateToCreate={() => {}}
+        />
+      </MemoryRouter>
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: /Start Quiz/i }))
+    fireEvent.click(screen.getByRole("button", { name: "Begin Quiz" }))
+
+    await screen.findByTestId(`quiz-question-${questionId}`)
+    expect(screen.getByText("Best of Five")).toBeInTheDocument()
+    const radioOrder = screen.getAllByRole("radio").map((node) => Number((node as HTMLInputElement).value))
+    expect(radioOrder).toEqual(shuffledEntries.map((entry) => entry.originalIndex))
+
+    fireEvent.click(screen.getAllByRole("radio")[0])
+    fireEvent.click(screen.getByRole("button", { name: "Submit" }))
+
+    await waitFor(() => {
+      expect(submitMutate).toHaveBeenCalledWith({
+        attemptId,
+        answers: [{
+          question_id: questionId,
+          user_answer: shuffledEntries[0]?.originalIndex,
+          hint_used: false
+        }]
+      })
+    })
+  }, 15000)
+
+  it("keeps Assertion / Reasoning order fixed and renders one cited guide in taking and results", async () => {
+    const questionId = 51
+    let attemptId = 251
+    let shuffledEntries = buildShuffledOptionEntries(
+      ASSERTION_REASONING_OPTIONS,
+      questionId,
+      attemptId
+    )
+    for (
+      let attempts = 0;
+      shuffledEntries.every((entry, index) => entry.originalIndex === index) && attempts < 128;
+      attempts += 1
+    ) {
+      attemptId += 1
+      shuffledEntries = buildShuffledOptionEntries(
+        ASSERTION_REASONING_OPTIONS,
+        questionId,
+        attemptId
+      )
+    }
+    expect(shuffledEntries.some((entry, index) => entry.originalIndex !== index)).toBe(true)
+
+    vi.mocked(useStartAttemptMutation).mockReturnValue({
+      mutateAsync: vi.fn(async () => ({
+        id: attemptId,
+        quiz_id: 7,
+        started_at: "2026-02-18T10:00:00Z",
+        total_possible: 1,
+        answers: [],
+        questions: [
+          {
+            id: questionId,
+            quiz_id: 7,
+            question_type: "multiple_choice",
+            question_text: "**Assertion:** The drug lowers blood pressure.\n\n**Reason:** It reduces vascular resistance.",
+            options: ASSERTION_REASONING_OPTIONS,
+            points: 1,
+            order_index: 0,
+            tags: ["Assertion / Reasoning"],
+            deleted: false,
+            client_id: "test",
+            version: 1
+          }
+        ]
+      }))
+    } as any)
+
+    const submitMutate = vi.fn(async ({ answers }: {
+      answers: Array<{ question_id: number; user_answer: number; hint_used?: boolean }>
+    }) => ({
+      id: attemptId,
+      quiz_id: 7,
+      started_at: "2026-02-18T10:00:00Z",
+      completed_at: "2026-02-18T10:03:00Z",
+      score: 1,
+      total_possible: 1,
+      answers: [
+        {
+          question_id: questionId,
+          user_answer: answers[0]?.user_answer,
+          is_correct: true,
+          correct_answer: 3,
+          points_awarded: 1,
+          explanation: "The assertion is false, while reduced vascular resistance is true.",
+          source_citations: [{ label: "Pharmacology source" }]
+        }
+      ]
+    }))
+    vi.mocked(useSubmitAttemptMutation).mockReturnValue({
+      mutateAsync: submitMutate,
+      isPending: false
+    } as any)
+
+    render(
+      <MemoryRouter>
+        <TakeQuizTab onNavigateToGenerate={() => {}} onNavigateToCreate={() => {}} />
+      </MemoryRouter>
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: /Start Quiz/i }))
+    fireEvent.click(screen.getByRole("button", { name: "Begin Quiz" }))
+
+    await screen.findByTestId(`quiz-question-${questionId}`)
+    expect(screen.getAllByTestId("assertion-reasoning-scale")).toHaveLength(1)
+    expect(screen.getByText("Assertion / Reasoning")).toBeInTheDocument()
+    expect(within(screen.getByTestId("assertion-reasoning-scale")).getByText(
+      `A. ${ASSERTION_REASONING_OPTIONS[0]}`
+    )).toBeInTheDocument()
+    expect(screen.getAllByRole("radio").map((node) => Number((node as HTMLInputElement).value))).toEqual([0, 1, 2, 3, 4])
+    expect(shuffledEntries.map((entry) => entry.originalIndex)).not.toEqual([0, 1, 2, 3, 4])
+
+    fireEvent.click(screen.getByRole("radio", { name: ASSERTION_REASONING_OPTIONS[3] }))
+    fireEvent.click(screen.getByRole("button", { name: "Submit" }))
+
+    await waitFor(() => {
+      expect(submitMutate).toHaveBeenCalledWith({
+        attemptId,
+        answers: [{ question_id: questionId, user_answer: 3, hint_used: false }]
+      })
+    })
+    expect(await screen.findByText("The assertion is false, while reduced vascular resistance is true.")).toBeInTheDocument()
+    expect(screen.getByText("Pharmacology source")).toBeInTheDocument()
+    expect(screen.getAllByTestId("assertion-reasoning-scale")).toHaveLength(1)
+  }, 15000)
+
   it("announces danger-zone timer updates in assertive live region", async () => {
     vi.mocked(useQuizTimer).mockReturnValue({
       minutes: 0,
@@ -370,17 +575,22 @@ describe("TakeQuizTab start flow", () => {
   }, 15000)
 
   it("shuffles multiple-choice option order per graded attempt while preserving answer mapping", async () => {
-    const optionLabels = ["Alpha", "Beta", "Gamma", "Delta"]
+    const optionLabels = ASSERTION_REASONING_OPTIONS
     const questionId = 11
 
     const firstAttemptId = 200
     let secondAttemptId = 201
     const firstOrder = buildShuffledOptionEntries(optionLabels, questionId, firstAttemptId).map((entry) => entry.originalIndex)
     let secondOrder = buildShuffledOptionEntries(optionLabels, questionId, secondAttemptId).map((entry) => entry.originalIndex)
-    while (secondOrder.join(",") === firstOrder.join(",")) {
+    for (
+      let attempts = 0;
+      secondOrder.join(",") === firstOrder.join(",") && attempts < 128;
+      attempts += 1
+    ) {
       secondAttemptId += 1
       secondOrder = buildShuffledOptionEntries(optionLabels, questionId, secondAttemptId).map((entry) => entry.originalIndex)
     }
+    expect(secondOrder).not.toEqual(firstOrder)
 
     const startMutate = vi
       .fn()
@@ -395,11 +605,11 @@ describe("TakeQuizTab start flow", () => {
             id: questionId,
             quiz_id: 7,
             question_type: "multiple_choice",
-            question_text: "Pick the second Greek letter.",
+            question_text: "**Assertion:** Alpha is first.\n\n**Reason:** Greek letters are ordered.",
             options: optionLabels,
             points: 1,
             order_index: 0,
-            tags: null,
+            tags: ["assertion/reasoning-extra"],
             deleted: false,
             client_id: "test",
             version: 1
@@ -417,11 +627,11 @@ describe("TakeQuizTab start flow", () => {
             id: questionId,
             quiz_id: 7,
             question_type: "multiple_choice",
-            question_text: "Pick the second Greek letter.",
+            question_text: "**Assertion:** Alpha is first.\n\n**Reason:** Greek letters are ordered.",
             options: optionLabels,
             points: 1,
             order_index: 0,
-            tags: null,
+            tags: ["assertion/reasoning-extra"],
             deleted: false,
             client_id: "test",
             version: 1
@@ -473,6 +683,7 @@ describe("TakeQuizTab start flow", () => {
 
     const firstRenderOrder = screen.getAllByRole("radio").map((node) => Number((node as HTMLInputElement).value))
     expect(firstRenderOrder).toEqual(firstOrder)
+    expect(screen.queryByRole("combobox", { name: "Pick the second Greek letter." })).not.toBeInTheDocument()
 
     fireEvent.click(screen.getAllByRole("radio")[0])
     fireEvent.click(screen.getByRole("button", { name: "Submit" }))
@@ -492,6 +703,148 @@ describe("TakeQuizTab start flow", () => {
     await screen.findByTestId(`quiz-question-${questionId}`)
     const secondRenderOrder = screen.getAllByRole("radio").map((node) => Number((node as HTMLInputElement).value))
     expect(secondRenderOrder).toEqual(secondOrder)
+  }, 15000)
+
+  it("presents and submits grouped EMQ stems independently through one shared bank", async () => {
+    const groupPrompt = "For each patient, choose the most likely diagnosis from the shared option bank."
+    const optionBank = ["Acute appendicitis", "Renal colic", "Gastroenteritis"]
+    const firstStem = "A 24-year-old has migrating right lower quadrant pain."
+    const secondStem = "A 45-year-old has colicky flank pain radiating to the groin."
+    const questions = [
+      {
+        id: 81,
+        quiz_id: 7,
+        question_type: "multiple_choice",
+        question_text: firstStem,
+        options: optionBank,
+        group_id: "abdominal-pain",
+        group_prompt: groupPrompt,
+        points: 1,
+        order_index: 0,
+        tags: null,
+        deleted: false,
+        client_id: "test",
+        version: 1
+      },
+      {
+        id: 82,
+        quiz_id: 7,
+        question_type: "multiple_choice",
+        question_text: secondStem,
+        options: optionBank,
+        group_id: "abdominal-pain",
+        group_prompt: groupPrompt,
+        points: 1,
+        order_index: 1,
+        tags: null,
+        deleted: false,
+        client_id: "test",
+        version: 1
+      }
+    ]
+    vi.mocked(useStartAttemptMutation).mockReturnValue({
+      mutateAsync: vi.fn(async () => ({
+        id: 808,
+        quiz_id: 7,
+        started_at: "2026-02-18T10:00:00Z",
+        total_possible: 2,
+        answers: [],
+        questions
+      }))
+    } as any)
+
+    const submitMutate = vi.fn(async ({ answers }: {
+      answers: Array<{ question_id: number; user_answer: number; hint_used?: boolean }>
+    }) => ({
+      id: 808,
+      quiz_id: 7,
+      started_at: "2026-02-18T10:00:00Z",
+      completed_at: "2026-02-18T10:03:00Z",
+      score: 2,
+      total_possible: 2,
+      answers: [
+        {
+          question_id: 81,
+          user_answer: answers.find((answer) => answer.question_id === 81)?.user_answer,
+          is_correct: true,
+          correct_answer: 0,
+          points_awarded: 1,
+          explanation: "The pain pattern supports appendicitis.",
+          source_citations: [{ label: "Appendicitis source" }]
+        },
+        {
+          question_id: 82,
+          user_answer: answers.find((answer) => answer.question_id === 82)?.user_answer,
+          is_correct: true,
+          correct_answer: 1,
+          points_awarded: 1,
+          explanation: "The radiation pattern supports renal colic.",
+          source_citations: [{ label: "Renal colic source" }]
+        }
+      ]
+    }))
+    vi.mocked(useSubmitAttemptMutation).mockReturnValue({
+      mutateAsync: submitMutate,
+      isPending: false
+    } as any)
+
+    render(
+      <MemoryRouter>
+        <TakeQuizTab onNavigateToGenerate={() => {}} onNavigateToCreate={() => {}} />
+      </MemoryRouter>
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: /Start Quiz/i }))
+    fireEvent.click(screen.getByRole("button", { name: "Begin Quiz" }))
+
+    const firstSelect = await screen.findByRole("combobox", { name: firstStem })
+    expect(screen.getByRole("combobox", { name: secondStem })).toBeInTheDocument()
+    expect(screen.getAllByText(groupPrompt)).toHaveLength(1)
+    expect(screen.getAllByText(firstStem)).toHaveLength(1)
+    expect(screen.getAllByText(secondStem)).toHaveLength(1)
+    expect(screen.getAllByTestId("emq-group-bank")).toHaveLength(1)
+    expect(within(screen.getByTestId("emq-group-bank")).getByText("A. Acute appendicitis")).toBeInTheDocument()
+    expect(within(screen.getByTestId("emq-group-bank")).getByText("B. Renal colic")).toBeInTheDocument()
+    expect(screen.queryAllByRole("radio")).toHaveLength(0)
+
+    fireEvent.mouseDown(firstSelect)
+    const firstVisibleOption = (await screen.findAllByText("A. Acute appendicitis")).find(
+      (element) => element.closest(".ant-select-item-option") && !element.closest(".ant-select-dropdown-hidden")
+    )
+    expect(firstVisibleOption).toBeDefined()
+    fireEvent.click(firstVisibleOption as HTMLElement)
+    const refreshedSecondSelect = screen.getByRole("combobox", { name: secondStem })
+    fireEvent.mouseDown(refreshedSecondSelect)
+    fireEvent.keyDown(refreshedSecondSelect, {
+      key: "ArrowDown",
+      code: "ArrowDown",
+      keyCode: 40,
+      which: 40
+    })
+    fireEvent.keyDown(refreshedSecondSelect, {
+      key: "Enter",
+      code: "Enter",
+      keyCode: 13,
+      which: 13
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Submit" }))
+
+    await waitFor(() => {
+      expect(submitMutate).toHaveBeenCalledWith({
+        attemptId: 808,
+        answers: [
+          { question_id: 81, user_answer: 0, hint_used: false },
+          { question_id: 82, user_answer: 1, hint_used: false }
+        ]
+      })
+    })
+
+    expect(await screen.findByText("The pain pattern supports appendicitis.")).toBeInTheDocument()
+    expect(screen.getByText("The radiation pattern supports renal colic.")).toBeInTheDocument()
+    expect(screen.getByText("Appendicitis source")).toBeInTheDocument()
+    expect(screen.getByText("Renal colic source")).toBeInTheDocument()
+    expect(screen.getAllByText(groupPrompt)).toHaveLength(1)
+    expect(screen.getAllByTestId("emq-group-bank")).toHaveLength(1)
   }, 15000)
 
   it("tracks hint usage in submit payload and reflects penalty in results", async () => {
