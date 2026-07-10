@@ -12,7 +12,7 @@
 
 ## Scope
 
-This is `TASK-12138`. It implements rollout step 7 from `Docs/superpowers/specs/2026-06-24-jobs-backend-parity-refactor-design.md`.
+This is `TASK-12945`. It implements rollout step 7 from `Docs/superpowers/specs/2026-06-24-jobs-backend-parity-refactor-design.md`.
 
 In scope:
 - `create_job` admission only.
@@ -74,7 +74,7 @@ Result: `55 passed, 424 warnings`.
   - Run the new shared scenario against SQLite.
 - Modify: `tldw_Server_API/tests/Jobs/parity/test_postgres_parity.py`
   - Run the same scenario against real Postgres when available.
-- Modify: `backlog/tasks/task-12138 - Extract-Jobs-admission-operations-behind-JobManager.md`
+- Modify: `backlog/tasks/task-12945 - Extract-Jobs-admission-operations-behind-JobManager.md`
   - Record plan, verification, and final summary.
 
 ## Task 1: Preserve Contract Truth For Idempotent Replay Events
@@ -393,7 +393,7 @@ Expected: SQLite passes. Postgres passes when the fixture is reachable or skips 
 ## Task 7: Full Focused Verification, Backlog, And Commit
 
 **Files:**
-- Modify: `backlog/tasks/task-12138 - Extract-Jobs-admission-operations-behind-JobManager.md`
+- Modify: `backlog/tasks/task-12945 - Extract-Jobs-admission-operations-behind-JobManager.md`
 
 - [x] **Step 1: Run focused Jobs admission matrix**
 
@@ -475,7 +475,7 @@ Run:
 ```bash
 git add \
   Docs/superpowers/plans/2026-07-04-jobs-admission-operations-extraction-plan.md \
-  "backlog/tasks/task-12138 - Extract-Jobs-admission-operations-behind-JobManager.md" \
+  "backlog/tasks/task-12945 - Extract-Jobs-admission-operations-behind-JobManager.md" \
   tldw_Server_API/app/core/Jobs/manager.py \
   tldw_Server_API/app/core/Jobs/operations/contracts.py \
   tldw_Server_API/app/core/Jobs/operations/sqlite \
