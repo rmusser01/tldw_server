@@ -416,7 +416,7 @@ git commit -m "feat: unify watchlists setup contracts"
 
 **Tests:** DB idempotency, pipeline stage transitions, zero-item behavior, selection cap, Scheduler dependency, delivery idempotency, latest projection, and retry authorization.
 
-**Status:** In Progress
+**Status:** Complete
 
 ### Task 3: Add owned briefing occurrence persistence
 
@@ -663,7 +663,7 @@ git commit -m "feat: fulfill scheduled watchlists briefings"
 - Backend produces: `GET /watchlists/briefings/latest`, `GET /watchlists/runs/{run_id}/briefing`, `POST /watchlists/runs/{run_id}/briefing/retry`, and Scheduler handler `watchlists_deliver_briefing`.
 - Frontend produces: `getLatestWatchlistBriefing`, `getWatchlistRunBriefing`, and `retryWatchlistBriefingStage`.
 
-- [ ] **Step 1: Write failing API and delivery tests**
+- [x] **Step 1: Write failing API and delivery tests**
 
 ```python
 def test_latest_projection_separates_artifact_and_delivery_state(client, seeded_occurrence):
@@ -705,7 +705,7 @@ async def test_timed_out_email_becomes_unknown_and_is_not_automatically_retried(
     assert delivery_fakes.occurrence.delivery_status == "unknown"
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 ```bash
 /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Watchlists/test_briefing_projection_api.py tldw_Server_API/tests/Watchlists/test_audio_output_delivery.py -q
@@ -713,7 +713,7 @@ async def test_timed_out_email_becomes_unknown_and_is_not_automatically_retried(
 
 Expected: projection schemas, routes, and delivery service are missing.
 
-- [ ] **Step 3: Add typed projection schemas**
+- [x] **Step 3: Add typed projection schemas**
 
 ```python
 class WatchlistBriefingStage(BaseModel):
@@ -747,19 +747,19 @@ class WatchlistBriefingProjection(BaseModel):
     recovery: dict[str, bool]
 ```
 
-- [ ] **Step 4: Implement effective projection and authorized retries**
+- [x] **Step 4: Implement effective projection and authorized retries**
 
 Build the response from occurrence state, output metadata, current Scheduler/Workflow audio projection, and job next-run state. Retry accepts only `render_text`, `persist_text`, `compose_audio_script`, `persist_audio_script`, `generate_audio`, `persist_audio`, or `deliver:<adapter>`. Reject ready non-regeneration stages with `409 stage_already_ready`. Reject an uncertain external delivery retry unless the request includes `confirm_unknown_delivery_retry: true`; the response and UI must explain duplicate risk. Keep existing retry-audio and retry-delivery endpoints as compatibility wrappers.
 
-- [ ] **Step 5: Implement dependent, idempotent delivery**
+- [x] **Step 5: Implement dependent, idempotent delivery**
 
 Submit `watchlists_deliver_briefing` with `dependencies=[audio_task_id]` when audio is selected and with no dependency otherwise. Use `watchlists-briefing-delivery:{user_id}:{occurrence_id}` as the task idempotency key and forward an adapter-specific idempotency key when supported. The handler reloads the occurrence and output, refuses delivery until required artifacts are ready, skips adapters already recorded as successful or unknown, writes `sending` before the provider call, records each acknowledged result immediately, and finishes with delivered, partially delivered, failed, or unknown. A timeout after dispatch records unknown and is not automatically replayed.
 
-- [ ] **Step 6: Add frontend service and overview data**
+- [x] **Step 6: Add frontend service and overview data**
 
 Fetch the latest projection in the existing overview request bundle and expose it as `overview.latestBriefing`. A 404 becomes `null`; network and authorization errors remain visible errors rather than an empty state.
 
-- [ ] **Step 7: Verify GREEN**
+- [x] **Step 7: Verify GREEN**
 
 ```bash
 /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Watchlists/test_briefing_projection_api.py tldw_Server_API/tests/Watchlists/test_audio_output_delivery.py tldw_Server_API/tests/Watchlists/test_watchlists_scheduler_handler.py -q
@@ -771,7 +771,7 @@ Fetch the latest projection in the existing overview request bundle and expose i
 
 Expected: backend projection/delivery and frontend overview suites pass.
 
-- [ ] **Step 8: Commit Task 5**
+- [x] **Step 8: Commit Task 5**
 
 ```bash
 git add tldw_Server_API/app/core/Watchlists/briefing_delivery.py tldw_Server_API/app/core/Scheduler/handlers/watchlists.py tldw_Server_API/app/api/v1/schemas/watchlists_schemas.py tldw_Server_API/app/api/v1/endpoints/watchlists.py tldw_Server_API/tests/Watchlists/test_briefing_projection_api.py tldw_Server_API/tests/Watchlists/test_audio_output_delivery.py apps/packages/ui/src/types/watchlists.ts apps/packages/ui/src/services/watchlists.ts apps/packages/ui/src/services/watchlists-overview.ts
@@ -786,7 +786,7 @@ git commit -m "feat: expose watchlists briefing fulfillment"
 
 **Tests:** Prompt contract, multi-host markers, format presets, source-data injection resistance, zero-update scripts, disclosure metadata, and legacy defaults.
 
-**Status:** Not Started
+**Status:** In Progress
 
 ### Task 6: Generalize the audio composer and workflow inputs
 
