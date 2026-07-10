@@ -160,6 +160,7 @@ const statusLabel = (status: string, t: TFunction): string => {
     cancelled: ["cancelled", "Cancelled"],
     successful: ["delivered", "Delivered"],
     delivered: ["delivered", "Delivered"],
+    partial: ["partial", "Partial"],
     unknown: ["unknown", "Outcome unknown"],
     sending: ["sending", "Sending"]
   }
@@ -651,7 +652,7 @@ export const LatestBriefing: React.FC<LatestBriefingProps> = ({
             </div>
             {deliveryRows.map(({ adapter, stageName, stage }) => {
               const outcome = stage.outcome || stage.status
-              const unknown = outcome === "unknown" || projection.delivery_status === "unknown"
+              const unknown = outcome === "unknown"
               const canRetry = unknown || (
                 stage.retryable === true && ["failed", "cancelled"].includes(stage.status)
               )

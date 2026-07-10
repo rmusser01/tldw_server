@@ -777,7 +777,8 @@
         "sending": "Sending",
         "stale": "Stale",
         "superseded": "Superseded",
-        "unavailable": "Unavailable"
+        "unavailable": "Unavailable",
+        "partial": "Partial"
       },
       "stages": {
         "renderText": "report",

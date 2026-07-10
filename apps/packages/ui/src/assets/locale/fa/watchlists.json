@@ -440,7 +440,8 @@
         "sending": "در حال ارسال",
         "stale": "قدیمی",
         "superseded": "جایگزین‌شده",
-        "unavailable": "در دسترس نیست"
+        "unavailable": "در دسترس نیست",
+        "partial": "جزئی"
       },
       "stages": {
         "renderText": "گزارش",

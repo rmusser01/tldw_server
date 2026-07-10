@@ -30,6 +30,7 @@ const requiredLatestRuntimeKeys = [
   "delivery.reviewTitle",
   "playback.accessError",
   "playback.missing",
+  "status.partial",
   "scriptAccessError",
   "scriptLoading",
   "scriptMissing",
@@ -273,11 +274,14 @@ describe("Watchlists Latest briefing locale contract", () => {
   })
 
   it("keeps the runtime manifest aligned with component translation references", () => {
-    for (const key of requiredLatestRuntimeKeys.filter((key) => !key.startsWith("recovery."))) {
+    for (const key of requiredLatestRuntimeKeys.filter((key) => (
+      !key.startsWith("recovery.") && !key.startsWith("status.")
+    ))) {
       expect(latestComponentSource, `LatestBriefing:${key}`)
         .toContain(`watchlists:overview.latest.${key}`)
     }
     expect(latestComponentSource).toContain("watchlists:overview.latest.recovery.${entry[0]}")
+    expect(latestComponentSource).toContain("watchlists:overview.latest.status.${entry[0]}")
     for (const key of requiredOutputRuntimeKeys) {
       expect(outputComponentSource, `OutputPreviewDrawer:${key}`)
         .toContain(`watchlists:outputs.${key}`)

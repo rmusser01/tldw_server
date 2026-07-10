@@ -1102,5 +1102,8 @@
   },
   "overview_latest_status_unavailable": {
     "message": "غير متاح"
+  },
+  "overview_latest_status_partial": {
+    "message": "جزئي"
   }
 }

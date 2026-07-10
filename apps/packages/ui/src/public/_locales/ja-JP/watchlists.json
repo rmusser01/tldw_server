@@ -1066,5 +1066,8 @@
   },
   "overview_latest_status_unavailable": {
     "message": "利用不可"
+  },
+  "overview_latest_status_partial": {
+    "message": "部分的"
   }
 }

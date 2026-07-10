@@ -1066,5 +1066,8 @@
   },
   "overview_latest_status_unavailable": {
     "message": "사용할 수 없음"
+  },
+  "overview_latest_status_partial": {
+    "message": "부분 완료"
   }
 }

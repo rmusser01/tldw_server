@@ -4672,5 +4672,8 @@
   },
   "overview_latest_status_unavailable": {
     "message": "Unavailable"
+  },
+  "overview_latest_status_partial": {
+    "message": "Partial"
   }
 }

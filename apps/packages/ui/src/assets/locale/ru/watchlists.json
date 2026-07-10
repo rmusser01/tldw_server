@@ -446,7 +446,8 @@
         "sending": "Отправляется",
         "stale": "Устарело",
         "superseded": "Заменено",
-        "unavailable": "Недоступно"
+        "unavailable": "Недоступно",
+        "partial": "Частично"
       },
       "stages": {
         "renderText": "отчёт",

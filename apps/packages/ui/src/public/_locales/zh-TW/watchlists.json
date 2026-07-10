@@ -1066,5 +1066,8 @@
   },
   "overview_latest_status_unavailable": {
     "message": "無法使用"
+  },
+  "overview_latest_status_partial": {
+    "message": "部分完成"
   }
 }

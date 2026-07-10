@@ -1066,5 +1066,8 @@
   },
   "overview_latest_status_unavailable": {
     "message": "ലഭ്യമല്ല"
+  },
+  "overview_latest_status_partial": {
+    "message": "ഭാഗികം"
   }
 }

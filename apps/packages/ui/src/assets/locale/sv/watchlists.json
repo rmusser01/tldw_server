@@ -440,7 +440,8 @@
         "sending": "Skickar",
         "stale": "Inaktuell",
         "superseded": "Ersatt",
-        "unavailable": "Inte tillgänglig"
+        "unavailable": "Inte tillgänglig",
+        "partial": "Delvis"
       },
       "stages": {
         "renderText": "rapport",

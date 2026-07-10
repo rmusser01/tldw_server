@@ -440,7 +440,8 @@
         "sending": "傳送中",
         "stale": "已過期",
         "superseded": "已被取代",
-        "unavailable": "無法使用"
+        "unavailable": "無法使用",
+        "partial": "部分完成"
       },
       "stages": {
         "renderText": "報告",

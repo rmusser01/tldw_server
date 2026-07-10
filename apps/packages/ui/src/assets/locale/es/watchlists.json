@@ -443,7 +443,8 @@
         "sending": "Enviando",
         "stale": "Obsoleto",
         "superseded": "Reemplazado",
-        "unavailable": "No disponible"
+        "unavailable": "No disponible",
+        "partial": "Parcial"
       },
       "stages": {
         "renderText": "informe",

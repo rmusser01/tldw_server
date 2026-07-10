@@ -440,7 +440,8 @@
         "sending": "送信中",
         "stale": "古い",
         "superseded": "置き換え済み",
-        "unavailable": "利用不可"
+        "unavailable": "利用不可",
+        "partial": "部分的"
       },
       "stages": {
         "renderText": "レポート",

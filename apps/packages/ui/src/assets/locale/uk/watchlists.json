@@ -446,7 +446,8 @@
         "sending": "Надсилається",
         "stale": "Застаріло",
         "superseded": "Замінено",
-        "unavailable": "Недоступно"
+        "unavailable": "Недоступно",
+        "partial": "Частково"
       },
       "stages": {
         "renderText": "звіт",

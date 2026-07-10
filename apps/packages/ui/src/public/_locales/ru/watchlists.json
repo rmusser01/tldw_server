@@ -1084,5 +1084,8 @@
   },
   "overview_latest_status_unavailable": {
     "message": "Недоступно"
+  },
+  "overview_latest_status_partial": {
+    "message": "Частично"
   }
 }

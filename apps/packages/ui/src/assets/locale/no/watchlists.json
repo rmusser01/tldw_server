@@ -440,7 +440,8 @@
         "sending": "Sender",
         "stale": "Utdatert",
         "superseded": "Erstattet",
-        "unavailable": "Utilgjengelig"
+        "unavailable": "Utilgjengelig",
+        "partial": "Delvis"
       },
       "stages": {
         "renderText": "rapport",

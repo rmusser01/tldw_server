@@ -440,7 +440,8 @@
         "sending": "Wird gesendet",
         "stale": "Veraltet",
         "superseded": "Ersetzt",
-        "unavailable": "Nicht verfügbar"
+        "unavailable": "Nicht verfügbar",
+        "partial": "Teilweise"
       },
       "stages": {
         "renderText": "Bericht",

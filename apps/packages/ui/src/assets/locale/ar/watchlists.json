@@ -452,7 +452,8 @@
         "sending": "جارٍ الإرسال",
         "stale": "قديم",
         "superseded": "مستبدل",
-        "unavailable": "غير متاح"
+        "unavailable": "غير متاح",
+        "partial": "جزئي"
       },
       "stages": {
         "renderText": "تقرير",

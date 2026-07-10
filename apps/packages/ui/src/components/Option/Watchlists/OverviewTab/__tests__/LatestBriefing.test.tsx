@@ -30,6 +30,7 @@ vi.mock("react-i18next", () => ({
       fallbackOrOptions?: string | { defaultValue?: string; count?: number },
       values?: Record<string, unknown>
     ) => {
+      if (_key === "watchlists:overview.latest.status.partial") return "Localized partial"
       const fallback = typeof fallbackOrOptions === "string"
         ? fallbackOrOptions
         : fallbackOrOptions?.defaultValue || ""
@@ -274,6 +275,37 @@ describe("LatestBriefing", () => {
     expect(callbacks.onRetryStage).toHaveBeenCalledWith(123, "deliver:email", {
       confirm_unknown_delivery_retry: true
     })
+  })
+
+  it("scopes unknown delivery recovery to the affected adapter", () => {
+    render(<LatestBriefing projection={readyEpisode({
+      delivery_status: "unknown",
+      stages: {
+        ...readyEpisode().stages,
+        "deliver:email": { status: "ready", outcome: "successful" },
+        "deliver:chatbook": { status: "failed", outcome: "unknown" }
+      }
+    })} {...actions()} />)
+
+    expect(screen.getByText("Email delivered")).toBeVisible()
+    expect(screen.queryByRole("button", {
+      name: /retry email delivery for Purple and Gold Weekly/i
+    })).not.toBeInTheDocument()
+    expect(screen.getByRole("button", {
+      name: "Review and retry chatbook delivery for Purple and Gold Weekly"
+    })).toBeVisible()
+  })
+
+  it("localizes a partial adapter outcome", () => {
+    render(<LatestBriefing projection={readyEpisode({
+      delivery_status: "partially_delivered",
+      stages: {
+        ...readyEpisode().stages,
+        "deliver:email": { status: "ready", outcome: "partial" }
+      }
+    })} {...actions()} />)
+
+    expect(screen.getByText("Email localized partial")).toBeVisible()
   })
 
   it("uses record-specific names for multiple briefing records", () => {

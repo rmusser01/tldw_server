@@ -1066,5 +1066,8 @@
   },
   "overview_latest_status_unavailable": {
     "message": "Utilgjengelig"
+  },
+  "overview_latest_status_partial": {
+    "message": "Delvis"
   }
 }
