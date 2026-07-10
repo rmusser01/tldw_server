@@ -19,6 +19,7 @@ import {
   hasEnvApiAuth
 } from "@web/lib/authStorage"
 import { loadTldwAuth, loadTldwClient } from "@web/lib/configured-auth-state"
+import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
 import {
   buildFirstRunOnboardingRoute,
   CHARACTER_CHAT_ONBOARDING_INTENT,
@@ -63,6 +64,27 @@ type ConfiguredAuthState = {
   hasConfig: boolean
   authMode?: "single-user" | "multi-user"
   isAuthenticated: boolean
+}
+
+const getErrorStatus = (error: unknown): number | null => {
+  const candidate = error as
+    | {
+        status?: unknown
+        statusCode?: unknown
+        response?: { status?: unknown }
+      }
+    | null
+  const rawStatus =
+    candidate?.status ?? candidate?.statusCode ?? candidate?.response?.status
+  return typeof rawStatus === "number" && Number.isFinite(rawStatus)
+    ? rawStatus
+    : null
+}
+
+const isAuthValidationFailure = (error: unknown): boolean => {
+  const status = getErrorStatus(error)
+  if (status === 401 || status === 403) return true
+  return error instanceof Error && error.message.trim() === "Not authenticated"
 }
 
 const splitRouteAsPath = (asPath: string) => {
@@ -116,10 +138,11 @@ const getConfiguredAuthState = async (): Promise<ConfiguredAuthState> => {
     }
 
     if (config.authMode === "multi-user") {
+      const hostedMode = isHostedTldwDeployment()
       const hasAccessToken =
         typeof config.accessToken === "string" &&
         config.accessToken.trim().length > 0
-      if (!hasAccessToken) {
+      if (!hasAccessToken && !hostedMode) {
         return {
           hasConfig: true,
           authMode: "multi-user",
@@ -127,15 +150,23 @@ const getConfiguredAuthState = async (): Promise<ConfiguredAuthState> => {
         }
       }
 
+      const tldwAuth = await loadTldwAuth()
       try {
-        const tldwAuth = await loadTldwAuth()
         await tldwAuth.getCurrentUser()
         return {
           hasConfig: true,
           authMode: "multi-user",
           isAuthenticated: true
         }
-      } catch {
+      } catch (error) {
+        if (!isAuthValidationFailure(error)) {
+          return {
+            hasConfig: true,
+            authMode: "multi-user",
+            isAuthenticated: true
+          }
+        }
+        await tldwAuth.logout?.().catch(() => undefined)
         return {
           hasConfig: true,
           authMode: "multi-user",
@@ -172,6 +203,8 @@ export default function App({ Component, pageProps }: AppProps) {
   const isSidepanelDebugRoute = routePath === "/__debug__/sidepanel-chat"
   const isSettingsRoute =
     routePath === "/settings" || routePath.startsWith("/settings/")
+  const shouldBypassGates =
+    isPublicAuthRoute || isSettingsRoute || isSetupRoute || isDebugRoute
   const [isAuthenticated, setIsAuthenticated] = React.useState(false)
   const [authResolved, setAuthResolved] = React.useState(false)
   const didWarmRoutePrefetch = React.useRef(false)
@@ -198,6 +231,14 @@ export default function App({ Component, pageProps }: AppProps) {
       if (!cancelled) {
         setIsAuthenticated(authed)
         setAuthResolved(true)
+        if (
+          !authed &&
+          configuredAuth.hasConfig &&
+          configuredAuth.authMode === "multi-user" &&
+          !shouldBypassGates
+        ) {
+          void router.push("/login")
+        }
       }
     }
 
@@ -222,7 +263,7 @@ export default function App({ Component, pageProps }: AppProps) {
       window.removeEventListener("focus", onConfigUpdated)
       window.removeEventListener("storage", onStorage)
     }
-  }, [router.asPath])
+  }, [router, router.asPath, shouldBypassGates])
 
   React.useEffect(() => {
     if (typeof window === "undefined") return
@@ -310,8 +351,6 @@ export default function App({ Component, pageProps }: AppProps) {
   }, [authResolved, isAuthenticated, isPublicAuthRoute, routePath, router])
 
   const hideShellNav = !authResolved || !isAuthenticated
-  const shouldBypassGates =
-    isPublicAuthRoute || isSettingsRoute || isSetupRoute || isDebugRoute
   const shouldAllowDegradedReadiness = DEGRADED_READINESS_ROUTES.has(routePath)
   const firstRunRouteParts = React.useMemo(
     () => splitRouteAsPath(router.asPath || routePath || "/"),

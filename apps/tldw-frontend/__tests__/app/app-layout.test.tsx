@@ -57,6 +57,7 @@ const mockRouter = {
 
 const mockGetConfig = vi.fn()
 const mockGetCurrentUser = vi.fn()
+const mockLogout = vi.fn()
 let currentConfig: Record<string, unknown> | null = null
 
 vi.mock("next/router", () => ({
@@ -144,7 +145,8 @@ vi.mock("@web/lib/configured-auth-state", () => ({
     getConfig: (...args: unknown[]) => mockGetConfig(...args)
   }),
   loadTldwAuth: async () => ({
-    getCurrentUser: (...args: unknown[]) => mockGetCurrentUser(...args)
+    getCurrentUser: (...args: unknown[]) => mockGetCurrentUser(...args),
+    logout: (...args: unknown[]) => mockLogout(...args)
   })
 }))
 
@@ -156,6 +158,11 @@ const renderApp = (pathname: string, asPath = pathname) => {
   return render(<App Component={DummyPage} pageProps={{}} />)
 }
 
+const makeStatusError = (
+  message: string,
+  status: number
+): Error & { status: number } => Object.assign(new Error(message), { status })
+
 const originalEnvApiKey = process.env.NEXT_PUBLIC_X_API_KEY
 const originalEnvBearer = process.env.NEXT_PUBLIC_API_BEARER
 const originalDeploymentMode = process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
@@ -166,7 +173,9 @@ beforeEach(() => {
   mockRouter.prefetch.mockClear()
   mockGetConfig.mockReset()
   mockGetCurrentUser.mockReset()
+  mockLogout.mockReset()
   mockGetCurrentUser.mockResolvedValue({ username: "test-user" })
+  mockLogout.mockResolvedValue(undefined)
   currentConfig = null
   mockGetConfig.mockImplementation(async () => currentConfig)
   delete process.env.NEXT_PUBLIC_X_API_KEY
@@ -464,13 +473,13 @@ describe("App layout routing", () => {
     expect(layout).toHaveAttribute("data-hide-sidebar", "false")
   })
 
-  it("keeps header and sidebar hidden when multi-user token validation fails", async () => {
+  it("redirects protected routes to login when multi-user token validation fails", async () => {
     currentConfig = {
       serverUrl: "http://127.0.0.1:8000",
       authMode: "multi-user",
       accessToken: "stale-token"
     }
-    mockGetCurrentUser.mockRejectedValueOnce(new Error("Unauthorized"))
+    mockGetCurrentUser.mockRejectedValueOnce(makeStatusError("Unauthorized", 401))
 
     renderApp("/media")
     const layout = await screen.findByTestId("option-layout")
@@ -478,8 +487,57 @@ describe("App layout routing", () => {
     await waitFor(() => {
       expect(mockGetCurrentUser).toHaveBeenCalled()
     })
+    await waitFor(() => {
+      expect(mockRouter.push).toHaveBeenCalledWith("/login")
+    })
     expect(layout).toHaveAttribute("data-hide-header", "true")
     expect(layout).toHaveAttribute("data-hide-sidebar", "true")
+    expect(mockLogout).toHaveBeenCalled()
+  })
+
+  it("keeps persisted multi-user auth when validation fails with a non-auth status", async () => {
+    currentConfig = {
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "multi-user",
+      accessToken: "still-valid-token"
+    }
+    mockGetCurrentUser.mockRejectedValueOnce(
+      makeStatusError("Server unavailable", 500)
+    )
+
+    renderApp("/media")
+    const layout = await screen.findByTestId("option-layout")
+
+    await waitFor(() => {
+      expect(mockGetCurrentUser).toHaveBeenCalled()
+    })
+    await waitFor(() => {
+      expect(layout).toHaveAttribute("data-hide-header", "false")
+    })
+    expect(layout).toHaveAttribute("data-hide-sidebar", "false")
+    expect(mockLogout).not.toHaveBeenCalled()
+    expect(mockRouter.push).not.toHaveBeenCalledWith("/login")
+  })
+
+  it("validates hosted multi-user sessions without a persisted access token", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "hosted"
+    currentConfig = {
+      serverUrl: "",
+      authMode: "multi-user"
+    }
+
+    renderApp("/chat")
+    const layout = await screen.findByTestId("option-layout")
+
+    await waitFor(() => {
+      expect(mockGetCurrentUser).toHaveBeenCalled()
+    })
+    await waitFor(() => {
+      expect(layout).toHaveAttribute("data-hide-header", "false")
+    })
+    expect(layout).toHaveAttribute("data-hide-sidebar", "false")
+    expect(mockLogout).not.toHaveBeenCalled()
+    expect(mockRouter.push).not.toHaveBeenCalledWith("/login")
   })
 
   it("warms primary navigation routes after auth resolves", async () => {
