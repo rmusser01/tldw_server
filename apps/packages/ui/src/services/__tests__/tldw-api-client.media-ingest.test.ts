@@ -178,6 +178,61 @@ describe("TldwApiClient media ingest contract", () => {
     )
   })
 
+  it("routes chat document upload preflight and drafts through media endpoints", async () => {
+    mocks.bgRequest
+      .mockResolvedValueOnce({ files: [] })
+      .mockResolvedValueOnce({
+        draft_id: "draft-1",
+        expires_at: "2026-07-09T00:00:00Z"
+      })
+      .mockResolvedValueOnce({ draft_id: "draft-1", payload: {} })
+      .mockResolvedValueOnce(undefined)
+
+    const client = new TldwApiClient()
+    await client.preflightDocumentUpload({
+      files: [
+        {
+          client_id: "file-1",
+          filename: "notes.md",
+          mime_type: "text/markdown",
+          size_bytes: 12
+        }
+      ]
+    })
+    await client.createDocumentUploadDraft({ files: [{ id: "file-1" }] })
+    await client.getDocumentUploadDraft("draft-1")
+    await client.deleteDocumentUploadDraft("draft-1")
+
+    expect(mocks.bgRequest).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        path: "/api/v1/media/document-upload/preflight",
+        method: "POST"
+      })
+    )
+    expect(mocks.bgRequest).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        path: "/api/v1/media/document-upload/drafts",
+        method: "POST"
+      })
+    )
+    expect(mocks.bgRequest).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({
+        path: "/api/v1/media/document-upload/drafts/draft-1",
+        method: "GET"
+      })
+    )
+    expect(mocks.bgRequest).toHaveBeenNthCalledWith(
+      4,
+      expect.objectContaining({
+        path: "/api/v1/media/document-upload/drafts/draft-1",
+        method: "DELETE"
+      })
+    )
+  })
+
   it("sends server-side playlist preflight timeout derived from timeoutMs", async () => {
     mocks.bgRequest.mockResolvedValue({ playlist_id: "PLtest", items: [] })
 

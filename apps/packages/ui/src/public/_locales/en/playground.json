@@ -128,6 +128,102 @@
   "attachments_manageContext": {
     "message": "Manage in Knowledge Panel"
   },
+  "attachments_processingBlocked": {
+    "message": "Blocked"
+  },
+  "attachments_processingFailed": {
+    "message": "Failed"
+  },
+  "attachments_processing": {
+    "message": "Processing"
+  },
+  "attachments_processingPreflight": {
+    "message": "Checking"
+  },
+  "attachments_processingOcr": {
+    "message": "OCR"
+  },
+  "attachments_processingIngest": {
+    "message": "Library ingest"
+  },
+  "attachments_processingChatOnly": {
+    "message": "Chat only"
+  },
+  "documentProcessing_title": {
+    "message": "Document handling"
+  },
+  "documentProcessing_adjustPerFile": {
+    "message": "Adjust per file"
+  },
+  "documentProcessing_addToChat": {
+    "message": "Add to chat"
+  },
+  "documentProcessing_addToChatDescription": {
+    "message": "Chat only context"
+  },
+  "documentProcessing_ocrPages": {
+    "message": "OCR pages"
+  },
+  "documentProcessing_ocrPagesDescription": {
+    "message": "Convert pages to images"
+  },
+  "documentProcessing_ingestToLibrary": {
+    "message": "Ingest to library"
+  },
+  "documentProcessing_ingestToLibraryDescription": {
+    "message": "Durable library source"
+  },
+  "documentProcessing_readyCount": {
+    "message": "{{count}} ready"
+  },
+  "documentProcessing_blockedCount": {
+    "message": "{{count}} blocked"
+  },
+  "documentProcessing_failedCount": {
+    "message": "{{count}} failed"
+  },
+  "documentProcessing_waiting": {
+    "message": "Waiting for files"
+  },
+  "documentProcessing_preflighting": {
+    "message": "Checking documents"
+  },
+  "documentProcessing_pending": {
+    "message": "Ready to process"
+  },
+  "documentProcessing_processing": {
+    "message": "Processing documents"
+  },
+  "documentProcessing_ready": {
+    "message": "Documents ready"
+  },
+  "documentProcessing_blocked": {
+    "message": "Document processing blocked"
+  },
+  "documentProcessing_failed": {
+    "message": "Document processing failed"
+  },
+  "documentProcessing_sending": {
+    "message": "Sending prompt"
+  },
+  "documentProcessing_cancelled": {
+    "message": "Processing cancelled"
+  },
+  "documentProcessing_genericFailure": {
+    "message": "Document processing failed"
+  },
+  "documentProcessing_modeUnavailable": {
+    "message": "This processing mode is unavailable."
+  },
+  "documentProcessing_unsupportedDocument": {
+    "message": "This document type is unsupported."
+  },
+  "documentProcessing_directChatTooLarge": {
+    "message": "Document text is too large for direct chat ({{count}} estimated tokens)."
+  },
+  "documentProcessing_preflightFailed": {
+    "message": "Document preflight failed. Try again or remove the file."
+  },
   "aria_chatTranscript": {
     "message": "Chat messages"
   },

@@ -13,7 +13,11 @@ import type { SlashCommandItem } from "@/components/Sidepanel/Chat/SlashCommandM
 import { isFirefoxTarget } from "@/config/platform";
 import { STT_DEFAULTS } from "@/config/ui-constants";
 import { getDesignSystemState } from "@/design-system";
-import { getAllPrompts } from "@/db/dexie/helpers";
+import { generateID, getAllPrompts } from "@/db/dexie/helpers";
+import type {
+  DocumentProcessingTurnMetadata,
+  UploadedFile,
+} from "@/db/dexie/types";
 import { useChatSettingsRecord } from "@/hooks/chat/useChatSettingsRecord";
 import { resolveEffectiveAssistantState } from "@/hooks/chat/effective-assistant-state";
 import {
@@ -174,6 +178,7 @@ import { ChatModelSelectorDropdown } from "./ChatModelSelectorDropdown";
 import { CompareToggle } from "./CompareToggle";
 import { ComposerTextarea } from "./ComposerTextarea";
 import { ComposerToolbar } from "./ComposerToolbar";
+import { DocumentProcessingChoices } from "./DocumentProcessingChoices";
 import { MentionsDropdown } from "./MentionsDropdown";
 import { getPresetByKey } from "./ParameterPresets";
 import { PlaygroundComposerNotices } from "./PlaygroundComposerNotices";
@@ -526,6 +531,7 @@ export const PlaygroundForm = ({
   const {
     onSubmit,
     messages,
+    setMessages,
     selectedModel,
     selectedModelIsLoading,
     setSelectedModel,
@@ -585,6 +591,7 @@ export const PlaygroundForm = ({
     messageSteeringMode,
     messageSteeringForceNarrate,
     contextFiles,
+    setContextFiles,
     documentContext,
     selectedKnowledge,
     ragMediaIds,
@@ -594,6 +601,7 @@ export const PlaygroundForm = ({
       inflightToolCallIds: [],
     },
   } = useMessageOption();
+  const setUploadedFiles = useStoreMessageOption((s) => s.setUploadedFiles);
   const setRagMediaIds = useStoreMessageOption((s) => s.setRagMediaIds);
   const setRagPinnedResults = useStoreMessageOption(
     (s) => s.setRagPinnedResults,
@@ -3090,6 +3098,54 @@ export const PlaygroundForm = ({
     [slashHandleSelect, form, textareaRef],
   );
 
+  const reserveDocumentProcessingTurn = React.useCallback(
+    ({
+      message,
+      metadata,
+    }: {
+      message: string;
+      metadata: DocumentProcessingTurnMetadata;
+    }) => {
+      const id = generateID();
+      setMessages((prev) => [
+        ...prev,
+        {
+          isBot: false,
+          role: "user",
+          name: "You",
+          message,
+          sources: [],
+          createdAt: Date.now(),
+          id,
+          metadataExtra: {
+            documentProcessing: metadata,
+          },
+        },
+      ]);
+      return id;
+    },
+    [setMessages],
+  );
+
+  const updateDocumentProcessingTurn = React.useCallback(
+    (userMessageId: string, metadata: DocumentProcessingTurnMetadata) => {
+      setMessages((prev) =>
+        prev.map((message) =>
+          message.id === userMessageId && !message.isBot
+            ? {
+                ...message,
+                metadataExtra: {
+                  ...(message.metadataExtra ?? {}),
+                  documentProcessing: metadata,
+                },
+              }
+            : message,
+        ),
+      );
+    },
+    [setMessages],
+  );
+
   const { submitForm, submitFormRef } = usePlaygroundSubmit({
     form,
     isSending,
@@ -3098,6 +3154,8 @@ export const PlaygroundForm = ({
     compareModeActive,
     compareSelectedModels,
     selectedModel,
+    historyId,
+    serverChatId,
     fileRetrievalEnabled,
     ragPinnedResults,
     selectedDocuments,
@@ -3116,6 +3174,8 @@ export const PlaygroundForm = ({
     clearOpenUIRequestMode: () => setOpenUIRequestMode(false),
     clearSelectedDocuments,
     clearUploadedFiles,
+    reserveDocumentProcessingTurn,
+    updateDocumentProcessingTurn,
     textAreaFocus,
     setLastSubmittedContext,
     estimateTokensForText: estimateTokensForText as any,
@@ -4222,6 +4282,16 @@ export const PlaygroundForm = ({
     t,
   });
 
+  const handleDocumentProcessingFilesChange = React.useCallback(
+    (files: UploadedFile[]) => {
+      setUploadedFiles(files);
+      setContextFiles(
+        files.filter((file) => file.processingMode !== "ingest_to_library"),
+      );
+    },
+    [setContextFiles, setUploadedFiles],
+  );
+
   const settingsHook = usePlaygroundSettings({
     selectedCharacterName: selectedCharacter?.name || null,
     selectedSystemPrompt,
@@ -5030,6 +5100,15 @@ export const PlaygroundForm = ({
                   readOnly
                 />,
               )}
+              {uploadedFiles.length > 0
+                ? wrapComposerProfile(
+                    "document-processing-choices",
+                    <DocumentProcessingChoices
+                      files={uploadedFiles}
+                      onChangeFiles={handleDocumentProcessingFilesChange}
+                    />,
+                  )
+                : null}
               {/* Link to Model Playground for Compare mode */}
               <div>
                 <div className="flex w-full min-w-0 bg-transparent">

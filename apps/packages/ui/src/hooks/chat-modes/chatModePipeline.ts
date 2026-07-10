@@ -457,6 +457,29 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
           mode.buildUserMessage!(context),
           params.userMetadataExtra
         )
+        const existingUserIndex = resolvedUserMessageId
+          ? prev.findIndex(
+              (messageEntry) =>
+                messageEntry.id === resolvedUserMessageId &&
+                !messageEntry.isBot
+            )
+          : -1
+        if (existingUserIndex >= 0) {
+          const next = [...prev]
+          const existingUserMessage = next[existingUserIndex]
+          next[existingUserIndex] = applyMetadataExtra(
+            {
+              ...existingUserMessage,
+              ...userMessageEntry,
+              id: existingUserMessage.id,
+              createdAt:
+                existingUserMessage.createdAt ?? userMessageEntry.createdAt,
+              metadataExtra: existingUserMessage.metadataExtra
+            },
+            params.userMetadataExtra
+          )
+          return [...next, assistantStub]
+        }
         return [...prev, userMessageEntry, assistantStub]
       }
       return [...prev, assistantStub]

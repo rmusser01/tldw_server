@@ -27,7 +27,17 @@ export type SidepanelChatWebUiHandoffPayload = {
   temporaryChat?: boolean
   useOCR?: boolean
   title?: string | null
+  chatDocumentDraftId?: string | null
+  ragMediaIds?: number[] | null
+  fileRetrievalEnabled?: boolean
 }
+
+export type SidepanelChatWebUiHandoffOverrides = Partial<
+  Pick<
+    SidepanelChatWebUiHandoffPayload,
+    "chatDocumentDraftId" | "ragMediaIds" | "fileRetrievalEnabled"
+  >
+>
 
 const normalizeOptionalString = (value: unknown): string | null => {
   if (typeof value !== "string") return null
@@ -63,6 +73,20 @@ const normalizeNullableStringField = (
   if (typeof raw !== "string") return undefined
   const trimmed = raw.trim()
   return trimmed.length > 0 ? trimmed : null
+}
+
+const normalizeFiniteNumberArrayField = (
+  record: Record<string, unknown>,
+  key: string
+): number[] | null | undefined => {
+  if (!hasOwn(record, key)) return undefined
+  const raw = record[key]
+  if (raw == null) return null
+  if (!Array.isArray(raw)) return undefined
+  return raw.filter(
+    (value): value is number =>
+      typeof value === "number" && Number.isFinite(value)
+  )
 }
 
 const normalizeWebUiBaseUrl = (
@@ -170,34 +194,54 @@ export const decodeSidepanelChatWebUiHandoff = (
       return null
     }
 
-    return {
+    const decoded: SidepanelChatWebUiHandoffPayload = {
       source: SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE,
-      createdAt: parsed.createdAt,
-      draft: normalizeOptionalString(parsed.draft) ?? undefined,
-      historyId: normalizeNullableStringField(parsed, "historyId"),
-      serverChatId: normalizeNullableStringField(parsed, "serverChatId"),
-      chatMode: isChatMode(parsed.chatMode) ? parsed.chatMode : undefined,
-      webSearch:
-        typeof parsed.webSearch === "boolean" ? parsed.webSearch : undefined,
-      toolChoice: isToolChoice(parsed.toolChoice)
-        ? parsed.toolChoice
-        : undefined,
-      selectedModel: normalizeNullableStringField(parsed, "selectedModel"),
-      selectedSystemPrompt: normalizeNullableStringField(
-        parsed,
-        "selectedSystemPrompt"
-      ),
-      selectedQuickPrompt: normalizeNullableStringField(
-        parsed,
-        "selectedQuickPrompt"
-      ),
-      temporaryChat:
-        typeof parsed.temporaryChat === "boolean"
-          ? parsed.temporaryChat
-          : undefined,
-      useOCR: typeof parsed.useOCR === "boolean" ? parsed.useOCR : undefined,
-      title: normalizeNullableStringField(parsed, "title")
+      createdAt: parsed.createdAt
     }
+    const assignIfPresent = <K extends keyof SidepanelChatWebUiHandoffPayload>(
+      key: K,
+      nextValue: SidepanelChatWebUiHandoffPayload[K] | undefined
+    ) => {
+      if (nextValue !== undefined) decoded[key] = nextValue
+    }
+
+    assignIfPresent("draft", normalizeOptionalString(parsed.draft) ?? undefined)
+    assignIfPresent("historyId", normalizeNullableStringField(parsed, "historyId"))
+    assignIfPresent("serverChatId", normalizeNullableStringField(parsed, "serverChatId"))
+    assignIfPresent("chatMode", isChatMode(parsed.chatMode) ? parsed.chatMode : undefined)
+    assignIfPresent(
+      "webSearch",
+      typeof parsed.webSearch === "boolean" ? parsed.webSearch : undefined
+    )
+    assignIfPresent("toolChoice", isToolChoice(parsed.toolChoice) ? parsed.toolChoice : undefined)
+    assignIfPresent("selectedModel", normalizeNullableStringField(parsed, "selectedModel"))
+    assignIfPresent(
+      "selectedSystemPrompt",
+      normalizeNullableStringField(parsed, "selectedSystemPrompt")
+    )
+    assignIfPresent(
+      "selectedQuickPrompt",
+      normalizeNullableStringField(parsed, "selectedQuickPrompt")
+    )
+    assignIfPresent(
+      "temporaryChat",
+      typeof parsed.temporaryChat === "boolean" ? parsed.temporaryChat : undefined
+    )
+    assignIfPresent("useOCR", typeof parsed.useOCR === "boolean" ? parsed.useOCR : undefined)
+    assignIfPresent("title", normalizeNullableStringField(parsed, "title"))
+    assignIfPresent(
+      "chatDocumentDraftId",
+      normalizeNullableStringField(parsed, "chatDocumentDraftId")
+    )
+    assignIfPresent("ragMediaIds", normalizeFiniteNumberArrayField(parsed, "ragMediaIds"))
+    assignIfPresent(
+      "fileRetrievalEnabled",
+      typeof parsed.fileRetrievalEnabled === "boolean"
+        ? parsed.fileRetrievalEnabled
+        : undefined
+    )
+
+    return decoded
   } catch {
     return null
   }

@@ -186,9 +186,10 @@ describe("EmptySidePanel", () => {
     renderPanel();
 
     expect(screen.getByTestId("chat-empty-connected")).toBeInTheDocument();
+    expect(screen.queryByText("Connected")).not.toBeInTheDocument();
     expect(screen.getByText("Try asking")).toBeInTheDocument();
     expect(screen.getByTestId("chat-suggestion-1")).toBeInTheDocument();
     expect(screen.getByTestId("chat-suggestion-2")).toBeInTheDocument();
-    expect(screen.getByTestId("chat-suggestion-3")).toBeInTheDocument();
+    expect(screen.queryByTestId("chat-suggestion-3")).not.toBeInTheDocument();
   });
 });

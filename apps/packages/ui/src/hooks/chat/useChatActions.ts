@@ -109,9 +109,12 @@ import {
   chatSubmitFailed,
   chatSubmitSkipped,
   normalizeChatSubmitResult,
+  resolveTurnContextFiles,
   resolveTurnFileRetrievalEnabled,
+  resolveTurnUploadedFiles,
   resolveTurnRagMediaIds,
   shouldUseRagForTurn,
+  type ChatModeOverrides,
   type ChatSubmitResult
 } from "@/hooks/chat/chat-action-utils"
 import {
@@ -157,23 +160,6 @@ import { parseVisualIdentityEmoteCommand } from "@/utils/visual-identity-emote"
 type ChatModelSettingsStore = ChatModelSettings & {
   setSystemPrompt?: (prompt: string) => void
 }
-
-type ChatModeOverrides = {
-  historyId?: string | null
-  serverChatId?: string | null
-  selectedModel?: string | null
-  selectedSystemPrompt?: string | null
-  toolChoice?: ToolChoice | null
-  useOCR?: boolean
-  webSearch?: boolean
-  imageEventSyncPolicy?: ImageGenerationEventSyncPolicy
-  researchContext?: ChatResearchContext
-  dynamicUIRequest?: DynamicUIRequest
-  userMetadataExtra?: MessageMetadataExtra
-  ragMediaIds?: number[] | null
-  fileRetrievalEnabled?: boolean
-  selectedKnowledge?: Knowledge | null
-} & Record<string, unknown>
 
 type PersonaMemoryMode = "read_only" | "read_write"
 
@@ -3091,6 +3077,14 @@ export const useChatActions = ({
       dynamicUIRequest ?? requestOverrides?.dynamicUIRequest
     const turnUserMetadataExtra =
       userMetadataExtra ?? requestOverrides?.userMetadataExtra
+    const turnContextFiles = resolveTurnContextFiles({
+      requestOverrides,
+      contextFiles
+    })
+    const turnUploadedFiles = resolveTurnUploadedFiles({
+      requestOverrides,
+      uploadedFiles
+    })
     // Declared before the try so the catch/finally can still read them even if
     // a pre-stream await throws below.
     const capturedReplyTargetId = replyTarget?.id ?? null
@@ -3242,7 +3236,7 @@ export const useChatActions = ({
         const enhancedChatModeParams = {
           ...chatModeParamsWithRegen,
           selectedModel: resolvedImageModelLabel,
-          uploadedFiles: hasExplicitImageBackend ? [] : uploadedFiles,
+          uploadedFiles: hasExplicitImageBackend ? [] : turnUploadedFiles,
           imageBackendOverride: hasExplicitImageBackend
             ? trimmedImageBackendOverride
             : undefined
@@ -3259,7 +3253,7 @@ export const useChatActions = ({
         return toChatSubmitResult(imageResult)
       }
       // console.log("contextFiles", contextFiles)
-      if (contextFiles.length > 0) {
+      if (turnContextFiles.length > 0) {
         markSteeringApplied()
         const documentResult = await documentChatMode(
           message,
@@ -3268,7 +3262,7 @@ export const useChatActions = ({
           chatHistory || messages,
           memory || history,
           signal,
-          contextFiles,
+          turnContextFiles,
           chatModeParamsWithRegen
         )
         // setFileRetrievalEnabled(false)
@@ -3336,7 +3330,7 @@ export const useChatActions = ({
         // Include uploaded files info even in normal mode
         const enhancedChatModeParams = {
           ...chatModeParamsWithRegen,
-          uploadedFiles: uploadedFiles
+          uploadedFiles: turnUploadedFiles
         }
         const baseMessages = chatHistory || messages
         const baseHistory = memory || history
@@ -3573,7 +3567,7 @@ export const useChatActions = ({
             clusterId,
             parentMessageId: compareUserParentMessageId,
             documents:
-              uploadedFiles?.map((file) => ({
+              turnUploadedFiles?.map((file) => ({
                 type: "file",
                 filename: file.filename,
                 fileSize: file.size,
@@ -3625,7 +3619,7 @@ export const useChatActions = ({
               clusterId,
               parent_message_id: compareUserParentMessageId,
               documents:
-                uploadedFiles?.map((file) => ({
+                turnUploadedFiles?.map((file) => ({
                   type: "file",
                   filename: file.filename,
                   fileSize: file.size,
@@ -3650,7 +3644,7 @@ export const useChatActions = ({
           })
           const compareEnhancedParams = {
             ...compareChatModeParams,
-            uploadedFiles: uploadedFiles
+            uploadedFiles: turnUploadedFiles
           }
 
           const comparePromises = models.map(async (modelId) => {
@@ -4083,7 +4077,7 @@ export const useChatActions = ({
 
       // Capture values synchronously before any awaits
       const targetId = target.id
-      const nextPinned = !Boolean(target.pinned)
+      const nextPinned = !target.pinned
       const serverMessageId = target.serverMessageId
       const serverMessageVersion = target.serverMessageVersion
       const messageText = String(target.message || "")

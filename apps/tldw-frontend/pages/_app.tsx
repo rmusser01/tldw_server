@@ -169,6 +169,7 @@ export default function App({ Component, pageProps }: AppProps) {
   const isSetupRoute = routePath === "/setup"
   const isDebugRoute =
     routePath === "/__debug__" || routePath.startsWith("/__debug__/")
+  const isSidepanelDebugRoute = routePath === "/__debug__/sidepanel-chat"
   const isSettingsRoute =
     routePath === "/settings" || routePath.startsWith("/settings/")
   const [isAuthenticated, setIsAuthenticated] = React.useState(false)
@@ -336,11 +337,12 @@ export default function App({ Component, pageProps }: AppProps) {
 
   const layoutProps = React.useMemo(
     () => ({
-      hideHeader: hideShellNav || isSetupRoute,
-      hideSidebar: hideShellNav || isSettingsRoute || isSetupRoute,
+      hideHeader: hideShellNav || isSetupRoute || isSidepanelDebugRoute,
+      hideSidebar:
+        hideShellNav || isSettingsRoute || isSetupRoute || isSidepanelDebugRoute,
       allowNestedHideHeader: !isSettingsRoute
     }),
-    [hideShellNav, isSettingsRoute, isSetupRoute]
+    [hideShellNav, isSettingsRoute, isSetupRoute, isSidepanelDebugRoute]
   )
   const enableNotifications =
     authResolved && isAuthenticated && !isPublicAuthRoute && !isSetupRoute

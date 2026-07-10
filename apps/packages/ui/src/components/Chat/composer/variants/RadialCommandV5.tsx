@@ -1,5 +1,5 @@
 import React from "react"
-import { FacetRow, type FacetSpec } from "../shared/FacetRow"
+import { Facet, FacetRow, type FacetSpec } from "../shared/FacetRow"
 import { IconButton } from "../shared/IconButton"
 import { SendButton } from "../shared/SendButton"
 import { TokenMeter } from "../shared/TokenMeter"
@@ -143,7 +143,7 @@ export const RadialCommandV5: React.FC<RadialCommandV5Props> = ({
   forceFocused = false,
 }) => {
   const compact = density === "compact"
-  const wrapperPad = compact ? "p-2.5" : "px-6 pt-3.5 pb-5"
+  const wrapperPad = compact ? "p-0" : "px-6 pt-3.5 pb-5"
   const boxFocusCls = forceFocused
     ? "border-primary [box-shadow:var(--glow-primary)]"
     : "focus-within:border-primary focus-within:[box-shadow:var(--glow-primary)]"
@@ -166,6 +166,137 @@ export const RadialCommandV5: React.FC<RadialCommandV5Props> = ({
   }
 
   const hasDefaultFacets = facets.length > 0 || tokens
+  const builtInInlineActions = (
+    <>
+      {onPaletteTrigger && (
+        <button
+          type="button"
+          className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary/10 text-primary border border-primary/40 font-mono text-[11px] hover:bg-primary/15 flex-shrink-0"
+          onClick={onPaletteTrigger}
+          aria-label="Open command palette"
+        >
+          <span aria-hidden="true">{compact ? "/" : "⌘K"}</span>
+        </button>
+      )}
+      {iconButtons.map((btn) => (
+        <IconButton
+          key={btn.id}
+          label={btn.label}
+          active={btn.active}
+          pressed={btn.pressed}
+          onClick={btn.onClick}
+          density={density}
+        >
+          {btn.icon}
+        </IconButton>
+      ))}
+    </>
+  )
+  const defaultSendButton = (
+    <SendButton
+      onClick={handleSend}
+      disabled={!canSend && !sending}
+      stopping={sending}
+      shape="round"
+      density={density}
+    />
+  )
+
+  if (compact) {
+    const compactFacets =
+      facetsSlot ??
+      (hasDefaultFacets ? (
+        <div
+          role="group"
+          aria-label="Composer facets"
+          className="flex min-w-0 items-center gap-3 overflow-x-auto px-3 py-2"
+        >
+          {facets.map((facet) => (
+            <span key={facet.id} className="shrink-0">
+              <Facet
+                fieldKey={facet.fieldKey}
+                value={facet.value}
+                active={facet.active}
+                onClick={facet.onClick}
+                aria-label={facet["aria-label"]}
+              />
+            </span>
+          ))}
+          {tokens && (
+            <span className="shrink-0">
+              <TokenMeter used={tokens.used} max={tokens.max} showUnit={false} />
+            </span>
+          )}
+        </div>
+      ) : null)
+
+    return (
+      <div
+        className={`${wrapperPad} relative`}
+        data-variant="v5"
+        data-density={density}
+      >
+        {noticesSlot && <div className="mb-2">{noticesSlot}</div>}
+        {paletteOpen && onPaletteSelect && onPaletteActiveIndexChange && (
+          <SlashPalette
+            open={paletteOpen}
+            groups={paletteGroups}
+            activeIndex={paletteActiveIndex}
+            onActiveIndexChange={onPaletteActiveIndexChange}
+            query={paletteQuery}
+            onSelect={onPaletteSelect}
+            matchCountLabel={paletteMatchCountLabel}
+          />
+        )}
+        <div
+          data-testid="v5-mobile-composer"
+          className={`relative overflow-hidden rounded-2xl border border-border bg-surface transition ${boxFocusCls}`}
+        >
+          {compactFacets && (
+            <div
+              data-testid="v5-mobile-meta-row"
+              className="border-b border-border/70"
+            >
+              {compactFacets}
+            </div>
+          )}
+          <div data-testid="v5-mobile-text-row" className="min-w-0 px-1 py-1.5">
+            {textareaSlot ? (
+              <div className="min-w-0">{textareaSlot}</div>
+            ) : (
+              <div className="flex min-w-0 items-start gap-2">
+                <span
+                  className="mt-2 flex-shrink-0 select-none font-mono text-sm text-primary"
+                  aria-hidden="true"
+                >
+                  &gt;_
+                </span>
+                <textarea
+                  ref={textareaRef}
+                  value={message}
+                  onChange={(e) => onMessageChange(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder={placeholder}
+                  rows={2}
+                  className="min-h-[52px] flex-1 resize-none border-0 bg-transparent py-1.5 font-sans text-[13px] leading-relaxed text-text outline-none placeholder:text-text-muted"
+                  aria-label="Message"
+                />
+              </div>
+            )}
+          </div>
+          <div
+            data-testid="v5-mobile-action-row"
+            className="flex items-center gap-2 border-t border-border/70 px-1 py-1.5"
+          >
+            <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto">
+              {inlineSlot ?? builtInInlineActions}
+            </div>
+            <div className="shrink-0">{sendSlot ?? defaultSendButton}</div>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div
@@ -232,41 +363,8 @@ export const RadialCommandV5: React.FC<RadialCommandV5Props> = ({
             />
           </>
         )}
-        {inlineSlot ?? (
-          <>
-            {onPaletteTrigger && (
-              <button
-                type="button"
-                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary/10 text-primary border border-primary/40 font-mono text-[11px] hover:bg-primary/15 flex-shrink-0"
-                onClick={onPaletteTrigger}
-                aria-label="Open command palette"
-              >
-                <span aria-hidden="true">⌘K</span>
-              </button>
-            )}
-            {iconButtons.map((btn) => (
-              <IconButton
-                key={btn.id}
-                label={btn.label}
-                active={btn.active}
-                pressed={btn.pressed}
-                onClick={btn.onClick}
-                density={density}
-              >
-                {btn.icon}
-              </IconButton>
-            ))}
-          </>
-        )}
-        {sendSlot ?? (
-          <SendButton
-            onClick={handleSend}
-            disabled={!canSend && !sending}
-            stopping={sending}
-            shape="round"
-            density={density}
-          />
-        )}
+        {inlineSlot ?? builtInInlineActions}
+        {sendSlot ?? defaultSendButton}
       </div>
     </div>
   )

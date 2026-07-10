@@ -104,6 +104,7 @@ _MEDIA_ENDPOINT_MODULES: tuple[str, ...] = (
     "playlist_preflight",
     "collections",
     "process_code",
+    "document_upload_processing",
     "process_documents",
     "process_pdfs",
     "process_ebooks",

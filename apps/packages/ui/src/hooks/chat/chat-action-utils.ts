@@ -3,11 +3,13 @@ import {
   isImageGenerationMessageType,
 } from "@/utils/image-generation-chat";
 import type { ImageGenerationEventSyncPolicy } from "@/utils/image-generation-chat";
-import type { Message } from "@/store/option";
-import type { ToolChoice } from "@/store/option";
+import type { Knowledge, Message, MessageMetadataExtra, ToolChoice } from "@/store/option";
+import type { UploadedFile } from "@/db/dexie/types";
 import type { ImageGenerationEventSyncMode } from "@/utils/image-generation-chat";
 import type { SaveMessageData } from "@/types/chat-modes";
 import type { ChatModelSettings } from "@/store/model";
+import type { ChatResearchContext } from "@/services/tldw/TldwApiClient";
+import type { DynamicUIRequest } from "@/types/dynamic-ui";
 import { isGreetingMessageType } from "@/utils/character-greetings";
 import { parseProviderQualifiedModelSelection } from "@/utils/resolve-api-provider";
 
@@ -28,9 +30,14 @@ export type ChatModeOverrides = {
   useOCR?: boolean;
   webSearch?: boolean;
   imageEventSyncPolicy?: ImageGenerationEventSyncPolicy;
+  researchContext?: ChatResearchContext;
+  dynamicUIRequest?: DynamicUIRequest;
+  userMetadataExtra?: MessageMetadataExtra;
   ragMediaIds?: number[] | null;
   fileRetrievalEnabled?: boolean;
-  selectedKnowledge?: unknown;
+  contextFiles?: UploadedFile[];
+  uploadedFiles?: UploadedFile[];
+  selectedKnowledge?: Knowledge | null;
 } & Record<string, unknown>;
 
 export type SaveMessagePayload = Omit<SaveMessageData, "setHistoryId"> & {
@@ -174,6 +181,28 @@ export const resolveTurnFileRetrievalEnabled = ({
   typeof requestOverrides?.fileRetrievalEnabled === "boolean"
     ? requestOverrides.fileRetrievalEnabled
     : fileRetrievalEnabled;
+
+export const resolveTurnContextFiles = ({
+  requestOverrides,
+  contextFiles,
+}: {
+  requestOverrides?: Pick<ChatModeOverrides, "contextFiles"> | null;
+  contextFiles: UploadedFile[];
+}): UploadedFile[] =>
+  Array.isArray(requestOverrides?.contextFiles)
+    ? requestOverrides.contextFiles
+    : contextFiles;
+
+export const resolveTurnUploadedFiles = ({
+  requestOverrides,
+  uploadedFiles,
+}: {
+  requestOverrides?: Pick<ChatModeOverrides, "uploadedFiles"> | null;
+  uploadedFiles: UploadedFile[];
+}): UploadedFile[] =>
+  Array.isArray(requestOverrides?.uploadedFiles)
+    ? requestOverrides.uploadedFiles
+    : uploadedFiles;
 
 export const shouldUseRagForTurn = ({
   selectedKnowledge,
