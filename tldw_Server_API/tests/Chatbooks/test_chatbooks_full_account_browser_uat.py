@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import subprocess
 import sys
 import zipfile
 from pathlib import Path
@@ -25,6 +26,10 @@ REQUIRED_PAYLOADS = {
     "json/account_settings.json": b'{"schema_version":"1.0","values":{}}',
     "media/full-account-uat.bin": b"browser-downloaded-media-bytes",
 }
+
+
+def test_runner_prioritizes_current_worktree_imports() -> None:
+    assert Path(browser_uat.sys.path[0]).resolve() == browser_uat.PROJECT_ROOT
 
 
 def _sha256(payload: bytes) -> str:
@@ -187,7 +192,7 @@ def test_archive_inspection_rejects_sensitive_or_source_path_leaks(
 def test_api_scope_preflight_rejects_wrong_source_or_dirty_destination() -> None:
     source_scope = {
         "categories": [
-            {"category": "account_settings", "count": 2},
+            {"category": "account_settings", "count": 1},
             {"category": "characters", "count": 2},
             {"category": "media_records", "count": 1},
             {"category": "media_stored_artifacts", "count": 1},
@@ -212,6 +217,62 @@ def test_api_scope_preflight_rejects_wrong_source_or_dirty_destination() -> None
     destination_scope["categories"][0]["count"] = 1
     with pytest.raises(browser_uat.BrowserUatError, match="destination API scope"):
         browser_uat.validate_phase_scope("destination", destination_scope)
+
+
+def test_browser_timeout_preserves_partial_output(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config = browser_uat.BrowserUatConfig(
+        surface="webui",
+        root=tmp_path,
+        api_port=18001,
+        web_port=18269,
+        timeout_seconds=1,
+    )
+    runtime = browser_uat.RealBrowserUatRuntime()
+    runtime._tokens["source"] = "synthetic-token"
+    monkeypatch.setattr(runtime, "_browser_command", lambda _config: (tmp_path, ["playwright"]))
+
+    def raise_timeout(*_args: object, **_kwargs: object) -> None:
+        raise subprocess.TimeoutExpired(
+            cmd=["playwright"],
+            timeout=1,
+            output="partial stdout",
+            stderr="partial stderr",
+        )
+
+    monkeypatch.setattr(browser_uat.subprocess, "run", raise_timeout)
+
+    with pytest.raises(browser_uat.BrowserUatError, match="timed out after 1 seconds"):
+        runtime.run_browser(config, "export", config.downloaded_archive)
+
+    browser_log = tmp_path / "logs" / "webui-export.log"
+    assert browser_log.read_text(encoding="utf-8") == "partial stdout\npartial stderr"
+
+
+def test_extension_browser_respects_explicit_headless_mode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = browser_uat.BrowserUatConfig(
+        surface="extension",
+        root=tmp_path,
+        api_port=18011,
+    )
+    runtime = browser_uat.RealBrowserUatRuntime()
+    runtime._tokens["source"] = "synthetic-token"
+    monkeypatch.setenv("TLDW_E2E_EXTENSION_HEADLESS", "0")
+    monkeypatch.setattr(runtime, "_browser_command", lambda _config: (tmp_path, ["playwright"]))
+    captured: dict[str, object] = {}
+
+    def complete(*_args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        captured["env"] = kwargs["env"]
+        return subprocess.CompletedProcess(["playwright"], 0, stdout="", stderr="")
+
+    monkeypatch.setattr(browser_uat.subprocess, "run", complete)
+
+    runtime.run_browser(config, "export", config.downloaded_archive)
+
+    assert isinstance(captured["env"], dict)
+    assert captured["env"]["TLDW_E2E_EXTENSION_HEADLESS"] == "0"
 
 
 @pytest.mark.parametrize(

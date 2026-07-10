@@ -104,7 +104,7 @@ def _fetch_frontend(base_url: str) -> Dict[str, Optional[str]]:
         raise ValueError(f"Unsupported frontend URL scheme: {parsed.scheme or '<empty>'}")
     try:
         with urllib.request.urlopen(base_url, timeout=1) as response:
-            body = response.read(4096).decode(
+            body = response.read(64 * 1024).decode(
                 response.headers.get_content_charset() or "utf-8",
                 errors="ignore",
             )

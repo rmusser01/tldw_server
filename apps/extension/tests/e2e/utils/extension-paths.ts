@@ -134,7 +134,7 @@ export const prepareExtensionLaunchPath = (
     rootDir?: string
   } = {}
 ): string => {
-  if (!minimalLocales) {
+  if (!minimalLocales && !deterministicManifestKey) {
     return extensionPath
   }
 
@@ -145,17 +145,23 @@ export const prepareExtensionLaunchPath = (
   fs.mkdirSync(rootDir, { recursive: true })
   const stagedPath = fs.mkdtempSync(path.join(rootDir, "chrome-mv3-"))
 
-  copyExtensionTreeWithoutLocales(extensionPath, stagedPath)
+  if (minimalLocales) {
+    copyExtensionTreeWithoutLocales(extensionPath, stagedPath)
+  } else {
+    fs.cpSync(extensionPath, stagedPath, { recursive: true })
+  }
   if (deterministicManifestKey) {
     ensureDeterministicManifestKey(stagedPath)
   }
 
-  copyDefaultLocaleCatalog(
-    extensionPath,
-    stagedPath,
-    resolveManifestDefaultLocale(extensionPath),
-    preserveDefaultLocaleCatalog
-  )
+  if (minimalLocales) {
+    copyDefaultLocaleCatalog(
+      extensionPath,
+      stagedPath,
+      resolveManifestDefaultLocale(extensionPath),
+      preserveDefaultLocaleCatalog
+    )
+  }
 
   return stagedPath
 }

@@ -499,6 +499,28 @@ const seedTldwConfigFromEnv = async (): Promise<void> => {
       shouldSyncStoredServerUrl = true
     }
 
+    const existingNormalizedServerUrl = normalizeBaseUrl(existing?.serverUrl)
+    const nextNormalizedServerUrl = normalizeBaseUrl(next.serverUrl)
+    const preserveManualMultiUserTokens =
+      existing?.authMode === "multi-user" &&
+      !apiKey &&
+      !apiBearer &&
+      existingNormalizedServerUrl !== null &&
+      existingNormalizedServerUrl === nextNormalizedServerUrl
+
+    if (next.apiBearer !== undefined) {
+      delete next.apiBearer
+      changed = true
+    }
+    if (!preserveManualMultiUserTokens && next.accessToken !== undefined) {
+      delete next.accessToken
+      changed = true
+    }
+    if (!preserveManualMultiUserTokens && next.refreshToken !== undefined) {
+      delete next.refreshToken
+      changed = true
+    }
+
     if (!next.apiKey && !next.accessToken) {
       if (apiKey) {
         next.authMode = "single-user"

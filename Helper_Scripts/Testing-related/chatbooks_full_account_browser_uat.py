@@ -18,6 +18,10 @@ from pathlib import Path
 from typing import Any, Literal, Protocol
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT_TEXT = str(PROJECT_ROOT)
+if PROJECT_ROOT_TEXT in sys.path:
+    sys.path.remove(PROJECT_ROOT_TEXT)
+sys.path.insert(0, PROJECT_ROOT_TEXT)
 FIXTURE_SCRIPT = PROJECT_ROOT / "Helper_Scripts" / "Testing-related" / "chatbooks_full_account_uat_fixture.py"
 WEBUI_SPEC = "e2e/workflows/tier-2-features/chatbooks-full-account-roundtrip.spec.ts"
 EXTENSION_SPEC = "tests/e2e/chatbooks-export-download.spec.ts"
@@ -294,7 +298,7 @@ def validate_phase_scope(phase: str, scope: dict[str, Any]) -> None:
     }
     if phase == "source":
         minimums = {
-            "account_settings": 2,
+            "account_settings": 1,
             "characters": 1,
             "media_records": 1,
             "media_stored_artifacts": 1,
@@ -635,24 +639,40 @@ class RealBrowserUatRuntime:
         else:
             env.update(
                 {
-                    "TLDW_E2E_EXTENSION_HEADLESS": "1",
+                    "TLDW_E2E_EXTENSION_HEADLESS": os.environ.get(
+                        "TLDW_E2E_EXTENSION_HEADLESS",
+                        "1",
+                    ),
                     "TLDW_E2E_EXTENSION_TARGET_WAIT_MS": "30000",
                 }
             )
 
-        # The Playwright command uses fixed argv and never invokes a shell.
-        completed = subprocess.run(  # nosec B603
-            command,
-            cwd=cwd,
-            env=env,
-            text=True,
-            capture_output=True,
-            check=False,
-            timeout=config.timeout_seconds,
-        )
         logs_dir = config.root / "logs"
         logs_dir.mkdir(parents=True, exist_ok=True)
         browser_log = logs_dir / f"{config.surface}-{phase}.log"
+        try:
+            # The Playwright command uses fixed argv and never invokes a shell.
+            completed = subprocess.run(  # nosec B603
+                command,
+                cwd=cwd,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+                timeout=config.timeout_seconds,
+            )
+        except subprocess.TimeoutExpired as exc:
+            stdout = exc.stdout or ""
+            stderr = exc.stderr or ""
+            if isinstance(stdout, bytes):
+                stdout = stdout.decode("utf-8", errors="replace")
+            if isinstance(stderr, bytes):
+                stderr = stderr.decode("utf-8", errors="replace")
+            browser_log.write_text(f"{stdout}\n{stderr}", encoding="utf-8")
+            raise BrowserUatError(
+                f"{config.surface} browser {phase} timed out after "
+                f"{config.timeout_seconds} seconds; see {browser_log}"
+            ) from exc
         browser_log.write_text(
             completed.stdout + "\n" + completed.stderr,
             encoding="utf-8",

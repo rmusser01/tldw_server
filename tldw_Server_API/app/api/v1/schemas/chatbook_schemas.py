@@ -263,6 +263,30 @@ class ContentItemResponse(BaseModel):
     checksum: Optional[str] = None
 
 
+class ChatbookAccountInventoryResponse(BaseModel):
+    """Redacted account-inventory row safe for archive previews."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    category: str
+    label: str
+    restore_status: str
+
+
+class ChatbookAccountInventorySummaryResponse(BaseModel):
+    """Redacted account-inventory aggregate safe for archive previews."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    counts: dict[str, int] = Field(default_factory=dict)
+    pointer_only_count: int = Field(default=0, ge=0)
+    sensitive_category_count: int = Field(default=0, ge=0)
+    warning_count: int = Field(default=0, ge=0)
+    warnings: list[str] = Field(default_factory=list)
+    archive_size_bytes: int = Field(default=0, ge=0)
+    post_write_verification: bool = False
+
+
 class ChatbookManifestResponse(BaseModel):
     """Chatbook manifest information."""
     version: ChatbookVersion
@@ -275,6 +299,10 @@ class ChatbookManifestResponse(BaseModel):
 
     # Content summary
     content_items: list[ContentItemResponse] = Field(default_factory=list)
+    account_inventory: list[ChatbookAccountInventoryResponse] = Field(default_factory=list)
+    account_inventory_summary: ChatbookAccountInventorySummaryResponse = Field(
+        default_factory=ChatbookAccountInventorySummaryResponse
+    )
 
     # Configuration
     include_media: bool = False

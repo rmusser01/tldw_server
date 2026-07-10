@@ -94,6 +94,39 @@ describe("prioritizeExtensionBuildCandidates", () => {
     ).toEqual({ appName: { message: "tldw Assistant" } })
   })
 
+  it("stages a deterministic manifest key without minimal-locale mode", () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "tldw-extension-paths-"))
+    tempRoots.push(tempRoot)
+    const extensionDir = path.join(tempRoot, "chrome-mv3")
+    fs.mkdirSync(path.join(extensionDir, "_locales", "en"), { recursive: true })
+    fs.writeFileSync(
+      path.join(extensionDir, "manifest.json"),
+      JSON.stringify({ manifest_version: 3, default_locale: "en" }),
+      "utf8"
+    )
+    fs.writeFileSync(path.join(extensionDir, "background.js"), "// background", "utf8")
+    fs.writeFileSync(
+      path.join(extensionDir, "_locales", "en", "messages.json"),
+      JSON.stringify({ appName: { message: "tldw Assistant" } }),
+      "utf8"
+    )
+
+    const stagedPath = prepareExtensionLaunchPath(extensionDir, {
+      deterministicManifestKey: true,
+      minimalLocales: false,
+      rootDir: path.join(tempRoot, "staged")
+    })
+
+    expect(stagedPath).not.toBe(extensionDir)
+    expect(
+      JSON.parse(fs.readFileSync(path.join(stagedPath, "manifest.json"), "utf8")).key
+    ).toBe(EXPECTED_E2E_MANIFEST_KEY)
+    expect(fs.existsSync(path.join(stagedPath, "background.js"))).toBe(true)
+    expect(
+      fs.existsSync(path.join(stagedPath, "_locales", "en", "messages.json"))
+    ).toBe(true)
+  })
+
   it("does not add a deterministic manifest key unless requested", () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "tldw-extension-paths-"))
     tempRoots.push(tempRoot)

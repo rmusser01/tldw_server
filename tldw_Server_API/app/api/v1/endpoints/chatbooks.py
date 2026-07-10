@@ -1267,6 +1267,16 @@ async def preview_chatbook(
             updated_at=manifest.updated_at,
             export_id=manifest.export_id,
             content_items=[],  # Simplified for preview
+            account_inventory=[
+                dict(row)
+                for row in (manifest.account_inventory or [])
+                if isinstance(row, dict)
+            ],
+            account_inventory_summary=(
+                dict(manifest.account_inventory_summary)
+                if isinstance(manifest.account_inventory_summary, dict)
+                else {}
+            ),
             include_media=manifest.include_media,
             include_embeddings=manifest.include_embeddings,
             include_generated_content=manifest.include_generated_content,

@@ -77,7 +77,7 @@ test.describe("Chatbooks full-account browser round trip", () => {
     await openChatbooks(page)
 
     const exportName = "Browser UAT full account backup"
-    await page.getByPlaceholder(/^Name$/i).fill(exportName)
+    await page.getByRole("textbox", { name: /^Name$/i }).fill(exportName)
     await page
       .getByPlaceholder(/Description/i)
       .fill("Browser-created full-account archive for clean-destination UAT")
@@ -144,13 +144,14 @@ test.describe("Chatbooks full-account browser round trip", () => {
     await page.locator('input[type="file"]').first().setInputFiles(archivePath!)
     const previewResponse = await previewResponsePromise
     expect(previewResponse.ok()).toBe(true)
-    await expect(
-      page.getByRole("heading", { name: /What will be restored/i }),
-    ).toBeVisible({ timeout: 30_000 })
-    await expect(page.getByText(/Account profile/i).first()).toBeVisible()
-    await expect(page.getByText(/Account settings/i).first()).toBeVisible()
-    await expect(page.getByText(/Media stored artifacts/i).first()).toBeVisible()
-    await expect(page.getByText(/^Verified$/i).first()).toBeVisible()
+    const restoreSummary = page.getByRole("region", {
+      name: /What will be restored/i,
+    })
+    await expect(restoreSummary).toBeVisible({ timeout: 30_000 })
+    await expect(restoreSummary.getByText(/Account profile/i)).toBeVisible()
+    await expect(restoreSummary.getByText(/Account settings/i)).toBeVisible()
+    await expect(restoreSummary.getByText(/Stored media artifacts/i)).toBeVisible()
+    await expect(restoreSummary.getByText(/^Verified$/i)).toBeVisible()
 
     const importRequestPromise = page.waitForRequest(
       (request) =>

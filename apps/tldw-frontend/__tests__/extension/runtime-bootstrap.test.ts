@@ -243,6 +243,59 @@ describe("runtime-bootstrap chrome shim", () => {
     })
   })
 
+  it("preserves manual multi-user tokens without replacement runtime auth", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "advanced"
+    process.env.NEXT_PUBLIC_API_URL = "http://127.0.0.1:8000"
+    delete process.env.NEXT_PUBLIC_X_API_KEY
+    delete process.env.NEXT_PUBLIC_API_BEARER
+    localStorage.setItem(
+      "tldwConfig",
+      JSON.stringify({
+        authMode: "multi-user",
+        accessToken: "user-token",
+        refreshToken: "user-refresh",
+        serverUrl: "http://127.0.0.1:8000"
+      })
+    )
+
+    await importAndAwaitBootstrap()
+
+    expect(readStoredValue("tldwConfig")).toMatchObject({
+      authMode: "multi-user",
+      accessToken: "user-token",
+      refreshToken: "user-refresh"
+    })
+  })
+
+  it("clears manual multi-user tokens when bootstrap changes server URL", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "advanced"
+    process.env.NEXT_PUBLIC_API_URL = "http://127.0.0.1:8000"
+    delete process.env.NEXT_PUBLIC_X_API_KEY
+    delete process.env.NEXT_PUBLIC_API_BEARER
+    localStorage.setItem("tldw-api-host", "http://localhost:18001")
+    localStorage.setItem(
+      "tldwConfig",
+      JSON.stringify({
+        authMode: "multi-user",
+        accessToken: "user-token",
+        refreshToken: "user-refresh",
+        serverUrl: "http://127.0.0.1:8000"
+      })
+    )
+
+    await importAndAwaitBootstrap()
+
+    const nextConfig = readStoredValue("tldwConfig") as Record<string, unknown>
+    expect(nextConfig).toMatchObject({
+      authMode: "multi-user",
+      serverUrl: "http://localhost:18001"
+    })
+    expect(nextConfig.accessToken).toBeUndefined()
+    expect(nextConfig.refreshToken).toBeUndefined()
+    expect(localStorage.getItem("tldwConfig")).not.toContain("user-token")
+    expect(localStorage.getItem("tldwConfig")).not.toContain("user-refresh")
+  })
+
   it("repairs a stale env LAN host to the current browser host during bootstrap", async () => {
     process.env.NEXT_PUBLIC_API_URL = "http://192.168.5.184:8000"
 
