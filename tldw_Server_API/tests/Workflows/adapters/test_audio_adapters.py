@@ -15,6 +15,7 @@ This module tests all 9 audio adapters:
 from __future__ import annotations
 
 import asyncio
+import json
 import subprocess
 from pathlib import Path
 from typing import Any, Dict
@@ -301,6 +302,16 @@ async def test_tts_adapter_merges_watchlist_and_config_artifact_metadata(monkeyp
             "single_voice_fallback": True,
             "fallback_reason": "multi_voice_tts_failed",
         },
+        "program_metadata": {
+            "program_format": "solo_update",
+            "show_name": "Tracked Daily",
+            "source_urls": [
+                "https://example.test/story",
+                "https://example.test/private?token=secret",
+            ],
+            "api_key": "must-not-persist",
+            "ai_generated_speech": False,
+        },
     }
 
     with patch(
@@ -323,6 +334,12 @@ async def test_tts_adapter_merges_watchlist_and_config_artifact_metadata(monkeyp
     assert metadata["fallback_artifact"] is True
     assert metadata["single_voice_fallback"] is True
     assert metadata["fallback_reason"] == "multi_voice_tts_failed"
+    assert metadata["program_format"] == "solo_update"
+    assert metadata["show_name"] == "Tracked Daily"
+    assert metadata["source_urls"] == ["https://example.test/story"]
+    assert metadata["ai_generated_speech"] is True
+    assert metadata["speech_disclosure"] == "Synthetic AI-generated speech"
+    assert "must-not-persist" not in json.dumps(metadata)
 
 
 # ============================================================================
@@ -2187,6 +2204,13 @@ class TestMultiVoiceTTSAdapter:
             "sections": sample_sections,
             "voice_assignments": sample_voice_assignments,
             "normalize": False,
+            "program_metadata": {
+                "program_format": "host_discussion",
+                "show_name": "Tracked Weekly",
+                "source_urls": ["https://example.test/story"],
+                "recipients": ["private@example.test"],
+                "ai_generated_speech": False,
+            },
         }
 
         with (
@@ -2209,6 +2233,11 @@ class TestMultiVoiceTTSAdapter:
         assert len(final_artifacts) == 1
         assert final_artifacts[0]["type"] == "tts_audio"
         assert final_artifacts[0]["metadata"]["multi_voice"] is True
+        assert final_artifacts[0]["metadata"]["program_format"] == "host_discussion"
+        assert final_artifacts[0]["metadata"]["show_name"] == "Tracked Weekly"
+        assert final_artifacts[0]["metadata"]["source_urls"] == ["https://example.test/story"]
+        assert final_artifacts[0]["metadata"]["ai_generated_speech"] is True
+        assert "private@example.test" not in json.dumps(final_artifacts[0]["metadata"])
         assert result.get("artifact_id") is not None
 
     @pytest.mark.asyncio

@@ -142,6 +142,73 @@ def test_build_audio_projection_script_only_partial_graph():
     assert projection.get("download_url") is None
 
 
+def test_final_only_audio_projection_keeps_public_program_metadata_and_drops_private_paths():
+    from tldw_Server_API.app.core.Watchlists.audio_artifact_projection import build_audio_projection
+
+    final_metadata = _watchlist_meta(
+        final_artifact=True,
+        program_format="host_discussion",
+        show_name="Tracked Weekly",
+        episode_title="Week 28",
+        premise="Private source at C:\\Users\\secret\\source.txt",
+        source_urls=[
+            "https://example.test/story?page=2",
+            "https://example.test/private?token=secret",
+        ],
+        show_notes={
+            "sources": [
+                {
+                    "item_id": 11,
+                    "source_id": 7,
+                    "title": "Public source",
+                    "url": "https://example.test/story?page=2",
+                    "private_path": "C:\\Users\\secret\\source.txt",
+                }
+            ],
+            "source_count": 1,
+        },
+        cast=[{"label": "Host", "role": "anchor", "synthetic_voice": "af_bella"}],
+        api_key="must-not-leak",
+        recipients=["private@example.test"],
+        posix_path="/private/source.txt",
+        windows_path="C:\\Users\\secret\\source.txt",
+        unc_path="\\\\server\\share\\secret.txt",
+        traversal_path="../../secret.txt",
+        local_uri="file:///private/source.txt",
+        unknown_public_looking_key="must-not-leak-either",
+    )
+
+    projection = build_audio_projection(
+        run_id=91,
+        task_id="task_final_only",
+        audio_request_id="wla_current",
+        workflow_run=_workflow_run(status="succeeded", metadata=_watchlist_meta()),
+        artifacts=[_artifact("art_final_only", metadata=final_metadata)],
+    )
+
+    assert projection["status"] == "completed"
+    assert projection["script_artifact"] is None
+    assert projection["artifact_id"] == "art_final_only"
+    assert projection["program_format"] == "host_discussion"
+    assert projection["show_name"] == "Tracked Weekly"
+    assert projection["episode_title"] == "Week 28"
+    assert projection["ai_generated_speech"] is True
+    assert projection["speech_disclosure"] == "Synthetic AI-generated speech"
+    assert projection["source_urls"] == ["https://example.test/story?page=2"]
+    assert projection["show_notes"]["sources"][0]["url"] == "https://example.test/story?page=2"
+    serialized = json.dumps(projection)
+    for leaked in (
+        "must-not-leak",
+        "private@example.test",
+        "/private/source.txt",
+        "C:\\Users\\secret",
+        "\\\\server\\share",
+        "../../secret.txt",
+        "file://",
+    ):
+        assert leaked not in serialized
+
+
 def test_speaker_artifacts_do_not_become_final_audio():
     from tldw_Server_API.app.core.Watchlists.audio_artifact_projection import build_audio_projection
 

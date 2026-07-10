@@ -817,7 +817,7 @@ async def _submit_audio(
                 else None
             ),
             resume_step_id={
-                "persist_audio_script": "clean_script",
+                "persist_audio_script": "generate_audio",
                 "generate_audio": "generate_audio",
                 "persist_audio": "generate_audio",
             }.get(requested_stage),

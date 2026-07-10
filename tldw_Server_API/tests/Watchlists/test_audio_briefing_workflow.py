@@ -26,7 +26,7 @@ class TestAudioBriefingWorkflowDefinition:
 
         step_ids = [s["id"] for s in AUDIO_BRIEFING_WORKFLOW_DEF["steps"]]
         assert "compose_script" in step_ids
-        assert "clean_script" in step_ids
+        assert "clean_script" not in step_ids
         assert "generate_audio" in step_ids
 
     def test_workflow_def_step_types(self):
@@ -37,7 +37,6 @@ class TestAudioBriefingWorkflowDefinition:
         steps = AUDIO_BRIEFING_WORKFLOW_DEF["steps"]
         step_types = {s["id"]: s["type"] for s in steps}
         assert step_types["compose_script"] == "audio_briefing_compose"
-        assert step_types["clean_script"] == "text_clean"
         assert step_types["generate_audio"] == "multi_voice_tts"
 
     def test_workflow_def_has_timeouts(self):
@@ -79,6 +78,8 @@ class TestAudioBriefingWorkflowDefinition:
         assert audio_cfg["background_audio_uri"] == "{{ inputs.background_audio_uri }}"
         assert audio_cfg["background_volume"] == "{{ inputs.background_volume }}"
         assert audio_cfg["default_provider"] == "{{ inputs.tts_provider }}"
+        assert audio_cfg["program_metadata"] == "{{ compose_script.program_metadata }}"
+        assert audio_cfg["sections"] == "{{ compose_script.sections }}"
 
     def test_workflow_def_marks_single_voice_fallback_artifact(self):
         from tldw_Server_API.app.core.Watchlists.audio_briefing_workflow import (
@@ -98,6 +99,8 @@ class TestAudioBriefingWorkflowDefinition:
             "fallback_reason": "multi_voice_tts_failed",
         }
         assert fallback_cfg["provider"] == "{{ inputs.tts_provider }}"
+        assert fallback_cfg["program_metadata"] == "{{ compose_script.program_metadata }}"
+        assert fallback_cfg["input"] == "{{ compose_script.text }}"
 
 
 class TestBuildWorkflowInputs:

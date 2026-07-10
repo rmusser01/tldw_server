@@ -20,6 +20,7 @@ from tldw_Server_API.app.core.exceptions import AdapterError
 from tldw_Server_API.app.core.TTS.utils import clean_text_for_tts
 from tldw_Server_API.app.core.Workflows.adapters._common import (
     AsyncFileWriter,
+    public_program_artifact_metadata,
     resolve_artifacts_dir,
     resolve_workflow_file_path,
     resolve_workflow_file_uri,
@@ -665,6 +666,10 @@ async def run_multi_voice_tts_adapter(config: dict[str, Any], context: dict[str,
 
             mime, _ = mimetypes.guess_type(str(final_path))
             audio_artifact_id = f"mvtts_{uuid.uuid4()}"
+            program_metadata = public_program_artifact_metadata(
+                config.get("program_metadata"),
+                speech_ready=True,
+            )
             context["add_artifact"](
                 type="tts_audio",
                 uri=f"file://{final_path}",
@@ -672,6 +677,7 @@ async def run_multi_voice_tts_adapter(config: dict[str, Any], context: dict[str,
                 mime_type=mime or "application/octet-stream",
                 metadata={
                     **watchlist_metadata,
+                    **program_metadata,
                     "model": default_model,
                     "sections_generated": sections_generated,
                     "format": ext,

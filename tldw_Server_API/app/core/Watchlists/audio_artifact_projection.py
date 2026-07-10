@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime
 from typing import Any
 from urllib.parse import quote
 
 from loguru import logger
+
+from tldw_Server_API.app.core.Workflows.adapters._common import public_program_artifact_metadata
 
 _PROJECTION_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     AttributeError,
@@ -46,17 +49,39 @@ _PROGRAM_METADATA_KEYS = {
     "speech_disclosure",
     "is_no_material_update",
 }
-_PRIVATE_METADATA_KEY_PARTS = (
-    "api_key",
-    "authorization",
-    "credential",
-    "password",
-    "recipient",
-    "secret",
-    "token",
+_PUBLIC_ARTIFACT_METADATA_KEYS = {
+    *_CORRELATION_KEYS,
+    "briefing_occurrence_id",
+    "briefing_attempt_id",
+    "watchlist_output_id",
+    "title",
+    "label",
+    "name",
+    "script_artifact",
+    "script_artifact_id",
+    "speaker_artifact",
+    "speaker_id",
+    "voice",
+    "model",
+    "sections_count",
+    "sections_generated",
+    "sections",
+    "voice_assignments",
+    "output_language",
+    "word_count",
+    "estimated_minutes",
+    "format",
+    "multi_voice",
+    "background_mixed",
+    "final_artifact",
+    "fallback_artifact",
+    "single_voice_fallback",
+    "fallback_reason",
+    "provenance",
+}
+_PRIVATE_LOCATION_VALUE_RE = re.compile(
+    r"(?i)(?:file:/{0,2}|(?:^|\s)[a-z]:[\\/]|\\\\|(?:^|\s)/(?:[^\s]+)|(?:^|[\\/])\.\.(?:[\\/]|$))"
 )
-_FILESYSTEM_METADATA_KEYS = {"file", "file_path", "path", "storage_path", "uri"}
-_SCRUBBED = object()
 
 
 def _get_value(obj: Any, key: str, default: Any = None) -> Any:
@@ -145,28 +170,62 @@ def _artifact_id(artifact: Any) -> Any:
     return _get_value(artifact, "artifact_id") or _get_value(artifact, "id")
 
 
-def _scrub_artifact_metadata(value: Any) -> Any:
-    """Remove secrets, recipients, and raw filesystem locations before mirroring."""
-    if isinstance(value, dict):
-        scrubbed: dict[str, Any] = {}
-        for key, item in value.items():
-            normalized_key = str(key).strip().lower()
-            if normalized_key in _FILESYSTEM_METADATA_KEYS or any(
-                private_part in normalized_key for private_part in _PRIVATE_METADATA_KEY_PARTS
-            ):
-                continue
-            safe_item = _scrub_artifact_metadata(item)
-            if safe_item is not _SCRUBBED:
-                scrubbed[key] = safe_item
-        return scrubbed
-    if isinstance(value, list):
-        scrubbed_items = [_scrub_artifact_metadata(item) for item in value]
-        return [item for item in scrubbed_items if item is not _SCRUBBED]
-    if isinstance(value, str):
-        stripped = value.strip()
-        if stripped.lower().startswith("file://") or stripped.startswith("/"):
-            return _SCRUBBED
-    return value
+def _safe_public_scalar(value: Any) -> Any:
+    """Keep bounded scalars that are not filesystem paths or local URIs."""
+    if isinstance(value, bool) or value is None or isinstance(value, (int, float)):
+        return value
+    if not isinstance(value, str):
+        return None
+    text = " ".join(value.split()).strip()
+    if not text or _PRIVATE_LOCATION_VALUE_RE.search(text):
+        return None
+    return text[:1000]
+
+
+def _scrub_artifact_metadata(value: Any) -> dict[str, Any]:
+    """Project artifact metadata through explicit public field allowlists."""
+    if not isinstance(value, dict):
+        return {}
+    scrubbed: dict[str, Any] = {}
+    for key in _PUBLIC_ARTIFACT_METADATA_KEYS:
+        if key not in value:
+            continue
+        item = value[key]
+        if key == "sections" and isinstance(item, list):
+            public_sections = []
+            for section in item[:5000]:
+                if not isinstance(section, dict):
+                    continue
+                public_section = {
+                    field: safe
+                    for field in ("section_index", "voice", "model", "fallback")
+                    if (safe := _safe_public_scalar(section.get(field))) is not None
+                }
+                if public_section:
+                    public_sections.append(public_section)
+            scrubbed[key] = public_sections
+            continue
+        if key == "voice_assignments" and isinstance(item, dict):
+            assignments: dict[str, str] = {}
+            for marker, voice in list(item.items())[:100]:
+                safe_marker = _safe_public_scalar(marker)
+                safe_voice = _safe_public_scalar(voice)
+                if isinstance(safe_marker, str) and isinstance(safe_voice, str):
+                    assignments[safe_marker] = safe_voice
+            scrubbed[key] = assignments
+            continue
+        if key == "provenance" and isinstance(item, dict):
+            source = _safe_public_scalar(item.get("source"))
+            if source is not None:
+                scrubbed[key] = {"source": source}
+            continue
+        safe_item = _safe_public_scalar(item)
+        if safe_item is not None:
+            scrubbed[key] = safe_item
+
+    speech_ready = bool(value.get("final_artifact") or value.get("is_final") or value.get("final"))
+    scrubbed.update(public_program_artifact_metadata(value, speech_ready=speech_ready))
+    return scrubbed
 
 
 def summarize_audio_artifact(
@@ -178,8 +237,6 @@ def summarize_audio_artifact(
 ) -> dict[str, Any]:
     """Return a mirrored-safe artifact summary without raw file URIs."""
     art_meta = _scrub_artifact_metadata(dict(metadata or _artifact_metadata(artifact)))
-    if not isinstance(art_meta, dict):
-        art_meta = {}
     artifact_id = _artifact_id(artifact)
     title = _first_non_empty_string(
         art_meta.get("title"),
@@ -379,9 +436,13 @@ def build_audio_projection(
         script_metadata = script_artifact.get("metadata")
         final_metadata = final_artifact.get("metadata")
         if isinstance(script_metadata, dict) and isinstance(final_metadata, dict):
+            combined_program = {
+                **{key: script_metadata[key] for key in _PROGRAM_METADATA_KEYS if key in script_metadata},
+                **{key: final_metadata[key] for key in _PROGRAM_METADATA_KEYS if key in final_metadata},
+            }
             final_artifact["metadata"] = {
                 **final_metadata,
-                **{key: script_metadata[key] for key in _PROGRAM_METADATA_KEYS if key in script_metadata},
+                **public_program_artifact_metadata(combined_program, speech_ready=True),
                 "script_artifact_id": script_artifact.get("artifact_id"),
             }
             final_title = _first_non_empty_string(

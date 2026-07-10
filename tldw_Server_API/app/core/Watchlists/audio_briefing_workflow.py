@@ -138,25 +138,13 @@ AUDIO_BRIEFING_WORKFLOW_DEF: dict[str, Any] = {
             "timeout_seconds": 120,
         },
         {
-            "id": "clean_script",
-            "type": "text_clean",
-            "config": {
-                "operations": [
-                    "strip_markdown",
-                    "normalize_whitespace",
-                    "normalize_unicode",
-                    "remove_urls",
-                ],
-            },
-            "timeout_seconds": 10,
-        },
-        {
             "id": "generate_audio",
             "type": "multi_voice_tts",
             "config": {
                 "sections": "{{ compose_script.sections }}",
                 "voice_assignments": "{{ compose_script.voice_assignments }}",
                 "default_provider": "{{ inputs.tts_provider }}",
+                "program_metadata": "{{ compose_script.program_metadata }}",
                 "default_model": "{{ inputs.tts_model }}",
                 "default_voice": "{{ inputs.tts_voice }}",
                 "response_format": "mp3",
@@ -183,6 +171,7 @@ AUDIO_BRIEFING_WORKFLOW_DEF: dict[str, Any] = {
                 "voice": "{{ inputs.tts_voice }}",
                 "response_format": "mp3",
                 "speed": "{{ inputs.tts_speed }}",
+                "program_metadata": "{{ compose_script.program_metadata }}",
                 "artifact_metadata": {
                     "final_artifact": True,
                     "fallback_artifact": True,

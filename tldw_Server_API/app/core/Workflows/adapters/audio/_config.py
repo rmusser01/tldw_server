@@ -48,6 +48,7 @@ class TTSConfig(BaseAdapterConfig):
     provider_options: dict[str, Any] | None = Field(None, description="Additional provider options")
     output_filename_template: str | None = Field(None, description="Output filename template (Jinja)")
     artifact_metadata: dict[str, Any] | None = Field(None, description="Additional audio artifact metadata")
+    program_metadata: dict[str, Any] | None = Field(None, description="Public spoken-program metadata")
     post_process: PostProcessConfig | None = Field(None, description="Post-processing options")
 
 
@@ -128,6 +129,7 @@ class MultiVoiceTTSConfig(BaseAdapterConfig):
     voice_assignments: dict[str, str] | None = Field(None, description="Voice marker -> Kokoro voice ID mapping")
     default_provider: str | None = Field(None, description="Default TTS provider hint")
     provider: str | None = Field(None, description="Legacy/default TTS provider hint")
+    program_metadata: dict[str, Any] | None = Field(None, description="Public spoken-program metadata")
     default_model: str = Field("kokoro", description="Default TTS model")
     default_voice: str = Field("af_heart", description="Fallback voice if assignment missing")
     fallback_provider: str | None = Field(None, description="Optional fallback TTS provider hint")
