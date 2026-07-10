@@ -65,6 +65,25 @@ def _clamped_int(value: Any, default: int, minimum: int, maximum: int) -> int:
     return max(minimum, min(maximum, parsed))
 
 
+def _coerce_bool(value: Any, *, default: bool = False) -> bool:
+    """Return a deterministic boolean, falling back safely for invalid values."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "on"}:
+            return True
+        if normalized in {"false", "0", "no", "off", ""}:
+            return False
+        return default
+    if isinstance(value, (int, float)):
+        if value == 1:
+            return True
+        if value == 0:
+            return False
+    return default
+
+
 def _configured_selection_limit() -> int:
     return _clamped_int(os.getenv("WATCHLIST_BRIEFING_MAX_ITEMS"), 100, 1, 1000)
 
@@ -89,7 +108,7 @@ def _base_contract(*, scheduled: bool) -> dict[str, Any]:
         "selection": {"mode": "automatic", "max_items": _configured_selection_limit()},
         "editorial": {"program_format": "concise_briefing", "outcome_noun": "briefing"},
         "text": {
-            "enabled": bool(scheduled),
+            "enabled": _coerce_bool(scheduled),
             "type": "briefing_markdown",
             "format": "md",
             "template_name": "",
@@ -150,7 +169,7 @@ def _legacy_contract(raw: Mapping[str, Any]) -> dict[str, Any]:
     }
     audio: dict[str, Any] = {}
     if "generate_audio" in raw:
-        audio["enabled"] = bool(raw.get("generate_audio"))
+        audio["enabled"] = _coerce_bool(raw.get("generate_audio"))
     for old_key, new_key in audio_key_map.items():
         if old_key in raw and raw.get(old_key) is not None:
             audio[new_key] = copy.deepcopy(raw.get(old_key))
@@ -174,12 +193,12 @@ def _legacy_contract(raw: Mapping[str, Any]) -> dict[str, Any]:
         if "email_recipients" in delivery_config:
             email.setdefault("recipients", copy.deepcopy(delivery_config["email_recipients"]))
         if "email_enabled" in delivery_config:
-            email.setdefault("enabled", bool(delivery_config["email_enabled"]))
+            email.setdefault("enabled", _coerce_bool(delivery_config["email_enabled"]))
         if email:
             delivery["email"] = email
         chatbook = _mapping_copy(delivery.get("chatbook"))
         if "create_chatbook" in delivery_config:
-            chatbook.setdefault("enabled", bool(delivery_config["create_chatbook"]))
+            chatbook.setdefault("enabled", _coerce_bool(delivery_config["create_chatbook"]))
         if chatbook:
             delivery["chatbook"] = chatbook
         for key, value in delivery_config.items():
@@ -192,6 +211,13 @@ def _legacy_contract(raw: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _finalize_contract(contract: dict[str, Any], *, scheduled: bool) -> dict[str, Any]:
+    defaults = _base_contract(scheduled=scheduled)
+    for section in ("selection", "editorial", "text", "audio", "delivery", "test"):
+        value = contract.get(section)
+        contract[section] = (
+            _deep_merge(defaults[section], value) if isinstance(value, Mapping) else copy.deepcopy(defaults[section])
+        )
+
     contract["version"] = BRIEFING_PIPELINE_VERSION
     selection = contract["selection"]
     selection["max_items"] = _clamped_int(selection.get("max_items"), _configured_selection_limit(), 1, 1000)
@@ -205,22 +231,24 @@ def _finalize_contract(contract: dict[str, Any], *, scheduled: bool) -> dict[str
         editorial["outcome_noun"] = "briefing"
 
     audio = contract["audio"]
-    audio["enabled"] = bool(audio.get("enabled"))
+    audio["enabled"] = _coerce_bool(audio.get("enabled"))
+    if "persona_summarize" in audio:
+        audio["persona_summarize"] = _coerce_bool(audio.get("persona_summarize"))
     audio["target_minutes"] = _clamped_int(audio.get("target_minutes"), 10, 1, 60)
     audio["language"] = str(audio.get("language") or "en")
 
     text = contract["text"]
-    text["enabled"] = bool(scheduled or text.get("enabled") or audio["enabled"])
+    text["enabled"] = _coerce_bool(scheduled) or _coerce_bool(text.get("enabled")) or audio["enabled"]
     text["type"] = str(text.get("type") or "briefing_markdown")
     text["format"] = text.get("format") if text.get("format") in {"md", "html"} else "md"
     text["template_name"] = str(text.get("template_name") or "")
-    text["show_notes"] = bool(text.get("show_notes"))
+    text["show_notes"] = _coerce_bool(text.get("show_notes"))
 
     delivery = contract["delivery"]
     delivery["reports"] = _deep_merge(_mapping_copy(delivery.get("reports")), {"enabled": True})
     for channel in ("email", "chatbook"):
         channel_config = _mapping_copy(delivery.get(channel))
-        channel_config["enabled"] = bool(channel_config.get("enabled"))
+        channel_config["enabled"] = _coerce_bool(channel_config.get("enabled"))
         delivery[channel] = channel_config
     if not isinstance(delivery["email"].get("recipients"), list):
         delivery["email"]["recipients"] = []
