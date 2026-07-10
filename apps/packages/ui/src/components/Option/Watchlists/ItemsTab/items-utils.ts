@@ -461,6 +461,7 @@ const stripHtmlTagsWithoutRegex = (value: string): string => {
 
 export const stripHtmlToText = (value: string): string => {
   if (!value) return ""
+  if (typeof DOMPurify.sanitize !== "function") return ""
   const sanitized = DOMPurify.sanitize(value, {
     USE_PROFILES: { html: true },
     FORBID_TAGS: ["script", "style"]
