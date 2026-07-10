@@ -75,23 +75,21 @@ const buildBoundedGenerationText = (
   if (sources.length === 0) return ""
 
   const separatorLength = Math.max(0, sources.length - 1) * 2
-  const excerptCount = sources.filter((source) => source.excerpt).length
-  const fixedLength =
-    separatorLength +
-    sources.reduce(
-      (total, source) => total + source.label.length + (source.excerpt ? 1 : 0),
-      0
-    )
-  let remaining = Math.max(0, SOURCE_REVIEW_GENERATION_TEXT_LIMIT - fixedLength)
-  let excerptsRemaining = excerptCount
+  let remaining = Math.max(
+    0,
+    SOURCE_REVIEW_GENERATION_TEXT_LIMIT - separatorLength
+  )
+  let sourcesRemaining = sources.length
 
   const blocks = sources.map((source) => {
-    if (!source.excerpt || excerptsRemaining === 0) return source.label
-    const allocation = Math.floor(remaining / excerptsRemaining)
-    const excerpt = source.excerpt.slice(0, allocation)
-    remaining -= excerpt.length
-    excerptsRemaining -= 1
-    return excerpt ? `${source.label}\n${excerpt}` : source.label
+    const allocation = Math.floor(remaining / sourcesRemaining)
+    const label = source.label.slice(0, allocation)
+    const excerptBudget = Math.max(0, allocation - label.length - 1)
+    const excerpt = source.excerpt.slice(0, excerptBudget)
+    const block = excerpt ? `${label}\n${excerpt}` : label
+    remaining -= block.length
+    sourcesRemaining -= 1
+    return block
   })
   return blocks.join("\n\n").slice(0, SOURCE_REVIEW_GENERATION_TEXT_LIMIT)
 }

@@ -84,6 +84,28 @@ describe("source review handoff helpers", () => {
     expect(intent.text).toContain("b".repeat(100))
   })
 
+  it("keeps every source represented when labels exceed the text budget", () => {
+    const handoff = payload()
+    handoff.source_bundle.items = [
+      {
+        source_type: "note",
+        source_id: "first",
+        label: `First source ${"x".repeat(25_000)}`
+      },
+      {
+        source_type: "media",
+        source_id: "second",
+        label: `Second source ${"y".repeat(25_000)}`
+      }
+    ]
+
+    const intent = buildSourceReviewFlashcardsIntent(handoff)
+
+    expect(intent.text.length).toBeLessThanOrEqual(20_000)
+    expect(intent.text).toContain("First source")
+    expect(intent.text).toContain("Second source")
+  })
+
   it("stores quiz payload behind a short token and never exposes excerpts in the URL", () => {
     const handoff = payload()
 

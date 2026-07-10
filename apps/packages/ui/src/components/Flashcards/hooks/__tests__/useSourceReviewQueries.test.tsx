@@ -168,11 +168,28 @@ describe("source review query hooks", () => {
         offset: 2
       })
     })
-    expect(
-      client.getQueryCache().find({
-        queryKey: ["flashcards:source-review:due", 10, 2]
-      })?.options.refetchInterval
-    ).toBe(60_000)
+  })
+
+  it("refetches enabled due reviews every minute", async () => {
+    vi.useFakeTimers()
+    const client = queryClient()
+    try {
+      renderHook(() => useDueSourceReviewOccurrencesQuery({ enabled: true }), {
+        wrapper: wrapper(client)
+      })
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0)
+      })
+      expect(listDueSourceReviewOccurrences).toHaveBeenCalledTimes(1)
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_000)
+      })
+      expect(listDueSourceReviewOccurrences).toHaveBeenCalledTimes(2)
+    } finally {
+      client.clear()
+      vi.useRealTimers()
+    }
   })
 
   it("does not fetch due reviews when disabled", async () => {
