@@ -531,10 +531,16 @@ export const prepareChatDocumentAttachmentsForSend = async ({
     const capability = file.processingCapabilities?.[mode]
     if (capability && !capability.available) {
       const recoveryActions: DocumentProcessingRecoveryAction[] = []
-      if (mode !== "add_to_chat") {
+      if (
+        mode !== "add_to_chat" &&
+        file.processingCapabilities?.add_to_chat?.available !== false
+      ) {
         recoveryActions.push("switch_to_add_to_chat")
       }
-      if (mode !== "ingest_to_library") {
+      if (
+        mode !== "ingest_to_library" &&
+        file.processingCapabilities?.ingest_to_library?.available !== false
+      ) {
         recoveryActions.push("switch_to_ingest")
       }
       const blockedFile: UploadedFile = {
