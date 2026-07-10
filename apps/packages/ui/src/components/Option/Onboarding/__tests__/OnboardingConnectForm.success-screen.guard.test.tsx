@@ -371,12 +371,18 @@ const renderSuccessScreen = async ({
     trackOnboardingFirstIngestSuccess: vi.fn().mockResolvedValue(undefined)
   }))
 
-  vi.doMock("../validation", () => ({
-    validateApiKey: vi.fn().mockResolvedValue({ success: true }),
-    validateMultiUserAuth: vi.fn(),
-    validateMagicLinkAuth: vi.fn(),
-    categorizeConnectionError: vi.fn().mockReturnValue(null)
-  }))
+  vi.doMock("../validation", async () => {
+    const actual = await vi.importActual<typeof import("../validation")>(
+      "../validation"
+    )
+    return {
+      ...actual,
+      validateApiKey: vi.fn().mockResolvedValue({ success: true }),
+      validateMultiUserAuth: vi.fn(),
+      validateMagicLinkAuth: vi.fn(),
+      categorizeConnectionError: vi.fn().mockReturnValue(null)
+    }
+  })
 
   const { OnboardingConnectForm } = await import("../OnboardingConnectForm")
   render(<OnboardingConnectForm entryIntent={entryIntent} returnTo={returnTo} />)
