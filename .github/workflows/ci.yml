@@ -795,6 +795,8 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_assistant_defaults_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_resource_memberships_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_db.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_postgres.py
+              tldw_Server_API/tests/Workspaces/test_workspace_context_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_artifact_validation.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
@@ -2203,6 +2205,8 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_assistant_defaults_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_resource_memberships_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_db.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_postgres.py
+              tldw_Server_API/tests/Workspaces/test_workspace_context_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_artifact_validation.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
@@ -3482,6 +3486,8 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_assistant_defaults_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_resource_memberships_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_db.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_postgres.py
+              tldw_Server_API/tests/Workspaces/test_workspace_context_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_artifact_validation.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
@@ -4685,6 +4691,8 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_assistant_defaults_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_resource_memberships_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_db.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_postgres.py
+              tldw_Server_API/tests/Workspaces/test_workspace_context_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_artifact_validation.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
@@ -5889,6 +5897,8 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_assistant_defaults_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_resource_memberships_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_db.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_postgres.py
+              tldw_Server_API/tests/Workspaces/test_workspace_context_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_artifact_validation.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py

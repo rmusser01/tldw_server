@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig
@@ -78,6 +80,11 @@ def test_postgres_workspace_source_review_schema_backfill_and_batch_transition(
         assert migrated_by_id["src-a"]["review_state_updated_at"] == migrated_by_id["src-a"]["added_at"]
         assert migrated_by_id["src-b"]["review_state_updated_at"].strip()
         assert migrated_by_id["src-b"]["review_state_updated_at"] != migrated_by_id["src-b"]["added_at"]
+        iso_utc_pattern = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$")
+        assert all(
+            iso_utc_pattern.fullmatch(row["review_state_updated_at"])
+            for row in migrated_rows
+        )
 
         fallback_age_rows = list(
             backend.execute(

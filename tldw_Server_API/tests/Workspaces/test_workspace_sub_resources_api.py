@@ -255,6 +255,20 @@ def test_batch_review_state_update_is_atomic_when_source_is_missing(
     assert sources["src-atomic-2"]["review_state"] == "unset"
 
 
+@pytest.mark.integration
+@pytest.mark.parametrize("source_id", ["", "   "], ids=["empty", "blank"])
+def test_batch_review_state_update_rejects_blank_source_ids(
+    workspace_source_client: TestClient,
+    source_id: str,
+) -> None:
+    response = workspace_source_client.put(
+        "/api/v1/workspaces/ws-1/sources/review-state",
+        json={"source_ids": [source_id], "review_state": "needs_review"},
+    )
+
+    assert response.status_code == 422, response.text
+
+
 class TestArtifactEndpoints:
     def test_add_and_list_artifacts(self, db):
         db.add_workspace_artifact("ws-1", {

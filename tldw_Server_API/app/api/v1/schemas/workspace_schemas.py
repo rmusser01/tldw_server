@@ -463,6 +463,14 @@ class WorkspaceSourceReviewStateBatchRequest(BaseModel):
     source_ids: list[str] = Field(..., min_length=1, max_length=500)
     review_state: WorkspaceSourceReviewState
 
+    @field_validator("source_ids")
+    @classmethod
+    def validate_source_ids(cls, value: list[str]) -> list[str]:
+        """Reject blank source IDs without changing valid identifiers."""
+        if any(not source_id.strip() for source_id in value):
+            raise ValueError("source_ids entries must be non-empty strings")
+        return value
+
 
 class WorkspaceSourceResponse(BaseModel):
     id: str

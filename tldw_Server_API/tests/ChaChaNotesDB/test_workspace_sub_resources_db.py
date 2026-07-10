@@ -241,6 +241,41 @@ class TestWorkspaceSources:
         assert db.get_workspace_source("ws-1", " src ")["review_state"] == "needs_review"
         assert db.get_workspace_source("ws-1", "src")["review_state"] == "unset"
 
+    @pytest.mark.parametrize(
+        "source_id",
+        ["", "   ", None, 0],
+        ids=["empty", "blank", "none", "non-string"],
+    )
+    def test_batch_update_review_state_rejects_invalid_source_ids(self, db, source_id):
+        with pytest.raises(InputError, match="source_ids"):
+            db.update_workspace_source_review_states(
+                "ws-1",
+                [source_id],
+                "needs_review",
+                None,
+            )
+
+    def test_postgres_review_backfill_statement_emits_iso_utc_text(self):
+        class RecordingBackend:
+            def __init__(self):
+                self.statements = []
+
+            def execute(self, statement, *, connection):
+                self.statements.append(statement)
+
+        backend = RecordingBackend()
+        db = type("RecordingDB", (), {"backend": backend})()
+
+        CharactersRAGDB._ensure_workspace_subresource_schema_postgres(db, object())
+
+        backfill = next(
+            statement
+            for statement in backend.statements
+            if "SET review_state_updated_at" in statement
+        )
+        assert "to_char(" in backfill
+        assert 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"' in backfill
+
     def test_batch_update_review_state_fails_atomically_for_missing_source(self, db):
         created = db.add_workspace_source("ws-1", {
             "id": "src-a", "media_id": 1, "title": "A",

@@ -10044,7 +10044,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "OR review_state NOT IN ('unset', 'needs_review', 'reviewed')",
             "UPDATE workspace_sources "
             "SET review_state_updated_at = COALESCE(NULLIF(btrim(review_state_updated_at), ''), "
-            "NULLIF(btrim(added_at::text), ''), (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::text) "
+            "to_char(COALESCE(NULLIF(btrim(added_at::text), '')::timestamp, "
+            "CURRENT_TIMESTAMP AT TIME ZONE 'UTC'), 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"')) "
             "WHERE review_state_updated_at IS NULL OR btrim(review_state_updated_at) = ''",
             "UPDATE workspace_sources SET reviewed_at = NULL, reviewed_by_user_id = NULL "
             "WHERE review_state <> 'reviewed' "
@@ -19715,7 +19716,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         actor_user_id: str | None,
     ) -> list[dict[str, Any]]:
         """Atomically transition workspace sources to one review state."""
-        normalized_ids = list(dict.fromkeys(str(source_id or "") for source_id in source_ids))
+        normalized_ids: list[str] = []
+        seen_ids: set[str] = set()
+        for source_id in source_ids:
+            if not isinstance(source_id, str) or not source_id.strip():
+                raise InputError("source_ids entries must be non-empty strings.")  # noqa: TRY003
+            if source_id not in seen_ids:
+                seen_ids.add(source_id)
+                normalized_ids.append(source_id)
         review_transition = self._build_workspace_source_review_transition(
             review_state,
             actor_user_id=actor_user_id,
@@ -19726,7 +19734,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         placeholders = ", ".join("?" for _ in normalized_ids)
         with self.transaction() as conn:
             rows = conn.execute(
-                f"SELECT id FROM workspace_sources WHERE workspace_id = ? AND id IN ({placeholders})",  # nosec B608
+                f"SELECT id FROM workspace_sources WHERE workspace_id = ? AND id IN ({placeholders})",  # nosec B608  # Placeholders are generated "?" tokens; IDs remain bound parameters.
                 (workspace_id, *normalized_ids),
             ).fetchall()
             found_ids = {str(row["id"]) for row in rows}
@@ -19741,7 +19749,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             cursor = conn.execute(
                 "UPDATE workspace_sources "
                 "SET review_state = ?, review_state_updated_at = ?, reviewed_at = ?, "
-                f"reviewed_by_user_id = ?, version = version + 1 WHERE workspace_id = ? AND id IN ({placeholders})",  # nosec B608
+                f"reviewed_by_user_id = ?, version = version + 1 WHERE workspace_id = ? AND id IN ({placeholders})",  # nosec B608  # Placeholders are generated "?" tokens; IDs remain bound parameters.
                 (
                     review_transition["review_state"],
                     review_transition["review_state_updated_at"],
@@ -19759,7 +19767,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 )
 
             updated_rows = conn.execute(
-                f"SELECT * FROM workspace_sources WHERE workspace_id = ? AND id IN ({placeholders})",  # nosec B608
+                f"SELECT * FROM workspace_sources WHERE workspace_id = ? AND id IN ({placeholders})",  # nosec B608  # Placeholders are generated "?" tokens; IDs remain bound parameters.
                 (workspace_id, *normalized_ids),
             ).fetchall()
 
