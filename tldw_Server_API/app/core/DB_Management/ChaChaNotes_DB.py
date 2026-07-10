@@ -21941,6 +21941,66 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             logger.error("SQLite FTS count failed for notes term '{}': {}", search_term, exc)
             raise
 
+    def count_chatbook_scope_category(self, category: str) -> int:
+        """Return the active row count for a Chatbooks account-scope category."""
+        queries = {
+            "conversations": "SELECT COUNT(*) AS count FROM conversations WHERE deleted = 0",
+            "notes": "SELECT COUNT(*) AS count FROM notes WHERE deleted = 0",
+            "characters": "SELECT COUNT(*) AS count FROM character_cards WHERE deleted = 0",
+            "world_books": "SELECT COUNT(*) AS count FROM world_books WHERE deleted = 0",
+            "dictionaries": "SELECT COUNT(*) AS count FROM chat_dictionaries WHERE deleted = 0",
+            "generated_documents": "SELECT COUNT(*) AS count FROM generated_documents",
+            "tags_categories_relationships": "SELECT COUNT(*) AS count FROM keywords WHERE deleted = 0",
+        }
+        query = queries.get(category)
+        if query is None:
+            return 0
+        try:
+            # Category selects a fixed allowlisted query; no user input enters SQL.
+            cursor = self.execute_query(query)  # nosec B608
+            row = cursor.fetchone()
+            if not row:
+                return 0
+            try:
+                value = row["count"]
+            except (TypeError, KeyError, IndexError):
+                value = row[0]
+            return max(0, int(value or 0))
+        except CharactersRAGDBError as exc:
+            logger.error("Failed counting Chatbooks account-scope category '{}': {}", category, exc)
+            raise
+        except (TypeError, ValueError):
+            return 0
+
+    def list_chatbook_scope_ids(self, category: str) -> list[str]:
+        """Return active row IDs for a Chatbooks account-scope category."""
+        queries = {
+            "conversations": "SELECT id FROM conversations WHERE deleted = 0 ORDER BY id ASC",
+            "notes": "SELECT id FROM notes WHERE deleted = 0 ORDER BY id ASC",
+            "characters": "SELECT id FROM character_cards WHERE deleted = 0 ORDER BY id ASC",
+            "world_books": "SELECT id FROM world_books WHERE deleted = 0 ORDER BY id ASC",
+            "dictionaries": "SELECT id FROM chat_dictionaries WHERE deleted = 0 ORDER BY id ASC",
+            "generated_documents": "SELECT id FROM generated_documents ORDER BY id ASC",
+        }
+        query = queries.get(category)
+        if query is None:
+            return []
+        try:
+            # Category selects a fixed allowlisted query; no user input enters SQL.
+            cursor = self.execute_query(query)  # nosec B608
+            ids: list[str] = []
+            for row in cursor.fetchall() or []:
+                try:
+                    value = row["id"]
+                except (TypeError, KeyError, IndexError):
+                    value = row[0]
+                if value is not None:
+                    ids.append(str(value))
+            return ids
+        except CharactersRAGDBError as exc:
+            logger.error("Failed listing Chatbooks account-scope IDs for '{}': {}", category, exc)
+            raise
+
     # Moodboards
     @staticmethod
     def _normalize_moodboard_name(name: str) -> str:

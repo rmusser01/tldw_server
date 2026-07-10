@@ -28,6 +28,8 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGD
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.media_db.api import create_media_database
 
+pytestmark = pytest.mark.integration
+
 
 class _DummyAuditService:
     async def log_event(self, *args, **kwargs) -> None:

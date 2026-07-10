@@ -1,3 +1,5 @@
+"""Account inventory definitions for full-account Chatbook backups."""
+
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
@@ -9,6 +11,8 @@ RestoreStatus = Literal["restorable", "pointer_only", "non_restorable"]
 
 @dataclass(frozen=True)
 class AccountInventoryEntry:
+    """Describe one category of user account data in a full-account backup."""
+
     category: str
     label: str
     source: str
@@ -21,6 +25,7 @@ class AccountInventoryEntry:
     warning: str | None = None
 
     def to_summary(self) -> dict[str, object]:
+        """Return the API-safe summary shape for scope previews and manifests."""
         return asdict(self)
 
 

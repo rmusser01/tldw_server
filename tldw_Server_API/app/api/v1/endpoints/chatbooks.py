@@ -37,7 +37,7 @@ from tldw_Server_API.app.core.Logging.log_context import ensure_request_id, ensu
 from tldw_Server_API.app.core.Metrics.metrics_manager import increment_counter
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal, get_request_user, rbac_rate_limit, User
 
-from ....core.Chatbooks.chatbook_models import ContentType, ExportJob, ExportStatus
+from ....core.Chatbooks.chatbook_models import ContentType, ExportJob, ExportStatus, ImportJob
 from ....core.Chatbooks.chatbook_service import ChatbookService
 from ....core.Chatbooks.chatbook_validators import ChatbookValidator
 from ....core.Chatbooks.exceptions import ExportError, JobError, QuotaExceededError
@@ -110,7 +110,7 @@ def _safe_increment_metric(metric_name: str, labels: dict, error_context: str = 
         logger.debug("metrics increment failed")
 
 
-def _import_job_response(job) -> ImportJobResponse:
+def _import_job_response(job: ImportJob) -> ImportJobResponse:
     """Build an API import job response including structured async result metadata."""
     metadata = job.metadata if isinstance(getattr(job, "metadata", None), dict) else {}
     return ImportJobResponse(
@@ -432,10 +432,11 @@ async def chatbooks_health():
 )
 async def get_chatbook_export_scope(
     service: ChatbookService = Depends(get_chatbook_service),
-):
+) -> ChatbookAccountScopeResponse:
     """Return a redacted full-account export scope summary."""
     try:
-        return ChatbookAccountScopeResponse(**service.get_full_account_export_scope())
+        scope = await asyncio.to_thread(service.get_full_account_export_scope)
+        return ChatbookAccountScopeResponse(**scope)
     except _CHATBOOKS_NONCRITICAL_EXCEPTIONS:
         logger.exception("Failed to build chatbook export scope")
         raise HTTPException(status_code=500, detail="An error occurred while building the export scope") from None

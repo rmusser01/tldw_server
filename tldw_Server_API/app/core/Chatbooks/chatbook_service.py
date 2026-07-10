@@ -2152,7 +2152,7 @@ class ChatbookService:
             ),
             "media_pointers": media_source_pointer_count + media_artifact_pointer_count,
             "embeddings": len(content.embeddings),
-            "tags_categories_relationships": len(self._query_ids("SELECT id FROM keywords WHERE deleted = 0")),
+            "tags_categories_relationships": self._scope_db_count_for_category("tags_categories_relationships"),
             "sensitive_user_values": 0,
         }
         warnings = [row.warning for row in ACCOUNT_DATA_INVENTORY if row.warning]
@@ -8059,22 +8059,15 @@ class ChatbookService:
         except _CHATBOOK_NONCRITICAL_EXCEPTIONS as e:
             raise DatabaseError(f"Failed to preview export: {e}", cause=e) from e
 
-    def _query_ids(self, query: str, params: tuple[Any, ...] = (), db: Any | None = None) -> list[str]:
-        """Return IDs from a best-effort query."""
-        db_obj = db or self.db
-        execute_query = getattr(db_obj, "execute_query", None)
-        if not callable(execute_query):
+    def _scope_db_ids_for_category(self, category: str) -> list[str]:
+        """Return a best-effort ChaChaNotes-backed ID list for an account category."""
+        list_ids = getattr(self.db, "list_chatbook_scope_ids", None)
+        if not callable(list_ids):
             return []
         try:
-            rows = self._fetch_results(execute_query(query, params))
+            return [str(item) for item in list_ids(category) if item is not None]
         except _CHATBOOK_SCOPE_COUNT_EXCEPTIONS:
             return []
-        ids: list[str] = []
-        for row in rows or []:
-            value = row.get("id") if isinstance(row, dict) else (row[0] if row else None)
-            if value is not None:
-                ids.append(str(value))
-        return ids
 
     def _list_all_prompt_ids(self) -> list[str]:
         if self._scope_existing_user_path(DatabasePaths.PROMPTS_SUBDIR, DatabasePaths.PROMPTS_DB_NAME) is None:
@@ -8128,23 +8121,26 @@ class ChatbookService:
         media_db = self._get_media_db()
         if media_db is None:
             return []
-        return self._query_ids(
-            "SELECT id FROM Media WHERE deleted = 0 AND is_trash = 0 ORDER BY id ASC",
-            db=media_db,
-        )
+        list_ids = getattr(media_db, "list_chatbook_scope_ids", None)
+        if not callable(list_ids):
+            return []
+        try:
+            return [str(item) for item in list_ids("media_records") if item is not None]
+        except _CHATBOOK_SCOPE_COUNT_EXCEPTIONS:
+            return []
 
     def _expand_full_account_content_selections(self) -> dict[ContentType, list[str]]:
         """Expand full-account export to every content collector this service owns."""
         selections = {
-            ContentType.CONVERSATION: self._query_ids("SELECT id FROM conversations WHERE deleted = 0 ORDER BY id ASC"),
-            ContentType.NOTE: self._query_ids("SELECT id FROM notes WHERE deleted = 0 ORDER BY id ASC"),
-            ContentType.CHARACTER: self._query_ids("SELECT id FROM character_cards WHERE deleted = 0 ORDER BY id ASC"),
-            ContentType.WORLD_BOOK: self._query_ids("SELECT id FROM world_books WHERE deleted = 0 ORDER BY id ASC"),
-            ContentType.DICTIONARY: self._query_ids("SELECT id FROM chat_dictionaries WHERE deleted = 0 ORDER BY id ASC"),
+            ContentType.CONVERSATION: self._scope_db_ids_for_category("conversations"),
+            ContentType.NOTE: self._scope_db_ids_for_category("notes"),
+            ContentType.CHARACTER: self._scope_db_ids_for_category("characters"),
+            ContentType.WORLD_BOOK: self._scope_db_ids_for_category("world_books"),
+            ContentType.DICTIONARY: self._scope_db_ids_for_category("dictionaries"),
             ContentType.PROMPT: self._list_all_prompt_ids(),
             ContentType.EVALUATION: self._list_all_evaluation_ids(),
             ContentType.MEDIA: self._list_all_media_ids(),
-            ContentType.GENERATED_DOCUMENT: self._query_ids("SELECT id FROM generated_documents ORDER BY id ASC"),
+            ContentType.GENERATED_DOCUMENT: self._scope_db_ids_for_category("generated_documents"),
             ContentType.EXPLAINER_SESSION: self._list_all_explainer_session_ids(),
             ContentType.EMBEDDING: [],
         }
@@ -8152,32 +8148,6 @@ class ChatbookService:
         if chroma_path is None:
             selections.pop(ContentType.EMBEDDING)
         return selections
-
-    def _scope_count_query(self, query: str, params: tuple[Any, ...] = (), db: Any | None = None) -> int:
-        """Return a best-effort COUNT(*) value from a DB object."""
-        db_obj = db or self.db
-        execute_query = getattr(db_obj, "execute_query", None)
-        if not callable(execute_query):
-            return 0
-        try:
-            rows = self._fetch_results(execute_query(query, params))
-        except _CHATBOOK_SCOPE_COUNT_EXCEPTIONS:
-            return 0
-        if not rows:
-            return 0
-        first = rows[0]
-        if isinstance(first, dict):
-            value = first.get("count")
-            if value is None and first:
-                value = next(iter(first.values()))
-        elif isinstance(first, (tuple, list)) and first:
-            value = first[0]
-        else:
-            value = first
-        try:
-            return max(0, int(value or 0))
-        except (TypeError, ValueError):
-            return 0
 
     def _scope_existing_user_path(self, *parts: str) -> Path | None:
         """Return an existing user-owned path without creating optional stores."""
@@ -8188,28 +8158,45 @@ class ChatbookService:
         except _CHATBOOK_SCOPE_COUNT_EXCEPTIONS:
             return None
 
-    def _scope_media_count_query(self, query: str) -> int:
+    @staticmethod
+    def _coerce_scope_count(value: Any) -> int:
+        """Normalize DB-layer scope counts into non-negative integers."""
+        try:
+            return max(0, int(value or 0))
+        except (TypeError, ValueError):
+            return 0
+
+    def _scope_db_count_for_category(self, category: str) -> int:
+        """Return a best-effort ChaChaNotes-backed count for an account category."""
+        count_category = getattr(self.db, "count_chatbook_scope_category", None)
+        if not callable(count_category):
+            return 0
+        try:
+            return self._coerce_scope_count(count_category(category))
+        except _CHATBOOK_SCOPE_COUNT_EXCEPTIONS:
+            return 0
+
+    def _scope_media_count_for_category(self, category: str) -> int:
+        """Return a best-effort Media DB-backed count for an account category."""
         if self._scope_existing_user_path(DatabasePaths.MEDIA_DB_NAME) is None:
             return 0
         media_db = self._get_media_db()
         if media_db is None:
             return 0
-        return self._scope_count_query(query, db=media_db)
+        count_category = getattr(media_db, "count_chatbook_scope_category", None)
+        if not callable(count_category):
+            return 0
+        try:
+            return self._coerce_scope_count(count_category(category))
+        except _CHATBOOK_SCOPE_COUNT_EXCEPTIONS:
+            return 0
 
     def _scope_count_for_category(self, category: str) -> int:
         """Best-effort category counts for the full-account export preview."""
         if category in {"account_profile", "account_settings"}:
             return 1
-        if category == "conversations":
-            return self._scope_count_query("SELECT COUNT(*) AS count FROM conversations WHERE deleted = 0")
-        if category == "notes":
-            return self._scope_count_query("SELECT COUNT(*) AS count FROM notes WHERE deleted = 0")
-        if category == "characters":
-            return self._scope_count_query("SELECT COUNT(*) AS count FROM character_cards WHERE deleted = 0")
-        if category == "world_books":
-            return self._scope_count_query("SELECT COUNT(*) AS count FROM world_books WHERE deleted = 0")
-        if category == "dictionaries":
-            return self._scope_count_query("SELECT COUNT(*) AS count FROM chat_dictionaries WHERE deleted = 0")
+        if category in {"conversations", "notes", "characters", "world_books", "dictionaries"}:
+            return self._scope_db_count_for_category(category)
         if category == "prompts":
             if self._scope_existing_user_path(DatabasePaths.PROMPTS_SUBDIR, DatabasePaths.PROMPTS_DB_NAME) is None:
                 return 0
@@ -8231,7 +8218,7 @@ class ChatbookService:
             except _CHATBOOK_SCOPE_COUNT_EXCEPTIONS:
                 return 0
         if category == "generated_documents":
-            return self._scope_count_query("SELECT COUNT(*) AS count FROM generated_documents")
+            return self._scope_db_count_for_category(category)
         if category == "explainer_sessions":
             if self._scope_existing_user_path(DatabasePaths.EXPLAINER_DB_NAME) is None:
                 return 0
@@ -8239,18 +8226,14 @@ class ChatbookService:
                 return max(0, int(self._get_explainer_repo().list_session_summaries(owner_user_id=self.user_id, limit=1)[1]))
             except _CHATBOOK_SCOPE_COUNT_EXCEPTIONS:
                 return 0
-        if category == "media_records":
-            return self._scope_media_count_query("SELECT COUNT(*) AS count FROM Media WHERE deleted = 0 AND is_trash = 0")
-        if category == "media_transcripts":
-            return self._scope_media_count_query("SELECT COUNT(*) AS count FROM Transcripts WHERE deleted = 0")
-        if category == "media_chunks":
-            return self._scope_media_count_query("SELECT COUNT(*) AS count FROM UnvectorizedMediaChunks WHERE deleted = 0")
-        if category == "media_stored_artifacts":
-            return self._scope_media_count_query("SELECT COUNT(*) AS count FROM MediaFiles WHERE deleted = 0")
-        if category == "media_pointers":
-            return self._scope_media_count_query(
-                "SELECT COUNT(*) AS count FROM Media WHERE deleted = 0 AND is_trash = 0 AND url IS NOT NULL AND url <> ''"
-            )
+        if category in {
+            "media_records",
+            "media_transcripts",
+            "media_chunks",
+            "media_stored_artifacts",
+            "media_pointers",
+        }:
+            return self._scope_media_count_for_category(category)
         if category == "embeddings":
             chroma_path = self._scope_existing_user_path(DatabasePaths.CHROMA_SUBDIR)
             if chroma_path is None:

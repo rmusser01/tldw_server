@@ -6,6 +6,8 @@ from tldw_Server_API.app.core.Chatbooks.chatbook_account_inventory import ACCOUN
 from tldw_Server_API.app.core.Chatbooks.chatbook_service import ChatbookService
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDBError
 
+pytestmark = pytest.mark.unit
+
 
 EXPECTED_CATEGORIES = {
     "account_profile",
