@@ -173,7 +173,142 @@ def test_attempt_claim_and_transition_are_atomic_and_attempt_scoped(tmp_path):
     assert json.loads(db.get_briefing_occurrence(int(occurrence.id)).stages_json)["generate_audio"][
         "status"
     ] == "ready"
-    assert retry.attempt == 2
+    assert retry.id == first.id
+    assert retry.attempt == 1
+    assert retry.state == "successful"
+
+
+def test_successful_attempt_cannot_be_claimed_as_retry(tmp_path):
+    db = _make_db(tmp_path)
+    job_id, run_id = _create_job_run(db, label="successful-attempt")
+    occurrence = db.create_or_get_briefing_occurrence(
+        run_id=run_id,
+        occurrence_key=f"user:1:job:{job_id}:run:{run_id}:successful",
+        contract_json='{"version":1}',
+    )
+    attempt = db.claim_briefing_attempt(
+        occurrence_id=int(occurrence.id),
+        artifact_version=1,
+        adapter="email",
+    )
+    db.transition_briefing_attempt(
+        int(attempt.id),
+        expected_states={"intent"},
+        state="successful",
+    )
+
+    claimed = db.claim_briefing_attempt(
+        occurrence_id=int(occurrence.id),
+        artifact_version=1,
+        adapter="email",
+        allow_retry=True,
+    )
+
+    assert claimed.id == attempt.id
+    assert claimed.attempt == 1
+    assert claimed.state == "successful"
+
+
+def test_attempt_terminal_and_occurrence_stage_roll_back_together(tmp_path, monkeypatch):
+    db = _make_db(tmp_path)
+    job_id, run_id = _create_job_run(db, label="atomic-terminal")
+    occurrence = db.create_or_get_briefing_occurrence(
+        run_id=run_id,
+        occurrence_key=f"user:1:job:{job_id}:run:{run_id}:atomic",
+        contract_json='{"version":1}',
+    )
+    db.update_briefing_occurrence(
+        int(occurrence.id),
+        stages={"deliver:email": {"status": "running", "outcome": "sending", "attempt_count": 1}},
+    )
+    attempt = db.claim_briefing_attempt(
+        occurrence_id=int(occurrence.id),
+        artifact_version=1,
+        adapter="email",
+    )
+    db.transition_briefing_attempt(
+        int(attempt.id),
+        expected_states={"intent"},
+        state="sending",
+    )
+    original_execute = db.backend.execute
+
+    def fail_occurrence_write(query, params=(), **kwargs):
+        normalized = " ".join(str(query).split())
+        if normalized.startswith("UPDATE watchlist_briefing_occurrences SET stages_json"):
+            raise RuntimeError("simulated occurrence write crash")
+        return original_execute(query, params, **kwargs)
+
+    monkeypatch.setattr(db.backend, "execute", fail_occurrence_write)
+    with pytest.raises(RuntimeError, match="simulated occurrence write crash"):
+        db.finalize_briefing_attempt(
+            int(attempt.id),
+            expected_states={"sending"},
+            state="successful",
+            stage_updates={
+                "deliver:email": {
+                    "status": "ready",
+                    "outcome": "successful",
+                    "attempt_count": 1,
+                }
+            },
+            delivery_status="delivered",
+        )
+    monkeypatch.setattr(db.backend, "execute", original_execute)
+
+    assert db.get_briefing_attempt(int(attempt.id)).state == "sending"
+    persisted = json.loads(db.get_briefing_occurrence(int(occurrence.id)).stages_json)
+    assert persisted["deliver:email"]["outcome"] == "sending"
+
+
+@pytest.mark.parametrize("terminal_state", ["successful", "failed", "cancelled"])
+def test_superseded_audio_callback_is_atomic_noop(tmp_path, terminal_state):
+    db = _make_db(tmp_path)
+    job_id, run_id = _create_job_run(db, label=f"stale-{terminal_state}")
+    occurrence = db.create_or_get_briefing_occurrence(
+        run_id=run_id,
+        occurrence_key=f"user:1:job:{job_id}:run:{run_id}:stale:{terminal_state}",
+        contract_json='{"version":1}',
+    )
+    first = db.claim_briefing_attempt(
+        occurrence_id=int(occurrence.id),
+        artifact_version=1,
+        adapter="audio",
+    )
+    db.transition_briefing_attempt(
+        int(first.id),
+        expected_states={"intent"},
+        state="failed",
+    )
+    retry = db.claim_briefing_attempt(
+        occurrence_id=int(occurrence.id),
+        artifact_version=1,
+        adapter="audio",
+        allow_retry=True,
+    )
+    db.update_briefing_occurrence(
+        int(occurrence.id),
+        stages={"generate_audio": {"status": "queued", "attempt_count": int(retry.attempt)}},
+        artifact_status="running",
+    )
+
+    result = db.finalize_briefing_attempt(
+        int(first.id),
+        expected_states={"intent", "queued", "sending"},
+        state=terminal_state,
+        stage_updates={
+            "generate_audio": {
+                "status": "ready" if terminal_state == "successful" else terminal_state,
+                "attempt_count": int(first.attempt),
+            }
+        },
+        artifact_status="ready" if terminal_state == "successful" else terminal_state,
+    )
+
+    assert result is None
+    persisted = db.get_briefing_occurrence(int(occurrence.id))
+    assert persisted.artifact_status == "running"
+    assert json.loads(persisted.stages_json)["generate_audio"]["attempt_count"] == retry.attempt
 
 
 def test_concurrent_attempt_claim_returns_one_intent(tmp_path):

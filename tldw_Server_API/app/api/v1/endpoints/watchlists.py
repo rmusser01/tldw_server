@@ -90,6 +90,7 @@ from tldw_Server_API.app.core.Watchlists.briefing_contract import (
 )
 from tldw_Server_API.app.core.Watchlists.briefing_delivery import (
     external_delivery_adapters,
+    reconcile_successful_delivery_attempt,
     schedule_briefing_delivery,
 )
 from tldw_Server_API.app.core.Watchlists.briefing_fulfillment import retry_briefing_stage
@@ -5403,6 +5404,10 @@ async def retry_watchlist_briefing_stage(
         db=db,
         collections_db=collections_db,
     )
+    tenant_id = await _resolve_watchlist_workflow_tenant_id(
+        current_user=current_user,
+        resolved_user_id=resolved_user_id,
+    )
     raw_stages = _parse_json_object(occurrence.stages_json)
     current_stage = raw_stages.get(payload.stage)
     if not isinstance(current_stage, dict):
@@ -5415,6 +5420,12 @@ async def retry_watchlist_briefing_stage(
         contract = _parse_json_object(occurrence.contract_json)
         if adapter not in external_delivery_adapters(contract):
             raise HTTPException(status_code=422, detail="delivery_adapter_not_configured")
+        if reconcile_successful_delivery_attempt(
+            watchlists_db=target_db,
+            occurrence=occurrence,
+            adapter=adapter,
+        ) is not None:
+            raise HTTPException(status_code=409, detail="stage_already_ready")
         outcome = current_stage.get("outcome")
         if outcome == "successful":
             raise HTTPException(status_code=409, detail="stage_already_ready")
@@ -5447,6 +5458,7 @@ async def retry_watchlist_briefing_stage(
                 watchlists_db=target_db,
                 collections_db=target_collections_db,
                 regenerate=payload.regenerate,
+                tenant_id=tenant_id,
             )
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -5482,6 +5494,10 @@ async def retry_run_audio(
         current_user=current_user,
         current_db=db,
         target_user_id=target_user_id,
+    )
+    tenant_id = await _resolve_watchlist_workflow_tenant_id(
+        current_user=current_user,
+        resolved_user_id=resolved_user_id,
     )
     target_collections_db = None
     if _looks_like_collections_db(collections_db):
@@ -5525,6 +5541,7 @@ async def retry_run_audio(
                 stage=retry_stage,
                 watchlists_db=target_db,
                 collections_db=target_collections_db,
+                tenant_id=tenant_id,
             )
             return RunStageRetryResponse(
                 run_id=run_id,
@@ -5567,6 +5584,7 @@ async def retry_run_audio(
         run_id=run_id,
         output_prefs=output_prefs,
         db=target_db,
+        tenant_id=tenant_id,
     )
     if not audio_result.submitted:
         raise HTTPException(status_code=409, detail="audio_retry_not_queued")

@@ -328,3 +328,18 @@ def test_watchlists_postgres_briefing_occurrence_round_trip(request: pytest.Fixt
     )
     assert queued is not None and queued.scheduler_task_id == "pg-task"
     assert stale is None
+    finalized = owner.finalize_briefing_attempt(
+        attempt_ids[0],
+        expected_states={"queued"},
+        state="successful",
+        stage_updates={
+            "deliver:email": {
+                "status": "ready",
+                "outcome": "successful",
+                "attempt_count": 1,
+            }
+        },
+        delivery_status="delivered",
+    )
+    assert finalized is not None and finalized.delivery_status == "delivered"
+    assert owner.get_briefing_attempt(attempt_ids[0]).state == "successful"

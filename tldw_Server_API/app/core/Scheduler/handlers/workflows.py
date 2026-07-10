@@ -162,7 +162,8 @@ async def workflow_run(payload: dict[str, Any]) -> dict[str, Any]:
                 break
             await asyncio.sleep(0.5)
         terminal_status = status or "unknown"
-        if metadata.get("source") == "watchlist_audio_briefing":
+        watchlist_audio = metadata.get("source") == "watchlist_audio_briefing"
+        if watchlist_audio:
             record_audio_workflow_terminal(
                 user_id=int(user_id),
                 tenant_id=tenant_id,
@@ -172,8 +173,12 @@ async def workflow_run(payload: dict[str, Any]) -> dict[str, Any]:
                 workflow_db=db,
                 workflow_run=db.get_run(run_id),
             )
-        if terminal_status != "succeeded":
+        if watchlist_audio and terminal_status != "succeeded":
             raise RuntimeError(f"workflow_run_failed:{terminal_status}")
-        return {"run_id": run_id, "status": terminal_status, "succeeded": True}
+        return {
+            "run_id": run_id,
+            "status": terminal_status,
+            "succeeded": terminal_status == "succeeded",
+        }
 
     return {"run_id": run_id, "status": "queued"}

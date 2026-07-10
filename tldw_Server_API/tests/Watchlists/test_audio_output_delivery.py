@@ -473,7 +473,7 @@ def test_audio_terminal_success_without_matching_final_artifact_is_failed():
     assert json.loads(occurrence.stages_json)["generate_audio"]["status"] == "failed"
 
 
-def test_superseded_audio_attempt_cannot_overwrite_occurrence_state():
+def test_superseded_audio_attempt_callback_is_noop():
     from tldw_Server_API.app.core.Watchlists.briefing_delivery import (
         BriefingArtifactsNotReadyError,
         record_audio_workflow_terminal,
@@ -507,24 +507,23 @@ def test_superseded_audio_attempt_cannot_overwrite_occurrence_state():
         metadata_json=json.dumps({}),
     )
 
-    with pytest.raises(BriefingArtifactsNotReadyError, match="audio_workflow_attempt_superseded"):
-        record_audio_workflow_terminal(
-            user_id=17,
-            tenant_id="default",
-            workflow_run_id="workflow-old",
-            status="failed",
-            metadata={
-                "source": "watchlist_audio_briefing",
-                "watchlist_job_id": 11,
-                "watchlist_run_id": 22,
-                "briefing_occurrence_id": 31,
-                "briefing_attempt_id": 7,
-                "audio_request_id": "wla_match",
-            },
-            workflow_db=workflow_db,
-            workflow_run=workflow_run,
-            watchlists_db=watchlists_db,
-        )
+    record_audio_workflow_terminal(
+        user_id=17,
+        tenant_id="default",
+        workflow_run_id="workflow-old",
+        status="failed",
+        metadata={
+            "source": "watchlist_audio_briefing",
+            "watchlist_job_id": 11,
+            "watchlist_run_id": 22,
+            "briefing_occurrence_id": 31,
+            "briefing_attempt_id": 7,
+            "audio_request_id": "wla_match",
+        },
+        workflow_db=workflow_db,
+        workflow_run=workflow_run,
+        watchlists_db=watchlists_db,
+    )
 
     assert occurrence.artifact_status == "running"
     watchlists_db.transition_briefing_attempt.assert_not_called()

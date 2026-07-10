@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import FastAPI
@@ -195,6 +195,28 @@ def test_retry_rejects_reports_as_external_delivery_adapter(projection_case):
     assert response.status_code == 422
 
 
+def test_briefing_stage_retry_passes_resolved_target_tenant(projection_case, monkeypatch):
+    client, seeded, _watchlists_db, _collections_db = projection_case
+    retry = AsyncMock()
+    tenant = AsyncMock(return_value="tenant-target")
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.endpoints.watchlists.retry_briefing_stage",
+        retry,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.endpoints.watchlists._resolve_watchlist_workflow_tenant_id",
+        tenant,
+    )
+
+    response = client.post(
+        f"/api/v1/watchlists/runs/{seeded.run_id}/briefing/retry",
+        json={"stage": "generate_audio"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert retry.await_args.kwargs["tenant_id"] == "tenant-target"
+
+
 def test_unknown_delivery_retry_requires_duplicate_risk_confirmation(projection_case, monkeypatch):
     client, seeded, watchlists_db, _collections_db = projection_case
     occurrence = watchlists_db.get_briefing_occurrence(seeded.occurrence_id)
@@ -268,6 +290,104 @@ def test_sending_delivery_retry_requires_duplicate_risk_confirmation(projection_
     assert submit.await_count == 1
 
 
+def test_successful_attempt_ledger_blocks_retry_when_stage_is_stale_sending(projection_case, monkeypatch):
+    client, seeded, watchlists_db, _collections_db = projection_case
+    occurrence = watchlists_db.get_briefing_occurrence(seeded.occurrence_id)
+    stages = json.loads(occurrence.stages_json)
+    stages["persist_text"]["output_version"] = 1
+    stages["deliver:email"] = {
+        "status": "running",
+        "outcome": "sending",
+        "attempt_count": 1,
+    }
+    watchlists_db.update_briefing_occurrence(
+        seeded.occurrence_id,
+        stages=stages,
+        delivery_status="delivering",
+    )
+    attempt = watchlists_db.claim_briefing_attempt(
+        occurrence_id=seeded.occurrence_id,
+        artifact_version=1,
+        adapter="email",
+    )
+    watchlists_db.transition_briefing_attempt(
+        int(attempt.id),
+        expected_states={"intent"},
+        state="successful",
+        code="delivery_acknowledged",
+    )
+    submit = AsyncMock(return_value="must-not-submit")
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.endpoints.watchlists.schedule_briefing_delivery",
+        submit,
+    )
+
+    response = client.post(
+        f"/api/v1/watchlists/runs/{seeded.run_id}/briefing/retry",
+        json={"stage": "deliver:email", "confirm_unknown_delivery_retry": True},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "stage_already_ready"
+    submit.assert_not_awaited()
+    latest = watchlists_db.get_latest_briefing_attempt(
+        occurrence_id=seeded.occurrence_id,
+        artifact_version=1,
+        adapter="email",
+    )
+    assert latest is not None and latest.id == attempt.id and latest.attempt == 1
+
+
+@pytest.mark.asyncio
+async def test_delivery_scheduler_reconciles_successful_ledger_without_resend(projection_case):
+    from tldw_Server_API.app.core.Watchlists.briefing_delivery import (
+        BriefingArtifactsNotReadyError,
+        schedule_briefing_delivery,
+    )
+
+    _client, seeded, watchlists_db, _collections_db = projection_case
+    occurrence = watchlists_db.get_briefing_occurrence(seeded.occurrence_id)
+    stages = json.loads(occurrence.stages_json)
+    stages["persist_text"]["output_version"] = 1
+    stages["deliver:email"] = {
+        "status": "running",
+        "outcome": "sending",
+        "attempt_count": 1,
+    }
+    occurrence = watchlists_db.update_briefing_occurrence(
+        seeded.occurrence_id,
+        stages=stages,
+        delivery_status="delivering",
+    )
+    attempt = watchlists_db.claim_briefing_attempt(
+        occurrence_id=seeded.occurrence_id,
+        artifact_version=1,
+        adapter="email",
+    )
+    watchlists_db.transition_briefing_attempt(
+        int(attempt.id),
+        expected_states={"intent"},
+        state="successful",
+        code="delivery_acknowledged",
+    )
+    scheduler = MagicMock()
+    scheduler.submit = AsyncMock(return_value="must-not-submit")
+
+    with pytest.raises(BriefingArtifactsNotReadyError, match="delivery_already_successful"):
+        await schedule_briefing_delivery(
+            occurrence=occurrence,
+            audio_task_id=None,
+            scheduler=scheduler,
+            watchlists_db=watchlists_db,
+            requested_adapters={"email"},
+            confirmed_unknown_adapters={"email"},
+        )
+
+    scheduler.submit.assert_not_awaited()
+    persisted = json.loads(watchlists_db.get_briefing_occurrence(seeded.occurrence_id).stages_json)
+    assert persisted["deliver:email"]["outcome"] == "successful"
+
+
 def test_completed_audio_does_not_override_failed_text(projection_case):
     from tldw_Server_API.app.core.Watchlists.briefing_projection import build_briefing_projection
 
@@ -297,12 +417,14 @@ def test_completed_audio_does_not_override_failed_text(projection_case):
     assert projection["stages"]["persist_audio"]["status"] == "ready"
 
 
-def test_missing_report_file_is_removed_and_persisted_failed(projection_case):
+def test_missing_report_file_projects_failed_without_mutating_occurrence(projection_case):
     from tldw_Server_API.app.core.Watchlists.briefing_projection import build_briefing_projection
 
     _client, seeded, watchlists_db, collections_db = projection_case
     _resolve_output_path_for_user(USER_ID, "signal-check.md").unlink()
     occurrence = watchlists_db.get_briefing_occurrence(seeded.occurrence_id)
+    stages_before = occurrence.stages_json
+    status_before = occurrence.artifact_status
 
     projection = build_briefing_projection(
         occurrence=occurrence,
@@ -310,14 +432,15 @@ def test_missing_report_file_is_removed_and_persisted_failed(projection_case):
         collections_db=collections_db,
     )
 
-    persisted = watchlists_db.get_briefing_occurrence(seeded.occurrence_id)
     assert projection["output"] is None
     assert projection["recovery"]["can_open_report"] is False
     assert projection["artifact_status"] == "failed"
-    assert json.loads(persisted.stages_json)["persist_text"]["code"] == "briefing_text_artifact_missing"
+    persisted_after = watchlists_db.get_briefing_occurrence(seeded.occurrence_id)
+    assert persisted_after.stages_json == stages_before
+    assert persisted_after.artifact_status == status_before
 
 
-def test_cross_run_report_is_removed_and_persisted_failed(projection_case):
+def test_cross_run_report_projects_failed_without_mutating_occurrence(projection_case):
     from tldw_Server_API.app.core.Watchlists.briefing_projection import build_briefing_projection
 
     _client, seeded, watchlists_db, collections_db = projection_case
@@ -335,6 +458,8 @@ def test_cross_run_report_is_removed_and_persisted_failed(projection_case):
     wrong_path.write_text("wrong", encoding="utf-8")
     watchlists_db.update_briefing_occurrence(seeded.occurrence_id, output_id=int(wrong.id))
     occurrence = watchlists_db.get_briefing_occurrence(seeded.occurrence_id)
+    stages_before = occurrence.stages_json
+    status_before = occurrence.artifact_status
 
     projection = build_briefing_projection(
         occurrence=occurrence,
@@ -344,6 +469,6 @@ def test_cross_run_report_is_removed_and_persisted_failed(projection_case):
 
     assert projection["output"] is None
     assert projection["artifact_status"] == "failed"
-    assert json.loads(watchlists_db.get_briefing_occurrence(seeded.occurrence_id).stages_json)[
-        "persist_text"
-    ]["code"] == "briefing_output_ownership_mismatch"
+    persisted_after = watchlists_db.get_briefing_occurrence(seeded.occurrence_id)
+    assert persisted_after.stages_json == stages_before
+    assert persisted_after.artifact_status == status_before

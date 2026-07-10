@@ -183,16 +183,6 @@ def build_briefing_projection(
             "retryable": True,
         }
         stages["persist_text"] = failed_stage
-        persisted_stages = dict(raw_stages)
-        persisted_stages["persist_text"] = {
-            **(raw_stages.get("persist_text") if isinstance(raw_stages.get("persist_text"), Mapping) else {}),
-            **failed_stage,
-        }
-        watchlists_db.update_briefing_occurrence(
-            int(occurrence.id),
-            stages=persisted_stages,
-            artifact_status="failed",
-        )
     artifact_status = _aggregate_artifact_status(
         stages,
         audio_enabled=bool(contract.get("audio", {}).get("enabled")),

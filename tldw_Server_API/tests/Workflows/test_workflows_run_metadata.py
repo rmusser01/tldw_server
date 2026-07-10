@@ -270,3 +270,37 @@ async def test_watchlist_workflow_failure_is_recorded_and_fails_scheduler_task(m
 
     assert recorded[0]["status"] == "failed"
     assert recorded[0]["workflow_db"].get_run(recorded[0]["workflow_run_id"]).status == "failed"
+
+
+@pytest.mark.asyncio
+async def test_generic_sync_workflow_failure_returns_structured_result(monkeypatch):
+    class FakeWorkflowsDB:
+        def create_run(self, **_kwargs: Any) -> None:
+            return None
+
+        def get_run(self, run_id: str) -> Any:
+            return SimpleNamespace(run_id=run_id, status="failed")
+
+    class FakeWorkflowEngine:
+        def __init__(self, *, db: Any) -> None:
+            self.db = db
+
+        def submit(self, _run_id: str, mode: Any) -> None:
+            assert mode == workflow_handler_mod.RunMode.SYNC
+
+    monkeypatch.setattr(workflow_handler_mod, "_get_wf_db", lambda: FakeWorkflowsDB())
+    monkeypatch.setattr(workflow_handler_mod, "WorkflowEngine", FakeWorkflowEngine)
+    monkeypatch.setattr(workflow_handler_mod, "record_workflow_run", AsyncMock())
+
+    result = await workflow_handler_mod.workflow_run(
+        {
+            "user_id": "42",
+            "definition_snapshot": {"name": "generic_sync", "steps": []},
+            "inputs": {},
+            "metadata": {"source": "generic_scheduler_test"},
+            "mode": "sync",
+        }
+    )
+
+    assert result["status"] == "failed"
+    assert result["succeeded"] is False

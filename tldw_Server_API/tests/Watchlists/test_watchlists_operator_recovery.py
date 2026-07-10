@@ -112,6 +112,10 @@ async def test_retry_run_audio_reuses_job_audio_config_without_rerunning_ingesti
         "tldw_Server_API.app.api.v1.endpoints.watchlists._resolve_target_watchlists_context",
         AsyncMock(return_value=(945, db)),
     )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.endpoints.watchlists._resolve_watchlist_workflow_tenant_id",
+        AsyncMock(return_value="target-tenant"),
+    )
 
     user = SimpleNamespace(id=945, role="admin")
     result = await retry_run_audio(run_id=10, target_user_id=None, current_user=user, db=db)
@@ -121,6 +125,7 @@ async def test_retry_run_audio_reuses_job_audio_config_without_rerunning_ingesti
     assert result.retried is True
     assert result.task_id == "task-retry-10"
     trigger.assert_awaited_once()
+    assert trigger.await_args.kwargs["tenant_id"] == "target-tenant"
     rerun_job.assert_not_called()
     db.update_run.assert_called_once()
     persisted_stats = json.loads(db.update_run.call_args.kwargs["stats_json"])

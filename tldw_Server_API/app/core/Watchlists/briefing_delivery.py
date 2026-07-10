@@ -125,6 +125,47 @@ def _transition_attempt(
     )
 
 
+def reconcile_successful_delivery_attempt(
+    *,
+    watchlists_db: Any,
+    occurrence: Any,
+    adapter: str,
+) -> Any | None:
+    """Project an authoritative successful ledger row and return the occurrence."""
+    get_latest = getattr(watchlists_db, "get_latest_briefing_attempt", None)
+    if not callable(get_latest):
+        return None
+    stages = _read_stages(occurrence)
+    attempt = get_latest(
+        occurrence_id=int(occurrence.id),
+        artifact_version=_artifact_version(stages),
+        adapter=adapter,
+    )
+    if attempt is None or str(attempt.state) != "successful":
+        return None
+    stage_name = f"deliver:{adapter}"
+    stage = {
+        **stages.get(stage_name, {}),
+        "status": "ready",
+        "code": getattr(attempt, "code", None) or "delivery_acknowledged",
+        "retryable": False,
+        "finished_at": getattr(attempt, "updated_at", None) or _utcnow_iso(),
+        "outcome": "successful",
+        "attempt_count": int(attempt.attempt),
+    }
+    finalize = getattr(watchlists_db, "finalize_briefing_attempt", None)
+    if callable(finalize):
+        return finalize(
+            int(attempt.id),
+            expected_states={"successful"},
+            state="successful",
+            stage_updates={stage_name: stage},
+            code=stage["code"],
+        )
+    stages[stage_name] = stage
+    return watchlists_db.update_briefing_occurrence(int(occurrence.id), stages=stages)
+
+
 def _aggregate_status(adapters: Mapping[str, Mapping[str, Any]], stages: Mapping[str, Mapping[str, Any]]) -> str:
     if not adapters:
         return "not_configured"
@@ -140,6 +181,28 @@ def _aggregate_status(adapters: Mapping[str, Mapping[str, Any]], stages: Mapping
     if any(outcome == "failed" for outcome in outcomes):
         return "failed"
     return "waiting_for_artifacts"
+
+
+def _aggregate_stage(delivery_status: str) -> dict[str, Any]:
+    """Build the persisted aggregate delivery stage."""
+    return {
+        "status": {
+            "not_configured": "skipped",
+            "waiting_for_artifacts": "not_started",
+            "delivering": "running",
+            "delivered": "ready",
+            "partially_delivered": "failed",
+            "failed": "failed",
+            "unknown": "failed",
+        }[delivery_status],
+        "code": None if delivery_status == "delivered" else delivery_status,
+        "retryable": delivery_status in {"failed", "partially_delivered"},
+        "finished_at": (
+            _utcnow_iso()
+            if delivery_status in {"not_configured", "delivered", "partially_delivered", "failed", "unknown"}
+            else None
+        ),
+    }
 
 
 def _save_stages(
@@ -164,25 +227,7 @@ def _save_stages(
         external_delivery_adapters(_json_object(occurrence.contract_json)),
         stages,
     )
-    aggregate_stage_status = {
-        "not_configured": "skipped",
-        "waiting_for_artifacts": "not_started",
-        "delivering": "running",
-        "delivered": "ready",
-        "partially_delivered": "failed",
-        "failed": "failed",
-        "unknown": "failed",
-    }[delivery_status]
-    stages["deliver"] = {
-        "status": aggregate_stage_status,
-        "code": None if delivery_status == "delivered" else delivery_status,
-        "retryable": delivery_status in {"failed", "partially_delivered"},
-        "finished_at": (
-            _utcnow_iso()
-            if delivery_status in {"not_configured", "delivered", "partially_delivered", "failed", "unknown"}
-            else None
-        ),
-    }
+    stages["deliver"] = _aggregate_stage(delivery_status)
     if callable(merge):
         occurrence = merge(
             int(occurrence.id),
@@ -361,6 +406,18 @@ async def schedule_briefing_delivery(
     configured = external_delivery_adapters(_json_object(occurrence.contract_json))
     adapters_to_claim = requested or sorted(configured)
     confirmed = set(confirmed_unknown_adapters or set())
+    for adapter in requested:
+        reconciled = (
+            reconcile_successful_delivery_attempt(
+                watchlists_db=watchlists_db,
+                occurrence=occurrence,
+                adapter=adapter,
+            )
+            if watchlists_db is not None
+            else None
+        )
+        if reconciled is not None:
+            raise BriefingArtifactsNotReadyError("delivery_already_successful")
     if watchlists_db is not None:
         get_latest = getattr(watchlists_db, "get_latest_briefing_attempt", None)
         transition_attempt = getattr(watchlists_db, "transition_briefing_attempt", None)
@@ -372,12 +429,34 @@ async def schedule_briefing_delivery(
                     adapter=adapter,
                 )
                 if previous is not None and str(previous.state) == "sending":
-                    transition_attempt(
-                        int(previous.id),
-                        expected_states={"sending"},
-                        state="unknown",
-                        code="delivery_outcome_unknown",
-                    )
+                    stage_name = f"deliver:{adapter}"
+                    unknown_stage = {
+                        **stages.get(stage_name, {}),
+                        "status": "failed",
+                        "code": "delivery_outcome_unknown",
+                        "retryable": False,
+                        "finished_at": _utcnow_iso(),
+                        "outcome": "unknown",
+                        "attempt_count": int(previous.attempt),
+                    }
+                    finalize = getattr(watchlists_db, "finalize_briefing_attempt", None)
+                    if callable(finalize):
+                        occurrence = finalize(
+                            int(previous.id),
+                            expected_states={"sending"},
+                            state="unknown",
+                            stage_updates={stage_name: unknown_stage},
+                            delivery_status="unknown",
+                            code="delivery_outcome_unknown",
+                        ) or watchlists_db.get_briefing_occurrence(int(occurrence.id))
+                        stages = _read_stages(occurrence)
+                    else:
+                        transition_attempt(
+                            int(previous.id),
+                            expected_states={"sending"},
+                            state="unknown",
+                            code="delivery_outcome_unknown",
+                        )
     attempts = {
         adapter: _claim_attempt(
             watchlists_db,
@@ -468,7 +547,7 @@ def _persist_audio_terminal_failure(
     state: str,
     code: str,
     workflow_run_id: str,
-) -> None:
+) -> bool:
     target_stage = (
         "generate_audio"
         if code == "audio_final_artifact_missing"
@@ -486,6 +565,17 @@ def _persist_audio_terminal_failure(
         "workflow_run_id": workflow_run_id,
         "attempt_count": int(getattr(attempt, "attempt", 1)),
     }
+    finalize = getattr(watchlists_db, "finalize_briefing_attempt", None)
+    if callable(finalize):
+        return finalize(
+            int(attempt.id),
+            expected_states={"intent", "queued", "sending"},
+            state=state,
+            stage_updates={target_stage: stages[target_stage]},
+            artifact_status="cancelled" if state == "cancelled" else "failed",
+            workflow_run_id=workflow_run_id,
+            code=code,
+        ) is not None
     transitioned = watchlists_db.transition_briefing_attempt(
         int(attempt.id),
         expected_states={"intent", "queued", "sending"},
@@ -493,13 +583,14 @@ def _persist_audio_terminal_failure(
         workflow_run_id=workflow_run_id,
         code=code,
     )
-    if transitioned is None and str(watchlists_db.get_briefing_attempt(int(attempt.id)).state) != state:
-        raise BriefingArtifactsNotReadyError("audio_workflow_attempt_stale")
+    if transitioned is None:
+        return False
     watchlists_db.update_briefing_occurrence(
         int(occurrence.id),
         stages=stages,
         artifact_status="cancelled" if state == "cancelled" else "failed",
     )
+    return True
 
 
 def record_audio_workflow_terminal(
@@ -563,7 +654,7 @@ def record_audio_workflow_terminal(
     ):
         raise BriefingArtifactsNotReadyError("audio_workflow_identity_mismatch")
     if latest_attempt is None or int(latest_attempt.id) != int(attempt.id):
-        raise BriefingArtifactsNotReadyError("audio_workflow_attempt_superseded")
+        return
     stages = _read_stages(occurrence)
     terminal_status = str(status).lower()
     if terminal_status in {"failed", "cancelled", "canceled"}:
@@ -608,7 +699,7 @@ def record_audio_workflow_terminal(
         )
         break
     if projection.get("status") != "completed" or not final_artifact_id or not matching_final:
-        _persist_audio_terminal_failure(
+        applied = _persist_audio_terminal_failure(
             watchlists_db=watchlists_db,
             occurrence=occurrence,
             attempt=attempt,
@@ -617,7 +708,9 @@ def record_audio_workflow_terminal(
             code="audio_final_artifact_missing",
             workflow_run_id=workflow_run_id,
         )
-        raise BriefingArtifactsNotReadyError("audio_final_artifact_missing")
+        if applied:
+            raise BriefingArtifactsNotReadyError("audio_final_artifact_missing")
+        return
 
     now = _utcnow_iso()
     for name in ("compose_audio_script", "persist_audio_script", "generate_audio", "persist_audio"):
@@ -632,6 +725,19 @@ def record_audio_workflow_terminal(
             "artifact_id": str(final_artifact_id) if name == "persist_audio" else stages.get(name, {}).get("artifact_id"),
             "attempt_count": int(attempt.attempt),
         }
+    text_ready = stages.get("persist_text", {}).get("status") == "ready"
+    finalize = getattr(watchlists_db, "finalize_briefing_attempt", None)
+    if callable(finalize):
+        finalize(
+            int(attempt.id),
+            expected_states={"intent", "queued", "sending"},
+            state="successful",
+            stage_updates={name: stages[name] for name in ("compose_audio_script", "persist_audio_script", "generate_audio", "persist_audio")},
+            artifact_status="ready" if text_ready else "failed",
+            workflow_run_id=workflow_run_id,
+            artifact_id=str(final_artifact_id),
+        )
+        return
     transitioned = watchlists_db.transition_briefing_attempt(
         int(attempt.id),
         expected_states={"intent", "queued", "sending"},
@@ -639,14 +745,12 @@ def record_audio_workflow_terminal(
         workflow_run_id=workflow_run_id,
         artifact_id=str(final_artifact_id),
     )
-    if transitioned is None and str(watchlists_db.get_briefing_attempt(int(attempt.id)).state) != "successful":
-        raise BriefingArtifactsNotReadyError("audio_workflow_attempt_stale")
-    text_ready = stages.get("persist_text", {}).get("status") == "ready"
-    watchlists_db.update_briefing_occurrence(
-        int(occurrence.id),
-        stages=stages,
-        artifact_status="ready" if text_ready else "failed",
-    )
+    if transitioned is not None:
+        watchlists_db.update_briefing_occurrence(
+            int(occurrence.id),
+            stages=stages,
+            artifact_status="ready" if text_ready else "failed",
+        )
 
 
 def assert_audio_dependency_ready(
@@ -711,6 +815,15 @@ async def deliver_briefing_occurrence(
     confirmed = set(confirmed_unknown_adapters or set())
 
     for adapter, config in adapters.items():
+        reconciled = reconcile_successful_delivery_attempt(
+            watchlists_db=watchlists_db,
+            occurrence=occurrence,
+            adapter=adapter,
+        )
+        if reconciled is not None:
+            occurrence = reconciled
+            stages = _read_stages(occurrence)
+            continue
         previous_outcome = _adapter_outcome(stages, adapter)
         if previous_outcome == "successful":
             continue
@@ -724,24 +837,30 @@ async def deliver_briefing_occurrence(
                 "finished_at": _utcnow_iso(),
                 "outcome": "unknown",
             }
-            occurrence = _save_stages(
-                watchlists_db, occurrence, stages, changed_stage=f"deliver:{adapter}"
-            )
             get_latest = getattr(watchlists_db, "get_latest_briefing_attempt", None)
+            reconciled_unknown = False
             if callable(get_latest):
                 sending_attempt = get_latest(
                     occurrence_id=int(occurrence.id),
                     artifact_version=_artifact_version(stages),
                     adapter=adapter,
                 )
-                if sending_attempt is not None:
-                    _transition_attempt(
-                        watchlists_db,
-                        sending_attempt,
+                finalize = getattr(watchlists_db, "finalize_briefing_attempt", None)
+                if sending_attempt is not None and callable(finalize):
+                    occurrence = finalize(
+                        int(sending_attempt.id),
                         expected_states={"sending"},
                         state="unknown",
+                        stage_updates={f"deliver:{adapter}": stages[f"deliver:{adapter}"]},
+                        delivery_status="unknown",
                         code="delivery_outcome_unknown",
-                    )
+                    ) or watchlists_db.get_briefing_occurrence(int(occurrence.id))
+                    stages = _read_stages(occurrence)
+                    reconciled_unknown = True
+            if not reconciled_unknown:
+                occurrence = _save_stages(
+                    watchlists_db, occurrence, stages, changed_stage=f"deliver:{adapter}"
+                )
             continue
         if previous_outcome == "unknown" and adapter not in confirmed:
             continue
@@ -799,14 +918,7 @@ async def deliver_briefing_occurrence(
             outcome, code, details = _result_outcome(adapter, provider_result)
         except asyncio.CancelledError:
             outcome, code, details = "unknown", "delivery_outcome_unknown", {"error_type": "CancelledError"}
-            _transition_attempt(
-                watchlists_db,
-                attempt,
-                expected_states={"sending"},
-                state="unknown",
-                code=code,
-            )
-            stages[f"deliver:{adapter}"] = {
+            terminal_stage = {
                 "status": "failed",
                 "code": code,
                 "retryable": False,
@@ -815,25 +927,39 @@ async def deliver_briefing_occurrence(
                 "outcome": outcome,
                 "attempt_count": attempt_count,
             }
-            _save_stages(
-                watchlists_db, occurrence, stages, changed_stage=f"deliver:{adapter}"
-            )
+            stages[f"deliver:{adapter}"] = terminal_stage
+            delivery_status = _aggregate_status(adapters, stages)
+            finalize = getattr(watchlists_db, "finalize_briefing_attempt", None)
+            if attempt is not None and callable(finalize):
+                finalize(
+                    int(attempt.id),
+                    expected_states={"sending"},
+                    state="unknown",
+                    stage_updates={
+                        f"deliver:{adapter}": terminal_stage,
+                        "deliver": _aggregate_stage(delivery_status),
+                    },
+                    delivery_status=delivery_status,
+                    code=code,
+                )
+            else:
+                _transition_attempt(
+                    watchlists_db,
+                    attempt,
+                    expected_states={"sending"},
+                    state="unknown",
+                    code=code,
+                )
+                _save_stages(
+                    watchlists_db, occurrence, stages, changed_stage=f"deliver:{adapter}"
+                )
             raise
         except (asyncio.TimeoutError, TimeoutError):
             outcome, code, details = "unknown", "delivery_outcome_unknown", {"error_type": "TimeoutError"}
         except Exception as exc:  # noqa: BLE001 - post-dispatch exceptions are ambiguous
             outcome, code, details = "unknown", "delivery_outcome_unknown", {"error_type": type(exc).__name__}
 
-        _transition_attempt(
-            watchlists_db,
-            attempt,
-            expected_states={"sending", "unknown"},
-            state=outcome,
-            code=code,
-            artifact_id=str(details.get("document_id")) if details.get("document_id") is not None else None,
-        )
-
-        stages[f"deliver:{adapter}"] = {
+        terminal_stage = {
             "status": "ready" if outcome == "successful" else "failed",
             "code": code,
             "retryable": outcome in {"failed", "partial"},
@@ -842,9 +968,35 @@ async def deliver_briefing_occurrence(
             "outcome": outcome,
             "attempt_count": attempt_count,
         }
-        occurrence = _save_stages(
-            watchlists_db, occurrence, stages, changed_stage=f"deliver:{adapter}"
-        )
+        stages[f"deliver:{adapter}"] = terminal_stage
+        delivery_status = _aggregate_status(adapters, stages)
+        finalize = getattr(watchlists_db, "finalize_briefing_attempt", None)
+        if attempt is not None and callable(finalize):
+            occurrence = finalize(
+                int(attempt.id),
+                expected_states={"sending"},
+                state=outcome,
+                stage_updates={
+                    f"deliver:{adapter}": terminal_stage,
+                    "deliver": _aggregate_stage(delivery_status),
+                },
+                delivery_status=delivery_status,
+                code=code,
+                artifact_id=str(details.get("document_id")) if details.get("document_id") is not None else None,
+            ) or watchlists_db.get_briefing_occurrence(int(occurrence.id))
+            stages = _read_stages(occurrence)
+        else:
+            _transition_attempt(
+                watchlists_db,
+                attempt,
+                expected_states={"sending"},
+                state=outcome,
+                code=code,
+                artifact_id=str(details.get("document_id")) if details.get("document_id") is not None else None,
+            )
+            occurrence = _save_stages(
+                watchlists_db, occurrence, stages, changed_stage=f"deliver:{adapter}"
+            )
         output = _persist_output_result(
             collections_db,
             output,
@@ -898,6 +1050,7 @@ __all__ = [
     "deliver_briefing_for_user",
     "deliver_briefing_occurrence",
     "external_delivery_adapters",
+    "reconcile_successful_delivery_attempt",
     "assert_audio_dependency_ready",
     "record_audio_workflow_terminal",
     "schedule_briefing_delivery",
