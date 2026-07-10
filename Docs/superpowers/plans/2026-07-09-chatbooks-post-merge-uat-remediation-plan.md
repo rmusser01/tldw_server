@@ -461,7 +461,7 @@ git add apps/packages/ui/src/components/Option/Chatbooks/ChatbooksPlaygroundPage
 git commit -m "test: certify browser chatbook backup restore"
 ```
 
-Implementation evidence before the live gate: 9 browser-orchestrator tests,
+Implementation evidence before the live gate: 10 browser-orchestrator tests,
 12 configuration-precedence contract tests, 18 focused WebUI tests, and 7
 extension-launch tests pass. Frontend and extension TypeScript checks pass,
 and Playwright collects both WebUI phases and the packaged-extension phase.
@@ -472,8 +472,9 @@ API-scope preflight that rejects the wrong source or a dirty destination. The
 exact WebUI and extension round trips remain open until localhost execution is
 available; API-only or fixture-archive evidence does not satisfy Step 5.
 Self-review additionally found and fixed a subprocess-output decoder that
-selected a nested object instead of the complete pretty-printed fixture result;
-the regression is included in the 9 runner tests.
+selected a nested object instead of the complete pretty-printed fixture result.
+The browser archive inspector also rejects the fixture password hash and raw
+source-storage paths; both regressions are included in the 10 runner tests.
 The implementation and deterministic gate are recorded in `a0e177228a`; this
 is not the Step 5 browser certification, which remains open.
 
