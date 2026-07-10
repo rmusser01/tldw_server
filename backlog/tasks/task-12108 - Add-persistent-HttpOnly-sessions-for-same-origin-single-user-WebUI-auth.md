@@ -4,7 +4,7 @@ title: Add persistent HttpOnly sessions for same-origin single-user WebUI auth
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-07-10 22:34'
+updated_date: '2026-07-10 22:44'
 labels: []
 dependencies: []
 references:
@@ -14,6 +14,8 @@ references:
   - 'https://github.com/rmusser01/tldw_server/issues/2590'
 documentation:
   - Docs/superpowers/specs/2026-07-10-single-user-http-only-session-design.md
+  - >-
+    docs/superpowers/plans/2026-07-10-single-user-http-only-session-implementation-plan.md
 priority: high
 ---
 
@@ -33,6 +35,12 @@ Replace browser-visible runtime API-key provisioning in the runtime-enabled loop
 - [ ] #6 Regression coverage includes hard reload, close/reopen of the same browser profile, and representative same-origin WebSockets without API-key re-entry.
 - [ ] #7 Runtime bootstrap fails closed and does not fall back to exposing or persisting the API key in browser JavaScript.
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Implementation plan: docs/superpowers/plans/2026-07-10-single-user-http-only-session-implementation-plan.md. Stages: opaque session primitive; HTTP principal/CSRF/endpoints; shared WebSocket auth; non-secret Next runtime bootstrap; cookie-mode WebUI clients; lifecycle/deployment/security verification.
+<!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
 

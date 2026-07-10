@@ -4,7 +4,7 @@ title: Add explicit single-user API key device persistence and relaunch coverage
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-07-10 22:34'
+updated_date: '2026-07-10 22:44'
 labels: []
 dependencies:
   - TASK-12108
@@ -16,6 +16,8 @@ references:
 documentation:
   - >-
     Docs/superpowers/specs/2026-07-10-single-user-api-key-device-persistence-design.md
+  - >-
+    docs/superpowers/plans/2026-07-10-remote-api-key-device-persistence-implementation-plan.md
 priority: high
 ---
 
@@ -35,6 +37,12 @@ Add explicit device/session persistence for API keys only when users manually co
 - [ ] #6 Same-origin cookie-session/runtime credentials are never copied into browser-readable manual key storage.
 - [ ] #7 No browser password-manager behavior is required for API-key persistence.
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Implementation plan: docs/superpowers/plans/2026-07-10-remote-api-key-device-persistence-implementation-plan.md. Execute after TASK-12108. Stages: credential metadata/storage policy; migration/hydration/save/clear; candidate-origin transition; onboarding/settings UX; WebUI and extension lifecycle verification.
+<!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
 
