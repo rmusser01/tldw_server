@@ -561,7 +561,7 @@
     "message": "സമയക്രമം സജീവമാക്കുക"
   },
   "overview_pipelineSetup_test_ready": {
-    "message": "പരിശോധന ആരംഭിച്ചു. സമയക്രമം സജീവമാക്കുന്നതുവരെ ഈ കരട് പ്രവർത്തനരഹിതമായിരിക്കും."
+    "message": "പരിശോധന പൂർത്തിയായി. നിങ്ങളുടെ ബ്രീഫിംഗ് തയ്യാറാണ്. സമയക്രമം സജീവമാക്കുന്നതുവരെ ഈ കരട് പ്രവർത്തനരഹിതമായിരിക്കും."
   },
   "overview_pipelineSetup_test_cancelled": {
     "message": "പരിശോധന റദ്ദാക്കി. കരട് സംരക്ഷിച്ചു."
@@ -664,5 +664,26 @@
   },
   "overview_pipelineSetup_receipt_duration_other": {
     "message": "{{count}} മിനിറ്റ് ലക്ഷ്യം"
+  },
+  "overview_pipelineSetup_schedulePreview_loading": {
+    "message": "കൃത്യമായ സമയക്രമം കണക്കാക്കുന്നു…"
+  },
+  "overview_pipelineSetup_schedulePreview_error": {
+    "message": "കൃത്യമായ സമയക്രമം കണക്കാക്കാനായില്ല. cron എക്സ്പ്രഷനും സമയമേഖലയും പരിശോധിക്കുക."
+  },
+  "overview_pipelineSetup_test_running": {
+    "message": "റൺ {{runId}} ഇപ്പോഴും പ്രവർത്തിക്കുന്നു: {{stage}}. സജ്ജീകരണം അടച്ച് അവലോകനത്തിൽ നിരീക്ഷിക്കാം."
+  },
+  "overview_pipelineSetup_test_failedStage": {
+    "message": "{{stage}} പരാജയപ്പെട്ടു. റൺ {{runId}} തുറന്ന് ഈ ഘട്ടം വീണ്ടും ശ്രമിക്കുക."
+  },
+  "overview_pipelineSetup_test_failedWithCode": {
+    "message": "{{stage}} പരാജയപ്പെട്ടു ({{code}}). റൺ {{runId}} തുറന്ന് ഈ ഘട്ടം വീണ്ടും ശ്രമിക്കുക."
+  },
+  "overview_pipelineSetup_test_cancelledStage": {
+    "message": "{{stage}} റദ്ദാക്കി. നിങ്ങളുടെ കരട് സംരക്ഷിച്ചു."
+  },
+  "overview_pipelineSetup_test_cancelledWithCode": {
+    "message": "{{stage}} റദ്ദാക്കി ({{code}}). നിങ്ങളുടെ കരട് സംരക്ഷിച്ചു."
   }
 }

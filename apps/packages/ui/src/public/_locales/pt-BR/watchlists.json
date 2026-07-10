@@ -561,7 +561,7 @@
     "message": "Ativar agendamento"
   },
   "overview_pipelineSetup_test_ready": {
-    "message": "Teste iniciado. Este rascunho permanece inativo até você ativar o agendamento."
+    "message": "Teste concluído. Seu briefing está pronto. Este rascunho permanece inativo até você ativar o agendamento."
   },
   "overview_pipelineSetup_test_cancelled": {
     "message": "Teste cancelado. Seu rascunho foi salvo."
@@ -673,5 +673,26 @@
   },
   "overview_pipelineSetup_receipt_duration_other": {
     "message": "meta de {{count}} minutos"
+  },
+  "overview_pipelineSetup_schedulePreview_loading": {
+    "message": "Calculando o agendamento exato…"
+  },
+  "overview_pipelineSetup_schedulePreview_error": {
+    "message": "Não foi possível calcular o agendamento exato. Revise a expressão cron e o fuso horário."
+  },
+  "overview_pipelineSetup_test_running": {
+    "message": "A execução {{runId}} ainda está em andamento: {{stage}}. Você pode fechar a configuração e acompanhá-la em Visão geral."
+  },
+  "overview_pipelineSetup_test_failedStage": {
+    "message": "{{stage}} falhou. Abra a execução {{runId}} e tente esta etapa novamente."
+  },
+  "overview_pipelineSetup_test_failedWithCode": {
+    "message": "{{stage}} falhou ({{code}}). Abra a execução {{runId}} e tente esta etapa novamente."
+  },
+  "overview_pipelineSetup_test_cancelledStage": {
+    "message": "{{stage}} foi cancelada. Seu rascunho foi salvo."
+  },
+  "overview_pipelineSetup_test_cancelledWithCode": {
+    "message": "{{stage}} foi cancelada ({{code}}). Seu rascunho foi salvo."
   }
 }

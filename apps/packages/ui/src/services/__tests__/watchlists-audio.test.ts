@@ -16,6 +16,7 @@ import {
   getWatchlistRunBriefing,
   getWatchlistRunAudio,
   getWatchlistRunDiagnostics,
+  previewWatchlistSchedule,
   retryWatchlistBriefingStage,
   retryWatchlistRunAudio,
   retryWatchlistRunDelivery
@@ -154,6 +155,27 @@ describe("watchlists audio services", () => {
         abortSignal: controller.signal
       })
     )
+  })
+
+  it("previews an exact schedule and forwards cancellation", async () => {
+    const preview = {
+      next_run_at: "2027-02-01T08:00:00Z",
+      following_run_at: "2027-03-01T08:00:00Z"
+    }
+    mocks.bgRequest.mockResolvedValueOnce(preview)
+    const controller = new AbortController()
+
+    await expect(previewWatchlistSchedule({
+      schedule_expr: "0 8 1 * MON",
+      timezone: "UTC"
+    }, controller.signal)).resolves.toEqual(preview)
+
+    expect(mocks.bgRequest).toHaveBeenCalledWith({
+      path: "/api/v1/watchlists/schedules/preview",
+      method: "POST",
+      body: { schedule_expr: "0 8 1 * MON", timezone: "UTC" },
+      abortSignal: controller.signal
+    })
   })
 
   it("maps only latest-briefing 404 responses to null", async () => {

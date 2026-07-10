@@ -462,6 +462,10 @@
       "nextOccurrence": "Next occurrence",
       "manualOccurrence": "Manual only",
       "nextOccurrencePending": "Save a valid schedule to calculate the exact time.",
+      "schedulePreview": {
+        "loading": "Calculating the exact schedule…",
+        "error": "Could not calculate the exact schedule. Review the cron expression and timezone."
+      },
       "briefing": {
         "question": "What are you making?",
         "help": "Choose the editorial shape. Every option stays grounded in your selected sources.",
@@ -574,7 +578,12 @@
       "text": "Generate test report",
         "send": "Send test",
         "activate": "Activate schedule",
-        "ready": "Test started. This draft stays inactive until you activate its schedule.",
+        "ready": "Test completed. Your briefing is ready. This draft stays inactive until you activate its schedule.",
+        "running": "Run {{runId}} is still running: {{stage}}. You can close setup and monitor it from Overview.",
+        "failedStage": "{{stage}} failed. Open run {{runId}} and retry this stage.",
+        "failedWithCode": "{{stage}} failed ({{code}}). Open run {{runId}} and retry this stage.",
+        "cancelledStage": "{{stage}} was cancelled. Your draft is saved.",
+        "cancelledWithCode": "{{stage}} was cancelled ({{code}}). Your draft is saved.",
         "cancelled": "Test cancelled. Your draft is saved.",
       "failed": "Test failed. Your draft is saved. {{message}}",
       "status": {

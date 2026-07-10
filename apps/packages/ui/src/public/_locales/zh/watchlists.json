@@ -561,7 +561,7 @@
     "message": "启用计划"
   },
   "overview_pipelineSetup_test_ready": {
-    "message": "测试已开始。在启用计划之前，此草稿保持未启用状态。"
+    "message": "测试已完成。简报已准备就绪。在启用计划之前，此草稿保持未启用状态。"
   },
   "overview_pipelineSetup_test_cancelled": {
     "message": "测试已取消。草稿已保存。"
@@ -664,5 +664,26 @@
   },
   "overview_pipelineSetup_receipt_duration_other": {
     "message": "目标 {{count}} 分钟"
+  },
+  "overview_pipelineSetup_schedulePreview_loading": {
+    "message": "正在计算准确计划…"
+  },
+  "overview_pipelineSetup_schedulePreview_error": {
+    "message": "无法计算准确计划。请检查 cron 表达式和时区。"
+  },
+  "overview_pipelineSetup_test_running": {
+    "message": "运行 {{runId}} 仍在进行：{{stage}}。你可以关闭设置并在概览中监控。"
+  },
+  "overview_pipelineSetup_test_failedStage": {
+    "message": "{{stage}} 失败。请打开运行 {{runId}} 并重试此阶段。"
+  },
+  "overview_pipelineSetup_test_failedWithCode": {
+    "message": "{{stage}} 失败（{{code}}）。请打开运行 {{runId}} 并重试此阶段。"
+  },
+  "overview_pipelineSetup_test_cancelledStage": {
+    "message": "{{stage}} 已取消。草稿已保存。"
+  },
+  "overview_pipelineSetup_test_cancelledWithCode": {
+    "message": "{{stage}} 已取消（{{code}}）。草稿已保存。"
   }
 }

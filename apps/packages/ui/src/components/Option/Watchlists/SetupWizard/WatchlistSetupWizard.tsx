@@ -1,9 +1,10 @@
-import React, { useEffect, useRef, useState } from "react"
+import React, { useCallback, useEffect, useRef, useState } from "react"
 import { Button, Input, Modal, Select } from "antd"
 import { useTranslation } from "react-i18next"
 import { Alert } from "@/components/ui/primitives"
 import {
   getWatchlistRunBriefing,
+  previewWatchlistSchedule,
   testWatchlistSourceDraft,
   triggerWatchlistRun
 } from "@/services/watchlists"
@@ -21,6 +22,7 @@ import {
   type PipelineWizardTestOptions
 } from "../OverviewTab/PipelineWizard"
 import {
+  buildPipelineWizardSchedule,
   toBriefingPipelineDraft,
   getPipelineWizardBriefingOutcome,
   getPipelineWizardSourceSignature,
@@ -225,10 +227,25 @@ export const WatchlistSetupWizard: React.FC<WatchlistSetupWizardProps> = ({
       jobId: persisted.job.id,
       runId: run.id,
       status: outcome.status,
-      message: outcome.message,
       briefing
     }
   }
+
+  const previewPipelineSchedule = useCallback(async (
+    draft: PipelineWizardDraft,
+    options: { signal: AbortSignal }
+  ) => {
+    const schedule = buildPipelineWizardSchedule(draft)
+    if (!schedule.schedule_expr) return {}
+    const preview = await previewWatchlistSchedule({
+      schedule_expr: schedule.schedule_expr,
+      timezone: schedule.timezone || "UTC"
+    }, options.signal)
+    return {
+      ...(preview.next_run_at ? { nextRunAt: preview.next_run_at } : {}),
+      ...(preview.following_run_at ? { followingRunAt: preview.following_run_at } : {})
+    }
+  }, [])
 
   const activatePipeline = async (draft: PipelineWizardDraft, options: { jobId?: number }) => {
     if (!watchlist) throw new Error("Watchlist container is missing.")
@@ -292,6 +309,7 @@ export const WatchlistSetupWizard: React.FC<WatchlistSetupWizardProps> = ({
         onTest={testPipeline}
         onActivate={activatePipeline}
         onTestSource={testSource}
+        onPreviewSchedule={previewPipelineSchedule}
       />
     )
   }

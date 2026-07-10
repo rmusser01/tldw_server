@@ -4008,7 +4008,22 @@
     "message": "Activate schedule"
   },
   "overview_pipelineSetup_test_ready": {
-    "message": "Test started. This draft stays inactive until you activate its schedule."
+    "message": "Test completed. Your briefing is ready. This draft stays inactive until you activate its schedule."
+  },
+  "overview_pipelineSetup_test_running": {
+    "message": "Run {{runId}} is still running: {{stage}}. You can close setup and monitor it from Overview."
+  },
+  "overview_pipelineSetup_test_failedStage": {
+    "message": "{{stage}} failed. Open run {{runId}} and retry this stage."
+  },
+  "overview_pipelineSetup_test_failedWithCode": {
+    "message": "{{stage}} failed ({{code}}). Open run {{runId}} and retry this stage."
+  },
+  "overview_pipelineSetup_test_cancelledStage": {
+    "message": "{{stage}} was cancelled. Your draft is saved."
+  },
+  "overview_pipelineSetup_test_cancelledWithCode": {
+    "message": "{{stage}} was cancelled ({{code}}). Your draft is saved."
   },
   "overview_pipelineSetup_test_cancelled": {
     "message": "Test cancelled. Your draft is saved."
@@ -4270,5 +4285,11 @@
   },
   "overview_pipelineSetup_receipt_duration_other": {
     "message": "targeting {{count}} minutes"
+  },
+  "overview_pipelineSetup_schedulePreview_loading": {
+    "message": "Calculating the exact schedule…"
+  },
+  "overview_pipelineSetup_schedulePreview_error": {
+    "message": "Could not calculate the exact schedule. Review the cron expression and timezone."
   }
 }

@@ -163,6 +163,10 @@
       "nextOccurrence": "Próxima execução",
       "manualOccurrence": "Somente manual",
       "nextOccurrencePending": "Salve um agendamento válido para calcular o horário exato.",
+      "schedulePreview": {
+        "loading": "Calculando o agendamento exato…",
+        "error": "Não foi possível calcular o agendamento exato. Revise a expressão cron e o fuso horário."
+      },
       "briefing": {
         "question": "O que você está criando?",
         "help": "Escolha o formato editorial. Todas as opções permanecem baseadas nas fontes selecionadas.",
@@ -278,7 +282,12 @@
         "text": "Gerar relatório de teste",
         "send": "Enviar teste",
         "activate": "Ativar agendamento",
-        "ready": "Teste iniciado. Este rascunho permanece inativo até você ativar o agendamento.",
+        "ready": "Teste concluído. Seu briefing está pronto. Este rascunho permanece inativo até você ativar o agendamento.",
+        "running": "A execução {{runId}} ainda está em andamento: {{stage}}. Você pode fechar a configuração e acompanhá-la em Visão geral.",
+        "failedStage": "{{stage}} falhou. Abra a execução {{runId}} e tente esta etapa novamente.",
+        "failedWithCode": "{{stage}} falhou ({{code}}). Abra a execução {{runId}} e tente esta etapa novamente.",
+        "cancelledStage": "{{stage}} foi cancelada. Seu rascunho foi salvo.",
+        "cancelledWithCode": "{{stage}} foi cancelada ({{code}}). Seu rascunho foi salvo.",
         "cancelled": "Teste cancelado. Seu rascunho foi salvo.",
         "failed": "Falha no teste. Seu rascunho foi salvo. {{message}}",
         "status": {

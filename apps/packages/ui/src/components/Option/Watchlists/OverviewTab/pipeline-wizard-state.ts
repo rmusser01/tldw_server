@@ -106,7 +106,9 @@ export type PipelineWizardBriefingStatus = "ready" | "running" | "failed" | "can
 
 export interface PipelineWizardBriefingOutcome {
   status: PipelineWizardBriefingStatus
-  message?: string
+  stage?: string
+  code?: string
+  runId?: number
 }
 
 export type PipelineWizardCronValidationError =
@@ -285,53 +287,24 @@ export const getPipelineWizardBriefingStatus = (
   return "ready"
 }
 
-const BRIEFING_STAGE_LABELS: Record<string, string> = {
-  collect: "Collect sources",
-  select: "Select updates",
-  render_text: "Create report",
-  persist_text: "Save report in Reports",
-  compose_audio_script: "Compose audio script",
-  persist_audio_script: "Save audio script",
-  generate_audio: "Create audio",
-  persist_audio: "Save audio in Reports",
-  deliver: "Deliver test"
-}
-
 export const getPipelineWizardBriefingOutcome = (
   projection: WatchlistBriefingProjection,
   waitForDelivery = false
 ): PipelineWizardBriefingOutcome => {
   const status = getPipelineWizardBriefingStatus(projection, waitForDelivery)
-  if (status === "ready") return { status }
-  const stageEntry = Object.entries(projection.stages).find(([, stage]) =>
-    stage.status === status || (status === "failed" && stage.status === "failed")
+  if (status === "ready") return { status, runId: projection.run_id }
+  const stageEntry = Object.entries(projection.stages).find(([, stageState]) =>
+    stageState.status === status ||
+    (status === "running" && ["running", "queued"].includes(stageState.status))
   )
   const stage = stageEntry?.[0] || (waitForDelivery ? "deliver" : "briefing")
-  const stageLabel = BRIEFING_STAGE_LABELS[stage] ||
-    (stage.startsWith("deliver:") ? `Deliver to ${stage.slice("deliver:".length)}` : stage)
   const code = stageEntry?.[1].code ||
     (stage === "deliver" ? `delivery_${projection.delivery_status}` : undefined)
-  if (status === "failed") {
-    return {
-      status,
-      message: `${stageLabel} failed${code ? ` (${code})` : ""}. Open run ${projection.run_id} and retry this stage.`
-    }
-  }
-  if (status === "cancelled") {
-    return {
-      status,
-      message: `${stageLabel} was cancelled${code ? ` (${code})` : ""}. Your draft is saved.`
-    }
-  }
-  const runningStage = Object.entries(projection.stages).find(([, stageState]) =>
-    stageState.status === "running" || stageState.status === "queued"
-  )?.[0]
-  const runningLabel = runningStage
-    ? BRIEFING_STAGE_LABELS[runningStage] || runningStage
-    : "briefing work"
   return {
     status,
-    message: `Run ${projection.run_id} is still running: ${runningLabel}. You can close setup and monitor it from Overview.`
+    stage,
+    ...(code ? { code } : {}),
+    runId: projection.run_id
   }
 }
 
@@ -606,7 +579,7 @@ export const projectPipelineWizardOccurrences = (
       ...(draft.followingRunAt ? { followingRunAt: draft.followingRunAt } : {})
     }
   }
-  if (draft.scheduleMode === "manual") return {}
+  if (draft.scheduleMode === "manual" || draft.scheduleMode === "advanced") return {}
   const expression = buildPipelineWizardSchedule(draft).schedule_expr
   if (!expression || validatePipelineWizardCron(expression)) return {}
   const fields = expression.split(/\s+/)

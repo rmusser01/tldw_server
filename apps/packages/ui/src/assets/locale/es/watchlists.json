@@ -163,6 +163,10 @@
       "nextOccurrence": "Próxima ejecución",
       "manualOccurrence": "Solo manual",
       "nextOccurrencePending": "Guarda una programación válida para calcular la hora exacta.",
+      "schedulePreview": {
+        "loading": "Calculando la programación exacta…",
+        "error": "No se pudo calcular la programación exacta. Revisa la expresión cron y la zona horaria."
+      },
       "briefing": {
         "question": "¿Qué estás creando?",
         "help": "Elige la forma editorial. Todas las opciones se basan en las fuentes seleccionadas.",
@@ -278,7 +282,12 @@
         "text": "Generar informe de prueba",
         "send": "Enviar prueba",
         "activate": "Activar programación",
-        "ready": "Prueba iniciada. Este borrador permanece inactivo hasta que actives su programación.",
+        "ready": "Prueba completada. Tu informe está listo. Este borrador permanece inactivo hasta que actives su programación.",
+        "running": "La ejecución {{runId}} sigue activa: {{stage}}. Puedes cerrar la configuración y supervisarla en Resumen.",
+        "failedStage": "{{stage}} falló. Abre la ejecución {{runId}} y reintenta esta etapa.",
+        "failedWithCode": "{{stage}} falló ({{code}}). Abre la ejecución {{runId}} y reintenta esta etapa.",
+        "cancelledStage": "{{stage}} se canceló. Tu borrador está guardado.",
+        "cancelledWithCode": "{{stage}} se canceló ({{code}}). Tu borrador está guardado.",
         "cancelled": "Prueba cancelada. Tu borrador está guardado.",
         "failed": "La prueba falló. Tu borrador está guardado. {{message}}",
         "status": {

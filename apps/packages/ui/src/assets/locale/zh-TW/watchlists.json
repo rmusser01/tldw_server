@@ -163,6 +163,10 @@
       "nextOccurrence": "下次執行",
       "manualOccurrence": "僅手動",
       "nextOccurrencePending": "儲存有效排程以計算確切時間。",
+      "schedulePreview": {
+        "loading": "正在計算確切排程…",
+        "error": "無法計算確切排程。請檢查 cron 運算式和時區。"
+      },
       "briefing": {
         "question": "您要製作什麼？",
         "help": "請選擇編輯形式。每個選項都以您選擇的來源為依據。",
@@ -275,7 +279,12 @@
         "text": "產生測試報告",
         "send": "傳送測試",
         "activate": "啟用排程",
-        "ready": "測試已開始。在啟用排程之前，此草稿會維持未啟用狀態。",
+        "ready": "測試已完成。簡報已準備就緒。在啟用排程之前，此草稿會維持未啟用狀態。",
+        "running": "執行 {{runId}} 仍在進行：{{stage}}。你可以關閉設定並在概覽中監控。",
+        "failedStage": "{{stage}} 失敗。請開啟執行 {{runId}} 並重試此階段。",
+        "failedWithCode": "{{stage}} 失敗（{{code}}）。請開啟執行 {{runId}} 並重試此階段。",
+        "cancelledStage": "{{stage}} 已取消。草稿已儲存。",
+        "cancelledWithCode": "{{stage}} 已取消（{{code}}）。草稿已儲存。",
         "cancelled": "測試已取消。草稿已儲存。",
         "failed": "測試失敗。草稿已儲存。{{message}}",
         "status": {

@@ -501,6 +501,16 @@ export interface WatchlistBriefingProjection {
   recovery: Record<string, boolean>
 }
 
+export interface WatchlistSchedulePreviewRequest {
+  schedule_expr: string
+  timezone: string
+}
+
+export interface WatchlistSchedulePreviewResponse {
+  next_run_at: string | null
+  following_run_at: string | null
+}
+
 export type WatchlistBriefingRetryStage =
   | "render_text"
   | "persist_text"

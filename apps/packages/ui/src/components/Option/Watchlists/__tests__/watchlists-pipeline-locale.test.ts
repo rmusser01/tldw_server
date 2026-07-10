@@ -194,4 +194,26 @@ describe("Watchlists pipeline locale contract", () => {
     expect(instance.t("overview.pipelineSetup.receipt.sources", { count: 2 })).toBe("2 источника")
     expect(instance.t("overview.pipelineSetup.receipt.sources", { count: 5 })).toBe("5 источников")
   })
+
+  it("ships localized terminal outcomes and exact-schedule feedback outside English", () => {
+    const english = setupCopy(readNested("en"))
+
+    for (const locale of ["es", "ja-JP", "ru"] as const) {
+      const translated = setupCopy(readNested(locale))
+      for (const key of [
+        "overview_pipelineSetup_test_ready",
+        "overview_pipelineSetup_test_running",
+        "overview_pipelineSetup_test_failedWithCode",
+        "overview_pipelineSetup_test_cancelledWithCode",
+        "overview_pipelineSetup_schedulePreview_loading",
+        "overview_pipelineSetup_schedulePreview_error"
+      ]) {
+        expect(translated[key], `${locale}:${key}`).toBeTruthy()
+        expect(translated[key], `${locale}:${key}`).not.toBe(english[key])
+        expect(placeholders(translated[key]), `${locale}:${key}`).toEqual(
+          placeholders(english[key])
+        )
+      }
+    }
+  })
 })

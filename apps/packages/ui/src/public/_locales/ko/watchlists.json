@@ -561,7 +561,7 @@
     "message": "일정 활성화"
   },
   "overview_pipelineSetup_test_ready": {
-    "message": "테스트가 시작되었습니다. 일정을 활성화할 때까지 이 초안은 비활성 상태로 유지됩니다."
+    "message": "테스트가 완료되었습니다. 브리핑이 준비되었습니다. 일정을 활성화할 때까지 이 초안은 비활성 상태로 유지됩니다."
   },
   "overview_pipelineSetup_test_cancelled": {
     "message": "테스트가 취소되었습니다. 초안이 저장되었습니다."
@@ -664,5 +664,26 @@
   },
   "overview_pipelineSetup_receipt_duration_other": {
     "message": "목표 {{count}}분"
+  },
+  "overview_pipelineSetup_schedulePreview_loading": {
+    "message": "정확한 일정을 계산하는 중…"
+  },
+  "overview_pipelineSetup_schedulePreview_error": {
+    "message": "정확한 일정을 계산할 수 없습니다. cron 표현식과 시간대를 확인하세요."
+  },
+  "overview_pipelineSetup_test_running": {
+    "message": "실행 {{runId}}이 아직 진행 중입니다: {{stage}}. 설정을 닫고 개요에서 모니터링할 수 있습니다."
+  },
+  "overview_pipelineSetup_test_failedStage": {
+    "message": "{{stage}}에 실패했습니다. 실행 {{runId}}을 열고 이 단계를 다시 시도하세요."
+  },
+  "overview_pipelineSetup_test_failedWithCode": {
+    "message": "{{stage}}에 실패했습니다({{code}}). 실행 {{runId}}을 열고 이 단계를 다시 시도하세요."
+  },
+  "overview_pipelineSetup_test_cancelledStage": {
+    "message": "{{stage}}이 취소되었습니다. 초안이 저장되었습니다."
+  },
+  "overview_pipelineSetup_test_cancelledWithCode": {
+    "message": "{{stage}}이 취소되었습니다({{code}}). 초안이 저장되었습니다."
   }
 }

@@ -60,6 +60,15 @@ export interface PipelineWizardActionResult {
   sourceTest?: JobPreviewResult
 }
 
+export interface PipelineWizardSchedulePreviewResult {
+  nextRunAt?: string
+  followingRunAt?: string
+}
+
+export interface PipelineWizardSchedulePreviewOptions {
+  signal: AbortSignal
+}
+
 interface PipelineWizardProps {
   open: boolean
   sources?: WatchlistSource[]
@@ -82,6 +91,10 @@ interface PipelineWizardProps {
   ) => PipelineWizardActionResult | void | Promise<PipelineWizardActionResult | void>
   onTestSource?: (draft: PipelineWizardDraft) =>
     PipelineWizardActionResult | void | Promise<PipelineWizardActionResult | void>
+  onPreviewSchedule?: (
+    draft: PipelineWizardDraft,
+    options: PipelineWizardSchedulePreviewOptions
+  ) => Promise<PipelineWizardSchedulePreviewResult>
   previewLoading?: boolean
   previewError?: string | null
   previewRendered?: string | null
@@ -170,6 +183,7 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
   onTest,
   onActivate,
   onTestSource,
+  onPreviewSchedule,
   previewLoading = false,
   previewError = null,
   previewRendered = null,
@@ -179,6 +193,10 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
 }) => {
   const { t, i18n } = useTranslation(["watchlists", "common"])
   const locale = i18n?.resolvedLanguage || i18n?.language || "en-US"
+  const schedulePreviewErrorCopy = t(
+    "watchlists:overview.pipelineSetup.schedulePreview.error",
+    "Could not calculate the exact schedule. Review the cron expression and timezone."
+  )
   const initial = useMemo(() => {
     const merged = mergePipelineWizardDraft(initialDraft)
     return {
@@ -205,6 +223,7 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
   const saveGenerationRef = useRef(0)
   const actionLockRef = useRef(false)
   const actionControllerRef = useRef<AbortController | null>(null)
+  const schedulePreviewGenerationRef = useRef(0)
   const emailRecipientSearchRef = useRef("")
   const validationRef = useRef<HTMLDivElement | null>(null)
   const advancedBriefingRef = useRef<HTMLDetailsElement | null>(null)
@@ -216,6 +235,9 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
   const [sourceTestResult, setSourceTestResult] = useState<JobPreviewResult | null>(null)
   const [inactiveJobId, setInactiveJobId] = useState<number | undefined>()
   const [testProjection, setTestProjection] = useState<WatchlistBriefingProjection | null>(null)
+  const [schedulePreview, setSchedulePreview] = useState<PipelineWizardSchedulePreviewResult | null>(null)
+  const [schedulePreviewLoading, setSchedulePreviewLoading] = useState(false)
+  const [schedulePreviewError, setSchedulePreviewError] = useState<string | null>(null)
 
   useEffect(() => {
     const sessionChanged = activeSessionKeyRef.current !== sessionKey
@@ -236,6 +258,9 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
       setSourceTestResult(null)
       setInactiveJobId(undefined)
       setTestProjection(null)
+      setSchedulePreview(null)
+      setSchedulePreviewLoading(false)
+      setSchedulePreviewError(null)
       setActionBusy(false)
       emailRecipientSearchRef.current = ""
       activeSessionKeyRef.current = sessionKey
@@ -253,6 +278,55 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
     actionControllerRef.current?.abort()
     actionControllerRef.current = null
   }, [])
+
+  useEffect(() => {
+    const generation = ++schedulePreviewGenerationRef.current
+    const candidate = draftRef.current
+    setSchedulePreviewError(null)
+    if (
+      !open ||
+      candidate.scheduleMode !== "advanced" ||
+      !onPreviewSchedule ||
+      !candidate.scheduleAdvancedCron.trim() ||
+      validatePipelineWizardDraft(candidate).errors.some((error) =>
+        error === "timezone" || error.startsWith("scheduleAdvancedCron")
+      )
+    ) {
+      setSchedulePreview(null)
+      setSchedulePreviewLoading(false)
+      return
+    }
+
+    const controller = new AbortController()
+    setSchedulePreview(null)
+    setSchedulePreviewLoading(true)
+    const timeoutId = window.setTimeout(() => {
+      void onPreviewSchedule(candidate, { signal: controller.signal })
+        .then((result) => {
+          if (generation !== schedulePreviewGenerationRef.current) return
+          setSchedulePreview(result)
+          setSchedulePreviewLoading(false)
+        })
+        .catch((error) => {
+          if (generation !== schedulePreviewGenerationRef.current || isAbortError(error)) return
+          setSchedulePreviewLoading(false)
+          setSchedulePreviewError(schedulePreviewErrorCopy)
+        })
+    }, 300)
+
+    return () => {
+      schedulePreviewGenerationRef.current += 1
+      window.clearTimeout(timeoutId)
+      controller.abort()
+    }
+  }, [
+    draft.scheduleAdvancedCron,
+    draft.scheduleMode,
+    draft.timezone,
+    onPreviewSchedule,
+    open,
+    schedulePreviewErrorCopy
+  ])
 
   useEffect(() => {
     if (!open || draft.sourceMode !== "existing" || draft.sourceIds.length > 0) return
@@ -429,6 +503,36 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
     return false
   }
 
+  const briefingStageLabel = (stage?: string): string => {
+    if (!stage) {
+      return t("watchlists:overview.pipelineSetup.test.stages.unknown", "Briefing work", {
+        stage: "briefing"
+      })
+    }
+    if (stage.startsWith("deliver:")) {
+      return t(
+        "watchlists:overview.pipelineSetup.test.stages.deliveryAdapter",
+        "Deliver to {{adapter}}",
+        { adapter: stage.slice("deliver:".length) }
+      )
+    }
+    const labels: Record<string, [string, string]> = {
+      collect: ["collection", "Collect sources"],
+      select: ["selection", "Select updates"],
+      render_text: ["text", "Create report"],
+      persist_text: ["persistence", "Save report in Reports"],
+      compose_audio_script: ["audioScript", "Compose audio script"],
+      persist_audio_script: ["audioScriptPersistence", "Save audio script"],
+      generate_audio: ["audio", "Create audio"],
+      persist_audio: ["audioPersistence", "Save audio in Reports"],
+      deliver: ["delivery", "Check test delivery"]
+    }
+    const label = labels[stage]
+    return label
+      ? t(`watchlists:overview.pipelineSetup.test.stages.${label[0]}`, label[1])
+      : t("watchlists:overview.pipelineSetup.test.stages.unknown", "Stage {{stage}}", { stage })
+  }
+
   const runTest = async (
     options: Omit<PipelineWizardTestOptions, "jobId" | "requestGeneration" | "signal">
   ) => {
@@ -458,15 +562,39 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
         ? getPipelineWizardBriefingOutcome(actionResult.briefing, options.externalDelivery)
         : undefined
       const resultStatus = observedOutcome?.status || actionResult?.status
-      const resultMessage = actionResult?.message || observedOutcome?.message
       if (resultStatus === "failed") {
-        setActionError(resultMessage || t("watchlists:overview.pipelineSetup.test.failed", "Test failed. Your draft is saved."))
+        const stage = briefingStageLabel(observedOutcome?.stage)
+        setActionError(observedOutcome?.code
+          ? t("watchlists:overview.pipelineSetup.test.failedWithCode", "{{stage}} failed ({{code}}). Open run {{runId}} and retry this stage.", {
+              stage,
+              code: observedOutcome.code,
+              runId: observedOutcome.runId
+            })
+          : observedOutcome
+            ? t("watchlists:overview.pipelineSetup.test.failedStage", "{{stage}} failed. Open run {{runId}} and retry this stage.", {
+                stage,
+                runId: observedOutcome.runId
+              })
+            : actionResult?.message || t("watchlists:overview.pipelineSetup.test.failed", "Test failed. Your draft is saved."))
       } else if (resultStatus === "cancelled") {
-        setActionMessage(resultMessage || t("watchlists:overview.pipelineSetup.test.cancelled", "Test cancelled. Your draft is saved."))
+        const stage = briefingStageLabel(observedOutcome?.stage)
+        setActionMessage(observedOutcome?.code
+          ? t("watchlists:overview.pipelineSetup.test.cancelledWithCode", "{{stage}} was cancelled ({{code}}). Your draft is saved.", {
+              stage,
+              code: observedOutcome.code
+            })
+          : observedOutcome
+            ? t("watchlists:overview.pipelineSetup.test.cancelledStage", "{{stage}} was cancelled. Your draft is saved.", { stage })
+            : actionResult?.message || t("watchlists:overview.pipelineSetup.test.cancelled", "Test cancelled. Your draft is saved."))
       } else if (resultStatus === "running") {
-        setActionMessage(resultMessage || t("watchlists:overview.pipelineSetup.test.running", "Test is still running. Monitor it from Overview."))
+        setActionMessage(observedOutcome
+          ? t("watchlists:overview.pipelineSetup.test.running", "Run {{runId}} is still running: {{stage}}. You can close setup and monitor it from Overview.", {
+              runId: observedOutcome.runId,
+              stage: briefingStageLabel(observedOutcome.stage)
+            })
+          : actionResult?.message || t("watchlists:overview.pipelineSetup.test.running", "Test is still running. Monitor it from Overview."))
       } else {
-        setActionMessage(t("watchlists:overview.pipelineSetup.test.ready", "Test started. This draft stays inactive until you activate its schedule."))
+        setActionMessage(t("watchlists:overview.pipelineSetup.test.ready", "Test completed. Your briefing is ready. This draft stays inactive until you activate its schedule."))
       }
     } catch (error) {
       if (generation === requestGenerationRef.current) {
@@ -562,7 +690,12 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
     }
   }
 
-  const occurrences = useMemo(() => projectPipelineWizardOccurrences(draft), [draft])
+  const occurrences = useMemo(
+    () => draft.scheduleMode === "advanced"
+      ? schedulePreview || projectPipelineWizardOccurrences(draft)
+      : projectPipelineWizardOccurrences(draft),
+    [draft, schedulePreview]
+  )
   const receipt = useMemo(() => {
     const payload = toPipelineJobCreatePayload(toBriefingPipelineDraft(draft))
     const contract = payload.output_prefs?.briefing_pipeline
@@ -912,7 +1045,9 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
             </Form>
             <div className="border-t border-border pt-3 text-sm">
               <span className="font-medium">{t("watchlists:overview.pipelineSetup.nextOccurrence", "Next occurrence")}</span>{" "}
-              {receipt?.nextRunLabel
+              {schedulePreviewLoading
+                ? t("watchlists:overview.pipelineSetup.schedulePreview.loading", "Calculating the exact schedule…")
+                : receipt?.nextRunLabel
                 ? t("watchlists:overview.pipelineSetup.receipt.schedule.scheduled", "{{date}} ({{timezone}})", {
                     date: receipt.nextRunLabel,
                     timezone: receipt.timezone
@@ -921,6 +1056,9 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
                   ? t("watchlists:overview.pipelineSetup.manualOccurrence", "Manual only")
                   : t("watchlists:overview.pipelineSetup.nextOccurrencePending", "Save a valid schedule to calculate the exact time.")}
             </div>
+            {schedulePreviewError && (
+              <DesignSystemAlert variant="warning" title={schedulePreviewError} />
+            )}
           </section>
         )}
 

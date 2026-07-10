@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
@@ -436,6 +437,16 @@ class JobCreateRequest(BaseModel):
         description="Optional job-level filters payload (bridge from SUBS Import Rules)",
     )
     watchlist_id: int | None = Field(default=None, ge=1)
+
+
+class WatchlistSchedulePreviewRequest(BaseModel):
+    schedule_expr: str = Field(min_length=1, max_length=255)
+    timezone: str = Field(default="UTC", min_length=1, max_length=128)
+
+
+class WatchlistSchedulePreviewResponse(BaseModel):
+    next_run_at: datetime | None
+    following_run_at: datetime | None
 
 
 class JobUpdateRequest(BaseModel):

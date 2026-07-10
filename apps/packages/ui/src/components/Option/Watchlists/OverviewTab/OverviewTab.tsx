@@ -30,6 +30,7 @@ import {
   fetchWatchlistSources,
   getWatchlistTemplate,
   getWatchlistRunBriefing,
+  previewWatchlistSchedule,
   previewWatchlistTemplate,
   testWatchlistSourceDraft,
   triggerWatchlistRun,
@@ -52,6 +53,7 @@ import {
   type PipelineWizardTestOptions
 } from "./PipelineWizard"
 import {
+  buildPipelineWizardSchedule,
   toBriefingPipelineDraft,
   getPipelineWizardBriefingOutcome,
   getPipelineWizardSourceSignature,
@@ -612,13 +614,28 @@ export const OverviewTab: React.FC = () => {
         jobId: persisted.jobId,
         runId: run.id,
         status: outcome.status,
-        message: outcome.message,
         briefing
       }
     } finally {
       setPipelineSetupSubmitting(false)
     }
   }, [loadOverview, persistInactivePipeline])
+
+  const previewPipelineSchedule = useCallback(async (
+    wizardDraft: PipelineWizardDraft,
+    options: { signal: AbortSignal }
+  ) => {
+    const schedule = buildPipelineWizardSchedule(wizardDraft)
+    if (!schedule.schedule_expr) return {}
+    const preview = await previewWatchlistSchedule({
+      schedule_expr: schedule.schedule_expr,
+      timezone: schedule.timezone || "UTC"
+    }, options.signal)
+    return {
+      ...(preview.next_run_at ? { nextRunAt: preview.next_run_at } : {}),
+      ...(preview.following_run_at ? { followingRunAt: preview.following_run_at } : {})
+    }
+  }, [])
 
   const activatePipeline = useCallback(async (
     wizardDraft: PipelineWizardDraft,
@@ -1226,6 +1243,7 @@ export const OverviewTab: React.FC = () => {
         onTest={testPipeline}
         onActivate={activatePipeline}
         onTestSource={testPipelineSource}
+        onPreviewSchedule={previewPipelineSchedule}
         onPreview={(draft) => {
           void generatePipelineTemplatePreview(draft)
         }}

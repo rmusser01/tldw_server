@@ -9,14 +9,16 @@ const services = vi.hoisted(() => ({
   triggerRun: vi.fn(),
   getBriefing: vi.fn(),
   createOutput: vi.fn(),
-  testSource: vi.fn()
+  testSource: vi.fn(),
+  previewSchedule: vi.fn()
 }))
 
 vi.mock("@/services/watchlists", () => ({
   triggerWatchlistRun: (...args: unknown[]) => services.triggerRun(...args),
   getWatchlistRunBriefing: (...args: unknown[]) => services.getBriefing(...args),
   createWatchlistOutput: (...args: unknown[]) => services.createOutput(...args),
-  testWatchlistSourceDraft: (...args: unknown[]) => services.testSource(...args)
+  testWatchlistSourceDraft: (...args: unknown[]) => services.testSource(...args),
+  previewWatchlistSchedule: (...args: unknown[]) => services.previewSchedule(...args)
 }))
 
 vi.mock("react-i18next", () => ({
@@ -86,6 +88,10 @@ beforeEach(() => {
   })
   services.createOutput.mockResolvedValue({ id: 99 })
   services.testSource.mockResolvedValue({ total: 1, ingestable: 1, filtered: 0, items: [] })
+  services.previewSchedule.mockResolvedValue({
+    next_run_at: "2027-02-01T08:00:00Z",
+    following_run_at: "2027-03-01T08:00:00Z"
+  })
 })
 
 describe("WatchlistSetupWizard", () => {
@@ -107,6 +113,29 @@ describe("WatchlistSetupWizard", () => {
       expect.stringContaining("Delivery"),
       expect.stringContaining("Test")
     ])
+  })
+
+  it("uses the same advanced schedule preview adapter after container setup", async () => {
+    renderWizard()
+    fireEvent.change(screen.getByLabelText("Watchlist name"), { target: { value: "Lakers weekly" } })
+    fireEvent.click(screen.getByRole("button", { name: "Continue to Sources" }))
+    const pipeline = within(await screen.findByRole("dialog", { name: "Set up briefing" }))
+    fireEvent.change(pipeline.getByLabelText("Source name"), { target: { value: "Lakers feed" } })
+    fireEvent.change(pipeline.getByLabelText("Source URL"), { target: { value: "https://example.com/lakers.xml" } })
+    fireEvent.click(pipeline.getByRole("button", { name: "Next: Cadence" }))
+
+    fireEvent.mouseDown(pipeline.getByLabelText("Schedule"))
+    fireEvent.click(await screen.findByText("Advanced cron", {
+      selector: ".ant-select-item-option-content"
+    }))
+    fireEvent.change(pipeline.getByLabelText("Cron expression"), {
+      target: { value: "0 8 1 * MON" }
+    })
+
+    await waitFor(() => expect(services.previewSchedule).toHaveBeenCalledWith(
+      { schedule_expr: "0 8 1 * MON", timezone: expect.any(String) },
+      expect.any(AbortSignal)
+    ), { timeout: 2_000 })
   })
 
   it("keeps container input after creation failure", async () => {

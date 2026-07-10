@@ -561,7 +561,7 @@
     "message": "Attiva pianificazione"
   },
   "overview_pipelineSetup_test_ready": {
-    "message": "Test avviato. Questa bozza rimane inattiva finché non attivi la pianificazione."
+    "message": "Test completato. Il briefing è pronto. Questa bozza rimane inattiva finché non attivi la pianificazione."
   },
   "overview_pipelineSetup_test_cancelled": {
     "message": "Test annullato. La bozza è stata salvata."
@@ -673,5 +673,26 @@
   },
   "overview_pipelineSetup_receipt_duration_other": {
     "message": "durata obiettivo di {{count}} minuti"
+  },
+  "overview_pipelineSetup_schedulePreview_loading": {
+    "message": "Calcolo della pianificazione esatta…"
+  },
+  "overview_pipelineSetup_schedulePreview_error": {
+    "message": "Impossibile calcolare la pianificazione esatta. Controlla l’espressione cron e il fuso orario."
+  },
+  "overview_pipelineSetup_test_running": {
+    "message": "L’esecuzione {{runId}} è ancora in corso: {{stage}}. Puoi chiudere la configurazione e monitorarla in Panoramica."
+  },
+  "overview_pipelineSetup_test_failedStage": {
+    "message": "{{stage}} non è riuscita. Apri l’esecuzione {{runId}} e riprova questa fase."
+  },
+  "overview_pipelineSetup_test_failedWithCode": {
+    "message": "{{stage}} non è riuscita ({{code}}). Apri l’esecuzione {{runId}} e riprova questa fase."
+  },
+  "overview_pipelineSetup_test_cancelledStage": {
+    "message": "{{stage}} è stata annullata. La bozza è stata salvata."
+  },
+  "overview_pipelineSetup_test_cancelledWithCode": {
+    "message": "{{stage}} è stata annullata ({{code}}). La bozza è stata salvata."
   }
 }

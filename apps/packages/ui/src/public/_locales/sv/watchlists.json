@@ -561,7 +561,7 @@
     "message": "Aktivera schema"
   },
   "overview_pipelineSetup_test_ready": {
-    "message": "Testet startade. Utkastet förblir inaktivt tills du aktiverar schemat."
+    "message": "Testet är klart. Din briefing är redo. Utkastet förblir inaktivt tills du aktiverar schemat."
   },
   "overview_pipelineSetup_test_cancelled": {
     "message": "Testet avbröts. Utkastet har sparats."
@@ -664,5 +664,26 @@
   },
   "overview_pipelineSetup_receipt_duration_other": {
     "message": "mål på {{count}} minuter"
+  },
+  "overview_pipelineSetup_schedulePreview_loading": {
+    "message": "Beräknar det exakta schemat…"
+  },
+  "overview_pipelineSetup_schedulePreview_error": {
+    "message": "Det exakta schemat kunde inte beräknas. Kontrollera cron-uttrycket och tidszonen."
+  },
+  "overview_pipelineSetup_test_running": {
+    "message": "Körning {{runId}} pågår fortfarande: {{stage}}. Du kan stänga konfigurationen och följa den i Översikt."
+  },
+  "overview_pipelineSetup_test_failedStage": {
+    "message": "{{stage}} misslyckades. Öppna körning {{runId}} och försök med steget igen."
+  },
+  "overview_pipelineSetup_test_failedWithCode": {
+    "message": "{{stage}} misslyckades ({{code}}). Öppna körning {{runId}} och försök med steget igen."
+  },
+  "overview_pipelineSetup_test_cancelledStage": {
+    "message": "{{stage}} avbröts. Utkastet har sparats."
+  },
+  "overview_pipelineSetup_test_cancelledWithCode": {
+    "message": "{{stage}} avbröts ({{code}}). Utkastet har sparats."
   }
 }

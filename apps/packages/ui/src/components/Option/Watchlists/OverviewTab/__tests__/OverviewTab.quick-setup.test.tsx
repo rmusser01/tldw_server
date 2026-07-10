@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   createOutput: vi.fn(),
   getTemplate: vi.fn(),
   previewTemplate: vi.fn(),
+  previewSchedule: vi.fn(),
   testSource: vi.fn(),
   setActiveTab: vi.fn(),
   setOutputsRunFilter: vi.fn(),
@@ -59,6 +60,7 @@ vi.mock("@/services/watchlists", () => ({
   createWatchlistOutput: (...args: unknown[]) => mocks.createOutput(...args),
   getWatchlistTemplate: (...args: unknown[]) => mocks.getTemplate(...args),
   previewWatchlistTemplate: (...args: unknown[]) => mocks.previewTemplate(...args),
+  previewWatchlistSchedule: (...args: unknown[]) => mocks.previewSchedule(...args),
   testWatchlistSourceDraft: (...args: unknown[]) => mocks.testSource(...args)
 }))
 
@@ -154,6 +156,10 @@ beforeEach(() => {
   })
   mocks.createOutput.mockResolvedValue({ id: 505 })
   mocks.testSource.mockResolvedValue({ items: [], total: 0, ingestable: 0, filtered: 0 })
+  mocks.previewSchedule.mockResolvedValue({
+    next_run_at: "2027-02-01T08:00:00Z",
+    following_run_at: "2027-03-01T08:00:00Z"
+  })
 })
 
 describe("extractPipelineErrorMessage", () => {
@@ -186,6 +192,27 @@ describe("OverviewTab canonical setup", () => {
     await waitFor(() => expect(quickTrigger).toHaveFocus())
   })
 
+  it("adapts advanced schedule previews through the authenticated service", async () => {
+    render(<OverviewTab />)
+    fireEvent.click(await screen.findByTestId("watchlists-overview-cta-pipeline-builder"))
+    await waitFor(() => expect(pipeline().getByLabelText("AI Feed")).toBeInTheDocument())
+    fireEvent.click(pipeline().getByLabelText("AI Feed"))
+    fireEvent.click(pipeline().getByRole("button", { name: "Next: Cadence" }))
+
+    fireEvent.mouseDown(pipeline().getByLabelText("Schedule"))
+    fireEvent.click(await screen.findByText("Advanced cron", {
+      selector: ".ant-select-item-option-content"
+    }))
+    fireEvent.change(pipeline().getByLabelText("Cron expression"), {
+      target: { value: "0 8 1 * MON" }
+    })
+
+    await waitFor(() => expect(mocks.previewSchedule).toHaveBeenCalledWith(
+      { schedule_expr: "0 8 1 * MON", timezone: expect.any(String) },
+      expect.any(AbortSignal)
+    ), { timeout: 2_000 })
+  })
+
   it("tests an inactive monitor and activates the same id without creating a duplicate", async () => {
     render(<OverviewTab />)
 
@@ -211,7 +238,7 @@ describe("OverviewTab canonical setup", () => {
     expect(mocks.getBriefing).toHaveBeenCalledWith(404, expect.any(AbortSignal))
     expect(mocks.createOutput).not.toHaveBeenCalled()
     expect(mocks.setActiveTab).not.toHaveBeenCalled()
-    expect(pipeline().getByText("Test started. This draft stays inactive until you activate its schedule.")).toBeInTheDocument()
+    expect(pipeline().getByText("Test completed. Your briefing is ready. This draft stays inactive until you activate its schedule.")).toBeInTheDocument()
 
     fireEvent.click(await readyPipelineAction("Activate schedule"))
     await waitFor(() => expect(mocks.updateJob).toHaveBeenCalledWith(303, { active: true }))

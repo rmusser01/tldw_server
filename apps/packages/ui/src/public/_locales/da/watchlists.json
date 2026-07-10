@@ -561,7 +561,7 @@
     "message": "Aktivér tidsplan"
   },
   "overview_pipelineSetup_test_ready": {
-    "message": "Test startet. Denne kladde forbliver inaktiv, indtil du aktiverer tidsplanen."
+    "message": "Testen er fuldført. Din briefing er klar. Denne kladde forbliver inaktiv, indtil du aktiverer tidsplanen."
   },
   "overview_pipelineSetup_test_cancelled": {
     "message": "Test annulleret. Din kladde er gemt."
@@ -664,5 +664,26 @@
   },
   "overview_pipelineSetup_receipt_duration_other": {
     "message": "mål på {{count}} minutter"
+  },
+  "overview_pipelineSetup_schedulePreview_loading": {
+    "message": "Beregner den præcise tidsplan…"
+  },
+  "overview_pipelineSetup_schedulePreview_error": {
+    "message": "Den præcise tidsplan kunne ikke beregnes. Kontrollér cron-udtrykket og tidszonen."
+  },
+  "overview_pipelineSetup_test_running": {
+    "message": "Kørsel {{runId}} kører stadig: {{stage}}. Du kan lukke opsætningen og følge den i Oversigt."
+  },
+  "overview_pipelineSetup_test_failedStage": {
+    "message": "{{stage}} mislykkedes. Åbn kørsel {{runId}}, og prøv denne fase igen."
+  },
+  "overview_pipelineSetup_test_failedWithCode": {
+    "message": "{{stage}} mislykkedes ({{code}}). Åbn kørsel {{runId}}, og prøv denne fase igen."
+  },
+  "overview_pipelineSetup_test_cancelledStage": {
+    "message": "{{stage}} blev annulleret. Din kladde er gemt."
+  },
+  "overview_pipelineSetup_test_cancelledWithCode": {
+    "message": "{{stage}} blev annulleret ({{code}}). Din kladde er gemt."
   }
 }

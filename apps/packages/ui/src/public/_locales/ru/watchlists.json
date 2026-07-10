@@ -561,7 +561,7 @@
     "message": "Активировать расписание"
   },
   "overview_pipelineSetup_test_ready": {
-    "message": "Тест запущен. Черновик останется неактивным, пока вы не активируете его расписание."
+    "message": "Тест завершён. Сводка готова. Черновик останется неактивным, пока вы не активируете его расписание."
   },
   "overview_pipelineSetup_test_cancelled": {
     "message": "Тест отменён. Черновик сохранён."
@@ -682,5 +682,26 @@
   },
   "overview_pipelineSetup_receipt_duration_other": {
     "message": "цель — {{count}} минуты"
+  },
+  "overview_pipelineSetup_schedulePreview_loading": {
+    "message": "Вычисляется точное расписание…"
+  },
+  "overview_pipelineSetup_schedulePreview_error": {
+    "message": "Не удалось вычислить точное расписание. Проверьте выражение cron и часовой пояс."
+  },
+  "overview_pipelineSetup_test_running": {
+    "message": "Запуск {{runId}} всё ещё выполняется: {{stage}}. Можно закрыть настройку и следить за ним в Обзоре."
+  },
+  "overview_pipelineSetup_test_failedStage": {
+    "message": "Этап «{{stage}}» завершился ошибкой. Откройте запуск {{runId}} и повторите этот этап."
+  },
+  "overview_pipelineSetup_test_failedWithCode": {
+    "message": "Этап «{{stage}}» завершился ошибкой ({{code}}). Откройте запуск {{runId}} и повторите этот этап."
+  },
+  "overview_pipelineSetup_test_cancelledStage": {
+    "message": "Этап «{{stage}}» отменён. Черновик сохранён."
+  },
+  "overview_pipelineSetup_test_cancelledWithCode": {
+    "message": "Этап «{{stage}}» отменён ({{code}}). Черновик сохранён."
   }
 }

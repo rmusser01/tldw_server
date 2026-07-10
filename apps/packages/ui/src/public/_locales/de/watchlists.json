@@ -561,7 +561,7 @@
     "message": "Zeitplan aktivieren"
   },
   "overview_pipelineSetup_test_ready": {
-    "message": "Test gestartet. Dieser Entwurf bleibt inaktiv, bis Sie seinen Zeitplan aktivieren."
+    "message": "Test abgeschlossen. Ihr Briefing ist bereit. Dieser Entwurf bleibt inaktiv, bis Sie seinen Zeitplan aktivieren."
   },
   "overview_pipelineSetup_test_cancelled": {
     "message": "Test abgebrochen. Ihr Entwurf wurde gespeichert."
@@ -664,5 +664,26 @@
   },
   "overview_pipelineSetup_receipt_duration_other": {
     "message": "Ziel: {{count}} Minuten"
+  },
+  "overview_pipelineSetup_schedulePreview_loading": {
+    "message": "Der genaue Zeitplan wird berechnet…"
+  },
+  "overview_pipelineSetup_schedulePreview_error": {
+    "message": "Der genaue Zeitplan konnte nicht berechnet werden. Prüfen Sie Cron-Ausdruck und Zeitzone."
+  },
+  "overview_pipelineSetup_test_running": {
+    "message": "Ausführung {{runId}} läuft noch: {{stage}}. Sie können die Einrichtung schließen und sie in der Übersicht verfolgen."
+  },
+  "overview_pipelineSetup_test_failedStage": {
+    "message": "{{stage}} ist fehlgeschlagen. Öffnen Sie Ausführung {{runId}} und versuchen Sie diese Phase erneut."
+  },
+  "overview_pipelineSetup_test_failedWithCode": {
+    "message": "{{stage}} ist fehlgeschlagen ({{code}}). Öffnen Sie Ausführung {{runId}} und versuchen Sie diese Phase erneut."
+  },
+  "overview_pipelineSetup_test_cancelledStage": {
+    "message": "{{stage}} wurde abgebrochen. Ihr Entwurf wurde gespeichert."
+  },
+  "overview_pipelineSetup_test_cancelledWithCode": {
+    "message": "{{stage}} wurde abgebrochen ({{code}}). Ihr Entwurf wurde gespeichert."
   }
 }

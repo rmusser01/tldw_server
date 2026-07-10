@@ -63,6 +63,8 @@ import type {
   WatchlistRunAudioStatus,
   WatchlistRunDiagnostics,
   WatchlistRunStageRetryResponse,
+  WatchlistSchedulePreviewRequest,
+  WatchlistSchedulePreviewResponse,
   WatchlistSettings,
   WatchlistSource,
   WatchlistSourceCreate,
@@ -562,6 +564,18 @@ export const restoreWatchlistJob = async (jobId: number): Promise<WatchlistJob> 
   return bgRequest<WatchlistJob>({
     path: `/api/v1/watchlists/jobs/${jobId}/restore` as any,
     method: "POST"
+  })
+}
+
+export const previewWatchlistSchedule = async (
+  payload: WatchlistSchedulePreviewRequest,
+  signal?: AbortSignal
+): Promise<WatchlistSchedulePreviewResponse> => {
+  return bgRequest<WatchlistSchedulePreviewResponse>({
+    path: "/api/v1/watchlists/schedules/preview",
+    method: "POST",
+    body: payload,
+    abortSignal: signal
   })
 }
 

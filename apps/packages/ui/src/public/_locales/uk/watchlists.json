@@ -561,7 +561,7 @@
     "message": "Активувати розклад"
   },
   "overview_pipelineSetup_test_ready": {
-    "message": "Тест розпочато. Чернетка залишатиметься неактивною, доки ви не активуєте її розклад."
+    "message": "Тест завершено. Зведення готове. Чернетка залишатиметься неактивною, доки ви не активуєте її розклад."
   },
   "overview_pipelineSetup_test_cancelled": {
     "message": "Тест скасовано. Чернетку збережено."
@@ -682,5 +682,26 @@
   },
   "overview_pipelineSetup_receipt_duration_other": {
     "message": "ціль — {{count}} хвилини"
+  },
+  "overview_pipelineSetup_schedulePreview_loading": {
+    "message": "Обчислюється точний розклад…"
+  },
+  "overview_pipelineSetup_schedulePreview_error": {
+    "message": "Не вдалося обчислити точний розклад. Перевірте вираз cron і часовий пояс."
+  },
+  "overview_pipelineSetup_test_running": {
+    "message": "Запуск {{runId}} досі виконується: {{stage}}. Можна закрити налаштування й стежити за ним в Огляді."
+  },
+  "overview_pipelineSetup_test_failedStage": {
+    "message": "Етап «{{stage}}» завершився помилкою. Відкрийте запуск {{runId}} і повторіть цей етап."
+  },
+  "overview_pipelineSetup_test_failedWithCode": {
+    "message": "Етап «{{stage}}» завершився помилкою ({{code}}). Відкрийте запуск {{runId}} і повторіть цей етап."
+  },
+  "overview_pipelineSetup_test_cancelledStage": {
+    "message": "Етап «{{stage}}» скасовано. Чернетку збережено."
+  },
+  "overview_pipelineSetup_test_cancelledWithCode": {
+    "message": "Етап «{{stage}}» скасовано ({{code}}). Чернетку збережено."
   }
 }

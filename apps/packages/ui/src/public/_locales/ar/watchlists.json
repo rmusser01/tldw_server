@@ -561,7 +561,7 @@
     "message": "تفعيل الجدول"
   },
   "overview_pipelineSetup_test_ready": {
-    "message": "بدأ الاختبار. تبقى هذه المسودة غير مفعلة حتى تفعّل جدولها."
+    "message": "اكتمل الاختبار. موجزك جاهز. تبقى هذه المسودة غير مفعلة حتى تفعّل جدولها."
   },
   "overview_pipelineSetup_test_cancelled": {
     "message": "أُلغي الاختبار. حُفظت مسودتك."
@@ -700,5 +700,26 @@
   },
   "overview_pipelineSetup_receipt_duration_other": {
     "message": "بهدف {{count}} دقيقة"
+  },
+  "overview_pipelineSetup_schedulePreview_loading": {
+    "message": "جارٍ حساب الجدول الدقيق…"
+  },
+  "overview_pipelineSetup_schedulePreview_error": {
+    "message": "تعذر حساب الجدول الدقيق. راجع تعبير cron والمنطقة الزمنية."
+  },
+  "overview_pipelineSetup_test_running": {
+    "message": "لا يزال التشغيل {{runId}} قيد التنفيذ: {{stage}}. يمكنك إغلاق الإعداد ومراقبته من نظرة عامة."
+  },
+  "overview_pipelineSetup_test_failedStage": {
+    "message": "فشلت {{stage}}. افتح التشغيل {{runId}} وأعد محاولة هذه المرحلة."
+  },
+  "overview_pipelineSetup_test_failedWithCode": {
+    "message": "فشلت {{stage}} ({{code}}). افتح التشغيل {{runId}} وأعد محاولة هذه المرحلة."
+  },
+  "overview_pipelineSetup_test_cancelledStage": {
+    "message": "أُلغيت {{stage}}. حُفظت مسودتك."
+  },
+  "overview_pipelineSetup_test_cancelledWithCode": {
+    "message": "أُلغيت {{stage}} ({{code}}). حُفظت مسودتك."
   }
 }

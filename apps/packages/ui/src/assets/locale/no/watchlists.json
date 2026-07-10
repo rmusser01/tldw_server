@@ -163,6 +163,10 @@
       "nextOccurrence": "Neste kjøring",
       "manualOccurrence": "Bare manuelt",
       "nextOccurrencePending": "Lagre en gyldig tidsplan for å beregne det nøyaktige tidspunktet.",
+      "schedulePreview": {
+        "loading": "Beregner den nøyaktige tidsplanen…",
+        "error": "Kunne ikke beregne den nøyaktige tidsplanen. Kontroller cron-uttrykket og tidssonen."
+      },
       "briefing": {
         "question": "Hva lager du?",
         "help": "Velg redaksjonell form. Alle alternativene er fortsatt forankret i de valgte kildene.",
@@ -275,7 +279,12 @@
         "text": "Generer testrapport",
         "send": "Send test",
         "activate": "Aktiver tidsplan",
-        "ready": "Test startet. Dette utkastet forblir inaktivt til du aktiverer tidsplanen.",
+        "ready": "Testen er fullført. Orienteringen er klar. Dette utkastet forblir inaktivt til du aktiverer tidsplanen.",
+        "running": "Kjøring {{runId}} pågår fortsatt: {{stage}}. Du kan lukke oppsettet og følge den i Oversikt.",
+        "failedStage": "{{stage}} mislyktes. Åpne kjøring {{runId}} og prøv dette trinnet på nytt.",
+        "failedWithCode": "{{stage}} mislyktes ({{code}}). Åpne kjøring {{runId}} og prøv dette trinnet på nytt.",
+        "cancelledStage": "{{stage}} ble avbrutt. Utkastet ditt er lagret.",
+        "cancelledWithCode": "{{stage}} ble avbrutt ({{code}}). Utkastet ditt er lagret.",
         "cancelled": "Test avbrutt. Utkastet er lagret.",
         "failed": "Testen mislyktes. Utkastet er lagret. {{message}}",
         "status": {

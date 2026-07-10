@@ -561,7 +561,7 @@
     "message": "فعال‌سازی زمان‌بندی"
   },
   "overview_pipelineSetup_test_ready": {
-    "message": "آزمون آغاز شد. این پیش‌نویس تا فعال‌سازی زمان‌بندی غیرفعال می‌ماند."
+    "message": "آزمون کامل شد. گزارش شما آماده است. این پیش‌نویس تا فعال‌سازی زمان‌بندی غیرفعال می‌ماند."
   },
   "overview_pipelineSetup_test_cancelled": {
     "message": "آزمون لغو شد. پیش‌نویس شما ذخیره شد."
@@ -664,5 +664,26 @@
   },
   "overview_pipelineSetup_receipt_duration_other": {
     "message": "با هدف {{count}} دقیقه"
+  },
+  "overview_pipelineSetup_schedulePreview_loading": {
+    "message": "در حال محاسبهٔ زمان‌بندی دقیق…"
+  },
+  "overview_pipelineSetup_schedulePreview_error": {
+    "message": "محاسبهٔ زمان‌بندی دقیق ممکن نشد. عبارت cron و منطقهٔ زمانی را بررسی کنید."
+  },
+  "overview_pipelineSetup_test_running": {
+    "message": "اجرای {{runId}} هنوز در حال انجام است: {{stage}}. می‌توانید راه‌اندازی را ببندید و آن را در نمای کلی پیگیری کنید."
+  },
+  "overview_pipelineSetup_test_failedStage": {
+    "message": "{{stage}} ناموفق بود. اجرای {{runId}} را باز کنید و این مرحله را دوباره امتحان کنید."
+  },
+  "overview_pipelineSetup_test_failedWithCode": {
+    "message": "{{stage}} ناموفق بود ({{code}}). اجرای {{runId}} را باز کنید و این مرحله را دوباره امتحان کنید."
+  },
+  "overview_pipelineSetup_test_cancelledStage": {
+    "message": "{{stage}} لغو شد. پیش‌نویس شما ذخیره شد."
+  },
+  "overview_pipelineSetup_test_cancelledWithCode": {
+    "message": "{{stage}} لغو شد ({{code}}). پیش‌نویس شما ذخیره شد."
   }
 }

@@ -163,6 +163,10 @@
       "nextOccurrence": "Nästa körning",
       "manualOccurrence": "Endast manuellt",
       "nextOccurrencePending": "Spara ett giltigt schema för att beräkna den exakta tiden.",
+      "schedulePreview": {
+        "loading": "Beräknar det exakta schemat…",
+        "error": "Det exakta schemat kunde inte beräknas. Kontrollera cron-uttrycket och tidszonen."
+      },
       "briefing": {
         "question": "Vad skapar du?",
         "help": "Välj redaktionell form. Alla alternativ bygger fortfarande på dina valda källor.",
@@ -275,7 +279,12 @@
         "text": "Skapa testrapport",
         "send": "Skicka test",
         "activate": "Aktivera schema",
-        "ready": "Testet startade. Utkastet förblir inaktivt tills du aktiverar schemat.",
+        "ready": "Testet är klart. Din briefing är redo. Utkastet förblir inaktivt tills du aktiverar schemat.",
+        "running": "Körning {{runId}} pågår fortfarande: {{stage}}. Du kan stänga konfigurationen och följa den i Översikt.",
+        "failedStage": "{{stage}} misslyckades. Öppna körning {{runId}} och försök med steget igen.",
+        "failedWithCode": "{{stage}} misslyckades ({{code}}). Öppna körning {{runId}} och försök med steget igen.",
+        "cancelledStage": "{{stage}} avbröts. Utkastet har sparats.",
+        "cancelledWithCode": "{{stage}} avbröts ({{code}}). Utkastet har sparats.",
         "cancelled": "Testet avbröts. Utkastet har sparats.",
         "failed": "Testet misslyckades. Utkastet har sparats. {{message}}",
         "status": {

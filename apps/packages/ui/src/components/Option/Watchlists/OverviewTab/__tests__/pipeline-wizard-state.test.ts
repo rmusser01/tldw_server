@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest"
 import {
   buildPipelineWizardReviewSummary,
   createDefaultPipelineWizardDraft,
+  getPipelineWizardBriefingOutcome,
   getPipelineWizardBriefingStatus,
   getPipelineWizardSourceSignature,
   normalizePipelineWizardSpeakers,
@@ -154,26 +155,40 @@ describe("watchlists pipeline wizard state", () => {
     })).toBe("cancelled")
   })
 
-  it("projects exact advanced cron occurrences with timezone and DST semantics", () => {
+  it("leaves advanced cron occurrence projection to the backend", () => {
     const base = {
       ...createDefaultPipelineWizardDraft(),
       scheduleMode: "advanced" as const,
       scheduleAdvancedCron: "0 8 * * MON-FRI",
       timezone: "UTC"
     }
-    expect(projectPipelineWizardOccurrences(base, new Date("2026-07-12T07:59:00Z"))).toEqual({
-      nextRunAt: "2026-07-13T08:00:00.000Z",
-      followingRunAt: "2026-07-14T08:00:00.000Z"
-    })
 
-    expect(projectPipelineWizardOccurrences({
-      ...base,
-      scheduleAdvancedCron: "30 1 * * *",
-      timezone: "America/Los_Angeles"
-    }, new Date("2026-10-31T08:31:00Z"))).toEqual({
-      nextRunAt: "2026-11-01T08:30:00.000Z",
-      followingRunAt: "2026-11-01T09:30:00.000Z"
+    expect(projectPipelineWizardOccurrences(base, new Date("2026-07-12T07:59:00Z"))).toEqual({})
+  })
+
+  it("classifies briefing outcomes without embedding user-facing prose", () => {
+    const projection = {
+      occurrence_id: 1,
+      run_id: 44,
+      job_id: 7,
+      artifact_status: "running" as const,
+      delivery_status: "waiting_for_artifacts" as const,
+      stages: { generate_audio: { status: "failed" as const, code: "tts_unavailable" } },
+      output: null,
+      audio: null,
+      editorial: {},
+      selection: {},
+      next_run_at: null,
+      recovery: {}
+    }
+
+    expect(getPipelineWizardBriefingOutcome(projection)).toEqual({
+      status: "failed",
+      stage: "generate_audio",
+      code: "tts_unavailable",
+      runId: 44
     })
+    expect(JSON.stringify(getPipelineWizardBriefingOutcome(projection))).not.toContain("failed (")
   })
 
   it("normalizes internal speaker ids so duplicate ids never become user errors", () => {

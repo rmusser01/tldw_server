@@ -163,6 +163,10 @@
       "nextOccurrence": "Nächste Ausführung",
       "manualOccurrence": "Nur manuell",
       "nextOccurrencePending": "Speichern Sie einen gültigen Zeitplan, um die genaue Zeit zu berechnen.",
+      "schedulePreview": {
+        "loading": "Der genaue Zeitplan wird berechnet…",
+        "error": "Der genaue Zeitplan konnte nicht berechnet werden. Prüfen Sie Cron-Ausdruck und Zeitzone."
+      },
       "briefing": {
         "question": "Was möchten Sie erstellen?",
         "help": "Wählen Sie die redaktionelle Form. Jede Option bleibt auf Ihren ausgewählten Quellen gegründet.",
@@ -275,7 +279,12 @@
         "text": "Testbericht erstellen",
         "send": "Test senden",
         "activate": "Zeitplan aktivieren",
-        "ready": "Test gestartet. Dieser Entwurf bleibt inaktiv, bis Sie seinen Zeitplan aktivieren.",
+        "ready": "Test abgeschlossen. Ihr Briefing ist bereit. Dieser Entwurf bleibt inaktiv, bis Sie seinen Zeitplan aktivieren.",
+        "running": "Ausführung {{runId}} läuft noch: {{stage}}. Sie können die Einrichtung schließen und sie in der Übersicht verfolgen.",
+        "failedStage": "{{stage}} ist fehlgeschlagen. Öffnen Sie Ausführung {{runId}} und versuchen Sie diese Phase erneut.",
+        "failedWithCode": "{{stage}} ist fehlgeschlagen ({{code}}). Öffnen Sie Ausführung {{runId}} und versuchen Sie diese Phase erneut.",
+        "cancelledStage": "{{stage}} wurde abgebrochen. Ihr Entwurf wurde gespeichert.",
+        "cancelledWithCode": "{{stage}} wurde abgebrochen ({{code}}). Ihr Entwurf wurde gespeichert.",
         "cancelled": "Test abgebrochen. Ihr Entwurf wurde gespeichert.",
         "failed": "Test fehlgeschlagen. Ihr Entwurf wurde gespeichert. {{message}}",
         "status": {

@@ -24,6 +24,7 @@ from datetime import datetime, timedelta, timezone
 from html import escape
 from pathlib import Path
 from typing import Any, Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import (
     APIRouter,
@@ -258,6 +259,8 @@ from tldw_Server_API.app.api.v1.schemas.watchlists_schemas import (  # noqa: E40
     WatchlistBriefingProjection,
     WatchlistBriefingRetryRequest,
     WatchlistReportReadiness,
+    WatchlistSchedulePreviewRequest,
+    WatchlistSchedulePreviewResponse,
     WatchlistsListResponse,
     WatchlistUpdateRequest,
     WatchlistTemplateCreateRequest,
@@ -334,6 +337,48 @@ _WATCHLISTS_UX_BASELINE = {
 def _utcnow_iso() -> str:
     """Return the current UTC timestamp as an ISO-8601 string."""
     return datetime.now(timezone.utc).isoformat()
+
+
+@router.post(
+    "/schedules/preview",
+    response_model=WatchlistSchedulePreviewResponse,
+    summary="Preview the next two schedule occurrences",
+    dependencies=[Depends(rbac_rate_limit("watchlists.read"))],
+)
+async def preview_watchlist_schedule(
+    payload: WatchlistSchedulePreviewRequest = Body(...),
+    current_user: User = Depends(get_request_user),
+    _db: WatchlistsDatabase = Depends(get_watchlists_db_for_user),
+) -> WatchlistSchedulePreviewResponse:
+    """Return APScheduler's exact next two occurrences for one authenticated user."""
+    _ = current_user
+    timezone_name = payload.timezone.strip() or "UTC"
+    try:
+        schedule_timezone = ZoneInfo(timezone_name)
+    except (ValueError, ZoneInfoNotFoundError):
+        raise HTTPException(status_code=422, detail="invalid_timezone") from None
+
+    try:
+        from apscheduler.triggers.cron import CronTrigger
+
+        trigger = CronTrigger.from_crontab(
+            payload.schedule_expr.strip(),
+            timezone=schedule_timezone,
+        )
+    except ValueError:
+        raise HTTPException(status_code=422, detail="invalid_schedule_expr") from None
+
+    now = datetime.now(schedule_timezone)
+    next_run_at = trigger.get_next_fire_time(None, now)
+    following_run_at = (
+        trigger.get_next_fire_time(next_run_at, next_run_at)
+        if next_run_at is not None
+        else None
+    )
+    return WatchlistSchedulePreviewResponse(
+        next_run_at=next_run_at,
+        following_run_at=following_run_at,
+    )
 
 
 def _safe_ratio(numerator: int | float, denominator: int | float) -> float:

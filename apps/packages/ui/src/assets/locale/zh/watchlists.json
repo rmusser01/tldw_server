@@ -163,6 +163,10 @@
       "nextOccurrence": "下次运行",
       "manualOccurrence": "仅手动",
       "nextOccurrencePending": "保存有效计划以计算准确时间。",
+      "schedulePreview": {
+        "loading": "正在计算准确计划…",
+        "error": "无法计算准确计划。请检查 cron 表达式和时区。"
+      },
       "briefing": {
         "question": "您要制作什么？",
         "help": "请选择编辑形式。每个选项都以您选择的来源为依据。",
@@ -275,7 +279,12 @@
         "text": "生成测试报告",
         "send": "发送测试",
         "activate": "启用计划",
-        "ready": "测试已开始。在启用计划之前，此草稿保持未启用状态。",
+        "ready": "测试已完成。简报已准备就绪。在启用计划之前，此草稿保持未启用状态。",
+        "running": "运行 {{runId}} 仍在进行：{{stage}}。你可以关闭设置并在概览中监控。",
+        "failedStage": "{{stage}} 失败。请打开运行 {{runId}} 并重试此阶段。",
+        "failedWithCode": "{{stage}} 失败（{{code}}）。请打开运行 {{runId}} 并重试此阶段。",
+        "cancelledStage": "{{stage}} 已取消。草稿已保存。",
+        "cancelledWithCode": "{{stage}} 已取消（{{code}}）。草稿已保存。",
         "cancelled": "测试已取消。草稿已保存。",
         "failed": "测试失败。草稿已保存。{{message}}",
         "status": {

@@ -561,7 +561,7 @@
     "message": "Activer la planification"
   },
   "overview_pipelineSetup_test_ready": {
-    "message": "Test démarré. Ce brouillon reste inactif jusqu’à l’activation de sa planification."
+    "message": "Test terminé. Votre briefing est prêt. Ce brouillon reste inactif jusqu’à l’activation de sa planification."
   },
   "overview_pipelineSetup_test_cancelled": {
     "message": "Test annulé. Votre brouillon est enregistré."
@@ -673,5 +673,26 @@
   },
   "overview_pipelineSetup_receipt_duration_other": {
     "message": "durée cible de {{count}} minutes"
+  },
+  "overview_pipelineSetup_schedulePreview_loading": {
+    "message": "Calcul de la planification exacte…"
+  },
+  "overview_pipelineSetup_schedulePreview_error": {
+    "message": "Impossible de calculer la planification exacte. Vérifiez l’expression cron et le fuseau horaire."
+  },
+  "overview_pipelineSetup_test_running": {
+    "message": "L’exécution {{runId}} est toujours en cours : {{stage}}. Vous pouvez fermer la configuration et la suivre dans Vue d’ensemble."
+  },
+  "overview_pipelineSetup_test_failedStage": {
+    "message": "{{stage}} a échoué. Ouvrez l’exécution {{runId}} et relancez cette étape."
+  },
+  "overview_pipelineSetup_test_failedWithCode": {
+    "message": "{{stage}} a échoué ({{code}}). Ouvrez l’exécution {{runId}} et relancez cette étape."
+  },
+  "overview_pipelineSetup_test_cancelledStage": {
+    "message": "{{stage}} a été annulée. Votre brouillon est enregistré."
+  },
+  "overview_pipelineSetup_test_cancelledWithCode": {
+    "message": "{{stage}} a été annulée ({{code}}). Votre brouillon est enregistré."
   }
 }

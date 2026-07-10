@@ -163,6 +163,10 @@
       "nextOccurrence": "Prochaine exécution",
       "manualOccurrence": "Manuel uniquement",
       "nextOccurrencePending": "Enregistrez une planification valide pour calculer l’heure exacte.",
+      "schedulePreview": {
+        "loading": "Calcul de la planification exacte…",
+        "error": "Impossible de calculer la planification exacte. Vérifiez l’expression cron et le fuseau horaire."
+      },
       "briefing": {
         "question": "Que créez-vous ?",
         "help": "Choisissez la forme éditoriale. Chaque option reste fondée sur les sources sélectionnées.",
@@ -278,7 +282,12 @@
         "text": "Générer le rapport de test",
         "send": "Envoyer le test",
         "activate": "Activer la planification",
-        "ready": "Test démarré. Ce brouillon reste inactif jusqu’à l’activation de sa planification.",
+        "ready": "Test terminé. Votre briefing est prêt. Ce brouillon reste inactif jusqu’à l’activation de sa planification.",
+        "running": "L’exécution {{runId}} est toujours en cours : {{stage}}. Vous pouvez fermer la configuration et la suivre dans Vue d’ensemble.",
+        "failedStage": "{{stage}} a échoué. Ouvrez l’exécution {{runId}} et relancez cette étape.",
+        "failedWithCode": "{{stage}} a échoué ({{code}}). Ouvrez l’exécution {{runId}} et relancez cette étape.",
+        "cancelledStage": "{{stage}} a été annulée. Votre brouillon est enregistré.",
+        "cancelledWithCode": "{{stage}} a été annulée ({{code}}). Votre brouillon est enregistré.",
         "cancelled": "Test annulé. Votre brouillon est enregistré.",
         "failed": "Échec du test. Votre brouillon est enregistré. {{message}}",
         "status": {

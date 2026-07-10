@@ -561,7 +561,7 @@
     "message": "スケジュールを有効化"
   },
   "overview_pipelineSetup_test_ready": {
-    "message": "テストを開始しました。スケジュールを有効化するまで、この下書きは無効のままです。"
+    "message": "テストが完了しました。ブリーフィングの準備ができました。スケジュールを有効化するまで、この下書きは無効のままです。"
   },
   "overview_pipelineSetup_test_cancelled": {
     "message": "テストをキャンセルしました。下書きは保存されています。"
@@ -664,5 +664,26 @@
   },
   "overview_pipelineSetup_receipt_duration_other": {
     "message": "目標 {{count}} 分"
+  },
+  "overview_pipelineSetup_schedulePreview_loading": {
+    "message": "正確なスケジュールを計算しています…"
+  },
+  "overview_pipelineSetup_schedulePreview_error": {
+    "message": "正確なスケジュールを計算できませんでした。cron 式とタイムゾーンを確認してください。"
+  },
+  "overview_pipelineSetup_test_running": {
+    "message": "実行 {{runId}} はまだ処理中です：{{stage}}。設定を閉じて、概要から監視できます。"
+  },
+  "overview_pipelineSetup_test_failedStage": {
+    "message": "{{stage}} に失敗しました。実行 {{runId}} を開き、このステージを再試行してください。"
+  },
+  "overview_pipelineSetup_test_failedWithCode": {
+    "message": "{{stage}} に失敗しました（{{code}}）。実行 {{runId}} を開き、このステージを再試行してください。"
+  },
+  "overview_pipelineSetup_test_cancelledStage": {
+    "message": "{{stage}} はキャンセルされました。下書きは保存されています。"
+  },
+  "overview_pipelineSetup_test_cancelledWithCode": {
+    "message": "{{stage}} はキャンセルされました（{{code}}）。下書きは保存されています。"
   }
 }

@@ -561,7 +561,7 @@
     "message": "Activar programación"
   },
   "overview_pipelineSetup_test_ready": {
-    "message": "Prueba iniciada. Este borrador permanece inactivo hasta que actives su programación."
+    "message": "Prueba completada. Tu informe está listo. Este borrador permanece inactivo hasta que actives su programación."
   },
   "overview_pipelineSetup_test_cancelled": {
     "message": "Prueba cancelada. Tu borrador está guardado."
@@ -673,5 +673,26 @@
   },
   "overview_pipelineSetup_receipt_duration_other": {
     "message": "objetivo de {{count}} minutos"
+  },
+  "overview_pipelineSetup_schedulePreview_loading": {
+    "message": "Calculando la programación exacta…"
+  },
+  "overview_pipelineSetup_schedulePreview_error": {
+    "message": "No se pudo calcular la programación exacta. Revisa la expresión cron y la zona horaria."
+  },
+  "overview_pipelineSetup_test_running": {
+    "message": "La ejecución {{runId}} sigue activa: {{stage}}. Puedes cerrar la configuración y supervisarla en Resumen."
+  },
+  "overview_pipelineSetup_test_failedStage": {
+    "message": "{{stage}} falló. Abre la ejecución {{runId}} y reintenta esta etapa."
+  },
+  "overview_pipelineSetup_test_failedWithCode": {
+    "message": "{{stage}} falló ({{code}}). Abre la ejecución {{runId}} y reintenta esta etapa."
+  },
+  "overview_pipelineSetup_test_cancelledStage": {
+    "message": "{{stage}} se canceló. Tu borrador está guardado."
+  },
+  "overview_pipelineSetup_test_cancelledWithCode": {
+    "message": "{{stage}} se canceló ({{code}}). Tu borrador está guardado."
   }
 }

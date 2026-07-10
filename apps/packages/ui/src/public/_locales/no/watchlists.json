@@ -561,7 +561,7 @@
     "message": "Aktiver tidsplan"
   },
   "overview_pipelineSetup_test_ready": {
-    "message": "Test startet. Dette utkastet forblir inaktivt til du aktiverer tidsplanen."
+    "message": "Testen er fullført. Orienteringen er klar. Dette utkastet forblir inaktivt til du aktiverer tidsplanen."
   },
   "overview_pipelineSetup_test_cancelled": {
     "message": "Test avbrutt. Utkastet er lagret."
@@ -664,5 +664,26 @@
   },
   "overview_pipelineSetup_receipt_duration_other": {
     "message": "mål på {{count}} minutter"
+  },
+  "overview_pipelineSetup_schedulePreview_loading": {
+    "message": "Beregner den nøyaktige tidsplanen…"
+  },
+  "overview_pipelineSetup_schedulePreview_error": {
+    "message": "Kunne ikke beregne den nøyaktige tidsplanen. Kontroller cron-uttrykket og tidssonen."
+  },
+  "overview_pipelineSetup_test_running": {
+    "message": "Kjøring {{runId}} pågår fortsatt: {{stage}}. Du kan lukke oppsettet og følge den i Oversikt."
+  },
+  "overview_pipelineSetup_test_failedStage": {
+    "message": "{{stage}} mislyktes. Åpne kjøring {{runId}} og prøv dette trinnet på nytt."
+  },
+  "overview_pipelineSetup_test_failedWithCode": {
+    "message": "{{stage}} mislyktes ({{code}}). Åpne kjøring {{runId}} og prøv dette trinnet på nytt."
+  },
+  "overview_pipelineSetup_test_cancelledStage": {
+    "message": "{{stage}} ble avbrutt. Utkastet ditt er lagret."
+  },
+  "overview_pipelineSetup_test_cancelledWithCode": {
+    "message": "{{stage}} ble avbrutt ({{code}}). Utkastet ditt er lagret."
   }
 }

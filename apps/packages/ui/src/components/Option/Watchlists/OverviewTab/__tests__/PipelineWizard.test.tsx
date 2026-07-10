@@ -1,5 +1,5 @@
 import React from "react"
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { PipelineWizard } from "../PipelineWizard"
 
@@ -156,6 +156,82 @@ describe("PipelineWizard", () => {
     const receipt = screen.getByTestId("watchlists-pipeline-receipt")
     expect(receipt).toHaveTextContent("Save a valid schedule to calculate the exact time.")
     expect(receipt).not.toHaveTextContent("Manual only")
+  })
+
+  it("cancels stale advanced previews and uses the latest exact backend receipt", async () => {
+    let resolveFirst: ((value: { nextRunAt?: string; followingRunAt?: string }) => void) | undefined
+    const onPreviewSchedule = vi.fn()
+      .mockImplementationOnce((_draft, _options) => new Promise((resolve) => {
+        resolveFirst = resolve
+      }))
+      .mockResolvedValueOnce({
+        nextRunAt: "2026-08-03T08:00:00Z",
+        followingRunAt: "2026-09-01T08:00:00Z"
+      })
+    renderWizard({
+      initialStep: "cadence",
+      initialDraft: {
+        ...sportscastDraft,
+        scheduleMode: "advanced",
+        scheduleAdvancedCron: "0 8 1 * MON",
+        timezone: "UTC",
+        nextRunAt: undefined,
+        followingRunAt: undefined
+      },
+      onPreviewSchedule
+    } as Partial<React.ComponentProps<typeof PipelineWizard>>)
+
+    await waitFor(() => expect(onPreviewSchedule).toHaveBeenCalledTimes(1), { timeout: 2_000 })
+    expect(inDialog().getByText("Calculating the exact schedule…")).toBeInTheDocument()
+    const firstSignal = onPreviewSchedule.mock.calls[0]?.[1]?.signal as AbortSignal
+
+    fireEvent.change(inDialog().getByLabelText("Cron expression"), {
+      target: { value: "0 8 1 * TUE" }
+    })
+
+    await waitFor(() => expect(onPreviewSchedule).toHaveBeenCalledTimes(2), { timeout: 2_000 })
+    expect(firstSignal.aborted).toBe(true)
+    resolveFirst?.({ nextRunAt: "2026-07-01T08:00:00Z" })
+    expect(await inDialog().findByText(/Monday, August 3 at 8:00 AM UTC/)).toBeInTheDocument()
+    expect(inDialog().queryByText(/Wednesday, July 1/)).not.toBeInTheDocument()
+
+    fireEvent.click(inDialog().getByRole("button", { name: "Next: Briefing" }))
+    fireEvent.click(inDialog().getByRole("button", { name: "Next: Delivery" }))
+    fireEvent.click(inDialog().getByRole("button", { name: "Next: Test" }))
+    expect(screen.getByTestId("watchlists-pipeline-receipt")).toHaveTextContent(
+      "Monday, August 3 at 8:00 AM UTC"
+    )
+    expect(screen.getByTestId("watchlists-pipeline-receipt")).not.toHaveTextContent("Manual only")
+  })
+
+  it("does not preview manual schedules and surfaces advanced preview failures", async () => {
+    const manualPreview = vi.fn()
+    const manualView = render(
+      <PipelineWizard
+        open
+        initialStep="cadence"
+        initialDraft={{ ...sportscastDraft, scheduleMode: "manual", nextRunAt: undefined }}
+        sources={sources}
+        onCancel={vi.fn()}
+        onPreviewSchedule={manualPreview as never}
+      />
+    )
+    await new Promise((resolve) => setTimeout(resolve, 350))
+    expect(manualPreview).not.toHaveBeenCalled()
+    manualView.unmount()
+
+    renderWizard({
+      initialStep: "cadence",
+      initialDraft: {
+        ...sportscastDraft,
+        scheduleMode: "advanced",
+        scheduleAdvancedCron: "0 8 1 * MON",
+        nextRunAt: undefined
+      },
+      onPreviewSchedule: vi.fn().mockRejectedValue(new Error("invalid_schedule_expr"))
+    } as Partial<React.ComponentProps<typeof PipelineWizard>>)
+
+    expect(await inDialog().findByText("Could not calculate the exact schedule. Review the cron expression and timezone.", {}, { timeout: 2_000 })).toBeInTheDocument()
   })
 
   it("does not send external delivery during the default test", async () => {
@@ -399,6 +475,12 @@ describe("PipelineWizard", () => {
   })
 
   it("reports a bounded foreground poll as still running with run context", async () => {
+    const projection = {
+      ...readyProjection({ generate_audio: { status: "running" } }),
+      run_id: 88,
+      artifact_status: "running" as const,
+      delivery_status: "waiting_for_artifacts" as const
+    }
     renderWizard({
       initialStep: "test",
       initialDraft: sportscastDraft,
@@ -406,14 +488,58 @@ describe("PipelineWizard", () => {
         jobId: 77,
         runId: 88,
         status: "running",
-        message: "Run 88 is still generating audio. You can close setup and monitor it from Overview."
+        briefing: projection
       })
     })
 
     fireEvent.click(inDialog().getByRole("button", { name: "Generate 60-second sample" }))
 
-    expect(await inDialog().findByText(/Run 88 is still generating audio/)).toBeInTheDocument()
+    expect(await inDialog().findByText("Run 88 is still running: Create audio. You can close setup and monitor it from Overview.")).toBeInTheDocument()
     expect(inDialog().queryByText(/Test started/)).not.toBeInTheDocument()
+  })
+
+  it("localizes ready, failed, and running terminal outcomes", async () => {
+    i18nMocks.language = "es"
+    i18nMocks.translations = {
+      "watchlists:overview.pipelineSetup.test.ready": "Prueba completada. El informe está listo.",
+      "watchlists:overview.pipelineSetup.test.failedWithCode": "{{stage}} falló ({{code}}). Abre la ejecución {{runId}} y reintenta esta etapa.",
+      "watchlists:overview.pipelineSetup.test.running": "La ejecución {{runId}} sigue activa: {{stage}}. Supervísala en Resumen.",
+      "watchlists:overview.pipelineSetup.test.stages.persistence": "Guardar informe en Informes",
+      "watchlists:overview.pipelineSetup.test.stages.audio": "Crear audio"
+    }
+    const outcomes = [
+      {
+        projection: readyProjection(),
+        expected: "Prueba completada. El informe está listo."
+      },
+      {
+        projection: {
+          ...readyProjection(),
+          artifact_status: "failed" as const,
+          stages: { persist_text: { status: "failed" as const, code: "persist_failed" } }
+        },
+        expected: "Guardar informe en Informes falló (persist_failed). Abre la ejecución 2 y reintenta esta etapa."
+      },
+      {
+        projection: {
+          ...readyProjection(),
+          artifact_status: "running" as const,
+          stages: { generate_audio: { status: "running" as const } }
+        },
+        expected: "La ejecución 2 sigue activa: Crear audio. Supervísala en Resumen."
+      }
+    ]
+
+    for (const { projection, expected } of outcomes) {
+      renderWizard({
+        initialStep: "test",
+        initialDraft: sportscastDraft,
+        onTest: vi.fn().mockResolvedValue({ status: "ready", briefing: projection })
+      })
+      fireEvent.click(inDialog().getByRole("button", { name: "Generate 60-second sample" }))
+      expect(await inDialog().findByText(expected)).toBeInTheDocument()
+      cleanup()
+    }
   })
 
   it("surfaces a current AbortError instead of assuming it is stale", async () => {

@@ -163,6 +163,10 @@
       "nextOccurrence": "Prossima esecuzione",
       "manualOccurrence": "Solo manuale",
       "nextOccurrencePending": "Salva una pianificazione valida per calcolare l’ora esatta.",
+      "schedulePreview": {
+        "loading": "Calcolo della pianificazione esatta…",
+        "error": "Impossibile calcolare la pianificazione esatta. Controlla l’espressione cron e il fuso orario."
+      },
       "briefing": {
         "question": "Che cosa stai creando?",
         "help": "Scegli la forma editoriale. Ogni opzione rimane basata sulle fonti selezionate.",
@@ -278,7 +282,12 @@
         "text": "Genera report di test",
         "send": "Invia test",
         "activate": "Attiva pianificazione",
-        "ready": "Test avviato. Questa bozza rimane inattiva finché non attivi la pianificazione.",
+        "ready": "Test completato. Il briefing è pronto. Questa bozza rimane inattiva finché non attivi la pianificazione.",
+        "running": "L’esecuzione {{runId}} è ancora in corso: {{stage}}. Puoi chiudere la configurazione e monitorarla in Panoramica.",
+        "failedStage": "{{stage}} non è riuscita. Apri l’esecuzione {{runId}} e riprova questa fase.",
+        "failedWithCode": "{{stage}} non è riuscita ({{code}}). Apri l’esecuzione {{runId}} e riprova questa fase.",
+        "cancelledStage": "{{stage}} è stata annullata. La bozza è stata salvata.",
+        "cancelledWithCode": "{{stage}} è stata annullata ({{code}}). La bozza è stata salvata.",
         "cancelled": "Test annullato. La bozza è stata salvata.",
         "failed": "Test non riuscito. La bozza è stata salvata. {{message}}",
         "status": {

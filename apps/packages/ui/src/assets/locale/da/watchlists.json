@@ -163,6 +163,10 @@
       "nextOccurrence": "Næste kørsel",
       "manualOccurrence": "Kun manuelt",
       "nextOccurrencePending": "Gem en gyldig tidsplan for at beregne det præcise tidspunkt.",
+      "schedulePreview": {
+        "loading": "Beregner den præcise tidsplan…",
+        "error": "Den præcise tidsplan kunne ikke beregnes. Kontrollér cron-udtrykket og tidszonen."
+      },
       "briefing": {
         "question": "Hvad vil du oprette?",
         "help": "Vælg den redaktionelle form. Alle muligheder bygger fortsat på dine valgte kilder.",
@@ -275,7 +279,12 @@
         "text": "Generer testrapport",
         "send": "Send test",
         "activate": "Aktivér tidsplan",
-        "ready": "Test startet. Denne kladde forbliver inaktiv, indtil du aktiverer tidsplanen.",
+        "ready": "Testen er fuldført. Din briefing er klar. Denne kladde forbliver inaktiv, indtil du aktiverer tidsplanen.",
+        "running": "Kørsel {{runId}} kører stadig: {{stage}}. Du kan lukke opsætningen og følge den i Oversigt.",
+        "failedStage": "{{stage}} mislykkedes. Åbn kørsel {{runId}}, og prøv denne fase igen.",
+        "failedWithCode": "{{stage}} mislykkedes ({{code}}). Åbn kørsel {{runId}}, og prøv denne fase igen.",
+        "cancelledStage": "{{stage}} blev annulleret. Din kladde er gemt.",
+        "cancelledWithCode": "{{stage}} blev annulleret ({{code}}). Din kladde er gemt.",
         "cancelled": "Test annulleret. Din kladde er gemt.",
         "failed": "Testen mislykkedes. Din kladde er gemt. {{message}}",
         "status": {
