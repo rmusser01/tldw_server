@@ -1,7 +1,7 @@
 # Paperless-Inspired Document Lifecycle PRD
 
 Date: 2026-07-09
-Status: Ready for user review
+Status: Ready for implementation planning
 Backlog: TASK-12093
 
 ## Summary
@@ -50,10 +50,16 @@ reuse inside workspaces.
 - Review state lives on workspace source associations in v1, not on global media
   items. Existing workspace sources migrate to `unset`. A later global media
   review state can be considered separately.
-- Review state uses `unset`, `needs_review`, and `reviewed`. Store state update
-  timestamps; when a source becomes `reviewed`, also store `reviewed_at` and
-  `reviewed_by_user_id` when auth context is available. Bulk updates require the
-  same workspace-source write permission as single-source updates.
+- Review state uses `unset`, `needs_review`, and `reviewed`. Expose it as a
+  separate workspace-source field, not as a processing/status lifecycle value.
+  Store `review_state_updated_at` on every transition. When a source becomes
+  `reviewed`, also store nullable `reviewed_at` and `reviewed_by_user_id` when
+  auth context is available; clear those reviewed-only fields when the source
+  moves back to `needs_review` or `unset`. Bulk updates require the same
+  workspace-source write permission as single-source updates.
+- The built-in Needs review view includes only explicit `needs_review` sources.
+  Existing sources migrated to `unset` appear in a separate Unreviewed view so
+  migration does not flood the needs-review queue.
 - Quick Ingest and extension captures only default to `needs_review` when the
   created or attached source is associated with a workspace and the entrypoint
   preset or user setting requests review.
@@ -73,6 +79,10 @@ reuse inside workspaces.
   exist.
 - Document Workspace may show workspace membership only for the current
   workspace and other workspaces the current user can read.
+- The first canonical extension path for unified ingest labels is the
+  context-menu Send to tldw URL ingest path in
+  `apps/packages/ui/src/entries/background.ts`. The sidepanel web-clipper flow
+  can follow after this path is normalized.
 
 ## Problem
 
@@ -127,8 +137,9 @@ adopt that discipline without adopting Paperless's office-archive assumptions.
    and result state using shared labels.
 3. If the entrypoint preset opts into review, the resulting workspace source is
    marked `needs_review`.
-4. User opens the Needs review view, inspects readiness/provenance, and marks
-   one or more sources `reviewed`.
+4. User opens the Needs review view for explicit review requests or the
+   Unreviewed view for migrated `unset` sources, inspects readiness/provenance,
+   and marks one or more sources `reviewed`.
 
 ### Reuse A Duplicate Source
 
@@ -152,7 +163,8 @@ adopt that discipline without adopting Paperless's office-archive assumptions.
   accessible records; use non-confirming copy for inaccessible matches and hard
   constraint failures.
 - Review-state confusion: keep v1 review state on workspace source associations
-  and migrate existing workspace sources to `unset`.
+  and migrate existing workspace sources to `unset`. Expose review state through
+  dedicated fields and filters rather than overloading processing status.
 - Saved-view drift: persist versioned per-user, per-workspace saved views and
   make stale payloads fail soft with reset.
 - Storage-policy overpromising: expose only implemented backend behavior, show
@@ -167,6 +179,10 @@ adopt that discipline without adopting Paperless's office-archive assumptions.
 - Quick Ingest UI and presets:
   - `apps/packages/ui/src/components/Common/QuickIngest/`
   - `apps/packages/ui/src/components/Common/QuickIngest/presets.ts`
+- Extension URL ingest and web capture:
+  - `apps/packages/ui/src/entries/background.ts`
+  - `apps/packages/ui/src/entries/web-clipper.content.ts`
+  - `apps/packages/ui/src/entries/shared/ingest-payloads.ts`
 - Research Workspace source pane and filters:
   - `apps/packages/ui/src/components/Option/ResearchWorkspace/SourcesPane/`
   - `apps/packages/ui/src/components/Option/ResearchWorkspace/SourcesPane/source-list-view.ts`
@@ -230,8 +246,10 @@ existing transient Quick Ingest row status.
   workspace attachment.
 - Existing workspace sources start as `unset` after migration.
 - Review state can be changed to `reviewed` or back to `needs_review`.
-- Source rows show review state alongside processing readiness.
-- Workspace source filters can include review state.
+- Source rows show review state alongside processing readiness without merging
+  it into queued/indexing/queryable/failed status.
+- Workspace source filters include dedicated `reviewStateFilters`, separate from
+  processing `statusFilters`.
 - Quick Ingest and extension captures can opt into defaulting new sources to
   `needs_review` when they attach to a workspace.
 
@@ -249,12 +267,15 @@ existing transient Quick Ingest row status.
 - User can mark one source or selected sources reviewed.
 - Existing workspace sources migrate to `unset` without being treated as
   reviewed.
-- Each review-state transition records an update timestamp. Review actor and
-  timestamp are recorded when a source becomes `reviewed`, when auth context is
-  available.
+- Each review-state transition records `review_state_updated_at`. Review actor
+  and timestamp are recorded when a source becomes `reviewed`, when auth context
+  is available, and reviewed-only fields are cleared when a source leaves
+  `reviewed`.
 - Quick Ingest and extension workspace attachments can opt into defaulting new
   workspace sources to `needs_review`.
-- Needs-review state appears in source filter presets.
+- Workspace source/status responses expose review state fields separately from
+  processing status.
+- Needs review and Unreviewed states appear in source filter presets.
 - Tests cover normalization, persistence, and UI state transitions.
 
 ## Child Task 2: Saved Source Filter Presets And Views
@@ -268,13 +289,13 @@ named source views.
 
 ### Product Behavior
 
-- Built-in presets: Needs review, Failed ingest, Partially indexed, PDFs, Web
-  captures, Large files.
+- Built-in presets: Needs review, Unreviewed, Failed ingest, Partially indexed,
+  PDFs, Web captures, Large files.
 - Users can save the current source filter/sort state with a name.
 - Saved views restore the existing source list filter model.
 - Saved views persist server-side per user and per workspace.
-- The implementation reuses `SourceListViewState` unless a narrower server
-  contract is needed.
+- The implementation extends `SourceListViewState` with `reviewStateFilters`
+  unless a narrower server contract is needed.
 
 ### Boundaries
 
@@ -285,6 +306,8 @@ named source views.
 ### Acceptance Criteria
 
 - Built-in presets apply the expected existing filters.
+- Needs review includes explicit `needs_review`; Unreviewed includes migrated or
+  otherwise unset `unset` sources.
 - Saving and reopening a user view restores filters and sort after reload.
 - Saved views are isolated by workspace and user.
 - Invalid or stale saved views fail soft and can be reset.
@@ -384,6 +407,10 @@ Make WebUI drag/drop, extension capture, URL paste, and file upload entrypoints
 use one visible ingest model: queue, progress, result, retry, and storage policy
 language.
 
+The first extension path is the context-menu Send to tldw URL ingest path. The
+sidepanel web-clipper route remains a follow-up extension path unless it already
+shares the same ingest queue/result model by the time this task starts.
+
 ### Product Behavior
 
 - Entrypoints route to the same Quick Ingest queue/progress concepts where
@@ -417,6 +444,7 @@ language.
 ### Acceptance Criteria
 
 - The main WebUI and extension capture paths use consistent ingest/result labels.
+- Extension coverage includes the context-menu Send to tldw URL ingest path.
 - Known file sizes show quota impact before submit.
 - Unsupported storage policies are not silently selectable.
 - Result summaries distinguish stored, indexed, skipped duplicate, failed,
@@ -467,6 +495,8 @@ TypeScript or Markdown slices should record why Bandit is not applicable.
 
 - A user can filter a workspace to Needs review, mark selected sources reviewed,
   reload, and see the same review state.
+- A user can filter migrated `unset` sources through the Unreviewed view without
+  treating every legacy source as explicit needs-review work.
 - Built-in and user-saved source views restore for the same user and workspace
   after reload.
 - Duplicate recovery never confirms inaccessible matches in API responses or UI
@@ -491,8 +521,6 @@ state without inventing broader abstractions.
 
 ## Open Questions
 
-- Which extension capture path should be the first canonical entrypoint for
-  unified ingest labels?
 - Which derived preview/archive artifacts should become selectable storage
   policies after backend support exists?
 - Should a later global media library add media-level review state outside

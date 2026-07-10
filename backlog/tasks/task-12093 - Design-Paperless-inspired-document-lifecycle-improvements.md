@@ -1,7 +1,7 @@
 ---
 id: TASK-12093
 title: Design Paperless-inspired document lifecycle improvements
-status: In Progress
+status: Done
 labels:
 - prd
 - webui
@@ -29,10 +29,10 @@ Create the umbrella PRD for Paperless-inspired document lifecycle improvements a
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Umbrella PRD exists and defines goals, non-goals, current repo anchors, user flows, risks, and phased child-task boundaries.
-- [ ] #2 PRD explicitly avoids cloning Paperless-ngx wholesale and excludes barcode/ASN, public share links, arbitrary storage templates, and full workflow builder scope.
-- [ ] #3 Five child Backlog tasks are created for persisted review lifecycle, saved source views, duplicate recovery, metadata panel, and unified ingest/storage policy visibility.
-- [ ] #4 Each child task is independently reviewable and links back to the umbrella PRD.
+- [x] #1 Umbrella PRD exists and defines goals, non-goals, current repo anchors, user flows, risks, and phased child-task boundaries.
+- [x] #2 PRD explicitly avoids cloning Paperless-ngx wholesale and excludes barcode/ASN, public share links, arbitrary storage templates, and full workflow builder scope.
+- [x] #3 Five child Backlog tasks are created for persisted review lifecycle, saved source views, duplicate recovery, metadata panel, and unified ingest/storage policy visibility.
+- [x] #4 Each child task is independently reviewable and links back to the umbrella PRD.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -50,15 +50,15 @@ Create one umbrella PRD under Docs/Product, then create five child Backlog imple
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Created the umbrella PRD and five child implementation Backlog tasks for Paperless-inspired document lifecycle improvements. Addressed spec-review findings around duplicate privacy, workspace-scoped review ownership, server-backed saved views, storage-policy specificity, terminology, product outcomes, readable workspace membership privacy, user flows, and risks/mitigations. Final spec-review pass approved with no blocking or material issues. Verification: docs/task-only staged diff review and git diff --check; Bandit not applicable because no Python/code files changed.
+Created the umbrella PRD and five child implementation Backlog tasks for Paperless-inspired document lifecycle improvements. Addressed spec-review findings around duplicate privacy, workspace-scoped review ownership, server-backed saved views, storage-policy specificity, terminology, product outcomes, readable workspace membership privacy, user flows, and risks/mitigations. Follow-up review fixes added explicit review-state fields and filters separate from processing status, `unset`/Needs review semantics, review timestamp reset behavior, the first canonical extension path for unified ingest labels, and readiness for implementation planning. Verification: docs/task-only diff review and git diff --check; Bandit not applicable because no Python/code files changed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
