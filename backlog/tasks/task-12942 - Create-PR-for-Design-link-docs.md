@@ -1,16 +1,18 @@
 ---
-id: TASK-12094
+id: TASK-12942
 title: Create PR for Design link docs
 status: In Progress
 labels:
 - docs
+references:
+- https://github.com/rmusser01/tldw_server/pull/2694
 modified_files:
 - Docs/Design/Coding_Page.md
 - Docs/Design/ETL_Pipeline.md
 - Docs/Design/Prompts.md
 - Docs/Design/Researcher.md
 - Docs/Design/VLMs.md
-- Docs/Design/# RAG Links.md
+- Docs/Design/RAG_Links.md
 - Docs/Design/ACP_Links.md
 - Docs/Design/Agent_Links.md
 - Docs/Design/ETL_Pipeline_Links.md
@@ -27,7 +29,7 @@ modified_files:
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Prepare a small docs-only pull request against dev containing the current Docs/Design link additions from the dev worktree.
+Prepare and maintain PR #2694 against dev containing the Docs/Design link additions and review cleanup.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
@@ -43,7 +45,7 @@ Prepare a small docs-only pull request against dev containing the current Docs/D
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Created PR #2694 against dev from clean branch codex/design-link-docs: https://github.com/rmusser01/tldw_server/pull/2694. The branch contains only the current Docs/Design link additions from the dev worktree plus the Backlog task record, with staged markdown whitespace fixed before commit. Verification: git diff --cached --check passed; git diff --check origin/dev..HEAD passed; targeted secret-value scan over touched docs/task files returned no matches. Bandit skipped because this is docs-only plus Backlog metadata.
+Rebased PR #2694 against latest origin/dev and addressed review feedback: renamed the unsafe RAG links filename, fixed malformed research and UX URLs, removed placeholder bullets, removed the Security typo, pruned review-flagged duplicate links, and kept the Design docs as internal Docs/Design notes rather than adding them to the published MkDocs pipeline. Verification: git diff --cached --check passed before commit; targeted bad-pattern scan found no remaining review-flagged malformed URLs/placeholders; pre-commit end-of-file-fixer passed for touched docs/task files after fixing RAG_Links.md. Bandit skipped because this is docs-only plus Backlog metadata.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

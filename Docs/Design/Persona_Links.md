@@ -9,7 +9,6 @@ https://huggingface.co/zai-org/SCAIL-2
 https://arxiv.org/abs/2606.05553
 https://arxiv.org/abs/2604.28130
 https://animotionlab.github.io/MoCapAnythingV2/
-https://animotionlab.github.io/MoCapAnythingV2/
 https://github.com/moeru-ai/airi
 https://github.com/Neph0s/awesome-llm-role-playing-with-persona
 

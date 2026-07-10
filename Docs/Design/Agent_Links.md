@@ -147,9 +147,7 @@ https://github.com/antithesishq/bombadil
 
 https://github.com/SeifBenayed/claude-code-sdk/blob/main/test-loop.js
 	https://github.com/SeifBenayed/claude-code-sdk/blob/main/claude-native.py
-	https://github.com/SeifBenayed/claude-code-sdk/blob/main/claude-native.py
 	https://github.com/SeifBenayed/claude-code-sdk/blob/main/test-mcp.js
-	https://github.com/SeifBenayed/claude-code-sdk/blob/main/test-loop.js
 
 
 Hermes webui

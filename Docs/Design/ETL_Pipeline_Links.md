@@ -112,9 +112,7 @@ On the size cap, a rolling index that streams in/out sections on demand is light
     - doc2txt
     - pypandoc
 - **RSS Feeds**:
-    - f
-- **Videos**
-    - f
+- **Videos**:
 - **Websites**:
     - playwright
     - bs4
@@ -124,7 +122,6 @@ On the size cap, a rolling index that streams in/out sections on demand is light
 - **3rd-Party Services**
     - Sharepoint
         * https://llamahub.ai/l/readers/llama-index-readers-microsoft-sharepoint
-        *
 
 ### Tools
 https://github.com/ucbepic/docetl

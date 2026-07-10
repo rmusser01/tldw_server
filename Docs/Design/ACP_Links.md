@@ -8,7 +8,6 @@ UI
 	https://github.com/formulahendry/acp-ui
 	https://github.com/The-Vibe-Company/companion
 	https://github.com/jamesrochabrun/AgentHub
-	https://github.com/The-Vibe-Company/companion
 	https://github.com/milisp/codexia
 	https://github.com/langware-labs/flowpad
 	https://github.com/OpenJeDi/codex-control
@@ -29,7 +28,6 @@ https://github.com/samuelclay/crabigator
 
 https://github.com/johannesjo/parallel-code
 
-https://github.com/vakovalskii/codbash
 https://github.com/vakovalskii/codbash
 
 https://github.com/asheshgoplani/agent-deck

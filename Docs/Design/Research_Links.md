@@ -7,7 +7,6 @@ Perplexica
    https://github.com/ItzCrazyKns/Perplexica/blob/master/src/search/metaSearchAgent.ts
    https://github.com/ItzCrazyKns/Perplexica/blob/master/src/chains/suggestionGeneratorAgent.ts
    https://github.com/ItzCrazyKns/Perplexica/blob/master/src/chains/imageSearchAgent.ts
-   https://github.com/ItzCrazyKns/Perplexica/blob/master/src/search/metaSearchAgent.ts
 
 Falle
    https://github.com/rashadphz/farfalle/blob/main/src/backend/agent_search.py
@@ -83,7 +82,6 @@ https://github.com/dzhng/deep-research
 https://github.com/thunlp/LLMxMapReduce/
 https://github.com/eRuaro/open-gemini-deep-research
 https://github.com/JasonHonKL/spy-search
-https://github.com/atineiatte/deep-research-at-home
 https://help.openalex.org/hc/en-us/articles/24396686889751-About-us
 https://www.ginkgonotes.com/
 https://github.com/camel-ai/owl
@@ -96,7 +94,7 @@ https://arxiv.org/abs/2505.19253
 https://github.com/google-gemini/gemini-fullstack-langgraph-quickstart
 https://github.com/AsyncFuncAI/deepwiki-open
 https://github.com/alienet1109/BookWorld
-https://github.com/jina-ai/node-DeepResearch[v1-f.py](../../../Sky/v1-f.py)
+https://github.com/jina-ai/node-DeepResearch
 https://github.com/LearningCircuit/local-deep-research
 https://www.reddit.com/r/Anki/comments/17u01ge/spaced_repetition_algorithm_a_threeday_journey/
 https://github.com/open-spaced-repetition/fsrs4anki/wiki/Spaced-Repetition-Algorithm:-A-Three%E2%80%90Day-Journey-from-Novice-to-Expert#day-3-the-latest-progress
@@ -108,9 +106,8 @@ https://github.com/ai-christianson/RA.Aid
 https://github.com/cbuccella/perplexity_research_prompt/blob/main/general_research_prompt.md
 https://github.com/0xeb/TheBigPromptLibrary/blob/main/SystemPrompts/Perplexity.ai/20241024-Perplexity-Desktop-App.md
 https://github.com/rashadphz/farfalle
-https://huggingface.co/blog/open-deep-re[v3-f-single.py](../../../Sky/v3-f-single.py)search
+https://huggingface.co/blog/open-deep-research
 https://danielkliewer.com/2025/02/05/open-deep-research
-https://github.com/cbuccella/perplexity_research_prompt/blob/main/general_research_prompt.md
 https://research.google/blog/accelerating-scientific-breakthroughs-with-an-ai-co-scientist/
 https://github.com/neoneye/PlanExe
 https://github.com/CJones-Optics/ChiCurate

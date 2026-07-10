@@ -78,7 +78,7 @@ https://github.com/coreyhaines31/marketingskills/tree/main
 https://github.com/nextlevelbuilder/ui-ux-pro-max-skill
 https://michalmalewicz.medium.com/ui-design-direction-2026-2027-2b4b6eb88336
 https://kurtis-redux.medium.com/what-is-bento-style-note-taking-751df3702068
-\https://github.com/OttoRenner/Gentle-Coding
+https://github.com/OttoRenner/Gentle-Coding
 https://uxdesign.cc/ai-uxr-implementation-d0e1b8a33613
 https://medium.com/analysts-corner/the-dialog-map-a-valuable-business-analysis-and-ux-design-tool-8ffa503d6e03
 https://medium.com/analysts-corner/design-to-make-it-hard-for-users-to-make-mistakes-75a38911cc15
@@ -141,7 +141,7 @@ https://uxdesign.cc/a-study-of-gatcha-games-the-ux-of-the-pokemon-tcg-pocket-app
 https://github.com/sshh12/spark-stack
 https://rentry.org/bloatmaxx
 https://github.com/ddkasa/textual-timepiece
-https://github.com/abi/screenshot-to-
+https://github.com/abi/screenshot-to-code
 https://data.perkins.org/
 https://customsvg.github.io/
 https://designdetails.fm/episodes
@@ -267,7 +267,7 @@ https://uxdesign.cc/making-medical-appointments-this-month-made-me-miss-phone-tr
 https://uxdesign.cc/when-innovation-deceives-escaping-the-value-mirage-bcbf5511aecf
 https://ieeexplore.ieee.org/document/5387632
 https://www.growthmates.news/p/how-an-ai-powered-user-onboardin
-https://www.nngroup.com/articles/serial-task-switching/g
+https://www.nngroup.com/articles/serial-task-switching/
 https://x.com/dot_louis/status/1884990033775493505
 https://clig.dev/
 https://www.nngroup.com/articles/analyze-usability-data/

@@ -34,7 +34,6 @@ Code Review
 	https://github.com/alibaba/aacr-bench
 	https://github.com/weareaisle/nano-analyzer
 	https://dirac.run/posts/hash-anchors-myers-diff-single-token
-	https://github.com/3stoneBrother/code-audit
 
 
 Design
