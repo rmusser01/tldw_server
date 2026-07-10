@@ -120,6 +120,9 @@ AUDIO_BRIEFING_WORKFLOW_DEF: dict[str, Any] = {
                 "persona_id": "{{ inputs.persona_id }}",
                 "persona_provider": "{{ inputs.persona_provider }}",
                 "persona_model": "{{ inputs.persona_model }}",
+                "editorial": "{{ inputs.editorial }}",
+                "status_audio_intent": "{{ inputs.status_audio_intent }}",
+                "skip_llm_expansion": "{{ inputs.skip_llm_expansion }}",
             },
             "timeout_seconds": 120,
         },
@@ -279,9 +282,13 @@ def _new_audio_request_id() -> str:
 def _build_workflow_inputs(
     items: list[dict[str, Any]],
     output_prefs: dict[str, Any],
+    *,
+    editorial: Mapping[str, Any] | None = None,
+    status_audio: bool = False,
 ) -> dict[str, Any] | None:
     """Build workflow inputs dict from watchlist output_prefs."""
-    audio_prefs = get_briefing_contract(output_prefs, scheduled=False)["audio"]
+    contract = get_briefing_contract(output_prefs, scheduled=False)
+    audio_prefs = contract["audio"]
     tts_defaults = _resolve_workflow_tts_defaults(audio_prefs)
     if tts_defaults is None:
         return None
@@ -294,7 +301,7 @@ def _build_workflow_inputs(
 
     return {
         "items": items,
-        "target_audio_minutes": audio_prefs.get("target_minutes", 10),
+        "target_audio_minutes": 1 if status_audio else audio_prefs.get("target_minutes", 10),
         "audio_language": audio_prefs.get("language") or "en",
         "tts_provider": tts_provider,
         "tts_model": tts_model,
@@ -312,6 +319,9 @@ def _build_workflow_inputs(
         "background_volume": audio_prefs.get("background_volume", 0.15),
         "background_delay_ms": audio_prefs.get("background_delay_ms", 0),
         "background_fade_seconds": audio_prefs.get("background_fade_seconds", 2.0),
+        "editorial": dict(editorial or contract["editorial"]),
+        "status_audio_intent": status_audio,
+        "skip_llm_expansion": status_audio,
     }
 
 
@@ -324,6 +334,11 @@ async def trigger_audio_briefing(
     db: Any,
     scheduler: Any | None = None,
     audio_request_id: str | None = None,
+    items: list[dict[str, Any]] | None = None,
+    occurrence_id: int | None = None,
+    output_id: int | None = None,
+    editorial: Mapping[str, Any] | None = None,
+    status_audio: bool = False,
 ) -> AudioBriefingTriggerResult:
     """Trigger the audio briefing workflow for a completed watchlist run.
 
@@ -335,6 +350,11 @@ async def trigger_audio_briefing(
         db: The WatchlistsDB instance.
         scheduler: Optional scheduler instance. Defaults to the global Scheduler.
         audio_request_id: Optional caller-supplied request ID for deterministic retries/tests.
+        items: Optional caller-selected normalized items. Avoids a second database load.
+        occurrence_id: Optional durable briefing occurrence correlation ID.
+        output_id: Optional persisted text output correlation ID.
+        editorial: Optional canonical editorial configuration.
+        status_audio: Whether this is a short deterministic no-update status intent.
 
     Returns:
         Structured status for the trigger attempt.
@@ -343,32 +363,39 @@ async def trigger_audio_briefing(
     if not contract["audio"]["enabled"]:
         return AudioBriefingTriggerResult(status="disabled")
 
-    # Gather scraped items for this run
-    try:
-        scraped_items, _ = await run_in_threadpool(
-            db.list_items,
-            run_id=run_id,
-            status="ingested",
-            limit=briefing_selection_limit(contract),
-            offset=0,
-        )
-    except asyncio.CancelledError:
-        raise
-    except Exception as exc:
-        logger.warning(
-            "Audio briefing: could not load scraped items for run {} (error_type={})",
-            run_id,
-            type(exc).__name__,
-        )
-        return AudioBriefingTriggerResult(status="enqueue_failed", reason="item_load_failed")
+    # Older callers may still ask this bridge to select items. Fulfillment callers
+    # pass the canonical bounded selection so text and audio cannot drift.
+    if items is None:
+        try:
+            scraped_items, _ = await run_in_threadpool(
+                db.list_items,
+                run_id=run_id,
+                status="ingested",
+                limit=briefing_selection_limit(contract),
+                offset=0,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning(
+                "Audio briefing: could not load scraped items for run {} (error_type={})",
+                run_id,
+                type(exc).__name__,
+            )
+            return AudioBriefingTriggerResult(status="enqueue_failed", reason="item_load_failed")
+    else:
+        scraped_items = items
 
     if not scraped_items:
         logger.info(f"Audio briefing: no ingested items for run {run_id}, skipping")
         return AudioBriefingTriggerResult(status="skipped_no_items", reason="no_ingested_items")
 
     # Build items context (title, summary, url)
-    items: list[dict[str, Any]] = []
+    normalized_items: list[dict[str, Any]] = []
     for item in scraped_items:
+        if items is not None:
+            normalized_items.append(dict(item))
+            continue
         if isinstance(item, dict):
             row = item
         elif hasattr(item, "_asdict"):
@@ -381,7 +408,7 @@ async def trigger_audio_briefing(
                 "snippet": getattr(item, "snippet", ""),
                 "source_url": getattr(item, "source_url", ""),
             }
-        items.append(
+        normalized_items.append(
             {
                 "title": row.get("title", ""),
                 "summary": row.get("summary", row.get("snippet", "")),
@@ -389,7 +416,12 @@ async def trigger_audio_briefing(
             }
         )
 
-    workflow_inputs = _build_workflow_inputs(items, output_prefs)
+    workflow_inputs = _build_workflow_inputs(
+        normalized_items,
+        output_prefs,
+        editorial=editorial,
+        status_audio=status_audio,
+    )
     if workflow_inputs is None:
         return AudioBriefingTriggerResult(
             status="configuration_required",
@@ -403,6 +435,8 @@ async def trigger_audio_briefing(
     workflow_inputs = {
         **workflow_inputs,
         "audio_request_id": active_audio_request_id,
+        "occurrence_id": occurrence_id,
+        "output_id": output_id,
     }
 
     # Submit as a scheduler workflow task.
@@ -443,6 +477,10 @@ async def trigger_audio_briefing(
             "watchlist_run_id": run_id,
             "audio_request_id": active_audio_request_id,
         }
+        if occurrence_id is not None:
+            metadata["briefing_occurrence_id"] = occurrence_id
+        if output_id is not None:
+            metadata["watchlist_output_id"] = output_id
         scheduler_metadata = {**metadata, "user_id": str(user_id)}
         task_id = await scheduler.submit(
             "workflow_run",
@@ -454,15 +492,13 @@ async def trigger_audio_briefing(
                 "metadata": metadata,
             },
             queue_name="workflows",
-            idempotency_key=(
-                f"watchlist-audio-briefing:{user_id}:{job_id}:{run_id}:{active_audio_request_id}"
-            ),
+            idempotency_key=(f"watchlist-audio-briefing:{user_id}:{job_id}:{run_id}:{active_audio_request_id}"),
             metadata=scheduler_metadata,
             max_retries=1,
         )
         logger.info(
             f"Audio briefing workflow submitted for watchlist run {run_id}, "
-            f"task_id={task_id}, items={len(items)}"
+            f"task_id={task_id}, items={len(normalized_items)}"
         )
         return AudioBriefingTriggerResult(
             status="submitted",

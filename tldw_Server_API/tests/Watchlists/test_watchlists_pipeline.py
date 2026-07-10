@@ -6,15 +6,13 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from tldw_Server_API.app.core.Watchlists import pipeline
-from tldw_Server_API.app.core.Watchlists import fetchers
-from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatabase
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
-from tldw_Server_API.app.core.DB_Management.Personalization_DB import PersonalizationDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
-from tldw_Server_API.app.core.Watchlists.audio_briefing_workflow import AudioBriefingTriggerResult
+from tldw_Server_API.app.core.DB_Management.Personalization_DB import PersonalizationDB
+from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatabase
+from tldw_Server_API.app.core.Watchlists import fetchers, pipeline
+from tldw_Server_API.app.core.Watchlists.briefing_fulfillment import FulfillmentResult
 from tldw_Server_API.app.core.Watchlists.pipeline import run_watchlist_job
-
 
 pytestmark = pytest.mark.unit
 
@@ -772,39 +770,51 @@ async def test_pipeline_persists_post_run_audio_and_output_stats():
         ),
     )
 
-    def create_auto_output_artifact(**kwargs):
-        return kwargs["collections_db"].create_output_artifact(
-            type_="briefing_markdown",
-            title="Auto Output",
-            format_="md",
-            storage_path="auto-output.md",
-            metadata_json=json.dumps(
-                {
-                    "origin": "watchlists",
-                    "generation_mode": "auto_output",
-                    "run_id": kwargs["run"].id,
-                    "job_id": kwargs["job"].id,
-                }
-            ),
-            job_id=kwargs["job"].id,
-            run_id=kwargs["run"].id,
-        ).id
+    async def fulfill_briefing(**kwargs):
+        output_id = (
+            kwargs["collections_db"]
+            .create_output_artifact(
+                type_="briefing_markdown",
+                title="Auto Output",
+                format_="md",
+                storage_path="auto-output.md",
+                metadata_json=json.dumps(
+                    {
+                        "origin": "watchlists",
+                        "generation_mode": "auto_output",
+                        "run_id": kwargs["run"].id,
+                        "job_id": kwargs["job"].id,
+                        "audio_briefing_requested": True,
+                        "audio_briefing_status": "queued",
+                        "audio_briefing_task_id": "task_stage2",
+                    }
+                ),
+                job_id=kwargs["job"].id,
+                run_id=kwargs["run"].id,
+            )
+            .id
+        )
+        return FulfillmentResult(
+            occurrence_id=91,
+            output_id=output_id,
+            audio_task_id="task_stage2",
+            artifact_status="running",
+            delivery_status="waiting_for_artifacts",
+            selected_count=1,
+            omitted_count=0,
+            stages={"compose_audio_script": {"status": "queued"}},
+        )
 
-    with (
-        patch(
-            "tldw_Server_API.app.core.Watchlists.pipeline._maybe_auto_generate_output",
-            new=AsyncMock(side_effect=create_auto_output_artifact),
-        ),
-        patch(
-            "tldw_Server_API.app.core.Watchlists.audio_briefing_workflow.trigger_audio_briefing",
-            new=AsyncMock(return_value=AudioBriefingTriggerResult(status="submitted", task_id="task_stage2")),
-        ),
+    with patch(
+        "tldw_Server_API.app.core.Watchlists.briefing_fulfillment.fulfill_watchlist_briefing",
+        new=AsyncMock(side_effect=fulfill_briefing),
     ):
         result = await run_watchlist_job(user_id, job.id)
 
     auto_output_id = int(result["auto_output_id"])
     assert result.get("audio_briefing_task_id") == "task_stage2"
     assert result.get("audio_briefing_status") == "queued"
+    assert result["briefing_occurrence"]["id"] == 91
 
     persisted_run = db.get_run(int(result["run_id"]))
     persisted_stats = json.loads(persisted_run.stats_json or "{}")

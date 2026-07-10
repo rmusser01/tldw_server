@@ -57,6 +57,7 @@ def client_with_user(monkeypatch, tmp_path):
 
     monkeypatch.setenv("USER_DB_BASE_DIR", str(base_dir))
     monkeypatch.setenv("WATCHLIST_TEMPLATE_DIR", str(template_dir))
+    monkeypatch.setenv("WATCHLIST_BRIEFING_MAX_ITEMS", "100")
     monkeypatch.setenv("EMAIL_PROVIDER", "mock")
 
     from fastapi import FastAPI
@@ -75,6 +76,7 @@ def client_with_user(monkeypatch, tmp_path):
 # ---------------------------------------------------------------------------
 # 1. Real RSS feed → briefing
 # ---------------------------------------------------------------------------
+
 
 def test_real_xkcd_rss_to_briefing(client_with_user: TestClient):
     """Fetch xkcd RSS (stable, rarely changes format) and generate a briefing."""
@@ -98,6 +100,13 @@ def test_real_xkcd_rss_to_briefing(client_with_user: TestClient):
         json={
             "name": "xkcd Digest",
             "scope": {"sources": [source_id]},
+            "output_prefs": {
+                "briefing_pipeline": {
+                    "version": 1,
+                    "text": {"enabled": True, "type": "briefing_markdown", "format": "md"},
+                    "audio": {"enabled": False},
+                }
+            },
         },
     )
     assert job.status_code == 200, job.text
@@ -110,6 +119,9 @@ def test_real_xkcd_rss_to_briefing(client_with_user: TestClient):
     run_id = run_data["id"]
     assert _run_metric(run_data, "items_found") >= 1
     assert _run_metric(run_data, "items_ingested") >= 1
+    occurrence = (run_data.get("stats") or {}).get("briefing_occurrence") or {}
+    assert occurrence.get("artifact_status") == "ready"
+    assert occurrence.get("output_id") is not None
 
     # Verify items have expected fields
     items_resp = c.get("/api/v1/watchlists/items", params={"run_id": run_id, "limit": 5})
