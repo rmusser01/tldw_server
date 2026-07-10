@@ -343,16 +343,16 @@ const reducer = (state: IngestWizardState, action: Action): IngestWizardState =>
       }
 
     case "UPDATE_ITEM_PROGRESS":
+      const existingProgressItem = state.processingState.perItemProgress.find(
+        (p) => p.id === action.progress.id
+      )
+      if (!existingProgressItem) return state
       if (
-        state.processingState.perItemProgress.some(
-          (p) =>
-            p.id === action.progress.id &&
-            p.status === action.progress.status &&
-            p.progressPercent === action.progress.progressPercent &&
-            p.currentStage === action.progress.currentStage &&
-            p.estimatedRemaining === action.progress.estimatedRemaining &&
-            p.error === action.progress.error
-        )
+        existingProgressItem.status === action.progress.status &&
+        existingProgressItem.progressPercent === action.progress.progressPercent &&
+        existingProgressItem.currentStage === action.progress.currentStage &&
+        existingProgressItem.estimatedRemaining === action.progress.estimatedRemaining &&
+        existingProgressItem.error === action.progress.error
       ) {
         return state
       }

@@ -43,7 +43,7 @@ test("Quick Ingest defaults flow does not trigger a Maximum update depth render 
   await expect(dialog).toContainText("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
 
   await dialog.getByRole("button", { name: /Use defaults/i }).click()
-  await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {})
+  await expect(dialog.getByRole("alert")).toContainText(/analysis provider/i)
 
   await expect(page.locator("body")).not.toContainText("Runtime Error")
   expect(renderLoopErrors, "no Maximum update depth render loop").toEqual([])

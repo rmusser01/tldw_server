@@ -330,6 +330,18 @@ const emitRuntimeMessage = (message: any) => {
   }
 }
 
+const SessionBackedQuickIngestModal = () => {
+  const open = useQuickIngestSessionStore(
+    (store) => store.session?.visibility === "visible"
+  )
+  return (
+    <QuickIngestWizardModal
+      open={open}
+      onClose={() => useQuickIngestSessionStore.getState().hideSession()}
+    />
+  )
+}
+
 describe("QuickIngestWizardModal session runtime", () => {
   beforeEach(() => {
     mocks.runtimeListeners.splice(0, mocks.runtimeListeners.length)
@@ -425,6 +437,56 @@ describe("QuickIngestWizardModal session runtime", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(
       "Choose an analysis provider before running ingest analysis."
     )
+    expect(screen.queryByTestId("wizard-processing")).not.toBeInTheDocument()
+    expect(mocks.startQuickIngestSession).not.toHaveBeenCalled()
+    expect(mocks.submitQuickIngestBatch).not.toHaveBeenCalled()
+  })
+
+  it("restores a hidden processing session when the late analysis provider guard blocks startRun", async () => {
+    mocks.getQuickIngestAnalysisProviderWarning.mockReturnValue(
+      "Choose an analysis provider before running ingest analysis."
+    )
+    useQuickIngestSessionStore.getState().createDraftSession({
+      visibility: "hidden",
+      lifecycle: "processing",
+      currentStep: 4,
+      queueItems: [
+        {
+          id: "late-guard-url-1",
+          url: "https://example.com/article",
+          detectedType: "web",
+          icon: "Globe",
+          fileSize: 0,
+          validation: { valid: true },
+        },
+      ],
+      processingState: {
+        status: "running",
+        perItemProgress: [
+          {
+            id: "late-guard-url-1",
+            status: "processing",
+            progressPercent: 10,
+            currentStage: "Processing",
+            estimatedRemaining: 0,
+          },
+        ],
+        elapsed: 0,
+        estimatedRemaining: 0,
+      },
+    })
+
+    render(<SessionBackedQuickIngestModal />)
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "Choose an analysis provider before running ingest analysis."
+      )
+    })
+
+    const session = useQuickIngestSessionStore.getState().session
+    expect(session?.visibility).toBe("visible")
+    expect(session?.currentStep).toBe(1)
     expect(screen.queryByTestId("wizard-processing")).not.toBeInTheDocument()
     expect(mocks.startQuickIngestSession).not.toHaveBeenCalled()
     expect(mocks.submitQuickIngestBatch).not.toHaveBeenCalled()

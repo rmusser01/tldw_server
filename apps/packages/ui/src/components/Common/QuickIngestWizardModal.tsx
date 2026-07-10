@@ -3,7 +3,7 @@ import { Modal, Button } from "antd"
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "react-router-dom"
 import { XCircle } from "lucide-react"
-import { shallow } from "zustand/shallow"
+import { useShallow } from "zustand/react/shallow"
 import { browser } from "wxt/browser"
 import {
   IngestWizardProvider,
@@ -833,6 +833,7 @@ type WizardModalContentProps = {
   session: QuickIngestSessionRecord
   markProcessingTracking: (tracking: PersistedQuickIngestTracking) => void
   markInterrupted: (reason?: string) => void
+  showSession: () => void
   shouldAttemptPersistedReattach: boolean
 }
 
@@ -843,6 +844,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   session,
   markProcessingTracking,
   markInterrupted,
+  showSession,
   shouldAttemptPersistedReattach,
 }) => {
   const { t } = useTranslation(["option"])
@@ -1399,7 +1401,6 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   const startRun = useCallback(async () => {
     if (hasStartedRunRef.current || validQueueItems.length === 0) return
     hasStartedRunRef.current = true
-    markRunActive()
 
     try {
       try {
@@ -1433,9 +1434,13 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
         })
         hasStartedRunRef.current = false
         activeSessionIdRef.current = null
+        restore()
+        showSession()
         goToStep(1)
         return
       }
+
+      markRunActive()
 
       const startAck = await startQuickIngestSession(requestPayload)
       if (!startAck?.ok || !startAck?.sessionId) {
@@ -1516,6 +1521,8 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     presetConfig.typeDefaults,
     state.conferenceBatchMetadata,
     goToStep,
+    restore,
+    showSession,
     markProcessingTracking,
     validQueueItems,
   ])
@@ -1773,16 +1780,17 @@ export const QuickIngestWizardModal: React.FC<QuickIngestWizardModalProps> = ({
     markProcessingTracking,
     markInterrupted,
     createDraftSession,
+    showSession,
   } =
     useQuickIngestSessionStore(
-      (store) => ({
+      useShallow((store) => ({
         session: store.session,
         upsertSession: store.upsertSession,
         markProcessingTracking: store.markProcessingTracking,
         markInterrupted: store.markInterrupted,
         createDraftSession: store.createDraftSession,
-      }),
-      shallow
+        showSession: store.showSession,
+      }))
     )
 
   const initialState = useMemo(
@@ -1824,6 +1832,7 @@ export const QuickIngestWizardModal: React.FC<QuickIngestWizardModalProps> = ({
         session={session}
         markProcessingTracking={markProcessingTracking}
         markInterrupted={markInterrupted}
+        showSession={showSession}
         shouldAttemptPersistedReattach={
           session.lifecycle === "processing" &&
           session.tracking?.mode === "webui-direct" &&

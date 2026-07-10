@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { useTranslation } from "react-i18next"
 import { AlertTriangle, Loader2, Check, ExternalLink, XCircle } from "lucide-react"
-import { shallow } from "zustand/shallow"
+import { useShallow } from "zustand/react/shallow"
 import { useIngestWizard } from "./IngestWizardContext"
 import { useQuickIngestSessionStore } from "@/store/quick-ingest-session"
 import type { WizardResultItem } from "./types"
@@ -90,12 +90,11 @@ export const FloatingProgressWidget: React.FC = () => {
   const { state, restore } = useIngestWizard()
   const { processingState, isMinimized, results, conferenceBatchMetadata } = state
   const { sessionVisibility, sessionLifecycle, showSession } = useQuickIngestSessionStore(
-    (store) => ({
+    useShallow((store) => ({
       sessionLifecycle: store.session?.lifecycle,
       sessionVisibility: store.session?.visibility,
       showSession: store.showSession,
-    }),
-    shallow
+    }))
   )
   const [dismissed, setDismissed] = useState(false)
   const dismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -222,6 +221,7 @@ export const FloatingProgressWidget: React.FC = () => {
 
   // Only render when minimized and not dismissed
   if (!isMinimized || sessionVisibility !== "hidden" || dismissed) return null
+  if (totalCount === 0 && !terminalState) return null
 
   const estimatedText =
     processingState.estimatedRemaining > 0
