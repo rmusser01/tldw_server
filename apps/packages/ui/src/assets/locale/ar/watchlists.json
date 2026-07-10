@@ -449,7 +449,10 @@
         "cancelled": "ملغى",
         "delivered": "تم التسليم",
         "unknown": "النتيجة غير معروفة",
-        "sending": "جارٍ الإرسال"
+        "sending": "جارٍ الإرسال",
+        "stale": "قديم",
+        "superseded": "مستبدل",
+        "unavailable": "غير متاح"
       },
       "stages": {
         "renderText": "تقرير",

@@ -1057,5 +1057,14 @@
   },
   "outputs_artifactAccessError": {
     "message": "ആക്സസ് പരാജയപ്പെട്ടു. സൈൻ ഇന്നും സെർവർ കണക്ഷനും പരിശോധിക്കുക."
+  },
+  "overview_latest_status_stale": {
+    "message": "കാലഹരണപ്പെട്ടത്"
+  },
+  "overview_latest_status_superseded": {
+    "message": "മാറ്റിസ്ഥാപിച്ചത്"
+  },
+  "overview_latest_status_unavailable": {
+    "message": "ലഭ്യമല്ല"
   }
 }

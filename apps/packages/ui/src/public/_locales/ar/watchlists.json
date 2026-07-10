@@ -1093,5 +1093,14 @@
   },
   "outputs_artifactAccessError": {
     "message": "فشل الوصول. تحقق من تسجيل الدخول واتصال الخادم."
+  },
+  "overview_latest_status_stale": {
+    "message": "قديم"
+  },
+  "overview_latest_status_superseded": {
+    "message": "مستبدل"
+  },
+  "overview_latest_status_unavailable": {
+    "message": "غير متاح"
   }
 }

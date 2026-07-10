@@ -437,7 +437,10 @@
         "cancelled": "لغوشده",
         "delivered": "تحویل‌شده",
         "unknown": "نتیجه نامشخص",
-        "sending": "در حال ارسال"
+        "sending": "در حال ارسال",
+        "stale": "قدیمی",
+        "superseded": "جایگزین‌شده",
+        "unavailable": "در دسترس نیست"
       },
       "stages": {
         "renderText": "گزارش",

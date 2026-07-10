@@ -437,7 +437,10 @@
         "cancelled": "キャンセル済み",
         "delivered": "配信済み",
         "unknown": "結果不明",
-        "sending": "送信中"
+        "sending": "送信中",
+        "stale": "古い",
+        "superseded": "置き換え済み",
+        "unavailable": "利用不可"
       },
       "stages": {
         "renderText": "レポート",

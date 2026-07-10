@@ -1057,5 +1057,14 @@
   },
   "outputs_artifactAccessError": {
     "message": "访问失败. 请检查登录状态和服务器连接。"
+  },
+  "overview_latest_status_stale": {
+    "message": "已过期"
+  },
+  "overview_latest_status_superseded": {
+    "message": "已被取代"
+  },
+  "overview_latest_status_unavailable": {
+    "message": "不可用"
   }
 }

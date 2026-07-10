@@ -1057,5 +1057,14 @@
   },
   "outputs_artifactAccessError": {
     "message": "Åtkomst misslyckades. Kontrollera din inloggning och serveranslutning."
+  },
+  "overview_latest_status_stale": {
+    "message": "Inaktuell"
+  },
+  "overview_latest_status_superseded": {
+    "message": "Ersatt"
+  },
+  "overview_latest_status_unavailable": {
+    "message": "Inte tillgänglig"
   }
 }

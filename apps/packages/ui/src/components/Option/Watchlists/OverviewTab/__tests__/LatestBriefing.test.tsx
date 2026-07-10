@@ -1,5 +1,5 @@
 import React from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type {
@@ -394,16 +394,29 @@ describe("LatestBriefing", () => {
   })
 
   it.each([
-    { stale: true, superseded_by: null },
-    { stale: false, superseded_by: "audio-task-new" },
-    { stale: false, superseded_by: null, download_url: null }
-  ])("does not present completed stale, superseded, or URL-less audio as ready", (audioState) => {
+    { audioState: { stale: true, superseded_by: null }, expectedStatus: "Stale" },
+    { audioState: { stale: false, superseded_by: "audio-task-new" }, expectedStatus: "Superseded" },
+    { audioState: { stale: false, superseded_by: null, download_url: null }, expectedStatus: "Unavailable" }
+  ])("reports completed noncurrent audio as $expectedStatus", ({ audioState, expectedStatus }) => {
     render(<LatestBriefing projection={readyEpisode({
       audio: { ...readyEpisode().audio!, ...audioState }
     })} {...actions()} />)
 
+    const audioRow = screen.getByText("Audio", { selector: "span" }).closest("div")
+    expect(audioRow).not.toBeNull()
+    expect(within(audioRow!).getByText(expectedStatus)).toBeVisible()
+    expect(within(audioRow!).queryByText("Ready")).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Play Purple and Gold Weekly" })).not.toBeInTheDocument()
     expect(artifactMocks.fetchBlob).not.toHaveBeenCalled()
+  })
+
+  it("reports completed current audio as ready", async () => {
+    render(<LatestBriefing projection={readyEpisode()} {...actions()} />)
+
+    const audioRow = screen.getByText("Audio", { selector: "span" }).closest("div")
+    expect(audioRow).not.toBeNull()
+    expect(within(audioRow!).getByText("Ready")).toBeVisible()
+    expect(await screen.findByRole("button", { name: "Play Purple and Gold Weekly" })).toBeEnabled()
   })
 
   it("downloads audio and reviews a script through authenticated artifact requests", async () => {

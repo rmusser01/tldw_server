@@ -1066,5 +1066,14 @@
   },
   "outputs_artifactAccessError": {
     "message": "Falha no acesso. Verifique seu login e a conexão com o servidor."
+  },
+  "overview_latest_status_stale": {
+    "message": "Desatualizado"
+  },
+  "overview_latest_status_superseded": {
+    "message": "Substituído"
+  },
+  "overview_latest_status_unavailable": {
+    "message": "Indisponível"
   }
 }

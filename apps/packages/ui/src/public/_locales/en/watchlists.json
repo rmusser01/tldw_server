@@ -4663,5 +4663,14 @@
   },
   "outputs_artifactAccessError": {
     "message": "Artifact access failed. Check your sign-in and server connection."
+  },
+  "overview_latest_status_stale": {
+    "message": "Stale"
+  },
+  "overview_latest_status_superseded": {
+    "message": "Superseded"
+  },
+  "overview_latest_status_unavailable": {
+    "message": "Unavailable"
   }
 }

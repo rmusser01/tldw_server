@@ -437,7 +437,10 @@
         "cancelled": "റദ്ദാക്കി",
         "delivered": "എത്തിച്ചു",
         "unknown": "ഫലം അജ്ഞാതം",
-        "sending": "അയയ്ക്കുന്നു"
+        "sending": "അയയ്ക്കുന്നു",
+        "stale": "കാലഹരണപ്പെട്ടത്",
+        "superseded": "മാറ്റിസ്ഥാപിച്ചത്",
+        "unavailable": "ലഭ്യമല്ല"
       },
       "stages": {
         "renderText": "റിപ്പോർട്ട്",

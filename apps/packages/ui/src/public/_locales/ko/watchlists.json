@@ -1057,5 +1057,14 @@
   },
   "outputs_artifactAccessError": {
     "message": "접근 실패. 로그인과 서버 연결을 확인하세요."
+  },
+  "overview_latest_status_stale": {
+    "message": "오래됨"
+  },
+  "overview_latest_status_superseded": {
+    "message": "대체됨"
+  },
+  "overview_latest_status_unavailable": {
+    "message": "사용할 수 없음"
   }
 }

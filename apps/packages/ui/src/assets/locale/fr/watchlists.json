@@ -440,7 +440,10 @@
         "cancelled": "Annulé",
         "delivered": "Livré",
         "unknown": "Résultat inconnu",
-        "sending": "Envoi"
+        "sending": "Envoi",
+        "stale": "Obsolète",
+        "superseded": "Remplacé",
+        "unavailable": "Indisponible"
       },
       "stages": {
         "renderText": "rapport",

@@ -1057,5 +1057,14 @@
   },
   "outputs_artifactAccessError": {
     "message": "アクセスに失敗しました. サインインとサーバー接続を確認してください。"
+  },
+  "overview_latest_status_stale": {
+    "message": "古い"
+  },
+  "overview_latest_status_superseded": {
+    "message": "置き換え済み"
+  },
+  "overview_latest_status_unavailable": {
+    "message": "利用不可"
   }
 }

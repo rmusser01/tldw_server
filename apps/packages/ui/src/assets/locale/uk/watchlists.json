@@ -443,7 +443,10 @@
         "cancelled": "Скасовано",
         "delivered": "Доставлено",
         "unknown": "Результат невідомий",
-        "sending": "Надсилається"
+        "sending": "Надсилається",
+        "stale": "Застаріло",
+        "superseded": "Замінено",
+        "unavailable": "Недоступно"
       },
       "stages": {
         "renderText": "звіт",

@@ -437,7 +437,10 @@
         "cancelled": "Abgebrochen",
         "delivered": "Zugestellt",
         "unknown": "Ergebnis unbekannt",
-        "sending": "Wird gesendet"
+        "sending": "Wird gesendet",
+        "stale": "Veraltet",
+        "superseded": "Ersetzt",
+        "unavailable": "Nicht verfügbar"
       },
       "stages": {
         "renderText": "Bericht",

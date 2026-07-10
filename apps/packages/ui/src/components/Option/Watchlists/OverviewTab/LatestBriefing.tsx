@@ -219,7 +219,8 @@ export const LatestBriefing: React.FC<LatestBriefingProps> = ({
   const effectiveTimezone = projection?.timezone || timezone || "UTC"
   const nextRunLabel = formatWatchlistOccurrenceDate(effectiveNextRun, effectiveTimezone, locale)
   const projectedAudio = projection?.audio
-  const audioArtifactPath = projection && hasCurrentBriefingAudio(projection)
+  const hasCurrentAudio = Boolean(projection && hasCurrentBriefingAudio(projection))
+  const audioArtifactPath = hasCurrentAudio
     ? stringValue(projectedAudio.download_url)
     : undefined
   const audioIdentity = projection && audioArtifactPath
@@ -326,6 +327,13 @@ export const LatestBriefing: React.FC<LatestBriefingProps> = ({
     ? t("watchlists:overview.latest.nouns.showNotes", "show notes")
     : t("watchlists:overview.latest.nouns.report", "report")
   const audioReady = Boolean(audioArtifactPath && audioObjectUrl)
+  const noncurrentAudioStatus = projectedAudio?.status === "completed" && !hasCurrentAudio
+    ? projectedAudio.stale
+      ? ["stale", "Stale"]
+      : projectedAudio.superseded_by
+        ? ["superseded", "Superseded"]
+        : ["unavailable", "Unavailable"]
+    : null
   const textReady = Boolean(projection.output) || projection.stages.persist_text?.status === "ready"
   const audioFailedStage = AUDIO_STAGES.find((stage) => projection.stages[stage]?.status === "failed")
   const composeScriptStage = projection.stages.compose_audio_script
@@ -627,10 +635,12 @@ export const LatestBriefing: React.FC<LatestBriefingProps> = ({
             )}
             <div className="flex items-center justify-between gap-3 border-b border-border py-2">
               <span className="inline-flex min-w-0 items-center gap-2"><Headphones className="h-4 w-4 shrink-0" />{t("watchlists:overview.latest.audio", "Audio")}</span>
-              <span className={audioFailedStage ? "text-danger" : audioReady ? "text-success" : "text-text-muted"}>
+              <span className={audioFailedStage ? "text-danger" : hasCurrentAudio ? "text-success" : "text-text-muted"}>
                 {audioFailedStage
                   ? t("watchlists:overview.latest.audioFailed", "Audio failed")
-                  : audioReady
+                  : noncurrentAudioStatus
+                    ? t(`watchlists:overview.latest.status.${noncurrentAudioStatus[0]}`, noncurrentAudioStatus[1])
+                    : hasCurrentAudio
                     ? t("watchlists:overview.latest.ready", "Ready")
                     : statusLabel(projection.audio?.status || projection.stages.generate_audio?.status || "not_started", t)}
               </span>

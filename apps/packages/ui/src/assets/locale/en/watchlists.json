@@ -774,7 +774,10 @@
         "cancelled": "Cancelled",
         "delivered": "Delivered",
         "unknown": "Outcome unknown",
-        "sending": "Sending"
+        "sending": "Sending",
+        "stale": "Stale",
+        "superseded": "Superseded",
+        "unavailable": "Unavailable"
       },
       "stages": {
         "renderText": "report",

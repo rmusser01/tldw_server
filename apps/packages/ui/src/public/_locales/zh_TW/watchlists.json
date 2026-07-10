@@ -1057,5 +1057,14 @@
   },
   "outputs_artifactAccessError": {
     "message": "存取失敗. 請檢查登入狀態與伺服器連線。"
+  },
+  "overview_latest_status_stale": {
+    "message": "已過期"
+  },
+  "overview_latest_status_superseded": {
+    "message": "已被取代"
+  },
+  "overview_latest_status_unavailable": {
+    "message": "無法使用"
   }
 }

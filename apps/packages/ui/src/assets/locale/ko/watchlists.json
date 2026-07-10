@@ -437,7 +437,10 @@
         "cancelled": "취소됨",
         "delivered": "전달됨",
         "unknown": "결과 알 수 없음",
-        "sending": "전송 중"
+        "sending": "전송 중",
+        "stale": "오래됨",
+        "superseded": "대체됨",
+        "unavailable": "사용할 수 없음"
       },
       "stages": {
         "renderText": "보고서",

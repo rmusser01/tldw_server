@@ -1066,5 +1066,14 @@
   },
   "outputs_artifactAccessError": {
     "message": "Error de acceso. Comprueba tu inicio de sesión y la conexión con el servidor."
+  },
+  "overview_latest_status_stale": {
+    "message": "Obsoleto"
+  },
+  "overview_latest_status_superseded": {
+    "message": "Reemplazado"
+  },
+  "overview_latest_status_unavailable": {
+    "message": "No disponible"
   }
 }

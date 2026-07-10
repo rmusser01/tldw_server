@@ -1066,5 +1066,14 @@
   },
   "outputs_artifactAccessError": {
     "message": "Accesso non riuscito. Controlla l’accesso e la connessione al server."
+  },
+  "overview_latest_status_stale": {
+    "message": "Obsoleto"
+  },
+  "overview_latest_status_superseded": {
+    "message": "Sostituito"
+  },
+  "overview_latest_status_unavailable": {
+    "message": "Non disponibile"
   }
 }

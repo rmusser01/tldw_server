@@ -1075,5 +1075,14 @@
   },
   "outputs_artifactAccessError": {
     "message": "Помилка доступу. Перевірте вхід і з’єднання із сервером."
+  },
+  "overview_latest_status_stale": {
+    "message": "Застаріло"
+  },
+  "overview_latest_status_superseded": {
+    "message": "Замінено"
+  },
+  "overview_latest_status_unavailable": {
+    "message": "Недоступно"
   }
 }

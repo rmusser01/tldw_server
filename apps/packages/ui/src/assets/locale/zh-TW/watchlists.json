@@ -437,7 +437,10 @@
         "cancelled": "已取消",
         "delivered": "已送達",
         "unknown": "結果未知",
-        "sending": "傳送中"
+        "sending": "傳送中",
+        "stale": "已過期",
+        "superseded": "已被取代",
+        "unavailable": "無法使用"
       },
       "stages": {
         "renderText": "報告",

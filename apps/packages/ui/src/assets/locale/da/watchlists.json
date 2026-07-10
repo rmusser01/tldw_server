@@ -437,7 +437,10 @@
         "cancelled": "Annulleret",
         "delivered": "Leveret",
         "unknown": "Resultat ukendt",
-        "sending": "Sender"
+        "sending": "Sender",
+        "stale": "Forældet",
+        "superseded": "Erstattet",
+        "unavailable": "Ikke tilgængelig"
       },
       "stages": {
         "renderText": "rapport",

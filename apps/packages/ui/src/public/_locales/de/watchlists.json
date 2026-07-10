@@ -1057,5 +1057,14 @@
   },
   "outputs_artifactAccessError": {
     "message": "Zugriff fehlgeschlagen. Prüfen Sie Ihre Anmeldung und Serververbindung."
+  },
+  "overview_latest_status_stale": {
+    "message": "Veraltet"
+  },
+  "overview_latest_status_superseded": {
+    "message": "Ersetzt"
+  },
+  "overview_latest_status_unavailable": {
+    "message": "Nicht verfügbar"
   }
 }

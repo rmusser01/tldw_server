@@ -1057,5 +1057,14 @@
   },
   "outputs_artifactAccessError": {
     "message": "دسترسی ناموفق بود. ورود و اتصال سرور را بررسی کنید."
+  },
+  "overview_latest_status_stale": {
+    "message": "قدیمی"
+  },
+  "overview_latest_status_superseded": {
+    "message": "جایگزین‌شده"
+  },
+  "overview_latest_status_unavailable": {
+    "message": "در دسترس نیست"
   }
 }

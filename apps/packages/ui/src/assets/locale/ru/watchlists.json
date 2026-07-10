@@ -443,7 +443,10 @@
         "cancelled": "Отменено",
         "delivered": "Доставлено",
         "unknown": "Результат неизвестен",
-        "sending": "Отправляется"
+        "sending": "Отправляется",
+        "stale": "Устарело",
+        "superseded": "Заменено",
+        "unavailable": "Недоступно"
       },
       "stages": {
         "renderText": "отчёт",
