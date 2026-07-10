@@ -2611,7 +2611,7 @@ def _clamp_int(value: Any, default: int, min_value: int, max_value: int) -> int:
 
 def _audio_protocol_frame_for_config(
     frame: dict[str, Any],
-    config: UnifiedStreamingConfig,
+    config: Optional[UnifiedStreamingConfig],
 ) -> dict[str, Any]:
     """Return the strict audio protocol view for a client config frame.
 
@@ -2626,7 +2626,8 @@ def _audio_protocol_frame_for_config(
     protocol_frame.setdefault("protocol_version", 1)
     protocol_frame.setdefault("mode", "dictate")
     protocol_frame.setdefault("audio_format", "pcm16")
-    protocol_frame.setdefault("sample_rate", getattr(config, "sample_rate", 16000) or 16000)
+    sample_rate = getattr(config, "sample_rate", 16000) if config is not None else 16000
+    protocol_frame.setdefault("sample_rate", sample_rate or 16000)
     protocol_frame.setdefault("channels", 1)
     return protocol_frame
 

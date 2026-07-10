@@ -76,9 +76,9 @@ runs:
           done
           test -f "$(brew --prefix portaudio)/include/portaudio.h"
           portaudio_prefix="$(brew --prefix portaudio)"
-          echo "CFLAGS=-I$portaudio_prefix/include" >> "$GITHUB_ENV"
-          echo "LDFLAGS=-L$portaudio_prefix/lib" >> "$GITHUB_ENV"
-          echo "PKG_CONFIG_PATH=$portaudio_prefix/lib/pkgconfig:${PKG_CONFIG_PATH:-}" >> "$GITHUB_ENV"
+          echo "CFLAGS=-I$portaudio_prefix/include${CFLAGS:+ $CFLAGS}" >> "$GITHUB_ENV"
+          echo "LDFLAGS=-L$portaudio_prefix/lib${LDFLAGS:+ $LDFLAGS}" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG_PATH=$portaudio_prefix/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}" >> "$GITHUB_ENV"
         fi
     - name: Install FFmpeg (Windows)
       if: runner.os == 'Windows' && inputs.install-ffmpeg == 'true'

@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import threading
 import time
+from concurrent.futures import Future
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 import pytest
 
@@ -77,14 +78,25 @@ class _DeterministicBackgroundExecutor:
     def __init__(self) -> None:
         self._threads: list[threading.Thread] = []
 
-    def submit(self, worker_fn: Callable[[], None]) -> None:
+    def submit(self, worker_fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Future:
+        future = Future()
+
+        def _run() -> None:
+            if not future.set_running_or_notify_cancel():
+                return
+            try:
+                future.set_result(worker_fn(*args, **kwargs))
+            except BaseException as exc:
+                future.set_exception(exc)
+
         thread = threading.Thread(
-            target=worker_fn,
+            target=_run,
             name="sandbox-test-runner",
             daemon=True,
         )
         self._threads.append(thread)
         thread.start()
+        return future
 
     def shutdown(self, wait: bool = True, cancel_futures: bool = False) -> None:
         del cancel_futures

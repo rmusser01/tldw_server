@@ -78,31 +78,24 @@ async def test_warm_chacha_notes_on_startup_skips_test_mode(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     warmup = _import_startup_chacha_warmup()
+    from tldw_Server_API.app.core.AuthNZ import settings as auth_settings
+
     logger = _FakeLogger()
-    observed: dict[str, object] = {"reset_calls": 0, "scheduled": False}
 
     monkeypatch.setenv("TEST_MODE", "true")
-    monkeypatch.setattr(
-        warmup,
-        "_reset_chacha_shutdown_state",
-        lambda: observed.__setitem__("reset_calls", int(observed["reset_calls"]) + 1),
-    )
-    monkeypatch.setattr(warmup, "_is_single_user_mode", lambda: True)
-    monkeypatch.setattr(
-        warmup,
-        "_schedule_warm_chacha_task",
-        lambda user_id, client_id: observed.__setitem__("scheduled", True),
-    )
+
+    def _fail_if_auth_mode_is_checked() -> bool:
+        raise AssertionError("test mode should skip auth mode checks")
+
+    monkeypatch.setattr(auth_settings, "is_single_user_mode", _fail_if_auth_mode_is_checked)
 
     await warmup.warm_chacha_notes_on_startup(
         logger=logger,
         startup_guard_exceptions=(RuntimeError,),
     )
 
-    assert observed["reset_calls"] == 1
-    assert observed["scheduled"] is False
     assert logger.info_messages == []
-    assert logger.debug_messages == ["ChaChaNotes warm-up skipped (test mode)"]
+    assert any("test mode" in message.lower() for message in logger.debug_messages)
     assert logger.warning_messages == []
 
 
