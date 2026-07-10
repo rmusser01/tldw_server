@@ -729,7 +729,7 @@
     "message": "{{stage}}: {{status}}"
   },
   "overview_latest_noUpdates": {
-    "message": "Ny: 0. Lagret {{noun}}."
+    "message": "Ingen kvalifiserende oppdateringer ble funnet. En status-{{noun}} ble lagret."
   },
   "overview_latest_nextRun": {
     "message": "Neste kjøring: {{date}}"
@@ -780,7 +780,7 @@
     "message": "Ukjent resultat. Prøv igjen {{adapter}}: {{name}}"
   },
   "overview_latest_delivery_reviewRetry": {
-    "message": "Prøv igjen"
+    "message": "Se gjennom og prøv igjen"
   },
   "overview_latest_delivery_unknownConfirmation": {
     "message": "Leverandøren bekreftet ikke levering via {{adapter}}. Et nytt forsøk kan sende en duplikat. Kontroller målet og fortsett bare hvis risikoen er akseptabel."
@@ -789,13 +789,13 @@
     "message": "lyd: {{name}}"
   },
   "overview_latest_playback_playAria": {
-    "message": "Åpne lyd: {{name}}"
+    "message": "Spill av {{name}}"
   },
   "overview_latest_playback_pauseAria": {
-    "message": "Venter lyd: {{name}}"
+    "message": "Sett {{name}} på pause"
   },
   "overview_latest_playback_resumeAria": {
-    "message": "Åpne lyd: {{name}}"
+    "message": "Fortsett {{name}}"
   },
   "overview_latest_playback_seekAria": {
     "message": "lyd: {{name}}"

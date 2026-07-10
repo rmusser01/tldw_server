@@ -91,6 +91,22 @@ const OVERVIEW_REFRESH_INTERVAL_MS = 30_000
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === "object" && !Array.isArray(value)
 
+interface BriefingActionKey {
+  watchlistId: number
+  occurrenceId: number
+  runId: number
+  jobId: number
+}
+
+const sameBriefingActionKey = (
+  left: BriefingActionKey,
+  right: BriefingActionKey
+): boolean =>
+  left.watchlistId === right.watchlistId &&
+  left.occurrenceId === right.occurrenceId &&
+  left.runId === right.runId &&
+  left.jobId === right.jobId
+
 export const extractPipelineErrorMessage = (error: unknown): string => {
   if (typeof error === "string") return error.trim()
   if (!isRecord(error)) {
@@ -151,6 +167,9 @@ export const OverviewTab: React.FC = () => {
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const overviewRequestRef = useRef(0)
   const previousBriefingRef = useRef<WatchlistBriefingProjection | null>(null)
+  const briefingActionGenerationRef = useRef(0)
+  const briefingActionControllerRef = useRef<AbortController | null>(null)
+  const briefingActionKeyRef = useRef<BriefingActionKey | null>(null)
   const quickSetupTriggerRef = useRef<HTMLButtonElement | null>(null)
   const pipelineSetupRestoreFocusTargetRef = useRef<HTMLElement | null>(null)
   const pipelineSetupWasOpenRef = useRef(false)
@@ -167,6 +186,16 @@ export const OverviewTab: React.FC = () => {
   const selectedWatchlistId = useWatchlistsStore((s) => s.selectedWatchlistId)
   const hasSelectedWatchlist = selectedWatchlistId != null
 
+  useEffect(() => {
+    briefingActionGenerationRef.current += 1
+    briefingActionControllerRef.current?.abort()
+    briefingActionControllerRef.current = null
+    briefingActionKeyRef.current = null
+    previousBriefingRef.current = null
+    setPoliteAnnouncement("")
+    setAssertiveAnnouncement("")
+  }, [selectedWatchlistId])
+
   const announceBriefingTransition = useCallback((next: WatchlistBriefingProjection | null) => {
     const previous = previousBriefingRef.current
     if (!next) {
@@ -175,10 +204,22 @@ export const OverviewTab: React.FC = () => {
       setAssertiveAnnouncement("")
       return
     }
+    const pendingAction = briefingActionKeyRef.current
+    if (pendingAction && selectedWatchlistId != null && !sameBriefingActionKey(pendingAction, {
+      watchlistId: selectedWatchlistId,
+      occurrenceId: next.occurrence_id,
+      runId: next.run_id,
+      jobId: next.job_id
+    })) {
+      briefingActionGenerationRef.current += 1
+      briefingActionControllerRef.current?.abort()
+      briefingActionControllerRef.current = null
+      briefingActionKeyRef.current = null
+    }
     setPoliteAnnouncement(transitionAnnouncement(previous, next, t) || "")
     setAssertiveAnnouncement(blockingFailureAnnouncement(previous, next, t) || "")
     previousBriefingRef.current = next
-  }, [t])
+  }, [selectedWatchlistId, t])
 
   const applyBriefingProjection = useCallback((next: WatchlistBriefingProjection) => {
     announceBriefingTransition(next)
@@ -311,40 +352,95 @@ export const OverviewTab: React.FC = () => {
     openOutputPreview(outputId)
   }, [openOutputPreview, setActiveTab])
 
+  const handleReviewDeliverySettings = useCallback((jobId: number) => {
+    setActiveTab("jobs")
+    openJobForm(jobId)
+  }, [openJobForm, setActiveTab])
+
+  const runBriefingRecovery = useCallback(async (
+    runId: number,
+    stage: WatchlistBriefingRetryStage,
+    options: {
+      regenerate?: boolean
+      confirm_unknown_delivery_retry?: boolean
+    },
+    errorKey: string,
+    errorFallback: string
+  ) => {
+    const target = previousBriefingRef.current
+    if (selectedWatchlistId == null || !target || target.run_id !== runId) return
+
+    briefingActionControllerRef.current?.abort()
+    const controller = new AbortController()
+    const generation = ++briefingActionGenerationRef.current
+    const actionKey: BriefingActionKey = {
+      watchlistId: selectedWatchlistId,
+      occurrenceId: target.occurrence_id,
+      runId: target.run_id,
+      jobId: target.job_id
+    }
+    briefingActionControllerRef.current = controller
+    briefingActionKeyRef.current = actionKey
+
+    try {
+      const next = await retryWatchlistBriefingStage(runId, stage, {
+        ...options,
+        signal: controller.signal
+      })
+      const current = previousBriefingRef.current
+      if (
+        controller.signal.aborted ||
+        generation !== briefingActionGenerationRef.current ||
+        !current ||
+        !sameBriefingActionKey(actionKey, {
+          watchlistId: selectedWatchlistId,
+          occurrenceId: current.occurrence_id,
+          runId: current.run_id,
+          jobId: current.job_id
+        }) ||
+        next.occurrence_id !== actionKey.occurrenceId ||
+        next.run_id !== actionKey.runId ||
+        next.job_id !== actionKey.jobId
+      ) return
+      applyBriefingProjection(next)
+    } catch (err) {
+      if (controller.signal.aborted || generation !== briefingActionGenerationRef.current) return
+      console.error("Failed to recover watchlists briefing stage:", err)
+      message.error(t(errorKey, errorFallback))
+    } finally {
+      if (generation === briefingActionGenerationRef.current) {
+        briefingActionControllerRef.current = null
+        briefingActionKeyRef.current = null
+      }
+    }
+  }, [applyBriefingProjection, selectedWatchlistId, t])
+
   const handleRetryBriefingStage = useCallback(async (
     runId: number,
     stage: WatchlistBriefingRetryStage,
     options?: { confirm_unknown_delivery_retry?: boolean }
   ) => {
-    try {
-      const next = await retryWatchlistBriefingStage(runId, stage, options)
-      applyBriefingProjection(next)
-    } catch (err) {
-      if ((err as { name?: string } | null)?.name === "AbortError") return
-      console.error("Failed to retry watchlists briefing stage:", err)
-      message.error(t(
-        "watchlists:overview.latest.retryError",
-        "Could not retry this briefing stage. Inspect the run for details."
-      ))
-    }
-  }, [applyBriefingProjection, t])
+    await runBriefingRecovery(
+      runId,
+      stage,
+      options || {},
+      "watchlists:overview.latest.retryError",
+      "Could not retry this briefing stage. Inspect the run for details."
+    )
+  }, [runBriefingRecovery])
 
   const handleRegenerateBriefing = useCallback(async (
     runId: number,
     stage: WatchlistBriefingRetryStage
   ) => {
-    try {
-      const next = await retryWatchlistBriefingStage(runId, stage, { regenerate: true })
-      applyBriefingProjection(next)
-    } catch (err) {
-      if ((err as { name?: string } | null)?.name === "AbortError") return
-      console.error("Failed to regenerate watchlists briefing stage:", err)
-      message.error(t(
-        "watchlists:overview.latest.regenerateError",
-        "Could not regenerate audio. Inspect the run for details."
-      ))
-    }
-  }, [applyBriefingProjection, t])
+    await runBriefingRecovery(
+      runId,
+      stage,
+      { regenerate: true },
+      "watchlists:overview.latest.regenerateError",
+      "Could not regenerate audio. Inspect the run for details."
+    )
+  }, [runBriefingRecovery])
 
   const handleOpenAlerts = useCallback(() => {
     setActiveTab("alerts")
@@ -828,6 +924,43 @@ export const OverviewTab: React.FC = () => {
 
   return (
     <div className="space-y-4">
+      <div
+        className="sr-only"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        data-testid="watchlists-overview-live-polite"
+      >
+        {politeAnnouncement}
+      </div>
+      <div
+        className="sr-only"
+        role="alert"
+        aria-live="assertive"
+        aria-atomic="true"
+        data-testid="watchlists-overview-live-assertive"
+      >
+        {assertiveAnnouncement}
+      </div>
+
+      {data && (
+        <LatestBriefing
+          projection={data.latestBriefing}
+          emptyJobId={data.jobs.nextActiveJob?.id}
+          nextRunAt={data.jobs.nextActiveJob?.nextRunAt}
+          timezone={data.jobs.nextActiveJob?.timezone}
+          unreadCount={data.items.unread}
+          onPlay={() => undefined}
+          onOpenReport={handleOpenBriefingReport}
+          onInspectRun={handleOpenRun}
+          onRetryStage={handleRetryBriefingStage}
+          onRegenerate={handleRegenerateBriefing}
+          onTestNow={handleTestLatest}
+          onViewReports={handleOpenAttentionOutputs}
+          onReviewDeliverySettings={handleReviewDeliverySettings}
+        />
+      )}
+
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-text-muted">
           {t(
@@ -867,38 +1000,8 @@ export const OverviewTab: React.FC = () => {
         <DesignSystemAlert variant="error" title={error} />
       )}
 
-      <div
-        className="sr-only"
-        role="status"
-        aria-live="polite"
-        aria-atomic="true"
-        data-testid="watchlists-overview-live-polite"
-      >
-        {politeAnnouncement}
-      </div>
-      <div
-        className="sr-only"
-        role="alert"
-        aria-live="assertive"
-        aria-atomic="true"
-        data-testid="watchlists-overview-live-assertive"
-      >
-        {assertiveAnnouncement}
-      </div>
-
       {data && (
         <>
-          <LatestBriefing
-            projection={data.latestBriefing}
-            unreadCount={data.items.unread}
-            onPlay={() => undefined}
-            onOpenReport={handleOpenBriefingReport}
-            onInspectRun={handleOpenRun}
-            onRetryStage={handleRetryBriefingStage}
-            onRegenerate={handleRegenerateBriefing}
-            onTestNow={handleTestLatest}
-            onViewReports={handleOpenAttentionOutputs}
-          />
           {(data.sources.total === 0 || data.jobs.total === 0) && (
             <Card
               size="small"

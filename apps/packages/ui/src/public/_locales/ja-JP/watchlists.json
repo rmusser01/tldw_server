@@ -729,7 +729,7 @@
     "message": "{{stage}}: {{status}}"
   },
   "overview_latest_noUpdates": {
-    "message": "新着: 0. 保存済み {{noun}}."
+    "message": "条件に一致する更新はありませんでした。ステータス用の{{noun}}を保存しました。"
   },
   "overview_latest_nextRun": {
     "message": "次回実行: {{date}}"
@@ -780,7 +780,7 @@
     "message": "結果不明. 再試行 {{adapter}}: {{name}}"
   },
   "overview_latest_delivery_reviewRetry": {
-    "message": "再試行"
+    "message": "確認して再試行"
   },
   "overview_latest_delivery_unknownConfirmation": {
     "message": "プロバイダーは {{adapter}} の配信を確認していません。再試行すると重複して送信される可能性があります。送信先を確認し、そのリスクを許容できる場合のみ続行してください。"
@@ -789,13 +789,13 @@
     "message": "音声: {{name}}"
   },
   "overview_latest_playback_playAria": {
-    "message": "開く 音声: {{name}}"
+    "message": "{{name}}を再生"
   },
   "overview_latest_playback_pauseAria": {
-    "message": "待機中 音声: {{name}}"
+    "message": "{{name}}を一時停止"
   },
   "overview_latest_playback_resumeAria": {
-    "message": "開く 音声: {{name}}"
+    "message": "{{name}}を再開"
   },
   "overview_latest_playback_seekAria": {
     "message": "音声: {{name}}"

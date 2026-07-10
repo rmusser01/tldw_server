@@ -729,7 +729,7 @@
     "message": "{{stage}}: {{status}}"
   },
   "overview_latest_noUpdates": {
-    "message": "新增: 0. 已儲存 {{noun}}."
+    "message": "找不到符合條件的更新。已儲存狀態{{noun}}。"
   },
   "overview_latest_nextRun": {
     "message": "下次執行: {{date}}"
@@ -780,7 +780,7 @@
     "message": "結果未知. 重試 {{adapter}}: {{name}}"
   },
   "overview_latest_delivery_reviewRetry": {
-    "message": "重試"
+    "message": "檢查後重試"
   },
   "overview_latest_delivery_unknownConfirmation": {
     "message": "提供者未確認透過 {{adapter}} 送達。重試可能會傳送重複內容。請檢查目的地，僅在可接受此風險時繼續。"
@@ -789,13 +789,13 @@
     "message": "音訊: {{name}}"
   },
   "overview_latest_playback_playAria": {
-    "message": "開啟 音訊: {{name}}"
+    "message": "播放 {{name}}"
   },
   "overview_latest_playback_pauseAria": {
-    "message": "等待中 音訊: {{name}}"
+    "message": "暫停 {{name}}"
   },
   "overview_latest_playback_resumeAria": {
-    "message": "開啟 音訊: {{name}}"
+    "message": "繼續播放 {{name}}"
   },
   "overview_latest_playback_seekAria": {
     "message": "音訊: {{name}}"

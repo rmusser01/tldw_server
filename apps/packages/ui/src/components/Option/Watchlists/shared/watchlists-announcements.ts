@@ -27,7 +27,46 @@ const audioFailed = (projection: WatchlistBriefingProjection): boolean =>
     "persist_audio"
   ].some((stage) => projection.stages[stage]?.status === "failed")
 
+const sameOccurrence = (
+  left: WatchlistBriefingProjection,
+  right: WatchlistBriefingProjection
+): boolean =>
+  left.occurrence_id === right.occurrence_id &&
+  left.run_id === right.run_id &&
+  left.job_id === right.job_id
+
+const localizedStage = (stage: string, t: TFunction): string => {
+  const stages: Record<string, [string, string]> = {
+    collect: ["collect", "Collecting updates"],
+    select: ["select", "Selecting updates"],
+    render_text: ["renderText", "Text report"],
+    persist_text: ["persistText", "Saving report"],
+    compose_audio_script: ["composeScript", "Audio script"],
+    persist_audio_script: ["persistScript", "Saving audio script"],
+    generate_audio: ["generateAudio", "Audio"],
+    persist_audio: ["persistAudio", "Saving audio"]
+  }
+  const entry = stages[stage]
+  return entry
+    ? t(`watchlists:overview.latest.stages.${entry[0]}`, entry[1])
+    : stage.replaceAll("_", " ")
+}
+
+const localizedStatus = (status: string, t: TFunction): string => {
+  const statuses: Record<string, [string, string]> = {
+    queued: ["queued", "queued"],
+    running: ["running", "running"]
+  }
+  const entry = statuses[status]
+  return entry
+    ? t(`watchlists:overview.latest.status.${entry[0]}`, entry[1])
+    : status
+}
+
 const semanticState = (projection: WatchlistBriefingProjection): string => JSON.stringify({
+  occurrence: projection.occurrence_id,
+  run: projection.run_id,
+  job: projection.job_id,
   artifact: projection.artifact_status,
   delivery: projection.delivery_status,
   textReady: textReady(projection),
@@ -106,15 +145,20 @@ export const transitionAnnouncement = (
     )
   }
 
+  const sameIdentity = sameOccurrence(previous, next)
   const activeStage = Object.entries(next.stages).find(([stageName, stage]) => {
-    const previousStage = previous.stages[stageName]
+    const previousStage = sameIdentity ? previous.stages[stageName] : undefined
     return ["queued", "running"].includes(stage.status) && previousStage?.status !== stage.status
   })
   if (activeStage) {
     return t(
       "watchlists:overview.latest.announcements.stageProgress",
       "{{name}}: {{stage}} is {{status}}.",
-      { name, stage: activeStage[0].replaceAll("_", " "), status: activeStage[1].status }
+      {
+        name,
+        stage: localizedStage(activeStage[0], t),
+        status: localizedStatus(activeStage[1].status, t)
+      }
     )
   }
 

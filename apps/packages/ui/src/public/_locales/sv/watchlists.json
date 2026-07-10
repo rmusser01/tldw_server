@@ -729,7 +729,7 @@
     "message": "{{stage}}: {{status}}"
   },
   "overview_latest_noUpdates": {
-    "message": "Nytt: 0. Sparad {{noun}}."
+    "message": "Inga kvalificerande uppdateringar hittades. En status-{{noun}} sparades."
   },
   "overview_latest_nextRun": {
     "message": "Nästa körning: {{date}}"
@@ -780,7 +780,7 @@
     "message": "Okänt resultat. Försök igen {{adapter}}: {{name}}"
   },
   "overview_latest_delivery_reviewRetry": {
-    "message": "Försök igen"
+    "message": "Granska och försök igen"
   },
   "overview_latest_delivery_unknownConfirmation": {
     "message": "Leverantören bekräftade inte leverans via {{adapter}}. Ett nytt försök kan skicka en dubblett. Kontrollera målet och fortsätt bara om risken är acceptabel."
@@ -789,13 +789,13 @@
     "message": "ljud: {{name}}"
   },
   "overview_latest_playback_playAria": {
-    "message": "Öppna ljud: {{name}}"
+    "message": "Spela upp {{name}}"
   },
   "overview_latest_playback_pauseAria": {
-    "message": "Väntar ljud: {{name}}"
+    "message": "Pausa {{name}}"
   },
   "overview_latest_playback_resumeAria": {
-    "message": "Öppna ljud: {{name}}"
+    "message": "Återuppta {{name}}"
   },
   "overview_latest_playback_seekAria": {
     "message": "ljud: {{name}}"

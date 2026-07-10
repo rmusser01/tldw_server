@@ -1067,6 +1067,66 @@ class WatchlistBriefingStage(BaseModel):
     workflow_run_id: str | None = None
 
 
+class WatchlistBriefingCastSpeaker(BaseModel):
+    """Public, bounded speaker identity for the latest briefing surface."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    label: str = Field(..., min_length=1, max_length=128)
+    role: str | None = Field(default=None, max_length=128)
+    voice: str | None = Field(default=None, max_length=128)
+    synthetic: bool = True
+
+
+class WatchlistBriefingCast(BaseModel):
+    """Public cast summary without internal IDs or persona configuration."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    speaker_count: int = Field(..., ge=0, le=4)
+    speakers: list[WatchlistBriefingCastSpeaker] = Field(default_factory=list, max_length=4)
+
+
+class WatchlistBriefingShowIdentity(BaseModel):
+    """Bounded public show identity."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(default=None, max_length=128)
+    premise: str | None = Field(default=None, max_length=280)
+
+
+class WatchlistBriefingEditorial(BaseModel):
+    """Allowlisted editorial fields needed by the latest briefing UI."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    program_format: Literal[
+        "concise_briefing",
+        "solo_update",
+        "host_discussion",
+        "sportscast",
+        "culture_roundtable",
+        "custom",
+    ] = "concise_briefing"
+    outcome_noun: Literal["briefing", "episode"] = "briefing"
+    show_name: str | None = Field(default=None, max_length=128)
+    show_identity: WatchlistBriefingShowIdentity = Field(default_factory=WatchlistBriefingShowIdentity)
+    show_notes: bool = False
+    target_minutes: int | None = Field(default=None, ge=1, le=60)
+    cast: WatchlistBriefingCast | None = None
+
+
+class WatchlistBriefingDeliverySummary(BaseModel):
+    """Privacy-safe destination summary for one delivery adapter."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    adapter: Literal["email", "chatbook"]
+    recipient_count: int = Field(default=0, ge=0, le=1000)
+    masked_label: str = Field(..., min_length=1, max_length=128)
+
+
 class WatchlistBriefingProjection(BaseModel):
     """Effective artifact and delivery state for one briefing occurrence."""
 
@@ -1086,7 +1146,8 @@ class WatchlistBriefingProjection(BaseModel):
     stages: dict[str, WatchlistBriefingStage]
     output: dict[str, Any] | None = None
     audio: WatchlistRunAudioResponse | None = None
-    editorial: dict[str, Any] = Field(default_factory=dict)
+    editorial: WatchlistBriefingEditorial = Field(default_factory=WatchlistBriefingEditorial)
+    delivery: dict[str, WatchlistBriefingDeliverySummary] = Field(default_factory=dict)
     selection: dict[str, int] = Field(default_factory=dict)
     next_run_at: str | None = None
     timezone: str = "UTC"

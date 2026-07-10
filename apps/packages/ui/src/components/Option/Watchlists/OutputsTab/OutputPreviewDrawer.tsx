@@ -18,9 +18,13 @@ import { DISCUSS_WATCHLIST_PROMPT_SETTING } from "@/services/settings/ui-setting
 import type { WatchlistChatHandoffPayload } from "@/services/tldw/watchlist-chat-handoff"
 import {
   downloadWatchlistOutput,
-  downloadWatchlistOutputBinary,
   getWatchlistRunAudio
 } from "@/services/watchlists"
+import {
+  createWatchlistArtifactObjectUrl,
+  fetchWatchlistArtifactBlob,
+  revokeWatchlistArtifactObjectUrl
+} from "@/services/watchlists-artifacts"
 import type { WatchlistOutput, WatchlistRunAudioStatus } from "@/types/watchlists"
 import { sanitizeServerErrorMessage } from "@/utils/server-error-message"
 import {
@@ -73,6 +77,8 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
   onClose
 }) => {
   const { t } = useTranslation(["watchlists", "common"])
+  const tRef = useRef(t)
+  tRef.current = t
   const navigate = useSafeNavigate()
 
   const [loading, setLoading] = useState(false)
@@ -133,31 +139,52 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
 
   const updateAudioObjectUrl = useCallback((nextUrl: string | null) => {
     if (audioObjectUrlRef.current && audioObjectUrlRef.current !== nextUrl) {
-      URL.revokeObjectURL(audioObjectUrlRef.current)
+      revokeWatchlistArtifactObjectUrl(audioObjectUrlRef.current)
     }
     audioObjectUrlRef.current = nextUrl
     setAudioObjectUrl(nextUrl)
   }, [])
 
+  const artifactErrorMessage = useCallback((artifactError: unknown) => {
+    const translate = tRef.current
+    const kind = (artifactError as { kind?: string } | null)?.kind
+    if (kind === "missing") {
+      return translate("watchlists:outputs.artifactMissing", "This artifact is no longer available")
+    }
+    if (kind === "auth") {
+      return translate("watchlists:outputs.artifactAuthError", "Artifact access was denied. Check your sign-in.")
+    }
+    return translate(
+      "watchlists:outputs.artifactAccessError",
+      "Artifact access failed. Check your sign-in and server connection."
+    )
+  }, [])
+
   // Fetch content when drawer opens
   useEffect(() => {
+    const controller = new AbortController()
     if (open && output) {
       setLoading(true)
       setError(null)
       if (outputIsAudio) {
         setContent(null)
-        downloadWatchlistOutputBinary(output.id)
-          .then((result) => {
-            const blob = new Blob([result], { type: getOutputMimeType(output.format) })
-            const nextUrl = URL.createObjectURL(blob)
+        updateAudioObjectUrl(null)
+        fetchWatchlistArtifactBlob(`/api/v1/watchlists/outputs/${output.id}/download`, {
+          mimeType: getOutputMimeType(output.format),
+          signal: controller.signal
+        })
+          .then((blob) => {
+            if (controller.signal.aborted) return
+            const nextUrl = createWatchlistArtifactObjectUrl(blob)
             updateAudioObjectUrl(nextUrl)
           })
           .catch((err) => {
+            if (controller.signal.aborted || err?.name === "AbortError") return
             console.error("Failed to fetch audio output content:", err)
-            setError(err.message || "Failed to load content")
+            setError(artifactErrorMessage(err))
           })
           .finally(() => {
-            setLoading(false)
+            if (!controller.signal.aborted) setLoading(false)
           })
       } else {
         updateAudioObjectUrl(null)
@@ -177,12 +204,13 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
       updateAudioObjectUrl(null)
       setViewMode("rendered")
     }
-  }, [open, output, outputIsAudio, updateAudioObjectUrl])
+    return () => controller.abort()
+  }, [artifactErrorMessage, open, output, outputIsAudio, updateAudioObjectUrl])
 
   useEffect(() => {
     return () => {
       if (audioObjectUrlRef.current) {
-        URL.revokeObjectURL(audioObjectUrlRef.current)
+        revokeWatchlistArtifactObjectUrl(audioObjectUrlRef.current)
       }
       audioObjectUrlRef.current = null
     }
@@ -194,20 +222,24 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
     try {
       const mimeType = getOutputMimeType(output.format)
       const blob = outputIsAudio
-        ? new Blob([await downloadWatchlistOutputBinary(output.id)], { type: mimeType })
+        ? await fetchWatchlistArtifactBlob(`/api/v1/watchlists/outputs/${output.id}/download`, {
+            mimeType
+          })
         : new Blob([await downloadWatchlistOutput(output.id)], { type: mimeType })
-      const url = URL.createObjectURL(blob)
+      const url = createWatchlistArtifactObjectUrl(blob)
       const a = document.createElement("a")
       a.href = url
       a.download = `${output.title || `output-${output.id}`}.${getOutputFileExtension(output)}`
       document.body.appendChild(a)
       a.click()
       document.body.removeChild(a)
-      URL.revokeObjectURL(url)
+      revokeWatchlistArtifactObjectUrl(url)
       message.success(t("watchlists:outputs.downloaded", "Output downloaded"))
     } catch (err) {
       console.error("Failed to download output:", err)
-      message.error(t("watchlists:outputs.downloadError", "Failed to download output"))
+      message.error(outputIsAudio
+        ? artifactErrorMessage(err)
+        : t("watchlists:outputs.downloadError", "Failed to download output"))
     }
   }
 
@@ -336,22 +368,38 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
   const renderAudioArtifactGraph = () => {
     if (!audioSummary.requested) return null
 
+    const downloadArtifact = async (artifact: AudioArtifactSummary) => {
+      if (!artifact.downloadUrl) return
+      try {
+        const blob = await fetchWatchlistArtifactBlob(artifact.downloadUrl, {})
+        const url = createWatchlistArtifactObjectUrl(blob)
+        const anchor = document.createElement("a")
+        anchor.href = url
+        anchor.download = artifact.displayName || artifact.label
+        document.body.appendChild(anchor)
+        anchor.click()
+        anchor.remove()
+        revokeWatchlistArtifactObjectUrl(url)
+      } catch (artifactError) {
+        message.error(artifactErrorMessage(artifactError))
+      }
+    }
+
     const renderArtifact = (artifact: AudioArtifactSummary, key: string) => (
       <div key={key}>
         <div className="font-medium text-text">{artifact.label}</div>
         {artifact.displayName ? <div>{artifact.displayName}</div> : null}
         {artifact.downloadUrl ? (
-          <a
-            href={artifact.downloadUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="text-primary hover:underline"
-            aria-label={t("watchlists:outputs.openAudioArtifactAria", "Open {{label}}", {
-              label: artifact.label
+          <Button
+            type="link"
+            className="min-h-11 p-0"
+            aria-label={t("watchlists:outputs.downloadAria", "Download {{title}}", {
+              title: artifact.label
             })}
+            onClick={() => void downloadArtifact(artifact)}
           >
-            {t("watchlists:outputs.openAudioArtifact", "Open")}
-          </a>
+            {t("watchlists:outputs.download", "Download")}
+          </Button>
         ) : null}
       </div>
     )

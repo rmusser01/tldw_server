@@ -729,7 +729,7 @@
     "message": "{{stage}}: {{status}}"
   },
   "overview_latest_noUpdates": {
-    "message": "신규: 0. 저장됨 {{noun}}."
+    "message": "조건에 맞는 업데이트를 찾지 못했습니다. 상태 {{noun}}을(를) 저장했습니다."
   },
   "overview_latest_nextRun": {
     "message": "다음 실행: {{date}}"
@@ -780,7 +780,7 @@
     "message": "결과 알 수 없음. 다시 시도 {{adapter}}: {{name}}"
   },
   "overview_latest_delivery_reviewRetry": {
-    "message": "다시 시도"
+    "message": "검토 후 다시 시도"
   },
   "overview_latest_delivery_unknownConfirmation": {
     "message": "제공자가 {{adapter}} 전달을 확인하지 않았습니다. 다시 시도하면 중복 전송될 수 있습니다. 대상을 검토하고 이 위험을 감수할 수 있을 때만 계속하세요."
@@ -789,13 +789,13 @@
     "message": "오디오: {{name}}"
   },
   "overview_latest_playback_playAria": {
-    "message": "열기 오디오: {{name}}"
+    "message": "{{name}} 재생"
   },
   "overview_latest_playback_pauseAria": {
-    "message": "대기 중 오디오: {{name}}"
+    "message": "{{name}} 일시 중지"
   },
   "overview_latest_playback_resumeAria": {
-    "message": "열기 오디오: {{name}}"
+    "message": "{{name}} 다시 재생"
   },
   "overview_latest_playback_seekAria": {
     "message": "오디오: {{name}}"

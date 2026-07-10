@@ -2,7 +2,7 @@
 
 import React from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { act, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { OutputPreviewDrawer } from "../OutputPreviewDrawer"
 import type { WatchlistOutput } from "@/types/watchlists"
 
@@ -10,6 +10,18 @@ const serviceMocks = vi.hoisted(() => ({
   downloadWatchlistOutput: vi.fn(),
   downloadWatchlistOutputBinary: vi.fn(),
   getWatchlistRunAudio: vi.fn()
+}))
+
+const artifactMocks = vi.hoisted(() => ({
+  fetchBlob: vi.fn(),
+  createUrl: vi.fn(),
+  revokeUrl: vi.fn()
+}))
+
+vi.mock("@/services/watchlists-artifacts", () => ({
+  fetchWatchlistArtifactBlob: (...args: unknown[]) => artifactMocks.fetchBlob(...args),
+  createWatchlistArtifactObjectUrl: (...args: unknown[]) => artifactMocks.createUrl(...args),
+  revokeWatchlistArtifactObjectUrl: (...args: unknown[]) => artifactMocks.revokeUrl(...args)
 }))
 
 vi.mock("react-i18next", () => ({
@@ -79,6 +91,9 @@ describe("OutputPreviewDrawer audio support", () => {
       audio_uri: null,
       download_url: null
     })
+    artifactMocks.fetchBlob.mockResolvedValue(new Blob([new Uint8Array([1, 2, 3])], { type: "audio/mpeg" }))
+    artifactMocks.createUrl.mockReturnValue("blob:audio-output")
+    artifactMocks.revokeUrl.mockImplementation(() => undefined)
     vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:audio-output")
     vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined)
   })
@@ -97,7 +112,10 @@ describe("OutputPreviewDrawer audio support", () => {
     )
 
     await waitFor(() => {
-      expect(serviceMocks.downloadWatchlistOutputBinary).toHaveBeenCalledWith(42)
+      expect(artifactMocks.fetchBlob).toHaveBeenCalledWith(
+        "/api/v1/watchlists/outputs/42/download",
+        expect.objectContaining({ mimeType: "audio/mpeg" })
+      )
     })
 
     expect(serviceMocks.downloadWatchlistOutput).not.toHaveBeenCalled()
@@ -162,7 +180,10 @@ describe("OutputPreviewDrawer audio support", () => {
     )
 
     await waitFor(() => {
-      expect(serviceMocks.downloadWatchlistOutputBinary).toHaveBeenCalledWith(42)
+      expect(artifactMocks.fetchBlob).toHaveBeenCalledWith(
+        "/api/v1/watchlists/outputs/42/download",
+        expect.objectContaining({ mimeType: "audio/mpeg" })
+      )
     })
 
     expect(screen.getByText("Audio artifacts")).toBeInTheDocument()
@@ -175,18 +196,21 @@ describe("OutputPreviewDrawer audio support", () => {
     expect(screen.getByText("Final mix")).toBeInTheDocument()
     expect(screen.getByText("script.md")).toBeInTheDocument()
     expect(screen.getByText("host.mp3")).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: "Open Briefing script" })).toHaveAttribute(
-      "href",
-      "/api/v1/watchlists/runs/9/audio/script/download"
-    )
-    expect(screen.getByRole("link", { name: "Open Analyst" })).toHaveAttribute(
-      "href",
-      "/api/v1/watchlists/runs/9/audio/speakers/analyst/download"
-    )
-    expect(screen.getByRole("link", { name: "Open Final mix" })).toHaveAttribute(
-      "href",
-      "/api/v1/watchlists/runs/9/audio/final/download"
-    )
+    expect(screen.getByRole("button", { name: "Download Briefing script" })).toBeEnabled()
+    expect(screen.getByRole("button", { name: "Download Analyst" })).toBeEnabled()
+    expect(screen.getByRole("button", { name: "Download Final mix" })).toBeEnabled()
+    expect(screen.queryByRole("link", { name: /Download (Briefing script|Analyst|Final mix)/ })).not.toBeInTheDocument()
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined)
+    artifactMocks.createUrl.mockReturnValueOnce("blob:script-artifact")
+    fireEvent.click(screen.getByRole("button", { name: "Download Briefing script" }))
+    await waitFor(() => {
+      expect(artifactMocks.fetchBlob).toHaveBeenCalledWith(
+        "/api/v1/watchlists/runs/9/audio/script/download",
+        expect.any(Object)
+      )
+    })
+    expect(click).toHaveBeenCalled()
+    expect(artifactMocks.revokeUrl).toHaveBeenCalledWith("blob:script-artifact")
     expect(screen.queryByText(/file:\/\//)).not.toBeInTheDocument()
     expect(screen.queryByText(/srv\/tldw/)).not.toBeInTheDocument()
     expect(screen.getByText(/Speaker B voice failed/)).toBeInTheDocument()
@@ -264,10 +288,45 @@ describe("OutputPreviewDrawer audio support", () => {
 
     expect(screen.getByText("Completed")).toBeInTheDocument()
     expect(screen.getByText("Final mix")).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: "Open Final mix" })).toHaveAttribute(
-      "href",
-      "/api/v1/workflows/artifacts/art_final/download"
+    expect(screen.getByRole("button", { name: "Download Final mix" })).toBeEnabled()
+  })
+
+  it("aborts a protected audio fetch when the selected output changes", async () => {
+    let resolveFirst!: (blob: Blob) => void
+    artifactMocks.fetchBlob
+      .mockImplementationOnce((_path: string, options: { signal?: AbortSignal }) =>
+        new Promise<Blob>((resolve) => {
+          resolveFirst = resolve
+          expect(options.signal?.aborted).toBe(false)
+        })
+      )
+      .mockResolvedValueOnce(new Blob(["second"], { type: "audio/mpeg" }))
+    artifactMocks.createUrl.mockReturnValueOnce("blob:second-output")
+
+    const { rerender } = render(
+      <OutputPreviewDrawer
+        open
+        onClose={vi.fn()}
+        output={buildOutput({ id: 42, type: "tts_audio", format: "mp3" })}
+      />
     )
+    await waitFor(() => expect(artifactMocks.fetchBlob).toHaveBeenCalledTimes(1))
+    const firstSignal = artifactMocks.fetchBlob.mock.calls[0][1].signal as AbortSignal
+
+    rerender(
+      <OutputPreviewDrawer
+        open
+        onClose={vi.fn()}
+        output={buildOutput({ id: 43, type: "tts_audio", format: "mp3" })}
+      />
+    )
+
+    expect(firstSignal.aborted).toBe(true)
+    resolveFirst(new Blob(["stale"], { type: "audio/mpeg" }))
+    await waitFor(() => {
+      expect(document.querySelector("audio")).toHaveAttribute("src", "blob:second-output")
+    })
+    expect(artifactMocks.createUrl).toHaveBeenCalledTimes(1)
   })
 
   it("preserves metadata artifacts when live status only updates queue state", async () => {

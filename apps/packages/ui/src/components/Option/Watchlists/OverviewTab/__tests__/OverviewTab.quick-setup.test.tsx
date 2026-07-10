@@ -32,6 +32,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
+    i18n: { resolvedLanguage: "en-US", language: "en-US", dir: () => "ltr" },
     t: (_key: string, fallback?: string, options?: Record<string, unknown>) =>
       (typeof fallback === "string" ? fallback : _key).replace(
         /\{\{(\w+)\}\}/g,

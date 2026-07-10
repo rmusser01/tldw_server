@@ -169,7 +169,95 @@ def test_latest_projection_separates_artifact_and_delivery_state(projection_case
     assert body["editorial"]["cast"]["speaker_count"] == 2
     assert body["editorial"]["target_minutes"] == 20
     assert body["editorial"]["show_notes"] is True
+    assert body["delivery"]["email"] == {
+        "adapter": "email",
+        "recipient_count": 1,
+        "masked_label": "1 recipient",
+    }
     assert body["recovery"]["can_retry_delivery"] is True
+
+
+def test_projection_scrubs_untyped_contract_and_private_values(projection_case):
+    from tldw_Server_API.app.api.v1.schemas.watchlists_schemas import WatchlistBriefingProjection
+    from tldw_Server_API.app.core.Watchlists.briefing_projection import build_briefing_projection
+
+    _client, seeded, watchlists_db, collections_db = projection_case
+    occurrence = watchlists_db.get_briefing_occurrence(seeded.occurrence_id)
+    contract = json.loads(occurrence.contract_json)
+    contract["editorial"].update(
+        {
+            "show_name": "Signal Check",
+            "premise": "Verified developments.",
+            "api_key": "must-not-leak",
+            "private_path": "/srv/private/report.md",
+            "unknown": {"password": "also-secret"},
+        }
+    )
+    contract["audio"]["cast"] = {
+        "speaker_count": 1,
+        "speakers": [
+            {
+                "id": "host-private-id",
+                "label": "Host",
+                "role": "anchor",
+                "voice": "alloy",
+                "persona": "private-persona",
+                "synthetic": True,
+                "token": "speaker-secret",
+            }
+        ],
+    }
+    contract["delivery"]["email"] = {
+        "enabled": True,
+        "recipients": ["private.reader@example.com", "second.reader@example.com"],
+        "api_key": "delivery-secret",
+    }
+    occurrence.contract_json = json.dumps(contract)
+
+    projection = WatchlistBriefingProjection.model_validate(
+        build_briefing_projection(
+            occurrence=occurrence,
+            watchlists_db=watchlists_db,
+            collections_db=collections_db,
+        )
+    ).model_dump()
+
+    assert projection["editorial"] == {
+        "program_format": "concise_briefing",
+        "outcome_noun": "briefing",
+        "show_name": "Signal Check",
+        "show_identity": {"name": "Signal Check", "premise": "Verified developments."},
+        "show_notes": True,
+        "target_minutes": 20,
+        "cast": {
+            "speaker_count": 1,
+            "speakers": [
+                {
+                    "label": "Host",
+                    "role": "anchor",
+                    "voice": "alloy",
+                    "synthetic": True,
+                }
+            ],
+        },
+    }
+    assert projection["delivery"]["email"] == {
+        "adapter": "email",
+        "recipient_count": 2,
+        "masked_label": "2 recipients",
+    }
+    serialized = json.dumps(projection)
+    for private_value in (
+        "must-not-leak",
+        "also-secret",
+        "/srv/private",
+        "private-persona",
+        "speaker-secret",
+        "private.reader@example.com",
+        "second.reader@example.com",
+        "delivery-secret",
+    ):
+        assert private_value not in serialized
 
 
 def test_run_projection_uses_exact_owned_occurrence_after_newer_run(projection_case):

@@ -85,6 +85,11 @@ export interface WatchlistsOverviewData {
     total: number
     active: number
     nextRunAt: string | null
+    nextActiveJob: {
+      id: number
+      nextRunAt: string | null
+      timezone: string
+    } | null
     attention: number
   }
   items: {
@@ -289,6 +294,21 @@ export const getEarliestNextRunAt = (
   })
 
   return earliestIso
+}
+
+const getEarliestActiveJob = (jobs: WatchlistJob[]): WatchlistsOverviewData["jobs"]["nextActiveJob"] => {
+  const active = jobs.filter((job) => job.active)
+  if (!active.length) return null
+  const scheduled = active
+    .map((job) => ({ job, epochMs: parseEpochMs(job.next_run_at) }))
+    .filter((entry): entry is { job: WatchlistJob; epochMs: number } => entry.epochMs !== null)
+    .sort((left, right) => left.epochMs - right.epochMs)
+  const job = scheduled[0]?.job || active[0]
+  return {
+    id: job.id,
+    nextRunAt: job.next_run_at || null,
+    timezone: job.timezone || "UTC"
+  }
 }
 
 const classifyOutputsAttention = (
@@ -527,6 +547,7 @@ export const fetchWatchlistsOverviewData = async (
       total: asFiniteNumber(jobsResult.total, jobs.length),
       active: activeJobs,
       nextRunAt: getEarliestNextRunAt(jobs),
+      nextActiveJob: getEarliestActiveJob(jobs),
       attention: jobsWithoutSchedule
     },
     items: {

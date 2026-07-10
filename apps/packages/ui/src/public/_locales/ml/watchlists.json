@@ -729,7 +729,7 @@
     "message": "{{stage}}: {{status}}"
   },
   "overview_latest_noUpdates": {
-    "message": "പുതിയത്: 0. സംരക്ഷിച്ചു {{noun}}."
+    "message": "യോഗ്യമായ അപ്‌ഡേറ്റുകളൊന്നും കണ്ടെത്തിയില്ല. ഒരു സ്റ്റാറ്റസ് {{noun}} സംരക്ഷിച്ചു."
   },
   "overview_latest_nextRun": {
     "message": "അടുത്ത റൺ: {{date}}"
@@ -780,7 +780,7 @@
     "message": "ഫലം അജ്ഞാതം. വീണ്ടും ശ്രമിക്കുക {{adapter}}: {{name}}"
   },
   "overview_latest_delivery_reviewRetry": {
-    "message": "വീണ്ടും ശ്രമിക്കുക"
+    "message": "പരിശോധിച്ച് വീണ്ടും ശ്രമിക്കുക"
   },
   "overview_latest_delivery_unknownConfirmation": {
     "message": "ദാതാവ് {{adapter}} ഡെലിവറി സ്ഥിരീകരിച്ചില്ല. വീണ്ടും ശ്രമിക്കുന്നത് പകർപ്പ് അയച്ചേക്കാം. ലക്ഷ്യസ്ഥാനം പരിശോധിച്ച് ഈ അപകടസാധ്യത അംഗീകരിക്കാമെങ്കിൽ മാത്രം തുടരുക."
@@ -789,13 +789,13 @@
     "message": "ഓഡിയോ: {{name}}"
   },
   "overview_latest_playback_playAria": {
-    "message": "തുറക്കുക ഓഡിയോ: {{name}}"
+    "message": "{{name}} പ്ലേ ചെയ്യുക"
   },
   "overview_latest_playback_pauseAria": {
-    "message": "കാത്തിരിക്കുന്നു ഓഡിയോ: {{name}}"
+    "message": "{{name}} താൽക്കാലികമായി നിർത്തുക"
   },
   "overview_latest_playback_resumeAria": {
-    "message": "തുറക്കുക ഓഡിയോ: {{name}}"
+    "message": "{{name}} പുനരാരംഭിക്കുക"
   },
   "overview_latest_playback_seekAria": {
     "message": "ഓഡിയോ: {{name}}"

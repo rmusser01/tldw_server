@@ -4335,7 +4335,7 @@
     "message": "{{stage}}: {{status}}"
   },
   "overview_latest_noUpdates": {
-    "message": "New: 0. Saved {{noun}}."
+    "message": "No qualifying updates were found. A status {{noun}} was saved."
   },
   "overview_latest_nextRun": {
     "message": "Next run: {{date}}"
@@ -4386,7 +4386,7 @@
     "message": "Outcome unknown. Retry {{adapter}}: {{name}}"
   },
   "overview_latest_delivery_reviewRetry": {
-    "message": "Retry"
+    "message": "Review and retry"
   },
   "overview_latest_delivery_unknownConfirmation": {
     "message": "The provider did not confirm {{adapter}} delivery. Retrying may send a duplicate. Review the destination, then continue only if that risk is acceptable."
@@ -4395,13 +4395,13 @@
     "message": "audio: {{name}}"
   },
   "overview_latest_playback_playAria": {
-    "message": "Open audio: {{name}}"
+    "message": "Play {{name}}"
   },
   "overview_latest_playback_pauseAria": {
-    "message": "Waiting audio: {{name}}"
+    "message": "Pause {{name}}"
   },
   "overview_latest_playback_resumeAria": {
-    "message": "Open audio: {{name}}"
+    "message": "Resume {{name}}"
   },
   "overview_latest_playback_seekAria": {
     "message": "audio: {{name}}"

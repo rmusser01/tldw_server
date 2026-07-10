@@ -141,6 +141,7 @@ describe("watchlists overview service", () => {
           name: "Morning Digest",
           scope: {},
           active: true,
+          timezone: "America/Los_Angeles",
           created_at: "2026-02-18T00:00:00Z",
           next_run_at: "2026-02-20T08:00:00Z"
         },
@@ -226,6 +227,11 @@ describe("watchlists overview service", () => {
     expect(result.jobs.total).toBe(2)
     expect(result.jobs.active).toBe(1)
     expect(result.jobs.nextRunAt).toBe("2026-02-20T08:00:00Z")
+    expect(result.jobs.nextActiveJob).toEqual({
+      id: 10,
+      nextRunAt: "2026-02-20T08:00:00Z",
+      timezone: "America/Los_Angeles"
+    })
     expect(result.jobs.attention).toBe(0)
     expect(result.items.unread).toBe(42)
     expect(result.alerts.unread).toBe(3)

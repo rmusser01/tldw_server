@@ -737,12 +737,15 @@ export const retryWatchlistBriefingStage = async (
   options: {
     regenerate?: boolean
     confirm_unknown_delivery_retry?: boolean
+    signal?: AbortSignal
   } = {}
 ): Promise<WatchlistBriefingProjection> => {
+  const { signal, ...bodyOptions } = options
   return bgRequest<WatchlistBriefingProjection>({
     path: `/api/v1/watchlists/runs/${runId}/briefing/retry`,
     method: "POST",
-    body: { stage, ...options }
+    body: { stage, ...bodyOptions },
+    abortSignal: signal
   })
 }
 

@@ -729,7 +729,7 @@
     "message": "{{stage}}: {{status}}"
   },
   "overview_latest_noUpdates": {
-    "message": "Neu: 0. Gespeichert {{noun}}."
+    "message": "Es wurden keine passenden Aktualisierungen gefunden. Ein Status-{{noun}} wurde gespeichert."
   },
   "overview_latest_nextRun": {
     "message": "Nächster Lauf: {{date}}"
@@ -780,7 +780,7 @@
     "message": "Ergebnis unbekannt. Erneut versuchen {{adapter}}: {{name}}"
   },
   "overview_latest_delivery_reviewRetry": {
-    "message": "Erneut versuchen"
+    "message": "Prüfen und erneut versuchen"
   },
   "overview_latest_delivery_unknownConfirmation": {
     "message": "Der Anbieter hat die Zustellung über {{adapter}} nicht bestätigt. Ein erneuter Versuch kann ein Duplikat senden. Prüfen Sie das Ziel und fahren Sie nur fort, wenn dieses Risiko vertretbar ist."
@@ -789,13 +789,13 @@
     "message": "Audio: {{name}}"
   },
   "overview_latest_playback_playAria": {
-    "message": "Öffnen Audio: {{name}}"
+    "message": "{{name}} abspielen"
   },
   "overview_latest_playback_pauseAria": {
-    "message": "Wartet Audio: {{name}}"
+    "message": "{{name}} pausieren"
   },
   "overview_latest_playback_resumeAria": {
-    "message": "Öffnen Audio: {{name}}"
+    "message": "{{name}} fortsetzen"
   },
   "overview_latest_playback_seekAria": {
     "message": "Audio: {{name}}"

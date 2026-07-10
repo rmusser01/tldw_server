@@ -747,7 +747,7 @@
     "message": "{{stage}}: {{status}}"
   },
   "overview_latest_noUpdates": {
-    "message": "Новое: 0. Сохранено {{noun}}."
+    "message": "Подходящих обновлений не найдено. Сохранён статусный материал «{{noun}}»."
   },
   "overview_latest_nextRun": {
     "message": "Следующий запуск: {{date}}"
@@ -798,7 +798,7 @@
     "message": "Результат неизвестен. Повторить {{adapter}}: {{name}}"
   },
   "overview_latest_delivery_reviewRetry": {
-    "message": "Повторить"
+    "message": "Проверить и повторить"
   },
   "overview_latest_delivery_unknownConfirmation": {
     "message": "Провайдер не подтвердил доставку через {{adapter}}. Повторная попытка может отправить дубликат. Проверьте адрес назначения и продолжайте, только если этот риск приемлем."
@@ -807,13 +807,13 @@
     "message": "аудио: {{name}}"
   },
   "overview_latest_playback_playAria": {
-    "message": "Открыть аудио: {{name}}"
+    "message": "Воспроизвести {{name}}"
   },
   "overview_latest_playback_pauseAria": {
-    "message": "Ожидание аудио: {{name}}"
+    "message": "Приостановить {{name}}"
   },
   "overview_latest_playback_resumeAria": {
-    "message": "Открыть аудио: {{name}}"
+    "message": "Продолжить {{name}}"
   },
   "overview_latest_playback_seekAria": {
     "message": "аудио: {{name}}"

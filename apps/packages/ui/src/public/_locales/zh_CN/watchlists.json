@@ -729,7 +729,7 @@
     "message": "{{stage}}: {{status}}"
   },
   "overview_latest_noUpdates": {
-    "message": "新增: 0. 已保存 {{noun}}."
+    "message": "未找到符合条件的更新。已保存状态{{noun}}。"
   },
   "overview_latest_nextRun": {
     "message": "下次运行: {{date}}"
@@ -780,7 +780,7 @@
     "message": "结果未知. 重试 {{adapter}}: {{name}}"
   },
   "overview_latest_delivery_reviewRetry": {
-    "message": "重试"
+    "message": "检查后重试"
   },
   "overview_latest_delivery_unknownConfirmation": {
     "message": "提供商未确认通过 {{adapter}} 送达。重试可能会发送重复内容。请检查目标，仅在可以接受该风险时继续。"
@@ -789,13 +789,13 @@
     "message": "音频: {{name}}"
   },
   "overview_latest_playback_playAria": {
-    "message": "打开 音频: {{name}}"
+    "message": "播放 {{name}}"
   },
   "overview_latest_playback_pauseAria": {
-    "message": "等待中 音频: {{name}}"
+    "message": "暂停 {{name}}"
   },
   "overview_latest_playback_resumeAria": {
-    "message": "打开 音频: {{name}}"
+    "message": "继续播放 {{name}}"
   },
   "overview_latest_playback_seekAria": {
     "message": "音频: {{name}}"

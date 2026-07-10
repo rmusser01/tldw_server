@@ -427,17 +427,28 @@ export interface WatchlistRunAudioStatus {
   artifact_id?: string | number | null
   size_bytes?: number | null
   mime_type?: string | null
-  script_artifact?: Record<string, unknown> | null
-  speaker_artifacts?: Array<Record<string, unknown>>
-  final_artifact?: Record<string, unknown> | null
+  script_artifact?: WatchlistAudioArtifactSummary | null
+  speaker_artifacts?: WatchlistAudioArtifactSummary[]
+  final_artifact?: WatchlistAudioArtifactSummary | null
   fallback_reason?: string | null
   audio_request_id?: string | null
   workflow_run_id?: string | number | null
   schema_version?: number | null
   synced_at?: string | null
   stale?: boolean | null
-  superseded_by?: string | null
+  superseded_by?: string | number | null
   error?: string | null
+}
+
+export interface WatchlistAudioArtifactSummary {
+  artifact_id?: string | number | null
+  type?: string | null
+  download_url?: string | null
+  size_bytes?: number | null
+  mime_type?: string | null
+  title?: string | null
+  speaker_id?: string | null
+  voice?: string | null
 }
 
 export interface WatchlistRunStageRetryResponse {
@@ -486,6 +497,32 @@ export type WatchlistBriefingDeliveryStatus =
   | "failed"
   | "unknown"
 
+export interface WatchlistBriefingCastSpeaker {
+  label: string
+  role?: string | null
+  voice?: string | null
+  synthetic: boolean
+}
+
+export interface WatchlistBriefingEditorial {
+  program_format?: WatchlistProgramFormat
+  outcome_noun?: "briefing" | "episode"
+  show_name?: string | null
+  show_identity?: { name?: string | null; premise?: string | null }
+  show_notes?: boolean
+  target_minutes?: number | null
+  cast?: {
+    speaker_count: number
+    speakers: WatchlistBriefingCastSpeaker[]
+  } | null
+}
+
+export interface WatchlistBriefingDeliverySummary {
+  adapter: "email" | "chatbook"
+  recipient_count: number
+  masked_label: string
+}
+
 export interface WatchlistBriefingProjection {
   occurrence_id: number
   run_id: number
@@ -495,7 +532,8 @@ export interface WatchlistBriefingProjection {
   stages: Record<string, WatchlistBriefingStage>
   output: Record<string, unknown> | null
   audio: WatchlistRunAudioStatus | null
-  editorial: Record<string, unknown>
+  editorial: WatchlistBriefingEditorial
+  delivery?: Partial<Record<"email" | "chatbook", WatchlistBriefingDeliverySummary>>
   selection: Record<string, number>
   next_run_at: string | null
   timezone: string

@@ -189,9 +189,11 @@ describe("watchlists audio services", () => {
 
   it("retries one briefing stage with explicit unknown-delivery confirmation", async () => {
     mocks.bgRequest.mockResolvedValueOnce({ occurrence_id: 31 })
+    const controller = new AbortController()
 
     await retryWatchlistBriefingStage(123, "deliver:email", {
-      confirm_unknown_delivery_retry: true
+      confirm_unknown_delivery_retry: true,
+      signal: controller.signal
     })
 
     expect(mocks.bgRequest).toHaveBeenCalledWith(
@@ -201,7 +203,8 @@ describe("watchlists audio services", () => {
         body: {
           stage: "deliver:email",
           confirm_unknown_delivery_retry: true
-        }
+        },
+        abortSignal: controller.signal
       })
     )
   })

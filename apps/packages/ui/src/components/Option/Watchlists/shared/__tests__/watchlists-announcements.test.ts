@@ -59,6 +59,25 @@ describe("watchlists briefing announcements", () => {
     expect(transitionAnnouncement(running, { ...running, occurrence_id: 4 }, t)).toBeNull()
   })
 
+  it("treats a new occurrence as a new identity and localizes stage progress", () => {
+    const previous = projection()
+    const next = projection({ occurrence_id: 5, run_id: 9 })
+    const localized = vi.fn((key: string, fallback: string, values?: Record<string, unknown>) => {
+      const translations: Record<string, string> = {
+        "watchlists:overview.latest.stages.generateAudio": "Localized audio",
+        "watchlists:overview.latest.status.running": "Localized running"
+      }
+      return (translations[key] || fallback).replace(
+        /{{(\w+)}}/g,
+        (_match, token) => String(values?.[token] ?? "")
+      )
+    })
+
+    expect(transitionAnnouncement(previous, next, localized)).toBe(
+      "Purple and Gold Weekly: Localized audio is Localized running."
+    )
+  })
+
   it("uses assertive copy only for a newly blocking artifact failure", () => {
     const running = projection({ output: null, recovery: {} })
     const blocked = projection({

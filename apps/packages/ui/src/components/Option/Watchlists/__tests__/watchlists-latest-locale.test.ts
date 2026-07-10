@@ -15,6 +15,134 @@ const canonicalLocales = [
   "no", "pt-BR", "ru", "sv", "uk", "zh", "zh-TW"
 ] as const
 const publicAliases = { ja: "ja-JP", zh_CN: "zh", zh_TW: "zh-TW" } as const
+const runtimeCorrections: Record<string, Record<string, string>> = {
+  en: {
+    noUpdates: "No qualifying updates were found. A status {{noun}} was saved.",
+    reviewRetry: "Review and retry",
+    playAria: "Play {{name}}",
+    pauseAria: "Pause {{name}}",
+    resumeAria: "Resume {{name}}"
+  },
+  ar: {
+    noUpdates: "لم يتم العثور على تحديثات مؤهلة. تم حفظ {{noun}} للحالة.",
+    reviewRetry: "مراجعة وإعادة المحاولة",
+    playAria: "تشغيل {{name}}",
+    pauseAria: "إيقاف {{name}} مؤقتًا",
+    resumeAria: "استئناف {{name}}"
+  },
+  da: {
+    noUpdates: "Der blev ikke fundet nogen kvalificerende opdateringer. En status-{{noun}} blev gemt.",
+    reviewRetry: "Gennemgå og prøv igen",
+    playAria: "Afspil {{name}}",
+    pauseAria: "Sæt {{name}} på pause",
+    resumeAria: "Genoptag {{name}}"
+  },
+  de: {
+    noUpdates: "Es wurden keine passenden Aktualisierungen gefunden. Ein Status-{{noun}} wurde gespeichert.",
+    reviewRetry: "Prüfen und erneut versuchen",
+    playAria: "{{name}} abspielen",
+    pauseAria: "{{name}} pausieren",
+    resumeAria: "{{name}} fortsetzen"
+  },
+  es: {
+    noUpdates: "No se encontraron actualizaciones que cumplieran los criterios. Se guardó un {{noun}} de estado.",
+    reviewRetry: "Revisar y reintentar",
+    playAria: "Reproducir {{name}}",
+    pauseAria: "Pausar {{name}}",
+    resumeAria: "Reanudar {{name}}"
+  },
+  fa: {
+    noUpdates: "هیچ به‌روزرسانی واجد شرایطی یافت نشد. یک {{noun}} وضعیت ذخیره شد.",
+    reviewRetry: "بررسی و تلاش دوباره",
+    playAria: "پخش {{name}}",
+    pauseAria: "مکث {{name}}",
+    resumeAria: "ادامه {{name}}"
+  },
+  fr: {
+    noUpdates: "Aucune mise à jour correspondante n’a été trouvée. Un {{noun}} de statut a été enregistré.",
+    reviewRetry: "Vérifier et réessayer",
+    playAria: "Lire {{name}}",
+    pauseAria: "Mettre {{name}} en pause",
+    resumeAria: "Reprendre {{name}}"
+  },
+  it: {
+    noUpdates: "Non sono stati trovati aggiornamenti idonei. È stato salvato un {{noun}} di stato.",
+    reviewRetry: "Verifica e riprova",
+    playAria: "Riproduci {{name}}",
+    pauseAria: "Metti in pausa {{name}}",
+    resumeAria: "Riprendi {{name}}"
+  },
+  "ja-JP": {
+    noUpdates: "条件に一致する更新はありませんでした。ステータス用の{{noun}}を保存しました。",
+    reviewRetry: "確認して再試行",
+    playAria: "{{name}}を再生",
+    pauseAria: "{{name}}を一時停止",
+    resumeAria: "{{name}}を再開"
+  },
+  ko: {
+    noUpdates: "조건에 맞는 업데이트를 찾지 못했습니다. 상태 {{noun}}을(를) 저장했습니다.",
+    reviewRetry: "검토 후 다시 시도",
+    playAria: "{{name}} 재생",
+    pauseAria: "{{name}} 일시 중지",
+    resumeAria: "{{name}} 다시 재생"
+  },
+  ml: {
+    noUpdates: "യോഗ്യമായ അപ്‌ഡേറ്റുകളൊന്നും കണ്ടെത്തിയില്ല. ഒരു സ്റ്റാറ്റസ് {{noun}} സംരക്ഷിച്ചു.",
+    reviewRetry: "പരിശോധിച്ച് വീണ്ടും ശ്രമിക്കുക",
+    playAria: "{{name}} പ്ലേ ചെയ്യുക",
+    pauseAria: "{{name}} താൽക്കാലികമായി നിർത്തുക",
+    resumeAria: "{{name}} പുനരാരംഭിക്കുക"
+  },
+  no: {
+    noUpdates: "Ingen kvalifiserende oppdateringer ble funnet. En status-{{noun}} ble lagret.",
+    reviewRetry: "Se gjennom og prøv igjen",
+    playAria: "Spill av {{name}}",
+    pauseAria: "Sett {{name}} på pause",
+    resumeAria: "Fortsett {{name}}"
+  },
+  "pt-BR": {
+    noUpdates: "Nenhuma atualização qualificada foi encontrada. Um {{noun}} de status foi salvo.",
+    reviewRetry: "Revisar e tentar novamente",
+    playAria: "Reproduzir {{name}}",
+    pauseAria: "Pausar {{name}}",
+    resumeAria: "Retomar {{name}}"
+  },
+  ru: {
+    noUpdates: "Подходящих обновлений не найдено. Сохранён статусный материал «{{noun}}».",
+    reviewRetry: "Проверить и повторить",
+    playAria: "Воспроизвести {{name}}",
+    pauseAria: "Приостановить {{name}}",
+    resumeAria: "Продолжить {{name}}"
+  },
+  sv: {
+    noUpdates: "Inga kvalificerande uppdateringar hittades. En status-{{noun}} sparades.",
+    reviewRetry: "Granska och försök igen",
+    playAria: "Spela upp {{name}}",
+    pauseAria: "Pausa {{name}}",
+    resumeAria: "Återuppta {{name}}"
+  },
+  uk: {
+    noUpdates: "Відповідних оновлень не знайдено. Збережено статусний матеріал «{{noun}}».",
+    reviewRetry: "Перевірити й повторити",
+    playAria: "Відтворити {{name}}",
+    pauseAria: "Призупинити {{name}}",
+    resumeAria: "Продовжити {{name}}"
+  },
+  zh: {
+    noUpdates: "未找到符合条件的更新。已保存状态{{noun}}。",
+    reviewRetry: "检查后重试",
+    playAria: "播放 {{name}}",
+    pauseAria: "暂停 {{name}}",
+    resumeAria: "继续播放 {{name}}"
+  },
+  "zh-TW": {
+    noUpdates: "找不到符合條件的更新。已儲存狀態{{noun}}。",
+    reviewRetry: "檢查後重試",
+    playAria: "播放 {{name}}",
+    pauseAria: "暫停 {{name}}",
+    resumeAria: "繼續播放 {{name}}"
+  }
+}
 
 const readNested = (locale: string): NestedLocale => JSON.parse(readFileSync(
   path.resolve(srcRoot, `assets/locale/${locale}/watchlists.json`),
@@ -80,6 +208,34 @@ describe("Watchlists Latest briefing locale contract", () => {
       "America/Los_Angeles",
       "es"
     )).toMatch(/domingo.*12.*julio.*18:00/i)
+  })
+
+  it.each(Object.entries(runtimeCorrections))("%s uses reviewed runtime copy instead of fallback-era labels", (locale, expected) => {
+    const latest = (readNested(locale).overview as Record<string, unknown>).latest as Record<string, unknown>
+    const delivery = latest.delivery as Record<string, string>
+    const playback = latest.playback as Record<string, string>
+    expect(latest.noUpdates).toBe(expected.noUpdates)
+    expect(delivery.reviewRetry).toBe(expected.reviewRetry)
+    expect(playback.playAria).toBe(expected.playAria)
+    expect(playback.pauseAria).toBe(expected.pauseAria)
+    expect(playback.resumeAria).toBe(expected.resumeAria)
+  })
+
+  it("resolves corrected accessible copy from the real English resource", async () => {
+    const instance = i18next.createInstance()
+    await instance.init({
+      lng: "en",
+      fallbackLng: false,
+      resources: { en: { watchlists: readNested("en") } },
+      ns: ["watchlists"],
+      defaultNS: "watchlists",
+      interpolation: { escapeValue: false }
+    })
+    expect(instance.t("overview.latest.playback.playAria", { name: "Signal Check" }))
+      .toBe("Play Signal Check")
+    expect(instance.t("overview.latest.delivery.reviewRetry")).toBe("Review and retry")
+    expect(instance.t("overview.latest.noUpdates", { noun: "briefing" }))
+      .toBe("No qualifying updates were found. A status briefing was saved.")
   })
 
   it("uses active-locale plural categories for provenance counts", async () => {

@@ -738,7 +738,7 @@
     "message": "{{stage}}: {{status}}"
   },
   "overview_latest_noUpdates": {
-    "message": "Nouveau: 0. Enregistré {{noun}}."
+    "message": "Aucune mise à jour correspondante n’a été trouvée. Un {{noun}} de statut a été enregistré."
   },
   "overview_latest_nextRun": {
     "message": "Prochaine exécution: {{date}}"
@@ -789,7 +789,7 @@
     "message": "Résultat inconnu. Réessayer {{adapter}}: {{name}}"
   },
   "overview_latest_delivery_reviewRetry": {
-    "message": "Réessayer"
+    "message": "Vérifier et réessayer"
   },
   "overview_latest_delivery_unknownConfirmation": {
     "message": "Le fournisseur n’a pas confirmé la livraison via {{adapter}}. Réessayer peut envoyer un doublon. Vérifiez la destination et continuez uniquement si ce risque est acceptable."
@@ -798,13 +798,13 @@
     "message": "audio: {{name}}"
   },
   "overview_latest_playback_playAria": {
-    "message": "Ouvrir audio: {{name}}"
+    "message": "Lire {{name}}"
   },
   "overview_latest_playback_pauseAria": {
-    "message": "En attente audio: {{name}}"
+    "message": "Mettre {{name}} en pause"
   },
   "overview_latest_playback_resumeAria": {
-    "message": "Ouvrir audio: {{name}}"
+    "message": "Reprendre {{name}}"
   },
   "overview_latest_playback_seekAria": {
     "message": "audio: {{name}}"

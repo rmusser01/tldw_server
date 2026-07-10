@@ -765,7 +765,7 @@
     "message": "{{stage}}: {{status}}"
   },
   "overview_latest_noUpdates": {
-    "message": "جديد: 0. محفوظ {{noun}}."
+    "message": "لم يتم العثور على تحديثات مؤهلة. تم حفظ {{noun}} للحالة."
   },
   "overview_latest_nextRun": {
     "message": "التشغيل التالي: {{date}}"
@@ -816,7 +816,7 @@
     "message": "النتيجة غير معروفة. إعادة المحاولة {{adapter}}: {{name}}"
   },
   "overview_latest_delivery_reviewRetry": {
-    "message": "إعادة المحاولة"
+    "message": "مراجعة وإعادة المحاولة"
   },
   "overview_latest_delivery_unknownConfirmation": {
     "message": "لم يؤكد المزوّد تسليم {{adapter}}. قد تؤدي إعادة المحاولة إلى إرسال نسخة مكررة. راجع الوجهة ولا تتابع إلا إذا كان هذا الخطر مقبولًا."
@@ -825,13 +825,13 @@
     "message": "صوت: {{name}}"
   },
   "overview_latest_playback_playAria": {
-    "message": "فتح صوت: {{name}}"
+    "message": "تشغيل {{name}}"
   },
   "overview_latest_playback_pauseAria": {
-    "message": "قيد الانتظار صوت: {{name}}"
+    "message": "إيقاف {{name}} مؤقتًا"
   },
   "overview_latest_playback_resumeAria": {
-    "message": "فتح صوت: {{name}}"
+    "message": "استئناف {{name}}"
   },
   "overview_latest_playback_seekAria": {
     "message": "صوت: {{name}}"

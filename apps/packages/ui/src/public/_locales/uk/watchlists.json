@@ -747,7 +747,7 @@
     "message": "{{stage}}: {{status}}"
   },
   "overview_latest_noUpdates": {
-    "message": "Нове: 0. Збережено {{noun}}."
+    "message": "Відповідних оновлень не знайдено. Збережено статусний матеріал «{{noun}}»."
   },
   "overview_latest_nextRun": {
     "message": "Наступний запуск: {{date}}"
@@ -798,7 +798,7 @@
     "message": "Результат невідомий. Повторити {{adapter}}: {{name}}"
   },
   "overview_latest_delivery_reviewRetry": {
-    "message": "Повторити"
+    "message": "Перевірити й повторити"
   },
   "overview_latest_delivery_unknownConfirmation": {
     "message": "Провайдер не підтвердив доставку через {{adapter}}. Повторна спроба може надіслати дублікат. Перевірте місце призначення й продовжуйте, лише якщо цей ризик прийнятний."
@@ -807,13 +807,13 @@
     "message": "аудіо: {{name}}"
   },
   "overview_latest_playback_playAria": {
-    "message": "Відкрити аудіо: {{name}}"
+    "message": "Відтворити {{name}}"
   },
   "overview_latest_playback_pauseAria": {
-    "message": "Очікування аудіо: {{name}}"
+    "message": "Призупинити {{name}}"
   },
   "overview_latest_playback_resumeAria": {
-    "message": "Відкрити аудіо: {{name}}"
+    "message": "Продовжити {{name}}"
   },
   "overview_latest_playback_seekAria": {
     "message": "аудіо: {{name}}"
