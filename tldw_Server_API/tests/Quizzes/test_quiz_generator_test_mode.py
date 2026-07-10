@@ -839,6 +839,41 @@ def test_assertion_reasoning_constants_define_canonical_scale() -> None:
     assert quiz_generator.ASSERTION_REASONING_OPTIONS == ASSERTION_REASONING_OPTIONS
 
 
+def test_question_tag_normalization_preserves_non_assertion_slash_tags() -> None:
+    tags = quiz_generator._coerce_question_tags(
+        ["domain/topic", "domain_topic"],
+        generation_profile="standard_recall",
+    )
+
+    assert tags == ["domain/topic", "domain_topic"]
+
+
+@pytest.mark.parametrize(
+    ("generation_profile", "raw_tags", "expected_tags"),
+    [
+        ("standard_recall", ["Cardiology", "cardiology"], ["Cardiology"]),
+        (
+            "best_of_five",
+            ["cardiology", "bof", "best-of-five"],
+            ["cardiology", "best_of_five"],
+        ),
+        ("emq", ["diagnosis", "Diagnosis"], ["diagnosis"]),
+    ],
+)
+def test_question_tag_normalization_preserves_existing_profile_behavior(
+    generation_profile: str,
+    raw_tags: list[str],
+    expected_tags: list[str],
+) -> None:
+    assert (
+        quiz_generator._coerce_question_tags(
+            raw_tags,
+            generation_profile=generation_profile,
+        )
+        == expected_tags
+    )
+
+
 def test_normalize_assertion_reasoning_owns_options_and_canonicalizes_one_subtype_tag() -> None:
     question = _normalize_assertion_reasoning_question(
         tags=[

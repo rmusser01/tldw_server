@@ -323,11 +323,11 @@ def _coerce_question_tags(raw: Any, *, generation_profile: Any) -> list[str] | N
         tag = str(candidate).strip()
         if not tag:
             continue
-        normalized = tag.lower().replace("-", "_").replace(" ", "_").replace("/", "_")
+        normalized = tag.lower().replace("-", "_").replace(" ", "_")
         if normalized in {BEST_OF_FIVE_TAG, "bof"}:
             tag = BEST_OF_FIVE_TAG
             normalized = BEST_OF_FIVE_TAG
-        elif normalized == ASSERTION_REASONING_TAG:
+        elif normalized in {ASSERTION_REASONING_TAG, "assertion/reasoning"}:
             tag = ASSERTION_REASONING_TAG
             normalized = ASSERTION_REASONING_TAG
         if normalized in seen:
