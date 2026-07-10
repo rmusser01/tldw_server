@@ -316,19 +316,21 @@ async def run_chatbooks_core_jobs_worker(stop_event: asyncio.Event | None = None
                             svc._save_import_job(ij)
                         jm.finalize_cancelled(int(job["id"]), reason="cancel requested before start")
                         continue
-                    cs = {}
-                    for k, v in (payload.get("content_selections") or {}).items():
-                        try:
-                            cs[ContentType(k)] = v
-                        except _CORE_JOBS_WORKER_NONCRITICAL_EXCEPTIONS as e:
-                            logger.debug(f"Core Jobs Worker: invalid content type {k}: {e}")
+                    raw_content_selections = payload.get("content_selections")
+                    cs = None if raw_content_selections is None else {}
+                    if cs is not None:
+                        for k, v in raw_content_selections.items():
                             try:
-                                get_metrics_registry().increment(
-                                    "app_warning_events_total",
-                                    labels={"component": "core_jobs_worker", "event": "invalid_content_type"},
-                                )
-                            except _CORE_JOBS_WORKER_NONCRITICAL_EXCEPTIONS:
-                                logger.debug("metrics increment failed for invalid_content_type")
+                                cs[ContentType(k)] = v
+                            except _CORE_JOBS_WORKER_NONCRITICAL_EXCEPTIONS as e:
+                                logger.debug(f"Core Jobs Worker: invalid content type {k}: {e}")
+                                try:
+                                    get_metrics_registry().increment(
+                                        "app_warning_events_total",
+                                        labels={"component": "core_jobs_worker", "event": "invalid_content_type"},
+                                    )
+                                except _CORE_JOBS_WORKER_NONCRITICAL_EXCEPTIONS:
+                                    logger.debug("metrics increment failed for invalid_content_type")
                     conf_val = payload.get("conflict_resolution", "skip")
                     try:
                         conf = ConflictResolution(conf_val)
@@ -344,15 +346,9 @@ async def run_chatbooks_core_jobs_worker(stop_event: asyncio.Event | None = None
                             f"Conflict resolution '{conf.value}' is not supported yet. "
                             "Use 'skip' or 'rename'."
                         )
-                    elif import_media or import_embeddings:
-                        ok = False
-                        msg = (
-                            "Media/embedding imports are not supported yet. "
-                            "Set import_media=false and import_embeddings=false."
-                        )
                     else:
                         _renew_task = await _start_renewal(int(job["id"]))
-                        ok, msg, _ = await asyncio.to_thread(
+                        ok, msg, result = await asyncio.to_thread(
                             svc._import_chatbook_sync,
                             file_ref, cs,
                             conf,
@@ -374,6 +370,19 @@ async def run_chatbooks_core_jobs_worker(stop_event: asyncio.Event | None = None
                         if ij and ij.status != ImportStatus.CANCELLED:
                             ij.status = ImportStatus.COMPLETED
                             ij.completed_at = datetime.now(timezone.utc)
+                            if isinstance(result, dict):
+                                imported_items = result.get("imported_items")
+                                skipped_non_restorable = result.get("skipped_non_restorable")
+                                ij.warnings = result.get("warnings") if isinstance(result.get("warnings"), list) else []
+                                ij.metadata = {
+                                    "imported_items": imported_items if isinstance(imported_items, dict) else {},
+                                    "inventory_summary": result.get("inventory_summary"),
+                                    "skipped_non_restorable": (
+                                        skipped_non_restorable
+                                        if isinstance(skipped_non_restorable, dict)
+                                        else {}
+                                    ),
+                                }
                             svc._save_import_job(ij)
                         jm.complete_job(int(job["id"]), worker_id=worker_id, lease_id=str(lease_id), completion_token=str(lease_id))
                     else:

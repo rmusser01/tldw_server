@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import hashlib
 import json
@@ -8,11 +9,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from tldw_Server_API.app.core.Chatbooks import chatbook_service as chatbook_service_module
-from tldw_Server_API.app.core.Chatbooks.chatbook_models import ConflictResolution
-from tldw_Server_API.app.core.Chatbooks.chatbook_service import ChatbookService
 from tldw_Server_API.app.core.Chat.document_generator import DocumentGeneratorService
+from tldw_Server_API.app.core.Chatbooks import chatbook_service as chatbook_service_module
+from tldw_Server_API.app.core.Chatbooks.chatbook_models import ConflictResolution, ImportJob, ImportStatus
+from tldw_Server_API.app.core.Chatbooks.chatbook_service import ChatbookService
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.services import core_jobs_worker
 
 pytestmark = pytest.mark.unit
 
@@ -399,6 +402,93 @@ async def test_service_default_archive_import_restores_restorable_full_account_p
     warnings = "\n".join(result["warnings"])
     assert "pointer" in warnings.lower()
     assert "SECRET" not in warnings
+
+
+@pytest.mark.asyncio
+async def test_live_worker_restores_bundled_media_and_records_inventory_result(tmp_path, monkeypatch):
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path))
+    db = CharactersRAGDB(db_path=str(tmp_path / "live_worker_restore.db"), client_id="live-worker-restore")
+    service = ChatbookService(user_id="1", db=db, user_id_int=1)
+    archive_path = _write_full_account_restore_fixture(
+        Path(service.import_dir) / "live_worker_full_restore.chatbook"
+    )
+    import_job = ImportJob(
+        job_id="live-worker-import",
+        user_id="1",
+        status=ImportStatus.PENDING,
+        chatbook_path=str(archive_path),
+    )
+    service._save_import_job(import_job)
+    prompts_db = FakePromptsDB()
+    evals_db = FakeEvaluationsDB()
+    media_db = FakeMediaDB()
+    chroma = FakeChromaManager()
+    stop_event = asyncio.Event()
+    public_job_status = "processing"
+    failures = []
+
+    monkeypatch.setattr(service, "_get_prompts_db", lambda: prompts_db)
+    monkeypatch.setattr(service, "_get_evaluations_db", lambda: evals_db)
+    monkeypatch.setattr(service, "_get_media_db", lambda: media_db)
+    monkeypatch.setattr(service, "_get_chroma_manager", lambda: chroma)
+    monkeypatch.setattr(chatbook_service_module, "upsert_transcript", lambda *args, **kwargs: {})
+
+    class FakeJobManager:
+        def acquire_next_job(self, **_kwargs):
+            return {
+                "id": 43,
+                "owner_user_id": "1",
+                "payload": {
+                    "action": "import",
+                    "chatbooks_job_id": import_job.job_id,
+                    "file_token": str(archive_path),
+                    "source_format": "chatbook",
+                    "content_selections": None,
+                    "import_media": True,
+                    "import_embeddings": True,
+                },
+                "lease_id": "lease-2",
+            }
+
+        def get_job(self, _job_id):
+            return {"status": public_job_status}
+
+        def complete_job(self, *_args, **_kwargs):
+            nonlocal public_job_status
+            public_job_status = "completed"
+            stop_event.set()
+
+        def fail_job(self, *_args, **kwargs):
+            nonlocal public_job_status
+            public_job_status = "failed"
+            failures.append(kwargs)
+            stop_event.set()
+
+        def finalize_cancelled(self, *_args, **_kwargs):
+            stop_event.set()
+
+        def renew_job_lease(self, *_args, **_kwargs):
+            return None
+
+    monkeypatch.setattr(core_jobs_worker, "JobManager", FakeJobManager)
+    monkeypatch.setattr(core_jobs_worker, "_build_chacha_db_for_user", lambda _owner: db)
+    monkeypatch.setattr(core_jobs_worker, "ChatbookService", lambda *_args, **_kwargs: service)
+    monkeypatch.setenv("JOBS_POLL_INTERVAL_SECONDS", "0.01")
+
+    await asyncio.wait_for(core_jobs_worker.run_chatbooks_core_jobs_worker(stop_event), timeout=2)
+
+    restored_job = service._get_import_job(import_job.job_id)
+    assert failures == []
+    assert public_job_status == "completed"
+    assert restored_job is not None
+    assert restored_job.status is ImportStatus.COMPLETED
+    assert restored_job.metadata["imported_items"]["media"] == 1
+    assert restored_job.metadata["inventory_summary"]["counts"]["media_stored_artifacts"] == 2
+    assert media_db.files
+    user_root = DatabasePaths.resolve_user_base_directory(1).resolve()
+    restored_path = (user_root / media_db.files[0]["storage_path"]).resolve()
+    assert restored_path.is_relative_to(user_root)
+    assert restored_path.read_bytes() == b"account-owned stored media bytes"
 
 
 def test_v1_1_import_rejects_bundled_media_artifact_missing_inventory(tmp_path, monkeypatch):
