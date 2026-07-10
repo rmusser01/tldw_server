@@ -63,11 +63,11 @@ This plan does not redesign the Chatbook format, add new account-data categories
 - Test: `tldw_Server_API/tests/Chatbooks/test_chatbooks_full_account_import_restore.py`
 - Test: `tldw_Server_API/tests/Chatbooks/test_chatbooks_jobs_worker_import_defaults.py`
 
-- [ ] **Step 1: Write the failing live-worker regression**
+- [x] **Step 1: Write the failing live-worker regression**
 
 Create a focused worker test that enqueues an `action=import`, `source_format=chatbook` payload with `import_media=true` and `import_embeddings=true`. Use a temporary archive and fakes for the Jobs manager and Chatbook service. Assert that `_import_chatbook_sync(...)` is invoked with both flags true and that the public import job finishes `completed`.
 
-- [ ] **Step 2: Prove the current failure**
+- [x] **Step 2: Prove the current failure**
 
 Run:
 
@@ -78,15 +78,15 @@ python -m pytest tldw_Server_API/tests/Chatbooks/test_chatbooks_core_jobs_worker
 
 Expected: FAIL because the legacy worker returns `Media/embedding imports are not supported yet` without calling the archive service.
 
-- [ ] **Step 3: Remove the obsolete archive restriction**
+- [x] **Step 3: Remove the obsolete archive restriction**
 
 In `core_jobs_worker.py`, retain the unsupported conflict-resolution validation, but allow Chatbook archive payloads to reach `_import_chatbook_sync` with the effective media and embedding flags. Do not weaken the endpoint guard that rejects archive restore flags for `openwebui_json` and `openwebui_db` sources.
 
-- [ ] **Step 4: Add a bundled-media async restore case**
+- [x] **Step 4: Add a bundled-media async restore case**
 
 Extend the regression with an archive containing an inventory-declared bundled media artifact. Assert that the restored bytes land under user-owned storage and that the import job records the imported media/inventory result rather than silently skipping it.
 
-- [ ] **Step 5: Run focused restore tests**
+- [x] **Step 5: Run focused restore tests**
 
 Run:
 
@@ -100,7 +100,7 @@ python -m pytest \
 
 Expected: PASS, including archive defaults true and OpenWebUI archive options rejected.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tldw_Server_API/app/services/core_jobs_worker.py tldw_Server_API/tests/Chatbooks/test_chatbooks_core_jobs_worker.py tldw_Server_API/tests/Chatbooks/test_chatbooks_full_account_import_restore.py tldw_Server_API/tests/Chatbooks/test_chatbooks_jobs_worker_import_defaults.py
