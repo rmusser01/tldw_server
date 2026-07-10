@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import {
   buildShuffledIndexOrder,
   buildShuffledOptionEntries,
+  drawDeterministicGroupedQuestionPool,
   drawDeterministicQuestionPool
 } from "../optionShuffle"
 
@@ -55,5 +56,34 @@ describe("optionShuffle", () => {
   it("returns full set when draw count exceeds question count", () => {
     const questions = ["q1", "q2", "q3"]
     expect(drawDeterministicQuestionPool(questions, 10, 2026)).toEqual(questions)
+  })
+
+  it("draws grouped stems atomically while preserving member order", () => {
+    const questions = [
+      { id: "a-1", groupId: "group-a" },
+      { id: "b-1", groupId: "group-b" },
+      { id: "a-2", groupId: "group-a" },
+      { id: "b-2", groupId: "group-b" }
+    ]
+    const first = drawDeterministicGroupedQuestionPool(questions, 1, 2026, (question) => question.groupId)
+    const second = drawDeterministicGroupedQuestionPool(questions, 1, 2026, (question) => question.groupId)
+    const selectedGroup = first[0]?.groupId
+
+    expect(first).toEqual(second)
+    expect(first).toHaveLength(2)
+    expect(first.every((question) => question.groupId === selectedGroup)).toBe(true)
+    expect(first.map((question) => question.id)).toEqual(
+      questions
+        .filter((question) => question.groupId === selectedGroup)
+        .map((question) => question.id)
+    )
+  })
+
+  it("keeps ungrouped draws compatible with the existing deterministic pool", () => {
+    const questions = ["q1", "q2", "q3", "q4", "q5"]
+
+    expect(drawDeterministicGroupedQuestionPool(questions, 3, 77, () => null)).toEqual(
+      drawDeterministicQuestionPool(questions, 3, 77)
+    )
   })
 })

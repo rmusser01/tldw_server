@@ -19,6 +19,13 @@ import {
   listDecks,
   listFlashcards,
 } from "@/services/flashcards";
+import {
+  QUIZ_GENERATION_PROFILES,
+  type QuestionBase,
+  type QuestionCreate,
+  type QuestionUpdate,
+  type QuizImportQuestion,
+} from "@/services/quizzes";
 
 const navigationMocks = {
   navigate: vi.fn(),
@@ -537,6 +544,101 @@ describe("GenerateTab scalable media selection and generation flow", () => {
         request: expect.objectContaining({
           sources: [{ source_type: "media", source_id: "10" }],
           generation_profile: "best_of_five",
+          num_questions: 5,
+          question_types: ["multiple_choice"]
+        }),
+        signal: expect.any(AbortSignal)
+      })
+    )
+  }, 20000)
+
+  it("exposes the available EMQ profile and grouped question contract", () => {
+    const questionBase: QuestionBase = {
+      id: 1,
+      quiz_id: 7,
+      question_type: "multiple_choice",
+      question_text: "Choose the most likely diagnosis.",
+      options: ["Diagnosis A", "Diagnosis B"],
+      group_id: null,
+      group_prompt: null,
+      points: 1,
+      order_index: 0,
+      deleted: false,
+      client_id: "test",
+      version: 1
+    }
+    const questionCreate: QuestionCreate = {
+      question_type: "multiple_choice",
+      question_text: "Choose the most likely diagnosis.",
+      options: ["Diagnosis A", "Diagnosis B"],
+      correct_answer: 0,
+      group_id: "clinical-emq",
+      group_prompt: "For each patient, choose one diagnosis from the shared bank."
+    }
+    const questionUpdate: QuestionUpdate = {
+      group_id: null,
+      group_prompt: null
+    }
+    const importQuestion: QuizImportQuestion = {
+      question_type: "multiple_choice",
+      question_text: "Choose the most likely diagnosis.",
+      options: ["Diagnosis A", "Diagnosis B"],
+      correct_answer: 0,
+      group_id: "clinical-emq",
+      group_prompt: "For each patient, choose one diagnosis from the shared bank."
+    }
+
+    expect(questionBase.group_id).toBeNull()
+    expect(questionCreate.group_id).toBe("clinical-emq")
+    expect(questionUpdate.group_prompt).toBeNull()
+    expect(importQuestion.group_prompt).toContain("shared bank")
+    expect(QUIZ_GENERATION_PROFILES.find((profile) => profile.id === "emq")).toMatchObject({
+      label: "EMQ",
+      status: "available",
+      default_num_questions: 5,
+      default_question_types: ["multiple_choice"]
+    })
+  })
+
+  it("applies EMQ profile defaults in generation payload", async () => {
+    vi.mocked(tldwClient.listMedia).mockResolvedValue({
+      items: [{ id: 10, title: "Clinical Notes", type: "pdf" }],
+      pagination: { total_items: 1 }
+    } as any)
+
+    const mutateAsync = vi.fn(async () => ({
+      quiz: { id: 42, name: "Clinical EMQ" },
+      questions: [{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }, { id: 5 }]
+    }))
+
+    vi.mocked(useGenerateQuizMutation).mockReturnValue({
+      mutateAsync,
+      isPending: false
+    } as any)
+
+    renderWithQueryClient()
+
+    await waitFor(() => {
+      expect(screen.getByText("1 media items available")).toBeInTheDocument()
+    })
+
+    fireEvent.mouseDown(screen.getAllByRole("combobox")[0])
+    fireEvent.click(await screen.findByText("Clinical Notes (pdf)"))
+
+    const profileSelect = screen.getByTestId("generate-profile-select")
+    fireEvent.mouseDown(profileSelect.querySelector(".ant-select-selector") ?? profileSelect)
+    fireEvent.click(await screen.findByText("EMQ"))
+
+    fireEvent.click(screen.getByRole("button", { name: /Generate Quiz/i }))
+
+    await waitFor(() => {
+      expect(mutateAsync).toHaveBeenCalledTimes(1)
+    })
+    expect(mutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        request: expect.objectContaining({
+          sources: [{ source_type: "media", source_id: "10" }],
+          generation_profile: "emq",
           num_questions: 5,
           question_types: ["multiple_choice"]
         }),

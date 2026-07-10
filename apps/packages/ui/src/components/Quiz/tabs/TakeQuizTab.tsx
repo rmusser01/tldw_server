@@ -57,7 +57,7 @@ import type { TakeTabNavigationSource } from "../navigation"
 import { TAKE_QUIZ_LIST_PREFS_KEY } from "../stateKeys"
 import {
   buildShuffledOptionEntries,
-  drawDeterministicQuestionPool,
+  drawDeterministicGroupedQuestionPool,
   type ShuffledOptionEntry
 } from "../utils/optionShuffle"
 import {
@@ -104,6 +104,12 @@ const hasBestOfFiveQuestionTag = (question: QuestionPublic): boolean => {
   return question.tags.some((tag) => (
     String(tag).trim().toLowerCase().replace(/[\s-]+/g, "_") === BEST_OF_FIVE_QUESTION_TAG
   ))
+}
+
+const getQuestionGroupId = (question: QuestionPublic): string | null => {
+  if (typeof question.group_id !== "string") return null
+  const normalized = question.group_id.trim()
+  return normalized.length > 0 ? normalized : null
 }
 
 const normalizeMultiSelectAnswer = (value: unknown): number[] => {
@@ -588,10 +594,11 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
       const drawCount = studyPoolSizePreference === "all"
         ? loadedQuestions.length
         : studyPoolSizePreference
-      const pooledQuestions = drawDeterministicQuestionPool(
+      const pooledQuestions = drawDeterministicGroupedQuestionPool(
         loadedQuestions,
         drawCount,
-        nextSessionSeed
+        nextSessionSeed,
+        getQuestionGroupId
       )
       setStudySessionShuffleSeed(nextSessionSeed === 0 ? quizId : nextSessionSeed)
       setQuestions(pooledQuestions)
@@ -871,6 +878,43 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
     return Array.isArray(raw) ? raw : null
   }
 
+  const formatEmqOptionLabel = (label: string, index: number) => {
+    const optionLabel = label || `${t("option:quiz.option", { defaultValue: "Option" })} ${index + 1}`
+    return `${String.fromCharCode(65 + index)}. ${optionLabel}`
+  }
+
+  const renderEmqGroupBank = (question: QuestionPublic, index: number) => {
+    const groupId = getQuestionGroupId(question)
+    if (!groupId) return null
+    const firstGroupIndex = questions.findIndex((candidate) => getQuestionGroupId(candidate) === groupId)
+    if (firstGroupIndex !== index) return null
+
+    const groupPrompt = typeof question.group_prompt === "string" ? question.group_prompt.trim() : ""
+    const optionBank = question.options ?? []
+    return (
+      <section
+        aria-label={t("option:quiz.emqSharedBank", { defaultValue: "Shared option bank" })}
+        className="mb-3 space-y-2 rounded-md border border-border bg-surface2 p-3"
+        data-testid="emq-group-bank"
+        data-emq-group-id={groupId}
+      >
+        {groupPrompt && (
+          <QuizMarkdown content={groupPrompt} className="text-sm text-text [&>p]:my-1" />
+        )}
+        <Typography.Text className="block text-xs font-medium text-text-muted">
+          {t("option:quiz.emqSharedBank", { defaultValue: "Shared option bank" })}
+        </Typography.Text>
+        <ol className="space-y-1 text-sm text-text">
+          {optionBank.map((label, optionIndex) => (
+            <li key={optionIndex} className="break-words">
+              {formatEmqOptionLabel(label, optionIndex)}
+            </li>
+          ))}
+        </ol>
+      </section>
+    )
+  }
+
   const renderQuestionHeader = (question: QuestionPublic, index: number) => (
     <div className="flex flex-wrap items-center gap-2">
       <span className="text-xs text-text-muted">
@@ -882,6 +926,11 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
       {hasBestOfFiveQuestionTag(question) && (
         <Tag color="blue" className="m-0">
           {t("option:quiz.bestOfFiveTag", { defaultValue: "Best of Five" })}
+        </Tag>
+      )}
+      {getQuestionGroupId(question) && (
+        <Tag className="m-0">
+          {t("option:quiz.emqTag", { defaultValue: "EMQ" })}
         </Tag>
       )}
     </div>
@@ -1145,6 +1194,22 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
   }
 
   const renderAnswerInput = (question: QuestionPublic) => {
+    if (getQuestionGroupId(question)) {
+      const optionBank = question.options ?? []
+      return (
+        <Select
+          aria-label={question.question_text}
+          className="min-h-11 w-full max-w-xl [&_.ant-select-selector]:min-h-11"
+          onChange={(value) => updateAnswer(question.id, value)}
+          options={optionBank.map((label, index) => ({
+            label: formatEmqOptionLabel(label, index),
+            value: index
+          }))}
+          placeholder={t("option:quiz.selectOption", { defaultValue: "Select an option" })}
+          value={typeof answers[question.id] === "number" ? answers[question.id] : undefined}
+        />
+      )
+    }
     if (question.question_type === "multiple_choice") {
       const optionEntries = getOptionEntriesForQuestion(question)
       return (
@@ -1345,6 +1410,7 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
             return (
               <List.Item>
                 <div className="w-full space-y-2">
+                  {renderEmqGroupBank(question, index)}
                   <div className="flex items-start justify-between gap-3">
                     <div className="font-medium">
                       {renderQuestionHeader(question, index)}
@@ -1932,6 +1998,7 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
                 return (
                   <List.Item>
                     <div className="w-full space-y-2">
+                      {renderEmqGroupBank(question, index)}
                       <div className="font-medium">
                         {renderQuestionHeader(question, index)}
                         <QuizMarkdown content={question.question_text} className="[&>p]:my-1" />
@@ -2089,6 +2156,7 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
                         focusedQuestionId === question.id ? "border border-warning/60 bg-warning/10" : ""
                       }`}
                     >
+                      {renderEmqGroupBank(question, index)}
                       <div className="font-medium">
                         {renderQuestionHeader(question, index)}
                         <QuizMarkdown content={question.question_text} className="[&>p]:my-1" />
@@ -2242,6 +2310,7 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
                       focusedQuestionId === question.id ? "border border-warning/60 bg-warning/10" : ""
                     }`}
                   >
+                    {renderEmqGroupBank(question, index)}
                     <div className="font-medium">
                       {renderQuestionHeader(question, index)}
                       <QuizMarkdown content={question.question_text} className="[&>p]:my-1" />

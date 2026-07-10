@@ -82,6 +82,15 @@ export const QUIZ_GENERATION_PROFILES: QuizGenerationProfileDefinition[] = [
     default_num_questions: 5,
     default_difficulty: "mixed",
     default_question_types: ["multiple_choice"]
+  },
+  {
+    id: "emq",
+    label: "EMQ",
+    description: "Extended matching questions with shared option banks.",
+    status: "available",
+    default_num_questions: 5,
+    default_difficulty: "mixed",
+    default_question_types: ["multiple_choice"]
   }
 ]
 export type AnswerValue = number | string | number[] | Record<string, string>
@@ -133,6 +142,8 @@ export type QuestionBase = {
   question_type: QuestionType
   question_text: string
   options?: string[] | null
+  group_id?: string | null
+  group_prompt?: string | null
   hint?: string | null
   hint_penalty_points?: number | null
   source_citations?: SourceCitation[] | null
@@ -217,6 +228,8 @@ export type QuestionCreate = {
   question_type: QuestionType
   question_text: string
   options?: string[] | null
+  group_id?: string | null
+  group_prompt?: string | null
   correct_answer: AnswerValue
   explanation?: string | null
   hint?: string | null
@@ -231,6 +244,8 @@ export type QuestionUpdate = {
   question_type?: QuestionType | null
   question_text?: string | null
   options?: string[] | null
+  group_id?: string | null
+  group_prompt?: string | null
   correct_answer?: AnswerValue | null
   explanation?: string | null
   hint?: string | null
@@ -387,6 +402,8 @@ export type QuizImportQuestion = {
   question_type: QuestionType
   question_text: string
   options?: string[] | null
+  group_id?: string | null
+  group_prompt?: string | null
   correct_answer: AnswerValue
   explanation?: string | null
   hint?: string | null

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { MemoryRouter } from "react-router-dom"
 import { TakeQuizTab } from "../TakeQuizTab"
@@ -115,6 +115,7 @@ describe("TakeQuizTab start flow", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     window.localStorage.clear()
+    Element.prototype.scrollIntoView = vi.fn()
 
     vi.mocked(useAttemptsQuery).mockReturnValue({
       data: {
@@ -516,6 +517,7 @@ describe("TakeQuizTab start flow", () => {
 
     const firstRenderOrder = screen.getAllByRole("radio").map((node) => Number((node as HTMLInputElement).value))
     expect(firstRenderOrder).toEqual(firstOrder)
+    expect(screen.queryByRole("combobox", { name: "Pick the second Greek letter." })).not.toBeInTheDocument()
 
     fireEvent.click(screen.getAllByRole("radio")[0])
     fireEvent.click(screen.getByRole("button", { name: "Submit" }))
@@ -535,6 +537,148 @@ describe("TakeQuizTab start flow", () => {
     await screen.findByTestId(`quiz-question-${questionId}`)
     const secondRenderOrder = screen.getAllByRole("radio").map((node) => Number((node as HTMLInputElement).value))
     expect(secondRenderOrder).toEqual(secondOrder)
+  }, 15000)
+
+  it("presents and submits grouped EMQ stems independently through one shared bank", async () => {
+    const groupPrompt = "For each patient, choose the most likely diagnosis from the shared option bank."
+    const optionBank = ["Acute appendicitis", "Renal colic", "Gastroenteritis"]
+    const firstStem = "A 24-year-old has migrating right lower quadrant pain."
+    const secondStem = "A 45-year-old has colicky flank pain radiating to the groin."
+    const questions = [
+      {
+        id: 81,
+        quiz_id: 7,
+        question_type: "multiple_choice",
+        question_text: firstStem,
+        options: optionBank,
+        group_id: "abdominal-pain",
+        group_prompt: groupPrompt,
+        points: 1,
+        order_index: 0,
+        tags: null,
+        deleted: false,
+        client_id: "test",
+        version: 1
+      },
+      {
+        id: 82,
+        quiz_id: 7,
+        question_type: "multiple_choice",
+        question_text: secondStem,
+        options: optionBank,
+        group_id: "abdominal-pain",
+        group_prompt: groupPrompt,
+        points: 1,
+        order_index: 1,
+        tags: null,
+        deleted: false,
+        client_id: "test",
+        version: 1
+      }
+    ]
+    vi.mocked(useStartAttemptMutation).mockReturnValue({
+      mutateAsync: vi.fn(async () => ({
+        id: 808,
+        quiz_id: 7,
+        started_at: "2026-02-18T10:00:00Z",
+        total_possible: 2,
+        answers: [],
+        questions
+      }))
+    } as any)
+
+    const submitMutate = vi.fn(async ({ answers }: {
+      answers: Array<{ question_id: number; user_answer: number; hint_used?: boolean }>
+    }) => ({
+      id: 808,
+      quiz_id: 7,
+      started_at: "2026-02-18T10:00:00Z",
+      completed_at: "2026-02-18T10:03:00Z",
+      score: 2,
+      total_possible: 2,
+      answers: [
+        {
+          question_id: 81,
+          user_answer: answers.find((answer) => answer.question_id === 81)?.user_answer,
+          is_correct: true,
+          correct_answer: 0,
+          points_awarded: 1,
+          explanation: "The pain pattern supports appendicitis.",
+          source_citations: [{ label: "Appendicitis source" }]
+        },
+        {
+          question_id: 82,
+          user_answer: answers.find((answer) => answer.question_id === 82)?.user_answer,
+          is_correct: true,
+          correct_answer: 1,
+          points_awarded: 1,
+          explanation: "The radiation pattern supports renal colic.",
+          source_citations: [{ label: "Renal colic source" }]
+        }
+      ]
+    }))
+    vi.mocked(useSubmitAttemptMutation).mockReturnValue({
+      mutateAsync: submitMutate,
+      isPending: false
+    } as any)
+
+    render(
+      <MemoryRouter>
+        <TakeQuizTab onNavigateToGenerate={() => {}} onNavigateToCreate={() => {}} />
+      </MemoryRouter>
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: /Start Quiz/i }))
+    fireEvent.click(screen.getByRole("button", { name: "Begin Quiz" }))
+
+    const firstSelect = await screen.findByRole("combobox", { name: firstStem })
+    expect(screen.getByRole("combobox", { name: secondStem })).toBeInTheDocument()
+    expect(screen.getAllByText(groupPrompt)).toHaveLength(1)
+    expect(screen.getAllByText(firstStem)).toHaveLength(1)
+    expect(screen.getAllByText(secondStem)).toHaveLength(1)
+    expect(screen.getAllByTestId("emq-group-bank")).toHaveLength(1)
+    expect(within(screen.getByTestId("emq-group-bank")).getByText("A. Acute appendicitis")).toBeInTheDocument()
+    expect(within(screen.getByTestId("emq-group-bank")).getByText("B. Renal colic")).toBeInTheDocument()
+    expect(screen.queryAllByRole("radio")).toHaveLength(0)
+
+    fireEvent.mouseDown(firstSelect)
+    const firstVisibleOption = (await screen.findAllByText("A. Acute appendicitis")).find(
+      (element) => element.closest(".ant-select-item-option") && !element.closest(".ant-select-dropdown-hidden")
+    )
+    expect(firstVisibleOption).toBeDefined()
+    fireEvent.click(firstVisibleOption as HTMLElement)
+    const refreshedSecondSelect = screen.getByRole("combobox", { name: secondStem })
+    fireEvent.mouseDown(refreshedSecondSelect)
+    fireEvent.keyDown(refreshedSecondSelect, {
+      key: "ArrowDown",
+      code: "ArrowDown",
+      keyCode: 40,
+      which: 40
+    })
+    fireEvent.keyDown(refreshedSecondSelect, {
+      key: "Enter",
+      code: "Enter",
+      keyCode: 13,
+      which: 13
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Submit" }))
+
+    await waitFor(() => {
+      expect(submitMutate).toHaveBeenCalledWith({
+        attemptId: 808,
+        answers: [
+          { question_id: 81, user_answer: 0, hint_used: false },
+          { question_id: 82, user_answer: 1, hint_used: false }
+        ]
+      })
+    })
+
+    expect(await screen.findByText("The pain pattern supports appendicitis.")).toBeInTheDocument()
+    expect(screen.getByText("The radiation pattern supports renal colic.")).toBeInTheDocument()
+    expect(screen.getByText("Appendicitis source")).toBeInTheDocument()
+    expect(screen.getByText("Renal colic source")).toBeInTheDocument()
+    expect(screen.getAllByText(groupPrompt)).toHaveLength(1)
+    expect(screen.getAllByTestId("emq-group-bank")).toHaveLength(1)
   }, 15000)
 
   it("tracks hint usage in submit payload and reflects penalty in results", async () => {

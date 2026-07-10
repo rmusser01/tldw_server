@@ -76,3 +76,41 @@ export const drawDeterministicQuestionPool = <T>(
   const order = buildShuffledIndexOrder(items.length, seed)
   return order.slice(0, normalizedDrawCount).map((index) => items[index] as T)
 }
+
+export const drawDeterministicGroupedQuestionPool = <T>(
+  items: T[],
+  drawCount: number,
+  seed: number,
+  getGroupKey: (item: T) => string | null | undefined
+): T[] => {
+  if (!Array.isArray(items) || items.length === 0) return []
+  const normalizedDrawCount = Math.min(items.length, Math.max(1, Math.floor(drawCount)))
+  if (normalizedDrawCount >= items.length) return [...items]
+
+  const units: T[][] = []
+  const groupedUnits = new Map<string, T[]>()
+  items.forEach((item) => {
+    const groupKey = getGroupKey(item)?.trim() ?? ""
+    if (!groupKey) {
+      units.push([item])
+      return
+    }
+    const existingUnit = groupedUnits.get(groupKey)
+    if (existingUnit) {
+      existingUnit.push(item)
+      return
+    }
+    const unit = [item]
+    groupedUnits.set(groupKey, unit)
+    units.push(unit)
+  })
+
+  const selected: T[] = []
+  const order = buildShuffledIndexOrder(units.length, seed)
+  for (const unitIndex of order) {
+    const unit = units[unitIndex]
+    if (unit) selected.push(...unit)
+    if (selected.length >= normalizedDrawCount) break
+  }
+  return selected
+}
