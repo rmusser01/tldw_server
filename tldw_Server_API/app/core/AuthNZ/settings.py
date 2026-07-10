@@ -779,6 +779,19 @@ class Settings(BaseSettings):
         default=1,
         description="Fixed user ID for single-user mode"
     )
+
+    SINGLE_USER_SESSION_COOKIE_NAME: str = Field(
+        default="tldw_single_user_session",
+        description="Host-only cookie name for opaque single-user sessions",
+    )
+
+    SINGLE_USER_SESSION_EXPIRE_DAYS: int = Field(
+        default=30,
+        ge=1,
+        le=365,
+        description="Opaque single-user session lifetime in days",
+    )
+
     # Optional IP allowlist for single-user mode (comma-separated env or list)
     SINGLE_USER_ALLOWED_IPS: Annotated[list[str], NoDecode] = Field(
         default_factory=list,
