@@ -776,7 +776,7 @@ class SourceReviewScheduleRow(BaseModel):
     activity_type: SourceReviewActivity
 
     @model_validator(mode="after")
-    def validate_offset_cap(self):
+    def validate_offset_cap(self) -> "SourceReviewScheduleRow":
         """Reject schedule offsets beyond the supported unit-specific cap."""
         cap = SOURCE_REVIEW_OFFSET_CAPS[self.offset_unit]
         if self.offset_value > cap:
@@ -811,7 +811,7 @@ class SourceReviewPlanCreateRequest(BaseModel):
         return _strip_required_string(value)
 
     @model_validator(mode="after")
-    def validate_source_snapshot_and_schedule(self):
+    def validate_source_snapshot_and_schedule(self) -> "SourceReviewPlanCreateRequest":
         """Validate source snapshot sizes and the computed review schedule."""
         for source_item in self.source_items:
             if source_item.excerpt_text is not None and len(source_item.excerpt_text) > 20_000:
@@ -931,6 +931,8 @@ class SourceReviewDueListResponse(BaseModel):
 
 
 class SourceReviewPlanDeleteResponse(BaseModel):
-    """Idempotent soft-delete result for a source-review plan."""
+    """Report whether this request newly applied the idempotent soft delete."""
 
-    deleted: bool
+    deleted: bool = Field(
+        description="True when this request deleted the plan; false when it was already deleted."
+    )

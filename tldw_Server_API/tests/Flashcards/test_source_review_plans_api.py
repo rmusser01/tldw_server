@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 import pytest
 from fastapi import FastAPI
+from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
 os.environ.setdefault("READING_DIGEST_JOBS_WORKER_ENABLED", "0")
@@ -25,6 +26,22 @@ from tldw_Server_API.tests.test_config import TestConfig
 
 AUTH_HEADERS = {"X-API-KEY": TestConfig.TEST_API_KEY}
 BASE_PATH = "/api/v1/flashcards/source-review-plans"
+pytestmark = pytest.mark.integration
+
+
+def test_source_review_routes_apply_rate_limiting() -> None:
+    source_review_routes = [
+        route
+        for route in flashcards_router.routes
+        if isinstance(route, APIRoute)
+        and route.path.startswith("/flashcards/source-review-plans")
+    ]
+
+    assert len(source_review_routes) == 7  # nosec B101
+    for route in source_review_routes:
+        assert flashcards_endpoint.check_rate_limit in {  # nosec B101
+            dependency.call for dependency in route.dependant.dependencies
+        }
 
 
 def test_source_review_conflict_text_does_not_infer_not_found_status() -> None:

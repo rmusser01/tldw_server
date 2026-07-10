@@ -2067,7 +2067,11 @@ def get_next_review_card(
         raise map_db_error_to_http(exc, default_detail="Failed to fetch next review card") from exc
 
 
-@router.post("/source-review-plans", response_model=SourceReviewPlanResponse)
+@router.post(
+    "/source-review-plans",
+    response_model=SourceReviewPlanResponse,
+    dependencies=[Depends(check_rate_limit)],
+)
 def create_source_review_plan(
     payload: SourceReviewPlanCreateRequest,
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
@@ -2093,7 +2097,11 @@ def create_source_review_plan(
         ) from exc
 
 
-@router.get("/source-review-plans", response_model=SourceReviewPlanListResponse)
+@router.get(
+    "/source-review-plans",
+    response_model=SourceReviewPlanListResponse,
+    dependencies=[Depends(check_rate_limit)],
+)
 def list_source_review_plans(
     limit: int = Query(50, ge=1),
     offset: int = Query(0, ge=0),
@@ -2114,7 +2122,11 @@ def list_source_review_plans(
         ) from exc
 
 
-@router.get("/source-review-plans/due", response_model=SourceReviewDueListResponse)
+@router.get(
+    "/source-review-plans/due",
+    response_model=SourceReviewDueListResponse,
+    dependencies=[Depends(check_rate_limit)],
+)
 def list_due_source_review_occurrences(
     limit: int = Query(50, ge=1),
     offset: int = Query(0, ge=0),
@@ -2173,6 +2185,7 @@ def _source_review_occurrence_action(
 @router.post(
     "/source-review-plans/occurrences/{occurrence_id}/start",
     response_model=SourceReviewOccurrenceActionResponse,
+    dependencies=[Depends(check_rate_limit)],
 )
 def start_source_review_occurrence(
     occurrence_id: int,
@@ -2190,6 +2203,7 @@ def start_source_review_occurrence(
 @router.post(
     "/source-review-plans/occurrences/{occurrence_id}/complete",
     response_model=SourceReviewOccurrenceActionResponse,
+    dependencies=[Depends(check_rate_limit)],
 )
 def complete_source_review_occurrence(
     occurrence_id: int,
@@ -2207,6 +2221,7 @@ def complete_source_review_occurrence(
 @router.post(
     "/source-review-plans/occurrences/{occurrence_id}/skip",
     response_model=SourceReviewOccurrenceActionResponse,
+    dependencies=[Depends(check_rate_limit)],
 )
 def skip_source_review_occurrence(
     occurrence_id: int,
@@ -2224,6 +2239,7 @@ def skip_source_review_occurrence(
 @router.delete(
     "/source-review-plans/{plan_id}",
     response_model=SourceReviewPlanDeleteResponse,
+    dependencies=[Depends(check_rate_limit)],
 )
 def delete_source_review_plan(
     plan_id: int,

@@ -19,6 +19,8 @@ from tldw_Server_API.app.core.Flashcards.source_review import (
     normalize_source_review_bundle,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def test_source_review_day_offset_uses_local_midnight():
     due_at = compute_source_review_due_at(

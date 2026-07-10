@@ -63,6 +63,21 @@ const pruneSourceReviewHandoffs = (session: Storage): void => {
   }
 }
 
+export function clearSourceReviewHandoffs(): void {
+  const session = storage()
+  if (!session) return
+  try {
+    for (let index = session.length - 1; index >= 0; index -= 1) {
+      const key = session.key(index)
+      if (key?.startsWith(SOURCE_REVIEW_HANDOFF_PREFIX)) {
+        session.removeItem(key)
+      }
+    }
+  } catch {
+    // Logout cleanup is best-effort when browser privacy settings block access.
+  }
+}
+
 const token = (): string => {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
     return crypto.randomUUID()

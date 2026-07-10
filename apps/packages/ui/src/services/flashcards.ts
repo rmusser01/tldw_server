@@ -294,6 +294,7 @@ export type SourceReviewDueListResponse = {
 }
 
 export type SourceReviewPlanDeleteResponse = {
+  /** Whether this request newly applied the delete; false means it was already deleted. */
   deleted: boolean
 }
 

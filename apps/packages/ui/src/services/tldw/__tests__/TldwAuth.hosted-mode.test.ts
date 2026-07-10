@@ -40,6 +40,7 @@ describe("TldwAuthService hosted mode", () => {
     mocks.getConfig.mockResolvedValue(null)
     mocks.updateConfig.mockResolvedValue(undefined)
     mocks.getCurrentUserProfile.mockResolvedValue({ active_org_id: 23 })
+    sessionStorage.clear()
   })
 
   afterEach(() => {
@@ -103,5 +104,35 @@ describe("TldwAuthService hosted mode", () => {
     )
     expect(result.access_token).toBeUndefined()
     expect(mocks.emitSplashAfterLoginSuccess).toHaveBeenCalledTimes(1)
+  })
+
+  it("clears source-review handoffs when logging out", async () => {
+    mocks.getConfig.mockResolvedValue({ authMode: "multi-user" })
+    mocks.bgRequest.mockResolvedValue(undefined)
+    const { TldwAuthService } = await import("@/services/tldw/TldwAuth")
+    const {
+      loadSourceReviewHandoff,
+      saveSourceReviewHandoff
+    } = await import("@/services/tldw/source-review-handoff")
+    const handoffToken = saveSourceReviewHandoff({
+      occurrence_id: 31,
+      plan_id: 7,
+      activity_type: "quiz",
+      source_bundle: {
+        items: [
+          {
+            source_type: "note",
+            source_id: "note-42",
+            excerpt_text: "private source excerpt"
+          }
+        ]
+      }
+    })
+    sessionStorage.setItem("unrelated", "keep")
+
+    await new TldwAuthService().logout()
+
+    expect(loadSourceReviewHandoff(handoffToken, false)).toBeNull()
+    expect(sessionStorage.getItem("unrelated")).toBe("keep")
   })
 })
