@@ -232,7 +232,48 @@ def test_zip_fixture_preserves_backslash_member_names(tmp_path: Path) -> None:
     archive_path = _zip_with_entries(tmp_path / "backslash.zip", {r"sprites\happy.png": b"data"})
 
     with zipfile.ZipFile(archive_path) as archive:
-        assert archive.namelist() == [r"sprites\happy.png"]
+        assert archive.infolist()[0].orig_filename == r"sprites\happy.png"
+
+
+def test_archive_import_rejects_raw_backslash_when_zipfile_normalizes_filename(
+    repo: VisualIdentityRepository,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    draft = repo.create_draft(owner_user_id=1, title="Backslash", source_kind="zip")
+    archive_path = tmp_path / "unsafe.zip"
+    archive_path.write_bytes(b"placeholder")
+    info = zipfile.ZipInfo("sprites/happy.png")
+    info.orig_filename = r"sprites\happy.png"
+    info.file_size = 4
+    info.compress_size = 4
+
+    class Archive:
+        def __init__(self, source: str | Path) -> None:
+            assert Path(source) == archive_path
+
+        def __enter__(self) -> "Archive":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def infolist(self) -> list[zipfile.ZipInfo]:
+            return [info]
+
+    monkeypatch.setattr(archive_import.zipfile, "ZipFile", Archive)
+
+    result = import_visual_identity_expression_zip(
+        repo,
+        owner_user_id=1,
+        draft_id=draft["id"],
+        archive_path=archive_path,
+        storage_root=tmp_path / "store",
+    )
+
+    assert result["status"] == "failed"
+    assert repo.list_draft_assets(draft["id"], owner_user_id=1) == []
+    assert _error_codes(json.loads(result["validation_summary_json"])) == {"unsafe_archive_path"}
 
 
 @pytest.mark.parametrize("member_name", ["C:happy.png", "sprites/C:happy.png"])

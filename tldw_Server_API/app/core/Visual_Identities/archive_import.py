@@ -141,28 +141,29 @@ def _collect_candidates(
     total_uncompressed = 0
 
     for info in infos:
-        normalized_path = _normalized_archive_path(info.filename)
+        source_filename = _zip_member_source_name(info)
+        normalized_path = _normalized_archive_path(source_filename)
         if normalized_path is None:
-            _record_error(summary, code="unsafe_archive_path", source_filename=info.filename)
+            _record_error(summary, code="unsafe_archive_path", source_filename=source_filename)
             continue
         duplicate_key = normalized_path.lower()
         if duplicate_key in seen_paths:
-            _record_error(summary, code="duplicate_archive_path", source_filename=info.filename)
+            _record_error(summary, code="duplicate_archive_path", source_filename=source_filename)
             continue
         seen_paths.add(duplicate_key)
 
-        _validate_entry_metadata(info, normalized_path, summary)
+        _validate_entry_metadata(info, normalized_path, summary, source_filename=source_filename)
         if info.is_dir():
-            if not _entry_has_errors(summary, info.filename):
+            if not _entry_has_errors(summary, source_filename):
                 summary["directories"].append(normalized_path)
             continue
 
         total_uncompressed += int(info.file_size)
         expression_key = normalize_expression_filename(PurePosixPath(normalized_path).name)
         if expression_key is None:
-            _record_error(summary, code="empty_expression_key", source_filename=info.filename)
+            _record_error(summary, code="empty_expression_key", source_filename=source_filename)
             continue
-        if _entry_has_errors(summary, info.filename):
+        if _entry_has_errors(summary, source_filename):
             continue
         candidates.append(
             _ImportCandidate(
@@ -184,8 +185,10 @@ def _validate_entry_metadata(
     info: zipfile.ZipInfo,
     normalized_path: str,
     summary: dict[str, Any],
+    *,
+    source_filename: str | None = None,
 ) -> None:
-    source_filename = info.filename
+    source_filename = source_filename or _zip_member_source_name(info)
     extension = PurePosixPath(normalized_path).suffix.lower()
     if info.flag_bits & 0x1:
         _record_error(summary, code="encrypted_entry", source_filename=source_filename)
@@ -376,6 +379,10 @@ def _normalized_archive_path(raw_name: str) -> str | None:
     if not PurePosixPath(normalized_path).name:
         return None
     return normalized_path
+
+
+def _zip_member_source_name(info: zipfile.ZipInfo) -> str:
+    return str(getattr(info, "orig_filename", info.filename))
 
 
 def _is_symlink(info: zipfile.ZipInfo) -> bool:
