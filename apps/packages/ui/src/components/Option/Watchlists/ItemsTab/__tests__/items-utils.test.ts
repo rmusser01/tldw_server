@@ -187,6 +187,18 @@ describe("stripHtmlToText", () => {
     const html = "<p>Hello <strong>world</strong></p><p>  Next&nbsp;line </p>"
     expect(stripHtmlToText(html)).toBe("Hello world Next line")
   })
+
+  it("removes script and style content without DOMParser", () => {
+    vi.stubGlobal("DOMParser", undefined)
+    try {
+      const html =
+        "<p>Hello <script>alert(1)</script>world</p><p><style>body{}</style>Next&nbsp;line</p>"
+
+      expect(stripHtmlToText(html)).toBe("Hello world Next line")
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
 })
 
 describe("extractImageUrl", () => {

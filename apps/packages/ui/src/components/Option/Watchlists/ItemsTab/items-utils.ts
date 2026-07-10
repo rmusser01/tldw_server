@@ -1,3 +1,5 @@
+import DOMPurify from "dompurify"
+
 import type {
   ScrapedItem,
   ScrapedItemSortMode,
@@ -459,16 +461,11 @@ const stripHtmlTagsWithoutRegex = (value: string): string => {
 
 export const stripHtmlToText = (value: string): string => {
   if (!value) return ""
-  if (typeof DOMParser !== "undefined") {
-    try {
-      const doc = new DOMParser().parseFromString(value, "text/html")
-      doc.querySelectorAll("script, style").forEach((node) => node.remove())
-      return (doc.body?.textContent || "").replace(/\s+/g, " ").trim()
-    } catch {
-      // Fall through to non-DOM fallback.
-    }
-  }
-  return decodeCommonEntities(stripHtmlTagsWithoutRegex(value))
+  const sanitized = DOMPurify.sanitize(value, {
+    USE_PROFILES: { html: true },
+    FORBID_TAGS: ["script", "style"]
+  })
+  return decodeCommonEntities(stripHtmlTagsWithoutRegex(sanitized))
     .replace(/\s+/g, " ")
     .trim()
 }
