@@ -297,6 +297,22 @@ describe("chat document processing service", () => {
     },
   )
 
+  it("does not suggest switching to a target mode that is also unavailable", async () => {
+    const result = await prepareChatDocumentAttachmentsForSend({
+      files: [
+        makeUploadedFile({
+          processingMode: "add_to_chat",
+          processingCapabilities: {
+            add_to_chat: { available: false, status: "unavailable" },
+            ingest_to_library: { available: false, status: "unavailable" },
+          },
+        }),
+      ],
+    })
+
+    expect(result.blockedFiles[0]?.processingRecoveryActions).toEqual([])
+  })
+
   it("applies default and explicit document processing decisions", () => {
     const file = makeUploadedFile({
       processingCapabilities: {
