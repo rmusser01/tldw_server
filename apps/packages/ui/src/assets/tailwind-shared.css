@@ -940,6 +940,34 @@ body {
   }
 }
 
+@media (pointer: coarse) {
+  .watchlists-pipeline-wizard .ant-input,
+  .watchlists-pipeline-wizard .ant-input-number,
+  .watchlists-pipeline-wizard .ant-input-number-input-wrap,
+  .watchlists-pipeline-wizard .ant-input-number-input,
+  .watchlists-pipeline-wizard .ant-select-selector,
+  .watchlists-pipeline-wizard .ant-select-selection-search-input,
+  .watchlists-pipeline-wizard .ant-radio-wrapper,
+  .watchlists-pipeline-wizard .ant-checkbox-wrapper,
+  .watchlists-pipeline-wizard .ant-switch,
+  .watchlists-pipeline-wizard .ant-btn {
+    min-height: 44px !important;
+  }
+
+  .watchlists-pipeline-wizard .ant-radio-wrapper,
+  .watchlists-pipeline-wizard .ant-checkbox-wrapper,
+  .watchlists-pipeline-wizard .ant-switch,
+  .watchlists-pipeline-wizard .ant-btn {
+    min-width: 44px !important;
+  }
+
+  .watchlists-pipeline-wizard .ant-radio-wrapper,
+  .watchlists-pipeline-wizard .ant-checkbox-wrapper {
+    display: inline-flex;
+    align-items: center;
+  }
+}
+
 /* Icon defaults (lucide/react) */
 .icon {
   width: 20px;

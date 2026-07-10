@@ -646,5 +646,23 @@
   },
   "overview_pipelineSetup_validationError": {
     "message": "Prüfen Sie die markierten Felder, bevor Sie fortfahren."
+  },
+  "overview_pipelineSetup_receipt_sources_one": {
+    "message": "{{count}} Quelle"
+  },
+  "overview_pipelineSetup_receipt_sources_other": {
+    "message": "{{count}} Quellen"
+  },
+  "overview_pipelineSetup_receipt_cast_one": {
+    "message": "{{count}} Sprecher"
+  },
+  "overview_pipelineSetup_receipt_cast_other": {
+    "message": "{{count}} Sprecher"
+  },
+  "overview_pipelineSetup_receipt_duration_one": {
+    "message": "Ziel: {{count}} Minute"
+  },
+  "overview_pipelineSetup_receipt_duration_other": {
+    "message": "Ziel: {{count}} Minuten"
   }
 }

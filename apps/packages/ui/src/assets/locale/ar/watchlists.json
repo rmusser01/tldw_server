@@ -216,6 +216,12 @@
           "scheduled": "{{date}} ({{timezone}})"
         },
         "sources": "{{count}} من المصادر",
+        "sources_zero": "{{count}} مصادر",
+        "sources_one": "{{count}} مصدر",
+        "sources_two": "{{count}} مصدران",
+        "sources_few": "{{count}} مصادر",
+        "sources_many": "{{count}} مصدرًا",
+        "sources_other": "{{count}} مصدر",
         "artifacts": {
           "textReport": "تقرير نصي",
           "showNotes": "ملاحظات البرنامج",
@@ -237,7 +243,19 @@
         },
         "programWithSpeakers": "{{format}} {{speakers}}",
         "cast": "{{count}} من المشاركين",
+        "cast_zero": "{{count}} مشاركين",
+        "cast_one": "{{count}} مشارك",
+        "cast_two": "{{count}} مشاركان",
+        "cast_few": "{{count}} مشاركين",
+        "cast_many": "{{count}} مشاركًا",
+        "cast_other": "{{count}} مشارك",
         "duration": "بهدف {{count}} دقيقة",
+        "duration_zero": "بهدف {{count}} دقائق",
+        "duration_one": "بهدف {{count}} دقيقة",
+        "duration_two": "بهدف {{count}} دقيقتين",
+        "duration_few": "بهدف {{count}} دقائق",
+        "duration_many": "بهدف {{count}} دقيقة",
+        "duration_other": "بهدف {{count}} دقيقة",
         "destinations": {
           "email": "البريد: {{recipients}}",
           "chatbook": "Chatbook: {{title}}"

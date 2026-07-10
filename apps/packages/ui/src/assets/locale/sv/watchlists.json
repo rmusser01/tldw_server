@@ -216,6 +216,8 @@
           "scheduled": "{{date}} ({{timezone}})"
         },
         "sources": "{{count}} källor",
+        "sources_one": "{{count}} källa",
+        "sources_other": "{{count}} källor",
         "artifacts": {
           "textReport": "textrapport",
           "showNotes": "programanteckningar",
@@ -237,7 +239,11 @@
         },
         "programWithSpeakers": "{{speakers}} {{format}}",
         "cast": "{{count}} medverkande",
+        "cast_one": "{{count}} medverkande",
+        "cast_other": "{{count}} medverkande",
         "duration": "mål på {{count}} minuter",
+        "duration_one": "mål på {{count}} minut",
+        "duration_other": "mål på {{count}} minuter",
         "destinations": {
           "email": "E-post: {{recipients}}",
           "chatbook": "Chatbook: {{title}}"

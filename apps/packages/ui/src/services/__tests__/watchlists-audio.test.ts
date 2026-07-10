@@ -136,7 +136,8 @@ describe("watchlists audio services", () => {
     mocks.bgRequest.mockResolvedValueOnce(projection).mockResolvedValueOnce(projection)
 
     await expect(getLatestWatchlistBriefing({ watchlist_id: 9 })).resolves.toEqual(projection)
-    await expect(getWatchlistRunBriefing(123)).resolves.toEqual(projection)
+    const controller = new AbortController()
+    await expect(getWatchlistRunBriefing(123, controller.signal)).resolves.toEqual(projection)
 
     expect(mocks.bgRequest).toHaveBeenNthCalledWith(
       1,
@@ -149,7 +150,8 @@ describe("watchlists audio services", () => {
       2,
       expect.objectContaining({
         path: "/api/v1/watchlists/runs/123/briefing",
-        method: "GET"
+        method: "GET",
+        abortSignal: controller.signal
       })
     )
   })

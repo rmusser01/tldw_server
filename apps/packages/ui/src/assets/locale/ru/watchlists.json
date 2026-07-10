@@ -216,6 +216,10 @@
           "scheduled": "{{date}} ({{timezone}})"
         },
         "sources": "Источников: {{count}}",
+        "sources_one": "{{count}} источник",
+        "sources_few": "{{count}} источника",
+        "sources_many": "{{count}} источников",
+        "sources_other": "{{count}} источника",
         "artifacts": {
           "textReport": "текстовый отчёт",
           "showNotes": "заметки программы",
@@ -237,7 +241,15 @@
         },
         "programWithSpeakers": "{{format}}, {{speakers}}",
         "cast": "Участников: {{count}}",
+        "cast_one": "{{count}} участник",
+        "cast_few": "{{count}} участника",
+        "cast_many": "{{count}} участников",
+        "cast_other": "{{count}} участника",
         "duration": "цель — {{count}} мин.",
+        "duration_one": "цель — {{count}} минута",
+        "duration_few": "цель — {{count}} минуты",
+        "duration_many": "цель — {{count}} минут",
+        "duration_other": "цель — {{count}} минуты",
         "destinations": {
           "email": "Почта: {{recipients}}",
           "chatbook": "Chatbook: {{title}}"

@@ -216,6 +216,10 @@
           "scheduled": "{{date}} ({{timezone}})"
         },
         "sources": "Джерел: {{count}}",
+        "sources_one": "{{count}} джерело",
+        "sources_few": "{{count}} джерела",
+        "sources_many": "{{count}} джерел",
+        "sources_other": "{{count}} джерела",
         "artifacts": {
           "textReport": "текстовий звіт",
           "showNotes": "нотатки програми",
@@ -237,7 +241,15 @@
         },
         "programWithSpeakers": "{{format}}, {{speakers}}",
         "cast": "Учасників: {{count}}",
+        "cast_one": "{{count}} учасник",
+        "cast_few": "{{count}} учасники",
+        "cast_many": "{{count}} учасників",
+        "cast_other": "{{count}} учасника",
         "duration": "ціль — {{count}} хв.",
+        "duration_one": "ціль — {{count}} хвилина",
+        "duration_few": "ціль — {{count}} хвилини",
+        "duration_many": "ціль — {{count}} хвилин",
+        "duration_other": "ціль — {{count}} хвилини",
         "destinations": {
           "email": "Пошта: {{recipients}}",
           "chatbook": "Chatbook: {{title}}"

@@ -8,6 +8,7 @@ export interface BriefingReceiptInput {
   sourceCount: number
   nextRunAt?: string
   followingRunAt?: string
+  scheduled?: boolean
   timezone: string
   locale?: string
 }
@@ -108,7 +109,7 @@ export const buildBriefingReceiptModel = (
   )
 
   return {
-    scheduleMode: nextRun ? "scheduled" : "manual",
+    scheduleMode: input.scheduled || nextRun ? "scheduled" : "manual",
     outcomeNoun: input.contract.editorial.outcome_noun,
     programFormat: input.contract.editorial.program_format,
     speakerCount,

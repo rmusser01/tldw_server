@@ -216,6 +216,8 @@
           "scheduled": "{{date}} ({{timezone}})"
         },
         "sources": "소스 {{count}}개",
+        "sources_one": "소스 {{count}}개",
+        "sources_other": "소스 {{count}}개",
         "artifacts": {
           "textReport": "텍스트 보고서",
           "showNotes": "프로그램 노트",
@@ -237,7 +239,11 @@
         },
         "programWithSpeakers": "{{speakers}} {{format}}",
         "cast": "출연자 {{count}}명",
+        "cast_one": "출연자 {{count}}명",
+        "cast_other": "출연자 {{count}}명",
         "duration": "목표 {{count}}분",
+        "duration_one": "목표 {{count}}분",
+        "duration_other": "목표 {{count}}분",
         "destinations": {
           "email": "이메일: {{recipients}}",
           "chatbook": "Chatbook: {{title}}"

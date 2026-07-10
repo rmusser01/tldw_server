@@ -646,5 +646,23 @@
   },
   "overview_pipelineSetup_validationError": {
     "message": "Se gjennom de uthevede feltene før du fortsetter."
+  },
+  "overview_pipelineSetup_receipt_sources_one": {
+    "message": "{{count}} kilde"
+  },
+  "overview_pipelineSetup_receipt_sources_other": {
+    "message": "{{count}} kilder"
+  },
+  "overview_pipelineSetup_receipt_cast_one": {
+    "message": "{{count}} deltaker"
+  },
+  "overview_pipelineSetup_receipt_cast_other": {
+    "message": "{{count}} deltakere"
+  },
+  "overview_pipelineSetup_receipt_duration_one": {
+    "message": "mål på {{count}} minutt"
+  },
+  "overview_pipelineSetup_receipt_duration_other": {
+    "message": "mål på {{count}} minutter"
   }
 }

@@ -154,6 +154,34 @@ describe("watchlists briefing receipt", () => {
     expect(receipt.speakerCount).toBe(0)
   })
 
+  it("preserves scheduled classification while the next projection is unavailable", () => {
+    const contract = buildBriefingPipelineContract({
+      monitorName: "Queued Brief",
+      scope: { sources: [1] },
+      active: false,
+      scheduleExpr: "0 8 * * MON-FRI",
+      timezone: "America/Los_Angeles",
+      templateName: "briefing_markdown",
+      audioEnabled: false
+    })
+
+    expect(buildBriefingReceiptModel({
+      contract,
+      sourceCount: 1,
+      scheduled: true,
+      timezone: "America/Los_Angeles"
+    })).toMatchObject({
+      scheduleMode: "scheduled",
+      timezone: "America/Los_Angeles"
+    })
+    expect(buildBriefingReceiptModel({
+      contract,
+      sourceCount: 1,
+      scheduled: true,
+      timezone: "America/Los_Angeles"
+    }).nextRunAt).toBeUndefined()
+  })
+
   it.each([
     "concise_briefing",
     "solo_update",

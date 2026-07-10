@@ -646,5 +646,41 @@
   },
   "overview_pipelineSetup_validationError": {
     "message": "Проверьте выделенные поля перед продолжением."
+  },
+  "overview_pipelineSetup_receipt_sources_one": {
+    "message": "{{count}} источник"
+  },
+  "overview_pipelineSetup_receipt_sources_few": {
+    "message": "{{count}} источника"
+  },
+  "overview_pipelineSetup_receipt_sources_many": {
+    "message": "{{count}} источников"
+  },
+  "overview_pipelineSetup_receipt_sources_other": {
+    "message": "{{count}} источника"
+  },
+  "overview_pipelineSetup_receipt_cast_one": {
+    "message": "{{count}} участник"
+  },
+  "overview_pipelineSetup_receipt_cast_few": {
+    "message": "{{count}} участника"
+  },
+  "overview_pipelineSetup_receipt_cast_many": {
+    "message": "{{count}} участников"
+  },
+  "overview_pipelineSetup_receipt_cast_other": {
+    "message": "{{count}} участника"
+  },
+  "overview_pipelineSetup_receipt_duration_one": {
+    "message": "цель — {{count}} минута"
+  },
+  "overview_pipelineSetup_receipt_duration_few": {
+    "message": "цель — {{count}} минуты"
+  },
+  "overview_pipelineSetup_receipt_duration_many": {
+    "message": "цель — {{count}} минут"
+  },
+  "overview_pipelineSetup_receipt_duration_other": {
+    "message": "цель — {{count}} минуты"
   }
 }

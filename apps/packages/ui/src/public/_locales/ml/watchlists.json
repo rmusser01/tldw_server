@@ -646,5 +646,23 @@
   },
   "overview_pipelineSetup_validationError": {
     "message": "തുടരുന്നതിന് മുമ്പ് അടയാളപ്പെടുത്തിയ ഫീൽഡുകൾ പരിശോധിക്കുക."
+  },
+  "overview_pipelineSetup_receipt_sources_one": {
+    "message": "{{count}} ഉറവിടം"
+  },
+  "overview_pipelineSetup_receipt_sources_other": {
+    "message": "{{count}} ഉറവിടങ്ങൾ"
+  },
+  "overview_pipelineSetup_receipt_cast_one": {
+    "message": "{{count}} പങ്കാളി"
+  },
+  "overview_pipelineSetup_receipt_cast_other": {
+    "message": "{{count}} പങ്കാളികൾ"
+  },
+  "overview_pipelineSetup_receipt_duration_one": {
+    "message": "{{count}} മിനിറ്റ് ലക്ഷ്യം"
+  },
+  "overview_pipelineSetup_receipt_duration_other": {
+    "message": "{{count}} മിനിറ്റ് ലക്ഷ്യം"
   }
 }

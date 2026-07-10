@@ -646,5 +646,32 @@
   },
   "overview_pipelineSetup_validationError": {
     "message": "Controlla i campi evidenziati prima di continuare."
+  },
+  "overview_pipelineSetup_receipt_sources_one": {
+    "message": "{{count}} fonte"
+  },
+  "overview_pipelineSetup_receipt_sources_many": {
+    "message": "{{count}} fonti"
+  },
+  "overview_pipelineSetup_receipt_sources_other": {
+    "message": "{{count}} fonti"
+  },
+  "overview_pipelineSetup_receipt_cast_one": {
+    "message": "{{count}} partecipante"
+  },
+  "overview_pipelineSetup_receipt_cast_many": {
+    "message": "{{count}} partecipanti"
+  },
+  "overview_pipelineSetup_receipt_cast_other": {
+    "message": "{{count}} partecipanti"
+  },
+  "overview_pipelineSetup_receipt_duration_one": {
+    "message": "durata obiettivo di {{count}} minuto"
+  },
+  "overview_pipelineSetup_receipt_duration_many": {
+    "message": "durata obiettivo di {{count}} minuti"
+  },
+  "overview_pipelineSetup_receipt_duration_other": {
+    "message": "durata obiettivo di {{count}} minuti"
   }
 }

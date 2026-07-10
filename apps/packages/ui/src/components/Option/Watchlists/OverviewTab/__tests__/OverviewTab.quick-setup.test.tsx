@@ -99,6 +99,11 @@ const overview = (sourceCount = 2, jobCount = 1) => ({
 })
 
 const pipeline = () => within(screen.getByRole("dialog", { name: "Set up briefing" }))
+const readyPipelineAction = async (name: string) => {
+  const button = pipeline().getByRole("button", { name: new RegExp(`${name}$`) })
+  await waitFor(() => expect(button).not.toHaveClass("ant-btn-loading"))
+  return button
+}
 
 const reachTestStep = async () => {
   fireEvent.click(pipeline().getByLabelText("AI Feed"))
@@ -203,12 +208,12 @@ describe("OverviewTab canonical setup", () => {
       watchlist_id: 42,
       output_prefs: expect.objectContaining({ briefing_pipeline: expect.any(Object) })
     }))
-    expect(mocks.getBriefing).toHaveBeenCalledWith(404)
+    expect(mocks.getBriefing).toHaveBeenCalledWith(404, expect.any(AbortSignal))
     expect(mocks.createOutput).not.toHaveBeenCalled()
     expect(mocks.setActiveTab).not.toHaveBeenCalled()
     expect(pipeline().getByText("Test started. This draft stays inactive until you activate its schedule.")).toBeInTheDocument()
 
-    fireEvent.click(pipeline().getByRole("button", { name: "Activate schedule" }))
+    fireEvent.click(await readyPipelineAction("Activate schedule"))
     await waitFor(() => expect(mocks.updateJob).toHaveBeenCalledWith(303, { active: true }))
     expect(mocks.createJob).toHaveBeenCalledTimes(1)
   }, 20_000)
@@ -237,7 +242,7 @@ describe("OverviewTab canonical setup", () => {
       })
     })))
 
-    fireEvent.click(pipeline().getByRole("button", { name: "Activate schedule" }))
+    fireEvent.click(await readyPipelineAction("Activate schedule"))
     await waitFor(() => expect(mocks.updateJob).toHaveBeenCalledWith(
       303,
       expect.objectContaining({
@@ -311,5 +316,61 @@ describe("OverviewTab canonical setup", () => {
       expect.objectContaining({ scope: { sources: [501] }, active: false })
     )
     expect(mocks.createJob).toHaveBeenCalledTimes(1)
+  }, 20_000)
+
+  it("never updates a pre-existing source when switching from existing to new", async () => {
+    render(<OverviewTab />)
+    fireEvent.click(await screen.findByTestId("watchlists-overview-cta-pipeline-builder"))
+    await waitFor(() => expect(pipeline().getByLabelText("AI Feed")).toBeInTheDocument())
+    await reachTestStep()
+    fireEvent.click(pipeline().getByRole("button", { name: "Generate 60-second sample" }))
+    await waitFor(() => expect(mocks.createJob).toHaveBeenCalledTimes(1))
+
+    fireEvent.click(pipeline().getByRole("button", { name: "Sources" }))
+    fireEvent.click(pipeline().getByLabelText("Add a new source"))
+    fireEvent.change(pipeline().getByLabelText("Source name"), { target: { value: "New policy feed" } })
+    fireEvent.change(pipeline().getByLabelText("Source URL"), { target: { value: "https://example.com/new.xml" } })
+    fireEvent.click(pipeline().getByRole("button", { name: "Next: Cadence" }))
+    fireEvent.click(pipeline().getByRole("button", { name: "Next: Briefing" }))
+    fireEvent.click(pipeline().getByRole("button", { name: "Next: Delivery" }))
+    fireEvent.click(pipeline().getByRole("button", { name: "Next: Test" }))
+    fireEvent.click(pipeline().getByRole("button", { name: "Generate full test episode" }))
+
+    await waitFor(() => expect(mocks.createSource).toHaveBeenCalledTimes(1))
+    expect(mocks.updateSource).not.toHaveBeenCalled()
+    expect(mocks.updateJob).toHaveBeenCalledWith(
+      303,
+      expect.objectContaining({ scope: { sources: [501] }, active: false })
+    )
+  }, 20_000)
+
+  it("rebinds a wizard-created source job to the current existing selection", async () => {
+    mocks.fetchOverview.mockResolvedValue(overview(0, 0))
+    render(<OverviewTab />)
+    fireEvent.click(await screen.findByTestId("watchlists-overview-cta-guided-setup"))
+    fireEvent.change(pipeline().getByLabelText("Source name"), { target: { value: "New feed" } })
+    fireEvent.change(pipeline().getByLabelText("Source URL"), { target: { value: "https://example.com/new.xml" } })
+    fireEvent.click(pipeline().getByRole("button", { name: "Next: Cadence" }))
+    fireEvent.change(pipeline().getByLabelText("Monitor name"), { target: { value: "Monitor" } })
+    fireEvent.click(pipeline().getByRole("button", { name: "Next: Briefing" }))
+    fireEvent.click(pipeline().getByRole("button", { name: "Next: Delivery" }))
+    fireEvent.click(pipeline().getByRole("button", { name: "Next: Test" }))
+    fireEvent.click(pipeline().getByRole("button", { name: "Generate 60-second sample" }))
+    await waitFor(() => expect(mocks.createSource).toHaveBeenCalledTimes(1))
+
+    fireEvent.click(pipeline().getByRole("button", { name: "Sources" }))
+    fireEvent.click(pipeline().getByLabelText("Use existing sources"))
+    fireEvent.click(pipeline().getByLabelText("Security Feed"))
+    fireEvent.click(pipeline().getByRole("button", { name: "Next: Cadence" }))
+    fireEvent.click(pipeline().getByRole("button", { name: "Next: Briefing" }))
+    fireEvent.click(pipeline().getByRole("button", { name: "Next: Delivery" }))
+    fireEvent.click(pipeline().getByRole("button", { name: "Next: Test" }))
+    fireEvent.click(pipeline().getByRole("button", { name: "Generate full test episode" }))
+
+    await waitFor(() => expect(mocks.updateJob).toHaveBeenCalledWith(
+      303,
+      expect.objectContaining({ scope: { sources: [12] }, active: false })
+    ))
+    expect(mocks.updateSource).not.toHaveBeenCalled()
   }, 20_000)
 })

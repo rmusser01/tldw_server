@@ -38,7 +38,8 @@ import {
   fetchWatchlists,
   triggerWatchlistRun,
   updateWatchlist,
-  updateWatchlistJob
+  updateWatchlistJob,
+  updateWatchlistSource
 } from "@/services/watchlists"
 import { useWatchlistsStore } from "@/store/watchlists"
 import type {
@@ -664,6 +665,11 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
       watchlist_id: watchlistId
     })
   }, [])
+
+  const updateSetupSource = useCallback(async (
+    sourceId: number,
+    source: Parameters<typeof updateWatchlistSource>[1]
+  ) => updateWatchlistSource(sourceId, source), [])
 
   const updateSetupJob = useCallback(async (
     jobId: number,
@@ -2522,6 +2528,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
         onCancel={() => setSetupWizardOpen(false)}
         onCreateWatchlist={createWatchlist}
         onCreateSources={createSetupSources}
+        onUpdateSource={updateSetupSource}
         onCreateJob={createSetupJob}
         onUpdateJob={updateSetupJob}
         onComplete={completeSetupWizard}

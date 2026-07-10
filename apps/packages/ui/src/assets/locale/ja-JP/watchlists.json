@@ -216,6 +216,8 @@
           "scheduled": "{{date}}（{{timezone}}）"
         },
         "sources": "{{count}} 件のソース",
+        "sources_one": "{{count}} 件のソース",
+        "sources_other": "{{count}} 件のソース",
         "artifacts": {
           "textReport": "テキストレポート",
           "showNotes": "番組ノート",
@@ -237,7 +239,11 @@
         },
         "programWithSpeakers": "{{speakers}}の{{format}}",
         "cast": "出演者 {{count}} 人",
+        "cast_one": "出演者 {{count}} 人",
+        "cast_other": "出演者 {{count}} 人",
         "duration": "目標 {{count}} 分",
+        "duration_one": "目標 {{count}} 分",
+        "duration_other": "目標 {{count}} 分",
         "destinations": {
           "email": "メール: {{recipients}}",
           "chatbook": "Chatbook: {{title}}"

@@ -86,6 +86,11 @@ const renderWizard = (
 
 const dialog = () => screen.getByRole("dialog", { name: "Set up briefing" })
 const inDialog = () => within(dialog())
+const readyActionButton = async (name: string) => {
+  const button = inDialog().getByRole("button", { name: new RegExp(`${name}$`) })
+  await waitFor(() => expect(button).not.toHaveClass("ant-btn-loading"))
+  return button
+}
 
 const readyProjection = (stages: Record<string, { status: string }> = {}) => ({
   occurrence_id: 1,
@@ -142,6 +147,17 @@ describe("PipelineWizard", () => {
     expect(receipt).toHaveTextContent("Reports")
   })
 
+  it("keeps a schedule classified as scheduled when projection is unavailable", () => {
+    renderWizard({
+      initialStep: "test",
+      initialDraft: { ...sportscastDraft, nextRunAt: "projection-unavailable" }
+    })
+
+    const receipt = screen.getByTestId("watchlists-pipeline-receipt")
+    expect(receipt).toHaveTextContent("Save a valid schedule to calculate the exact time.")
+    expect(receipt).not.toHaveTextContent("Manual only")
+  })
+
   it("does not send external delivery during the default test", async () => {
     const props = renderWizard({
       initialStep: "test",
@@ -189,6 +205,11 @@ describe("PipelineWizard", () => {
     expect(inDialog().getAllByText("Ready")).toHaveLength(2)
     expect(inDialog().queryByText("Create audio")).not.toBeInTheDocument()
     expect(inDialog().queryByText("Check test delivery")).not.toBeInTheDocument()
+
+    fireEvent.click(inDialog().getByRole("button", { name: "Sources" }))
+    fireEvent.click(inDialog().getByLabelText("Lakers source 1"))
+    expect(inDialog().queryByText(/Test started/)).not.toBeInTheDocument()
+    expect(inDialog().queryByText("Collect sources")).not.toBeInTheDocument()
   })
 
   it("uses text-only test actions, disclosure, receipt, and metadata", async () => {
@@ -232,7 +253,7 @@ describe("PipelineWizard", () => {
     fireEvent.click(inDialog().getByRole("button", { name: "Generate 60-second sample" }))
     await waitFor(() => expect(props.onTest).toHaveBeenCalledTimes(1))
 
-    fireEvent.click(inDialog().getByRole("button", { name: "Generate full test episode" }))
+    fireEvent.click(await readyActionButton("Generate full test episode"))
     await waitFor(() => {
       expect(props.onTest).toHaveBeenLastCalledWith(
         expect.any(Object),
@@ -245,7 +266,7 @@ describe("PipelineWizard", () => {
       )
     })
 
-    fireEvent.click(inDialog().getByRole("button", { name: "Send test" }))
+    fireEvent.click(await readyActionButton("Send test"))
     await waitFor(() => {
       expect(props.onTest).toHaveBeenLastCalledWith(
         expect.any(Object),
@@ -258,14 +279,14 @@ describe("PipelineWizard", () => {
       )
     })
 
-    fireEvent.click(inDialog().getByRole("button", { name: "Activate schedule" }))
+    fireEvent.click(await readyActionButton("Activate schedule"))
     await waitFor(() => {
       expect(props.onActivate).toHaveBeenCalledWith(
         expect.any(Object),
         { jobId: 77 }
       )
     })
-  })
+  }, 20_000)
 
   it("starts Briefing with all six formats and reveals custom controls progressively", () => {
     renderWizard({ initialStep: "briefing", initialDraft: sportscastDraft })
@@ -333,17 +354,66 @@ describe("PipelineWizard", () => {
       .mockResolvedValueOnce({ jobId: 77, status: "cancelled" })
     renderWizard({ initialStep: "test", initialDraft: sportscastDraft, onTest })
 
-    fireEvent.click(inDialog().getByRole("button", { name: "Generate 60-second sample" }))
+    fireEvent.click(await readyActionButton("Generate 60-second sample"))
     expect(await inDialog().findByText(/Provider unavailable/)).toHaveTextContent(
       "Test failed. Your draft is saved. Provider unavailable"
     )
 
-    fireEvent.click(inDialog().getByRole("button", { name: "Generate 60-second sample" }))
+    fireEvent.click(await readyActionButton("Generate 60-second sample"))
     expect(await inDialog().findByText("Test cancelled. Your draft is saved.")).toBeInTheDocument()
 
     fireEvent.click(inDialog().getByRole("button", { name: "Back" }))
     fireEvent.click(inDialog().getByRole("button", { name: "Back" }))
     expect(inDialog().getByLabelText("Show name")).toHaveValue("Purple and Gold Weekly")
+  }, 10_000)
+
+  it("does not show success when the durable projection failed", async () => {
+    const projection = {
+      ...readyProjection(),
+      artifact_status: "failed" as const,
+      stages: {
+        persist_text: {
+          status: "failed" as const,
+          code: "report_persist_failed",
+          retryable: true
+        }
+      }
+    }
+    renderWizard({
+      initialStep: "test",
+      initialDraft: sportscastDraft,
+      onTest: vi.fn().mockResolvedValue({
+        jobId: 77,
+        runId: 2,
+        status: "ready",
+        briefing: projection
+      })
+    })
+
+    fireEvent.click(inDialog().getByRole("button", { name: "Generate 60-second sample" }))
+
+    expect(await inDialog().findByTestId("watchlists-pipeline-action-error")).toHaveTextContent(
+      "Save report in Reports failed (report_persist_failed). Open run 2 and retry this stage."
+    )
+    expect(inDialog().queryByText(/Test started/)).not.toBeInTheDocument()
+  })
+
+  it("reports a bounded foreground poll as still running with run context", async () => {
+    renderWizard({
+      initialStep: "test",
+      initialDraft: sportscastDraft,
+      onTest: vi.fn().mockResolvedValue({
+        jobId: 77,
+        runId: 88,
+        status: "running",
+        message: "Run 88 is still generating audio. You can close setup and monitor it from Overview."
+      })
+    })
+
+    fireEvent.click(inDialog().getByRole("button", { name: "Generate 60-second sample" }))
+
+    expect(await inDialog().findByText(/Run 88 is still generating audio/)).toBeInTheDocument()
+    expect(inDialog().queryByText(/Test started/)).not.toBeInTheDocument()
   })
 
   it("surfaces a current AbortError instead of assuming it is stale", async () => {
@@ -380,6 +450,7 @@ describe("PipelineWizard", () => {
     const view = render(<PipelineWizard {...(firstProps as React.ComponentProps<typeof PipelineWizard>)} />)
     fireEvent.click(inDialog().getByRole("button", { name: "Generate 60-second sample" }))
     await waitFor(() => expect(onTest).toHaveBeenCalledTimes(1))
+    const firstSignal = onTest.mock.calls[0]?.[1]?.signal as AbortSignal
 
     view.rerender(
       <PipelineWizard
@@ -390,6 +461,7 @@ describe("PipelineWizard", () => {
       />
     )
     expect(inDialog().getByLabelText("Source name")).toHaveValue("Fresh feed")
+    expect(firstSignal.aborted).toBe(true)
     resolveFirst?.({ jobId: 77, status: "ready" })
     await waitFor(() => {
       expect(inDialog().queryByText(/Test started/)).not.toBeInTheDocument()
@@ -411,6 +483,32 @@ describe("PipelineWizard", () => {
       "id",
       "pipeline-source-name-error"
     )
+  })
+
+  it("opens advanced details, annotates, and focuses the first invalid voice", async () => {
+    renderWizard({
+      initialStep: "test",
+      initialDraft: {
+        ...sportscastDraft,
+        audioSpeakers: [
+          { id: "host", label: "Host", role: "host", voice: "alloy" },
+          { id: "host", label: "Analyst", role: "analyst", voice: "" }
+        ]
+      }
+    })
+
+    fireEvent.click(inDialog().getByRole("button", { name: "Generate 60-second sample" }))
+
+    const voice = await inDialog().findByRole("combobox", { name: "Speaker 2 voice" })
+    await waitFor(() => expect(voice).toHaveFocus())
+    expect(voice).toHaveAttribute("id", "pipeline-speaker-2-voice")
+    expect(voice).toHaveAttribute("aria-invalid", "true")
+    expect(voice).toHaveAttribute("aria-describedby", "pipeline-speaker-2-voice-error")
+    expect(inDialog().getByText("Choose a voice for every speaker.")).toHaveAttribute(
+      "id",
+      "pipeline-speaker-2-voice-error"
+    )
+    expect(voice.closest("details")).toHaveAttribute("open")
   })
 
   it("localizes destination step and default source/speaker grammar", () => {
@@ -444,5 +542,11 @@ describe("PipelineWizard", () => {
     expect(inDialog().getByRole("switch", { name: "Audio" }).className).toContain(
       "[@media(pointer:coarse)]:min-h-11"
     )
+    expect(dialog()).toHaveClass("watchlists-pipeline-wizard")
+    expect(inDialog().getByLabelText("Target duration in minutes")).toHaveClass("ant-input")
+    expect(inDialog().getByRole("combobox", { name: "Cast size" }).closest(".ant-select")).toContainElement(
+      inDialog().getByRole("combobox", { name: "Cast size" })
+    )
+    expect(inDialog().getByLabelText("Sportscast").closest(".ant-radio-wrapper")).toBeInTheDocument()
   })
 })

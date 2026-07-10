@@ -707,11 +707,13 @@ export const getLatestWatchlistBriefing = async (
 }
 
 export const getWatchlistRunBriefing = async (
-  runId: number
+  runId: number,
+  signal?: AbortSignal
 ): Promise<WatchlistBriefingProjection> => {
   return bgRequest<WatchlistBriefingProjection>({
     path: `/api/v1/watchlists/runs/${runId}/briefing`,
-    method: "GET"
+    method: "GET",
+    abortSignal: signal
   })
 }
 

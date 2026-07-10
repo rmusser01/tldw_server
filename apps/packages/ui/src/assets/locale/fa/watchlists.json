@@ -216,6 +216,8 @@
           "scheduled": "{{date}} ({{timezone}})"
         },
         "sources": "{{count}} منبع",
+        "sources_one": "{{count}} منبع",
+        "sources_other": "{{count}} منبع",
         "artifacts": {
           "textReport": "گزارش متنی",
           "showNotes": "یادداشت‌های برنامه",
@@ -237,7 +239,11 @@
         },
         "programWithSpeakers": "{{format}} {{speakers}}",
         "cast": "{{count}} گوینده",
+        "cast_one": "{{count}} گوینده",
+        "cast_other": "{{count}} گوینده",
         "duration": "با هدف {{count}} دقیقه",
+        "duration_one": "با هدف {{count}} دقیقه",
+        "duration_other": "با هدف {{count}} دقیقه",
         "destinations": {
           "email": "ایمیل: {{recipients}}",
           "chatbook": "Chatbook: {{title}}"

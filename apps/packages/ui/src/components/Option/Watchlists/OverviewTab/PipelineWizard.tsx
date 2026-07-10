@@ -31,6 +31,8 @@ import { buildBriefingReceiptModel } from "../shared/briefing-receipt"
 import { toPipelineJobCreatePayload } from "./pipeline-contract"
 import {
   mergePipelineWizardDraft,
+  getPipelineWizardBriefingOutcome,
+  projectPipelineWizardOccurrences,
   toBriefingPipelineDraft,
   type PipelineWizardAudioSpeakerDraft,
   type PipelineWizardDraft,
@@ -46,12 +48,13 @@ export interface PipelineWizardTestOptions {
   audioSampleSeconds: 60 | null
   jobId?: number
   requestGeneration: number
+  signal: AbortSignal
 }
 
 export interface PipelineWizardActionResult {
   jobId?: number
   runId?: number
-  status?: "ready" | "active" | "cancelled"
+  status?: "ready" | "running" | "failed" | "active" | "cancelled"
   message?: string
   briefing?: WatchlistBriefingProjection
   sourceTest?: JobPreviewResult
@@ -153,69 +156,6 @@ const getErrorMessage = (error: unknown): string =>
 const isAbortError = (error: unknown): boolean =>
   error instanceof Error && error.name === "AbortError"
 
-const zonedParts = (date: Date, formatter: Intl.DateTimeFormat) => {
-  const parts = formatter.formatToParts(date)
-  const get = (type: Intl.DateTimeFormatPartTypes) =>
-    parts.find((part) => part.type === type)?.value || ""
-  return {
-    weekday: get("weekday").toUpperCase(),
-    hour: Number(get("hour")),
-    minute: Number(get("minute"))
-  }
-}
-
-const projectRunOccurrences = (
-  draft: PipelineWizardDraft,
-  from = new Date()
-): { nextRunAt?: string; followingRunAt?: string } => {
-  if (draft.nextRunAt) {
-    return {
-      nextRunAt: draft.nextRunAt,
-      ...(draft.followingRunAt ? { followingRunAt: draft.followingRunAt } : {})
-    }
-  }
-  if (draft.scheduleMode === "manual" || draft.scheduleMode === "advanced") return {}
-  const timezone = draft.timezone || "UTC"
-  let formatter: Intl.DateTimeFormat
-  try {
-    formatter = new Intl.DateTimeFormat("en-US", {
-      timeZone: timezone,
-      weekday: "short",
-      hour: "numeric",
-      minute: "numeric",
-      hourCycle: "h23"
-    })
-    formatter.format(from)
-  } catch {
-    return {}
-  }
-  const candidate = new Date(Math.ceil((from.getTime() + 1) / 60_000) * 60_000)
-  const occurrences: string[] = []
-  const maxMinutes = 16 * 24 * 60
-  for (let index = 0; index < maxMinutes; index += 1) {
-    const parts = zonedParts(candidate, formatter)
-    const matches = draft.scheduleMode === "interval"
-      ? draft.scheduleIntervalUnit === "minutes"
-        ? parts.minute % Math.max(1, draft.scheduleIntervalValue) === 0
-        : parts.hour % Math.max(1, draft.scheduleIntervalValue) === 0 &&
-          parts.minute === draft.scheduleMinute
-      : parts.hour === draft.scheduleHour &&
-        parts.minute === draft.scheduleMinute &&
-        (draft.scheduleMode === "daily" ||
-          (draft.scheduleMode === "weekdays" && !["SAT", "SUN"].includes(parts.weekday)) ||
-          (draft.scheduleMode === "weekly" && parts.weekday === draft.scheduleWeekday))
-    if (matches) {
-      occurrences.push(candidate.toISOString())
-      if (occurrences.length === 2) break
-    }
-    candidate.setUTCMinutes(candidate.getUTCMinutes() + 1)
-  }
-  return {
-    ...(occurrences[0] ? { nextRunAt: occurrences[0] } : {}),
-    ...(occurrences[1] ? { followingRunAt: occurrences[1] } : {})
-  }
-}
-
 export const PipelineWizard: React.FC<PipelineWizardProps> = ({
   open,
   sources = [],
@@ -264,8 +204,10 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
   const requestGenerationRef = useRef(0)
   const saveGenerationRef = useRef(0)
   const actionLockRef = useRef(false)
+  const actionControllerRef = useRef<AbortController | null>(null)
   const emailRecipientSearchRef = useRef("")
   const validationRef = useRef<HTMLDivElement | null>(null)
+  const advancedBriefingRef = useRef<HTMLDetailsElement | null>(null)
   const [stepErrors, setStepErrors] = useState<string[]>([])
   const [actionBusy, setActionBusy] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
@@ -279,6 +221,8 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
     const sessionChanged = activeSessionKeyRef.current !== sessionKey
     if (open && (!wasOpenRef.current || sessionChanged)) {
       requestGenerationRef.current += 1
+      actionControllerRef.current?.abort()
+      actionControllerRef.current = null
       saveGenerationRef.current += 1
       actionLockRef.current = false
       const next = initial
@@ -296,9 +240,19 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
       emailRecipientSearchRef.current = ""
       activeSessionKeyRef.current = sessionKey
     }
-    if (!open && wasOpenRef.current) requestGenerationRef.current += 1
+    if (!open && wasOpenRef.current) {
+      requestGenerationRef.current += 1
+      actionControllerRef.current?.abort()
+      actionControllerRef.current = null
+    }
     wasOpenRef.current = open
   }, [initial, initialStep, open, sessionKey])
+
+  useEffect(() => () => {
+    requestGenerationRef.current += 1
+    actionControllerRef.current?.abort()
+    actionControllerRef.current = null
+  }, [])
 
   useEffect(() => {
     if (!open || draft.sourceMode !== "existing" || draft.sourceIds.length > 0) return
@@ -312,8 +266,11 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
     const firstError = stepErrors[0]
     if (!firstError) return
     const focusInvalidControl = () => {
+      if (firstError === "audioSpeakerVoices") advancedBriefingRef.current?.setAttribute("open", "")
       const target = firstError === "sourceIds"
         ? document.querySelector<HTMLElement>("[data-pipeline-field='sourceIds'] input")
+        : firstError === "audioSpeakerVoices"
+          ? document.querySelector<HTMLElement>("[id^='pipeline-speaker-'][id$='-voice'][aria-invalid='true']")
         : document.getElementById(FIELD_IDS[firstError] || "")
       if (target && typeof target.focus === "function") target.focus()
       else validationRef.current?.focus()
@@ -323,11 +280,19 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
   }, [currentStep, stepErrors])
 
   const updateDraft = (patch: Partial<PipelineWizardDraft>) => {
+    if (actionControllerRef.current) {
+      requestGenerationRef.current += 1
+      actionControllerRef.current.abort()
+      actionControllerRef.current = null
+      actionLockRef.current = false
+      setActionBusy(false)
+    }
     const next = { ...draftRef.current, ...patch }
     draftRef.current = next
     setDraft(next)
     setStepErrors([])
     setActionError(null)
+    setActionMessage(null)
     setSourceTestResult(null)
     setTestProjection(null)
     const generation = ++saveGenerationRef.current
@@ -400,7 +365,6 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
       scheduleAdvancedCronTooFrequent: t("watchlists:overview.pipelineSetup.validation.cronTooFrequent", "Choose a schedule at least five minutes apart."),
       templateName: t("watchlists:overview.pipelineSetup.validation.templateRequired", "Enter a report template."),
       audioSpeakers: t("watchlists:overview.pipelineSetup.validation.castSizeInvalid", "Choose one to four speakers."),
-      audioSpeakerIds: t("watchlists:overview.pipelineSetup.validation.castIdsInvalid", "Each speaker needs a unique identity."),
       audioSpeakerVoices: t("watchlists:overview.pipelineSetup.validation.castVoicesRequired", "Choose a voice for every speaker."),
       targetAudioMinutes: t("watchlists:overview.pipelineSetup.validation.audioMinutesInvalid", "Enter a duration from 1 through 60 minutes."),
       emailRecipients: t("watchlists:overview.pipelineSetup.validation.emailInvalid", "Enter at least one valid email address.")
@@ -427,7 +391,7 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
             "scheduleAdvancedCronTooFrequent"
           ]
         : index === 2
-          ? ["templateName", "audioSpeakers", "audioSpeakerIds", "audioSpeakerVoices", "targetAudioMinutes"]
+          ? ["templateName", "audioSpeakers", "audioSpeakerVoices", "targetAudioMinutes"]
           : index === 3
             ? ["emailRecipients"]
             : validation.errors
@@ -460,18 +424,20 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
     setStepErrors(validation.errors)
     if (["sourceIds", "sourceName", "sourceUrl"].includes(first)) setCurrentStep(0)
     else if (["monitorName", "timezone", "scheduleIntervalValue", "scheduleHour", "scheduleMinute", "scheduleAdvancedCron", "scheduleAdvancedCronTooFrequent"].includes(first)) setCurrentStep(1)
-    else if (["templateName", "audioSpeakers", "audioSpeakerIds", "audioSpeakerVoices", "targetAudioMinutes"].includes(first)) setCurrentStep(2)
+    else if (["templateName", "audioSpeakers", "audioSpeakerVoices", "targetAudioMinutes"].includes(first)) setCurrentStep(2)
     else setCurrentStep(3)
     return false
   }
 
   const runTest = async (
-    options: Omit<PipelineWizardTestOptions, "jobId" | "requestGeneration">
+    options: Omit<PipelineWizardTestOptions, "jobId" | "requestGeneration" | "signal">
   ) => {
     if (!validateAll()) return
     if (actionLockRef.current) return
     actionLockRef.current = true
     const generation = ++requestGenerationRef.current
+    const controller = new AbortController()
+    actionControllerRef.current = controller
     setActionBusy(true)
     setActionError(null)
     setActionMessage(null)
@@ -479,19 +445,29 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
     try {
       const result = await onTest?.(
         draftRef.current,
-        { ...options, requestGeneration: generation, ...(inactiveJobId ? { jobId: inactiveJobId } : {}) },
+        { ...options, requestGeneration: generation, signal: controller.signal, ...(inactiveJobId ? { jobId: inactiveJobId } : {}) },
         (projection) => {
           if (generation === requestGenerationRef.current) setTestProjection(projection)
         }
       )
       if (generation !== requestGenerationRef.current) return
-      if (result && result.jobId) setInactiveJobId(result.jobId)
-      if (result && result.briefing) setTestProjection(result.briefing)
-      setActionMessage(
-        result && result.status === "cancelled"
-          ? t("watchlists:overview.pipelineSetup.test.cancelled", "Test cancelled. Your draft is saved.")
-          : t("watchlists:overview.pipelineSetup.test.ready", "Test started. This draft stays inactive until you activate its schedule.")
-      )
+      const actionResult: PipelineWizardActionResult | undefined = result || undefined
+      if (actionResult?.jobId) setInactiveJobId(actionResult.jobId)
+      if (actionResult?.briefing) setTestProjection(actionResult.briefing)
+      const observedOutcome = actionResult?.briefing
+        ? getPipelineWizardBriefingOutcome(actionResult.briefing, options.externalDelivery)
+        : undefined
+      const resultStatus = observedOutcome?.status || actionResult?.status
+      const resultMessage = actionResult?.message || observedOutcome?.message
+      if (resultStatus === "failed") {
+        setActionError(resultMessage || t("watchlists:overview.pipelineSetup.test.failed", "Test failed. Your draft is saved."))
+      } else if (resultStatus === "cancelled") {
+        setActionMessage(resultMessage || t("watchlists:overview.pipelineSetup.test.cancelled", "Test cancelled. Your draft is saved."))
+      } else if (resultStatus === "running") {
+        setActionMessage(resultMessage || t("watchlists:overview.pipelineSetup.test.running", "Test is still running. Monitor it from Overview."))
+      } else {
+        setActionMessage(t("watchlists:overview.pipelineSetup.test.ready", "Test started. This draft stays inactive until you activate its schedule."))
+      }
     } catch (error) {
       if (generation === requestGenerationRef.current) {
         setActionError(
@@ -503,7 +479,9 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
         )
       }
     } finally {
-      if (generation === requestGenerationRef.current) {
+      const activeController = actionControllerRef.current
+      if (!activeController || activeController === controller) {
+        actionControllerRef.current = null
         actionLockRef.current = false
         setActionBusy(false)
       }
@@ -584,7 +562,7 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
     }
   }
 
-  const occurrences = useMemo(() => projectRunOccurrences(draft), [draft])
+  const occurrences = useMemo(() => projectPipelineWizardOccurrences(draft), [draft])
   const receipt = useMemo(() => {
     const payload = toPipelineJobCreatePayload(toBriefingPipelineDraft(draft))
     const contract = payload.output_prefs?.briefing_pipeline
@@ -594,6 +572,7 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
       sourceCount: draft.sourceMode === "new" ? 1 : draft.sourceIds.length,
       nextRunAt: occurrences.nextRunAt,
       followingRunAt: occurrences.followingRunAt,
+      scheduled: draft.scheduleMode !== "manual",
       timezone: draft.timezone || "UTC",
       locale
     })
@@ -761,7 +740,7 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
       destroyOnHidden
       maskClosable={!isBusy}
       width="min(760px, calc(100vw - 2rem))"
-      className="w-[min(760px,calc(100vw-2rem))]"
+      className="watchlists-pipeline-wizard w-[min(760px,calc(100vw-2rem))]"
       footer={footer}
     >
       <div
@@ -1012,7 +991,7 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
                 </div>
               </div>
             )}
-            <details className="rounded-md border border-border px-3 py-2">
+            <details ref={advancedBriefingRef} className="rounded-md border border-border px-3 py-2">
               <summary className="min-h-11 cursor-pointer py-3 font-medium">{t("watchlists:overview.pipelineSetup.briefing.advanced", "Advanced briefing settings")}</summary>
               <div className="space-y-3 pt-2">
                 <Form layout="vertical">
@@ -1031,8 +1010,24 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
                   )}
                   {draft.audioEnabled && draft.audioSpeakers.map((speaker, index) => (
                     <div key={speaker.id || index} className="grid gap-3 sm:grid-cols-2">
-                      <Form.Item label={t("watchlists:overview.pipelineSetup.speaker.voiceField", "Speaker {{index}} voice", { index: index + 1 })}>
-                        <Select className={TOUCH_TARGET_CLASS} aria-label={t("watchlists:overview.pipelineSetup.speaker.voiceField", "Speaker {{index}} voice", { index: index + 1 })} value={speaker.voice} options={DEFAULT_SPEAKER_VOICES.map((voice) => ({ value: voice, label: voice }))} onChange={(value) => updateSpeaker(index, { voice: value })} />
+                      <Form.Item
+                        label={t("watchlists:overview.pipelineSetup.speaker.voiceField", "Speaker {{index}} voice", { index: index + 1 })}
+                        validateStatus={stepErrors.includes("audioSpeakerVoices") && !speaker.voice.trim() ? "error" : undefined}
+                        help={stepErrors.includes("audioSpeakerVoices") && !speaker.voice.trim()
+                          ? <span id={`pipeline-speaker-${index + 1}-voice-error`}>{validationMessage("audioSpeakerVoices")}</span>
+                          : undefined}
+                      >
+                        <Select
+                          id={`pipeline-speaker-${index + 1}-voice`}
+                          data-pipeline-speaker-voice
+                          className={TOUCH_TARGET_CLASS}
+                          aria-label={t("watchlists:overview.pipelineSetup.speaker.voiceField", "Speaker {{index}} voice", { index: index + 1 })}
+                          aria-invalid={stepErrors.includes("audioSpeakerVoices") && !speaker.voice.trim()}
+                          aria-describedby={stepErrors.includes("audioSpeakerVoices") && !speaker.voice.trim() ? `pipeline-speaker-${index + 1}-voice-error` : undefined}
+                          value={speaker.voice || undefined}
+                          options={DEFAULT_SPEAKER_VOICES.map((voice) => ({ value: voice, label: voice }))}
+                          onChange={(value) => updateSpeaker(index, { voice: value })}
+                        />
                       </Form.Item>
                       <Form.Item label={t("watchlists:overview.pipelineSetup.speaker.personaField", "Speaker {{index}} persona", { index: index + 1 })}>
                         <Input aria-label={t("watchlists:overview.pipelineSetup.speaker.personaField", "Speaker {{index}} persona", { index: index + 1 })} value={speaker.persona} onChange={(event) => updateSpeaker(index, { persona: event.target.value })} />
@@ -1132,7 +1127,9 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
                   <dd className="text-text-muted">
                     {receipt.nextRunLabel
                       ? t("watchlists:overview.pipelineSetup.receipt.schedule.scheduled", "{{date}} ({{timezone}})", { date: receipt.nextRunLabel, timezone: receipt.timezone })
-                      : t("watchlists:overview.pipelineSetup.receipt.schedule.manual", "Manual only")}
+                      : receipt.scheduleMode === "scheduled"
+                        ? t("watchlists:overview.pipelineSetup.nextOccurrencePending", "Save a valid schedule to calculate the exact time.")
+                        : t("watchlists:overview.pipelineSetup.receipt.schedule.manual", "Manual only")}
                   </dd>
                   <dt className="font-medium">{t("watchlists:overview.pipelineSetup.receipt.labels.sources", "Sources")}</dt>
                   <dd className="text-text-muted">

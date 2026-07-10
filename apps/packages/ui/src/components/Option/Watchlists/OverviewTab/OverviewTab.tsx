@@ -53,6 +53,7 @@ import {
 } from "./PipelineWizard"
 import {
   toBriefingPipelineDraft,
+  getPipelineWizardBriefingOutcome,
   getPipelineWizardSourceSignature,
   toPipelineWizardSourcePayload,
   type PipelineWizardSourceBinding,
@@ -528,23 +529,45 @@ export const OverviewTab: React.FC = () => {
     let sourceIds = wizardDraft.sourceIds
     if (wizardDraft.sourceMode === "new" && sourcePayload) {
       const binding = pipelineSourceBindingRef.current
-      if (binding && binding.signature !== signature && binding.ids.length === 1) {
+      const ownsBoundSource = binding?.mode === "new" &&
+        binding.createdByWizard &&
+        binding.sessionKey === pipelineSessionKey &&
+        binding.ids.length === 1
+      if (ownsBoundSource && binding.signature !== signature) {
         const updatePayload = { ...sourcePayload }
         delete updatePayload.watchlist_id
         await updateWatchlistSource(binding.ids[0], updatePayload)
         sourceIds = binding.ids
-        pipelineSourceBindingRef.current = { signature, ids: sourceIds }
-      } else if (binding?.signature === signature && binding.ids.length > 0) {
+        pipelineSourceBindingRef.current = {
+          mode: "new",
+          signature,
+          ids: sourceIds,
+          createdByWizard: true,
+          sessionKey: pipelineSessionKey
+        }
+      } else if (ownsBoundSource && binding.signature === signature) {
         sourceIds = binding.ids
       } else {
         const source = await createWatchlistSource(sourcePayload)
         sourceIds = [source.id]
-        pipelineSourceBindingRef.current = { signature, ids: sourceIds }
+        pipelineSourceBindingRef.current = {
+          mode: "new",
+          signature,
+          ids: sourceIds,
+          createdByWizard: true,
+          sessionKey: pipelineSessionKey
+        }
       }
     } else if (wizardDraft.sourceMode === "new") {
       if (!sourcePayload) throw new Error("Source details are incomplete.")
     } else {
-      pipelineSourceBindingRef.current = { signature, ids: sourceIds }
+      pipelineSourceBindingRef.current = {
+        mode: "existing",
+        signature,
+        ids: sourceIds,
+        createdByWizard: false,
+        sessionKey: pipelineSessionKey
+      }
     }
 
     const draft = toBriefingPipelineDraft(wizardDraft, sourceIds)
@@ -566,7 +589,7 @@ export const OverviewTab: React.FC = () => {
     const job = await createWatchlistJob(payload)
     pipelinePersistedJobIdRef.current = job.id
     return { jobId: job.id, draft }
-  }, [selectedWatchlistId])
+  }, [pipelineSessionKey, selectedWatchlistId])
 
   const testPipeline = useCallback(async (
     wizardDraft: PipelineWizardDraft,
@@ -581,13 +604,15 @@ export const OverviewTab: React.FC = () => {
         run.id,
         getWatchlistRunBriefing,
         onProgress,
-        { waitForDelivery: options.externalDelivery }
+        { waitForDelivery: options.externalDelivery, signal: options.signal }
       )
+      const outcome = getPipelineWizardBriefingOutcome(briefing, options.externalDelivery)
       void loadOverview(false)
       return {
         jobId: persisted.jobId,
         runId: run.id,
-        status: "ready" as const,
+        status: outcome.status,
+        message: outcome.message,
         briefing
       }
     } finally {

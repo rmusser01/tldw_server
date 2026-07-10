@@ -646,5 +646,32 @@
   },
   "overview_pipelineSetup_validationError": {
     "message": "Revisa los campos resaltados antes de continuar."
+  },
+  "overview_pipelineSetup_receipt_sources_one": {
+    "message": "{{count}} fuente"
+  },
+  "overview_pipelineSetup_receipt_sources_many": {
+    "message": "{{count}} fuentes"
+  },
+  "overview_pipelineSetup_receipt_sources_other": {
+    "message": "{{count}} fuentes"
+  },
+  "overview_pipelineSetup_receipt_cast_one": {
+    "message": "{{count}} participante"
+  },
+  "overview_pipelineSetup_receipt_cast_many": {
+    "message": "{{count}} participantes"
+  },
+  "overview_pipelineSetup_receipt_cast_other": {
+    "message": "{{count}} participantes"
+  },
+  "overview_pipelineSetup_receipt_duration_one": {
+    "message": "objetivo de {{count}} minuto"
+  },
+  "overview_pipelineSetup_receipt_duration_many": {
+    "message": "objetivo de {{count}} minutos"
+  },
+  "overview_pipelineSetup_receipt_duration_other": {
+    "message": "objetivo de {{count}} minutos"
   }
 }

@@ -646,5 +646,23 @@
   },
   "overview_pipelineSetup_validationError": {
     "message": "请检查突出显示的字段再继续。"
+  },
+  "overview_pipelineSetup_receipt_sources_one": {
+    "message": "{{count}} 个来源"
+  },
+  "overview_pipelineSetup_receipt_sources_other": {
+    "message": "{{count}} 个来源"
+  },
+  "overview_pipelineSetup_receipt_cast_one": {
+    "message": "{{count}} 位参与者"
+  },
+  "overview_pipelineSetup_receipt_cast_other": {
+    "message": "{{count}} 位参与者"
+  },
+  "overview_pipelineSetup_receipt_duration_one": {
+    "message": "目标 {{count}} 分钟"
+  },
+  "overview_pipelineSetup_receipt_duration_other": {
+    "message": "目标 {{count}} 分钟"
   }
 }

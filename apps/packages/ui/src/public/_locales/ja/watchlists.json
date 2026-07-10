@@ -646,5 +646,23 @@
   },
   "overview_pipelineSetup_validationError": {
     "message": "続行する前に、強調表示された項目を確認してください。"
+  },
+  "overview_pipelineSetup_receipt_sources_one": {
+    "message": "{{count}} 件のソース"
+  },
+  "overview_pipelineSetup_receipt_sources_other": {
+    "message": "{{count}} 件のソース"
+  },
+  "overview_pipelineSetup_receipt_cast_one": {
+    "message": "出演者 {{count}} 人"
+  },
+  "overview_pipelineSetup_receipt_cast_other": {
+    "message": "出演者 {{count}} 人"
+  },
+  "overview_pipelineSetup_receipt_duration_one": {
+    "message": "目標 {{count}} 分"
+  },
+  "overview_pipelineSetup_receipt_duration_other": {
+    "message": "目標 {{count}} 分"
   }
 }

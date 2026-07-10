@@ -13,7 +13,8 @@ import type {
   WatchlistJob,
   WatchlistJobCreate,
   WatchlistSource,
-  WatchlistSourceCreate
+  WatchlistSourceCreate,
+  WatchlistSourceUpdate
 } from "@/types/watchlists"
 import {
   PipelineWizard,
@@ -21,6 +22,7 @@ import {
 } from "../OverviewTab/PipelineWizard"
 import {
   toBriefingPipelineDraft,
+  getPipelineWizardBriefingOutcome,
   getPipelineWizardSourceSignature,
   toPipelineWizardSourcePayload,
   waitForPipelineWizardBriefing,
@@ -53,6 +55,7 @@ export interface WatchlistSetupWizardProps {
   onCancel: () => void
   onCreateWatchlist: (payload: WatchlistCreate) => Promise<WatchlistContainer>
   onCreateSources: (watchlistId: number, sources: WatchlistSourceCreate[]) => Promise<number[]>
+  onUpdateSource: (sourceId: number, source: WatchlistSourceUpdate) => Promise<WatchlistSource>
   onCreateJob: (watchlistId: number, job: WatchlistJobCreate) => Promise<WatchlistJob>
   onUpdateJob: (jobId: number, job: WatchlistJobCreate | { active: true }) => Promise<WatchlistJob>
   onComplete: (result: WatchlistSetupCompleteResult) => void
@@ -80,6 +83,7 @@ export const WatchlistSetupWizard: React.FC<WatchlistSetupWizardProps> = ({
   onCancel,
   onCreateWatchlist,
   onCreateSources,
+  onUpdateSource,
   onCreateJob,
   onUpdateJob,
   onComplete
@@ -147,16 +151,41 @@ export const WatchlistSetupWizard: React.FC<WatchlistSetupWizardProps> = ({
   ) => {
     if (!watchlist) throw new Error("Watchlist container is missing.")
     const signature = getPipelineWizardSourceSignature(draft)
+    const sessionKey = watchlist.id
     let sourceIds = draft.sourceIds
-    if (draft.sourceMode === "new" && sourceBindingRef.current?.signature !== signature) {
+    if (draft.sourceMode === "new") {
       const source = toPipelineWizardSourcePayload(draft, watchlist.id)
       if (!source) throw new Error("Source details are incomplete.")
-      sourceIds = await onCreateSources(watchlist.id, [source])
-      sourceBindingRef.current = { signature, ids: sourceIds }
-    } else if (draft.sourceMode === "new") {
-      sourceIds = sourceBindingRef.current?.ids || []
+      const binding = sourceBindingRef.current
+      const ownsBoundSource = binding?.mode === "new" &&
+        binding.createdByWizard &&
+        binding.sessionKey === sessionKey &&
+        binding.ids.length === 1
+      if (ownsBoundSource && binding.signature !== signature) {
+        const updatePayload = { ...source }
+        delete updatePayload.watchlist_id
+        await onUpdateSource(binding.ids[0], updatePayload)
+        sourceIds = binding.ids
+      } else if (ownsBoundSource && binding.signature === signature) {
+        sourceIds = binding.ids
+      } else {
+        sourceIds = await onCreateSources(watchlist.id, [source])
+      }
+      sourceBindingRef.current = {
+        mode: "new",
+        signature,
+        ids: sourceIds,
+        createdByWizard: true,
+        sessionKey
+      }
     } else {
-      sourceBindingRef.current = { signature, ids: sourceIds }
+      sourceBindingRef.current = {
+        mode: "existing",
+        signature,
+        ids: sourceIds,
+        createdByWizard: false,
+        sessionKey
+      }
     }
     const pipeline = toBriefingPipelineDraft(draft, sourceIds)
     const jobPayload = testOptions
@@ -189,12 +218,14 @@ export const WatchlistSetupWizard: React.FC<WatchlistSetupWizardProps> = ({
       run.id,
       getWatchlistRunBriefing,
       onProgress,
-      { waitForDelivery: options.externalDelivery }
+      { waitForDelivery: options.externalDelivery, signal: options.signal }
     )
+    const outcome = getPipelineWizardBriefingOutcome(briefing, options.externalDelivery)
     return {
       jobId: persisted.job.id,
       runId: run.id,
-      status: "ready" as const,
+      status: outcome.status,
+      message: outcome.message,
       briefing
     }
   }

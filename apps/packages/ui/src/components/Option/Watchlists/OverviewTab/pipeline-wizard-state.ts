@@ -88,14 +88,25 @@ export interface PipelineWizardValidationResult {
 }
 
 export interface PipelineWizardSourceBinding {
+  mode: PipelineWizardSourceMode
   signature: string
   ids: number[]
+  createdByWizard: boolean
+  sessionKey: string | number
 }
 
 export interface PipelineWizardBriefingPollOptions {
   intervalMs?: number
   maxAttempts?: number
   waitForDelivery?: boolean
+  signal?: AbortSignal
+}
+
+export type PipelineWizardBriefingStatus = "ready" | "running" | "failed" | "cancelled"
+
+export interface PipelineWizardBriefingOutcome {
+  status: PipelineWizardBriefingStatus
+  message?: string
 }
 
 export type PipelineWizardCronValidationError =
@@ -201,7 +212,7 @@ export const mergePipelineWizardDraft = (
       ? [...initial.emailRecipients]
       : defaults.emailRecipients,
     audioSpeakers: Array.isArray(initial?.audioSpeakers)
-      ? initial.audioSpeakers.map((speaker) => ({ ...speaker }))
+      ? normalizePipelineWizardSpeakers(initial.audioSpeakers)
       : defaults.audioSpeakers,
     preservedOutputPrefs: initial?.preservedOutputPrefs
       ? structuredClone(initial.preservedOutputPrefs)
@@ -228,42 +239,123 @@ export const getPipelineWizardSourceSignature = (
       [...new Set(draft.sourceIds.map(Number).filter(Number.isFinite))].sort((a, b) => a - b)
     ])
 
-const wait = (milliseconds: number): Promise<void> =>
-  milliseconds > 0
-    ? new Promise((resolve) => setTimeout(resolve, milliseconds))
-    : Promise.resolve()
+const createAbortError = (): Error => {
+  const error = new Error("The operation was aborted.")
+  error.name = "AbortError"
+  return error
+}
 
-const hasTerminalStageFailure = (projection: WatchlistBriefingProjection): boolean =>
-  Object.values(projection.stages).some((stage) =>
-    stage.status === "failed" || stage.status === "cancelled"
+const throwIfAborted = (signal?: AbortSignal): void => {
+  if (signal?.aborted) throw createAbortError()
+}
+
+const wait = (milliseconds: number, signal?: AbortSignal): Promise<void> => {
+  throwIfAborted(signal)
+  if (milliseconds <= 0) return Promise.resolve()
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timeoutId)
+      reject(createAbortError())
+    }
+    const timeoutId = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort)
+      resolve()
+    }, milliseconds)
+    signal?.addEventListener("abort", onAbort, { once: true })
+  })
+}
+
+export const getPipelineWizardBriefingStatus = (
+  projection: WatchlistBriefingProjection,
+  waitForDelivery = false
+): PipelineWizardBriefingStatus => {
+  if (projection.artifact_status === "failed") return "failed"
+  if (projection.artifact_status === "cancelled") return "cancelled"
+  const stages = Object.values(projection.stages)
+  if (stages.some((stage) => stage.status === "failed")) return "failed"
+  if (stages.some((stage) => stage.status === "cancelled")) return "cancelled"
+  if (projection.artifact_status !== "ready") return "running"
+  if (!waitForDelivery) return "ready"
+  if (["waiting_for_artifacts", "delivering"].includes(projection.delivery_status)) {
+    return "running"
+  }
+  if (["failed", "partially_delivered", "unknown"].includes(projection.delivery_status)) {
+    return "failed"
+  }
+  return "ready"
+}
+
+const BRIEFING_STAGE_LABELS: Record<string, string> = {
+  collect: "Collect sources",
+  select: "Select updates",
+  render_text: "Create report",
+  persist_text: "Save report in Reports",
+  compose_audio_script: "Compose audio script",
+  persist_audio_script: "Save audio script",
+  generate_audio: "Create audio",
+  persist_audio: "Save audio in Reports",
+  deliver: "Deliver test"
+}
+
+export const getPipelineWizardBriefingOutcome = (
+  projection: WatchlistBriefingProjection,
+  waitForDelivery = false
+): PipelineWizardBriefingOutcome => {
+  const status = getPipelineWizardBriefingStatus(projection, waitForDelivery)
+  if (status === "ready") return { status }
+  const stageEntry = Object.entries(projection.stages).find(([, stage]) =>
+    stage.status === status || (status === "failed" && stage.status === "failed")
   )
+  const stage = stageEntry?.[0] || (waitForDelivery ? "deliver" : "briefing")
+  const stageLabel = BRIEFING_STAGE_LABELS[stage] ||
+    (stage.startsWith("deliver:") ? `Deliver to ${stage.slice("deliver:".length)}` : stage)
+  const code = stageEntry?.[1].code ||
+    (stage === "deliver" ? `delivery_${projection.delivery_status}` : undefined)
+  if (status === "failed") {
+    return {
+      status,
+      message: `${stageLabel} failed${code ? ` (${code})` : ""}. Open run ${projection.run_id} and retry this stage.`
+    }
+  }
+  if (status === "cancelled") {
+    return {
+      status,
+      message: `${stageLabel} was cancelled${code ? ` (${code})` : ""}. Your draft is saved.`
+    }
+  }
+  const runningStage = Object.entries(projection.stages).find(([, stageState]) =>
+    stageState.status === "running" || stageState.status === "queued"
+  )?.[0]
+  const runningLabel = runningStage
+    ? BRIEFING_STAGE_LABELS[runningStage] || runningStage
+    : "briefing work"
+  return {
+    status,
+    message: `Run ${projection.run_id} is still running: ${runningLabel}. You can close setup and monitor it from Overview.`
+  }
+}
 
 const isPipelineWizardBriefingTerminal = (
   projection: WatchlistBriefingProjection,
   waitForDelivery: boolean
 ): boolean => {
-  if (hasTerminalStageFailure(projection)) return true
-  if (projection.artifact_status === "failed" || projection.artifact_status === "cancelled") {
-    return true
-  }
-  if (projection.artifact_status !== "ready") return false
-  return !waitForDelivery || ![
-    "waiting_for_artifacts",
-    "delivering"
-  ].includes(projection.delivery_status)
+  return getPipelineWizardBriefingStatus(projection, waitForDelivery) !== "running"
 }
 
 export const waitForPipelineWizardBriefing = async (
   runId: number,
-  getBriefing: (runId: number) => Promise<WatchlistBriefingProjection>,
+  getBriefing: (runId: number, signal?: AbortSignal) => Promise<WatchlistBriefingProjection>,
   onProgress: (projection: WatchlistBriefingProjection) => void,
   options: PipelineWizardBriefingPollOptions = {}
 ): Promise<WatchlistBriefingProjection> => {
   const intervalMs = Math.max(0, options.intervalMs ?? 1_000)
   const maxAttempts = Math.max(1, options.maxAttempts ?? 120)
+  let lastProjection: WatchlistBriefingProjection | undefined
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    throwIfAborted(options.signal)
     try {
-      const projection = await getBriefing(runId)
+      const projection = await getBriefing(runId, options.signal)
+      lastProjection = projection
       onProgress(projection)
       if (isPipelineWizardBriefingTerminal(projection, Boolean(options.waitForDelivery))) {
         return projection
@@ -272,9 +364,10 @@ export const waitForPipelineWizardBriefing = async (
       const status = (error as { status?: number } | null)?.status
       if (status !== 404 || attempt === maxAttempts - 1) throw error
     }
-    await wait(intervalMs)
+    if (attempt < maxAttempts - 1) await wait(intervalMs, options.signal)
   }
-  throw new Error("briefing_status_timeout")
+  if (lastProjection) return lastProjection
+  throw new Error("briefing_projection_unavailable")
 }
 
 const normalizeEmails = (value: string[] | undefined): string[] =>
@@ -301,16 +394,30 @@ export const validatePipelineWizardCron = (
 
 export const normalizePipelineWizardSpeakers = (
   speakers: PipelineWizardAudioSpeakerDraft[] | undefined
-): PipelineWizardAudioSpeakerDraft[] =>
-  (Array.isArray(speakers) ? speakers : [])
-    .map((speaker, index) => ({
-      id: trim(speaker.id) || `speaker_${index + 1}`,
+): PipelineWizardAudioSpeakerDraft[] => {
+  const usedIds = new Set<string>()
+  return (Array.isArray(speakers) ? speakers : [])
+    .map((speaker, index) => {
+      const requestedId = trim(speaker.id)
+      let id = requestedId && !usedIds.has(requestedId)
+        ? requestedId
+        : `speaker_${index + 1}`
+      let suffix = 2
+      while (usedIds.has(id)) {
+        id = `speaker_${index + 1}_${suffix}`
+        suffix += 1
+      }
+      usedIds.add(id)
+      return {
+      id,
       label: trim(speaker.label) || `Speaker ${index + 1}`,
       role: trim(speaker.role) || undefined,
       voice: trim(speaker.voice),
       persona: trim(speaker.persona) || undefined
-    }))
+      }
+    })
     .filter((speaker) => speaker.id.length > 0 || speaker.label.length > 0 || speaker.voice.length > 0)
+}
 
 export const validatePipelineWizardDraft = (
   draft: PipelineWizardDraft
@@ -384,8 +491,6 @@ export const validatePipelineWizardDraft = (
   if (draft.audioEnabled) {
     const speakers = normalizePipelineWizardSpeakers(draft.audioSpeakers)
     if (speakers.length < 1 || speakers.length > 4) errors.push("audioSpeakers")
-    const ids = speakers.map((speaker) => speaker.id)
-    if (new Set(ids).size !== ids.length) errors.push("audioSpeakerIds")
     if (speakers.some((speaker) => !trim(speaker.voice))) errors.push("audioSpeakerVoices")
     const minutes = Number(draft.targetAudioMinutes)
     if (!Number.isFinite(minutes) || minutes < 1 || minutes > 60) {
@@ -445,6 +550,114 @@ export const buildPipelineWizardSchedule = (
       weekday: draft.scheduleWeekday
     }),
     timezone: trim(draft.timezone) || getLocalTimezone()
+  }
+}
+
+const CRON_MONTHS: Record<string, number> = {
+  JAN: 1, FEB: 2, MAR: 3, APR: 4, MAY: 5, JUN: 6,
+  JUL: 7, AUG: 8, SEP: 9, OCT: 10, NOV: 11, DEC: 12
+}
+const CRON_WEEKDAYS: Record<string, number> = {
+  SUN: 0, MON: 1, TUE: 2, WED: 3, THU: 4, FRI: 5, SAT: 6
+}
+
+const cronAtom = (
+  value: string,
+  names: Record<string, number>
+): number => names[value.toUpperCase()] ?? Number(value)
+
+const cronFieldMatches = (
+  token: string,
+  value: number,
+  min: number,
+  max: number,
+  names: Record<string, number> = {},
+  alternateValues: number[] = []
+): boolean => token.split(",").some((part) => {
+  const [base, rawStep] = part.split("/")
+  const step = rawStep ? Number(rawStep) : 1
+  if (!Number.isInteger(step) || step <= 0) return false
+  let start = min
+  let end = max
+  if (base !== "*" && base !== "?") {
+    const range = base.split("-")
+    start = cronAtom(range[0], names)
+    end = range[1]
+      ? cronAtom(range[1], names)
+      : rawStep
+        ? max
+        : start
+  }
+  return Number.isFinite(start) && Number.isFinite(end) &&
+    [value, ...alternateValues].some((candidate) =>
+      candidate >= start && candidate <= end && (candidate - start) % step === 0
+    )
+})
+
+const cronWildcard = (token: string): boolean => token === "*" || token === "?"
+
+export const projectPipelineWizardOccurrences = (
+  draft: PipelineWizardDraft,
+  from = new Date()
+): { nextRunAt?: string; followingRunAt?: string } => {
+  if (draft.nextRunAt) {
+    return {
+      nextRunAt: draft.nextRunAt,
+      ...(draft.followingRunAt ? { followingRunAt: draft.followingRunAt } : {})
+    }
+  }
+  if (draft.scheduleMode === "manual") return {}
+  const expression = buildPipelineWizardSchedule(draft).schedule_expr
+  if (!expression || validatePipelineWizardCron(expression)) return {}
+  const fields = expression.split(/\s+/)
+  const timezone = trim(draft.timezone) || "UTC"
+  let formatter: Intl.DateTimeFormat
+  try {
+    formatter = new Intl.DateTimeFormat("en-US", {
+      timeZone: timezone,
+      year: "numeric",
+      month: "numeric",
+      day: "numeric",
+      weekday: "short",
+      hour: "numeric",
+      minute: "numeric",
+      hourCycle: "h23"
+    })
+    formatter.format(from)
+  } catch {
+    return {}
+  }
+  const candidate = new Date(Math.floor(from.getTime() / 60_000) * 60_000 + 60_000)
+  const occurrences: string[] = []
+  const maxMinutes = 370 * 24 * 60
+  for (let index = 0; index < maxMinutes && occurrences.length < 2; index += 1) {
+    const parts = Object.fromEntries(
+      formatter.formatToParts(candidate).map((part) => [part.type, part.value])
+    )
+    const minuteMatch = cronFieldMatches(fields[0], Number(parts.minute), 0, 59)
+    const hourMatch = cronFieldMatches(fields[1], Number(parts.hour), 0, 23)
+    const monthMatch = cronFieldMatches(fields[3], Number(parts.month), 1, 12, CRON_MONTHS)
+    const dayOfMonthMatch = cronFieldMatches(fields[2], Number(parts.day), 1, 31)
+    const weekdayValue = CRON_WEEKDAYS[String(parts.weekday || "").toUpperCase()]
+    const weekdayMatch = cronFieldMatches(
+      fields[4],
+      weekdayValue,
+      0,
+      7,
+      CRON_WEEKDAYS,
+      weekdayValue === 0 ? [7] : []
+    )
+    const dayMatch = !cronWildcard(fields[2]) && !cronWildcard(fields[4])
+      ? dayOfMonthMatch || weekdayMatch
+      : dayOfMonthMatch && weekdayMatch
+    if (minuteMatch && hourMatch && monthMatch && dayMatch) {
+      occurrences.push(candidate.toISOString())
+    }
+    candidate.setUTCMinutes(candidate.getUTCMinutes() + 1)
+  }
+  return {
+    ...(occurrences[0] ? { nextRunAt: occurrences[0] } : {}),
+    ...(occurrences[1] ? { followingRunAt: occurrences[1] } : {})
   }
 }
 

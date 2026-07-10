@@ -216,6 +216,9 @@
           "scheduled": "{{date}} ({{timezone}})"
         },
         "sources": "{{count}} fonti",
+        "sources_one": "{{count}} fonte",
+        "sources_many": "{{count}} fonti",
+        "sources_other": "{{count}} fonti",
         "artifacts": {
           "textReport": "report di testo",
           "showNotes": "note del programma",
@@ -237,7 +240,13 @@
         },
         "programWithSpeakers": "{{format}} {{speakers}}",
         "cast": "{{count}} partecipanti",
+        "cast_one": "{{count}} partecipante",
+        "cast_many": "{{count}} partecipanti",
+        "cast_other": "{{count}} partecipanti",
         "duration": "durata obiettivo di {{count}} minuti",
+        "duration_one": "durata obiettivo di {{count}} minuto",
+        "duration_many": "durata obiettivo di {{count}} minuti",
+        "duration_other": "durata obiettivo di {{count}} minuti",
         "destinations": {
           "email": "E-mail: {{recipients}}",
           "chatbook": "Chatbook: {{title}}"

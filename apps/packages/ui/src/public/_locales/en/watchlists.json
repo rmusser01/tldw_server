@@ -4252,5 +4252,23 @@
   },
   "overview_pipelineSetup_validation_emailInvalid": {
     "message": "Enter at least one valid email address."
+  },
+  "overview_pipelineSetup_receipt_sources_one": {
+    "message": "{{count}} source"
+  },
+  "overview_pipelineSetup_receipt_sources_other": {
+    "message": "{{count}} sources"
+  },
+  "overview_pipelineSetup_receipt_cast_one": {
+    "message": "{{count}} speaker"
+  },
+  "overview_pipelineSetup_receipt_cast_other": {
+    "message": "{{count}} speakers"
+  },
+  "overview_pipelineSetup_receipt_duration_one": {
+    "message": "targeting {{count}} minute"
+  },
+  "overview_pipelineSetup_receipt_duration_other": {
+    "message": "targeting {{count}} minutes"
   }
 }

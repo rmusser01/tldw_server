@@ -515,6 +515,8 @@
         "scheduled": "{{date}} ({{timezone}})"
       },
       "sources": "{{count}} sources",
+      "sources_one": "{{count}} source",
+      "sources_other": "{{count}} sources",
       "artifacts": {
         "textReport": "text report",
         "showNotes": "show notes",
@@ -536,7 +538,11 @@
       },
       "programWithSpeakers": "{{speakers}} {{format}}",
       "cast": "{{count}} speakers",
+      "cast_one": "{{count}} speaker",
+      "cast_other": "{{count}} speakers",
       "duration": "targeting {{count}} minutes",
+      "duration_one": "targeting {{count}} minute",
+      "duration_other": "targeting {{count}} minutes",
       "destinations": {
         "email": "Email: {{recipients}}",
         "chatbook": "Chatbook: {{title}}"

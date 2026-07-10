@@ -646,5 +646,41 @@
   },
   "overview_pipelineSetup_validationError": {
     "message": "Перевірте виділені поля перед продовженням."
+  },
+  "overview_pipelineSetup_receipt_sources_one": {
+    "message": "{{count}} джерело"
+  },
+  "overview_pipelineSetup_receipt_sources_few": {
+    "message": "{{count}} джерела"
+  },
+  "overview_pipelineSetup_receipt_sources_many": {
+    "message": "{{count}} джерел"
+  },
+  "overview_pipelineSetup_receipt_sources_other": {
+    "message": "{{count}} джерела"
+  },
+  "overview_pipelineSetup_receipt_cast_one": {
+    "message": "{{count}} учасник"
+  },
+  "overview_pipelineSetup_receipt_cast_few": {
+    "message": "{{count}} учасники"
+  },
+  "overview_pipelineSetup_receipt_cast_many": {
+    "message": "{{count}} учасників"
+  },
+  "overview_pipelineSetup_receipt_cast_other": {
+    "message": "{{count}} учасника"
+  },
+  "overview_pipelineSetup_receipt_duration_one": {
+    "message": "ціль — {{count}} хвилина"
+  },
+  "overview_pipelineSetup_receipt_duration_few": {
+    "message": "ціль — {{count}} хвилини"
+  },
+  "overview_pipelineSetup_receipt_duration_many": {
+    "message": "ціль — {{count}} хвилин"
+  },
+  "overview_pipelineSetup_receipt_duration_other": {
+    "message": "ціль — {{count}} хвилини"
   }
 }

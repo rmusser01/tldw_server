@@ -216,6 +216,8 @@
           "scheduled": "{{date}} ({{timezone}})"
         },
         "sources": "{{count}} ഉറവിടങ്ങൾ",
+        "sources_one": "{{count}} ഉറവിടം",
+        "sources_other": "{{count}} ഉറവിടങ്ങൾ",
         "artifacts": {
           "textReport": "എഴുത്ത് റിപ്പോർട്ട്",
           "showNotes": "പരിപാടി കുറിപ്പുകൾ",
@@ -237,7 +239,11 @@
         },
         "programWithSpeakers": "{{speakers}} {{format}}",
         "cast": "{{count}} പങ്കാളികൾ",
+        "cast_one": "{{count}} പങ്കാളി",
+        "cast_other": "{{count}} പങ്കാളികൾ",
         "duration": "{{count}} മിനിറ്റ് ലക്ഷ്യം",
+        "duration_one": "{{count}} മിനിറ്റ് ലക്ഷ്യം",
+        "duration_other": "{{count}} മിനിറ്റ് ലക്ഷ്യം",
         "destinations": {
           "email": "ഇമെയിൽ: {{recipients}}",
           "chatbook": "Chatbook: {{title}}"

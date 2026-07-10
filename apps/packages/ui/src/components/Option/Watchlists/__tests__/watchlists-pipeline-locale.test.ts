@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
+import i18next from "i18next"
 
 type NestedLocale = Record<string, unknown>
 type ExtensionLocale = Record<string, { message?: unknown }>
@@ -93,7 +94,12 @@ describe("Watchlists pipeline locale contract", () => {
     (locale) => {
       const translated = setupCopy(readNested(locale))
 
-      expect(Object.keys(translated).sort()).toEqual(englishKeys)
+      expect(englishKeys.filter((key) => !(key in translated))).toEqual([])
+      expect(
+        Object.keys(translated)
+          .filter((key) => !englishKeys.includes(key))
+          .every((key) => /^overview_pipelineSetup_receipt_(sources|cast|duration)_(zero|two|few|many)$/.test(key))
+      ).toBe(true)
       expect(englishKeys.length).toBeGreaterThan(100)
       expect(
         englishKeys.filter((key) => translated[key] !== english[key]).length
@@ -145,5 +151,47 @@ describe("Watchlists pipeline locale contract", () => {
 
     expect(guidance).toMatch(/[\u0600-\u06ff]/)
     expect(guidance.length).toBeGreaterThan(120)
+  })
+
+  it.each(["en", ...canonicalLocales])(
+    "%s ships receipt plural keys for every supported category",
+    (locale) => {
+      const nested = setupCopy(readNested(locale))
+      const categories = new Set([
+        "one",
+        "other",
+        ...new Intl.PluralRules(locale).resolvedOptions().pluralCategories
+      ])
+
+      for (const noun of ["sources", "cast", "duration"]) {
+        for (const category of categories) {
+          const key = `overview_pipelineSetup_receipt_${noun}_${category}`
+          expect(nested[key], `${locale}:${key}`).toBeTruthy()
+          expect(placeholders(nested[key]), `${locale}:${key}`).toEqual(["count"])
+        }
+      }
+    }
+  )
+
+  it("renders singular and plural English plus Russian multi-category grammar", async () => {
+    const instance = i18next.createInstance()
+    await instance.init({
+      lng: "en",
+      fallbackLng: false,
+      ns: ["watchlists"],
+      defaultNS: "watchlists",
+      resources: {
+        en: { watchlists: readNested("en") },
+        ru: { watchlists: readNested("ru") }
+      },
+      interpolation: { escapeValue: false }
+    })
+
+    expect(instance.t("overview.pipelineSetup.receipt.sources", { count: 1 })).toBe("1 source")
+    expect(instance.t("overview.pipelineSetup.receipt.sources", { count: 2 })).toBe("2 sources")
+    await instance.changeLanguage("ru")
+    expect(instance.t("overview.pipelineSetup.receipt.sources", { count: 1 })).toBe("1 источник")
+    expect(instance.t("overview.pipelineSetup.receipt.sources", { count: 2 })).toBe("2 источника")
+    expect(instance.t("overview.pipelineSetup.receipt.sources", { count: 5 })).toBe("5 источников")
   })
 })

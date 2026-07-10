@@ -646,5 +646,59 @@
   },
   "overview_pipelineSetup_validationError": {
     "message": "راجع الحقول المميزة قبل المتابعة."
+  },
+  "overview_pipelineSetup_receipt_sources_zero": {
+    "message": "{{count}} مصادر"
+  },
+  "overview_pipelineSetup_receipt_sources_one": {
+    "message": "{{count}} مصدر"
+  },
+  "overview_pipelineSetup_receipt_sources_two": {
+    "message": "{{count}} مصدران"
+  },
+  "overview_pipelineSetup_receipt_sources_few": {
+    "message": "{{count}} مصادر"
+  },
+  "overview_pipelineSetup_receipt_sources_many": {
+    "message": "{{count}} مصدرًا"
+  },
+  "overview_pipelineSetup_receipt_sources_other": {
+    "message": "{{count}} مصدر"
+  },
+  "overview_pipelineSetup_receipt_cast_zero": {
+    "message": "{{count}} مشاركين"
+  },
+  "overview_pipelineSetup_receipt_cast_one": {
+    "message": "{{count}} مشارك"
+  },
+  "overview_pipelineSetup_receipt_cast_two": {
+    "message": "{{count}} مشاركان"
+  },
+  "overview_pipelineSetup_receipt_cast_few": {
+    "message": "{{count}} مشاركين"
+  },
+  "overview_pipelineSetup_receipt_cast_many": {
+    "message": "{{count}} مشاركًا"
+  },
+  "overview_pipelineSetup_receipt_cast_other": {
+    "message": "{{count}} مشارك"
+  },
+  "overview_pipelineSetup_receipt_duration_zero": {
+    "message": "بهدف {{count}} دقائق"
+  },
+  "overview_pipelineSetup_receipt_duration_one": {
+    "message": "بهدف {{count}} دقيقة"
+  },
+  "overview_pipelineSetup_receipt_duration_two": {
+    "message": "بهدف {{count}} دقيقتين"
+  },
+  "overview_pipelineSetup_receipt_duration_few": {
+    "message": "بهدف {{count}} دقائق"
+  },
+  "overview_pipelineSetup_receipt_duration_many": {
+    "message": "بهدف {{count}} دقيقة"
+  },
+  "overview_pipelineSetup_receipt_duration_other": {
+    "message": "بهدف {{count}} دقيقة"
   }
 }

@@ -216,6 +216,8 @@
           "scheduled": "{{date}} ({{timezone}})"
         },
         "sources": "{{count}} Quellen",
+        "sources_one": "{{count}} Quelle",
+        "sources_other": "{{count}} Quellen",
         "artifacts": {
           "textReport": "Textbericht",
           "showNotes": "Sendungsnotizen",
@@ -237,7 +239,11 @@
         },
         "programWithSpeakers": "{{speakers}} {{format}}",
         "cast": "{{count}} Sprecher",
+        "cast_one": "{{count}} Sprecher",
+        "cast_other": "{{count}} Sprecher",
         "duration": "Ziel: {{count}} Minuten",
+        "duration_one": "Ziel: {{count}} Minute",
+        "duration_other": "Ziel: {{count}} Minuten",
         "destinations": {
           "email": "E-Mail: {{recipients}}",
           "chatbook": "Chatbook: {{title}}"

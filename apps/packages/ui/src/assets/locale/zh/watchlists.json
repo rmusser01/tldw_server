@@ -216,6 +216,8 @@
           "scheduled": "{{date}}（{{timezone}}）"
         },
         "sources": "{{count}} 个来源",
+        "sources_one": "{{count}} 个来源",
+        "sources_other": "{{count}} 个来源",
         "artifacts": {
           "textReport": "文本报告",
           "showNotes": "节目说明",
@@ -237,7 +239,11 @@
         },
         "programWithSpeakers": "{{speakers}}{{format}}",
         "cast": "{{count}} 位参与者",
+        "cast_one": "{{count}} 位参与者",
+        "cast_other": "{{count}} 位参与者",
         "duration": "目标 {{count}} 分钟",
+        "duration_one": "目标 {{count}} 分钟",
+        "duration_other": "目标 {{count}} 分钟",
         "destinations": {
           "email": "电子邮件：{{recipients}}",
           "chatbook": "Chatbook：{{title}}"

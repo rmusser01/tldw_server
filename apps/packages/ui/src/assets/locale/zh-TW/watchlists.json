@@ -216,6 +216,8 @@
           "scheduled": "{{date}}（{{timezone}}）"
         },
         "sources": "{{count}} 個來源",
+        "sources_one": "{{count}} 個來源",
+        "sources_other": "{{count}} 個來源",
         "artifacts": {
           "textReport": "文字報告",
           "showNotes": "節目說明",
@@ -237,7 +239,11 @@
         },
         "programWithSpeakers": "{{speakers}}{{format}}",
         "cast": "{{count}} 位參與者",
+        "cast_one": "{{count}} 位參與者",
+        "cast_other": "{{count}} 位參與者",
         "duration": "目標 {{count}} 分鐘",
+        "duration_one": "目標 {{count}} 分鐘",
+        "duration_other": "目標 {{count}} 分鐘",
         "destinations": {
           "email": "電子郵件：{{recipients}}",
           "chatbook": "Chatbook：{{title}}"

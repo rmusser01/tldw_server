@@ -646,5 +646,23 @@
   },
   "overview_pipelineSetup_validationError": {
     "message": "پیش از ادامه فیلدهای برجسته را بررسی کنید."
+  },
+  "overview_pipelineSetup_receipt_sources_one": {
+    "message": "{{count}} منبع"
+  },
+  "overview_pipelineSetup_receipt_sources_other": {
+    "message": "{{count}} منبع"
+  },
+  "overview_pipelineSetup_receipt_cast_one": {
+    "message": "{{count}} گوینده"
+  },
+  "overview_pipelineSetup_receipt_cast_other": {
+    "message": "{{count}} گوینده"
+  },
+  "overview_pipelineSetup_receipt_duration_one": {
+    "message": "با هدف {{count}} دقیقه"
+  },
+  "overview_pipelineSetup_receipt_duration_other": {
+    "message": "با هدف {{count}} دقیقه"
   }
 }

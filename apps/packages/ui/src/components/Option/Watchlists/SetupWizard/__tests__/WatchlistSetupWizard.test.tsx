@@ -53,6 +53,7 @@ const renderWizard = (overrides: Record<string, unknown> = {}) => {
     onCancel: vi.fn(),
     onCreateWatchlist: vi.fn().mockResolvedValue(watchlist),
     onCreateSources: vi.fn().mockResolvedValue([301]),
+    onUpdateSource: vi.fn().mockResolvedValue({ id: 301, active: true }),
     onCreateJob: vi.fn().mockResolvedValue(inactiveJob),
     onUpdateJob: vi.fn().mockResolvedValue({ ...inactiveJob, active: true }),
     onComplete: vi.fn(),
@@ -142,10 +143,12 @@ describe("WatchlistSetupWizard", () => {
       )
     })
     expect(services.triggerRun).toHaveBeenCalledWith(77)
-    expect(services.getBriefing).toHaveBeenCalledWith(88)
+    expect(services.getBriefing).toHaveBeenCalledWith(88, expect.any(AbortSignal))
     expect(services.createOutput).not.toHaveBeenCalled()
 
-    fireEvent.click(pipeline.getByRole("button", { name: "Activate schedule" }))
+    const activateButton = pipeline.getByRole("button", { name: /Activate schedule$/ })
+    await waitFor(() => expect(activateButton).not.toHaveClass("ant-btn-loading"))
+    fireEvent.click(activateButton)
     await waitFor(() => expect(props.onUpdateJob).toHaveBeenCalledWith(77, { active: true }))
     expect(props.onCreateJob).toHaveBeenCalledTimes(1)
     expect(props.onComplete).toHaveBeenCalledWith(expect.objectContaining({
@@ -155,11 +158,10 @@ describe("WatchlistSetupWizard", () => {
     }))
   }, 20_000)
 
-  it("recreates a changed new source and updates the same inactive job scope", async () => {
-    const onCreateSources = vi.fn()
-      .mockResolvedValueOnce([301])
-      .mockResolvedValueOnce([302])
-    const props = renderWizard({ onCreateSources })
+  it("updates a changed wizard-owned source and keeps the same inactive job scope", async () => {
+    const onCreateSources = vi.fn().mockResolvedValue([301])
+    const onUpdateSource = vi.fn().mockResolvedValue({ id: 301, active: true })
+    const props = renderWizard({ onCreateSources, onUpdateSource })
     fireEvent.change(screen.getByLabelText("Watchlist name"), { target: { value: "Policy" } })
     fireEvent.click(screen.getByRole("button", { name: "Continue to Sources" }))
     const pipeline = within(await screen.findByRole("dialog", { name: "Set up briefing" }))
@@ -181,11 +183,71 @@ describe("WatchlistSetupWizard", () => {
     fireEvent.click(pipeline.getByRole("button", { name: "Next: Test" }))
     fireEvent.click(pipeline.getByRole("button", { name: "Generate full test episode" }))
 
-    await waitFor(() => expect(onCreateSources).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(onUpdateSource).toHaveBeenCalledWith(
+      301,
+      expect.objectContaining({ url: "https://example.com/two.xml" })
+    ))
+    expect(onCreateSources).toHaveBeenCalledTimes(1)
     expect(props.onUpdateJob).toHaveBeenCalledWith(
       77,
-      expect.objectContaining({ scope: { sources: [302] }, active: false })
+      expect.objectContaining({ scope: { sources: [301] }, active: false })
     )
     expect(props.onCreateJob).toHaveBeenCalledTimes(1)
+  }, 20_000)
+
+  it("rebinds existing to new without updating the pre-existing source", async () => {
+    const existingSource = {
+      id: 12,
+      name: "Existing feed",
+      url: "https://example.com/existing.xml",
+      source_type: "rss" as const,
+      active: true
+    }
+    const props = renderWizard({ sources: [existingSource] })
+    fireEvent.change(screen.getByLabelText("Watchlist name"), { target: { value: "Policy" } })
+    fireEvent.click(screen.getByRole("button", { name: "Continue to Sources" }))
+    const pipeline = within(await screen.findByRole("dialog", { name: "Set up briefing" }))
+
+    fireEvent.click(pipeline.getByLabelText("Use existing sources"))
+    fireEvent.click(pipeline.getByLabelText("Existing feed"))
+    fireEvent.click(pipeline.getByRole("button", { name: "Next: Cadence" }))
+    fireEvent.click(pipeline.getByRole("button", { name: "Next: Briefing" }))
+    fireEvent.click(pipeline.getByRole("button", { name: "Next: Delivery" }))
+    fireEvent.click(pipeline.getByRole("button", { name: "Next: Test" }))
+    fireEvent.click(pipeline.getByRole("button", { name: "Generate 60-second sample" }))
+    await waitFor(() => expect(props.onCreateJob).toHaveBeenCalledTimes(1))
+
+    fireEvent.click(pipeline.getByRole("button", { name: "Sources" }))
+    fireEvent.click(pipeline.getByLabelText("Add a new source"))
+    fireEvent.change(pipeline.getByLabelText("Source name"), { target: { value: "New feed" } })
+    fireEvent.change(pipeline.getByLabelText("Source URL"), { target: { value: "https://example.com/new.xml" } })
+    fireEvent.click(pipeline.getByRole("button", { name: "Next: Cadence" }))
+    fireEvent.click(pipeline.getByRole("button", { name: "Next: Briefing" }))
+    fireEvent.click(pipeline.getByRole("button", { name: "Next: Delivery" }))
+    fireEvent.click(pipeline.getByRole("button", { name: "Next: Test" }))
+    fireEvent.click(pipeline.getByRole("button", { name: "Generate full test episode" }))
+
+    await waitFor(() => expect(props.onCreateSources).toHaveBeenCalledTimes(1))
+    expect(props.onUpdateSource).not.toHaveBeenCalled()
+    expect(props.onUpdateJob).toHaveBeenCalledWith(
+      77,
+      expect.objectContaining({ scope: { sources: [301] }, active: false })
+    )
+
+    fireEvent.click(pipeline.getByRole("button", { name: "Sources" }))
+    fireEvent.click(pipeline.getByLabelText("Use existing sources"))
+    fireEvent.click(pipeline.getByLabelText("Existing feed"))
+    fireEvent.click(pipeline.getByRole("button", { name: "Next: Cadence" }))
+    fireEvent.click(pipeline.getByRole("button", { name: "Next: Briefing" }))
+    fireEvent.click(pipeline.getByRole("button", { name: "Next: Delivery" }))
+    fireEvent.click(pipeline.getByRole("button", { name: "Next: Test" }))
+    fireEvent.click(pipeline.getByRole("button", { name: "Generate full test episode" }))
+
+    await waitFor(() => expect(props.onUpdateJob).toHaveBeenCalledWith(
+      77,
+      expect.objectContaining({ scope: { sources: [12] }, active: false })
+    ))
+    expect(props.onCreateSources).toHaveBeenCalledTimes(1)
+    expect(props.onUpdateSource).not.toHaveBeenCalled()
   }, 20_000)
 })
