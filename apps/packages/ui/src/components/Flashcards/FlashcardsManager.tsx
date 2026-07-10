@@ -130,6 +130,9 @@ export const FlashcardsManager: React.FC = () => {
   } | null>(null)
   const [sourceReviewGenerateIntent, setSourceReviewGenerateIntent] =
     React.useState<SourceReviewFlashcardsIntent | null>(null)
+  const clearSourceReviewGenerateIntent = React.useCallback(() => {
+    setSourceReviewGenerateIntent(null)
+  }, [])
   const deckHandoffCounterRef = React.useRef(0)
   const transferTaskHandoffCounterRef = React.useRef(0)
   const nextDeckHandoffKey = React.useCallback((prefix: string, deckId: number) => {
@@ -197,12 +200,15 @@ export const FlashcardsManager: React.FC = () => {
       ) {
         setTransferTaskHandoff(null)
       }
+      if (nextTab !== "importExport") {
+        clearSourceReviewGenerateIntent()
+      }
       setActiveTab(nextTab)
     }
     if (currentStudyIntent?.deckId !== undefined) {
       applyReviewDeckChange(currentStudyIntent.deckId ?? undefined)
     }
-  }, [applyReviewDeckChange, currentGenerateIntent, currentStudyIntent?.deckId, currentStudyPackIntent, currentTab])
+  }, [applyReviewDeckChange, clearSourceReviewGenerateIntent, currentGenerateIntent, currentStudyIntent?.deckId, currentStudyPackIntent, currentTab])
 
   React.useEffect(() => {
     if (hasNoInitialDecks && activeTab === "scheduler" && schedulerDirty) {
@@ -339,11 +345,13 @@ export const FlashcardsManager: React.FC = () => {
 
       if (nextTab === "importExport") {
         setTransferTaskHandoff(null)
+      } else {
+        clearSourceReviewGenerateIntent()
       }
 
       setActiveTab(nextTab)
     },
-    [activeTab, discardSchedulerChanges, schedulerDirty, t]
+    [activeTab, clearSourceReviewGenerateIntent, discardSchedulerChanges, schedulerDirty, t]
   )
 
   const schedulerEmptyPreview = (
@@ -496,6 +504,7 @@ export const FlashcardsManager: React.FC = () => {
                 initialTaskHandoffKey={transferTaskHandoff?.key ?? null}
                 initialExportDeckId={exportDeckHandoff?.deckId ?? null}
                 initialExportDeckHandoffKey={exportDeckHandoff?.key ?? null}
+                onSourceReviewIntentExit={clearSourceReviewGenerateIntent}
               />
             )
           },

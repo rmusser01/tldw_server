@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from uuid import uuid4
+
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig
@@ -200,6 +202,8 @@ def test_postgres_source_review_rls_isolates_two_principals(
     owner_db = CharactersRAGDB(db_path=":memory:", client_id="101", backend=backend)
     other_db = CharactersRAGDB(db_path=":memory:", client_id="202", backend=backend)
     ident = backend.escape_identifier  # type: ignore[attr-defined]
+    role_name = f"{SOURCE_REVIEW_RLS_ROLE}_{uuid4().hex[:8]}"
+    role_created = False
 
     try:
         owner_plan_id = owner_db.create_source_review_plan(
@@ -240,38 +244,33 @@ def test_postgres_source_review_rls_isolates_two_principals(
         )
 
         with backend.transaction() as conn:
-            role_exists = backend.execute(
-                "SELECT 1 FROM pg_roles WHERE rolname = ? LIMIT 1",
-                (SOURCE_REVIEW_RLS_ROLE,),
-                connection=conn,
-            ).scalar is not None
-            if not role_exists:
-                backend.execute(
-                    f"CREATE ROLE {ident(SOURCE_REVIEW_RLS_ROLE)} NOLOGIN",
-                    connection=conn,
-                )
             backend.execute(
-                f"GRANT USAGE ON SCHEMA public TO {ident(SOURCE_REVIEW_RLS_ROLE)}",
+                f"CREATE ROLE {ident(role_name)} NOLOGIN",
+                connection=conn,
+            )
+            backend.execute(
+                f"GRANT USAGE ON SCHEMA public TO {ident(role_name)}",
                 connection=conn,
             )
             backend.execute(
                 f"GRANT SELECT, INSERT, UPDATE, DELETE ON "
-                f"source_review_plans, source_review_occurrences TO {ident(SOURCE_REVIEW_RLS_ROLE)}",
+                f"source_review_plans, source_review_occurrences TO {ident(role_name)}",
                 connection=conn,
             )
             backend.execute(
                 f"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public "
-                f"TO {ident(SOURCE_REVIEW_RLS_ROLE)}",
+                f"TO {ident(role_name)}",
                 connection=conn,
             )
             backend.execute(
-                f"GRANT {ident(SOURCE_REVIEW_RLS_ROLE)} TO CURRENT_USER",
+                f"GRANT {ident(role_name)} TO CURRENT_USER",
                 connection=conn,
             )
+        role_created = True
 
         with backend.transaction() as conn:
             backend.execute(
-                f"SET LOCAL ROLE {ident(SOURCE_REVIEW_RLS_ROLE)}",
+                f"SET LOCAL ROLE {ident(role_name)}",
                 connection=conn,
             )
             backend.execute(
@@ -311,3 +310,17 @@ def test_postgres_source_review_rls_isolates_two_principals(
     finally:
         owner_db.close_connection()
         other_db.close_connection()
+        if role_created:
+            with backend.transaction() as conn:
+                backend.execute(
+                    f"REVOKE {ident(role_name)} FROM CURRENT_USER",
+                    connection=conn,
+                )
+                backend.execute(
+                    f"DROP OWNED BY {ident(role_name)}",
+                    connection=conn,
+                )
+                backend.execute(
+                    f"DROP ROLE {ident(role_name)}",
+                    connection=conn,
+                )

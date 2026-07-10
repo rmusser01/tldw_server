@@ -94,6 +94,7 @@ from tldw_Server_API.app.core.DB_Management.backends.query_utils import (  # noq
     replace_insert_or_ignore,
     transform_sqlite_query_for_postgres,
 )
+from tldw_Server_API.app.core.DB_Management.db_errors import NotFoundError  # noqa: E402
 from tldw_Server_API.app.core.DB_Management.backends.sqlite_backend import SQLiteBackend  # noqa: E402
 from tldw_Server_API.app.core.DB_Management.content_backend import get_content_backend  # noqa: E402
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths  # noqa: E402
@@ -26737,11 +26738,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     ) -> dict[str, Any]:
         occurrence = self._get_source_review_occurrence_row(conn, occurrence_id, for_update=True)
         if occurrence is None:
-            raise ConflictError(
-                "Source review occurrence not found",
-                entity="source_review_occurrences",
-                identifier=occurrence_id,
-            )
+            raise NotFoundError(f"Source review occurrence {occurrence_id} not found")
         return occurrence
 
     def start_source_review_occurrence(self, occurrence_id: int) -> dict[str, Any]:
@@ -26783,12 +26780,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     )
                 started = self._get_source_review_occurrence_row(conn, occurrence_id)
                 if started is None:
-                    raise ConflictError(
-                        "Source review occurrence not found",
-                        entity="source_review_occurrences",
-                        identifier=occurrence_id,
+                    raise NotFoundError(
+                        f"Source review occurrence {occurrence_id} not found"
                     )
                 return started
+        except ValueError as exc:
+            raise CharactersRAGDBError(
+                "Stored source review launch metadata is invalid"
+            ) from exc
         except sqlite3.Error as exc:
             raise CharactersRAGDBError(f"Failed to start source review occurrence: {exc}") from exc  # noqa: TRY003
         except BackendDatabaseError as exc:
@@ -26838,10 +26837,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     )
                 completed = self._get_source_review_occurrence_row(conn, occurrence_id)
                 if completed is None:
-                    raise ConflictError(
-                        "Source review occurrence not found",
-                        entity="source_review_occurrences",
-                        identifier=occurrence_id,
+                    raise NotFoundError(
+                        f"Source review occurrence {occurrence_id} not found"
                     )
                 return completed
         except sqlite3.Error as exc:
@@ -26881,10 +26878,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     )
                 skipped = self._get_source_review_occurrence_row(conn, occurrence_id)
                 if skipped is None:
-                    raise ConflictError(
-                        "Source review occurrence not found",
-                        entity="source_review_occurrences",
-                        identifier=occurrence_id,
+                    raise NotFoundError(
+                        f"Source review occurrence {occurrence_id} not found"
                     )
                 return skipped
         except sqlite3.Error as exc:
@@ -26901,11 +26896,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     select_query += " FOR UPDATE"
                 plan = conn.execute(select_query, (plan_id,)).fetchone()
                 if plan is None:
-                    raise ConflictError(
-                        "Source review plan not found",
-                        entity="source_review_plans",
-                        identifier=plan_id,
-                    )
+                    raise NotFoundError(f"Source review plan {plan_id} not found")
                 if bool(plan["deleted"]):
                     return False
 

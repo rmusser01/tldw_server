@@ -199,9 +199,12 @@ describe("source review query hooks", () => {
       { wrapper: wrapper(client) }
     )
 
-    await waitFor(() => {
-      expect(listDueSourceReviewOccurrences).not.toHaveBeenCalled()
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
     })
+
+    expect(listDueSourceReviewOccurrences).not.toHaveBeenCalled()
   })
 
   it("calls every mutation service and invalidates source-review queries", async () => {
@@ -238,16 +241,18 @@ describe("source review query hooks", () => {
     expect(skipSourceReviewOccurrence).toHaveBeenCalledWith(31)
     expect(deleteSourceReviewPlan).toHaveBeenCalledWith(7)
     expect(invalidate).toHaveBeenCalledTimes(5)
-    const predicate = invalidate.mock.calls[0][0]?.predicate
-    expect(
-      predicate?.({
-        queryKey: ["flashcards:source-review:due"]
-      } as never)
-    ).toBe(true)
-    expect(
-      predicate?.({
-        queryKey: ["flashcards:other"]
-      } as never)
-    ).toBe(false)
+    for (const call of invalidate.mock.calls) {
+      const predicate = call[0]?.predicate
+      expect(
+        predicate?.({
+          queryKey: ["flashcards:source-review:due"]
+        } as never)
+      ).toBe(true)
+      expect(
+        predicate?.({
+          queryKey: ["flashcards:other"]
+        } as never)
+      ).toBe(false)
+    }
   })
 })

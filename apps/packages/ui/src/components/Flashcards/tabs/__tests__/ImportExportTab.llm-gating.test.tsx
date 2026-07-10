@@ -340,6 +340,54 @@ describe("ImportExportTab LLM provider gating", () => {
     expect(generateFlashcardsMock).not.toHaveBeenCalled()
   })
 
+  it("activates the create task when a source review intent arrives", async () => {
+    const view = render(
+      <ImportExportTab
+        initialTask="import"
+        initialTaskHandoffKey="import:1"
+      />
+    )
+    expect(screen.getByTestId("flashcards-create-task-panel")).toHaveClass(
+      "hidden"
+    )
+
+    view.rerender(
+      <ImportExportTab
+        initialTask="import"
+        initialTaskHandoffKey="import:1"
+        sourceReviewIntent={{
+          activity_type: "flashcards",
+          text: "New grounded source",
+          source_items: [{ source_type: "note", source_id: "note-42" }]
+        }}
+      />
+    )
+
+    await waitFor(() =>
+      expect(screen.getByTestId("flashcards-create-task-panel")).not.toHaveClass(
+        "hidden"
+      )
+    )
+  })
+
+  it("clears source review provenance when leaving the create task", async () => {
+    const onSourceReviewIntentExit = vi.fn()
+    render(
+      <ImportExportTab
+        sourceReviewIntent={{
+          activity_type: "flashcards",
+          text: "Grounded source excerpt",
+          source_items: [{ source_type: "note", source_id: "note-42" }]
+        }}
+        {...({ onSourceReviewIntentExit } as any)}
+      />
+    )
+
+    fireEvent.click(screen.getByText("Import file"))
+
+    await waitFor(() => expect(onSourceReviewIntentExit).toHaveBeenCalled())
+  })
+
   it("does not assign one source reference to multi-source generated cards", async () => {
     useQueryMock.mockImplementation((opts: { queryKey: string[] }) => {
       if (opts?.queryKey?.[1] === "llm-providers") {

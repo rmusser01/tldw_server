@@ -13,7 +13,9 @@ const mocks = vi.hoisted(() => ({
   dueQuery: vi.fn(),
   start: vi.fn(),
   complete: vi.fn(),
-  skip: vi.fn()
+  skip: vi.fn(),
+  messageError: vi.fn(),
+  telemetry: vi.fn()
 }))
 
 vi.mock("react-i18next", () => ({
@@ -55,7 +57,11 @@ vi.mock("../../hooks/useSourceReviewQueries", () => ({
 }))
 
 vi.mock("@/hooks/useAntdMessage", () => ({
-  useAntdMessage: () => ({ error: vi.fn(), success: vi.fn() })
+  useAntdMessage: () => ({ error: mocks.messageError, success: vi.fn() })
+}))
+
+vi.mock("@/utils/flashcards-error-recovery-telemetry", () => ({
+  trackFlashcardsErrorRecoveryTelemetry: mocks.telemetry
 }))
 
 if (!(globalThis as any).ResizeObserver) {
@@ -156,6 +162,7 @@ const renderPanel = (
 describe("SourceReviewDuePanel", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.start.mockReset()
     mocks.complete.mockResolvedValue({
       ...occurrence("reread", "in_progress"),
       status: "completed"
@@ -266,12 +273,38 @@ describe("SourceReviewDuePanel", () => {
     const resumed = occurrence("reread", "in_progress")
     const launchState = resumed.launch_state as any
     launchState.source_bundle = undefined
+    mocks.start.mockResolvedValue(resumed)
     renderPanel(resumed)
 
     expect(() =>
       fireEvent.click(screen.getByRole("button", { name: "Resume" }))
     ).not.toThrow()
   })
+
+  it.each(["quiz", "flashcards", "cloze"] as const)(
+    "does not launch a %s handoff without a source bundle",
+    async (activity) => {
+      const resumed = occurrence(activity, "in_progress")
+      resumed.launch_state!.source_bundle = undefined as never
+      mocks.start.mockResolvedValue(resumed)
+      const onGenerate =
+        vi.fn<SourceReviewDuePanelProps["onSourceReviewGenerate"]>()
+      const onQuiz = vi.fn<SourceReviewDuePanelProps["onSourceReviewQuiz"]>()
+      renderPanel(occurrence(activity, "in_progress"), {
+        onSourceReviewGenerate: onGenerate,
+        onSourceReviewQuiz: onQuiz
+      })
+
+      fireEvent.click(screen.getByRole("button", { name: "Resume" }))
+
+      await waitFor(() => expect(mocks.start).toHaveBeenCalledWith(31))
+      expect(onGenerate).not.toHaveBeenCalled()
+      expect(onQuiz).not.toHaveBeenCalled()
+      expect(mocks.messageError).toHaveBeenCalledWith(
+        "This review could not load its saved source snapshot."
+      )
+    }
+  )
 
   it("starts a pending occurrence", async () => {
     const started = occurrence("reread", "in_progress")
@@ -297,23 +330,119 @@ describe("SourceReviewDuePanel", () => {
     ).not.toBeInTheDocument()
   })
 
-  it("resumes an in-progress occurrence from its existing launch state", () => {
+  it("resumes an in-progress occurrence through the start endpoint", async () => {
     const onQuiz = vi.fn<SourceReviewDuePanelProps["onSourceReviewQuiz"]>()
+    mocks.start.mockResolvedValue(occurrence("quiz", "in_progress"))
     renderPanel(occurrence("quiz", "in_progress"), {
       onSourceReviewQuiz: onQuiz
     })
 
     fireEvent.click(screen.getByRole("button", { name: "Resume" }))
 
-    expect(mocks.start).not.toHaveBeenCalled()
-    expect(onQuiz).toHaveBeenCalledWith({
-      occurrence_id: 31,
-      plan_id: 7,
-      plan_title: "Cardiac physiology",
-      activity_type: "quiz",
-      source_bundle: launchState("quiz").source_bundle
+    await waitFor(() => {
+      expect(mocks.start).toHaveBeenCalledWith(31)
+      expect(onQuiz).toHaveBeenCalledWith({
+        occurrence_id: 31,
+        plan_id: 7,
+        plan_title: "Cardiac physiology",
+        activity_type: "quiz",
+        source_bundle: launchState("quiz").source_bundle
+      })
     })
   })
+
+  it("keeps a completed occurrence hidden while a stale refetch settles", async () => {
+    const item = occurrence("reread", "in_progress")
+    const dueResult = (now: string) => ({
+      data: { items: [item], total: 1, now },
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn()
+    })
+    mocks.dueQuery.mockReturnValue(dueResult("2026-07-10T12:00:00Z"))
+    const view = render(
+      <SourceReviewDuePanel
+        isActive
+        onSourceReviewGenerate={vi.fn()}
+        onSourceReviewQuiz={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Complete" }))
+    await waitFor(() => expect(screen.queryByRole("article")).toBeNull())
+
+    mocks.dueQuery.mockReturnValue(dueResult("2026-07-10T12:01:00Z"))
+    view.rerender(
+      <SourceReviewDuePanel
+        isActive
+        onSourceReviewGenerate={vi.fn()}
+        onSourceReviewQuiz={vi.fn()}
+      />
+    )
+
+    await waitFor(() => expect(screen.queryByRole("article")).toBeNull())
+  })
+
+  it("keeps a started occurrence local while a stale refetch settles", async () => {
+    const pending = occurrence("reread")
+    mocks.start.mockResolvedValue(occurrence("reread", "in_progress"))
+    const dueResult = (now: string) => ({
+      data: { items: [pending], total: 1, now },
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn()
+    })
+    mocks.dueQuery.mockReturnValue(dueResult("2026-07-10T12:00:00Z"))
+    const view = render(
+      <SourceReviewDuePanel
+        isActive
+        onSourceReviewGenerate={vi.fn()}
+        onSourceReviewQuiz={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Start" }))
+    expect(await screen.findByRole("button", { name: "Resume" })).toBeVisible()
+
+    mocks.dueQuery.mockReturnValue(dueResult("2026-07-10T12:01:00Z"))
+    view.rerender(
+      <SourceReviewDuePanel
+        isActive
+        onSourceReviewGenerate={vi.fn()}
+        onSourceReviewQuiz={vi.fn()}
+      />
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Resume" })).toBeVisible()
+    )
+  })
+
+  it.each([
+    ["start", "Start", "source-review-start"],
+    ["complete", "Complete", "source-review-complete"],
+    ["skip", "Skip", "source-review-skip"]
+  ] as const)(
+    "reports %s failures through flashcards recovery telemetry",
+    async (mutation, buttonName, operation) => {
+      mocks[mutation].mockRejectedValueOnce(new Error(`${mutation} failed`))
+      renderPanel(
+        occurrence("reread", mutation === "start" ? "pending" : "in_progress")
+      )
+
+      fireEvent.click(screen.getByRole("button", { name: buttonName }))
+
+      await waitFor(() =>
+        expect(mocks.telemetry).toHaveBeenCalledWith(
+          expect.objectContaining({
+            type: "flashcards_mutation_failed",
+            surface: "review",
+            operation
+          })
+        )
+      )
+    }
+  )
 
   it("shows the grounded source snapshot inline for reread", async () => {
     mocks.start.mockResolvedValue(occurrence("reread", "in_progress"))

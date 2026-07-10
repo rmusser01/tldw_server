@@ -11,6 +11,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDBError,
     ConflictError,
 )
+from tldw_Server_API.app.core.DB_Management.db_errors import NotFoundError
 from tldw_Server_API.app.core.Flashcards.source_review import (
     build_source_review_launch_metadata,
     compute_source_review_due_at,
@@ -906,8 +907,29 @@ def test_deleted_source_review_occurrence_actions_act_not_found(
     occurrence_id = int(_occurrence_rows(source_review_db, plan_id)[0]["id"])
     assert source_review_db.soft_delete_source_review_plan(plan_id) is True  # nosec B101
 
-    with pytest.raises(ConflictError, match="not found"):
+    with pytest.raises(NotFoundError, match="not found"):
         getattr(source_review_db, f"{action}_source_review_occurrence")(occurrence_id)
+
+
+def test_source_review_start_wraps_invalid_stored_launch_metadata(
+    source_review_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan_id = _create_source_review_plan(source_review_db)
+    occurrence_id = int(_occurrence_rows(source_review_db, plan_id)[0]["id"])
+
+    def reject_launch_metadata(**_kwargs: object) -> None:
+        raise ValueError("Unsupported activity_type")
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB.build_source_review_launch_metadata",
+        reject_launch_metadata,
+    )
+
+    with pytest.raises(CharactersRAGDBError, match="launch metadata"):
+        source_review_db.start_source_review_occurrence(occurrence_id)
+
+    assert _occurrence_rows(source_review_db, plan_id)[0]["status"] == "pending"  # nosec B101
 
 
 def test_source_review_delete_rolls_back_plan_when_occurrence_delete_fails(
@@ -1058,5 +1080,5 @@ def test_source_review_delete_is_idempotent_and_syncs_each_row_once(
 def test_source_review_delete_missing_plan_uses_not_found_convention(
     source_review_db: CharactersRAGDB,
 ) -> None:
-    with pytest.raises(ConflictError, match="not found"):
+    with pytest.raises(NotFoundError, match="not found"):
         source_review_db.soft_delete_source_review_plan(999_999)

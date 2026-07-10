@@ -12,7 +12,10 @@ from tldw_Server_API.app.api.v1.schemas.study_packs import (
     StudyPackSourceSelection,
     StudyPackSummaryResponse,
 )
-from tldw_Server_API.app.core.Flashcards.source_review import compute_source_review_schedule
+from tldw_Server_API.app.core.Flashcards.source_review import (
+    SOURCE_REVIEW_OFFSET_CAPS,
+    compute_source_review_schedule,
+)
 
 DeckSchedulerType = Literal["sm2_plus", "fsrs"]
 DeckReviewPromptSide = Literal["front", "back"]
@@ -766,13 +769,15 @@ SOURCE_REVIEW_BUNDLE_MAX_BYTES = 256 * 1024
 
 
 class SourceReviewScheduleRow(BaseModel):
+    """One activity scheduled at a bounded day or month offset."""
+
     offset_value: int = Field(..., strict=True, gt=0)
     offset_unit: SourceReviewOffsetUnit
     activity_type: SourceReviewActivity
 
     @model_validator(mode="after")
     def validate_offset_cap(self):
-        cap = 3650 if self.offset_unit == "day" else 120
+        cap = SOURCE_REVIEW_OFFSET_CAPS[self.offset_unit]
         if self.offset_value > cap:
             raise ValueError(f"offset_value exceeds the {cap} {self.offset_unit} cap")
         return self
@@ -790,6 +795,8 @@ class SourceReviewSourceSelection(StudyPackSourceSelection):
 
 
 class SourceReviewPlanCreateRequest(BaseModel):
+    """Request for a source snapshot, local anchor date, and review schedule."""
+
     title: str = Field(..., min_length=1, max_length=200)
     starts_on: date
     timezone: str = Field(..., min_length=1, max_length=255)
@@ -839,6 +846,8 @@ class SourceReviewPlanCreateRequest(BaseModel):
 
 
 class SourceReviewOccurrenceResponse(BaseModel):
+    """Persisted schedule occurrence and its lifecycle timestamps."""
+
     id: int
     plan_id: int
     offset_value: int
@@ -856,6 +865,8 @@ class SourceReviewOccurrenceResponse(BaseModel):
 
 
 class SourceReviewLaunchStateResponse(BaseModel):
+    """Resume metadata plus the full source bundle returned by action endpoints."""
+
     activity_type: SourceReviewActivity
     plan_id: int
     occurrence_id: int
@@ -869,6 +880,8 @@ class SourceReviewLaunchStateResponse(BaseModel):
 
 
 class SourceReviewSourceSummaryItem(BaseModel):
+    """Bounded source identity and preview used by the polled due queue."""
+
     source_type: Literal["note", "media", "message"]
     source_id: str = Field(..., max_length=256)
     label: Optional[str] = Field(default=None, max_length=200)
@@ -876,12 +889,16 @@ class SourceReviewSourceSummaryItem(BaseModel):
 
 
 class SourceReviewOccurrenceActionResponse(SourceReviewOccurrenceResponse):
+    """Occurrence returned after an action, including optional resume payload."""
+
     plan_title: Optional[str] = None
     source_summary: list[SourceReviewSourceSummaryItem] = Field(default_factory=list)
     launch_state: Optional[SourceReviewLaunchStateResponse] = None
 
 
 class SourceReviewPlanResponse(BaseModel):
+    """Saved source-review plan with its source bundle and occurrences."""
+
     id: int
     title: str
     starts_on: date
@@ -895,15 +912,21 @@ class SourceReviewPlanResponse(BaseModel):
 
 
 class SourceReviewPlanListResponse(BaseModel):
+    """Paginated source-review plan collection."""
+
     items: list[SourceReviewPlanResponse] = Field(default_factory=list)
     total: int = Field(ge=0)
 
 
 class SourceReviewDueListResponse(BaseModel):
+    """Polled due occurrences with bounded summaries and a server timestamp."""
+
     items: list[SourceReviewOccurrenceActionResponse] = Field(default_factory=list)
     total: int = Field(ge=0)
     now: datetime
 
 
 class SourceReviewPlanDeleteResponse(BaseModel):
+    """Idempotent soft-delete result for a source-review plan."""
+
     deleted: bool

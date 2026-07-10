@@ -72,6 +72,7 @@ type ImportExportTabProps = {
   initialTaskHandoffKey?: string | null
   initialExportDeckId?: number | null
   initialExportDeckHandoffKey?: string | null
+  onSourceReviewIntentExit?: () => void
 }
 
 export const ImportExportTab: React.FC<ImportExportTabProps> = ({
@@ -81,7 +82,8 @@ export const ImportExportTab: React.FC<ImportExportTabProps> = ({
   initialTask = null,
   initialTaskHandoffKey = null,
   initialExportDeckId = null,
-  initialExportDeckHandoffKey = null
+  initialExportDeckHandoffKey = null,
+  onSourceReviewIntentExit
 }) => {
   const { t } = useTranslation(["option", "common"])
   const limitsQuery = useImportLimitsQuery()
@@ -139,6 +141,25 @@ export const ImportExportTab: React.FC<ImportExportTabProps> = ({
     seenGenerateIntentTokenRef.current = token
     setActiveTask("create")
   }, [generateIntent])
+
+  React.useEffect(() => {
+    if (sourceReviewIntent) setActiveTask("create")
+  }, [sourceReviewIntent])
+
+  const handleTaskChange = React.useCallback(
+    (value: string | number) => {
+      const nextTask = value as TransferTaskKey
+      if (
+        activeTask === "create" &&
+        nextTask !== "create" &&
+        sourceReviewIntent
+      ) {
+        onSourceReviewIntentExit?.()
+      }
+      setActiveTask(nextTask)
+    },
+    [activeTask, onSourceReviewIntentExit, sourceReviewIntent]
+  )
 
   React.useEffect(() => {
     if (!initialTask || !initialTaskHandoffKey) {
@@ -241,7 +262,7 @@ export const ImportExportTab: React.FC<ImportExportTabProps> = ({
           })}
           options={transferTaskOptions}
           value={activeTask}
-          onChange={(value) => setActiveTask(value as TransferTaskKey)}
+          onChange={handleTaskChange}
         />
       </Card>
       <section

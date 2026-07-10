@@ -17,11 +17,23 @@ from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_
 from tldw_Server_API.app.api.v1.endpoints import flashcards as flashcards_endpoint
 from tldw_Server_API.app.api.v1.endpoints.flashcards import router as flashcards_router
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+    CharactersRAGDB,
+    ConflictError,
+)
 from tldw_Server_API.tests.test_config import TestConfig
 
 AUTH_HEADERS = {"X-API-KEY": TestConfig.TEST_API_KEY}
 BASE_PATH = "/api/v1/flashcards/source-review-plans"
+
+
+def test_source_review_conflict_text_does_not_infer_not_found_status() -> None:
+    mapped = flashcards_endpoint._map_source_review_db_error(
+        ConflictError("not found in a conflicting state"),
+        default_detail="Source review operation failed",
+    )
+
+    assert mapped.status_code == 409  # nosec B101
 
 
 def _app() -> FastAPI:
@@ -269,6 +281,24 @@ def test_due_source_review_response_has_backend_utc_now(
         }
     ]
     assert "excerpt_text" not in json.dumps(body["items"][0]["source_summary"])  # nosec B101
+
+
+def test_due_source_review_response_does_not_poll_full_source_bundle(
+    client_with_flashcards_db: TestClient,
+) -> None:
+    created = _create_plan(client_with_flashcards_db)
+    occurrence_id = created["occurrences"][0]["id"]
+    started = client_with_flashcards_db.post(
+        f"{BASE_PATH}/occurrences/{occurrence_id}/start"
+    )
+
+    response = client_with_flashcards_db.get(f"{BASE_PATH}/due")
+
+    assert started.status_code == 200  # nosec B101
+    assert started.json()["launch_state"]["source_bundle"] == created["source_bundle"]  # nosec B101
+    assert response.status_code == 200  # nosec B101
+    assert response.json()["items"][0]["status"] == "in_progress"  # nosec B101
+    assert response.json()["items"][0]["launch_state"] is None  # nosec B101
 
 
 def test_source_review_start_complete_and_stored_launch_state(

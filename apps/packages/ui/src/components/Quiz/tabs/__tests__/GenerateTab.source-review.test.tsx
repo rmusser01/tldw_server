@@ -172,6 +172,36 @@ describe("GenerateTab source-review handoff", () => {
     expect(mutateAsync).not.toHaveBeenCalled()
   })
 
+  it("keeps media snapshots whose source IDs cannot be selected", async () => {
+    renderGenerateTab({
+      payload: {
+        occurrence_id: 42,
+        plan_id: 7,
+        activity_type: "quiz",
+        source_bundle: {
+          items: [
+            {
+              source_type: "media",
+              source_id: "legacy-media-id",
+              label: "Imported anatomy figure",
+              excerpt_text: "Figure snapshot retained for grounding."
+            }
+          ]
+        }
+      },
+      error: null
+    })
+
+    await waitFor(() =>
+      expect(
+        screen.getByTestId("generate-source-review-snapshots")
+      ).toHaveTextContent("Imported anatomy figure")
+    )
+    expect(
+      screen.getByTestId("generate-source-review-snapshots")
+    ).toHaveTextContent("Figure snapshot retained for grounding.")
+  })
+
   it("shows a recoverable message when the token cannot be loaded", () => {
     renderGenerateTab({ payload: null, error: "expired_or_missing" })
 

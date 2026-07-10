@@ -80,6 +80,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     ConflictError,
     InputError,
 )
+from tldw_Server_API.app.core.DB_Management.db_errors import NotFoundError
 from tldw_Server_API.app.core.Flashcards.apkg_exporter import export_apkg_from_rows
 from tldw_Server_API.app.core.Flashcards.apkg_importer import (
     APKGImportError,
@@ -96,7 +97,6 @@ from tldw_Server_API.app.core.Flashcards.generation import (
     _get_flashcard_generation_plan,
     _normalize_generated_flashcards,
 )
-from tldw_Server_API.app.core.Flashcards.source_review import normalize_source_review_bundle
 from tldw_Server_API.app.core.Flashcards.scheduler_fsrs import (
     FsrsSettingsError,
     build_fsrs_next_interval_previews,
@@ -106,6 +106,7 @@ from tldw_Server_API.app.core.Flashcards.scheduler_sm2 import (
     build_next_interval_previews,
     get_default_scheduler_settings_envelope,
 )
+from tldw_Server_API.app.core.Flashcards.source_review import normalize_source_review_bundle
 from tldw_Server_API.app.core.Flashcards.structured_qa_import import parse_structured_qa_preview
 from tldw_Server_API.app.core.Flashcards.study_assistant import (
     build_flashcard_assistant_context,
@@ -334,6 +335,8 @@ def _source_review_source_summary(source_bundle: Any) -> list[dict[str, str | No
 
 def _serialize_source_review_occurrence(
     occurrence: dict[str, Any],
+    *,
+    include_launch_state: bool = True,
 ) -> SourceReviewOccurrenceActionResponse:
     data = dict(occurrence)
     launch_state = data.pop("launch_state_json", None)
@@ -341,7 +344,7 @@ def _serialize_source_review_occurrence(
     if isinstance(launch_state, str):
         with contextlib.suppress(json.JSONDecodeError):
             launch_state = json.loads(launch_state)
-    if isinstance(launch_state, dict):
+    if include_launch_state and isinstance(launch_state, dict):
         launch_state = {**launch_state, "source_bundle": source_bundle}
     else:
         launch_state = None
@@ -359,14 +362,6 @@ def _map_source_review_db_error(
     *,
     default_detail: str,
 ) -> HTTPException:
-    if isinstance(exc, ConflictError) and "not found" in str(exc).lower():
-        entity = getattr(exc, "entity", "")
-        detail = (
-            "Source review plan not found"
-            if entity == "source_review_plans"
-            else "Source review occurrence not found"
-        )
-        return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
     return map_db_error_to_http(exc, default_detail=default_detail)
 
 
@@ -2129,7 +2124,10 @@ def list_due_source_review_occurrences(
         )
         return SourceReviewDueListResponse(
             items=[
-                _serialize_source_review_occurrence(occurrence)
+                _serialize_source_review_occurrence(
+                    occurrence,
+                    include_launch_state=False,
+                )
                 for occurrence in occurrences
             ],
             total=total,
@@ -2156,7 +2154,7 @@ def _source_review_occurrence_action(
         else:
             occurrence = db.skip_source_review_occurrence(occurrence_id)
         return _serialize_source_review_occurrence(occurrence)
-    except CharactersRAGDBError as exc:
+    except (CharactersRAGDBError, NotFoundError) as exc:
         raise _map_source_review_db_error(
             exc,
             default_detail=f"Failed to {action} source review occurrence",
@@ -2224,7 +2222,7 @@ def delete_source_review_plan(
         return SourceReviewPlanDeleteResponse(
             deleted=db.soft_delete_source_review_plan(plan_id)
         )
-    except CharactersRAGDBError as exc:
+    except (CharactersRAGDBError, NotFoundError) as exc:
         raise _map_source_review_db_error(
             exc,
             default_detail="Failed to delete source review plan",

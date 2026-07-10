@@ -628,6 +628,19 @@ describe("FlashcardsManager consistency standards", () => {
     )
   })
 
+  it("clears source-review provenance after leaving the generation workspace", () => {
+    renderFlashcardsManager()
+    fireEvent.click(screen.getByText("Route Source Cloze"))
+    expect(screen.getByTestId("mock-source-review-activity")).toHaveTextContent(
+      "cloze"
+    )
+
+    fireEvent.click(screen.getByRole("tab", { name: "Study" }))
+    fireEvent.click(screen.getByRole("tab", { name: "Import / Export" }))
+
+    expect(screen.getByTestId("mock-source-review-activity")).toBeEmptyDOMElement()
+  })
+
   it("routes source-review quiz snapshots with a short session token", () => {
     renderFlashcardsManager()
 

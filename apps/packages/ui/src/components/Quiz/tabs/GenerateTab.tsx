@@ -152,7 +152,7 @@ const buildInitialSourceReviewSelection = (
       const candidateId = parseMediaSourceId(sourceId);
       if (candidateId != null && mediaId == null) {
         mediaId = candidateId;
-      } else if (candidateId !== mediaId) {
+      } else if (candidateId == null || candidateId !== mediaId) {
         snapshots.push(item);
       }
       continue;

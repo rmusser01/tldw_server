@@ -14,7 +14,7 @@ from tldw_Server_API.app.api.v1.schemas.study_packs import StudyPackSourceSelect
 SourceReviewActivity = Literal["reread", "quiz", "flashcards", "cloze"]
 SourceReviewOffsetUnit = Literal["day", "month"]
 
-_OFFSET_CAPS = {"day": 3650, "month": 120}
+SOURCE_REVIEW_OFFSET_CAPS = {"day": 3650, "month": 120}
 _LAUNCH_METADATA_MAX_BYTES = 16 * 1024
 _ACTIVITY_LAUNCH_FIELDS = {
     "reread": (
@@ -56,14 +56,16 @@ def compute_source_review_due_at(
     if isinstance(starts_on, datetime):
         starts_on = starts_on.date()
 
-    if not isinstance(offset_unit, str) or offset_unit not in _OFFSET_CAPS:
+    if not isinstance(offset_unit, str) or offset_unit not in SOURCE_REVIEW_OFFSET_CAPS:
         raise ValueError("offset_unit must be 'day' or 'month'")
     if isinstance(offset_value, bool) or not isinstance(offset_value, int):
         raise ValueError("offset_value must be an integer")
     if offset_value <= 0:
         raise ValueError("offset_value must be positive")
-    if offset_value > _OFFSET_CAPS[offset_unit]:
-        raise ValueError(f"offset_value exceeds the {_OFFSET_CAPS[offset_unit]} {offset_unit} cap")
+    if offset_value > SOURCE_REVIEW_OFFSET_CAPS[offset_unit]:
+        raise ValueError(
+            f"offset_value exceeds the {SOURCE_REVIEW_OFFSET_CAPS[offset_unit]} {offset_unit} cap"
+        )
 
     try:
         if offset_unit == "day":

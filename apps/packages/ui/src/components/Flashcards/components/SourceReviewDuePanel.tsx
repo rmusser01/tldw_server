@@ -1,4 +1,5 @@
 import { useAntdMessage } from "@/hooks/useAntdMessage"
+import { trackFlashcardsErrorRecoveryTelemetry } from "@/utils/flashcards-error-recovery-telemetry"
 import type {
   SourceReviewActivity,
   SourceReviewOccurrenceActionResponse
@@ -28,6 +29,10 @@ import {
   useSkipSourceReviewOccurrenceMutation,
   useStartSourceReviewOccurrenceMutation
 } from "../hooks/useSourceReviewQueries"
+import {
+  formatFlashcardsUiErrorMessage,
+  mapFlashcardsUiError
+} from "../utils/error-taxonomy"
 import { SourceReviewPlanDrawer } from "./SourceReviewPlanDrawer"
 
 const { Text } = Typography
@@ -84,7 +89,9 @@ const handoffPayload = (
   occurrence: SourceReviewOccurrenceActionResponse
 ): SourceReviewHandoffPayload | null => {
   const launch = occurrence.launch_state
-  if (!launch) return null
+  if (!launch?.source_bundle || !Array.isArray(launch.source_bundle.items)) {
+    return null
+  }
   return {
     occurrence_id: occurrence.id,
     plan_id: occurrence.plan_id,
@@ -121,6 +128,27 @@ export const SourceReviewDuePanel: React.FC<SourceReviewDuePanelProps> = ({
     action: "start" | "complete" | "skip"
   } | null>(null)
   const [showAll, setShowAll] = React.useState(false)
+  const reportUiError = React.useCallback(
+    (error: unknown, operation: string, fallback: string) => {
+      const mapped = mapFlashcardsUiError(error, { operation, fallback })
+      console.warn("[flashcards:error]", {
+        code: mapped.code,
+        status: mapped.status,
+        operation,
+        raw: mapped.rawMessage
+      })
+      void trackFlashcardsErrorRecoveryTelemetry({
+        type: "flashcards_mutation_failed",
+        surface: "review",
+        operation,
+        error_code: mapped.code,
+        status: mapped.status ?? null,
+        retriable: mapped.code !== "FLASHCARDS_VALIDATION"
+      })
+      message.error(formatFlashcardsUiErrorMessage(mapped))
+    },
+    [message]
+  )
   const activityLabels = React.useMemo<Record<SourceReviewActivity, string>>(
     () => ({
       reread: t("option:flashcards.sourceReviewActivityReread", {
@@ -154,9 +182,30 @@ export const SourceReviewDuePanel: React.FC<SourceReviewDuePanelProps> = ({
   )
 
   React.useEffect(() => {
-    setLocalOccurrences({})
-    setHiddenIds(new Set())
-  }, [dueQuery.data?.now])
+    const refreshedItems = dueQuery.data?.items
+    if (!refreshedItems) return
+
+    const refreshedById = new Map(refreshedItems.map((item) => [item.id, item]))
+    setLocalOccurrences((current) => {
+      const next = { ...current }
+      let changed = false
+      for (const [rawId, local] of Object.entries(current)) {
+        const id = Number(rawId)
+        const refreshed = refreshedById.get(id)
+        if (!refreshed || refreshed.status === local.status) {
+          delete next[id]
+          changed = true
+        }
+      }
+      return changed ? next : current
+    })
+    setHiddenIds((current) => {
+      const next = new Set(
+        [...current].filter((occurrenceId) => refreshedById.has(occurrenceId))
+      )
+      return next.size === current.size ? current : next
+    })
+  }, [dueQuery.data?.items])
 
   const occurrences = (dueQuery.data?.items ?? [])
     .map((item) => localOccurrences[item.id] ?? item)
@@ -216,8 +265,10 @@ export const SourceReviewDuePanel: React.FC<SourceReviewDuePanelProps> = ({
           [started.id]: started
         }))
         launchOccurrence(started)
-      } catch {
-        message.error(
+      } catch (error) {
+        reportUiError(
+          error,
+          "source-review-start",
           t("option:flashcards.sourceReviewStartFailed", {
             defaultValue: "Could not start this source review."
           })
@@ -226,7 +277,7 @@ export const SourceReviewDuePanel: React.FC<SourceReviewDuePanelProps> = ({
         setPendingAction(null)
       }
     },
-    [launchOccurrence, message, startMutation, t]
+    [launchOccurrence, reportUiError, startMutation, t]
   )
 
   const handleComplete = React.useCallback(
@@ -235,8 +286,10 @@ export const SourceReviewDuePanel: React.FC<SourceReviewDuePanelProps> = ({
       try {
         await completeMutation.mutateAsync(occurrenceId)
         setHiddenIds((current) => new Set(current).add(occurrenceId))
-      } catch {
-        message.error(
+      } catch (error) {
+        reportUiError(
+          error,
+          "source-review-complete",
           t("option:flashcards.sourceReviewCompleteFailed", {
             defaultValue: "Could not complete this source review."
           })
@@ -245,7 +298,7 @@ export const SourceReviewDuePanel: React.FC<SourceReviewDuePanelProps> = ({
         setPendingAction(null)
       }
     },
-    [completeMutation, message, t]
+    [completeMutation, reportUiError, t]
   )
 
   const handleSkip = React.useCallback(
@@ -254,8 +307,10 @@ export const SourceReviewDuePanel: React.FC<SourceReviewDuePanelProps> = ({
       try {
         await skipMutation.mutateAsync(occurrenceId)
         setHiddenIds((current) => new Set(current).add(occurrenceId))
-      } catch {
-        message.error(
+      } catch (error) {
+        reportUiError(
+          error,
+          "source-review-skip",
           t("option:flashcards.sourceReviewSkipFailed", {
             defaultValue: "Could not skip this source review."
           })
@@ -264,7 +319,7 @@ export const SourceReviewDuePanel: React.FC<SourceReviewDuePanelProps> = ({
         setPendingAction(null)
       }
     },
-    [message, skipMutation, t]
+    [reportUiError, skipMutation, t]
   )
 
   if (!isActive) return null
@@ -384,13 +439,7 @@ export const SourceReviewDuePanel: React.FC<SourceReviewDuePanelProps> = ({
                       }
                       loading={isBusy && pendingAction?.action === "start"}
                       disabled={isBusy}
-                      onClick={() => {
-                        if (isPending) {
-                          void handleStart(occurrence)
-                        } else {
-                          launchOccurrence(occurrence)
-                        }
-                      }}>
+                      onClick={() => void handleStart(occurrence)}>
                       {isPending
                         ? t("option:flashcards.sourceReviewStart", {
                             defaultValue: "Start"
