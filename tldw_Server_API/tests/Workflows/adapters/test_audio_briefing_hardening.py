@@ -106,6 +106,109 @@ async def test_compose_returns_explicit_budget_error_without_calling_llm(monkeyp
     llm.assert_not_awaited()
 
 
+@pytest.mark.asyncio
+async def test_persona_compose_preflights_impossible_full_selection_before_any_llm_call():
+    from tldw_Server_API.app.core.Workflows.adapters.content.audio_briefing import (
+        run_audio_briefing_compose_adapter,
+    )
+
+    items = [
+        {"id": index, "title": f"Item {index}", "summary": f"Fact {index}"}
+        for index in range(1, 1501)
+    ]
+    with patch(
+        "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async",
+        new_callable=AsyncMock,
+    ) as llm:
+        result = await run_audio_briefing_compose_adapter(
+            {"items": items, "persona_summarize": True, "provider": "openai"},
+            {"user_id": "1"},
+        )
+
+    assert result["error"] == "source_material_budget_exceeded"
+    assert result["selected_item_count"] == 1500
+    llm.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_persona_compose_preflights_tiny_source_budget_before_any_llm_call(monkeypatch):
+    from tldw_Server_API.app.core.Workflows.adapters.content import audio_briefing
+
+    monkeypatch.setattr(audio_briefing, "_SOURCE_MATERIAL_MAX_CHARS", 100)
+    with patch(
+        "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async",
+        new_callable=AsyncMock,
+    ) as llm:
+        result = await audio_briefing.run_audio_briefing_compose_adapter(
+            {
+                "items": [{"id": index, "title": f"Item {index}", "summary": "Fact"} for index in range(10)],
+                "persona_summarize": True,
+                "provider": "openai",
+            },
+            {"user_id": "1"},
+        )
+
+    assert result["error"] == "source_material_budget_exceeded"
+    assert result["selected_item_count"] == 10
+    llm.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_persona_compose_preflights_editorial_budget_before_any_llm_call(monkeypatch):
+    from tldw_Server_API.app.core.Workflows.adapters.content import audio_briefing
+
+    monkeypatch.setattr(audio_briefing, "_EDITORIAL_CONFIGURATION_MAX_CHARS", 100)
+    with patch(
+        "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async",
+        new_callable=AsyncMock,
+    ) as llm:
+        result = await audio_briefing.run_audio_briefing_compose_adapter(
+            {
+                "items": [{"id": 1, "title": "Item", "summary": "Fact"}],
+                "persona_summarize": True,
+                "provider": "openai",
+            },
+            {"user_id": "1"},
+        )
+
+    assert result["error"] == "editorial_configuration_budget_exceeded"
+    assert result["selected_item_count"] == 1
+    llm.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_persona_prompt_budget_error_is_stable_and_never_reaches_llm(monkeypatch):
+    from tldw_Server_API.app.core.Workflows.adapters.content import audio_briefing
+
+    original_builder = audio_briefing._build_source_material_block
+    build_count = 0
+
+    def fail_persona_prompt(items):
+        nonlocal build_count
+        build_count += 1
+        if build_count == 2:
+            raise ValueError("source_material_budget_exceeded")
+        return original_builder(items)
+
+    monkeypatch.setattr(audio_briefing, "_build_source_material_block", fail_persona_prompt)
+    with patch(
+        "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async",
+        new_callable=AsyncMock,
+    ) as llm:
+        result = await audio_briefing.run_audio_briefing_compose_adapter(
+            {
+                "items": [{"id": 1, "title": "Item", "summary": "Fact"}],
+                "persona_summarize": True,
+                "provider": "openai",
+            },
+            {"user_id": "1"},
+        )
+
+    assert result["error"] == "source_material_budget_exceeded"
+    assert result["selected_item_count"] == 1
+    llm.assert_not_awaited()
+
+
 @pytest.mark.parametrize("item_count", [100, 1000])
 @pytest.mark.asyncio
 async def test_compose_user_prompt_reports_exact_selection_count_and_stays_bounded(item_count: int):
@@ -466,6 +569,13 @@ async def test_explicit_voice_map_overrides_only_its_canonical_collision_marker(
         "https://example.test/story?redirect=https%3A%2F%2Fuser%3Apass%40nested.test%2Fcallback",
         "https://example.test/story?next=https%253A%252F%252Fnested.test%252Fcallback%253Frefresh_token%253Dsecret",
         "https://example.test/story?return_url=https%3A%2F%2Fnested.test%2Fcallback%3Fclient_secret%3Dsecret",
+        "https://example.test/story?clientSecret=secret",
+        "https://example.test/story?accessToken=secret",
+        "https://example.test/story?XAmzSignature=secret",
+        "https://example.test/story?client%255fsecret=secret",
+        "https://example.test/story?refresh%255ftoken=secret",
+        "https://example.test/story?page=2;clientSecret=secret",
+        "https://example.test/story?payload=HTTPS%3A%2F%2Fnested.test%2Fcallback%3FaccessToken%3Dsecret",
     ],
 )
 def test_sensitive_or_non_public_source_urls_are_rejected(unsafe_url: str):
@@ -487,6 +597,12 @@ def test_benign_public_source_query_is_retained():
     assert _safe_source_url("https://example.test/story?q=discussion%26client_secret%3Dphrase") == (
         "https://example.test/story?q=discussion%26client_secret%3Dphrase"
     )
+    assert _safe_source_url("https://example.test/story?q=discussion%3BclientSecret%3Dphrase") == (
+        "https://example.test/story?q=discussion%3BclientSecret%3Dphrase"
+    )
+    assert _safe_source_url("https://example.test/story?q=discussion%3FaccessToken%3Dphrase") == (
+        "https://example.test/story?q=discussion%3FaccessToken%3Dphrase"
+    )
 
 
 @pytest.mark.parametrize(
@@ -498,7 +614,13 @@ def test_benign_public_source_query_is_retained():
         ("Read docs.example.test/path for context.", "Read for context."),
         ("Read 192.0.2.1:8080/feed and continue.", "Read and continue."),
         ("Read [2001:db8::1]/feed and continue.", "Read and continue."),
+        ("Visit example.test for context.", "Visit for context."),
+        ("Visit subdomain.example.test:8443 for context.", "Visit for context."),
+        ("Read 192.0.2.1 and continue.", "Read and continue."),
+        ("Read [2001:db8::1] and continue.", "Read and continue."),
+        ("Read 2001:db8::1 and continue.", "Read and continue."),
         ("Version 1.2.3 costs 3.14. Normal punctuation stays.", "Version 1.2.3 costs 3.14. Normal punctuation stays."),
+        ("Invalid 999.999.999.999 stays visible.", "Invalid 999.999.999.999 stays visible."),
     ],
 )
 def test_spoken_sanitizer_removes_uri_forms_without_mangling_versions(spoken: str, expected: str):

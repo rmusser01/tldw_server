@@ -6,6 +6,7 @@ with section markers and voice assignments for downstream multi-voice TTS.
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import re
 import uuid
@@ -106,10 +107,19 @@ _SCHEMED_URI_RE = re.compile(
 _PROTOCOL_RELATIVE_URL_RE = re.compile(
     r"(?i)(?<![:\w])//(?:[a-z0-9.-]+|\[[0-9a-f:.]+\])(?::\d+)?(?:/[^\s<>()]*)?"
 )
-_BARE_HOST_PATH_RE = re.compile(
-    r"(?ix)(?<![@\w.-])"
-    r"(?:(?:[a-z0-9-]+\.)+[a-z]{2,63}|(?:\d{1,3}\.){3}\d{1,3}|\[[0-9a-f:.]+\])"
-    r"(?::\d+)?/[^\s<>()]*"
+_DOMAIN_LABEL_PATTERN = r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)"
+_BARE_DOMAIN_RE = re.compile(
+    rf"(?i)(?<![@\w.-])(?:{_DOMAIN_LABEL_PATTERN}\.){{1,9}}[a-z](?:[a-z0-9-]{{0,61}}[a-z0-9])"
+    r"(?::\d{1,5})?(?:/[^\s<>()]{0,2048})?(?![\w-])"
+)
+_IPV4_CANDIDATE_RE = re.compile(
+    r"(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?::\d{1,5})?(?:/[^\s<>()]{0,2048})?(?![\w]|\.\d)"
+)
+_BRACKETED_IPV6_CANDIDATE_RE = re.compile(
+    r"(?i)(?<!\w)\[[0-9a-f:.]{2,64}\](?::\d{1,5})?(?:/[^\s<>()]{0,2048})?"
+)
+_IPV6_CANDIDATE_RE = re.compile(
+    r"(?i)(?<![\w:])(?:[0-9a-f]{0,4}:){2,7}[0-9a-f]{0,4}(?![\w:])"
 )
 
 _SYSTEM_PROMPT = f"""You write source-grounded spoken-word programs that sound natural when read by text-to-speech.
@@ -410,14 +420,36 @@ def _build_editorial_configuration_block(
     return block
 
 
+def _remove_valid_ip_address(match: re.Match[str]) -> str:
+    """Remove a bounded IP-shaped token only when its host parses as an IP address."""
+    token = match.group(0)
+    endpoint = token.split("/", 1)[0]
+    if endpoint.startswith("["):
+        closing_bracket = endpoint.find("]")
+        host = endpoint[1:closing_bracket]
+    elif endpoint.count(":") == 1:
+        host = endpoint.rsplit(":", 1)[0]
+    else:
+        host = endpoint
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        return token
+    return ""
+
+
 def _sanitize_spoken_text(text: str) -> str:
     """Remove hidden reasoning and speakable URLs while retaining link labels."""
     sanitized = _strip_reasoning_blocks(text or "")
     sanitized = _MARKDOWN_LINK_RE.sub(r"\1", sanitized)
     sanitized = _SCHEMED_URI_RE.sub("", sanitized)
     sanitized = _PROTOCOL_RELATIVE_URL_RE.sub("", sanitized)
-    sanitized = _BARE_HOST_PATH_RE.sub("", sanitized)
-    return "\n".join(" ".join(line.split()) for line in sanitized.splitlines() if line.strip()).strip()
+    sanitized = _BARE_DOMAIN_RE.sub("", sanitized)
+    sanitized = _IPV4_CANDIDATE_RE.sub(_remove_valid_ip_address, sanitized)
+    sanitized = _BRACKETED_IPV6_CANDIDATE_RE.sub(_remove_valid_ip_address, sanitized)
+    sanitized = _IPV6_CANDIDATE_RE.sub(_remove_valid_ip_address, sanitized)
+    lines = [re.sub(r"\s+([,.;:!?])", r"\1", " ".join(line.split())) for line in sanitized.splitlines()]
+    return "\n".join(line for line in lines if line).strip()
 
 
 def _parse_sections(script: str, allowed_markers: list[str] | None = None) -> list[dict[str, str]]:
@@ -797,17 +829,7 @@ async def run_audio_briefing_compose_adapter(config: dict[str, Any], context: di
     persona_provider_cfg = config.get("persona_provider") or config.get("provider")
     persona_model_cfg = config.get("persona_model") or config.get("model")
     persona_id_cfg = config.get("persona_id")
-    if persona_summarize:
-        normalized_items = await _persona_pre_summarize_items(
-            normalized_items,
-            output_language=output_language,
-            provider=persona_provider_cfg,
-            model=persona_model_cfg,
-            persona_id=str(persona_id_cfg).strip() if persona_id_cfg is not None else None,
-        )
-
     items = normalized_items
-
     system_prompt = _build_system_prompt()
     try:
         editorial_block = _build_editorial_configuration_block(
@@ -820,6 +842,15 @@ async def run_audio_briefing_compose_adapter(config: dict[str, Any], context: di
             editorial=editorial,
         )
         items_block = _build_source_material_block(items)
+        if persona_summarize:
+            items = await _persona_pre_summarize_items(
+                items,
+                output_language=output_language,
+                provider=persona_provider_cfg,
+                model=persona_model_cfg,
+                persona_id=str(persona_id_cfg).strip() if persona_id_cfg is not None else None,
+            )
+            items_block = _build_source_material_block(items)
     except ValueError as exc:
         error_code = str(exc)
         if error_code in {"source_material_budget_exceeded", "editorial_configuration_budget_exceeded"}:

@@ -226,7 +226,10 @@ def canonical_speaker_markers(values: list[Any]) -> list[str]:
 
 
 def _normalized_query_key(value: Any) -> str:
-    return re.sub(r"[^a-z0-9]+", "_", str(value or "").lower()).strip("_")
+    decoded = _fully_unquote(str(value or ""))
+    snake_case = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", decoded)
+    snake_case = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", snake_case)
+    return re.sub(r"[^a-z0-9]+", "_", snake_case.casefold()).strip("_")
 
 
 def _is_sensitive_query_key(key: str) -> bool:
@@ -261,7 +264,7 @@ def _url_contains_sensitive_data(value: str, *, depth: int = 0) -> bool:
         parsed = urlsplit(parse_value)
         _ = parsed.port
         query = parse_qsl(
-            parsed.query,
+            parsed.query.replace(";", "&"),
             keep_blank_values=True,
             max_num_fields=_URL_INSPECTION_MAX_QUERY_FIELDS,
         )
@@ -274,7 +277,7 @@ def _url_contains_sensitive_data(value: str, *, depth: int = 0) -> bool:
         if _is_sensitive_query_key(key):
             return True
         nested = _fully_unquote(raw_value.strip())
-        looks_url_like = nested.startswith(("http://", "https://", "//", "/")) or "?" in nested
+        looks_url_like = nested.casefold().startswith(("http://", "https://", "//", "/"))
         if (key in _URL_VALUE_QUERY_KEYS or looks_url_like) and nested:
             if depth >= _URL_INSPECTION_MAX_DEPTH or _url_contains_sensitive_data(nested, depth=depth + 1):
                 return True
