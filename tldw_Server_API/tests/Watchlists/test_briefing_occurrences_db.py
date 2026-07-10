@@ -244,6 +244,134 @@ def test_update_occurrence_serializes_stages_and_only_changes_named_fields(tmp_p
         )
 
 
+def test_update_occurrence_clears_nullable_ids_but_omission_preserves_them(tmp_path):
+    db = _make_db(tmp_path)
+    job_id, run_id = _create_job_run(db, label="nullable")
+    occurrence = db.create_or_get_briefing_occurrence(
+        run_id=run_id,
+        occurrence_key=f"user:1:job:{job_id}:run:{run_id}:nullable",
+        contract_json='{"version":1}',
+    )
+    stored = db.update_briefing_occurrence(
+        int(occurrence.id),
+        output_id=901,
+        audio_task_id="audio-123",
+        delivery_task_id="delivery-456",
+    )
+
+    preserved = db.update_briefing_occurrence(
+        int(occurrence.id),
+        stages=None,
+        artifact_status=None,
+        delivery_status=None,
+        selected_count=None,
+        omitted_count=None,
+    )
+    assert preserved.output_id == stored.output_id
+    assert preserved.audio_task_id == stored.audio_task_id
+    assert preserved.delivery_task_id == stored.delivery_task_id
+    assert preserved.updated_at == stored.updated_at
+
+    cleared = db.update_briefing_occurrence(
+        int(occurrence.id),
+        output_id=None,
+        audio_task_id=None,
+        delivery_task_id=None,
+    )
+    assert cleared.output_id is None
+    assert cleared.audio_task_id is None
+    assert cleared.delivery_task_id is None
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("artifact_status", "running"),
+        ("artifact_status", "ready"),
+        ("artifact_status", "failed"),
+        ("artifact_status", "cancelled"),
+        ("delivery_status", "not_configured"),
+        ("delivery_status", "waiting_for_artifacts"),
+        ("delivery_status", "delivering"),
+        ("delivery_status", "delivered"),
+        ("delivery_status", "partially_delivered"),
+        ("delivery_status", "failed"),
+        ("delivery_status", "unknown"),
+    ],
+)
+def test_update_occurrence_accepts_exact_lifecycle_values(tmp_path, field, value):
+    db = _make_db(tmp_path)
+    job_id, run_id = _create_job_run(db, label=f"valid-{value}")
+    occurrence = db.create_or_get_briefing_occurrence(
+        run_id=run_id,
+        occurrence_key=f"user:1:job:{job_id}:run:{run_id}:{field}:{value}",
+        contract_json='{"version":1}',
+    )
+
+    updated = db.update_briefing_occurrence(int(occurrence.id), **{field: value})
+
+    assert getattr(updated, field) == value
+
+
+@pytest.mark.parametrize(
+    ("fields", "error"),
+    [
+        ({"artifact_status": "complete"}, "invalid_briefing_artifact_status"),
+        ({"delivery_status": "sent"}, "invalid_briefing_delivery_status"),
+        ({"selected_count": -1}, "selected_count_must_be_non_negative"),
+        ({"omitted_count": -1}, "omitted_count_must_be_non_negative"),
+    ],
+)
+def test_update_occurrence_rejects_invalid_durable_values_before_sql(
+    tmp_path,
+    monkeypatch,
+    fields,
+    error,
+):
+    db = _make_db(tmp_path)
+    job_id, run_id = _create_job_run(db, label=error)
+    occurrence = db.create_or_get_briefing_occurrence(
+        run_id=run_id,
+        occurrence_key=f"user:1:job:{job_id}:run:{run_id}:{error}",
+        contract_json='{"version":1}',
+    )
+
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            db.backend,
+            "execute",
+            lambda *args, **kwargs: pytest.fail("invalid update reached SQL"),
+        )
+        with pytest.raises(ValueError, match=error):
+            db.update_briefing_occurrence(int(occurrence.id), **fields)
+
+    assert db.get_briefing_occurrence(int(occurrence.id)) == occurrence
+
+
+def test_update_occurrence_accepts_zero_counts(tmp_path):
+    db = _make_db(tmp_path)
+    job_id, run_id = _create_job_run(db, label="zero-counts")
+    occurrence = db.create_or_get_briefing_occurrence(
+        run_id=run_id,
+        occurrence_key=f"user:1:job:{job_id}:run:{run_id}:zero-counts",
+        contract_json='{"version":1}',
+    )
+    db.update_briefing_occurrence(
+        int(occurrence.id),
+        selected_count=3,
+        omitted_count=2,
+    )
+
+    updated = db.update_briefing_occurrence(
+        int(occurrence.id),
+        selected_count=0,
+        omitted_count=0,
+    )
+
+    assert updated.selected_count == 0
+    assert updated.omitted_count == 0
+
+
 class _CapturingPostgresBackend:
     backend_type = BackendType.POSTGRESQL
 

@@ -231,6 +231,19 @@ class RunRow:
     log_path: str | None
 
 
+_VALID_BRIEFING_ARTIFACT_STATUSES = {"running", "ready", "failed", "cancelled"}
+_VALID_BRIEFING_DELIVERY_STATUSES = {
+    "not_configured",
+    "waiting_for_artifacts",
+    "delivering",
+    "delivered",
+    "partially_delivered",
+    "failed",
+    "unknown",
+}
+_BRIEFING_OCCURRENCE_FIELD_OMITTED = object()
+
+
 @dataclass
 class BriefingOccurrenceRow:
     id: int
@@ -3096,27 +3109,41 @@ class WatchlistsDatabase:
         stages: dict[str, Any] | None = None,
         artifact_status: str | None = None,
         delivery_status: str | None = None,
-        output_id: int | None = None,
-        audio_task_id: str | None = None,
-        delivery_task_id: str | None = None,
+        output_id: int | None | object = _BRIEFING_OCCURRENCE_FIELD_OMITTED,
+        audio_task_id: str | None | object = _BRIEFING_OCCURRENCE_FIELD_OMITTED,
+        delivery_task_id: str | None | object = _BRIEFING_OCCURRENCE_FIELD_OMITTED,
         selected_count: int | None = None,
         omitted_count: int | None = None,
     ) -> BriefingOccurrenceRow:
         """Update the explicitly supported mutable fields on an owned occurrence."""
+        if artifact_status is not None and artifact_status not in _VALID_BRIEFING_ARTIFACT_STATUSES:
+            raise ValueError("invalid_briefing_artifact_status")
+        if delivery_status is not None and delivery_status not in _VALID_BRIEFING_DELIVERY_STATUSES:
+            raise ValueError("invalid_briefing_delivery_status")
+        if selected_count is not None and selected_count < 0:
+            raise ValueError("selected_count_must_be_non_negative")
+        if omitted_count is not None and omitted_count < 0:
+            raise ValueError("omitted_count_must_be_non_negative")
         fields: list[str] = []
         params: list[Any] = []
         updates = (
             ("stages_json", json.dumps(stages) if stages is not None else None),
             ("artifact_status", artifact_status),
             ("delivery_status", delivery_status),
-            ("output_id", output_id),
-            ("audio_task_id", audio_task_id),
-            ("delivery_task_id", delivery_task_id),
             ("selected_count", selected_count),
             ("omitted_count", omitted_count),
         )
         for column, value in updates:
             if value is not None:
+                fields.append(f"{column} = ?")
+                params.append(value)
+        nullable_updates = (
+            ("output_id", output_id),
+            ("audio_task_id", audio_task_id),
+            ("delivery_task_id", delivery_task_id),
+        )
+        for column, value in nullable_updates:
+            if value is not _BRIEFING_OCCURRENCE_FIELD_OMITTED:
                 fields.append(f"{column} = ?")
                 params.append(value)
         if not fields:

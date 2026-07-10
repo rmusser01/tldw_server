@@ -1,13 +1,15 @@
 from __future__ import annotations
 
-import os
 import json
+import os
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 
 import pytest
 
-from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatabase
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatabase
 
 pytest_plugins = ["tldw_Server_API.tests._plugins.authnz_full_fixtures"]
 
@@ -226,3 +228,72 @@ def test_watchlists_postgres_seen_state_round_trip(request: pytest.FixtureReques
     assert cleared == 1
     stats_after = db.get_seen_item_stats(source.id)
     assert int(stats_after.get("seen_count") or 0) == 0
+
+
+def test_watchlists_postgres_briefing_occurrence_round_trip(request: pytest.FixtureRequest):
+    _client, db_name = request.getfixturevalue("isolated_test_environment")  # type: ignore[assignment]
+
+    backend = _pg_backend(db_name)
+    owner = WatchlistsDatabase(user_id="1", backend=backend)
+    outsider = WatchlistsDatabase(user_id="2", backend=backend)
+    job = owner.create_job(
+        name="Briefing occurrence job",
+        description=None,
+        scope_json=json.dumps({}),
+        schedule_expr=None,
+        schedule_timezone="UTC",
+        active=True,
+        max_concurrency=1,
+        per_host_delay_ms=0,
+        retry_policy_json=None,
+        output_prefs_json=None,
+        job_filters_json=None,
+    )
+    run = owner.create_run(int(job.id), status="finished")
+    occurrence = owner.create_or_get_briefing_occurrence(
+        run_id=int(run.id),
+        occurrence_key="postgres:briefing:round-trip",
+        contract_json='{"version":1}',
+    )
+
+    assert owner.get_briefing_occurrence(int(occurrence.id)).id == occurrence.id
+    updated = owner.update_briefing_occurrence(
+        int(occurrence.id),
+        artifact_status="ready",
+        delivery_status="unknown",
+        output_id=901,
+        audio_task_id="audio-123",
+        delivery_task_id="delivery-456",
+        selected_count=2,
+        omitted_count=1,
+    )
+    assert updated.artifact_status == "ready"
+    assert updated.delivery_status == "unknown"
+    cleared = owner.update_briefing_occurrence(
+        int(occurrence.id),
+        output_id=None,
+        audio_task_id=None,
+        delivery_task_id=None,
+    )
+    assert (cleared.output_id, cleared.audio_task_id, cleared.delivery_task_id) == (None, None, None)
+    with pytest.raises(KeyError, match="briefing_occurrence_not_found"):
+        outsider.get_briefing_occurrence(int(occurrence.id))
+    with pytest.raises(KeyError, match="briefing_occurrence_not_found"):
+        outsider.update_briefing_occurrence(int(occurrence.id), artifact_status="failed")
+
+    race_run = owner.create_run(int(job.id), status="finished")
+    barrier = Barrier(4)
+
+    def create_same_occurrence() -> int:
+        barrier.wait()
+        row = owner.create_or_get_briefing_occurrence(
+            run_id=int(race_run.id),
+            occurrence_key="postgres:briefing:race",
+            contract_json='{"version":1}',
+        )
+        return int(row.id)
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        occurrence_ids = list(pool.map(lambda _: create_same_occurrence(), range(4)))
+
+    assert len(set(occurrence_ids)) == 1
