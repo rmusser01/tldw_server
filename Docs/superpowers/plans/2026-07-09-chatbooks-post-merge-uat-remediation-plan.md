@@ -537,7 +537,7 @@ Implemented in `98771aa17b`.
 - Modify: `backlog/tasks/task-12098.2 - P1-Chatbooks-backup-import-UX-clarity-remediation.md`
 - Modify: `backlog/tasks/task-12098.3 - P2-Chatbooks-backup-import-acceptance-coverage.md`
 
-- [ ] **Step 1: Prepare the isolated full-account UAT fixture**
+- [x] **Step 1: Prepare the isolated full-account UAT fixture**
 
 Use the Task 5 helper. `prepare` creates a source account containing a character, account setting, media record, transcript/chunks, one stored media artifact with known SHA-256, and embedding/vector records, then writes a full-account archive and `expected.json`. `reset-destination` creates an empty destination root without copying source databases.
 
@@ -552,6 +552,10 @@ python Helper_Scripts/Testing-related/chatbooks_full_account_uat_fixture.py rese
 ```
 
 Expected: `/tmp/chatbooks-full-account-uat/source/full-account.chatbook` and `expected.json` exist; destination contains initialized empty stores only.
+
+Verification evidence: source user 1 produced the archive and expected-state
+file; destination user 2 reset with zero characters, media records, stored
+artifacts, and Chroma embeddings.
 
 - [ ] **Step 2: Run exact backend suites and two-user restore verification**
 
