@@ -122,8 +122,15 @@ describe("watchlist setup model", () => {
       schedule_expr: "0 8 * * MON-FRI",
       timezone: expect.any(String),
       output_prefs: {
-        template_name: "briefing_md",
-        generate_audio: true
+        briefing_pipeline: expect.objectContaining({
+          version: 1,
+          text: expect.objectContaining({
+            enabled: true,
+            template_name: "briefing_markdown"
+          }),
+          audio: expect.objectContaining({ enabled: true }),
+          delivery: expect.objectContaining({ reports: { enabled: true } })
+        })
       }
     })
   })

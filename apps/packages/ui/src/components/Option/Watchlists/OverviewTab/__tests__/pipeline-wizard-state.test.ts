@@ -150,7 +150,7 @@ describe("watchlists pipeline wizard state", () => {
     timezoneSpy.mockRestore()
   })
 
-  it("keeps scheduled wizard monitors manual/test-only until scheduled reports are selected", () => {
+  it("keeps required Reports output canonical for scheduled wizard monitors", () => {
     const timezoneSpy = vi
       .spyOn(Intl, "DateTimeFormat")
       .mockImplementation(
@@ -171,20 +171,21 @@ describe("watchlists pipeline wizard state", () => {
       audioSpeakers: []
     }
 
-    expect(toPipelineJobCreatePayload(toBriefingPipelineDraft(scheduledDraft)).output_prefs).not.toHaveProperty("auto_output")
+    const expectedContract = toPipelineJobCreatePayload(
+      toBriefingPipelineDraft(scheduledDraft)
+    ).output_prefs?.briefing_pipeline
+    expect(expectedContract).toMatchObject({
+      text: { enabled: true, type: "briefing_markdown" },
+      delivery: { reports: { enabled: true } }
+    })
     expect(
       toPipelineJobCreatePayload(
         toBriefingPipelineDraft({
           ...scheduledDraft,
           createScheduledOutput: true
         })
-      ).output_prefs
-    ).toMatchObject({
-      auto_output: {
-        enabled: true,
-        type: "briefing_markdown"
-      }
-    })
+      ).output_prefs?.briefing_pipeline
+    ).toEqual(expectedContract)
 
     timezoneSpy.mockRestore()
   })

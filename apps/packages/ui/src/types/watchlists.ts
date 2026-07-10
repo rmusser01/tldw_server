@@ -140,8 +140,60 @@ export interface JobScope {
   tags?: string[]
 }
 
+export type WatchlistProgramFormat =
+  | "concise_briefing"
+  | "solo_update"
+  | "host_discussion"
+  | "sportscast"
+  | "culture_roundtable"
+  | "custom"
+
+export interface BriefingPipelineContractV1 {
+  version: 1
+  selection: {
+    mode: "automatic" | "manual_override"
+    max_items: number
+  }
+  editorial: {
+    program_format: WatchlistProgramFormat
+    outcome_noun: "briefing" | "episode"
+    show_name?: string
+    premise?: string
+    audience?: string
+    tone?: string
+    episode_title_pattern?: string
+    custom_instructions?: string
+  }
+  text: {
+    enabled: true
+    type: "briefing_markdown"
+    format: "md" | "html"
+    template_name: string
+    template_version?: number
+    show_notes: boolean
+  }
+  audio: {
+    enabled: boolean
+    target_minutes?: number
+    language: string
+    voice?: string
+    cast?: WatchlistAudioCast
+    voice_map?: Record<string, string>
+  }
+  delivery: {
+    reports: { enabled: true }
+    email: { enabled: boolean; recipients: string[] }
+    chatbook: { enabled: boolean; title?: string }
+  }
+  test: {
+    external_delivery: false
+    audio_sample_seconds: 60
+  }
+}
+
 export interface JobOutputPrefs {
   [key: string]: unknown
+  briefing_pipeline?: BriefingPipelineContractV1
   auto_output?: {
     [key: string]: unknown
     enabled?: boolean
@@ -397,6 +449,65 @@ export interface WatchlistRunStageRetryResponse {
   delivery_results?: Array<Record<string, unknown>>
   message?: string | null
 }
+
+export type WatchlistBriefingStageStatus =
+  | "not_started"
+  | "queued"
+  | "running"
+  | "ready"
+  | "failed"
+  | "skipped"
+  | "cancelled"
+
+export interface WatchlistBriefingStage {
+  status: WatchlistBriefingStageStatus
+  code?: string | null
+  retryable?: boolean
+  started_at?: string | null
+  finished_at?: string | null
+}
+
+export type WatchlistBriefingArtifactStatus = "running" | "ready" | "failed" | "cancelled"
+
+export type WatchlistBriefingDeliveryStatus =
+  | "not_configured"
+  | "waiting_for_artifacts"
+  | "delivering"
+  | "delivered"
+  | "partially_delivered"
+  | "failed"
+  | "unknown"
+
+export interface WatchlistBriefingProjection {
+  occurrence_id: number
+  run_id: number
+  job_id: number
+  artifact_status: WatchlistBriefingArtifactStatus
+  delivery_status: WatchlistBriefingDeliveryStatus
+  stages: Record<string, WatchlistBriefingStage>
+  output: Record<string, unknown> | null
+  audio: WatchlistRunAudioStatus | null
+  editorial: Record<string, unknown>
+  selection: Record<string, number>
+  next_run_at: string | null
+  recovery: Record<string, boolean>
+}
+
+export type WatchlistBriefingRetryStage =
+  | "render_text"
+  | "persist_text"
+  | "compose_audio_script"
+  | "persist_audio_script"
+  | "generate_audio"
+  | "persist_audio"
+  | `deliver:${string}`
+
+export interface WatchlistBriefingRetryRequest {
+  stage: WatchlistBriefingRetryStage
+  confirm_unknown_delivery_retry?: boolean
+}
+
+export type WatchlistBriefingRetryResponse = WatchlistBriefingProjection
 
 export interface WatchlistRunDiagnostics {
   run_id: number

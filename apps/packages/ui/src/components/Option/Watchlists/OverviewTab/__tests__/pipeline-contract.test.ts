@@ -68,23 +68,31 @@ describe("watchlists pipeline contract", () => {
         schedule_expr: "0 8 * * *",
         timezone: "UTC",
         output_prefs: expect.objectContaining({
-          template_name: "briefing_markdown",
-          template: expect.objectContaining({
-            default_name: "briefing_markdown"
-          }),
-          generate_audio: true,
-          audio_voice: "alloy",
-          target_audio_minutes: 8,
-          deliveries: {
-            email: { enabled: true, recipients: ["analyst@example.com"] },
-            chatbook: { enabled: true, title: "Morning Intel" }
-          }
+          briefing_pipeline: expect.objectContaining({
+            version: 1,
+            text: expect.objectContaining({
+              enabled: true,
+              template_name: "briefing_markdown",
+              template_version: 2
+            }),
+            audio: expect.objectContaining({
+              enabled: true,
+              voice: "alloy",
+              target_minutes: 8
+            }),
+            delivery: {
+              reports: { enabled: true },
+              email: { enabled: true, recipients: ["analyst@example.com"] },
+              chatbook: { enabled: true, title: "Morning Intel" }
+            }
+          })
         })
       })
     )
     expect(jobPayload.output_prefs).toMatchObject({
-      template_name: "briefing_markdown",
-      template: { default_name: "briefing_markdown" }
+      briefing_pipeline: {
+        text: { template_name: "briefing_markdown" }
+      }
     })
 
     const outputPayload = toPipelineOutputCreatePayload(9001, baseDraft, [1, 2])
@@ -119,19 +127,24 @@ describe("watchlists pipeline contract", () => {
     expect(toPipelineJobCreatePayload(baseDraft).output_prefs).not.toHaveProperty("auto_output")
   })
 
-  it("enables scheduled output when a pipeline draft explicitly requests scheduled reports", () => {
+  it("keeps required text reports in the canonical contract", () => {
     expect(
       toPipelineJobCreatePayload({
         ...baseDraft,
         createScheduledOutput: true
       }).output_prefs
     ).toMatchObject({
-      auto_output: {
-        enabled: true,
-        type: "briefing_markdown",
-        format: "md",
-        template_name: "briefing_markdown",
-        template_version: 2
+      briefing_pipeline: {
+        text: {
+          enabled: true,
+          type: "briefing_markdown",
+          format: "md",
+          template_name: "briefing_markdown",
+          template_version: 2
+        },
+        delivery: {
+          reports: { enabled: true }
+        }
       }
     })
   })
@@ -229,8 +242,10 @@ describe("watchlists pipeline contract", () => {
     expect(toPipelineJobCreatePayload(htmlDraft)).toEqual(
       expect.objectContaining({
         output_prefs: expect.objectContaining({
-          template: expect.objectContaining({
-            default_format: "html"
+          briefing_pipeline: expect.objectContaining({
+            text: expect.objectContaining({
+              format: "html"
+            })
           })
         })
       })

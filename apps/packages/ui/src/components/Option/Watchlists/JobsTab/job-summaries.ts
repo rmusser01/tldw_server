@@ -1,6 +1,11 @@
 import type { JobOutputPrefs, JobScope, WatchlistFilter } from "@/types/watchlists"
+import { normalizeLegacyBriefingContract } from "../shared/briefing-contract"
 
-type Translator = (...args: any[]) => unknown
+type Translator = (
+  key: string,
+  fallback: string,
+  values?: Record<string, unknown>
+) => unknown
 
 const toText = (value: unknown): string =>
   typeof value === "string" ? value : String(value)
@@ -203,6 +208,10 @@ export const summarizeFilters = (
 }
 
 const resolveTemplateName = (outputPrefs: JobOutputPrefs | null | undefined): string | null => {
+  const canonicalTemplate = outputPrefs?.briefing_pipeline?.text.template_name
+  if (typeof canonicalTemplate === "string" && canonicalTemplate.trim().length > 0) {
+    return canonicalTemplate.trim()
+  }
   const nestedTemplate = outputPrefs?.template?.default_name
   if (typeof nestedTemplate === "string" && nestedTemplate.trim().length > 0) {
     return nestedTemplate.trim()
@@ -214,21 +223,30 @@ const resolveTemplateName = (outputPrefs: JobOutputPrefs | null | undefined): st
   return null
 }
 
-const isEnabledRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" &&
-  value !== null &&
-  !Array.isArray(value) &&
-  (value as Record<string, unknown>).enabled === true
-
 export const summarizeOutputLinkage = (
   outputPrefs: JobOutputPrefs | null | undefined,
   t: Translator
 ): string => {
-  const autoOutputSummary = outputPrefs?.auto_output?.enabled
+  const hasBriefingPreferences = Boolean(
+    outputPrefs && (
+      outputPrefs.briefing_pipeline ||
+      outputPrefs.auto_output ||
+      outputPrefs.generate_audio !== undefined ||
+      outputPrefs.template ||
+      outputPrefs.template_name
+    )
+  )
+  const contract = normalizeLegacyBriefingContract(outputPrefs, {
+    scheduled: Boolean(outputPrefs?.auto_output?.enabled)
+  }).contract
+  const outcomeNoun = contract.editorial.outcome_noun
+  const programFormat = contract.editorial.program_format.replaceAll("_", " ")
+  const autoOutputSummary = hasBriefingPreferences
     ? toText(
         t(
           "watchlists:jobs.outputLinkage.scheduledReport",
-          "Create a report after each scheduled run"
+          `Save a ${outcomeNoun} in Reports after each run`,
+          { outcome: outcomeNoun }
         )
       )
     : toText(
@@ -248,26 +266,29 @@ export const summarizeOutputLinkage = (
         t("watchlists:jobs.outputLinkage.templateDefault", "Template: default")
       )
 
-  const deliveryParts: string[] = []
-  if (isEnabledRecord(outputPrefs?.deliveries?.email)) {
+  const deliveryParts: string[] = [
+    toText(t("watchlists:jobs.outputLinkage.reportsTabOnly", "Reports (required)"))
+  ]
+  if (contract.delivery.email.enabled) {
     deliveryParts.push(
       toText(t("watchlists:jobs.outputLinkage.email", "Deliver by email"))
     )
   }
-  if (isEnabledRecord(outputPrefs?.deliveries?.chatbook)) {
+  if (contract.delivery.chatbook.enabled) {
     deliveryParts.push(
       toText(t("watchlists:jobs.outputLinkage.chatbook", "Save to Chatbook"))
     )
   }
-  if (deliveryParts.length === 0) {
-    deliveryParts.push(
-      toText(t("watchlists:jobs.outputLinkage.reportsTabOnly", "Reports tab only"))
-    )
-  }
-
-  const audioSummary = outputPrefs?.generate_audio
+  const audioSummary = contract.audio.enabled
     ? toText(
-        t("watchlists:jobs.outputLinkage.audioRequested", "Audio briefing requested")
+        t(
+          "watchlists:jobs.outputLinkage.audioRequested",
+          `${programFormat} audio targeting ${contract.audio.target_minutes} minutes`,
+          {
+            format: programFormat,
+            minutes: contract.audio.target_minutes
+          }
+        )
       )
     : toText(t("watchlists:jobs.outputLinkage.audioTextOnly", "Text report only"))
 

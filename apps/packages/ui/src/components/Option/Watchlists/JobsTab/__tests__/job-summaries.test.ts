@@ -80,7 +80,7 @@ describe("job summary helpers", () => {
     ])
   })
 
-  it("only summarizes delivery channels with explicit enabled flags", () => {
+  it("always summarizes Reports and only adds explicitly enabled delivery channels", () => {
     expect(
       summarizeOutputLinkage(
         {
@@ -92,7 +92,7 @@ describe("job summary helpers", () => {
         },
         t
       )
-    ).toBe("Create a report after each scheduled run • Template: default • Reports tab only • Text report only")
+    ).toBe("Save a briefing in Reports after each run • Template: default • Reports (required) • Text report only")
 
     expect(
       summarizeOutputLinkage(
@@ -105,6 +105,6 @@ describe("job summary helpers", () => {
         },
         t
       )
-    ).toBe("Create a report after each scheduled run • Template: default • Deliver by email • Save to Chatbook • Text report only")
+    ).toBe("Save a briefing in Reports after each run • Template: default • Reports (required) • Deliver by email • Save to Chatbook • Text report only")
   })
 })

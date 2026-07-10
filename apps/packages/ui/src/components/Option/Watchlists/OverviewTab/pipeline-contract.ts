@@ -15,6 +15,27 @@ import {
   type WeekdayToken
 } from "../JobsTab/schedule-utils"
 import { normalizeWatchlistTemplateName } from "../shared/templateNames"
+import {
+  toCanonicalWatchlistJobPayload,
+  type BriefingSetupDraft,
+  type WatchlistProgramFormat
+} from "../shared/briefing-contract"
+
+export {
+  BRIEFING_PIPELINE_VERSION,
+  DEFAULT_BRIEFING_AUDIO_TARGET_MINUTES,
+  DEFAULT_BRIEFING_SELECTION_MAX_ITEMS,
+  WATCHLIST_PROGRAM_FORMATS,
+  buildBriefingPipelineContract,
+  normalizeLegacyBriefingContract,
+  toCanonicalWatchlistJobPayload
+} from "../shared/briefing-contract"
+export type {
+  BriefingPipelineContractV1,
+  BriefingSetupDraft,
+  NormalizedLegacyBriefingContract,
+  WatchlistProgramFormat
+} from "../shared/briefing-contract"
 
 export interface BriefingPipelineDraft {
   monitorName: string
@@ -35,6 +56,19 @@ export interface BriefingPipelineDraft {
   emailRecipients?: string[]
   createChatbook?: boolean
   chatbookTitle?: string
+  selectionMode?: BriefingSetupDraft["selectionMode"]
+  maxItems?: number
+  programFormat?: WatchlistProgramFormat
+  outcomeNoun?: "briefing" | "episode"
+  showName?: string
+  premise?: string
+  audience?: string
+  tone?: string
+  episodeTitlePattern?: string
+  customInstructions?: string
+  showNotes?: boolean
+  audioLanguage?: string
+  preservedOutputPrefs?: BriefingSetupDraft["preservedOutputPrefs"]
 }
 
 export interface PipelineValidationResult {
@@ -192,57 +226,43 @@ export const toPipelineJobCreatePayload = (
     draft.templateFormat === "html" || draft.templateFormat === "md"
       ? draft.templateFormat
       : undefined
-  const shouldAutoOutput = Boolean(draft.createScheduledOutput && schedule.schedule_expr)
   const normalizedAudioVoice = String(draft.audioVoice || "").trim() || undefined
   const templateName = normalizeWatchlistTemplateName(draft.templateName)
 
-  return {
-    name: String(draft.monitorName || "").trim(),
+  return toCanonicalWatchlistJobPayload({
+    monitorName: String(draft.monitorName || "").trim(),
     scope: { sources: draft.sourceIds },
     active: true,
-    ...schedule,
-    output_prefs: {
-      ...(shouldAutoOutput
-        ? {
-            auto_output: {
-              enabled: true,
-              type: "briefing_markdown",
-              ...(templateFormat ? { format: templateFormat } : {}),
-              ...(templateName ? { template_name: templateName } : {}),
-              ...(normalizedTemplateVersion ? { template_version: normalizedTemplateVersion } : {})
-            }
-          }
-        : {}),
-      template_name: templateName,
-      template: {
-        default_name: templateName,
-        ...(templateFormat ? { default_format: templateFormat } : {}),
-        default_version: normalizedTemplateVersion
-      },
-      generate_audio: draft.includeAudio,
-      audio_voice: draft.includeAudio ? normalizedAudioVoice : undefined,
-      audio_cast: draft.includeAudio ? draft.audioCast : undefined,
-      voice_map: draft.includeAudio ? draft.voiceMap : undefined,
-      target_audio_minutes: draft.includeAudio
-        ? Number(draft.targetAudioMinutes)
-        : undefined,
-      deliveries: {
-        email:
-          recipients.length > 0
-            ? {
-                enabled: true,
-                recipients
-              }
-            : undefined,
-        chatbook: draft.createChatbook
-          ? {
-              enabled: true,
-              title: String(draft.chatbookTitle || "").trim() || "Watchlists Briefing"
-            }
-          : undefined
-      }
-    }
-  }
+    scheduleExpr: schedule.schedule_expr,
+    timezone: schedule.timezone,
+    selectionMode: draft.selectionMode,
+    maxItems: draft.maxItems,
+    programFormat: draft.programFormat,
+    outcomeNoun: draft.outcomeNoun,
+    showName: draft.showName,
+    premise: draft.premise,
+    audience: draft.audience,
+    tone: draft.tone,
+    episodeTitlePattern: draft.episodeTitlePattern,
+    customInstructions: draft.customInstructions,
+    templateName,
+    templateFormat,
+    templateVersion: normalizedTemplateVersion,
+    showNotes: draft.showNotes,
+    audioEnabled: draft.includeAudio,
+    audioVoice: draft.includeAudio ? normalizedAudioVoice : undefined,
+    audioCast: draft.includeAudio ? draft.audioCast : undefined,
+    voiceMap: draft.includeAudio ? draft.voiceMap : undefined,
+    targetAudioMinutes: draft.includeAudio ? Number(draft.targetAudioMinutes) : undefined,
+    audioLanguage: draft.audioLanguage,
+    emailEnabled: recipients.length > 0,
+    emailRecipients: recipients,
+    chatbookEnabled: Boolean(draft.createChatbook),
+    chatbookTitle: draft.createChatbook
+      ? String(draft.chatbookTitle || "").trim() || "Watchlists Briefing"
+      : undefined,
+    preservedOutputPrefs: draft.preservedOutputPrefs
+  })
 }
 
 export const toPipelineOutputCreatePayload = (
