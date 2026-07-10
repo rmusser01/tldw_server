@@ -20,6 +20,33 @@
   "chatDictionariesNav": {
     "message": "Chat Dictionaries"
   },
+  "chatbooksPlayground_title": {
+    "message": "Chatbooks Backup & Import"
+  },
+  "chatbooksPlayground_subtitle": {
+    "message": "Back up and restore account data, with selective export available when you need a smaller archive."
+  },
+  "chatbooksPlayground_backupAllMode": {
+    "message": "Backup all account data"
+  },
+  "chatbooksPlayground_backupAllScope": {
+    "message": "Backup all scope"
+  },
+  "chatbooksPlayground_backupAllCta": {
+    "message": "Backup all"
+  },
+  "chatbooksPlayground_exportSelectedCta": {
+    "message": "Export selected"
+  },
+  "chatbooksPlayground_archiveRestoreDefaults": {
+    "message": "Archive restore defaults"
+  },
+  "chatbooksPlayground_jobPostWriteVerification": {
+    "message": "Post-write verification"
+  },
+  "chatbooksPlayground_verified": {
+    "message": "Verified"
+  },
   "charactersNav": {
     "message": "Characters"
   },
@@ -399,19 +426,31 @@
     "message": "Import Error"
   },
   "generalSettings_chatbooks_heading": {
-    "message": "Chatbooks"
+    "message": "Chatbooks settings"
   },
   "generalSettings_chatbooks_subheading": {
-    "message": "Export conversations into portable archives, or import them later."
+    "message": "Use Backup & Import for complete account backups and archive imports. Settings keeps only a selected-conversation export shortcut."
   },
   "generalSettings_chatbooks_unavailable": {
     "message": "Chatbooks are not available on this server."
   },
+  "generalSettings_chatbooks_fullFlowTitle": {
+    "message": "Full backup and archive import"
+  },
+  "generalSettings_chatbooks_fullFlowDescription": {
+    "message": "Complete account backups and archive imports live in the dedicated Backup & Import workflow."
+  },
+  "generalSettings_chatbooks_openBackupImport": {
+    "message": "Open Backup & Import"
+  },
   "generalSettings_chatbooks_exportTitle": {
-    "message": "Export chatbook"
+    "message": "Selective conversation export"
+  },
+  "generalSettings_chatbooks_exportScopeNote": {
+    "message": "Exports only the conversation IDs listed here. This is not a full account backup."
   },
   "generalSettings_chatbooks_exportName": {
-    "message": "Chatbook name"
+    "message": "Conversation export name"
   },
   "generalSettings_chatbooks_exportDescription": {
     "message": "Short description"
@@ -420,91 +459,37 @@
     "message": "Conversation IDs (comma-separated)"
   },
   "generalSettings_chatbooks_includeMedia": {
-    "message": "Include media"
+    "message": "Include selected conversation media"
   },
   "generalSettings_chatbooks_includeEmbeddings": {
-    "message": "Include embeddings"
+    "message": "Include selected conversation embeddings"
   },
   "generalSettings_chatbooks_includeGenerated": {
-    "message": "Include generated docs"
+    "message": "Include selected generated conversation content"
   },
   "generalSettings_chatbooks_runAsync": {
     "message": "Run as background job"
   },
   "generalSettings_chatbooks_exportButton": {
-    "message": "Export chatbook"
-  },
-  "generalSettings_chatbooks_noExportJobs": {
-    "message": "No export jobs yet."
-  },
-  "generalSettings_chatbooks_download": {
-    "message": "Download"
-  },
-  "generalSettings_chatbooks_importTitle": {
-    "message": "Import chatbook"
-  },
-  "generalSettings_chatbooks_conflictSkip": {
-    "message": "Skip conflicts"
-  },
-  "generalSettings_chatbooks_conflictOverwrite": {
-    "message": "Overwrite existing"
-  },
-  "generalSettings_chatbooks_conflictRename": {
-    "message": "Rename imported"
-  },
-  "generalSettings_chatbooks_conflictMerge": {
-    "message": "Merge when possible"
-  },
-  "generalSettings_chatbooks_prefixImported": {
-    "message": "Prefix imported"
-  },
-  "generalSettings_chatbooks_importMedia": {
-    "message": "Import media"
-  },
-  "generalSettings_chatbooks_importEmbeddings": {
-    "message": "Import embeddings"
-  },
-  "generalSettings_chatbooks_importButton": {
-    "message": "Import chatbook"
-  },
-  "generalSettings_chatbooks_noImportJobs": {
-    "message": "No import jobs yet."
-  },
-  "generalSettings_chatbooks_importedCount": {
-    "message": "{{count}} items imported"
-  },
-  "generalSettings_chatbooks_jobsError": {
-    "message": "Unable to load chatbook jobs"
+    "message": "Export selected conversations"
   },
   "generalSettings_chatbooks_exportMissingIds": {
     "message": "Add at least one conversation ID."
   },
   "generalSettings_chatbooks_exportDescriptionFallback": {
-    "message": "Chatbook export"
+    "message": "Selective conversation export"
   },
   "generalSettings_chatbooks_exportQueued": {
-    "message": "Export job created"
+    "message": "Selective conversation export job created"
   },
   "generalSettings_chatbooks_exportComplete": {
-    "message": "Chatbook export complete"
+    "message": "Selective conversation export complete"
   },
   "generalSettings_chatbooks_exportError": {
-    "message": "Chatbook export failed"
-  },
-  "generalSettings_chatbooks_downloadError": {
-    "message": "Download failed"
-  },
-  "generalSettings_chatbooks_importQueued": {
-    "message": "Import job created"
-  },
-  "generalSettings_chatbooks_importComplete": {
-    "message": "Chatbook import complete"
-  },
-  "generalSettings_chatbooks_importError": {
-    "message": "Chatbook import failed"
+    "message": "Selective conversation export failed"
   },
   "generalSettings_chatbooks_defaultName": {
-    "message": "Chatbook {{date}}"
+    "message": "Conversation export {{date}}"
   },
   "generalSettings_sidepanelRag_heading": {
     "message": "Retrieval Settings"
@@ -3171,7 +3156,7 @@
     "message": "https://github.com/rmusser01/tldw_browser_assistant"
   },
   "chatbooksNav": {
-    "message": "Chatbooks"
+    "message": "Chatbooks settings"
   },
   "generalSettings_settings_stickyChatInput_label": {
     "message": "Keep chat input visible while scrolling"

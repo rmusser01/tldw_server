@@ -1,6 +1,12 @@
 import { useRef } from "react";
 import { generateID } from "@/db/dexie/helpers";
 import { type UploadedFile } from "@/db/dexie/types";
+import {
+  cancelPreparedDocumentProcessing,
+  normalizeDocumentPreflightResponse,
+  withDefaultDocumentDecision,
+} from "@/services/chat-document-processing";
+import { tldwClient } from "@/services/tldw/TldwApiClient";
 
 const toText = (value: unknown, fallback = ""): string =>
   typeof value === "string" && value.trim().length > 0 ? value : fallback;
@@ -35,6 +41,71 @@ export const useFileUpload = ({
   const contextFilesRef = useRef(contextFiles);
   contextFilesRef.current = contextFiles;
 
+  const commitUploadedFiles = (files: UploadedFile[]) => {
+    const nextContextFiles = files.filter(
+      (file) => file.processingMode !== "ingest_to_library",
+    );
+    uploadedFilesRef.current = files;
+    contextFilesRef.current = nextContextFiles;
+    setUploadedFiles(files);
+    setContextFiles(nextContextFiles);
+  };
+
+  const markPreflightFailed = (fileId: string) => {
+    const blockedReason = toText(
+      t(
+        "playground:documentProcessing.preflightFailed",
+        "Document preflight failed. Try again or remove the file.",
+      ),
+      "Document preflight failed. Try again or remove the file.",
+    );
+    const nextFiles = uploadedFilesRef.current.map((uploadedFile) =>
+      uploadedFile.id === fileId
+        ? {
+            ...uploadedFile,
+            processingStatus: "blocked" as const,
+            processingBlockedReason: blockedReason,
+          }
+        : uploadedFile,
+    );
+    commitUploadedFiles(nextFiles);
+  };
+
+  const preflightUploadedDocument = async (uploadedFile: UploadedFile) => {
+    try {
+      const response = await tldwClient.preflightDocumentUpload({
+        files: [
+          {
+            client_id: uploadedFile.id,
+            filename: uploadedFile.filename,
+            mime_type: uploadedFile.type || null,
+            size_bytes: uploadedFile.size,
+          },
+        ],
+      });
+
+      if (
+        !uploadedFilesRef.current.some((file) => file.id === uploadedFile.id)
+      ) {
+        return;
+      }
+
+      commitUploadedFiles(
+        normalizeDocumentPreflightResponse(
+          response,
+          uploadedFilesRef.current,
+        ),
+      );
+    } catch (error) {
+      console.error("Document preflight failed:", error);
+      if (
+        uploadedFilesRef.current.some((file) => file.id === uploadedFile.id)
+      ) {
+        markPreflightFailed(uploadedFile.id);
+      }
+    }
+  };
+
   const handleFileUpload = async (file: File) => {
     try {
       const isImage = file.type.startsWith("image/");
@@ -65,7 +136,7 @@ export const useFileUpload = ({
       const { processFileUpload } = await import("~/utils/file-processor");
       const source = await processFileUpload(file);
 
-      const uploadedFile: UploadedFile = {
+      const uploadedFile = withDefaultDocumentDecision({
         id: fileId,
         filename: file.name,
         type: file.type,
@@ -73,11 +144,11 @@ export const useFileUpload = ({
         size: file.size,
         uploadedAt: Date.now(),
         processed: false,
-      };
+      });
 
       // Read current values from refs to avoid stale closure on concurrent uploads
-      setUploadedFiles([...uploadedFilesRef.current, uploadedFile]);
-      setContextFiles([...contextFilesRef.current, uploadedFile]);
+      commitUploadedFiles([...uploadedFilesRef.current, uploadedFile]);
+      void preflightUploadedDocument(uploadedFile);
 
       return file;
     } catch (error) {
@@ -100,12 +171,23 @@ export const useFileUpload = ({
   };
 
   const removeUploadedFile = async (fileId: string) => {
-    setUploadedFiles(uploadedFilesRef.current.filter((f) => f.id !== fileId));
-    setContextFiles(contextFilesRef.current.filter((f) => f.id !== fileId));
+    const removedFile = uploadedFilesRef.current.find((file) => file.id === fileId);
+    if (
+      removedFile &&
+      (removedFile.ingestJobId != null ||
+        removedFile.ingestBatchId ||
+        removedFile.documentDraftId ||
+        removedFile.processingResultRef?.kind === "draft")
+    ) {
+      await cancelPreparedDocumentProcessing([removedFile]).catch((error) => {
+        console.error("Failed to cancel removed document processing:", error);
+      });
+    }
+    commitUploadedFiles(uploadedFilesRef.current.filter((f) => f.id !== fileId));
   };
 
   const clearUploadedFiles = () => {
-    setUploadedFiles([]);
+    commitUploadedFiles([]);
   };
 
   return {

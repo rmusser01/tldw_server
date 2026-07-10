@@ -19,6 +19,9 @@ https://github.com/uxiew/epub2MD
 https://huggingface.co/papers/2409.01704
 https://huggingface.co/abhinand/GOT-OCR-2.0
 https://huggingface.co/papers/2412.07626
+https://github.com/rcarmo/python-office-mcp-server
+https://github.com/kklimuk/docx-cli
+https://github.com/oxbshw/watch-skill
 https://towardsdatascience.com/ai-powered-information-extraction-and-matchmaking-0408c93ec1b9/
 https://github.com/databridge-org/databridge-core
 https://github.com/cocoindex-io/cocoindex

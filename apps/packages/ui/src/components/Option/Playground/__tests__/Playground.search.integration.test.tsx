@@ -29,6 +29,8 @@ const messageOptionState = vi.hoisted(() => ({
     toolChoice: "none",
     temporaryChat: false,
     useOCR: false,
+    fileRetrievalEnabled: false,
+    ragMediaIds: null as number[] | null,
     setHistoryId: vi.fn(),
     setHistory: vi.fn(),
     setMessages: vi.fn(),
@@ -41,6 +43,8 @@ const messageOptionState = vi.hoisted(() => ({
     setToolChoice: vi.fn(),
     setTemporaryChat: vi.fn(),
     setUseOCR: vi.fn(),
+    setFileRetrievalEnabled: vi.fn(),
+    setRagMediaIds: vi.fn(),
     setContextFiles: vi.fn(),
     createChatBranch: vi.fn(),
     streaming: false,
@@ -96,8 +100,21 @@ const storeOptionState = vi.hoisted(() => ({
     compareParentByHistory: {} as Record<
       string,
       { parentHistoryId: string; clusterId?: string }
-    >
+    >,
+    uploadedFiles: [] as Array<Record<string, unknown>>,
+    contextFiles: [] as Array<Record<string, unknown>>,
+    setUploadedFiles: vi.fn(),
+    setContextFiles: vi.fn()
   }
+}))
+
+const tldwClientState = vi.hoisted(() => ({
+  getConfig: vi.fn(async () => ({})),
+  getProvidersStatus: vi.fn(async () => ({})),
+  initialize: vi.fn(async () => null),
+  getResearchBundle: vi.fn(async () => null),
+  getDocumentUploadDraft: vi.fn(async () => ({ payload: {} })),
+  deleteDocumentUploadDraft: vi.fn(async () => undefined)
 }))
 
 const routerState = vi.hoisted(() => ({
@@ -225,10 +242,16 @@ vi.mock("../Knowledge/utils/unsupported-types", () => ({
   otherUnsupportedTypes: []
 }))
 
-vi.mock("@/store/option", () => ({
-  useStoreMessageOption: (
+vi.mock("@/store/option", () => {
+  const useStoreMessageOption = (
     selector: (state: typeof storeOptionState.value) => unknown
   ) => selector(storeOptionState.value)
+  useStoreMessageOption.getState = () => storeOptionState.value
+  return { useStoreMessageOption }
+})
+
+vi.mock("@/services/tldw/TldwApiClient", () => ({
+  tldwClient: tldwClientState
 }))
 
 vi.mock("@/store/artifacts", () => ({
@@ -310,11 +333,22 @@ describe("Playground thread search integration", () => {
     messageOptionState.value.toolChoice = "none"
     messageOptionState.value.temporaryChat = false
     messageOptionState.value.useOCR = false
+    messageOptionState.value.fileRetrievalEnabled = false
+    messageOptionState.value.ragMediaIds = null
     artifactsState.value.isOpen = false
     artifactsState.value.active = null
     artifactsState.value.history = []
     artifactsState.value.unreadCount = 0
     storeOptionState.value.compareParentByHistory = {}
+    storeOptionState.value.uploadedFiles = []
+    storeOptionState.value.contextFiles = []
+    storeOptionState.value.setUploadedFiles.mockImplementation((files) => {
+      storeOptionState.value.uploadedFiles = files
+    })
+    storeOptionState.value.setContextFiles.mockImplementation((files) => {
+      storeOptionState.value.contextFiles = files
+    })
+    tldwClientState.getDocumentUploadDraft.mockResolvedValue({ payload: {} })
     window.history.replaceState(null, "", "/chat")
   })
 
@@ -506,7 +540,9 @@ describe("Playground thread search integration", () => {
       webSearch: true,
       toolChoice: "auto",
       temporaryChat: true,
-      useOCR: true
+      useOCR: true,
+      ragMediaIds: [101, 202],
+      fileRetrievalEnabled: true
     })
     const hashParams = new URLSearchParams()
     hashParams.set(SIDEPANEL_CHAT_WEBUI_HANDOFF_PARAM, encodedHandoff)
@@ -541,6 +577,70 @@ describe("Playground thread search integration", () => {
     expect(messageOptionState.value.setToolChoice).toHaveBeenCalledWith("auto")
     expect(messageOptionState.value.setTemporaryChat).toHaveBeenCalledWith(true)
     expect(messageOptionState.value.setUseOCR).toHaveBeenCalledWith(true)
+    expect(messageOptionState.value.setRagMediaIds).toHaveBeenCalledWith([
+      101,
+      202
+    ])
+    expect(
+      messageOptionState.value.setFileRetrievalEnabled
+    ).toHaveBeenCalledWith(true)
     expect(window.location.hash).toBe("")
+  })
+
+  it("imports sidepanel document draft files into chat attachments", async () => {
+    const existingFile = {
+      id: "existing-file",
+      filename: "existing.md",
+      type: "text/markdown",
+      content: "existing",
+      size: 8,
+      uploadedAt: 1,
+      processed: false,
+      processingMode: "add_to_chat"
+    }
+    const draftFile = {
+      id: "draft-file",
+      filename: "draft.pdf",
+      type: "application/pdf",
+      content: "draft",
+      size: 16,
+      uploadedAt: 2,
+      processed: false,
+      processingMode: "add_to_chat"
+    }
+    storeOptionState.value.uploadedFiles = [existingFile]
+    storeOptionState.value.contextFiles = [existingFile]
+    tldwClientState.getDocumentUploadDraft.mockResolvedValueOnce({
+      payload: { files: [draftFile] }
+    })
+
+    const encodedHandoff = encodeSidepanelChatWebUiHandoff({
+      source: SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE,
+      createdAt: Date.now(),
+      chatDocumentDraftId: "document-draft-1"
+    })
+    const hashParams = new URLSearchParams()
+    hashParams.set(SIDEPANEL_CHAT_WEBUI_HANDOFF_PARAM, encodedHandoff)
+    window.history.replaceState(null, "", `/chat#${hashParams.toString()}`)
+
+    render(<Playground />)
+
+    await waitFor(() => {
+      expect(tldwClientState.getDocumentUploadDraft).toHaveBeenCalledWith(
+        "document-draft-1"
+      )
+    })
+    expect(storeOptionState.value.setUploadedFiles).toHaveBeenCalledWith([
+      existingFile,
+      draftFile
+    ])
+    expect(messageOptionState.value.setContextFiles).toHaveBeenCalledWith([
+      existingFile,
+      draftFile
+    ])
+    expect(tldwClientState.deleteDocumentUploadDraft).toHaveBeenCalledWith(
+      "document-draft-1"
+    )
+    expect(messageOptionState.value.setRagMediaIds).not.toHaveBeenCalled()
   })
 })

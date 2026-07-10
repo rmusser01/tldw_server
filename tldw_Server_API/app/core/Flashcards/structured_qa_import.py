@@ -1,11 +1,10 @@
 """Deterministic parser for structured Q&A flashcard preview imports."""
-
-import re
 from dataclasses import dataclass, field
 
 
-QUESTION_RE = re.compile(r"^\s*(?:Q|Question)\s*[:.-]\s*(.*)\s*$", re.IGNORECASE)
-ANSWER_RE = re.compile(r"^\s*(?:A|Answer)\s*[:.-]\s*(.*)\s*$", re.IGNORECASE)
+QUESTION_LABELS = frozenset({"q", "question"})
+ANSWER_LABELS = frozenset({"a", "answer"})
+LABEL_SEPARATORS = frozenset({":", ".", "-"})
 
 
 @dataclass
@@ -35,6 +34,18 @@ class StructuredQaPreviewResult:
 
 def _utf8_length(value: str) -> int:
     return len(value.encode("utf-8"))
+
+
+def _match_labeled_line(raw_line: str, labels: frozenset[str]) -> str | None:
+    stripped = raw_line.lstrip()
+    for index, char in enumerate(stripped):
+        if char not in LABEL_SEPARATORS:
+            continue
+        label = stripped[:index].strip().lower()
+        if label in labels:
+            return stripped[index + 1 :].strip()
+        return None
+    return None
 
 
 def parse_structured_qa_preview(
@@ -122,23 +133,23 @@ def parse_structured_qa_preview(
             push_error(index, f"Line too long (> {max_line_length} bytes)")
             continue
 
-        question_match = QUESTION_RE.match(raw_line)
-        if question_match:
+        question_value = _match_labeled_line(raw_line, QUESTION_LABELS)
+        if question_value is not None:
             finalize_block()
-            question_lines = [question_match.group(1).strip()]
+            question_lines = [question_value]
             answer_lines = []
             line_start = index
             line_end = index
             in_answer = False
             continue
 
-        answer_match = ANSWER_RE.match(raw_line)
-        if answer_match:
+        answer_value = _match_labeled_line(raw_line, ANSWER_LABELS)
+        if answer_value is not None:
             if line_start is None:
                 result.skipped_blocks += 1
                 push_error(index, "Answer block found before any question label")
                 continue
-            answer_lines.append(answer_match.group(1).strip())
+            answer_lines.append(answer_value)
             line_end = index
             in_answer = True
             continue

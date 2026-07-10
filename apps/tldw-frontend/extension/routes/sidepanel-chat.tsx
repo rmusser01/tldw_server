@@ -73,7 +73,8 @@ import {
 import {
   buildSidepanelChatWebUiHandoffUrl,
   SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE,
-  type SidepanelChatWebUiConfig
+  type SidepanelChatWebUiConfig,
+  type SidepanelChatWebUiHandoffOverrides
 } from "@/services/tldw/sidepanel-chat-webui-handoff"
 
 // Lazy-load Timeline to reduce initial bundle size (~1.2MB cytoscape)
@@ -1773,7 +1774,9 @@ const SidepanelChat = () => {
     return config
   }, [])
 
-  const openChatInWebUi = React.useCallback(async () => {
+  const openChatInWebUi = React.useCallback(async (
+    handoffOverrides: SidepanelChatWebUiHandoffOverrides = {}
+  ) => {
     const snapshot = buildSnapshot()
     const draft = textareaRef.current?.value ?? ""
     const config = await readWebUiHandoffConfig()
@@ -1793,7 +1796,8 @@ const SidepanelChat = () => {
         selectedQuickPrompt: snapshot.selectedQuickPrompt ?? null,
         temporaryChat: snapshot.temporaryChat ?? false,
         useOCR: snapshot.useOCR ?? false,
-        title: activeTabLabel
+        title: activeTabLabel,
+        ...handoffOverrides
       }
     })
 

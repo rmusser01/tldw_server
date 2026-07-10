@@ -14,8 +14,6 @@ const originalApiUrl = process.env.NEXT_PUBLIC_API_URL
 const originalDeploymentMode = process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
 const originalXApiKey = process.env.NEXT_PUBLIC_X_API_KEY
 const originalWindowLocation = window.location
-const RUNTIME_SESSION_SINGLE_USER_API_KEY =
-  "tldwRuntimeSessionSingleUserApiKey"
 
 const setWindowLocation = (href: string) => {
   Object.defineProperty(window, "location", {
@@ -318,7 +316,7 @@ describe("runtime-bootstrap chrome shim", () => {
     })
   })
 
-  it("keeps a manual single-user key available after a second hard reload in the same browser session", async () => {
+  it("does not persist a scrubbed manual single-user key across module reloads", async () => {
     process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "advanced"
     process.env.NEXT_PUBLIC_API_URL = "http://127.0.0.1:8000"
     delete process.env.NEXT_PUBLIC_X_API_KEY
@@ -343,13 +341,11 @@ describe("runtime-bootstrap chrome shim", () => {
     await importAndAwaitBootstrap()
     runtimeAuth = await import("@/services/tldw/runtime-auth-override")
 
-    expect(runtimeAuth.getRuntimeSingleUserApiKeyOverride()).toBe(
-      "manual-user-key"
-    )
+    expect(runtimeAuth.getRuntimeSingleUserApiKeyOverride()).toBeNull()
     expect(localStorage.getItem("tldwConfig")).not.toContain("manual-user-key")
   })
 
-  it("rehydrates the session key when stored single-user config has a blank apiKey", async () => {
+  it("does not rehydrate a scrubbed key when stored single-user config has a blank apiKey", async () => {
     process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "advanced"
     process.env.NEXT_PUBLIC_API_URL = "http://127.0.0.1:8000"
     delete process.env.NEXT_PUBLIC_X_API_KEY
@@ -378,9 +374,7 @@ describe("runtime-bootstrap chrome shim", () => {
     await importAndAwaitBootstrap()
     const runtimeAuth = await import("@/services/tldw/runtime-auth-override")
 
-    expect(runtimeAuth.getRuntimeSingleUserApiKeyOverride()).toBe(
-      "manual-user-key"
-    )
+    expect(runtimeAuth.getRuntimeSingleUserApiKeyOverride()).toBeNull()
     expect(localStorage.getItem("tldwConfig")).not.toContain("manual-user-key")
   })
 
@@ -398,7 +392,8 @@ describe("runtime-bootstrap chrome shim", () => {
     )
 
     await importAndAwaitBootstrap()
-    expect(sessionStorage.getItem(RUNTIME_SESSION_SINGLE_USER_API_KEY)).toBe(
+    let runtimeAuth = await import("@/services/tldw/runtime-auth-override")
+    expect(runtimeAuth.getRuntimeSingleUserApiKeyOverride()).toBe(
       "manual-user-key"
     )
 
@@ -413,9 +408,8 @@ describe("runtime-bootstrap chrome shim", () => {
 
     vi.resetModules()
     await importAndAwaitBootstrap()
-    const runtimeAuth = await import("@/services/tldw/runtime-auth-override")
+    runtimeAuth = await import("@/services/tldw/runtime-auth-override")
 
-    expect(sessionStorage.getItem(RUNTIME_SESSION_SINGLE_USER_API_KEY)).toBeNull()
     expect(runtimeAuth.getRuntimeSingleUserApiKeyOverride()).toBeNull()
   })
 

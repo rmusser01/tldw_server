@@ -27,7 +27,6 @@ ${0}, ${1}, etc. for specific arguments.
 """
 
 import hashlib
-import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
@@ -36,19 +35,6 @@ import yaml
 from loguru import logger
 
 from tldw_Server_API.app.core.Skills.exceptions import SkillParseError
-
-# Regex to match YAML frontmatter at the start of content
-FRONTMATTER_PATTERN = re.compile(
-    r'^---\s*\n(.*?)\n---\s*\n(.*)$',
-    re.DOTALL
-)
-
-# Alternative pattern for Windows line endings
-FRONTMATTER_PATTERN_CRLF = re.compile(
-    r'^---\s*\r?\n(.*?)\r?\n---\s*\r?\n(.*)$',
-    re.DOTALL
-)
-
 
 @dataclass
 class SkillFrontmatter:
@@ -91,6 +77,22 @@ class SkillFrontmatter:
         )
 
 
+def _split_frontmatter(content: str) -> tuple[str, str] | None:
+    first_line_end = content.find("\n")
+    if first_line_end < 0 or content[:first_line_end].strip() != "---":
+        return None
+
+    yaml_start = first_line_end + 1
+    line_start = yaml_start
+    while True:
+        line_end = content.find("\n", line_start)
+        if line_end < 0:
+            return None
+        if content[line_start:line_end].strip() == "---":
+            return content[yaml_start:line_start].rstrip("\r\n"), content[line_end + 1 :]
+        line_start = line_end + 1
+
+
 @dataclass
 class ParsedSkill:
     """Fully parsed skill from SKILL.md and supporting files."""
@@ -130,12 +132,9 @@ class SkillParser:
         markdown_content = content
 
         # Try to extract frontmatter
-        match = FRONTMATTER_PATTERN.match(content)
-        if not match:
-            match = FRONTMATTER_PATTERN_CRLF.match(content)
-
-        if match:
-            frontmatter_yaml, markdown_content = match.groups()
+        frontmatter_parts = _split_frontmatter(content)
+        if frontmatter_parts:
+            frontmatter_yaml, markdown_content = frontmatter_parts
             try:
                 parsed_yaml = yaml.safe_load(frontmatter_yaml)
                 if parsed_yaml and isinstance(parsed_yaml, dict):

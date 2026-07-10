@@ -116,6 +116,15 @@ def test_compile_global_policy_reports_invalid_lines_without_raw_regex():
     assert "(unclosed" not in rendered
 
 
+def test_nested_quantifier_scanner_flags_nested_repetition_only():
+    compiler = PolicyCompiler()
+
+    assert compiler.has_nested_quantifiers("(a+)+")
+    assert compiler.has_nested_quantifiers(r"(foo\\*)*") is True
+    assert compiler.has_nested_quantifiers(r"(foo\\\*)*") is False
+    assert compiler.has_nested_quantifiers("(foo)+") is False
+
+
 def test_compile_global_policy_reports_empty_pattern_after_parsing():
     result = PolicyCompiler().compile_global(
         PolicyCompilationInput(

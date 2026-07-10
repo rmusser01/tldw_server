@@ -12,6 +12,11 @@ import {
 } from "lucide-react"
 import { Image, Tooltip } from "antd"
 import { DocumentChip } from "@/components/Common/Playground/DocumentChip"
+import {
+  documentProcessingModeLabel,
+  documentProcessingStatusLabel
+} from "@/components/Common/Playground/document-processing-labels"
+import type { UploadedFile as StoredUploadedFile } from "@/db/dexie/types"
 
 interface Document {
   id: number
@@ -20,11 +25,13 @@ interface Document {
   favIconUrl?: string
 }
 
-interface UploadedFile {
-  id: string
-  filename: string
-  size: number
-}
+type UploadedFile = Pick<StoredUploadedFile, "id" | "filename" | "size"> &
+  Partial<
+    Pick<
+      StoredUploadedFile,
+      "processingMode" | "processingStatus" | "processingBlockedReason"
+    >
+  >
 
 interface AttachmentsSummaryProps {
   /** Base64 image string */
@@ -85,6 +92,22 @@ export const AttachmentsSummary: React.FC<AttachmentsSummaryProps> = ({
       unit: "megabyte",
       maximumFractionDigits: 2
     }).format(bytes / (1024 * 1024))
+  }
+
+  const fileProcessingLabel = (file: UploadedFile) => {
+    if (
+      file.processingStatus === "blocked" ||
+      file.processingStatus === "failed" ||
+      file.processingStatus === "processing" ||
+      file.processingStatus === "preflighting" ||
+      file.processingStatus === "cancelled"
+    ) {
+      return documentProcessingStatusLabel(file.processingStatus, t)
+    }
+    if (file.processingMode) {
+      return documentProcessingModeLabel(file.processingMode, t)
+    }
+    return null
   }
 
   const handleClearAll = () => {
@@ -249,33 +272,49 @@ export const AttachmentsSummary: React.FC<AttachmentsSummaryProps> = ({
                 )}
               </div>
               <div className="flex flex-wrap gap-2">
-                {files.map((file) => (
-                  <div
-                    key={file.id}
-                    className="group relative flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1.5 text-xs"
-                  >
-                    <FileText className="h-3.5 w-3.5 text-text-subtle" />
-                    <div className="flex flex-col">
-                      <span className="font-medium text-text line-clamp-1 max-w-[150px]">
-                        {file.filename}
-                      </span>
-                      <span className="text-[10px] text-text-muted">
-                        {formatFileSize(file.size)}
-                      </span>
+                {files.map((file) => {
+                  const processingLabel = fileProcessingLabel(file)
+                  return (
+                    <div
+                      key={file.id}
+                      className="group relative flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1.5 text-xs"
+                    >
+                      <FileText className="h-3.5 w-3.5 text-text-subtle" />
+                      <div className="flex flex-col">
+                        <span className="font-medium text-text line-clamp-1 max-w-[150px]">
+                          {file.filename}
+                        </span>
+                        <span className="text-[10px] text-text-muted">
+                          {formatFileSize(file.size)}
+                        </span>
+                        {processingLabel && (
+                          <Tooltip title={file.processingBlockedReason}>
+                            <span className="text-[10px] font-medium text-text-subtle">
+                              {processingLabel}
+                            </span>
+                          </Tooltip>
+                        )}
+                        {file.processingStatus === "blocked" &&
+                          file.processingBlockedReason && (
+                            <span className="max-w-[150px] text-[10px] text-warn line-clamp-2">
+                              {file.processingBlockedReason}
+                            </span>
+                          )}
+                      </div>
+                      {!readOnly && (
+                        <button
+                          type="button"
+                          onClick={() => onRemoveFile(file.id)}
+                          className="absolute -top-1 -right-1 invisible rounded-full border border-border bg-surface p-0.5 text-text shadow-sm group-hover:visible hover:bg-surface2"
+                          aria-label={t("common:remove", "Remove") as string}
+                          title={t("common:remove", "Remove") as string}
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      )}
                     </div>
-                    {!readOnly && (
-                      <button
-                        type="button"
-                        onClick={() => onRemoveFile(file.id)}
-                        className="absolute -top-1 -right-1 invisible rounded-full border border-border bg-surface p-0.5 text-text shadow-sm group-hover:visible hover:bg-surface2"
-                        aria-label={t("common:remove", "Remove") as string}
-                        title={t("common:remove", "Remove") as string}
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    )}
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             </div>
           )}

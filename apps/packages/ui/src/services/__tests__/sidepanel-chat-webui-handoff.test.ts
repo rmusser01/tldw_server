@@ -144,4 +144,52 @@ describe("sidepanel chat WebUI handoff", () => {
       selectedQuickPrompt: null
     })
   })
+
+  it("preserves document-processing handoff fields and filters invalid media ids", () => {
+    const url = new URL(
+      buildSidepanelChatWebUiHandoffUrl({
+        payload: {
+          source: SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE,
+          createdAt: Date.now(),
+          draft: "Summarize this document",
+          chatDocumentDraftId: "draft-123",
+          ragMediaIds: [101, Number.NaN, "bad", 202] as unknown as number[],
+          fileRetrievalEnabled: true
+        }
+      })
+    )
+
+    expect(decodeSidepanelChatWebUiHandoff(getFragmentHandoff(url))).toMatchObject({
+      chatDocumentDraftId: "draft-123",
+      ragMediaIds: [101, 202],
+      fileRetrievalEnabled: true
+    })
+  })
+
+  it("does not materialize omitted document-processing handoff fields", () => {
+    const url = new URL(
+      buildSidepanelChatWebUiHandoffUrl({
+        payload: {
+          source: SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE,
+          createdAt: Date.now(),
+          draft: "Summarize this document"
+        }
+      })
+    )
+
+    const decoded = decodeSidepanelChatWebUiHandoff(getFragmentHandoff(url))
+
+    expect(decoded?.chatDocumentDraftId).toBeUndefined()
+    expect(decoded?.ragMediaIds).toBeUndefined()
+    expect(decoded?.fileRetrievalEnabled).toBeUndefined()
+    expect(
+      Object.prototype.hasOwnProperty.call(decoded, "chatDocumentDraftId")
+    ).toBe(false)
+    expect(Object.prototype.hasOwnProperty.call(decoded, "ragMediaIds")).toBe(
+      false
+    )
+    expect(
+      Object.prototype.hasOwnProperty.call(decoded, "fileRetrievalEnabled")
+    ).toBe(false)
+  })
 })

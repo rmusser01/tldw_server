@@ -1,4 +1,5 @@
-import { expect, test, type Page } from "@playwright/test"
+import { expect, test, type Page, type Route } from "@playwright/test"
+import { seedAuth } from "./smoke.setup"
 
 /**
  * Smoke test for the Primer composer redesign preview route.
@@ -17,6 +18,7 @@ import { expect, test, type Page } from "@playwright/test"
  * applies on every navigation in the context.
  */
 const bypassOnboarding = async (page: Page) => {
+  await seedAuth(page)
   await page.addInitScript(() => {
     try {
       window.localStorage.setItem("assistant_setup_dismissed", "true")
@@ -30,6 +32,59 @@ const waitForPreviewHarness = async (page: Page) => {
   await page.waitForLoadState("networkidle", { timeout: 30_000 }).catch(() => {})
   await expect(page.getByRole("button", { name: "V1" })).toBeVisible({
     timeout: 30_000,
+  })
+}
+
+const notificationHeaders = {
+  "access-control-allow-headers": "*",
+  "access-control-allow-methods": "GET,OPTIONS",
+  "access-control-allow-origin": "*"
+}
+
+const fulfillNotificationOptions = async (route: Route) => {
+  if (route.request().method() !== "OPTIONS") return false
+  await route.fulfill({ status: 204, headers: notificationHeaders })
+  return true
+}
+
+const stubNotifications = async (page: Page) => {
+  await page.route(/\/api\/v1\/notifications\/stream(?:\?.*)?$/, async (route) => {
+    if (await fulfillNotificationOptions(route)) return
+    await route.fulfill({
+      status: 200,
+      contentType: "text/event-stream",
+      headers: {
+        ...notificationHeaders,
+        "cache-control": "no-cache"
+      },
+      body: ""
+    })
+  })
+
+  await page.route(/\/api\/v1\/notifications\/unread-count(?:\?.*)?$/, async (route) => {
+    if (await fulfillNotificationOptions(route)) return
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      headers: notificationHeaders,
+      body: JSON.stringify({ unread_count: 0 })
+    })
+  })
+
+  await page.route(/\/api\/v1\/notifications(?:\?.*)?$/, async (route) => {
+    if (await fulfillNotificationOptions(route)) return
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      headers: notificationHeaders,
+      body: JSON.stringify({
+        items: [],
+        total: 0,
+        limit: 1,
+        offset: 0,
+        has_more: false
+      })
+    })
   })
 }
 
@@ -51,6 +106,7 @@ test.describe("composer variants preview", () => {
     })
 
     await bypassOnboarding(page)
+    await stubNotifications(page)
     await page.goto("/composer-variants-preview")
     await waitForPreviewHarness(page)
 
@@ -112,6 +168,7 @@ test.describe("composer variants preview", () => {
   }) => {
     test.setTimeout(90_000)
     await bypassOnboarding(page)
+    await stubNotifications(page)
     await page.goto("/composer-variants-preview")
     await waitForPreviewHarness(page)
     await page.getByRole("button", { name: "V5" }).click()

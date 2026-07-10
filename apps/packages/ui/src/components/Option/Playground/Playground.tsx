@@ -84,6 +84,7 @@ import {
 import { otherUnsupportedTypes } from "../Knowledge/utils/unsupported-types";
 import { useTranslation } from "react-i18next";
 import { useStoreMessageOption, type Message } from "@/store/option";
+import type { UploadedFile } from "@/db/dexie/types";
 import { useArtifactsStore } from "@/store/artifacts";
 import { DEGRADED_STATE_LABEL, READY_STATE_LABEL } from "@/design-system";
 import { useSetting } from "@/hooks/useSetting";
@@ -316,6 +317,45 @@ const COCKPIT_MCP_SETTINGS_TRIGGER_SELECTOR =
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === "object" && !Array.isArray(value);
 
+const isUploadedFileDraft = (value: unknown): value is UploadedFile =>
+  isRecord(value) &&
+  typeof value.id === "string" &&
+  typeof value.filename === "string" &&
+  typeof value.type === "string" &&
+  typeof value.content === "string" &&
+  typeof value.size === "number" &&
+  typeof value.uploadedAt === "number" &&
+  typeof value.processed === "boolean";
+
+const normalizeSidepanelDocumentDraftFiles = (
+  payload: unknown,
+): UploadedFile[] => {
+  if (!isRecord(payload) || !Array.isArray(payload.files)) {
+    return [];
+  }
+  const invalidCount = payload.files.filter(
+    (file) => !isUploadedFileDraft(file),
+  ).length;
+  if (invalidCount > 0) {
+    console.warn(
+      "[Playground] Ignored invalid sidepanel document draft file entries",
+      { invalidCount },
+    );
+  }
+  return payload.files.filter(isUploadedFileDraft);
+};
+
+const mergeUploadedFilesById = (
+  existing: UploadedFile[],
+  incoming: UploadedFile[],
+): UploadedFile[] => {
+  const byId = new Map(existing.map((file) => [file.id, file]));
+  for (const file of incoming) {
+    byId.set(file.id, file);
+  }
+  return Array.from(byId.values());
+};
+
 const getRecordString = (value: unknown, keys: string[]): string | null => {
   if (!isRecord(value)) return null;
   for (const key of keys) {
@@ -516,6 +556,8 @@ export const Playground = () => {
     setSelectedKnowledge,
     ragMediaIds,
     setRagMediaIds,
+    fileRetrievalEnabled,
+    setFileRetrievalEnabled,
     stopStreamingRequest,
     regenerateLastMessage,
     selectedAssistant,
@@ -527,6 +569,9 @@ export const Playground = () => {
     setServerChatPersonaMemoryMode,
     setServerChatMetaLoaded,
   } = useMessageOption();
+  const setUploadedFiles = useStoreMessageOption(
+    (state) => state.setUploadedFiles,
+  );
   const {
     systemPrompt,
     setSystemPrompt,
@@ -1911,6 +1956,66 @@ export const Playground = () => {
       ) {
         setUseOCR(sidepanelChatHandoff.useOCR);
       }
+      if (sidepanelChatHandoff.chatDocumentDraftId) {
+        try {
+          const documentDraft = await tldwClient.getDocumentUploadDraft(
+            sidepanelChatHandoff.chatDocumentDraftId,
+          );
+          if (cancelled) return;
+          const draftFiles = normalizeSidepanelDocumentDraftFiles(
+            documentDraft.payload,
+          );
+          if (draftFiles.length > 0) {
+            const currentState = useStoreMessageOption.getState();
+            const nextUploadedFiles = mergeUploadedFilesById(
+              currentState.uploadedFiles,
+              draftFiles,
+            );
+            const draftContextFiles = draftFiles.filter(
+              (file) => file.processingMode !== "ingest_to_library",
+            );
+            setUploadedFiles(nextUploadedFiles);
+            setContextFiles(
+              mergeUploadedFilesById(
+                currentState.contextFiles,
+                draftContextFiles,
+              ),
+            );
+          }
+          await tldwClient
+            .deleteDocumentUploadDraft(sidepanelChatHandoff.chatDocumentDraftId)
+            .catch((error) => {
+              console.warn(
+                "[Playground] Failed to delete imported document draft",
+                error,
+              );
+            });
+        } catch (error) {
+          console.warn(
+            "[Playground] Failed to import sidepanel document draft",
+            error,
+          );
+        }
+      }
+      if (
+        Object.prototype.hasOwnProperty.call(
+          sidepanelChatHandoff,
+          "ragMediaIds",
+        )
+      ) {
+        const nextRagMediaIds =
+          Array.isArray(sidepanelChatHandoff.ragMediaIds) &&
+          sidepanelChatHandoff.ragMediaIds.length > 0
+            ? sidepanelChatHandoff.ragMediaIds
+            : null;
+        setRagMediaIds(nextRagMediaIds);
+      }
+      if (
+        typeof sidepanelChatHandoff.fileRetrievalEnabled === "boolean" &&
+        sidepanelChatHandoff.fileRetrievalEnabled !== fileRetrievalEnabled
+      ) {
+        setFileRetrievalEnabled(sidepanelChatHandoff.fileRetrievalEnabled);
+      }
 
       if (sidepanelChatHandoff.draft?.trim()) {
         requestAnimationFrame(() => {
@@ -1953,12 +2058,16 @@ export const Playground = () => {
     selectedSystemPrompt,
     serverChatId,
     setChatMode,
+    setContextFiles,
+    setFileRetrievalEnabled,
+    setRagMediaIds,
     setSelectedModel,
     setSelectedQuickPrompt,
     setSelectedSystemPrompt,
     setServerChatId,
     setTemporaryChat,
     setToolChoice,
+    setUploadedFiles,
     setUseOCR,
     setWebSearch,
     sidepanelChatHandoff,
@@ -1966,6 +2075,7 @@ export const Playground = () => {
     toolChoice,
     useOCR,
     webSearch,
+    fileRetrievalEnabled,
   ]);
 
   const pendingTimelineActionRef = React.useRef<TimelineActionDetail | null>(

@@ -50,8 +50,9 @@ def client(tmp_path_factory, monkeypatch):
                     job_id, user_id, status, chatbook_name, output_path,
                     created_at, started_at, completed_at, error_message,
                     progress_percentage, total_items, processed_items,
-                    file_size_bytes, download_url, expires_at,
+                    file_size_bytes, download_url, expires_at, *rest,
                 ) = params
+                metadata = rest[0] if rest else None
                 self.export_jobs[job_id] = {
                     "job_id": job_id,
                     "user_id": user_id,
@@ -68,6 +69,7 @@ def client(tmp_path_factory, monkeypatch):
                     "file_size_bytes": file_size_bytes,
                     "download_url": download_url,
                     "expires_at": expires_at,
+                    "metadata": metadata,
                 }
                 return _DummyCursor([])
 
@@ -77,8 +79,9 @@ def client(tmp_path_factory, monkeypatch):
                     created_at, started_at, completed_at, error_message,
                     progress_percentage, total_items, processed_items,
                     successful_items, failed_items, skipped_items,
-                    conflicts, warnings,
+                    conflicts, warnings, *rest,
                 ) = params
+                metadata = rest[0] if rest else None
                 self.import_jobs[job_id] = {
                     "job_id": job_id,
                     "user_id": user_id,
@@ -96,6 +99,7 @@ def client(tmp_path_factory, monkeypatch):
                     "skipped_items": skipped_items,
                     "conflicts": conflicts,
                     "warnings": warnings,
+                    "metadata": metadata,
                 }
                 return _DummyCursor([])
 

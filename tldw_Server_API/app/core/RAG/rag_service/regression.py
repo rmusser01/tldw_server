@@ -177,7 +177,7 @@ class RegressionDetector:
                 than this fraction of the baseline value.
             lower_is_better: Set of metric names where lower values are better.
         """
-        self.baseline_dir = Path(baseline_dir or self.DEFAULT_BASELINE_DIR)
+        self.baseline_dir = Path(baseline_dir or self.DEFAULT_BASELINE_DIR).resolve(strict=False)
         self._dir_ensured = False
         self.default_threshold = default_threshold
         self.lower_is_better = lower_is_better or {"hallucination", "latency_p99_ms"}
@@ -394,7 +394,12 @@ class RegressionDetector:
         """
         if not _SAFE_ID_RE.match(baseline_id):
             raise ValueError(f"Invalid baseline ID: {baseline_id!r}")
-        return self.baseline_dir / f"{baseline_id}.json"
+        path = (self.baseline_dir / f"{baseline_id}.json").resolve(strict=False)
+        try:
+            path.relative_to(self.baseline_dir)
+        except ValueError as exc:
+            raise ValueError("baseline path escapes baseline directory") from exc
+        return path
 
     def _save_atomic(self, baseline: MetricBaseline) -> None:
         """Save baseline atomically using temp file + rename."""

@@ -2,23 +2,15 @@ import type { Page } from "@playwright/test"
 import { expect, seedAuth, test } from "./smoke.setup"
 
 /**
- * Mobile-viewport smoke for {V1, V3, V5} at narrow widths. The plan
- * calls for "resize each surface to ~360px; verify all three variants
- * degrade cleanly (especially V3's brief panel collapsing to a chip
- * strip above the textarea)."
- *
- * The Playground page itself isn't designed for sub-tablet widths
- * (the legacy composer also overflows there), so we test the
- * Sidepanel surface at 360px (it IS designed for narrow widths) and
- * the Playground at 768px (tablet — its breakpoint where the layout
- * collapses gracefully).
+ * Mobile-viewport smoke for the current composer direction. The sidepanel
+ * uses V5 as the mobile reference; V1/V3 remain selectable layouts, but they
+ * are not the standard we design or regress against for narrow screens.
  *
  * We don't snapshot pixels. Instead we assert structural invariants:
- *   - the variant root [data-variant=vN] exists
- *   - the chat input is present and visible
- *   - the composer WRAPPER itself does not exceed its container
- *     (rules out variant-level layout regressions, even if the rest
- *     of the page has its own overflow story)
+ *   - the V5 compact mobile rows render at 360px
+ *   - the textarea keeps usable width
+ *   - desktop command affordances do not leak into mobile
+ *   - the composer wrapper itself does not exceed its container
  */
 
 const bypassOnboarding = async (page: Page) => {
@@ -28,97 +20,133 @@ const bypassOnboarding = async (page: Page) => {
   })
 }
 
-const setVariant = (variant: "v1" | "v3" | "v5") => async (page: Page) => {
-  await page.addInitScript((v: string) => {
-    window.localStorage.setItem("tldw:composerVariant", v)
-  }, variant)
+const mockComposerProfile = async (page: Page) => {
+  await page.route(/\/api\/v1\/users\/me\/profile.*/, async (route) => {
+    const method = route.request().method()
+    if (method === "GET") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          profile_version: "2026-04-20T00:00:00Z",
+          preferences: {},
+        }),
+      })
+      return
+    }
+    if (method === "PATCH") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ applied: [], skipped: [] }),
+      })
+      return
+    }
+    await route.continue()
+  })
 }
 
-const SIDEPANEL_MATRIX: Array<{ variant: "v1" | "v3" | "v5"; width: number }> = [
-  { variant: "v1", width: 360 },
-  { variant: "v3", width: 360 },
-  { variant: "v5", width: 360 },
-]
+const setV5 = async (page: Page) => {
+  await page.addInitScript(() => {
+    window.localStorage.setItem("tldw:composerVariant", "v5")
+  })
+}
 
-const PLAYGROUND_MATRIX: Array<{ variant: "v1" | "v3" | "v5"; width: number }> = [
-  { variant: "v1", width: 768 },
-  { variant: "v3", width: 768 },
-  { variant: "v5", width: 768 },
-]
+const assertWrapperDoesNotOverflow = async (page: Page) => {
+  const wrapper = page.locator('[data-testid="nextgen-composer-wrapper"]')
+  const overflow = await wrapper.evaluate((el) => {
+    const parent = el.parentElement
+    if (!parent) return false
+    return el.scrollWidth > parent.clientWidth
+  })
+  expect(overflow).toBe(false)
+}
 
 test.describe("composer · mobile viewport", () => {
-  for (const { variant, width } of SIDEPANEL_MATRIX) {
-    test(`sidepanel: ${variant} at ${width}px fits without composer overflow`, async ({
-      page,
-    }) => {
-      test.setTimeout(90_000)
-      await bypassOnboarding(page)
-      await setVariant(variant)(page)
-      await page.setViewportSize({ width, height: 800 })
+  test("sidepanel: V5 at 360px keeps a usable compact composer", async ({
+    page,
+  }) => {
+    test.setTimeout(90_000)
+    await bypassOnboarding(page)
+    await mockComposerProfile(page)
+    await setV5(page)
+    await page.setViewportSize({ width: 360, height: 800 })
 
-      await page.goto("/__debug__/sidepanel-chat?nextgenComposer=1")
-      await page
-        .waitForLoadState("networkidle", { timeout: 30_000 })
-        .catch(() => {})
+    await page.goto("/__debug__/sidepanel-chat?nextgenComposer=1")
+    await page
+      .waitForLoadState("networkidle", { timeout: 30_000 })
+      .catch(() => {})
 
-      const wrapper = page.locator('[data-testid="nextgen-composer-wrapper"]')
-      await expect(wrapper).toBeVisible({ timeout: 30_000 })
-      await expect(
-        wrapper.locator(`[data-variant='${variant}']`)
-      ).toBeVisible()
+    await expect(
+      page.locator('[data-testid="chat-header-sidebar-toggle"]')
+    ).toHaveCount(0)
+    await expect(
+      page.locator('[data-testid="chat-header-companion-home"]')
+    ).toHaveCount(0)
+    await expect(page.locator('[data-testid="chat-header"]')).toHaveCount(1)
 
-      const chatInput = wrapper.locator('[data-testid="chat-input"]')
-      await expect(chatInput).toBeVisible()
+    const emptyState = page.locator('[data-testid="chat-empty-connected"]')
+    await expect(emptyState).toBeVisible()
+    await expect(emptyState.getByText("Connected", { exact: true })).toHaveCount(
+      0
+    )
+    await expect(page.locator('[data-testid="chat-suggestion-3"]')).toHaveCount(0)
 
-      // The composer wrapper should not exceed its parent container.
-      const overflow = await wrapper.evaluate((el) => {
-        const parent = el.parentElement
-        if (!parent) return false
-        return el.scrollWidth > parent.clientWidth
-      })
-      expect(overflow).toBe(false)
+    const wrapper = page.locator('[data-testid="nextgen-composer-wrapper"]')
+    await expect(wrapper).toBeVisible({ timeout: 30_000 })
+    await expect(wrapper.locator("[data-variant='v5']")).toBeVisible()
+    await expect(wrapper.locator('[data-testid="v5-mobile-composer"]')).toBeVisible()
+    await expect(wrapper.locator('[data-testid="v5-mobile-text-row"]')).toBeVisible()
+    await expect(wrapper.locator('[data-testid="v5-mobile-action-row"]')).toBeVisible()
+    await expect(wrapper.getByText("⌘K")).toHaveCount(0)
+    await expect(
+      wrapper.locator('[data-testid="chat-upload-image-inline"]')
+    ).toHaveCount(0)
+    await expect(
+      wrapper.locator('[data-testid="chat-attach-document-inline"]')
+    ).toBeVisible()
+
+    const metaText = await wrapper
+      .locator('[data-testid="v5-mobile-meta-row"]')
+      .innerText()
+    expect(metaText).not.toContain("MDL")
+    expect(metaText).not.toContain("—")
+
+    const chatInput = wrapper.locator('[data-testid="chat-input"]')
+    await expect(chatInput).toBeVisible()
+    const inputBox = await chatInput.boundingBox()
+    expect(inputBox?.width ?? 0).toBeGreaterThan(220)
+
+    await assertWrapperDoesNotOverflow(page)
+  })
+
+  test("/chat: V5 tablet viewport fits without composer overflow", async ({
+    page,
+  }) => {
+    test.setTimeout(90_000)
+    await bypassOnboarding(page)
+    await mockComposerProfile(page)
+    await setV5(page)
+    await page.setViewportSize({ width: 768, height: 800 })
+
+    await page.goto("/chat?nextgenComposer=1")
+    await page
+      .waitForLoadState("networkidle", { timeout: 30_000 })
+      .catch(() => {})
+
+    await page.evaluate(() => {
+      document
+        .querySelectorAll("nextjs-portal, [role='dialog']")
+        .forEach((el) => {
+          if (el instanceof HTMLElement) el.style.display = "none"
+        })
     })
-  }
 
-  for (const { variant, width } of PLAYGROUND_MATRIX) {
-    test(`/chat: ${variant} at ${width}px fits without composer overflow`, async ({
-      page,
-    }) => {
-      test.setTimeout(90_000)
-      await bypassOnboarding(page)
-      await setVariant(variant)(page)
-      await page.setViewportSize({ width, height: 800 })
+    const wrapper = page.locator('[data-testid="nextgen-composer-wrapper"]')
+    await expect(wrapper).toBeVisible({ timeout: 30_000 })
+    await expect(wrapper.locator("[data-variant='v5']")).toBeVisible()
+    await expect(wrapper.locator('[data-testid="chat-input"]')).toBeVisible()
 
-      await page.goto("/chat?nextgenComposer=1")
-      await page
-        .waitForLoadState("networkidle", { timeout: 30_000 })
-        .catch(() => {})
-
-      // Hide dev runtime overlay (no backend)
-      await page.evaluate(() => {
-        document
-          .querySelectorAll("nextjs-portal, [role='dialog']")
-          .forEach((el) => {
-            if (el instanceof HTMLElement) el.style.display = "none"
-          })
-      })
-
-      const wrapper = page.locator('[data-testid="nextgen-composer-wrapper"]')
-      await expect(wrapper).toBeVisible({ timeout: 30_000 })
-      await expect(
-        wrapper.locator(`[data-variant='${variant}']`)
-      ).toBeVisible()
-
-      const chatInput = wrapper.locator('[data-testid="chat-input"]')
-      await expect(chatInput).toBeVisible()
-
-      // The composer wrapper should not exceed its parent container.
-      const overflow = await wrapper.evaluate((el) => {
-        const parent = el.parentElement
-        if (!parent) return false
-        return el.scrollWidth > parent.clientWidth
-      })
-      expect(overflow).toBe(false)
-    })
-  }
+    await assertWrapperDoesNotOverflow(page)
+  })
 })

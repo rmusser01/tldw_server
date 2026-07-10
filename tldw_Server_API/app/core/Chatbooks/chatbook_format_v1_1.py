@@ -194,6 +194,20 @@ def validate_v1_1_before_import(manifest: Any, extract_dir: Path) -> tuple[bool,
             errors.append(
                 f"File inventory validation failed for {attachment_path}: missing inventory entry"
             )
+    for artifact_path, reason in _media_artifact_inventory_requirements(
+        getattr(manifest, "content_items", []),
+        extract_dir,
+        inventory_paths,
+        failed_inventory_paths,
+    ):
+        if reason == "unsafe_media_artifact_path":
+            errors.append(
+                f"File inventory validation failed for {artifact_path}: unsafe media artifact path"
+            )
+        elif artifact_path not in inventory_paths:
+            errors.append(
+                f"File inventory validation failed for {artifact_path}: missing inventory entry"
+            )
 
     for report_error in report.get("errors") or []:
         if isinstance(report_error, str):
@@ -411,6 +425,11 @@ def _required_import_payload_paths(content_items: Any) -> list[str]:
         "character": "content/characters/character_{id}.json",
         "world_book": "content/world_books/world_book_{id}.json",
         "dictionary": "content/dictionaries/dictionary_{id}.json",
+        "prompt": "content/prompts/prompt_{id}.json",
+        "evaluation": "content/evaluations/evaluation_{id}.json",
+        "media": "content/media/media_{id}.json",
+        "embedding": "content/embeddings/embedding_{id}.json",
+        "generated_document": "content/generated_documents/document_{id}.json",
     }
 
     paths: list[str] = []
@@ -423,8 +442,6 @@ def _required_import_payload_paths(content_items: Any) -> list[str]:
         path: str | None = None
         if item_type in fallback_templates:
             path = _content_item_file_path(item) or fallback_templates[item_type].format(id=str(item_id))
-        elif item_type == "generated_document":
-            path = _content_item_file_path(item) or f"content/generated_documents/document_{item_id}.json"
 
         if path and path not in paths:
             paths.append(path)
@@ -490,6 +507,59 @@ def _conversation_attachment_inventory_requirements(
                     continue
                 if (attachment_path, "missing_inventory") not in requirements:
                     requirements.append((attachment_path, "missing_inventory"))
+    return requirements
+
+
+def _media_artifact_inventory_requirements(
+    content_items: Any,
+    extract_dir: Path,
+    inventory_paths: set[str],
+    failed_inventory_paths: set[str],
+) -> list[tuple[str, str]]:
+    if not isinstance(content_items, list):
+        return []
+
+    requirements: list[tuple[str, str]] = []
+    for item in content_items:
+        item_id = _content_item_field(item, "id")
+        if item_id is None or str(item_id) == "":
+            continue
+        item_type = _content_type_value(_content_item_field(item, "type"))
+        if item_type != "media":
+            continue
+
+        media_path = _content_item_file_path(item) or f"content/media/media_{item_id}.json"
+        if media_path not in inventory_paths or media_path in failed_inventory_paths:
+            continue
+
+        media_file = _safe_extract_file_path(extract_dir, media_path)
+        if media_file is None:
+            continue
+
+        try:
+            media_data = json.loads(media_file.read_text(encoding="utf-8"))
+        except (OSError, TypeError, UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        if not isinstance(media_data, dict):
+            continue
+
+        artifacts = media_data.get("stored_artifacts")
+        if not isinstance(artifacts, list):
+            continue
+        for artifact in artifacts:
+            if not isinstance(artifact, dict):
+                continue
+            if not artifact.get("bundled"):
+                continue
+            raw_path = artifact.get("archive_path")
+            if not isinstance(raw_path, str) or not raw_path:
+                continue
+            artifact_path = _normalize_archive_relative_path(raw_path)
+            if artifact_path is None:
+                requirements.append((raw_path, "unsafe_media_artifact_path"))
+                continue
+            if (artifact_path, "missing_inventory") not in requirements:
+                requirements.append((artifact_path, "missing_inventory"))
     return requirements
 
 

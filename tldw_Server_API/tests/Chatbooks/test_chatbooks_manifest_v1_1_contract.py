@@ -12,6 +12,7 @@ from pydantic import ValidationError
 from tldw_Server_API.app.api.v1.schemas.chatbook_schemas import CreateChatbookRequest
 from tldw_Server_API.app.services import core_jobs_worker as active_core_jobs_worker
 from tldw_Server_API.app.core.Chatbooks.chatbook_models import (
+    FULL_ACCOUNT_EXPORT_MODE,
     ChatbookManifest,
     ChatbookVersion,
     ExportJob,
@@ -210,7 +211,8 @@ async def test_core_jobs_export_payload_accepts_none_content_selections(chatbook
 
     assert success is True
     assert captured_payload["chatbooks_job_id"] == job_id
-    assert captured_payload["content_selections"] == {}
+    assert captured_payload["selection_mode"] == FULL_ACCOUNT_EXPORT_MODE
+    assert captured_payload["content_selections"] is None
 
 
 async def test_core_jobs_worker_forwards_format_version_to_archive_creation():
@@ -232,7 +234,8 @@ async def test_core_jobs_worker_forwards_format_version_to_archive_creation():
         {
             "name": "v1.1 queued",
             "description": "v1.1 queued",
-            "content_selections": {},
+            "selection_mode": FULL_ACCOUNT_EXPORT_MODE,
+            "content_selections": None,
             "format_version": "1.1.0",
         },
         "job-1",
@@ -253,7 +256,8 @@ async def test_core_jobs_worker_rejects_unsupported_format_version_nonretryably(
             {
                 "name": "v2 queued",
                 "description": "v2 queued",
-                "content_selections": {},
+                "selection_mode": FULL_ACCOUNT_EXPORT_MODE,
+                "content_selections": None,
                 "format_version": "2.0.0",
             },
             "job-1",
@@ -287,7 +291,8 @@ async def test_core_jobs_worker_marks_export_job_failed_for_unsupported_format_v
             {
                 "name": "v2 queued",
                 "description": "v2 queued",
-                "content_selections": {},
+                "selection_mode": FULL_ACCOUNT_EXPORT_MODE,
+                "content_selections": None,
                 "format_version": "2.0.0",
             },
             "job-1",
@@ -360,7 +365,8 @@ async def test_active_core_jobs_worker_forwards_format_version_to_archive_creati
         {
             "name": "v1.1 active queued",
             "description": "v1.1 active queued",
-            "content_selections": {},
+            "selection_mode": FULL_ACCOUNT_EXPORT_MODE,
+            "content_selections": None,
             "format_version": "1.1.0",
         },
     )
@@ -374,11 +380,26 @@ async def test_active_core_jobs_worker_defaults_format_version_to_v1(monkeypatch
         {
             "name": "v1 active queued",
             "description": "v1 active queued",
-            "content_selections": {},
+            "selection_mode": FULL_ACCOUNT_EXPORT_MODE,
+            "content_selections": None,
         },
     )
 
     assert captured_kwargs["format_version"] == ChatbookVersion.V1
+
+
+async def test_active_core_jobs_worker_treats_legacy_empty_mapping_payload_as_full_account(monkeypatch):
+    captured_kwargs, _fail_calls = await _run_active_core_jobs_worker_export_once(
+        monkeypatch,
+        {
+            "name": "legacy active queued",
+            "description": "legacy active queued",
+            "content_selections": {},
+        },
+    )
+
+    assert captured_kwargs["selection_mode"] == FULL_ACCOUNT_EXPORT_MODE
+    assert captured_kwargs["content_selections"] is None
 
 
 async def test_active_core_jobs_worker_fails_unsupported_format_version_nonretryably(monkeypatch):
@@ -387,7 +408,8 @@ async def test_active_core_jobs_worker_fails_unsupported_format_version_nonretry
         {
             "name": "v2 active queued",
             "description": "v2 active queued",
-            "content_selections": {},
+            "selection_mode": FULL_ACCOUNT_EXPORT_MODE,
+            "content_selections": None,
             "format_version": "2.0.0",
         },
         service_captures=False,
@@ -455,6 +477,32 @@ def test_v1_manifest_to_dict_excludes_populated_v1_1_metadata_fields():
                 "role": "readme",
             }
         ],
+        account_inventory=[
+            {
+                "category": "media_pointers",
+                "label": "Media source references",
+                "source": "Media DB",
+                "export_representation": "json/media_pointers.json",
+                "manifest_count_key": "media_pointers",
+                "import_handler_key": "restore_media_pointers",
+                "dependencies": [],
+                "sensitivity": "personal",
+                "restore_status": "pointer_only",
+                "warning": "Pointer-only test warning.",
+            }
+        ],
+        account_inventory_summary={
+            "counts": {
+                "account_profiles": 1,
+                "media_pointers": 1,
+            },
+            "pointer_only_count": 1,
+            "sensitive_category_count": 1,
+            "warning_count": 1,
+            "warnings": ["Pointer-only test warning."],
+            "archive_size_bytes": 0,
+            "post_write_verification": False,
+        },
     )
 
     manifest_dict = manifest.to_dict()
@@ -464,6 +512,10 @@ def test_v1_manifest_to_dict_excludes_populated_v1_1_metadata_fields():
     assert "source_instance" not in manifest_dict
     assert "compatibility" not in manifest_dict
     assert "file_inventory" not in manifest_dict
+    assert "account_inventory" not in manifest_dict
+    assert "account_inventory_summary" not in manifest_dict
+    assert "account_profiles" not in manifest_dict["statistics"]
+    assert "media_pointers" not in manifest_dict["statistics"]
 
 
 def test_v1_1_manifest_to_dict_includes_default_v1_1_metadata_fields():

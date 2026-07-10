@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import io
 import os
-import re
 import stat
 import tempfile
 from collections.abc import Mapping
@@ -34,7 +33,6 @@ VISUAL_IDENTITY_STORED_ASSET_HASH_MISMATCH = "stored_asset_hash_mismatch"
 VISUAL_IDENTITY_STORED_ASSET_PUBLISH_UNAVAILABLE = "stored_asset_publish_unavailable"
 
 _IMAGE_VALIDATION_ERRORS = (OSError, ValueError, UnidentifiedImageError)
-_SAFE_COMPONENT_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 _MIME_EXTENSION_CHOICES = {
     "image/png": (".png",),
     "image/jpeg": (".jpg", ".jpeg"),
@@ -260,17 +258,8 @@ def _preview_relpath(
 
 def _safe_storage_component(value: str, *, prefix: str) -> str:
     raw = str(value or "").strip()
-    if not raw or raw in {".", ".."}:
-        digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
-        return f"{prefix}_{digest}"
-    cleaned = _SAFE_COMPONENT_RE.sub("_", raw).strip("._-")
-    if not cleaned:
-        digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
-        return f"{prefix}_{digest}"
-    if cleaned in {".", ".."}:
-        digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
-        return f"{prefix}_{digest}"
-    return cleaned[:120]
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
+    return f"{prefix}_{digest}"
 
 
 def _validate_visual_identity_source(

@@ -93,7 +93,10 @@
     "tempChatDisabledClearedMessages": "Temporary chat disabled. Previous messages cleared.",
     "tempChatClearedMessages": "Temporary chat enabled. Previous messages cleared.",
     "clearQueueConfirmTitle": "Clear message queue?",
-    "clearQueueConfirmContent": "This will delete {{count}} queued message(s) that haven't been sent yet."
+    "clearQueueConfirmContent": "This will delete {{count}} queued message(s) that haven't been sent yet.",
+    "documentHandoffFailedTitle": "Could not open documents in chat",
+    "documentHandoffFailedDescription": "Try again, or remove the files and open chat without them.",
+    "documentPreflightFailed": "Document preflight failed. Try again or remove the file."
   },
   "notification": {
     "ingestSent": "Sent to tldw server",

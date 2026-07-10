@@ -9,11 +9,9 @@ import { ConnectionPhase } from "@/types/connection";
 import { cleanUrl } from "@/libs/clean-url";
 import {
   MessageSquare,
-  Wifi,
   Sparkles,
   FileText,
   Search,
-  BookOpen,
 } from "lucide-react";
 import { RecoveryCallout, type RecoveryState } from "@/components/ui/state";
 
@@ -252,23 +250,19 @@ export const EmptySidePanel = ({ inputRef }: EmptySidePanelProps) => {
   // Connected state: show welcoming empty chat guidance
   return (
     <div
-      className="mt-4 flex w-full flex-col items-center justify-center px-4"
+      className="mt-2 flex w-full flex-col items-center justify-center px-4"
       data-testid="chat-empty-connected"
     >
       {/* Animated icon */}
-      <div className="relative mb-3">
-        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-success/10">
-          <MessageSquare className="size-6 text-success" />
+      <div className="relative mb-2">
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-success/10">
+          <MessageSquare className="size-5 text-success" />
         </div>
         <div className="absolute -right-1 -top-1 h-3 w-3 rounded-full border-2 border-bg bg-success" />
       </div>
 
-      {/* Status and heading */}
-      <div className="mb-1 flex items-center gap-1 text-xs font-medium text-success">
-        <Wifi className="size-3" />
-        {t("sidepanel:emptyChat.connected", "Connected")}
-      </div>
-      <p className="mb-4 text-sm font-medium text-text">
+      {/* Heading */}
+      <p className="mb-3 text-sm font-medium text-text">
         {mode === "demo"
           ? t(
               "sidepanel:emptyChat.demoHint",
@@ -326,31 +320,6 @@ export const EmptySidePanel = ({ inputRef }: EmptySidePanelProps) => {
             {t(
               "sidepanel:emptyChat.examplePrompt2",
               '"What are the key points?"',
-            )}
-          </span>
-        </button>
-        <button
-          type="button"
-          data-testid="chat-suggestion-3"
-          className="group flex w-full items-center gap-3 rounded-2xl border border-border/70 bg-surface px-3 py-2 text-left transition-colors hover:border-primary/40 hover:bg-surface2"
-          title={t(
-            "sidepanel:emptyChat.examplePrompt3",
-            '"Explain this in simple terms"',
-          )}
-          onClick={() =>
-            insertPrompt(
-              t(
-                "sidepanel:emptyChat.examplePrompt3Text",
-                "Explain this in simple terms",
-              ),
-            )
-          }
-        >
-          <BookOpen className="size-4 text-text-subtle group-hover:text-primary flex-shrink-0" />
-          <span className="text-xs text-text-muted">
-            {t(
-              "sidepanel:emptyChat.examplePrompt3",
-              '"Explain this in simple terms"',
             )}
           </span>
         </button>

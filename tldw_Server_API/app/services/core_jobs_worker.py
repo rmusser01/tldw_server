@@ -9,6 +9,7 @@ from pathlib import Path
 from loguru import logger
 
 from tldw_Server_API.app.core.Chatbooks.chatbook_models import (
+    FULL_ACCOUNT_EXPORT_MODE,
     ConflictResolution,
     ContentType,
     ExportStatus,
@@ -176,10 +177,32 @@ async def run_chatbooks_core_jobs_worker(stop_event: asyncio.Event | None = None
                     continue
                 try:
                     # Build selections
-                    cs = {}
-                    for k, v in (payload.get("content_selections") or {}).items():
-                        with contextlib.suppress(_CORE_JOBS_WORKER_NONCRITICAL_EXCEPTIONS):
-                            cs[ContentType(k)] = v
+                    raw_selections = payload.get("content_selections")
+                    selection_mode = str(
+                        payload.get("selection_mode")
+                        or (FULL_ACCOUNT_EXPORT_MODE if raw_selections is None or raw_selections == {} else "allowlist")
+                    )
+                    cs = None if selection_mode == FULL_ACCOUNT_EXPORT_MODE else {}
+                    if cs is not None:
+                        for k, v in (raw_selections or {}).items():
+                            with contextlib.suppress(_CORE_JOBS_WORKER_NONCRITICAL_EXCEPTIONS):
+                                cs[ContentType(k)] = v
+                        if sum(len(ids or []) for ids in cs.values()) == 0:
+                            err_msg = "Export allowlist contains no exportable items."
+                            if ej:
+                                ej.status = ExportStatus.FAILED
+                                ej.completed_at = datetime.now(timezone.utc)
+                                ej.error_message = err_msg
+                                svc._save_export_job(ej)
+                            jm.fail_job(
+                                int(job["id"]),
+                                error=err_msg,
+                                retryable=False,
+                                worker_id=worker_id,
+                                lease_id=str(lease_id),
+                                completion_token=str(lease_id),
+                            )
+                            continue
                     try:
                         format_version = coerce_chatbook_export_version(payload.get("format_version"))
                     except ValueError as exc:
@@ -212,6 +235,7 @@ async def run_chatbooks_core_jobs_worker(stop_event: asyncio.Event | None = None
                         tags=payload.get("tags") or [],
                         categories=payload.get("categories") or [],
                         format_version=format_version,
+                        selection_mode=selection_mode,
                     )
                     if ok:
                         # Mid-flight cancel check (honor cancellation request or terminal state)

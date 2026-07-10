@@ -1,5 +1,6 @@
 import "@testing-library/jest-dom/vitest"
 import { cleanup } from "@testing-library/react"
+import { webcrypto } from "node:crypto"
 import { afterAll, afterEach, beforeAll, vi } from "vitest"
 
 const originalGetComputedStyle = window.getComputedStyle.bind(window)
@@ -86,6 +87,13 @@ const ensureLocalStorage = (): void => {
 }
 
 ensureLocalStorage()
+
+if (!globalThis.crypto?.subtle) {
+  Object.defineProperty(globalThis, "crypto", {
+    configurable: true,
+    value: webcrypto
+  })
+}
 
 const TEXTAREA_STYLE_FALLBACKS: Record<string, string> = {
   "letter-spacing": "normal",

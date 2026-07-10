@@ -917,15 +917,14 @@ class TestChatbookService:
         insert_index = next(index for index, query in enumerate(queries) if "INSERT OR REPLACE INTO export_jobs" in query)
         assert lock_index < insert_index
 
-    def test_import_skips_unsupported_content_types(self, service, tmp_path):
-        """Unsupported content types should be skipped with warnings."""
+    def test_import_skips_media_when_restore_flag_is_false(self, service, tmp_path):
+        """Explicitly disabled media restore should skip media content with warnings."""
         manifest = ChatbookManifest(
             version=ChatbookVersion.V1,
-            name="Unsupported Types",
-            description="Media and prompts are skipped",
+            name="Media Disabled",
+            description="Media is skipped when import_media is false",
             content_items=[
                 ContentItem(id="m1", type=ContentType.MEDIA, title="Media 1"),
-                ContentItem(id="p1", type=ContentType.PROMPT, title="Prompt 1"),
             ],
         )
 
@@ -938,7 +937,7 @@ class TestChatbookService:
             content_selections=None,
             conflict_resolution=ConflictResolution.SKIP,
             prefix_imported=False,
-            import_media=True,
+            import_media=False,
             import_embeddings=False,
         )
 
@@ -946,7 +945,7 @@ class TestChatbookService:
         assert "skipped" in message.lower()
         assert details is not None
         assert details["imported_items"] == {}
-        assert any("unsupported content type" in warning.lower() for warning in details["warnings"])
+        assert any("import_media=false" in warning for warning in details["warnings"])
 
     def test_import_conversation_missing_character_falls_back(self, service, mock_db, tmp_path):
         """Missing character_id should fall back to default with a warning."""
@@ -1116,6 +1115,26 @@ class TestChatbookService:
 
         call_args = mock_to_thread.await_args.args
         assert call_args[3] is ConflictResolution.SKIP
+
+    @pytest.mark.asyncio
+    async def test_async_import_job_persists_source_format_metadata(self, service):
+        """Async import status keeps the source format needed by polling clients."""
+        sample_path = service.import_dir / "openwebui.json"
+        sample_path.write_text("[]", encoding="utf-8")
+        saved_jobs = []
+        service._save_import_job_with_quota = saved_jobs.append
+        service._core_jobs = MagicMock()
+        service._core_jobs.create_job.return_value = {"id": 1}
+
+        success, _message, job_id = await service.import_chatbook(
+            file_path=str(sample_path),
+            source_format="openwebui_json",
+            async_mode=True,
+        )
+
+        assert success is True
+        assert job_id
+        assert saved_jobs[0].metadata["source_format"] == "openwebui_json"
 
     def test_get_statistics(self, service, mock_db):
         """Test getting import/export statistics."""

@@ -2194,7 +2194,7 @@ async def create_embeddings_batch_async(
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(exc),
+            detail="Invalid embedding provider configuration",
         ) from exc
 
     backend_identity = _normalize_cache_backend_identity(config, provider)
@@ -5038,7 +5038,7 @@ async def requeue_dlq_bulk(
                         with suppress(_EMBEDDINGS_NONCRITICAL_EXCEPTIONS):
                             await client.xdel(dlq_stream, eid)
             except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as e:
-                status = f"error:{type(e).__name__}"
+                status = "error"
                 dlq_requeue_errors_total.labels(queue_name=dlq_stream, error_type=type(e).__name__).inc()
             else:
                 dlq_requeued_total.labels(queue_name=dlq_stream, status=status).inc()

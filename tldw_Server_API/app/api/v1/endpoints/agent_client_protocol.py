@@ -2077,7 +2077,8 @@ async def acp_health(
             else:
                 runner_probe = {"status": "not_running", "detail": "Runner process is not started"}
         except _ACP_ENDPOINT_NONCRITICAL_EXCEPTIONS as exc:
-            runner_probe = {"status": "error", "detail": str(exc)}
+            logger.warning("ACP runner probe failed: {}", exc)
+            runner_probe = {"status": "error", "detail": "ACP runner probe failed"}
     result["runner_probe"] = runner_probe
 
     # 4. Route-gating status

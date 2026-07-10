@@ -89,6 +89,25 @@ def test_session_metadata_rehydrates_across_orchestrator_instances(monkeypatch, 
     assert (Path(str(ws_b)) / "marker.txt").read_text(encoding="utf-8") == "hello"
 
 
+def test_workspace_lookup_preserves_existing_legacy_raw_layout(monkeypatch, tmp_path: Path) -> None:
+    root_dir = tmp_path / "sandbox_root"
+    monkeypatch.setattr(SandboxOrchestrator, "_workspace_root", lambda _self: root_dir)
+
+    class _Store:
+        def get_session(self, session_id: str) -> dict[str, str | None]:
+            return {"id": session_id, "user_id": "user-legacy", "workspace_path": None}
+
+    legacy_ws = root_dir / "user-legacy" / "sessions" / "sess-legacy" / "workspace"
+    legacy_ws.mkdir(parents=True, exist_ok=True)
+    (legacy_ws / "marker.txt").write_text("legacy", encoding="utf-8")
+
+    orch = SandboxOrchestrator()
+    orch._store = _Store()  # type: ignore[assignment]
+
+    assert orch.get_session_workspace_path("sess-legacy") == str(legacy_ws.resolve(strict=False))
+    assert (legacy_ws / "marker.txt").read_text(encoding="utf-8") == "legacy"
+
+
 def test_clone_session_works_after_service_restart(monkeypatch, tmp_path: Path) -> None:
     _configure_sqlite_store(monkeypatch, tmp_path)
     _force_docker_preflight_available(monkeypatch)
@@ -283,7 +302,7 @@ def test_destroy_session_cleans_snapshots_artifacts_and_usage(monkeypatch, tmp_p
         body={"command": ["python", "-c", "print('queued')"], "session_id": session.id},
     )
     svc._orch.store_artifacts(run.id, {"out.txt": b"hello"})
-    snapshot_dir = Path(tmp_path) / "snapshots" / session.id
+    snapshot_dir = svc._snapshots._snapshot_dir(session.id)  # type: ignore[attr-defined]
     artifact_dir = svc._orch._artifact_dir("user-77", run.id)  # type: ignore[attr-defined]
     assert snapshot_dir.exists()
     assert artifact_dir.exists()

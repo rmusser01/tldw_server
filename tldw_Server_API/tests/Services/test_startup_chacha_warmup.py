@@ -39,6 +39,8 @@ async def test_warm_chacha_notes_on_startup_schedules_single_user_warmup(
     logger = _FakeLogger()
     observed: dict[str, object] = {"reset_calls": 0}
 
+    monkeypatch.delenv("TEST_MODE", raising=False)
+    monkeypatch.delenv("TLDW_TEST_MODE", raising=False)
     monkeypatch.setattr(
         warmup,
         "_reset_chacha_shutdown_state",
@@ -72,6 +74,32 @@ async def test_warm_chacha_notes_on_startup_schedules_single_user_warmup(
 
 
 @pytest.mark.asyncio
+async def test_warm_chacha_notes_on_startup_skips_test_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    warmup = _import_startup_chacha_warmup()
+    from tldw_Server_API.app.core.AuthNZ import settings as auth_settings
+
+    logger = _FakeLogger()
+
+    monkeypatch.setenv("TEST_MODE", "true")
+
+    def _fail_if_auth_mode_is_checked() -> bool:
+        raise AssertionError("test mode should skip auth mode checks")
+
+    monkeypatch.setattr(auth_settings, "is_single_user_mode", _fail_if_auth_mode_is_checked)
+
+    await warmup.warm_chacha_notes_on_startup(
+        logger=logger,
+        startup_guard_exceptions=(RuntimeError,),
+    )
+
+    assert logger.info_messages == []
+    assert any("test mode" in message.lower() for message in logger.debug_messages)
+    assert logger.warning_messages == []
+
+
+@pytest.mark.asyncio
 async def test_warm_chacha_notes_on_startup_skips_multi_user_mode(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -79,6 +107,8 @@ async def test_warm_chacha_notes_on_startup_skips_multi_user_mode(
     logger = _FakeLogger()
     observed: dict[str, object] = {"reset_calls": 0, "scheduled": False}
 
+    monkeypatch.delenv("TEST_MODE", raising=False)
+    monkeypatch.delenv("TLDW_TEST_MODE", raising=False)
     monkeypatch.setattr(
         warmup,
         "_reset_chacha_shutdown_state",

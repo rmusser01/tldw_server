@@ -449,6 +449,49 @@ def test_db_chat_file_fallback_skips_conversations_without_source_row_id():
     assert preview.items == ()
 
 
+def test_preview_hydration_resolves_selected_import_scope(real_hydration_db, tmp_path, monkeypatch):
+    data_root = tmp_path / "openwebui-data"
+    uploads = data_root / "uploads"
+    uploads.mkdir(parents=True)
+    (uploads / "file-image_image.png").write_bytes(PNG_BYTES)
+    _write_openwebui_hydration_db(data_root)
+    _patch_allowed_roots(monkeypatch, tmp_path)
+    real_hydration_db.upsert_conversation_settings(
+        "conv-a",
+        {
+            "openwebui_import": {
+                "source": "openwebui",
+                "external_ref": "source-chat-a",
+                "history_current_id": "source-msg-a",
+                "branched": False,
+                "metadata": {
+                    "import_scope_id": "scope-ow-user",
+                    "source_kind": "openwebui_db",
+                    "source_user_id": "ow-user",
+                    "source_user_label": "OpenWebUI User",
+                    "row_id": "source-chat-a",
+                },
+            }
+        },
+    )
+    service = ChatbookService(user_id="101", db=real_hydration_db)
+
+    preview = service.preview_openwebui_attachment_hydration(
+        openwebui_data_root=str(data_root),
+        scope={"import_scope_id": "scope-ow-user"},
+        process_supported_files=False,
+    )
+
+    assert preview["scope"] == {
+        "import_scope_id": "scope-ow-user",
+        "conversation_ids": ["conv-a"],
+        "source_user_id": "ow-user",
+    }
+    assert preview["summary"]["referenced_files"] == 1
+    assert preview["items"][0]["status"] == "resolved"
+    assert preview["items"][0]["conversation_id"] == "conv-a"
+
+
 def test_hydrate_png_ref_appends_image_and_preserves_openwebui_metadata(real_hydration_db, tmp_path):
     image_path = tmp_path / "image.png"
     image_path.write_bytes(PNG_BYTES)

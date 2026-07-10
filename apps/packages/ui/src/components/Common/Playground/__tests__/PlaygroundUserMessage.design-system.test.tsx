@@ -120,4 +120,26 @@ describe("Playground user message design-system badges", () => {
     expect(badge).toHaveTextContent("Custom review")
     expect(badge).not.toHaveTextContent("copilot.custom_review")
   })
+
+  it("renders document processing metadata below the user message", () => {
+    renderUserMessage({
+      messageId: "message-3",
+      metadataExtra: {
+        documentProcessing: {
+          status: "processing",
+          files: [
+            {
+              id: "file-1",
+              filename: "scan.pdf",
+              mode: "ocr_pages",
+              status: "processing"
+            }
+          ]
+        }
+      }
+    })
+
+    expect(screen.getByText("Processing documents")).toBeInTheDocument()
+    expect(screen.getByText("scan.pdf")).toBeInTheDocument()
+  })
 })

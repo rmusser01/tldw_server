@@ -168,7 +168,9 @@ def test_docs_info_exposes_bulk_conference_ingest_capabilities(
     monkeypatch.setenv("TLDW_CONFIG_PATH", str(config_path))
     monkeypatch.delenv("ROUTES_DISABLE", raising=False)
     monkeypatch.delenv("ROUTES_ENABLE", raising=False)
+    monkeypatch.delenv("MEDIA_INGEST_JOBS_WORKER_ENABLED", raising=False)
     monkeypatch.delenv("MEDIA_INGEST_HEAVY_JOBS_WORKER_ENABLED", raising=False)
+    monkeypatch.delenv("TLDW_WORKERS_SIDECAR_MODE", raising=False)
     config_mod._route_toggle_policy.cache_clear()
 
     safe_config = config_info.load_safe_config()
@@ -177,10 +179,81 @@ def test_docs_info_exposes_bulk_conference_ingest_capabilities(
     assert caps["hasMediaPlaylistPreflight"] is True
     assert caps["hasMediaIngestJobs"] is True
     assert caps["hasMediaIngestJobEvents"] is True
-    assert caps["hasMediaIngestWorker"] is False
+    assert caps["hasMediaIngestWorker"] is True
     assert caps["hasDurableMediaCollections"] is True
     assert caps["hasKnowledgeQaMediaScope"] is True
     assert safe_config["supported_features"] == caps
+
+
+def test_docs_info_media_ingest_worker_capability_respects_explicit_false(
+    monkeypatch, tmp_path: Path
+) -> None:
+    config_path = tmp_path / "config.txt"
+    _write_minimal_config(config_path)
+
+    monkeypatch.setenv("TLDW_CONFIG_PATH", str(config_path))
+    monkeypatch.setenv("MEDIA_INGEST_JOBS_WORKER_ENABLED", "false")
+    monkeypatch.delenv("TLDW_WORKERS_SIDECAR_MODE", raising=False)
+    config_mod._route_toggle_policy.cache_clear()
+
+    safe_config = config_info.load_safe_config()
+
+    assert safe_config["capabilities"]["hasMediaIngestWorker"] is False
+
+
+def test_docs_info_media_ingest_worker_capability_follows_disabled_media_route(
+    monkeypatch, tmp_path: Path
+) -> None:
+    config_path = tmp_path / "config.txt"
+    _write_minimal_config(config_path)
+
+    monkeypatch.setenv("TLDW_CONFIG_PATH", str(config_path))
+    monkeypatch.setenv("ROUTES_DISABLE", "media")
+    monkeypatch.delenv("ROUTES_ENABLE", raising=False)
+    monkeypatch.delenv("MEDIA_INGEST_JOBS_WORKER_ENABLED", raising=False)
+    monkeypatch.delenv("TLDW_WORKERS_SIDECAR_MODE", raising=False)
+    config_mod._route_toggle_policy.cache_clear()
+
+    safe_config = config_info.load_safe_config()
+
+    assert safe_config["capabilities"]["hasMediaIngestWorker"] is False
+
+
+def test_docs_info_media_ingest_worker_capability_stays_false_when_route_disabled_and_flag_true(
+    monkeypatch, tmp_path: Path
+) -> None:
+    config_path = tmp_path / "config.txt"
+    _write_minimal_config(config_path)
+
+    monkeypatch.setenv("TLDW_CONFIG_PATH", str(config_path))
+    monkeypatch.setenv("ROUTES_DISABLE", "media")
+    monkeypatch.delenv("ROUTES_ENABLE", raising=False)
+    monkeypatch.setenv("MEDIA_INGEST_JOBS_WORKER_ENABLED", "true")
+    monkeypatch.delenv("TLDW_WORKERS_SIDECAR_MODE", raising=False)
+    config_mod._route_toggle_policy.cache_clear()
+
+    safe_config = config_info.load_safe_config()
+    caps = safe_config["capabilities"]
+
+    assert caps["hasMediaIngestJobs"] is False
+    assert caps["hasMediaIngestJobEvents"] is False
+    assert caps["hasMediaIngestWorker"] is False
+
+
+def test_docs_info_media_ingest_worker_capability_is_false_in_sidecar_mode(
+    monkeypatch, tmp_path: Path
+) -> None:
+    config_path = tmp_path / "config.txt"
+    _write_minimal_config(config_path)
+
+    monkeypatch.setenv("TLDW_CONFIG_PATH", str(config_path))
+    monkeypatch.setenv("MEDIA_INGEST_JOBS_WORKER_ENABLED", "true")
+    monkeypatch.setenv("TLDW_WORKERS_SIDECAR_MODE", "true")
+    config_mod._route_toggle_policy.cache_clear()
+
+    safe_config = config_info.load_safe_config()
+
+    assert safe_config["capabilities"]["hasMediaIngestWorker"] is False
 
 
 def test_docs_info_disables_voice_transport_when_audio_websocket_route_disabled(

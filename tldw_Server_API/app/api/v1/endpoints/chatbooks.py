@@ -37,7 +37,7 @@ from tldw_Server_API.app.core.Logging.log_context import ensure_request_id, ensu
 from tldw_Server_API.app.core.Metrics.metrics_manager import increment_counter
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal, get_request_user, rbac_rate_limit, User
 
-from ....core.Chatbooks.chatbook_models import ContentType, ExportJob, ExportStatus
+from ....core.Chatbooks.chatbook_models import ContentType, ExportJob, ExportStatus, ImportJob
 from ....core.Chatbooks.chatbook_service import ChatbookService
 from ....core.Chatbooks.chatbook_validators import ChatbookValidator
 from ....core.Chatbooks.exceptions import ExportError, JobError, QuotaExceededError
@@ -49,6 +49,7 @@ from ._pagination_utils import build_offset_pagination_meta
 from ..API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user as get_chacha_db
 from ..schemas.chatbook_schemas import (
     CancelJobResponse,
+    ChatbookAccountScopeResponse,
     ChatbookManifestResponse,
     ChatbookImportSourceFormat,
     CleanupExpiredExportsResponse,
@@ -62,6 +63,7 @@ from ..schemas.chatbook_schemas import (
     ImportJobResponse,
     ListExportJobsResponse,
     ListImportJobsResponse,
+    OpenWebUIImportScopesResponse,
     OpenWebUIHydrationJobRequest,
     OpenWebUIHydrationJobResponse,
     OpenWebUIHydrationPreviewRequest,
@@ -106,6 +108,32 @@ def _safe_increment_metric(metric_name: str, labels: dict, error_context: str = 
         increment_counter(metric_name, labels=labels)
     except _CHATBOOKS_NONCRITICAL_EXCEPTIONS:
         logger.debug("metrics increment failed")
+
+
+def _import_job_response(job: ImportJob) -> ImportJobResponse:
+    """Build an API import job response including structured async result metadata."""
+    metadata = job.metadata if isinstance(getattr(job, "metadata", None), dict) else {}
+    return ImportJobResponse(
+        job_id=job.job_id,
+        status=job.status,
+        chatbook_path=job.chatbook_path,
+        created_at=job.created_at,
+        started_at=job.started_at,
+        completed_at=job.completed_at,
+        error_message=job.error_message,
+        progress_percentage=job.progress_percentage,
+        total_items=job.total_items,
+        processed_items=job.processed_items,
+        successful_items=job.successful_items,
+        failed_items=job.failed_items,
+        skipped_items=job.skipped_items,
+        conflicts=job.conflicts,
+        warnings=job.warnings,
+        imported_items=metadata.get("imported_items"),
+        inventory_summary=metadata.get("inventory_summary"),
+        skipped_non_restorable=metadata.get("skipped_non_restorable"),
+        metadata=metadata,
+    )
 
 
 def _principal_has_admin_claims(principal: AuthPrincipal | None) -> bool:
@@ -308,6 +336,8 @@ def _persist_completed_sync_export_job(
     expires_at = service._get_export_expiry(now_utc)
     download_expires_at = service._get_download_expiry(now_utc, expires_at)
     download_url = service._build_download_url(job_id, download_expires_at)
+    metadata_builder = getattr(service, "build_export_job_metadata", None)
+    metadata = metadata_builder(file_path) if callable(metadata_builder) else {}
 
     job = ExportJob(
         job_id=job_id,
@@ -325,6 +355,7 @@ def _persist_completed_sync_export_job(
         file_size_bytes=file_size,
         download_url=download_url,
         expires_at=expires_at,
+        metadata=metadata,
     )
     try:
         service._save_export_job(job)  # noqa: SLF001 (internal helper is appropriate here)
@@ -394,6 +425,23 @@ async def chatbooks_health():
     return health
 
 
+@router.get(
+    "/export/scope",
+    response_model=ChatbookAccountScopeResponse,
+    dependencies=[Depends(rbac_rate_limit("chatbooks.export"))],
+)
+async def get_chatbook_export_scope(
+    service: ChatbookService = Depends(get_chatbook_service),
+) -> ChatbookAccountScopeResponse:
+    """Return a redacted full-account export scope summary."""
+    try:
+        scope = await asyncio.to_thread(service.get_full_account_export_scope)
+        return ChatbookAccountScopeResponse(**scope)
+    except _CHATBOOKS_NONCRITICAL_EXCEPTIONS:
+        logger.exception("Failed to build chatbook export scope")
+        raise HTTPException(status_code=500, detail="An error occurred while building the export scope") from None
+
+
 @router.post(
     "/export",
     response_model=CreateChatbookResponse,
@@ -443,12 +491,14 @@ async def create_chatbook(
         if not allowed:
             raise HTTPException(status_code=429, detail=message)
 
-        # Convert content selections to use core ContentType enums
-        content_selections = {}
-        for content_type, ids in request_data.content_selections.items():
-            # Handle both schema enums and strings robustly
-            ct_val = content_type.value if hasattr(content_type, "value") else str(content_type)
-            content_selections[ContentType(ct_val)] = ids
+        # Convert explicit allowlists to core ContentType enums. None/{} is full-account mode.
+        content_selections = None
+        if request_data.content_selections:
+            content_selections = {}
+            for content_type, ids in request_data.content_selections.items():
+                # Handle both schema enums and strings robustly
+                ct_val = content_type.value if hasattr(content_type, "value") else str(content_type)
+                content_selections[ContentType(ct_val)] = ids
 
         # Create chatbook
         rid = ensure_request_id(request)
@@ -705,6 +755,24 @@ async def import_chatbook(
         elif import_request.content_selections is not None:
             import_request.content_selections = _coerce_import_content_selections(import_request.content_selections)
 
+        source_format_text = (
+            source_format_value.value
+            if hasattr(source_format_value, "value")
+            else str(source_format_value or ChatbookImportSourceFormat.CHATBOOK.value)
+        )
+        effective_import_media = (
+            import_request.import_media
+            if import_request.import_media is not None
+            else source_format_text == ChatbookImportSourceFormat.CHATBOOK.value
+        )
+        effective_import_embeddings = (
+            import_request.import_embeddings
+            if import_request.import_embeddings is not None
+            else source_format_text == ChatbookImportSourceFormat.CHATBOOK.value
+        )
+        import_request.import_media = bool(effective_import_media)
+        import_request.import_embeddings = bool(effective_import_embeddings)
+
         if (
             import_request.source_format == ChatbookImportSourceFormat.OPENWEBUI_DB
             and not (import_request.selected_openwebui_user_id or "").strip()
@@ -727,24 +795,15 @@ async def import_chatbook(
         if not allowed:
             raise HTTPException(status_code=429, detail=message)
 
-        # Reject unsupported import options until implemented
-        if import_request.import_media or import_request.import_embeddings:
+        if (
+            import_request.source_format
+            in {ChatbookImportSourceFormat.OPENWEBUI_JSON, ChatbookImportSourceFormat.OPENWEBUI_DB}
+            and (import_request.import_media or import_request.import_embeddings)
+        ):
             raise HTTPException(
                 status_code=400,
-                detail="Media/embedding imports are not supported yet. Set import_media=false and import_embeddings=false.",
+                detail="OpenWebUI imports do not use archive media or embedding restore options.",
             )
-        if import_request.content_selections:
-            unsupported = {"media", "embedding", "prompt", "evaluation"}
-            requested = []
-            for content_type in import_request.content_selections:
-                ct_val = content_type.value if hasattr(content_type, "value") else str(content_type)
-                if ct_val in unsupported:
-                    requested.append(ct_val)
-            if requested:
-                raise HTTPException(
-                    status_code=400,
-                    detail=("Import for content types is not supported yet: " + ", ".join(sorted(set(requested)))),
-                )
 
         # Validate file
         if not file.filename:
@@ -896,6 +955,8 @@ async def import_chatbook(
                     source_format=import_request.source_format,
                     imported_items=result_data.get("imported_items") or {},
                     warnings=result_data.get("warnings") or [],
+                    inventory_summary=result_data.get("inventory_summary"),
+                    skipped_non_restorable=result_data.get("skipped_non_restorable"),
                 )
         else:
             # For async jobs, return a failure response with job_id so clients can inspect status.
@@ -1202,6 +1263,33 @@ async def preview_chatbook(
                 )
 
 
+@router.get(
+    "/openwebui/import-scopes",
+    response_model=OpenWebUIImportScopesResponse,
+    dependencies=[Depends(rbac_rate_limit("chatbooks.openwebui_import_scopes.list"))],
+)
+async def list_openwebui_import_scopes(
+    request: Request,
+    service: ChatbookService = Depends(get_chatbook_service),
+    user: User = Depends(get_request_user),
+):
+    """List imported OpenWebUI conversation scopes available for hydration."""
+    try:
+        scopes = await asyncio.to_thread(service.list_openwebui_import_scopes)
+        return OpenWebUIImportScopesResponse(scopes=scopes)
+    except _CHATBOOKS_NONCRITICAL_EXCEPTIONS:
+        get_ps_logger(
+            request_id=ensure_request_id(request),
+            ps_component="endpoint",
+            ps_job_kind="chatbooks",
+            traceparent=ensure_traceparent(request),
+        ).exception(f"Error listing OpenWebUI import scopes for user {user.id}")
+        raise HTTPException(
+            status_code=500,
+            detail="An error occurred while listing OpenWebUI import scopes",
+        ) from None
+
+
 @router.post(
     "/openwebui/hydration/preview",
     response_model=OpenWebUIHydrationPreviewResponse,
@@ -1357,6 +1445,7 @@ async def list_export_jobs(
                     file_size_bytes=job.file_size_bytes,
                     download_url=secure_download_url,  # Use secure URL based on job_id
                     expires_at=job.expires_at,
+                    metadata=job.metadata or {},
                 )
             )
 
@@ -1425,6 +1514,7 @@ async def get_export_job(
             file_size_bytes=job.file_size_bytes,
             download_url=secure_download_url,  # Use secure URL based on job_id
             expires_at=job.expires_at,
+            metadata=job.metadata or {},
         )
 
     except HTTPException:
@@ -1464,25 +1554,7 @@ async def list_import_jobs(
         # Convert to response models
         job_responses = []
         for job in jobs:
-            job_responses.append(
-                ImportJobResponse(
-                    job_id=job.job_id,
-                    status=job.status,
-                    chatbook_path=job.chatbook_path,
-                    created_at=job.created_at,
-                    started_at=job.started_at,
-                    completed_at=job.completed_at,
-                    error_message=job.error_message,
-                    progress_percentage=job.progress_percentage,
-                    total_items=job.total_items,
-                    processed_items=job.processed_items,
-                    successful_items=job.successful_items,
-                    failed_items=job.failed_items,
-                    skipped_items=job.skipped_items,
-                    conflicts=job.conflicts,
-                    warnings=job.warnings,
-                )
-            )
+            job_responses.append(_import_job_response(job))
 
         return ListImportJobsResponse(
             jobs=job_responses,
@@ -1524,23 +1596,7 @@ async def get_import_job(
         if not job:
             raise HTTPException(status_code=404, detail="Import job not found")
 
-        return ImportJobResponse(
-            job_id=job.job_id,
-            status=job.status,
-            chatbook_path=job.chatbook_path,
-            created_at=job.created_at,
-            started_at=job.started_at,
-            completed_at=job.completed_at,
-            error_message=job.error_message,
-            progress_percentage=job.progress_percentage,
-            total_items=job.total_items,
-            processed_items=job.processed_items,
-            successful_items=job.successful_items,
-            failed_items=job.failed_items,
-            skipped_items=job.skipped_items,
-            conflicts=job.conflicts,
-            warnings=job.warnings,
-        )
+        return _import_job_response(job)
 
     except HTTPException:
         raise

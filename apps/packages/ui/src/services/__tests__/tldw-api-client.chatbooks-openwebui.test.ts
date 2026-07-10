@@ -25,16 +25,49 @@ vi.mock("@/utils/safe-storage", () => ({
 
 import { TldwApiClient } from "@/services/tldw/TldwApiClient"
 
+function makeUploadFile(content: string, name: string, type: string): File {
+  const bytes = new TextEncoder().encode(content).buffer
+  return {
+    name,
+    type,
+    arrayBuffer: vi.fn(async () => bytes)
+  } as unknown as File
+}
+
 describe("TldwApiClient Chatbooks OpenWebUI import contract", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+  })
+
+  it("sends full-account exports without content_selections", async () => {
+    mocks.bgRequest.mockResolvedValue({ job_id: "export-1" })
+
+    const client = new TldwApiClient()
+    await client.exportChatbook({
+      name: "Backup all",
+      description: "Full account backup",
+      async_mode: true
+    })
+
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/chatbooks/export",
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: {
+          name: "Backup all",
+          description: "Full account backup",
+          async_mode: true
+        }
+      })
+    )
   })
 
   it("sends source_format for OpenWebUI preview uploads", async () => {
     mocks.bgUpload.mockResolvedValue({ openwebui_preview: { chat_count: 0 } })
 
     const client = new TldwApiClient()
-    const file = new File(["[]"], "openwebui.json", { type: "application/json" })
+    const file = makeUploadFile("[]", "openwebui.json", "application/json")
     await client.previewChatbook(file, { source_format: "openwebui_json" })
 
     expect(mocks.bgUpload).toHaveBeenCalledWith(
@@ -54,7 +87,7 @@ describe("TldwApiClient Chatbooks OpenWebUI import contract", () => {
     mocks.bgUpload.mockResolvedValue({ openwebui_db_preview: { user_count: 0, users: [] } })
 
     const client = new TldwApiClient()
-    const file = new File(["SQLite format 3"], "webui.db", { type: "application/vnd.sqlite3" })
+    const file = makeUploadFile("SQLite format 3", "webui.db", "application/vnd.sqlite3")
     await client.previewChatbook(file, { source_format: "openwebui_db" })
 
     expect(mocks.bgUpload).toHaveBeenCalledWith(
@@ -74,7 +107,7 @@ describe("TldwApiClient Chatbooks OpenWebUI import contract", () => {
     mocks.bgUpload.mockResolvedValue({ success: true })
 
     const client = new TldwApiClient()
-    const file = new File(["[]"], "openwebui.json", { type: "application/json" })
+    const file = makeUploadFile("[]", "openwebui.json", "application/json")
     await client.importChatbook(file, {
       source_format: "openwebui_json",
       conflict_resolution: "rename",
@@ -106,7 +139,7 @@ describe("TldwApiClient Chatbooks OpenWebUI import contract", () => {
     mocks.bgUpload.mockResolvedValue({ success: true })
 
     const client = new TldwApiClient()
-    const file = new File(["SQLite format 3"], "webui.db", { type: "application/vnd.sqlite3" })
+    const file = makeUploadFile("SQLite format 3", "webui.db", "application/vnd.sqlite3")
     await client.importChatbook(file, {
       source_format: "openwebui_db",
       selected_openwebui_user_id: "user-a",
@@ -143,6 +176,44 @@ describe("TldwApiClient Chatbooks OpenWebUI import contract", () => {
       scope: {
         conversation_ids: ["conv-a"],
         source_user_id: "ow-user"
+      },
+      process_supported_files: false
+    }
+
+    await client.previewOpenWebUIHydration(payload)
+
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/chatbooks/openwebui/hydration/preview",
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: payload
+      })
+    )
+  })
+
+  it("lists OpenWebUI import scopes", async () => {
+    mocks.bgRequest.mockResolvedValue({ scopes: [] })
+
+    const client = new TldwApiClient()
+    await client.listOpenWebUIImportScopes()
+
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/chatbooks/openwebui/import-scopes",
+        method: "GET"
+      })
+    )
+  })
+
+  it("previews OpenWebUI attachment hydration with an import scope id", async () => {
+    mocks.bgRequest.mockResolvedValue({ summary: { referenced_files: 1 } })
+
+    const client = new TldwApiClient()
+    const payload = {
+      openwebui_data_root: "/srv/openwebui",
+      scope: {
+        import_scope_id: "scope-json"
       },
       process_supported_files: false
     }

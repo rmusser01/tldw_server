@@ -25,8 +25,8 @@ from tldw_Server_API.app.core.custom_openai_providers import (
     custom_openai_provider_number,
     iter_custom_openai_provider_names,
 )
-from tldw_Server_API.app.core.testing import is_truthy
-from tldw_Server_API.app.services.worker_startup_policy import worker_path_enabled
+from tldw_Server_API.app.core.testing import env_flag_enabled, is_truthy
+from tldw_Server_API.app.services.worker_startup_policy import should_start_inprocess_worker
 
 router = APIRouter()
 _DOCS_API_KEY_PLACEHOLDER = "YOUR_API_KEY"
@@ -146,10 +146,12 @@ def load_safe_config() -> dict:
         caps["hasMediaIngestJobs"] = has_media_routes
         caps["hasMediaIngestJobEvents"] = has_media_routes
         caps["hasMediaIngestWorker"] = bool(
-            worker_path_enabled(
-                "MEDIA_INGEST_HEAVY_JOBS_WORKER_ENABLED",
-                "media-ingest-heavy-jobs",
-                default_stable=False,
+            has_media_routes
+            and should_start_inprocess_worker(
+                "MEDIA_INGEST_JOBS_WORKER_ENABLED",
+                "media",
+                sidecar_mode=env_flag_enabled("TLDW_WORKERS_SIDECAR_MODE"),
+                default_stable=True,
                 test_mode=False,
             )
         )

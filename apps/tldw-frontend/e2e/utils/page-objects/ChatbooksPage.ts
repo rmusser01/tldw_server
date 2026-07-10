@@ -1,5 +1,5 @@
 /**
- * Page Object for Chatbooks Playground workflow
+ * Page Object for Chatbooks Backup & Import workflow
  */
 import { type Page, type Locator, expect } from "@playwright/test"
 import { BasePage, type InteractiveElement } from "./BasePage"
@@ -13,14 +13,14 @@ export class ChatbooksPage extends BasePage {
   // -- Navigation ------------------------------------------------------------
 
   async goto(): Promise<void> {
-    await this.page.goto("/chatbooks-playground", { waitUntil: "domcontentloaded" })
+    await this.page.goto("/chatbooks", { waitUntil: "domcontentloaded" })
     await waitForConnection(this.page)
   }
 
   async assertPageReady(): Promise<void> {
     await waitForAppShell(this.page, 30_000)
     // Wait for heading or the offline empty state
-    const heading = this.page.getByText("Chatbooks Playground")
+    const heading = this.page.getByText("Chatbooks Backup & Import")
     const offline = this.page.getByText("Connect to your tldw server to use Chatbooks")
     await Promise.race([
       heading.first().waitFor({ state: "visible", timeout: 20_000 }),
@@ -31,7 +31,7 @@ export class ChatbooksPage extends BasePage {
   // -- Locators --------------------------------------------------------------
 
   get heading(): Locator {
-    return this.page.getByRole("heading", { name: /chatbooks playground/i })
+    return this.page.getByRole("heading", { name: /chatbooks backup & import/i })
   }
 
   get offlineMessage(): Locator {
@@ -53,14 +53,14 @@ export class ChatbooksPage extends BasePage {
     return this.page.getByRole("tab", { name: /jobs/i })
   }
 
-  /** Export chatbook button */
+  /** Backup all button */
   get exportButton(): Locator {
-    return this.page.getByRole("button", { name: /export chatbook/i })
+    return this.page.getByRole("button", { name: /backup all|export selected/i })
   }
 
-  /** Import chatbook button */
+  /** Archive import button */
   get importButton(): Locator {
-    return this.page.getByRole("button", { name: /import chatbook/i })
+    return this.page.getByRole("button", { name: /import chatbook|import archive/i })
   }
 
   /** File upload dragger area */
@@ -94,7 +94,7 @@ export class ChatbooksPage extends BasePage {
   async getInteractiveElements(): Promise<InteractiveElement[]> {
     return [
       {
-        name: "Export chatbook button",
+        name: "Backup all button",
         locator: this.exportButton,
         expectation: {
           type: "api_call",

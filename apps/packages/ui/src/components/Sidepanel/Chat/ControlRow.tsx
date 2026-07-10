@@ -42,6 +42,7 @@ import type { ToolChoice } from "@/store/option"
 import { DEFAULT_CHAT_SETTINGS } from "@/types/chat-settings"
 import type { ConversationContextComposition } from "@/types/conversation-context"
 import type { ConversationContextCompositionStatus } from "@/hooks/chat/useConversationContextComposition"
+import type { SidepanelChatWebUiHandoffOverrides } from "@/services/tldw/sidepanel-chat-webui-handoff"
 
 interface ControlRowProps {
   // Prompt selection
@@ -83,7 +84,9 @@ interface ControlRowProps {
   onToggleRag: () => void
   // Connection state
   isConnected: boolean
-  onOpenChatInWebUi?: () => Promise<void> | void
+  onOpenChatInWebUi?: (
+    overrides?: SidepanelChatWebUiHandoffOverrides
+  ) => Promise<void> | void
 }
 
 const ControlRowBase: React.FC<ControlRowProps> = ({

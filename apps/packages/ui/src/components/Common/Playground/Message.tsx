@@ -22,6 +22,7 @@ import {
 } from "@/utils/chat-error-message"
 import { useStorage } from "@plasmohq/storage/hook"
 import { PlaygroundUserMessageBubble } from "./PlaygroundUserMessage"
+import { DocumentProcessingTurn } from "./DocumentProcessingTurn"
 import { copyToClipboard } from "@/utils/clipboard"
 import { ChatDocuments } from "@/models/ChatTypes"
 import { buildChatTextClass } from "@/utils/chat-style"
@@ -2673,6 +2674,11 @@ export const PlaygroundMessage = (props: Props) => {
               />
             )}
           </div>
+          {!props.isBot && !editMode && props.metadataExtra?.documentProcessing && (
+            <DocumentProcessingTurn
+              metadata={props.metadataExtra.documentProcessing}
+            />
+          )}
           {/* images if available */}
           {props.images &&
             props.images.filter((img) => img.length > 0).length > 0 && (

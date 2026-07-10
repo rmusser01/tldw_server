@@ -1,7 +1,7 @@
 /**
- * Chatbooks Playground E2E Tests (Tier 2)
+ * Chatbooks Backup & Import E2E Tests (Tier 2)
  *
- * Tests the Chatbooks Playground page lifecycle:
+ * Tests the Chatbooks Backup & Import page lifecycle:
  * - Page loads with expected elements (heading, tabs, job tracker)
  * - Tab switching between Export, Import, and Jobs
  * - Export button fires POST /api/v1/chatbooks/export (requires server)
@@ -18,7 +18,7 @@ import { ChatbooksPage } from "../../utils/page-objects/ChatbooksPage"
 import { expectApiCall } from "../../utils/api-assertions"
 import { seedAuth } from "../../utils/helpers"
 
-test.describe("Chatbooks Playground", () => {
+test.describe("Chatbooks Backup & Import", () => {
   let chatbooks: ChatbooksPage
 
   test.beforeEach(async ({ page }) => {
@@ -31,7 +31,7 @@ test.describe("Chatbooks Playground", () => {
   // =========================================================================
 
   test.describe("Page Load", () => {
-    test("should render the Chatbooks Playground page with heading and tabs", async ({
+    test("should render the Chatbooks Backup & Import page with heading and tabs", async ({
       authedPage,
       diagnostics,
     }) => {
@@ -111,7 +111,7 @@ test.describe("Chatbooks Playground", () => {
   // =========================================================================
 
   test.describe("Export API", () => {
-    test("should fire POST /api/v1/chatbooks/export when Export button is clicked", async ({
+    test("should fire full-account POST /api/v1/chatbooks/export when Backup all is clicked", async ({
       authedPage,
       serverInfo,
       diagnostics,
@@ -122,28 +122,29 @@ test.describe("Chatbooks Playground", () => {
       await chatbooks.goto()
       await chatbooks.assertPageReady()
 
-      // Ensure we are on the Export tab
-      const exportTabVisible = await chatbooks.exportTab.isVisible().catch(() => false)
-      if (!exportTabVisible) return
-
+      await expect(chatbooks.exportTab).toBeVisible()
       await chatbooks.switchToTab("export")
 
-      const exportEnabled = await chatbooks.exportButton.isEnabled().catch(() => false)
-      if (!exportEnabled) return
+      await authedPage.getByPlaceholder(/^Name$/i).fill(`E2E Backup All ${Date.now()}`)
+      await authedPage
+        .getByPlaceholder(/Description/i)
+        .fill("E2E full-account Backup all export")
+
+      await expect(authedPage.getByText(/Backup all scope/i)).toBeVisible({
+        timeout: 15_000,
+      })
 
       const apiCall = expectApiCall(authedPage, {
         url: /\/api\/v1\/chatbooks\/export/,
         method: "POST",
       }, 15_000)
 
-      await chatbooks.exportButton.click()
+      await authedPage.getByRole("button", { name: /^Backup all$/i }).click()
 
-      try {
-        const { response } = await apiCall
-        expect(response.status()).toBeLessThan(500)
-      } catch {
-        // Export may require content selection; acceptable to not fire if nothing is selected
-      }
+      const { request, response } = await apiCall
+      const body = request.postDataJSON() as Record<string, unknown>
+      expect(body).not.toHaveProperty("content_selections")
+      expect(response.status()).toBeLessThan(500)
 
       await assertNoCriticalErrors(diagnostics)
     })

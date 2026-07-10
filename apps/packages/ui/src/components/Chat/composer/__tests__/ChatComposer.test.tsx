@@ -56,6 +56,36 @@ describe("ChatComposer", () => {
     await waitForVariant(container, "v5")
   })
 
+  it("renders compact V5 as a mobile row layout", async () => {
+    render(
+      <ChatComposer
+        variant="v5"
+        {...commonTextProps}
+        density="compact"
+        facets={[
+          { id: "docs", fieldKey: "doc", value: "2 files", active: true },
+          { id: "mode", fieldKey: "mode", value: "OCR pages", active: true },
+        ]}
+        textareaSlot={<textarea data-testid="chat-input" aria-label="Message input" />}
+        sendSlot={<button type="button">Queue</button>}
+        onPaletteTrigger={vi.fn()}
+      />
+    )
+
+    expect(await screen.findByTestId("v5-mobile-composer")).toBeTruthy()
+    expect(screen.getByTestId("v5-mobile-text-row")).toBeTruthy()
+    expect(screen.getByTestId("v5-mobile-action-row")).toBeTruthy()
+    expect(screen.getByTestId("chat-input")).toBeTruthy()
+    expect(screen.getByRole("button", { name: /open command palette/i })).toHaveTextContent("/")
+    expect(screen.queryByText("⌘K")).toBeNull()
+
+    const root = screen
+      .getByTestId("v5-mobile-composer")
+      .closest("[data-variant='v5']")
+    expect(root).not.toBeNull()
+    expect(root!.className).not.toContain("border-t")
+  })
+
   it("forwards V1-specific props (sourceChip)", async () => {
     render(
       <ChatComposer

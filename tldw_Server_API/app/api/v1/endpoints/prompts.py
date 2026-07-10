@@ -452,9 +452,9 @@ async def prompts_health():
         try:
             importlib.import_module("tldw_Server_API.app.core.DB_Management.Prompts_DB")
             lib_ok = True
-        except ImportError as e:
+        except ImportError:
             lib_ok = False
-            health["components"]["library_error"] = str(e)
+            health["components"]["library_error"] = "Prompts DB import failed"
 
         health["components"]["library"] = {"import_ok": lib_ok}
 

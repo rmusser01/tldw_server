@@ -327,10 +327,36 @@ class PolicyCompiler:
     def has_nested_quantifiers(expr: str) -> bool:
         """Detect nested quantifiers that can trigger catastrophic backtracking."""
 
-        try:
-            return bool(re.search(r"\((?:[^)(]|\([^)(]*\))*[+*][^)]*\)\s*[+*]", expr))
-        except (TypeError, ValueError, re.error):
+        if not isinstance(expr, str):
             return False
+        stack: list[bool] = []
+        escaped = False
+        for index, char in enumerate(expr):
+            if escaped:
+                escaped = False
+                continue
+            if char == "\\":
+                escaped = True
+                continue
+            if char == "(":
+                stack.append(False)
+                continue
+            if char == ")":
+                if not stack:
+                    continue
+                group_has_quantifier = stack.pop()
+                next_index = index + 1
+                while next_index < len(expr) and expr[next_index].isspace():
+                    next_index += 1
+                group_is_quantified = next_index < len(expr) and expr[next_index] in {"+", "*"}
+                if group_has_quantifier and group_is_quantified:
+                    return True
+                if stack and (group_has_quantifier or group_is_quantified):
+                    stack[-1] = True
+                continue
+            if char in {"+", "*"} and stack:
+                stack[-1] = True
+        return False
 
     @staticmethod
     def too_many_groups(expr: str, limit: int = 100) -> bool:

@@ -20,12 +20,24 @@ import {
   buildSidepanelHandoffMessageForModel,
   type SidepanelChatHandoffPageContext
 } from "@/services/sidepanel-chat-handoff"
+import {
+  prepareChatDocumentAttachmentsForSend
+} from "@/services/chat-document-processing"
+import type {
+  DocumentProcessingTurnMetadata,
+  UploadedFile
+} from "@/db/dexie/types"
 
 type PlaygroundQueueSubmissionArgs = {
   promptText: string
   image: string
   intent: any
   requestOverrides?: Record<string, unknown>
+}
+
+type DocumentProcessingTurnReservation = {
+  message: string
+  metadata: DocumentProcessingTurnMetadata
 }
 
 export type UsePlaygroundSubmitDeps = {
@@ -36,10 +48,12 @@ export type UsePlaygroundSubmitDeps = {
   compareModeActive: boolean
   compareSelectedModels: string[]
   selectedModel: string | null | undefined
+  historyId?: string | null
+  serverChatId?: string | null
   fileRetrievalEnabled: boolean
   ragPinnedResults: any[]
   selectedDocuments: any[]
-  uploadedFiles: any[]
+  uploadedFiles: UploadedFile[]
   currentContextSnapshot: any
   conversationTokenCount: number
   characterContextTokenEstimate: number
@@ -54,6 +68,13 @@ export type UsePlaygroundSubmitDeps = {
   clearOpenUIRequestMode: () => void
   clearSelectedDocuments: () => void
   clearUploadedFiles: () => void
+  reserveDocumentProcessingTurn?: (
+    reservation: DocumentProcessingTurnReservation
+  ) => string | undefined
+  updateDocumentProcessingTurn?: (
+    userMessageId: string,
+    metadata: DocumentProcessingTurnMetadata
+  ) => void
   textAreaFocus: () => void
   setLastSubmittedContext: (ctx: any) => void
   estimateTokensForText: (text: string) => number
@@ -65,6 +86,38 @@ export type UsePlaygroundSubmitDeps = {
   t: (key: string, defaultValueOrOptions?: any, options?: any) => string
 }
 
+const buildPendingDocumentProcessingMetadata = (
+  files: UploadedFile[],
+  status: "waiting_for_files" | "processing"
+): DocumentProcessingTurnMetadata => ({
+  status,
+  files: files.map((file) => ({
+    id: file.id,
+    filename: file.filename,
+    mode: file.processingMode,
+    status:
+      status === "processing"
+        ? "processing"
+        : file.processingStatus ?? "pending",
+    summary: file.processingSummary ?? file.processingBlockedReason,
+    error: file.processingError
+  }))
+})
+
+const toSendingPromptMetadata = (
+  metadata: unknown,
+  fallback: DocumentProcessingTurnMetadata
+): DocumentProcessingTurnMetadata => {
+  const base =
+    metadata && typeof metadata === "object" && !Array.isArray(metadata)
+      ? (metadata as DocumentProcessingTurnMetadata)
+      : fallback
+  return {
+    ...base,
+    status: "sending_prompt"
+  }
+}
+
 export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
   const {
     form,
@@ -74,6 +127,8 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
     compareModeActive,
     compareSelectedModels,
     selectedModel,
+    historyId,
+    serverChatId,
     fileRetrievalEnabled,
     ragPinnedResults,
     selectedDocuments,
@@ -92,6 +147,8 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
     clearOpenUIRequestMode,
     clearSelectedDocuments,
     clearUploadedFiles,
+    reserveDocumentProcessingTurn,
+    updateDocumentProcessingTurn,
     textAreaFocus,
     setLastSubmittedContext,
     estimateTokensForText,
@@ -164,14 +221,14 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
               importedSidepanelContext
             )
           : undefined
-      const requestOverrides = messageForModel
+      const requestOverrides: Record<string, unknown> | undefined = messageForModel
         ? { messageForModel }
         : undefined
-      const openUIRequestOverrides =
+      const openUIRequestOverrides: Record<string, unknown> | undefined =
         openUIRequestMode && !intent.isImageCommand
           ? { dynamicUIRequest: { renderer: "openui" } }
           : undefined
-      const mergedRequestOverrides =
+      let mergedRequestOverrides: Record<string, unknown> | undefined =
         requestOverrides || openUIRequestOverrides
           ? {
               ...(requestOverrides ?? {}),
@@ -247,7 +304,9 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
           promptText: visiblePrompt,
           image: value.image,
           intent,
-          ...(mergedRequestOverrides ? { requestOverrides: mergedRequestOverrides } : {})
+          ...(mergedRequestOverrides
+            ? { requestOverrides: mergedRequestOverrides }
+            : {})
         })
         if (queuedItem && messageForModel) {
           clearImportedSidepanelContext?.()
@@ -264,6 +323,102 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
         if (!defaultEM && !simpleSearch) {
           form.setFieldError("message", t("formError.noEmbeddingModel"))
           return
+        }
+      }
+
+      if (!intent.isImageCommand && uploadedFiles.length > 0) {
+        const waitingMetadata = buildPendingDocumentProcessingMetadata(
+          uploadedFiles,
+          "waiting_for_files"
+        )
+        const reservedDocumentUserMessageId =
+          reserveDocumentProcessingTurn?.({
+            message: visiblePrompt,
+            metadata: waitingMetadata
+          })
+        if (reservedDocumentUserMessageId) {
+          updateDocumentProcessingTurn?.(
+            reservedDocumentUserMessageId,
+            buildPendingDocumentProcessingMetadata(uploadedFiles, "processing")
+          )
+        }
+        const preparedDocuments = await prepareChatDocumentAttachmentsForSend({
+          files: uploadedFiles,
+          historyId: historyId ?? undefined,
+          sessionId: serverChatId ?? undefined
+        })
+        const firstBlockedOrFailed =
+          preparedDocuments.blockedFiles[0] || preparedDocuments.failedFiles[0]
+        if (
+          firstBlockedOrFailed ||
+          !preparedDocuments.requestOverrides
+        ) {
+          if (reservedDocumentUserMessageId) {
+            updateDocumentProcessingTurn?.(
+              reservedDocumentUserMessageId,
+              preparedDocuments.turnMetadata
+            )
+          }
+          notificationApi.error({
+            message: t(
+              "playground:documentProcessing.sendBlockedTitle",
+              "Document processing blocked"
+            ),
+            description:
+              firstBlockedOrFailed?.processingBlockedReason ||
+              firstBlockedOrFailed?.processingError ||
+              t(
+                "playground:documentProcessing.sendBlockedBody",
+                "Resolve the document processing issue before sending."
+              )
+          })
+          return
+        }
+
+        const {
+          documentProcessing,
+          documentSnippetForModel,
+          userMetadataExtra,
+          ...preparedRequestOverrides
+        } = preparedDocuments.requestOverrides as Record<string, unknown>
+        const preparedMessageForModel =
+          typeof documentSnippetForModel === "string" &&
+          documentSnippetForModel.trim()
+            ? [
+                typeof mergedRequestOverrides?.messageForModel === "string"
+                  ? mergedRequestOverrides.messageForModel
+                  : visiblePrompt,
+                documentSnippetForModel
+              ]
+                .filter(Boolean)
+                .join("\n\n")
+            : undefined
+        const sendingPromptMetadata = toSendingPromptMetadata(
+          documentProcessing,
+          preparedDocuments.turnMetadata
+        )
+        if (reservedDocumentUserMessageId) {
+          updateDocumentProcessingTurn?.(
+            reservedDocumentUserMessageId,
+            sendingPromptMetadata
+          )
+        }
+        mergedRequestOverrides = {
+          ...(mergedRequestOverrides ?? {}),
+          ...preparedRequestOverrides,
+          ...(typeof preparedMessageForModel === "string"
+            ? { messageForModel: preparedMessageForModel }
+            : {}),
+          ...(reservedDocumentUserMessageId
+            ? { userMessageId: reservedDocumentUserMessageId }
+            : {}),
+          userMetadataExtra: {
+            ...((mergedRequestOverrides as any)?.userMetadataExtra ?? {}),
+            ...(userMetadataExtra && typeof userMetadataExtra === "object"
+              ? userMetadataExtra
+              : {}),
+            documentProcessing: sendingPromptMetadata
+          }
         }
       }
       form.reset()

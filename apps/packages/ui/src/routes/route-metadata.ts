@@ -581,22 +581,26 @@ export const ROUTE_METADATA = [
   }),
   defineRoute({
     path: "/chatbooks",
-    label: "Chatbooks",
+    label: "Chatbooks Backup & Import",
     group: "media_library",
     surface: "advanced_self_hosted",
     availability: webAndExtension,
     smoke: "manual",
     requiresBackend: true,
-    rationale: "Chatbook management entry route with known full-suite smoke instability."
+    rationale: "Primary account backup, archive import, and selective Chatbook export route with known full-suite smoke instability."
   }),
   defineRoute({
     path: "/chatbooks-playground",
-    label: "Chatbooks Playground",
+    canonicalPath: "/chatbooks",
+    label: "Chatbooks Backup & Import",
     group: "media_library",
-    surface: "advanced_self_hosted",
+    surface: "legacy_alias",
     availability: webAndExtension,
+    smoke: "manual",
+    commandPalette: "alias_only",
+    redirectsTo: "/chatbooks",
     requiresBackend: true,
-    rationale: "Chatbook authoring and testing workspace."
+    rationale: "Legacy route name retained for compatibility; use /chatbooks for the Backup & Import workflow."
   }),
   defineRoute({
     path: "/sources",

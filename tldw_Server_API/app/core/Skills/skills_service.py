@@ -282,7 +282,34 @@ class SkillsService:
 
     def _get_skill_dir(self, name: str) -> Path:
         """Get the directory path for a skill."""
-        return self.skills_dir / name
+        safe_name = self._normalize_and_validate_skill_name(name)
+        base = self.skills_dir.resolve(strict=False)
+        path = (base / safe_name).resolve(strict=False)
+        try:
+            path.relative_to(base)
+        except ValueError as e:
+            raise SkillValidationError(f"Invalid skill name: {name}", field="name") from e
+        return path
+
+    def _remove_skill_dir(self, skill_dir: Path) -> None:
+        """Remove a skill directory after confirming it is under the user skills root."""
+        base = self.skills_dir.resolve(strict=False)
+        path = skill_dir.resolve(strict=False)
+        try:
+            path.relative_to(base)
+        except ValueError as e:
+            raise SkillStorageError("Refusing to remove skill directory outside skills root", path=str(skill_dir)) from e
+        shutil.rmtree(path, ignore_errors=True)
+
+    def _skill_main_file(self, skill_dir: Path) -> Path:
+        """Return the validated SKILL.md path for a skill directory."""
+        base = skill_dir.resolve(strict=False)
+        path = (base / "SKILL.md").resolve(strict=False)
+        try:
+            path.relative_to(base)
+        except ValueError as e:
+            raise SkillStorageError("SKILL.md path escapes skill directory", path=str(path)) from e
+        return path
 
     def _skill_asset_id(self, name: str) -> str:
         """Return the Context Integrity asset id for a user skill."""
@@ -623,7 +650,7 @@ class SkillsService:
 
     def _parse_skill_file(self, skill_dir: Path) -> Optional[Any]:
         """Parse SKILL.md content without loading supporting files."""
-        skill_file = skill_dir / "SKILL.md"
+        skill_file = self._skill_main_file(skill_dir)
         try:
             content = _read_regular_file_bytes_no_follow(skill_file).decode("utf-8")
         except FileNotFoundError:
@@ -970,11 +997,11 @@ class SkillsService:
             raise SkillStorageError(f"Failed to create skill directory: {e}", path=str(skill_dir)) from e
 
         # Write SKILL.md
-        skill_file = skill_dir / "SKILL.md"
+        skill_file = self._skill_main_file(skill_dir)
         try:
             skill_file.write_text(content, encoding="utf-8")
         except OSError as e:
-            shutil.rmtree(skill_dir, ignore_errors=True)
+            self._remove_skill_dir(skill_dir)
             raise SkillStorageError(f"Failed to write SKILL.md: {e}", path=str(skill_file)) from e
 
         # Write supporting files
@@ -984,7 +1011,7 @@ class SkillsService:
                 try:
                     file_path.write_text(file_content or "", encoding="utf-8")
                 except OSError as e:
-                    shutil.rmtree(skill_dir, ignore_errors=True)
+                    self._remove_skill_dir(skill_dir)
                     raise SkillStorageError(
                         f"Failed to write supporting file {filename}: {e}",
                         path=str(file_path),
@@ -1017,10 +1044,10 @@ class SkillsService:
             else:
                 db.insert_skill_registry(registry_payload)
         except ConflictError as e:
-            shutil.rmtree(skill_dir, ignore_errors=True)
+            self._remove_skill_dir(skill_dir)
             raise SkillConflictError(str(e), skill_name=name) from e
         except (CharactersRAGDBError, InputError) as e:
-            shutil.rmtree(skill_dir, ignore_errors=True)
+            self._remove_skill_dir(skill_dir)
             raise SkillsError(f"Failed to record skill '{name}' in registry: {e}") from e
 
         logger.info(f"Created skill '{name}' for user {self.user_id}")
@@ -1106,7 +1133,7 @@ class SkillsService:
             except Exception as e:
                 raise SkillValidationError(f"Invalid skill content: {e}") from e
 
-            skill_file = skill_dir / "SKILL.md"
+            skill_file = self._skill_main_file(skill_dir)
             try:
                 await snapshot_file(skill_file)
                 await asyncio.to_thread(skill_file.write_text, content, encoding="utf-8")
@@ -1851,7 +1878,7 @@ class SkillsService:
                     )
 
                 if overwrite and destination_dir.exists():
-                    shutil.rmtree(destination_dir, ignore_errors=True)
+                    self._remove_skill_dir(destination_dir)
 
                 if destination_dir.exists():
                     logger.warning(
