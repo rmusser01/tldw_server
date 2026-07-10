@@ -231,6 +231,7 @@ type AddContentStepProps = {
   connectionRecoveryMessage?: string
   onRetryConnection?: () => void
   onQuickProcess?: () => void
+  quickProcessWarning?: string | null
 }
 
 export const AddContentStep: React.FC<AddContentStepProps> = ({
@@ -239,6 +240,7 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
   connectionRecoveryMessage,
   onRetryConnection,
   onQuickProcess,
+  quickProcessWarning = null,
 }) => {
   const { t } = useTranslation(["option"])
   const {
@@ -865,6 +867,16 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
       )}
 
       {hasItems && <BatchMetadataPanel />}
+
+      {hasItems && quickProcessWarning && (
+        <DesignSystemAlert
+          variant="warning"
+          role="alert"
+          icon={<AlertTriangle className="h-4 w-4" aria-hidden="true" />}
+          className="mt-3"
+          title={quickProcessWarning}
+        />
+      )}
 
       {/* Action buttons */}
       <div className="mt-4 flex items-center justify-end gap-2">

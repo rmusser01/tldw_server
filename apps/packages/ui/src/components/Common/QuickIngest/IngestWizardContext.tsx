@@ -343,6 +343,19 @@ const reducer = (state: IngestWizardState, action: Action): IngestWizardState =>
       }
 
     case "UPDATE_ITEM_PROGRESS":
+      if (
+        state.processingState.perItemProgress.some(
+          (p) =>
+            p.id === action.progress.id &&
+            p.status === action.progress.status &&
+            p.progressPercent === action.progress.progressPercent &&
+            p.currentStage === action.progress.currentStage &&
+            p.estimatedRemaining === action.progress.estimatedRemaining &&
+            p.error === action.progress.error
+        )
+      ) {
+        return state
+      }
       return {
         ...state,
         processingState: {
@@ -354,12 +367,21 @@ const reducer = (state: IngestWizardState, action: Action): IngestWizardState =>
       }
 
     case "UPDATE_PROCESSING_STATE":
+      if (
+        Object.entries(action.state).every(
+          ([key, value]) =>
+            state.processingState[key as keyof WizardProcessingState] === value
+        )
+      ) {
+        return state
+      }
       return {
         ...state,
         processingState: { ...state.processingState, ...action.state },
       }
 
     case "SET_RESULTS":
+      if (state.results === action.results) return state
       return { ...state, results: action.results }
 
     case "SKIP_TO_PROCESSING": {

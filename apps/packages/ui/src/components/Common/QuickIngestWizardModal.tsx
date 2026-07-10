@@ -1,8 +1,9 @@
-import React, { useCallback, useEffect, useMemo, useRef } from "react"
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Modal, Button } from "antd"
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "react-router-dom"
 import { XCircle } from "lucide-react"
+import { shallow } from "zustand/shallow"
 import { browser } from "wxt/browser"
 import {
   IngestWizardProvider,
@@ -854,9 +855,11 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     updateItemProgress,
     updateProcessingState,
     setResults,
+    goToStep,
     goNext,
   } = useIngestWizard()
   const { currentStep, queueItems, processingState, presetConfig, results } = state
+  const [quickProcessWarning, setQuickProcessWarning] = useState<string | null>(null)
   const connectionState = useConnectionStore((store) => store.state)
   const checkConnection = useConnectionStore((store) => store.checkOnce)
   const activeSessionIdRef = useRef<string | null>(null)
@@ -937,6 +940,17 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   const handleRetryConnection = useCallback(() => {
     void checkConnection()
   }, [checkConnection])
+
+  useEffect(() => {
+    if (!quickProcessWarning) return
+    const analysisProviderWarning = getQuickIngestAnalysisProviderWarning({
+      common: presetConfig.common,
+      advancedValues: presetConfig.advancedValues,
+    })
+    if (!analysisProviderWarning) {
+      setQuickProcessWarning(null)
+    }
+  }, [presetConfig.advancedValues, presetConfig.common, quickProcessWarning])
 
   useEffect(() => {
     resultsRef.current = results
@@ -1410,7 +1424,16 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
         advancedValues: requestPayload.advancedValues,
       })
       if (analysisProviderWarning) {
-        finalizeFailure(analysisProviderWarning, "failed")
+        setQuickProcessWarning(analysisProviderWarning)
+        updateProcessingState({
+          status: "idle",
+          perItemProgress: [],
+          elapsed: 0,
+          estimatedRemaining: 0,
+        })
+        hasStartedRunRef.current = false
+        activeSessionIdRef.current = null
+        goToStep(1)
         return
       }
 
@@ -1492,6 +1515,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     presetConfig.storeRemote,
     presetConfig.typeDefaults,
     state.conferenceBatchMetadata,
+    goToStep,
     markProcessingTracking,
     validQueueItems,
   ])
@@ -1583,8 +1607,23 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   // Quick-process callback for AddContentStep (skip to processing with defaults)
   const handleQuickProcess = useCallback(() => {
     if (!isOnlineForIngest || isCheckingConnection) return
+    const analysisProviderWarning = getQuickIngestAnalysisProviderWarning({
+      common: presetConfig.common,
+      advancedValues: presetConfig.advancedValues,
+    })
+    if (analysisProviderWarning) {
+      setQuickProcessWarning(analysisProviderWarning)
+      return
+    }
+    setQuickProcessWarning(null)
     skipToProcessing()
-  }, [isCheckingConnection, isOnlineForIngest, skipToProcessing])
+  }, [
+    isCheckingConnection,
+    isOnlineForIngest,
+    presetConfig.advancedValues,
+    presetConfig.common,
+    skipToProcessing,
+  ])
 
   // Navigation callbacks for WizardResultsStep CTAs
   const navigate = useNavigate()
@@ -1639,6 +1678,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
             connectionRecoveryMessage={connectionRecoveryMessage}
             onRetryConnection={handleRetryConnection}
             onQuickProcess={handleQuickProcess}
+            quickProcessWarning={quickProcessWarning}
           />
         )
       case 2:
@@ -1684,6 +1724,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     isOnlineForIngest,
     onClose,
     open,
+    quickProcessWarning,
     state.isMinimized,
   ])
 
@@ -1733,13 +1774,16 @@ export const QuickIngestWizardModal: React.FC<QuickIngestWizardModalProps> = ({
     markInterrupted,
     createDraftSession,
   } =
-    useQuickIngestSessionStore((store) => ({
-      session: store.session,
-      upsertSession: store.upsertSession,
-      markProcessingTracking: store.markProcessingTracking,
-      markInterrupted: store.markInterrupted,
-      createDraftSession: store.createDraftSession,
-    }))
+    useQuickIngestSessionStore(
+      (store) => ({
+        session: store.session,
+        upsertSession: store.upsertSession,
+        markProcessingTracking: store.markProcessingTracking,
+        markInterrupted: store.markInterrupted,
+        createDraftSession: store.createDraftSession,
+      }),
+      shallow
+    )
 
   const initialState = useMemo(
     () => (session ? buildInitialWizardState(session) : undefined),

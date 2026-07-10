@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   submitQuickIngestBatch: vi.fn(),
   cancelQuickIngestSession: vi.fn(),
   reattachQuickIngestSession: vi.fn(),
+  getQuickIngestAnalysisProviderWarning: vi.fn(),
   checkConnection: vi.fn(),
   navigate: vi.fn(),
   runtimeListeners: [] as Array<(message: any) => void>,
@@ -152,6 +153,8 @@ vi.mock("@/services/tldw/quick-ingest-batch", () => ({
   startQuickIngestSession: (...args: unknown[]) => mocks.startQuickIngestSession(...args),
   submitQuickIngestBatch: (...args: unknown[]) => mocks.submitQuickIngestBatch(...args),
   cancelQuickIngestSession: (...args: unknown[]) => mocks.cancelQuickIngestSession(...args),
+  getQuickIngestAnalysisProviderWarning: (...args: unknown[]) =>
+    mocks.getQuickIngestAnalysisProviderWarning(...args),
 }))
 
 vi.mock("@/services/tldw/quick-ingest-session-reattach", () => ({
@@ -174,11 +177,18 @@ vi.mock("@/components/Common/QuickIngest/AddContentStep", async () => {
     typeof import("@/components/Common/QuickIngest/IngestWizardContext")
   >("@/components/Common/QuickIngest/IngestWizardContext")
   return {
-    AddContentStep: ({ onQuickProcess }: { onQuickProcess?: () => void }) => {
+    AddContentStep: ({
+      onQuickProcess,
+      quickProcessWarning,
+    }: {
+      onQuickProcess?: () => void
+      quickProcessWarning?: string | null
+    }) => {
       const context = actual.useIngestWizard() as any
       const { state, setQueueItems } = context
       return (
         <div>
+          {quickProcessWarning ? <div role="alert">{quickProcessWarning}</div> : null}
           <button
             onClick={() => {
               setQueueItems([
@@ -327,6 +337,8 @@ describe("QuickIngestWizardModal session runtime", () => {
     mocks.submitQuickIngestBatch.mockReset()
     mocks.cancelQuickIngestSession.mockReset()
     mocks.reattachQuickIngestSession.mockReset()
+    mocks.getQuickIngestAnalysisProviderWarning.mockReset()
+    mocks.getQuickIngestAnalysisProviderWarning.mockReturnValue(null)
     mocks.checkConnection.mockReset()
     mocks.navigate.mockReset()
     mocks.cancelQuickIngestSession.mockResolvedValue({ ok: true })
@@ -397,6 +409,25 @@ describe("QuickIngestWizardModal session runtime", () => {
     await waitFor(() => {
       expect(screen.getByTestId("wizard-results")).toHaveTextContent("complete:1")
     })
+  })
+
+  it("keeps quick defaults on the add step when analysis needs a provider", async () => {
+    const user = userEvent.setup()
+    useQuickIngestSessionStore.getState().createDraftSession()
+    mocks.getQuickIngestAnalysisProviderWarning.mockReturnValue(
+      "Choose an analysis provider before running ingest analysis."
+    )
+
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+
+    await user.click(screen.getByRole("button", { name: "Queue And Process" }))
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Choose an analysis provider before running ingest analysis."
+    )
+    expect(screen.queryByTestId("wizard-processing")).not.toBeInTheDocument()
+    expect(mocks.startQuickIngestSession).not.toHaveBeenCalled()
+    expect(mocks.submitQuickIngestBatch).not.toHaveBeenCalled()
   })
 
   it("preserves first-source open detail while syncing wizard state", async () => {
