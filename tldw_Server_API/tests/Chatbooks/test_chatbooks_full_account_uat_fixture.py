@@ -72,6 +72,32 @@ def _effective_auth_state(db_path: Path, user_id: int) -> tuple[list[str], list[
 
 
 @pytest.mark.asyncio
+async def test_prepare_fails_when_user_lacks_effective_notification_permission(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = _load_fixture_module()
+
+    class _MissingNotificationPermissionRepo:
+        def __init__(self, *, client_id: str) -> None:  # noqa: ARG002
+            pass
+
+        def get_effective_permissions(self, user_id: int) -> list[str]:  # noqa: ARG002
+            return ["notifications.read"]
+
+    monkeypatch.setattr(fixture, "AuthnzRbacRepo", _MissingNotificationPermissionRepo, raising=False)
+
+    with pytest.raises(
+        RuntimeError,
+        match=r"missing required notification permissions: notifications\.control",
+    ):
+        await fixture.prepare(tmp_path)
+
+    roles, _ = _effective_auth_state(tmp_path / "source" / "users.db", 1)
+    assert roles == ["user"]
+
+
+@pytest.mark.asyncio
 async def test_prepare_and_reset_create_separate_source_and_empty_destination(tmp_path: Path) -> None:
     fixture = _load_fixture_module()
 

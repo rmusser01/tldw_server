@@ -20,6 +20,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
 from tldw_Server_API.app.core.AuthNZ.initialize import ensure_authnz_schema_ready_once
+from tldw_Server_API.app.core.AuthNZ.repos.rbac_repo import AuthnzRbacRepo
 from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
 from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 from tldw_Server_API.app.core.Chatbooks.chatbook_models import ChatbookVersion, ConflictResolution
@@ -51,6 +52,9 @@ MEDIA_VECTOR = b"tldw-media-vector-v1\x00\x10\x20"
 COLLECTION_NAME = "chatbooks_full_account_uat"
 COLLECTION_IDS = ["uat-chunk-001", "uat-chunk-002"]
 COLLECTION_EMBEDDINGS = [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]]
+REQUIRED_NOTIFICATION_PERMISSIONS = frozenset(
+    {"notifications.read", "notifications.control"}
+)
 
 
 class FixtureVerificationError(AssertionError):
@@ -115,6 +119,15 @@ async def _create_user(*, username: str, email: str) -> int:
     await users_repo.assign_role_if_missing(user_id=user_id, role_name=role_name)
     if not await users_repo.has_role_assignment(user_id=user_id, role_name=role_name):
         raise RuntimeError(f"Fixture role '{role_name}' does not exist or could not be assigned")
+    effective_permissions = set(
+        AuthnzRbacRepo(client_id="chatbooks_full_account_uat_fixture").get_effective_permissions(user_id)
+    )
+    missing_permissions = sorted(REQUIRED_NOTIFICATION_PERMISSIONS - effective_permissions)
+    if missing_permissions:
+        raise RuntimeError(
+            "Fixture user is missing required notification permissions: "
+            + ", ".join(missing_permissions)
+        )
     return user_id
 
 
