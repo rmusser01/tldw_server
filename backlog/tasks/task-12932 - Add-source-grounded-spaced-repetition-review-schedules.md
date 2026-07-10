@@ -5,8 +5,11 @@ status: To Do
 references:
 - 'Design spec: Docs/superpowers/specs/2026-07-09-source-grounded-spaced-repetition-design.md'
 - Spec review approved by subagent 019f4a0a-f590-75e0-9fc6-ff1f4d48eba6
+- 'Implementation plan: Docs/superpowers/plans/2026-07-09-source-grounded-spaced-repetition-implementation-plan.md'
+- Plan review approved by subagent 019f4a19-7d71-7bf2-8425-db97d8674734
 modified_files:
 - Docs/superpowers/specs/2026-07-09-source-grounded-spaced-repetition-design.md
+- Docs/superpowers/plans/2026-07-09-source-grounded-spaced-repetition-implementation-plan.md
 - backlog/tasks/task-12932 - Add-source-grounded-spaced-repetition-review-schedules.md
 ---
 
