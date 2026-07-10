@@ -19,19 +19,50 @@ class ResearchArtifactStore:
     """Write internal artifacts to disk and register them in the research manifest."""
 
     def __init__(self, *, base_dir: str | Path, db: ResearchSessionsDB):
-        self.base_dir = Path(base_dir)
+        self.base_dir = Path(base_dir).resolve(strict=False)
         self.db = db
 
-    def _artifact_path(self, session_id: str, artifact_name: str) -> Path:
-        safe_name = normalize_output_storage_filename(
+    @staticmethod
+    def _safe_session_component(session_id: str) -> str:
+        raw = str(session_id or "").strip()
+        if not raw:
+            raise ValueError("session_id must contain at least one safe character")
+        return f"session_{hashlib.sha256(raw.encode('utf-8')).hexdigest()[:32]}"
+
+    def _resolve_artifact_path(self, session_id: str, safe_name: str) -> Path:
+        base = (self.base_dir / "research").resolve(strict=False)
+        session_dir = (base / self._safe_session_component(session_id)).resolve(strict=False)
+        try:
+            session_dir.relative_to(base)
+        except ValueError as exc:
+            raise ValueError("artifact session path escapes research directory") from exc
+        session_dir.mkdir(parents=True, exist_ok=True)
+        path = (session_dir / safe_name).resolve(strict=False)
+        try:
+            path.relative_to(session_dir)
+        except ValueError as exc:
+            raise ValueError("artifact path escapes session directory") from exc
+        return path
+
+    @staticmethod
+    def _safe_artifact_name(artifact_name: str) -> str:
+        return normalize_output_storage_filename(
             artifact_name,
             allow_absolute=False,
             reject_relative_with_separators=True,
             expand_user=False,
         )
-        artifact_dir = self.base_dir / "research" / session_id
-        artifact_dir.mkdir(parents=True, exist_ok=True)
-        return artifact_dir / safe_name
+
+    @staticmethod
+    def _storage_file_name(safe_name: str) -> str:
+        suffix = "".join(Path(safe_name).suffixes)
+        digest = hashlib.sha256(safe_name.encode("utf-8")).hexdigest()
+        return f"artifact_{digest}{suffix}"
+
+    def _artifact_path(self, session_id: str, artifact_name: str) -> Path:
+        safe_name = self._safe_artifact_name(artifact_name)
+        storage_name = self._storage_file_name(safe_name)
+        return self._resolve_artifact_path(session_id, storage_name)
 
     def _versioned_artifact_path(self, session_id: str, artifact_name: str, artifact_version: int) -> Path:
         path = self._artifact_path(session_id, artifact_name)
@@ -58,10 +89,11 @@ class ResearchArtifactStore:
         return (max(existing) + 1) if existing else 1
 
     def _latest_artifact(self, session_id: str, artifact_name: str) -> ResearchArtifactRow | None:
+        safe_name = self._safe_artifact_name(artifact_name)
         matches = [
             artifact
             for artifact in self.db.list_artifacts(session_id)
-            if artifact.artifact_name == artifact_name
+            if artifact.artifact_name == safe_name
         ]
         if not matches:
             return None
@@ -95,7 +127,7 @@ class ResearchArtifactStore:
         job_id: str | None,
     ) -> ResearchArtifactRow:
         owner_user_id = str(owner_user_id)
-        safe_name = self._artifact_path(session_id, artifact_name).name
+        safe_name = self._safe_artifact_name(artifact_name)
         next_version = self._next_version(session_id, safe_name)
         path = self._versioned_artifact_path(session_id, safe_name, next_version)
         encoded = json.dumps(payload, indent=2, sort_keys=True).encode("utf-8")
@@ -134,7 +166,7 @@ class ResearchArtifactStore:
         job_id: str | None,
     ) -> ResearchArtifactRow:
         owner_user_id = str(owner_user_id)
-        safe_name = self._artifact_path(session_id, artifact_name).name
+        safe_name = self._safe_artifact_name(artifact_name)
         next_version = self._next_version(session_id, safe_name)
         path = self._versioned_artifact_path(session_id, safe_name, next_version)
         encoded = "".join(
@@ -177,7 +209,7 @@ class ResearchArtifactStore:
         content_type: str = "text/plain",
     ) -> ResearchArtifactRow:
         owner_user_id = str(owner_user_id)
-        safe_name = self._artifact_path(session_id, artifact_name).name
+        safe_name = self._safe_artifact_name(artifact_name)
         next_version = self._next_version(session_id, safe_name)
         path = self._versioned_artifact_path(session_id, safe_name, next_version)
         encoded = content.encode("utf-8")

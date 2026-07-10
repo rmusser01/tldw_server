@@ -12,6 +12,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from loguru import logger
@@ -2606,9 +2607,18 @@ class SandboxService:
         ws = str(workspace_root or "").strip()
         if not ws:
             return
-        ws_path = os.path.abspath(ws)
-        session_root = os.path.dirname(ws_path) if os.path.basename(ws_path) == "workspace" else ws_path
-        shutil.rmtree(session_root, ignore_errors=True)
+        resolved_ws = self._orch._resolve_workspace_path_from_store(ws)
+        if resolved_ws is None:
+            logger.warning("Refusing to remove sandbox workspace outside sandbox root: {}", ws)
+            return
+        session_root = resolved_ws.parent if resolved_ws.name == "workspace" else resolved_ws
+        sandbox_root = self._orch._workspace_root()
+        try:
+            session_root.relative_to(sandbox_root)
+        except ValueError:
+            logger.warning("Refusing to remove sandbox session outside sandbox root: {}", session_root)
+            return
+        shutil.rmtree(Path(session_root), ignore_errors=True)
 
     def _cleanup_vz_session_control(self, session_id: str) -> None:
         control = self._orch.get_vz_session_control(session_id)

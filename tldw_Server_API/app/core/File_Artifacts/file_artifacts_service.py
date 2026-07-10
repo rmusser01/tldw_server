@@ -491,8 +491,13 @@ class FileArtifactsService:
     async def _write_export_file(self, file_id: int, export_format: str, content: bytes) -> tuple[str, int]:
         filename = f"file_{file_id}.{export_format}"
         storage_path = self._cdb.resolve_temp_output_storage_path(filename)
-        outputs_dir = DatabasePaths.get_user_temp_outputs_dir(self._user_id_int)
-        file_path = outputs_dir / storage_path
+        outputs_dir = DatabasePaths.get_user_temp_outputs_dir(self._user_id_int).resolve(strict=False)
+        await asyncio.to_thread(outputs_dir.mkdir, parents=True, exist_ok=True)
+        file_path = (outputs_dir / storage_path).resolve(strict=False)
+        try:
+            file_path.relative_to(outputs_dir)
+        except ValueError as exc:
+            raise FileArtifactsError("storage_persist_failed", detail="invalid_export_storage_path") from exc
         async with aiofiles.open(file_path, "wb") as handle:
             await handle.write(content)
         return storage_path, len(content)
@@ -500,8 +505,9 @@ class FileArtifactsService:
     def _delete_temp_export_file(self, storage_path: str) -> None:
         try:
             safe_name = self._cdb.resolve_temp_output_storage_path(storage_path)
-            outputs_dir = DatabasePaths.get_user_temp_outputs_dir(self._user_id_int)
-            file_path = outputs_dir / safe_name
+            outputs_dir = DatabasePaths.get_user_temp_outputs_dir(self._user_id_int).resolve(strict=False)
+            file_path = (outputs_dir / safe_name).resolve(strict=False)
+            file_path.relative_to(outputs_dir)
             if file_path.exists():
                 file_path.unlink()
         except Exception as exc:

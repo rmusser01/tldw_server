@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import os
+import re
 import shutil
 import stat
 import threading
@@ -45,6 +47,7 @@ _SANDBOX_ORCH_NONCRITICAL_EXCEPTIONS = (
 _ARTIFACT_OPENAT_SUPPORTED = os.open in os.supports_dir_fd and os.mkdir in os.supports_dir_fd
 
 _OWNER_ONLY_DIR_MODE = stat.S_IRWXU
+_SAFE_LEGACY_WORKSPACE_COMPONENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 
 
 class IdempotencyConflict(Exception):
@@ -1473,7 +1476,27 @@ class SandboxOrchestrator:
     # -----------------
     # Workspaces
     # -----------------
-    def _workspace_path(self, user_id: Any, session_id: str) -> Path:
+    @staticmethod
+    def _safe_workspace_component(value: Any, *, label: str) -> str:
+        raw = str(value or "").strip()
+        if not raw:
+            raise ValueError(f"{label} is required")
+        safe = "".join(c if c.isalnum() or c in "_.-" else "_" for c in raw).strip("._")
+        if safe and safe == raw:
+            return safe
+        digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+        return f"{label}_{digest}"
+
+    @staticmethod
+    def _legacy_workspace_component(value: Any, *, label: str) -> str:
+        raw = str(value or "").strip()
+        if not raw or "/" in raw or "\\" in raw:
+            raise ValueError(f"{label} is required")
+        if not _SAFE_LEGACY_WORKSPACE_COMPONENT_RE.fullmatch(raw):
+            raise ValueError(f"invalid {label}")
+        return raw
+
+    def _workspace_root(self) -> Path:
         try:
             root = getattr(app_settings, "SANDBOX_ROOT_DIR", None)
         except _SANDBOX_ORCH_NONCRITICAL_EXCEPTIONS:
@@ -1484,7 +1507,45 @@ class SandboxOrchestrator:
             except _SANDBOX_ORCH_NONCRITICAL_EXCEPTIONS:
                 proj = "."
             root = Path(str(proj)) / "tmp_dir" / "sandbox"
-        return Path(str(root)) / str(user_id) / "sessions" / str(session_id) / "workspace"
+        return Path(str(root)).resolve(strict=False)
+
+    def _workspace_path(self, user_id: Any, session_id: str) -> Path:
+        root = self._workspace_root()
+        user_component = self._safe_workspace_component(user_id, label="user")
+        session_component = self._safe_workspace_component(session_id, label="session")
+        path = (root / user_component / "sessions" / session_component / "workspace").resolve(strict=False)
+        try:
+            path.relative_to(root)
+        except ValueError as exc:
+            raise ValueError("workspace path escapes sandbox root") from exc
+        return path
+
+    def _legacy_workspace_path(self, user_id: Any, session_id: str) -> Path:
+        root = self._workspace_root()
+        user_component = self._legacy_workspace_component(user_id, label="user")
+        session_component = self._legacy_workspace_component(session_id, label="session")
+        path = (root / user_component / "sessions" / session_component / "workspace").resolve(strict=False)
+        try:
+            path.relative_to(root)
+        except ValueError as exc:
+            raise ValueError("workspace path escapes sandbox root") from exc
+        return path
+
+    def _resolve_workspace_path_from_store(self, workspace_path: Any) -> Path | None:
+        raw = str(workspace_path or "").strip()
+        if not raw:
+            return None
+        root = self._workspace_root()
+        path = Path(raw).resolve(strict=False)
+        try:
+            path.relative_to(root)
+        except ValueError:
+            logger.warning("Ignoring sandbox workspace path outside sandbox root: {}", raw)
+            return None
+        if path.name != "workspace":
+            logger.warning("Ignoring sandbox workspace path without workspace leaf: {}", raw)
+            return None
+        return path
 
     def _ensure_workspace(self, user_id: Any, session_id: str) -> str:
         ws = self._workspace_path(user_id, session_id)
@@ -1526,13 +1587,20 @@ class SandboxOrchestrator:
         if not ws_path:
             owner = row.get("user_id")
             if owner:
-                ws_path = str(self._workspace_path(owner, sid))
+                legacy_ws = None
+                with contextlib.suppress(_SANDBOX_ORCH_NONCRITICAL_EXCEPTIONS):
+                    legacy_ws = self._legacy_workspace_path(owner, sid)
+                ws_path = str(legacy_ws if legacy_ws and legacy_ws.exists() else self._workspace_path(owner, sid))
         if not ws_path:
             self._drop_cached_session(sid)
             return None
-        ws_str = str(ws_path)
+        resolved_ws = self._resolve_workspace_path_from_store(ws_path)
+        if resolved_ws is None:
+            self._drop_cached_session(sid)
+            return None
+        ws_str = str(resolved_ws)
         with contextlib.suppress(_SANDBOX_ORCH_NONCRITICAL_EXCEPTIONS):
-            Path(ws_str).mkdir(parents=True, exist_ok=True)
+            resolved_ws.mkdir(parents=True, exist_ok=True)
         with self._lock:
             self._session_roots[sid] = ws_str
         return ws_str
@@ -1555,10 +1623,16 @@ class SandboxOrchestrator:
         with contextlib.suppress(_SANDBOX_ORCH_NONCRITICAL_EXCEPTIONS):
             self._prune_expired_sessions()
         try:
-            return self._store.list_workspace_paths_for_user_workspace(
+            paths = self._store.list_workspace_paths_for_user_workspace(
                 user_id=owner_key,
                 workspace_id=workspace_key,
             )
+            resolved_paths = []
+            for path in paths:
+                resolved = self._resolve_workspace_path_from_store(path)
+                if resolved is not None:
+                    resolved_paths.append(str(resolved))
+            return resolved_paths
         except _SANDBOX_ORCH_NONCRITICAL_EXCEPTIONS as exc:
             logger.debug(
                 "store.list_workspace_paths_for_user_workspace failed: {}",

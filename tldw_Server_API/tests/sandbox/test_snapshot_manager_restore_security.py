@@ -28,6 +28,32 @@ def test_restore_snapshot_round_trip(tmp_path: Path) -> None:
     assert not (workspace / "new.txt").exists()
 
 
+def test_legacy_raw_snapshot_layout_remains_readable(tmp_path: Path) -> None:
+    manager = SnapshotManager(storage_path=str(tmp_path / "snapshots"))
+    session_id = "sess-legacy"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(parents=True, exist_ok=True)
+    (workspace / "state.txt").write_text("legacy", encoding="utf-8")
+
+    snapshot = manager.create_snapshot(session_id, str(workspace))
+    snapshot_id = snapshot["snapshot_id"]
+    legacy_dir = tmp_path / "snapshots" / session_id
+    legacy_dir.mkdir(parents=True, exist_ok=True)
+    manager._snapshot_path(session_id, snapshot_id).rename(legacy_dir / f"{snapshot_id}.tar.gz")
+    manager._metadata_path(session_id, snapshot_id).rename(legacy_dir / f"{snapshot_id}.meta.json")
+    manager._snapshot_dir(session_id).rmdir()
+
+    listed = manager.list_snapshots(session_id)
+    assert [item["snapshot_id"] for item in listed] == [snapshot_id]
+    assert manager.get_snapshot_info(session_id, snapshot_id) is not None
+
+    (workspace / "state.txt").write_text("mutated", encoding="utf-8")
+    assert manager.restore_snapshot(session_id, snapshot_id, str(workspace)) is True
+    assert (workspace / "state.txt").read_text(encoding="utf-8") == "legacy"
+    assert manager.delete_snapshot(session_id, snapshot_id) is True
+    assert manager.list_snapshots(session_id) == []
+
+
 def test_restore_snapshot_rejects_path_traversal_member(tmp_path: Path) -> None:
     manager = SnapshotManager(storage_path=str(tmp_path / "snapshots"))
     workspace = tmp_path / "workspace"
@@ -49,6 +75,15 @@ def test_restore_snapshot_rejects_path_traversal_member(tmp_path: Path) -> None:
 
     assert (workspace / "keep.txt").read_text(encoding="utf-8") == "ok"
     assert not (workspace.parent / "outside.txt").exists()
+
+
+def test_snapshot_paths_reject_traversal_ids(tmp_path: Path) -> None:
+    manager = SnapshotManager(storage_path=str(tmp_path / "snapshots"))
+
+    with pytest.raises(ValueError, match="Invalid session_id"):
+        manager.list_snapshots("../outside")
+    with pytest.raises(ValueError, match="Invalid snapshot_id"):
+        manager.get_snapshot_info("sess-safe", "../outside")
 
 
 def test_restore_snapshot_rejects_symlink_member(tmp_path: Path) -> None:
