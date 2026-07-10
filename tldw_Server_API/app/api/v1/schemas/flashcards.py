@@ -843,8 +843,16 @@ class SourceReviewLaunchStateResponse(BaseModel):
     source_bundle: dict[str, Any]
 
 
+class SourceReviewSourceSummaryItem(BaseModel):
+    source_type: Literal["note", "media", "message"]
+    source_id: str = Field(..., max_length=256)
+    label: Optional[str] = Field(default=None, max_length=200)
+    excerpt_preview: Optional[str] = Field(default=None, max_length=240)
+
+
 class SourceReviewOccurrenceActionResponse(SourceReviewOccurrenceResponse):
     plan_title: Optional[str] = None
+    source_summary: list[SourceReviewSourceSummaryItem] = Field(default_factory=list)
     launch_state: Optional[SourceReviewLaunchStateResponse] = None
 
 

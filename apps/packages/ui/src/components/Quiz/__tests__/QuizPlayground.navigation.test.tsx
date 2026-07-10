@@ -225,6 +225,21 @@ describe("QuizPlayground navigation intents", () => {
     )
   })
 
+  it("keeps a storage-failure source-review handoff recoverable on Generate", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/quiz?tab=generate&source_review=1"
+    )
+
+    render(<QuizPlayground />)
+
+    expect(screen.getByTestId("active-tab")).toHaveTextContent("generate")
+    expect(await screen.findByTestId("generate-source-review-intent")).toHaveTextContent(
+      '"error":"missing_token"'
+    )
+  })
+
   it("honors the token-storage fallback Generate route", async () => {
     window.history.replaceState({}, "", "/quiz?tab=generate")
 

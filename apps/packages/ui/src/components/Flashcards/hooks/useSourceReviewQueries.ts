@@ -49,10 +49,12 @@ export function useDueSourceReviewOccurrencesQuery(
 ) {
   const { flashcardsEnabled } = useFlashcardsEnabled()
   const { limit, offset } = options
+  const enabled = (options.enabled ?? true) && flashcardsEnabled
   return useQuery({
     queryKey: [`${SOURCE_REVIEW_QUERY_PREFIX}:due`, limit, offset],
     queryFn: () => listDueSourceReviewOccurrences({ limit, offset }),
-    enabled: (options.enabled ?? true) && flashcardsEnabled,
+    enabled,
+    refetchInterval: enabled ? 60_000 : false,
     retry: false
   })
 }

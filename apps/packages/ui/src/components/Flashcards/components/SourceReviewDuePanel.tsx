@@ -53,6 +53,22 @@ const formatDueAt = (value: string): string => {
   }).format(date)
 }
 
+const sourceSummaryText = (
+  occurrence: SourceReviewOccurrenceActionResponse
+): string | null => {
+  const items = occurrence.source_summary ?? []
+  if (items.length === 0) return null
+  const labels = items
+    .slice(0, 2)
+    .map((item) => item.label?.trim() || item.source_id)
+    .filter(Boolean)
+    .join(", ")
+  const remainder = items.length > 2 ? `, +${items.length - 2}` : ""
+  return `${items.length} ${items.length === 1 ? "source" : "sources"}${
+    labels ? ` · ${labels}${remainder}` : ""
+  }`
+}
+
 const handoffPayload = (
   occurrence: SourceReviewOccurrenceActionResponse
 ): SourceReviewHandoffPayload | null => {
@@ -252,6 +268,10 @@ export const SourceReviewDuePanel: React.FC<SourceReviewDuePanelProps> = ({
           {visibleOccurrences.map((occurrence) => {
             const isPending = occurrence.status === "pending"
             const isBusy = pendingAction?.occurrenceId === occurrence.id
+            const sourceSummary = sourceSummaryText(occurrence)
+            const sourcePreview = occurrence.source_summary
+              ?.find((item) => item.excerpt_preview?.trim())
+              ?.excerpt_preview?.trim()
             const rereadItems =
               expandedRereadId === occurrence.id
                 ? occurrence.launch_state?.source_bundle.items ?? []
@@ -272,6 +292,20 @@ export const SourceReviewDuePanel: React.FC<SourceReviewDuePanelProps> = ({
                     <Text type="secondary" className="block text-xs">
                       Due {formatDueAt(occurrence.due_at)}
                     </Text>
+                    {sourceSummary ? (
+                      <Text
+                        type="secondary"
+                        className="block max-w-sm truncate text-xs">
+                        {sourceSummary}
+                      </Text>
+                    ) : null}
+                    {sourcePreview ? (
+                      <Text
+                        type="secondary"
+                        className="block max-w-xl truncate text-xs italic">
+                        {sourcePreview}
+                      </Text>
+                    ) : null}
                   </div>
                   <div className="flex flex-wrap items-center gap-1">
                     <Button

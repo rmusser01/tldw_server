@@ -118,6 +118,16 @@ def test_source_review_due_at_rejects_invalid_timezone():
         )
 
 
+def test_source_review_due_at_rejects_nonexistent_local_date():
+    with pytest.raises(ValueError, match="does not exist"):
+        compute_source_review_due_at(
+            starts_on=date(2011, 12, 29),
+            timezone_name="Pacific/Apia",
+            offset_value=1,
+            offset_unit="day",
+        )
+
+
 def test_source_review_day_offset_rejects_date_overflow_consistently():
     with pytest.raises(ValueError, match="supported date range"):
         compute_source_review_due_at(

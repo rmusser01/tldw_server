@@ -293,6 +293,45 @@ def _serialize_source_review_plan(plan: dict[str, Any]) -> SourceReviewPlanRespo
     return SourceReviewPlanResponse.model_validate(data)
 
 
+def _bounded_source_review_text(value: Any, limit: int) -> str | None:
+    if value is None:
+        return None
+    return str(value).strip()[:limit] or None
+
+
+def _source_review_source_summary(source_bundle: Any) -> list[dict[str, str | None]]:
+    """Return bounded source identifiers and previews for due-list scanning."""
+
+    if not isinstance(source_bundle, dict):
+        return []
+    source_items = source_bundle.get("items")
+    if not isinstance(source_items, list):
+        return []
+
+    summary: list[dict[str, str | None]] = []
+    for item in source_items[:10]:
+        if not isinstance(item, dict):
+            continue
+        source_type = item.get("source_type")
+        source_id = item.get("source_id")
+        if source_type not in {"note", "media", "message"} or not isinstance(source_id, str):
+            continue
+        source_id = source_id.strip()[:256]
+        if not source_id:
+            continue
+        label = item.get("label") or item.get("source_title")
+        excerpt = item.get("excerpt_text")
+        summary.append(
+            {
+                "source_type": source_type,
+                "source_id": source_id,
+                "label": _bounded_source_review_text(label, 200),
+                "excerpt_preview": _bounded_source_review_text(excerpt, 240),
+            }
+        )
+    return summary
+
+
 def _serialize_source_review_occurrence(
     occurrence: dict[str, Any],
 ) -> SourceReviewOccurrenceActionResponse:
@@ -306,6 +345,7 @@ def _serialize_source_review_occurrence(
         launch_state = {**launch_state, "source_bundle": source_bundle}
     else:
         launch_state = None
+    data["source_summary"] = _source_review_source_summary(source_bundle)
     data["launch_state"] = launch_state
     return SourceReviewOccurrenceActionResponse.model_validate(data)
 

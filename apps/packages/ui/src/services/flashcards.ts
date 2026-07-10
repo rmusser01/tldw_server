@@ -239,6 +239,13 @@ export type SourceReviewOccurrence = {
   version: number
 }
 
+export type SourceReviewSourceSummaryItem = {
+  source_type: StudyPackSourceType
+  source_id: string
+  label?: string | null
+  excerpt_preview?: string | null
+}
+
 export type SourceReviewLaunchState = {
   activity_type: SourceReviewActivity
   plan_id: number
@@ -256,6 +263,7 @@ export type SourceReviewLaunchState = {
 
 export type SourceReviewOccurrenceActionResponse = SourceReviewOccurrence & {
   plan_title?: string | null
+  source_summary?: SourceReviewSourceSummaryItem[]
   launch_state?: SourceReviewLaunchState | null
 }
 

@@ -65,6 +65,37 @@ const sourceLabel = (item: StudyPackSourceSelection): string =>
   item.source_title?.trim() ||
   `${item.source_type} ${item.source_id}`
 
+const buildBoundedGenerationText = (
+  items: StudyPackSourceSelection[]
+): string => {
+  const sources = items.map((item) => ({
+    label: sourceLabel(item),
+    excerpt: item.excerpt_text?.trim() || ""
+  }))
+  if (sources.length === 0) return ""
+
+  const separatorLength = Math.max(0, sources.length - 1) * 2
+  const excerptCount = sources.filter((source) => source.excerpt).length
+  const fixedLength =
+    separatorLength +
+    sources.reduce(
+      (total, source) => total + source.label.length + (source.excerpt ? 1 : 0),
+      0
+    )
+  let remaining = Math.max(0, SOURCE_REVIEW_GENERATION_TEXT_LIMIT - fixedLength)
+  let excerptsRemaining = excerptCount
+
+  const blocks = sources.map((source) => {
+    if (!source.excerpt || excerptsRemaining === 0) return source.label
+    const allocation = Math.floor(remaining / excerptsRemaining)
+    const excerpt = source.excerpt.slice(0, allocation)
+    remaining -= excerpt.length
+    excerptsRemaining -= 1
+    return excerpt ? `${source.label}\n${excerpt}` : source.label
+  })
+  return blocks.join("\n\n").slice(0, SOURCE_REVIEW_GENERATION_TEXT_LIMIT)
+}
+
 export function buildSourceReviewRereadContent(
   payload: SourceReviewHandoffPayload
 ): string {
@@ -84,13 +115,7 @@ export function buildSourceReviewFlashcardsIntent(
   payload: SourceReviewHandoffPayload
 ): SourceReviewFlashcardsIntent {
   const activityType = payload.activity_type === "cloze" ? "cloze" : "flashcards"
-  const text = payload.source_bundle.items
-    .map((item) => {
-      const excerpt = item.excerpt_text?.trim()
-      return excerpt ? `${sourceLabel(item)}\n${excerpt}` : sourceLabel(item)
-    })
-    .join("\n\n")
-    .slice(0, SOURCE_REVIEW_GENERATION_TEXT_LIMIT)
+  const text = buildBoundedGenerationText(payload.source_bundle.items)
 
   return {
     activity_type: activityType,
@@ -157,7 +182,7 @@ export function buildSourceReviewQuizRoute(
   payload: SourceReviewHandoffPayload
 ): string {
   const handoffToken = saveSourceReviewHandoff(payload)
-  if (!handoffToken) return "/quiz?tab=generate"
+  if (!handoffToken) return "/quiz?tab=generate&source_review=1"
   return `/quiz?tab=generate&source_review=1&source_review_token=${encodeURIComponent(
     handoffToken
   )}`

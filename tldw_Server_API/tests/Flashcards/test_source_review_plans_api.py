@@ -241,6 +241,15 @@ def test_due_source_review_response_has_backend_utc_now(
     assert body["now"] == "2026-07-10T12:00:00Z"  # nosec B101
     assert body["total"] == 1  # nosec B101
     assert body["items"][0]["activity_type"] == "reread"  # nosec B101
+    assert body["items"][0]["source_summary"] == [  # nosec B101
+        {
+            "source_type": "note",
+            "source_id": "note-42",
+            "label": "Cardiac physiology",
+            "excerpt_preview": "Frank-Starling mechanism",
+        }
+    ]
+    assert "excerpt_text" not in json.dumps(body["items"][0]["source_summary"])  # nosec B101
 
 
 def test_source_review_start_complete_and_stored_launch_state(

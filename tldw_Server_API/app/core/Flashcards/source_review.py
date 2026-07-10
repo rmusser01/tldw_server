@@ -80,7 +80,13 @@ def compute_source_review_due_at(
         raise ValueError(f"Invalid timezone: {timezone_name!r}") from exc
 
     local_midnight = datetime.combine(due_date, time.min, tzinfo=plan_timezone)
-    return local_midnight.astimezone(timezone.utc)
+    due_at = local_midnight.astimezone(timezone.utc)
+    round_trip = due_at.astimezone(plan_timezone)
+    if round_trip.date() != due_date or round_trip.time().replace(tzinfo=None) != time.min:
+        raise ValueError(
+            f"Source review due date {due_date.isoformat()} does not exist in timezone {timezone_name!r}"
+        )
+    return due_at
 
 
 def compute_source_review_schedule(

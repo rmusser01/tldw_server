@@ -57,6 +57,33 @@ describe("source review handoff helpers", () => {
     expect(intent.source_items).toEqual(handoff.source_bundle.items)
   })
 
+  it("shares the generation text budget across every source", () => {
+    const handoff = payload()
+    handoff.activity_type = "flashcards"
+    handoff.source_bundle.items = [
+      {
+        source_type: "note",
+        source_id: "first",
+        label: "First source",
+        excerpt_text: "a".repeat(20_000)
+      },
+      {
+        source_type: "media",
+        source_id: "second",
+        label: "Second source",
+        excerpt_text: "b".repeat(20_000)
+      }
+    ]
+
+    const intent = buildSourceReviewFlashcardsIntent(handoff)
+
+    expect(intent.text.length).toBeLessThanOrEqual(20_000)
+    expect(intent.text).toContain("First source")
+    expect(intent.text).toContain("Second source")
+    expect(intent.text).toContain("a".repeat(100))
+    expect(intent.text).toContain("b".repeat(100))
+  })
+
   it("stores quiz payload behind a short token and never exposes excerpts in the URL", () => {
     const handoff = payload()
 
@@ -101,7 +128,9 @@ describe("source review handoff helpers", () => {
     })
 
     try {
-      expect(buildSourceReviewQuizRoute(payload())).toBe("/quiz?tab=generate")
+      expect(buildSourceReviewQuizRoute(payload())).toBe(
+        "/quiz?tab=generate&source_review=1"
+      )
     } finally {
       Object.defineProperty(window, "sessionStorage", {
         configurable: true,

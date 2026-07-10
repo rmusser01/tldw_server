@@ -99,7 +99,10 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
   }, [llmProvidersQuery.data, llmProvidersQuery.isLoading, llmProvidersQuery.isError])
 
   const sourceContext = React.useMemo<GenerateSourceContext | null>(() => {
-    const sourceReviewItem = sourceReviewIntent?.source_items[0]
+    const sourceReviewItem =
+      sourceReviewIntent?.source_items.length === 1
+        ? sourceReviewIntent.source_items[0]
+        : null
     if (sourceReviewItem) {
       return {
         sourceType: sourceReviewItem.source_type,
@@ -379,8 +382,12 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
             model_type: card.model_type,
             reverse: card.model_type === "basic_reverse",
             is_cloze: card.model_type === "cloze",
-            source_ref_type: sourceContext?.sourceType,
-            source_ref_id: sourceContext?.sourceId || undefined
+            ...(sourceContext?.sourceType && sourceContext.sourceId
+              ? {
+                  source_ref_type: sourceContext.sourceType,
+                  source_ref_id: sourceContext.sourceId
+                }
+              : {})
           })
           created += 1
           successfulDraftIds.add(card.id)

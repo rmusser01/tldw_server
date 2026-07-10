@@ -105,6 +105,14 @@ const occurrence = (
   client_id: "source-review-tests",
   version: status === "in_progress" ? 2 : 1,
   plan_title: "Cardiac physiology",
+  source_summary: [
+    {
+      source_type: "note",
+      source_id: "note-42",
+      label: "Cardiac physiology notes",
+      excerpt_preview: "Frank-Starling preview"
+    }
+  ],
   launch_state: status === "in_progress" ? launchState(activity) : null
 })
 
@@ -208,6 +216,16 @@ describe("SourceReviewDuePanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Start" }))
 
     await waitFor(() => expect(mocks.start).toHaveBeenCalledWith(31))
+  })
+
+  it("shows a bounded source summary before an occurrence starts", () => {
+    renderPanel(occurrence("quiz"))
+
+    expect(screen.getByText("1 source · Cardiac physiology notes")).toBeInTheDocument()
+    expect(screen.getByText("Frank-Starling preview")).toBeInTheDocument()
+    expect(
+      screen.queryByText("The Frank-Starling mechanism increases stroke volume.")
+    ).not.toBeInTheDocument()
   })
 
   it("resumes an in-progress occurrence from its existing launch state", () => {

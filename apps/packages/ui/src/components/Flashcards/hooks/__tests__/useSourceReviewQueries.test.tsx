@@ -168,6 +168,11 @@ describe("source review query hooks", () => {
         offset: 2
       })
     })
+    expect(
+      client.getQueryCache().find({
+        queryKey: ["flashcards:source-review:due", 10, 2]
+      })?.options.refetchInterval
+    ).toBe(60_000)
   })
 
   it("does not fetch due reviews when disabled", async () => {
