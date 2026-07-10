@@ -2136,6 +2136,7 @@ export const AddSourceModal: React.FC<AddSourceModalProps> = ({
   const addSource = useWorkspaceStore((s) => s.addSource)
   const sources = useWorkspaceStore((s) => s.sources)
   const workspaceTag = useWorkspaceStore((s) => s.workspaceTag)
+  const [addToNeedsReview, setAddToNeedsReview] = React.useState(false)
   const [tabUsage, setTabUsage] = React.useState<AddSourceTabUsage>(() =>
     readAddSourceTabUsage()
   )
@@ -2149,6 +2150,7 @@ export const AddSourceModal: React.FC<AddSourceModalProps> = ({
 
   React.useEffect(() => {
     if (!isOpen) return
+    setAddToNeedsReview(false)
     setTabUsage(readAddSourceTabUsage())
   }, [isOpen])
 
@@ -2192,7 +2194,11 @@ export const AddSourceModal: React.FC<AddSourceModalProps> = ({
 
     // Add only new sources to workspace
     for (const source of newSources) {
-      addSource(source)
+      addSource(
+        addToNeedsReview
+          ? { ...source, reviewState: "needs_review" as const }
+          : source
+      )
 
       // Tag media with workspace tag
       if (workspaceTag) {
@@ -2358,6 +2364,14 @@ export const AddSourceModal: React.FC<AddSourceModalProps> = ({
             className="mb-4"
           />
         )}
+        <label className="mb-3 flex cursor-pointer items-center gap-2 text-sm font-medium text-text">
+          <input
+            type="checkbox"
+            checked={addToNeedsReview}
+            onChange={(event) => setAddToNeedsReview(event.target.checked)}
+          />
+          <span>{t("playground:sources.addToNeedsReview", "Add to Needs Review")}</span>
+        </label>
         <Tabs
           activeKey={activeTab}
           onChange={handleTabChange}

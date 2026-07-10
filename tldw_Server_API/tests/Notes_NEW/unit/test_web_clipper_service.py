@@ -48,6 +48,7 @@ def _save_request(
     destination_mode: str = "both",
     include_attachment: bool = False,
     full_extract: str | None = "Alpha paragraph.\n\nBeta paragraph.",
+    default_review_state: str | None = None,
 ) -> WebClipperSaveRequest:
     attachments: list[WebClipperSaveRequest.AttachmentPayload] = []
     if include_attachment:
@@ -71,7 +72,14 @@ def _save_request(
             keywords=["example"],
         ),
         workspace=(
-            WebClipperSaveRequest.WorkspacePayload(workspace_id="ws-1")
+            WebClipperSaveRequest.WorkspacePayload(
+                workspace_id="ws-1",
+                **(
+                    {"default_review_state": default_review_state}
+                    if default_review_state is not None
+                    else {}
+                ),
+            )
             if destination_mode in {"workspace", "both"}
             else None
         ),
@@ -84,6 +92,20 @@ def _save_request(
         enhancements=WebClipperSaveRequest.EnhancementOptions(run_ocr=False, run_vlm=False),
         capture_metadata={"fallback_path": ["article"]},
     )
+
+
+def test_workspace_payload_accepts_only_needs_review_default():
+    payload = WebClipperSaveRequest.WorkspacePayload(
+        workspace_id="ws-1",
+        default_review_state="needs_review",
+    )
+
+    assert payload.default_review_state == "needs_review"
+    with pytest.raises(ValueError):
+        WebClipperSaveRequest.WorkspacePayload(
+            workspace_id="ws-1",
+            default_review_state="reviewed",
+        )
 
 
 @pytest.mark.parametrize(
@@ -277,6 +299,7 @@ def test_save_clip_creates_media_backed_workspace_source(clipper_db, media_db):
     assert source["source_type"] == "web_clip"
     assert source["url"] == "https://example.com/story"
     assert source["selected"] == 1
+    assert source["review_state"] == "unset"
 
     media = media_db_api.get_media_by_id(media_db, int(source["media_id"]))
     assert media is not None
@@ -284,6 +307,30 @@ def test_save_clip_creates_media_backed_workspace_source(clipper_db, media_db):
     assert media["type"] == "article"
     assert "Alpha paragraph." in media["content"]
     assert "Beta paragraph." in media["content"]
+
+
+def test_save_clip_can_default_promoted_workspace_source_to_needs_review(
+    clipper_db,
+    media_db,
+):
+    service = WebClipperService(
+        db=clipper_db,
+        media_db=media_db,
+        user_id=1,
+        promote_workspace_sources=True,
+    )
+
+    service.save_clip(
+        _save_request(
+            clip_id="clip-source-review",
+            destination_mode="workspace",
+            default_review_state="needs_review",
+        )
+    )
+
+    sources = clipper_db.list_workspace_sources("ws-1")
+    assert len(sources) == 1
+    assert sources[0]["review_state"] == "needs_review"
 
 
 def test_save_clip_notifies_workspace_source_job_enqueuer(clipper_db, media_db):

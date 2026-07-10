@@ -324,6 +324,55 @@ describe("AddSourceModal Stage 2 intake and relevance", () => {
     expect(checkbox).not.toBeChecked()
   })
 
+  it("adds library sources to needs review only when explicitly selected", async () => {
+    const user = userEvent.setup()
+    workspaceStoreState.addSourceModalTab = "existing"
+    mockListMedia.mockResolvedValueOnce({
+      items: [{ id: 702, title: "Review Candidate", type: "pdf" }],
+      total: 1
+    })
+
+    render(<AddSourceModal />)
+
+    const reviewDefault = screen.getByRole("checkbox", {
+      name: "Add to Needs Review"
+    })
+    expect(reviewDefault).not.toBeChecked()
+    await user.click(reviewDefault)
+    await user.click(
+      await screen.findByRole("checkbox", { name: /select review candidate/i })
+    )
+    await user.click(screen.getByRole("button", { name: "Add 1 selected" }))
+
+    expect(mockAddSource).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mediaId: 702,
+        reviewState: "needs_review"
+      })
+    )
+  })
+
+  it("keeps library sources unreviewed by default", async () => {
+    const user = userEvent.setup()
+    workspaceStoreState.addSourceModalTab = "existing"
+    mockListMedia.mockResolvedValueOnce({
+      items: [{ id: 703, title: "Ordinary Source", type: "pdf" }],
+      total: 1
+    })
+
+    render(<AddSourceModal />)
+
+    await user.click(
+      await screen.findByRole("checkbox", { name: /select ordinary source/i })
+    )
+    await user.click(screen.getByRole("button", { name: "Add 1 selected" }))
+
+    expect(mockAddSource).toHaveBeenCalledWith(
+      expect.objectContaining({ mediaId: 703 })
+    )
+    expect(mockAddSource.mock.calls[0]?.[0]).not.toHaveProperty("reviewState")
+  })
+
   it("persists updated tab usage when switching tabs", async () => {
     render(<AddSourceModal />)
 
