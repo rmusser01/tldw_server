@@ -2,41 +2,55 @@
 id: TASK-12106
 title: Add explicit single-user API key device persistence and relaunch coverage
 status: In Progress
-priority: High
+assignee: []
+created_date: ''
+updated_date: '2026-07-10 22:17'
+labels: []
+dependencies:
+  - TASK-12108
 references:
-- TASK-12030
-- TASK-12127
-- https://github.com/rmusser01/tldw_server/issues/2590
+  - TASK-12108
+  - TASK-12030
+  - TASK-12127
+  - 'https://github.com/rmusser01/tldw_server/issues/2590'
+documentation:
+  - >-
+    Docs/superpowers/specs/2026-07-10-single-user-api-key-device-persistence-design.md
+priority: high
 ---
 
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Provision same-origin single-user WebUI auth from runtime configuration, add explicit opt-in persistent storage for manually configured remote servers, and cover hard reload plus browser/extension relaunch persistence.
+Add explicit device/session persistence for API keys only when users manually configure a remote single-user server in the WebUI or browser extension, with origin binding and browser/extension relaunch coverage. Same-origin runtime auth is handled without browser-readable keys by TASK-12108.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Same-origin single-user WebUI deployments with runtime auth do not ask users to enter an API key.
-- [ ] #2 Manually configured remote single-user servers expose an explicit Remember on this device choice.
-- [ ] #3 Session-only choice does not persist the API key across a full browser restart.
-- [ ] #4 Remembered choice persists the API key across a full browser restart until logout/reset.
-- [ ] #5 WebUI regression coverage includes save then hard reload and save then close/reopen same profile.
-- [ ] #6 Extension regression coverage includes save then close/reopen same extension installation.
-- [ ] #7 No browser password-manager behavior is required for API key persistence.
+- [ ] #1 Manually configured remote single-user servers expose an explicit Remember on this device choice that defaults enabled for new setups.
+- [ ] #2 Session-only choice survives hard reload but does not persist the API key across a full browser restart.
+- [ ] #3 Remembered choice persists the origin-bound API key across a full browser restart until logout/reset.
+- [ ] #4 Remote WebUI regression coverage includes save then hard reload and save then close/reopen the same profile.
+- [ ] #5 Extension regression coverage includes save then close/reopen the same extension installation.
+- [ ] #6 Same-origin cookie-session/runtime credentials are never copied into browser-readable manual key storage.
+- [ ] #7 No browser password-manager behavior is required for API-key persistence.
 <!-- AC:END -->
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Approved design: runtime-provisioned same-origin auth remains automatic; manual single-user setup defaults Remember on this device to enabled; unchecked credentials are session-only; keys are origin-bound; runtime keys are never persisted; extension device storage must remain local rather than synced.
-Design specification: docs/superpowers/specs/2026-07-10-single-user-api-key-device-persistence-design.md
-Spec review iteration 1 found origin-transition and legacy session-bridge ownership ambiguities. Revised the design to require explicit no-inherited-auth candidate probes, an ordered post-validation origin transition, a strict legacy manual-session classifier, and device → session → memory fallback semantics.
+Scope revised after the hybrid architecture was approved. This task covers only manually configured remote WebUI and browser-extension API-key persistence. Same-origin runtime auth moves to TASK-12108 and must never persist or expose the runtime key. Prior spec review required no-inherited-auth candidate probes, ordered origin transitions, strict legacy ownership classification, and device → session → memory fallback. Design: Docs/superpowers/specs/2026-07-10-single-user-api-key-device-persistence-design.md
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+
+<!-- SECTION:FINAL_SUMMARY:END -->
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 <!-- SECTION:FINAL_SUMMARY:END -->
 

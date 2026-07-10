@@ -1,18 +1,18 @@
-# Single-User API Key Device Persistence Design
+# Remote Single-User API Key Device Persistence Design
 
-**Backlog:** TASK-12106  
-**Status:** Approved for specification review  
+**Backlog:** TASK-12106
+**Related:** TASK-12108 (same-origin HttpOnly sessions)
+**Status:** Revised for specification review
 **Date:** 2026-07-10
 
 ## Problem
 
-Single-user authentication uses an `X-API-KEY` request header rather than a browser login cookie. Browser password managers therefore are not a dependable persistence mechanism. Same-origin WebUI deployments can already receive runtime-provisioned auth, but manually configured WebUI and extension users need an explicit, predictable choice between device persistence and session-only use.
+Single-user authentication for a manually configured remote server uses an `X-API-KEY` request header. Browser password managers are not a dependable persistence mechanism for that credential. The WebUI in advanced mode and the browser extension therefore need an explicit, predictable choice between device persistence and session-only use.
 
-The current code has multiple credential readers and writers. Some branches persist a manual key in `tldwConfig`; others scrub it and retain a session-only runtime copy. Without one policy, hard reloads, browser restarts, background-worker restarts, and auth-mode changes can disagree about whether the user is authenticated.
+Same-origin runtime-enabled WebUI deployments are deliberately excluded from browser-readable API-key storage. They use the HttpOnly session design in TASK-12108.
 
 ## Goals
 
-- Same-origin single-user WebUI deployments use runtime-provisioned auth without asking the user for an API key.
 - Manual single-user setup in onboarding and Settings shows `Remember on this device`, enabled by default for a new setup.
 - Device persistence survives hard reloads and full browser restarts in the same browser profile or extension installation.
 - Session-only persistence survives hard reloads and extension service-worker restarts, but not a full browser restart.
@@ -22,7 +22,8 @@ The current code has multiple credential readers and writers. Some branches pers
 
 ## Non-Goals
 
-- Adding a backend login endpoint or HttpOnly cookie session for single-user mode.
+- Persisting or exposing the runtime-configured key used by a same-origin WebUI.
+- Replacing the same-origin HttpOnly session described in TASK-12108.
 - Encrypting a browser-stored key without an independent user secret. Client-side encryption with a colocated key would not improve the XSS trust boundary.
 - Syncing API keys between devices or browser profiles.
 - Changing multi-user JWT or hosted-cookie behavior.
@@ -30,18 +31,12 @@ The current code has multiple credential readers and writers. Some branches pers
 
 ## Chosen Approach
 
-Use explicit app-owned credential persistence with two scopes:
+Use explicit app-owned credential persistence only for manually configured remote servers, with two scopes:
 
 - `device`: store a manually entered key in device-local storage.
 - `session`: store a manually entered key in browser-session storage.
 
-Runtime-provisioned keys remain runtime-owned and are never copied into either manual credential store. The in-memory request configuration is hydrated from exactly one source according to precedence:
-
-1. Same-origin runtime-provisioned single-user key.
-2. Manual key whose recorded server origin matches the active server origin.
-3. No single-user credential.
-
-Environment/build-time runtime auth remains part of the runtime-provisioned category and keeps its existing precedence.
+The in-memory request configuration is hydrated from a manual key only when its recorded server origin matches the active remote server origin. Runtime/session-cookie auth has precedence and may not be copied into either manual credential store.
 
 ## Storage Model
 
@@ -49,21 +44,18 @@ Extend the non-secret connection metadata with:
 
 ```ts
 type ApiKeyPersistence = "device" | "session"
-type ApiKeySource = "runtime" | "manual"
 
 type SingleUserCredentialMetadata = {
-  source: ApiKeySource
-  persistence?: ApiKeyPersistence
+  source: "manual"
+  persistence: ApiKeyPersistence
   serverOrigin: string
 }
 ```
 
-The runtime source is represented only in memory or by non-secret ownership metadata. Its API key value must not be persisted by manual save logic.
-
 For a manual device credential:
 
 - Persist the key in local storage explicitly scoped to the current device.
-- Persist `persistence: "device"` and the normalized `serverOrigin` with the connection metadata.
+- Persist `persistence: "device"` and the normalized `serverOrigin` with connection metadata.
 - In the extension, use `browser.storage.local`, never `browser.storage.sync`.
 
 For a manual session credential:
@@ -71,35 +63,25 @@ For a manual session credential:
 - Persist the key and matching origin in session storage.
 - Persist only the non-secret preference `persistence: "session"` in local connection metadata.
 - In the extension, use `browser.storage.session` so the key survives extension service-worker restarts without surviving a browser restart.
-- In the WebUI shim, session storage must map to `window.sessionStorage`, not `window.localStorage` with a prefix.
+- In the WebUI shim, session storage maps to `window.sessionStorage`, not `window.localStorage` with a prefix.
 
-The existing `tldwConfig` object remains the connection metadata source of truth. Runtime hydration may expose an `apiKey` on the in-memory config consumed by request code, but storage writers must include the key only for a manual `device` credential.
+The existing `tldwConfig` object remains the connection metadata source of truth. Runtime hydration may expose an `apiKey` on the in-memory config consumed by request code, but storage writers include the key only for a manual `device` credential.
 
 ## Origin Binding
 
 Normalize the configured server URL with `new URL(value).origin`. Every manual key is stored with that origin.
 
 - Credential lookup returns no key when the active origin differs from the stored origin.
-- A new-origin connection probe uses only the key currently submitted in the form. It must bypass the shared credential resolver so the old stored key cannot be inherited by the request.
-- The active server configuration does not change until the explicit new-origin probe succeeds. After success, commit the origin transition as one ordered operation: clear both old manual key stores, write the new credential to its selected scope, then publish the new server metadata and in-memory config.
+- A new-origin connection probe uses only the key currently submitted in the form. It bypasses the shared credential resolver so an old stored key cannot be inherited by the request.
+- The active server configuration does not change until the explicit new-origin probe succeeds.
+- After success, commit the transition in order: clear both old manual key stores, write the new credential to its selected scope, then publish the new server metadata and in-memory config.
 - The key field is cleared when a populated form changes to a different valid origin.
-- Cosmetic URL changes that preserve the origin, such as a trailing slash or path normalization, do not clear the key.
+- Cosmetic URL changes that preserve the origin do not clear the key.
 - Invalid URLs never cause a stored key to be attached to a request.
 
 ## User Experience
 
-### Runtime-Provisioned Same-Origin WebUI
-
-When runtime auth is available:
-
-- Hide the manual API-key input and persistence checkbox.
-- Show a compact informational state: `Connected using this server's configured API key.`
-- Do not copy the runtime key into manual storage.
-- If runtime auth becomes unavailable, return to the manual setup state without displaying the old key.
-
-### Manual Single-User Setup
-
-Show the same inline control in onboarding and Settings:
+Show the same inline control in onboarding and Settings for manual single-user setup:
 
 - Label: `Remember on this device`
 - Default: enabled for a new manual setup.
@@ -108,31 +90,33 @@ Show the same inline control in onboarding and Settings:
 
 Use the existing shared checkbox/switch vocabulary, visible focus treatment, and semantic labels. Do not add a confirmation modal.
 
-Existing manual credentials retain their current scope during migration. A session-only credential must not be silently promoted to device storage merely because the new-control default is enabled for new entries.
+When the same-origin cookie session from TASK-12108 is active, hide the manual API-key and persistence controls and show `Connected securely through this WebUI.` No browser-readable key is available to display or migrate.
+
+Existing manual credentials retain their current scope during migration. A session-only credential is never silently promoted to device storage merely because the control defaults on for new entries.
 
 ## Save and Hydration Flow
 
 ### Manual Save
 
 1. Validate the server URL and derive its origin.
-2. Compare the derived origin with the active credential origin. If it differs, require a freshly entered key and keep the old server configuration active during the probe.
-3. Validate the freshly submitted API key against the candidate server using an explicit unaffiliated request that cannot inject stored auth.
+2. Compare that origin with the active credential origin. If it differs, require a freshly entered key and keep the old server configuration active during the probe.
+3. Validate the submitted key against the candidate server using an explicit request that cannot inject stored auth.
 4. After successful validation, clear credential data associated with the old origin.
 5. Write the manual credential to the selected storage scope.
 6. Write non-secret connection metadata and the persistence preference.
 7. Hydrate the in-memory request client from the selected scope.
 8. Emit the existing config-updated event so other WebUI tabs or extension contexts refresh.
 
-If the selected device write fails, do not claim that the key was remembered. Fall back in this exact order: device-local storage, browser-session storage, then in-memory only. Show a warning that accurately names the achieved scope. Never silently fall back from session storage to persistent storage.
+If a device-local write fails, do not claim the key was remembered. Fall back in this exact order: device-local storage, browser-session storage, then in-memory only. Show a warning that accurately names the achieved scope. Never fall back from session storage to persistent storage.
 
 ### Startup
 
 1. Load non-secret connection metadata.
-2. Resolve runtime auth first.
-3. If runtime auth is absent, load the manual key from the declared scope.
+2. Resolve same-origin cookie-session/runtime auth first.
+3. Only when that is absent and the transport is a manually configured remote server, load the manual key from the declared scope.
 4. Verify the stored key origin matches the active server origin.
 5. Hydrate request headers in memory.
-6. Treat missing, invalid, or mismatched credentials as unconfigured auth, not as a successful anonymous connection.
+6. Treat missing, invalid, or mismatched credentials as unconfigured auth.
 
 ### Clearing
 
@@ -147,23 +131,24 @@ Network errors, timeouts, and server `5xx` responses do not clear credentials. A
 ## Migration
 
 - Existing valid manual keys already stored persistently remain `device` credentials and gain origin metadata on the next successful load or save.
-- A legacy `tldwRuntimeSessionSingleUserApiKey` bridge is migrated as a manual `session` credential only when all of the following hold: the stored config is single-user, it has a valid server URL, no current runtime-config/build-time/environment key is available, and runtime ownership metadata does not fingerprint-match the bridge key. Derive the credential origin from the stored server URL.
-- Existing runtime-owned keys identified by runtime ownership metadata remain runtime-owned and are never reclassified as manual.
-- If legacy ownership cannot be distinguished confidently or the server origin cannot be derived, do not migrate or persist the bridge key. Runtime-provisioned auth may still use its existing in-memory path for that load.
+- A legacy `tldwRuntimeSessionSingleUserApiKey` bridge is migrated as a manual `session` credential only when all of the following hold: the stored config is single-user, it has a valid remote server URL, no current same-origin cookie-session/runtime config is available, and runtime ownership metadata does not fingerprint-match the bridge key.
+- Existing runtime-owned keys identified by runtime ownership metadata are cleared from browser-readable storage after the cookie-session bootstrap succeeds; they are never reclassified as manual.
+- If ownership cannot be distinguished confidently or the server origin cannot be derived, do not migrate or persist the bridge key.
+- Missing or malformed runtime-ownership metadata fails closed; it does not authorize manual migration.
 - Placeholder keys are ignored.
 - Configurations with an unparseable server URL do not hydrate a manual key until the URL is corrected.
 
-Migration must be idempotent and must not move a secret from session storage into local storage without a subsequent explicit manual save.
+Migration is idempotent and never moves a secret from session storage into local storage without a subsequent explicit manual save.
 
 ## Error Handling
 
 - Storage unavailable or quota exceeded: connect session-only and show a non-blocking persistence warning.
-- Session storage unsupported: fail closed to in-memory use for the current page/context and disclose that reload persistence is unavailable.
-- Runtime-config fetch unavailable: fall back to manual setup; do not display a raw fetch error on the key field.
+- Session storage unsupported: fall back to in-memory use for the current page/context and disclose that reload persistence is unavailable.
+- Same-origin session bootstrap unavailable: show the normal connection error for that deployment; do not expose the runtime key or silently convert to manual storage.
 - Origin mismatch: suppress the key and show the normal API-key-required state.
 - Corrupt credential metadata: ignore and clear the corrupt manual credential record without logging secret material.
 
-Logs and diagnostics may report credential source, persistence scope, and origin match state, but never the key value.
+Logs and diagnostics may report credential source, persistence scope, and origin-match state, but never the key value.
 
 ## Test Strategy
 
@@ -171,23 +156,23 @@ Logs and diagnostics may report credential source, persistence scope, and origin
 
 - New manual forms default `Remember on this device` to enabled.
 - Existing session metadata renders the choice disabled.
-- Runtime auth hides the manual key and persistence controls.
+- Same-origin cookie-session auth hides manual key and persistence controls.
 - Device save writes only device-local secret storage.
 - Session save writes only session secret storage.
-- Runtime keys are never copied to manual storage.
+- Cookie/runtime auth is never copied to manual storage.
 - Origin mismatch returns no credential and clears the form value before connection.
 - Logout/reset/auth-mode changes clear both scopes.
 - Persistent-write failure falls back to session-only with a warning.
+- Legacy migration fails closed for both missing and malformed runtime-ownership metadata.
 
-### WebUI Browser Tests
+### Remote WebUI Browser Tests
 
 - Manual device save, hard reload, authenticated route remains available.
 - Manual device save, close browser, reopen the same persistent profile, authenticated route remains available.
 - Manual session save, hard reload, authenticated route remains available.
 - Manual session save, close browser, reopen the same persistent profile, manual key is absent.
-- Runtime-provisioned same-origin auth reaches an authenticated route with no manual key persisted.
 
-The close/reopen test must launch two browser processes against the same Playwright `userDataDir`; opening another page in the same context is insufficient.
+The close/reopen test launches two browser processes against the same Playwright `userDataDir`; opening another page in the same context is insufficient.
 
 ### Extension Browser Tests
 
@@ -197,27 +182,25 @@ The close/reopen test must launch two browser processes against the same Playwri
 - Verify the extension ID/installation is unchanged, connection config is present, and authenticated UI is available without entering the key again.
 - Cover session-only behavior separately by confirming the session key is absent after relaunch.
 
-Tests must exercise the UI save path rather than seeding `tldwConfig` directly.
+Tests exercise the UI save path rather than seeding `tldwConfig` directly.
 
 ## Security and Privacy
 
-Device persistence intentionally stores the single-user API key as browser-readable secret material. The checked-by-default control is visible and explains the shared-device risk. This does not expand the trust boundary beyond the existing WebUI/extension JavaScript runtime, but it does increase persistence after local compromise or XSS.
+Device persistence intentionally stores a manually supplied remote-server API key as browser-readable secret material. The checked-by-default control is visible and explains the shared-device risk. This exception is required because a remote API origin and an extension origin cannot share the same host-only session cookie.
 
-The following controls limit that risk:
+Controls limiting the risk:
 
-- Runtime keys are never copied into manual storage.
+- Same-origin deployments use TASK-12108 instead of browser-readable key storage.
 - Manual keys are bound to one server origin.
 - Extension keys are device-local, not synced.
 - Session-only mode is available inline.
 - Explicit disconnect/reset clears both stores.
 - Secret values are excluded from logs, errors, diagnostics, and test artifacts.
 
-An HttpOnly cookie session remains the appropriate future design if the product later requires persistent single-user auth without exposing a reusable API key to JavaScript.
-
 ## Rollout and Compatibility
 
-- Keep existing configuration keys readable during migration.
-- Add focused tests before changing storage behavior.
-- Ship WebUI and extension support together so shared onboarding copy does not promise behavior one surface lacks.
+- Land TASK-12108 and this task as linked, independently reviewable commits.
+- Keep legacy configuration keys readable during migration.
+- Ship remote WebUI and extension support together so shared onboarding copy does not promise behavior one surface lacks.
 - Document the device-persistence security trade-off in setup/help text.
-- Do not remove legacy readers until the migration has shipped and regression coverage confirms both upgraded and fresh profiles.
+- Do not remove legacy readers until upgraded and fresh-profile regression coverage passes.
