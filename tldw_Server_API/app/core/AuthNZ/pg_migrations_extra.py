@@ -14,6 +14,7 @@ from typing import Any
 from loguru import logger
 
 from .database import DatabasePool, get_db_pool
+from .exceptions import DatabaseError as AuthNZDatabaseError
 
 _PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS = (
     OSError,
@@ -2740,6 +2741,9 @@ async def ensure_notification_permissions_pg(pool: DatabasePool | None = None) -
 
         logger.info("Ensured PostgreSQL notification permissions and legacy role memberships")
         return True
+    except AuthNZDatabaseError as exc:
+        logger.warning(f"Failed to ensure PostgreSQL notification permissions: {exc}")
+        return False
     except _PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS as exc:
         logger.warning(f"Failed to ensure PostgreSQL notification permissions: {exc}")
         return False

@@ -147,6 +147,7 @@ async def test_init_auth_services_runs_pg_extras_when_pool_present(
         "tldw_Server_API.app.core.AuthNZ.pg_migrations_extra",
         ensure_user_timestamp_timezones_pg=_make_pg_ensure("user_timestamps"),
         ensure_authnz_core_tables_pg=_make_pg_ensure("authnz_core"),
+        ensure_notification_permissions_pg=_make_pg_ensure("notification_permissions"),
         ensure_generated_files_table_pg=_make_pg_ensure("generated_files"),
         ensure_tool_catalogs_tables_pg=_make_pg_ensure("tool_catalogs"),
         ensure_privilege_snapshots_table_pg=_make_pg_ensure("privilege_snapshots"),
@@ -164,6 +165,7 @@ async def test_init_auth_services_runs_pg_extras_when_pool_present(
     assert pg_calls == [
         "user_timestamps",
         "authnz_core",
+        "notification_permissions",
         "generated_files",
         "tool_catalogs",
         "privilege_snapshots",

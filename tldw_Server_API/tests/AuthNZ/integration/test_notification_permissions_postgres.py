@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from datetime import datetime
+from types import SimpleNamespace
 
 import pytest
 
@@ -9,6 +11,23 @@ pytestmark = pytest.mark.integration
 
 _INTERACTIVE_ROLES = ("admin", "user", "moderator", "reviewer", "viewer")
 _NOTIFICATION_PERMISSIONS = {"notifications.read", "notifications.control"}
+
+
+@pytest.mark.asyncio
+async def test_postgres_notification_backfill_returns_false_on_transaction_error() -> None:
+    from tldw_Server_API.app.core.AuthNZ.exceptions import TransactionError
+    from tldw_Server_API.app.core.AuthNZ.pg_migrations_extra import (
+        ensure_notification_permissions_pg,
+    )
+
+    @asynccontextmanager
+    async def _failing_transaction():
+        raise TransactionError("PostgreSQL transaction", "forced SQL failure")
+        yield
+
+    pool = SimpleNamespace(pool=object(), transaction=_failing_transaction)
+
+    assert await ensure_notification_permissions_pg(pool) is False
 
 
 @pytest.mark.asyncio
