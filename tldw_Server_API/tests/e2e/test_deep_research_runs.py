@@ -2,6 +2,7 @@ import asyncio
 import json
 import threading
 import time
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Callable
 
@@ -11,8 +12,25 @@ from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
 
-
 pytestmark = pytest.mark.critical
+
+
+def _assert_artifacts_exist(
+    db,
+    base_dir: Path,
+    session_id: str,
+    artifact_names: set[str],
+) -> None:
+    artifacts = {
+        artifact.artifact_name: artifact
+        for artifact in db.list_artifacts(session_id)
+    }
+    assert artifact_names <= artifacts.keys()
+    research_root = (base_dir / "research").resolve()
+    for name in artifact_names:
+        path = Path(artifacts[name].storage_path).resolve()
+        path.relative_to(research_root)
+        assert path.is_file()
 
 
 def _set_user_db_base(monkeypatch: pytest.MonkeyPatch, base_dir) -> str | None:
@@ -251,9 +269,12 @@ def test_deep_research_run_can_be_approved_and_exported(tmp_path):
     assert session is not None
     assert session.phase == "awaiting_source_review"
     assert session.latest_checkpoint_id is not None
-    assert (outputs_dir / "research" / session_id / "source_registry.json").exists()
-    assert (outputs_dir / "research" / session_id / "evidence_notes.jsonl").exists()
-    assert (outputs_dir / "research" / session_id / "collection_summary.json").exists()
+    _assert_artifacts_exist(
+        db,
+        outputs_dir,
+        session_id,
+        {"source_registry.json", "evidence_notes.jsonl", "collection_summary.json"},
+    )
     source_registry = ResearchArtifactStore(base_dir=outputs_dir, db=db).read_json(
         session_id=session_id,
         artifact_name="source_registry.json",
@@ -332,10 +353,12 @@ def test_deep_research_run_can_be_approved_and_exported(tmp_path):
     assert session is not None
     assert session.phase == "awaiting_outline_review"
     assert session.latest_checkpoint_id is not None
-    assert (outputs_dir / "research" / session_id / "outline_v1.json").exists()
-    assert (outputs_dir / "research" / session_id / "claims.json").exists()
-    assert (outputs_dir / "research" / session_id / "report_v1.md").exists()
-    assert (outputs_dir / "research" / session_id / "synthesis_summary.json").exists()
+    _assert_artifacts_exist(
+        db,
+        outputs_dir,
+        session_id,
+        {"outline_v1.json", "claims.json", "report_v1.md", "synthesis_summary.json"},
+    )
     synthesis_summary = store.read_json(session_id=session_id, artifact_name="synthesis_summary.json")
     assert synthesis_summary is not None
     assert synthesis_summary["mode"] == "llm_backed"
@@ -404,13 +427,13 @@ def test_deep_research_run_can_be_approved_and_exported(tmp_path):
     export = adapter.export(package, format="md")
     assert export.status == "ready"
     assert export.content.startswith(b"# Research Report")
-    assert (outputs_dir / "research" / session_id / "bundle.json").exists()
+    _assert_artifacts_exist(db, outputs_dir, session_id, {"bundle.json"})
 
 
 def test_deep_research_run_creation_persists_chat_handoff(tmp_path, monkeypatch):
     from tldw_Server_API.app.api.v1.endpoints import research_runs
-    from tldw_Server_API.app.core.DB_Management.ResearchSessionsDB import ResearchSessionsDB
     from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+    from tldw_Server_API.app.core.DB_Management.ResearchSessionsDB import ResearchSessionsDB
     from tldw_Server_API.app.core.Research.service import ResearchService
 
     class DummyJobs:
