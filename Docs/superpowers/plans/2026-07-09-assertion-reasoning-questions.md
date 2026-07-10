@@ -16,7 +16,7 @@
 **Goal:** Make the profile available and guarantee a deterministic answer shape before persistence.
 **Success Criteria:** Every generated item has separate source statements, a server-owned five-option scale, one unambiguous answer, a concise rationale, citations, and persisted subtype metadata.
 **Tests:** Generator registry, prompt, normalization, test-mode, final validation, and persistence tests.
-**Status:** Not Started
+**Status:** Complete
 
 **Files:**
 - Modify: `tldw_Server_API/app/services/quiz_generator.py`
@@ -155,7 +155,7 @@ git commit -m "feat: generate assertion reasoning questions"
 **Goal:** Explain the specialized answer model once and preserve stable A-E semantics throughout taking and review.
 **Success Criteria:** The profile is selectable; tagged questions show a subtype label; options never shuffle; one scale guide appears in graded, practice, review, and results; answers and evidence remain per-question.
 **Tests:** Profile payload, graded submission/results, practice feedback, review evidence, and legacy MCQ/EMQ regressions.
-**Status:** Not Started
+**Status:** In Progress
 
 **Files:**
 - Modify: `apps/packages/ui/src/services/quizzes.ts`
