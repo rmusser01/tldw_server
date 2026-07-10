@@ -477,6 +477,7 @@ async def setup_database():
                 ensure_billing_tables_pg,
                 ensure_byok_oauth_state_pg,
                 ensure_generated_files_table_pg,
+                ensure_notification_permissions_pg,
                 ensure_org_provider_secrets_pg,
                 ensure_usage_tables_pg,
                 ensure_user_provider_secrets_pg,
@@ -501,6 +502,9 @@ async def setup_database():
                     include_mcp_permissions=True,
                     is_postgres=True,
                 )
+
+            if not await ensure_notification_permissions_pg(pool):
+                raise RuntimeError("Failed to ensure Postgres notification permissions")
 
             # Ensure API key tables after org/team tables exist
             ok_api_keys = await ensure_api_keys_tables_pg(pool)

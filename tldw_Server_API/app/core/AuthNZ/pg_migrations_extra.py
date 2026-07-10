@@ -2674,6 +2674,77 @@ async def ensure_mcp_prompt_read_permission_pg(pool: DatabasePool | None = None)
         return False
 
 
+async def ensure_notification_permissions_pg(pool: DatabasePool | None = None) -> bool:
+    """Ensure notification grants and matching legacy role memberships on PostgreSQL."""
+    try:
+        db_pool = pool or await get_db_pool()
+        if getattr(db_pool, "pool", None) is None:
+            return False
+
+        permissions = (
+            ("notifications.read", "Read personal notifications", "notifications"),
+            ("notifications.control", "Manage personal notifications", "notifications"),
+        )
+        interactive_roles = ["admin", "user", "moderator", "reviewer", "viewer"]
+
+        async with db_pool.transaction() as conn:
+            existing_tables = await conn.fetch(
+                """
+                SELECT table_name
+                FROM information_schema.tables
+                WHERE table_schema = current_schema()
+                  AND table_name = ANY($1::text[])
+                """,
+                ["users", "roles", "permissions", "role_permissions", "user_roles"],
+            )
+            table_names = {str(row["table_name"]) for row in existing_tables}
+            if {"users", "roles", "permissions", "role_permissions", "user_roles"} - table_names:
+                logger.debug("PG notification seed skipped; AuthNZ RBAC tables are incomplete")
+                return False
+
+            for name, description, category in permissions:
+                await conn.execute(
+                    """
+                    INSERT INTO permissions (name, description, category)
+                    VALUES ($1, $2, $3)
+                    ON CONFLICT (name) DO NOTHING
+                    """,
+                    name,
+                    description,
+                    category,
+                )
+
+            await conn.execute(
+                """
+                INSERT INTO role_permissions (role_id, permission_id)
+                SELECT r.id, p.id
+                FROM roles r
+                CROSS JOIN permissions p
+                WHERE r.is_system IS TRUE
+                  AND r.name = ANY($1::text[])
+                  AND p.name = ANY($2::text[])
+                ON CONFLICT (role_id, permission_id) DO NOTHING
+                """,
+                interactive_roles,
+                [permission[0] for permission in permissions],
+            )
+            await conn.execute(
+                """
+                INSERT INTO user_roles (user_id, role_id)
+                SELECT u.id, r.id
+                FROM users u
+                JOIN roles r ON r.name = u.role
+                ON CONFLICT (user_id, role_id) DO NOTHING
+                """
+            )
+
+        logger.info("Ensured PostgreSQL notification permissions and legacy role memberships")
+        return True
+    except _PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS as exc:
+        logger.warning(f"Failed to ensure PostgreSQL notification permissions: {exc}")
+        return False
+
+
 async def ensure_user_timestamp_timezones_pg(pool: DatabasePool | None = None) -> bool:
     """Ensure legacy PostgreSQL users timestamp columns accept aware UTC datetimes."""
     try:
