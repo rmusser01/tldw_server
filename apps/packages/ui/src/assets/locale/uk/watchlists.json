@@ -326,6 +326,124 @@
         "emailInvalid": "Введіть принаймні одну допустиму адресу електронної пошти."
       },
       "validationError": "Перевірте виділені поля перед продовженням."
+    },
+    "latest": {
+      "heading": {
+        "briefing": "Останній дайджест",
+        "episode": "Останній епізод"
+      },
+      "empty": {
+        "scheduled": "дайджест: {{date}}.",
+        "manual": "Не розпочато. Перевірити зараз."
+      },
+      "generatedAt": "Створено {{date}}",
+      "untitled": "дайджест {{runId}}",
+      "artifacts": "звіт / аудіо",
+      "audio": "аудіо",
+      "audioFailed": "аудіо помилка",
+      "ready": "Готово",
+      "saved": "Збережено",
+      "waiting": "Очікування",
+      "script": "аудіо звіт",
+      "stageWithStatus": "{{stage}}: {{status}}",
+      "noUpdates": "Нове: 0. Збережено {{noun}}.",
+      "nextRun": "Наступний запуск: {{date}}",
+      "nextRunRelative": "Наступний запуск: {{relative}}",
+      "counts": "дайджест: Включено, Непрочитано, Нове",
+      "count": {
+        "included": "Включено {{count}}",
+        "unread": "Непрочитано {{count}}",
+        "new": "Нове {{count}}"
+      },
+      "provenance": {
+        "sources": "{{count}} відстежувані джерела",
+        "sources_zero": "{{count}} відстежувані джерела",
+        "sources_one": "{{count}} відстежуване джерело",
+        "sources_two": "{{count}} відстежувані джерела",
+        "sources_few": "{{count}} відстежувані джерела",
+        "sources_many": "{{count}} відстежувані джерела",
+        "sources_other": "{{count}} відстежувані джерела"
+      },
+      "delivery": {
+        "reports": "Усі звіти",
+        "retryAria": "Повторити {{adapter}}: {{name}}",
+        "retryUnknownAria": "Результат невідомий. Повторити {{adapter}}: {{name}}",
+        "reviewRetry": "Повторити",
+        "unknownConfirmation": "Провайдер не підтвердив доставку через {{adapter}}. Повторна спроба може надіслати дублікат. Перевірте місце призначення й продовжуйте, лише якщо цей ризик прийнятний."
+      },
+      "playback": {
+        "region": "аудіо: {{name}}",
+        "playAria": "Відкрити аудіо: {{name}}",
+        "pauseAria": "Очікування аудіо: {{name}}",
+        "resumeAria": "Відкрити аудіо: {{name}}",
+        "seekAria": "аудіо: {{name}}",
+        "loading": "Завантаження аудіо",
+        "error": "аудіо помилка. Відкрити звіт / Створити знову аудіо.",
+        "play": "Відтворити",
+        "pause": "Пауза",
+        "resume": "Продовжити"
+      },
+      "actions": {
+        "label": "Останній дайджест",
+        "openReport": "Відкрити {{report}}",
+        "openReportAria": "Відкрити {{report}}: {{name}}",
+        "regenerateAudio": "Створити знову аудіо",
+        "regenerateAudioAria": "Створити знову {{style}} {{noun}} аудіо: {{name}}",
+        "retry": "Повторити",
+        "retrySaveAria": "Повторити збережено звіт: {{name}}",
+        "retryTextAria": "Повторити звіт: {{name}}",
+        "retryStage": "Повторити: {{stage}}",
+        "inspect": "Перевірити запуск",
+        "inspectAria": "Перевірити запуск {{runId}}: {{name}}",
+        "viewReports": "Усі звіти",
+        "testNow": "Перевірити зараз"
+      },
+      "announcements": {
+        "blockingFailure": "{{name}} помилка. Перевірити запуск {{runId}}.",
+        "delivered": "{{name}}: доставлено.",
+        "nextRunUpdated": "{{name}}: наступний запуск.",
+        "partialAudioFailure": "{{name}}: нотатки до випуску готово, аудіо помилка.",
+        "readyText": "{{name}}: звіт готово.",
+        "readyWithAudio": "{{name}}: Готово. аудіо / нотатки до випуску.",
+        "stageProgress": "{{name}}: {{stage}} {{status}}.",
+        "testQueued": "Перевірити зараз: у черзі."
+      },
+      "retryError": "Повторити помилка. Перевірити запуск.",
+      "regenerateError": "Створити знову аудіо: помилка.",
+      "testError": "Перевірити зараз: помилка.",
+      "status": {
+        "ready": "Готово",
+        "failed": "Помилка",
+        "saved": "Збережено",
+        "waiting": "Очікування",
+        "running": "Виконується",
+        "queued": "У черзі",
+        "notStarted": "Не розпочато",
+        "notSelected": "Не вибрано",
+        "cancelled": "Скасовано",
+        "delivered": "Доставлено",
+        "unknown": "Результат невідомий",
+        "sending": "Надсилається"
+      },
+      "stages": {
+        "renderText": "звіт",
+        "persistText": "Збережено звіт",
+        "composeScript": "аудіо звіт",
+        "persistScript": "Збережено аудіо звіт",
+        "generateAudio": "аудіо",
+        "persistAudio": "Збережено аудіо"
+      },
+      "nouns": {
+        "briefing": "дайджест",
+        "episode": "епізод",
+        "report": "звіт",
+        "showNotes": "нотатки до випуску"
+      }
     }
+  },
+  "outputs": {
+    "openInNewTabAria": "Відкрити в новій вкладці: {{title}}",
+    "chatAboutAria": "Обговорити: {{title}}",
+    "downloadAria": "Завантажити: {{title}}"
   }
 }

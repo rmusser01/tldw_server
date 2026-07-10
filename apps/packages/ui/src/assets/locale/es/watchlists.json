@@ -323,6 +323,124 @@
         "emailInvalid": "Introduce al menos una dirección de correo válida."
       },
       "validationError": "Revisa los campos resaltados antes de continuar."
+    },
+    "latest": {
+      "heading": {
+        "briefing": "Último resumen",
+        "episode": "Último episodio"
+      },
+      "empty": {
+        "scheduled": "resumen: {{date}}.",
+        "manual": "No iniciado. Probar ahora."
+      },
+      "generatedAt": "Generado {{date}}",
+      "untitled": "resumen {{runId}}",
+      "artifacts": "informe / audio",
+      "audio": "audio",
+      "audioFailed": "audio falló",
+      "ready": "Listo",
+      "saved": "Guardado",
+      "waiting": "En espera",
+      "script": "audio informe",
+      "stageWithStatus": "{{stage}}: {{status}}",
+      "noUpdates": "Nuevos: 0. Guardado {{noun}}.",
+      "nextRun": "Próxima ejecución: {{date}}",
+      "nextRunRelative": "Próxima ejecución: {{relative}}",
+      "counts": "resumen: Incluidos, Sin leer, Nuevos",
+      "count": {
+        "included": "Incluidos {{count}}",
+        "unread": "Sin leer {{count}}",
+        "new": "Nuevos {{count}}"
+      },
+      "provenance": {
+        "sources": "{{count}} fuentes seguidas",
+        "sources_zero": "{{count}} fuentes seguidas",
+        "sources_one": "{{count}} fuente seguida",
+        "sources_two": "{{count}} fuentes seguidas",
+        "sources_few": "{{count}} fuentes seguidas",
+        "sources_many": "{{count}} fuentes seguidas",
+        "sources_other": "{{count}} fuentes seguidas"
+      },
+      "delivery": {
+        "reports": "Ver todos los informes",
+        "retryAria": "Reintentar {{adapter}}: {{name}}",
+        "retryUnknownAria": "Resultado desconocido. Reintentar {{adapter}}: {{name}}",
+        "reviewRetry": "Reintentar",
+        "unknownConfirmation": "El proveedor no confirmó la entrega por {{adapter}}. Reintentar puede enviar un duplicado. Revisa el destino y continúa solo si aceptas ese riesgo."
+      },
+      "playback": {
+        "region": "audio: {{name}}",
+        "playAria": "Abrir audio: {{name}}",
+        "pauseAria": "En espera audio: {{name}}",
+        "resumeAria": "Abrir audio: {{name}}",
+        "seekAria": "audio: {{name}}",
+        "loading": "Cargando audio",
+        "error": "audio falló. Abrir informe / Regenerar audio.",
+        "play": "Reproducir",
+        "pause": "Pausar",
+        "resume": "Reanudar"
+      },
+      "actions": {
+        "label": "Último resumen",
+        "openReport": "Abrir {{report}}",
+        "openReportAria": "Abrir {{report}}: {{name}}",
+        "regenerateAudio": "Regenerar audio",
+        "regenerateAudioAria": "Regenerar {{style}} {{noun}} audio: {{name}}",
+        "retry": "Reintentar",
+        "retrySaveAria": "Reintentar guardado informe: {{name}}",
+        "retryTextAria": "Reintentar informe: {{name}}",
+        "retryStage": "Reintentar: {{stage}}",
+        "inspect": "Inspeccionar ejecución",
+        "inspectAria": "Inspeccionar ejecución {{runId}}: {{name}}",
+        "viewReports": "Ver todos los informes",
+        "testNow": "Probar ahora"
+      },
+      "announcements": {
+        "blockingFailure": "{{name}} falló. Inspeccionar ejecución {{runId}}.",
+        "delivered": "{{name}}: entregado.",
+        "nextRunUpdated": "{{name}}: próxima ejecución.",
+        "partialAudioFailure": "{{name}}: notas del programa listo, audio falló.",
+        "readyText": "{{name}}: informe listo.",
+        "readyWithAudio": "{{name}}: Listo. audio / notas del programa.",
+        "stageProgress": "{{name}}: {{stage}} {{status}}.",
+        "testQueued": "Probar ahora: en cola."
+      },
+      "retryError": "Reintentar falló. Inspeccionar ejecución.",
+      "regenerateError": "Regenerar audio: falló.",
+      "testError": "Probar ahora: falló.",
+      "status": {
+        "ready": "Listo",
+        "failed": "Falló",
+        "saved": "Guardado",
+        "waiting": "En espera",
+        "running": "En ejecución",
+        "queued": "En cola",
+        "notStarted": "No iniciado",
+        "notSelected": "No seleccionado",
+        "cancelled": "Cancelado",
+        "delivered": "Entregado",
+        "unknown": "Resultado desconocido",
+        "sending": "Enviando"
+      },
+      "stages": {
+        "renderText": "informe",
+        "persistText": "Guardado informe",
+        "composeScript": "audio informe",
+        "persistScript": "Guardado audio informe",
+        "generateAudio": "audio",
+        "persistAudio": "Guardado audio"
+      },
+      "nouns": {
+        "briefing": "resumen",
+        "episode": "episodio",
+        "report": "informe",
+        "showNotes": "notas del programa"
+      }
     }
+  },
+  "outputs": {
+    "openInNewTabAria": "Abrir en una pestaña nueva: {{title}}",
+    "chatAboutAria": "Conversar sobre esto: {{title}}",
+    "downloadAria": "Descargar: {{title}}"
   }
 }

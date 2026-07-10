@@ -43,7 +43,18 @@ def projection_case(monkeypatch, tmp_path):
         {
             "briefing_pipeline": {
                 "editorial": {"program_format": "concise_briefing", "show_name": "Signal Check"},
-                "text": {"enabled": True},
+                "text": {"enabled": True, "show_notes": True},
+                "audio": {
+                    "enabled": False,
+                    "target_minutes": 20,
+                    "cast": {
+                        "speaker_count": 2,
+                        "speakers": [
+                            {"id": "host", "label": "Host", "voice": "alloy"},
+                            {"id": "analyst", "label": "Analyst", "voice": "nova"},
+                        ],
+                    },
+                },
                 "delivery": {
                     "reports": {"enabled": True},
                     "email": {"enabled": True, "recipients": ["reader@example.com"]},
@@ -154,6 +165,10 @@ def test_latest_projection_separates_artifact_and_delivery_state(projection_case
     assert body["delivery_status"] == "failed"
     assert body["output"]["id"] == seeded.output_id
     assert body["selection"] == {"candidate_count": 5, "included_count": 3, "omitted_count": 2}
+    assert body["timezone"] == "UTC"
+    assert body["editorial"]["cast"]["speaker_count"] == 2
+    assert body["editorial"]["target_minutes"] == 20
+    assert body["editorial"]["show_notes"] is True
     assert body["recovery"]["can_retry_delivery"] is True
 
 

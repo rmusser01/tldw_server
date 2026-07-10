@@ -694,5 +694,281 @@
   },
   "overview_pipelineSetup_test_cancelledWithCode": {
     "message": "{{stage}} è stata annullata ({{code}}). La bozza è stata salvata."
+  },
+  "overview_latest_heading_briefing": {
+    "message": "Ultimo briefing"
+  },
+  "overview_latest_heading_episode": {
+    "message": "Ultimo episodio"
+  },
+  "overview_latest_empty_scheduled": {
+    "message": "briefing: {{date}}."
+  },
+  "overview_latest_empty_manual": {
+    "message": "Non avviato. Prova ora."
+  },
+  "overview_latest_generatedAt": {
+    "message": "Generato {{date}}"
+  },
+  "overview_latest_untitled": {
+    "message": "briefing {{runId}}"
+  },
+  "overview_latest_artifacts": {
+    "message": "rapporto / audio"
+  },
+  "overview_latest_audio": {
+    "message": "audio"
+  },
+  "overview_latest_audioFailed": {
+    "message": "audio non riuscito"
+  },
+  "overview_latest_ready": {
+    "message": "Pronto"
+  },
+  "overview_latest_saved": {
+    "message": "Salvato"
+  },
+  "overview_latest_waiting": {
+    "message": "In attesa"
+  },
+  "overview_latest_script": {
+    "message": "audio rapporto"
+  },
+  "overview_latest_stageWithStatus": {
+    "message": "{{stage}}: {{status}}"
+  },
+  "overview_latest_noUpdates": {
+    "message": "Nuovi: 0. Salvato {{noun}}."
+  },
+  "overview_latest_nextRun": {
+    "message": "Prossima esecuzione: {{date}}"
+  },
+  "overview_latest_nextRunRelative": {
+    "message": "Prossima esecuzione: {{relative}}"
+  },
+  "overview_latest_counts": {
+    "message": "briefing: Inclusi, Non letti, Nuovi"
+  },
+  "overview_latest_count_included": {
+    "message": "Inclusi {{count}}"
+  },
+  "overview_latest_count_unread": {
+    "message": "Non letti {{count}}"
+  },
+  "overview_latest_count_new": {
+    "message": "Nuovi {{count}}"
+  },
+  "overview_latest_provenance_sources": {
+    "message": "{{count}} fonti monitorate"
+  },
+  "overview_latest_provenance_sources_zero": {
+    "message": "{{count}} fonti monitorate"
+  },
+  "overview_latest_provenance_sources_one": {
+    "message": "{{count}} fonte monitorata"
+  },
+  "overview_latest_provenance_sources_two": {
+    "message": "{{count}} fonti monitorate"
+  },
+  "overview_latest_provenance_sources_few": {
+    "message": "{{count}} fonti monitorate"
+  },
+  "overview_latest_provenance_sources_many": {
+    "message": "{{count}} fonti monitorate"
+  },
+  "overview_latest_provenance_sources_other": {
+    "message": "{{count}} fonti monitorate"
+  },
+  "overview_latest_delivery_reports": {
+    "message": "Vedi tutti i rapporti"
+  },
+  "overview_latest_delivery_retryAria": {
+    "message": "Riprova {{adapter}}: {{name}}"
+  },
+  "overview_latest_delivery_retryUnknownAria": {
+    "message": "Esito sconosciuto. Riprova {{adapter}}: {{name}}"
+  },
+  "overview_latest_delivery_reviewRetry": {
+    "message": "Riprova"
+  },
+  "overview_latest_delivery_unknownConfirmation": {
+    "message": "Il provider non ha confermato la consegna tramite {{adapter}}. Un nuovo tentativo può inviare un duplicato. Controlla la destinazione e continua solo se accetti il rischio."
+  },
+  "overview_latest_playback_region": {
+    "message": "audio: {{name}}"
+  },
+  "overview_latest_playback_playAria": {
+    "message": "Apri audio: {{name}}"
+  },
+  "overview_latest_playback_pauseAria": {
+    "message": "In attesa audio: {{name}}"
+  },
+  "overview_latest_playback_resumeAria": {
+    "message": "Apri audio: {{name}}"
+  },
+  "overview_latest_playback_seekAria": {
+    "message": "audio: {{name}}"
+  },
+  "overview_latest_playback_loading": {
+    "message": "Caricamento audio"
+  },
+  "overview_latest_playback_error": {
+    "message": "audio non riuscito. Apri rapporto / Rigenera audio."
+  },
+  "overview_latest_playback_play": {
+    "message": "Riproduci"
+  },
+  "overview_latest_playback_pause": {
+    "message": "Pausa"
+  },
+  "overview_latest_playback_resume": {
+    "message": "Riprendi"
+  },
+  "overview_latest_actions_label": {
+    "message": "Ultimo briefing"
+  },
+  "overview_latest_actions_openReport": {
+    "message": "Apri {{report}}"
+  },
+  "overview_latest_actions_openReportAria": {
+    "message": "Apri {{report}}: {{name}}"
+  },
+  "overview_latest_actions_regenerateAudio": {
+    "message": "Rigenera audio"
+  },
+  "overview_latest_actions_regenerateAudioAria": {
+    "message": "Rigenera {{style}} {{noun}} audio: {{name}}"
+  },
+  "overview_latest_actions_retry": {
+    "message": "Riprova"
+  },
+  "overview_latest_actions_retrySaveAria": {
+    "message": "Riprova salvato rapporto: {{name}}"
+  },
+  "overview_latest_actions_retryTextAria": {
+    "message": "Riprova rapporto: {{name}}"
+  },
+  "overview_latest_actions_retryStage": {
+    "message": "Riprova: {{stage}}"
+  },
+  "overview_latest_actions_inspect": {
+    "message": "Ispeziona esecuzione"
+  },
+  "overview_latest_actions_inspectAria": {
+    "message": "Ispeziona esecuzione {{runId}}: {{name}}"
+  },
+  "overview_latest_actions_viewReports": {
+    "message": "Vedi tutti i rapporti"
+  },
+  "overview_latest_actions_testNow": {
+    "message": "Prova ora"
+  },
+  "overview_latest_announcements_blockingFailure": {
+    "message": "{{name}} non riuscito. Ispeziona esecuzione {{runId}}."
+  },
+  "overview_latest_announcements_delivered": {
+    "message": "{{name}}: consegnato."
+  },
+  "overview_latest_announcements_nextRunUpdated": {
+    "message": "{{name}}: prossima esecuzione."
+  },
+  "overview_latest_announcements_partialAudioFailure": {
+    "message": "{{name}}: note del programma pronto, audio non riuscito."
+  },
+  "overview_latest_announcements_readyText": {
+    "message": "{{name}}: rapporto pronto."
+  },
+  "overview_latest_announcements_readyWithAudio": {
+    "message": "{{name}}: Pronto. audio / note del programma."
+  },
+  "overview_latest_announcements_stageProgress": {
+    "message": "{{name}}: {{stage}} {{status}}."
+  },
+  "overview_latest_announcements_testQueued": {
+    "message": "Prova ora: in coda."
+  },
+  "overview_latest_retryError": {
+    "message": "Riprova non riuscito. Ispeziona esecuzione."
+  },
+  "overview_latest_regenerateError": {
+    "message": "Rigenera audio: non riuscito."
+  },
+  "overview_latest_testError": {
+    "message": "Prova ora: non riuscito."
+  },
+  "overview_latest_status_ready": {
+    "message": "Pronto"
+  },
+  "overview_latest_status_failed": {
+    "message": "Non riuscito"
+  },
+  "overview_latest_status_saved": {
+    "message": "Salvato"
+  },
+  "overview_latest_status_waiting": {
+    "message": "In attesa"
+  },
+  "overview_latest_status_running": {
+    "message": "In esecuzione"
+  },
+  "overview_latest_status_queued": {
+    "message": "In coda"
+  },
+  "overview_latest_status_notStarted": {
+    "message": "Non avviato"
+  },
+  "overview_latest_status_notSelected": {
+    "message": "Non selezionato"
+  },
+  "overview_latest_status_cancelled": {
+    "message": "Annullato"
+  },
+  "overview_latest_status_delivered": {
+    "message": "Consegnato"
+  },
+  "overview_latest_status_unknown": {
+    "message": "Esito sconosciuto"
+  },
+  "overview_latest_status_sending": {
+    "message": "Invio"
+  },
+  "overview_latest_stages_renderText": {
+    "message": "rapporto"
+  },
+  "overview_latest_stages_persistText": {
+    "message": "Salvato rapporto"
+  },
+  "overview_latest_stages_composeScript": {
+    "message": "audio rapporto"
+  },
+  "overview_latest_stages_persistScript": {
+    "message": "Salvato audio rapporto"
+  },
+  "overview_latest_stages_generateAudio": {
+    "message": "audio"
+  },
+  "overview_latest_stages_persistAudio": {
+    "message": "Salvato audio"
+  },
+  "overview_latest_nouns_briefing": {
+    "message": "briefing"
+  },
+  "overview_latest_nouns_episode": {
+    "message": "episodio"
+  },
+  "overview_latest_nouns_report": {
+    "message": "rapporto"
+  },
+  "overview_latest_nouns_showNotes": {
+    "message": "note del programma"
+  },
+  "outputs_openInNewTabAria": {
+    "message": "Apri in una nuova scheda: {{title}}"
+  },
+  "outputs_chatAboutAria": {
+    "message": "Discuti di questo: {{title}}"
+  },
+  "outputs_downloadAria": {
+    "message": "Scarica: {{title}}"
   }
 }

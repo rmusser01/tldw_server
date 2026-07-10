@@ -326,6 +326,124 @@
         "emailInvalid": "Введите хотя бы один допустимый адрес электронной почты."
       },
       "validationError": "Проверьте выделенные поля перед продолжением."
+    },
+    "latest": {
+      "heading": {
+        "briefing": "Последний дайджест",
+        "episode": "Последний эпизод"
+      },
+      "empty": {
+        "scheduled": "дайджест: {{date}}.",
+        "manual": "Не начато. Проверить сейчас."
+      },
+      "generatedAt": "Создано {{date}}",
+      "untitled": "дайджест {{runId}}",
+      "artifacts": "отчёт / аудио",
+      "audio": "аудио",
+      "audioFailed": "аудио ошибка",
+      "ready": "Готово",
+      "saved": "Сохранено",
+      "waiting": "Ожидание",
+      "script": "аудио отчёт",
+      "stageWithStatus": "{{stage}}: {{status}}",
+      "noUpdates": "Новое: 0. Сохранено {{noun}}.",
+      "nextRun": "Следующий запуск: {{date}}",
+      "nextRunRelative": "Следующий запуск: {{relative}}",
+      "counts": "дайджест: Включено, Непрочитано, Новое",
+      "count": {
+        "included": "Включено {{count}}",
+        "unread": "Непрочитано {{count}}",
+        "new": "Новое {{count}}"
+      },
+      "provenance": {
+        "sources": "{{count}} отслеживаемых источника",
+        "sources_zero": "{{count}} отслеживаемых источника",
+        "sources_one": "{{count}} отслеживаемый источник",
+        "sources_two": "{{count}} отслеживаемых источника",
+        "sources_few": "{{count}} отслеживаемых источника",
+        "sources_many": "{{count}} отслеживаемых источника",
+        "sources_other": "{{count}} отслеживаемых источника"
+      },
+      "delivery": {
+        "reports": "Все отчёты",
+        "retryAria": "Повторить {{adapter}}: {{name}}",
+        "retryUnknownAria": "Результат неизвестен. Повторить {{adapter}}: {{name}}",
+        "reviewRetry": "Повторить",
+        "unknownConfirmation": "Провайдер не подтвердил доставку через {{adapter}}. Повторная попытка может отправить дубликат. Проверьте адрес назначения и продолжайте, только если этот риск приемлем."
+      },
+      "playback": {
+        "region": "аудио: {{name}}",
+        "playAria": "Открыть аудио: {{name}}",
+        "pauseAria": "Ожидание аудио: {{name}}",
+        "resumeAria": "Открыть аудио: {{name}}",
+        "seekAria": "аудио: {{name}}",
+        "loading": "Загрузка аудио",
+        "error": "аудио ошибка. Открыть отчёт / Создать заново аудио.",
+        "play": "Воспроизвести",
+        "pause": "Пауза",
+        "resume": "Продолжить"
+      },
+      "actions": {
+        "label": "Последний дайджест",
+        "openReport": "Открыть {{report}}",
+        "openReportAria": "Открыть {{report}}: {{name}}",
+        "regenerateAudio": "Создать заново аудио",
+        "regenerateAudioAria": "Создать заново {{style}} {{noun}} аудио: {{name}}",
+        "retry": "Повторить",
+        "retrySaveAria": "Повторить сохранено отчёт: {{name}}",
+        "retryTextAria": "Повторить отчёт: {{name}}",
+        "retryStage": "Повторить: {{stage}}",
+        "inspect": "Проверить запуск",
+        "inspectAria": "Проверить запуск {{runId}}: {{name}}",
+        "viewReports": "Все отчёты",
+        "testNow": "Проверить сейчас"
+      },
+      "announcements": {
+        "blockingFailure": "{{name}} ошибка. Проверить запуск {{runId}}.",
+        "delivered": "{{name}}: доставлено.",
+        "nextRunUpdated": "{{name}}: следующий запуск.",
+        "partialAudioFailure": "{{name}}: заметки к выпуску готово, аудио ошибка.",
+        "readyText": "{{name}}: отчёт готово.",
+        "readyWithAudio": "{{name}}: Готово. аудио / заметки к выпуску.",
+        "stageProgress": "{{name}}: {{stage}} {{status}}.",
+        "testQueued": "Проверить сейчас: в очереди."
+      },
+      "retryError": "Повторить ошибка. Проверить запуск.",
+      "regenerateError": "Создать заново аудио: ошибка.",
+      "testError": "Проверить сейчас: ошибка.",
+      "status": {
+        "ready": "Готово",
+        "failed": "Ошибка",
+        "saved": "Сохранено",
+        "waiting": "Ожидание",
+        "running": "Выполняется",
+        "queued": "В очереди",
+        "notStarted": "Не начато",
+        "notSelected": "Не выбрано",
+        "cancelled": "Отменено",
+        "delivered": "Доставлено",
+        "unknown": "Результат неизвестен",
+        "sending": "Отправляется"
+      },
+      "stages": {
+        "renderText": "отчёт",
+        "persistText": "Сохранено отчёт",
+        "composeScript": "аудио отчёт",
+        "persistScript": "Сохранено аудио отчёт",
+        "generateAudio": "аудио",
+        "persistAudio": "Сохранено аудио"
+      },
+      "nouns": {
+        "briefing": "дайджест",
+        "episode": "эпизод",
+        "report": "отчёт",
+        "showNotes": "заметки к выпуску"
+      }
     }
+  },
+  "outputs": {
+    "openInNewTabAria": "Открыть в новой вкладке: {{title}}",
+    "chatAboutAria": "Обсудить: {{title}}",
+    "downloadAria": "Скачать: {{title}}"
   }
 }

@@ -703,5 +703,281 @@
   },
   "overview_pipelineSetup_test_cancelledWithCode": {
     "message": "Этап «{{stage}}» отменён ({{code}}). Черновик сохранён."
+  },
+  "overview_latest_heading_briefing": {
+    "message": "Последний дайджест"
+  },
+  "overview_latest_heading_episode": {
+    "message": "Последний эпизод"
+  },
+  "overview_latest_empty_scheduled": {
+    "message": "дайджест: {{date}}."
+  },
+  "overview_latest_empty_manual": {
+    "message": "Не начато. Проверить сейчас."
+  },
+  "overview_latest_generatedAt": {
+    "message": "Создано {{date}}"
+  },
+  "overview_latest_untitled": {
+    "message": "дайджест {{runId}}"
+  },
+  "overview_latest_artifacts": {
+    "message": "отчёт / аудио"
+  },
+  "overview_latest_audio": {
+    "message": "аудио"
+  },
+  "overview_latest_audioFailed": {
+    "message": "аудио ошибка"
+  },
+  "overview_latest_ready": {
+    "message": "Готово"
+  },
+  "overview_latest_saved": {
+    "message": "Сохранено"
+  },
+  "overview_latest_waiting": {
+    "message": "Ожидание"
+  },
+  "overview_latest_script": {
+    "message": "аудио отчёт"
+  },
+  "overview_latest_stageWithStatus": {
+    "message": "{{stage}}: {{status}}"
+  },
+  "overview_latest_noUpdates": {
+    "message": "Новое: 0. Сохранено {{noun}}."
+  },
+  "overview_latest_nextRun": {
+    "message": "Следующий запуск: {{date}}"
+  },
+  "overview_latest_nextRunRelative": {
+    "message": "Следующий запуск: {{relative}}"
+  },
+  "overview_latest_counts": {
+    "message": "дайджест: Включено, Непрочитано, Новое"
+  },
+  "overview_latest_count_included": {
+    "message": "Включено {{count}}"
+  },
+  "overview_latest_count_unread": {
+    "message": "Непрочитано {{count}}"
+  },
+  "overview_latest_count_new": {
+    "message": "Новое {{count}}"
+  },
+  "overview_latest_provenance_sources": {
+    "message": "{{count}} отслеживаемых источника"
+  },
+  "overview_latest_provenance_sources_zero": {
+    "message": "{{count}} отслеживаемых источника"
+  },
+  "overview_latest_provenance_sources_one": {
+    "message": "{{count}} отслеживаемый источник"
+  },
+  "overview_latest_provenance_sources_two": {
+    "message": "{{count}} отслеживаемых источника"
+  },
+  "overview_latest_provenance_sources_few": {
+    "message": "{{count}} отслеживаемых источника"
+  },
+  "overview_latest_provenance_sources_many": {
+    "message": "{{count}} отслеживаемых источника"
+  },
+  "overview_latest_provenance_sources_other": {
+    "message": "{{count}} отслеживаемых источника"
+  },
+  "overview_latest_delivery_reports": {
+    "message": "Все отчёты"
+  },
+  "overview_latest_delivery_retryAria": {
+    "message": "Повторить {{adapter}}: {{name}}"
+  },
+  "overview_latest_delivery_retryUnknownAria": {
+    "message": "Результат неизвестен. Повторить {{adapter}}: {{name}}"
+  },
+  "overview_latest_delivery_reviewRetry": {
+    "message": "Повторить"
+  },
+  "overview_latest_delivery_unknownConfirmation": {
+    "message": "Провайдер не подтвердил доставку через {{adapter}}. Повторная попытка может отправить дубликат. Проверьте адрес назначения и продолжайте, только если этот риск приемлем."
+  },
+  "overview_latest_playback_region": {
+    "message": "аудио: {{name}}"
+  },
+  "overview_latest_playback_playAria": {
+    "message": "Открыть аудио: {{name}}"
+  },
+  "overview_latest_playback_pauseAria": {
+    "message": "Ожидание аудио: {{name}}"
+  },
+  "overview_latest_playback_resumeAria": {
+    "message": "Открыть аудио: {{name}}"
+  },
+  "overview_latest_playback_seekAria": {
+    "message": "аудио: {{name}}"
+  },
+  "overview_latest_playback_loading": {
+    "message": "Загрузка аудио"
+  },
+  "overview_latest_playback_error": {
+    "message": "аудио ошибка. Открыть отчёт / Создать заново аудио."
+  },
+  "overview_latest_playback_play": {
+    "message": "Воспроизвести"
+  },
+  "overview_latest_playback_pause": {
+    "message": "Пауза"
+  },
+  "overview_latest_playback_resume": {
+    "message": "Продолжить"
+  },
+  "overview_latest_actions_label": {
+    "message": "Последний дайджест"
+  },
+  "overview_latest_actions_openReport": {
+    "message": "Открыть {{report}}"
+  },
+  "overview_latest_actions_openReportAria": {
+    "message": "Открыть {{report}}: {{name}}"
+  },
+  "overview_latest_actions_regenerateAudio": {
+    "message": "Создать заново аудио"
+  },
+  "overview_latest_actions_regenerateAudioAria": {
+    "message": "Создать заново {{style}} {{noun}} аудио: {{name}}"
+  },
+  "overview_latest_actions_retry": {
+    "message": "Повторить"
+  },
+  "overview_latest_actions_retrySaveAria": {
+    "message": "Повторить сохранено отчёт: {{name}}"
+  },
+  "overview_latest_actions_retryTextAria": {
+    "message": "Повторить отчёт: {{name}}"
+  },
+  "overview_latest_actions_retryStage": {
+    "message": "Повторить: {{stage}}"
+  },
+  "overview_latest_actions_inspect": {
+    "message": "Проверить запуск"
+  },
+  "overview_latest_actions_inspectAria": {
+    "message": "Проверить запуск {{runId}}: {{name}}"
+  },
+  "overview_latest_actions_viewReports": {
+    "message": "Все отчёты"
+  },
+  "overview_latest_actions_testNow": {
+    "message": "Проверить сейчас"
+  },
+  "overview_latest_announcements_blockingFailure": {
+    "message": "{{name}} ошибка. Проверить запуск {{runId}}."
+  },
+  "overview_latest_announcements_delivered": {
+    "message": "{{name}}: доставлено."
+  },
+  "overview_latest_announcements_nextRunUpdated": {
+    "message": "{{name}}: следующий запуск."
+  },
+  "overview_latest_announcements_partialAudioFailure": {
+    "message": "{{name}}: заметки к выпуску готово, аудио ошибка."
+  },
+  "overview_latest_announcements_readyText": {
+    "message": "{{name}}: отчёт готово."
+  },
+  "overview_latest_announcements_readyWithAudio": {
+    "message": "{{name}}: Готово. аудио / заметки к выпуску."
+  },
+  "overview_latest_announcements_stageProgress": {
+    "message": "{{name}}: {{stage}} {{status}}."
+  },
+  "overview_latest_announcements_testQueued": {
+    "message": "Проверить сейчас: в очереди."
+  },
+  "overview_latest_retryError": {
+    "message": "Повторить ошибка. Проверить запуск."
+  },
+  "overview_latest_regenerateError": {
+    "message": "Создать заново аудио: ошибка."
+  },
+  "overview_latest_testError": {
+    "message": "Проверить сейчас: ошибка."
+  },
+  "overview_latest_status_ready": {
+    "message": "Готово"
+  },
+  "overview_latest_status_failed": {
+    "message": "Ошибка"
+  },
+  "overview_latest_status_saved": {
+    "message": "Сохранено"
+  },
+  "overview_latest_status_waiting": {
+    "message": "Ожидание"
+  },
+  "overview_latest_status_running": {
+    "message": "Выполняется"
+  },
+  "overview_latest_status_queued": {
+    "message": "В очереди"
+  },
+  "overview_latest_status_notStarted": {
+    "message": "Не начато"
+  },
+  "overview_latest_status_notSelected": {
+    "message": "Не выбрано"
+  },
+  "overview_latest_status_cancelled": {
+    "message": "Отменено"
+  },
+  "overview_latest_status_delivered": {
+    "message": "Доставлено"
+  },
+  "overview_latest_status_unknown": {
+    "message": "Результат неизвестен"
+  },
+  "overview_latest_status_sending": {
+    "message": "Отправляется"
+  },
+  "overview_latest_stages_renderText": {
+    "message": "отчёт"
+  },
+  "overview_latest_stages_persistText": {
+    "message": "Сохранено отчёт"
+  },
+  "overview_latest_stages_composeScript": {
+    "message": "аудио отчёт"
+  },
+  "overview_latest_stages_persistScript": {
+    "message": "Сохранено аудио отчёт"
+  },
+  "overview_latest_stages_generateAudio": {
+    "message": "аудио"
+  },
+  "overview_latest_stages_persistAudio": {
+    "message": "Сохранено аудио"
+  },
+  "overview_latest_nouns_briefing": {
+    "message": "дайджест"
+  },
+  "overview_latest_nouns_episode": {
+    "message": "эпизод"
+  },
+  "overview_latest_nouns_report": {
+    "message": "отчёт"
+  },
+  "overview_latest_nouns_showNotes": {
+    "message": "заметки к выпуску"
+  },
+  "outputs_openInNewTabAria": {
+    "message": "Открыть в новой вкладке: {{title}}"
+  },
+  "outputs_chatAboutAria": {
+    "message": "Обсудить: {{title}}"
+  },
+  "outputs_downloadAria": {
+    "message": "Скачать: {{title}}"
   }
 }

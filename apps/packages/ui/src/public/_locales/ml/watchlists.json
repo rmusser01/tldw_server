@@ -685,5 +685,281 @@
   },
   "overview_pipelineSetup_test_cancelledWithCode": {
     "message": "{{stage}} റദ്ദാക്കി ({{code}}). നിങ്ങളുടെ കരട് സംരക്ഷിച്ചു."
+  },
+  "overview_latest_heading_briefing": {
+    "message": "ഏറ്റവും പുതിയ സംക്ഷിപ്തം"
+  },
+  "overview_latest_heading_episode": {
+    "message": "ഏറ്റവും പുതിയ എപ്പിസോഡ്"
+  },
+  "overview_latest_empty_scheduled": {
+    "message": "സംക്ഷിപ്തം: {{date}}."
+  },
+  "overview_latest_empty_manual": {
+    "message": "ആരംഭിച്ചിട്ടില്ല. ഇപ്പോൾ പരീക്ഷിക്കുക."
+  },
+  "overview_latest_generatedAt": {
+    "message": "സൃഷ്ടിച്ചത് {{date}}"
+  },
+  "overview_latest_untitled": {
+    "message": "സംക്ഷിപ്തം {{runId}}"
+  },
+  "overview_latest_artifacts": {
+    "message": "റിപ്പോർട്ട് / ഓഡിയോ"
+  },
+  "overview_latest_audio": {
+    "message": "ഓഡിയോ"
+  },
+  "overview_latest_audioFailed": {
+    "message": "ഓഡിയോ പരാജയം"
+  },
+  "overview_latest_ready": {
+    "message": "തയ്യാർ"
+  },
+  "overview_latest_saved": {
+    "message": "സംരക്ഷിച്ചു"
+  },
+  "overview_latest_waiting": {
+    "message": "കാത്തിരിക്കുന്നു"
+  },
+  "overview_latest_script": {
+    "message": "ഓഡിയോ റിപ്പോർട്ട്"
+  },
+  "overview_latest_stageWithStatus": {
+    "message": "{{stage}}: {{status}}"
+  },
+  "overview_latest_noUpdates": {
+    "message": "പുതിയത്: 0. സംരക്ഷിച്ചു {{noun}}."
+  },
+  "overview_latest_nextRun": {
+    "message": "അടുത്ത റൺ: {{date}}"
+  },
+  "overview_latest_nextRunRelative": {
+    "message": "അടുത്ത റൺ: {{relative}}"
+  },
+  "overview_latest_counts": {
+    "message": "സംക്ഷിപ്തം: ഉൾപ്പെടുത്തി, വായിക്കാത്തത്, പുതിയത്"
+  },
+  "overview_latest_count_included": {
+    "message": "ഉൾപ്പെടുത്തി {{count}}"
+  },
+  "overview_latest_count_unread": {
+    "message": "വായിക്കാത്തത് {{count}}"
+  },
+  "overview_latest_count_new": {
+    "message": "പുതിയത് {{count}}"
+  },
+  "overview_latest_provenance_sources": {
+    "message": "{{count}} പിന്തുടരുന്ന ഉറവിടങ്ങൾ"
+  },
+  "overview_latest_provenance_sources_zero": {
+    "message": "{{count}} പിന്തുടരുന്ന ഉറവിടങ്ങൾ"
+  },
+  "overview_latest_provenance_sources_one": {
+    "message": "{{count}} പിന്തുടരുന്ന ഉറവിടം"
+  },
+  "overview_latest_provenance_sources_two": {
+    "message": "{{count}} പിന്തുടരുന്ന ഉറവിടങ്ങൾ"
+  },
+  "overview_latest_provenance_sources_few": {
+    "message": "{{count}} പിന്തുടരുന്ന ഉറവിടങ്ങൾ"
+  },
+  "overview_latest_provenance_sources_many": {
+    "message": "{{count}} പിന്തുടരുന്ന ഉറവിടങ്ങൾ"
+  },
+  "overview_latest_provenance_sources_other": {
+    "message": "{{count}} പിന്തുടരുന്ന ഉറവിടങ്ങൾ"
+  },
+  "overview_latest_delivery_reports": {
+    "message": "എല്ലാ റിപ്പോർട്ടുകളും കാണുക"
+  },
+  "overview_latest_delivery_retryAria": {
+    "message": "വീണ്ടും ശ്രമിക്കുക {{adapter}}: {{name}}"
+  },
+  "overview_latest_delivery_retryUnknownAria": {
+    "message": "ഫലം അജ്ഞാതം. വീണ്ടും ശ്രമിക്കുക {{adapter}}: {{name}}"
+  },
+  "overview_latest_delivery_reviewRetry": {
+    "message": "വീണ്ടും ശ്രമിക്കുക"
+  },
+  "overview_latest_delivery_unknownConfirmation": {
+    "message": "ദാതാവ് {{adapter}} ഡെലിവറി സ്ഥിരീകരിച്ചില്ല. വീണ്ടും ശ്രമിക്കുന്നത് പകർപ്പ് അയച്ചേക്കാം. ലക്ഷ്യസ്ഥാനം പരിശോധിച്ച് ഈ അപകടസാധ്യത അംഗീകരിക്കാമെങ്കിൽ മാത്രം തുടരുക."
+  },
+  "overview_latest_playback_region": {
+    "message": "ഓഡിയോ: {{name}}"
+  },
+  "overview_latest_playback_playAria": {
+    "message": "തുറക്കുക ഓഡിയോ: {{name}}"
+  },
+  "overview_latest_playback_pauseAria": {
+    "message": "കാത്തിരിക്കുന്നു ഓഡിയോ: {{name}}"
+  },
+  "overview_latest_playback_resumeAria": {
+    "message": "തുറക്കുക ഓഡിയോ: {{name}}"
+  },
+  "overview_latest_playback_seekAria": {
+    "message": "ഓഡിയോ: {{name}}"
+  },
+  "overview_latest_playback_loading": {
+    "message": "ഓഡിയോ ലോഡ് ചെയ്യുന്നു"
+  },
+  "overview_latest_playback_error": {
+    "message": "ഓഡിയോ പരാജയം. തുറക്കുക റിപ്പോർട്ട് / വീണ്ടും സൃഷ്ടിക്കുക ഓഡിയോ."
+  },
+  "overview_latest_playback_play": {
+    "message": "പ്ലേ"
+  },
+  "overview_latest_playback_pause": {
+    "message": "താൽക്കാലികമായി നിർത്തുക"
+  },
+  "overview_latest_playback_resume": {
+    "message": "തുടരുക"
+  },
+  "overview_latest_actions_label": {
+    "message": "ഏറ്റവും പുതിയ സംക്ഷിപ്തം"
+  },
+  "overview_latest_actions_openReport": {
+    "message": "തുറക്കുക {{report}}"
+  },
+  "overview_latest_actions_openReportAria": {
+    "message": "തുറക്കുക {{report}}: {{name}}"
+  },
+  "overview_latest_actions_regenerateAudio": {
+    "message": "വീണ്ടും സൃഷ്ടിക്കുക ഓഡിയോ"
+  },
+  "overview_latest_actions_regenerateAudioAria": {
+    "message": "വീണ്ടും സൃഷ്ടിക്കുക {{style}} {{noun}} ഓഡിയോ: {{name}}"
+  },
+  "overview_latest_actions_retry": {
+    "message": "വീണ്ടും ശ്രമിക്കുക"
+  },
+  "overview_latest_actions_retrySaveAria": {
+    "message": "വീണ്ടും ശ്രമിക്കുക സംരക്ഷിച്ചു റിപ്പോർട്ട്: {{name}}"
+  },
+  "overview_latest_actions_retryTextAria": {
+    "message": "വീണ്ടും ശ്രമിക്കുക റിപ്പോർട്ട്: {{name}}"
+  },
+  "overview_latest_actions_retryStage": {
+    "message": "വീണ്ടും ശ്രമിക്കുക: {{stage}}"
+  },
+  "overview_latest_actions_inspect": {
+    "message": "റൺ പരിശോധിക്കുക"
+  },
+  "overview_latest_actions_inspectAria": {
+    "message": "റൺ പരിശോധിക്കുക {{runId}}: {{name}}"
+  },
+  "overview_latest_actions_viewReports": {
+    "message": "എല്ലാ റിപ്പോർട്ടുകളും കാണുക"
+  },
+  "overview_latest_actions_testNow": {
+    "message": "ഇപ്പോൾ പരീക്ഷിക്കുക"
+  },
+  "overview_latest_announcements_blockingFailure": {
+    "message": "{{name}} പരാജയം. റൺ പരിശോധിക്കുക {{runId}}."
+  },
+  "overview_latest_announcements_delivered": {
+    "message": "{{name}}: എത്തിച്ചു."
+  },
+  "overview_latest_announcements_nextRunUpdated": {
+    "message": "{{name}}: അടുത്ത റൺ."
+  },
+  "overview_latest_announcements_partialAudioFailure": {
+    "message": "{{name}}: ഷോ കുറിപ്പുകൾ തയ്യാർ, ഓഡിയോ പരാജയം."
+  },
+  "overview_latest_announcements_readyText": {
+    "message": "{{name}}: റിപ്പോർട്ട് തയ്യാർ."
+  },
+  "overview_latest_announcements_readyWithAudio": {
+    "message": "{{name}}: തയ്യാർ. ഓഡിയോ / ഷോ കുറിപ്പുകൾ."
+  },
+  "overview_latest_announcements_stageProgress": {
+    "message": "{{name}}: {{stage}} {{status}}."
+  },
+  "overview_latest_announcements_testQueued": {
+    "message": "ഇപ്പോൾ പരീക്ഷിക്കുക: ക്യൂവിൽ."
+  },
+  "overview_latest_retryError": {
+    "message": "വീണ്ടും ശ്രമിക്കുക പരാജയം. റൺ പരിശോധിക്കുക."
+  },
+  "overview_latest_regenerateError": {
+    "message": "വീണ്ടും സൃഷ്ടിക്കുക ഓഡിയോ: പരാജയം."
+  },
+  "overview_latest_testError": {
+    "message": "ഇപ്പോൾ പരീക്ഷിക്കുക: പരാജയം."
+  },
+  "overview_latest_status_ready": {
+    "message": "തയ്യാർ"
+  },
+  "overview_latest_status_failed": {
+    "message": "പരാജയം"
+  },
+  "overview_latest_status_saved": {
+    "message": "സംരക്ഷിച്ചു"
+  },
+  "overview_latest_status_waiting": {
+    "message": "കാത്തിരിക്കുന്നു"
+  },
+  "overview_latest_status_running": {
+    "message": "പ്രവർത്തിക്കുന്നു"
+  },
+  "overview_latest_status_queued": {
+    "message": "ക്യൂവിൽ"
+  },
+  "overview_latest_status_notStarted": {
+    "message": "ആരംഭിച്ചിട്ടില്ല"
+  },
+  "overview_latest_status_notSelected": {
+    "message": "തിരഞ്ഞെടുത്തിട്ടില്ല"
+  },
+  "overview_latest_status_cancelled": {
+    "message": "റദ്ദാക്കി"
+  },
+  "overview_latest_status_delivered": {
+    "message": "എത്തിച്ചു"
+  },
+  "overview_latest_status_unknown": {
+    "message": "ഫലം അജ്ഞാതം"
+  },
+  "overview_latest_status_sending": {
+    "message": "അയയ്ക്കുന്നു"
+  },
+  "overview_latest_stages_renderText": {
+    "message": "റിപ്പോർട്ട്"
+  },
+  "overview_latest_stages_persistText": {
+    "message": "സംരക്ഷിച്ചു റിപ്പോർട്ട്"
+  },
+  "overview_latest_stages_composeScript": {
+    "message": "ഓഡിയോ റിപ്പോർട്ട്"
+  },
+  "overview_latest_stages_persistScript": {
+    "message": "സംരക്ഷിച്ചു ഓഡിയോ റിപ്പോർട്ട്"
+  },
+  "overview_latest_stages_generateAudio": {
+    "message": "ഓഡിയോ"
+  },
+  "overview_latest_stages_persistAudio": {
+    "message": "സംരക്ഷിച്ചു ഓഡിയോ"
+  },
+  "overview_latest_nouns_briefing": {
+    "message": "സംക്ഷിപ്തം"
+  },
+  "overview_latest_nouns_episode": {
+    "message": "എപ്പിസോഡ്"
+  },
+  "overview_latest_nouns_report": {
+    "message": "റിപ്പോർട്ട്"
+  },
+  "overview_latest_nouns_showNotes": {
+    "message": "ഷോ കുറിപ്പുകൾ"
+  },
+  "outputs_openInNewTabAria": {
+    "message": "പുതിയ ടാബിൽ തുറക്കുക: {{title}}"
+  },
+  "outputs_chatAboutAria": {
+    "message": "ഇതിനെക്കുറിച്ച് ചാറ്റ് ചെയ്യുക: {{title}}"
+  },
+  "outputs_downloadAria": {
+    "message": "ഡൗൺലോഡ്: {{title}}"
   }
 }

@@ -32,6 +32,7 @@ import {
   getWatchlistRunBriefing,
   previewWatchlistSchedule,
   previewWatchlistTemplate,
+  retryWatchlistBriefingStage,
   testWatchlistSourceDraft,
   triggerWatchlistRun,
   updateWatchlistJob,
@@ -75,6 +76,15 @@ import { isWatchlistRunSuccessful } from "../shared/runStatus"
 import { normalizeWatchlistTemplateName } from "../shared/templateNames"
 import { trackWatchlistsOnboardingTelemetry } from "@/utils/watchlists-onboarding-telemetry"
 import type { WatchlistSource } from "@/types/watchlists"
+import type {
+  WatchlistBriefingProjection,
+  WatchlistBriefingRetryStage
+} from "@/types/watchlists"
+import { LatestBriefing } from "./LatestBriefing"
+import {
+  blockingFailureAnnouncement,
+  transitionAnnouncement
+} from "../shared/watchlists-announcements"
 
 const OVERVIEW_REFRESH_INTERVAL_MS = 30_000
 
@@ -121,6 +131,8 @@ export const OverviewTab: React.FC = () => {
   const [loading, setLoading] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [politeAnnouncement, setPoliteAnnouncement] = useState("")
+  const [assertiveAnnouncement, setAssertiveAnnouncement] = useState("")
   const [pipelineSetupOpen, setPipelineSetupOpen] = useState(false)
   const [pipelineSetupSubmitting, setPipelineSetupSubmitting] = useState(false)
   const [pipelineSourcesLoading, setPipelineSourcesLoading] = useState(false)
@@ -137,6 +149,8 @@ export const OverviewTab: React.FC = () => {
     readWatchlistsOnboardingPath()
   )
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const overviewRequestRef = useRef(0)
+  const previousBriefingRef = useRef<WatchlistBriefingProjection | null>(null)
   const quickSetupTriggerRef = useRef<HTMLButtonElement | null>(null)
   const pipelineSetupRestoreFocusTargetRef = useRef<HTMLElement | null>(null)
   const pipelineSetupWasOpenRef = useRef(false)
@@ -149,13 +163,40 @@ export const OverviewTab: React.FC = () => {
   const openRunDetail = useWatchlistsStore((s) => s.openRunDetail)
   const openSourceForm = useWatchlistsStore((s) => s.openSourceForm)
   const openJobForm = useWatchlistsStore((s) => s.openJobForm)
+  const openOutputPreview = useWatchlistsStore((s) => s.openOutputPreview)
   const selectedWatchlistId = useWatchlistsStore((s) => s.selectedWatchlistId)
   const hasSelectedWatchlist = selectedWatchlistId != null
 
+  const announceBriefingTransition = useCallback((next: WatchlistBriefingProjection | null) => {
+    const previous = previousBriefingRef.current
+    if (!next) {
+      previousBriefingRef.current = null
+      setPoliteAnnouncement("")
+      setAssertiveAnnouncement("")
+      return
+    }
+    setPoliteAnnouncement(transitionAnnouncement(previous, next, t) || "")
+    setAssertiveAnnouncement(blockingFailureAnnouncement(previous, next, t) || "")
+    previousBriefingRef.current = next
+  }, [t])
+
+  const applyBriefingProjection = useCallback((next: WatchlistBriefingProjection) => {
+    announceBriefingTransition(next)
+    setData((current) => current ? {
+      ...current,
+      fetchedAt: new Date().toISOString(),
+      latestBriefing: next
+    } : current)
+  }, [announceBriefingTransition])
+
   const loadOverview = useCallback(async (showLoading: boolean) => {
+    const requestId = ++overviewRequestRef.current
     if (selectedWatchlistId == null) {
       setData(null)
       setError(null)
+      previousBriefingRef.current = null
+      setPoliteAnnouncement("")
+      setAssertiveAnnouncement("")
       if (typeof setOverviewHealth === "function") {
         setOverviewHealth(null, null)
       }
@@ -173,6 +214,8 @@ export const OverviewTab: React.FC = () => {
       const result = await fetchWatchlistsOverviewData({
         watchlist_id: selectedWatchlistId ?? undefined
       })
+      if (requestId !== overviewRequestRef.current) return
+      announceBriefingTransition(result.latestBriefing)
       setData(result)
       if (typeof setOverviewHealth === "function") {
         setOverviewHealth(result.health, result.fetchedAt)
@@ -189,13 +232,17 @@ export const OverviewTab: React.FC = () => {
       }
       setError(null)
     } catch (err) {
+      if ((err as { name?: string } | null)?.name === "AbortError") return
+      if (requestId !== overviewRequestRef.current) return
       console.error("Failed to load watchlists overview:", err)
       setError(t("watchlists:overview.fetchError", "Failed to load overview"))
     } finally {
-      setLoading(false)
-      setRefreshing(false)
+      if (requestId === overviewRequestRef.current) {
+        setLoading(false)
+        setRefreshing(false)
+      }
     }
-  }, [selectedWatchlistId, setOverviewHealth, t])
+  }, [announceBriefingTransition, selectedWatchlistId, setOverviewHealth, t])
 
   useEffect(() => {
     void loadOverview(true)
@@ -258,6 +305,46 @@ export const OverviewTab: React.FC = () => {
   const handleOpenRuns = useCallback(() => {
     setActiveTab("runs")
   }, [setActiveTab])
+
+  const handleOpenBriefingReport = useCallback((outputId: number) => {
+    setActiveTab("outputs")
+    openOutputPreview(outputId)
+  }, [openOutputPreview, setActiveTab])
+
+  const handleRetryBriefingStage = useCallback(async (
+    runId: number,
+    stage: WatchlistBriefingRetryStage,
+    options?: { confirm_unknown_delivery_retry?: boolean }
+  ) => {
+    try {
+      const next = await retryWatchlistBriefingStage(runId, stage, options)
+      applyBriefingProjection(next)
+    } catch (err) {
+      if ((err as { name?: string } | null)?.name === "AbortError") return
+      console.error("Failed to retry watchlists briefing stage:", err)
+      message.error(t(
+        "watchlists:overview.latest.retryError",
+        "Could not retry this briefing stage. Inspect the run for details."
+      ))
+    }
+  }, [applyBriefingProjection, t])
+
+  const handleRegenerateBriefing = useCallback(async (
+    runId: number,
+    stage: WatchlistBriefingRetryStage
+  ) => {
+    try {
+      const next = await retryWatchlistBriefingStage(runId, stage, { regenerate: true })
+      applyBriefingProjection(next)
+    } catch (err) {
+      if ((err as { name?: string } | null)?.name === "AbortError") return
+      console.error("Failed to regenerate watchlists briefing stage:", err)
+      message.error(t(
+        "watchlists:overview.latest.regenerateError",
+        "Could not regenerate audio. Inspect the run for details."
+      ))
+    }
+  }, [applyBriefingProjection, t])
 
   const handleOpenAlerts = useCallback(() => {
     setActiveTab("alerts")
@@ -383,6 +470,25 @@ export const OverviewTab: React.FC = () => {
     void trackWatchlistsOnboardingTelemetry({ type: "pipeline_setup_opened" })
     void loadPipelineSources()
   }, [loadPipelineSources])
+
+  const handleTestLatest = useCallback(async (jobId?: number) => {
+    if (!jobId) {
+      openPipelineSetup()
+      return
+    }
+    try {
+      await triggerWatchlistRun(jobId)
+      setPoliteAnnouncement(t(
+        "watchlists:overview.latest.announcements.testQueued",
+        "Test run queued. Progress will appear in the latest briefing."
+      ))
+      void loadOverview(false)
+    } catch (err) {
+      if ((err as { name?: string } | null)?.name === "AbortError") return
+      console.error("Failed to start watchlists briefing test:", err)
+      message.error(t("watchlists:overview.latest.testError", "Could not start the test run."))
+    }
+  }, [loadOverview, openPipelineSetup, t])
 
   const closePipelineSetup = useCallback(() => {
     if (pipelineSetupSubmitting) return
@@ -761,8 +867,38 @@ export const OverviewTab: React.FC = () => {
         <DesignSystemAlert variant="error" title={error} />
       )}
 
+      <div
+        className="sr-only"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        data-testid="watchlists-overview-live-polite"
+      >
+        {politeAnnouncement}
+      </div>
+      <div
+        className="sr-only"
+        role="alert"
+        aria-live="assertive"
+        aria-atomic="true"
+        data-testid="watchlists-overview-live-assertive"
+      >
+        {assertiveAnnouncement}
+      </div>
+
       {data && (
         <>
+          <LatestBriefing
+            projection={data.latestBriefing}
+            unreadCount={data.items.unread}
+            onPlay={() => undefined}
+            onOpenReport={handleOpenBriefingReport}
+            onInspectRun={handleOpenRun}
+            onRetryStage={handleRetryBriefingStage}
+            onRegenerate={handleRegenerateBriefing}
+            onTestNow={handleTestLatest}
+            onViewReports={handleOpenAttentionOutputs}
+          />
           {(data.sources.total === 0 || data.jobs.total === 0) && (
             <Card
               size="small"

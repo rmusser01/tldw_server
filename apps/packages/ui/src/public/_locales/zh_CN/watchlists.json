@@ -685,5 +685,281 @@
   },
   "overview_pipelineSetup_test_cancelledWithCode": {
     "message": "{{stage}} 已取消（{{code}}）。草稿已保存。"
+  },
+  "overview_latest_heading_briefing": {
+    "message": "最新 简报"
+  },
+  "overview_latest_heading_episode": {
+    "message": "最新 节目"
+  },
+  "overview_latest_empty_scheduled": {
+    "message": "简报: {{date}}."
+  },
+  "overview_latest_empty_manual": {
+    "message": "未开始. 立即测试."
+  },
+  "overview_latest_generatedAt": {
+    "message": "生成于 {{date}}"
+  },
+  "overview_latest_untitled": {
+    "message": "简报 {{runId}}"
+  },
+  "overview_latest_artifacts": {
+    "message": "报告 / 音频"
+  },
+  "overview_latest_audio": {
+    "message": "音频"
+  },
+  "overview_latest_audioFailed": {
+    "message": "音频 失败"
+  },
+  "overview_latest_ready": {
+    "message": "就绪"
+  },
+  "overview_latest_saved": {
+    "message": "已保存"
+  },
+  "overview_latest_waiting": {
+    "message": "等待中"
+  },
+  "overview_latest_script": {
+    "message": "音频 报告"
+  },
+  "overview_latest_stageWithStatus": {
+    "message": "{{stage}}: {{status}}"
+  },
+  "overview_latest_noUpdates": {
+    "message": "新增: 0. 已保存 {{noun}}."
+  },
+  "overview_latest_nextRun": {
+    "message": "下次运行: {{date}}"
+  },
+  "overview_latest_nextRunRelative": {
+    "message": "下次运行: {{relative}}"
+  },
+  "overview_latest_counts": {
+    "message": "简报: 已包含, 未读, 新增"
+  },
+  "overview_latest_count_included": {
+    "message": "已包含 {{count}}"
+  },
+  "overview_latest_count_unread": {
+    "message": "未读 {{count}}"
+  },
+  "overview_latest_count_new": {
+    "message": "新增 {{count}}"
+  },
+  "overview_latest_provenance_sources": {
+    "message": "{{count}} 个跟踪来源"
+  },
+  "overview_latest_provenance_sources_zero": {
+    "message": "{{count}} 个跟踪来源"
+  },
+  "overview_latest_provenance_sources_one": {
+    "message": "{{count}} 个跟踪来源"
+  },
+  "overview_latest_provenance_sources_two": {
+    "message": "{{count}} 个跟踪来源"
+  },
+  "overview_latest_provenance_sources_few": {
+    "message": "{{count}} 个跟踪来源"
+  },
+  "overview_latest_provenance_sources_many": {
+    "message": "{{count}} 个跟踪来源"
+  },
+  "overview_latest_provenance_sources_other": {
+    "message": "{{count}} 个跟踪来源"
+  },
+  "overview_latest_delivery_reports": {
+    "message": "查看所有报告"
+  },
+  "overview_latest_delivery_retryAria": {
+    "message": "重试 {{adapter}}: {{name}}"
+  },
+  "overview_latest_delivery_retryUnknownAria": {
+    "message": "结果未知. 重试 {{adapter}}: {{name}}"
+  },
+  "overview_latest_delivery_reviewRetry": {
+    "message": "重试"
+  },
+  "overview_latest_delivery_unknownConfirmation": {
+    "message": "提供商未确认通过 {{adapter}} 送达。重试可能会发送重复内容。请检查目标，仅在可以接受该风险时继续。"
+  },
+  "overview_latest_playback_region": {
+    "message": "音频: {{name}}"
+  },
+  "overview_latest_playback_playAria": {
+    "message": "打开 音频: {{name}}"
+  },
+  "overview_latest_playback_pauseAria": {
+    "message": "等待中 音频: {{name}}"
+  },
+  "overview_latest_playback_resumeAria": {
+    "message": "打开 音频: {{name}}"
+  },
+  "overview_latest_playback_seekAria": {
+    "message": "音频: {{name}}"
+  },
+  "overview_latest_playback_loading": {
+    "message": "正在加载音频"
+  },
+  "overview_latest_playback_error": {
+    "message": "音频 失败. 打开 报告 / 重新生成 音频."
+  },
+  "overview_latest_playback_play": {
+    "message": "播放"
+  },
+  "overview_latest_playback_pause": {
+    "message": "暂停"
+  },
+  "overview_latest_playback_resume": {
+    "message": "继续"
+  },
+  "overview_latest_actions_label": {
+    "message": "最新 简报"
+  },
+  "overview_latest_actions_openReport": {
+    "message": "打开 {{report}}"
+  },
+  "overview_latest_actions_openReportAria": {
+    "message": "打开 {{report}}: {{name}}"
+  },
+  "overview_latest_actions_regenerateAudio": {
+    "message": "重新生成 音频"
+  },
+  "overview_latest_actions_regenerateAudioAria": {
+    "message": "重新生成 {{style}} {{noun}} 音频: {{name}}"
+  },
+  "overview_latest_actions_retry": {
+    "message": "重试"
+  },
+  "overview_latest_actions_retrySaveAria": {
+    "message": "重试 已保存 报告: {{name}}"
+  },
+  "overview_latest_actions_retryTextAria": {
+    "message": "重试 报告: {{name}}"
+  },
+  "overview_latest_actions_retryStage": {
+    "message": "重试: {{stage}}"
+  },
+  "overview_latest_actions_inspect": {
+    "message": "检查运行"
+  },
+  "overview_latest_actions_inspectAria": {
+    "message": "检查运行 {{runId}}: {{name}}"
+  },
+  "overview_latest_actions_viewReports": {
+    "message": "查看所有报告"
+  },
+  "overview_latest_actions_testNow": {
+    "message": "立即测试"
+  },
+  "overview_latest_announcements_blockingFailure": {
+    "message": "{{name}} 失败. 检查运行 {{runId}}."
+  },
+  "overview_latest_announcements_delivered": {
+    "message": "{{name}}: 已送达."
+  },
+  "overview_latest_announcements_nextRunUpdated": {
+    "message": "{{name}}: 下次运行."
+  },
+  "overview_latest_announcements_partialAudioFailure": {
+    "message": "{{name}}: 节目说明 就绪, 音频 失败."
+  },
+  "overview_latest_announcements_readyText": {
+    "message": "{{name}}: 报告 就绪."
+  },
+  "overview_latest_announcements_readyWithAudio": {
+    "message": "{{name}}: 就绪. 音频 / 节目说明."
+  },
+  "overview_latest_announcements_stageProgress": {
+    "message": "{{name}}: {{stage}} {{status}}."
+  },
+  "overview_latest_announcements_testQueued": {
+    "message": "立即测试: 已排队."
+  },
+  "overview_latest_retryError": {
+    "message": "重试 失败. 检查运行."
+  },
+  "overview_latest_regenerateError": {
+    "message": "重新生成 音频: 失败."
+  },
+  "overview_latest_testError": {
+    "message": "立即测试: 失败."
+  },
+  "overview_latest_status_ready": {
+    "message": "就绪"
+  },
+  "overview_latest_status_failed": {
+    "message": "失败"
+  },
+  "overview_latest_status_saved": {
+    "message": "已保存"
+  },
+  "overview_latest_status_waiting": {
+    "message": "等待中"
+  },
+  "overview_latest_status_running": {
+    "message": "运行中"
+  },
+  "overview_latest_status_queued": {
+    "message": "已排队"
+  },
+  "overview_latest_status_notStarted": {
+    "message": "未开始"
+  },
+  "overview_latest_status_notSelected": {
+    "message": "未选择"
+  },
+  "overview_latest_status_cancelled": {
+    "message": "已取消"
+  },
+  "overview_latest_status_delivered": {
+    "message": "已送达"
+  },
+  "overview_latest_status_unknown": {
+    "message": "结果未知"
+  },
+  "overview_latest_status_sending": {
+    "message": "发送中"
+  },
+  "overview_latest_stages_renderText": {
+    "message": "报告"
+  },
+  "overview_latest_stages_persistText": {
+    "message": "已保存 报告"
+  },
+  "overview_latest_stages_composeScript": {
+    "message": "音频 报告"
+  },
+  "overview_latest_stages_persistScript": {
+    "message": "已保存 音频 报告"
+  },
+  "overview_latest_stages_generateAudio": {
+    "message": "音频"
+  },
+  "overview_latest_stages_persistAudio": {
+    "message": "已保存 音频"
+  },
+  "overview_latest_nouns_briefing": {
+    "message": "简报"
+  },
+  "overview_latest_nouns_episode": {
+    "message": "节目"
+  },
+  "overview_latest_nouns_report": {
+    "message": "报告"
+  },
+  "overview_latest_nouns_showNotes": {
+    "message": "节目说明"
+  },
+  "outputs_openInNewTabAria": {
+    "message": "在新标签页中打开: {{title}}"
+  },
+  "outputs_chatAboutAria": {
+    "message": "讨论此内容: {{title}}"
+  },
+  "outputs_downloadAria": {
+    "message": "下载: {{title}}"
   }
 }

@@ -323,6 +323,124 @@
         "emailInvalid": "Informe pelo menos um endereço de e-mail válido."
       },
       "validationError": "Revise os campos destacados antes de continuar."
+    },
+    "latest": {
+      "heading": {
+        "briefing": "Mais recente resumo",
+        "episode": "Mais recente episódio"
+      },
+      "empty": {
+        "scheduled": "resumo: {{date}}.",
+        "manual": "Não iniciado. Testar agora."
+      },
+      "generatedAt": "Gerado {{date}}",
+      "untitled": "resumo {{runId}}",
+      "artifacts": "relatório / áudio",
+      "audio": "áudio",
+      "audioFailed": "áudio falhou",
+      "ready": "Pronto",
+      "saved": "Salvo",
+      "waiting": "Aguardando",
+      "script": "áudio relatório",
+      "stageWithStatus": "{{stage}}: {{status}}",
+      "noUpdates": "Novos: 0. Salvo {{noun}}.",
+      "nextRun": "Próxima execução: {{date}}",
+      "nextRunRelative": "Próxima execução: {{relative}}",
+      "counts": "resumo: Incluídos, Não lidos, Novos",
+      "count": {
+        "included": "Incluídos {{count}}",
+        "unread": "Não lidos {{count}}",
+        "new": "Novos {{count}}"
+      },
+      "provenance": {
+        "sources": "{{count}} fontes acompanhadas",
+        "sources_zero": "{{count}} fontes acompanhadas",
+        "sources_one": "{{count}} fonte acompanhada",
+        "sources_two": "{{count}} fontes acompanhadas",
+        "sources_few": "{{count}} fontes acompanhadas",
+        "sources_many": "{{count}} fontes acompanhadas",
+        "sources_other": "{{count}} fontes acompanhadas"
+      },
+      "delivery": {
+        "reports": "Ver todos os relatórios",
+        "retryAria": "Tentar novamente {{adapter}}: {{name}}",
+        "retryUnknownAria": "Resultado desconhecido. Tentar novamente {{adapter}}: {{name}}",
+        "reviewRetry": "Tentar novamente",
+        "unknownConfirmation": "O provedor não confirmou a entrega por {{adapter}}. Tentar novamente pode enviar uma duplicata. Revise o destino e continue apenas se aceitar esse risco."
+      },
+      "playback": {
+        "region": "áudio: {{name}}",
+        "playAria": "Abrir áudio: {{name}}",
+        "pauseAria": "Aguardando áudio: {{name}}",
+        "resumeAria": "Abrir áudio: {{name}}",
+        "seekAria": "áudio: {{name}}",
+        "loading": "Carregando áudio",
+        "error": "áudio falhou. Abrir relatório / Regenerar áudio.",
+        "play": "Reproduzir",
+        "pause": "Pausar",
+        "resume": "Retomar"
+      },
+      "actions": {
+        "label": "Mais recente resumo",
+        "openReport": "Abrir {{report}}",
+        "openReportAria": "Abrir {{report}}: {{name}}",
+        "regenerateAudio": "Regenerar áudio",
+        "regenerateAudioAria": "Regenerar {{style}} {{noun}} áudio: {{name}}",
+        "retry": "Tentar novamente",
+        "retrySaveAria": "Tentar novamente salvo relatório: {{name}}",
+        "retryTextAria": "Tentar novamente relatório: {{name}}",
+        "retryStage": "Tentar novamente: {{stage}}",
+        "inspect": "Inspecionar execução",
+        "inspectAria": "Inspecionar execução {{runId}}: {{name}}",
+        "viewReports": "Ver todos os relatórios",
+        "testNow": "Testar agora"
+      },
+      "announcements": {
+        "blockingFailure": "{{name}} falhou. Inspecionar execução {{runId}}.",
+        "delivered": "{{name}}: entregue.",
+        "nextRunUpdated": "{{name}}: próxima execução.",
+        "partialAudioFailure": "{{name}}: notas do programa pronto, áudio falhou.",
+        "readyText": "{{name}}: relatório pronto.",
+        "readyWithAudio": "{{name}}: Pronto. áudio / notas do programa.",
+        "stageProgress": "{{name}}: {{stage}} {{status}}.",
+        "testQueued": "Testar agora: na fila."
+      },
+      "retryError": "Tentar novamente falhou. Inspecionar execução.",
+      "regenerateError": "Regenerar áudio: falhou.",
+      "testError": "Testar agora: falhou.",
+      "status": {
+        "ready": "Pronto",
+        "failed": "Falhou",
+        "saved": "Salvo",
+        "waiting": "Aguardando",
+        "running": "Em execução",
+        "queued": "Na fila",
+        "notStarted": "Não iniciado",
+        "notSelected": "Não selecionado",
+        "cancelled": "Cancelado",
+        "delivered": "Entregue",
+        "unknown": "Resultado desconhecido",
+        "sending": "Enviando"
+      },
+      "stages": {
+        "renderText": "relatório",
+        "persistText": "Salvo relatório",
+        "composeScript": "áudio relatório",
+        "persistScript": "Salvo áudio relatório",
+        "generateAudio": "áudio",
+        "persistAudio": "Salvo áudio"
+      },
+      "nouns": {
+        "briefing": "resumo",
+        "episode": "episódio",
+        "report": "relatório",
+        "showNotes": "notas do programa"
+      }
     }
+  },
+  "outputs": {
+    "openInNewTabAria": "Abrir em nova guia: {{title}}",
+    "chatAboutAria": "Conversar sobre isto: {{title}}",
+    "downloadAria": "Baixar: {{title}}"
   }
 }

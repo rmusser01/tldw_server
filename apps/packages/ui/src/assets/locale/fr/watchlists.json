@@ -323,6 +323,124 @@
         "emailInvalid": "Saisissez au moins une adresse e-mail valide."
       },
       "validationError": "Vérifiez les champs en surbrillance avant de continuer."
+    },
+    "latest": {
+      "heading": {
+        "briefing": "Dernier briefing",
+        "episode": "Dernier épisode"
+      },
+      "empty": {
+        "scheduled": "briefing: {{date}}.",
+        "manual": "Non démarré. Tester maintenant."
+      },
+      "generatedAt": "Généré {{date}}",
+      "untitled": "briefing {{runId}}",
+      "artifacts": "rapport / audio",
+      "audio": "audio",
+      "audioFailed": "audio échec",
+      "ready": "Prêt",
+      "saved": "Enregistré",
+      "waiting": "En attente",
+      "script": "audio rapport",
+      "stageWithStatus": "{{stage}}: {{status}}",
+      "noUpdates": "Nouveau: 0. Enregistré {{noun}}.",
+      "nextRun": "Prochaine exécution: {{date}}",
+      "nextRunRelative": "Prochaine exécution: {{relative}}",
+      "counts": "briefing: Inclus, Non lu, Nouveau",
+      "count": {
+        "included": "Inclus {{count}}",
+        "unread": "Non lu {{count}}",
+        "new": "Nouveau {{count}}"
+      },
+      "provenance": {
+        "sources": "{{count}} sources suivies",
+        "sources_zero": "{{count}} sources suivies",
+        "sources_one": "{{count}} source suivie",
+        "sources_two": "{{count}} sources suivies",
+        "sources_few": "{{count}} sources suivies",
+        "sources_many": "{{count}} sources suivies",
+        "sources_other": "{{count}} sources suivies"
+      },
+      "delivery": {
+        "reports": "Voir tous les rapports",
+        "retryAria": "Réessayer {{adapter}}: {{name}}",
+        "retryUnknownAria": "Résultat inconnu. Réessayer {{adapter}}: {{name}}",
+        "reviewRetry": "Réessayer",
+        "unknownConfirmation": "Le fournisseur n’a pas confirmé la livraison via {{adapter}}. Réessayer peut envoyer un doublon. Vérifiez la destination et continuez uniquement si ce risque est acceptable."
+      },
+      "playback": {
+        "region": "audio: {{name}}",
+        "playAria": "Ouvrir audio: {{name}}",
+        "pauseAria": "En attente audio: {{name}}",
+        "resumeAria": "Ouvrir audio: {{name}}",
+        "seekAria": "audio: {{name}}",
+        "loading": "Chargement audio",
+        "error": "audio échec. Ouvrir rapport / Régénérer audio.",
+        "play": "Lire",
+        "pause": "Pause",
+        "resume": "Reprendre"
+      },
+      "actions": {
+        "label": "Dernier briefing",
+        "openReport": "Ouvrir {{report}}",
+        "openReportAria": "Ouvrir {{report}}: {{name}}",
+        "regenerateAudio": "Régénérer audio",
+        "regenerateAudioAria": "Régénérer {{style}} {{noun}} audio: {{name}}",
+        "retry": "Réessayer",
+        "retrySaveAria": "Réessayer enregistré rapport: {{name}}",
+        "retryTextAria": "Réessayer rapport: {{name}}",
+        "retryStage": "Réessayer: {{stage}}",
+        "inspect": "Inspecter l’exécution",
+        "inspectAria": "Inspecter l’exécution {{runId}}: {{name}}",
+        "viewReports": "Voir tous les rapports",
+        "testNow": "Tester maintenant"
+      },
+      "announcements": {
+        "blockingFailure": "{{name}} échec. Inspecter l’exécution {{runId}}.",
+        "delivered": "{{name}}: livré.",
+        "nextRunUpdated": "{{name}}: prochaine exécution.",
+        "partialAudioFailure": "{{name}}: notes d’émission prêt, audio échec.",
+        "readyText": "{{name}}: rapport prêt.",
+        "readyWithAudio": "{{name}}: Prêt. audio / notes d’émission.",
+        "stageProgress": "{{name}}: {{stage}} {{status}}.",
+        "testQueued": "Tester maintenant: en file."
+      },
+      "retryError": "Réessayer échec. Inspecter l’exécution.",
+      "regenerateError": "Régénérer audio: échec.",
+      "testError": "Tester maintenant: échec.",
+      "status": {
+        "ready": "Prêt",
+        "failed": "Échec",
+        "saved": "Enregistré",
+        "waiting": "En attente",
+        "running": "En cours",
+        "queued": "En file",
+        "notStarted": "Non démarré",
+        "notSelected": "Non sélectionné",
+        "cancelled": "Annulé",
+        "delivered": "Livré",
+        "unknown": "Résultat inconnu",
+        "sending": "Envoi"
+      },
+      "stages": {
+        "renderText": "rapport",
+        "persistText": "Enregistré rapport",
+        "composeScript": "audio rapport",
+        "persistScript": "Enregistré audio rapport",
+        "generateAudio": "audio",
+        "persistAudio": "Enregistré audio"
+      },
+      "nouns": {
+        "briefing": "briefing",
+        "episode": "épisode",
+        "report": "rapport",
+        "showNotes": "notes d’émission"
+      }
     }
+  },
+  "outputs": {
+    "openInNewTabAria": "Ouvrir dans un nouvel onglet: {{title}}",
+    "chatAboutAria": "Discuter de ceci: {{title}}",
+    "downloadAria": "Télécharger: {{title}}"
   }
 }

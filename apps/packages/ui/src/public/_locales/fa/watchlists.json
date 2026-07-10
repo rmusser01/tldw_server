@@ -685,5 +685,281 @@
   },
   "overview_pipelineSetup_test_cancelledWithCode": {
     "message": "{{stage}} لغو شد ({{code}}). پیش‌نویس شما ذخیره شد."
+  },
+  "overview_latest_heading_briefing": {
+    "message": "تازه‌ترین خلاصه"
+  },
+  "overview_latest_heading_episode": {
+    "message": "تازه‌ترین قسمت"
+  },
+  "overview_latest_empty_scheduled": {
+    "message": "خلاصه: {{date}}."
+  },
+  "overview_latest_empty_manual": {
+    "message": "شروع‌نشده. اکنون آزمایش کن."
+  },
+  "overview_latest_generatedAt": {
+    "message": "تولیدشده {{date}}"
+  },
+  "overview_latest_untitled": {
+    "message": "خلاصه {{runId}}"
+  },
+  "overview_latest_artifacts": {
+    "message": "گزارش / صدا"
+  },
+  "overview_latest_audio": {
+    "message": "صدا"
+  },
+  "overview_latest_audioFailed": {
+    "message": "صدا ناموفق"
+  },
+  "overview_latest_ready": {
+    "message": "آماده"
+  },
+  "overview_latest_saved": {
+    "message": "ذخیره‌شده"
+  },
+  "overview_latest_waiting": {
+    "message": "در انتظار"
+  },
+  "overview_latest_script": {
+    "message": "صدا گزارش"
+  },
+  "overview_latest_stageWithStatus": {
+    "message": "{{stage}}: {{status}}"
+  },
+  "overview_latest_noUpdates": {
+    "message": "جدید: 0. ذخیره‌شده {{noun}}."
+  },
+  "overview_latest_nextRun": {
+    "message": "اجرای بعدی: {{date}}"
+  },
+  "overview_latest_nextRunRelative": {
+    "message": "اجرای بعدی: {{relative}}"
+  },
+  "overview_latest_counts": {
+    "message": "خلاصه: گنجانده‌شده, خوانده‌نشده, جدید"
+  },
+  "overview_latest_count_included": {
+    "message": "گنجانده‌شده {{count}}"
+  },
+  "overview_latest_count_unread": {
+    "message": "خوانده‌نشده {{count}}"
+  },
+  "overview_latest_count_new": {
+    "message": "جدید {{count}}"
+  },
+  "overview_latest_provenance_sources": {
+    "message": "{{count}} منابع پیگیری‌شده"
+  },
+  "overview_latest_provenance_sources_zero": {
+    "message": "{{count}} منابع پیگیری‌شده"
+  },
+  "overview_latest_provenance_sources_one": {
+    "message": "{{count}} منبع پیگیری‌شده"
+  },
+  "overview_latest_provenance_sources_two": {
+    "message": "{{count}} منابع پیگیری‌شده"
+  },
+  "overview_latest_provenance_sources_few": {
+    "message": "{{count}} منابع پیگیری‌شده"
+  },
+  "overview_latest_provenance_sources_many": {
+    "message": "{{count}} منابع پیگیری‌شده"
+  },
+  "overview_latest_provenance_sources_other": {
+    "message": "{{count}} منابع پیگیری‌شده"
+  },
+  "overview_latest_delivery_reports": {
+    "message": "مشاهده همه گزارش‌ها"
+  },
+  "overview_latest_delivery_retryAria": {
+    "message": "تلاش دوباره {{adapter}}: {{name}}"
+  },
+  "overview_latest_delivery_retryUnknownAria": {
+    "message": "نتیجه نامشخص. تلاش دوباره {{adapter}}: {{name}}"
+  },
+  "overview_latest_delivery_reviewRetry": {
+    "message": "تلاش دوباره"
+  },
+  "overview_latest_delivery_unknownConfirmation": {
+    "message": "ارائه‌دهنده تحویل {{adapter}} را تأیید نکرد. تلاش دوباره ممکن است یک نسخه تکراری بفرستد. مقصد را بررسی کنید و فقط در صورت پذیرش این خطر ادامه دهید."
+  },
+  "overview_latest_playback_region": {
+    "message": "صدا: {{name}}"
+  },
+  "overview_latest_playback_playAria": {
+    "message": "باز کردن صدا: {{name}}"
+  },
+  "overview_latest_playback_pauseAria": {
+    "message": "در انتظار صدا: {{name}}"
+  },
+  "overview_latest_playback_resumeAria": {
+    "message": "باز کردن صدا: {{name}}"
+  },
+  "overview_latest_playback_seekAria": {
+    "message": "صدا: {{name}}"
+  },
+  "overview_latest_playback_loading": {
+    "message": "در حال بارگیری صدا"
+  },
+  "overview_latest_playback_error": {
+    "message": "صدا ناموفق. باز کردن گزارش / تولید دوباره صدا."
+  },
+  "overview_latest_playback_play": {
+    "message": "پخش"
+  },
+  "overview_latest_playback_pause": {
+    "message": "مکث"
+  },
+  "overview_latest_playback_resume": {
+    "message": "ادامه"
+  },
+  "overview_latest_actions_label": {
+    "message": "تازه‌ترین خلاصه"
+  },
+  "overview_latest_actions_openReport": {
+    "message": "باز کردن {{report}}"
+  },
+  "overview_latest_actions_openReportAria": {
+    "message": "باز کردن {{report}}: {{name}}"
+  },
+  "overview_latest_actions_regenerateAudio": {
+    "message": "تولید دوباره صدا"
+  },
+  "overview_latest_actions_regenerateAudioAria": {
+    "message": "تولید دوباره {{style}} {{noun}} صدا: {{name}}"
+  },
+  "overview_latest_actions_retry": {
+    "message": "تلاش دوباره"
+  },
+  "overview_latest_actions_retrySaveAria": {
+    "message": "تلاش دوباره ذخیره‌شده گزارش: {{name}}"
+  },
+  "overview_latest_actions_retryTextAria": {
+    "message": "تلاش دوباره گزارش: {{name}}"
+  },
+  "overview_latest_actions_retryStage": {
+    "message": "تلاش دوباره: {{stage}}"
+  },
+  "overview_latest_actions_inspect": {
+    "message": "بررسی اجرا"
+  },
+  "overview_latest_actions_inspectAria": {
+    "message": "بررسی اجرا {{runId}}: {{name}}"
+  },
+  "overview_latest_actions_viewReports": {
+    "message": "مشاهده همه گزارش‌ها"
+  },
+  "overview_latest_actions_testNow": {
+    "message": "اکنون آزمایش کن"
+  },
+  "overview_latest_announcements_blockingFailure": {
+    "message": "{{name}} ناموفق. بررسی اجرا {{runId}}."
+  },
+  "overview_latest_announcements_delivered": {
+    "message": "{{name}}: تحویل‌شده."
+  },
+  "overview_latest_announcements_nextRunUpdated": {
+    "message": "{{name}}: اجرای بعدی."
+  },
+  "overview_latest_announcements_partialAudioFailure": {
+    "message": "{{name}}: یادداشت‌های برنامه آماده, صدا ناموفق."
+  },
+  "overview_latest_announcements_readyText": {
+    "message": "{{name}}: گزارش آماده."
+  },
+  "overview_latest_announcements_readyWithAudio": {
+    "message": "{{name}}: آماده. صدا / یادداشت‌های برنامه."
+  },
+  "overview_latest_announcements_stageProgress": {
+    "message": "{{name}}: {{stage}} {{status}}."
+  },
+  "overview_latest_announcements_testQueued": {
+    "message": "اکنون آزمایش کن: در صف."
+  },
+  "overview_latest_retryError": {
+    "message": "تلاش دوباره ناموفق. بررسی اجرا."
+  },
+  "overview_latest_regenerateError": {
+    "message": "تولید دوباره صدا: ناموفق."
+  },
+  "overview_latest_testError": {
+    "message": "اکنون آزمایش کن: ناموفق."
+  },
+  "overview_latest_status_ready": {
+    "message": "آماده"
+  },
+  "overview_latest_status_failed": {
+    "message": "ناموفق"
+  },
+  "overview_latest_status_saved": {
+    "message": "ذخیره‌شده"
+  },
+  "overview_latest_status_waiting": {
+    "message": "در انتظار"
+  },
+  "overview_latest_status_running": {
+    "message": "در حال اجرا"
+  },
+  "overview_latest_status_queued": {
+    "message": "در صف"
+  },
+  "overview_latest_status_notStarted": {
+    "message": "شروع‌نشده"
+  },
+  "overview_latest_status_notSelected": {
+    "message": "انتخاب‌نشده"
+  },
+  "overview_latest_status_cancelled": {
+    "message": "لغوشده"
+  },
+  "overview_latest_status_delivered": {
+    "message": "تحویل‌شده"
+  },
+  "overview_latest_status_unknown": {
+    "message": "نتیجه نامشخص"
+  },
+  "overview_latest_status_sending": {
+    "message": "در حال ارسال"
+  },
+  "overview_latest_stages_renderText": {
+    "message": "گزارش"
+  },
+  "overview_latest_stages_persistText": {
+    "message": "ذخیره‌شده گزارش"
+  },
+  "overview_latest_stages_composeScript": {
+    "message": "صدا گزارش"
+  },
+  "overview_latest_stages_persistScript": {
+    "message": "ذخیره‌شده صدا گزارش"
+  },
+  "overview_latest_stages_generateAudio": {
+    "message": "صدا"
+  },
+  "overview_latest_stages_persistAudio": {
+    "message": "ذخیره‌شده صدا"
+  },
+  "overview_latest_nouns_briefing": {
+    "message": "خلاصه"
+  },
+  "overview_latest_nouns_episode": {
+    "message": "قسمت"
+  },
+  "overview_latest_nouns_report": {
+    "message": "گزارش"
+  },
+  "overview_latest_nouns_showNotes": {
+    "message": "یادداشت‌های برنامه"
+  },
+  "outputs_openInNewTabAria": {
+    "message": "باز کردن در زبانه جدید: {{title}}"
+  },
+  "outputs_chatAboutAria": {
+    "message": "گفت‌وگو درباره این: {{title}}"
+  },
+  "outputs_downloadAria": {
+    "message": "بارگیری: {{title}}"
   }
 }

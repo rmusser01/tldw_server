@@ -320,6 +320,124 @@
         "emailInvalid": "دست‌کم یک نشانی ایمیل معتبر وارد کنید."
       },
       "validationError": "پیش از ادامه فیلدهای برجسته را بررسی کنید."
+    },
+    "latest": {
+      "heading": {
+        "briefing": "تازه‌ترین خلاصه",
+        "episode": "تازه‌ترین قسمت"
+      },
+      "empty": {
+        "scheduled": "خلاصه: {{date}}.",
+        "manual": "شروع‌نشده. اکنون آزمایش کن."
+      },
+      "generatedAt": "تولیدشده {{date}}",
+      "untitled": "خلاصه {{runId}}",
+      "artifacts": "گزارش / صدا",
+      "audio": "صدا",
+      "audioFailed": "صدا ناموفق",
+      "ready": "آماده",
+      "saved": "ذخیره‌شده",
+      "waiting": "در انتظار",
+      "script": "صدا گزارش",
+      "stageWithStatus": "{{stage}}: {{status}}",
+      "noUpdates": "جدید: 0. ذخیره‌شده {{noun}}.",
+      "nextRun": "اجرای بعدی: {{date}}",
+      "nextRunRelative": "اجرای بعدی: {{relative}}",
+      "counts": "خلاصه: گنجانده‌شده, خوانده‌نشده, جدید",
+      "count": {
+        "included": "گنجانده‌شده {{count}}",
+        "unread": "خوانده‌نشده {{count}}",
+        "new": "جدید {{count}}"
+      },
+      "provenance": {
+        "sources": "{{count}} منابع پیگیری‌شده",
+        "sources_zero": "{{count}} منابع پیگیری‌شده",
+        "sources_one": "{{count}} منبع پیگیری‌شده",
+        "sources_two": "{{count}} منابع پیگیری‌شده",
+        "sources_few": "{{count}} منابع پیگیری‌شده",
+        "sources_many": "{{count}} منابع پیگیری‌شده",
+        "sources_other": "{{count}} منابع پیگیری‌شده"
+      },
+      "delivery": {
+        "reports": "مشاهده همه گزارش‌ها",
+        "retryAria": "تلاش دوباره {{adapter}}: {{name}}",
+        "retryUnknownAria": "نتیجه نامشخص. تلاش دوباره {{adapter}}: {{name}}",
+        "reviewRetry": "تلاش دوباره",
+        "unknownConfirmation": "ارائه‌دهنده تحویل {{adapter}} را تأیید نکرد. تلاش دوباره ممکن است یک نسخه تکراری بفرستد. مقصد را بررسی کنید و فقط در صورت پذیرش این خطر ادامه دهید."
+      },
+      "playback": {
+        "region": "صدا: {{name}}",
+        "playAria": "باز کردن صدا: {{name}}",
+        "pauseAria": "در انتظار صدا: {{name}}",
+        "resumeAria": "باز کردن صدا: {{name}}",
+        "seekAria": "صدا: {{name}}",
+        "loading": "در حال بارگیری صدا",
+        "error": "صدا ناموفق. باز کردن گزارش / تولید دوباره صدا.",
+        "play": "پخش",
+        "pause": "مکث",
+        "resume": "ادامه"
+      },
+      "actions": {
+        "label": "تازه‌ترین خلاصه",
+        "openReport": "باز کردن {{report}}",
+        "openReportAria": "باز کردن {{report}}: {{name}}",
+        "regenerateAudio": "تولید دوباره صدا",
+        "regenerateAudioAria": "تولید دوباره {{style}} {{noun}} صدا: {{name}}",
+        "retry": "تلاش دوباره",
+        "retrySaveAria": "تلاش دوباره ذخیره‌شده گزارش: {{name}}",
+        "retryTextAria": "تلاش دوباره گزارش: {{name}}",
+        "retryStage": "تلاش دوباره: {{stage}}",
+        "inspect": "بررسی اجرا",
+        "inspectAria": "بررسی اجرا {{runId}}: {{name}}",
+        "viewReports": "مشاهده همه گزارش‌ها",
+        "testNow": "اکنون آزمایش کن"
+      },
+      "announcements": {
+        "blockingFailure": "{{name}} ناموفق. بررسی اجرا {{runId}}.",
+        "delivered": "{{name}}: تحویل‌شده.",
+        "nextRunUpdated": "{{name}}: اجرای بعدی.",
+        "partialAudioFailure": "{{name}}: یادداشت‌های برنامه آماده, صدا ناموفق.",
+        "readyText": "{{name}}: گزارش آماده.",
+        "readyWithAudio": "{{name}}: آماده. صدا / یادداشت‌های برنامه.",
+        "stageProgress": "{{name}}: {{stage}} {{status}}.",
+        "testQueued": "اکنون آزمایش کن: در صف."
+      },
+      "retryError": "تلاش دوباره ناموفق. بررسی اجرا.",
+      "regenerateError": "تولید دوباره صدا: ناموفق.",
+      "testError": "اکنون آزمایش کن: ناموفق.",
+      "status": {
+        "ready": "آماده",
+        "failed": "ناموفق",
+        "saved": "ذخیره‌شده",
+        "waiting": "در انتظار",
+        "running": "در حال اجرا",
+        "queued": "در صف",
+        "notStarted": "شروع‌نشده",
+        "notSelected": "انتخاب‌نشده",
+        "cancelled": "لغوشده",
+        "delivered": "تحویل‌شده",
+        "unknown": "نتیجه نامشخص",
+        "sending": "در حال ارسال"
+      },
+      "stages": {
+        "renderText": "گزارش",
+        "persistText": "ذخیره‌شده گزارش",
+        "composeScript": "صدا گزارش",
+        "persistScript": "ذخیره‌شده صدا گزارش",
+        "generateAudio": "صدا",
+        "persistAudio": "ذخیره‌شده صدا"
+      },
+      "nouns": {
+        "briefing": "خلاصه",
+        "episode": "قسمت",
+        "report": "گزارش",
+        "showNotes": "یادداشت‌های برنامه"
+      }
     }
+  },
+  "outputs": {
+    "openInNewTabAria": "باز کردن در زبانه جدید: {{title}}",
+    "chatAboutAria": "گفت‌وگو درباره این: {{title}}",
+    "downloadAria": "بارگیری: {{title}}"
   }
 }

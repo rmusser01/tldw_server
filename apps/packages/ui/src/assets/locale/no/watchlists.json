@@ -320,6 +320,124 @@
         "emailInvalid": "Skriv inn minst én gyldig e-postadresse."
       },
       "validationError": "Se gjennom de uthevede feltene før du fortsetter."
+    },
+    "latest": {
+      "heading": {
+        "briefing": "Siste orientering",
+        "episode": "Siste episode"
+      },
+      "empty": {
+        "scheduled": "orientering: {{date}}.",
+        "manual": "Ikke startet. Test nå."
+      },
+      "generatedAt": "Generert {{date}}",
+      "untitled": "orientering {{runId}}",
+      "artifacts": "rapport / lyd",
+      "audio": "lyd",
+      "audioFailed": "lyd mislyktes",
+      "ready": "Klar",
+      "saved": "Lagret",
+      "waiting": "Venter",
+      "script": "lyd rapport",
+      "stageWithStatus": "{{stage}}: {{status}}",
+      "noUpdates": "Ny: 0. Lagret {{noun}}.",
+      "nextRun": "Neste kjøring: {{date}}",
+      "nextRunRelative": "Neste kjøring: {{relative}}",
+      "counts": "orientering: Inkludert, Ulest, Ny",
+      "count": {
+        "included": "Inkludert {{count}}",
+        "unread": "Ulest {{count}}",
+        "new": "Ny {{count}}"
+      },
+      "provenance": {
+        "sources": "{{count}} sporede kilder",
+        "sources_zero": "{{count}} sporede kilder",
+        "sources_one": "{{count}} sporet kilde",
+        "sources_two": "{{count}} sporede kilder",
+        "sources_few": "{{count}} sporede kilder",
+        "sources_many": "{{count}} sporede kilder",
+        "sources_other": "{{count}} sporede kilder"
+      },
+      "delivery": {
+        "reports": "Se alle rapporter",
+        "retryAria": "Prøv igjen {{adapter}}: {{name}}",
+        "retryUnknownAria": "Ukjent resultat. Prøv igjen {{adapter}}: {{name}}",
+        "reviewRetry": "Prøv igjen",
+        "unknownConfirmation": "Leverandøren bekreftet ikke levering via {{adapter}}. Et nytt forsøk kan sende en duplikat. Kontroller målet og fortsett bare hvis risikoen er akseptabel."
+      },
+      "playback": {
+        "region": "lyd: {{name}}",
+        "playAria": "Åpne lyd: {{name}}",
+        "pauseAria": "Venter lyd: {{name}}",
+        "resumeAria": "Åpne lyd: {{name}}",
+        "seekAria": "lyd: {{name}}",
+        "loading": "Laster lyd",
+        "error": "lyd mislyktes. Åpne rapport / Regenerer lyd.",
+        "play": "Spill av",
+        "pause": "Pause",
+        "resume": "Fortsett"
+      },
+      "actions": {
+        "label": "Siste orientering",
+        "openReport": "Åpne {{report}}",
+        "openReportAria": "Åpne {{report}}: {{name}}",
+        "regenerateAudio": "Regenerer lyd",
+        "regenerateAudioAria": "Regenerer {{style}} {{noun}} lyd: {{name}}",
+        "retry": "Prøv igjen",
+        "retrySaveAria": "Prøv igjen lagret rapport: {{name}}",
+        "retryTextAria": "Prøv igjen rapport: {{name}}",
+        "retryStage": "Prøv igjen: {{stage}}",
+        "inspect": "Undersøk kjøring",
+        "inspectAria": "Undersøk kjøring {{runId}}: {{name}}",
+        "viewReports": "Se alle rapporter",
+        "testNow": "Test nå"
+      },
+      "announcements": {
+        "blockingFailure": "{{name}} mislyktes. Undersøk kjøring {{runId}}.",
+        "delivered": "{{name}}: levert.",
+        "nextRunUpdated": "{{name}}: neste kjøring.",
+        "partialAudioFailure": "{{name}}: shownotater klar, lyd mislyktes.",
+        "readyText": "{{name}}: rapport klar.",
+        "readyWithAudio": "{{name}}: Klar. lyd / shownotater.",
+        "stageProgress": "{{name}}: {{stage}} {{status}}.",
+        "testQueued": "Test nå: i kø."
+      },
+      "retryError": "Prøv igjen mislyktes. Undersøk kjøring.",
+      "regenerateError": "Regenerer lyd: mislyktes.",
+      "testError": "Test nå: mislyktes.",
+      "status": {
+        "ready": "Klar",
+        "failed": "Mislyktes",
+        "saved": "Lagret",
+        "waiting": "Venter",
+        "running": "Kjører",
+        "queued": "I kø",
+        "notStarted": "Ikke startet",
+        "notSelected": "Ikke valgt",
+        "cancelled": "Avbrutt",
+        "delivered": "Levert",
+        "unknown": "Ukjent resultat",
+        "sending": "Sender"
+      },
+      "stages": {
+        "renderText": "rapport",
+        "persistText": "Lagret rapport",
+        "composeScript": "lyd rapport",
+        "persistScript": "Lagret lyd rapport",
+        "generateAudio": "lyd",
+        "persistAudio": "Lagret lyd"
+      },
+      "nouns": {
+        "briefing": "orientering",
+        "episode": "episode",
+        "report": "rapport",
+        "showNotes": "shownotater"
+      }
     }
+  },
+  "outputs": {
+    "openInNewTabAria": "Åpne i ny fane: {{title}}",
+    "chatAboutAria": "Chat om dette: {{title}}",
+    "downloadAria": "Last ned: {{title}}"
   }
 }

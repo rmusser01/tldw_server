@@ -4291,5 +4291,281 @@
   },
   "overview_pipelineSetup_schedulePreview_error": {
     "message": "Could not calculate the exact schedule. Review the cron expression and timezone."
+  },
+  "overview_latest_heading_briefing": {
+    "message": "Latest briefing"
+  },
+  "overview_latest_heading_episode": {
+    "message": "Latest episode"
+  },
+  "overview_latest_empty_scheduled": {
+    "message": "briefing: {{date}}."
+  },
+  "overview_latest_empty_manual": {
+    "message": "Not started. Test now."
+  },
+  "overview_latest_generatedAt": {
+    "message": "Generated {{date}}"
+  },
+  "overview_latest_untitled": {
+    "message": "briefing {{runId}}"
+  },
+  "overview_latest_artifacts": {
+    "message": "report / audio"
+  },
+  "overview_latest_audio": {
+    "message": "audio"
+  },
+  "overview_latest_audioFailed": {
+    "message": "audio failed"
+  },
+  "overview_latest_ready": {
+    "message": "Ready"
+  },
+  "overview_latest_saved": {
+    "message": "Saved"
+  },
+  "overview_latest_waiting": {
+    "message": "Waiting"
+  },
+  "overview_latest_script": {
+    "message": "audio report"
+  },
+  "overview_latest_stageWithStatus": {
+    "message": "{{stage}}: {{status}}"
+  },
+  "overview_latest_noUpdates": {
+    "message": "New: 0. Saved {{noun}}."
+  },
+  "overview_latest_nextRun": {
+    "message": "Next run: {{date}}"
+  },
+  "overview_latest_nextRunRelative": {
+    "message": "Next run: {{relative}}"
+  },
+  "overview_latest_counts": {
+    "message": "briefing: Included, Unread, New"
+  },
+  "overview_latest_count_included": {
+    "message": "Included {{count}}"
+  },
+  "overview_latest_count_unread": {
+    "message": "Unread {{count}}"
+  },
+  "overview_latest_count_new": {
+    "message": "New {{count}}"
+  },
+  "overview_latest_provenance_sources": {
+    "message": "{{count}} tracked sources"
+  },
+  "overview_latest_provenance_sources_zero": {
+    "message": "{{count}} tracked sources"
+  },
+  "overview_latest_provenance_sources_one": {
+    "message": "{{count}} tracked source"
+  },
+  "overview_latest_provenance_sources_two": {
+    "message": "{{count}} tracked sources"
+  },
+  "overview_latest_provenance_sources_few": {
+    "message": "{{count}} tracked sources"
+  },
+  "overview_latest_provenance_sources_many": {
+    "message": "{{count}} tracked sources"
+  },
+  "overview_latest_provenance_sources_other": {
+    "message": "{{count}} tracked sources"
+  },
+  "overview_latest_delivery_reports": {
+    "message": "View all reports"
+  },
+  "overview_latest_delivery_retryAria": {
+    "message": "Retry {{adapter}}: {{name}}"
+  },
+  "overview_latest_delivery_retryUnknownAria": {
+    "message": "Outcome unknown. Retry {{adapter}}: {{name}}"
+  },
+  "overview_latest_delivery_reviewRetry": {
+    "message": "Retry"
+  },
+  "overview_latest_delivery_unknownConfirmation": {
+    "message": "The provider did not confirm {{adapter}} delivery. Retrying may send a duplicate. Review the destination, then continue only if that risk is acceptable."
+  },
+  "overview_latest_playback_region": {
+    "message": "audio: {{name}}"
+  },
+  "overview_latest_playback_playAria": {
+    "message": "Open audio: {{name}}"
+  },
+  "overview_latest_playback_pauseAria": {
+    "message": "Waiting audio: {{name}}"
+  },
+  "overview_latest_playback_resumeAria": {
+    "message": "Open audio: {{name}}"
+  },
+  "overview_latest_playback_seekAria": {
+    "message": "audio: {{name}}"
+  },
+  "overview_latest_playback_loading": {
+    "message": "Loading audio"
+  },
+  "overview_latest_playback_error": {
+    "message": "audio failed. Open report / Regenerate audio."
+  },
+  "overview_latest_playback_play": {
+    "message": "Play"
+  },
+  "overview_latest_playback_pause": {
+    "message": "Pause"
+  },
+  "overview_latest_playback_resume": {
+    "message": "Resume"
+  },
+  "overview_latest_actions_label": {
+    "message": "Latest briefing"
+  },
+  "overview_latest_actions_openReport": {
+    "message": "Open {{report}}"
+  },
+  "overview_latest_actions_openReportAria": {
+    "message": "Open {{report}}: {{name}}"
+  },
+  "overview_latest_actions_regenerateAudio": {
+    "message": "Regenerate audio"
+  },
+  "overview_latest_actions_regenerateAudioAria": {
+    "message": "Regenerate {{style}} {{noun}} audio: {{name}}"
+  },
+  "overview_latest_actions_retry": {
+    "message": "Retry"
+  },
+  "overview_latest_actions_retrySaveAria": {
+    "message": "Retry saved report: {{name}}"
+  },
+  "overview_latest_actions_retryTextAria": {
+    "message": "Retry report: {{name}}"
+  },
+  "overview_latest_actions_retryStage": {
+    "message": "Retry: {{stage}}"
+  },
+  "overview_latest_actions_inspect": {
+    "message": "Inspect run"
+  },
+  "overview_latest_actions_inspectAria": {
+    "message": "Inspect run {{runId}}: {{name}}"
+  },
+  "overview_latest_actions_viewReports": {
+    "message": "View all reports"
+  },
+  "overview_latest_actions_testNow": {
+    "message": "Test now"
+  },
+  "overview_latest_announcements_blockingFailure": {
+    "message": "{{name}} failed. Inspect run {{runId}}."
+  },
+  "overview_latest_announcements_delivered": {
+    "message": "{{name}}: delivered."
+  },
+  "overview_latest_announcements_nextRunUpdated": {
+    "message": "{{name}}: next run."
+  },
+  "overview_latest_announcements_partialAudioFailure": {
+    "message": "{{name}}: show notes ready, audio failed."
+  },
+  "overview_latest_announcements_readyText": {
+    "message": "{{name}}: report ready."
+  },
+  "overview_latest_announcements_readyWithAudio": {
+    "message": "{{name}}: Ready. audio / show notes."
+  },
+  "overview_latest_announcements_stageProgress": {
+    "message": "{{name}}: {{stage}} {{status}}."
+  },
+  "overview_latest_announcements_testQueued": {
+    "message": "Test now: queued."
+  },
+  "overview_latest_retryError": {
+    "message": "Retry failed. Inspect run."
+  },
+  "overview_latest_regenerateError": {
+    "message": "Regenerate audio: failed."
+  },
+  "overview_latest_testError": {
+    "message": "Test now: failed."
+  },
+  "overview_latest_status_ready": {
+    "message": "Ready"
+  },
+  "overview_latest_status_failed": {
+    "message": "Failed"
+  },
+  "overview_latest_status_saved": {
+    "message": "Saved"
+  },
+  "overview_latest_status_waiting": {
+    "message": "Waiting"
+  },
+  "overview_latest_status_running": {
+    "message": "Running"
+  },
+  "overview_latest_status_queued": {
+    "message": "Queued"
+  },
+  "overview_latest_status_notStarted": {
+    "message": "Not started"
+  },
+  "overview_latest_status_notSelected": {
+    "message": "Not selected"
+  },
+  "overview_latest_status_cancelled": {
+    "message": "Cancelled"
+  },
+  "overview_latest_status_delivered": {
+    "message": "Delivered"
+  },
+  "overview_latest_status_unknown": {
+    "message": "Outcome unknown"
+  },
+  "overview_latest_status_sending": {
+    "message": "Sending"
+  },
+  "overview_latest_stages_renderText": {
+    "message": "report"
+  },
+  "overview_latest_stages_persistText": {
+    "message": "Saved report"
+  },
+  "overview_latest_stages_composeScript": {
+    "message": "audio report"
+  },
+  "overview_latest_stages_persistScript": {
+    "message": "Saved audio report"
+  },
+  "overview_latest_stages_generateAudio": {
+    "message": "audio"
+  },
+  "overview_latest_stages_persistAudio": {
+    "message": "Saved audio"
+  },
+  "overview_latest_nouns_briefing": {
+    "message": "briefing"
+  },
+  "overview_latest_nouns_episode": {
+    "message": "episode"
+  },
+  "overview_latest_nouns_report": {
+    "message": "report"
+  },
+  "overview_latest_nouns_showNotes": {
+    "message": "show notes"
+  },
+  "outputs_openInNewTabAria": {
+    "message": "Open in new tab: {{title}}"
+  },
+  "outputs_chatAboutAria": {
+    "message": "Chat about this: {{title}}"
+  },
+  "outputs_downloadAria": {
+    "message": "Download: {{title}}"
   }
 }

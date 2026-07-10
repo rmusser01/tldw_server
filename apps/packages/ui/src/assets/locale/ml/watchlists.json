@@ -320,6 +320,124 @@
         "emailInvalid": "കുറഞ്ഞത് ഒരു സാധുവായ ഇമെയിൽ വിലാസമെങ്കിലും നൽകുക."
       },
       "validationError": "തുടരുന്നതിന് മുമ്പ് അടയാളപ്പെടുത്തിയ ഫീൽഡുകൾ പരിശോധിക്കുക."
+    },
+    "latest": {
+      "heading": {
+        "briefing": "ഏറ്റവും പുതിയ സംക്ഷിപ്തം",
+        "episode": "ഏറ്റവും പുതിയ എപ്പിസോഡ്"
+      },
+      "empty": {
+        "scheduled": "സംക്ഷിപ്തം: {{date}}.",
+        "manual": "ആരംഭിച്ചിട്ടില്ല. ഇപ്പോൾ പരീക്ഷിക്കുക."
+      },
+      "generatedAt": "സൃഷ്ടിച്ചത് {{date}}",
+      "untitled": "സംക്ഷിപ്തം {{runId}}",
+      "artifacts": "റിപ്പോർട്ട് / ഓഡിയോ",
+      "audio": "ഓഡിയോ",
+      "audioFailed": "ഓഡിയോ പരാജയം",
+      "ready": "തയ്യാർ",
+      "saved": "സംരക്ഷിച്ചു",
+      "waiting": "കാത്തിരിക്കുന്നു",
+      "script": "ഓഡിയോ റിപ്പോർട്ട്",
+      "stageWithStatus": "{{stage}}: {{status}}",
+      "noUpdates": "പുതിയത്: 0. സംരക്ഷിച്ചു {{noun}}.",
+      "nextRun": "അടുത്ത റൺ: {{date}}",
+      "nextRunRelative": "അടുത്ത റൺ: {{relative}}",
+      "counts": "സംക്ഷിപ്തം: ഉൾപ്പെടുത്തി, വായിക്കാത്തത്, പുതിയത്",
+      "count": {
+        "included": "ഉൾപ്പെടുത്തി {{count}}",
+        "unread": "വായിക്കാത്തത് {{count}}",
+        "new": "പുതിയത് {{count}}"
+      },
+      "provenance": {
+        "sources": "{{count}} പിന്തുടരുന്ന ഉറവിടങ്ങൾ",
+        "sources_zero": "{{count}} പിന്തുടരുന്ന ഉറവിടങ്ങൾ",
+        "sources_one": "{{count}} പിന്തുടരുന്ന ഉറവിടം",
+        "sources_two": "{{count}} പിന്തുടരുന്ന ഉറവിടങ്ങൾ",
+        "sources_few": "{{count}} പിന്തുടരുന്ന ഉറവിടങ്ങൾ",
+        "sources_many": "{{count}} പിന്തുടരുന്ന ഉറവിടങ്ങൾ",
+        "sources_other": "{{count}} പിന്തുടരുന്ന ഉറവിടങ്ങൾ"
+      },
+      "delivery": {
+        "reports": "എല്ലാ റിപ്പോർട്ടുകളും കാണുക",
+        "retryAria": "വീണ്ടും ശ്രമിക്കുക {{adapter}}: {{name}}",
+        "retryUnknownAria": "ഫലം അജ്ഞാതം. വീണ്ടും ശ്രമിക്കുക {{adapter}}: {{name}}",
+        "reviewRetry": "വീണ്ടും ശ്രമിക്കുക",
+        "unknownConfirmation": "ദാതാവ് {{adapter}} ഡെലിവറി സ്ഥിരീകരിച്ചില്ല. വീണ്ടും ശ്രമിക്കുന്നത് പകർപ്പ് അയച്ചേക്കാം. ലക്ഷ്യസ്ഥാനം പരിശോധിച്ച് ഈ അപകടസാധ്യത അംഗീകരിക്കാമെങ്കിൽ മാത്രം തുടരുക."
+      },
+      "playback": {
+        "region": "ഓഡിയോ: {{name}}",
+        "playAria": "തുറക്കുക ഓഡിയോ: {{name}}",
+        "pauseAria": "കാത്തിരിക്കുന്നു ഓഡിയോ: {{name}}",
+        "resumeAria": "തുറക്കുക ഓഡിയോ: {{name}}",
+        "seekAria": "ഓഡിയോ: {{name}}",
+        "loading": "ഓഡിയോ ലോഡ് ചെയ്യുന്നു",
+        "error": "ഓഡിയോ പരാജയം. തുറക്കുക റിപ്പോർട്ട് / വീണ്ടും സൃഷ്ടിക്കുക ഓഡിയോ.",
+        "play": "പ്ലേ",
+        "pause": "താൽക്കാലികമായി നിർത്തുക",
+        "resume": "തുടരുക"
+      },
+      "actions": {
+        "label": "ഏറ്റവും പുതിയ സംക്ഷിപ്തം",
+        "openReport": "തുറക്കുക {{report}}",
+        "openReportAria": "തുറക്കുക {{report}}: {{name}}",
+        "regenerateAudio": "വീണ്ടും സൃഷ്ടിക്കുക ഓഡിയോ",
+        "regenerateAudioAria": "വീണ്ടും സൃഷ്ടിക്കുക {{style}} {{noun}} ഓഡിയോ: {{name}}",
+        "retry": "വീണ്ടും ശ്രമിക്കുക",
+        "retrySaveAria": "വീണ്ടും ശ്രമിക്കുക സംരക്ഷിച്ചു റിപ്പോർട്ട്: {{name}}",
+        "retryTextAria": "വീണ്ടും ശ്രമിക്കുക റിപ്പോർട്ട്: {{name}}",
+        "retryStage": "വീണ്ടും ശ്രമിക്കുക: {{stage}}",
+        "inspect": "റൺ പരിശോധിക്കുക",
+        "inspectAria": "റൺ പരിശോധിക്കുക {{runId}}: {{name}}",
+        "viewReports": "എല്ലാ റിപ്പോർട്ടുകളും കാണുക",
+        "testNow": "ഇപ്പോൾ പരീക്ഷിക്കുക"
+      },
+      "announcements": {
+        "blockingFailure": "{{name}} പരാജയം. റൺ പരിശോധിക്കുക {{runId}}.",
+        "delivered": "{{name}}: എത്തിച്ചു.",
+        "nextRunUpdated": "{{name}}: അടുത്ത റൺ.",
+        "partialAudioFailure": "{{name}}: ഷോ കുറിപ്പുകൾ തയ്യാർ, ഓഡിയോ പരാജയം.",
+        "readyText": "{{name}}: റിപ്പോർട്ട് തയ്യാർ.",
+        "readyWithAudio": "{{name}}: തയ്യാർ. ഓഡിയോ / ഷോ കുറിപ്പുകൾ.",
+        "stageProgress": "{{name}}: {{stage}} {{status}}.",
+        "testQueued": "ഇപ്പോൾ പരീക്ഷിക്കുക: ക്യൂവിൽ."
+      },
+      "retryError": "വീണ്ടും ശ്രമിക്കുക പരാജയം. റൺ പരിശോധിക്കുക.",
+      "regenerateError": "വീണ്ടും സൃഷ്ടിക്കുക ഓഡിയോ: പരാജയം.",
+      "testError": "ഇപ്പോൾ പരീക്ഷിക്കുക: പരാജയം.",
+      "status": {
+        "ready": "തയ്യാർ",
+        "failed": "പരാജയം",
+        "saved": "സംരക്ഷിച്ചു",
+        "waiting": "കാത്തിരിക്കുന്നു",
+        "running": "പ്രവർത്തിക്കുന്നു",
+        "queued": "ക്യൂവിൽ",
+        "notStarted": "ആരംഭിച്ചിട്ടില്ല",
+        "notSelected": "തിരഞ്ഞെടുത്തിട്ടില്ല",
+        "cancelled": "റദ്ദാക്കി",
+        "delivered": "എത്തിച്ചു",
+        "unknown": "ഫലം അജ്ഞാതം",
+        "sending": "അയയ്ക്കുന്നു"
+      },
+      "stages": {
+        "renderText": "റിപ്പോർട്ട്",
+        "persistText": "സംരക്ഷിച്ചു റിപ്പോർട്ട്",
+        "composeScript": "ഓഡിയോ റിപ്പോർട്ട്",
+        "persistScript": "സംരക്ഷിച്ചു ഓഡിയോ റിപ്പോർട്ട്",
+        "generateAudio": "ഓഡിയോ",
+        "persistAudio": "സംരക്ഷിച്ചു ഓഡിയോ"
+      },
+      "nouns": {
+        "briefing": "സംക്ഷിപ്തം",
+        "episode": "എപ്പിസോഡ്",
+        "report": "റിപ്പോർട്ട്",
+        "showNotes": "ഷോ കുറിപ്പുകൾ"
+      }
     }
+  },
+  "outputs": {
+    "openInNewTabAria": "പുതിയ ടാബിൽ തുറക്കുക: {{title}}",
+    "chatAboutAria": "ഇതിനെക്കുറിച്ച് ചാറ്റ് ചെയ്യുക: {{title}}",
+    "downloadAria": "ഡൗൺലോഡ്: {{title}}"
   }
 }

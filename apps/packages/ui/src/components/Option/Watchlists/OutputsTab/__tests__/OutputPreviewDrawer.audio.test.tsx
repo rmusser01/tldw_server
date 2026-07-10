@@ -108,6 +108,13 @@ describe("OutputPreviewDrawer audio support", () => {
     const audioElement = document.querySelector("audio")
     expect(audioElement).not.toBeNull()
     expect(audioElement?.getAttribute("src")).toBe("blob:audio-output")
+    const drawer = document.querySelector(".ant-drawer-content-wrapper")
+    expect(drawer).not.toHaveStyle({ width: "700px" })
+    expect(audioElement).toHaveClass("w-full")
+    expect(screen.getByRole("button", { name: "Download Daily Brief" })).toHaveClass(
+      "min-h-11",
+      "min-w-11"
+    )
   })
 
   it("surfaces audio artifact graph and fallback metadata", async () => {

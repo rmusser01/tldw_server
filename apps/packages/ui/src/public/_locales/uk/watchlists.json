@@ -703,5 +703,281 @@
   },
   "overview_pipelineSetup_test_cancelledWithCode": {
     "message": "Етап «{{stage}}» скасовано ({{code}}). Чернетку збережено."
+  },
+  "overview_latest_heading_briefing": {
+    "message": "Останній дайджест"
+  },
+  "overview_latest_heading_episode": {
+    "message": "Останній епізод"
+  },
+  "overview_latest_empty_scheduled": {
+    "message": "дайджест: {{date}}."
+  },
+  "overview_latest_empty_manual": {
+    "message": "Не розпочато. Перевірити зараз."
+  },
+  "overview_latest_generatedAt": {
+    "message": "Створено {{date}}"
+  },
+  "overview_latest_untitled": {
+    "message": "дайджест {{runId}}"
+  },
+  "overview_latest_artifacts": {
+    "message": "звіт / аудіо"
+  },
+  "overview_latest_audio": {
+    "message": "аудіо"
+  },
+  "overview_latest_audioFailed": {
+    "message": "аудіо помилка"
+  },
+  "overview_latest_ready": {
+    "message": "Готово"
+  },
+  "overview_latest_saved": {
+    "message": "Збережено"
+  },
+  "overview_latest_waiting": {
+    "message": "Очікування"
+  },
+  "overview_latest_script": {
+    "message": "аудіо звіт"
+  },
+  "overview_latest_stageWithStatus": {
+    "message": "{{stage}}: {{status}}"
+  },
+  "overview_latest_noUpdates": {
+    "message": "Нове: 0. Збережено {{noun}}."
+  },
+  "overview_latest_nextRun": {
+    "message": "Наступний запуск: {{date}}"
+  },
+  "overview_latest_nextRunRelative": {
+    "message": "Наступний запуск: {{relative}}"
+  },
+  "overview_latest_counts": {
+    "message": "дайджест: Включено, Непрочитано, Нове"
+  },
+  "overview_latest_count_included": {
+    "message": "Включено {{count}}"
+  },
+  "overview_latest_count_unread": {
+    "message": "Непрочитано {{count}}"
+  },
+  "overview_latest_count_new": {
+    "message": "Нове {{count}}"
+  },
+  "overview_latest_provenance_sources": {
+    "message": "{{count}} відстежувані джерела"
+  },
+  "overview_latest_provenance_sources_zero": {
+    "message": "{{count}} відстежувані джерела"
+  },
+  "overview_latest_provenance_sources_one": {
+    "message": "{{count}} відстежуване джерело"
+  },
+  "overview_latest_provenance_sources_two": {
+    "message": "{{count}} відстежувані джерела"
+  },
+  "overview_latest_provenance_sources_few": {
+    "message": "{{count}} відстежувані джерела"
+  },
+  "overview_latest_provenance_sources_many": {
+    "message": "{{count}} відстежувані джерела"
+  },
+  "overview_latest_provenance_sources_other": {
+    "message": "{{count}} відстежувані джерела"
+  },
+  "overview_latest_delivery_reports": {
+    "message": "Усі звіти"
+  },
+  "overview_latest_delivery_retryAria": {
+    "message": "Повторити {{adapter}}: {{name}}"
+  },
+  "overview_latest_delivery_retryUnknownAria": {
+    "message": "Результат невідомий. Повторити {{adapter}}: {{name}}"
+  },
+  "overview_latest_delivery_reviewRetry": {
+    "message": "Повторити"
+  },
+  "overview_latest_delivery_unknownConfirmation": {
+    "message": "Провайдер не підтвердив доставку через {{adapter}}. Повторна спроба може надіслати дублікат. Перевірте місце призначення й продовжуйте, лише якщо цей ризик прийнятний."
+  },
+  "overview_latest_playback_region": {
+    "message": "аудіо: {{name}}"
+  },
+  "overview_latest_playback_playAria": {
+    "message": "Відкрити аудіо: {{name}}"
+  },
+  "overview_latest_playback_pauseAria": {
+    "message": "Очікування аудіо: {{name}}"
+  },
+  "overview_latest_playback_resumeAria": {
+    "message": "Відкрити аудіо: {{name}}"
+  },
+  "overview_latest_playback_seekAria": {
+    "message": "аудіо: {{name}}"
+  },
+  "overview_latest_playback_loading": {
+    "message": "Завантаження аудіо"
+  },
+  "overview_latest_playback_error": {
+    "message": "аудіо помилка. Відкрити звіт / Створити знову аудіо."
+  },
+  "overview_latest_playback_play": {
+    "message": "Відтворити"
+  },
+  "overview_latest_playback_pause": {
+    "message": "Пауза"
+  },
+  "overview_latest_playback_resume": {
+    "message": "Продовжити"
+  },
+  "overview_latest_actions_label": {
+    "message": "Останній дайджест"
+  },
+  "overview_latest_actions_openReport": {
+    "message": "Відкрити {{report}}"
+  },
+  "overview_latest_actions_openReportAria": {
+    "message": "Відкрити {{report}}: {{name}}"
+  },
+  "overview_latest_actions_regenerateAudio": {
+    "message": "Створити знову аудіо"
+  },
+  "overview_latest_actions_regenerateAudioAria": {
+    "message": "Створити знову {{style}} {{noun}} аудіо: {{name}}"
+  },
+  "overview_latest_actions_retry": {
+    "message": "Повторити"
+  },
+  "overview_latest_actions_retrySaveAria": {
+    "message": "Повторити збережено звіт: {{name}}"
+  },
+  "overview_latest_actions_retryTextAria": {
+    "message": "Повторити звіт: {{name}}"
+  },
+  "overview_latest_actions_retryStage": {
+    "message": "Повторити: {{stage}}"
+  },
+  "overview_latest_actions_inspect": {
+    "message": "Перевірити запуск"
+  },
+  "overview_latest_actions_inspectAria": {
+    "message": "Перевірити запуск {{runId}}: {{name}}"
+  },
+  "overview_latest_actions_viewReports": {
+    "message": "Усі звіти"
+  },
+  "overview_latest_actions_testNow": {
+    "message": "Перевірити зараз"
+  },
+  "overview_latest_announcements_blockingFailure": {
+    "message": "{{name}} помилка. Перевірити запуск {{runId}}."
+  },
+  "overview_latest_announcements_delivered": {
+    "message": "{{name}}: доставлено."
+  },
+  "overview_latest_announcements_nextRunUpdated": {
+    "message": "{{name}}: наступний запуск."
+  },
+  "overview_latest_announcements_partialAudioFailure": {
+    "message": "{{name}}: нотатки до випуску готово, аудіо помилка."
+  },
+  "overview_latest_announcements_readyText": {
+    "message": "{{name}}: звіт готово."
+  },
+  "overview_latest_announcements_readyWithAudio": {
+    "message": "{{name}}: Готово. аудіо / нотатки до випуску."
+  },
+  "overview_latest_announcements_stageProgress": {
+    "message": "{{name}}: {{stage}} {{status}}."
+  },
+  "overview_latest_announcements_testQueued": {
+    "message": "Перевірити зараз: у черзі."
+  },
+  "overview_latest_retryError": {
+    "message": "Повторити помилка. Перевірити запуск."
+  },
+  "overview_latest_regenerateError": {
+    "message": "Створити знову аудіо: помилка."
+  },
+  "overview_latest_testError": {
+    "message": "Перевірити зараз: помилка."
+  },
+  "overview_latest_status_ready": {
+    "message": "Готово"
+  },
+  "overview_latest_status_failed": {
+    "message": "Помилка"
+  },
+  "overview_latest_status_saved": {
+    "message": "Збережено"
+  },
+  "overview_latest_status_waiting": {
+    "message": "Очікування"
+  },
+  "overview_latest_status_running": {
+    "message": "Виконується"
+  },
+  "overview_latest_status_queued": {
+    "message": "У черзі"
+  },
+  "overview_latest_status_notStarted": {
+    "message": "Не розпочато"
+  },
+  "overview_latest_status_notSelected": {
+    "message": "Не вибрано"
+  },
+  "overview_latest_status_cancelled": {
+    "message": "Скасовано"
+  },
+  "overview_latest_status_delivered": {
+    "message": "Доставлено"
+  },
+  "overview_latest_status_unknown": {
+    "message": "Результат невідомий"
+  },
+  "overview_latest_status_sending": {
+    "message": "Надсилається"
+  },
+  "overview_latest_stages_renderText": {
+    "message": "звіт"
+  },
+  "overview_latest_stages_persistText": {
+    "message": "Збережено звіт"
+  },
+  "overview_latest_stages_composeScript": {
+    "message": "аудіо звіт"
+  },
+  "overview_latest_stages_persistScript": {
+    "message": "Збережено аудіо звіт"
+  },
+  "overview_latest_stages_generateAudio": {
+    "message": "аудіо"
+  },
+  "overview_latest_stages_persistAudio": {
+    "message": "Збережено аудіо"
+  },
+  "overview_latest_nouns_briefing": {
+    "message": "дайджест"
+  },
+  "overview_latest_nouns_episode": {
+    "message": "епізод"
+  },
+  "overview_latest_nouns_report": {
+    "message": "звіт"
+  },
+  "overview_latest_nouns_showNotes": {
+    "message": "нотатки до випуску"
+  },
+  "outputs_openInNewTabAria": {
+    "message": "Відкрити в новій вкладці: {{title}}"
+  },
+  "outputs_chatAboutAria": {
+    "message": "Обговорити: {{title}}"
+  },
+  "outputs_downloadAria": {
+    "message": "Завантажити: {{title}}"
   }
 }

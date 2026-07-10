@@ -498,6 +498,7 @@ export interface WatchlistBriefingProjection {
   editorial: Record<string, unknown>
   selection: Record<string, number>
   next_run_at: string | null
+  timezone: string
   recovery: Record<string, boolean>
 }
 

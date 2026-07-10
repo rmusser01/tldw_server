@@ -320,6 +320,124 @@
         "emailInvalid": "Indtast mindst én gyldig e-mailadresse."
       },
       "validationError": "Gennemgå de fremhævede felter, før du fortsætter."
+    },
+    "latest": {
+      "heading": {
+        "briefing": "Seneste briefing",
+        "episode": "Seneste episode"
+      },
+      "empty": {
+        "scheduled": "briefing: {{date}}.",
+        "manual": "Ikke startet. Test nu."
+      },
+      "generatedAt": "Genereret {{date}}",
+      "untitled": "briefing {{runId}}",
+      "artifacts": "rapport / lyd",
+      "audio": "lyd",
+      "audioFailed": "lyd mislykket",
+      "ready": "Klar",
+      "saved": "Gemt",
+      "waiting": "Venter",
+      "script": "lyd rapport",
+      "stageWithStatus": "{{stage}}: {{status}}",
+      "noUpdates": "Ny: 0. Gemt {{noun}}.",
+      "nextRun": "Næste kørsel: {{date}}",
+      "nextRunRelative": "Næste kørsel: {{relative}}",
+      "counts": "briefing: Inkluderet, Ulæst, Ny",
+      "count": {
+        "included": "Inkluderet {{count}}",
+        "unread": "Ulæst {{count}}",
+        "new": "Ny {{count}}"
+      },
+      "provenance": {
+        "sources": "{{count}} sporede kilder",
+        "sources_zero": "{{count}} sporede kilder",
+        "sources_one": "{{count}} sporet kilde",
+        "sources_two": "{{count}} sporede kilder",
+        "sources_few": "{{count}} sporede kilder",
+        "sources_many": "{{count}} sporede kilder",
+        "sources_other": "{{count}} sporede kilder"
+      },
+      "delivery": {
+        "reports": "Se alle rapporter",
+        "retryAria": "Prøv igen {{adapter}}: {{name}}",
+        "retryUnknownAria": "Resultat ukendt. Prøv igen {{adapter}}: {{name}}",
+        "reviewRetry": "Prøv igen",
+        "unknownConfirmation": "Udbyderen bekræftede ikke levering via {{adapter}}. Et nyt forsøg kan sende en dublet. Kontrollér destinationen, og fortsæt kun, hvis risikoen er acceptabel."
+      },
+      "playback": {
+        "region": "lyd: {{name}}",
+        "playAria": "Åbn lyd: {{name}}",
+        "pauseAria": "Venter lyd: {{name}}",
+        "resumeAria": "Åbn lyd: {{name}}",
+        "seekAria": "lyd: {{name}}",
+        "loading": "Indlæser lyd",
+        "error": "lyd mislykket. Åbn rapport / Gendan lyd.",
+        "play": "Afspil",
+        "pause": "Pause",
+        "resume": "Fortsæt"
+      },
+      "actions": {
+        "label": "Seneste briefing",
+        "openReport": "Åbn {{report}}",
+        "openReportAria": "Åbn {{report}}: {{name}}",
+        "regenerateAudio": "Gendan lyd",
+        "regenerateAudioAria": "Gendan {{style}} {{noun}} lyd: {{name}}",
+        "retry": "Prøv igen",
+        "retrySaveAria": "Prøv igen gemt rapport: {{name}}",
+        "retryTextAria": "Prøv igen rapport: {{name}}",
+        "retryStage": "Prøv igen: {{stage}}",
+        "inspect": "Undersøg kørsel",
+        "inspectAria": "Undersøg kørsel {{runId}}: {{name}}",
+        "viewReports": "Se alle rapporter",
+        "testNow": "Test nu"
+      },
+      "announcements": {
+        "blockingFailure": "{{name}} mislykket. Undersøg kørsel {{runId}}.",
+        "delivered": "{{name}}: leveret.",
+        "nextRunUpdated": "{{name}}: næste kørsel.",
+        "partialAudioFailure": "{{name}}: shownoter klar, lyd mislykket.",
+        "readyText": "{{name}}: rapport klar.",
+        "readyWithAudio": "{{name}}: Klar. lyd / shownoter.",
+        "stageProgress": "{{name}}: {{stage}} {{status}}.",
+        "testQueued": "Test nu: i kø."
+      },
+      "retryError": "Prøv igen mislykket. Undersøg kørsel.",
+      "regenerateError": "Gendan lyd: mislykket.",
+      "testError": "Test nu: mislykket.",
+      "status": {
+        "ready": "Klar",
+        "failed": "Mislykket",
+        "saved": "Gemt",
+        "waiting": "Venter",
+        "running": "Kører",
+        "queued": "I kø",
+        "notStarted": "Ikke startet",
+        "notSelected": "Ikke valgt",
+        "cancelled": "Annulleret",
+        "delivered": "Leveret",
+        "unknown": "Resultat ukendt",
+        "sending": "Sender"
+      },
+      "stages": {
+        "renderText": "rapport",
+        "persistText": "Gemt rapport",
+        "composeScript": "lyd rapport",
+        "persistScript": "Gemt lyd rapport",
+        "generateAudio": "lyd",
+        "persistAudio": "Gemt lyd"
+      },
+      "nouns": {
+        "briefing": "briefing",
+        "episode": "episode",
+        "report": "rapport",
+        "showNotes": "shownoter"
+      }
     }
+  },
+  "outputs": {
+    "openInNewTabAria": "Åbn i ny fane: {{title}}",
+    "chatAboutAria": "Chat om dette: {{title}}",
+    "downloadAria": "Download: {{title}}"
   }
 }

@@ -685,5 +685,281 @@
   },
   "overview_pipelineSetup_test_cancelledWithCode": {
     "message": "{{stage}} はキャンセルされました（{{code}}）。下書きは保存されています。"
+  },
+  "overview_latest_heading_briefing": {
+    "message": "最新 ブリーフィング"
+  },
+  "overview_latest_heading_episode": {
+    "message": "最新 エピソード"
+  },
+  "overview_latest_empty_scheduled": {
+    "message": "ブリーフィング: {{date}}."
+  },
+  "overview_latest_empty_manual": {
+    "message": "未開始. 今すぐテスト."
+  },
+  "overview_latest_generatedAt": {
+    "message": "生成日時 {{date}}"
+  },
+  "overview_latest_untitled": {
+    "message": "ブリーフィング {{runId}}"
+  },
+  "overview_latest_artifacts": {
+    "message": "レポート / 音声"
+  },
+  "overview_latest_audio": {
+    "message": "音声"
+  },
+  "overview_latest_audioFailed": {
+    "message": "音声 失敗"
+  },
+  "overview_latest_ready": {
+    "message": "準備完了"
+  },
+  "overview_latest_saved": {
+    "message": "保存済み"
+  },
+  "overview_latest_waiting": {
+    "message": "待機中"
+  },
+  "overview_latest_script": {
+    "message": "音声 レポート"
+  },
+  "overview_latest_stageWithStatus": {
+    "message": "{{stage}}: {{status}}"
+  },
+  "overview_latest_noUpdates": {
+    "message": "新着: 0. 保存済み {{noun}}."
+  },
+  "overview_latest_nextRun": {
+    "message": "次回実行: {{date}}"
+  },
+  "overview_latest_nextRunRelative": {
+    "message": "次回実行: {{relative}}"
+  },
+  "overview_latest_counts": {
+    "message": "ブリーフィング: 含む, 未読, 新着"
+  },
+  "overview_latest_count_included": {
+    "message": "含む {{count}}"
+  },
+  "overview_latest_count_unread": {
+    "message": "未読 {{count}}"
+  },
+  "overview_latest_count_new": {
+    "message": "新着 {{count}}"
+  },
+  "overview_latest_provenance_sources": {
+    "message": "{{count}} 追跡ソース"
+  },
+  "overview_latest_provenance_sources_zero": {
+    "message": "{{count}} 追跡ソース"
+  },
+  "overview_latest_provenance_sources_one": {
+    "message": "{{count}} 追跡ソース"
+  },
+  "overview_latest_provenance_sources_two": {
+    "message": "{{count}} 追跡ソース"
+  },
+  "overview_latest_provenance_sources_few": {
+    "message": "{{count}} 追跡ソース"
+  },
+  "overview_latest_provenance_sources_many": {
+    "message": "{{count}} 追跡ソース"
+  },
+  "overview_latest_provenance_sources_other": {
+    "message": "{{count}} 追跡ソース"
+  },
+  "overview_latest_delivery_reports": {
+    "message": "すべてのレポートを表示"
+  },
+  "overview_latest_delivery_retryAria": {
+    "message": "再試行 {{adapter}}: {{name}}"
+  },
+  "overview_latest_delivery_retryUnknownAria": {
+    "message": "結果不明. 再試行 {{adapter}}: {{name}}"
+  },
+  "overview_latest_delivery_reviewRetry": {
+    "message": "再試行"
+  },
+  "overview_latest_delivery_unknownConfirmation": {
+    "message": "プロバイダーは {{adapter}} の配信を確認していません。再試行すると重複して送信される可能性があります。送信先を確認し、そのリスクを許容できる場合のみ続行してください。"
+  },
+  "overview_latest_playback_region": {
+    "message": "音声: {{name}}"
+  },
+  "overview_latest_playback_playAria": {
+    "message": "開く 音声: {{name}}"
+  },
+  "overview_latest_playback_pauseAria": {
+    "message": "待機中 音声: {{name}}"
+  },
+  "overview_latest_playback_resumeAria": {
+    "message": "開く 音声: {{name}}"
+  },
+  "overview_latest_playback_seekAria": {
+    "message": "音声: {{name}}"
+  },
+  "overview_latest_playback_loading": {
+    "message": "音声を読み込み中"
+  },
+  "overview_latest_playback_error": {
+    "message": "音声 失敗. 開く レポート / 再生成 音声."
+  },
+  "overview_latest_playback_play": {
+    "message": "再生"
+  },
+  "overview_latest_playback_pause": {
+    "message": "一時停止"
+  },
+  "overview_latest_playback_resume": {
+    "message": "再開"
+  },
+  "overview_latest_actions_label": {
+    "message": "最新 ブリーフィング"
+  },
+  "overview_latest_actions_openReport": {
+    "message": "開く {{report}}"
+  },
+  "overview_latest_actions_openReportAria": {
+    "message": "開く {{report}}: {{name}}"
+  },
+  "overview_latest_actions_regenerateAudio": {
+    "message": "再生成 音声"
+  },
+  "overview_latest_actions_regenerateAudioAria": {
+    "message": "再生成 {{style}} {{noun}} 音声: {{name}}"
+  },
+  "overview_latest_actions_retry": {
+    "message": "再試行"
+  },
+  "overview_latest_actions_retrySaveAria": {
+    "message": "再試行 保存済み レポート: {{name}}"
+  },
+  "overview_latest_actions_retryTextAria": {
+    "message": "再試行 レポート: {{name}}"
+  },
+  "overview_latest_actions_retryStage": {
+    "message": "再試行: {{stage}}"
+  },
+  "overview_latest_actions_inspect": {
+    "message": "実行を確認"
+  },
+  "overview_latest_actions_inspectAria": {
+    "message": "実行を確認 {{runId}}: {{name}}"
+  },
+  "overview_latest_actions_viewReports": {
+    "message": "すべてのレポートを表示"
+  },
+  "overview_latest_actions_testNow": {
+    "message": "今すぐテスト"
+  },
+  "overview_latest_announcements_blockingFailure": {
+    "message": "{{name}} 失敗. 実行を確認 {{runId}}."
+  },
+  "overview_latest_announcements_delivered": {
+    "message": "{{name}}: 配信済み."
+  },
+  "overview_latest_announcements_nextRunUpdated": {
+    "message": "{{name}}: 次回実行."
+  },
+  "overview_latest_announcements_partialAudioFailure": {
+    "message": "{{name}}: ショーノート 準備完了, 音声 失敗."
+  },
+  "overview_latest_announcements_readyText": {
+    "message": "{{name}}: レポート 準備完了."
+  },
+  "overview_latest_announcements_readyWithAudio": {
+    "message": "{{name}}: 準備完了. 音声 / ショーノート."
+  },
+  "overview_latest_announcements_stageProgress": {
+    "message": "{{name}}: {{stage}} {{status}}."
+  },
+  "overview_latest_announcements_testQueued": {
+    "message": "今すぐテスト: キュー済み."
+  },
+  "overview_latest_retryError": {
+    "message": "再試行 失敗. 実行を確認."
+  },
+  "overview_latest_regenerateError": {
+    "message": "再生成 音声: 失敗."
+  },
+  "overview_latest_testError": {
+    "message": "今すぐテスト: 失敗."
+  },
+  "overview_latest_status_ready": {
+    "message": "準備完了"
+  },
+  "overview_latest_status_failed": {
+    "message": "失敗"
+  },
+  "overview_latest_status_saved": {
+    "message": "保存済み"
+  },
+  "overview_latest_status_waiting": {
+    "message": "待機中"
+  },
+  "overview_latest_status_running": {
+    "message": "実行中"
+  },
+  "overview_latest_status_queued": {
+    "message": "キュー済み"
+  },
+  "overview_latest_status_notStarted": {
+    "message": "未開始"
+  },
+  "overview_latest_status_notSelected": {
+    "message": "未選択"
+  },
+  "overview_latest_status_cancelled": {
+    "message": "キャンセル済み"
+  },
+  "overview_latest_status_delivered": {
+    "message": "配信済み"
+  },
+  "overview_latest_status_unknown": {
+    "message": "結果不明"
+  },
+  "overview_latest_status_sending": {
+    "message": "送信中"
+  },
+  "overview_latest_stages_renderText": {
+    "message": "レポート"
+  },
+  "overview_latest_stages_persistText": {
+    "message": "保存済み レポート"
+  },
+  "overview_latest_stages_composeScript": {
+    "message": "音声 レポート"
+  },
+  "overview_latest_stages_persistScript": {
+    "message": "保存済み 音声 レポート"
+  },
+  "overview_latest_stages_generateAudio": {
+    "message": "音声"
+  },
+  "overview_latest_stages_persistAudio": {
+    "message": "保存済み 音声"
+  },
+  "overview_latest_nouns_briefing": {
+    "message": "ブリーフィング"
+  },
+  "overview_latest_nouns_episode": {
+    "message": "エピソード"
+  },
+  "overview_latest_nouns_report": {
+    "message": "レポート"
+  },
+  "overview_latest_nouns_showNotes": {
+    "message": "ショーノート"
+  },
+  "outputs_openInNewTabAria": {
+    "message": "新しいタブで開く: {{title}}"
+  },
+  "outputs_chatAboutAria": {
+    "message": "これについてチャット: {{title}}"
+  },
+  "outputs_downloadAria": {
+    "message": "ダウンロード: {{title}}"
   }
 }

@@ -685,5 +685,281 @@
   },
   "overview_pipelineSetup_test_cancelledWithCode": {
     "message": "{{stage}} avbröts ({{code}}). Utkastet har sparats."
+  },
+  "overview_latest_heading_briefing": {
+    "message": "Senaste briefing"
+  },
+  "overview_latest_heading_episode": {
+    "message": "Senaste avsnitt"
+  },
+  "overview_latest_empty_scheduled": {
+    "message": "briefing: {{date}}."
+  },
+  "overview_latest_empty_manual": {
+    "message": "Inte startad. Testa nu."
+  },
+  "overview_latest_generatedAt": {
+    "message": "Skapad {{date}}"
+  },
+  "overview_latest_untitled": {
+    "message": "briefing {{runId}}"
+  },
+  "overview_latest_artifacts": {
+    "message": "rapport / ljud"
+  },
+  "overview_latest_audio": {
+    "message": "ljud"
+  },
+  "overview_latest_audioFailed": {
+    "message": "ljud misslyckades"
+  },
+  "overview_latest_ready": {
+    "message": "Klar"
+  },
+  "overview_latest_saved": {
+    "message": "Sparad"
+  },
+  "overview_latest_waiting": {
+    "message": "Väntar"
+  },
+  "overview_latest_script": {
+    "message": "ljud rapport"
+  },
+  "overview_latest_stageWithStatus": {
+    "message": "{{stage}}: {{status}}"
+  },
+  "overview_latest_noUpdates": {
+    "message": "Nytt: 0. Sparad {{noun}}."
+  },
+  "overview_latest_nextRun": {
+    "message": "Nästa körning: {{date}}"
+  },
+  "overview_latest_nextRunRelative": {
+    "message": "Nästa körning: {{relative}}"
+  },
+  "overview_latest_counts": {
+    "message": "briefing: Inkluderat, Oläst, Nytt"
+  },
+  "overview_latest_count_included": {
+    "message": "Inkluderat {{count}}"
+  },
+  "overview_latest_count_unread": {
+    "message": "Oläst {{count}}"
+  },
+  "overview_latest_count_new": {
+    "message": "Nytt {{count}}"
+  },
+  "overview_latest_provenance_sources": {
+    "message": "{{count}} spårade källor"
+  },
+  "overview_latest_provenance_sources_zero": {
+    "message": "{{count}} spårade källor"
+  },
+  "overview_latest_provenance_sources_one": {
+    "message": "{{count}} spårad källa"
+  },
+  "overview_latest_provenance_sources_two": {
+    "message": "{{count}} spårade källor"
+  },
+  "overview_latest_provenance_sources_few": {
+    "message": "{{count}} spårade källor"
+  },
+  "overview_latest_provenance_sources_many": {
+    "message": "{{count}} spårade källor"
+  },
+  "overview_latest_provenance_sources_other": {
+    "message": "{{count}} spårade källor"
+  },
+  "overview_latest_delivery_reports": {
+    "message": "Visa alla rapporter"
+  },
+  "overview_latest_delivery_retryAria": {
+    "message": "Försök igen {{adapter}}: {{name}}"
+  },
+  "overview_latest_delivery_retryUnknownAria": {
+    "message": "Okänt resultat. Försök igen {{adapter}}: {{name}}"
+  },
+  "overview_latest_delivery_reviewRetry": {
+    "message": "Försök igen"
+  },
+  "overview_latest_delivery_unknownConfirmation": {
+    "message": "Leverantören bekräftade inte leverans via {{adapter}}. Ett nytt försök kan skicka en dubblett. Kontrollera målet och fortsätt bara om risken är acceptabel."
+  },
+  "overview_latest_playback_region": {
+    "message": "ljud: {{name}}"
+  },
+  "overview_latest_playback_playAria": {
+    "message": "Öppna ljud: {{name}}"
+  },
+  "overview_latest_playback_pauseAria": {
+    "message": "Väntar ljud: {{name}}"
+  },
+  "overview_latest_playback_resumeAria": {
+    "message": "Öppna ljud: {{name}}"
+  },
+  "overview_latest_playback_seekAria": {
+    "message": "ljud: {{name}}"
+  },
+  "overview_latest_playback_loading": {
+    "message": "Laddar ljud"
+  },
+  "overview_latest_playback_error": {
+    "message": "ljud misslyckades. Öppna rapport / Återskapa ljud."
+  },
+  "overview_latest_playback_play": {
+    "message": "Spela"
+  },
+  "overview_latest_playback_pause": {
+    "message": "Pausa"
+  },
+  "overview_latest_playback_resume": {
+    "message": "Fortsätt"
+  },
+  "overview_latest_actions_label": {
+    "message": "Senaste briefing"
+  },
+  "overview_latest_actions_openReport": {
+    "message": "Öppna {{report}}"
+  },
+  "overview_latest_actions_openReportAria": {
+    "message": "Öppna {{report}}: {{name}}"
+  },
+  "overview_latest_actions_regenerateAudio": {
+    "message": "Återskapa ljud"
+  },
+  "overview_latest_actions_regenerateAudioAria": {
+    "message": "Återskapa {{style}} {{noun}} ljud: {{name}}"
+  },
+  "overview_latest_actions_retry": {
+    "message": "Försök igen"
+  },
+  "overview_latest_actions_retrySaveAria": {
+    "message": "Försök igen sparad rapport: {{name}}"
+  },
+  "overview_latest_actions_retryTextAria": {
+    "message": "Försök igen rapport: {{name}}"
+  },
+  "overview_latest_actions_retryStage": {
+    "message": "Försök igen: {{stage}}"
+  },
+  "overview_latest_actions_inspect": {
+    "message": "Granska körning"
+  },
+  "overview_latest_actions_inspectAria": {
+    "message": "Granska körning {{runId}}: {{name}}"
+  },
+  "overview_latest_actions_viewReports": {
+    "message": "Visa alla rapporter"
+  },
+  "overview_latest_actions_testNow": {
+    "message": "Testa nu"
+  },
+  "overview_latest_announcements_blockingFailure": {
+    "message": "{{name}} misslyckades. Granska körning {{runId}}."
+  },
+  "overview_latest_announcements_delivered": {
+    "message": "{{name}}: levererad."
+  },
+  "overview_latest_announcements_nextRunUpdated": {
+    "message": "{{name}}: nästa körning."
+  },
+  "overview_latest_announcements_partialAudioFailure": {
+    "message": "{{name}}: programanteckningar klar, ljud misslyckades."
+  },
+  "overview_latest_announcements_readyText": {
+    "message": "{{name}}: rapport klar."
+  },
+  "overview_latest_announcements_readyWithAudio": {
+    "message": "{{name}}: Klar. ljud / programanteckningar."
+  },
+  "overview_latest_announcements_stageProgress": {
+    "message": "{{name}}: {{stage}} {{status}}."
+  },
+  "overview_latest_announcements_testQueued": {
+    "message": "Testa nu: i kö."
+  },
+  "overview_latest_retryError": {
+    "message": "Försök igen misslyckades. Granska körning."
+  },
+  "overview_latest_regenerateError": {
+    "message": "Återskapa ljud: misslyckades."
+  },
+  "overview_latest_testError": {
+    "message": "Testa nu: misslyckades."
+  },
+  "overview_latest_status_ready": {
+    "message": "Klar"
+  },
+  "overview_latest_status_failed": {
+    "message": "Misslyckades"
+  },
+  "overview_latest_status_saved": {
+    "message": "Sparad"
+  },
+  "overview_latest_status_waiting": {
+    "message": "Väntar"
+  },
+  "overview_latest_status_running": {
+    "message": "Körs"
+  },
+  "overview_latest_status_queued": {
+    "message": "I kö"
+  },
+  "overview_latest_status_notStarted": {
+    "message": "Inte startad"
+  },
+  "overview_latest_status_notSelected": {
+    "message": "Inte vald"
+  },
+  "overview_latest_status_cancelled": {
+    "message": "Avbruten"
+  },
+  "overview_latest_status_delivered": {
+    "message": "Levererad"
+  },
+  "overview_latest_status_unknown": {
+    "message": "Okänt resultat"
+  },
+  "overview_latest_status_sending": {
+    "message": "Skickar"
+  },
+  "overview_latest_stages_renderText": {
+    "message": "rapport"
+  },
+  "overview_latest_stages_persistText": {
+    "message": "Sparad rapport"
+  },
+  "overview_latest_stages_composeScript": {
+    "message": "ljud rapport"
+  },
+  "overview_latest_stages_persistScript": {
+    "message": "Sparad ljud rapport"
+  },
+  "overview_latest_stages_generateAudio": {
+    "message": "ljud"
+  },
+  "overview_latest_stages_persistAudio": {
+    "message": "Sparad ljud"
+  },
+  "overview_latest_nouns_briefing": {
+    "message": "briefing"
+  },
+  "overview_latest_nouns_episode": {
+    "message": "avsnitt"
+  },
+  "overview_latest_nouns_report": {
+    "message": "rapport"
+  },
+  "overview_latest_nouns_showNotes": {
+    "message": "programanteckningar"
+  },
+  "outputs_openInNewTabAria": {
+    "message": "Öppna i ny flik: {{title}}"
+  },
+  "outputs_chatAboutAria": {
+    "message": "Chatta om detta: {{title}}"
+  },
+  "outputs_downloadAria": {
+    "message": "Hämta: {{title}}"
   }
 }

@@ -685,5 +685,281 @@
   },
   "overview_pipelineSetup_test_cancelledWithCode": {
     "message": "{{stage}} 已取消（{{code}}）。草稿已儲存。"
+  },
+  "overview_latest_heading_briefing": {
+    "message": "最新 簡報"
+  },
+  "overview_latest_heading_episode": {
+    "message": "最新 節目"
+  },
+  "overview_latest_empty_scheduled": {
+    "message": "簡報: {{date}}."
+  },
+  "overview_latest_empty_manual": {
+    "message": "未開始. 立即測試."
+  },
+  "overview_latest_generatedAt": {
+    "message": "產生於 {{date}}"
+  },
+  "overview_latest_untitled": {
+    "message": "簡報 {{runId}}"
+  },
+  "overview_latest_artifacts": {
+    "message": "報告 / 音訊"
+  },
+  "overview_latest_audio": {
+    "message": "音訊"
+  },
+  "overview_latest_audioFailed": {
+    "message": "音訊 失敗"
+  },
+  "overview_latest_ready": {
+    "message": "就緒"
+  },
+  "overview_latest_saved": {
+    "message": "已儲存"
+  },
+  "overview_latest_waiting": {
+    "message": "等待中"
+  },
+  "overview_latest_script": {
+    "message": "音訊 報告"
+  },
+  "overview_latest_stageWithStatus": {
+    "message": "{{stage}}: {{status}}"
+  },
+  "overview_latest_noUpdates": {
+    "message": "新增: 0. 已儲存 {{noun}}."
+  },
+  "overview_latest_nextRun": {
+    "message": "下次執行: {{date}}"
+  },
+  "overview_latest_nextRunRelative": {
+    "message": "下次執行: {{relative}}"
+  },
+  "overview_latest_counts": {
+    "message": "簡報: 已包含, 未讀, 新增"
+  },
+  "overview_latest_count_included": {
+    "message": "已包含 {{count}}"
+  },
+  "overview_latest_count_unread": {
+    "message": "未讀 {{count}}"
+  },
+  "overview_latest_count_new": {
+    "message": "新增 {{count}}"
+  },
+  "overview_latest_provenance_sources": {
+    "message": "{{count}} 個追蹤來源"
+  },
+  "overview_latest_provenance_sources_zero": {
+    "message": "{{count}} 個追蹤來源"
+  },
+  "overview_latest_provenance_sources_one": {
+    "message": "{{count}} 個追蹤來源"
+  },
+  "overview_latest_provenance_sources_two": {
+    "message": "{{count}} 個追蹤來源"
+  },
+  "overview_latest_provenance_sources_few": {
+    "message": "{{count}} 個追蹤來源"
+  },
+  "overview_latest_provenance_sources_many": {
+    "message": "{{count}} 個追蹤來源"
+  },
+  "overview_latest_provenance_sources_other": {
+    "message": "{{count}} 個追蹤來源"
+  },
+  "overview_latest_delivery_reports": {
+    "message": "查看所有報告"
+  },
+  "overview_latest_delivery_retryAria": {
+    "message": "重試 {{adapter}}: {{name}}"
+  },
+  "overview_latest_delivery_retryUnknownAria": {
+    "message": "結果未知. 重試 {{adapter}}: {{name}}"
+  },
+  "overview_latest_delivery_reviewRetry": {
+    "message": "重試"
+  },
+  "overview_latest_delivery_unknownConfirmation": {
+    "message": "提供者未確認透過 {{adapter}} 送達。重試可能會傳送重複內容。請檢查目的地，僅在可接受此風險時繼續。"
+  },
+  "overview_latest_playback_region": {
+    "message": "音訊: {{name}}"
+  },
+  "overview_latest_playback_playAria": {
+    "message": "開啟 音訊: {{name}}"
+  },
+  "overview_latest_playback_pauseAria": {
+    "message": "等待中 音訊: {{name}}"
+  },
+  "overview_latest_playback_resumeAria": {
+    "message": "開啟 音訊: {{name}}"
+  },
+  "overview_latest_playback_seekAria": {
+    "message": "音訊: {{name}}"
+  },
+  "overview_latest_playback_loading": {
+    "message": "正在載入音訊"
+  },
+  "overview_latest_playback_error": {
+    "message": "音訊 失敗. 開啟 報告 / 重新產生 音訊."
+  },
+  "overview_latest_playback_play": {
+    "message": "播放"
+  },
+  "overview_latest_playback_pause": {
+    "message": "暫停"
+  },
+  "overview_latest_playback_resume": {
+    "message": "繼續"
+  },
+  "overview_latest_actions_label": {
+    "message": "最新 簡報"
+  },
+  "overview_latest_actions_openReport": {
+    "message": "開啟 {{report}}"
+  },
+  "overview_latest_actions_openReportAria": {
+    "message": "開啟 {{report}}: {{name}}"
+  },
+  "overview_latest_actions_regenerateAudio": {
+    "message": "重新產生 音訊"
+  },
+  "overview_latest_actions_regenerateAudioAria": {
+    "message": "重新產生 {{style}} {{noun}} 音訊: {{name}}"
+  },
+  "overview_latest_actions_retry": {
+    "message": "重試"
+  },
+  "overview_latest_actions_retrySaveAria": {
+    "message": "重試 已儲存 報告: {{name}}"
+  },
+  "overview_latest_actions_retryTextAria": {
+    "message": "重試 報告: {{name}}"
+  },
+  "overview_latest_actions_retryStage": {
+    "message": "重試: {{stage}}"
+  },
+  "overview_latest_actions_inspect": {
+    "message": "檢查執行"
+  },
+  "overview_latest_actions_inspectAria": {
+    "message": "檢查執行 {{runId}}: {{name}}"
+  },
+  "overview_latest_actions_viewReports": {
+    "message": "查看所有報告"
+  },
+  "overview_latest_actions_testNow": {
+    "message": "立即測試"
+  },
+  "overview_latest_announcements_blockingFailure": {
+    "message": "{{name}} 失敗. 檢查執行 {{runId}}."
+  },
+  "overview_latest_announcements_delivered": {
+    "message": "{{name}}: 已送達."
+  },
+  "overview_latest_announcements_nextRunUpdated": {
+    "message": "{{name}}: 下次執行."
+  },
+  "overview_latest_announcements_partialAudioFailure": {
+    "message": "{{name}}: 節目說明 就緒, 音訊 失敗."
+  },
+  "overview_latest_announcements_readyText": {
+    "message": "{{name}}: 報告 就緒."
+  },
+  "overview_latest_announcements_readyWithAudio": {
+    "message": "{{name}}: 就緒. 音訊 / 節目說明."
+  },
+  "overview_latest_announcements_stageProgress": {
+    "message": "{{name}}: {{stage}} {{status}}."
+  },
+  "overview_latest_announcements_testQueued": {
+    "message": "立即測試: 已排入佇列."
+  },
+  "overview_latest_retryError": {
+    "message": "重試 失敗. 檢查執行."
+  },
+  "overview_latest_regenerateError": {
+    "message": "重新產生 音訊: 失敗."
+  },
+  "overview_latest_testError": {
+    "message": "立即測試: 失敗."
+  },
+  "overview_latest_status_ready": {
+    "message": "就緒"
+  },
+  "overview_latest_status_failed": {
+    "message": "失敗"
+  },
+  "overview_latest_status_saved": {
+    "message": "已儲存"
+  },
+  "overview_latest_status_waiting": {
+    "message": "等待中"
+  },
+  "overview_latest_status_running": {
+    "message": "執行中"
+  },
+  "overview_latest_status_queued": {
+    "message": "已排入佇列"
+  },
+  "overview_latest_status_notStarted": {
+    "message": "未開始"
+  },
+  "overview_latest_status_notSelected": {
+    "message": "未選取"
+  },
+  "overview_latest_status_cancelled": {
+    "message": "已取消"
+  },
+  "overview_latest_status_delivered": {
+    "message": "已送達"
+  },
+  "overview_latest_status_unknown": {
+    "message": "結果未知"
+  },
+  "overview_latest_status_sending": {
+    "message": "傳送中"
+  },
+  "overview_latest_stages_renderText": {
+    "message": "報告"
+  },
+  "overview_latest_stages_persistText": {
+    "message": "已儲存 報告"
+  },
+  "overview_latest_stages_composeScript": {
+    "message": "音訊 報告"
+  },
+  "overview_latest_stages_persistScript": {
+    "message": "已儲存 音訊 報告"
+  },
+  "overview_latest_stages_generateAudio": {
+    "message": "音訊"
+  },
+  "overview_latest_stages_persistAudio": {
+    "message": "已儲存 音訊"
+  },
+  "overview_latest_nouns_briefing": {
+    "message": "簡報"
+  },
+  "overview_latest_nouns_episode": {
+    "message": "節目"
+  },
+  "overview_latest_nouns_report": {
+    "message": "報告"
+  },
+  "overview_latest_nouns_showNotes": {
+    "message": "節目說明"
+  },
+  "outputs_openInNewTabAria": {
+    "message": "在新分頁中開啟: {{title}}"
+  },
+  "outputs_chatAboutAria": {
+    "message": "討論此內容: {{title}}"
+  },
+  "outputs_downloadAria": {
+    "message": "下載: {{title}}"
   }
 }

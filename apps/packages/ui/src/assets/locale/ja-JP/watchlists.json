@@ -320,6 +320,124 @@
         "emailInvalid": "有効なメールアドレスを 1 件以上入力してください。"
       },
       "validationError": "続行する前に、強調表示された項目を確認してください。"
+    },
+    "latest": {
+      "heading": {
+        "briefing": "最新 ブリーフィング",
+        "episode": "最新 エピソード"
+      },
+      "empty": {
+        "scheduled": "ブリーフィング: {{date}}.",
+        "manual": "未開始. 今すぐテスト."
+      },
+      "generatedAt": "生成日時 {{date}}",
+      "untitled": "ブリーフィング {{runId}}",
+      "artifacts": "レポート / 音声",
+      "audio": "音声",
+      "audioFailed": "音声 失敗",
+      "ready": "準備完了",
+      "saved": "保存済み",
+      "waiting": "待機中",
+      "script": "音声 レポート",
+      "stageWithStatus": "{{stage}}: {{status}}",
+      "noUpdates": "新着: 0. 保存済み {{noun}}.",
+      "nextRun": "次回実行: {{date}}",
+      "nextRunRelative": "次回実行: {{relative}}",
+      "counts": "ブリーフィング: 含む, 未読, 新着",
+      "count": {
+        "included": "含む {{count}}",
+        "unread": "未読 {{count}}",
+        "new": "新着 {{count}}"
+      },
+      "provenance": {
+        "sources": "{{count}} 追跡ソース",
+        "sources_zero": "{{count}} 追跡ソース",
+        "sources_one": "{{count}} 追跡ソース",
+        "sources_two": "{{count}} 追跡ソース",
+        "sources_few": "{{count}} 追跡ソース",
+        "sources_many": "{{count}} 追跡ソース",
+        "sources_other": "{{count}} 追跡ソース"
+      },
+      "delivery": {
+        "reports": "すべてのレポートを表示",
+        "retryAria": "再試行 {{adapter}}: {{name}}",
+        "retryUnknownAria": "結果不明. 再試行 {{adapter}}: {{name}}",
+        "reviewRetry": "再試行",
+        "unknownConfirmation": "プロバイダーは {{adapter}} の配信を確認していません。再試行すると重複して送信される可能性があります。送信先を確認し、そのリスクを許容できる場合のみ続行してください。"
+      },
+      "playback": {
+        "region": "音声: {{name}}",
+        "playAria": "開く 音声: {{name}}",
+        "pauseAria": "待機中 音声: {{name}}",
+        "resumeAria": "開く 音声: {{name}}",
+        "seekAria": "音声: {{name}}",
+        "loading": "音声を読み込み中",
+        "error": "音声 失敗. 開く レポート / 再生成 音声.",
+        "play": "再生",
+        "pause": "一時停止",
+        "resume": "再開"
+      },
+      "actions": {
+        "label": "最新 ブリーフィング",
+        "openReport": "開く {{report}}",
+        "openReportAria": "開く {{report}}: {{name}}",
+        "regenerateAudio": "再生成 音声",
+        "regenerateAudioAria": "再生成 {{style}} {{noun}} 音声: {{name}}",
+        "retry": "再試行",
+        "retrySaveAria": "再試行 保存済み レポート: {{name}}",
+        "retryTextAria": "再試行 レポート: {{name}}",
+        "retryStage": "再試行: {{stage}}",
+        "inspect": "実行を確認",
+        "inspectAria": "実行を確認 {{runId}}: {{name}}",
+        "viewReports": "すべてのレポートを表示",
+        "testNow": "今すぐテスト"
+      },
+      "announcements": {
+        "blockingFailure": "{{name}} 失敗. 実行を確認 {{runId}}.",
+        "delivered": "{{name}}: 配信済み.",
+        "nextRunUpdated": "{{name}}: 次回実行.",
+        "partialAudioFailure": "{{name}}: ショーノート 準備完了, 音声 失敗.",
+        "readyText": "{{name}}: レポート 準備完了.",
+        "readyWithAudio": "{{name}}: 準備完了. 音声 / ショーノート.",
+        "stageProgress": "{{name}}: {{stage}} {{status}}.",
+        "testQueued": "今すぐテスト: キュー済み."
+      },
+      "retryError": "再試行 失敗. 実行を確認.",
+      "regenerateError": "再生成 音声: 失敗.",
+      "testError": "今すぐテスト: 失敗.",
+      "status": {
+        "ready": "準備完了",
+        "failed": "失敗",
+        "saved": "保存済み",
+        "waiting": "待機中",
+        "running": "実行中",
+        "queued": "キュー済み",
+        "notStarted": "未開始",
+        "notSelected": "未選択",
+        "cancelled": "キャンセル済み",
+        "delivered": "配信済み",
+        "unknown": "結果不明",
+        "sending": "送信中"
+      },
+      "stages": {
+        "renderText": "レポート",
+        "persistText": "保存済み レポート",
+        "composeScript": "音声 レポート",
+        "persistScript": "保存済み 音声 レポート",
+        "generateAudio": "音声",
+        "persistAudio": "保存済み 音声"
+      },
+      "nouns": {
+        "briefing": "ブリーフィング",
+        "episode": "エピソード",
+        "report": "レポート",
+        "showNotes": "ショーノート"
+      }
     }
+  },
+  "outputs": {
+    "openInNewTabAria": "新しいタブで開く: {{title}}",
+    "chatAboutAria": "これについてチャット: {{title}}",
+    "downloadAria": "ダウンロード: {{title}}"
   }
 }

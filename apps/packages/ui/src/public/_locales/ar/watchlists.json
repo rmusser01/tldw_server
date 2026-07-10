@@ -721,5 +721,281 @@
   },
   "overview_pipelineSetup_test_cancelledWithCode": {
     "message": "أُلغيت {{stage}} ({{code}}). حُفظت مسودتك."
+  },
+  "overview_latest_heading_briefing": {
+    "message": "أحدث موجز"
+  },
+  "overview_latest_heading_episode": {
+    "message": "أحدث حلقة"
+  },
+  "overview_latest_empty_scheduled": {
+    "message": "موجز: {{date}}."
+  },
+  "overview_latest_empty_manual": {
+    "message": "لم يبدأ. اختبار الآن."
+  },
+  "overview_latest_generatedAt": {
+    "message": "تم الإنشاء {{date}}"
+  },
+  "overview_latest_untitled": {
+    "message": "موجز {{runId}}"
+  },
+  "overview_latest_artifacts": {
+    "message": "تقرير / صوت"
+  },
+  "overview_latest_audio": {
+    "message": "صوت"
+  },
+  "overview_latest_audioFailed": {
+    "message": "صوت فشل"
+  },
+  "overview_latest_ready": {
+    "message": "جاهز"
+  },
+  "overview_latest_saved": {
+    "message": "محفوظ"
+  },
+  "overview_latest_waiting": {
+    "message": "قيد الانتظار"
+  },
+  "overview_latest_script": {
+    "message": "صوت تقرير"
+  },
+  "overview_latest_stageWithStatus": {
+    "message": "{{stage}}: {{status}}"
+  },
+  "overview_latest_noUpdates": {
+    "message": "جديد: 0. محفوظ {{noun}}."
+  },
+  "overview_latest_nextRun": {
+    "message": "التشغيل التالي: {{date}}"
+  },
+  "overview_latest_nextRunRelative": {
+    "message": "التشغيل التالي: {{relative}}"
+  },
+  "overview_latest_counts": {
+    "message": "موجز: مضمّن, غير مقروء, جديد"
+  },
+  "overview_latest_count_included": {
+    "message": "مضمّن {{count}}"
+  },
+  "overview_latest_count_unread": {
+    "message": "غير مقروء {{count}}"
+  },
+  "overview_latest_count_new": {
+    "message": "جديد {{count}}"
+  },
+  "overview_latest_provenance_sources": {
+    "message": "{{count}} مصادر متتبّعة"
+  },
+  "overview_latest_provenance_sources_zero": {
+    "message": "{{count}} مصادر متتبّعة"
+  },
+  "overview_latest_provenance_sources_one": {
+    "message": "{{count}} مصدر متتبّع"
+  },
+  "overview_latest_provenance_sources_two": {
+    "message": "{{count}} مصادر متتبّعة"
+  },
+  "overview_latest_provenance_sources_few": {
+    "message": "{{count}} مصادر متتبّعة"
+  },
+  "overview_latest_provenance_sources_many": {
+    "message": "{{count}} مصادر متتبّعة"
+  },
+  "overview_latest_provenance_sources_other": {
+    "message": "{{count}} مصادر متتبّعة"
+  },
+  "overview_latest_delivery_reports": {
+    "message": "عرض كل التقارير"
+  },
+  "overview_latest_delivery_retryAria": {
+    "message": "إعادة المحاولة {{adapter}}: {{name}}"
+  },
+  "overview_latest_delivery_retryUnknownAria": {
+    "message": "النتيجة غير معروفة. إعادة المحاولة {{adapter}}: {{name}}"
+  },
+  "overview_latest_delivery_reviewRetry": {
+    "message": "إعادة المحاولة"
+  },
+  "overview_latest_delivery_unknownConfirmation": {
+    "message": "لم يؤكد المزوّد تسليم {{adapter}}. قد تؤدي إعادة المحاولة إلى إرسال نسخة مكررة. راجع الوجهة ولا تتابع إلا إذا كان هذا الخطر مقبولًا."
+  },
+  "overview_latest_playback_region": {
+    "message": "صوت: {{name}}"
+  },
+  "overview_latest_playback_playAria": {
+    "message": "فتح صوت: {{name}}"
+  },
+  "overview_latest_playback_pauseAria": {
+    "message": "قيد الانتظار صوت: {{name}}"
+  },
+  "overview_latest_playback_resumeAria": {
+    "message": "فتح صوت: {{name}}"
+  },
+  "overview_latest_playback_seekAria": {
+    "message": "صوت: {{name}}"
+  },
+  "overview_latest_playback_loading": {
+    "message": "جارٍ تحميل الصوت"
+  },
+  "overview_latest_playback_error": {
+    "message": "صوت فشل. فتح تقرير / إعادة الإنشاء صوت."
+  },
+  "overview_latest_playback_play": {
+    "message": "تشغيل"
+  },
+  "overview_latest_playback_pause": {
+    "message": "إيقاف مؤقت"
+  },
+  "overview_latest_playback_resume": {
+    "message": "استئناف"
+  },
+  "overview_latest_actions_label": {
+    "message": "أحدث موجز"
+  },
+  "overview_latest_actions_openReport": {
+    "message": "فتح {{report}}"
+  },
+  "overview_latest_actions_openReportAria": {
+    "message": "فتح {{report}}: {{name}}"
+  },
+  "overview_latest_actions_regenerateAudio": {
+    "message": "إعادة الإنشاء صوت"
+  },
+  "overview_latest_actions_regenerateAudioAria": {
+    "message": "إعادة الإنشاء {{style}} {{noun}} صوت: {{name}}"
+  },
+  "overview_latest_actions_retry": {
+    "message": "إعادة المحاولة"
+  },
+  "overview_latest_actions_retrySaveAria": {
+    "message": "إعادة المحاولة محفوظ تقرير: {{name}}"
+  },
+  "overview_latest_actions_retryTextAria": {
+    "message": "إعادة المحاولة تقرير: {{name}}"
+  },
+  "overview_latest_actions_retryStage": {
+    "message": "إعادة المحاولة: {{stage}}"
+  },
+  "overview_latest_actions_inspect": {
+    "message": "فحص التشغيل"
+  },
+  "overview_latest_actions_inspectAria": {
+    "message": "فحص التشغيل {{runId}}: {{name}}"
+  },
+  "overview_latest_actions_viewReports": {
+    "message": "عرض كل التقارير"
+  },
+  "overview_latest_actions_testNow": {
+    "message": "اختبار الآن"
+  },
+  "overview_latest_announcements_blockingFailure": {
+    "message": "{{name}} فشل. فحص التشغيل {{runId}}."
+  },
+  "overview_latest_announcements_delivered": {
+    "message": "{{name}}: تم التسليم."
+  },
+  "overview_latest_announcements_nextRunUpdated": {
+    "message": "{{name}}: التشغيل التالي."
+  },
+  "overview_latest_announcements_partialAudioFailure": {
+    "message": "{{name}}: ملاحظات العرض جاهز, صوت فشل."
+  },
+  "overview_latest_announcements_readyText": {
+    "message": "{{name}}: تقرير جاهز."
+  },
+  "overview_latest_announcements_readyWithAudio": {
+    "message": "{{name}}: جاهز. صوت / ملاحظات العرض."
+  },
+  "overview_latest_announcements_stageProgress": {
+    "message": "{{name}}: {{stage}} {{status}}."
+  },
+  "overview_latest_announcements_testQueued": {
+    "message": "اختبار الآن: في قائمة الانتظار."
+  },
+  "overview_latest_retryError": {
+    "message": "إعادة المحاولة فشل. فحص التشغيل."
+  },
+  "overview_latest_regenerateError": {
+    "message": "إعادة الإنشاء صوت: فشل."
+  },
+  "overview_latest_testError": {
+    "message": "اختبار الآن: فشل."
+  },
+  "overview_latest_status_ready": {
+    "message": "جاهز"
+  },
+  "overview_latest_status_failed": {
+    "message": "فشل"
+  },
+  "overview_latest_status_saved": {
+    "message": "محفوظ"
+  },
+  "overview_latest_status_waiting": {
+    "message": "قيد الانتظار"
+  },
+  "overview_latest_status_running": {
+    "message": "قيد التشغيل"
+  },
+  "overview_latest_status_queued": {
+    "message": "في قائمة الانتظار"
+  },
+  "overview_latest_status_notStarted": {
+    "message": "لم يبدأ"
+  },
+  "overview_latest_status_notSelected": {
+    "message": "غير محدد"
+  },
+  "overview_latest_status_cancelled": {
+    "message": "ملغى"
+  },
+  "overview_latest_status_delivered": {
+    "message": "تم التسليم"
+  },
+  "overview_latest_status_unknown": {
+    "message": "النتيجة غير معروفة"
+  },
+  "overview_latest_status_sending": {
+    "message": "جارٍ الإرسال"
+  },
+  "overview_latest_stages_renderText": {
+    "message": "تقرير"
+  },
+  "overview_latest_stages_persistText": {
+    "message": "محفوظ تقرير"
+  },
+  "overview_latest_stages_composeScript": {
+    "message": "صوت تقرير"
+  },
+  "overview_latest_stages_persistScript": {
+    "message": "محفوظ صوت تقرير"
+  },
+  "overview_latest_stages_generateAudio": {
+    "message": "صوت"
+  },
+  "overview_latest_stages_persistAudio": {
+    "message": "محفوظ صوت"
+  },
+  "overview_latest_nouns_briefing": {
+    "message": "موجز"
+  },
+  "overview_latest_nouns_episode": {
+    "message": "حلقة"
+  },
+  "overview_latest_nouns_report": {
+    "message": "تقرير"
+  },
+  "overview_latest_nouns_showNotes": {
+    "message": "ملاحظات العرض"
+  },
+  "outputs_openInNewTabAria": {
+    "message": "فتح في علامة تبويب جديدة: {{title}}"
+  },
+  "outputs_chatAboutAria": {
+    "message": "مناقشة هذا: {{title}}"
+  },
+  "outputs_downloadAria": {
+    "message": "تنزيل: {{title}}"
   }
 }

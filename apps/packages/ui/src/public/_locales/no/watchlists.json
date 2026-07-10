@@ -685,5 +685,281 @@
   },
   "overview_pipelineSetup_test_cancelledWithCode": {
     "message": "{{stage}} ble avbrutt ({{code}}). Utkastet ditt er lagret."
+  },
+  "overview_latest_heading_briefing": {
+    "message": "Siste orientering"
+  },
+  "overview_latest_heading_episode": {
+    "message": "Siste episode"
+  },
+  "overview_latest_empty_scheduled": {
+    "message": "orientering: {{date}}."
+  },
+  "overview_latest_empty_manual": {
+    "message": "Ikke startet. Test nå."
+  },
+  "overview_latest_generatedAt": {
+    "message": "Generert {{date}}"
+  },
+  "overview_latest_untitled": {
+    "message": "orientering {{runId}}"
+  },
+  "overview_latest_artifacts": {
+    "message": "rapport / lyd"
+  },
+  "overview_latest_audio": {
+    "message": "lyd"
+  },
+  "overview_latest_audioFailed": {
+    "message": "lyd mislyktes"
+  },
+  "overview_latest_ready": {
+    "message": "Klar"
+  },
+  "overview_latest_saved": {
+    "message": "Lagret"
+  },
+  "overview_latest_waiting": {
+    "message": "Venter"
+  },
+  "overview_latest_script": {
+    "message": "lyd rapport"
+  },
+  "overview_latest_stageWithStatus": {
+    "message": "{{stage}}: {{status}}"
+  },
+  "overview_latest_noUpdates": {
+    "message": "Ny: 0. Lagret {{noun}}."
+  },
+  "overview_latest_nextRun": {
+    "message": "Neste kjøring: {{date}}"
+  },
+  "overview_latest_nextRunRelative": {
+    "message": "Neste kjøring: {{relative}}"
+  },
+  "overview_latest_counts": {
+    "message": "orientering: Inkludert, Ulest, Ny"
+  },
+  "overview_latest_count_included": {
+    "message": "Inkludert {{count}}"
+  },
+  "overview_latest_count_unread": {
+    "message": "Ulest {{count}}"
+  },
+  "overview_latest_count_new": {
+    "message": "Ny {{count}}"
+  },
+  "overview_latest_provenance_sources": {
+    "message": "{{count}} sporede kilder"
+  },
+  "overview_latest_provenance_sources_zero": {
+    "message": "{{count}} sporede kilder"
+  },
+  "overview_latest_provenance_sources_one": {
+    "message": "{{count}} sporet kilde"
+  },
+  "overview_latest_provenance_sources_two": {
+    "message": "{{count}} sporede kilder"
+  },
+  "overview_latest_provenance_sources_few": {
+    "message": "{{count}} sporede kilder"
+  },
+  "overview_latest_provenance_sources_many": {
+    "message": "{{count}} sporede kilder"
+  },
+  "overview_latest_provenance_sources_other": {
+    "message": "{{count}} sporede kilder"
+  },
+  "overview_latest_delivery_reports": {
+    "message": "Se alle rapporter"
+  },
+  "overview_latest_delivery_retryAria": {
+    "message": "Prøv igjen {{adapter}}: {{name}}"
+  },
+  "overview_latest_delivery_retryUnknownAria": {
+    "message": "Ukjent resultat. Prøv igjen {{adapter}}: {{name}}"
+  },
+  "overview_latest_delivery_reviewRetry": {
+    "message": "Prøv igjen"
+  },
+  "overview_latest_delivery_unknownConfirmation": {
+    "message": "Leverandøren bekreftet ikke levering via {{adapter}}. Et nytt forsøk kan sende en duplikat. Kontroller målet og fortsett bare hvis risikoen er akseptabel."
+  },
+  "overview_latest_playback_region": {
+    "message": "lyd: {{name}}"
+  },
+  "overview_latest_playback_playAria": {
+    "message": "Åpne lyd: {{name}}"
+  },
+  "overview_latest_playback_pauseAria": {
+    "message": "Venter lyd: {{name}}"
+  },
+  "overview_latest_playback_resumeAria": {
+    "message": "Åpne lyd: {{name}}"
+  },
+  "overview_latest_playback_seekAria": {
+    "message": "lyd: {{name}}"
+  },
+  "overview_latest_playback_loading": {
+    "message": "Laster lyd"
+  },
+  "overview_latest_playback_error": {
+    "message": "lyd mislyktes. Åpne rapport / Regenerer lyd."
+  },
+  "overview_latest_playback_play": {
+    "message": "Spill av"
+  },
+  "overview_latest_playback_pause": {
+    "message": "Pause"
+  },
+  "overview_latest_playback_resume": {
+    "message": "Fortsett"
+  },
+  "overview_latest_actions_label": {
+    "message": "Siste orientering"
+  },
+  "overview_latest_actions_openReport": {
+    "message": "Åpne {{report}}"
+  },
+  "overview_latest_actions_openReportAria": {
+    "message": "Åpne {{report}}: {{name}}"
+  },
+  "overview_latest_actions_regenerateAudio": {
+    "message": "Regenerer lyd"
+  },
+  "overview_latest_actions_regenerateAudioAria": {
+    "message": "Regenerer {{style}} {{noun}} lyd: {{name}}"
+  },
+  "overview_latest_actions_retry": {
+    "message": "Prøv igjen"
+  },
+  "overview_latest_actions_retrySaveAria": {
+    "message": "Prøv igjen lagret rapport: {{name}}"
+  },
+  "overview_latest_actions_retryTextAria": {
+    "message": "Prøv igjen rapport: {{name}}"
+  },
+  "overview_latest_actions_retryStage": {
+    "message": "Prøv igjen: {{stage}}"
+  },
+  "overview_latest_actions_inspect": {
+    "message": "Undersøk kjøring"
+  },
+  "overview_latest_actions_inspectAria": {
+    "message": "Undersøk kjøring {{runId}}: {{name}}"
+  },
+  "overview_latest_actions_viewReports": {
+    "message": "Se alle rapporter"
+  },
+  "overview_latest_actions_testNow": {
+    "message": "Test nå"
+  },
+  "overview_latest_announcements_blockingFailure": {
+    "message": "{{name}} mislyktes. Undersøk kjøring {{runId}}."
+  },
+  "overview_latest_announcements_delivered": {
+    "message": "{{name}}: levert."
+  },
+  "overview_latest_announcements_nextRunUpdated": {
+    "message": "{{name}}: neste kjøring."
+  },
+  "overview_latest_announcements_partialAudioFailure": {
+    "message": "{{name}}: shownotater klar, lyd mislyktes."
+  },
+  "overview_latest_announcements_readyText": {
+    "message": "{{name}}: rapport klar."
+  },
+  "overview_latest_announcements_readyWithAudio": {
+    "message": "{{name}}: Klar. lyd / shownotater."
+  },
+  "overview_latest_announcements_stageProgress": {
+    "message": "{{name}}: {{stage}} {{status}}."
+  },
+  "overview_latest_announcements_testQueued": {
+    "message": "Test nå: i kø."
+  },
+  "overview_latest_retryError": {
+    "message": "Prøv igjen mislyktes. Undersøk kjøring."
+  },
+  "overview_latest_regenerateError": {
+    "message": "Regenerer lyd: mislyktes."
+  },
+  "overview_latest_testError": {
+    "message": "Test nå: mislyktes."
+  },
+  "overview_latest_status_ready": {
+    "message": "Klar"
+  },
+  "overview_latest_status_failed": {
+    "message": "Mislyktes"
+  },
+  "overview_latest_status_saved": {
+    "message": "Lagret"
+  },
+  "overview_latest_status_waiting": {
+    "message": "Venter"
+  },
+  "overview_latest_status_running": {
+    "message": "Kjører"
+  },
+  "overview_latest_status_queued": {
+    "message": "I kø"
+  },
+  "overview_latest_status_notStarted": {
+    "message": "Ikke startet"
+  },
+  "overview_latest_status_notSelected": {
+    "message": "Ikke valgt"
+  },
+  "overview_latest_status_cancelled": {
+    "message": "Avbrutt"
+  },
+  "overview_latest_status_delivered": {
+    "message": "Levert"
+  },
+  "overview_latest_status_unknown": {
+    "message": "Ukjent resultat"
+  },
+  "overview_latest_status_sending": {
+    "message": "Sender"
+  },
+  "overview_latest_stages_renderText": {
+    "message": "rapport"
+  },
+  "overview_latest_stages_persistText": {
+    "message": "Lagret rapport"
+  },
+  "overview_latest_stages_composeScript": {
+    "message": "lyd rapport"
+  },
+  "overview_latest_stages_persistScript": {
+    "message": "Lagret lyd rapport"
+  },
+  "overview_latest_stages_generateAudio": {
+    "message": "lyd"
+  },
+  "overview_latest_stages_persistAudio": {
+    "message": "Lagret lyd"
+  },
+  "overview_latest_nouns_briefing": {
+    "message": "orientering"
+  },
+  "overview_latest_nouns_episode": {
+    "message": "episode"
+  },
+  "overview_latest_nouns_report": {
+    "message": "rapport"
+  },
+  "overview_latest_nouns_showNotes": {
+    "message": "shownotater"
+  },
+  "outputs_openInNewTabAria": {
+    "message": "Åpne i ny fane: {{title}}"
+  },
+  "outputs_chatAboutAria": {
+    "message": "Chat om dette: {{title}}"
+  },
+  "outputs_downloadAria": {
+    "message": "Last ned: {{title}}"
   }
 }

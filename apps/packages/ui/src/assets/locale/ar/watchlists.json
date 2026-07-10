@@ -332,6 +332,124 @@
         "emailInvalid": "أدخل عنوان بريد إلكتروني صالحاً واحداً على الأقل."
       },
       "validationError": "راجع الحقول المميزة قبل المتابعة."
+    },
+    "latest": {
+      "heading": {
+        "briefing": "أحدث موجز",
+        "episode": "أحدث حلقة"
+      },
+      "empty": {
+        "scheduled": "موجز: {{date}}.",
+        "manual": "لم يبدأ. اختبار الآن."
+      },
+      "generatedAt": "تم الإنشاء {{date}}",
+      "untitled": "موجز {{runId}}",
+      "artifacts": "تقرير / صوت",
+      "audio": "صوت",
+      "audioFailed": "صوت فشل",
+      "ready": "جاهز",
+      "saved": "محفوظ",
+      "waiting": "قيد الانتظار",
+      "script": "صوت تقرير",
+      "stageWithStatus": "{{stage}}: {{status}}",
+      "noUpdates": "جديد: 0. محفوظ {{noun}}.",
+      "nextRun": "التشغيل التالي: {{date}}",
+      "nextRunRelative": "التشغيل التالي: {{relative}}",
+      "counts": "موجز: مضمّن, غير مقروء, جديد",
+      "count": {
+        "included": "مضمّن {{count}}",
+        "unread": "غير مقروء {{count}}",
+        "new": "جديد {{count}}"
+      },
+      "provenance": {
+        "sources": "{{count}} مصادر متتبّعة",
+        "sources_zero": "{{count}} مصادر متتبّعة",
+        "sources_one": "{{count}} مصدر متتبّع",
+        "sources_two": "{{count}} مصادر متتبّعة",
+        "sources_few": "{{count}} مصادر متتبّعة",
+        "sources_many": "{{count}} مصادر متتبّعة",
+        "sources_other": "{{count}} مصادر متتبّعة"
+      },
+      "delivery": {
+        "reports": "عرض كل التقارير",
+        "retryAria": "إعادة المحاولة {{adapter}}: {{name}}",
+        "retryUnknownAria": "النتيجة غير معروفة. إعادة المحاولة {{adapter}}: {{name}}",
+        "reviewRetry": "إعادة المحاولة",
+        "unknownConfirmation": "لم يؤكد المزوّد تسليم {{adapter}}. قد تؤدي إعادة المحاولة إلى إرسال نسخة مكررة. راجع الوجهة ولا تتابع إلا إذا كان هذا الخطر مقبولًا."
+      },
+      "playback": {
+        "region": "صوت: {{name}}",
+        "playAria": "فتح صوت: {{name}}",
+        "pauseAria": "قيد الانتظار صوت: {{name}}",
+        "resumeAria": "فتح صوت: {{name}}",
+        "seekAria": "صوت: {{name}}",
+        "loading": "جارٍ تحميل الصوت",
+        "error": "صوت فشل. فتح تقرير / إعادة الإنشاء صوت.",
+        "play": "تشغيل",
+        "pause": "إيقاف مؤقت",
+        "resume": "استئناف"
+      },
+      "actions": {
+        "label": "أحدث موجز",
+        "openReport": "فتح {{report}}",
+        "openReportAria": "فتح {{report}}: {{name}}",
+        "regenerateAudio": "إعادة الإنشاء صوت",
+        "regenerateAudioAria": "إعادة الإنشاء {{style}} {{noun}} صوت: {{name}}",
+        "retry": "إعادة المحاولة",
+        "retrySaveAria": "إعادة المحاولة محفوظ تقرير: {{name}}",
+        "retryTextAria": "إعادة المحاولة تقرير: {{name}}",
+        "retryStage": "إعادة المحاولة: {{stage}}",
+        "inspect": "فحص التشغيل",
+        "inspectAria": "فحص التشغيل {{runId}}: {{name}}",
+        "viewReports": "عرض كل التقارير",
+        "testNow": "اختبار الآن"
+      },
+      "announcements": {
+        "blockingFailure": "{{name}} فشل. فحص التشغيل {{runId}}.",
+        "delivered": "{{name}}: تم التسليم.",
+        "nextRunUpdated": "{{name}}: التشغيل التالي.",
+        "partialAudioFailure": "{{name}}: ملاحظات العرض جاهز, صوت فشل.",
+        "readyText": "{{name}}: تقرير جاهز.",
+        "readyWithAudio": "{{name}}: جاهز. صوت / ملاحظات العرض.",
+        "stageProgress": "{{name}}: {{stage}} {{status}}.",
+        "testQueued": "اختبار الآن: في قائمة الانتظار."
+      },
+      "retryError": "إعادة المحاولة فشل. فحص التشغيل.",
+      "regenerateError": "إعادة الإنشاء صوت: فشل.",
+      "testError": "اختبار الآن: فشل.",
+      "status": {
+        "ready": "جاهز",
+        "failed": "فشل",
+        "saved": "محفوظ",
+        "waiting": "قيد الانتظار",
+        "running": "قيد التشغيل",
+        "queued": "في قائمة الانتظار",
+        "notStarted": "لم يبدأ",
+        "notSelected": "غير محدد",
+        "cancelled": "ملغى",
+        "delivered": "تم التسليم",
+        "unknown": "النتيجة غير معروفة",
+        "sending": "جارٍ الإرسال"
+      },
+      "stages": {
+        "renderText": "تقرير",
+        "persistText": "محفوظ تقرير",
+        "composeScript": "صوت تقرير",
+        "persistScript": "محفوظ صوت تقرير",
+        "generateAudio": "صوت",
+        "persistAudio": "محفوظ صوت"
+      },
+      "nouns": {
+        "briefing": "موجز",
+        "episode": "حلقة",
+        "report": "تقرير",
+        "showNotes": "ملاحظات العرض"
+      }
     }
+  },
+  "outputs": {
+    "openInNewTabAria": "فتح في علامة تبويب جديدة: {{title}}",
+    "chatAboutAria": "مناقشة هذا: {{title}}",
+    "downloadAria": "تنزيل: {{title}}"
   }
 }

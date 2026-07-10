@@ -694,5 +694,281 @@
   },
   "overview_pipelineSetup_test_cancelledWithCode": {
     "message": "{{stage}} a été annulée ({{code}}). Votre brouillon est enregistré."
+  },
+  "overview_latest_heading_briefing": {
+    "message": "Dernier briefing"
+  },
+  "overview_latest_heading_episode": {
+    "message": "Dernier épisode"
+  },
+  "overview_latest_empty_scheduled": {
+    "message": "briefing: {{date}}."
+  },
+  "overview_latest_empty_manual": {
+    "message": "Non démarré. Tester maintenant."
+  },
+  "overview_latest_generatedAt": {
+    "message": "Généré {{date}}"
+  },
+  "overview_latest_untitled": {
+    "message": "briefing {{runId}}"
+  },
+  "overview_latest_artifacts": {
+    "message": "rapport / audio"
+  },
+  "overview_latest_audio": {
+    "message": "audio"
+  },
+  "overview_latest_audioFailed": {
+    "message": "audio échec"
+  },
+  "overview_latest_ready": {
+    "message": "Prêt"
+  },
+  "overview_latest_saved": {
+    "message": "Enregistré"
+  },
+  "overview_latest_waiting": {
+    "message": "En attente"
+  },
+  "overview_latest_script": {
+    "message": "audio rapport"
+  },
+  "overview_latest_stageWithStatus": {
+    "message": "{{stage}}: {{status}}"
+  },
+  "overview_latest_noUpdates": {
+    "message": "Nouveau: 0. Enregistré {{noun}}."
+  },
+  "overview_latest_nextRun": {
+    "message": "Prochaine exécution: {{date}}"
+  },
+  "overview_latest_nextRunRelative": {
+    "message": "Prochaine exécution: {{relative}}"
+  },
+  "overview_latest_counts": {
+    "message": "briefing: Inclus, Non lu, Nouveau"
+  },
+  "overview_latest_count_included": {
+    "message": "Inclus {{count}}"
+  },
+  "overview_latest_count_unread": {
+    "message": "Non lu {{count}}"
+  },
+  "overview_latest_count_new": {
+    "message": "Nouveau {{count}}"
+  },
+  "overview_latest_provenance_sources": {
+    "message": "{{count}} sources suivies"
+  },
+  "overview_latest_provenance_sources_zero": {
+    "message": "{{count}} sources suivies"
+  },
+  "overview_latest_provenance_sources_one": {
+    "message": "{{count}} source suivie"
+  },
+  "overview_latest_provenance_sources_two": {
+    "message": "{{count}} sources suivies"
+  },
+  "overview_latest_provenance_sources_few": {
+    "message": "{{count}} sources suivies"
+  },
+  "overview_latest_provenance_sources_many": {
+    "message": "{{count}} sources suivies"
+  },
+  "overview_latest_provenance_sources_other": {
+    "message": "{{count}} sources suivies"
+  },
+  "overview_latest_delivery_reports": {
+    "message": "Voir tous les rapports"
+  },
+  "overview_latest_delivery_retryAria": {
+    "message": "Réessayer {{adapter}}: {{name}}"
+  },
+  "overview_latest_delivery_retryUnknownAria": {
+    "message": "Résultat inconnu. Réessayer {{adapter}}: {{name}}"
+  },
+  "overview_latest_delivery_reviewRetry": {
+    "message": "Réessayer"
+  },
+  "overview_latest_delivery_unknownConfirmation": {
+    "message": "Le fournisseur n’a pas confirmé la livraison via {{adapter}}. Réessayer peut envoyer un doublon. Vérifiez la destination et continuez uniquement si ce risque est acceptable."
+  },
+  "overview_latest_playback_region": {
+    "message": "audio: {{name}}"
+  },
+  "overview_latest_playback_playAria": {
+    "message": "Ouvrir audio: {{name}}"
+  },
+  "overview_latest_playback_pauseAria": {
+    "message": "En attente audio: {{name}}"
+  },
+  "overview_latest_playback_resumeAria": {
+    "message": "Ouvrir audio: {{name}}"
+  },
+  "overview_latest_playback_seekAria": {
+    "message": "audio: {{name}}"
+  },
+  "overview_latest_playback_loading": {
+    "message": "Chargement audio"
+  },
+  "overview_latest_playback_error": {
+    "message": "audio échec. Ouvrir rapport / Régénérer audio."
+  },
+  "overview_latest_playback_play": {
+    "message": "Lire"
+  },
+  "overview_latest_playback_pause": {
+    "message": "Pause"
+  },
+  "overview_latest_playback_resume": {
+    "message": "Reprendre"
+  },
+  "overview_latest_actions_label": {
+    "message": "Dernier briefing"
+  },
+  "overview_latest_actions_openReport": {
+    "message": "Ouvrir {{report}}"
+  },
+  "overview_latest_actions_openReportAria": {
+    "message": "Ouvrir {{report}}: {{name}}"
+  },
+  "overview_latest_actions_regenerateAudio": {
+    "message": "Régénérer audio"
+  },
+  "overview_latest_actions_regenerateAudioAria": {
+    "message": "Régénérer {{style}} {{noun}} audio: {{name}}"
+  },
+  "overview_latest_actions_retry": {
+    "message": "Réessayer"
+  },
+  "overview_latest_actions_retrySaveAria": {
+    "message": "Réessayer enregistré rapport: {{name}}"
+  },
+  "overview_latest_actions_retryTextAria": {
+    "message": "Réessayer rapport: {{name}}"
+  },
+  "overview_latest_actions_retryStage": {
+    "message": "Réessayer: {{stage}}"
+  },
+  "overview_latest_actions_inspect": {
+    "message": "Inspecter l’exécution"
+  },
+  "overview_latest_actions_inspectAria": {
+    "message": "Inspecter l’exécution {{runId}}: {{name}}"
+  },
+  "overview_latest_actions_viewReports": {
+    "message": "Voir tous les rapports"
+  },
+  "overview_latest_actions_testNow": {
+    "message": "Tester maintenant"
+  },
+  "overview_latest_announcements_blockingFailure": {
+    "message": "{{name}} échec. Inspecter l’exécution {{runId}}."
+  },
+  "overview_latest_announcements_delivered": {
+    "message": "{{name}}: livré."
+  },
+  "overview_latest_announcements_nextRunUpdated": {
+    "message": "{{name}}: prochaine exécution."
+  },
+  "overview_latest_announcements_partialAudioFailure": {
+    "message": "{{name}}: notes d’émission prêt, audio échec."
+  },
+  "overview_latest_announcements_readyText": {
+    "message": "{{name}}: rapport prêt."
+  },
+  "overview_latest_announcements_readyWithAudio": {
+    "message": "{{name}}: Prêt. audio / notes d’émission."
+  },
+  "overview_latest_announcements_stageProgress": {
+    "message": "{{name}}: {{stage}} {{status}}."
+  },
+  "overview_latest_announcements_testQueued": {
+    "message": "Tester maintenant: en file."
+  },
+  "overview_latest_retryError": {
+    "message": "Réessayer échec. Inspecter l’exécution."
+  },
+  "overview_latest_regenerateError": {
+    "message": "Régénérer audio: échec."
+  },
+  "overview_latest_testError": {
+    "message": "Tester maintenant: échec."
+  },
+  "overview_latest_status_ready": {
+    "message": "Prêt"
+  },
+  "overview_latest_status_failed": {
+    "message": "Échec"
+  },
+  "overview_latest_status_saved": {
+    "message": "Enregistré"
+  },
+  "overview_latest_status_waiting": {
+    "message": "En attente"
+  },
+  "overview_latest_status_running": {
+    "message": "En cours"
+  },
+  "overview_latest_status_queued": {
+    "message": "En file"
+  },
+  "overview_latest_status_notStarted": {
+    "message": "Non démarré"
+  },
+  "overview_latest_status_notSelected": {
+    "message": "Non sélectionné"
+  },
+  "overview_latest_status_cancelled": {
+    "message": "Annulé"
+  },
+  "overview_latest_status_delivered": {
+    "message": "Livré"
+  },
+  "overview_latest_status_unknown": {
+    "message": "Résultat inconnu"
+  },
+  "overview_latest_status_sending": {
+    "message": "Envoi"
+  },
+  "overview_latest_stages_renderText": {
+    "message": "rapport"
+  },
+  "overview_latest_stages_persistText": {
+    "message": "Enregistré rapport"
+  },
+  "overview_latest_stages_composeScript": {
+    "message": "audio rapport"
+  },
+  "overview_latest_stages_persistScript": {
+    "message": "Enregistré audio rapport"
+  },
+  "overview_latest_stages_generateAudio": {
+    "message": "audio"
+  },
+  "overview_latest_stages_persistAudio": {
+    "message": "Enregistré audio"
+  },
+  "overview_latest_nouns_briefing": {
+    "message": "briefing"
+  },
+  "overview_latest_nouns_episode": {
+    "message": "épisode"
+  },
+  "overview_latest_nouns_report": {
+    "message": "rapport"
+  },
+  "overview_latest_nouns_showNotes": {
+    "message": "notes d’émission"
+  },
+  "outputs_openInNewTabAria": {
+    "message": "Ouvrir dans un nouvel onglet: {{title}}"
+  },
+  "outputs_chatAboutAria": {
+    "message": "Discuter de ceci: {{title}}"
+  },
+  "outputs_downloadAria": {
+    "message": "Télécharger: {{title}}"
   }
 }

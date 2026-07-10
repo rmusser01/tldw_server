@@ -320,6 +320,124 @@
         "emailInvalid": "Ange minst en giltig e-postadress."
       },
       "validationError": "Granska de markerade fälten innan du fortsätter."
+    },
+    "latest": {
+      "heading": {
+        "briefing": "Senaste briefing",
+        "episode": "Senaste avsnitt"
+      },
+      "empty": {
+        "scheduled": "briefing: {{date}}.",
+        "manual": "Inte startad. Testa nu."
+      },
+      "generatedAt": "Skapad {{date}}",
+      "untitled": "briefing {{runId}}",
+      "artifacts": "rapport / ljud",
+      "audio": "ljud",
+      "audioFailed": "ljud misslyckades",
+      "ready": "Klar",
+      "saved": "Sparad",
+      "waiting": "Väntar",
+      "script": "ljud rapport",
+      "stageWithStatus": "{{stage}}: {{status}}",
+      "noUpdates": "Nytt: 0. Sparad {{noun}}.",
+      "nextRun": "Nästa körning: {{date}}",
+      "nextRunRelative": "Nästa körning: {{relative}}",
+      "counts": "briefing: Inkluderat, Oläst, Nytt",
+      "count": {
+        "included": "Inkluderat {{count}}",
+        "unread": "Oläst {{count}}",
+        "new": "Nytt {{count}}"
+      },
+      "provenance": {
+        "sources": "{{count}} spårade källor",
+        "sources_zero": "{{count}} spårade källor",
+        "sources_one": "{{count}} spårad källa",
+        "sources_two": "{{count}} spårade källor",
+        "sources_few": "{{count}} spårade källor",
+        "sources_many": "{{count}} spårade källor",
+        "sources_other": "{{count}} spårade källor"
+      },
+      "delivery": {
+        "reports": "Visa alla rapporter",
+        "retryAria": "Försök igen {{adapter}}: {{name}}",
+        "retryUnknownAria": "Okänt resultat. Försök igen {{adapter}}: {{name}}",
+        "reviewRetry": "Försök igen",
+        "unknownConfirmation": "Leverantören bekräftade inte leverans via {{adapter}}. Ett nytt försök kan skicka en dubblett. Kontrollera målet och fortsätt bara om risken är acceptabel."
+      },
+      "playback": {
+        "region": "ljud: {{name}}",
+        "playAria": "Öppna ljud: {{name}}",
+        "pauseAria": "Väntar ljud: {{name}}",
+        "resumeAria": "Öppna ljud: {{name}}",
+        "seekAria": "ljud: {{name}}",
+        "loading": "Laddar ljud",
+        "error": "ljud misslyckades. Öppna rapport / Återskapa ljud.",
+        "play": "Spela",
+        "pause": "Pausa",
+        "resume": "Fortsätt"
+      },
+      "actions": {
+        "label": "Senaste briefing",
+        "openReport": "Öppna {{report}}",
+        "openReportAria": "Öppna {{report}}: {{name}}",
+        "regenerateAudio": "Återskapa ljud",
+        "regenerateAudioAria": "Återskapa {{style}} {{noun}} ljud: {{name}}",
+        "retry": "Försök igen",
+        "retrySaveAria": "Försök igen sparad rapport: {{name}}",
+        "retryTextAria": "Försök igen rapport: {{name}}",
+        "retryStage": "Försök igen: {{stage}}",
+        "inspect": "Granska körning",
+        "inspectAria": "Granska körning {{runId}}: {{name}}",
+        "viewReports": "Visa alla rapporter",
+        "testNow": "Testa nu"
+      },
+      "announcements": {
+        "blockingFailure": "{{name}} misslyckades. Granska körning {{runId}}.",
+        "delivered": "{{name}}: levererad.",
+        "nextRunUpdated": "{{name}}: nästa körning.",
+        "partialAudioFailure": "{{name}}: programanteckningar klar, ljud misslyckades.",
+        "readyText": "{{name}}: rapport klar.",
+        "readyWithAudio": "{{name}}: Klar. ljud / programanteckningar.",
+        "stageProgress": "{{name}}: {{stage}} {{status}}.",
+        "testQueued": "Testa nu: i kö."
+      },
+      "retryError": "Försök igen misslyckades. Granska körning.",
+      "regenerateError": "Återskapa ljud: misslyckades.",
+      "testError": "Testa nu: misslyckades.",
+      "status": {
+        "ready": "Klar",
+        "failed": "Misslyckades",
+        "saved": "Sparad",
+        "waiting": "Väntar",
+        "running": "Körs",
+        "queued": "I kö",
+        "notStarted": "Inte startad",
+        "notSelected": "Inte vald",
+        "cancelled": "Avbruten",
+        "delivered": "Levererad",
+        "unknown": "Okänt resultat",
+        "sending": "Skickar"
+      },
+      "stages": {
+        "renderText": "rapport",
+        "persistText": "Sparad rapport",
+        "composeScript": "ljud rapport",
+        "persistScript": "Sparad ljud rapport",
+        "generateAudio": "ljud",
+        "persistAudio": "Sparad ljud"
+      },
+      "nouns": {
+        "briefing": "briefing",
+        "episode": "avsnitt",
+        "report": "rapport",
+        "showNotes": "programanteckningar"
+      }
     }
+  },
+  "outputs": {
+    "openInNewTabAria": "Öppna i ny flik: {{title}}",
+    "chatAboutAria": "Chatta om detta: {{title}}",
+    "downloadAria": "Hämta: {{title}}"
   }
 }

@@ -423,7 +423,7 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
       placement="right"
       onClose={onClose}
       open={open}
-      styles={{ wrapper: { width: 700 } }}
+      size="min(100vw, 48rem)"
       extra={
         <div className="flex items-center gap-2">
           {output?.format === "html" && (
@@ -433,6 +433,10 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
                 icon={<ExternalLink className="h-4 w-4" />}
                 onClick={handleOpenInNewTab}
                 disabled={!content}
+                className="min-h-11 min-w-11"
+                aria-label={t("watchlists:outputs.openInNewTabAria", "Open {{title}} in new tab", {
+                  title: output?.title || t("watchlists:outputs.preview", "Output Preview")
+                })}
               />
             </Tooltip>
           )}
@@ -443,6 +447,10 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
               onClick={handleChatAboutOutput}
               disabled={!content}
               data-testid="watchlists-output-chat-about"
+              className="min-h-11 min-w-11"
+              aria-label={t("watchlists:outputs.chatAboutAria", "Chat about {{title}}", {
+                title: output?.title || t("watchlists:outputs.preview", "Output Preview")
+              })}
             />
           </Tooltip>
           <Tooltip title={t("watchlists:outputs.download", "Download")}>
@@ -450,6 +458,10 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
               type="text"
               icon={<Download className="h-4 w-4" />}
               onClick={handleDownload}
+              className="min-h-11 min-w-11"
+              aria-label={t("watchlists:outputs.downloadAria", "Download {{title}}", {
+                title: output?.title || t("watchlists:outputs.preview", "Output Preview")
+              })}
             />
           </Tooltip>
         </div>

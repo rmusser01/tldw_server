@@ -1089,6 +1089,7 @@ class WatchlistBriefingProjection(BaseModel):
     editorial: dict[str, Any] = Field(default_factory=dict)
     selection: dict[str, int] = Field(default_factory=dict)
     next_run_at: str | None = None
+    timezone: str = "UTC"
     recovery: dict[str, bool] = Field(default_factory=dict)
 
 

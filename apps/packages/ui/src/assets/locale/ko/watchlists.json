@@ -320,6 +320,124 @@
         "emailInvalid": "유효한 이메일 주소를 하나 이상 입력하세요."
       },
       "validationError": "계속하기 전에 강조 표시된 필드를 확인하세요."
+    },
+    "latest": {
+      "heading": {
+        "briefing": "최신 브리핑",
+        "episode": "최신 에피소드"
+      },
+      "empty": {
+        "scheduled": "브리핑: {{date}}.",
+        "manual": "시작 안 함. 지금 테스트."
+      },
+      "generatedAt": "생성됨 {{date}}",
+      "untitled": "브리핑 {{runId}}",
+      "artifacts": "보고서 / 오디오",
+      "audio": "오디오",
+      "audioFailed": "오디오 실패",
+      "ready": "준비됨",
+      "saved": "저장됨",
+      "waiting": "대기 중",
+      "script": "오디오 보고서",
+      "stageWithStatus": "{{stage}}: {{status}}",
+      "noUpdates": "신규: 0. 저장됨 {{noun}}.",
+      "nextRun": "다음 실행: {{date}}",
+      "nextRunRelative": "다음 실행: {{relative}}",
+      "counts": "브리핑: 포함, 읽지 않음, 신규",
+      "count": {
+        "included": "포함 {{count}}",
+        "unread": "읽지 않음 {{count}}",
+        "new": "신규 {{count}}"
+      },
+      "provenance": {
+        "sources": "{{count}} 추적 소스",
+        "sources_zero": "{{count}} 추적 소스",
+        "sources_one": "{{count}} 추적 소스",
+        "sources_two": "{{count}} 추적 소스",
+        "sources_few": "{{count}} 추적 소스",
+        "sources_many": "{{count}} 추적 소스",
+        "sources_other": "{{count}} 추적 소스"
+      },
+      "delivery": {
+        "reports": "모든 보고서 보기",
+        "retryAria": "다시 시도 {{adapter}}: {{name}}",
+        "retryUnknownAria": "결과 알 수 없음. 다시 시도 {{adapter}}: {{name}}",
+        "reviewRetry": "다시 시도",
+        "unknownConfirmation": "제공자가 {{adapter}} 전달을 확인하지 않았습니다. 다시 시도하면 중복 전송될 수 있습니다. 대상을 검토하고 이 위험을 감수할 수 있을 때만 계속하세요."
+      },
+      "playback": {
+        "region": "오디오: {{name}}",
+        "playAria": "열기 오디오: {{name}}",
+        "pauseAria": "대기 중 오디오: {{name}}",
+        "resumeAria": "열기 오디오: {{name}}",
+        "seekAria": "오디오: {{name}}",
+        "loading": "오디오 로드 중",
+        "error": "오디오 실패. 열기 보고서 / 재생성 오디오.",
+        "play": "재생",
+        "pause": "일시 중지",
+        "resume": "계속"
+      },
+      "actions": {
+        "label": "최신 브리핑",
+        "openReport": "열기 {{report}}",
+        "openReportAria": "열기 {{report}}: {{name}}",
+        "regenerateAudio": "재생성 오디오",
+        "regenerateAudioAria": "재생성 {{style}} {{noun}} 오디오: {{name}}",
+        "retry": "다시 시도",
+        "retrySaveAria": "다시 시도 저장됨 보고서: {{name}}",
+        "retryTextAria": "다시 시도 보고서: {{name}}",
+        "retryStage": "다시 시도: {{stage}}",
+        "inspect": "실행 검사",
+        "inspectAria": "실행 검사 {{runId}}: {{name}}",
+        "viewReports": "모든 보고서 보기",
+        "testNow": "지금 테스트"
+      },
+      "announcements": {
+        "blockingFailure": "{{name}} 실패. 실행 검사 {{runId}}.",
+        "delivered": "{{name}}: 전달됨.",
+        "nextRunUpdated": "{{name}}: 다음 실행.",
+        "partialAudioFailure": "{{name}}: 쇼 노트 준비됨, 오디오 실패.",
+        "readyText": "{{name}}: 보고서 준비됨.",
+        "readyWithAudio": "{{name}}: 준비됨. 오디오 / 쇼 노트.",
+        "stageProgress": "{{name}}: {{stage}} {{status}}.",
+        "testQueued": "지금 테스트: 대기열."
+      },
+      "retryError": "다시 시도 실패. 실행 검사.",
+      "regenerateError": "재생성 오디오: 실패.",
+      "testError": "지금 테스트: 실패.",
+      "status": {
+        "ready": "준비됨",
+        "failed": "실패",
+        "saved": "저장됨",
+        "waiting": "대기 중",
+        "running": "실행 중",
+        "queued": "대기열",
+        "notStarted": "시작 안 함",
+        "notSelected": "선택 안 함",
+        "cancelled": "취소됨",
+        "delivered": "전달됨",
+        "unknown": "결과 알 수 없음",
+        "sending": "전송 중"
+      },
+      "stages": {
+        "renderText": "보고서",
+        "persistText": "저장됨 보고서",
+        "composeScript": "오디오 보고서",
+        "persistScript": "저장됨 오디오 보고서",
+        "generateAudio": "오디오",
+        "persistAudio": "저장됨 오디오"
+      },
+      "nouns": {
+        "briefing": "브리핑",
+        "episode": "에피소드",
+        "report": "보고서",
+        "showNotes": "쇼 노트"
+      }
     }
+  },
+  "outputs": {
+    "openInNewTabAria": "새 탭에서 열기: {{title}}",
+    "chatAboutAria": "이 항목에 대해 채팅: {{title}}",
+    "downloadAria": "다운로드: {{title}}"
   }
 }

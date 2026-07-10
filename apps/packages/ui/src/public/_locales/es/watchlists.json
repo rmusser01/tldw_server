@@ -694,5 +694,281 @@
   },
   "overview_pipelineSetup_test_cancelledWithCode": {
     "message": "{{stage}} se canceló ({{code}}). Tu borrador está guardado."
+  },
+  "overview_latest_heading_briefing": {
+    "message": "Último resumen"
+  },
+  "overview_latest_heading_episode": {
+    "message": "Último episodio"
+  },
+  "overview_latest_empty_scheduled": {
+    "message": "resumen: {{date}}."
+  },
+  "overview_latest_empty_manual": {
+    "message": "No iniciado. Probar ahora."
+  },
+  "overview_latest_generatedAt": {
+    "message": "Generado {{date}}"
+  },
+  "overview_latest_untitled": {
+    "message": "resumen {{runId}}"
+  },
+  "overview_latest_artifacts": {
+    "message": "informe / audio"
+  },
+  "overview_latest_audio": {
+    "message": "audio"
+  },
+  "overview_latest_audioFailed": {
+    "message": "audio falló"
+  },
+  "overview_latest_ready": {
+    "message": "Listo"
+  },
+  "overview_latest_saved": {
+    "message": "Guardado"
+  },
+  "overview_latest_waiting": {
+    "message": "En espera"
+  },
+  "overview_latest_script": {
+    "message": "audio informe"
+  },
+  "overview_latest_stageWithStatus": {
+    "message": "{{stage}}: {{status}}"
+  },
+  "overview_latest_noUpdates": {
+    "message": "Nuevos: 0. Guardado {{noun}}."
+  },
+  "overview_latest_nextRun": {
+    "message": "Próxima ejecución: {{date}}"
+  },
+  "overview_latest_nextRunRelative": {
+    "message": "Próxima ejecución: {{relative}}"
+  },
+  "overview_latest_counts": {
+    "message": "resumen: Incluidos, Sin leer, Nuevos"
+  },
+  "overview_latest_count_included": {
+    "message": "Incluidos {{count}}"
+  },
+  "overview_latest_count_unread": {
+    "message": "Sin leer {{count}}"
+  },
+  "overview_latest_count_new": {
+    "message": "Nuevos {{count}}"
+  },
+  "overview_latest_provenance_sources": {
+    "message": "{{count}} fuentes seguidas"
+  },
+  "overview_latest_provenance_sources_zero": {
+    "message": "{{count}} fuentes seguidas"
+  },
+  "overview_latest_provenance_sources_one": {
+    "message": "{{count}} fuente seguida"
+  },
+  "overview_latest_provenance_sources_two": {
+    "message": "{{count}} fuentes seguidas"
+  },
+  "overview_latest_provenance_sources_few": {
+    "message": "{{count}} fuentes seguidas"
+  },
+  "overview_latest_provenance_sources_many": {
+    "message": "{{count}} fuentes seguidas"
+  },
+  "overview_latest_provenance_sources_other": {
+    "message": "{{count}} fuentes seguidas"
+  },
+  "overview_latest_delivery_reports": {
+    "message": "Ver todos los informes"
+  },
+  "overview_latest_delivery_retryAria": {
+    "message": "Reintentar {{adapter}}: {{name}}"
+  },
+  "overview_latest_delivery_retryUnknownAria": {
+    "message": "Resultado desconocido. Reintentar {{adapter}}: {{name}}"
+  },
+  "overview_latest_delivery_reviewRetry": {
+    "message": "Reintentar"
+  },
+  "overview_latest_delivery_unknownConfirmation": {
+    "message": "El proveedor no confirmó la entrega por {{adapter}}. Reintentar puede enviar un duplicado. Revisa el destino y continúa solo si aceptas ese riesgo."
+  },
+  "overview_latest_playback_region": {
+    "message": "audio: {{name}}"
+  },
+  "overview_latest_playback_playAria": {
+    "message": "Abrir audio: {{name}}"
+  },
+  "overview_latest_playback_pauseAria": {
+    "message": "En espera audio: {{name}}"
+  },
+  "overview_latest_playback_resumeAria": {
+    "message": "Abrir audio: {{name}}"
+  },
+  "overview_latest_playback_seekAria": {
+    "message": "audio: {{name}}"
+  },
+  "overview_latest_playback_loading": {
+    "message": "Cargando audio"
+  },
+  "overview_latest_playback_error": {
+    "message": "audio falló. Abrir informe / Regenerar audio."
+  },
+  "overview_latest_playback_play": {
+    "message": "Reproducir"
+  },
+  "overview_latest_playback_pause": {
+    "message": "Pausar"
+  },
+  "overview_latest_playback_resume": {
+    "message": "Reanudar"
+  },
+  "overview_latest_actions_label": {
+    "message": "Último resumen"
+  },
+  "overview_latest_actions_openReport": {
+    "message": "Abrir {{report}}"
+  },
+  "overview_latest_actions_openReportAria": {
+    "message": "Abrir {{report}}: {{name}}"
+  },
+  "overview_latest_actions_regenerateAudio": {
+    "message": "Regenerar audio"
+  },
+  "overview_latest_actions_regenerateAudioAria": {
+    "message": "Regenerar {{style}} {{noun}} audio: {{name}}"
+  },
+  "overview_latest_actions_retry": {
+    "message": "Reintentar"
+  },
+  "overview_latest_actions_retrySaveAria": {
+    "message": "Reintentar guardado informe: {{name}}"
+  },
+  "overview_latest_actions_retryTextAria": {
+    "message": "Reintentar informe: {{name}}"
+  },
+  "overview_latest_actions_retryStage": {
+    "message": "Reintentar: {{stage}}"
+  },
+  "overview_latest_actions_inspect": {
+    "message": "Inspeccionar ejecución"
+  },
+  "overview_latest_actions_inspectAria": {
+    "message": "Inspeccionar ejecución {{runId}}: {{name}}"
+  },
+  "overview_latest_actions_viewReports": {
+    "message": "Ver todos los informes"
+  },
+  "overview_latest_actions_testNow": {
+    "message": "Probar ahora"
+  },
+  "overview_latest_announcements_blockingFailure": {
+    "message": "{{name}} falló. Inspeccionar ejecución {{runId}}."
+  },
+  "overview_latest_announcements_delivered": {
+    "message": "{{name}}: entregado."
+  },
+  "overview_latest_announcements_nextRunUpdated": {
+    "message": "{{name}}: próxima ejecución."
+  },
+  "overview_latest_announcements_partialAudioFailure": {
+    "message": "{{name}}: notas del programa listo, audio falló."
+  },
+  "overview_latest_announcements_readyText": {
+    "message": "{{name}}: informe listo."
+  },
+  "overview_latest_announcements_readyWithAudio": {
+    "message": "{{name}}: Listo. audio / notas del programa."
+  },
+  "overview_latest_announcements_stageProgress": {
+    "message": "{{name}}: {{stage}} {{status}}."
+  },
+  "overview_latest_announcements_testQueued": {
+    "message": "Probar ahora: en cola."
+  },
+  "overview_latest_retryError": {
+    "message": "Reintentar falló. Inspeccionar ejecución."
+  },
+  "overview_latest_regenerateError": {
+    "message": "Regenerar audio: falló."
+  },
+  "overview_latest_testError": {
+    "message": "Probar ahora: falló."
+  },
+  "overview_latest_status_ready": {
+    "message": "Listo"
+  },
+  "overview_latest_status_failed": {
+    "message": "Falló"
+  },
+  "overview_latest_status_saved": {
+    "message": "Guardado"
+  },
+  "overview_latest_status_waiting": {
+    "message": "En espera"
+  },
+  "overview_latest_status_running": {
+    "message": "En ejecución"
+  },
+  "overview_latest_status_queued": {
+    "message": "En cola"
+  },
+  "overview_latest_status_notStarted": {
+    "message": "No iniciado"
+  },
+  "overview_latest_status_notSelected": {
+    "message": "No seleccionado"
+  },
+  "overview_latest_status_cancelled": {
+    "message": "Cancelado"
+  },
+  "overview_latest_status_delivered": {
+    "message": "Entregado"
+  },
+  "overview_latest_status_unknown": {
+    "message": "Resultado desconocido"
+  },
+  "overview_latest_status_sending": {
+    "message": "Enviando"
+  },
+  "overview_latest_stages_renderText": {
+    "message": "informe"
+  },
+  "overview_latest_stages_persistText": {
+    "message": "Guardado informe"
+  },
+  "overview_latest_stages_composeScript": {
+    "message": "audio informe"
+  },
+  "overview_latest_stages_persistScript": {
+    "message": "Guardado audio informe"
+  },
+  "overview_latest_stages_generateAudio": {
+    "message": "audio"
+  },
+  "overview_latest_stages_persistAudio": {
+    "message": "Guardado audio"
+  },
+  "overview_latest_nouns_briefing": {
+    "message": "resumen"
+  },
+  "overview_latest_nouns_episode": {
+    "message": "episodio"
+  },
+  "overview_latest_nouns_report": {
+    "message": "informe"
+  },
+  "overview_latest_nouns_showNotes": {
+    "message": "notas del programa"
+  },
+  "outputs_openInNewTabAria": {
+    "message": "Abrir en una pestaña nueva: {{title}}"
+  },
+  "outputs_chatAboutAria": {
+    "message": "Conversar sobre esto: {{title}}"
+  },
+  "outputs_downloadAria": {
+    "message": "Descargar: {{title}}"
   }
 }

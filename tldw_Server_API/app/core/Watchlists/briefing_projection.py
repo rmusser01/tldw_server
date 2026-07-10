@@ -194,6 +194,14 @@ def build_briefing_projection(
     delivery_stages = [stage for name, stage in stages.items() if name.startswith("deliver:")]
     delivery_status = str(occurrence.delivery_status)
     job = watchlists_db.get_job(int(occurrence.job_id))
+    editorial = dict(contract.get("editorial") or {})
+    audio_contract = _json_object(contract.get("audio"))
+    text_contract = _json_object(contract.get("text"))
+    if isinstance(audio_contract.get("cast"), Mapping):
+        editorial["cast"] = dict(audio_contract["cast"])
+    if audio_contract.get("target_minutes") is not None:
+        editorial["target_minutes"] = audio_contract["target_minutes"]
+    editorial["show_notes"] = bool(text_contract.get("show_notes"))
     return {
         "occurrence_id": int(occurrence.id),
         "run_id": int(occurrence.run_id),
@@ -203,13 +211,14 @@ def build_briefing_projection(
         "stages": stages,
         "output": output,
         "audio": dict(audio) if audio is not None else None,
-        "editorial": dict(contract.get("editorial") or {}),
+        "editorial": editorial,
         "selection": {
             "candidate_count": candidate_count,
             "included_count": int(occurrence.selected_count or 0),
             "omitted_count": int(occurrence.omitted_count or 0),
         },
         "next_run_at": getattr(job, "next_run_at", None),
+        "timezone": str(getattr(job, "schedule_timezone", None) or "UTC"),
         "recovery": {
             "can_open_report": output is not None,
             "can_retry_text": any(

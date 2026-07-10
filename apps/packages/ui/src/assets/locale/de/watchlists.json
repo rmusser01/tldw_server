@@ -320,6 +320,124 @@
         "emailInvalid": "Geben Sie mindestens eine gültige E-Mail-Adresse ein."
       },
       "validationError": "Prüfen Sie die markierten Felder, bevor Sie fortfahren."
+    },
+    "latest": {
+      "heading": {
+        "briefing": "Neueste Übersicht",
+        "episode": "Neueste Episode"
+      },
+      "empty": {
+        "scheduled": "Übersicht: {{date}}.",
+        "manual": "Nicht gestartet. Jetzt testen."
+      },
+      "generatedAt": "Erstellt {{date}}",
+      "untitled": "Übersicht {{runId}}",
+      "artifacts": "Bericht / Audio",
+      "audio": "Audio",
+      "audioFailed": "Audio fehlgeschlagen",
+      "ready": "Bereit",
+      "saved": "Gespeichert",
+      "waiting": "Wartet",
+      "script": "Audio Bericht",
+      "stageWithStatus": "{{stage}}: {{status}}",
+      "noUpdates": "Neu: 0. Gespeichert {{noun}}.",
+      "nextRun": "Nächster Lauf: {{date}}",
+      "nextRunRelative": "Nächster Lauf: {{relative}}",
+      "counts": "Übersicht: Enthalten, Ungelesen, Neu",
+      "count": {
+        "included": "Enthalten {{count}}",
+        "unread": "Ungelesen {{count}}",
+        "new": "Neu {{count}}"
+      },
+      "provenance": {
+        "sources": "{{count}} verfolgte Quellen",
+        "sources_zero": "{{count}} verfolgte Quellen",
+        "sources_one": "{{count}} verfolgte Quelle",
+        "sources_two": "{{count}} verfolgte Quellen",
+        "sources_few": "{{count}} verfolgte Quellen",
+        "sources_many": "{{count}} verfolgte Quellen",
+        "sources_other": "{{count}} verfolgte Quellen"
+      },
+      "delivery": {
+        "reports": "Alle Berichte anzeigen",
+        "retryAria": "Erneut versuchen {{adapter}}: {{name}}",
+        "retryUnknownAria": "Ergebnis unbekannt. Erneut versuchen {{adapter}}: {{name}}",
+        "reviewRetry": "Erneut versuchen",
+        "unknownConfirmation": "Der Anbieter hat die Zustellung über {{adapter}} nicht bestätigt. Ein erneuter Versuch kann ein Duplikat senden. Prüfen Sie das Ziel und fahren Sie nur fort, wenn dieses Risiko vertretbar ist."
+      },
+      "playback": {
+        "region": "Audio: {{name}}",
+        "playAria": "Öffnen Audio: {{name}}",
+        "pauseAria": "Wartet Audio: {{name}}",
+        "resumeAria": "Öffnen Audio: {{name}}",
+        "seekAria": "Audio: {{name}}",
+        "loading": "Audio wird geladen",
+        "error": "Audio fehlgeschlagen. Öffnen Bericht / Neu erzeugen Audio.",
+        "play": "Abspielen",
+        "pause": "Pause",
+        "resume": "Fortsetzen"
+      },
+      "actions": {
+        "label": "Neueste Übersicht",
+        "openReport": "Öffnen {{report}}",
+        "openReportAria": "Öffnen {{report}}: {{name}}",
+        "regenerateAudio": "Neu erzeugen Audio",
+        "regenerateAudioAria": "Neu erzeugen {{style}} {{noun}} Audio: {{name}}",
+        "retry": "Erneut versuchen",
+        "retrySaveAria": "Erneut versuchen gespeichert Bericht: {{name}}",
+        "retryTextAria": "Erneut versuchen Bericht: {{name}}",
+        "retryStage": "Erneut versuchen: {{stage}}",
+        "inspect": "Lauf prüfen",
+        "inspectAria": "Lauf prüfen {{runId}}: {{name}}",
+        "viewReports": "Alle Berichte anzeigen",
+        "testNow": "Jetzt testen"
+      },
+      "announcements": {
+        "blockingFailure": "{{name}} fehlgeschlagen. Lauf prüfen {{runId}}.",
+        "delivered": "{{name}}: zugestellt.",
+        "nextRunUpdated": "{{name}}: nächster lauf.",
+        "partialAudioFailure": "{{name}}: Shownotizen bereit, Audio fehlgeschlagen.",
+        "readyText": "{{name}}: Bericht bereit.",
+        "readyWithAudio": "{{name}}: Bereit. Audio / Shownotizen.",
+        "stageProgress": "{{name}}: {{stage}} {{status}}.",
+        "testQueued": "Jetzt testen: eingereiht."
+      },
+      "retryError": "Erneut versuchen fehlgeschlagen. Lauf prüfen.",
+      "regenerateError": "Neu erzeugen Audio: fehlgeschlagen.",
+      "testError": "Jetzt testen: fehlgeschlagen.",
+      "status": {
+        "ready": "Bereit",
+        "failed": "Fehlgeschlagen",
+        "saved": "Gespeichert",
+        "waiting": "Wartet",
+        "running": "Läuft",
+        "queued": "Eingereiht",
+        "notStarted": "Nicht gestartet",
+        "notSelected": "Nicht ausgewählt",
+        "cancelled": "Abgebrochen",
+        "delivered": "Zugestellt",
+        "unknown": "Ergebnis unbekannt",
+        "sending": "Wird gesendet"
+      },
+      "stages": {
+        "renderText": "Bericht",
+        "persistText": "Gespeichert Bericht",
+        "composeScript": "Audio Bericht",
+        "persistScript": "Gespeichert Audio Bericht",
+        "generateAudio": "Audio",
+        "persistAudio": "Gespeichert Audio"
+      },
+      "nouns": {
+        "briefing": "Übersicht",
+        "episode": "Episode",
+        "report": "Bericht",
+        "showNotes": "Shownotizen"
+      }
     }
+  },
+  "outputs": {
+    "openInNewTabAria": "In neuem Tab öffnen: {{title}}",
+    "chatAboutAria": "Darüber chatten: {{title}}",
+    "downloadAria": "Herunterladen: {{title}}"
   }
 }

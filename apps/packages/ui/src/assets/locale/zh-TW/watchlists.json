@@ -320,6 +320,124 @@
         "emailInvalid": "請輸入至少一個有效的電子郵件地址。"
       },
       "validationError": "請檢查醒目顯示的欄位再繼續。"
+    },
+    "latest": {
+      "heading": {
+        "briefing": "最新 簡報",
+        "episode": "最新 節目"
+      },
+      "empty": {
+        "scheduled": "簡報: {{date}}.",
+        "manual": "未開始. 立即測試."
+      },
+      "generatedAt": "產生於 {{date}}",
+      "untitled": "簡報 {{runId}}",
+      "artifacts": "報告 / 音訊",
+      "audio": "音訊",
+      "audioFailed": "音訊 失敗",
+      "ready": "就緒",
+      "saved": "已儲存",
+      "waiting": "等待中",
+      "script": "音訊 報告",
+      "stageWithStatus": "{{stage}}: {{status}}",
+      "noUpdates": "新增: 0. 已儲存 {{noun}}.",
+      "nextRun": "下次執行: {{date}}",
+      "nextRunRelative": "下次執行: {{relative}}",
+      "counts": "簡報: 已包含, 未讀, 新增",
+      "count": {
+        "included": "已包含 {{count}}",
+        "unread": "未讀 {{count}}",
+        "new": "新增 {{count}}"
+      },
+      "provenance": {
+        "sources": "{{count}} 個追蹤來源",
+        "sources_zero": "{{count}} 個追蹤來源",
+        "sources_one": "{{count}} 個追蹤來源",
+        "sources_two": "{{count}} 個追蹤來源",
+        "sources_few": "{{count}} 個追蹤來源",
+        "sources_many": "{{count}} 個追蹤來源",
+        "sources_other": "{{count}} 個追蹤來源"
+      },
+      "delivery": {
+        "reports": "查看所有報告",
+        "retryAria": "重試 {{adapter}}: {{name}}",
+        "retryUnknownAria": "結果未知. 重試 {{adapter}}: {{name}}",
+        "reviewRetry": "重試",
+        "unknownConfirmation": "提供者未確認透過 {{adapter}} 送達。重試可能會傳送重複內容。請檢查目的地，僅在可接受此風險時繼續。"
+      },
+      "playback": {
+        "region": "音訊: {{name}}",
+        "playAria": "開啟 音訊: {{name}}",
+        "pauseAria": "等待中 音訊: {{name}}",
+        "resumeAria": "開啟 音訊: {{name}}",
+        "seekAria": "音訊: {{name}}",
+        "loading": "正在載入音訊",
+        "error": "音訊 失敗. 開啟 報告 / 重新產生 音訊.",
+        "play": "播放",
+        "pause": "暫停",
+        "resume": "繼續"
+      },
+      "actions": {
+        "label": "最新 簡報",
+        "openReport": "開啟 {{report}}",
+        "openReportAria": "開啟 {{report}}: {{name}}",
+        "regenerateAudio": "重新產生 音訊",
+        "regenerateAudioAria": "重新產生 {{style}} {{noun}} 音訊: {{name}}",
+        "retry": "重試",
+        "retrySaveAria": "重試 已儲存 報告: {{name}}",
+        "retryTextAria": "重試 報告: {{name}}",
+        "retryStage": "重試: {{stage}}",
+        "inspect": "檢查執行",
+        "inspectAria": "檢查執行 {{runId}}: {{name}}",
+        "viewReports": "查看所有報告",
+        "testNow": "立即測試"
+      },
+      "announcements": {
+        "blockingFailure": "{{name}} 失敗. 檢查執行 {{runId}}.",
+        "delivered": "{{name}}: 已送達.",
+        "nextRunUpdated": "{{name}}: 下次執行.",
+        "partialAudioFailure": "{{name}}: 節目說明 就緒, 音訊 失敗.",
+        "readyText": "{{name}}: 報告 就緒.",
+        "readyWithAudio": "{{name}}: 就緒. 音訊 / 節目說明.",
+        "stageProgress": "{{name}}: {{stage}} {{status}}.",
+        "testQueued": "立即測試: 已排入佇列."
+      },
+      "retryError": "重試 失敗. 檢查執行.",
+      "regenerateError": "重新產生 音訊: 失敗.",
+      "testError": "立即測試: 失敗.",
+      "status": {
+        "ready": "就緒",
+        "failed": "失敗",
+        "saved": "已儲存",
+        "waiting": "等待中",
+        "running": "執行中",
+        "queued": "已排入佇列",
+        "notStarted": "未開始",
+        "notSelected": "未選取",
+        "cancelled": "已取消",
+        "delivered": "已送達",
+        "unknown": "結果未知",
+        "sending": "傳送中"
+      },
+      "stages": {
+        "renderText": "報告",
+        "persistText": "已儲存 報告",
+        "composeScript": "音訊 報告",
+        "persistScript": "已儲存 音訊 報告",
+        "generateAudio": "音訊",
+        "persistAudio": "已儲存 音訊"
+      },
+      "nouns": {
+        "briefing": "簡報",
+        "episode": "節目",
+        "report": "報告",
+        "showNotes": "節目說明"
+      }
     }
+  },
+  "outputs": {
+    "openInNewTabAria": "在新分頁中開啟: {{title}}",
+    "chatAboutAria": "討論此內容: {{title}}",
+    "downloadAria": "下載: {{title}}"
   }
 }

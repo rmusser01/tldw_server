@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   deleteWatchlistJobMock: vi.fn(),
   deleteWatchlistSourceMock: vi.fn(),
   triggerWatchlistRunMock: vi.fn(),
+  retryWatchlistBriefingStageMock: vi.fn(),
   createWatchlistOutputMock: vi.fn(),
   getWatchlistTemplateMock: vi.fn(),
   previewWatchlistTemplateMock: vi.fn(),
@@ -31,9 +32,8 @@ const mocks = vi.hoisted(() => ({
   selectedWatchlistId: 42 as number | null
 }))
 
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
-    t: (
+vi.mock("react-i18next", () => {
+  const t = (
       key: string,
       fallbackOrOptions?: string | { defaultValue?: string },
       maybeOptions?: Record<string, unknown>
@@ -50,8 +50,13 @@ vi.mock("react-i18next", () => ({
       }
       return key
     }
-  })
-}))
+  return {
+    useTranslation: () => ({
+      i18n: { resolvedLanguage: "en-US", language: "en-US", dir: () => "ltr" },
+      t
+    })
+  }
+})
 
 vi.mock("@/services/watchlists-overview", () => ({
   fetchWatchlistsOverviewData: (...args: unknown[]) => mocks.fetchOverviewMock(...args),
@@ -71,6 +76,8 @@ vi.mock("@/services/watchlists", () => ({
   deleteWatchlistJob: (...args: unknown[]) => mocks.deleteWatchlistJobMock(...args),
   deleteWatchlistSource: (...args: unknown[]) => mocks.deleteWatchlistSourceMock(...args),
   triggerWatchlistRun: (...args: unknown[]) => mocks.triggerWatchlistRunMock(...args),
+  retryWatchlistBriefingStage: (...args: unknown[]) =>
+    mocks.retryWatchlistBriefingStageMock(...args),
   createWatchlistOutput: (...args: unknown[]) => mocks.createWatchlistOutputMock(...args),
   getWatchlistTemplate: (...args: unknown[]) => mocks.getWatchlistTemplateMock(...args),
   previewWatchlistTemplate: (...args: unknown[]) => mocks.previewWatchlistTemplateMock(...args),
@@ -103,6 +110,7 @@ vi.mock("@/utils/dateFormatters", () => ({
 
 const createOverviewPayload = (overrides?: Partial<Record<string, unknown>>) => ({
   fetchedAt: "2026-05-15T12:00:00Z",
+  latestBriefing: null,
   sources: {
     total: 1,
     healthy: 1,
@@ -168,6 +176,7 @@ const createOverviewPayload = (overrides?: Partial<Record<string, unknown>>) => 
 describe("OverviewTab alert and health summary", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.fetchOverviewMock.mockReset()
     mocks.selectedWatchlistId = 42
     mocks.trackWatchlistsOnboardingTelemetryMock.mockResolvedValue(undefined)
     mocks.fetchWatchlistSourcesMock.mockResolvedValue({ items: [], total: 0 })
@@ -252,5 +261,89 @@ describe("OverviewTab alert and health summary", () => {
     } finally {
       consoleErrorSpy.mockRestore()
     }
+  })
+
+  it("mounts one polite and one assertive briefing region and deduplicates poll refreshes", async () => {
+    const running = {
+      occurrence_id: 31,
+      run_id: 123,
+      job_id: 7,
+      artifact_status: "running",
+      delivery_status: "waiting_for_artifacts",
+      stages: {
+        persist_text: { status: "ready" },
+        generate_audio: { status: "running" }
+      },
+      output: { id: 71, title: "Signal Check", created_at: "2026-07-10T19:20:00Z" },
+      audio: null,
+      editorial: { outcome_noun: "briefing", show_name: "Signal Check" },
+      selection: { candidate_count: 5, included_count: 3, omitted_count: 2 },
+      next_run_at: "2026-07-12T18:00:00-07:00",
+      timezone: "America/Los_Angeles",
+      recovery: { can_open_report: true }
+    }
+    const ready = {
+      ...running,
+      artifact_status: "ready",
+      delivery_status: "delivered",
+      stages: {
+        persist_text: { status: "ready" },
+        generate_audio: { status: "ready" },
+        persist_audio: { status: "ready" }
+      },
+      audio: { run_id: 123, status: "completed", download_url: "/audio/123" }
+    }
+    mocks.fetchOverviewMock
+      .mockResolvedValueOnce(createOverviewPayload({ latestBriefing: running }))
+      .mockResolvedValueOnce(createOverviewPayload({ latestBriefing: ready }))
+      .mockResolvedValueOnce(createOverviewPayload({ latestBriefing: ready }))
+
+    render(<OverviewTab />)
+    await screen.findByRole("heading", { name: "Latest briefing" })
+    expect(screen.getAllByTestId("watchlists-overview-live-polite")).toHaveLength(1)
+    expect(screen.getAllByTestId("watchlists-overview-live-assertive")).toHaveLength(1)
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }))
+    await waitFor(() => {
+      expect(screen.getByTestId("watchlists-overview-live-polite")).toHaveTextContent(
+        "Signal Check is ready. Audio and show notes are available."
+      )
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }))
+    await waitFor(() => expect(mocks.fetchOverviewMock).toHaveBeenCalledTimes(3))
+    expect(screen.getByTestId("watchlists-overview-live-assertive")).toHaveTextContent("")
+  })
+
+  it("opens the exact briefing report and suppresses AbortError refresh noise", async () => {
+    const projection = {
+      occurrence_id: 31,
+      run_id: 123,
+      job_id: 7,
+      artifact_status: "ready",
+      delivery_status: "delivered",
+      stages: { persist_text: { status: "ready" } },
+      output: { id: 71, title: "Signal Check", created_at: "2026-07-10T19:20:00Z" },
+      audio: null,
+      editorial: { outcome_noun: "briefing", show_name: "Signal Check" },
+      selection: { candidate_count: 5, included_count: 3, omitted_count: 2 },
+      next_run_at: null,
+      timezone: "UTC",
+      recovery: { can_open_report: true }
+    }
+    mocks.fetchOverviewMock
+      .mockResolvedValueOnce(createOverviewPayload({ latestBriefing: projection }))
+      .mockRejectedValueOnce(Object.assign(new Error("superseded"), { name: "AbortError" }))
+
+    render(<OverviewTab />)
+    fireEvent.click(await screen.findByRole("button", { name: "Open report for Signal Check" }))
+    expect(mocks.setActiveTabMock).toHaveBeenCalledWith("outputs")
+    expect(mocks.openOutputPreviewMock).toHaveBeenCalledWith(71)
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }))
+    await waitFor(() => expect(mocks.fetchOverviewMock).toHaveBeenCalledTimes(2))
+    expect(screen.queryByText("Failed to load overview")).not.toBeInTheDocument()
+    expect(screen.getByTestId("watchlists-overview-live-polite")).toHaveTextContent("")
+    expect(screen.getByTestId("watchlists-overview-live-assertive")).toHaveTextContent("")
   })
 })

@@ -685,5 +685,281 @@
   },
   "overview_pipelineSetup_test_cancelledWithCode": {
     "message": "{{stage}}이 취소되었습니다({{code}}). 초안이 저장되었습니다."
+  },
+  "overview_latest_heading_briefing": {
+    "message": "최신 브리핑"
+  },
+  "overview_latest_heading_episode": {
+    "message": "최신 에피소드"
+  },
+  "overview_latest_empty_scheduled": {
+    "message": "브리핑: {{date}}."
+  },
+  "overview_latest_empty_manual": {
+    "message": "시작 안 함. 지금 테스트."
+  },
+  "overview_latest_generatedAt": {
+    "message": "생성됨 {{date}}"
+  },
+  "overview_latest_untitled": {
+    "message": "브리핑 {{runId}}"
+  },
+  "overview_latest_artifacts": {
+    "message": "보고서 / 오디오"
+  },
+  "overview_latest_audio": {
+    "message": "오디오"
+  },
+  "overview_latest_audioFailed": {
+    "message": "오디오 실패"
+  },
+  "overview_latest_ready": {
+    "message": "준비됨"
+  },
+  "overview_latest_saved": {
+    "message": "저장됨"
+  },
+  "overview_latest_waiting": {
+    "message": "대기 중"
+  },
+  "overview_latest_script": {
+    "message": "오디오 보고서"
+  },
+  "overview_latest_stageWithStatus": {
+    "message": "{{stage}}: {{status}}"
+  },
+  "overview_latest_noUpdates": {
+    "message": "신규: 0. 저장됨 {{noun}}."
+  },
+  "overview_latest_nextRun": {
+    "message": "다음 실행: {{date}}"
+  },
+  "overview_latest_nextRunRelative": {
+    "message": "다음 실행: {{relative}}"
+  },
+  "overview_latest_counts": {
+    "message": "브리핑: 포함, 읽지 않음, 신규"
+  },
+  "overview_latest_count_included": {
+    "message": "포함 {{count}}"
+  },
+  "overview_latest_count_unread": {
+    "message": "읽지 않음 {{count}}"
+  },
+  "overview_latest_count_new": {
+    "message": "신규 {{count}}"
+  },
+  "overview_latest_provenance_sources": {
+    "message": "{{count}} 추적 소스"
+  },
+  "overview_latest_provenance_sources_zero": {
+    "message": "{{count}} 추적 소스"
+  },
+  "overview_latest_provenance_sources_one": {
+    "message": "{{count}} 추적 소스"
+  },
+  "overview_latest_provenance_sources_two": {
+    "message": "{{count}} 추적 소스"
+  },
+  "overview_latest_provenance_sources_few": {
+    "message": "{{count}} 추적 소스"
+  },
+  "overview_latest_provenance_sources_many": {
+    "message": "{{count}} 추적 소스"
+  },
+  "overview_latest_provenance_sources_other": {
+    "message": "{{count}} 추적 소스"
+  },
+  "overview_latest_delivery_reports": {
+    "message": "모든 보고서 보기"
+  },
+  "overview_latest_delivery_retryAria": {
+    "message": "다시 시도 {{adapter}}: {{name}}"
+  },
+  "overview_latest_delivery_retryUnknownAria": {
+    "message": "결과 알 수 없음. 다시 시도 {{adapter}}: {{name}}"
+  },
+  "overview_latest_delivery_reviewRetry": {
+    "message": "다시 시도"
+  },
+  "overview_latest_delivery_unknownConfirmation": {
+    "message": "제공자가 {{adapter}} 전달을 확인하지 않았습니다. 다시 시도하면 중복 전송될 수 있습니다. 대상을 검토하고 이 위험을 감수할 수 있을 때만 계속하세요."
+  },
+  "overview_latest_playback_region": {
+    "message": "오디오: {{name}}"
+  },
+  "overview_latest_playback_playAria": {
+    "message": "열기 오디오: {{name}}"
+  },
+  "overview_latest_playback_pauseAria": {
+    "message": "대기 중 오디오: {{name}}"
+  },
+  "overview_latest_playback_resumeAria": {
+    "message": "열기 오디오: {{name}}"
+  },
+  "overview_latest_playback_seekAria": {
+    "message": "오디오: {{name}}"
+  },
+  "overview_latest_playback_loading": {
+    "message": "오디오 로드 중"
+  },
+  "overview_latest_playback_error": {
+    "message": "오디오 실패. 열기 보고서 / 재생성 오디오."
+  },
+  "overview_latest_playback_play": {
+    "message": "재생"
+  },
+  "overview_latest_playback_pause": {
+    "message": "일시 중지"
+  },
+  "overview_latest_playback_resume": {
+    "message": "계속"
+  },
+  "overview_latest_actions_label": {
+    "message": "최신 브리핑"
+  },
+  "overview_latest_actions_openReport": {
+    "message": "열기 {{report}}"
+  },
+  "overview_latest_actions_openReportAria": {
+    "message": "열기 {{report}}: {{name}}"
+  },
+  "overview_latest_actions_regenerateAudio": {
+    "message": "재생성 오디오"
+  },
+  "overview_latest_actions_regenerateAudioAria": {
+    "message": "재생성 {{style}} {{noun}} 오디오: {{name}}"
+  },
+  "overview_latest_actions_retry": {
+    "message": "다시 시도"
+  },
+  "overview_latest_actions_retrySaveAria": {
+    "message": "다시 시도 저장됨 보고서: {{name}}"
+  },
+  "overview_latest_actions_retryTextAria": {
+    "message": "다시 시도 보고서: {{name}}"
+  },
+  "overview_latest_actions_retryStage": {
+    "message": "다시 시도: {{stage}}"
+  },
+  "overview_latest_actions_inspect": {
+    "message": "실행 검사"
+  },
+  "overview_latest_actions_inspectAria": {
+    "message": "실행 검사 {{runId}}: {{name}}"
+  },
+  "overview_latest_actions_viewReports": {
+    "message": "모든 보고서 보기"
+  },
+  "overview_latest_actions_testNow": {
+    "message": "지금 테스트"
+  },
+  "overview_latest_announcements_blockingFailure": {
+    "message": "{{name}} 실패. 실행 검사 {{runId}}."
+  },
+  "overview_latest_announcements_delivered": {
+    "message": "{{name}}: 전달됨."
+  },
+  "overview_latest_announcements_nextRunUpdated": {
+    "message": "{{name}}: 다음 실행."
+  },
+  "overview_latest_announcements_partialAudioFailure": {
+    "message": "{{name}}: 쇼 노트 준비됨, 오디오 실패."
+  },
+  "overview_latest_announcements_readyText": {
+    "message": "{{name}}: 보고서 준비됨."
+  },
+  "overview_latest_announcements_readyWithAudio": {
+    "message": "{{name}}: 준비됨. 오디오 / 쇼 노트."
+  },
+  "overview_latest_announcements_stageProgress": {
+    "message": "{{name}}: {{stage}} {{status}}."
+  },
+  "overview_latest_announcements_testQueued": {
+    "message": "지금 테스트: 대기열."
+  },
+  "overview_latest_retryError": {
+    "message": "다시 시도 실패. 실행 검사."
+  },
+  "overview_latest_regenerateError": {
+    "message": "재생성 오디오: 실패."
+  },
+  "overview_latest_testError": {
+    "message": "지금 테스트: 실패."
+  },
+  "overview_latest_status_ready": {
+    "message": "준비됨"
+  },
+  "overview_latest_status_failed": {
+    "message": "실패"
+  },
+  "overview_latest_status_saved": {
+    "message": "저장됨"
+  },
+  "overview_latest_status_waiting": {
+    "message": "대기 중"
+  },
+  "overview_latest_status_running": {
+    "message": "실행 중"
+  },
+  "overview_latest_status_queued": {
+    "message": "대기열"
+  },
+  "overview_latest_status_notStarted": {
+    "message": "시작 안 함"
+  },
+  "overview_latest_status_notSelected": {
+    "message": "선택 안 함"
+  },
+  "overview_latest_status_cancelled": {
+    "message": "취소됨"
+  },
+  "overview_latest_status_delivered": {
+    "message": "전달됨"
+  },
+  "overview_latest_status_unknown": {
+    "message": "결과 알 수 없음"
+  },
+  "overview_latest_status_sending": {
+    "message": "전송 중"
+  },
+  "overview_latest_stages_renderText": {
+    "message": "보고서"
+  },
+  "overview_latest_stages_persistText": {
+    "message": "저장됨 보고서"
+  },
+  "overview_latest_stages_composeScript": {
+    "message": "오디오 보고서"
+  },
+  "overview_latest_stages_persistScript": {
+    "message": "저장됨 오디오 보고서"
+  },
+  "overview_latest_stages_generateAudio": {
+    "message": "오디오"
+  },
+  "overview_latest_stages_persistAudio": {
+    "message": "저장됨 오디오"
+  },
+  "overview_latest_nouns_briefing": {
+    "message": "브리핑"
+  },
+  "overview_latest_nouns_episode": {
+    "message": "에피소드"
+  },
+  "overview_latest_nouns_report": {
+    "message": "보고서"
+  },
+  "overview_latest_nouns_showNotes": {
+    "message": "쇼 노트"
+  },
+  "outputs_openInNewTabAria": {
+    "message": "새 탭에서 열기: {{title}}"
+  },
+  "outputs_chatAboutAria": {
+    "message": "이 항목에 대해 채팅: {{title}}"
+  },
+  "outputs_downloadAria": {
+    "message": "다운로드: {{title}}"
   }
 }
