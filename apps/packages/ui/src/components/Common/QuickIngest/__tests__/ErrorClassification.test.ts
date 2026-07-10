@@ -48,6 +48,15 @@ describe("classifyError", () => {
       expect(result.retryable).toBe(false)
       expect(result.badgeLabel).toContain("Auth")
     })
+
+    it("returns configuration guidance before generic HTTP 400 handling", () => {
+      const result = classifyError("HTTP 400: tldw server not configured")
+
+      expect(result.classification).toBe("auth")
+      expect(result.retryable).toBe(false)
+      expect(result.badgeLabel).toContain("Config")
+      expect(result.userMessage).toContain("server is not configured")
+    })
   })
 
   // -------------------------------------------------------------------------

@@ -45,6 +45,15 @@ const AUTH_CATEGORY: ErrorCategory = {
   suggestion: "Check your API key or server configuration.",
 }
 
+const CONFIG_CATEGORY: ErrorCategory = {
+  classification: "auth",
+  retryable: false,
+  badgeLabel: "Config \u00b7 Check Server",
+  badgeColor: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300",
+  userMessage: "The tldw server is not configured.",
+  suggestion: "Set the server URL and API key in Settings, then try again.",
+}
+
 const VALIDATION_CATEGORY: ErrorCategory = {
   classification: "validation",
   retryable: false,
@@ -102,6 +111,10 @@ const PATTERN_TABLE: PatternEntry[] = [
   {
     patterns: /\b429\b|too many requests|concurrent job limit|max(?:imum)? concurrent/i,
     category: JOB_LIMIT_CATEGORY,
+  },
+  {
+    patterns: /server (?:is )?not configured|server configuration/i,
+    category: CONFIG_CATEGORY,
   },
   {
     patterns: /\b40[13]\b|unauthorized|forbidden|auth/i,
