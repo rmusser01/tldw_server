@@ -18,7 +18,7 @@
 
 | Stage | Goal | Success Criteria | Status |
 | --- | --- | --- | --- |
-| 1 | Canonical authorization data | SQLite 090 and PostgreSQL fresh/backfill paths grant permissions and backfill effective role membership | Not Started |
+| 1 | Canonical authorization data | SQLite 090 and PostgreSQL fresh/backfill paths grant permissions and backfill effective role membership | In Progress |
 | 2 | Shared lifecycle policy | Both transports preserve status; reads/SSE retry safely; mutations never replay automatically | Not Started |
 | 3 | Runtime adapters | Extension and WebUI expose truthful principal-scoped lifecycle state | Not Started |
 | 4 | Accessible recovery UX | Header and inbox distinguish active, degraded, auth-required, and unavailable states | Not Started |
@@ -83,7 +83,7 @@ tail -n 190 tldw_Server_API/app/core/AuthNZ/migrations.py
 - Modify: `tldw_Server_API/tests/AuthNZ/unit/test_rbac_seed_helper.py`
 - Create: `tldw_Server_API/tests/AuthNZ/integration/test_notification_permissions_postgres.py`
 
-- [ ] **Step 1: Write failing SQLite migration tests**
+- [x] **Step 1: Write failing SQLite migration tests**
 
 Add tests that migrate a version-089 database and assert:
 
@@ -97,7 +97,7 @@ assert user_role_rows == {(legacy_user_id, expected_role_id)}
 
 Cover `moderator`, `reviewer`, and `viewer` only when the role exists. Add a user whose legacy `users.role` matches an existing custom role and prove the matching role is backfilled without changing custom grants.
 
-- [ ] **Step 2: Run the SQLite tests and verify RED**
+- [x] **Step 2: Run the SQLite tests and verify RED**
 
 ```bash
 cd "$(git rev-parse --show-toplevel)"
@@ -107,7 +107,7 @@ python -m pytest tldw_Server_API/tests/AuthNZ/unit/test_rbac_seed_helper.py -v
 
 Expected: FAIL because migration 090 and notification seed entries do not exist.
 
-- [ ] **Step 3: Implement SQLite migration 090 and fresh seed entries**
+- [x] **Step 3: Implement SQLite migration 090 and fresh seed entries**
 
 Use parameterized SQL and `INSERT OR IGNORE`. The migration must:
 
@@ -121,7 +121,7 @@ interactive_roles = ("admin", "user", "moderator", "reviewer", "viewer")
 
 Backfill `user_roles` by joining `users.role` to an existing `roles.name`; never create a role from arbitrary legacy text. Do not modify `user_permissions`.
 
-- [ ] **Step 4: Write failing PostgreSQL fresh-seed and post-role backfill tests**
+- [x] **Step 4: Write failing PostgreSQL fresh-seed and post-role backfill tests**
 
 Test both sequences:
 
@@ -136,11 +136,11 @@ source .venv/bin/activate
 python -m pytest tldw_Server_API/tests/AuthNZ/integration/test_notification_permissions_postgres.py -v
 ```
 
-- [ ] **Step 5: Implement PostgreSQL seed ordering and backfill**
+- [x] **Step 5: Implement PostgreSQL seed ordering and backfill**
 
 Add notification permissions to `rbac_seed.py`. Add an idempotent helper in `pg_migrations_extra.py` that runs after baseline role seeding from `initialize.py`, grants every present interactive system role, and backfills matching legacy role membership. Keep the existing pre-role ensure harmless, but do not rely on it for grants.
 
-- [ ] **Step 6: Run backend authorization tests GREEN**
+- [x] **Step 6: Run backend authorization tests GREEN**
 
 ```bash
 cd "$(git rev-parse --show-toplevel)"
@@ -152,7 +152,7 @@ python -m pytest \
 
 Expected: PASS, including idempotent second execution and explicit-deny preservation.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 cd "$(git rev-parse --show-toplevel)"
