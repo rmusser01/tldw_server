@@ -115,7 +115,7 @@ async def test_core_worker_honors_mid_processing_cancellation(monkeypatch, tmp_p
 
 
 @pytest.mark.asyncio
-async def test_core_worker_rejects_unsupported_import_media(monkeypatch, tmp_path):
+async def test_core_worker_allows_supported_import_media_and_embeddings(monkeypatch, tmp_path):
     # Prepare isolated jobs DB
     jobs_db = tmp_path / "jobs.db"
     ensure_jobs_tables(jobs_db)
@@ -133,7 +133,7 @@ async def test_core_worker_rejects_unsupported_import_media(monkeypatch, tmp_pat
 
     class FakeChatbookService:
         jobs = {}
-        called = False
+        called_args = None
 
         def __init__(self, user_id, db, **kwargs):
             pass
@@ -144,9 +144,24 @@ async def test_core_worker_rejects_unsupported_import_media(monkeypatch, tmp_pat
         def _save_import_job(self, ij):
             FakeChatbookService.jobs[ij.job_id] = ij
 
-        def _import_chatbook_sync(self, *args, **kwargs):
-            FakeChatbookService.called = True
-            return True, "ok", []
+        def _import_chatbook_sync(
+            self,
+            file_path,
+            content_selections,
+            conflict_resolution,
+            prefix_imported,
+            import_media,
+            import_embeddings,
+        ):
+            FakeChatbookService.called_args = {
+                "file_path": file_path,
+                "content_selections": content_selections,
+                "conflict_resolution": conflict_resolution,
+                "prefix_imported": prefix_imported,
+                "import_media": import_media,
+                "import_embeddings": import_embeddings,
+            }
+            return True, "ok", {"imported_items": {"media": 1, "embedding": 1}, "warnings": []}
 
         def _resolve_import_archive_path(self, file_ref):
             return Path(file_ref)
@@ -179,7 +194,10 @@ async def test_core_worker_rejects_unsupported_import_media(monkeypatch, tmp_pat
             "action": "import",
             "chatbooks_job_id": "cb-imp-1",
             "file_token": str(file_path),
+            "source_format": "chatbook",
+            "content_selections": None,
             "import_media": True,
+            "import_embeddings": True,
         },
         owner_user_id="1",
     )
@@ -199,11 +217,13 @@ async def test_core_worker_rejects_unsupported_import_media(monkeypatch, tmp_pat
             pass
 
     jr = jm.get_job(int(job["id"]))
-    assert jr["status"] == "failed"
-    assert FakeChatbookService.called is False
+    assert jr["status"] == "completed"
+    assert FakeChatbookService.called_args is not None
+    assert FakeChatbookService.called_args["import_media"] is True
+    assert FakeChatbookService.called_args["import_embeddings"] is True
     ij = FakeChatbookService.jobs["cb-imp-1"]
-    assert ij.status == ImportStatus.FAILED
-    assert "Media/embedding imports are not supported" in (ij.error_message or "")
+    assert ij.status == ImportStatus.COMPLETED
+    assert ij.error_message is None
 
 
 @pytest.mark.asyncio
