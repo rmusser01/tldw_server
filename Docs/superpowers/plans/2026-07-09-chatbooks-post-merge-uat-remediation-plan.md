@@ -375,6 +375,8 @@ not-found exception mapping, and final-client close/reopen lifecycle behavior.
 - Modify: `apps/packages/ui/src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx`
 - Modify: `apps/packages/ui/src/services/tldw/TldwApiClient.ts`
 - Modify: `apps/packages/ui/src/services/tldw/domains/chat-rag.ts`
+- Modify: `tldw_Server_API/app/core/config.py`
+- Test: `tldw_Server_API/tests/Config/test_config_precedence_contract.py`
 - Test: `apps/packages/ui/src/components/Option/Chatbooks/__tests__/ChatbooksPlaygroundPage.backup-all.test.tsx`
 - Test: `apps/packages/ui/src/services/__tests__/tldw-api-client.chatbooks-openwebui.test.ts`
 - Modify: `apps/extension/tests/e2e/utils/extension.ts:278`
@@ -385,7 +387,7 @@ not-found exception mapping, and final-client close/reopen lifecycle behavior.
 - Create: `tldw_Server_API/tests/Chatbooks/test_chatbooks_full_account_browser_uat.py`
 - Use fixture: `Helper_Scripts/Testing-related/chatbooks_full_account_uat_fixture.py`
 
-- [ ] **Step 1: Write failing extension-launch and browser-orchestrator tests**
+- [x] **Step 1: Write failing extension-launch and browser-orchestrator tests**
 
 Model a persistent extension context with no immediately visible service-worker target. Assert that extension ID resolution and seeded configuration still succeed through the existing extension-page fallback.
 
@@ -396,7 +398,7 @@ integrity-bearing v1.1 format.
 
 Test the browser UAT orchestrator in dry-run/fake-process mode. It must enforce this order independently for WebUI and extension: seed media-bearing source root; start source services; export and capture the browser-downloaded archive path; stop source services; initialize a distinct clean destination root; start destination services; import that exact downloaded archive; stop services; verify destination artifact hash and vector identifiers. The runner must reject a fixture archive substituted for the browser download.
 
-- [ ] **Step 2: Prove the current harness gap**
+- [x] **Step 2: Prove the current harness gap**
 
 Run:
 
@@ -411,11 +413,11 @@ python -m pytest tldw_Server_API/tests/Chatbooks/test_chatbooks_full_account_bro
 
 Expected: extension test FAILS if the launcher requires a service worker before it can seed configuration or resolve the options URL; backend test FAILS because the two-phase browser UAT orchestrator does not exist.
 
-- [ ] **Step 3: Make service-worker discovery optional for page-based flows**
+- [x] **Step 3: Make service-worker discovery optional for page-based flows**
 
 Keep service-worker seeding when available. When absent, resolve the extension ID, open the options page, seed `chrome.storage` from that extension origin, reload once, and verify the sentinel before returning. Do not skip the Chatbooks test solely because an idle MV3 worker target is absent.
 
-- [ ] **Step 4: Add two-phase WebUI and packaged-extension acceptance**
+- [x] **Step 4: Add two-phase WebUI and packaged-extension acceptance**
 
 Add an export phase and import phase to the WebUI real-server spec and packaged-extension spec. The export phase connects to the seeded source root, clicks **Backup all**, waits for completion, downloads the archive, and writes the actual download path to the runner result. The import phase starts only after the runner has stopped source services and started a clean destination; it uploads the exact download path, verifies the full account-impact preview, starts import, and waits for a completed job whose metadata reports imported media and embedding categories.
 
@@ -459,6 +461,22 @@ git add apps/packages/ui/src/components/Option/Chatbooks/ChatbooksPlaygroundPage
 git commit -m "test: certify browser chatbook backup restore"
 ```
 
+Implementation evidence before the live gate: 9 browser-orchestrator tests,
+12 configuration-precedence contract tests, 18 focused WebUI tests, and 7
+extension-launch tests pass. Frontend and extension TypeScript checks pass,
+and Playwright collects both WebUI phases and the packaged-extension phase.
+The first real WebUI run exposed that `config.txt` overrode the runner's
+isolated `USER_DB_BASE_DIR`; the runner stopped before export, and the
+configuration contract now enforces documented environment precedence with an
+API-scope preflight that rejects the wrong source or a dirty destination. The
+exact WebUI and extension round trips remain open until localhost execution is
+available; API-only or fixture-archive evidence does not satisfy Step 5.
+Self-review additionally found and fixed a subprocess-output decoder that
+selected a nested object instead of the complete pretty-printed fixture result;
+the regression is included in the 9 runner tests.
+The implementation and deterministic gate are recorded in `a0e177228a`; this
+is not the Step 5 browser certification, which remains open.
+
 ## Task 7: Repair Stale Integration And Documentation Contracts
 
 **Files:**
@@ -468,19 +486,19 @@ git commit -m "test: certify browser chatbook backup restore"
 - Modify: `Docs/User_Guides/WebUI_Extension/Chatbook_User_Guide.md`
 - Modify: published mirrors under `Docs/Published/`
 
-- [ ] **Step 1: Make legacy export tests explicit about selection mode**
+- [x] **Step 1: Make legacy export tests explicit about selection mode**
 
 Change the old empty-export test to either assert the new full-account default or pass an explicit zero-item allowlist and assert validation. Do not retain the obsolete assumption that omitted/empty content types mean an empty backup.
 
-- [ ] **Step 2: Repair the minimal multi-user fixture**
+- [x] **Step 2: Repair the minimal multi-user fixture**
 
 Ensure the integration fixture exposes all account-inventory tables required by full-account export, including `generated_documents`, or uses the normal migration fixture. Keep the test focused on user isolation rather than accidental schema incompleteness.
 
-- [ ] **Step 3: Align docs tests with archive restore semantics**
+- [x] **Step 3: Align docs tests with archive restore semantics**
 
 Document that Chatbook archives restore bundled media artifacts and embeddings by default, while OpenWebUI JSON/DB sources do not use those archive options. Remove assertions that globally label media/embedding import unsupported.
 
-- [ ] **Step 4: Run the previously failing tests**
+- [x] **Step 4: Run the previously failing tests**
 
 Run:
 
@@ -494,12 +512,21 @@ python -m pytest \
 
 Expected: PASS with runtime and docs describing the same source-specific behavior.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tldw_Server_API/tests/integration/test_chatbook_integration.py tldw_Server_API/tests/Docs/test_chatbook_openwebui_import_docs.py Docs/API-related/Chatbook_API_Documentation.md Docs/User_Guides/WebUI_Extension/Chatbook_User_Guide.md Docs/Published
 git commit -m "test: align chatbook integration contracts"
 ```
+
+Verification evidence: the exact three previously failing contracts passed,
+then the complete browser-orchestrator, configuration-precedence, integration,
+and Chatbook/OpenWebUI documentation files passed 40 tests. Source and
+published documentation now use the same source-specific contract: Chatbook
+archives restore bundled media data and embeddings present in the archive by
+default, while OpenWebUI imports preserve attachment references for the
+separate hydration workflow and do not import embeddings.
+Implemented in `98771aa17b`.
 
 ## Task 8: Final Verification And UAT Closeout
 
@@ -546,7 +573,15 @@ python -m pytest -q \
 
 Expected: PASS. Environment-dependent tests may skip only with their documented prerequisite missing. `test_chatbooks_full_account_media_roundtrip.py` must not skip and must verify a clean destination user's artifact hash and embedding/vector records.
 
-- [ ] **Step 3: Run exact WebUI unit suites**
+Current evidence: the complete 445-test in-process subset passed 436 tests with
+9 documented prerequisite skips, including the non-skipping full-account
+media/profile/settings/vector round trip. The initial exact matrix exposed five
+legacy manifest/filesystem tests that still used `{}` as an empty archive;
+those tests now use explicit allowlists without weakening full-account
+semantics and are committed in `6404115595`. Three server-spawning tests remain
+open because this sandbox rejects local socket binding before fixture startup.
+
+- [x] **Step 3: Run exact WebUI unit suites**
 
 Run unit/component tests:
 
@@ -562,6 +597,11 @@ bunx vitest run \
 ```
 
 Expected: all listed component and client tests PASS.
+
+Verification evidence: all 38 tests in the six planned component/client files
+passed. Frontend TypeScript and extension production compile checks passed,
+the Chrome MV3 production build completed, and both Playwright configurations
+collect the intended Chatbooks UAT phases.
 
 - [ ] **Step 4: Run the exact WebUI-exported archive round trip**
 
@@ -592,7 +632,7 @@ Expected: runner reports the actual extension-downloaded archive path, distinct 
 
 Inspect the WebUI and extension archive paths reported by Steps 4 and 5. Verify `manifest.json`, `file_inventory`, account inventory summary, bundled media artifact bytes, pointer-only warnings, and no raw server storage paths or secrets.
 
-- [ ] **Step 7: Run Bandit on touched backend scope**
+- [x] **Step 7: Run Bandit on touched backend scope**
 
 ```bash
 source .venv/bin/activate
@@ -604,6 +644,10 @@ python -m bandit -r \
 ```
 
 Expected: zero new findings in changed code.
+
+Verification evidence: zero findings across 15,541 lines in the exact final
+Chatbooks worker/service/endpoint scope, plus zero findings across the new
+browser runner and configuration-precedence scope.
 
 - [ ] **Step 8: Update tracking honestly**
 
