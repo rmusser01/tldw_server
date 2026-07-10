@@ -177,7 +177,7 @@ On startup:
 4. Probe the normal authenticated profile endpoint using the ambient cookie.
 5. Clear any legacy runtime-owned key copies only after the cookie-authenticated probe succeeds.
 
-After that successful probe, perform a fail-closed secret scrub for the same-origin runtime context: remove `apiKey` from persisted `tldwConfig`, all legacy runtime/session bridge slots, and any single-user secret record that is not a complete new-format manual remote credential with explicit `source: "manual"`, persistence scope, and normalized origin metadata. Missing, malformed, partially written, or contradictory ownership metadata never preserves a browser-readable key. Preserve non-secret connection metadata. This scrub is idempotent and runs before publishing cookie-session readiness.
+After that successful probe, perform a fail-closed secret scrub for the same-origin runtime context: always remove `apiKey` from persisted `tldwConfig` and all legacy runtime/session bridge slots. Preserve only a complete credential in the dedicated new-format manual-device/manual-session secret location with explicit `source: "manual"`, persistence scope, normalized origin, and matching non-secret manual connection metadata. Missing, malformed, partially written, or contradictory ownership metadata never preserves a browser-readable key. Preserve non-secret connection metadata. This scrub is idempotent and runs before publishing cookie-session readiness.
 
 For same-origin requests, the shared request client:
 
@@ -247,7 +247,7 @@ No error or log includes the API key, opaque token, cookie header, or CSRF token
 - Client cookie-session mode omits `X-API-KEY`, includes same-origin credentials, and adds CSRF on mutations.
 - Cookie-session WebSocket builders use the same-origin proxy and omit query credentials; remote/extension builders retain explicit credentials.
 - Failed bootstrap never writes a key to local/session storage.
-- Successful cookie probe scrubs ambiguous/partial legacy key artifacts and preserves only complete new-format origin-bound manual remote credentials.
+- Successful cookie probe always removes legacy `tldwConfig.apiKey`/bridge artifacts, scrubs ambiguous dedicated records, and preserves only complete new-format origin-bound credentials in the dedicated manual secret stores.
 
 ### Browser Lifecycle
 

@@ -4,7 +4,7 @@ title: Add persistent HttpOnly sessions for same-origin single-user WebUI auth
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-07-10 22:24'
+updated_date: '2026-07-10 22:26'
 labels: []
 dependencies: []
 references:
@@ -42,14 +42,16 @@ Hybrid design selected: reuse the existing AuthNZ SessionManager/sessions table 
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 Independent spec review found three blockers: omitted WebSocket cookie auth/origin validation, ambiguous legacy runtime-key cleanup, and CSRF user-binding pre-resolution. Revised the linked specs to add a shared HTTP/WebSocket cookie-principal helper, exact trusted-Origin WebSocket auth with query-secret removal, fail-closed upgraded-profile key scrubbing, and CSRF_BIND_TO_USER cookie resolution.
+
+Second re-review clarification: cookie bootstrap always removes legacy tldwConfig.apiKey/bridge values, while only complete new-format manual credentials in dedicated secret records may survive.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
+
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 <!-- SECTION:FINAL_SUMMARY:END -->

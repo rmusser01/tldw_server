@@ -50,22 +50,26 @@ type SingleUserCredentialMetadata = {
   persistence: ApiKeyPersistence
   serverOrigin: string
 }
+
+type ManualApiKeySecretRecord = SingleUserCredentialMetadata & {
+  apiKey: string
+}
 ```
 
 For a manual device credential:
 
-- Persist the key in local storage explicitly scoped to the current device.
+- Persist a complete `ManualApiKeySecretRecord` under a dedicated manual-device secret key in local storage.
 - Persist `persistence: "device"` and the normalized `serverOrigin` with connection metadata.
 - In the extension, use `browser.storage.local`, never `browser.storage.sync`.
 
 For a manual session credential:
 
-- Persist the key and matching origin in session storage.
+- Persist a complete `ManualApiKeySecretRecord` under a dedicated manual-session secret key in session storage.
 - Persist only the non-secret preference `persistence: "session"` in local connection metadata.
 - In the extension, use `browser.storage.session` so the key survives extension service-worker restarts without surviving a browser restart.
 - In the WebUI shim, session storage maps to `window.sessionStorage`, not `window.localStorage` with a prefix.
 
-The existing `tldwConfig` object remains the connection metadata source of truth. Runtime hydration may expose an `apiKey` on the in-memory config consumed by request code, but storage writers include the key only for a manual `device` credential.
+The existing persisted `tldwConfig` object remains the non-secret connection metadata source of truth, but it never contains `apiKey` in the new format. Dedicated device/session records are the only canonical manual secret locations. Runtime hydration may expose an `apiKey` on a transient in-memory config consumed by request code; every `tldwConfig` storage writer strips that field before serialization.
 
 ## Origin Binding
 
@@ -130,15 +134,17 @@ Network errors, timeouts, and server `5xx` responses do not clear credentials. A
 
 ## Migration
 
-- Existing valid manual keys already stored persistently remain `device` credentials and gain origin metadata on the next successful load or save only in a remote/manual context where no same-origin cookie session succeeded.
+- In a remote/manual context where no same-origin cookie session succeeded, an existing `tldwConfig.apiKey` that is confidently classified as manual and has a valid matching server origin is migrated once into the dedicated manual-device secret record; the legacy field is then deleted.
 - A legacy `tldwRuntimeSessionSingleUserApiKey` bridge is migrated as a manual `session` credential only when all of the following hold: the stored config is single-user, it has a valid remote server URL, no current same-origin cookie-session/runtime config is available, and runtime ownership metadata does not fingerprint-match the bridge key.
-- After a same-origin cookie-session bootstrap and authenticated probe succeed, clear `tldwConfig.apiKey`, all legacy bridge/runtime slots, and every incomplete or ambiguous single-user secret record before publishing readiness. Missing, malformed, partially written, or contradictory ownership metadata is evidence to scrub, never evidence to preserve or reclassify.
-- Only a complete new-format record with explicit `source: "manual"`, persistence scope, normalized remote origin, and matching non-secret manual connection metadata may survive that scrub. Preserve non-secret metadata even when its ambiguous secret is removed.
+- After a same-origin cookie-session bootstrap and authenticated probe succeed, always clear `tldwConfig.apiKey` and all legacy bridge/runtime slots, then clear every incomplete or ambiguous dedicated single-user secret record before publishing readiness. Missing, malformed, partially written, or contradictory ownership metadata is evidence to scrub, never evidence to preserve or reclassify.
+- Only a complete dedicated new-format record with explicit `source: "manual"`, persistence scope, normalized remote origin, and matching non-secret manual connection metadata may survive that scrub. Preserve non-secret metadata even when its ambiguous secret is removed.
 - In a remote/manual context, if legacy ownership cannot be distinguished confidently or the server origin cannot be derived, do not migrate or persist the bridge key.
 - Placeholder keys are ignored.
 - Configurations with an unparseable server URL do not hydrate a manual key until the URL is corrected.
 
 Migration is idempotent and never moves a secret from session storage into local storage without a subsequent explicit manual save.
+
+After migration, `tldwConfig.apiKey` and the legacy bridge keys are deletion-only compatibility inputs; no production writer may recreate them.
 
 ## Error Handling
 
@@ -157,8 +163,8 @@ Logs and diagnostics may report credential source, persistence scope, and origin
 - New manual forms default `Remember on this device` to enabled.
 - Existing session metadata renders the choice disabled.
 - Same-origin cookie-session auth hides manual key and persistence controls.
-- Device save writes only device-local secret storage.
-- Session save writes only session secret storage.
+- Device save writes only the dedicated device-local secret record and persists no `tldwConfig.apiKey`.
+- Session save writes only the dedicated session secret record and persists no `tldwConfig.apiKey`.
 - Cookie/runtime auth is never copied to manual storage.
 - Origin mismatch returns no credential and clears the form value before connection.
 - Logout/reset/auth-mode changes clear both scopes.

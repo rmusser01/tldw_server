@@ -4,7 +4,7 @@ title: Add explicit single-user API key device persistence and relaunch coverage
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-07-10 22:24'
+updated_date: '2026-07-10 22:26'
 labels: []
 dependencies:
   - TASK-12108
@@ -44,6 +44,8 @@ Scope revised after the hybrid architecture was approved. This task covers only 
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 Hybrid spec review found that legacy or partial runtime writes could be misclassified as manual. Migration now scrubs ambiguous browser-readable keys after successful same-origin cookie authentication and preserves only complete new-format origin-bound manual records.
+
+Second re-review found a contradiction between preserving manual device keys and scrubbing tldwConfig.apiKey. The design now makes dedicated manual-device/manual-session records the only canonical secret locations; persisted tldwConfig is non-secret and its legacy apiKey field is always removed after migration.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
