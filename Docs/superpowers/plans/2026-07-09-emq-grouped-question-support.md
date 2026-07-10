@@ -18,7 +18,7 @@
 **Goal:** Round-trip nullable group metadata without changing legacy question behavior.  
 **Success Criteria:** New and migrated databases expose `group_id` and `group_prompt`; create/list/update/API schemas preserve them; legacy questions return null values.  
 **Tests:** Focused ChaChaNotes DB persistence and quiz schema tests.  
-**Status:** In Progress
+**Status:** Complete
 
 **Files:**
 - Modify: `tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py`
@@ -27,7 +27,7 @@
 - Create: `tldw_Server_API/tests/DB_Management/test_chacha_postgres_migration_v52.py`
 - Modify: `tldw_Server_API/tests/Quizzes/test_quiz_generate_schema_contract.py`
 
-- [ ] **Step 1: Write failing persistence and schema tests**
+- [x] **Step 1: Write failing persistence and schema tests**
 
 Create two `multiple_choice` questions with the same `group_id`, `group_prompt`, and options, then assert `get_question()` and `list_questions()` return both group fields. Update one question's group fields through `update_question()` and assert the explicit DB allowlist persists the changes. Add Pydantic contract assertions for `QuestionCreate`, `QuestionUpdate`, `QuestionPublicResponse`, and `QuizImportQuestion`, including the 128/2000-character limits.
 
@@ -48,7 +48,7 @@ assert question["group_id"] == "emq-1"
 assert question["group_prompt"].startswith("Theme:")
 ```
 
-- [ ] **Step 2: Run the focused tests and verify RED**
+- [x] **Step 2: Run the focused tests and verify RED**
 
 Run:
 
@@ -61,7 +61,7 @@ Run:
 
 Expected: failures because the schema and DB methods do not accept or return the group fields.
 
-- [ ] **Step 3: Add the minimal additive DB migration and contract fields**
+- [x] **Step 3: Add the minimal additive DB migration and contract fields**
 
 In `CharactersRAGDB`:
 
@@ -78,11 +78,11 @@ group_id: Optional[str] = Field(None, max_length=128)
 group_prompt: Optional[str] = Field(None, max_length=2000)
 ```
 
-- [ ] **Step 4: Run the focused tests and verify GREEN**
+- [x] **Step 4: Run the focused tests and verify GREEN**
 
 Run the command from Step 2. Expected: all selected tests pass.
 
-- [ ] **Step 5: Commit Task 1**
+- [x] **Step 5: Commit Task 1**
 
 ```bash
 git add tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py \
@@ -99,7 +99,7 @@ git commit -m "feat: persist emq question groups"
 **Goal:** Make the EMQ profile available and fail closed on malformed groups.  
 **Success Criteria:** Deterministic and LLM normalization paths emit grouped MCQ stems with an identical bank, per-stem citations, and no partial persistence of invalid groups.  
 **Tests:** Generator profile, normalization, deterministic generation, and persistence tests.  
-**Status:** Not Started
+**Status:** In Progress
 
 **Files:**
 - Modify: `tldw_Server_API/app/services/quiz_generator.py`
