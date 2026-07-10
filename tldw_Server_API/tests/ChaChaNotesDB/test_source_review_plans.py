@@ -1,9 +1,16 @@
 import json
+from collections.abc import Iterator
 from datetime import date, datetime, timezone
+from pathlib import Path
 
 import pytest
 
 from tldw_Server_API.app.api.v1.schemas.study_packs import StudyPackSourceSelection
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+    CharactersRAGDB,
+    CharactersRAGDBError,
+    ConflictError,
+)
 from tldw_Server_API.app.core.Flashcards.source_review import (
     build_source_review_launch_metadata,
     compute_source_review_due_at,
@@ -375,3 +382,382 @@ def test_source_review_bundle_normalizes_models_and_source_title_alias():
         ]
     }
     assert "source_title" not in bundle["items"][0]  # nosec B101
+
+
+@pytest.fixture
+def source_review_db(tmp_path: Path) -> Iterator[CharactersRAGDB]:
+    db = CharactersRAGDB(tmp_path / "source-review.db", "source-review-test-client")
+    try:
+        yield db
+    finally:
+        db.close_connection()
+
+
+def _source_bundle() -> dict[str, object]:
+    return normalize_source_review_bundle(
+        [
+            {
+                "source_type": "note",
+                "source_id": "note-42",
+                "source_title": "Congestion control",
+                "excerpt_text": "Additive increase and multiplicative decrease.",
+                "locator": {"line": 12},
+            }
+        ]
+    )
+
+
+def _schedule_row(
+    due_at: str,
+    *,
+    activity_type: str = "quiz",
+    offset_value: int = 1,
+    offset_unit: str = "day",
+) -> dict[str, object]:
+    return {
+        "offset_value": offset_value,
+        "offset_unit": offset_unit,
+        "activity_type": activity_type,
+        "due_at": due_at,
+    }
+
+
+def _create_source_review_plan(
+    db: CharactersRAGDB,
+    *,
+    title: str = "TCP review",
+    schedule: list[dict[str, object]] | None = None,
+) -> int:
+    return db.create_source_review_plan(
+        title=title,
+        starts_on="2026-07-09",
+        timezone_name="America/Los_Angeles",
+        source_bundle_json=_source_bundle(),
+        schedule=schedule or [_schedule_row("2026-07-10T07:00:00Z")],
+    )
+
+
+def _occurrence_rows(db: CharactersRAGDB, plan_id: int) -> list[dict[str, object]]:
+    rows = db.execute_query(
+        "SELECT * FROM source_review_occurrences WHERE plan_id = ? ORDER BY id",
+        (plan_id,),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def test_create_source_review_plan_persists_bundle_and_occurrences_atomically(
+    source_review_db: CharactersRAGDB,
+) -> None:
+    schedule = compute_source_review_schedule(
+        starts_on=date(2026, 7, 9),
+        timezone_name="America/Los_Angeles",
+        schedule=[
+            {"offset_value": 1, "offset_unit": "day", "activity_type": "reread"},
+            {"offset_value": 3, "offset_unit": "day", "activity_type": "quiz"},
+        ],
+    )
+
+    plan_id = _create_source_review_plan(source_review_db, schedule=schedule)
+
+    plans, total = source_review_db.list_source_review_plans()
+    occurrences = _occurrence_rows(source_review_db, plan_id)
+    assert total == 1  # nosec B101
+    assert plans[0]["source_bundle_json"] == _source_bundle()  # nosec B101
+    assert plans[0]["version"] == 1  # nosec B101
+    assert plans[0]["client_id"] == "source-review-test-client"  # nosec B101
+    assert [row["activity_type"] for row in occurrences] == ["reread", "quiz"]  # nosec B101
+    assert [row["status"] for row in occurrences] == ["pending", "pending"]  # nosec B101
+    assert all(row["version"] == 1 for row in occurrences)  # nosec B101
+    assert all(row["client_id"] == "source-review-test-client" for row in occurrences)  # nosec B101
+
+
+def test_source_review_plan_and_due_lists_have_stable_pagination_order(
+    source_review_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        source_review_db,
+        "_get_current_utc_timestamp_iso",
+        lambda: "2026-07-09T12:00:00.000Z",
+    )
+    plan_ids = [
+        _create_source_review_plan(
+            source_review_db,
+            title=title,
+            schedule=[_schedule_row("2026-07-08T12:00:00Z", activity_type=activity)],
+        )
+        for title, activity in (("First", "reread"), ("Second", "quiz"), ("Third", "cloze"))
+    ]
+
+    plans, plan_total = source_review_db.list_source_review_plans(limit=2, offset=1)
+    due_rows, due_total = source_review_db.list_due_source_review_occurrences(
+        now_utc="2026-07-09T12:00:00Z",
+        limit=2,
+        offset=1,
+    )
+
+    occurrence_ids = [row["id"] for plan_id in plan_ids for row in _occurrence_rows(source_review_db, plan_id)]
+    assert plan_total == 3  # nosec B101
+    assert [row["id"] for row in plans] == list(reversed(plan_ids))[1:3]  # nosec B101
+    assert due_total == 3  # nosec B101
+    assert [row["id"] for row in due_rows] == occurrence_ids[1:3]  # nosec B101
+
+
+def test_due_source_review_occurrences_filter_status_time_and_deleted_rows(
+    source_review_db: CharactersRAGDB,
+) -> None:
+    due_at = "2026-07-08T12:00:00Z"
+    plan_id = _create_source_review_plan(
+        source_review_db,
+        schedule=[
+            _schedule_row(due_at, activity_type="reread", offset_value=1),
+            _schedule_row(due_at, activity_type="quiz", offset_value=2),
+            _schedule_row(due_at, activity_type="flashcards", offset_value=3),
+            _schedule_row(due_at, activity_type="cloze", offset_value=4),
+            _schedule_row("2026-07-11T12:00:00Z", activity_type="reread", offset_value=5),
+            _schedule_row(due_at, activity_type="quiz", offset_value=6),
+        ],
+    )
+    occurrence_ids = [int(row["id"]) for row in _occurrence_rows(source_review_db, plan_id)]
+    source_review_db.start_source_review_occurrence(occurrence_ids[1])
+    source_review_db.start_source_review_occurrence(occurrence_ids[2])
+    source_review_db.complete_source_review_occurrence(occurrence_ids[2])
+    source_review_db.skip_source_review_occurrence(occurrence_ids[3])
+    source_review_db.execute_query(
+        "UPDATE source_review_occurrences SET deleted = 1 WHERE id = ?",
+        (occurrence_ids[5],),
+        commit=True,
+    )
+    hidden_plan_id = _create_source_review_plan(
+        source_review_db,
+        title="Deleted plan",
+        schedule=[_schedule_row(due_at, activity_type="reread")],
+    )
+    source_review_db.execute_query(
+        "UPDATE source_review_plans SET deleted = 1 WHERE id = ?",
+        (hidden_plan_id,),
+        commit=True,
+    )
+
+    rows, total = source_review_db.list_due_source_review_occurrences(now_utc="2026-07-09T12:00:00Z")
+
+    assert total == 2  # nosec B101
+    assert [row["id"] for row in rows] == occurrence_ids[:2]  # nosec B101
+    assert [row["status"] for row in rows] == ["pending", "in_progress"]  # nosec B101
+    assert all(row["plan_title"] == "TCP review" for row in rows)  # nosec B101
+    assert all(row["source_bundle_json"] == _source_bundle() for row in rows)  # nosec B101
+
+
+def test_start_source_review_occurrence_is_idempotent_and_stores_thin_metadata(
+    source_review_db: CharactersRAGDB,
+) -> None:
+    plan_id = _create_source_review_plan(source_review_db)
+    occurrence_id = int(_occurrence_rows(source_review_db, plan_id)[0]["id"])
+
+    started = source_review_db.start_source_review_occurrence(occurrence_id)
+    resumed = source_review_db.start_source_review_occurrence(occurrence_id)
+    stored = _occurrence_rows(source_review_db, plan_id)[0]
+
+    expected_keys = {
+        "activity_type",
+        "plan_id",
+        "occurrence_id",
+        "target_route",
+        "target_surface",
+        "action",
+        "source_payload_field",
+        "completion_required",
+        "created_at",
+    }
+    assert started["status"] == "in_progress"  # nosec B101
+    assert resumed["launch_state_json"] == started["launch_state_json"]  # nosec B101
+    assert json.loads(stored["launch_state_json"]) == started["launch_state_json"]  # nosec B101
+    assert set(started["launch_state_json"]) == expected_keys  # nosec B101
+    assert "source_bundle" not in started["launch_state_json"]  # nosec B101
+    assert "generated_content" not in started["launch_state_json"]  # nosec B101
+    assert stored["version"] == 2  # nosec B101
+
+
+def _occurrence_in_status(db: CharactersRAGDB, status: str) -> tuple[int, int]:
+    plan_id = _create_source_review_plan(db)
+    occurrence_id = int(_occurrence_rows(db, plan_id)[0]["id"])
+    if status in {"in_progress", "completed"}:
+        db.start_source_review_occurrence(occurrence_id)
+    if status == "completed":
+        db.complete_source_review_occurrence(occurrence_id)
+    elif status == "skipped":
+        db.skip_source_review_occurrence(occurrence_id)
+    return plan_id, occurrence_id
+
+
+@pytest.mark.parametrize(
+    ("current_status", "action", "expected_status"),
+    [
+        ("pending", "start", "in_progress"),
+        ("pending", "complete", None),
+        ("pending", "skip", "skipped"),
+        ("in_progress", "start", "in_progress"),
+        ("in_progress", "complete", "completed"),
+        ("in_progress", "skip", "skipped"),
+        ("completed", "start", "completed"),
+        ("completed", "complete", "completed"),
+        ("completed", "skip", None),
+        ("skipped", "start", None),
+        ("skipped", "complete", None),
+        ("skipped", "skip", "skipped"),
+    ],
+)
+def test_source_review_occurrence_transition_table(
+    source_review_db: CharactersRAGDB,
+    current_status: str,
+    action: str,
+    expected_status: str | None,
+) -> None:
+    plan_id, occurrence_id = _occurrence_in_status(source_review_db, current_status)
+    before = _occurrence_rows(source_review_db, plan_id)[0]
+    method = getattr(source_review_db, f"{action}_source_review_occurrence")
+
+    if expected_status is None:
+        with pytest.raises(ConflictError):
+            method(occurrence_id)
+        result = None
+    else:
+        result = method(occurrence_id)
+
+    after = _occurrence_rows(source_review_db, plan_id)[0]
+    if result is not None:
+        assert result["status"] == expected_status  # nosec B101
+    assert after["status"] == (expected_status or current_status)  # nosec B101
+    idempotent_transition = (current_status, action) in {
+        ("in_progress", "start"),
+        ("completed", "start"),
+        ("completed", "complete"),
+        ("skipped", "skip"),
+    }
+    if expected_status is None or idempotent_transition:
+        assert after["version"] == before["version"]  # nosec B101
+    else:
+        assert after["version"] == before["version"] + 1  # nosec B101
+
+
+@pytest.mark.parametrize("action", ["start", "complete", "skip"])
+def test_deleted_source_review_occurrence_actions_act_not_found(
+    source_review_db: CharactersRAGDB,
+    action: str,
+) -> None:
+    plan_id = _create_source_review_plan(source_review_db)
+    occurrence_id = int(_occurrence_rows(source_review_db, plan_id)[0]["id"])
+    assert source_review_db.soft_delete_source_review_plan(plan_id) is True  # nosec B101
+
+    with pytest.raises(ConflictError, match="not found"):
+        getattr(source_review_db, f"{action}_source_review_occurrence")(occurrence_id)
+
+
+def test_source_review_delete_rolls_back_plan_when_occurrence_delete_fails(
+    source_review_db: CharactersRAGDB,
+) -> None:
+    plan_id = _create_source_review_plan(source_review_db)
+    source_review_db.execute_query(
+        """
+        CREATE TRIGGER reject_source_review_occurrence_delete
+        BEFORE UPDATE OF deleted ON source_review_occurrences
+        WHEN OLD.deleted = 0 AND NEW.deleted = 1
+        BEGIN
+          SELECT RAISE(ABORT, 'reject occurrence delete');
+        END;
+        """,
+        script=True,
+    )
+
+    with pytest.raises(CharactersRAGDBError, match="delete source review plan"):
+        source_review_db.soft_delete_source_review_plan(plan_id)
+
+    plan = source_review_db.execute_query(
+        "SELECT deleted, version FROM source_review_plans WHERE id = ?",
+        (plan_id,),
+    ).fetchone()
+    occurrence = _occurrence_rows(source_review_db, plan_id)[0]
+    assert not plan["deleted"]  # nosec B101
+    assert plan["version"] == 1  # nosec B101
+    assert not occurrence["deleted"]  # nosec B101
+    assert occurrence["version"] == 1  # nosec B101
+
+
+def test_source_review_delete_is_idempotent_and_syncs_each_row_once(
+    source_review_db: CharactersRAGDB,
+) -> None:
+    plan_id = _create_source_review_plan(
+        source_review_db,
+        schedule=[
+            _schedule_row("2026-07-10T07:00:00Z", activity_type="reread"),
+            _schedule_row("2026-07-12T07:00:00Z", activity_type="quiz", offset_value=3),
+        ],
+    )
+
+    assert source_review_db.soft_delete_source_review_plan(plan_id) is True  # nosec B101
+    versions_after_first_delete = [
+        dict(
+            source_review_db.execute_query(
+                "SELECT deleted, version FROM source_review_plans WHERE id = ?",
+                (plan_id,),
+            ).fetchone()
+        ),
+        *[
+            {"deleted": row["deleted"], "version": row["version"]}
+            for row in _occurrence_rows(source_review_db, plan_id)
+        ],
+    ]
+    delete_sync_rows_after_first = source_review_db.execute_query(
+        """
+        SELECT entity, entity_id, operation
+          FROM sync_log
+         WHERE entity IN ('source_review_plans', 'source_review_occurrences')
+           AND operation = 'delete'
+         ORDER BY change_id
+        """
+    ).fetchall()
+
+    assert source_review_db.soft_delete_source_review_plan(plan_id) is False  # nosec B101
+    versions_after_second_delete = [
+        dict(
+            source_review_db.execute_query(
+                "SELECT deleted, version FROM source_review_plans WHERE id = ?",
+                (plan_id,),
+            ).fetchone()
+        ),
+        *[
+            {"deleted": row["deleted"], "version": row["version"]}
+            for row in _occurrence_rows(source_review_db, plan_id)
+        ],
+    ]
+    delete_sync_rows_after_second = source_review_db.execute_query(
+        """
+        SELECT entity, entity_id, operation
+          FROM sync_log
+         WHERE entity IN ('source_review_plans', 'source_review_occurrences')
+           AND operation = 'delete'
+         ORDER BY change_id
+        """
+    ).fetchall()
+    plans, total = source_review_db.list_source_review_plans()
+    due, due_total = source_review_db.list_due_source_review_occurrences(now_utc="2030-01-01T00:00:00Z")
+
+    assert versions_after_first_delete == [  # nosec B101
+        {"deleted": 1, "version": 2},
+        {"deleted": 1, "version": 2},
+        {"deleted": 1, "version": 2},
+    ]
+    assert versions_after_second_delete == versions_after_first_delete  # nosec B101
+    assert len(delete_sync_rows_after_first) == 3  # nosec B101
+    assert [dict(row) for row in delete_sync_rows_after_second] == [  # nosec B101
+        dict(row) for row in delete_sync_rows_after_first
+    ]
+    assert plans == [] and total == 0  # nosec B101
+    assert due == [] and due_total == 0  # nosec B101
+
+
+def test_source_review_delete_missing_plan_uses_not_found_convention(
+    source_review_db: CharactersRAGDB,
+) -> None:
+    with pytest.raises(ConflictError, match="not found"):
+        source_review_db.soft_delete_source_review_plan(999_999)
