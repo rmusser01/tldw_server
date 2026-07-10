@@ -225,11 +225,12 @@ def canonical_speaker_markers(values: list[Any]) -> list[str]:
     return markers
 
 
-def _normalized_query_key(value: Any) -> str:
-    decoded = _fully_unquote(str(value or ""))
+def _normalized_query_key(value: Any) -> tuple[str, bool]:
+    decoded, stabilized = _bounded_unquote(str(value or ""))
     snake_case = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", decoded)
     snake_case = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", snake_case)
-    return re.sub(r"[^a-z0-9]+", "_", snake_case.casefold()).strip("_")
+    normalized = re.sub(r"[^a-z0-9]+", "_", snake_case.casefold()).strip("_")
+    return normalized, stabilized
 
 
 def _is_sensitive_query_key(key: str) -> bool:
@@ -242,21 +243,27 @@ def _is_sensitive_query_key(key: str) -> bool:
     )
 
 
-def _fully_unquote(value: str) -> str:
+def _bounded_unquote(value: str) -> tuple[str, bool]:
+    """Decode a bounded number of times and report whether decoding stabilized."""
     decoded = value
     for _ in range(_URL_INSPECTION_MAX_DEPTH):
         next_value = unquote(decoded)
         if next_value == decoded:
-            break
+            return decoded, True
         decoded = next_value
-    return decoded
+    return decoded, unquote(decoded) == decoded
 
 
 def _url_contains_sensitive_data(value: str, *, depth: int = 0) -> bool:
     """Inspect nested URL-valued query parameters for credentials and signatures."""
     if depth > _URL_INSPECTION_MAX_DEPTH or len(value) > _URL_INSPECTION_MAX_CHARS:
         return True
-    decoded = value.strip() if depth == 0 else _fully_unquote(value.strip())
+    if depth == 0:
+        decoded = value.strip()
+    else:
+        decoded, stabilized = _bounded_unquote(value.strip())
+        if not stabilized:
+            return True
     if any(ord(char) < 32 for char in decoded):
         return True
     parse_value = f"https:{decoded}" if decoded.startswith("//") else decoded
@@ -273,10 +280,14 @@ def _url_contains_sensitive_data(value: str, *, depth: int = 0) -> bool:
     if parsed.username or parsed.password or parsed.fragment:
         return True
     for raw_key, raw_value in query:
-        key = _normalized_query_key(raw_key)
+        key, key_stabilized = _normalized_query_key(raw_key)
+        if not key_stabilized:
+            return True
         if _is_sensitive_query_key(key):
             return True
-        nested = _fully_unquote(raw_value.strip())
+        nested, nested_stabilized = _bounded_unquote(raw_value.strip())
+        if not nested_stabilized:
+            return True
         looks_url_like = nested.casefold().startswith(("http://", "https://", "//", "/"))
         if (key in _URL_VALUE_QUERY_KEYS or looks_url_like) and nested:
             if depth >= _URL_INSPECTION_MAX_DEPTH or _url_contains_sensitive_data(nested, depth=depth + 1):

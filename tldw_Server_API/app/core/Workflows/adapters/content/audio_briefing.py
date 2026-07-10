@@ -121,6 +121,10 @@ _BRACKETED_IPV6_CANDIDATE_RE = re.compile(
 _IPV6_CANDIDATE_RE = re.compile(
     r"(?i)(?<![\w:])(?:[0-9a-f]{0,4}:){2,7}[0-9a-f]{0,4}(?![\w:])"
 )
+_IPV4_VERSION_CONTEXT_MAX_CHARS = 32
+_IPV4_VERSION_CONTEXT_RE = re.compile(
+    r"(?i)\b(?:version|build|release)\s*(?:[:#=_-]\s*)?$"
+)
 
 _SYSTEM_PROMPT = f"""You write source-grounded spoken-word programs that sound natural when read by text-to-speech.
 
@@ -432,9 +436,14 @@ def _remove_valid_ip_address(match: re.Match[str]) -> str:
     else:
         host = endpoint
     try:
-        ipaddress.ip_address(host)
+        address = ipaddress.ip_address(host)
     except ValueError:
         return token
+    if address.version == 4 and token == host:
+        context_start = max(0, match.start() - _IPV4_VERSION_CONTEXT_MAX_CHARS)
+        preceding_context = match.string[context_start : match.start()]
+        if _IPV4_VERSION_CONTEXT_RE.search(preceding_context):
+            return token
     return ""
 
 

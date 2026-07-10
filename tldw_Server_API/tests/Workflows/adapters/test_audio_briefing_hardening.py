@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, patch
+from urllib.parse import quote
 from xml.etree import ElementTree
 
 import pytest
@@ -576,12 +577,23 @@ async def test_explicit_voice_map_overrides_only_its_canonical_collision_marker(
         "https://example.test/story?refresh%255ftoken=secret",
         "https://example.test/story?page=2;clientSecret=secret",
         "https://example.test/story?payload=HTTPS%3A%2F%2Fnested.test%2Fcallback%3FaccessToken%3Dsecret",
+        "https://example.test/story?client%252525255fsecret=secret",
     ],
 )
 def test_sensitive_or_non_public_source_urls_are_rejected(unsafe_url: str):
     from tldw_Server_API.app.core.Workflows.adapters.content.audio_briefing import _safe_source_url
 
     assert _safe_source_url(unsafe_url) == ""
+
+
+def test_five_layer_encoded_nested_userinfo_is_rejected():
+    from tldw_Server_API.app.core.Workflows.adapters.content.audio_briefing import _safe_source_url
+
+    nested = "https://user:pass@nested.test/callback"
+    for _ in range(5):
+        nested = quote(nested, safe="")
+
+    assert _safe_source_url(f"https://example.test/story?payload={nested}") == ""
 
 
 def test_benign_public_source_query_is_retained():
@@ -603,6 +615,15 @@ def test_benign_public_source_query_is_retained():
     assert _safe_source_url("https://example.test/story?q=discussion%3FaccessToken%3Dphrase") == (
         "https://example.test/story?q=discussion%3FaccessToken%3Dphrase"
     )
+    assert _safe_source_url("https://example.test/story?utm%255fsource=digest") == (
+        "https://example.test/story?utm%255fsource=digest"
+    )
+    for encoding_layers in (1, 3):
+        nested = "https://nested.test/callback?page=2"
+        for _ in range(encoding_layers):
+            nested = quote(nested, safe="")
+        public_url = f"https://example.test/story?payload={nested}"
+        assert _safe_source_url(public_url) == public_url
 
 
 @pytest.mark.parametrize(
@@ -620,6 +641,10 @@ def test_benign_public_source_query_is_retained():
         ("Read [2001:db8::1] and continue.", "Read and continue."),
         ("Read 2001:db8::1 and continue.", "Read and continue."),
         ("Version 1.2.3 costs 3.14. Normal punctuation stays.", "Version 1.2.3 costs 3.14. Normal punctuation stays."),
+        ("Version 1.2.3.4 stays.", "Version 1.2.3.4 stays."),
+        ("BUILD 1.2.3.4 stays.", "BUILD 1.2.3.4 stays."),
+        ("release: 1.2.3.4 stays.", "release: 1.2.3.4 stays."),
+        ("IP 192.0.2.1 and address 198.51.100.2 disappear.", "IP and address disappear."),
         ("Invalid 999.999.999.999 stays visible.", "Invalid 999.999.999.999 stays visible."),
     ],
 )
