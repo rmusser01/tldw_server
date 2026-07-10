@@ -16,6 +16,8 @@ dependencies: []
 references:
 - Docs/Reviews/CHATBOOKS_BACKUP_IMPORT_UAT_UX_REVIEW_2026_07_09.md
 - Docs/superpowers/plans/2026-07-09-chatbooks-full-account-backup-import-implementation-plan.md
+- Docs/Reviews/CHATBOOKS_POST_MERGE_UAT_UX_REVIEW_2026_07_09.md
+- Docs/superpowers/plans/2026-07-09-chatbooks-post-merge-uat-remediation-plan.md
 ---
 
 ## Description
@@ -36,6 +38,7 @@ Create an umbrella PRD/spec and milestone Backlog tasks for addressing all findi
 <!-- SECTION:PLAN:BEGIN -->
 Docs/superpowers/specs/2026-07-09-chatbooks-backup-import-remediation-prd-design.md
 Docs/superpowers/plans/2026-07-09-chatbooks-full-account-backup-import-implementation-plan.md
+Docs/superpowers/plans/2026-07-09-chatbooks-post-merge-uat-remediation-plan.md
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
