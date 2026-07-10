@@ -4,19 +4,22 @@ title: Add persistent HttpOnly sessions for same-origin single-user WebUI auth
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-07-10 22:44'
+updated_date: 2026-07-10 22:44
 labels: []
 dependencies: []
 references:
-  - TASK-12106
-  - TASK-12030
-  - TASK-12127
-  - 'https://github.com/rmusser01/tldw_server/issues/2590'
+- TASK-12106
+- TASK-12030
+- TASK-12127
+- https://github.com/rmusser01/tldw_server/issues/2590
 documentation:
-  - Docs/superpowers/specs/2026-07-10-single-user-http-only-session-design.md
-  - >-
-    docs/superpowers/plans/2026-07-10-single-user-http-only-session-implementation-plan.md
+- Docs/superpowers/specs/2026-07-10-single-user-http-only-session-design.md
+- docs/superpowers/plans/2026-07-10-single-user-http-only-session-implementation-plan.md
+- .superpowers/sdd/http-task-2-report.md
 priority: high
+modified_files:
+- tldw_Server_API/app/core/AuthNZ/auth_principal_resolver.py
+- tldw_Server_API/tests/AuthNZ/unit/test_auth_principal_service_and_single_user_tokens.py
 ---
 
 ## Description

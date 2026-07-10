@@ -95,6 +95,49 @@ async def test_explicit_credentials_take_precedence_over_cookie_session(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "credential_header",
+    [
+        {"Authorization": "Basic dXNlcjpwYXNz"},
+        {"Authorization": "Bearer"},
+        {"Authorization": "Bearer   "},
+        {"X-API-KEY": "   "},
+    ],
+)
+async def test_present_invalid_explicit_credentials_do_not_fall_back_to_cookie(
+    monkeypatch,
+    credential_header,
+):
+    monkeypatch.setenv("AUTH_MODE", "single_user")
+    monkeypatch.setenv("SINGLE_USER_API_KEY", "tldw_test_key_123456")
+    monkeypatch.setenv("SINGLE_USER_FIXED_ID", "1")
+    reset_settings()
+
+    identity = SingleUserSessionIdentity(
+        session_id=41,
+        user_id=1,
+        expires_at=datetime.now(timezone.utc) + timedelta(days=1),
+    )
+    validate = AsyncMock(return_value=identity)
+    monkeypatch.setattr(
+        auth_principal_resolver,
+        "validate_single_user_session",
+        validate,
+        raising=False,
+    )
+    request = _build_request(
+        {**credential_header, "Cookie": "tldw_single_user_session=opaque"}
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await auth_principal_resolver.get_auth_principal(request)
+
+    assert exc.value.status_code == 401
+    validate.assert_not_awaited()
+    reset_settings()
+
+
+@pytest.mark.asyncio
 async def test_get_auth_principal_accepts_service_token(monkeypatch):
     monkeypatch.setenv("AUTH_MODE", "multi_user")
     monkeypatch.setenv("JWT_SECRET_KEY", "test-service-secret-1234567890-abcdef")
