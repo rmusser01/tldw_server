@@ -226,6 +226,26 @@ def test_source_review_launch_metadata_rejects_payload_over_size_cap():
         )
 
 
+def test_source_review_launch_metadata_rejects_default_json_over_size_cap():
+    baseline = build_source_review_launch_metadata(
+        activity_type="quiz",
+        plan_id=7,
+        occurrence_id=11,
+        created_at="",
+    )
+    created_at = "x" * (16 * 1024 - len(json.dumps(baseline).encode("utf-8")) + 1)
+    oversized_metadata = {**baseline, "created_at": created_at}
+
+    assert len(json.dumps(oversized_metadata).encode("utf-8")) == 16 * 1024 + 1  # nosec B101
+    with pytest.raises(ValueError, match="16 KiB"):
+        build_source_review_launch_metadata(
+            activity_type="quiz",
+            plan_id=7,
+            occurrence_id=11,
+            created_at=created_at,
+        )
+
+
 def test_source_review_bundle_normalizes_models_and_source_title_alias():
     bundle = normalize_source_review_bundle(
         [

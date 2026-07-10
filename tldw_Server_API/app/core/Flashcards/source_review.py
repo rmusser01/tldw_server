@@ -155,11 +155,7 @@ def build_source_review_launch_metadata(
         "completion_required": True,
         "created_at": created_at,
     }
-    serialized = json.dumps(
-        metadata,
-        ensure_ascii=False,
-        separators=(",", ":"),
-    ).encode("utf-8")
+    serialized = json.dumps(metadata).encode("utf-8")
     if len(serialized) > _LAUNCH_METADATA_MAX_BYTES:
         raise ValueError("Launch metadata exceeds the 16 KiB limit")
     return metadata
