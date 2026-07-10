@@ -77,6 +77,11 @@ export const drawDeterministicQuestionPool = <T>(
   return order.slice(0, normalizedDrawCount).map((index) => items[index] as T)
 }
 
+/**
+ * Draws deterministic units while keeping grouped items atomic. Unlike
+ * drawDeterministicQuestionPool, the result can exceed drawCount when a whole
+ * group is larger than the remaining selection budget.
+ */
 export const drawDeterministicGroupedQuestionPool = <T>(
   items: T[],
   drawCount: number,

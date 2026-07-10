@@ -928,6 +928,27 @@ def test_non_assertion_profiles_strip_assertion_reasoning_reserved_tags(
     assert tags == expected_tags
 
 
+@pytest.mark.parametrize(
+    ("generation_profile", "expected_tags"),
+    [
+        ("standard_recall", ["cardiology", "hard"]),
+        ("mixed_assessment", ["cardiology", "hard"]),
+        ("emq", ["cardiology", "hard"]),
+        ("assertion_reasoning", ["cardiology", "hard", "assertion_reasoning"]),
+    ],
+)
+def test_non_best_of_five_profiles_strip_best_of_five_reserved_tags(
+    generation_profile: str,
+    expected_tags: list[str],
+) -> None:
+    tags = quiz_generator._coerce_question_tags(
+        ["cardiology", "bof", "best-of-five", "hard"],
+        generation_profile=generation_profile,
+    )
+
+    assert tags == expected_tags
+
+
 def test_normalize_assertion_reasoning_owns_options_and_canonicalizes_one_subtype_tag() -> None:
     question = _normalize_assertion_reasoning_question(
         tags=[

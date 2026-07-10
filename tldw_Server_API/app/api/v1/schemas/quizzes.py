@@ -46,6 +46,23 @@ class AvailableQuizGenerationProfile(str, Enum):
     ASSERTION_REASONING = "assertion_reasoning"
 
 
+def _validate_available_generation_profiles() -> None:
+    """Fail fast if request profiles drift from the available catalog subset."""
+    expected = {
+        profile.value
+        for profile in QuizGenerationProfile
+        if profile is not QuizGenerationProfile.OSCE_SCENARIO
+    }
+    actual = {profile.value for profile in AvailableQuizGenerationProfile}
+    if actual != expected:
+        raise RuntimeError(
+            "AvailableQuizGenerationProfile must match all non-planned quiz profiles"
+        )
+
+
+_validate_available_generation_profiles()
+
+
 class QuizSourceType(str, Enum):
     MEDIA = "media"
     NOTE = "note"

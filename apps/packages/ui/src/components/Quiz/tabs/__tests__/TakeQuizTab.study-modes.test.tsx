@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { MemoryRouter } from "react-router-dom"
-import { TakeQuizTab } from "../TakeQuizTab"
+import { ASSERTION_REASONING_OPTIONS, TakeQuizTab } from "../TakeQuizTab"
 import {
   useAttemptsQuery,
   useQuizzesQuery,
@@ -14,14 +14,6 @@ import { useQuizTimer } from "../../hooks/useQuizTimer"
 import { listQuestions } from "@/services/quizzes"
 import { TAKE_QUIZ_LIST_PREFS_KEY } from "../../stateKeys"
 import { drawDeterministicQuestionPool } from "../../utils/optionShuffle"
-
-const ASSERTION_REASONING_OPTIONS = [
-  "Both the assertion and reason are true, and the reason correctly explains the assertion.",
-  "Both the assertion and reason are true, but the reason does not explain the assertion.",
-  "The assertion is true, but the reason is false.",
-  "The assertion is false, but the reason is true.",
-  "Both the assertion and reason are false."
-]
 
 vi.mock("react-router-dom", async (importOriginal) => {
   const actual = await importOriginal<typeof import("react-router-dom")>()
@@ -250,6 +242,36 @@ describe("TakeQuizTab study modes", () => {
 
     fireEvent.click(screen.getByRole("checkbox", { name: "5" }))
     expect(await screen.findByText("Correct")).toBeInTheDocument()
+  }, 15000)
+
+  it("uses the true-false control for a malformed grouped true-false question", async () => {
+    window.sessionStorage.setItem(
+      TAKE_QUIZ_LIST_PREFS_KEY,
+      JSON.stringify({ modePreference: "practice" })
+    )
+
+    vi.mocked(listQuestions).mockResolvedValue({
+      items: [
+        {
+          id: 20,
+          quiz_id: 7,
+          question_type: "true_false",
+          question_text: "This malformed legacy record has group metadata.",
+          options: ["Distractor A", "Distractor B"],
+          correct_answer: "true",
+          group_id: "legacy-group"
+        }
+      ],
+      count: 1
+    } as any)
+
+    render(<MemoryRouter><TakeQuizTab onNavigateToGenerate={() => {}} onNavigateToCreate={() => {}} /></MemoryRouter>)
+
+    fireEvent.click(screen.getByRole("button", { name: /Start Practice/i }))
+
+    expect(await screen.findByRole("radio", { name: "True" })).toBeInTheDocument()
+    expect(screen.getByRole("radio", { name: "False" })).toBeInTheDocument()
+    expect(screen.queryByRole("combobox")).not.toBeInTheDocument()
   }, 15000)
 
   it("keeps Assertion / Reasoning practice order fixed and shows evidence after incorrect and correct answers", async () => {

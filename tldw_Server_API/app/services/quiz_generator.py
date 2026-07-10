@@ -330,6 +330,8 @@ def _coerce_question_tags(raw: Any, *, generation_profile: Any) -> list[str] | N
             tag.lower().replace("-", " ").replace("_", " ").replace("/", " ").split()
         )
         if reserved_normalized in {BEST_OF_FIVE_TAG, "bof"}:
+            if profile_id != "best_of_five":
+                continue
             tag = BEST_OF_FIVE_TAG
             normalized = BEST_OF_FIVE_TAG
         elif reserved_normalized == ASSERTION_REASONING_TAG:
@@ -557,6 +559,10 @@ def _coerce_generation_plan(
     profile_id = _normalize_generation_profile(generation_profile)
     allowed_types = set(_PROFILE_BY_ID[profile_id]["allowed_question_types"])
     if question_plan:
+        if profile_id not in {"standard_recall", "mixed_assessment"}:
+            raise ValueError(
+                "question_plan is only supported for standard_recall and mixed_assessment profiles"
+            )
         plan: list[dict[str, Any]] = []
         seen_types: set[str] = set()
         for item in question_plan:
@@ -808,12 +814,14 @@ def _format_quiz_generation_prompt(
     focus_instruction: str,
     source_contract: str,
     question_plan: Sequence[Any] | None = None,
+    generation_profile: Any = DEFAULT_GENERATION_PROFILE,
 ) -> str:
     """Render the quiz generation prompt, including structured plan instructions."""
     plan = _coerce_generation_plan(
         num_questions=num_questions,
         question_types=question_types,
         question_plan=question_plan,
+        generation_profile=generation_profile,
     )
     template = QUIZ_GENERATION_PROMPT
     if question_plan:
@@ -1612,6 +1620,7 @@ async def generate_quiz_from_sources(
         focus_instruction=focus_instruction,
         source_contract=source_contract,
         question_plan=plan if question_plan else None,
+        generation_profile=normalized_profile,
     )
 
     llm_kwargs: dict[str, Any] = {

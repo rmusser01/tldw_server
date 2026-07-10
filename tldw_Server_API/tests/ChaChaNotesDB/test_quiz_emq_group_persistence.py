@@ -1,21 +1,10 @@
 """Persistence tests for additive EMQ question group metadata."""
 
-from pathlib import Path
-
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 pytestmark = pytest.mark.unit
-
-
-@pytest.fixture
-def quiz_db(tmp_path: Path):
-    db = CharactersRAGDB(tmp_path / "emq-groups.db", client_id="emq-groups-test")
-    try:
-        yield db
-    finally:
-        db.close_all_connections()
 
 
 def test_emq_group_metadata_round_trips_through_get_and_list(quiz_db: CharactersRAGDB) -> None:

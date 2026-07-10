@@ -2,6 +2,7 @@ import pytest
 from pydantic import ValidationError
 
 from tldw_Server_API.app.api.v1.schemas.quizzes import (
+    AvailableQuizGenerationProfile,
     QuestionCreate,
     QuestionPublicResponse,
     QuestionUpdate,
@@ -135,6 +136,14 @@ def test_quiz_generate_request_rejects_planned_generation_profile():
                 "generation_profile": "osce_scenario",
             }
         )
+
+
+def test_available_generation_profiles_match_non_planned_catalog_profiles() -> None:
+    assert {profile.value for profile in AvailableQuizGenerationProfile} == {
+        profile.value
+        for profile in QuizGenerationProfile
+        if profile is not QuizGenerationProfile.OSCE_SCENARIO
+    }
 
 
 def test_quiz_generate_request_rejects_unknown_source_type():

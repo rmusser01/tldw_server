@@ -36,6 +36,8 @@ modified_files:
 - backlog/tasks/task-12102.3.4 - Implement-assertion-and-reasoning-questions.md
 - backlog/tasks/task-12102.3.5 - Implement-OSCE-scenario-practice.md
 - backlog/tasks/task-12102.3.6 - Add-advanced-quiz-docs-examples-and-generated-output-validation-fixtures.md
+- backlog/tasks/task-12102.3.7 - Add-advanced-quiz-generation-observability-metrics.md
+- backlog/tasks/task-12102.3.8 - Rebase-PR-2708-and-address-review-follow-ups.md
 ---
 
 ## Description
@@ -46,12 +48,17 @@ Draft PRD and task breakdown for NotebookLM-inspired feature groups: editable sl
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
+- [x] #1 Three separate PRDs define Slides/Infographics, Mind Maps, and Advanced Quiz Customization.
+- [x] #2 Each PRD records feasibility, scoped backend/WebUI/extension behavior, non-goals, risks, and rollout sequencing.
+- [x] #3 Each feature group has a parent task and independently reviewable phase tasks linked to its PRD.
+- [x] #4 Task breakdowns include testable deliverables, dependencies, and deferred investigation work.
+- [x] #5 Documentation and task metadata pass placeholder, punctuation, and whitespace review.
 <!-- AC:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
+Created one feasibility-driven PRD and phased Backlog hierarchy per feature group. The task set separates implementation slices from investigations, keeps backend/WebUI/extension ownership explicit, and records non-code verification plus the Bandit skip.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
@@ -62,10 +69,10 @@ Created three separate PRDs for Slides/Infographics, Mind Maps, and Advanced Qui
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

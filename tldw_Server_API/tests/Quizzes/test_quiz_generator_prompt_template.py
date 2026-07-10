@@ -1,4 +1,5 @@
 import os
+from typing import Any
 
 import pytest
 
@@ -85,6 +86,43 @@ def test_quiz_generation_prompt_preserves_source_content_when_removing_legacy_hi
 
     assert content in rendered_prompt
     assert "Planned question requirements" in rendered_prompt
+
+
+def test_quiz_generation_prompt_threads_active_profile_to_plan_coercion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    original = quiz_generator._coerce_generation_plan
+
+    def capture_profile(**kwargs: Any) -> list[dict[str, Any]]:
+        captured["generation_profile"] = kwargs.get("generation_profile")
+        return original(**kwargs)
+
+    monkeypatch.setattr(quiz_generator, "_coerce_generation_plan", capture_profile)
+
+    quiz_generator._format_quiz_generation_prompt(
+        num_questions=1,
+        content="Sample content",
+        difficulty="mixed",
+        question_types=["multiple_choice"],
+        focus_instruction="",
+        source_contract="- Allowed sources: note:note-1",
+        generation_profile="best_of_five",
+    )
+
+    assert captured["generation_profile"] == "best_of_five"
+
+
+@pytest.mark.parametrize("profile", ["best_of_five", "emq", "assertion_reasoning"])
+def test_locked_generation_profiles_reject_question_plan(profile: str) -> None:
+    with pytest.raises(ValueError, match="question_plan is only supported"):
+        quiz_generator._coerce_generation_plan(
+            num_questions=1,
+            question_plan=[
+                {"question_type": "multiple_choice", "count": 1, "option_count": 5}
+            ],
+            generation_profile=profile,
+        )
 
 
 def test_best_of_five_profile_exposes_prompt_contract_and_question_defaults():

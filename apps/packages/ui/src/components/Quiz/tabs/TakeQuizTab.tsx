@@ -99,7 +99,7 @@ type PracticeQuestionTimerPreference = "off" | number
 const TOUCH_TARGET_CLASS = "min-h-11 px-4"
 const BEST_OF_FIVE_QUESTION_TAG = "best_of_five"
 const ASSERTION_REASONING_QUESTION_TAG = "assertion_reasoning"
-const ASSERTION_REASONING_OPTIONS = [
+export const ASSERTION_REASONING_OPTIONS = [
   "Both the assertion and reason are true, and the reason correctly explains the assertion.",
   "Both the assertion and reason are true, but the reason does not explain the assertion.",
   "The assertion is true, but the reason is false.",
@@ -1289,7 +1289,10 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
   }
 
   const renderAnswerInput = (question: QuestionPublic) => {
-    if (getQuestionGroupId(question)) {
+    if (
+      question.question_type === "multiple_choice" &&
+      getQuestionGroupId(question)
+    ) {
       const optionBank = question.options ?? []
       return (
         <Select

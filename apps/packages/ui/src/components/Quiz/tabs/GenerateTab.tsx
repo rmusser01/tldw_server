@@ -137,6 +137,11 @@ const getGenerationProfile = (
   );
 };
 
+const usesQuestionPlanShape = (
+  profileId: AvailableQuizGenerationProfile,
+): boolean =>
+  profileId === "standard_recall" || profileId === "mixed_assessment";
+
 type QuestionPlanRowState = QuizQuestionPlanItem & {
   enabled: boolean;
   labelKey: string;
@@ -656,9 +661,9 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
     generationProfiles,
     Form.useWatch("generationProfile", form),
   );
-  const profileLocksQuestionShape =
-    selectedGenerationProfile.id !== "standard_recall" &&
-    selectedGenerationProfile.id !== "mixed_assessment";
+  const profileLocksQuestionShape = !usesQuestionPlanShape(
+    selectedGenerationProfile.id,
+  );
   const shouldGenerateStudyMaterials = Boolean(
     Form.useWatch("generateStudyMaterials", form),
   );
@@ -1145,7 +1150,7 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
       const profile = getGenerationProfile(generationProfiles, value);
       form.setFieldValue("difficulty", profile.default_difficulty);
       setQuestionPlanRows((rows) => {
-        if (profile.id === "standard_recall" || profile.id === "mixed_assessment") {
+        if (usesQuestionPlanShape(profile.id)) {
           return DEFAULT_QUESTION_PLAN_ROWS.map((row) => ({ ...row }));
         }
 
@@ -1358,9 +1363,7 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
         generationProfiles,
         values.generationProfile,
       );
-      const usesQuestionPlan =
-        generationProfile.id === "standard_recall" ||
-        generationProfile.id === "mixed_assessment";
+      const usesQuestionPlan = usesQuestionPlanShape(generationProfile.id);
       const shouldGenerateStudyMaterials = Boolean(
         values.generateStudyMaterials,
       );
@@ -1373,10 +1376,9 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
           sources: selectedSources,
           generation_profile: generationProfile.id,
           num_questions: totalQuestions,
-          question_plan: usesQuestionPlan ? enabledPlanRows : undefined,
-          question_types: usesQuestionPlan
-            ? undefined
-            : generationProfile.default_question_types,
+          ...(usesQuestionPlan
+            ? { question_plan: enabledPlanRows }
+            : { question_types: generationProfile.default_question_types }),
           difficulty: values.difficulty,
           focus_topics: focusTopics.length > 0 ? focusTopics : undefined,
         },

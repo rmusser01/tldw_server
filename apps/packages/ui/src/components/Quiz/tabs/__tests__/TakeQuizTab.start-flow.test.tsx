@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { MemoryRouter } from "react-router-dom"
-import { TakeQuizTab } from "../TakeQuizTab"
+import { ASSERTION_REASONING_OPTIONS, TakeQuizTab } from "../TakeQuizTab"
 import {
   useAttemptsQuery,
   useQuizzesQuery,
@@ -12,14 +12,6 @@ import {
 import { useQuizAutoSave } from "../../hooks/useQuizAutoSave"
 import { useQuizTimer } from "../../hooks/useQuizTimer"
 import { buildShuffledOptionEntries } from "../../utils/optionShuffle"
-
-const ASSERTION_REASONING_OPTIONS = [
-  "Both the assertion and reason are true, and the reason correctly explains the assertion.",
-  "Both the assertion and reason are true, but the reason does not explain the assertion.",
-  "The assertion is true, but the reason is false.",
-  "The assertion is false, but the reason is true.",
-  "Both the assertion and reason are false."
-]
 
 vi.mock("react-router-dom", async (importOriginal) => {
   const actual = await importOriginal<typeof import("react-router-dom")>()

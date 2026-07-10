@@ -1,22 +1,11 @@
 """SQLite roundtrip coverage for assertion/reasoning quiz questions."""
 
-from pathlib import Path
-
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.services import quiz_generator
 
 pytestmark = pytest.mark.unit
-
-
-@pytest.fixture
-def quiz_db(tmp_path: Path):
-    db = CharactersRAGDB(tmp_path / "assertion-reasoning.db", client_id="assertion-reasoning-test")
-    try:
-        yield db
-    finally:
-        db.close_all_connections()
 
 
 def test_assertion_reasoning_roundtrip_preserves_public_subtype_contract(
