@@ -6,7 +6,9 @@ import base64
 import contextlib
 import hashlib
 import hmac
+import os
 import secrets
+import sys
 from typing import Callable, Optional
 
 #
@@ -17,12 +19,13 @@ from loguru import logger
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from tldw_Server_API.app.core.AuthNZ.crypto_utils import derive_hmac_key
-from tldw_Server_API.app.core.AuthNZ.exceptions import UserRegistrationException
+from tldw_Server_API.app.core.AuthNZ.exceptions import SessionError, UserRegistrationException
 from tldw_Server_API.app.core.AuthNZ.ip_allowlist import resolve_client_ip
 
 #
 # Local imports
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+from tldw_Server_API.app.core.AuthNZ.single_user_session import validate_single_user_session
 from tldw_Server_API.app.core.config import settings as global_settings
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
@@ -45,9 +48,23 @@ _CSRF_NONCRITICAL_EXCEPTIONS = (
     TimeoutError,
     TypeError,
     UnicodeDecodeError,
+    SessionError,
     UserRegistrationException,
     ValueError,
 )
+
+
+def resolve_effective_csrf_enabled() -> bool:
+    """Resolve the effective CSRF setting for middleware and cookie minting."""
+    configured = global_settings.get("CSRF_ENABLED")
+    raw = os.getenv("CSRF_ENABLED")
+    if raw is not None:
+        configured = bool(is_truthy(raw.strip().lower()))
+    if configured is not None:
+        return bool(configured)
+    if is_test_mode() or "pytest" in sys.modules:
+        return False
+    return get_settings().AUTH_MODE in {"single_user", "multi_user"}
 
 #######################################################################################################################
 #
@@ -177,6 +194,10 @@ class CSRFTokenManager:
             scheme, _, credential = authorization.partition(" ")
             if scheme.lower() == "bearer" and credential.strip():
                 return False
+
+        settings = get_settings()
+        if settings.AUTH_MODE == "single_user":
+            return settings.SINGLE_USER_SESSION_COOKIE_NAME in request.cookies
 
         # Check content type
         content_type = request.headers.get("content-type", "").lower()
@@ -309,6 +330,15 @@ class CSRFProtectionMiddleware(BaseHTTPMiddleware):
                     return user_id
             except _CSRF_NONCRITICAL_EXCEPTIONS as exc:
                 logger.debug(f"CSRF binding: API key resolution failed: {exc}")
+        try:
+            identity = await validate_single_user_session(request)
+            if identity is not None:
+                with contextlib.suppress(AttributeError):
+                    request.state.single_user_session_id = identity.session_id
+                    request.state.user_id = identity.user_id
+                return identity.user_id
+        except _CSRF_NONCRITICAL_EXCEPTIONS as exc:
+            logger.debug(f"CSRF binding: single-user session resolution failed: {exc}")
         return None
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
@@ -322,12 +352,7 @@ class CSRFProtectionMiddleware(BaseHTTPMiddleware):
         Returns:
             Response with CSRF token cookie if needed
         """
-        # Check runtime setting to allow test overrides
-        # Use global settings which tests can modify
-        runtime_csrf_enabled = global_settings.get('CSRF_ENABLED', None)
-
-        # If CSRF_ENABLED is explicitly False, bypass protection
-        if runtime_csrf_enabled is False or not self.enabled:
+        if not resolve_effective_csrf_enabled() or not self.enabled:
             return await call_next(request)
 
         # Check if this request needs CSRF protection
@@ -489,58 +514,19 @@ def add_csrf_protection(app):
     Args:
         app: FastAPI application instance
     """
-    settings = get_settings()
-
-    # Check both AUTH_MODE and CSRF_ENABLED setting
-    # CSRF_ENABLED can override the default behavior for testing
-    csrf_enabled = global_settings.get('CSRF_ENABLED', None)
-    # Allow explicit environment override to take precedence when provided
-    import os as _os
-    _env_ce = _os.getenv('CSRF_ENABLED')
-    if _env_ce is not None:
-        try:
-            _normalized = str(_env_ce).strip().lower()
-            _val = is_truthy(_normalized)
-            csrf_enabled = bool(_val)
-        except (AttributeError, TypeError, ValueError) as _e:
-            # Invalid value provided; keep existing default and log for visibility
-            logger.debug(f"Invalid CSRF_ENABLED value {repr(_env_ce)}: {_e}; using default/fallback")
-        except _CSRF_NONCRITICAL_EXCEPTIONS as _e:  # pragma: no cover - defensive
-            # Unexpected error; log with traceback to aid debugging, keep fallback
-            logger.exception(f"Unexpected error parsing CSRF_ENABLED: {_e}")
-    # In test mode, default to disabled unless explicitly enabled in settings
-    try:
-        import os as _os
-        import sys as _sys
-        if csrf_enabled is None and (
-            is_test_mode()
-            or "pytest" in _sys.modules
-        ):
-            csrf_enabled = False
-    except _CSRF_NONCRITICAL_EXCEPTIONS:
-        pass
-
-    if csrf_enabled is False:
-        # Explicitly disabled (e.g., for testing)
+    csrf_enabled = resolve_effective_csrf_enabled()
+    if not csrf_enabled:
         logger.info("CSRF Protection explicitly disabled via CSRF_ENABLED setting")
         app.add_middleware(
             CSRFProtectionMiddleware,
             enabled=False
         )
-    elif settings.AUTH_MODE == "multi_user" or csrf_enabled is True:
-        # Enable for multi-user mode or if explicitly enabled
+    else:
         app.add_middleware(
             CSRFProtectionMiddleware,
             enabled=True
         )
         logger.info("CSRF Protection enabled")
-    else:
-        # Single-user mode and not explicitly enabled
-        app.add_middleware(
-            CSRFProtectionMiddleware,
-            enabled=False
-        )
-        logger.info("CSRF Protection disabled for single-user mode")
 
 
 #

@@ -1,14 +1,17 @@
+from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock
+
 import pytest
 from fastapi import HTTPException, Response
 from fastapi.security import HTTPAuthorizationCredentials
 from starlette.requests import Request
 
 from tldw_Server_API.app.api.v1.API_Deps import auth_deps
-from tldw_Server_API.app.core.AuthNZ import auth_principal_resolver
-from tldw_Server_API.app.core.AuthNZ import User_DB_Handling
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
+from tldw_Server_API.app.core.AuthNZ import User_DB_Handling, auth_principal_resolver
 from tldw_Server_API.app.core.AuthNZ.jwt_service import JWTService, reset_jwt_service
 from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+from tldw_Server_API.app.core.AuthNZ.single_user_session import SingleUserSessionIdentity
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
 
 
 def _build_request(headers: dict[str, str], client_host: str = "127.0.0.1") -> Request:
@@ -22,6 +25,73 @@ def _build_request(headers: dict[str, str], client_host: str = "127.0.0.1") -> R
         "client": (client_host, 0),
     }
     return Request(scope)
+
+
+@pytest.mark.asyncio
+async def test_get_auth_principal_accepts_single_user_cookie_session(monkeypatch):
+    monkeypatch.setenv("AUTH_MODE", "single_user")
+    monkeypatch.setenv("SINGLE_USER_API_KEY", "tldw_test_key_123456")
+    monkeypatch.setenv("SINGLE_USER_FIXED_ID", "1")
+    reset_settings()
+
+    identity = SingleUserSessionIdentity(
+        session_id=41,
+        user_id=1,
+        expires_at=datetime.now(timezone.utc) + timedelta(days=1),
+    )
+    validate = AsyncMock(return_value=identity)
+    monkeypatch.setattr(
+        auth_principal_resolver,
+        "validate_single_user_session",
+        validate,
+        raising=False,
+    )
+    request = _build_request({"Cookie": "tldw_single_user_session=opaque"})
+
+    principal = await auth_principal_resolver.get_auth_principal(request)
+
+    assert principal.kind == "user"
+    assert principal.subject == "single_user"
+    assert principal.token_type == "single_user_session"
+    assert request.state.single_user_session_id == 41
+    assert request.state.user_id == 1
+    validate.assert_awaited_once_with(request)
+    reset_settings()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "credential_header",
+    [
+        {"X-API-KEY": "tldw_test_key_123456"},
+        {"Authorization": "Bearer tldw_test_key_123456"},
+    ],
+)
+async def test_explicit_credentials_take_precedence_over_cookie_session(
+    monkeypatch,
+    credential_header,
+):
+    monkeypatch.setenv("AUTH_MODE", "single_user")
+    monkeypatch.setenv("SINGLE_USER_API_KEY", "tldw_test_key_123456")
+    monkeypatch.setenv("SINGLE_USER_FIXED_ID", "1")
+    reset_settings()
+
+    validate = AsyncMock()
+    monkeypatch.setattr(
+        auth_principal_resolver,
+        "validate_single_user_session",
+        validate,
+        raising=False,
+    )
+    request = _build_request(
+        {**credential_header, "Cookie": "tldw_single_user_session=opaque"}
+    )
+
+    principal = await auth_principal_resolver.get_auth_principal(request)
+
+    assert principal.token_type == "api_key"
+    validate.assert_not_awaited()
+    reset_settings()
 
 
 @pytest.mark.asyncio
