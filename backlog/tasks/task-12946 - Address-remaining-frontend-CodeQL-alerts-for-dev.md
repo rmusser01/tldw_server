@@ -12,8 +12,10 @@ references:
 - https://github.com/rmusser01/tldw_server/pull/2696
 documentation:
 - Docs/superpowers/specs/2026-07-10-remaining-frontend-codeql-alerts-design.md
+- Docs/superpowers/plans/IMPLEMENTATION_PLAN_2026-07-10_remaining_frontend_codeql_alerts.md
 modified_files:
 - Docs/superpowers/specs/2026-07-10-remaining-frontend-codeql-alerts-design.md
+- Docs/superpowers/plans/IMPLEMENTATION_PLAN_2026-07-10_remaining_frontend_codeql_alerts.md
 - backlog/tasks/task-12946 - Address-remaining-frontend-CodeQL-alerts-for-dev.md
 ---
 
@@ -35,6 +37,8 @@ Address the 12 JavaScript/TypeScript CodeQL alerts #2251-#2262 that remain unpat
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Pre-implementation review refined the design in four material ways: use the existing server-side `groups` source query instead of OPML/client filtering; centralize an image-specific URL validator with an analyzer-visible safe prefix and embedded-image fallback; sanitize article HTML before the non-DOM text scanner; and preserve the printable quiz document shell with DOMPurify `WHOLE_DOCUMENT` plus a trusted doctype. Verification limitation: the dev-targeted PR is not expected to receive JavaScript default-setup CodeQL because dev is unprotected and the repository advanced workflow is Python-only. Independent spec review approved the revised approach.
+
+Implementation plan: `Docs/superpowers/plans/IMPLEMENTATION_PLAN_2026-07-10_remaining_frontend_codeql_alerts.md`, with alert-to-source/test traceability and mandatory red-green steps.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
