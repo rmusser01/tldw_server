@@ -1,5 +1,6 @@
 import type {
   WorkspaceSource,
+  WorkspaceSourceReviewState,
   WorkspaceSourceStatus,
   WorkspaceSourceType
 } from "@/types/workspace"
@@ -23,6 +24,7 @@ export interface SourceListViewState {
   expanded: boolean
   typeFilters: WorkspaceSourceType[]
   statusFilters: WorkspaceSourceStatus[]
+  reviewStateFilters: WorkspaceSourceReviewState[]
   dateField: "addedAt" | "sourceCreatedAt"
   dateFrom: string | null
   dateTo: string | null
@@ -43,6 +45,7 @@ export const DEFAULT_SOURCE_LIST_VIEW_STATE: SourceListViewState = {
   expanded: false,
   typeFilters: [],
   statusFilters: [],
+  reviewStateFilters: [],
   dateField: "addedAt",
   dateFrom: null,
   dateTo: null,
@@ -106,6 +109,7 @@ const matchesDateRange = (
 export const hasActiveSourceFilters = (viewState: SourceListViewState): boolean =>
   viewState.typeFilters.length > 0 ||
   viewState.statusFilters.length > 0 ||
+  (viewState.reviewStateFilters?.length ?? 0) > 0 ||
   viewState.dateFrom !== null ||
   viewState.dateTo !== null ||
   viewState.requireUrl ||
@@ -135,6 +139,15 @@ export const filterSources = (
     if (
       viewState.statusFilters.length > 0 &&
       !viewState.statusFilters.includes(status)
+    ) {
+      return false
+    }
+
+    const reviewStateFilters = viewState.reviewStateFilters ?? []
+    const reviewState = source.reviewState ?? "unset"
+    if (
+      reviewStateFilters.length > 0 &&
+      !reviewStateFilters.includes(reviewState)
     ) {
       return false
     }
@@ -277,6 +290,17 @@ export const sortSources = (
 const capitalize = (value: string): string =>
   value.length === 0 ? value : value[0].toUpperCase() + value.slice(1)
 
+const REVIEW_STATE_LABELS: Record<WorkspaceSourceReviewState, string> = {
+  unset: "Unreviewed",
+  needs_review: "Needs review",
+  reviewed: "Reviewed"
+}
+
+export const SOURCE_REVIEW_FILTER_PRESETS = {
+  needsReview: { reviewStateFilters: ["needs_review"] },
+  unreviewed: { reviewStateFilters: ["unset"] }
+} satisfies Record<string, Pick<SourceListViewState, "reviewStateFilters">>
+
 export const SOURCE_LIST_SORT_LABELS: Record<
   Exclude<SourceListSortOption, "manual">,
   string
@@ -305,6 +329,15 @@ export const buildSourceFilterSummary = (viewState: SourceListViewState): string
   if (viewState.statusFilters.length > 0) {
     parts.push(
       `Status=${viewState.statusFilters.map((value) => capitalize(value)).join(", ")}`
+    )
+  }
+
+  const reviewStateFilters = viewState.reviewStateFilters ?? []
+  if (reviewStateFilters.length > 0) {
+    parts.push(
+      `Review=${reviewStateFilters
+        .map((value) => REVIEW_STATE_LABELS[value])
+        .join(", ")}`
     )
   }
 

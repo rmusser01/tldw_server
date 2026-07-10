@@ -810,6 +810,8 @@ class WebClipperService:
             "position": len(existing_sources),
             "selected": True,
         }
+        if request.workspace.default_review_state == "needs_review":
+            source_data["review_state"] = "needs_review"
         return self.db.add_workspace_source(request.workspace.workspace_id, source_data)
 
     def _upsert_workspace_clip_media(

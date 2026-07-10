@@ -340,6 +340,26 @@ describe("workspace API domain contract", () => {
     )
   })
 
+  it("updates workspace source review state through the batch endpoint", async () => {
+    mocks.bgRequest.mockResolvedValue([])
+
+    await workspaceApiMethods.updateWorkspaceSourceReviewState(
+      "workspace with spaces",
+      [" source with spaces "],
+      "reviewed"
+    )
+
+    expect(mocks.bgRequest).toHaveBeenCalledWith({
+      path: "/api/v1/workspaces/workspace%20with%20spaces/sources/review-state",
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: {
+        source_ids: [" source with spaces "],
+        review_state: "reviewed"
+      }
+    })
+  })
+
   it("rejects slash-delimited IDs before making segment-routed requests", async () => {
     await expect(
       workspaceApiMethods.deleteWorkspace("workspace/with/slash")

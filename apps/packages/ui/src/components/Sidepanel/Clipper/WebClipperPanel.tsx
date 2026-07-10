@@ -212,6 +212,7 @@ const WebClipperPanel = ({ draft, onCancel }: WebClipperPanelProps) => {
   const [destinationMode, setDestinationMode] =
     React.useState<WebClipperDestination>("note")
   const [workspaceId, setWorkspaceId] = React.useState("")
+  const [addToNeedsReview, setAddToNeedsReview] = React.useState(false)
   const [runOcr, setRunOcr] = React.useState(false)
   const [runVlm, setRunVlm] = React.useState(false)
   const [folderValidation, setFolderValidation] =
@@ -260,6 +261,7 @@ const WebClipperPanel = ({ draft, onCancel }: WebClipperPanelProps) => {
     setFolderId("")
     setDestinationMode("note")
     setWorkspaceId("")
+    setAddToNeedsReview(false)
     setRunOcr(false)
     setRunVlm(false)
     setFolderValidation(null)
@@ -508,7 +510,12 @@ const WebClipperPanel = ({ draft, onCancel }: WebClipperPanelProps) => {
         keywords: withCapturedNoteKeyword(splitKeywords(tags))
       },
       workspace: needsWorkspace
-        ? { workspace_id: trimmedWorkspaceId }
+        ? {
+            workspace_id: trimmedWorkspaceId,
+            ...(addToNeedsReview
+              ? { default_review_state: "needs_review" as const }
+              : {})
+          }
         : null,
       content: {
         visible_body: draft.visibleBody,
@@ -727,6 +734,7 @@ const WebClipperPanel = ({ draft, onCancel }: WebClipperPanelProps) => {
         workspaceOptionsError={workspaceOptionsError}
         workspaceId={workspaceId}
         workspaceValidation={workspaceValidation}
+        addToNeedsReview={addToNeedsReview}
         onDestinationChange={(nextValue) => {
           setDestinationMode(nextValue)
           if (nextValue === "note") {
@@ -754,6 +762,7 @@ const WebClipperPanel = ({ draft, onCancel }: WebClipperPanelProps) => {
             setWorkspaceValidation(null)
           }
         }}
+        onAddToNeedsReviewChange={setAddToNeedsReview}
       />
 
       <ClipEnhancementFields

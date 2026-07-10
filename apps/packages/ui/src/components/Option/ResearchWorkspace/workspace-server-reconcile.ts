@@ -91,7 +91,10 @@ const buildSourceCreateRequest = (
     source_type: source.type,
     url: source.url || null,
     position,
-    selected: selectedSourceIds ? selectedSourceIds.has(source.id) : true
+    selected: selectedSourceIds ? selectedSourceIds.has(source.id) : true,
+    ...(source.reviewState === "needs_review"
+      ? { review_state: "needs_review" as const }
+      : {})
   }
 }
 

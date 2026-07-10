@@ -62,6 +62,7 @@ from tldw_Server_API.app.api.v1.schemas.workspace_schemas import (
     WorkspaceSourcePreviewResponse,
     WorkspaceSourceReorderRequest,
     WorkspaceSourceResponse,
+    WorkspaceSourceReviewStateBatchRequest,
     WorkspaceSourceSelectionRequest,
     WorkspaceSourceStatusListResponse,
     WorkspaceSourceUpdateRequest,
@@ -366,6 +367,10 @@ def _src_to_response(src: dict) -> WorkspaceSourceResponse:
         position=src.get("position", 0),
         selected=bool(src.get("selected", True)),
         added_at=str(src.get("added_at", "")),
+        review_state=src.get("review_state") or "unset",
+        review_state_updated_at=src.get("review_state_updated_at"),
+        reviewed_at=src.get("reviewed_at"),
+        reviewed_by_user_id=src.get("reviewed_by_user_id"),
         version=src.get("version", 1),
     )
 
@@ -2413,6 +2418,35 @@ async def reorder_sources(
 
 
 @router.put(
+    "/{workspace_id}/sources/review-state",
+    response_model=list[WorkspaceSourceResponse],
+    dependencies=[Depends(WORKSPACES_WRITE_RATE_LIMIT)],
+    summary="Batch-update workspace source review state",
+)
+async def update_source_review_states(
+    workspace_id: str,
+    body: WorkspaceSourceReviewStateBatchRequest,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    current_user: User = Depends(get_request_user),
+) -> list[WorkspaceSourceResponse]:
+    """Set the review state for selected workspace sources atomically."""
+    _require_workspace(db, workspace_id)
+    try:
+        sources = db.update_workspace_source_review_states(
+            workspace_id,
+            body.source_ids,
+            body.review_state,
+            str(getattr(current_user, "id", "")),
+        )
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(
+            exc,
+            default_detail="Failed to update workspace source review state",
+        ) from exc
+    return [_src_to_response(source) for source in sources]
+
+
+@router.put(
     "/{workspace_id}/sources/{source_id}",
     response_model=WorkspaceSourceResponse,
     dependencies=[Depends(WORKSPACES_WRITE_RATE_LIMIT)],
@@ -2428,8 +2462,21 @@ async def update_source(
     """Update a workspace source with optimistic locking."""
     _require_workspace(db, workspace_id)
     updates = body.model_dump(exclude_unset=True, exclude={"version"})
+    if updates.get("review_state") is None:
+        updates.pop("review_state", None)
+    actor_kwargs = (
+        {"actor_user_id": str(getattr(current_user, "id", ""))}
+        if "review_state" in updates
+        else {}
+    )
     try:
-        src = db.update_workspace_source(workspace_id, source_id, updates, expected_version=body.version)
+        src = db.update_workspace_source(
+            workspace_id,
+            source_id,
+            updates,
+            expected_version=body.version,
+            **actor_kwargs,
+        )
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to update workspace source") from exc
     return _src_to_response(src)

@@ -434,6 +434,10 @@ class WorkspaceEligibilityCheckResponse(BaseModel):
 
 # --- Source schemas ---
 
+WorkspaceSourceReviewState = Literal["unset", "needs_review", "reviewed"]
+WorkspaceSourceCreateReviewState = Literal["unset", "needs_review"]
+
+
 class WorkspaceSourceCreateRequest(BaseModel):
     id: str
     media_id: int
@@ -442,6 +446,7 @@ class WorkspaceSourceCreateRequest(BaseModel):
     url: str | None = None
     position: int = 0
     selected: bool = True
+    review_state: WorkspaceSourceCreateReviewState = "unset"
 
 
 class WorkspaceSourceUpdateRequest(BaseModel):
@@ -450,7 +455,21 @@ class WorkspaceSourceUpdateRequest(BaseModel):
     url: str | None = None
     position: int | None = None
     selected: bool | None = None
+    review_state: WorkspaceSourceReviewState | None = None
     version: int = Field(..., description="Current version for optimistic locking")
+
+
+class WorkspaceSourceReviewStateBatchRequest(BaseModel):
+    source_ids: list[str] = Field(..., min_length=1, max_length=500)
+    review_state: WorkspaceSourceReviewState
+
+    @field_validator("source_ids")
+    @classmethod
+    def validate_source_ids(cls, value: list[str]) -> list[str]:
+        """Reject blank source IDs without changing valid identifiers."""
+        if any(not source_id.strip() for source_id in value):
+            raise ValueError("source_ids entries must be non-empty strings")
+        return value
 
 
 class WorkspaceSourceResponse(BaseModel):
@@ -463,6 +482,10 @@ class WorkspaceSourceResponse(BaseModel):
     position: int = 0
     selected: bool = True
     added_at: str
+    review_state: WorkspaceSourceReviewState = "unset"
+    review_state_updated_at: str | None = None
+    reviewed_at: str | None = None
+    reviewed_by_user_id: str | None = None
     version: int
 
 
@@ -528,6 +551,10 @@ class WorkspaceSourceStatusResponse(BaseModel):
     source_type: str
     url: str | None = None
     selected: bool = True
+    review_state: WorkspaceSourceReviewState = "unset"
+    review_state_updated_at: str | None = None
+    reviewed_at: str | None = None
+    reviewed_by_user_id: str | None = None
     state: WorkspaceSourceLifecycleState
     status_reason: str
     readiness: WorkspaceSourceReadiness
@@ -913,6 +940,10 @@ class WorkspaceContextSource(BaseModel):
     position: int = 0
     selected: bool = True
     added_at: str
+    review_state: WorkspaceSourceReviewState = "unset"
+    review_state_updated_at: str | None = None
+    reviewed_at: str | None = None
+    reviewed_by_user_id: str | None = None
     version: int
     state: WorkspaceSourceLifecycleState
     status_reason: str

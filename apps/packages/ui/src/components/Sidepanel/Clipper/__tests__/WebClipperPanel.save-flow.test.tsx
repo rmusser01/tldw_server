@@ -284,6 +284,33 @@ describe("WebClipperPanel save flow", () => {
     expect(screen.getByText("Advanced: enter workspace ID manually")).toBeInTheDocument()
   })
 
+  it("opts workspace captures into needs review only when selected", async () => {
+    const user = userEvent.setup()
+
+    render(<WebClipperPanel draft={createDraft()} onCancel={vi.fn()} />)
+
+    await chooseWorkspaceDestination(user)
+    const reviewDefault = screen.getByRole("checkbox", {
+      name: "Add to Needs Review"
+    })
+    expect(reviewDefault).not.toBeChecked()
+    await user.click(reviewDefault)
+    await user.click(screen.getByRole("button", { name: "Save clip" }))
+
+    await waitFor(() => {
+      expect(apiMocks.saveWebClip).toHaveBeenCalledTimes(1)
+    })
+    expect(apiMocks.saveWebClip).toHaveBeenCalledWith(
+      expect.objectContaining({
+        destination_mode: "workspace",
+        workspace: {
+          workspace_id: "workspace-alpha",
+          default_review_state: "needs_review"
+        }
+      })
+    )
+  })
+
   it("loads note folder choices and submits the selected folder", async () => {
     const user = userEvent.setup()
 

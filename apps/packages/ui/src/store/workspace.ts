@@ -50,6 +50,7 @@ import type {
   WorkspaceConfig,
   WorkspaceNote,
   WorkspaceSource,
+  WorkspaceSourceReviewUpdate,
   WorkspaceSourceReadiness,
   WorkspaceSourceStatusDetails,
   WorkspaceSourceTransferConflictResolution,
@@ -2203,6 +2204,7 @@ interface SourcesActions {
   ) => WorkspaceSource[]
   removeSource: (id: string) => void
   removeSources: (ids: string[]) => void
+  mergeSourceReviewUpdates: (updates: WorkspaceSourceReviewUpdate[]) => void
   reorderSource: (sourceId: string, targetIndex: number) => void
   toggleSourceSelection: (id: string) => void
   selectAllSources: () => void

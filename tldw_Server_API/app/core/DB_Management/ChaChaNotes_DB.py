@@ -736,6 +736,15 @@ class CharactersRAGDB:
         "assigned",
         "archived",
     )
+    _ALLOWED_WORKSPACE_SOURCE_REVIEW_STATES: tuple[str, ...] = (
+        "unset",
+        "needs_review",
+        "reviewed",
+    )
+    _ALLOWED_WORKSPACE_SOURCE_CREATE_REVIEW_STATES: tuple[str, ...] = (
+        "unset",
+        "needs_review",
+    )
 
     _FTS_CONFIG: list[tuple[str, str, list[str]]] = [
         (
@@ -3418,10 +3427,35 @@ CREATE TABLE IF NOT EXISTS workspace_sources (
     position      INTEGER NOT NULL DEFAULT 0,
     selected      BOOLEAN NOT NULL DEFAULT true,
     added_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    review_state  TEXT NOT NULL DEFAULT 'unset',
+    review_state_updated_at TEXT,
+    reviewed_at   TEXT,
+    reviewed_by_user_id TEXT,
     version       INTEGER NOT NULL DEFAULT 1,
     PRIMARY KEY (workspace_id, id)
 );
 CREATE INDEX IF NOT EXISTS idx_ws_sources_workspace ON workspace_sources(workspace_id);
+ALTER TABLE workspace_sources ADD COLUMN IF NOT EXISTS review_state TEXT NOT NULL DEFAULT 'unset';
+ALTER TABLE workspace_sources ADD COLUMN IF NOT EXISTS review_state_updated_at TEXT;
+ALTER TABLE workspace_sources ADD COLUMN IF NOT EXISTS reviewed_at TEXT;
+ALTER TABLE workspace_sources ADD COLUMN IF NOT EXISTS reviewed_by_user_id TEXT;
+UPDATE workspace_sources
+   SET review_state = 'unset'
+ WHERE review_state IS NULL
+    OR btrim(review_state) = ''
+    OR review_state NOT IN ('unset', 'needs_review', 'reviewed');
+UPDATE workspace_sources
+   SET review_state_updated_at = COALESCE(
+       NULLIF(btrim(review_state_updated_at), ''),
+       NULLIF(btrim(added_at::text), ''),
+       (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::text
+   )
+ WHERE review_state_updated_at IS NULL OR btrim(review_state_updated_at) = '';
+UPDATE workspace_sources
+   SET reviewed_at = NULL,
+       reviewed_by_user_id = NULL
+ WHERE review_state <> 'reviewed'
+   AND (reviewed_at IS NOT NULL OR reviewed_by_user_id IS NOT NULL);
 
 CREATE TABLE IF NOT EXISTS workspace_artifacts (
     id              TEXT    NOT NULL,
@@ -9658,12 +9692,43 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     position      INTEGER NOT NULL DEFAULT 0,
                     selected      BOOLEAN NOT NULL DEFAULT 1,
                     added_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    review_state  TEXT NOT NULL DEFAULT 'unset',
+                    review_state_updated_at TEXT,
+                    reviewed_at   TEXT,
+                    reviewed_by_user_id TEXT,
                     version       INTEGER NOT NULL DEFAULT 1,
                     PRIMARY KEY (workspace_id, id)
                 )
             """)
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_ws_sources_workspace ON workspace_sources(workspace_id)"
+            )
+            source_cols = {row[1] for row in conn.execute("PRAGMA table_info('workspace_sources')").fetchall()}
+            new_source_col_ddls = {
+                "review_state": "ALTER TABLE workspace_sources ADD COLUMN review_state TEXT NOT NULL DEFAULT 'unset'",
+                "review_state_updated_at": "ALTER TABLE workspace_sources ADD COLUMN review_state_updated_at TEXT",
+                "reviewed_at": "ALTER TABLE workspace_sources ADD COLUMN reviewed_at TEXT",
+                "reviewed_by_user_id": "ALTER TABLE workspace_sources ADD COLUMN reviewed_by_user_id TEXT",
+            }
+            for col_name, ddl in new_source_col_ddls.items():
+                if col_name not in source_cols:
+                    conn.execute(ddl)
+            conn.execute(
+                "UPDATE workspace_sources SET review_state = 'unset' "
+                "WHERE review_state IS NULL OR trim(review_state) = '' "
+                "OR review_state NOT IN ('unset', 'needs_review', 'reviewed')"
+            )
+            conn.execute(
+                "UPDATE workspace_sources "
+                "SET review_state_updated_at = COALESCE(NULLIF(trim(review_state_updated_at), ''), "
+                "NULLIF(trim(added_at), ''), ?) "
+                "WHERE review_state_updated_at IS NULL OR trim(review_state_updated_at) = ''",
+                (self._get_current_utc_timestamp_iso(),),
+            )
+            conn.execute(
+                "UPDATE workspace_sources SET reviewed_at = NULL, reviewed_by_user_id = NULL "
+                "WHERE review_state <> 'reviewed' "
+                "AND (reviewed_at IS NOT NULL OR reviewed_by_user_id IS NOT NULL)"
             )
 
             conn.execute("""
@@ -9961,11 +10026,30 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 position      INTEGER NOT NULL DEFAULT 0,
                 selected      BOOLEAN NOT NULL DEFAULT true,
                 added_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                review_state  TEXT NOT NULL DEFAULT 'unset',
+                review_state_updated_at TEXT,
+                reviewed_at   TEXT,
+                reviewed_by_user_id TEXT,
                 version       INTEGER NOT NULL DEFAULT 1,
                 PRIMARY KEY (workspace_id, id)
             )
             """,
             "CREATE INDEX IF NOT EXISTS idx_ws_sources_workspace ON workspace_sources(workspace_id)",
+            "ALTER TABLE workspace_sources ADD COLUMN IF NOT EXISTS review_state TEXT NOT NULL DEFAULT 'unset'",
+            "ALTER TABLE workspace_sources ADD COLUMN IF NOT EXISTS review_state_updated_at TEXT",
+            "ALTER TABLE workspace_sources ADD COLUMN IF NOT EXISTS reviewed_at TEXT",
+            "ALTER TABLE workspace_sources ADD COLUMN IF NOT EXISTS reviewed_by_user_id TEXT",
+            "UPDATE workspace_sources SET review_state = 'unset' "
+            "WHERE review_state IS NULL OR btrim(review_state) = '' "
+            "OR review_state NOT IN ('unset', 'needs_review', 'reviewed')",
+            "UPDATE workspace_sources "
+            "SET review_state_updated_at = COALESCE(NULLIF(btrim(review_state_updated_at), ''), "
+            "to_char(COALESCE(NULLIF(btrim(added_at::text), '')::timestamp, "
+            "CURRENT_TIMESTAMP AT TIME ZONE 'UTC'), 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"')) "
+            "WHERE review_state_updated_at IS NULL OR btrim(review_state_updated_at) = ''",
+            "UPDATE workspace_sources SET reviewed_at = NULL, reviewed_by_user_id = NULL "
+            "WHERE review_state <> 'reviewed' "
+            "AND (reviewed_at IS NOT NULL OR reviewed_by_user_id IS NOT NULL)",
             """
             CREATE TABLE IF NOT EXISTS workspace_artifacts (
                 id              TEXT    NOT NULL,
@@ -19231,15 +19315,60 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     # --- Workspace Source Methods ---
 
+    def _normalize_workspace_source_review_state(self, value: Any, *, for_create: bool) -> str:
+        if value is None:
+            state = ""
+        elif isinstance(value, str):
+            state = value.strip().lower()
+        else:
+            raise InputError("Workspace source review state must be a string.")  # noqa: TRY003
+        if for_create and not state:
+            state = "unset"
+        allowed_states = (
+            self._ALLOWED_WORKSPACE_SOURCE_CREATE_REVIEW_STATES
+            if for_create
+            else self._ALLOWED_WORKSPACE_SOURCE_REVIEW_STATES
+        )
+        if state not in allowed_states:
+            raise InputError(f"Unsupported workspace source review state '{state}'.")  # noqa: TRY003
+        return state
+
+    def _build_workspace_source_review_transition(
+        self,
+        review_state: Any,
+        *,
+        actor_user_id: str | None = None,
+        for_create: bool = False,
+    ) -> dict[str, Any]:
+        state = self._normalize_workspace_source_review_state(review_state, for_create=for_create)
+        actor = None
+        if state == "reviewed":
+            if not isinstance(actor_user_id, str) or not actor_user_id.strip():
+                raise InputError("A non-empty actor_user_id is required to review a workspace source.")  # noqa: TRY003
+            actor = actor_user_id.strip()
+        now = self._get_current_utc_timestamp_iso()
+        return {
+            "review_state": state,
+            "review_state_updated_at": now,
+            "reviewed_at": now if state == "reviewed" else None,
+            "reviewed_by_user_id": actor if state == "reviewed" else None,
+        }
+
     def add_workspace_source(self, workspace_id: str, data: dict[str, Any]) -> dict[str, Any]:
         """Add a source to a workspace."""
         source_id = data.get("id")
         if not source_id:
             raise InputError("Source id is required.")  # noqa: TRY003
         now = self._get_current_utc_timestamp_iso()
+        review_transition = self._build_workspace_source_review_transition(
+            data.get("review_state"),
+            for_create=True,
+        )
         query = (
-            "INSERT INTO workspace_sources (id, workspace_id, media_id, title, source_type, url, position, selected, added_at, version) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)"
+            "INSERT INTO workspace_sources "
+            "(id, workspace_id, media_id, title, source_type, url, position, selected, added_at, "
+            "review_state, review_state_updated_at, reviewed_at, reviewed_by_user_id, version) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)"
         )
         params = (
             source_id,
@@ -19251,6 +19380,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             data.get("position", 0),
             1 if data.get("selected", True) else 0,
             now,
+            review_transition["review_state"],
+            review_transition["review_state_updated_at"],
+            review_transition["reviewed_at"],
+            review_transition["reviewed_by_user_id"],
         )
         with self.transaction() as conn:
             try:
@@ -19528,6 +19661,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         updates: dict[str, Any],
         *,
         expected_version: int,
+        actor_user_id: str | None = None,
     ) -> dict[str, Any]:
         """Update a workspace source with optimistic locking."""
         existing = self._get_workspace_source(workspace_id, source_id)
@@ -19549,6 +19683,19 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             if col in updates:
                 set_clauses.append(f"{col} = ?")
                 params.append(updates[col])
+        if "review_state" in updates:
+            review_transition = self._build_workspace_source_review_transition(
+                updates["review_state"],
+                actor_user_id=actor_user_id,
+            )
+            for col in (
+                "review_state",
+                "review_state_updated_at",
+                "reviewed_at",
+                "reviewed_by_user_id",
+            ):
+                set_clauses.append(f"{col} = ?")
+                params.append(review_transition[col])
         query = f"UPDATE workspace_sources SET {', '.join(set_clauses)} WHERE workspace_id = ? AND id = ? AND version = ?"  # nosec B608
         params.extend([workspace_id, source_id, expected_version])
         with self.transaction() as conn:
@@ -19560,6 +19707,72 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     entity_id=source_id,
                 )
         return self._get_workspace_source(workspace_id, source_id)  # type: ignore[return-value]
+
+    def update_workspace_source_review_states(
+        self,
+        workspace_id: str,
+        source_ids: list[str],
+        review_state: Any,
+        actor_user_id: str | None,
+    ) -> list[dict[str, Any]]:
+        """Atomically transition workspace sources to one review state."""
+        normalized_ids: list[str] = []
+        seen_ids: set[str] = set()
+        for source_id in source_ids:
+            if not isinstance(source_id, str) or not source_id.strip():
+                raise InputError("source_ids entries must be non-empty strings.")  # noqa: TRY003
+            if source_id not in seen_ids:
+                seen_ids.add(source_id)
+                normalized_ids.append(source_id)
+        review_transition = self._build_workspace_source_review_transition(
+            review_state,
+            actor_user_id=actor_user_id,
+        )
+        if not normalized_ids:
+            return []
+
+        placeholders = ", ".join("?" for _ in normalized_ids)
+        with self.transaction() as conn:
+            rows = conn.execute(
+                f"SELECT id FROM workspace_sources WHERE workspace_id = ? AND id IN ({placeholders})",  # nosec B608  # Placeholders are generated "?" tokens; IDs remain bound parameters.
+                (workspace_id, *normalized_ids),
+            ).fetchall()
+            found_ids = {str(row["id"]) for row in rows}
+            missing_ids = [source_id for source_id in normalized_ids if source_id not in found_ids]
+            if missing_ids:
+                raise ConflictError(  # noqa: TRY003
+                    f"Workspace sources not found: {', '.join(repr(source_id) for source_id in missing_ids)}.",
+                    entity="workspace_sources",
+                    entity_id=missing_ids[0],
+                )
+
+            cursor = conn.execute(
+                "UPDATE workspace_sources "
+                "SET review_state = ?, review_state_updated_at = ?, reviewed_at = ?, "
+                f"reviewed_by_user_id = ?, version = version + 1 WHERE workspace_id = ? AND id IN ({placeholders})",  # nosec B608  # Placeholders are generated "?" tokens; IDs remain bound parameters.
+                (
+                    review_transition["review_state"],
+                    review_transition["review_state_updated_at"],
+                    review_transition["reviewed_at"],
+                    review_transition["reviewed_by_user_id"],
+                    workspace_id,
+                    *normalized_ids,
+                ),
+            )
+            if cursor.rowcount != len(normalized_ids):
+                raise ConflictError(  # noqa: TRY003
+                    "Workspace source review-state update was incomplete.",
+                    entity="workspace_sources",
+                    entity_id=workspace_id,
+                )
+
+            updated_rows = conn.execute(
+                f"SELECT * FROM workspace_sources WHERE workspace_id = ? AND id IN ({placeholders})",  # nosec B608  # Placeholders are generated "?" tokens; IDs remain bound parameters.
+                (workspace_id, *normalized_ids),
+            ).fetchall()
+
+        updated_by_id = {str(row["id"]): dict(row) for row in updated_rows}
+        return [updated_by_id[source_id] for source_id in normalized_ids]
 
     def delete_workspace_source(self, workspace_id: str, source_id: str) -> None:
         """Hard-delete a workspace source."""

@@ -18,7 +18,8 @@ import type {
   WorkspaceAssistantDefaultDegradedReason,
   WorkspaceAssistantDefaults,
   WorkspaceAssistantKind,
-  WorkspacePersonaMemoryMode
+  WorkspacePersonaMemoryMode,
+  WorkspaceSourceReviewState
 } from "@/types/workspace"
 import {
   normalizeEffectiveWorkspaceAssistantDefault,
@@ -134,6 +135,10 @@ export interface WorkspaceSourceApiResponse {
   position: number
   selected: boolean
   added_at: string
+  review_state?: WorkspaceSourceReviewState
+  review_state_updated_at?: string | null
+  reviewed_at?: string | null
+  reviewed_by_user_id?: string | null
   version: number
 }
 
@@ -179,6 +184,10 @@ export interface WorkspaceSourceStatusApiResponse {
   source_type: string
   url: string | null
   selected: boolean
+  review_state?: WorkspaceSourceReviewState
+  review_state_updated_at?: string | null
+  reviewed_at?: string | null
+  reviewed_by_user_id?: string | null
   state: WorkspaceSourceLifecycleState
   status_reason: string
   readiness: WorkspaceSourceReadiness
@@ -679,6 +688,7 @@ export interface WorkspaceSourceCreateRequest {
   url?: string | null
   position?: number
   selected?: boolean
+  review_state?: Exclude<WorkspaceSourceReviewState, "reviewed">
 }
 
 export interface WorkspaceSourceUpdateRequest {
@@ -687,7 +697,13 @@ export interface WorkspaceSourceUpdateRequest {
   url?: string | null
   position?: number
   selected?: boolean
+  review_state?: WorkspaceSourceReviewState | null
   version: number
+}
+
+export interface WorkspaceSourceReviewStateBatchRequest {
+  source_ids: string[]
+  review_state: WorkspaceSourceReviewState
 }
 
 export type WorkspaceArtifactReviewState =
@@ -1553,6 +1569,23 @@ export const workspaceApiMethods = {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: data
+    })
+  },
+
+  async updateWorkspaceSourceReviewState(
+    workspaceId: string,
+    sourceIds: string[],
+    reviewState: WorkspaceSourceReviewState
+  ): Promise<WorkspaceSourceApiResponse[]> {
+    const body: WorkspaceSourceReviewStateBatchRequest = {
+      source_ids: sourceIds,
+      review_state: reviewState
+    }
+    return await bgRequest<WorkspaceSourceApiResponse[]>({
+      path: workspacePath(workspaceId, "/sources/review-state"),
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body
     })
   },
 

@@ -54,6 +54,7 @@ export const SourceAdvancedControls: React.FC<SourceAdvancedControlsProps> = ({
   onResetAdvancedFilters
 }) => {
   const showClearFilters = hasActiveSourceFilters(viewState) || viewState.sort !== "manual"
+  const reviewStateFilters = viewState.reviewStateFilters ?? []
 
   return (
     <div className="mt-2 rounded-lg border border-border/70 bg-surface/50 px-3 py-2">
@@ -101,6 +102,37 @@ export const SourceAdvancedControls: React.FC<SourceAdvancedControlsProps> = ({
                     }
                   />
                   <span>{`Status ${status[0].toUpperCase()}${status.slice(1)}`}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-1">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-text-muted">
+              Review
+            </p>
+            <div className="flex flex-wrap gap-3 text-sm text-text">
+              {(
+                [
+                  ["unset", "Unreviewed"],
+                  ["needs_review", "Needs review"],
+                  ["reviewed", "Reviewed"]
+                ] as const
+              ).map(([reviewState, label]) => (
+                <label key={reviewState} className="inline-flex items-center gap-1.5">
+                  <input
+                    type="checkbox"
+                    checked={reviewStateFilters.includes(reviewState)}
+                    onChange={() =>
+                      onPatchViewState({
+                        reviewStateFilters: toggleListValue(
+                          reviewStateFilters,
+                          reviewState
+                        )
+                      })
+                    }
+                  />
+                  <span>{label}</span>
                 </label>
               ))}
             </div>

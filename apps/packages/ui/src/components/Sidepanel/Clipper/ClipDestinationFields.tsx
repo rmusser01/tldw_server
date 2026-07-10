@@ -25,9 +25,11 @@ type ClipDestinationFieldsProps = {
   workspaceOptionsError: string | null
   workspaceId: string
   workspaceValidation: string | null
+  addToNeedsReview: boolean
   onDestinationChange: (nextValue: WebClipperDestination) => void
   onFolderIdChange: (nextValue: string) => void
   onWorkspaceIdChange: (nextValue: string) => void
+  onAddToNeedsReviewChange: (nextValue: boolean) => void
 }
 
 const destinationOptions: WebClipperDestination[] = [
@@ -48,9 +50,11 @@ const ClipDestinationFields = ({
   workspaceOptionsError,
   workspaceId,
   workspaceValidation,
+  addToNeedsReview,
   onDestinationChange,
   onFolderIdChange,
-  onWorkspaceIdChange
+  onWorkspaceIdChange,
+  onAddToNeedsReviewChange
 }: ClipDestinationFieldsProps) => {
   const { t } = useTranslation()
   const hasFolderOptions = folderOptions.length > 0
@@ -253,6 +257,21 @@ const ClipDestinationFields = ({
             {workspaceValidation ? (
               <p className="text-sm text-red-600">{workspaceValidation}</p>
             ) : null}
+            <label className="flex cursor-pointer items-center gap-2 text-sm font-medium text-text">
+              <input
+                type="checkbox"
+                checked={addToNeedsReview}
+                onChange={(event) =>
+                  onAddToNeedsReviewChange(event.target.checked)
+                }
+              />
+              <span>
+                {t(
+                  "sidepanel:clipper.addToNeedsReview",
+                  "Add to Needs Review"
+                )}
+              </span>
+            </label>
           </div>
         ) : null}
       </fieldset>

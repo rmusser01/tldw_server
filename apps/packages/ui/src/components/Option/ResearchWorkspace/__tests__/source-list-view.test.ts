@@ -4,6 +4,7 @@ import {
   buildSourceFilterSummary,
   filterSources,
   hasActiveSourceFilters,
+  SOURCE_REVIEW_FILTER_PRESETS,
   sortSources,
   type SourceListViewState
 } from "../SourcesPane/source-list-view"
@@ -15,6 +16,7 @@ const sources: WorkspaceSource[] = [
     title: "Bravo Document",
     type: "pdf",
     status: "ready",
+    reviewState: "needs_review",
     addedAt: new Date("2026-03-10T00:00:00.000Z"),
     sourceCreatedAt: new Date("2026-03-01T00:00:00.000Z"),
     pageCount: 8,
@@ -26,6 +28,7 @@ const sources: WorkspaceSource[] = [
     title: "Alpha Site",
     type: "website",
     status: "error",
+    reviewState: "unset",
     addedAt: new Date("2026-03-12T00:00:00.000Z"),
     url: "https://example.com"
   },
@@ -35,6 +38,7 @@ const sources: WorkspaceSource[] = [
     title: "Alpha Audio",
     type: "audio",
     status: "processing",
+    reviewState: "reviewed",
     addedAt: new Date("2026-03-11T00:00:00.000Z"),
     duration: 90
   }
@@ -44,6 +48,7 @@ const baseViewState: SourceListViewState = {
   expanded: false,
   typeFilters: [],
   statusFilters: [],
+  reviewStateFilters: [],
   dateField: "addedAt",
   dateFrom: null,
   dateTo: null,
@@ -84,6 +89,29 @@ describe("source-list-view", () => {
     expect(filterSources(sources, state).map((source) => source.id)).toEqual(["s1"])
   })
 
+  it.each([
+    ["needs_review", ["s1"]],
+    ["unset", ["s2"]]
+  ] as const)("filters by review state %s", (reviewState, expectedIds) => {
+    const state: SourceListViewState = {
+      ...baseViewState,
+      reviewStateFilters: [reviewState]
+    }
+
+    expect(filterSources(sources, state).map((source) => source.id)).toEqual(
+      expectedIds
+    )
+  })
+
+  it("provides needs-review and unreviewed filter presets", () => {
+    expect(SOURCE_REVIEW_FILTER_PRESETS.needsReview).toEqual({
+      reviewStateFilters: ["needs_review"]
+    })
+    expect(SOURCE_REVIEW_FILTER_PRESETS.unreviewed).toEqual({
+      reviewStateFilters: ["unset"]
+    })
+  })
+
   it("sorts by name and falls back to the existing manual order on ties", () => {
     const sorted = sortSources(
       [
@@ -117,6 +145,7 @@ describe("source-list-view", () => {
       ...baseViewState,
       typeFilters: ["pdf"],
       statusFilters: ["ready"],
+      reviewStateFilters: ["needs_review"],
       sort: "added_desc"
     }
 
@@ -124,6 +153,7 @@ describe("source-list-view", () => {
 
     expect(summary).toContain("Type=PDF")
     expect(summary).toContain("Status=Ready")
+    expect(summary).toContain("Review=Needs review")
     expect(summary).toContain("Sort: Added date")
   })
 })

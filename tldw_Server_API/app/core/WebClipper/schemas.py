@@ -80,6 +80,10 @@ class WebClipperSaveRequest(BaseModel):
 
     class WorkspacePayload(BaseModel):
         workspace_id: str = Field(..., min_length=1, max_length=128, description="Workspace destination identifier.")
+        default_review_state: Literal["needs_review"] | None = Field(
+            default=None,
+            description="Optional review state for a newly promoted workspace source.",
+        )
 
         model_config = ConfigDict(extra="forbid")
 
