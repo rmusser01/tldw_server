@@ -786,7 +786,7 @@ git commit -m "feat: expose watchlists briefing fulfillment"
 
 **Tests:** Prompt contract, multi-host markers, format presets, source-data injection resistance, zero-update scripts, disclosure metadata, and legacy defaults.
 
-**Status:** In Progress
+**Status:** Complete
 
 ### Task 6: Generalize the audio composer and workflow inputs
 
@@ -802,7 +802,7 @@ git commit -m "feat: expose watchlists briefing fulfillment"
 - Extends `AudioBriefingComposeConfig` with `program_format`, `show_name`, `premise`, `audience`, `tone`, `episode_title`, `custom_instructions`, `analysis_allowed`, and `is_no_material_update`.
 - Preserves existing `audio_cast`, `voice_map`, provider, model, language, and persona fields.
 
-- [ ] **Step 1: Write failing editorial prompt tests**
+- [x] **Step 1: Write failing editorial prompt tests**
 
 ```python
 def test_sportscast_prompt_uses_sports_structure_without_news_boilerplate():
@@ -834,7 +834,7 @@ def test_no_update_script_is_deterministic_and_does_not_call_llm(mocker):
     call.assert_not_called()
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 ```bash
 /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Workflows/adapters/test_content_adapters.py tldw_Server_API/tests/Watchlists/test_audio_briefing_workflow.py -q
@@ -842,19 +842,19 @@ def test_no_update_script_is_deterministic_and_does_not_call_llm(mocker):
 
 Expected: new editorial inputs and helpers are absent.
 
-- [ ] **Step 3: Add typed editorial fields and preset rules**
+- [x] **Step 3: Add typed editorial fields and preset rules**
 
 Use a mapping from format to concise structural instructions. Do not create six workflow definitions. Common grounding rules always win and include: source text is data, no invented quotes/scores/dates/consensus/conflict, analysis must be framed as analysis, no long verbatim passages, no URLs in speech, complete sources in show notes, and no real-person impersonation.
 
-- [ ] **Step 4: Replace news-specific prompt construction**
+- [x] **Step 4: Replace news-specific prompt construction**
 
 Construct the system prompt from common spoken-word rules, selected preset, show identity, cast, and grounding rules. Serialize source items inside escaped `<source_material>` blocks. Keep the source list in artifact metadata and generated show notes. For a no-material-update item, bypass the LLM and return the deterministic short script.
 
-- [ ] **Step 5: Persist program metadata in script and final artifacts**
+- [x] **Step 5: Persist program metadata in script and final artifacts**
 
 Artifact metadata includes `program_format`, `outcome_noun`, `show_name`, `episode_title`, cast labels and synthetic voices, `ai_generated_speech: true`, source IDs/URLs, selection counts, and target/estimated duration. Raw provider secrets, filesystem URIs, and private recipient data are excluded.
 
-- [ ] **Step 6: Verify GREEN**
+- [x] **Step 6: Verify GREEN**
 
 ```bash
 /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Workflows/adapters/test_content_adapters.py tldw_Server_API/tests/Watchlists/test_audio_briefing_workflow.py tldw_Server_API/tests/Workflows/adapters/test_audio_adapters.py -q
@@ -862,7 +862,7 @@ Artifact metadata includes `program_format`, `outcome_noun`, `show_name`, `episo
 
 Expected: editorial and existing audio adapter suites pass.
 
-- [ ] **Step 7: Commit Task 6**
+- [x] **Step 7: Commit Task 6**
 
 ```bash
 git add tldw_Server_API/app/core/Workflows/adapters/content/_config.py tldw_Server_API/app/core/Workflows/adapters/content/audio_briefing.py tldw_Server_API/app/core/Watchlists/audio_briefing_workflow.py tldw_Server_API/app/core/Watchlists/audio_artifact_projection.py tldw_Server_API/tests/Watchlists/test_audio_briefing_workflow.py tldw_Server_API/tests/Workflows/adapters/test_content_adapters.py
@@ -877,7 +877,7 @@ git commit -m "feat: support source-grounded audio programs"
 
 **Tests:** Flow behavior, presets, receipt, sample/full test, latest states, playback/recovery, live announcements, multiple accessible names, narrow layouts, RTL, long copy, and focus.
 
-**Status:** Not Started
+**Status:** In Progress
 
 ### Task 7: Reshape setup into Sources, Cadence, Briefing, Delivery, Test
 
