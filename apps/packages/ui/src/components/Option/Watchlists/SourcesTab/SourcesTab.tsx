@@ -255,7 +255,7 @@ export const SourcesTab: React.FC = () => {
         watchlist_id: selectedWatchlistId ?? undefined,
         q: sourcesSearch || undefined,
         tags: selectedTagName ? [selectedTagName] : undefined,
-        groups: selectedGroupId ? [selectedGroupId] : undefined
+        groups: selectedGroupId != null ? [selectedGroupId] : undefined
       }
       let items: WatchlistSource[] = []
       let total = 0

@@ -396,6 +396,31 @@ describe("SourcesTab advanced details disclosure", () => {
     expect(mocks.exportOpmlMock).not.toHaveBeenCalled()
   })
 
+  it("does not treat a defensive zero group id as an empty selection", async () => {
+    const source = buildSource(302)
+    mocks.storeStateRef.current = baseState({
+      selectedGroupId: 0,
+      groups: [{ id: 0, name: "Defensive", description: null, parent_group_id: null }],
+      sources: [source],
+      sourcesTotal: 1
+    })
+    mocks.fetchWatchlistSourcesMock.mockResolvedValue({
+      items: [source],
+      total: 1,
+      page: 1,
+      size: 25,
+      has_more: false
+    })
+
+    render(<SourcesTab />)
+
+    await waitFor(() => {
+      expect(mocks.fetchWatchlistSourcesMock).toHaveBeenCalledWith(
+        expect.objectContaining({ groups: [0] })
+      )
+    })
+  })
+
   it("server-filters every group page before client-side type filtering and paging", async () => {
     const firstRssSource = buildSource(501)
     const secondRssSource = buildSource(502)
