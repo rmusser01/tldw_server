@@ -54,7 +54,7 @@ Do not create a root-level source-review API, a scheduler engine, external notif
 - Create: `tldw_Server_API/app/core/Flashcards/source_review.py`
 - Test: `tldw_Server_API/tests/ChaChaNotesDB/test_source_review_plans.py`
 
-- [ ] **Step 1: Write failing helper tests**
+- [x] **Step 1: Write failing helper tests**
 
 Add tests for day/month date math, duplicate computed `(due_at, activity_type)`, offset caps, launch metadata size, and source-bundle normalization.
 
@@ -69,7 +69,7 @@ def test_source_review_month_offset_clamps_to_month_end():
     assert due_at == datetime(2026, 2, 28, 8, 0, tzinfo=timezone.utc)
 ```
 
-- [ ] **Step 2: Run helper tests and confirm they fail**
+- [x] **Step 2: Run helper tests and confirm they fail**
 
 Run:
 
@@ -79,7 +79,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/ChaChaNotesD
 
 Expected: fails with missing `source_review` module or missing helper functions.
 
-- [ ] **Step 3: Implement minimal helper module**
+- [x] **Step 3: Implement minimal helper module**
 
 Implement these public helpers:
 
@@ -100,7 +100,7 @@ def build_source_review_launch_metadata(
 
 Use `zoneinfo.ZoneInfo`, `calendar.monthrange`, and stdlib `datetime`. Validate offset caps with `3650` for days and `120` for months.
 
-- [ ] **Step 4: Run helper tests and confirm they pass**
+- [x] **Step 4: Run helper tests and confirm they pass**
 
 Run:
 
@@ -110,7 +110,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/ChaChaNotesD
 
 Expected: helper-only tests pass; DB-specific tests can still be absent until Task 2.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/Flashcards/source_review.py tldw_Server_API/tests/ChaChaNotesDB/test_source_review_plans.py
@@ -126,7 +126,7 @@ git commit -m "test: cover source review scheduling helpers"
 - Test: `tldw_Server_API/tests/ChaChaNotesDB/test_source_review_plans.py`
 - Test: `tldw_Server_API/tests/ChaChaNotesDB/test_source_review_plans_postgres.py`
 
-- [ ] **Step 1: Add failing DB tests**
+- [x] **Step 1: Add failing DB tests**
 
 Cover:
 
@@ -165,7 +165,7 @@ def test_postgres_source_review_schema_has_tables_indexes_and_sync_triggers(pg_d
         db.close_connection()
 ```
 
-- [ ] **Step 2: Run DB tests and confirm they fail**
+- [x] **Step 2: Run DB tests and confirm they fail**
 
 Run:
 
@@ -175,7 +175,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/ChaChaNotesD
 
 Expected: fails on missing DB methods/tables.
 
-- [ ] **Step 3: Add schema migration**
+- [x] **Step 3: Add schema migration**
 
 In `ChaChaNotes_DB.py`:
 
@@ -194,7 +194,7 @@ source_review_plans
 source_review_occurrences
 ```
 
-- [ ] **Step 4: Add DB methods**
+- [x] **Step 4: Add DB methods**
 
 Add methods near the Flashcards/Study Packs section:
 
@@ -210,7 +210,7 @@ def soft_delete_source_review_plan(self, plan_id: int) -> bool: ...
 
 Return joined plan/occurrence rows with deserialized JSON fields where route serialization needs them.
 
-- [ ] **Step 5: Run DB tests and confirm they pass**
+- [x] **Step 5: Run DB tests and confirm they pass**
 
 Run:
 
@@ -220,7 +220,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/ChaChaNotesD
 
 Expected: all source-review DB tests pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py tldw_Server_API/tests/ChaChaNotesDB/test_source_review_plans.py tldw_Server_API/tests/ChaChaNotesDB/test_source_review_plans_postgres.py
@@ -236,7 +236,7 @@ git commit -m "feat: persist source review plans"
 - Modify: `tldw_Server_API/app/api/v1/endpoints/flashcards.py`
 - Test: `tldw_Server_API/tests/Flashcards/test_source_review_plans_api.py`
 
-- [ ] **Step 1: Write failing API/schema tests**
+- [x] **Step 1: Write failing API/schema tests**
 
 Cover validation and route behavior:
 
@@ -260,7 +260,7 @@ def test_create_source_review_plan_rejects_duplicate_computed_due_activity(clien
     assert response.status_code == 422
 ```
 
-- [ ] **Step 2: Run API tests and confirm they fail**
+- [x] **Step 2: Run API tests and confirm they fail**
 
 Run:
 
@@ -270,7 +270,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Flashcards/t
 
 Expected: fails on missing schemas/routes.
 
-- [ ] **Step 3: Add Pydantic DTOs**
+- [x] **Step 3: Add Pydantic DTOs**
 
 In `schemas/flashcards.py`, add:
 
@@ -291,7 +291,7 @@ class SourceReviewPlanDeleteResponse(BaseModel): ...
 
 Reuse `StudyPackSourceSelection` from `schemas.study_packs`. Accept `source_title` through that model and serialize canonical `label`.
 
-- [ ] **Step 4: Add route handlers under the existing Flashcards router**
+- [x] **Step 4: Add route handlers under the existing Flashcards router**
 
 In `endpoints/flashcards.py`, add handlers for:
 
@@ -307,7 +307,7 @@ DELETE /source-review-plans/{plan_id}
 
 Use `get_chacha_db_for_user`, `get_request_user`, and existing `map_db_error_to_http` patterns. Cap list/due `limit` at 100 and default to 50.
 
-- [ ] **Step 5: Run API and existing Flashcards endpoint tests**
+- [x] **Step 5: Run API and existing Flashcards endpoint tests**
 
 Run:
 
@@ -317,7 +317,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Flashcards/t
 
 Expected: new source-review API tests pass; existing Flashcards route tests remain green.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tldw_Server_API/app/api/v1/schemas/flashcards.py tldw_Server_API/app/api/v1/endpoints/flashcards.py tldw_Server_API/tests/Flashcards/test_source_review_plans_api.py
@@ -338,7 +338,7 @@ git commit -m "feat: expose source review plan APIs"
 - Modify: `apps/packages/ui/src/components/Flashcards/hooks/index.ts`
 - Create: `apps/packages/ui/src/components/Flashcards/hooks/__tests__/useSourceReviewQueries.test.tsx`
 
-- [ ] **Step 1: Write failing service and handoff tests**
+- [x] **Step 1: Write failing service and handoff tests**
 
 Assert client functions hit the exact paths, query params, methods, and payloads. Assert handoff helpers:
 
@@ -348,7 +348,7 @@ Assert client functions hit the exact paths, query params, methods, and payloads
 - build Quiz generate route with a short `source_review_token` and store the full source-review payload in `sessionStorage`
 - reject missing/expired source-review handoff tokens without throwing
 
-- [ ] **Step 2: Run service tests and confirm they fail**
+- [x] **Step 2: Run service tests and confirm they fail**
 
 Run:
 
@@ -358,7 +358,7 @@ cd apps/packages/ui && bunx vitest run src/services/__tests__/flashcards-source-
 
 Expected: fails on missing functions/modules.
 
-- [ ] **Step 3: Add service types and functions**
+- [x] **Step 3: Add service types and functions**
 
 Add types mirroring backend DTOs to `services/flashcards.ts`:
 
@@ -382,7 +382,7 @@ skipSourceReviewOccurrence
 deleteSourceReviewPlan
 ```
 
-- [ ] **Step 4: Update `ClientPath`**
+- [x] **Step 4: Update `ClientPath`**
 
 Add only:
 
@@ -395,7 +395,7 @@ Add only:
 | "/api/v1/flashcards/source-review-plans/occurrences/{occurrence_id}/skip"
 ```
 
-- [ ] **Step 5: Add React Query hooks**
+- [x] **Step 5: Add React Query hooks**
 
 Create hooks:
 
@@ -411,7 +411,7 @@ useDeleteSourceReviewPlanMutation
 
 Invalidate query keys prefixed with `flashcards:source-review`.
 
-- [ ] **Step 6: Add bounded source-review handoff storage**
+- [x] **Step 6: Add bounded source-review handoff storage**
 
 In `source-review-handoff.ts`, do not serialize source snapshots into query strings. Implement tokenized handoff helpers:
 
@@ -431,7 +431,7 @@ export function buildSourceReviewQuizRoute(payload: SourceReviewHandoffPayload):
 
 It must not include excerpt text or the full source bundle in the URL. Store only in `sessionStorage`; if storage is unavailable, return a safe fallback route to `/quiz?tab=generate` and let the caller show a non-blocking error.
 
-- [ ] **Step 7: Run service and hook tests**
+- [x] **Step 7: Run service and hook tests**
 
 Run:
 
@@ -441,7 +441,7 @@ cd apps/packages/ui && bunx vitest run src/services/__tests__/flashcards-source-
 
 Expected: all service/hook tests pass.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add apps/packages/ui/src/services/flashcards.ts apps/packages/ui/src/services/tldw/openapi-guard.ts apps/packages/ui/src/services/tldw/source-review-handoff.ts apps/packages/ui/src/services/__tests__/flashcards-source-review.test.ts apps/packages/ui/src/services/tldw/__tests__/source-review-handoff.test.ts apps/packages/ui/src/components/Flashcards/hooks/useSourceReviewQueries.ts apps/packages/ui/src/components/Flashcards/hooks/index.ts apps/packages/ui/src/components/Flashcards/hooks/__tests__/useSourceReviewQueries.test.tsx
@@ -462,7 +462,7 @@ git commit -m "feat: add source review frontend client"
 - Create: `apps/packages/ui/src/components/Flashcards/components/__tests__/SourceReviewPlanDrawer.test.tsx`
 - Create: `apps/packages/ui/src/components/Flashcards/components/__tests__/SourceReviewDuePanel.test.tsx`
 
-- [ ] **Step 1: Write failing component tests**
+- [x] **Step 1: Write failing component tests**
 
 Planner tests:
 
@@ -481,7 +481,7 @@ Due panel tests:
 - skip calls skip mutation
 - flashcards/cloze launch calls generate handoff without auto-generating artifacts
 
-- [ ] **Step 2: Run component tests and confirm they fail**
+- [x] **Step 2: Run component tests and confirm they fail**
 
 Run:
 
@@ -491,7 +491,7 @@ cd apps/packages/ui && bunx vitest run src/components/Flashcards/components/__te
 
 Expected: fails on missing components.
 
-- [ ] **Step 3: Implement planner drawer**
+- [x] **Step 3: Implement planner drawer**
 
 Build a drawer similar in footprint to `StudyPackCreateDrawer`:
 
@@ -503,7 +503,7 @@ Build a drawer similar in footprint to `StudyPackCreateDrawer`:
 - row validation without silently dropping invalid rows
 - create button disabled until title, source, and schedule are valid
 
-- [ ] **Step 4: Implement due panel**
+- [x] **Step 4: Implement due panel**
 
 Place the panel near the top of `ReviewTab`. Keep it compact so normal flashcard review remains primary. Use icons in action buttons where existing UI patterns do.
 
@@ -516,7 +516,7 @@ Behavior:
 - for `flashcards` and `cloze`, route to Flashcards generate prefill via manager handoff
 - for `quiz`, navigate to `/quiz` with only a short source-review token in the query string; the source snapshot remains in `sessionStorage`
 
-- [ ] **Step 5: Add manager and generate handoff support**
+- [x] **Step 5: Add manager and generate handoff support**
 
 Wire `FlashcardsManager` so `SourceReviewDuePanel` can request:
 
@@ -527,7 +527,7 @@ onSourceReviewQuiz(intent)
 
 Extend `GeneratePanel` only as needed to select cloze/default card type from the source-review generate handoff. Do not trigger generation automatically.
 
-- [ ] **Step 6: Run component tests**
+- [x] **Step 6: Run component tests**
 
 Run:
 
@@ -537,7 +537,7 @@ cd apps/packages/ui && bunx vitest run src/components/Flashcards/components/__te
 
 Expected: new component tests pass and existing ReviewTab coverage remains green.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps/packages/ui/src/components/Flashcards/components/SourceReviewPlanDrawer.tsx apps/packages/ui/src/components/Flashcards/components/SourceReviewDuePanel.tsx apps/packages/ui/src/components/Flashcards/components/index.ts apps/packages/ui/src/components/Flashcards/tabs/ReviewTab.tsx apps/packages/ui/src/components/Flashcards/FlashcardsManager.tsx apps/packages/ui/src/components/Flashcards/tabs/ImportExport/GeneratePanel.tsx apps/packages/ui/src/components/Flashcards/components/__tests__/SourceReviewPlanDrawer.test.tsx apps/packages/ui/src/components/Flashcards/components/__tests__/SourceReviewDuePanel.test.tsx
@@ -553,7 +553,7 @@ git commit -m "feat: add source review flashcards UI"
 - Modify: `apps/packages/ui/src/components/Quiz/tabs/GenerateTab.tsx`
 - Create or modify: `apps/packages/ui/src/components/Quiz/tabs/__tests__/GenerateTab.source-review.test.tsx`
 
-- [ ] **Step 1: Write failing quiz handoff tests**
+- [x] **Step 1: Write failing quiz handoff tests**
 
 Cover:
 
@@ -565,7 +565,7 @@ Cover:
 - source excerpt text is not present in `window.location.href`
 - missing/expired token falls back to Generate tab with a recoverable message
 
-- [ ] **Step 2: Run tests and confirm they fail**
+- [x] **Step 2: Run tests and confirm they fail**
 
 Run:
 
@@ -575,11 +575,11 @@ cd apps/packages/ui && bunx vitest run src/components/Quiz/tabs/__tests__/Genera
 
 Expected: fails on missing handoff parse/props.
 
-- [ ] **Step 3: Implement quiz source-review handoff**
+- [x] **Step 3: Implement quiz source-review handoff**
 
 Use `source-review-handoff.ts` to parse the short route token, load the full payload from `sessionStorage`, and pass an `initialSourceReviewIntent` prop into `GenerateTab`. Preselect media/note IDs using existing state setters and render a small source-review context summary for snapshot-only items. Never read excerpt text directly from query parameters.
 
-- [ ] **Step 4: Run quiz handoff tests**
+- [x] **Step 4: Run quiz handoff tests**
 
 Run:
 
@@ -589,10 +589,10 @@ cd apps/packages/ui && bunx vitest run src/components/Quiz/tabs/__tests__/Genera
 
 Expected: tests pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
-git add apps/packages/ui/src/components/Quiz/QuizPlayground.tsx apps/packages/ui/src/components/Quiz/tabs/GenerateTab.tsx apps/packages/ui/src/components/Quiz/tabs/__tests__/GenerateTab.source-review.test.tsx
+git add apps/packages/ui/src/components/Quiz/QuizPlayground.tsx apps/packages/ui/src/components/Quiz/__tests__/QuizPlayground.navigation.test.tsx apps/packages/ui/src/components/Quiz/tabs/GenerateTab.tsx apps/packages/ui/src/components/Quiz/tabs/__tests__/GenerateTab.source-review.test.tsx
 git commit -m "feat: wire source review quiz handoff"
 ```
 
@@ -603,7 +603,7 @@ git commit -m "feat: wire source review quiz handoff"
 **Files:**
 - Modify: `backlog/tasks/task-12932 - Add-source-grounded-spaced-repetition-review-schedules.md`
 
-- [ ] **Step 1: Run backend focused tests**
+- [x] **Step 1: Run backend focused tests**
 
 Run:
 
@@ -613,7 +613,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/ChaChaNotesD
 
 Expected: all pass.
 
-- [ ] **Step 2: Run frontend focused tests**
+- [x] **Step 2: Run frontend focused tests**
 
 Run:
 
@@ -623,7 +623,7 @@ cd apps/packages/ui && bunx vitest run src/services/__tests__/flashcards-source-
 
 Expected: all pass.
 
-- [ ] **Step 3: Run OpenAPI/path guard**
+- [x] **Step 3: Run OpenAPI/path guard**
 
 Run:
 
@@ -633,7 +633,7 @@ cd apps/packages/ui && bun run verify:openapi
 
 Expected: new Flashcards paths are accepted by the guard.
 
-- [ ] **Step 4: Run Bandit on touched backend paths**
+- [x] **Step 4: Run Bandit on touched backend paths**
 
 Run:
 
@@ -643,7 +643,7 @@ source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/Flashc
 
 Expected: no new findings in touched code. If the command reports existing unrelated findings, document them and fix any finding introduced by this task.
 
-- [ ] **Step 5: Run diff checks**
+- [x] **Step 5: Run diff checks**
 
 Run:
 
@@ -654,7 +654,7 @@ rg -n 'TO''DO|TB''D|PLACE''HOLDER' tldw_Server_API/app/core/Flashcards/source_re
 
 Expected: `git diff --check` exits 0; placeholder scan has no matches.
 
-- [ ] **Step 6: Update Backlog task**
+- [x] **Step 6: Update Backlog task**
 
 Record:
 
@@ -664,10 +664,10 @@ Record:
 - modified files
 - known skips or blockers, if any
 
-- [ ] **Step 7: Commit final task metadata**
+- [x] **Step 7: Commit final task metadata**
 
 ```bash
-git add 'backlog/tasks/task-12932 - Add-source-grounded-spaced-repetition-review-schedules.md'
+git add Docs/superpowers/plans/2026-07-09-source-grounded-spaced-repetition-implementation-plan.md 'backlog/tasks/task-12932 - Add-source-grounded-spaced-repetition-review-schedules.md'
 git commit -m "docs: finalize source review task record"
 ```
 
