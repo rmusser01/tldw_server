@@ -63,6 +63,17 @@ vi.mock("../tabs", () => ({
     onNavigateToManageDeck?: (deckId: number) => void
     onNavigateToSchedulerDeck?: (deckId: number) => void
     onNavigateToExportDeck?: (deckId: number) => void
+    onSourceReviewGenerate?: (intent: {
+      activity_type: "flashcards" | "cloze"
+      text: string
+      source_items: Array<{ source_type: "note"; source_id: string }>
+    }) => void
+    onSourceReviewQuiz?: (intent: {
+      occurrence_id: number
+      plan_id: number
+      activity_type: "quiz"
+      source_bundle: { items: Array<{ source_type: "note"; source_id: string }> }
+    }) => void
   }) => (
     <div data-testid="mock-review-tab">
       <button onClick={props.onNavigateToCreate}>Route Create</button>
@@ -76,6 +87,27 @@ vi.mock("../tabs", () => ({
       <button onClick={() => props.onNavigateToSchedulerDeck?.(12)}>Route Scheduler Deck 12</button>
       <button onClick={() => props.onNavigateToExportDeck?.(12)}>Route Export Deck 12</button>
       <button onClick={() => props.onNavigateToExportDeck?.(21)}>Route Export Deck 21</button>
+      <button
+        onClick={() => props.onSourceReviewGenerate?.({
+          activity_type: "cloze",
+          text: "Grounded source excerpt",
+          source_items: [{ source_type: "note", source_id: "note-42" }]
+        })}
+      >
+        Route Source Cloze
+      </button>
+      <button
+        onClick={() => props.onSourceReviewQuiz?.({
+          occurrence_id: 31,
+          plan_id: 7,
+          activity_type: "quiz",
+          source_bundle: {
+            items: [{ source_type: "note", source_id: "note-42" }]
+          }
+        })}
+      >
+        Route Source Quiz
+      </button>
       <span data-testid="mock-review-deck-id">{String(props.reviewDeckId ?? "")}</span>
     </div>
   ),
@@ -111,6 +143,10 @@ vi.mock("../tabs", () => ({
     initialTaskHandoffKey?: string | null
     initialExportDeckId?: number | null
     initialExportDeckHandoffKey?: string | null
+    sourceReviewIntent?: {
+      activity_type: "flashcards" | "cloze"
+      text: string
+    } | null
   }) => (
     <div data-testid="mock-transfer-tab">
       Import / Export panel
@@ -118,6 +154,12 @@ vi.mock("../tabs", () => ({
       <span data-testid="mock-transfer-task-handoff-key">{String(props.initialTaskHandoffKey ?? "")}</span>
       <span data-testid="mock-export-initial-deck-id">{String(props.initialExportDeckId ?? "")}</span>
       <span data-testid="mock-export-handoff-key">{String(props.initialExportDeckHandoffKey ?? "")}</span>
+      <span data-testid="mock-source-review-activity">
+        {String(props.sourceReviewIntent?.activity_type ?? "")}
+      </span>
+      <span data-testid="mock-source-review-text">
+        {String(props.sourceReviewIntent?.text ?? "")}
+      </span>
     </div>
   ),
   TemplatesTab: () => <div data-testid="mock-templates-tab">Templates panel</div>,
@@ -571,6 +613,50 @@ describe("FlashcardsManager consistency standards", () => {
     expect(screen.getByTestId("mock-transfer-tab")).toBeInTheDocument()
     expect(screen.getByTestId("mock-transfer-initial-task")).toHaveTextContent("create")
     expect(screen.getByTestId("mock-transfer-task-handoff-key")).toHaveTextContent("create:")
+  })
+
+  it("routes source-review cloze text into the generation workspace", () => {
+    renderFlashcardsManager()
+
+    fireEvent.click(screen.getByText("Route Source Cloze"))
+
+    expect(screen.getByTestId("mock-transfer-tab")).toBeInTheDocument()
+    expect(screen.getByTestId("mock-transfer-initial-task")).toHaveTextContent("create")
+    expect(screen.getByTestId("mock-source-review-activity")).toHaveTextContent("cloze")
+    expect(screen.getByTestId("mock-source-review-text")).toHaveTextContent(
+      "Grounded source excerpt"
+    )
+  })
+
+  it("routes source-review quiz snapshots with a short session token", () => {
+    renderFlashcardsManager()
+
+    fireEvent.click(screen.getByText("Route Source Quiz"))
+
+    expect(mocks.navigate).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /^\/quiz\?tab=generate&source_review=1&source_review_token=[^&]+$/
+      )
+    )
+    expect(mocks.navigate.mock.calls[0][0]).not.toContain("note-42")
+  })
+
+  it("clears stale source-review context when a newer URL handoff arrives", async () => {
+    const rendered = renderFlashcardsManager()
+    fireEvent.click(screen.getByText("Route Source Cloze"))
+    expect(screen.getByTestId("mock-source-review-activity")).toHaveTextContent("cloze")
+
+    window.history.replaceState(
+      {},
+      "",
+      "/flashcards?generate=1&generate_text=New%20URL%20source"
+    )
+    mocks.locationKey = "url-generation-handoff"
+    rendered.rerender(<FlashcardsManager />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId("mock-source-review-activity")).toBeEmptyDOMElement()
+    })
   })
 
   it("routes Manage empty-state transfer CTAs to distinct transfer tasks", () => {

@@ -18,6 +18,10 @@ import { useNavigate } from "react-router-dom"
 import { Alert } from "@/components/ui/primitives"
 import { useAntdMessage } from "@/hooks/useAntdMessage"
 import type { DeckReviewPromptSide, Flashcard, FlashcardUpdate } from "@/services/flashcards"
+import type {
+  SourceReviewFlashcardsIntent,
+  SourceReviewHandoffPayload
+} from "@/services/tldw/source-review-handoff"
 import { getSetting, setSetting } from "@/services/settings/registry"
 import { FLASHCARDS_REVIEW_ONBOARDING_DISMISSED_SETTING } from "@/services/settings/ui-settings"
 import { trackFlashcardsShortcutHintTelemetry } from "@/utils/flashcards-shortcut-hint-telemetry"
@@ -46,7 +50,8 @@ import {
   ReviewProgress,
   ReviewAnalyticsSummary,
   FlashcardEditDrawer,
-  FlashcardStudyAssistantPanel
+  FlashcardStudyAssistantPanel,
+  SourceReviewDuePanel
 } from "../components"
 import { RecentStudySessions } from "../components/RecentStudySessions"
 import { calculateIntervals } from "../utils/calculateIntervals"
@@ -91,6 +96,8 @@ interface ReviewTabProps {
   onNavigateToManageDeck?: (deckId: number) => void
   onNavigateToSchedulerDeck?: (deckId: number) => void
   onNavigateToExportDeck?: (deckId: number) => void
+  onSourceReviewGenerate?: (intent: SourceReviewFlashcardsIntent) => void
+  onSourceReviewQuiz?: (payload: SourceReviewHandoffPayload) => void
 }
 
 interface ReviewFailureState {
@@ -119,7 +126,9 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
   forceShowWorkspaceItems = false,
   onNavigateToManageDeck,
   onNavigateToSchedulerDeck,
-  onNavigateToExportDeck
+  onNavigateToExportDeck,
+  onSourceReviewGenerate,
+  onSourceReviewQuiz
 }) => {
   const { t } = useTranslation(["option", "common"])
   const navigate = useNavigate()
@@ -1225,6 +1234,14 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
           </Button>
         )}
       </div>
+
+      {onSourceReviewGenerate && onSourceReviewQuiz ? (
+        <SourceReviewDuePanel
+          isActive={isActive}
+          onSourceReviewGenerate={onSourceReviewGenerate}
+          onSourceReviewQuiz={onSourceReviewQuiz}
+        />
+      ) : null}
 
       {canShowAllDeckDashboard && (
         <div

@@ -28,8 +28,9 @@ const messageSpies = {
   destroy: vi.fn()
 }
 
-const { useQueryMock } = vi.hoisted(() => ({
-  useQueryMock: vi.fn()
+const { useQueryMock, generateFlashcardsMock } = vi.hoisted(() => ({
+  useQueryMock: vi.fn(),
+  generateFlashcardsMock: vi.fn()
 }))
 
 vi.mock("@tanstack/react-query", async () => {
@@ -139,7 +140,7 @@ if (!(Element.prototype as any).scrollIntoView) {
 
 function setupMutationMocks() {
   vi.mocked(useGenerateFlashcardsMutation).mockReturnValue({
-    mutateAsync: vi.fn(),
+    mutateAsync: generateFlashcardsMock,
     isPending: false
   } as any)
   vi.mocked(useCreateFlashcardMutation).mockReturnValue({
@@ -299,5 +300,42 @@ describe("ImportExportTab LLM provider gating", () => {
     expect(
       screen.queryByTestId("flashcards-generate-no-llm-banner")
     ).not.toBeInTheDocument()
+  })
+
+  it("prefills cloze source reviews without starting generation", () => {
+    useQueryMock.mockImplementation((opts: { queryKey: string[] }) => {
+      if (opts?.queryKey?.[1] === "llm-providers") {
+        return {
+          data: { ok: true, status: 200, data: { providers: [{ id: "openai" }], total_configured: 1 } },
+          isLoading: false,
+          isError: false
+        }
+      }
+      return { data: 42, isLoading: false, isError: false }
+    })
+
+    render(
+      <ImportExportTab
+        sourceReviewIntent={{
+          activity_type: "cloze",
+          text: "Grounded source excerpt",
+          source_items: [
+            {
+              source_type: "note",
+              source_id: "note-42",
+              label: "Cardiac physiology"
+            }
+          ]
+        }}
+      />
+    )
+
+    expect(screen.getByTestId("flashcards-generate-text")).toHaveValue(
+      "Grounded source excerpt"
+    )
+    expect(screen.getByTestId("flashcards-generate-card-type")).toHaveTextContent(
+      "Cloze"
+    )
+    expect(generateFlashcardsMock).not.toHaveBeenCalled()
   })
 })
