@@ -15,6 +15,7 @@ import type { MediaLibraryStorageUsage } from '@/components/Media/MediaLibrarySt
 import { getErrorStatusCode } from './useMediaSearch'
 
 const MEDIA_COLLECTIONS_STORAGE_KEY = 'media:collections:v1'
+const READING_PROGRESS_MEDIA_ID_SEPARATOR = '\u001f'
 
 const toNonNegativeFiniteNumber = (value: unknown): number | null => {
   if (typeof value === 'number' && Number.isFinite(value) && value >= 0) return value
@@ -61,6 +62,17 @@ const supportsReadingProgressForResult = (item: MediaResultItem): boolean => {
     item.raw?.safe_metadata?.type
   if (typeof rawType !== 'string') return false
   return READING_PROGRESS_SUPPORTED_MEDIA_TYPES.has(rawType.trim().toLowerCase())
+}
+
+const areReadingProgressMapsEqual = (
+  left: Map<string, number>,
+  right: Map<string, number>
+): boolean => {
+  if (left.size !== right.size) return false
+  for (const [key, value] of right) {
+    if (left.get(key) !== value) return false
+  }
+  return true
 }
 
 type MediaCollectionRecord = {
@@ -125,6 +137,18 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
   // Reading progress
   const [readingProgressMap, setReadingProgressMap] = useState<Map<string, number>>(new Map())
   const readingProgressUnavailableRef = useRef(false)
+  const readingProgressMediaIdsKey = useMemo(() => {
+    const mediaIds = displayResults
+      .filter((r) => supportsReadingProgressForResult(r))
+      .map((r) => String(r.id))
+    return mediaIds.join(READING_PROGRESS_MEDIA_ID_SEPARATOR)
+  }, [displayResults])
+  const updateReadingProgressMap = useCallback((entries: Array<[string, number]>) => {
+    const next = new Map(entries)
+    setReadingProgressMap((prev) =>
+      areReadingProgressMapsEqual(prev, next) ? prev : next
+    )
+  }, [])
 
   const toggleFavorite = useCallback((id: string) => {
     const idStr = String(id)
@@ -189,19 +213,19 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
   // Reading progress
   useEffect(() => {
     if (readingProgressUnavailableRef.current) {
-      setReadingProgressMap(new Map())
+      updateReadingProgressMap([])
       return
     }
-    const mediaIds = displayResults
-      .filter((r) => supportsReadingProgressForResult(r))
-      .map((r) => String(r.id))
+    const mediaIds = readingProgressMediaIdsKey === ''
+      ? []
+      : readingProgressMediaIdsKey.split(READING_PROGRESS_MEDIA_ID_SEPARATOR)
     if (mediaIds.length === 0) {
-      setReadingProgressMap(new Map())
+      updateReadingProgressMap([])
       return
     }
     const getReadingProgress = (tldwClient as any).getReadingProgress
     if (typeof getReadingProgress !== 'function') {
-      setReadingProgressMap(new Map())
+      updateReadingProgressMap([])
       return
     }
     let cancelled = false
@@ -221,18 +245,18 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
           if (cancelled) return
           if (isReadingProgressEndpointUnavailableError(error)) {
             readingProgressUnavailableRef.current = true
-            setReadingProgressMap(new Map(entries))
+            updateReadingProgressMap(entries)
             return
           }
         }
       }
       if (!cancelled) {
-        setReadingProgressMap(new Map(entries))
+        updateReadingProgressMap(entries)
       }
     }
     void fetchProgress()
     return () => { cancelled = true }
-  }, [displayResults])
+  }, [readingProgressMediaIdsKey, updateReadingProgressMap])
 
   // Storage usage
   const refreshLibraryStorageUsage = useCallback(async () => {

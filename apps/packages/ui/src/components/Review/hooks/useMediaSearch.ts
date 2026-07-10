@@ -37,6 +37,7 @@ import {
 } from '@/components/Review/mediaTypeCache'
 
 const MEDIA_KEYWORD_ENDPOINT_RETRY_COOLDOWN_MS = 30_000
+const EMPTY_MEDIA_RESULTS: MediaResultItem[] = []
 
 export const deriveMediaMeta = (m: any): {
   type: string
@@ -646,7 +647,7 @@ export function useMediaSearch(deps: UseMediaSearchDeps) {
     t
   ])
 
-  const { data: results = [], refetch, isLoading, isFetching } = useQuery({
+  const { data: queryResults, refetch, isLoading, isFetching } = useQuery({
     queryKey: [
       'media-search',
       query,
@@ -671,6 +672,7 @@ export function useMediaSearch(deps: UseMediaSearchDeps) {
     queryFn: runSearch,
     enabled: false
   })
+  const results = queryResults ?? EMPTY_MEDIA_RESULTS
 
   const normalizedMetadataFilters = useMemo(
     () => normalizeMetadataSearchFilters(metadataFilters),
