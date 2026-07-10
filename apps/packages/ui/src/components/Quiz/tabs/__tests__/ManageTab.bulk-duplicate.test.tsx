@@ -648,13 +648,34 @@ describe("ManageTab bulk and duplicate actions", () => {
   }, 20000)
 
   it("opens a printable quiz view from list actions", async () => {
+    vi.mocked(listQuestions).mockResolvedValueOnce({
+      items: [
+        {
+          id: 301,
+          quiz_id: 1,
+          question_type: "true_false",
+          question_text: "Question one",
+          options: null,
+          correct_answer: "true",
+          explanation: "",
+          points: '</p><img src=x onerror="globalThis.__quizXss=1">' as any,
+          order_index: 0,
+          deleted: false,
+          client_id: "test",
+          version: 1
+        }
+      ],
+      count: 1
+    } as any)
+
     const printSpy = vi.fn()
     const focusSpy = vi.fn()
+    const documentWriteSpy = vi.fn()
     const openSpy = vi.spyOn(window, "open").mockImplementation(
       () => ({
         document: {
           open: vi.fn(),
-          write: vi.fn(),
+          write: documentWriteSpy,
           close: vi.fn()
         },
         focus: focusSpy,
@@ -673,9 +694,19 @@ describe("ManageTab bulk and duplicate actions", () => {
     fireEvent.click(screen.getByTestId("quiz-print-1"))
 
     await waitFor(() => {
-      expect(openSpy).toHaveBeenCalledTimes(1)
+      expect(documentWriteSpy).toHaveBeenCalledTimes(1)
     })
     expect(printSpy).toHaveBeenCalledTimes(1)
+
+    const writtenHtml = String(documentWriteSpy.mock.calls[0]?.[0] ?? "")
+    expect(writtenHtml.match(/<!doctype html>/gi) ?? []).toHaveLength(1)
+    expect(writtenHtml).toContain("<html")
+    expect(writtenHtml).toContain("<head>")
+    expect(writtenHtml).toContain("<title>Quiz A - Printable Quiz</title>")
+    expect(writtenHtml).toContain("<style>")
+    expect(writtenHtml).toContain("<body>")
+    expect(writtenHtml).not.toContain("onerror")
+    expect(writtenHtml).not.toContain("__quizXss")
 
     openSpy.mockRestore()
   }, 20000)
