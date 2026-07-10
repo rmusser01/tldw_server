@@ -2462,13 +2462,20 @@ async def update_source(
     """Update a workspace source with optimistic locking."""
     _require_workspace(db, workspace_id)
     updates = body.model_dump(exclude_unset=True, exclude={"version"})
+    if updates.get("review_state") is None:
+        updates.pop("review_state", None)
+    actor_kwargs = (
+        {"actor_user_id": str(getattr(current_user, "id", ""))}
+        if "review_state" in updates
+        else {}
+    )
     try:
         src = db.update_workspace_source(
             workspace_id,
             source_id,
             updates,
             expected_version=body.version,
-            actor_user_id=(str(getattr(current_user, "id", "")) if "review_state" in updates else None),
+            **actor_kwargs,
         )
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to update workspace source") from exc

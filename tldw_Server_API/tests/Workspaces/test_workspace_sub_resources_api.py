@@ -183,6 +183,27 @@ def test_update_source_rejects_invalid_review_state(
 
 
 @pytest.mark.integration
+def test_update_source_treats_null_review_state_as_omitted(
+    workspace_source_client: TestClient,
+) -> None:
+    created = workspace_source_client.post(
+        "/api/v1/workspaces/ws-1/sources",
+        json=_source_payload("src-null-review-state"),
+    ).json()
+
+    response = workspace_source_client.put(
+        "/api/v1/workspaces/ws-1/sources/src-null-review-state",
+        json={"title": "Renamed", "review_state": None, "version": created["version"]},
+    )
+
+    assert response.status_code == 200, response.text
+    source = response.json()
+    assert source["title"] == "Renamed"
+    assert source["review_state"] == "unset"
+    assert source["version"] == created["version"] + 1
+
+
+@pytest.mark.integration
 def test_batch_review_state_update_returns_updated_sources(
     workspace_source_client: TestClient,
 ) -> None:

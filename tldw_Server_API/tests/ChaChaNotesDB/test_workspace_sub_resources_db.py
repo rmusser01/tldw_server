@@ -223,6 +223,24 @@ class TestWorkspaceSources:
         assert unrelated["review_state"] == "needs_review"
         assert unrelated["version"] == 1
 
+    def test_batch_update_review_state_preserves_exact_source_ids(self, db):
+        for source_id in ("src", " src "):
+            db.add_workspace_source("ws-1", {
+                "id": source_id, "media_id": 1, "title": repr(source_id),
+                "source_type": "video",
+            })
+
+        updated = db.update_workspace_source_review_states(
+            "ws-1",
+            [" src "],
+            "needs_review",
+            None,
+        )
+
+        assert [source["id"] for source in updated] == [" src "]
+        assert db.get_workspace_source("ws-1", " src ")["review_state"] == "needs_review"
+        assert db.get_workspace_source("ws-1", "src")["review_state"] == "unset"
+
     def test_batch_update_review_state_fails_atomically_for_missing_source(self, db):
         created = db.add_workspace_source("ws-1", {
             "id": "src-a", "media_id": 1, "title": "A",

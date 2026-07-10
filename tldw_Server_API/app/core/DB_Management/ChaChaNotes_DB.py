@@ -19715,7 +19715,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         actor_user_id: str | None,
     ) -> list[dict[str, Any]]:
         """Atomically transition workspace sources to one review state."""
-        normalized_ids = list(dict.fromkeys(str(source_id or "").strip() for source_id in source_ids))
+        normalized_ids = list(dict.fromkeys(str(source_id or "") for source_id in source_ids))
         review_transition = self._build_workspace_source_review_transition(
             review_state,
             actor_user_id=actor_user_id,
