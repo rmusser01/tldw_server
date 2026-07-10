@@ -232,6 +232,26 @@ class RunRow:
 
 
 @dataclass
+class BriefingOccurrenceRow:
+    id: int
+    user_id: str
+    job_id: int
+    run_id: int
+    occurrence_key: str
+    contract_json: str
+    stages_json: str
+    artifact_status: str
+    delivery_status: str
+    output_id: int | None
+    audio_task_id: str | None
+    delivery_task_id: str | None
+    selected_count: int
+    omitted_count: int
+    created_at: str
+    updated_at: str
+
+
+@dataclass
 class ScrapedItemRow:
     id: int
     run_id: int
@@ -676,6 +696,30 @@ class WatchlistsDatabase:
             );
             CREATE INDEX IF NOT EXISTS idx_runs_job ON scrape_runs(job_id);
 
+            CREATE TABLE IF NOT EXISTS watchlist_briefing_occurrences (
+                id BIGSERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                job_id BIGINT NOT NULL,
+                run_id BIGINT NOT NULL,
+                occurrence_key TEXT NOT NULL,
+                contract_json TEXT NOT NULL,
+                stages_json TEXT NOT NULL,
+                artifact_status TEXT NOT NULL,
+                delivery_status TEXT NOT NULL,
+                output_id BIGINT,
+                audio_task_id TEXT,
+                delivery_task_id TEXT,
+                selected_count INTEGER NOT NULL DEFAULT 0,
+                omitted_count INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE (user_id, occurrence_key)
+            );
+            CREATE INDEX IF NOT EXISTS idx_briefing_occurrences_user_job
+                ON watchlist_briefing_occurrences(user_id, job_id);
+            CREATE INDEX IF NOT EXISTS idx_briefing_occurrences_run
+                ON watchlist_briefing_occurrences(run_id);
+
             CREATE TABLE IF NOT EXISTS scrape_run_items (
                 run_id BIGINT NOT NULL,
                 media_id BIGINT NOT NULL,
@@ -992,6 +1036,30 @@ class WatchlistsDatabase:
                 log_path TEXT
             );
             CREATE INDEX IF NOT EXISTS idx_runs_job ON scrape_runs(job_id);
+
+            CREATE TABLE IF NOT EXISTS watchlist_briefing_occurrences (
+                id INTEGER PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                job_id INTEGER NOT NULL,
+                run_id INTEGER NOT NULL,
+                occurrence_key TEXT NOT NULL,
+                contract_json TEXT NOT NULL,
+                stages_json TEXT NOT NULL,
+                artifact_status TEXT NOT NULL,
+                delivery_status TEXT NOT NULL,
+                output_id INTEGER,
+                audio_task_id TEXT,
+                delivery_task_id TEXT,
+                selected_count INTEGER NOT NULL DEFAULT 0,
+                omitted_count INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE (user_id, occurrence_key)
+            );
+            CREATE INDEX IF NOT EXISTS idx_briefing_occurrences_user_job
+                ON watchlist_briefing_occurrences(user_id, job_id);
+            CREATE INDEX IF NOT EXISTS idx_briefing_occurrences_run
+                ON watchlist_briefing_occurrences(run_id);
 
             CREATE TABLE IF NOT EXISTS scrape_run_items (
                 run_id INTEGER NOT NULL,
@@ -2950,6 +3018,117 @@ class WatchlistsDatabase:
             tuple(params + [limit, offset]),
         ).rows
         return [RunRow(**r) for r in rows], total
+
+    # ------------------------
+    # Briefing occurrences
+    # ------------------------
+    def create_or_get_briefing_occurrence(
+        self,
+        *,
+        run_id: int,
+        occurrence_key: str,
+        contract_json: str,
+    ) -> BriefingOccurrenceRow:
+        """Create one logical occurrence for an owned run or return its existing row."""
+        run = self.get_run(run_id)
+        now = _utcnow_iso()
+        self.backend.execute(
+            """
+            INSERT INTO watchlist_briefing_occurrences (
+                user_id, job_id, run_id, occurrence_key, contract_json, stages_json,
+                artifact_status, delivery_status, selected_count, omitted_count,
+                created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(user_id, occurrence_key) DO NOTHING
+            """,
+            (
+                self.user_id,
+                run.job_id,
+                run.id,
+                occurrence_key,
+                contract_json,
+                "{}",
+                "running",
+                "waiting_for_artifacts",
+                0,
+                0,
+                now,
+                now,
+            ),
+        )
+        row = self.backend.execute(
+            "SELECT * FROM watchlist_briefing_occurrences WHERE user_id = ? AND occurrence_key = ?",
+            (self.user_id, occurrence_key),
+        ).first
+        if not row:
+            raise RuntimeError("failed_to_create_briefing_occurrence")
+        return BriefingOccurrenceRow(**row)
+
+    def get_briefing_occurrence(self, occurrence_id: int) -> BriefingOccurrenceRow:
+        """Return an occurrence owned by the current user."""
+        row = self.backend.execute(
+            "SELECT * FROM watchlist_briefing_occurrences WHERE id = ? AND user_id = ?",
+            (occurrence_id, self.user_id),
+        ).first
+        if not row:
+            raise KeyError("briefing_occurrence_not_found")
+        return BriefingOccurrenceRow(**row)
+
+    def get_latest_briefing_occurrence(self, job_id: int) -> BriefingOccurrenceRow:
+        """Return the newest occurrence for an owned job."""
+        row = self.backend.execute(
+            """
+            SELECT * FROM watchlist_briefing_occurrences
+            WHERE user_id = ? AND job_id = ?
+            ORDER BY created_at DESC, id DESC
+            LIMIT 1
+            """,
+            (self.user_id, job_id),
+        ).first
+        if not row:
+            raise KeyError("briefing_occurrence_not_found")
+        return BriefingOccurrenceRow(**row)
+
+    def update_briefing_occurrence(
+        self,
+        occurrence_id: int,
+        *,
+        stages: dict[str, Any] | None = None,
+        artifact_status: str | None = None,
+        delivery_status: str | None = None,
+        output_id: int | None = None,
+        audio_task_id: str | None = None,
+        delivery_task_id: str | None = None,
+        selected_count: int | None = None,
+        omitted_count: int | None = None,
+    ) -> BriefingOccurrenceRow:
+        """Update the explicitly supported mutable fields on an owned occurrence."""
+        fields: list[str] = []
+        params: list[Any] = []
+        updates = (
+            ("stages_json", json.dumps(stages) if stages is not None else None),
+            ("artifact_status", artifact_status),
+            ("delivery_status", delivery_status),
+            ("output_id", output_id),
+            ("audio_task_id", audio_task_id),
+            ("delivery_task_id", delivery_task_id),
+            ("selected_count", selected_count),
+            ("omitted_count", omitted_count),
+        )
+        for column, value in updates:
+            if value is not None:
+                fields.append(f"{column} = ?")
+                params.append(value)
+        if not fields:
+            return self.get_briefing_occurrence(occurrence_id)
+        fields.append("updated_at = ?")
+        params.extend((_utcnow_iso(), occurrence_id, self.user_id))
+        self.backend.execute(
+            f"UPDATE watchlist_briefing_occurrences SET {', '.join(fields)} "  # nosec B608
+            "WHERE id = ? AND user_id = ?",
+            tuple(params),
+        )
+        return self.get_briefing_occurrence(occurrence_id)
 
     def append_run_item(self, run_id: int, media_id: int, source_id: int | None = None) -> None:
         # Ensure the run belongs to this user in shared-backend deployments.
