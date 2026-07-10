@@ -1,6 +1,6 @@
 # Chatbooks Residual UAT Remediation Design
 
-**Status:** Approved design and independent spec review
+**Status:** Approved design and technical/UX spec review
 **Date:** 2026-07-10
 **Tasks:** TASK-12098.3, TASK-12098.4, TASK-12098.5
 **Evidence:** `Docs/Reviews/CHATBOOKS_POST_MERGE_UAT_UX_REVIEW_2026_07_09.md`
@@ -27,7 +27,7 @@ This work must not:
 - relax the clean-destination restore checks; or
 - treat a build, unit test, or reduced extension package as equivalent to a browser round trip.
 
-Certification uses the bytes included in the browser-downloaded full-account archive. The UAT must extract and hash each fixture stored-media payload directly from that archive, then prove three-way SHA-256 equality between the source fixture bytes, archive payload bytes, and restored destination bytes. Before import, the source user's stored-media directory must be moved outside the server-visible root and external media retrieval must be disabled. The restore must therefore succeed from the downloaded archive alone. Restored vector identifiers must match the exported records.
+Certification uses the bytes included in the browser-downloaded full-account archive. The UAT must extract and hash each fixture stored-media payload directly from that archive, then prove three-way SHA-256 equality between the source fixture bytes, archive payload bytes, and restored destination bytes. Before import, the source server stops and its entire data root is quarantined. The destination server starts with a fresh independent data root that contains no source databases or storage. A local trap endpoint records and fails any attempted external-media retrieval. The restore must therefore succeed from the downloaded archive alone. Restored vector identifiers must match the exported records.
 
 The approved archive contract may retain only its existing explicit security exclusions, such as non-exportable authentication secrets. This remediation adds no new exclusion, pointer-only substitution, or unsupported-data loophole.
 
@@ -80,21 +80,25 @@ The current unpacked output is about 45 MB. `background.js` is about 653 KB, `co
 
 TASK-12098.4 and TASK-12098.5 are independent implementation tracks with separate commits and focused verification. Their only shared gate is the final exact-artifact browser acceptance run in TASK-12098.3. The implementation plan must preserve this separation so notification remediation can be reviewed without depending on the extension asset-tree diagnosis.
 
+Before implementation, rebase this worktree onto the latest `dev` and re-check migration numbering, package output, and existing notification behavior. The SQLite migration is 090 in the reviewed worktree, but implementation must use the next available migration number after that rebase.
+
 ## 6. Notification Authorization Design
 
 ### 6.1 Permission seeding
 
-Add SQLite migration 090 and an idempotent PostgreSQL parity function in the existing AuthNZ migration/ensure flow.
+Add the next available SQLite migration after rebasing (090 in the reviewed worktree). PostgreSQL requires both a fresh-install seed update and an idempotent backfill in the existing AuthNZ ensure flow.
 
-Both paths must:
+Both database backends must:
 
 1. insert `notifications.read` and `notifications.control` if absent;
-2. grant both permissions to the built-in interactive roles `admin`, `user`, `moderator`, and `reviewer` if those roles exist; and
+2. grant both permissions to each backend's built-in interactive roles when present: `admin`, `user`, `reviewer`, `moderator`, and `viewer`; and
 3. leave custom role grants and explicit user-level allow/deny overrides unchanged.
 
 These are global permissions for a user's personal notification inbox. They must not be copied into organization or team scoped-role tables, because the inbox is not an organization or team resource.
 
 The migration is additive and idempotent. Reapplying it must not duplicate permission or role-permission rows. Rollback must not delete notification permissions that may already be referenced by custom roles; if the migration framework requires a rollback function, it should remove only grants proven to have been created by the migration, or document the migration as forward-only following current project convention.
+
+PostgreSQL role grants must run after baseline roles are seeded. Fresh installation must include the two permissions in the baseline role seed, and the idempotent ensure/backfill must run after role seeding for existing installations. Calling only the current pre-role ensure hook is insufficient. Backend parity means equivalent effective access for the interactive system roles each backend actually defines; it does not require renaming `viewer` or adding `moderator` to PostgreSQL.
 
 ### 6.2 Role assignment
 
@@ -118,30 +122,55 @@ Tests must cover:
 
 ### 7.1 Error classification
 
-Use the structured `status` already attached by `background-proxy`. Do not introduce a second request-error hierarchy.
+Normalize the structured HTTP metadata already used by both runtimes. Extension failures expose `status` through `background-proxy`; direct WebUI API failures expose `status` or `statusCode` through `ApiError`. The WebUI SSE opener must stop throwing a message-only `Error` and preserve HTTP status in that existing error shape. A shared pure classifier may read `status` and `statusCode`, but it must not create a competing request-error hierarchy or parse status only from human-readable text.
 
 The stream policy is:
 
 | Failure | Behavior |
 | --- | --- |
 | Abort or explicit unsubscribe | Stop silently |
-| 401 or 403 | Terminal unavailable state; no automatic reconnect |
+| 401 | Stop notification requests, enter `auth-required`, and invoke the runtime's existing session-expiry/auth recovery path |
+| 403 | Stop notification requests and enter `unavailable`; no automatic reconnect |
 | Other non-retryable 4xx | Terminal error; no automatic reconnect |
 | 408, 425, 429, 5xx, or network error with no HTTP status | Retry with bounded exponential backoff |
 
-Backoff starts at the existing 1.2-second interval, doubles to a maximum of 30 seconds, and resets after a successful connection or event. Tests use injected delays or fake timers; production jitter may be added to avoid synchronized clients, but test assertions must remain deterministic.
+Backoff starts at the existing 1.2-second interval, doubles to a maximum of 30 seconds, honors a valid longer `Retry-After` value for 429/503, and resets after a successful connection. Tests use injected delays or fake timers; production jitter may be added to avoid synchronized clients, but test assertions must remain deterministic.
 
-### 7.2 Subscription lifecycle
+This policy applies to every initiator, not only the shared stream loop:
 
-The shared notification subscription exposes one storage-backed state:
+- the extension background unread bootstrap and SSE subscription;
+- the WebUI `WebLayout` unread poll;
+- the WebUI toast bridge bootstrap and SSE subscription; and
+- the WebUI notifications page bootstrap, mutations, and SSE subscription.
+
+A terminal bootstrap response must prevent the corresponding poll or stream from starting. A terminal response after startup must cancel its timer or stream. A transient bootstrap failure may recover through bounded retry without blocking Chatbooks.
+
+Automatic backoff applies only to idempotent reads, bootstrap requests, polls, and SSE connections. Notification mutations are never replayed automatically unless their endpoint first has an explicit idempotency-key contract. A transient mutation failure is shown once in the initiating surface and requires an explicit user retry; a terminal mutation failure updates the shared lifecycle state through the same classifier, preserving `auth-required` for 401 and `unavailable` for 403.
+
+### 7.2 Runtime adapters and lifecycle
+
+Use one shared pure state model with runtime-specific adapters. The extension adapter persists state and unread count in safe extension storage. The WebUI adapter holds state in its authenticated layout/provider and passes it to the header, toast bridge, and notifications page. Do not assume WebUI uses the extension background subscription or extension storage.
+
+The states are:
 
 - `idle`: not started or explicitly stopped;
-- `connecting`: initial unread count or stream connection in progress;
-- `active`: initial count succeeded and the stream is running;
-- `degraded`: a retryable failure is backing off; or
-- `unavailable`: a terminal authorization or other non-retryable response occurred.
+- `connecting`: bootstrap or stream connection is in progress;
+- `active`: the transport has confirmed an open HTTP stream and bootstrap data is current;
+- `degraded`: a retryable failure is backing off and data may be stale;
+- `auth-required`: the current session is no longer authorized and sign-in recovery is required; or
+- `unavailable`: the authenticated principal lacks permission or the endpoint returned another non-retryable response.
 
-The initial unread-count request and the SSE request use the same classification. A terminal initial response must prevent stream startup. A terminal stream response must clear the active flag and cancel the reconnect loop. An explicit auth/session/configuration change may start a new subscription; time alone may not restart a terminal subscription.
+The stream transport must expose an explicit connection-open callback after a successful HTTP response/body is acquired. `active` cannot be inferred from creating an unsubscribe handle or from waiting for the stream promise to return. It returns to `connecting` during an intentional reconnect and to `degraded` only after a retryable failure.
+
+401 and 403 have different restart contracts:
+
+- `auth-required` restarts automatically only after a successful login, token refresh, or authenticated principal change;
+- `unavailable` restarts after server/endpoint change, a successful explicit authenticated-user/effective-permissions refresh, or an explicit user `Try again` action; and
+- logout synchronously stops all notification work and clears rendered notification metadata before the next principal can render.
+
+There is no passive role-change polling. A permission grant becomes visible through an existing explicit account/permission refresh if that flow is available, or through the user's `Try again` action.
+
+Extension unread count and lifecycle keys must be namespaced by normalized server identity and stable principal identity. If either identity is unavailable, clear and suppress the prior value rather than reusing a global count. WebUI state resets synchronously when its authenticated principal or server identity changes. Tests must cover login, logout, token refresh, account switch, server switch, role grant, and a failed explicit retry.
 
 ### 7.3 User-facing state
 
@@ -150,12 +179,20 @@ For the default built-in roles, the existing bell and inbox behave normally.
 For an intentionally restricted role:
 
 - suppress the unread badge and stale unread count;
-- keep the notification control focusable so the missing capability is not ambiguous;
-- expose `Notifications unavailable for this account` on hover, focus, and activation using the existing tooltip/popover system;
-- use `aria-disabled="true"` and an accessible name that includes the unavailable state; and
+- keep the notification control as an enabled native button so the missing capability is discoverable;
+- expose `Notifications unavailable for this account` on hover and focus, and open a compact status popover on activation;
+- allow one explicit `Try again` request from that popover without enabling an automatic retry loop; and
 - do not emit repeated toasts, system notifications, console warnings, or network requests.
 
-A retryable outage keeps the last known count only if it is visibly marked stale in the inbox surface. The header must not invent a zero count while disconnected. Notification failure must never block Chatbooks export or import.
+A 401 state says `Sign in again to view notifications` and defers to the existing authentication recovery flow. It must not use the restricted-account message. A retryable outage suppresses the header badge and marks any retained inbox count as `Last updated before the connection was lost`. The header must not invent a zero count while disconnected.
+
+The active bell's accessible name includes its unread count, for example `Notifications, 3 unread`; the visual badge itself is `aria-hidden`. Non-active names include the state, for example `Notifications, reconnecting`, `Notifications, sign-in required`, or `Notifications unavailable`. State transitions are announced once through a polite status region, not on every retry.
+
+`idle` is internal-only before the authenticated shell starts the notification lifecycle or after logout. It renders no bell and no badge. An authenticated shell must transition synchronously from `idle` to `connecting`; it may not remain silently idle.
+
+If a popover is used, the button exposes `aria-haspopup`, `aria-expanded`, and `aria-controls`; keyboard activation opens it, Escape dismisses it, focus moves predictably within it, and dismissal returns focus to the bell. Tooltip content remains available on hover and focus and satisfies dismissible/hoverable behavior. The status button itself performs no notification API request except when the user activates the explicit `Try again` action.
+
+Direct navigation to the notifications page must render the corresponding `auth-required`, `unavailable`, or `degraded` state and suppress actions that cannot succeed. Notification failure must never block Chatbooks export or import.
 
 This behavior applies the relevant usability heuristics: visibility of system status, error prevention, consistency, recognition rather than recall, and useful recovery guidance without exposing internal RBAC terminology.
 
@@ -165,25 +202,29 @@ This behavior applies the relevant usability heuristics: visibility of system st
 
 Add a deterministic package-health command under the extension workspace. It must:
 
-1. run or require the normal production Chrome MV3 build;
+1. require an explicit normal production Chrome MV3 output directory and never rebuild it implicitly;
 2. validate `manifest.json` and every manifest-referenced local file before launch;
-3. launch Chromium with a fresh temporary user-data directory and only the normal output directory loaded;
-4. wait for a usable extension target, deriving the extension ID from the service worker or an extension page rather than assuming the worker exists immediately;
-5. open a known extension page and assert a stable app-ready marker;
-6. enforce separate launch and app-ready timeouts; and
-7. always close processes and preserve concise diagnostics on failure.
+3. reject symlinks in the production output and compute its fingerprint before any browser launch;
+4. canonicalize the explicit output realpath, pass that same value as the only path in both `--disable-extensions-except` and `--load-extension`, and launch Chromium with a fresh temporary user-data directory;
+5. prohibit certification-time copying, staging, manifest-key injection, host-permission patching, entrypoint replacement, or any other output mutation;
+6. discover the extension ID dynamically and grant optional host access through the existing runtime-permission path rather than changing the manifest;
+7. use one shared direct-output launcher for package health and final acceptance;
+8. wait for a usable extension target, deriving the extension ID from the service worker or an extension page rather than assuming the worker exists immediately;
+9. open a known extension page and assert both a stable app-ready marker and an extension-storage read/write sentinel;
+10. enforce separate launch, storage-sentinel, and app-ready timeouts; and
+11. always close processes and preserve concise diagnostics on failure.
 
-The build fingerprint is the SHA-256 of a deterministic package manifest containing every production-output file's sorted relative path, byte length, and file SHA-256. The probe writes a machine-readable result containing that fingerprint. The extension UAT must recompute the fingerprint before launch, require equality with the probe result, and recompute it after UAT to prove the tested directory was not mutated.
+The build fingerprint is the SHA-256 of a deterministic package manifest containing every regular production-output file's sorted POSIX-style relative path, byte length, and file SHA-256. Symlinks are rejected rather than followed. The probe writes its machine-readable result outside the fingerprinted output directory. It recomputes the fingerprint after package health and requires equality. The extension UAT must recompute the fingerprint before launch, require equality with the probe result, and recompute it after UAT to prove the same directory was loaded without mutation.
 
 Failure output must include the sanitized output label (for example, `chrome-mv3`), build fingerprint, file count and total bytes, relative manifest references, elapsed phase, sanitized browser stderr, observed target types, and relative names of the largest files. It must never emit an absolute extension root, repository root, home directory, credentials, or user data into retained logs or release artifacts.
 
-The probe passes only against the untouched output of the normal production build. A build-time change may stop emitting files proven unreachable from production, but no test step may delete asset classes, rewrite the manifest, or replace entrypoints after the build.
+The probe passes only against the untouched output of the normal production build. A build-time change may stop emitting files proven unreachable from production, but no test step may delete asset classes, rewrite the manifest, copy to a staged directory, inject a key, patch permissions, or replace entrypoints after the build. Loaded-path proof consists of unit-tested launcher arguments containing the same canonical realpath in both extension flags, a pre-launch fingerprint of that realpath, an observed extension target from that process, and an equal post-launch fingerprint. Retained evidence records only a sanitized label and fingerprint, never the absolute realpath.
 
 ### 8.2 Asset-tree isolation
 
-Before changing production output, add a diagnostic isolator that copies candidate subsets into temporary directories and reruns the same launch probe. It should bisect by top-level asset class and then by file batches while preserving the minimum valid manifest graph.
+Before changing production output, add a diagnostic isolator that copies candidate subsets into temporary directories and reruns the launcher in diagnostic mode. It should bisect by top-level asset class and then by dependency-closed file batches while preserving the minimum valid manifest graph.
 
-The diagnostic output must identify a reproducible minimal failing set or a measurable threshold condition. The production correction then belongs at the source that emits or references the offending files, such as WXT/Vite configuration, import structure, locale generation, or asset copying. Temporary diagnostic packages are evidence only and cannot satisfy release acceptance.
+The diagnostic output must identify a reproducible minimal failing set or a measurable threshold condition. The production correction then belongs at the source that emits or references the offending files, such as WXT/Vite configuration, import structure, locale generation, or asset copying. Temporary diagnostic packages are evidence only, use a visibly different diagnostic result type, and cannot satisfy package health or release acceptance.
 
 ### 8.3 Service-worker startup
 
@@ -230,13 +271,16 @@ The generic Vite large-chunk threshold may only be adjusted after these graph bu
 ### 10.1 Focused automated tests
 
 - SQLite migration and permission-resolution tests.
-- PostgreSQL ensure-function and grant-parity tests using the project fixture.
+- PostgreSQL fresh-seed ordering, post-role backfill, idempotency, and grant-parity tests using the project fixture.
 - Registration/default-role and UAT-fixture assertions.
-- Notification stream unit tests for terminal 401/403, other 4xx, transient retry, backoff cap, cursor retention, reset after success, and unsubscribe.
-- Shared subscription tests for initial terminal failure, stale-count clearing, state transitions, and explicit restart.
-- Header/inbox accessibility tests for restricted and degraded states.
+- Notification stream unit tests for structured direct-WebUI and extension errors, terminal 401/403, other 4xx, transient retry, `Retry-After`, backoff cap, cursor retention, connection-open, reset after success, and unsubscribe.
+- Extension adapter tests for initial terminal failure, principal/server namespacing, synchronous stale-count clearing, state transitions, and restart after auth/config/permission events.
+- WebUI tests for the layout unread poll, toast bridge, notifications page, terminal bootstrap suppression, timer cancellation, and shared availability presentation.
+- Header/inbox accessibility tests for active count naming, connecting, degraded, auth-required, restricted, explicit retry, popover keyboard behavior, focus return, and one-time polite announcements.
 - Extension build-warning, font-resolution, manifest-reference, and startup-budget tests.
-- Package-health probe against the production output.
+- Direct-output package-health tests for no staging/mutation, loaded-path identity, fingerprint equality, result placement outside output, symlink rejection, storage sentinel, and initially absent service worker activation.
+- Certification-report tests for checked-in expected test-ID manifest validation, phase-qualified aggregation, exact selected-set equality, and failure on skipped, missing, renamed, duplicated, or extra certification tests.
+- Central diagnostic-sanitizer negative tests for API keys, bearer/cookie headers, absolute paths, home paths, browser command lines, archive names, and raw child-process output.
 
 ### 10.2 Exact browser acceptance
 
@@ -244,22 +288,27 @@ Run the host UAT outside the sandbox for both surfaces. The extension run must u
 
 The extension acceptance run must:
 
-1. recompute the production-output fingerprint, require equality with the package-health result, and retain that fingerprint with the UAT result;
-2. create a source standard user with verified effective notification permissions;
-3. create the media-bearing full-account fixture;
-4. export through the extension `/chatbooks` route with the Full export contract;
-5. retain the exact browser-downloaded archive and extract the fixture stored-media payload from it;
-6. prove source-fixture and archive-payload SHA-256 equality;
-7. move source stored-media data outside the server-visible root and disable external media retrieval before import;
-8. import that archive into a distinct clean destination user;
-9. verify restored profile/settings values, characters, media, transcripts, chunks, and other fixture records;
-10. prove archive-payload and restored stored-media SHA-256 equality;
-11. verify vector identifiers;
-12. confirm notification requests do not return 401/403 or retry terminal failures;
-13. activate and continue when the MV3 service worker is initially absent, failing only if no usable extension target appears before timeout; and
-14. recompute the production-output fingerprint after UAT and require it to remain unchanged.
+1. accept an explicit production-output directory and package-health result, without rebuilding, staging, copying, or patching either;
+2. recompute the production-output fingerprint, require equality with the package-health result, and retain that fingerprint with the UAT result;
+3. create a source standard user with verified effective notification permissions;
+4. create the media-bearing full-account fixture and hash its stored-media bytes before export;
+5. export through the extension `/chatbooks` route with the Full export contract;
+6. retain the exact browser-downloaded archive, extract the fixture stored-media payload from it, and prove source-fixture and archive-payload SHA-256 equality;
+7. stop the source server and quarantine its entire data root so the destination process cannot resolve source databases, stored media, or absolute source paths;
+8. start the destination server with a fresh independent data root containing no source account data and a distinct clean destination user;
+9. configure the fixture's external-media location to a local trap endpoint and fail the run if the destination process attempts any external retrieval;
+10. import the exact downloaded archive into that destination user;
+11. verify restored profile/settings values, characters, media, transcripts, chunks, and other fixture records;
+12. prove archive-payload and restored stored-media SHA-256 equality;
+13. verify vector identifiers;
+14. confirm standard-user notification requests do not return 401/403 or retry terminal failures;
+15. exercise a restricted principal, keyboard-accessible unavailable state, badge suppression, explicit retry, and recovery after a permission grant;
+16. exercise 401 auth-required behavior and automatic recovery after successful reauthentication;
+17. activate and continue when the MV3 service worker is initially absent, failing only if no usable extension target appears before timeout;
+18. aggregate the machine-readable source-export, destination-import, notification, and extension-activation phase reports into one certification result with phase-qualified test IDs, compare that result against a checked-in manifest of required IDs, require exact set equality with every required ID passed and zero skipped, and fail preflight when required environment is absent; and
+19. recompute the production-output fingerprint after UAT and require it to remain unchanged.
 
-WebUI UAT is rerun as a regression gate. Neither surface may pass if export did not fire, import used a different archive, destination state was not clean, or only inventory counts were checked.
+WebUI UAT is rerun as a regression gate. Neither surface may pass if export did not fire, import used a different archive, destination state was not isolated and clean, only inventory counts were checked, a required test skipped, or the machine-readable result omitted a required assertion.
 
 ### 10.3 Quality gates
 
@@ -268,8 +317,9 @@ WebUI UAT is rerun as a regression gate. Neither surface may pass if export did 
 - Relevant backend unit and integration tests.
 - Bandit on touched backend production paths.
 - `git diff --check`.
-- No new warnings in the touched build scope.
-- UAT logs, package-health results, and archive checks contain no credentials, absolute source paths, home-directory paths, or unredacted sensitive values.
+- Zero duplicate-export, circular-service-import, or unresolved-font warnings in the touched build scope; no startup-budget violation.
+- One central sanitizer processes every retained package-health/UAT diagnostic write, including child-process stdout/stderr and browser command lines.
+- UAT logs, machine-readable reports, package-health results, and archive checks contain no credentials, authorization/cookie headers, archive names containing account data, absolute source paths, home-directory paths, or unredacted sensitive values.
 
 ## 11. Rollout and Rollback
 
@@ -279,8 +329,8 @@ If the notification UI state causes a regression, the UI presentation can be rol
 
 ## 12. Completion Criteria
 
-TASK-12098.4 is complete when notification authorization, lifecycle, accessible unavailable state, and tests pass for both runtimes.
+TASK-12098.4 is complete when notification authorization, fresh-install/backfill ordering, structured error parity, every WebUI and extension initiator, principal-scoped state, accessible recovery states, and focused browser tests pass for both runtimes.
 
-TASK-12098.5 is complete when the exact production extension loads, build-integrity findings are addressed, startup budgets are enforced, and its machine-readable package-health fingerprint is ready for the acceptance harness. It owns package readiness, not the final account-data round-trip result.
+TASK-12098.5 is complete when the exact production directory loads directly without staging or mutation, its pre/post fingerprints match, the storage sentinel and app-ready marker pass, build-integrity findings are addressed, startup budgets are enforced, and its machine-readable package-health result is ready for the acceptance harness. It owns package readiness, not the final account-data round-trip result.
 
-TASK-12098.3 owns the shared final UAT evidence and closes only after its remaining AC 15 and AC 17 are satisfied using the fingerprinted artifact from TASK-12098.5. WebUI success alone is not packaged-extension certification.
+TASK-12098.3 owns the shared final UAT evidence and closes only after its remaining acceptance criteria are updated and satisfied using the fingerprinted artifact from TASK-12098.5, an isolated destination data root, archive-extracted media hashes, an external-retrieval trap, and a machine-readable zero-skip report. WebUI success alone is not packaged-extension certification.
