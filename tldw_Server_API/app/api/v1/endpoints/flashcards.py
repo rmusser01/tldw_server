@@ -1,9 +1,11 @@
 # flashcards.py
 # REST endpoints for Flashcards/Decks backed by ChaChaNotes DB (schema v5)
 
+import contextlib
 import json
 import os
 import re
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
@@ -49,6 +51,12 @@ from tldw_Server_API.app.api.v1.schemas.flashcards import (
     FlashcardTemplateListResponse,
     FlashcardTemplateUpdate,
     FlashcardUpdate,
+    SourceReviewDueListResponse,
+    SourceReviewOccurrenceActionResponse,
+    SourceReviewPlanCreateRequest,
+    SourceReviewPlanDeleteResponse,
+    SourceReviewPlanListResponse,
+    SourceReviewPlanResponse,
     StructuredQaImportPreviewRequest,
     StructuredQaImportPreviewResponse,
     StudyAssistantContextResponse,
@@ -88,6 +96,7 @@ from tldw_Server_API.app.core.Flashcards.generation import (
     _get_flashcard_generation_plan,
     _normalize_generated_flashcards,
 )
+from tldw_Server_API.app.core.Flashcards.source_review import normalize_source_review_bundle
 from tldw_Server_API.app.core.Flashcards.scheduler_fsrs import (
     FsrsSettingsError,
     build_fsrs_next_interval_previews,
@@ -276,6 +285,49 @@ def _is_admin_principal(principal: AuthPrincipal) -> bool:
 
 def _serialize_study_pack(pack: dict[str, Any]) -> dict[str, Any]:
     return StudyPackSummaryResponse.model_validate(pack).model_dump(mode="json")
+
+
+def _serialize_source_review_plan(plan: dict[str, Any]) -> SourceReviewPlanResponse:
+    data = dict(plan)
+    data["source_bundle"] = data.pop("source_bundle_json", {"items": []})
+    return SourceReviewPlanResponse.model_validate(data)
+
+
+def _serialize_source_review_occurrence(
+    occurrence: dict[str, Any],
+) -> SourceReviewOccurrenceActionResponse:
+    data = dict(occurrence)
+    launch_state = data.pop("launch_state_json", None)
+    source_bundle = data.pop("source_bundle_json", {"items": []})
+    if isinstance(launch_state, str):
+        with contextlib.suppress(json.JSONDecodeError):
+            launch_state = json.loads(launch_state)
+    if isinstance(launch_state, dict):
+        launch_state = {**launch_state, "source_bundle": source_bundle}
+    else:
+        launch_state = None
+    data["launch_state"] = launch_state
+    return SourceReviewOccurrenceActionResponse.model_validate(data)
+
+
+def _source_review_now_utc() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _map_source_review_db_error(
+    exc: Exception,
+    *,
+    default_detail: str,
+) -> HTTPException:
+    if isinstance(exc, ConflictError) and "not found" in str(exc).lower():
+        entity = getattr(exc, "entity", "")
+        detail = (
+            "Source review plan not found"
+            if entity == "source_review_plans"
+            else "Source review occurrence not found"
+        )
+        return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
+    return map_db_error_to_http(exc, default_detail=default_detail)
 
 
 def _serialize_study_pack_job(job: dict[str, Any]) -> dict[str, Any]:
@@ -1973,6 +2025,170 @@ def get_next_review_card(
         raise HTTPException(status_code=400, detail=str(e)) from e
     except (InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to fetch next review card") from exc
+
+
+@router.post("/source-review-plans", response_model=SourceReviewPlanResponse)
+def create_source_review_plan(
+    payload: SourceReviewPlanCreateRequest,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    _current_user: User = Depends(get_request_user),
+) -> SourceReviewPlanResponse:
+    try:
+        plan_id = db.create_source_review_plan(
+            title=payload.title,
+            starts_on=payload.starts_on.isoformat(),
+            timezone_name=payload.timezone,
+            source_bundle_json=normalize_source_review_bundle(payload.source_items),
+            schedule=payload.computed_schedule(),
+        )
+        plan = db.get_source_review_plan(plan_id)
+        if plan is None:
+            raise CharactersRAGDBError("Created source review plan could not be loaded")
+        return _serialize_source_review_plan(plan)
+    except CharactersRAGDBError as exc:
+        raise _map_source_review_db_error(
+            exc,
+            default_detail="Failed to create source review plan",
+        ) from exc
+
+
+@router.get("/source-review-plans", response_model=SourceReviewPlanListResponse)
+def list_source_review_plans(
+    limit: int = Query(50, ge=1),
+    offset: int = Query(0, ge=0),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    _current_user: User = Depends(get_request_user),
+) -> SourceReviewPlanListResponse:
+    try:
+        plans, total = db.list_source_review_plans(limit=min(limit, 100), offset=offset)
+        return SourceReviewPlanListResponse(
+            items=[_serialize_source_review_plan(plan) for plan in plans],
+            total=total,
+        )
+    except CharactersRAGDBError as exc:
+        raise _map_source_review_db_error(
+            exc,
+            default_detail="Failed to list source review plans",
+        ) from exc
+
+
+@router.get("/source-review-plans/due", response_model=SourceReviewDueListResponse)
+def list_due_source_review_occurrences(
+    limit: int = Query(50, ge=1),
+    offset: int = Query(0, ge=0),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    _current_user: User = Depends(get_request_user),
+) -> SourceReviewDueListResponse:
+    now = _source_review_now_utc()
+    now_iso = now.isoformat().replace("+00:00", "Z")
+    try:
+        occurrences, total = db.list_due_source_review_occurrences(
+            now_utc=now_iso,
+            limit=min(limit, 100),
+            offset=offset,
+        )
+        return SourceReviewDueListResponse(
+            items=[
+                _serialize_source_review_occurrence(occurrence)
+                for occurrence in occurrences
+            ],
+            total=total,
+            now=now,
+        )
+    except CharactersRAGDBError as exc:
+        raise _map_source_review_db_error(
+            exc,
+            default_detail="Failed to list due source reviews",
+        ) from exc
+
+
+def _source_review_occurrence_action(
+    *,
+    db: CharactersRAGDB,
+    occurrence_id: int,
+    action: str,
+) -> SourceReviewOccurrenceActionResponse:
+    try:
+        if action == "start":
+            occurrence = db.start_source_review_occurrence(occurrence_id)
+        elif action == "complete":
+            occurrence = db.complete_source_review_occurrence(occurrence_id)
+        else:
+            occurrence = db.skip_source_review_occurrence(occurrence_id)
+        return _serialize_source_review_occurrence(occurrence)
+    except CharactersRAGDBError as exc:
+        raise _map_source_review_db_error(
+            exc,
+            default_detail=f"Failed to {action} source review occurrence",
+        ) from exc
+
+
+@router.post(
+    "/source-review-plans/occurrences/{occurrence_id}/start",
+    response_model=SourceReviewOccurrenceActionResponse,
+)
+def start_source_review_occurrence(
+    occurrence_id: int,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    _current_user: User = Depends(get_request_user),
+) -> SourceReviewOccurrenceActionResponse:
+    return _source_review_occurrence_action(
+        db=db,
+        occurrence_id=occurrence_id,
+        action="start",
+    )
+
+
+@router.post(
+    "/source-review-plans/occurrences/{occurrence_id}/complete",
+    response_model=SourceReviewOccurrenceActionResponse,
+)
+def complete_source_review_occurrence(
+    occurrence_id: int,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    _current_user: User = Depends(get_request_user),
+) -> SourceReviewOccurrenceActionResponse:
+    return _source_review_occurrence_action(
+        db=db,
+        occurrence_id=occurrence_id,
+        action="complete",
+    )
+
+
+@router.post(
+    "/source-review-plans/occurrences/{occurrence_id}/skip",
+    response_model=SourceReviewOccurrenceActionResponse,
+)
+def skip_source_review_occurrence(
+    occurrence_id: int,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    _current_user: User = Depends(get_request_user),
+) -> SourceReviewOccurrenceActionResponse:
+    return _source_review_occurrence_action(
+        db=db,
+        occurrence_id=occurrence_id,
+        action="skip",
+    )
+
+
+@router.delete(
+    "/source-review-plans/{plan_id}",
+    response_model=SourceReviewPlanDeleteResponse,
+)
+def delete_source_review_plan(
+    plan_id: int,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    _current_user: User = Depends(get_request_user),
+) -> SourceReviewPlanDeleteResponse:
+    try:
+        return SourceReviewPlanDeleteResponse(
+            deleted=db.soft_delete_source_review_plan(plan_id)
+        )
+    except CharactersRAGDBError as exc:
+        raise _map_source_review_db_error(
+            exc,
+            default_detail="Failed to delete source review plan",
+        ) from exc
 
 
 @router.post("/study-packs/jobs", response_model=StudyPackJobAcceptedResponse, status_code=202)
