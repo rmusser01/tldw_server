@@ -24,6 +24,7 @@ from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabas
 from tldw_Server_API.app.core.Scheduler.base.registry import task
 from tldw_Server_API.app.core.Workflows.daily_ledger import record_workflow_run
 from tldw_Server_API.app.core.Workflows.engine import RunMode, WorkflowEngine
+from tldw_Server_API.app.core.Watchlists.briefing_delivery import record_audio_workflow_terminal
 
 
 def _get_wf_db() -> WorkflowsDatabase:
@@ -67,8 +68,12 @@ async def workflow_run(payload: dict[str, Any]) -> dict[str, Any]:
     tenant_id = str(payload.get("tenant_id") or "default")
     workflow_id = payload.get("workflow_id")
     definition_snapshot = payload.get("definition_snapshot")
-    if workflow_id is None and not definition_snapshot:
+    resume_run_id = str(payload.get("resume_run_id") or "").strip() or None
+    resume_step_id = str(payload.get("resume_step_id") or "").strip() or None
+    if resume_run_id is None and workflow_id is None and not definition_snapshot:
         raise ValueError("workflow_run: must provide workflow_id or definition_snapshot")
+    if bool(resume_run_id) != bool(resume_step_id):
+        raise ValueError("workflow_run: resume_run_id and resume_step_id are required together")
     raw_metadata = payload.get("metadata")
     if raw_metadata is not None and not isinstance(raw_metadata, dict):
         raise ValueError("workflow_run: metadata must be a dict when provided")
@@ -84,33 +89,46 @@ async def workflow_run(payload: dict[str, Any]) -> dict[str, Any]:
             definition_snapshot["metadata"] = merged_definition_metadata
 
     run_mode = str(payload.get("mode") or "async").lower()
+    if metadata.get("source") == "watchlist_audio_briefing":
+        run_mode = "sync"
     mode = RunMode.SYNC if run_mode == "sync" else RunMode.ASYNC
     validation_mode = str(payload.get("validation_mode") or "block")
 
     # Create run
-    run_id = __import__("uuid").uuid4().hex
-    try:
-        db.create_run(
-            run_id=run_id,
-            tenant_id=tenant_id,
-            user_id=user_id,
-            inputs=inputs,
-            workflow_id=int(workflow_id) if workflow_id is not None else None,
-            definition_version=None,
-            definition_snapshot=definition_snapshot,
-            idempotency_key=None,
-            session_id=None,
-            validation_mode=validation_mode,
-            metadata=metadata,
-        )
-    except Exception as e:
-        logger.error(f"workflow_run: failed to create run: {e}")
-        raise
+    run_id = resume_run_id or __import__("uuid").uuid4().hex
+    if resume_run_id:
+        existing_run = db.get_run(resume_run_id)
+        if (
+            existing_run is None
+            or str(existing_run.user_id) != str(user_id)
+            or str(existing_run.tenant_id) != tenant_id
+        ):
+            raise ValueError("workflow_run: resume run not found")
+        db.update_run_metadata(resume_run_id, metadata)
+    else:
+        try:
+            db.create_run(
+                run_id=run_id,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                inputs=inputs,
+                workflow_id=int(workflow_id) if workflow_id is not None else None,
+                definition_version=None,
+                definition_snapshot=definition_snapshot,
+                idempotency_key=None,
+                session_id=None,
+                validation_mode=validation_mode,
+                metadata=metadata,
+            )
+        except Exception as e:
+            logger.error(f"workflow_run: failed to create run: {e}")
+            raise
 
     # Shadow-write this run into the daily ledger so RG daily caps account for
     # scheduled runs as well. Fail open if ledger unavailable.
-    with contextlib.suppress(Exception):
-        await record_workflow_run(entity_scope="user", entity_value=str(user_id), run_id=run_id, units=1)
+    if not resume_run_id:
+        with contextlib.suppress(Exception):
+            await record_workflow_run(entity_scope="user", entity_value=str(user_id), run_id=run_id, units=1)
 
     # Inject secrets ephemerally
     secrets = payload.get("secrets")
@@ -122,7 +140,15 @@ async def workflow_run(payload: dict[str, Any]) -> dict[str, Any]:
 
     # Submit to engine (respect internal concurrency scheduler)
     engine = WorkflowEngine(db=db)
-    engine.submit(run_id, mode=mode)
+    if resume_run_id:
+        await engine.continue_run(
+            run_id,
+            after_step_id="",
+            next_step_id=str(resume_step_id),
+            retry_resume=True,
+        )
+    else:
+        engine.submit(run_id, mode=mode)
 
     # Optionally wait for terminal state when mode=sync
     if mode == RunMode.SYNC:
@@ -135,7 +161,19 @@ async def workflow_run(payload: dict[str, Any]) -> dict[str, Any]:
             if status in {"succeeded", "failed", "cancelled"}:
                 break
             await asyncio.sleep(0.5)
-        succeeded = status == "succeeded"
-        return {"run_id": run_id, "status": status or "unknown", "succeeded": succeeded}
+        terminal_status = status or "unknown"
+        if metadata.get("source") == "watchlist_audio_briefing":
+            record_audio_workflow_terminal(
+                user_id=int(user_id),
+                tenant_id=tenant_id,
+                workflow_run_id=run_id,
+                status=terminal_status,
+                metadata=metadata,
+                workflow_db=db,
+                workflow_run=db.get_run(run_id),
+            )
+        if terminal_status != "succeeded":
+            raise RuntimeError(f"workflow_run_failed:{terminal_status}")
+        return {"run_id": run_id, "status": terminal_status, "succeeded": True}
 
     return {"run_id": run_id, "status": "queued"}

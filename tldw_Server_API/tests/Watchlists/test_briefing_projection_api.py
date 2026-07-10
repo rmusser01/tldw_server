@@ -14,6 +14,7 @@ from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_u
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatabase
 from tldw_Server_API.app.core.Watchlists.briefing_contract import get_briefing_contract
+from tldw_Server_API.app.services.outputs_service import _resolve_output_path_for_user
 
 pytestmark = pytest.mark.unit
 USER_ID = 7841
@@ -87,6 +88,9 @@ def projection_case(monkeypatch, tmp_path):
         job_id=int(job.id),
         run_id=int(run.id),
     )
+    report_path = _resolve_output_path_for_user(USER_ID, "signal-check.md")
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text("# Signal Check\n", encoding="utf-8")
     stages = {
         "collect": {"status": "ready"},
         "select": {"status": "ready", "candidate_count": 5, "selected_count": 3, "omitted_count": 2},
@@ -226,3 +230,120 @@ def test_unknown_delivery_retry_requires_duplicate_risk_confirmation(projection_
     assert "duplicate" in blocked.json()["detail"]["message"].lower()
     assert confirmed.status_code == 200, confirmed.text
     assert submit.await_count == 1
+
+
+def test_sending_delivery_retry_requires_duplicate_risk_confirmation(projection_case, monkeypatch):
+    client, seeded, watchlists_db, _collections_db = projection_case
+    occurrence = watchlists_db.get_briefing_occurrence(seeded.occurrence_id)
+    stages = json.loads(occurrence.stages_json)
+    stages["deliver:email"] = {
+        "status": "running",
+        "code": None,
+        "retryable": False,
+        "outcome": "sending",
+    }
+    watchlists_db.update_briefing_occurrence(
+        seeded.occurrence_id,
+        stages=stages,
+        delivery_status="delivering",
+    )
+    submit = AsyncMock(return_value="delivery-task-sending")
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.endpoints.watchlists.schedule_briefing_delivery",
+        submit,
+    )
+
+    blocked = client.post(
+        f"/api/v1/watchlists/runs/{seeded.run_id}/briefing/retry",
+        json={"stage": "deliver:email"},
+    )
+    confirmed = client.post(
+        f"/api/v1/watchlists/runs/{seeded.run_id}/briefing/retry",
+        json={"stage": "deliver:email", "confirm_unknown_delivery_retry": True},
+    )
+
+    assert blocked.status_code == 409
+    assert blocked.json()["detail"]["code"] == "unknown_delivery_confirmation_required"
+    assert confirmed.status_code == 200, confirmed.text
+    assert submit.await_count == 1
+
+
+def test_completed_audio_does_not_override_failed_text(projection_case):
+    from tldw_Server_API.app.core.Watchlists.briefing_projection import build_briefing_projection
+
+    _client, seeded, watchlists_db, collections_db = projection_case
+    occurrence = watchlists_db.get_briefing_occurrence(seeded.occurrence_id)
+    contract = json.loads(occurrence.contract_json)
+    contract["audio"]["enabled"] = True
+    stages = json.loads(occurrence.stages_json)
+    stages["persist_text"] = {"status": "failed", "code": "text_persist_failed", "retryable": True}
+    watchlists_db.update_briefing_occurrence(
+        seeded.occurrence_id,
+        stages=stages,
+        artifact_status="failed",
+    )
+    occurrence = watchlists_db.get_briefing_occurrence(seeded.occurrence_id)
+    occurrence.contract_json = json.dumps(contract)
+
+    projection = build_briefing_projection(
+        occurrence=occurrence,
+        watchlists_db=watchlists_db,
+        collections_db=collections_db,
+        audio={"status": "completed", "final_artifact": {"artifact_id": "audio-final"}},
+    )
+
+    assert projection["artifact_status"] == "failed"
+    assert projection["stages"]["persist_text"]["status"] == "failed"
+    assert projection["stages"]["persist_audio"]["status"] == "ready"
+
+
+def test_missing_report_file_is_removed_and_persisted_failed(projection_case):
+    from tldw_Server_API.app.core.Watchlists.briefing_projection import build_briefing_projection
+
+    _client, seeded, watchlists_db, collections_db = projection_case
+    _resolve_output_path_for_user(USER_ID, "signal-check.md").unlink()
+    occurrence = watchlists_db.get_briefing_occurrence(seeded.occurrence_id)
+
+    projection = build_briefing_projection(
+        occurrence=occurrence,
+        watchlists_db=watchlists_db,
+        collections_db=collections_db,
+    )
+
+    persisted = watchlists_db.get_briefing_occurrence(seeded.occurrence_id)
+    assert projection["output"] is None
+    assert projection["recovery"]["can_open_report"] is False
+    assert projection["artifact_status"] == "failed"
+    assert json.loads(persisted.stages_json)["persist_text"]["code"] == "briefing_text_artifact_missing"
+
+
+def test_cross_run_report_is_removed_and_persisted_failed(projection_case):
+    from tldw_Server_API.app.core.Watchlists.briefing_projection import build_briefing_projection
+
+    _client, seeded, watchlists_db, collections_db = projection_case
+    wrong = collections_db.create_output_artifact(
+        type_="briefing_markdown",
+        title="Wrong run",
+        format_="md",
+        storage_path="wrong-run.md",
+        metadata_json=json.dumps({"origin": "watchlists", "occurrence_id": seeded.occurrence_id}),
+        job_id=seeded.job_id,
+        run_id=seeded.run_id + 999,
+    )
+    wrong_path = _resolve_output_path_for_user(USER_ID, "wrong-run.md")
+    wrong_path.parent.mkdir(parents=True, exist_ok=True)
+    wrong_path.write_text("wrong", encoding="utf-8")
+    watchlists_db.update_briefing_occurrence(seeded.occurrence_id, output_id=int(wrong.id))
+    occurrence = watchlists_db.get_briefing_occurrence(seeded.occurrence_id)
+
+    projection = build_briefing_projection(
+        occurrence=occurrence,
+        watchlists_db=watchlists_db,
+        collections_db=collections_db,
+    )
+
+    assert projection["output"] is None
+    assert projection["artifact_status"] == "failed"
+    assert json.loads(watchlists_db.get_briefing_occurrence(seeded.occurrence_id).stages_json)[
+        "persist_text"
+    ]["code"] == "briefing_output_ownership_mismatch"

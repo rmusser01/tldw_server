@@ -67,7 +67,7 @@ async def test_watchlists_deliver_briefing_calls_core_handler(monkeypatch):
         captured.update(kwargs)
         return {"occurrence_id": 31, "delivery_status": "delivered"}
 
-    def fake_mark_audio_ready(**kwargs):
+    def fake_assert_audio_ready(**kwargs):
         marked.update(kwargs)
 
     monkeypatch.setattr(
@@ -77,8 +77,8 @@ async def test_watchlists_deliver_briefing_calls_core_handler(monkeypatch):
     )
     monkeypatch.setattr(
         watchlist_handler.briefing_delivery,
-        "mark_audio_dependency_ready",
-        fake_mark_audio_ready,
+        "assert_audio_dependency_ready",
+        fake_assert_audio_ready,
     )
     result = await watchlist_handler.watchlists_deliver_briefing(
         {

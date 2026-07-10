@@ -337,6 +337,12 @@ async def trigger_audio_briefing(
     output_id: int | None = None,
     editorial: Mapping[str, Any] | None = None,
     status_audio: bool = False,
+    tenant_id: str | None = None,
+    attempt_id: int | None = None,
+    attempt_number: int = 1,
+    requested_stage: str | None = None,
+    resume_workflow_run_id: str | None = None,
+    resume_step_id: str | None = None,
 ) -> AudioBriefingTriggerResult:
     """Trigger the audio briefing workflow for a completed watchlist run.
 
@@ -479,18 +485,31 @@ async def trigger_audio_briefing(
             metadata["briefing_occurrence_id"] = occurrence_id
         if output_id is not None:
             metadata["watchlist_output_id"] = output_id
+        if attempt_id is not None:
+            metadata["briefing_attempt_id"] = int(attempt_id)
+            metadata["briefing_attempt_number"] = int(attempt_number)
+        if requested_stage:
+            metadata["briefing_requested_stage"] = str(requested_stage)
         scheduler_metadata = {**metadata, "user_id": str(user_id)}
+        payload: dict[str, Any] = {
+            "user_id": user_id,
+            "tenant_id": str(tenant_id or "default"),
+            "definition_snapshot": AUDIO_BRIEFING_WORKFLOW_DEF,
+            "inputs": workflow_inputs,
+            "mode": "sync",
+            "metadata": metadata,
+        }
+        if resume_workflow_run_id and resume_step_id:
+            payload["resume_run_id"] = str(resume_workflow_run_id)
+            payload["resume_step_id"] = str(resume_step_id)
         task_id = await scheduler.submit(
             "workflow_run",
-            payload={
-                "user_id": user_id,
-                "definition_snapshot": AUDIO_BRIEFING_WORKFLOW_DEF,
-                "inputs": workflow_inputs,
-                "mode": "async",
-                "metadata": metadata,
-            },
+            payload=payload,
             queue_name="workflows",
-            idempotency_key=(f"watchlist-audio-briefing:{user_id}:{job_id}:{run_id}:{active_audio_request_id}"),
+            idempotency_key=(
+                f"watchlist-audio-briefing:{user_id}:{job_id}:{run_id}:{active_audio_request_id}"
+                + (f":attempt:{int(attempt_number)}" if attempt_id is not None else "")
+            ),
             metadata=scheduler_metadata,
             max_retries=1,
         )

@@ -466,6 +466,13 @@ export interface WatchlistBriefingStage {
   started_at?: string | null
   finished_at?: string | null
   outcome?: "sending" | "successful" | "partial" | "failed" | "unknown" | null
+  artifact_id?: string | number | null
+  artifact_version?: number | null
+  attempt_count?: number | null
+  audio_request_id?: string | null
+  scheduler_task_id?: string | null
+  task_id?: string | null
+  workflow_run_id?: string | null
 }
 
 export type WatchlistBriefingArtifactStatus = "running" | "ready" | "failed" | "cancelled"
@@ -501,7 +508,8 @@ export type WatchlistBriefingRetryStage =
   | "persist_audio_script"
   | "generate_audio"
   | "persist_audio"
-  | `deliver:${string}`
+  | "deliver:email"
+  | "deliver:chatbook"
 
 export interface WatchlistBriefingRetryRequest {
   stage: WatchlistBriefingRetryStage

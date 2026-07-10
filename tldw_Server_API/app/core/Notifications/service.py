@@ -53,6 +53,7 @@ def _normalize_email_recipients(recipients: list[str] | None) -> tuple[list[str]
             continue
         recipient = raw_recipient.strip()
         if not recipient:
+            invalid_count += 1
             continue
         if (
             len(recipient) > 254
@@ -68,6 +69,11 @@ def _normalize_email_recipients(recipients: list[str] | None) -> tuple[list[str]
         seen.add(dedupe_key)
         normalized.append(recipient)
     return normalized, invalid_count
+
+
+def normalize_email_recipients(recipients: list[Any] | None) -> tuple[list[str], int]:
+    """Public validation helper shared by API preconditions and delivery."""
+    return _normalize_email_recipients(recipients)  # type: ignore[arg-type]
 
 
 def _redacted_exception_for_log(exc: BaseException) -> RuntimeError:
@@ -275,9 +281,15 @@ class NotificationsService:
                 details={"document_id": doc_id, "provider": provider, "model": model},
             )
         except Exception as exc:
-            logger.error(f"Chatbook delivery failed: {exc}")
+            logger.bind(
+                operation="notifications.deliver_chatbook",
+                user_id=self.user_id,
+                exception_type=type(exc).__name__,
+            ).opt(exception=_redacted_exception_for_log(exc)).error(
+                "Chatbook delivery failed"
+            )
             return NotificationResult(
                 channel="chatbook",
                 status="failed",
-                details={"error": str(exc)},
+                details={"error_type": type(exc).__name__},
             )

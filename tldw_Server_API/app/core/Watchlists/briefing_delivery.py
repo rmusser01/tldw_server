@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from tldw_Server_API.app.core.Notifications import NotificationsService
+from tldw_Server_API.app.core.Watchlists.audio_artifact_projection import build_audio_projection
 from tldw_Server_API.app.services.outputs_service import _resolve_output_path_for_user
 
 _EXTERNAL_ADAPTERS = ("email", "chatbook")
@@ -77,6 +78,53 @@ def _attempt_count(stage: Mapping[str, Any] | None) -> int:
         return 0
 
 
+def _artifact_version(stages: Mapping[str, Mapping[str, Any]]) -> int:
+    try:
+        return max(1, int(stages.get("persist_text", {}).get("output_version") or 1))
+    except (TypeError, ValueError):
+        return 1
+
+
+def _claim_attempt(
+    watchlists_db: Any,
+    occurrence: Any,
+    *,
+    adapter: str,
+    stages: Mapping[str, Mapping[str, Any]],
+    requested_stage: str | None = None,
+    allow_retry: bool = False,
+) -> Any | None:
+    claim = getattr(watchlists_db, "claim_briefing_attempt", None)
+    if not callable(claim):
+        return None
+    return claim(
+        occurrence_id=int(occurrence.id),
+        artifact_version=_artifact_version(stages),
+        adapter=adapter,
+        requested_stage=requested_stage,
+        allow_retry=allow_retry,
+    )
+
+
+def _transition_attempt(
+    watchlists_db: Any,
+    attempt: Any | None,
+    *,
+    expected_states: set[str],
+    state: str,
+    **fields: Any,
+) -> Any | None:
+    transition = getattr(watchlists_db, "transition_briefing_attempt", None)
+    if attempt is None or not callable(transition):
+        return attempt
+    return transition(
+        int(attempt.id),
+        expected_states=expected_states,
+        state=state,
+        **fields,
+    )
+
+
 def _aggregate_status(adapters: Mapping[str, Mapping[str, Any]], stages: Mapping[str, Mapping[str, Any]]) -> str:
     if not adapters:
         return "not_configured"
@@ -94,7 +142,24 @@ def _aggregate_status(adapters: Mapping[str, Mapping[str, Any]], stages: Mapping
     return "waiting_for_artifacts"
 
 
-def _save_stages(watchlists_db: Any, occurrence: Any, stages: dict[str, dict[str, Any]]) -> Any:
+def _save_stages(
+    watchlists_db: Any,
+    occurrence: Any,
+    stages: dict[str, dict[str, Any]],
+    *,
+    changed_stage: str | None = None,
+) -> Any:
+    merge = getattr(watchlists_db, "merge_briefing_occurrence_stages", None)
+    if callable(merge):
+        if changed_stage is not None:
+            occurrence = merge(
+                int(occurrence.id),
+                stage_updates={changed_stage: stages[changed_stage]},
+            )
+        else:
+            occurrence = watchlists_db.get_briefing_occurrence(int(occurrence.id))
+        stages.clear()
+        stages.update(_read_stages(occurrence))
     delivery_status = _aggregate_status(
         external_delivery_adapters(_json_object(occurrence.contract_json)),
         stages,
@@ -118,10 +183,17 @@ def _save_stages(watchlists_db: Any, occurrence: Any, stages: dict[str, dict[str
             else None
         ),
     }
+    if callable(merge):
+        occurrence = merge(
+            int(occurrence.id),
+            stage_updates={"deliver": stages["deliver"]},
+            delivery_status=delivery_status,
+        )
+        stages.clear()
+        stages.update(_read_stages(occurrence))
+        return occurrence
     return watchlists_db.update_briefing_occurrence(
-        int(occurrence.id),
-        stages=stages,
-        delivery_status=delivery_status,
+        int(occurrence.id), stages=stages, delivery_status=delivery_status
     )
 
 
@@ -286,32 +358,93 @@ async def schedule_briefing_delivery(
     task_key = f"watchlists-briefing-delivery:{occurrence.user_id}:{occurrence.id}"
     stages = _read_stages(occurrence)
     requested = sorted(requested_adapters or set())
+    configured = external_delivery_adapters(_json_object(occurrence.contract_json))
+    adapters_to_claim = requested or sorted(configured)
+    confirmed = set(confirmed_unknown_adapters or set())
+    if watchlists_db is not None:
+        get_latest = getattr(watchlists_db, "get_latest_briefing_attempt", None)
+        transition_attempt = getattr(watchlists_db, "transition_briefing_attempt", None)
+        if callable(get_latest) and callable(transition_attempt):
+            for adapter in confirmed:
+                previous = get_latest(
+                    occurrence_id=int(occurrence.id),
+                    artifact_version=_artifact_version(stages),
+                    adapter=adapter,
+                )
+                if previous is not None and str(previous.state) == "sending":
+                    transition_attempt(
+                        int(previous.id),
+                        expected_states={"sending"},
+                        state="unknown",
+                        code="delivery_outcome_unknown",
+                    )
+    attempts = {
+        adapter: _claim_attempt(
+            watchlists_db,
+            occurrence,
+            adapter=adapter,
+            stages=stages,
+            requested_stage=f"deliver:{adapter}",
+            allow_retry=adapter in requested,
+        )
+        for adapter in adapters_to_claim
+        if watchlists_db is not None
+    }
     if requested:
-        attempt_keys = [f"{adapter}-{_attempt_count(stages.get(f'deliver:{adapter}'))}" for adapter in requested]
+        attempt_keys = [
+            f"{adapter}-{getattr(attempts.get(adapter), 'attempt', _attempt_count(stages.get(f'deliver:{adapter}')))}"
+            for adapter in requested
+        ]
         task_key = f"{task_key}:retry:{','.join(attempt_keys)}"
     elif audio_task_id and occurrence.delivery_task_id:
         previous_dependency = stages.get("deliver", {}).get("audio_dependency_task_id")
         if str(previous_dependency or "") != str(audio_task_id):
             task_key = f"{task_key}:audio:{audio_task_id}"
-    task_id = await scheduler.submit(
-        "watchlists_deliver_briefing",
-        payload={
-            "user_id": int(occurrence.user_id),
-            "occurrence_id": int(occurrence.id),
-            "audio_dependency_task_id": str(audio_task_id) if audio_task_id else None,
-            "requested_adapters": requested,
-            "confirmed_unknown_adapters": sorted(confirmed_unknown_adapters or set()),
-        },
-        queue_name="watchlists",
-        depends_on=[str(audio_task_id)] if audio_task_id else None,
-        idempotency_key=task_key,
-        metadata={
-            "source": "watchlists_briefing_delivery",
-            "user_id": str(occurrence.user_id),
-            "briefing_occurrence_id": int(occurrence.id),
-        },
-        max_retries=0,
-    )
+    try:
+        task_id = await scheduler.submit(
+            "watchlists_deliver_briefing",
+            payload={
+                "user_id": int(occurrence.user_id),
+                "occurrence_id": int(occurrence.id),
+                "audio_dependency_task_id": str(audio_task_id) if audio_task_id else None,
+                "requested_adapters": requested,
+                "confirmed_unknown_adapters": sorted(confirmed_unknown_adapters or set()),
+            },
+            queue_name="watchlists",
+            depends_on=[str(audio_task_id)] if audio_task_id else None,
+            idempotency_key=task_key,
+            metadata={
+                "source": "watchlists_briefing_delivery",
+                "user_id": str(occurrence.user_id),
+                "briefing_occurrence_id": int(occurrence.id),
+            },
+            max_retries=0,
+        )
+    except BaseException:
+        for attempt in attempts.values():
+            _transition_attempt(
+                watchlists_db,
+                attempt,
+                expected_states={"intent"},
+                state="failed",
+                code="delivery_enqueue_failed",
+            )
+        raise
+    for attempt in attempts.values():
+        bind_attempt = getattr(watchlists_db, "bind_briefing_attempt_scheduler_task", None)
+        if attempt is not None and callable(bind_attempt):
+            attempt = bind_attempt(
+                int(attempt.id),
+                scheduler_task_id=str(task_id),
+                request_id=str(task_id),
+            )
+        _transition_attempt(
+            watchlists_db,
+            attempt,
+            expected_states={"intent"},
+            state="queued",
+            scheduler_task_id=str(task_id),
+        )
     if watchlists_db is not None:
         watchlists_db.update_briefing_occurrence(
             int(occurrence.id),
@@ -320,13 +453,209 @@ async def schedule_briefing_delivery(
     return str(task_id)
 
 
-def mark_audio_dependency_ready(
+def _workflow_artifact_metadata(artifact: Any) -> dict[str, Any]:
+    if isinstance(artifact, Mapping):
+        return _json_object(artifact.get("metadata_json") or artifact.get("metadata"))
+    return _json_object(getattr(artifact, "metadata_json", None) or getattr(artifact, "metadata", None))
+
+
+def _persist_audio_terminal_failure(
+    *,
+    watchlists_db: Any,
+    occurrence: Any,
+    attempt: Any,
+    stages: dict[str, dict[str, Any]],
+    state: str,
+    code: str,
+    workflow_run_id: str,
+) -> None:
+    target_stage = (
+        "generate_audio"
+        if code == "audio_final_artifact_missing"
+        else str(getattr(attempt, "requested_stage", None) or "generate_audio")
+    )
+    if target_stage not in {"compose_audio_script", "persist_audio_script", "generate_audio", "persist_audio"}:
+        target_stage = "generate_audio"
+    now = _utcnow_iso()
+    stages[target_stage] = {
+        **stages.get(target_stage, {}),
+        "status": "cancelled" if state == "cancelled" else "failed",
+        "code": code,
+        "retryable": True,
+        "finished_at": now,
+        "workflow_run_id": workflow_run_id,
+        "attempt_count": int(getattr(attempt, "attempt", 1)),
+    }
+    transitioned = watchlists_db.transition_briefing_attempt(
+        int(attempt.id),
+        expected_states={"intent", "queued", "sending"},
+        state=state,
+        workflow_run_id=workflow_run_id,
+        code=code,
+    )
+    if transitioned is None and str(watchlists_db.get_briefing_attempt(int(attempt.id)).state) != state:
+        raise BriefingArtifactsNotReadyError("audio_workflow_attempt_stale")
+    watchlists_db.update_briefing_occurrence(
+        int(occurrence.id),
+        stages=stages,
+        artifact_status="cancelled" if state == "cancelled" else "failed",
+    )
+
+
+def record_audio_workflow_terminal(
+    *,
+    user_id: int,
+    tenant_id: str,
+    workflow_run_id: str,
+    status: str,
+    metadata: Mapping[str, Any],
+    workflow_db: Any,
+    workflow_run: Any | None = None,
+    watchlists_db: Any | None = None,
+) -> None:
+    """Validate and durably project one terminal Watchlists audio Workflow."""
+    from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatabase
+
+    watchlists_db = watchlists_db or WatchlistsDatabase.for_user(user_id)
+    try:
+        occurrence_id = int(metadata["briefing_occurrence_id"])
+        attempt_id = int(metadata["briefing_attempt_id"])
+        expected_job_id = int(metadata["watchlist_job_id"])
+        expected_run_id = int(metadata["watchlist_run_id"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise BriefingArtifactsNotReadyError("audio_workflow_identity_missing") from exc
+    request_id = str(metadata.get("audio_request_id") or "").strip()
+    occurrence = watchlists_db.get_briefing_occurrence(occurrence_id)
+    attempt = watchlists_db.get_briefing_attempt(attempt_id)
+    workflow_run = workflow_run or workflow_db.get_run(workflow_run_id)
+    get_latest_attempt = getattr(watchlists_db, "get_latest_briefing_attempt", None)
+    latest_attempt = (
+        get_latest_attempt(
+            occurrence_id=occurrence_id,
+            artifact_version=int(attempt.artifact_version),
+            adapter="audio",
+        )
+        if callable(get_latest_attempt)
+        else attempt
+    )
+    if (
+        str(metadata.get("source")) != "watchlist_audio_briefing"
+        or str(occurrence.user_id) != str(user_id)
+        or int(occurrence.job_id) != expected_job_id
+        or int(occurrence.run_id) != expected_run_id
+        or int(attempt.occurrence_id) != occurrence_id
+        or str(attempt.adapter) != "audio"
+        or int(attempt.artifact_version) != _artifact_version(_read_stages(occurrence))
+        or workflow_run is None
+        or (
+            getattr(workflow_run, "run_id", None) is not None
+            and str(workflow_run.run_id) != str(workflow_run_id)
+        )
+        or (
+            getattr(workflow_run, "user_id", None) is not None
+            and str(workflow_run.user_id) != str(user_id)
+        )
+        or (
+            getattr(workflow_run, "tenant_id", None) is not None
+            and str(workflow_run.tenant_id) != str(tenant_id)
+        )
+        or (getattr(attempt, "request_id", None) and str(attempt.request_id) != request_id)
+    ):
+        raise BriefingArtifactsNotReadyError("audio_workflow_identity_mismatch")
+    if latest_attempt is None or int(latest_attempt.id) != int(attempt.id):
+        raise BriefingArtifactsNotReadyError("audio_workflow_attempt_superseded")
+    stages = _read_stages(occurrence)
+    terminal_status = str(status).lower()
+    if terminal_status in {"failed", "cancelled", "canceled"}:
+        state = "cancelled" if terminal_status in {"cancelled", "canceled"} else "failed"
+        _persist_audio_terminal_failure(
+            watchlists_db=watchlists_db,
+            occurrence=occurrence,
+            attempt=attempt,
+            stages=stages,
+            state=state,
+            code="audio_workflow_cancelled" if state == "cancelled" else "audio_workflow_failed",
+            workflow_run_id=workflow_run_id,
+        )
+        return
+    if terminal_status != "succeeded":
+        raise BriefingArtifactsNotReadyError("audio_workflow_not_terminal")
+
+    artifacts = list(workflow_db.list_artifacts_for_run(workflow_run_id) or [])
+    projection = build_audio_projection(
+        run_id=int(occurrence.run_id),
+        task_id=getattr(attempt, "scheduler_task_id", None),
+        audio_request_id=request_id,
+        workflow_run=workflow_run,
+        artifacts=artifacts,
+    )
+    final_artifact = projection.get("final_artifact")
+    final_artifact_id = final_artifact.get("artifact_id") if isinstance(final_artifact, Mapping) else None
+    matching_final = False
+    for artifact in artifacts:
+        artifact_id = artifact.get("artifact_id") if isinstance(artifact, Mapping) else getattr(artifact, "artifact_id", None)
+        if str(artifact_id or "") != str(final_artifact_id or ""):
+            continue
+        artifact_metadata = _workflow_artifact_metadata(artifact)
+        matching_final = (
+            bool(artifact_metadata.get("final_artifact"))
+            and str(artifact_metadata.get("source")) == "watchlist_audio_briefing"
+            and str(artifact_metadata.get("watchlist_job_id")) == str(occurrence.job_id)
+            and str(artifact_metadata.get("watchlist_run_id")) == str(occurrence.run_id)
+            and str(artifact_metadata.get("briefing_occurrence_id")) == str(occurrence.id)
+            and str(artifact_metadata.get("briefing_attempt_id")) == str(attempt.id)
+            and str(artifact_metadata.get("audio_request_id")) == request_id
+        )
+        break
+    if projection.get("status") != "completed" or not final_artifact_id or not matching_final:
+        _persist_audio_terminal_failure(
+            watchlists_db=watchlists_db,
+            occurrence=occurrence,
+            attempt=attempt,
+            stages=stages,
+            state="failed",
+            code="audio_final_artifact_missing",
+            workflow_run_id=workflow_run_id,
+        )
+        raise BriefingArtifactsNotReadyError("audio_final_artifact_missing")
+
+    now = _utcnow_iso()
+    for name in ("compose_audio_script", "persist_audio_script", "generate_audio", "persist_audio"):
+        stages[name] = {
+            **stages.get(name, {}),
+            "status": "ready",
+            "code": None,
+            "retryable": False,
+            "finished_at": now,
+            "audio_request_id": request_id,
+            "workflow_run_id": workflow_run_id,
+            "artifact_id": str(final_artifact_id) if name == "persist_audio" else stages.get(name, {}).get("artifact_id"),
+            "attempt_count": int(attempt.attempt),
+        }
+    transitioned = watchlists_db.transition_briefing_attempt(
+        int(attempt.id),
+        expected_states={"intent", "queued", "sending"},
+        state="successful",
+        workflow_run_id=workflow_run_id,
+        artifact_id=str(final_artifact_id),
+    )
+    if transitioned is None and str(watchlists_db.get_briefing_attempt(int(attempt.id)).state) != "successful":
+        raise BriefingArtifactsNotReadyError("audio_workflow_attempt_stale")
+    text_ready = stages.get("persist_text", {}).get("status") == "ready"
+    watchlists_db.update_briefing_occurrence(
+        int(occurrence.id),
+        stages=stages,
+        artifact_status="ready" if text_ready else "failed",
+    )
+
+
+def assert_audio_dependency_ready(
     *,
     user_id: int,
     occurrence_id: int,
     audio_task_id: str,
 ) -> None:
-    """Project a successfully completed Scheduler audio dependency into occurrence state."""
+    """Require a matching terminal audio attempt without mutating occurrence state."""
     from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatabase
 
     watchlists_db = WatchlistsDatabase.for_user(user_id)
@@ -337,22 +666,18 @@ def mark_audio_dependency_ready(
     if not bool(contract.get("audio", {}).get("enabled")):
         raise BriefingArtifactsNotReadyError("audio_not_selected")
     stages = _read_stages(occurrence)
-    now = _utcnow_iso()
-    for name in ("compose_audio_script", "persist_audio_script", "generate_audio", "persist_audio"):
-        stage = stages.get(name, {})
-        stages[name] = {
-            **stage,
-            "status": "ready",
-            "code": None,
-            "retryable": False,
-            "started_at": stage.get("started_at"),
-            "finished_at": now,
-        }
-    watchlists_db.update_briefing_occurrence(
-        occurrence_id,
-        stages=stages,
-        artifact_status="ready",
+    attempt = watchlists_db.get_latest_briefing_attempt(
+        occurrence_id=int(occurrence.id),
+        artifact_version=_artifact_version(stages),
+        adapter="audio",
     )
+    if (
+        attempt is None
+        or str(attempt.state) != "successful"
+        or str(attempt.scheduler_task_id or "") != str(audio_task_id)
+        or any(stages.get(name, {}).get("status") != "ready" for name in ("compose_audio_script", "persist_audio_script", "generate_audio", "persist_audio"))
+    ):
+        raise BriefingArtifactsNotReadyError("audio_dependency_not_terminal")
 
 
 async def deliver_briefing_occurrence(
@@ -389,6 +714,35 @@ async def deliver_briefing_occurrence(
         previous_outcome = _adapter_outcome(stages, adapter)
         if previous_outcome == "successful":
             continue
+        if previous_outcome == "sending":
+            previous = stages.get(f"deliver:{adapter}", {})
+            stages[f"deliver:{adapter}"] = {
+                **previous,
+                "status": "failed",
+                "code": "delivery_outcome_unknown",
+                "retryable": False,
+                "finished_at": _utcnow_iso(),
+                "outcome": "unknown",
+            }
+            occurrence = _save_stages(
+                watchlists_db, occurrence, stages, changed_stage=f"deliver:{adapter}"
+            )
+            get_latest = getattr(watchlists_db, "get_latest_briefing_attempt", None)
+            if callable(get_latest):
+                sending_attempt = get_latest(
+                    occurrence_id=int(occurrence.id),
+                    artifact_version=_artifact_version(stages),
+                    adapter=adapter,
+                )
+                if sending_attempt is not None:
+                    _transition_attempt(
+                        watchlists_db,
+                        sending_attempt,
+                        expected_states={"sending"},
+                        state="unknown",
+                        code="delivery_outcome_unknown",
+                    )
+            continue
         if previous_outcome == "unknown" and adapter not in confirmed:
             continue
         if previous_outcome == "partial" and adapter not in requested:
@@ -396,8 +750,31 @@ async def deliver_briefing_occurrence(
         if requested and adapter not in requested:
             continue
 
+        attempt = _claim_attempt(
+            watchlists_db,
+            occurrence,
+            adapter=adapter,
+            stages=stages,
+            requested_stage=f"deliver:{adapter}",
+            allow_retry=adapter in requested,
+        )
+        if attempt is not None:
+            attempt_count = int(attempt.attempt)
+            attempt_state = str(attempt.state)
+            if attempt_state not in {"intent", "queued"}:
+                continue
+            claimed = _transition_attempt(
+                watchlists_db,
+                attempt,
+                expected_states={"intent", "queued"},
+                state="sending",
+            )
+            if claimed is None:
+                continue
+            attempt = claimed
+        else:
+            attempt_count = _attempt_count(stages.get(f"deliver:{adapter}")) + 1
         started_at = _utcnow_iso()
-        attempt_count = _attempt_count(stages.get(f"deliver:{adapter}")) + 1
         stages[f"deliver:{adapter}"] = {
             "status": "running",
             "code": None,
@@ -407,7 +784,9 @@ async def deliver_briefing_occurrence(
             "outcome": "sending",
             "attempt_count": attempt_count,
         }
-        occurrence = _save_stages(watchlists_db, occurrence, stages)
+        occurrence = _save_stages(
+            watchlists_db, occurrence, stages, changed_stage=f"deliver:{adapter}"
+        )
         try:
             provider_result = await _send_adapter(
                 adapter=adapter,
@@ -418,10 +797,41 @@ async def deliver_briefing_occurrence(
                 occurrence=occurrence,
             )
             outcome, code, details = _result_outcome(adapter, provider_result)
+        except asyncio.CancelledError:
+            outcome, code, details = "unknown", "delivery_outcome_unknown", {"error_type": "CancelledError"}
+            _transition_attempt(
+                watchlists_db,
+                attempt,
+                expected_states={"sending"},
+                state="unknown",
+                code=code,
+            )
+            stages[f"deliver:{adapter}"] = {
+                "status": "failed",
+                "code": code,
+                "retryable": False,
+                "started_at": started_at,
+                "finished_at": _utcnow_iso(),
+                "outcome": outcome,
+                "attempt_count": attempt_count,
+            }
+            _save_stages(
+                watchlists_db, occurrence, stages, changed_stage=f"deliver:{adapter}"
+            )
+            raise
         except (asyncio.TimeoutError, TimeoutError):
             outcome, code, details = "unknown", "delivery_outcome_unknown", {"error_type": "TimeoutError"}
-        except Exception as exc:  # noqa: BLE001 - provider boundary persists a safe failure code
-            outcome, code, details = "failed", f"{adapter}_delivery_failed", {"error_type": type(exc).__name__}
+        except Exception as exc:  # noqa: BLE001 - post-dispatch exceptions are ambiguous
+            outcome, code, details = "unknown", "delivery_outcome_unknown", {"error_type": type(exc).__name__}
+
+        _transition_attempt(
+            watchlists_db,
+            attempt,
+            expected_states={"sending", "unknown"},
+            state=outcome,
+            code=code,
+            artifact_id=str(details.get("document_id")) if details.get("document_id") is not None else None,
+        )
 
         stages[f"deliver:{adapter}"] = {
             "status": "ready" if outcome == "successful" else "failed",
@@ -432,7 +842,9 @@ async def deliver_briefing_occurrence(
             "outcome": outcome,
             "attempt_count": attempt_count,
         }
-        occurrence = _save_stages(watchlists_db, occurrence, stages)
+        occurrence = _save_stages(
+            watchlists_db, occurrence, stages, changed_stage=f"deliver:{adapter}"
+        )
         output = _persist_output_result(
             collections_db,
             output,
@@ -486,6 +898,7 @@ __all__ = [
     "deliver_briefing_for_user",
     "deliver_briefing_occurrence",
     "external_delivery_adapters",
-    "mark_audio_dependency_ready",
+    "assert_audio_dependency_ready",
+    "record_audio_workflow_terminal",
     "schedule_briefing_delivery",
 ]

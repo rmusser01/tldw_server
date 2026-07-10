@@ -113,6 +113,32 @@ async def test_delivery_waits_for_audio_dependency():
 
 
 @pytest.mark.asyncio
+async def test_delivery_submission_binds_task_before_queued_transition():
+    from tldw_Server_API.app.core.Watchlists.briefing_delivery import schedule_briefing_delivery
+
+    occurrence, watchlists_db, _collections_db = _delivery_case()
+    attempt = SimpleNamespace(id=91, attempt=1, state="intent")
+    watchlists_db.claim_briefing_attempt = MagicMock(return_value=attempt)
+    watchlists_db.bind_briefing_attempt_scheduler_task = MagicMock(return_value=attempt)
+    watchlists_db.transition_briefing_attempt = MagicMock(return_value=attempt)
+    scheduler = MagicMock()
+    scheduler.submit = AsyncMock(return_value="delivery-task")
+
+    await schedule_briefing_delivery(
+        occurrence=occurrence,
+        audio_task_id=None,
+        scheduler=scheduler,
+        watchlists_db=watchlists_db,
+    )
+
+    watchlists_db.bind_briefing_attempt_scheduler_task.assert_called_once_with(
+        91,
+        scheduler_task_id="delivery-task",
+        request_id="delivery-task",
+    )
+
+
+@pytest.mark.asyncio
 async def test_reviewed_delivery_retry_uses_stable_attempt_specific_task_key():
     from tldw_Server_API.app.core.Watchlists.briefing_delivery import schedule_briefing_delivery
 
@@ -210,6 +236,145 @@ async def test_timed_out_email_becomes_unknown_and_is_not_automatically_retried(
 
 
 @pytest.mark.asyncio
+async def test_ambiguous_provider_error_becomes_unknown_and_requires_confirmation():
+    from tldw_Server_API.app.core.Watchlists.briefing_delivery import deliver_briefing_occurrence
+
+    occurrence, watchlists_db, collections_db = _delivery_case()
+    notifications = MagicMock()
+    notifications.deliver_email = AsyncMock(side_effect=ConnectionError("socket reset after send"))
+
+    await deliver_briefing_occurrence(
+        occurrence_id=occurrence.id,
+        watchlists_db=watchlists_db,
+        collections_db=collections_db,
+        notifications=notifications,
+    )
+    await deliver_briefing_occurrence(
+        occurrence_id=occurrence.id,
+        watchlists_db=watchlists_db,
+        collections_db=collections_db,
+        notifications=notifications,
+    )
+
+    assert notifications.deliver_email.await_count == 1
+    assert json.loads(occurrence.stages_json)["deliver:email"]["outcome"] == "unknown"
+
+
+@pytest.mark.asyncio
+async def test_cancelled_delivery_persists_unknown_then_reraises():
+    from tldw_Server_API.app.core.Watchlists.briefing_delivery import deliver_briefing_occurrence
+
+    occurrence, watchlists_db, collections_db = _delivery_case()
+    notifications = MagicMock()
+    notifications.deliver_email = AsyncMock(side_effect=asyncio.CancelledError())
+
+    with pytest.raises(asyncio.CancelledError):
+        await deliver_briefing_occurrence(
+            occurrence_id=occurrence.id,
+            watchlists_db=watchlists_db,
+            collections_db=collections_db,
+            notifications=notifications,
+        )
+
+    stage = json.loads(occurrence.stages_json)["deliver:email"]
+    assert stage["outcome"] == "unknown"
+    assert occurrence.delivery_status == "unknown"
+
+
+@pytest.mark.asyncio
+async def test_persisted_sending_is_reconciled_to_unknown_without_resend():
+    from tldw_Server_API.app.core.Watchlists.briefing_delivery import deliver_briefing_occurrence
+
+    occurrence, watchlists_db, collections_db = _delivery_case()
+    stages = json.loads(occurrence.stages_json)
+    stages["deliver:email"] = {
+        "status": "running",
+        "outcome": "sending",
+        "attempt_count": 1,
+    }
+    occurrence.stages_json = json.dumps(stages)
+    notifications = MagicMock()
+    notifications.deliver_email = AsyncMock()
+
+    await deliver_briefing_occurrence(
+        occurrence_id=occurrence.id,
+        watchlists_db=watchlists_db,
+        collections_db=collections_db,
+        notifications=notifications,
+    )
+
+    notifications.deliver_email.assert_not_awaited()
+    assert json.loads(occurrence.stages_json)["deliver:email"]["outcome"] == "unknown"
+
+
+@pytest.mark.asyncio
+async def test_concurrent_delivery_calls_dispatch_adapter_once():
+    from tldw_Server_API.app.core.Watchlists.briefing_delivery import deliver_briefing_occurrence
+
+    occurrence, watchlists_db, collections_db = _delivery_case()
+    dispatched = asyncio.Event()
+    release = asyncio.Event()
+
+    async def send_once(**_kwargs):
+        dispatched.set()
+        await release.wait()
+        return SimpleNamespace(channel="email", status="sent", details={"provider_id": "ack"})
+
+    notifications = MagicMock()
+    notifications.deliver_email = AsyncMock(side_effect=send_once)
+    first = asyncio.create_task(
+        deliver_briefing_occurrence(
+            occurrence_id=occurrence.id,
+            watchlists_db=watchlists_db,
+            collections_db=collections_db,
+            notifications=notifications,
+        )
+    )
+    await dispatched.wait()
+    second = asyncio.create_task(
+        deliver_briefing_occurrence(
+            occurrence_id=occurrence.id,
+            watchlists_db=watchlists_db,
+            collections_db=collections_db,
+            notifications=notifications,
+        )
+    )
+    await asyncio.sleep(0)
+    release.set()
+    await asyncio.gather(first, second)
+
+    assert notifications.deliver_email.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_failed_durable_attempt_is_not_dispatched_without_explicit_retry():
+    from tldw_Server_API.app.core.Watchlists.briefing_delivery import deliver_briefing_occurrence
+
+    occurrence, watchlists_db, collections_db = _delivery_case()
+    stages = json.loads(occurrence.stages_json)
+    stages["deliver:email"] = {
+        "status": "failed",
+        "outcome": "failed",
+        "attempt_count": 1,
+    }
+    occurrence.stages_json = json.dumps(stages)
+    attempt = SimpleNamespace(id=92, attempt=1, state="failed")
+    watchlists_db.claim_briefing_attempt = MagicMock(return_value=attempt)
+    watchlists_db.transition_briefing_attempt = MagicMock(return_value=attempt)
+    notifications = MagicMock()
+    notifications.deliver_email = AsyncMock()
+
+    await deliver_briefing_occurrence(
+        occurrence_id=occurrence.id,
+        watchlists_db=watchlists_db,
+        collections_db=collections_db,
+        notifications=notifications,
+    )
+
+    notifications.deliver_email.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_reports_only_contract_has_no_external_delivery_attempt():
     from tldw_Server_API.app.core.Watchlists.briefing_delivery import deliver_briefing_occurrence
 
@@ -244,6 +409,125 @@ async def test_delivery_refuses_before_required_artifacts_are_ready():
             collections_db=collections_db,
             notifications=MagicMock(),
         )
+
+
+def test_audio_terminal_success_without_matching_final_artifact_is_failed():
+    from tldw_Server_API.app.core.Watchlists.briefing_delivery import (
+        BriefingArtifactsNotReadyError,
+        record_audio_workflow_terminal,
+    )
+
+    occurrence, watchlists_db, _collections_db = _delivery_case()
+    occurrence.contract_json = json.dumps({"audio": {"enabled": True}, "delivery": {}})
+    occurrence.artifact_status = "running"
+    occurrence.audio_task_id = "audio-task"
+    stages = json.loads(occurrence.stages_json)
+    stages.update(
+        {
+            "compose_audio_script": {"status": "queued", "audio_request_id": "wla_match"},
+            "persist_audio_script": {"status": "not_started"},
+            "generate_audio": {"status": "not_started"},
+            "persist_audio": {"status": "not_started"},
+        }
+    )
+    occurrence.stages_json = json.dumps(stages)
+    attempt = SimpleNamespace(
+        id=7,
+        user_id="17",
+        occurrence_id=31,
+        artifact_version=1,
+        adapter="audio",
+        attempt=1,
+        state="queued",
+        requested_stage="compose_audio_script",
+        scheduler_task_id="audio-task",
+        request_id="wla_match",
+    )
+    watchlists_db.get_briefing_attempt = MagicMock(return_value=attempt)
+    watchlists_db.transition_briefing_attempt = MagicMock(return_value=attempt)
+    workflow_db = MagicMock()
+    workflow_db.list_artifacts_for_run.return_value = []
+    workflow_db.list_step_runs.return_value = []
+    workflow_run = SimpleNamespace(status="succeeded", metadata_json=json.dumps({}))
+
+    with pytest.raises(BriefingArtifactsNotReadyError, match="audio_final_artifact_missing"):
+        record_audio_workflow_terminal(
+            user_id=17,
+            tenant_id="default",
+            workflow_run_id="workflow-1",
+            status="succeeded",
+            metadata={
+                "source": "watchlist_audio_briefing",
+                "watchlist_job_id": 11,
+                "watchlist_run_id": 22,
+                "briefing_occurrence_id": 31,
+                "briefing_attempt_id": 7,
+                "audio_request_id": "wla_match",
+            },
+            workflow_db=workflow_db,
+            workflow_run=workflow_run,
+            watchlists_db=watchlists_db,
+        )
+
+    assert occurrence.artifact_status == "failed"
+    assert json.loads(occurrence.stages_json)["generate_audio"]["status"] == "failed"
+
+
+def test_superseded_audio_attempt_cannot_overwrite_occurrence_state():
+    from tldw_Server_API.app.core.Watchlists.briefing_delivery import (
+        BriefingArtifactsNotReadyError,
+        record_audio_workflow_terminal,
+    )
+
+    occurrence, watchlists_db, _collections_db = _delivery_case()
+    occurrence.contract_json = json.dumps({"audio": {"enabled": True}, "delivery": {}})
+    occurrence.artifact_status = "running"
+    old_attempt = SimpleNamespace(
+        id=7,
+        user_id="17",
+        occurrence_id=31,
+        artifact_version=1,
+        adapter="audio",
+        attempt=1,
+        state="failed",
+        requested_stage="generate_audio",
+        scheduler_task_id="audio-task-old",
+        request_id="wla_match",
+    )
+    newer_attempt = SimpleNamespace(**{**vars(old_attempt), "id": 8, "attempt": 2, "state": "queued"})
+    watchlists_db.get_briefing_attempt = MagicMock(return_value=old_attempt)
+    watchlists_db.get_latest_briefing_attempt = MagicMock(return_value=newer_attempt)
+    watchlists_db.transition_briefing_attempt = MagicMock()
+    workflow_db = MagicMock()
+    workflow_run = SimpleNamespace(
+        run_id="workflow-old",
+        user_id="17",
+        tenant_id="default",
+        status="failed",
+        metadata_json=json.dumps({}),
+    )
+
+    with pytest.raises(BriefingArtifactsNotReadyError, match="audio_workflow_attempt_superseded"):
+        record_audio_workflow_terminal(
+            user_id=17,
+            tenant_id="default",
+            workflow_run_id="workflow-old",
+            status="failed",
+            metadata={
+                "source": "watchlist_audio_briefing",
+                "watchlist_job_id": 11,
+                "watchlist_run_id": 22,
+                "briefing_occurrence_id": 31,
+                "briefing_attempt_id": 7,
+                "audio_request_id": "wla_match",
+            },
+            workflow_db=workflow_db,
+            workflow_run=workflow_run,
+            watchlists_db=watchlists_db,
+        )
+
+    assert occurrence.artifact_status == "running"
+    watchlists_db.transition_briefing_attempt.assert_not_called()
 
 
 def test_external_delivery_plan_only_keeps_enabled_external_adapters():

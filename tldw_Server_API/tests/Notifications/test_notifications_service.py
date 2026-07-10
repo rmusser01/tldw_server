@@ -349,3 +349,32 @@ def test_notifications_chatbook_delivery(monkeypatch):
     call = fake_doc.calls[0]
     assert call["metadata"]["source"] == "watchlist"
     assert call["metadata"]["description"] == "Daily brief"
+
+
+def test_notifications_chatbook_failure_redacts_logged_and_returned_error(monkeypatch):
+    class FailingDocService:
+        def create_manual_document(self, **_kwargs):
+            raise RuntimeError("secret@example.com private briefing content")
+
+    fake_logger = _FakeLogger()
+    monkeypatch.setattr(notifications_service, "logger", fake_logger)
+    monkeypatch.setattr(
+        NotificationsService,
+        "_ensure_doc_service",
+        lambda self: FailingDocService(),
+    )
+
+    result = NotificationsService(user_id=2).deliver_chatbook(
+        title="Secret title",
+        content="Private body",
+    )
+
+    assert result.status == "failed"
+    assert result.details == {"error_type": "RuntimeError"}
+    assert fake_logger.bound_calls[0] == {
+        "operation": "notifications.deliver_chatbook",
+        "user_id": 2,
+        "exception_type": "RuntimeError",
+    }
+    assert "secret@example.com" not in str(fake_logger.opt_calls[0]["exception"])
+    assert "private briefing" not in str(fake_logger.opt_calls[0]["exception"])

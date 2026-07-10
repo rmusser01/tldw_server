@@ -116,7 +116,7 @@ async def watchlists_deliver_briefing(payload: dict[str, Any]) -> dict[str, Any]
         raise ValueError("watchlists_deliver_briefing: adapter lists must be lists")
     audio_dependency_task_id = payload.get("audio_dependency_task_id")
     if audio_dependency_task_id:
-        briefing_delivery.mark_audio_dependency_ready(
+        briefing_delivery.assert_audio_dependency_ready(
             user_id=user_id,
             occurrence_id=occurrence_id,
             audio_task_id=str(audio_dependency_task_id),

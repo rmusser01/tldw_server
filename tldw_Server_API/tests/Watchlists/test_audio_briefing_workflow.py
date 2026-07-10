@@ -482,6 +482,14 @@ class TestTriggerAudioBriefing:
                 },
                 db=db,
                 scheduler=mock_scheduler,
+                occurrence_id=8,
+                output_id=9,
+                tenant_id="tenant-x",
+                attempt_id=13,
+                attempt_number=2,
+                requested_stage="generate_audio",
+                resume_workflow_run_id="workflow-old",
+                resume_step_id="generate_audio",
             )
 
         assert result.status == "submitted"
@@ -500,19 +508,29 @@ class TestTriggerAudioBriefing:
         kwargs = mock_scheduler.submit.call_args.kwargs
         assert args == ("workflow_run",)
         assert kwargs["queue_name"] == "workflows"
-        assert kwargs["idempotency_key"] == f"watchlist-audio-briefing:1:42:7:{result.audio_request_id}"
+        assert kwargs["idempotency_key"] == (
+            f"watchlist-audio-briefing:1:42:7:{result.audio_request_id}:attempt:2"
+        )
         assert kwargs["max_retries"] == 1
         assert kwargs["metadata"] == {
             "source": "watchlist_audio_briefing",
             "watchlist_job_id": 42,
             "watchlist_run_id": 7,
             "audio_request_id": result.audio_request_id,
+            "briefing_occurrence_id": 8,
+            "watchlist_output_id": 9,
+            "briefing_attempt_id": 13,
+            "briefing_attempt_number": 2,
+            "briefing_requested_stage": "generate_audio",
             "user_id": "1",
         }
         payload = kwargs["payload"]
         assert payload["user_id"] == 1
         assert payload["definition_snapshot"] == AUDIO_BRIEFING_WORKFLOW_DEF
-        assert payload["mode"] == "async"
+        assert payload["mode"] == "sync"
+        assert payload["tenant_id"] == "tenant-x"
+        assert payload["resume_run_id"] == "workflow-old"
+        assert payload["resume_step_id"] == "generate_audio"
         assert payload["inputs"]["target_audio_minutes"] == 5
         assert payload["inputs"]["voice_map"] == {"HOST": "af_bella"}
         assert payload["inputs"]["background_audio_uri"] == "file:///tmp/bed.mp3"
@@ -524,6 +542,7 @@ class TestTriggerAudioBriefing:
         assert payload["metadata"]["watchlist_job_id"] == 42
         assert payload["metadata"]["watchlist_run_id"] == 7
         assert payload["metadata"]["audio_request_id"] == result.audio_request_id
+        assert payload["metadata"]["briefing_attempt_id"] == 13
         mock_threadpool.assert_awaited_once()
         db.list_items.assert_called_once_with(run_id=7, status="ingested", limit=100, offset=0)
 

@@ -493,7 +493,10 @@ def test_job_delete_and_restore_fidelity(client_with_user):
     assert restored_job["max_concurrency"] == job_body["max_concurrency"]
     assert restored_job["per_host_delay_ms"] == job_body["per_host_delay_ms"]
     assert restored_job["retry_policy"] == job_body["retry_policy"]
-    assert restored_job["output_prefs"] == job_body["output_prefs"]
+    assert restored_job["output_prefs"] == created_job["output_prefs"]
+    restored_contract = restored_job["output_prefs"]["briefing_pipeline"]
+    assert restored_contract["text"]["template_name"] == "daily-brief"
+    assert restored_contract["delivery"]["chatbook"]["enabled"] is True
     restored_filters = restored_job.get("job_filters") or {}
     assert restored_filters.get("require_include") is None
     assert isinstance(restored_filters.get("filters"), list) and len(restored_filters["filters"]) == 1
@@ -683,6 +686,39 @@ def test_update_job_email_validation_returns_structured_detail(client_with_user)
     assert isinstance(meta, dict)
     assert int(meta.get("count", 0)) == 1
     assert "not-an-email" in (meta.get("invalid_recipients") or [])
+
+
+@pytest.mark.parametrize(
+    ("delivery", "rule"),
+    [
+        ({"email": {"enabled": True, "recipients": []}}, "email_recipients_required"),
+        ({"email": {"enabled": True, "recipients": [None]}}, "invalid_email_recipients"),
+        (
+            {"email": {"enabled": True, "recipients": [f"user-{index}@example.com" for index in range(51)]}},
+            "too_many_email_recipients",
+        ),
+        ({"chatbook": {"enabled": True, "metadata": []}}, "invalid_chatbook_delivery"),
+        ({"chatbook": {"enabled": True, "conversation_id": True}}, "invalid_chatbook_delivery"),
+        ({"chatbook": {"enabled": True, "title": "x" * 256}}, "invalid_chatbook_delivery"),
+    ],
+)
+def test_create_job_rejects_invalid_delivery_contract(client_with_user, delivery, rule):
+    response = client_with_user.post(
+        "/api/v1/watchlists/jobs",
+        json={
+            "name": f"Invalid delivery {rule}",
+            "scope": {"tags": ["alpha"]},
+            "schedule_expr": None,
+            "timezone": "UTC",
+            "active": True,
+            "output_prefs": {"briefing_pipeline": {"delivery": delivery}},
+        },
+    )
+
+    detail = response.json().get("detail")
+    assert response.status_code == 422, response.text
+    assert isinstance(detail, dict)
+    assert detail["rule"] == rule
 
 
 def test_cancel_run_endpoint_marks_running_run_cancelled(client_with_user):

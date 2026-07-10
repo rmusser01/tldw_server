@@ -297,3 +297,34 @@ def test_watchlists_postgres_briefing_occurrence_round_trip(request: pytest.Fixt
         occurrence_ids = list(pool.map(lambda _: create_same_occurrence(), range(4)))
 
     assert len(set(occurrence_ids)) == 1
+
+    attempt_barrier = Barrier(4)
+
+    def claim_same_attempt() -> int:
+        attempt_barrier.wait()
+        return int(
+            owner.claim_briefing_attempt(
+                occurrence_id=occurrence_ids[0],
+                artifact_version=1,
+                adapter="email",
+            ).id
+        )
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        attempt_ids = list(pool.map(lambda _: claim_same_attempt(), range(4)))
+
+    assert len(set(attempt_ids)) == 1
+    queued = owner.transition_briefing_attempt(
+        attempt_ids[0],
+        expected_states={"intent"},
+        state="queued",
+        scheduler_task_id="pg-task",
+    )
+    stale = owner.transition_briefing_attempt(
+        attempt_ids[0],
+        expected_states={"intent"},
+        state="queued",
+        scheduler_task_id="stale-task",
+    )
+    assert queued is not None and queued.scheduler_task_id == "pg-task"
+    assert stale is None

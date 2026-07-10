@@ -2138,6 +2138,27 @@ class WorkflowsDatabase:
         except _WORKFLOWS_DB_NONCRITICAL_EXCEPTIONS:
             pass
 
+    def update_run_metadata(self, run_id: str, metadata: dict[str, Any]) -> None:
+        """Replace run metadata and mirror it into the definition snapshot."""
+        run = self.get_run(run_id)
+        if run is None:
+            raise KeyError("workflow_run_not_found")
+        try:
+            definition = json.loads(run.definition_snapshot_json or "{}")
+        except _WORKFLOWS_DB_NONCRITICAL_EXCEPTIONS:
+            definition = {}
+        if not isinstance(definition, dict):
+            definition = {}
+        definition["metadata"] = dict(metadata)
+        params = (json.dumps(metadata), json.dumps(definition), str(run_id))
+        query = "UPDATE workflow_runs SET metadata_json = ?, definition_snapshot_json = ? WHERE run_id = ?"
+        if self._using_backend():
+            with self.backend.transaction() as conn:  # type: ignore[union-attr]
+                self._execute_backend(query, params, connection=conn)
+        else:
+            self._conn.execute(query, params)
+            self._conn.commit()
+
     # ---------- Run control ----------
     def set_cancel_requested(self, run_id: str, cancel: bool = True) -> None:
         run_id_param = "" if run_id is None else str(run_id)

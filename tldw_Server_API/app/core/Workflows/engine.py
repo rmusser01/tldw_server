@@ -1178,6 +1178,24 @@ class WorkflowEngine:
             "run_id": run_id,
             "user_id": getattr(run, "user_id", None),
         }
+        recovered_last: dict[str, Any] = {}
+        try:
+            for step_run in self.db.list_step_runs(run_id=run_id):
+                step_id = str(step_run.get("step_id") or "")
+                if (
+                    step_run.get("status") != "succeeded"
+                    or step_id not in id_to_idx
+                    or id_to_idx[step_id] >= start_idx
+                ):
+                    continue
+                outputs = step_run.get("outputs_json")
+                if isinstance(outputs, str):
+                    outputs = json.loads(outputs or "{}")
+                if isinstance(outputs, dict):
+                    context[step_id] = outputs
+                    recovered_last = outputs
+        except _WF_NONCRITICAL_EXCEPTIONS:
+            recovered_last = {}
         try:
             meta = definition.get("metadata") if isinstance(definition, dict) else None
             if isinstance(meta, dict):
@@ -1199,8 +1217,8 @@ class WorkflowEngine:
                 e,
                 exc_info=True,
             )
-        if last_outputs:
-            context["last"] = last_outputs
+        if last_outputs or recovered_last:
+            context["last"] = last_outputs or recovered_last
         # Mark running
         if not self._update_run_status_guarded(
             run_id,
@@ -1214,7 +1232,7 @@ class WorkflowEngine:
         self._append_event(run_id, "run_resumed", {"after": after_step_id})
 
         # Execute with branching support
-        last = last_outputs or {}
+        last = last_outputs or recovered_last
         idx = start_idx
         visited = 0
         max_iters = max(1, len(steps) * 10)

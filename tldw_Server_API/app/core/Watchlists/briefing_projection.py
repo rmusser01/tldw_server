@@ -6,6 +6,8 @@ import json
 from collections.abc import Mapping
 from typing import Any
 
+from tldw_Server_API.app.services.outputs_service import _resolve_output_path_for_user
+
 _AUDIO_STAGES = (
     "compose_audio_script",
     "persist_audio_script",
@@ -41,18 +43,46 @@ def _stages(occurrence: Any) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]
             "started_at": value.get("started_at"),
             "finished_at": value.get("finished_at"),
             "outcome": value.get("outcome"),
+            **{
+                key: value[key]
+                for key in (
+                    "artifact_id",
+                    "artifact_version",
+                    "attempt_count",
+                    "audio_request_id",
+                    "scheduler_task_id",
+                    "task_id",
+                    "workflow_run_id",
+                )
+                if value.get(key) is not None
+            },
         }
     return stages, raw
 
 
-def _output(collections_db: Any, occurrence: Any) -> dict[str, Any] | None:
+def _output(collections_db: Any, occurrence: Any) -> tuple[dict[str, Any] | None, str | None]:
     if occurrence.output_id is None:
-        return None
+        return None, None
     try:
         row = collections_db.get_output_artifact(int(occurrence.output_id))
-    except KeyError:
-        return None
+    except (KeyError, OSError, RuntimeError, TypeError, ValueError):
+        return None, "briefing_text_artifact_missing"
     metadata = _json_object(getattr(row, "metadata_json", None))
+    if (
+        (getattr(row, "user_id", None) is not None and str(row.user_id) != str(occurrence.user_id))
+        or int(getattr(row, "run_id", 0) or 0) != int(occurrence.run_id)
+        or int(getattr(row, "job_id", 0) or 0) != int(occurrence.job_id)
+        or str(metadata.get("occurrence_id")) != str(occurrence.id)
+    ):
+        return None, "briefing_output_ownership_mismatch"
+    storage_path = str(getattr(row, "storage_path", None) or "").strip()
+    if not storage_path:
+        return None, "briefing_text_artifact_missing"
+    try:
+        if not _resolve_output_path_for_user(int(occurrence.user_id), storage_path).is_file():
+            return None, "briefing_text_artifact_missing"
+    except (OSError, RuntimeError, TypeError, ValueError):
+        return None, "briefing_text_artifact_missing"
     public_keys = {
         "ai_generated_speech",
         "candidate_count",
@@ -79,7 +109,7 @@ def _output(collections_db: Any, occurrence: Any) -> dict[str, Any] | None:
         "created_at": row.created_at,
         "download_url": f"/api/v1/watchlists/outputs/{int(row.id)}/download",
         "metadata": {key: metadata[key] for key in public_keys if key in metadata},
-    }
+    }, None
 
 
 def _with_audio(
@@ -93,7 +123,7 @@ def _with_audio(
     if status == "completed" and audio.get("final_artifact"):
         for name in _AUDIO_STAGES:
             stages[name] = {**stages.get(name, {}), "status": "ready", "code": None, "retryable": False}
-        return stages, "ready"
+        return stages, artifact_status
     if status in {"failed", "dead"}:
         for name in _AUDIO_STAGES:
             existing = stages.get(name, {})
@@ -115,6 +145,24 @@ def _with_audio(
     return stages, artifact_status
 
 
+def _aggregate_artifact_status(
+    stages: Mapping[str, Mapping[str, Any]],
+    *,
+    audio_enabled: bool,
+) -> str:
+    required = ["persist_text"]
+    if audio_enabled:
+        required.extend(_AUDIO_STAGES)
+    statuses = [str(stages.get(name, {}).get("status") or "not_started") for name in required]
+    if any(status == "failed" for status in statuses):
+        return "failed"
+    if any(status == "cancelled" for status in statuses):
+        return "cancelled"
+    if statuses and all(status in {"ready", "skipped"} for status in statuses):
+        return "ready"
+    return "running"
+
+
 def build_briefing_projection(
     *,
     occurrence: Any,
@@ -125,7 +173,30 @@ def build_briefing_projection(
     """Combine authoritative occurrence state with current output/audio projections."""
     contract = _json_object(occurrence.contract_json)
     stages, raw_stages = _stages(occurrence)
-    stages, artifact_status = _with_audio(stages, audio, str(occurrence.artifact_status))
+    stages, _artifact_status = _with_audio(stages, audio, str(occurrence.artifact_status))
+    output, output_error = _output(collections_db, occurrence)
+    if output_error:
+        failed_stage = {
+            **stages.get("persist_text", {}),
+            "status": "failed",
+            "code": output_error,
+            "retryable": True,
+        }
+        stages["persist_text"] = failed_stage
+        persisted_stages = dict(raw_stages)
+        persisted_stages["persist_text"] = {
+            **(raw_stages.get("persist_text") if isinstance(raw_stages.get("persist_text"), Mapping) else {}),
+            **failed_stage,
+        }
+        watchlists_db.update_briefing_occurrence(
+            int(occurrence.id),
+            stages=persisted_stages,
+            artifact_status="failed",
+        )
+    artifact_status = _aggregate_artifact_status(
+        stages,
+        audio_enabled=bool(contract.get("audio", {}).get("enabled")),
+    )
     select = raw_stages.get("select") if isinstance(raw_stages.get("select"), Mapping) else {}
     candidate_count = int(
         select.get("candidate_count") or int(occurrence.selected_count or 0) + int(occurrence.omitted_count or 0)
@@ -140,7 +211,7 @@ def build_briefing_projection(
         "artifact_status": artifact_status,
         "delivery_status": delivery_status,
         "stages": stages,
-        "output": _output(collections_db, occurrence),
+        "output": output,
         "audio": dict(audio) if audio is not None else None,
         "editorial": dict(contract.get("editorial") or {}),
         "selection": {
@@ -150,7 +221,7 @@ def build_briefing_projection(
         },
         "next_run_at": getattr(job, "next_run_at", None),
         "recovery": {
-            "can_open_report": occurrence.output_id is not None,
+            "can_open_report": output is not None,
             "can_retry_text": any(
                 stages.get(name, {}).get("status") == "failed" for name in ("render_text", "persist_text")
             ),

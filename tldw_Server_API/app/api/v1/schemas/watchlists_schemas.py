@@ -1047,6 +1047,13 @@ class WatchlistBriefingStage(BaseModel):
     started_at: str | None = None
     finished_at: str | None = None
     outcome: Literal["sending", "successful", "partial", "failed", "unknown"] | None = None
+    artifact_id: str | int | None = None
+    artifact_version: int | None = None
+    attempt_count: int | None = None
+    audio_request_id: str | None = None
+    scheduler_task_id: str | None = None
+    task_id: str | None = None
+    workflow_run_id: str | None = None
 
 
 class WatchlistBriefingProjection(BaseModel):

@@ -81,6 +81,133 @@ def test_sqlite_schema_contains_briefing_occurrence_contract_and_indexes(tmp_pat
         "idx_briefing_occurrences_run",
     }.issubset(indexes)
 
+    attempt_columns = {
+        row["name"] for row in db.backend.get_table_info("watchlist_briefing_attempts")
+    }
+    assert {
+        "id",
+        "user_id",
+        "occurrence_id",
+        "artifact_version",
+        "adapter",
+        "attempt",
+        "state",
+        "requested_stage",
+        "scheduler_task_id",
+        "request_id",
+        "workflow_run_id",
+        "artifact_id",
+        "code",
+        "created_at",
+        "updated_at",
+    } == attempt_columns
+
+
+def test_attempt_claim_and_transition_are_atomic_and_attempt_scoped(tmp_path):
+    db = _make_db(tmp_path)
+    job_id, run_id = _create_job_run(db, label="attempt")
+    occurrence = db.create_or_get_briefing_occurrence(
+        run_id=run_id,
+        occurrence_key=f"user:1:job:{job_id}:run:{run_id}:attempt",
+        contract_json='{"version":1}',
+    )
+
+    first = db.claim_briefing_attempt(
+        occurrence_id=int(occurrence.id),
+        artifact_version=1,
+        adapter="audio",
+        requested_stage="generate_audio",
+    )
+    duplicate = db.claim_briefing_attempt(
+        occurrence_id=int(occurrence.id),
+        artifact_version=1,
+        adapter="audio",
+        requested_stage="generate_audio",
+    )
+    queued = db.transition_briefing_attempt(
+        int(first.id),
+        expected_states={"intent"},
+        state="queued",
+        scheduler_task_id="task-1",
+        request_id="wla_attempt_1",
+    )
+    stale = db.transition_briefing_attempt(
+        int(first.id),
+        expected_states={"intent"},
+        state="queued",
+        scheduler_task_id="stale-task",
+    )
+    terminal = db.transition_briefing_attempt(
+        int(first.id),
+        expected_states={"queued"},
+        state="successful",
+        workflow_run_id="workflow-1",
+        artifact_id="audio-1",
+    )
+    db.update_briefing_occurrence(
+        int(occurrence.id),
+        stages={"generate_audio": {"status": "ready", "attempt_count": 1}},
+        artifact_status="ready",
+    )
+    stale_occurrence = db.update_briefing_occurrence_for_attempt(
+        int(occurrence.id),
+        int(first.id),
+        expected_attempt_states={"queued"},
+        stages={"generate_audio": {"status": "queued", "attempt_count": 1}},
+        artifact_status="running",
+        audio_task_id="stale-task",
+    )
+    retry = db.claim_briefing_attempt(
+        occurrence_id=int(occurrence.id),
+        artifact_version=1,
+        adapter="audio",
+        requested_stage="generate_audio",
+        allow_retry=True,
+    )
+
+    assert duplicate.id == first.id
+    assert queued is not None and queued.scheduler_task_id == "task-1"
+    assert stale is None
+    assert stale_occurrence is None
+    assert terminal is not None and terminal.state == "successful"
+    assert json.loads(db.get_briefing_occurrence(int(occurrence.id)).stages_json)["generate_audio"][
+        "status"
+    ] == "ready"
+    assert retry.attempt == 2
+
+
+def test_concurrent_attempt_claim_returns_one_intent(tmp_path):
+    db = _make_db(tmp_path)
+    job_id, run_id = _create_job_run(db, label="concurrent-attempt")
+    occurrence = db.create_or_get_briefing_occurrence(
+        run_id=run_id,
+        occurrence_key=f"user:1:job:{job_id}:run:{run_id}:attempt",
+        contract_json='{"version":1}',
+    )
+    barrier = Barrier(4)
+
+    def claim() -> int:
+        barrier.wait()
+        return int(
+            db.claim_briefing_attempt(
+                occurrence_id=int(occurrence.id),
+                artifact_version=1,
+                adapter="email",
+            ).id
+        )
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        ids = list(executor.map(lambda _index: claim(), range(4)))
+
+    assert len(set(ids)) == 1
+    assert (
+        db.backend.execute(
+            "SELECT COUNT(*) AS count FROM watchlist_briefing_attempts WHERE occurrence_id = ?",
+            (int(occurrence.id),),
+        ).scalar
+        == 1
+    )
+
 
 def test_create_or_get_occurrence_is_idempotent_and_preserves_initial_contract(tmp_path):
     db = _make_db(tmp_path)
@@ -432,3 +559,10 @@ def test_postgres_schema_includes_briefing_occurrence_contract():
     assert "UNIQUE (user_id, occurrence_key)" in occurrence_ddl
     assert "CREATE INDEX IF NOT EXISTS idx_briefing_occurrences_user_job" in backend.ddl
     assert "CREATE INDEX IF NOT EXISTS idx_briefing_occurrences_run" in backend.ddl
+    attempt_marker = "CREATE TABLE IF NOT EXISTS watchlist_briefing_attempts"
+    assert attempt_marker in backend.ddl
+    attempt_ddl = backend.ddl.partition(attempt_marker)[2].partition(";")[0]
+    assert "id BIGSERIAL PRIMARY KEY" in attempt_ddl
+    assert "occurrence_id BIGINT NOT NULL" in attempt_ddl
+    assert "UNIQUE (user_id, occurrence_id, artifact_version, adapter, attempt)" in attempt_ddl
+    assert "CREATE INDEX IF NOT EXISTS idx_briefing_attempts_latest" in backend.ddl

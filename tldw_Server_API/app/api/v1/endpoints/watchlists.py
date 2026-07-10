@@ -1081,6 +1081,124 @@ def _find_invalid_email_recipients(recipients: list[str]) -> list[str]:
     return invalid
 
 
+def _raw_delivery_configs(output_prefs: dict[str, Any] | None) -> list[dict[str, Any]]:
+    if not isinstance(output_prefs, dict):
+        return []
+    candidates: list[Any] = [output_prefs.get("deliveries")]
+    pipeline = output_prefs.get(BRIEFING_PIPELINE_KEY)
+    if isinstance(pipeline, dict):
+        candidates.append(pipeline.get("delivery"))
+    return [dict(candidate) for candidate in candidates if isinstance(candidate, dict)]
+
+
+def _validate_raw_delivery_config(output_prefs: dict[str, Any] | None) -> None:
+    """Reject malformed adapter intent before canonical normalization can erase it."""
+    from tldw_Server_API.app.core.Notifications.service import (
+        MAX_EMAIL_RECIPIENTS,
+        normalize_email_recipients,
+    )
+
+    for delivery in _raw_delivery_configs(output_prefs):
+        email = delivery.get("email")
+        if email is not None and not isinstance(email, dict):
+            _raise_watchlists_validation_error(
+                rule="invalid_email_delivery",
+                message_key="watchlists:jobs.form.emailRecipientsInvalidSubmit",
+                message="Email delivery configuration must be an object.",
+                remediation_key="watchlists:jobs.form.emailRecipientsRemediation",
+                remediation="Provide a valid email delivery configuration.",
+            )
+        if isinstance(email, dict):
+            raw_recipients = email.get("recipients", [])
+            if not isinstance(raw_recipients, list):
+                _raise_watchlists_validation_error(
+                    rule="invalid_email_recipients",
+                    message_key="watchlists:jobs.form.emailRecipientsInvalidSubmit",
+                    message="Email recipients must be a list.",
+                    remediation_key="watchlists:jobs.form.emailRecipientsRemediation",
+                    remediation="Provide a list of valid recipient addresses.",
+                )
+            if len(raw_recipients) > MAX_EMAIL_RECIPIENTS:
+                _raise_watchlists_validation_error(
+                    rule="too_many_email_recipients",
+                    message_key="watchlists:jobs.form.emailRecipientsInvalidSubmit",
+                    message="Too many email recipients.",
+                    remediation_key="watchlists:jobs.form.emailRecipientsRemediation",
+                    remediation=f"Use at most {MAX_EMAIL_RECIPIENTS} recipient addresses.",
+                    meta={"count": len(raw_recipients), "maximum": MAX_EMAIL_RECIPIENTS},
+                )
+            normalized, invalid_count = normalize_email_recipients(raw_recipients)
+            if invalid_count:
+                invalid_values = [
+                    value
+                    for value in raw_recipients
+                    if isinstance(value, str) and value.strip() and value.strip() not in normalized
+                ]
+                _raise_watchlists_validation_error(
+                    rule="invalid_email_recipients",
+                    message_key="watchlists:jobs.form.emailRecipientsInvalidSubmit",
+                    message="Fix invalid email recipients before saving.",
+                    remediation_key="watchlists:jobs.form.emailRecipientsRemediation",
+                    remediation="Remove or correct invalid recipient addresses.",
+                    meta={"count": invalid_count, "invalid_recipients": invalid_values[:10]},
+                )
+            if bool(email.get("enabled")) and not normalized:
+                _raise_watchlists_validation_error(
+                    rule="email_recipients_required",
+                    message_key="watchlists:jobs.form.emailRecipientsInvalidSubmit",
+                    message="Enabled email delivery requires at least one recipient.",
+                    remediation_key="watchlists:jobs.form.emailRecipientsRemediation",
+                    remediation="Add a valid recipient or disable email delivery.",
+                )
+
+        chatbook = delivery.get("chatbook")
+        if chatbook is not None and not isinstance(chatbook, dict):
+            _raise_watchlists_validation_error(
+                rule="invalid_chatbook_delivery",
+                message_key="watchlists:jobs.form.deliveryInvalid",
+                message="Chatbook delivery configuration must be an object.",
+                remediation_key="watchlists:jobs.form.deliveryRemediation",
+                remediation="Provide a valid Chatbook delivery configuration.",
+            )
+        if isinstance(chatbook, dict):
+            metadata = chatbook.get("metadata")
+            conversation_id = chatbook.get("conversation_id")
+            scalar_limits = {
+                "title": 255,
+                "description": 4000,
+                "provider": 128,
+                "model": 128,
+            }
+            scalar_fields_valid = all(
+                value is None
+                or (
+                    isinstance(value, str)
+                    and bool(value.strip())
+                    and len(value) <= scalar_limits[field]
+                )
+                for field, value in ((field, chatbook.get(field)) for field in scalar_limits)
+            )
+            if (
+                (metadata is not None and not isinstance(metadata, dict))
+                or (
+                    conversation_id is not None
+                    and (
+                        isinstance(conversation_id, bool)
+                        or not isinstance(conversation_id, int)
+                        or conversation_id < 1
+                    )
+                )
+                or not scalar_fields_valid
+            ):
+                _raise_watchlists_validation_error(
+                    rule="invalid_chatbook_delivery",
+                    message_key="watchlists:jobs.form.deliveryInvalid",
+                    message="Chatbook delivery configuration is invalid.",
+                    remediation_key="watchlists:jobs.form.deliveryRemediation",
+                    remediation="Correct the Chatbook title, metadata, or conversation association.",
+                )
+
+
 def _detect_schedule_interval_minutes(schedule_expr: str | None, timezone: str | None) -> float | None:
     expr = str(schedule_expr or "").strip()
     if not expr:
@@ -3377,6 +3495,7 @@ async def create_job(
 ):
     ingest_prefs = payload.ingest_prefs.model_dump(exclude_none=True) if payload.ingest_prefs else None
     output_prefs = _merge_output_prefs(payload.output_prefs or {}, ingest_prefs)
+    _validate_raw_delivery_config(output_prefs)
     output_prefs = normalize_briefing_output_prefs(
         output_prefs,
         scheduled=bool(payload.schedule_expr),
@@ -3842,9 +3961,11 @@ async def update_job(
         if output_prefs is None:
             output_prefs = current_output_prefs
         output_prefs = _merge_output_prefs(output_prefs, ingest_prefs)
+        _validate_raw_delivery_config(output_prefs)
         output_prefs = normalize_briefing_output_prefs(output_prefs, scheduled=scheduled).output_prefs
         patch["output_prefs_json"] = json.dumps(output_prefs)
     elif output_prefs is not None:
+        _validate_raw_delivery_config(output_prefs)
         output_prefs = normalize_briefing_output_prefs(output_prefs or {}, scheduled=scheduled).output_prefs
         patch["output_prefs_json"] = json.dumps(output_prefs)
     current_scope = {}
@@ -5297,7 +5418,7 @@ async def retry_watchlist_briefing_stage(
         outcome = current_stage.get("outcome")
         if outcome == "successful":
             raise HTTPException(status_code=409, detail="stage_already_ready")
-        if outcome == "unknown" and not payload.confirm_unknown_delivery_retry:
+        if outcome in {"unknown", "sending"} and not payload.confirm_unknown_delivery_retry:
             raise HTTPException(
                 status_code=409,
                 detail={

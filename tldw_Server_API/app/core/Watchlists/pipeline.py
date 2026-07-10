@@ -1702,6 +1702,7 @@ async def run_watchlist_job(
                     run=db.get_run(run.id),
                     watchlists_db=db,
                     collections_db=collections_db,
+                    tenant_id=effective_tenant_id,
                 )
                 stats.update(_fulfillment_stats_projection(fulfillment))
             except Exception as exc:  # noqa: BLE001 - fulfillment is downstream of durable collection success

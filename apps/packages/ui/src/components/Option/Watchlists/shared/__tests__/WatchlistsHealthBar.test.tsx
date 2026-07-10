@@ -77,6 +77,7 @@ const buildOverviewData = (
   overrides: Partial<WatchlistsOverviewData> = {}
 ): WatchlistsOverviewData => ({
   fetchedAt: "2026-05-19T12:00:00Z",
+  latestBriefing: null,
   sources: {
     total: 0,
     healthy: 0,

@@ -141,8 +141,12 @@ def _read_stages(
     if not isinstance(stored, dict):
         return defaults
     for name, value in stored.items():
-        if name in defaults and isinstance(value, dict):
+        if not isinstance(value, dict):
+            continue
+        if name in defaults:
             defaults[name] = {**defaults[name], **value}
+        elif str(name).startswith("deliver:"):
+            defaults[str(name)] = copy.deepcopy(value)
     return defaults
 
 
@@ -714,8 +718,40 @@ async def _submit_audio(
     watchlists_db: Any,
     scheduler: Any | None,
     output_version: int,
+    tenant_id: str | None = None,
+    requested_stage: str = "compose_audio_script",
+    allow_retry: bool = False,
 ) -> FulfillmentResult:
-    _transition(stages, "compose_audio_script", "running")
+    previous_attempt = None
+    get_latest_attempt = getattr(watchlists_db, "get_latest_briefing_attempt", None)
+    if callable(get_latest_attempt):
+        previous_attempt = get_latest_attempt(
+            occurrence_id=int(occurrence.id),
+            artifact_version=output_version,
+            adapter="audio",
+        )
+    claim_attempt = getattr(watchlists_db, "claim_briefing_attempt", None)
+    attempt = (
+        claim_attempt(
+            occurrence_id=int(occurrence.id),
+            artifact_version=output_version,
+            adapter="audio",
+            requested_stage=requested_stage,
+            allow_retry=allow_retry,
+        )
+        if callable(claim_attempt)
+        else None
+    )
+    if attempt is not None and str(attempt.state) != "intent":
+        refreshed = watchlists_db.get_briefing_occurrence(int(occurrence.id))
+        refreshed_stages = _read_stages(
+            refreshed,
+            run=run,
+            audio_enabled=True,
+            delivery_configured=_delivery_configured(contract),
+        )
+        return _result(refreshed, refreshed_stages)
+    _transition(stages, requested_stage, "running", attempt_count=getattr(attempt, "attempt", 1))
     occurrence = _save_occurrence(
         watchlists_db,
         int(occurrence.id),
@@ -763,9 +799,33 @@ async def _submit_audio(
             output_id=int(occurrence.output_id),
             editorial=copy.deepcopy(dict(contract["editorial"])),
             status_audio=no_material,
+            tenant_id=tenant_id,
+            attempt_id=int(attempt.id) if attempt is not None else None,
+            attempt_number=int(attempt.attempt) if attempt is not None else 1,
+            requested_stage=requested_stage,
+            resume_workflow_run_id=(
+                str(previous_attempt.workflow_run_id)
+                if allow_retry
+                and requested_stage != "compose_audio_script"
+                and previous_attempt is not None
+                and previous_attempt.workflow_run_id
+                else None
+            ),
+            resume_step_id={
+                "persist_audio_script": "clean_script",
+                "generate_audio": "generate_audio",
+                "persist_audio": "generate_audio",
+            }.get(requested_stage),
         )
     except asyncio.CancelledError:
-        _transition(stages, "compose_audio_script", "cancelled", code="audio_submit_cancelled", retryable=True)
+        if attempt is not None:
+            watchlists_db.transition_briefing_attempt(
+                int(attempt.id),
+                expected_states={"intent", "queued"},
+                state="cancelled",
+                code="audio_submit_cancelled",
+            )
+        _transition(stages, requested_stage, "cancelled", code="audio_submit_cancelled", retryable=True)
         occurrence = _save_occurrence(
             watchlists_db,
             int(occurrence.id),
@@ -774,7 +834,14 @@ async def _submit_audio(
         )
         raise
     except Exception:  # noqa: BLE001 - orchestration boundary persists provider failures
-        _transition(stages, "compose_audio_script", "failed", code="audio_submit_failed", retryable=True)
+        if attempt is not None:
+            watchlists_db.transition_briefing_attempt(
+                int(attempt.id),
+                expected_states={"intent", "queued"},
+                state="failed",
+                code="audio_submit_failed",
+            )
+        _transition(stages, requested_stage, "failed", code="audio_submit_failed", retryable=True)
         occurrence = _save_occurrence(
             watchlists_db,
             int(occurrence.id),
@@ -785,9 +852,16 @@ async def _submit_audio(
 
     if not audio_result.submitted:
         code = str(audio_result.reason or audio_result.status)
+        if attempt is not None:
+            watchlists_db.transition_briefing_attempt(
+                int(attempt.id),
+                expected_states={"intent", "queued"},
+                state="failed",
+                code=code,
+            )
         _transition(
             stages,
-            "compose_audio_script",
+            requested_stage,
             "failed",
             code=code,
             retryable=audio_result.status in {"queue_unavailable", "enqueue_failed"},
@@ -802,6 +876,34 @@ async def _submit_audio(
         )
         return _result(occurrence, stages)
 
+    if attempt is not None:
+        bind_attempt = getattr(watchlists_db, "bind_briefing_attempt_scheduler_task", None)
+        if callable(bind_attempt):
+            attempt = bind_attempt(
+                int(attempt.id),
+                scheduler_task_id=str(audio_result.task_id),
+                request_id=request_id,
+            )
+        queued_attempt = watchlists_db.transition_briefing_attempt(
+            int(attempt.id),
+            expected_states={"intent"},
+            state="queued",
+            scheduler_task_id=str(audio_result.task_id),
+            request_id=request_id,
+        )
+        if queued_attempt is None:
+            refreshed = watchlists_db.update_briefing_occurrence(
+                int(occurrence.id),
+                audio_task_id=audio_result.task_id,
+            )
+            refreshed_stages = _read_stages(
+                refreshed,
+                run=run,
+                audio_enabled=True,
+                delivery_configured=_delivery_configured(contract),
+            )
+            return _result(refreshed, refreshed_stages)
+
     try:
         await _update_output_audio_metadata(
             collections_db,
@@ -812,36 +914,64 @@ async def _submit_audio(
     except Exception:  # noqa: BLE001 - orchestration boundary persists metadata failures
         _transition(
             stages,
-            "compose_audio_script",
+            requested_stage,
             "failed",
             code="audio_metadata_persist_failed",
             retryable=True,
             audio_request_id=request_id,
             task_id=audio_result.task_id,
         )
-        occurrence = _save_occurrence(
-            watchlists_db,
-            int(occurrence.id),
-            stages,
-            artifact_status="failed",
-            audio_task_id=audio_result.task_id,
-        )
+        guarded_update = getattr(watchlists_db, "update_briefing_occurrence_for_attempt", None)
+        if attempt is not None and callable(guarded_update):
+            occurrence = guarded_update(
+                int(occurrence.id),
+                int(attempt.id),
+                expected_attempt_states={"queued"},
+                stages=stages,
+                artifact_status="failed",
+                audio_task_id=audio_result.task_id,
+            ) or watchlists_db.get_briefing_occurrence(int(occurrence.id))
+        else:
+            occurrence = _save_occurrence(
+                watchlists_db,
+                int(occurrence.id),
+                stages,
+                artifact_status="failed",
+                audio_task_id=audio_result.task_id,
+            )
         return _result(occurrence, stages)
 
     _transition(
         stages,
-        "compose_audio_script",
+        requested_stage,
         "queued",
         audio_request_id=request_id,
         task_id=audio_result.task_id,
     )
-    occurrence = _save_occurrence(
-        watchlists_db,
-        int(occurrence.id),
-        stages,
-        artifact_status="running",
-        audio_task_id=audio_result.task_id,
-    )
+    guarded_update = getattr(watchlists_db, "update_briefing_occurrence_for_attempt", None)
+    if attempt is not None and callable(guarded_update):
+        occurrence = guarded_update(
+            int(occurrence.id),
+            int(attempt.id),
+            expected_attempt_states={"queued"},
+            stages=stages,
+            artifact_status="running",
+            audio_task_id=audio_result.task_id,
+        ) or watchlists_db.get_briefing_occurrence(int(occurrence.id))
+        stages = _read_stages(
+            occurrence,
+            run=run,
+            audio_enabled=True,
+            delivery_configured=_delivery_configured(contract),
+        )
+    else:
+        occurrence = _save_occurrence(
+            watchlists_db,
+            int(occurrence.id),
+            stages,
+            artifact_status="running",
+            audio_task_id=audio_result.task_id,
+        )
     return _result(occurrence, stages)
 
 
@@ -1048,6 +1178,7 @@ async def fulfill_watchlist_briefing(
     watchlists_db: Any,
     collections_db: Any,
     scheduler: Any | None = None,
+    tenant_id: str | None = None,
 ) -> FulfillmentResult:
     """Fulfill one logical Watchlists occurrence without duplicate artifacts."""
     output_prefs = _job_output_prefs(job)
@@ -1179,6 +1310,7 @@ async def fulfill_watchlist_briefing(
         watchlists_db=watchlists_db,
         scheduler=scheduler,
         output_version=output_version,
+        tenant_id=tenant_id,
     )
     return await _schedule_delivery_after_artifacts(
         result,
@@ -1197,6 +1329,7 @@ async def retry_briefing_stage(
     collections_db: Any,
     scheduler: Any | None = None,
     regenerate: bool = False,
+    tenant_id: str | None = None,
 ) -> FulfillmentResult:
     """Retry one failed/missing artifact stage while reusing durable outputs."""
     if stage not in {
@@ -1260,6 +1393,9 @@ async def retry_briefing_stage(
                 watchlists_db=watchlists_db,
                 scheduler=scheduler,
                 output_version=output_version,
+                tenant_id=tenant_id,
+                requested_stage="compose_audio_script",
+                allow_retry=True,
             )
         return await _schedule_delivery_after_artifacts(
             result,
@@ -1292,6 +1428,9 @@ async def retry_briefing_stage(
         watchlists_db=watchlists_db,
         scheduler=scheduler,
         output_version=output_version,
+        tenant_id=tenant_id,
+        requested_stage=stage,
+        allow_retry=True,
     )
     return await _schedule_delivery_after_artifacts(
         result,

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -174,7 +176,7 @@ async def test_workflow_run_handler_persists_payload_metadata_without_mutating_d
         "steps": [],
     }
     metadata = {
-        "source": "watchlist_audio_briefing",
+        "source": "scheduled_test_workflow",
         "watchlist_job_id": 3,
         "watchlist_run_id": 7,
         "audio_request_id": "wla_test_1",
@@ -220,3 +222,51 @@ async def test_workflow_run_handler_rejects_non_dict_metadata(monkeypatch):
                 "mode": "async",
             }
         )
+
+
+@pytest.mark.asyncio
+async def test_watchlist_workflow_failure_is_recorded_and_fails_scheduler_task(monkeypatch):
+    recorded: list[dict[str, Any]] = []
+
+    class FakeWorkflowsDB:
+        def create_run(self, **_kwargs: Any) -> None:
+            return None
+
+        def get_run(self, run_id: str) -> Any:
+            return SimpleNamespace(run_id=run_id, status="failed")
+
+    class FakeWorkflowEngine:
+        def __init__(self, *, db: Any) -> None:
+            self.db = db
+
+        def submit(self, _run_id: str, mode: Any) -> None:
+            assert mode == workflow_handler_mod.RunMode.SYNC
+
+    def record_terminal(**kwargs: Any) -> None:
+        recorded.append(kwargs)
+
+    monkeypatch.setattr(workflow_handler_mod, "_get_wf_db", lambda: FakeWorkflowsDB())
+    monkeypatch.setattr(workflow_handler_mod, "WorkflowEngine", FakeWorkflowEngine)
+    monkeypatch.setattr(workflow_handler_mod, "record_workflow_run", AsyncMock())
+    monkeypatch.setattr(workflow_handler_mod, "record_audio_workflow_terminal", record_terminal)
+
+    with pytest.raises(RuntimeError, match="workflow_run_failed"):
+        await workflow_handler_mod.workflow_run(
+            {
+                "user_id": "42",
+                "definition_snapshot": {"name": "audio_briefing", "steps": []},
+                "inputs": {"items": []},
+                "metadata": {
+                    "source": "watchlist_audio_briefing",
+                    "watchlist_job_id": 3,
+                    "watchlist_run_id": 7,
+                    "briefing_occurrence_id": 9,
+                    "briefing_attempt_id": 11,
+                    "audio_request_id": "wla_test_1",
+                },
+                "mode": "async",
+            }
+        )
+
+    assert recorded[0]["status"] == "failed"
+    assert recorded[0]["workflow_db"].get_run(recorded[0]["workflow_run_id"]).status == "failed"

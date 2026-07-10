@@ -27,6 +27,31 @@ from tldw_Server_API.app.core.Watchlists.pipeline import _fulfillment_stats_proj
 pytestmark = pytest.mark.unit
 
 
+def test_read_stages_preserves_terminal_delivery_adapter_history():
+    from tldw_Server_API.app.core.Watchlists.briefing_fulfillment import _read_stages
+
+    occurrence = SimpleNamespace(
+        stages_json=json.dumps(
+            {
+                "persist_text": {"status": "failed"},
+                "deliver:email": {"status": "ready", "outcome": "successful", "attempt_count": 1},
+                "deliver:chatbook": {"status": "failed", "outcome": "unknown", "attempt_count": 2},
+            }
+        )
+    )
+    run = SimpleNamespace(started_at=None, finished_at=None)
+
+    stages = _read_stages(
+        occurrence,
+        run=run,
+        audio_enabled=False,
+        delivery_configured=True,
+    )
+
+    assert stages["deliver:email"]["outcome"] == "successful"
+    assert stages["deliver:chatbook"]["outcome"] == "unknown"
+
+
 def _contract(*, audio: bool = False, limit: int = 100) -> dict[str, Any]:
     return {
         "version": 1,
@@ -654,8 +679,10 @@ async def test_downstream_audio_stage_retry_resumes_same_audio_attempt(
     watchlists_db = FakeWatchlistsDB(job=job, run=run, items=make_items(1))
     collections_db = FakeCollectionsDB()
     request_ids: list[str] = []
+    trigger_calls: list[dict[str, Any]] = []
 
     async def trigger(**kwargs: Any) -> AudioBriefingTriggerResult:
+        trigger_calls.append(kwargs)
         request_ids.append(kwargs["audio_request_id"])
         return AudioBriefingTriggerResult(
             status="submitted",
@@ -695,6 +722,7 @@ async def test_downstream_audio_stage_retry_resumes_same_audio_attempt(
 
     assert retried.audio_task_id == "audio-task-2"
     assert request_ids == [request_ids[0], request_ids[0]]
+    assert trigger_calls[1]["requested_stage"] == "generate_audio"
     assert collections_db.create_calls == 1
 
 

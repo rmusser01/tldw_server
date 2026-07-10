@@ -132,7 +132,15 @@ def watchlist_artifact_metadata(context: dict[str, Any]) -> dict[str, Any]:
         return {}
     return {
         key: metadata[key]
-        for key in ("source", "watchlist_job_id", "watchlist_run_id", "audio_request_id")
+        for key in (
+            "source",
+            "watchlist_job_id",
+            "watchlist_run_id",
+            "briefing_occurrence_id",
+            "briefing_attempt_id",
+            "watchlist_output_id",
+            "audio_request_id",
+        )
         if metadata.get(key) is not None
     }
 
