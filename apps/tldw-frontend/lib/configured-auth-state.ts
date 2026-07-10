@@ -12,6 +12,7 @@ type TldwClientLike = {
 
 type TldwAuthLike = {
   getCurrentUser: () => Promise<unknown>
+  logout?: () => Promise<void>
 }
 
 export const loadTldwClient = async (): Promise<TldwClientLike> => {
