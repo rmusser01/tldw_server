@@ -19,6 +19,7 @@ from tldw_Server_API.app.api.v1.schemas.quizzes import (
     QuizCreate,
     QuizGenerateRequest,
     QuizGenerateResponse,
+    QuizGenerationProfileDefinition,
     QuizImportError,
     QuizImportItemResult,
     QuizImportRequest,
@@ -57,6 +58,7 @@ from tldw_Server_API.app.core.StudySuggestions.jobs import (
 from tldw_Server_API.app.services.quiz_generator import (
     QuizProvenanceValidationError,
     generate_quiz_from_sources,
+    get_quiz_generation_profiles,
 )
 
 router = APIRouter(prefix="/quizzes", tags=["quizzes"])
@@ -78,6 +80,12 @@ def _format_import_error(exc: Exception, *, default_detail: str) -> str:
     if detail == default_detail:
         return default_detail
     return f"{default_detail}: {detail}"
+
+
+@router.get("/generation-profiles", response_model=list[QuizGenerationProfileDefinition])
+def list_quiz_generation_profiles():
+    """List quiz generation profiles exposed by the generator."""
+    return get_quiz_generation_profiles()
 
 
 def _build_assistant_context_snapshot(context: dict[str, Any]) -> dict[str, Any]:
@@ -685,6 +693,7 @@ async def generate_quiz(
             num_questions=request.num_questions,
             question_types=request.question_types,
             question_plan=request.question_plan,
+            generation_profile=request.generation_profile,
             difficulty=request.difficulty,
             focus_topics=request.focus_topics,
             model=request.model,

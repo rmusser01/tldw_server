@@ -28,7 +28,81 @@ SUPPORTED_GENERATED_QUESTION_TYPES = [
     "true_false",
     "fill_blank",
 ]
+DEFAULT_GENERATION_PROFILE = "standard_recall"
 MAX_CONTENT_CHARS = 15000
+
+_QUIZ_GENERATION_PROFILES: list[dict[str, Any]] = [
+    {
+        "id": "standard_recall",
+        "label": "Standard Recall",
+        "description": "Balanced source-grounded recall and application questions.",
+        "status": "available",
+        "default_num_questions": 10,
+        "default_difficulty": "mixed",
+        "default_question_types": DEFAULT_QUESTION_TYPES,
+        "allowed_question_types": SUPPORTED_GENERATED_QUESTION_TYPES,
+        "prompt_instruction": "Use concise recall and application questions across the selected question types.",
+    },
+    {
+        "id": "mixed_assessment",
+        "label": "Mixed Assessment",
+        "description": "A broader mix of recall, interpretation, and applied understanding.",
+        "status": "available",
+        "default_num_questions": 10,
+        "default_difficulty": "mixed",
+        "default_question_types": DEFAULT_QUESTION_TYPES,
+        "allowed_question_types": SUPPORTED_GENERATED_QUESTION_TYPES,
+        "prompt_instruction": "Mix recall, interpretation, and applied understanding while preserving citations.",
+    },
+    {
+        "id": "best_of_five",
+        "label": "Best of Five",
+        "description": "Single-best-answer questions with five plausible options.",
+        "status": "available",
+        "default_num_questions": 5,
+        "default_difficulty": "mixed",
+        "default_question_types": ["multiple_choice"],
+        "allowed_question_types": ["multiple_choice"],
+        "prompt_instruction": (
+            "Best of Five: every question must be multiple_choice with exactly five answer options, "
+            "one best answer, and plausible distractors."
+        ),
+    },
+    {
+        "id": "emq",
+        "label": "EMQ",
+        "description": "Extended matching questions with shared option banks.",
+        "status": "planned",
+        "default_num_questions": 5,
+        "default_difficulty": "mixed",
+        "default_question_types": ["matching"],
+        "allowed_question_types": ["matching"],
+        "prompt_instruction": "",
+    },
+    {
+        "id": "assertion_reasoning",
+        "label": "Assertion / Reasoning",
+        "description": "Assertion and reason pairs with concise evidence-backed rationales.",
+        "status": "planned",
+        "default_num_questions": 5,
+        "default_difficulty": "mixed",
+        "default_question_types": ["multiple_choice"],
+        "allowed_question_types": ["multiple_choice"],
+        "prompt_instruction": "",
+    },
+    {
+        "id": "osce_scenario",
+        "label": "OSCE Scenario",
+        "description": "Scenario practice with checklist and rubric feedback.",
+        "status": "planned",
+        "default_num_questions": 3,
+        "default_difficulty": "mixed",
+        "default_question_types": ["fill_blank"],
+        "allowed_question_types": ["fill_blank"],
+        "prompt_instruction": "",
+    },
+]
+_PROFILE_BY_ID = {profile["id"]: profile for profile in _QUIZ_GENERATION_PROFILES}
 
 
 class QuizProvenanceValidationError(ValueError):
@@ -53,8 +127,8 @@ Return a JSON object in this exact format:
     {{
       "question_type": "multiple_choice" | "true_false" | "fill_blank",
       "question_text": "The question text",
-      "options": ["A", "B", "C", "D"],
-      "correct_answer": 0 | 1 | 2 | 3 | "true" | "false" | "the answer",
+      "options": ["A", "B", "C", "D", "E if required by the profile"],
+      "correct_answer": 0 | 1 | 2 | 3 | 4 | "true" | "false" | "the answer",
       "explanation": "Brief explanation of why this is correct",
       "hint": "Optional short hint shown on request",
       "hint_penalty_points": 0,
@@ -74,7 +148,8 @@ Return a JSON object in this exact format:
 }}
 
 Important:
-- For multiple_choice: options must be array of 4 strings, correct_answer is 0-based index (0-3)
+- For multiple_choice: options must be an array of answer strings, correct_answer is the 0-based index
+- For Best of Five: multiple_choice options must be exactly 5 strings
 - For true_false: correct_answer must be exactly "true" or "false"
 - For fill_blank: question_text should contain ___ where answer goes, correct_answer is the word/phrase
 - hint_penalty_points must be a non-negative integer
@@ -117,19 +192,67 @@ def _normalize_question_type(value: Any) -> str | None:
     return aliases.get(text, text)
 
 
-def _coerce_question_types(question_types: Sequence[Any] | None) -> list[str]:
+def _normalize_generation_profile(value: Any) -> str:
+    raw = getattr(value, "value", value)
+    text = str(raw or DEFAULT_GENERATION_PROFILE).strip().lower().replace("-", "_")
+    aliases = {
+        "standard": "standard_recall",
+        "recall": "standard_recall",
+        "mixed": "mixed_assessment",
+        "bof": "best_of_five",
+        "best of five": "best_of_five",
+        "best-of-five": "best_of_five",
+        "assertion reasoning": "assertion_reasoning",
+        "assertion/reasoning": "assertion_reasoning",
+        "osce": "osce_scenario",
+    }
+    profile_id = aliases.get(text, text)
+    profile = _PROFILE_BY_ID.get(profile_id)
+    if profile is None:
+        raise ValueError(f"Unknown quiz generation profile: {raw}")
+    if profile["status"] != "available":
+        raise ValueError(f"Quiz generation profile '{profile_id}' is not available yet")
+    return profile_id
+
+
+def get_quiz_generation_profiles() -> list[dict[str, Any]]:
+    return [
+        {key: value for key, value in profile.items() if key not in {"allowed_question_types", "prompt_instruction"}}
+        for profile in _QUIZ_GENERATION_PROFILES
+    ]
+
+
+def _build_generation_profile_instruction(generation_profile: Any) -> str:
+    profile_id = _normalize_generation_profile(generation_profile)
+    profile = _PROFILE_BY_ID[profile_id]
+    return f"- Generation profile: {profile['label']}. {profile['prompt_instruction']}"
+
+
+def _coerce_question_types(
+    question_types: Sequence[Any] | None,
+    *,
+    generation_profile: Any = DEFAULT_GENERATION_PROFILE,
+) -> list[str]:
+    profile = _PROFILE_BY_ID[_normalize_generation_profile(generation_profile)]
+    defaults = list(profile["default_question_types"])
+    allowed_types = set(profile["allowed_question_types"])
     if not question_types:
-        return list(DEFAULT_QUESTION_TYPES)
+        return defaults
     normalized: list[str] = []
     for item in question_types:
         raw = getattr(item, "value", item)
         q_type = _normalize_question_type(raw)
-        if q_type in DEFAULT_QUESTION_TYPES and q_type not in normalized:
+        if q_type in SUPPORTED_GENERATED_QUESTION_TYPES and q_type in allowed_types and q_type not in normalized:
             normalized.append(q_type)
-    return normalized or list(DEFAULT_QUESTION_TYPES)
+    return normalized or defaults
 
 
-def _coerce_options(raw: Any, expected_count: int | None = None) -> list[str]:
+def _coerce_options(
+    raw: Any,
+    expected_count: int | None = None,
+    *,
+    max_options: int | None = 4,
+) -> list[str]:
     if isinstance(raw, list):
         options = [str(opt).strip() for opt in raw if str(opt).strip()]
     elif isinstance(raw, str):
@@ -147,8 +270,8 @@ def _coerce_options(raw: Any, expected_count: int | None = None) -> list[str]:
         if len(options) != expected_count:
             raise ValueError(f"Expected {expected_count} options, got {len(options)}")
         return options
-    if len(options) > 4:
-        options = options[:4]
+    if max_options is not None and len(options) > max_options:
+        options = options[:max_options]
     return options
 
 
@@ -166,7 +289,7 @@ def _normalize_mc_answer(raw: Any, options: list[str]) -> int:
         if 0 <= idx < len(options):
             return idx
         return 0
-    if len(text) == 1 and text.isalpha():
+    if options and len(text) == 1 and "A" <= text.upper() <= chr(ord("A") + len(options) - 1):
         idx = ord(text.upper()) - ord("A")
         if 0 <= idx < len(options):
             return idx
@@ -212,8 +335,11 @@ def _coerce_generation_plan(
     num_questions: int,
     question_types: Sequence[Any] | None = None,
     question_plan: Sequence[Any] | None = None,
+    generation_profile: Any = DEFAULT_GENERATION_PROFILE,
 ) -> list[dict[str, Any]]:
     """Normalize legacy question types or a structured question plan."""
+    profile_id = _normalize_generation_profile(generation_profile)
+    allowed_types = set(_PROFILE_BY_ID[profile_id]["allowed_question_types"])
     if question_plan:
         plan: list[dict[str, Any]] = []
         seen_types: set[str] = set()
@@ -221,6 +347,10 @@ def _coerce_generation_plan(
             q_type = _normalize_question_type(_plan_value(item, "question_type"))
             if q_type not in SUPPORTED_GENERATED_QUESTION_TYPES:
                 raise ValueError(f"Unsupported generated question type: {q_type}")
+            if q_type not in allowed_types:
+                raise ValueError(
+                    f"Question type '{q_type}' is not allowed for generation profile '{profile_id}'"
+                )
             if q_type in seen_types:
                 raise ValueError("question_plan cannot contain duplicate question_type rows")
             seen_types.add(q_type)
@@ -231,7 +361,7 @@ def _coerce_generation_plan(
             if q_type in {"multiple_choice", "multi_select"}:
                 if _plan_has_value(item, "pair_count"):
                     raise ValueError("pair_count is only valid for matching questions")
-                option_count = _plan_int(item, "option_count", 4)
+                option_count = 5 if profile_id == "best_of_five" else _plan_int(item, "option_count", 4)
                 if not 2 <= option_count <= 6:
                     raise ValueError("option_count must be between 2 and 6")
                 row["option_count"] = option_count
@@ -249,7 +379,7 @@ def _coerce_generation_plan(
             raise ValueError("question_plan counts must sum to num_questions")
         return plan
 
-    types = _coerce_question_types(question_types)
+    types = _coerce_question_types(question_types, generation_profile=profile_id)
     base, extra = divmod(max(0, int(num_questions)), len(types))
     return [
         {"question_type": q_type, "count": base + (1 if index < extra else 0)}
@@ -581,7 +711,10 @@ def _normalize_questions(
     raw_questions: Sequence[Any],
     default_source_type: str,
     default_source_id: str,
+    generation_profile: Any = DEFAULT_GENERATION_PROFILE,
 ) -> list[dict[str, Any]]:
+    profile_id = _normalize_generation_profile(generation_profile)
+    mc_option_count = 5 if profile_id == "best_of_five" else 4
     normalized: list[dict[str, Any]] = []
     for raw in raw_questions:
         if not isinstance(raw, dict):
@@ -612,7 +745,9 @@ def _normalize_questions(
         options: list[str] | None = None
         correct_answer: int | str
         if q_type == "multiple_choice":
-            options = _coerce_options(raw.get("options"))
+            options = _coerce_options(raw.get("options"), max_options=mc_option_count)
+            if profile_id == "best_of_five" and len(options) != 5:
+                continue
             correct_answer = _normalize_mc_answer(raw.get("correct_answer"), options)
         elif q_type == "true_false":
             correct_answer = _normalize_tf_answer(raw.get("correct_answer"))
@@ -779,13 +914,16 @@ def _build_test_mode_questions(
     num_questions: int,
     question_types: Sequence[Any] | None,
     question_plan: Sequence[Any] | None = None,
+    generation_profile: Any = DEFAULT_GENERATION_PROFILE,
 ) -> list[dict[str, Any]]:
     """Build deterministic quiz questions that preserve evidence provenance in test mode."""
+    profile_id = _normalize_generation_profile(generation_profile)
     if question_plan:
         plan = _coerce_generation_plan(
             num_questions=num_questions,
             question_types=question_types,
             question_plan=question_plan,
+            generation_profile=profile_id,
         )
         planned_types = [
             (item["question_type"], copy_index, item)
@@ -794,7 +932,10 @@ def _build_test_mode_questions(
         ]
         total_questions = len(planned_types)
     else:
-        normalized_types = _coerce_question_types(question_types)
+        normalized_types = _coerce_question_types(
+            question_types,
+            generation_profile=profile_id,
+        )
         total_questions = max(1, num_questions)
         planned_types = [
             (normalized_types[index % len(normalized_types)], index, {})
@@ -822,22 +963,34 @@ def _build_test_mode_questions(
         question_type, copy_index, plan_item = planned_types[index]
 
         if question_type == "multiple_choice":
-            option_count = int(plan_item.get("option_count", 4) or 4)
+            option_count = (
+                5
+                if profile_id == "best_of_five"
+                else int(plan_item.get("option_count", 4) or 4)
+            )
+            options = [
+                excerpt,
+                "A conflicting claim with no evidence.",
+                "An empty workspace selection.",
+                "A discarded draft artifact.",
+            ]
+            if option_count >= 5:
+                options.append("A plausible but unsupported alternate answer.")
+            if option_count > len(options):
+                options.extend(
+                    f"Unused distractor {option_idx}"
+                    for option_idx in range(len(options) + 1, option_count + 1)
+                )
             questions.append(
                 {
                     "question_type": "multiple_choice",
                     "question_text": (
-                        f"Which statement is directly supported by "
+                        f"Which statement is the best answer supported by "
                         f"{citation_source_type}:{citation_source_id}?"
                     ),
-                    "options": [
-                        excerpt,
-                        "A conflicting claim with no evidence.",
-                        "An empty workspace selection.",
-                        "A discarded draft artifact.",
-                    ][:option_count] + [f"Unused distractor {option_idx}" for option_idx in range(5, option_count + 1)],
+                    "options": options[:option_count],
                     "correct_answer": 0,
-                    "explanation": "The first option quotes the selected source evidence.",
+                    "explanation": "The first option is the best answer because it quotes the selected source evidence.",
                     "hint": "Look for the excerpt copied from the selected source.",
                     "hint_penalty_points": 0,
                     "source_citations": [citation],
@@ -1067,6 +1220,7 @@ async def generate_quiz_from_sources(
     sources: Sequence[Any],
     num_questions: int = 10,
     question_types: list[Any] | None = None,
+    generation_profile: Any = DEFAULT_GENERATION_PROFILE,
     difficulty: str = "mixed",
     focus_topics: list[str] | None = None,
     question_plan: Sequence[Any] | None = None,
@@ -1076,6 +1230,7 @@ async def generate_quiz_from_sources(
     workspace_tag: str | None = None,
 ) -> dict[str, Any]:
     """Generate a quiz from mixed sources (media, notes, flashcard decks/cards)."""
+    normalized_profile = _normalize_generation_profile(generation_profile)
     normalized_sources = _normalize_sources(sources)
     evidence = await asyncio.to_thread(
         resolve_quiz_sources,
@@ -1088,11 +1243,13 @@ async def generate_quiz_from_sources(
         num_questions=num_questions,
         question_types=question_types,
         question_plan=question_plan,
+        generation_profile=normalized_profile,
     )
     normalized_types = [item["question_type"] for item in plan]
-    focus_instruction = ""
+    focus_instructions = [_build_generation_profile_instruction(normalized_profile)]
     if focus_topics:
-        focus_instruction = f"- Focus on these topics: {', '.join(t for t in focus_topics if t)}"
+        focus_instructions.append(f"- Focus on these topics: {', '.join(t for t in focus_topics if t)}")
+    focus_instruction = "\n".join(focus_instructions)
     source_contract = _build_source_contract(normalized_sources)
     primary_media_id = _resolve_primary_media_id(normalized_sources)
     quiz_title, quiz_description = await asyncio.to_thread(
@@ -1109,6 +1266,7 @@ async def generate_quiz_from_sources(
             num_questions=num_questions,
             question_types=normalized_types,
             question_plan=plan if question_plan else None,
+            generation_profile=normalized_profile,
         )
         _validate_strict_provenance(questions, normalized_sources)
         return await asyncio.to_thread(
@@ -1150,7 +1308,7 @@ async def generate_quiz_from_sources(
         raise ValueError("LLM response did not include a questions list")
 
     default_source = normalized_sources[0]
-    if question_plan:
+    if question_plan and normalized_profile in {"standard_recall", "mixed_assessment"}:
         questions = _normalize_planned_questions(
             raw_questions,
             plan,
@@ -1162,6 +1320,7 @@ async def generate_quiz_from_sources(
             raw_questions,
             default_source_type=default_source["source_type"],
             default_source_id=default_source["source_id"],
+            generation_profile=normalized_profile,
         )
         if num_questions and len(questions) > num_questions:
             questions = questions[:num_questions]
@@ -1189,6 +1348,7 @@ async def generate_quiz_from_media(
     media_id: int,
     num_questions: int = 10,
     question_types: list[Any] | None = None,
+    generation_profile: Any = DEFAULT_GENERATION_PROFILE,
     difficulty: str = "mixed",
     focus_topics: list[str] | None = None,
     model: str | None = None,
@@ -1203,6 +1363,7 @@ async def generate_quiz_from_media(
         sources=[{"source_type": "media", "source_id": str(media_id)}],
         num_questions=num_questions,
         question_types=question_types,
+        generation_profile=generation_profile,
         difficulty=difficulty,
         focus_topics=focus_topics,
         model=model,

@@ -88,7 +88,6 @@ def test_build_test_mode_questions_honors_planned_question_shapes() -> None:
         {"question_type": "true_false", "count": 1},
         {"question_type": "fill_blank", "count": 1},
     ]
-
     questions = _build_test_mode_questions(
         evidence=[
             {
@@ -115,6 +114,27 @@ def test_build_test_mode_questions_honors_planned_question_shapes() -> None:
     assert len(questions[2]["options"]) == 3
     assert len(questions[2]["correct_answer"]) == 3
     assert all(question["source_citations"][0]["source_id"] == "note-plan" for question in questions)
+
+
+def test_build_test_mode_questions_emits_five_options_for_best_of_five_profile() -> None:
+    questions = _build_test_mode_questions(
+        evidence=[
+            {
+                "source_type": "note",
+                "source_id": "note-bof",
+                "text": "BOF evidence should produce one best answer.",
+            }
+        ],
+        normalized_sources=[{"source_type": "note", "source_id": "note-bof"}],
+        num_questions=1,
+        question_types=None,
+        generation_profile="best_of_five",
+    )
+
+    question = questions[0]
+    assert question["question_type"] == "multiple_choice"
+    assert len(question["options"]) == 5
+    assert question["correct_answer"] == 0
 
 
 @pytest.mark.asyncio

@@ -39,6 +39,51 @@ export type QuizQuestionPlanItem = {
   option_count?: number
   pair_count?: number
 }
+export type QuizGenerationProfile =
+  | "standard_recall"
+  | "mixed_assessment"
+  | "best_of_five"
+  | "emq"
+  | "assertion_reasoning"
+  | "osce_scenario"
+export type QuizGenerationProfileDefinition = {
+  id: QuizGenerationProfile
+  label: string
+  description: string
+  status: "available" | "planned"
+  default_num_questions: number
+  default_difficulty: "easy" | "medium" | "hard" | "mixed"
+  default_question_types: QuestionType[]
+}
+export const QUIZ_GENERATION_PROFILES: QuizGenerationProfileDefinition[] = [
+  {
+    id: "standard_recall",
+    label: "Standard Recall",
+    description: "Balanced source-grounded recall and application questions.",
+    status: "available",
+    default_num_questions: 10,
+    default_difficulty: "mixed",
+    default_question_types: ["multiple_choice", "true_false", "fill_blank"]
+  },
+  {
+    id: "mixed_assessment",
+    label: "Mixed Assessment",
+    description: "A broader mix of recall, interpretation, and applied understanding.",
+    status: "available",
+    default_num_questions: 10,
+    default_difficulty: "mixed",
+    default_question_types: ["multiple_choice", "true_false", "fill_blank"]
+  },
+  {
+    id: "best_of_five",
+    label: "Best of Five",
+    description: "Single-best-answer questions with five plausible options.",
+    status: "available",
+    default_num_questions: 5,
+    default_difficulty: "mixed",
+    default_question_types: ["multiple_choice"]
+  }
+]
 export type AnswerValue = number | string | number[] | Record<string, string>
 export type QuizGenerateSourceType =
   | "media"
@@ -199,6 +244,7 @@ export type QuestionUpdate = {
 
 // AI generation request
 type QuizGenerateRequestBase = {
+  generation_profile?: QuizGenerationProfile
   num_questions?: number
   question_types?: QuestionType[]
   question_plan?: QuizQuestionPlanItem[]
@@ -556,6 +602,16 @@ export async function generateQuiz(
     body: request,
     abortSignal: options?.signal,
     timeoutMs
+  })
+}
+
+export async function listQuizGenerationProfiles(
+  options?: { signal?: AbortSignal }
+): Promise<QuizGenerationProfileDefinition[]> {
+  return await bgRequest<QuizGenerationProfileDefinition[], AllowedPath, "GET">({
+    path: "/api/v1/quizzes/generation-profiles" as AllowedPath,
+    method: "GET",
+    abortSignal: options?.signal
   })
 }
 

@@ -1,7 +1,11 @@
 import pytest
 from pydantic import ValidationError
 
-from tldw_Server_API.app.api.v1.schemas.quizzes import QuizGenerateRequest, SourceCitation
+from tldw_Server_API.app.api.v1.schemas.quizzes import (
+    QuizGenerateRequest,
+    QuizGenerationProfile,
+    SourceCitation,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -104,6 +108,18 @@ def test_quiz_generate_request_does_not_default_mutate_question_plan_items():
 def test_quiz_generate_request_rejects_invalid_question_plan(payload):
     with pytest.raises(ValidationError):
         QuizGenerateRequest.model_validate(payload)
+
+
+def test_quiz_generate_request_accepts_generation_profile():
+    payload = QuizGenerateRequest.model_validate(
+        {
+            "num_questions": 5,
+            "sources": [{"source_type": "note", "source_id": "note-1"}],
+            "generation_profile": "best_of_five",
+        }
+    )
+
+    assert payload.generation_profile == QuizGenerationProfile.BEST_OF_FIVE
 
 
 def test_quiz_generate_request_rejects_unknown_source_type():

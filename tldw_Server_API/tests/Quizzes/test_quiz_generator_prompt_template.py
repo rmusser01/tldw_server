@@ -6,7 +6,12 @@ os.environ.setdefault("TEST_MODE", "1")
 pytestmark = pytest.mark.unit
 
 from tldw_Server_API.app.services import quiz_generator
-from tldw_Server_API.app.services.quiz_generator import QUIZ_GENERATION_PROMPT
+from tldw_Server_API.app.services.quiz_generator import (
+    QUIZ_GENERATION_PROMPT,
+    _build_generation_profile_instruction,
+    _coerce_question_types,
+    get_quiz_generation_profiles,
+)
 
 
 def test_quiz_generation_prompt_template_formats_with_literal_citation_object():
@@ -68,3 +73,16 @@ def test_quiz_generation_prompt_preserves_source_content_when_removing_legacy_hi
 
     assert content in rendered_prompt
     assert "Planned question requirements" in rendered_prompt
+
+
+def test_best_of_five_profile_exposes_prompt_contract_and_question_defaults():
+    profiles = get_quiz_generation_profiles()
+    best_of_five = next(profile for profile in profiles if profile["id"] == "best_of_five")
+
+    assert best_of_five["status"] == "available"
+    assert best_of_five["default_question_types"] == ["multiple_choice"]
+    assert _coerce_question_types(None, generation_profile="best_of_five") == ["multiple_choice"]
+
+    instruction = _build_generation_profile_instruction("best_of_five")
+    assert "Best of Five" in instruction
+    assert "exactly five answer options" in instruction

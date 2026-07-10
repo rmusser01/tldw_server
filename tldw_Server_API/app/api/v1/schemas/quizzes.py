@@ -29,6 +29,15 @@ class QuestionType(str, Enum):
     FILL_BLANK = "fill_blank"
 
 
+class QuizGenerationProfile(str, Enum):
+    STANDARD_RECALL = "standard_recall"
+    MIXED_ASSESSMENT = "mixed_assessment"
+    BEST_OF_FIVE = "best_of_five"
+    EMQ = "emq"
+    ASSERTION_REASONING = "assertion_reasoning"
+    OSCE_SCENARIO = "osce_scenario"
+
+
 class QuizSourceType(str, Enum):
     MEDIA = "media"
     NOTE = "note"
@@ -123,6 +132,16 @@ class QuizListResponse(BaseModel):
     @model_validator(mode="after")
     def _default_pagination_aliases(self):
         return _default_offset_pagination_aliases(self)
+
+
+class QuizGenerationProfileDefinition(BaseModel):
+    id: QuizGenerationProfile
+    label: str
+    description: str
+    status: Literal["available", "planned"]
+    default_num_questions: int = Field(..., ge=1, le=100)
+    default_difficulty: Literal["easy", "medium", "hard", "mixed"]
+    default_question_types: list[QuestionType]
 
 
 class QuestionCreate(BaseModel):
@@ -332,6 +351,7 @@ class QuizRemediationConvertResponse(BaseModel):
 class QuizGenerateRequest(BaseModel):
     media_id: Optional[int] = Field(None, ge=1)
     sources: Optional[list[QuizGenerateSource]] = Field(None, min_length=1)
+    generation_profile: QuizGenerationProfile = QuizGenerationProfile.STANDARD_RECALL
     num_questions: int = Field(10, ge=1, le=100)
     question_types: Optional[list[QuestionType]] = None
     question_plan: Optional[list[QuizQuestionPlanItem]] = Field(None, min_length=1)

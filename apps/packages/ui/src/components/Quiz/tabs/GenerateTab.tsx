@@ -25,7 +25,14 @@ import { useNavigate } from "react-router-dom";
 import { useGenerateQuizMutation } from "../hooks";
 import { useDebounce } from "@/hooks/useDebounce";
 import { tldwClient } from "@/services/tldw";
-import type { QuestionType, QuizGenerateSource } from "@/services/quizzes";
+import {
+  QUIZ_GENERATION_PROFILES,
+  type QuestionType,
+  type QuizGenerateSource,
+  type QuizGenerationProfile,
+  type QuizGenerationProfileDefinition,
+  type QuizQuestionPlanItem,
+} from "@/services/quizzes";
 import {
   createDeck,
   createFlashcard,
@@ -39,7 +46,6 @@ import { buildFlashcardsGenerateRoute } from "@/services/tldw/flashcards-generat
 import { buildFlashcardsStudyRouteFromQuiz } from "@/services/tldw/quiz-flashcards-handoff";
 import type { SourceReviewHandoffPayload } from "@/services/tldw/source-review-handoff";
 import type { TakeTabNavigationIntent } from "../navigation";
-import type { QuizQuestionPlanItem } from "@/services/quizzes";
 
 interface GenerateTabProps {
   initialSourceReviewIntent?: SourceReviewQuizIntent | null;
@@ -100,6 +106,25 @@ type FlashcardsSummary = {
 const MEDIA_PAGE_SIZE = 50;
 const MAX_FLASHCARDS_IN_STUDY_FLOW = 30;
 const MAX_FLASHCARD_SOURCE_TEXT_CHARS = 20_000;
+
+const GENERATION_PROFILE_OPTIONS = QUIZ_GENERATION_PROFILES
+  .filter((profile) => profile.status === "available")
+  .map((profile) => ({
+    label: profile.label,
+    value: profile.id,
+    description: profile.description,
+  }));
+
+const DEFAULT_GENERATION_PROFILE = QUIZ_GENERATION_PROFILES[0] as QuizGenerationProfileDefinition;
+
+const getGenerationProfile = (value: unknown): QuizGenerationProfileDefinition => {
+  const profileId = typeof value === "string" ? value : "standard_recall";
+  return (
+    QUIZ_GENERATION_PROFILES.find(
+      (profile) => profile.id === profileId && profile.status === "available",
+    ) ?? DEFAULT_GENERATION_PROFILE
+  );
+};
 
 type QuestionPlanRowState = QuizQuestionPlanItem & {
   enabled: boolean;
@@ -590,6 +615,12 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
   const debouncedNotesSearch = useDebounce(notesSearchInput, 300);
   const generateAbortRef = React.useRef<AbortController | null>(null);
   const selectedDifficulty = Form.useWatch("difficulty", form) ?? "mixed";
+  const selectedGenerationProfile = getGenerationProfile(
+    Form.useWatch("generationProfile", form),
+  );
+  const profileLocksQuestionShape =
+    selectedGenerationProfile.id !== "standard_recall" &&
+    selectedGenerationProfile.id !== "mixed_assessment";
   const shouldGenerateStudyMaterials = Boolean(
     Form.useWatch("generateStudyMaterials", form),
   );
@@ -1071,6 +1102,32 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
     generateAbortRef.current?.abort();
   }, [generationInFlight]);
 
+  const handleGenerationProfileChange = React.useCallback(
+    (value: QuizGenerationProfile) => {
+      const profile = getGenerationProfile(value);
+      form.setFieldValue("difficulty", profile.default_difficulty);
+      setQuestionPlanRows((rows) => {
+        if (profile.id === "standard_recall" || profile.id === "mixed_assessment") {
+          return DEFAULT_QUESTION_PLAN_ROWS.map((row) => ({ ...row }));
+        }
+
+        const enabledTypes = new Set<QuestionType>(profile.default_question_types);
+        return rows.map((row) => ({
+          ...row,
+          enabled: enabledTypes.has(row.question_type),
+          count: enabledTypes.has(row.question_type)
+            ? profile.default_num_questions
+            : row.count,
+          option_count:
+            row.question_type === "multiple_choice" && profile.id === "best_of_five"
+              ? 5
+              : row.option_count,
+        }));
+      });
+    },
+    [form],
+  );
+
   const generateStudyMaterialsFlashcards = React.useCallback(
     async (params: {
       mediaId: number;
@@ -1259,6 +1316,10 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
       setGeneratedPreview(null);
 
       const focusTopics = normalizeFocusTopics(values.focusTopics);
+      const generationProfile = getGenerationProfile(values.generationProfile);
+      const usesQuestionPlan =
+        generationProfile.id === "standard_recall" ||
+        generationProfile.id === "mixed_assessment";
       const shouldGenerateStudyMaterials = Boolean(
         values.generateStudyMaterials,
       );
@@ -1269,8 +1330,12 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
       const generated = await generateMutation.mutateAsync({
         request: {
           sources: selectedSources,
+          generation_profile: generationProfile.id,
           num_questions: totalQuestions,
-          question_plan: enabledPlanRows,
+          question_plan: usesQuestionPlan ? enabledPlanRows : undefined,
+          question_types: usesQuestionPlan
+            ? undefined
+            : generationProfile.default_question_types,
           difficulty: values.difficulty,
           focus_topics: focusTopics.length > 0 ? focusTopics : undefined,
         },
@@ -1765,11 +1830,34 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
               form={form}
               layout="vertical"
               initialValues={{
+                generationProfile: "standard_recall",
                 difficulty: "mixed",
                 focusTopics: [],
                 generateStudyMaterials: false,
               }}
             >
+              <Form.Item
+                name="generationProfile"
+                label={t("option:quiz.generationProfile", {
+                  defaultValue: "Generation Profile",
+                })}
+                extra={t("option:quiz.generationProfileHelp", {
+                  defaultValue:
+                    "Choose an assessment style; selecting a profile applies its recommended defaults.",
+                })}
+              >
+                <Select
+                  options={GENERATION_PROFILE_OPTIONS.map((profile) => ({
+                    value: profile.value,
+                    label: profile.label,
+                    title: profile.description,
+                  }))}
+                  onChange={handleGenerationProfileChange}
+                  disabled={generationInFlight}
+                  data-testid="generate-profile-select"
+                />
+              </Form.Item>
+
               <div className="mb-6 space-y-3">
                 <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
                   <div>
@@ -1809,7 +1897,7 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
                     >
                       <Checkbox
                         checked={row.enabled}
-                        disabled={generationInFlight}
+                        disabled={generationInFlight || profileLocksQuestionShape}
                         onChange={(event) =>
                           updateQuestionPlanRow(row.question_type, {
                             enabled: event.target.checked,
@@ -1868,7 +1956,11 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
                                 value={row.option_count}
                                 aria-label={`${rowLabel} options`}
                                 className="w-full"
-                                disabled={generationInFlight || !row.enabled}
+                                disabled={
+                                  generationInFlight ||
+                                  profileLocksQuestionShape ||
+                                  !row.enabled
+                                }
                                 onChange={(value) => {
                                   const next = sanitizeInputNumber(value, 2, 6);
                                   if (next != null) {
@@ -1899,7 +1991,11 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
                                   count,
                                   label: rowLabel,
                                 })}
-                                disabled={generationInFlight || !row.enabled}
+                                disabled={
+                                  generationInFlight ||
+                                  profileLocksQuestionShape ||
+                                  !row.enabled
+                                }
                                 onClick={() =>
                                   updateQuestionPlanRow(row.question_type, {
                                     option_count: count,
@@ -1929,7 +2025,11 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
                               value={row.pair_count}
                               aria-label={`${rowLabel} pairs`}
                               className="w-full"
-                              disabled={generationInFlight || !row.enabled}
+                              disabled={
+                                generationInFlight ||
+                                profileLocksQuestionShape ||
+                                !row.enabled
+                              }
                               onChange={(value) => {
                                 const next = sanitizeInputNumber(value, 2, 6);
                                 if (next != null) {

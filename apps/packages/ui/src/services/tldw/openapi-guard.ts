@@ -270,6 +270,7 @@ export type ClientPath =
   | "/api/v1/outputs/templates/{template_id}/preview"
   | "/api/v1/outputs"
   | "/api/v1/outputs/{output_id}/download"
+  | "/api/v1/quizzes/generation-profiles"
   | "/api/v1/quizzes/import/json"
   | "/api/v1/flashcards"
   | "/api/v1/flashcards/decks"

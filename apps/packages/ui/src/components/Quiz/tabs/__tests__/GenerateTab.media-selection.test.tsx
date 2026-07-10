@@ -498,6 +498,53 @@ describe("GenerateTab scalable media selection and generation flow", () => {
     });
   }, 20000);
 
+  it("applies Best of Five profile defaults in generation payload", async () => {
+    vi.mocked(tldwClient.listMedia).mockResolvedValue({
+      items: [{ id: 10, title: "Clinical Notes", type: "pdf" }],
+      pagination: { total_items: 1 }
+    } as any)
+
+    const mutateAsync = vi.fn(async () => ({
+      quiz: { id: 42, name: "Clinical BOF" },
+      questions: [{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }, { id: 5 }]
+    }))
+
+    vi.mocked(useGenerateQuizMutation).mockReturnValue({
+      mutateAsync,
+      isPending: false
+    } as any)
+
+    renderWithQueryClient()
+
+    await waitFor(() => {
+      expect(screen.getByText("1 media items available")).toBeInTheDocument()
+    })
+
+    fireEvent.mouseDown(screen.getAllByRole("combobox")[0])
+    fireEvent.click(await screen.findByText("Clinical Notes (pdf)"))
+
+    const profileSelect = screen.getByTestId("generate-profile-select")
+    fireEvent.mouseDown(profileSelect.querySelector(".ant-select-selector") ?? profileSelect)
+    fireEvent.click(await screen.findByText("Best of Five"))
+
+    fireEvent.click(screen.getByRole("button", { name: /Generate Quiz/i }))
+
+    await waitFor(() => {
+      expect(mutateAsync).toHaveBeenCalledTimes(1)
+    })
+    expect(mutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        request: expect.objectContaining({
+          sources: [{ source_type: "media", source_id: "10" }],
+          generation_profile: "best_of_five",
+          num_questions: 5,
+          question_types: ["multiple_choice"]
+        }),
+        signal: expect.any(AbortSignal)
+      })
+    )
+  }, 20000)
+
   it("supports canceling in-flight generation and does not navigate", async () => {
     vi.mocked(tldwClient.listMedia).mockResolvedValue({
       items: [{ id: 5, title: "Long Transcript", type: "audio" }],

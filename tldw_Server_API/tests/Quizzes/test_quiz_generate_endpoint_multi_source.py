@@ -9,6 +9,17 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
 from tldw_Server_API.app.services.quiz_generator import QuizProvenanceValidationError
 
 
+def test_generation_profiles_endpoint_lists_available_best_of_five_profile():
+    profiles = quizzes_endpoint.list_quiz_generation_profiles()
+
+    assert any(
+        profile["id"] == "best_of_five"
+        and profile["status"] == "available"
+        and profile["default_question_types"] == ["multiple_choice"]
+        for profile in profiles
+    )
+
+
 @pytest.mark.asyncio
 async def test_generate_quiz_legacy_media_id_maps_to_single_media_source(monkeypatch):
     captured: dict = {}
@@ -47,6 +58,28 @@ async def test_generate_quiz_forwards_sources_array(monkeypatch):
 
     assert captured["sources"] == [{"source_type": "note", "source_id": "note-1"}]
     assert captured["workspace_id"] == "ws-2"
+
+
+@pytest.mark.asyncio
+async def test_generate_quiz_forwards_generation_profile(monkeypatch):
+    captured: dict = {}
+
+    async def fake_generate_quiz_from_sources(**kwargs):
+        captured.update(kwargs)
+        return {"quiz": {"id": 1}, "questions": []}
+
+    monkeypatch.setattr(quizzes_endpoint, "generate_quiz_from_sources", fake_generate_quiz_from_sources)
+
+    request = QuizGenerateRequest.model_validate(
+        {
+            "num_questions": 5,
+            "sources": [{"source_type": "note", "source_id": "note-1"}],
+            "generation_profile": "best_of_five",
+        }
+    )
+    await quizzes_endpoint.generate_quiz(request=request, db=Mock(), media_db=Mock())
+
+    assert captured["generation_profile"] == "best_of_five"
 
 
 @pytest.mark.asyncio
