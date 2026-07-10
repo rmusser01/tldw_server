@@ -1,30 +1,26 @@
 ---
 id: TASK-12932
 title: Add source-grounded spaced repetition review schedules
-status: Done
+status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-07-10 19:48'
+updated_date: 2026-07-10 19:48
 labels: []
 dependencies: []
 references:
-  - >-
-    Design spec:
-    Docs/superpowers/specs/2026-07-09-source-grounded-spaced-repetition-design.md
-  - Spec review approved by subagent 019f4a0a-f590-75e0-9fc6-ff1f4d48eba6
-  - >-
-    Implementation plan:
-    Docs/superpowers/plans/2026-07-09-source-grounded-spaced-repetition-implementation-plan.md
-  - Plan review approved by subagent 019f4a19-7d71-7bf2-8425-db97d8674734
-  - 'Task 5 Flashcards UI commit: 296cc53a4f'
-  - 'Task 6 Quiz handoff commit: fb0e1266e8'
-  - 'Independent code review: subagent 019f4c74-52d1-7c80-8f8a-62d5bfcb76f9'
-  - 'Review fixes: c669d2b545 and e694a3b08b'
-  - 'Bandit report: /tmp/bandit_task_12932.json'
-  - 'Review hardening commit: bd34bb431c'
-  - 'PR comment fixes: cec28a759c'
-  - 'Pull request: https://github.com/rmusser01/tldw_server/pull/2705'
-  - 'Final Bandit report: /tmp/bandit_task_12932_review_final.json'
+- 'Design spec: Docs/superpowers/specs/2026-07-09-source-grounded-spaced-repetition-design.md'
+- Spec review approved by subagent 019f4a0a-f590-75e0-9fc6-ff1f4d48eba6
+- 'Implementation plan: Docs/superpowers/plans/2026-07-09-source-grounded-spaced-repetition-implementation-plan.md'
+- Plan review approved by subagent 019f4a19-7d71-7bf2-8425-db97d8674734
+- 'Task 5 Flashcards UI commit: 296cc53a4f'
+- 'Task 6 Quiz handoff commit: fb0e1266e8'
+- 'Independent code review: subagent 019f4c74-52d1-7c80-8f8a-62d5bfcb76f9'
+- 'Review fixes: c669d2b545 and e694a3b08b'
+- 'Bandit report: /tmp/bandit_task_12932.json'
+- 'Review hardening commit: bd34bb431c'
+- 'PR comment fixes: cec28a759c'
+- 'Pull request: https://github.com/rmusser01/tldw_server/pull/2705'
+- 'Final Bandit report: /tmp/bandit_task_12932_review_final.json'
 ---
 
 ## Description
