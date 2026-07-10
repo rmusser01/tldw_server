@@ -777,6 +777,7 @@ class SourceReviewScheduleRow(BaseModel):
 
     @model_validator(mode="after")
     def validate_offset_cap(self):
+        """Reject schedule offsets beyond the supported unit-specific cap."""
         cap = SOURCE_REVIEW_OFFSET_CAPS[self.offset_unit]
         if self.offset_value > cap:
             raise ValueError(f"offset_value exceeds the {cap} {self.offset_unit} cap")
@@ -806,10 +807,12 @@ class SourceReviewPlanCreateRequest(BaseModel):
     @field_validator("title", "timezone", mode="before")
     @classmethod
     def normalize_required_text(cls, value: Any) -> Any:
+        """Trim required plan text before field constraints are evaluated."""
         return _strip_required_string(value)
 
     @model_validator(mode="after")
     def validate_source_snapshot_and_schedule(self):
+        """Validate source snapshot sizes and the computed review schedule."""
         for source_item in self.source_items:
             if source_item.excerpt_text is not None and len(source_item.excerpt_text) > 20_000:
                 raise ValueError("source excerpt_text exceeds 20000 characters")
@@ -838,6 +841,7 @@ class SourceReviewPlanCreateRequest(BaseModel):
         return self
 
     def computed_schedule(self) -> list[dict[str, Any]]:
+        """Return validated occurrences with timezone-aware UTC due times."""
         return compute_source_review_schedule(
             starts_on=self.starts_on,
             timezone_name=self.timezone,

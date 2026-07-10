@@ -289,12 +289,14 @@ def _serialize_study_pack(pack: dict[str, Any]) -> dict[str, Any]:
 
 
 def _serialize_source_review_plan(plan: dict[str, Any]) -> SourceReviewPlanResponse:
+    """Convert a persisted plan row into its public response model."""
     data = dict(plan)
     data["source_bundle"] = data.pop("source_bundle_json", {"items": []})
     return SourceReviewPlanResponse.model_validate(data)
 
 
 def _bounded_source_review_text(value: Any, limit: int) -> str | None:
+    """Normalize optional source text and truncate it to a response-safe limit."""
     if value is None:
         return None
     return str(value).strip()[:limit] or None
@@ -338,6 +340,7 @@ def _serialize_source_review_occurrence(
     *,
     include_launch_state: bool = True,
 ) -> SourceReviewOccurrenceActionResponse:
+    """Convert an occurrence row into a bounded API response."""
     data = dict(occurrence)
     launch_state = data.pop("launch_state_json", None)
     source_bundle = data.pop("source_bundle_json", {"items": []})
@@ -354,6 +357,7 @@ def _serialize_source_review_occurrence(
 
 
 def _source_review_now_utc() -> datetime:
+    """Return the current timezone-aware UTC timestamp."""
     return datetime.now(timezone.utc)
 
 
@@ -362,6 +366,7 @@ def _map_source_review_db_error(
     *,
     default_detail: str,
 ) -> HTTPException:
+    """Map source-review persistence failures through the shared DB mapper."""
     return map_db_error_to_http(exc, default_detail=default_detail)
 
 
@@ -2068,6 +2073,7 @@ def create_source_review_plan(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     _current_user: User = Depends(get_request_user),
 ) -> SourceReviewPlanResponse:
+    """Create a source-grounded review plan and its scheduled occurrences."""
     try:
         plan_id = db.create_source_review_plan(
             title=payload.title,
@@ -2094,6 +2100,7 @@ def list_source_review_plans(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     _current_user: User = Depends(get_request_user),
 ) -> SourceReviewPlanListResponse:
+    """List active source-grounded review plans for the current user."""
     try:
         plans, total = db.list_source_review_plans(limit=min(limit, 100), offset=offset)
         return SourceReviewPlanListResponse(
@@ -2114,6 +2121,7 @@ def list_due_source_review_occurrences(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     _current_user: User = Depends(get_request_user),
 ) -> SourceReviewDueListResponse:
+    """List due source-review occurrences with bounded source summaries."""
     now = _source_review_now_utc()
     now_iso = now.isoformat().replace("+00:00", "Z")
     try:
@@ -2146,6 +2154,7 @@ def _source_review_occurrence_action(
     occurrence_id: int,
     action: str,
 ) -> SourceReviewOccurrenceActionResponse:
+    """Apply one occurrence lifecycle action and serialize its result."""
     try:
         if action == "start":
             occurrence = db.start_source_review_occurrence(occurrence_id)
@@ -2170,6 +2179,7 @@ def start_source_review_occurrence(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     _current_user: User = Depends(get_request_user),
 ) -> SourceReviewOccurrenceActionResponse:
+    """Start or resume one source-review occurrence."""
     return _source_review_occurrence_action(
         db=db,
         occurrence_id=occurrence_id,
@@ -2186,6 +2196,7 @@ def complete_source_review_occurrence(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     _current_user: User = Depends(get_request_user),
 ) -> SourceReviewOccurrenceActionResponse:
+    """Complete one in-progress source-review occurrence."""
     return _source_review_occurrence_action(
         db=db,
         occurrence_id=occurrence_id,
@@ -2202,6 +2213,7 @@ def skip_source_review_occurrence(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     _current_user: User = Depends(get_request_user),
 ) -> SourceReviewOccurrenceActionResponse:
+    """Skip one pending or in-progress source-review occurrence."""
     return _source_review_occurrence_action(
         db=db,
         occurrence_id=occurrence_id,
@@ -2218,6 +2230,7 @@ def delete_source_review_plan(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     _current_user: User = Depends(get_request_user),
 ) -> SourceReviewPlanDeleteResponse:
+    """Soft-delete a source-review plan and its active occurrences."""
     try:
         return SourceReviewPlanDeleteResponse(
             deleted=db.soft_delete_source_review_plan(plan_id)

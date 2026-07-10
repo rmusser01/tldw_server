@@ -26716,6 +26716,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         *,
         for_update: bool = False,
     ) -> dict[str, Any] | None:
+        """Load one active occurrence and its plan snapshot within a transaction."""
         query = """
             SELECT o.id, o.plan_id, o.offset_value, o.offset_unit, o.activity_type,
                    o.due_at, o.status, o.launch_state_json, o.started_at,
@@ -26736,6 +26737,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         conn: Any,
         occurrence_id: int,
     ) -> dict[str, Any]:
+        """Lock and return an occurrence or raise the domain not-found error."""
         occurrence = self._get_source_review_occurrence_row(conn, occurrence_id, for_update=True)
         if occurrence is None:
             raise NotFoundError(f"Source review occurrence {occurrence_id} not found")
