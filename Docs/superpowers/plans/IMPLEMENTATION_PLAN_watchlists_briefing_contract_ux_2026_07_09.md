@@ -525,7 +525,7 @@ git commit -m "feat: persist watchlists briefing occurrences"
 - Produces: `BriefingSelection`, `FulfillmentResult`, `fulfill_watchlist_briefing`, `retry_briefing_stage`, and `no_material_updates_markdown`.
 - Consumes: canonical contract, occurrence repository, Collections output helpers, and existing audio trigger.
 
-- [ ] **Step 1: Write failing orchestration tests**
+- [x] **Step 1: Write failing orchestration tests**
 
 Cover these exact behaviors:
 
@@ -576,7 +576,7 @@ async def test_text_and_audio_share_selection_cap(fakes):
     assert fakes.render_item_ids == fakes.audio_item_ids
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 ```bash
 /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Watchlists/test_briefing_fulfillment.py -q
@@ -584,7 +584,7 @@ async def test_text_and_audio_share_selection_cap(fakes):
 
 Expected: fulfillment module is missing.
 
-- [ ] **Step 3: Implement deterministic selection and stage recording**
+- [x] **Step 3: Implement deterministic selection and stage recording**
 
 Define:
 
@@ -611,11 +611,11 @@ class FulfillmentResult:
 
 Load ingested items once, sort by published timestamp descending then stable item ID, apply the one cap, and pass the same normalized item list to text and audio. Stage updates happen before and after each side effect. Exceptions set a stable failure code and return a failed result instead of becoming debug-only logs.
 
-- [ ] **Step 4: Make text output idempotent and zero-item capable**
+- [x] **Step 4: Make text output idempotent and zero-item capable**
 
 Reuse `outputs_service` rendering and storage helpers. If the occurrence already has a valid `output_id`, reuse it. If no items qualify, render deterministic Markdown with source success/failure counts, checked time, and next run. Metadata includes occurrence ID/key, selected counts, editorial format, show identity, `ai_generated_speech`, and provenance.
 
-- [ ] **Step 5: Trigger audio with a stable request ID**
+- [x] **Step 5: Trigger audio with a stable request ID**
 
 Derive `audio_request_id` from a SHA-256 digest of the occurrence key:
 
@@ -627,11 +627,11 @@ def audio_request_id_for_occurrence(occurrence_key: str) -> str:
 
 Pass canonical editorial, cast, target, selected items, occurrence ID, and output ID into `trigger_audio_briefing`. A repeated retry with the same logical attempt reuses the request ID; explicit Regenerate increments output version and uses a versioned request ID.
 
-- [ ] **Step 6: Replace best-effort pipeline blocks**
+- [x] **Step 6: Replace best-effort pipeline blocks**
 
 After the collection run status is persisted, call `fulfill_watchlist_briefing` once. Store a compact occurrence projection in run stats for compatibility, but keep the occurrence table authoritative. Collection status remains separate from artifact status.
 
-- [ ] **Step 7: Verify GREEN and end-to-end fixture behavior**
+- [x] **Step 7: Verify GREEN and end-to-end fixture behavior**
 
 ```bash
 /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Watchlists/test_briefing_fulfillment.py tldw_Server_API/tests/Watchlists/test_e2e_rss_briefing.py tldw_Server_API/tests/Watchlists/test_audio_briefing_workflow.py -q
@@ -639,7 +639,7 @@ After the collection run status is persisted, call `fulfill_watchlist_briefing` 
 
 Expected: selected tests pass; external-feed cases may retain their documented skip condition.
 
-- [ ] **Step 8: Commit Task 4**
+- [x] **Step 8: Commit Task 4**
 
 ```bash
 git add tldw_Server_API/app/core/Watchlists/briefing_fulfillment.py tldw_Server_API/app/core/Watchlists/pipeline.py tldw_Server_API/app/core/Watchlists/audio_briefing_workflow.py tldw_Server_API/tests/Watchlists/test_briefing_fulfillment.py tldw_Server_API/tests/Watchlists/test_e2e_rss_briefing.py
