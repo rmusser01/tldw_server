@@ -311,6 +311,7 @@ def _coerce_options(
 def _coerce_question_tags(raw: Any, *, generation_profile: Any) -> list[str] | None:
     tags: list[str] = []
     seen: set[str] = set()
+    profile_id = _normalize_generation_profile(generation_profile)
 
     if isinstance(raw, list):
         candidates = raw
@@ -328,6 +329,8 @@ def _coerce_question_tags(raw: Any, *, generation_profile: Any) -> list[str] | N
             tag = BEST_OF_FIVE_TAG
             normalized = BEST_OF_FIVE_TAG
         elif normalized in {ASSERTION_REASONING_TAG, "assertion/reasoning"}:
+            if profile_id != ASSERTION_REASONING_TAG:
+                continue
             tag = ASSERTION_REASONING_TAG
             normalized = ASSERTION_REASONING_TAG
         if normalized in seen:
@@ -335,7 +338,6 @@ def _coerce_question_tags(raw: Any, *, generation_profile: Any) -> list[str] | N
         seen.add(normalized)
         tags.append(tag)
 
-    profile_id = _normalize_generation_profile(generation_profile)
     if profile_id == "best_of_five" and BEST_OF_FIVE_TAG not in seen:
         tags.append(BEST_OF_FIVE_TAG)
     elif profile_id == ASSERTION_REASONING_TAG and ASSERTION_REASONING_TAG not in seen:

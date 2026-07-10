@@ -874,6 +874,37 @@ def test_question_tag_normalization_preserves_existing_profile_behavior(
     )
 
 
+@pytest.mark.parametrize(
+    ("generation_profile", "expected_tags"),
+    [
+        ("standard_recall", ["cardiology", "hard", "topic/area"]),
+        ("mixed_assessment", ["cardiology", "hard", "topic/area"]),
+        (
+            "best_of_five",
+            ["cardiology", "hard", "topic/area", "best_of_five"],
+        ),
+        ("emq", ["cardiology", "hard", "topic/area"]),
+    ],
+)
+def test_non_assertion_profiles_strip_assertion_reasoning_reserved_tags(
+    generation_profile: str,
+    expected_tags: list[str],
+) -> None:
+    tags = quiz_generator._coerce_question_tags(
+        [
+            "cardiology",
+            "hard",
+            "assertion_reasoning",
+            "assertion reasoning",
+            "assertion/reasoning",
+            "topic/area",
+        ],
+        generation_profile=generation_profile,
+    )
+
+    assert tags == expected_tags
+
+
 def test_normalize_assertion_reasoning_owns_options_and_canonicalizes_one_subtype_tag() -> None:
     question = _normalize_assertion_reasoning_question(
         tags=[
