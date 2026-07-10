@@ -4,6 +4,7 @@ import {
   createImageDataUrl,
   inferImageAttachmentMimeType,
   normalizeImageDataUrlMime,
+  safeImageUrl,
   validateAndCreateImageDataUrl
 } from "../image-utils"
 
@@ -14,6 +15,40 @@ const WEBP_HEADER_BASE64 = "UklGRhAAAABXRUJQVlA4IAAAAAA="
 describe("image utils", () => {
   afterEach(() => {
     vi.unstubAllGlobals()
+  })
+
+  it("normalizes absolute HTTP(S) image URLs to lowercase schemes", () => {
+    expect(safeImageUrl("HTTPS://example.com/a.png")).toBe(
+      "https://example.com/a.png"
+    )
+    expect(safeImageUrl("HTTP://example.com/a.png")).toBe(
+      "http://example.com/a.png"
+    )
+  })
+
+  it("preserves explicit relative image paths", () => {
+    expect(safeImageUrl("/images/a.png")).toBe("/images/a.png")
+    expect(safeImageUrl("./images/a.png")).toBe("./images/a.png")
+    expect(safeImageUrl("../images/a.png")).toBe("../images/a.png")
+  })
+
+  it("makes bare relative image paths explicit", () => {
+    expect(safeImageUrl("images/a.png")).toBe("./images/a.png")
+  })
+
+  it("accepts valid raster image data", () => {
+    expect(safeImageUrl(ONE_PIXEL_PNG_BASE64)).toBe(
+      `data:image/png;base64,${ONE_PIXEL_PNG_BASE64}`
+    )
+  })
+
+  it("rejects non-image URL schemes", () => {
+    expect(safeImageUrl("javascript:alert(1)")).toBeNull()
+    expect(safeImageUrl("mailto:image@example.com")).toBeNull()
+  })
+
+  it("rejects SVG image data", () => {
+    expect(safeImageUrl("data:image/svg+xml;base64,PHN2Zy8+")).toBeNull()
   })
 
   it("builds a data URL from valid base64 image content", () => {
