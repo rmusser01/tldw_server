@@ -76,7 +76,7 @@ def compute_source_review_due_at(
 
     try:
         plan_timezone = ZoneInfo(timezone_name)
-    except (TypeError, ZoneInfoNotFoundError) as exc:
+    except (OSError, TypeError, ValueError, ZoneInfoNotFoundError) as exc:
         raise ValueError(f"Invalid timezone: {timezone_name!r}") from exc
 
     local_midnight = datetime.combine(due_date, time.min, tzinfo=plan_timezone)

@@ -102,10 +102,13 @@ Field rules:
 
 - `title`: non-empty string, max 200 characters.
 - `starts_on`: ISO date. This is the authoritative anchor for schedule offsets.
-- `timezone`: required IANA timezone string. The WebUI should default it from the browser timezone. The backend validates it with `zoneinfo`.
+- `timezone`: required IANA timezone string, max 255 characters. The WebUI should default it from the browser timezone. The backend validates it with `zoneinfo` and maps malformed filesystem-backed keys to request validation errors.
 - `source_items`: at least one item using the existing `StudyPackSourceSelection` shape, max 10 items.
+- `source_items[].source_id`: required non-empty string, max 256 characters.
+- `source_items[].label`: optional string, max 200 characters.
 - `source_items[].excerpt_text`: optional, max 20,000 characters per item.
 - `source_items[].locator`: optional JSON object, max 8 KiB serialized per item.
+- The canonical serialized source bundle is max 256 KiB across all items.
 - `schedule`: at least one row, max 24 rows.
 - `offset_value`: strict positive integer, max `3650` for `day` rows and max `120` for `month` rows.
 - `offset_unit`: `day` or `month`.
@@ -180,6 +183,7 @@ Plan completion is derived from occurrences. The first slice does not need a pla
 Sync/version requirements:
 
 - SQLite and any PostgreSQL schema/migration path for `ChaChaNotes_DB` must stay equivalent for these two tables.
+- PostgreSQL enables and forces row-level security on both tables. Read and write policies scope `client_id` to `app.current_user_id`; occurrence policies also require an owned parent plan. Policies are installed both during source-review schema creation and by the startup ChaCha RLS installer. Startup installation safely skips tables that have not been created yet so an asynchronous or multi-user warm-up cannot roll back the rest of the ChaCha policy transaction.
 - Create sets `version = 1`, current timestamps, and the request `client_id`.
 - Start/complete/skip/delete increment `version`, update `last_modified`, preserve/update `client_id` using the DB's existing convention, and write matching `sync_log` rows.
 - Sync entities are `source_review_plans` and `source_review_occurrences`; operations are `create`, `update`, and `delete`.
@@ -328,6 +332,7 @@ Frontend tests:
 Security validation:
 
 - Run Bandit on touched backend Python.
+- Tokenized Quiz handoffs are one-shot: React render reads without mutation, successful Quiz hydration consumes the stored snapshot, writes prune expired source-review handoffs, and hydration removes the token from browser history.
 
 ## Implementation Notes
 

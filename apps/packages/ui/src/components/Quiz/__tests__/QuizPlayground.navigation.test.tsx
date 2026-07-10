@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { StrictMode } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { QuizPlayground } from "../QuizPlayground"
@@ -197,7 +198,11 @@ describe("QuizPlayground navigation intents", () => {
     })
     window.history.replaceState({}, "", route)
 
-    render(<QuizPlayground />)
+    render(
+      <StrictMode>
+        <QuizPlayground />
+      </StrictMode>
+    )
 
     expect(screen.getByTestId("active-tab")).toHaveTextContent("generate")
     expect(await screen.findByTestId("generate-source-review-intent")).toHaveTextContent(
@@ -206,6 +211,10 @@ describe("QuizPlayground navigation intents", () => {
     expect(screen.getByTestId("generate-source-review-intent")).toHaveTextContent(
       '"source_id":"19"'
     )
+    await waitFor(() => {
+      expect(window.location.search).not.toContain("source_review_token")
+      expect(window.location.search).not.toContain("source_review=1")
+    })
     expect(window.location.href).not.toContain(excerpt)
     expect(window.location.href).not.toContain(encodeURIComponent(excerpt))
   })

@@ -4,6 +4,7 @@ import type {
   SourceReviewOccurrenceActionResponse
 } from "@/services/flashcards"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import type { ComponentProps } from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { SourceReviewDuePanel } from "../SourceReviewDuePanel"
@@ -22,6 +23,9 @@ vi.mock("react-i18next", () => ({
       options?: string | { defaultValue?: string; [key: string]: unknown }
     ) => {
       if (typeof options === "string") return options
+      if (key === "option:flashcards.sourceReviewHeading") {
+        return "Translated source reviews"
+      }
       if (options?.defaultValue) {
         return options.defaultValue.replace(
           /\{\{(\w+)\}\}/g,
@@ -116,12 +120,19 @@ const occurrence = (
   launch_state: status === "in_progress" ? launchState(activity) : null
 })
 
+type SourceReviewDuePanelProps = ComponentProps<typeof SourceReviewDuePanel>
+const noopGenerate: SourceReviewDuePanelProps["onSourceReviewGenerate"] =
+  () => {}
+const noopQuiz: SourceReviewDuePanelProps["onSourceReviewQuiz"] = () => {}
+
 const renderPanel = (
   item?: SourceReviewOccurrenceActionResponse,
-  callbacks?: {
-    onSourceReviewGenerate?: ReturnType<typeof vi.fn>
-    onSourceReviewQuiz?: ReturnType<typeof vi.fn>
-  }
+  callbacks?: Partial<
+    Pick<
+      SourceReviewDuePanelProps,
+      "onSourceReviewGenerate" | "onSourceReviewQuiz"
+    >
+  >
 ) => {
   mocks.dueQuery.mockReturnValue({
     data: {
@@ -136,8 +147,8 @@ const renderPanel = (
   return render(
     <SourceReviewDuePanel
       isActive
-      onSourceReviewGenerate={callbacks?.onSourceReviewGenerate ?? vi.fn()}
-      onSourceReviewQuiz={callbacks?.onSourceReviewQuiz ?? vi.fn()}
+      onSourceReviewGenerate={callbacks?.onSourceReviewGenerate ?? noopGenerate}
+      onSourceReviewQuiz={callbacks?.onSourceReviewQuiz ?? noopQuiz}
     />
   )
 }
@@ -158,6 +169,7 @@ describe("SourceReviewDuePanel", () => {
   it("shows a compact empty state when no source reviews are due", () => {
     renderPanel()
 
+    expect(screen.getByText("Translated source reviews")).toBeInTheDocument()
     expect(screen.getByText("No source reviews due")).toBeInTheDocument()
   })
 
@@ -221,15 +233,19 @@ describe("SourceReviewDuePanel", () => {
   it("shows a bounded source summary before an occurrence starts", () => {
     renderPanel(occurrence("quiz"))
 
-    expect(screen.getByText("1 source · Cardiac physiology notes")).toBeInTheDocument()
+    expect(
+      screen.getByText("1 source · Cardiac physiology notes")
+    ).toBeInTheDocument()
     expect(screen.getByText("Frank-Starling preview")).toBeInTheDocument()
     expect(
-      screen.queryByText("The Frank-Starling mechanism increases stroke volume.")
+      screen.queryByText(
+        "The Frank-Starling mechanism increases stroke volume."
+      )
     ).not.toBeInTheDocument()
   })
 
   it("resumes an in-progress occurrence from its existing launch state", () => {
-    const onQuiz = vi.fn()
+    const onQuiz = vi.fn<SourceReviewDuePanelProps["onSourceReviewQuiz"]>()
     renderPanel(occurrence("quiz", "in_progress"), {
       onSourceReviewQuiz: onQuiz
     })
@@ -259,6 +275,25 @@ describe("SourceReviewDuePanel", () => {
     ).toBeInTheDocument()
   })
 
+  it("shows source type, ID, and locator when reread has no excerpt", async () => {
+    const started = occurrence("reread", "in_progress")
+    started.launch_state!.source_bundle.items = [
+      {
+        source_type: "note",
+        source_id: "note-42",
+        label: "Cardiac physiology notes",
+        locator: { section: "Hemodynamics" }
+      }
+    ]
+    mocks.start.mockResolvedValue(started)
+    renderPanel(occurrence("reread"))
+
+    fireEvent.click(screen.getByRole("button", { name: "Start" }))
+
+    expect(await screen.findByText("Note · note-42")).toBeInTheDocument()
+    expect(screen.getByText(/Hemodynamics/)).toBeInTheDocument()
+  })
+
   it("completes an in-progress occurrence", async () => {
     renderPanel(occurrence("reread", "in_progress"))
 
@@ -278,7 +313,8 @@ describe("SourceReviewDuePanel", () => {
   it.each(["flashcards", "cloze"] as const)(
     "hands %s source text to generation without generating artifacts",
     async (activity) => {
-      const onGenerate = vi.fn()
+      const onGenerate =
+        vi.fn<SourceReviewDuePanelProps["onSourceReviewGenerate"]>()
       mocks.start.mockResolvedValue(occurrence(activity, "in_progress"))
       renderPanel(occurrence(activity), {
         onSourceReviewGenerate: onGenerate

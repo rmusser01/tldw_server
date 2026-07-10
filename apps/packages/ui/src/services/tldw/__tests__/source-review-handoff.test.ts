@@ -1,13 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import {
+  type SourceReviewHandoffPayload,
   buildSourceReviewFlashcardsIntent,
   buildSourceReviewQuizRoute,
   buildSourceReviewRereadContent,
   getSourceReviewItems,
   loadSourceReviewHandoff,
-  saveSourceReviewHandoff,
-  type SourceReviewHandoffPayload
+  saveSourceReviewHandoff
 } from "../source-review-handoff"
 
 const payload = (): SourceReviewHandoffPayload => ({
@@ -120,6 +120,35 @@ describe("source review handoff helpers", () => {
     expect(route).not.toContain("Frank-Starling")
     expect(token).toBeTruthy()
     expect(loadSourceReviewHandoff(token!)).toEqual(handoff)
+    expect(loadSourceReviewHandoff(token!)).toBeNull()
+  })
+
+  it("can inspect a handoff without consuming it during render", () => {
+    const handoff = payload()
+    const route = buildSourceReviewQuizRoute(handoff)
+    const token = new URL(route, "https://example.test").searchParams.get(
+      "source_review_token"
+    )
+
+    expect(loadSourceReviewHandoff(token!, false)).toEqual(handoff)
+    expect(loadSourceReviewHandoff(token!)).toEqual(handoff)
+    expect(loadSourceReviewHandoff(token!)).toBeNull()
+  })
+
+  it("prunes expired handoffs before storing a new payload", () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date("2026-07-09T12:00:00Z"))
+    sessionStorage.setItem(
+      "tldw:source-review-handoff:expired",
+      JSON.stringify({ expires_at: Date.now() - 1, payload: payload() })
+    )
+    sessionStorage.setItem("unrelated", "keep")
+
+    expect(saveSourceReviewHandoff(payload())).toBeTruthy()
+    expect(
+      sessionStorage.getItem("tldw:source-review-handoff:expired")
+    ).toBeNull()
+    expect(sessionStorage.getItem("unrelated")).toBe("keep")
   })
 
   it("returns null for missing or expired tokens without throwing", () => {

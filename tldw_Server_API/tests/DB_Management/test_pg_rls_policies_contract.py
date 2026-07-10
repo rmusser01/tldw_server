@@ -85,6 +85,17 @@ def test_chacha_rls_includes_workspace_resource_memberships_tenant_policy():
     assert "client_id = current_setting('app.current_user_id', true)" in sql
 
 
+def test_chacha_rls_includes_source_review_read_and_write_policies():
+    sql = "\n".join(build_chacha_rls_sql())
+
+    for table_name in ("source_review_plans", "source_review_occurrences"):
+        assert f"to_regclass('{table_name}')" in sql
+        assert f"ALTER TABLE IF EXISTS {table_name} ENABLE ROW LEVEL SECURITY" in sql
+        assert f"ALTER TABLE IF EXISTS {table_name} FORCE ROW LEVEL SECURITY" in sql
+        assert f"CREATE POLICY {table_name}_tenant_isolation ON {table_name}" in sql
+    assert sql.count("WITH CHECK") >= 2
+
+
 def test_run_pg_rls_auto_ensure_logs_success_only_after_both_installers_pass(monkeypatch):
     import tldw_Server_API.app.main as main_mod
 

@@ -8,6 +8,8 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGD
 
 pytestmark = pytest.mark.integration
 
+SOURCE_REVIEW_RLS_ROLE = "tldw_source_review_rls_tester"
+
 
 def test_postgres_source_review_schema_and_sync_triggers(
     pg_database_config: DatabaseConfig,
@@ -108,6 +110,20 @@ def test_postgres_source_review_schema_and_sync_triggers(
             }
         )
 
+        policy_rows = list(
+            backend.execute(
+                """
+                SELECT tablename, policyname, qual, with_check
+                  FROM pg_policies
+                 WHERE schemaname = current_schema()
+                   AND tablename IN ('source_review_plans', 'source_review_occurrences')
+                """
+            )
+        )
+        policies = {row["tablename"]: row for row in policy_rows}
+        assert set(policies) == {"source_review_plans", "source_review_occurrences"}  # nosec B101
+        assert all(row["qual"] and row["with_check"] for row in policies.values())  # nosec B101
+
         sequence_rows = list(
             backend.execute(
                 """
@@ -175,3 +191,123 @@ def test_postgres_source_review_schema_and_sync_triggers(
         )
     finally:
         db.close_connection()
+
+
+def test_postgres_source_review_rls_isolates_two_principals(
+    pg_database_config: DatabaseConfig,
+) -> None:
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    owner_db = CharactersRAGDB(db_path=":memory:", client_id="101", backend=backend)
+    other_db = CharactersRAGDB(db_path=":memory:", client_id="202", backend=backend)
+    ident = backend.escape_identifier  # type: ignore[attr-defined]
+
+    try:
+        owner_plan_id = owner_db.create_source_review_plan(
+            title="Owner source review",
+            starts_on="2026-07-09",
+            timezone_name="UTC",
+            source_bundle_json={
+                "items": [
+                    {
+                        "source_type": "note",
+                        "source_id": "owner-note",
+                        "label": "Private owner note",
+                    }
+                ]
+            },
+            schedule=[
+                {
+                    "offset_value": 1,
+                    "offset_unit": "day",
+                    "activity_type": "reread",
+                    "due_at": "2026-07-10T00:00:00Z",
+                }
+            ],
+        )
+        other_plan_id = other_db.create_source_review_plan(
+            title="Other source review",
+            starts_on="2026-07-09",
+            timezone_name="UTC",
+            source_bundle_json={"items": [{"source_type": "note", "source_id": "other-note"}]},
+            schedule=[
+                {
+                    "offset_value": 1,
+                    "offset_unit": "day",
+                    "activity_type": "reread",
+                    "due_at": "2026-07-10T00:00:00Z",
+                }
+            ],
+        )
+
+        with backend.transaction() as conn:
+            role_exists = backend.execute(
+                "SELECT 1 FROM pg_roles WHERE rolname = ? LIMIT 1",
+                (SOURCE_REVIEW_RLS_ROLE,),
+                connection=conn,
+            ).scalar is not None
+            if not role_exists:
+                backend.execute(
+                    f"CREATE ROLE {ident(SOURCE_REVIEW_RLS_ROLE)} NOLOGIN",
+                    connection=conn,
+                )
+            backend.execute(
+                f"GRANT USAGE ON SCHEMA public TO {ident(SOURCE_REVIEW_RLS_ROLE)}",
+                connection=conn,
+            )
+            backend.execute(
+                f"GRANT SELECT, INSERT, UPDATE, DELETE ON "
+                f"source_review_plans, source_review_occurrences TO {ident(SOURCE_REVIEW_RLS_ROLE)}",
+                connection=conn,
+            )
+            backend.execute(
+                f"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public "
+                f"TO {ident(SOURCE_REVIEW_RLS_ROLE)}",
+                connection=conn,
+            )
+            backend.execute(
+                f"GRANT {ident(SOURCE_REVIEW_RLS_ROLE)} TO CURRENT_USER",
+                connection=conn,
+            )
+
+        with backend.transaction() as conn:
+            backend.execute(
+                f"SET LOCAL ROLE {ident(SOURCE_REVIEW_RLS_ROLE)}",
+                connection=conn,
+            )
+            backend.execute(
+                "SELECT set_config('app.current_user_id', ?, true)",
+                ("202",),
+                connection=conn,
+            )
+            visible_ids = {
+                int(row["id"])
+                for row in backend.execute(
+                    "SELECT id FROM source_review_plans ORDER BY id",
+                    connection=conn,
+                )
+            }
+            visible_occurrences = {
+                int(row["plan_id"])
+                for row in backend.execute(
+                    "SELECT plan_id FROM source_review_occurrences ORDER BY id",
+                    connection=conn,
+                )
+            }
+            cross_tenant_update = backend.execute(
+                "UPDATE source_review_plans SET title = ? WHERE id = ?",
+                ("Cross-tenant edit", owner_plan_id),
+                connection=conn,
+            )
+            cross_tenant_occurrence_update = backend.execute(
+                "UPDATE source_review_occurrences SET status = ? WHERE plan_id = ?",
+                ("skipped", owner_plan_id),
+                connection=conn,
+            )
+
+        assert visible_ids == {other_plan_id}  # nosec B101
+        assert visible_occurrences == {other_plan_id}  # nosec B101
+        assert cross_tenant_update.rowcount == 0  # nosec B101
+        assert cross_tenant_occurrence_update.rowcount == 0  # nosec B101
+    finally:
+        owner_db.close_connection()
+        other_db.close_connection()

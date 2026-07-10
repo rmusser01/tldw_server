@@ -3,7 +3,7 @@ from datetime import date, datetime
 from typing import Any, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 from tldw_Server_API.app.api.v1.schemas.study_packs import (
@@ -762,6 +762,7 @@ class StructuredQaImportPreviewResponse(BaseModel):
 SourceReviewActivity = Literal["reread", "quiz", "flashcards", "cloze"]
 SourceReviewOffsetUnit = Literal["day", "month"]
 SourceReviewStatus = Literal["pending", "in_progress", "completed", "skipped"]
+SOURCE_REVIEW_BUNDLE_MAX_BYTES = 256 * 1024
 
 
 class SourceReviewScheduleRow(BaseModel):
@@ -777,11 +778,22 @@ class SourceReviewScheduleRow(BaseModel):
         return self
 
 
+class SourceReviewSourceSelection(StudyPackSourceSelection):
+    """Study Pack-compatible source selection with source-review bounds."""
+
+    source_id: str = Field(..., min_length=1, max_length=256)
+    label: Optional[str] = Field(
+        default=None,
+        max_length=200,
+        validation_alias=AliasChoices("label", "source_title"),
+    )
+
+
 class SourceReviewPlanCreateRequest(BaseModel):
     title: str = Field(..., min_length=1, max_length=200)
     starts_on: date
-    timezone: str = Field(..., min_length=1)
-    source_items: list[StudyPackSourceSelection] = Field(..., min_length=1, max_length=10)
+    timezone: str = Field(..., min_length=1, max_length=255)
+    source_items: list[SourceReviewSourceSelection] = Field(..., min_length=1, max_length=10)
     schedule: list[SourceReviewScheduleRow] = Field(..., min_length=1, max_length=24)
 
     @field_validator("title", "timezone", mode="before")
@@ -802,6 +814,19 @@ class SourceReviewPlanCreateRequest(BaseModel):
                 raise ValueError("source locator must be JSON serializable") from exc
             if locator_size > 8 * 1024:
                 raise ValueError("source locator exceeds 8 KiB")
+        bundle_size = len(
+            json.dumps(
+                {
+                    "items": [
+                        source_item.model_dump(mode="json", exclude_none=True)
+                        for source_item in self.source_items
+                    ]
+                },
+                ensure_ascii=False,
+            ).encode("utf-8")
+        )
+        if bundle_size > SOURCE_REVIEW_BUNDLE_MAX_BYTES:
+            raise ValueError("source bundle exceeds 256 KiB")
         self.computed_schedule()
         return self
 

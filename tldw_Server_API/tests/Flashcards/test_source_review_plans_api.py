@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import os
 import uuid
-from copy import deepcopy
 from datetime import datetime, timezone
 
 import pytest
@@ -20,7 +19,6 @@ from tldw_Server_API.app.api.v1.endpoints.flashcards import router as flashcards
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.tests.test_config import TestConfig
-
 
 AUTH_HEADERS = {"X-API-KEY": TestConfig.TEST_API_KEY}
 BASE_PATH = "/api/v1/flashcards/source-review-plans"
@@ -101,6 +99,7 @@ def _create_plan(client: TestClient, payload: dict | None = None) -> dict:
         ("title", "   "),
         ("title", "x" * 201),
         ("timezone", "Not/A-Timezone"),
+        ("timezone", "x" * 300),
         ("source_items", []),
         (
             "source_items",
@@ -163,13 +162,33 @@ def test_create_source_review_plan_rejects_source_size_limits(
     long_excerpt["source_items"][0]["excerpt_text"] = "x" * 20_001
     large_locator = _valid_payload()
     large_locator["source_items"][0]["locator"] = {"value": "x" * 8_192}
+    long_source_id = _valid_payload()
+    long_source_id["source_items"][0]["source_id"] = "x" * 257
+    long_label = _valid_payload()
+    long_label["source_items"][0]["label"] = "x" * 201
+    large_bundle = _valid_payload()
+    large_bundle["source_items"] = [
+        {
+            **large_bundle["source_items"][0],
+            "source_id": f"note-{index}",
+            "excerpt_text": "\U0001f4da" * 20_000,
+        }
+        for index in range(10)
+    ]
 
     statuses = [
         client_with_flashcards_db.post(BASE_PATH, json=payload).status_code
-        for payload in (too_many, long_excerpt, large_locator)
+        for payload in (
+            too_many,
+            long_excerpt,
+            large_locator,
+            long_source_id,
+            long_label,
+            large_bundle,
+        )
     ]
 
-    assert statuses == [422, 422, 422]  # nosec B101
+    assert statuses == [422, 422, 422, 422, 422, 422]  # nosec B101
 
 
 def test_create_source_review_plan_rejects_duplicate_computed_due_activity(

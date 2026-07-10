@@ -37,7 +37,7 @@ const parseSourceReviewQuizIntentFromLocation = (
     return { payload: null, error: "missing_token" }
   }
 
-  const payload = loadSourceReviewHandoff(handoffToken)
+  const payload = loadSourceReviewHandoff(handoffToken, false)
   return payload
     ? { payload, error: null }
     : { payload: null, error: "expired_or_missing" }
@@ -126,6 +126,22 @@ export const QuizPlayground: React.FC = () => {
   })
   const searchTokenCounter = React.useRef(0)
   const tabsRef = React.useRef<HTMLDivElement | null>(null)
+
+  React.useEffect(() => {
+    if (typeof window === "undefined") return
+    const params = new URLSearchParams(window.location.search)
+    if (params.get("source_review") !== "1") return
+    const handoffToken = params.get("source_review_token")?.trim()
+    if (handoffToken) loadSourceReviewHandoff(handoffToken)
+    params.delete("source_review")
+    params.delete("source_review_token")
+    const search = params.toString()
+    window.history.replaceState(
+      window.history.state,
+      "",
+      `${window.location.pathname}${search ? `?${search}` : ""}${window.location.hash}`
+    )
+  }, [])
 
   React.useEffect(() => {
     if (!initialAssessmentIntent?.deckName) return

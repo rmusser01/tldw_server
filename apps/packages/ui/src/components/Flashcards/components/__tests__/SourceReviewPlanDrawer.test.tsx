@@ -12,6 +12,9 @@ vi.mock("react-i18next", () => ({
       options?: string | { defaultValue?: string; [key: string]: unknown }
     ) => {
       if (typeof options === "string") return options
+      if (key === "option:flashcards.sourceReviewPlanDetailsHeading") {
+        return "Translated plan details"
+      }
       if (options?.defaultValue) {
         return options.defaultValue.replace(
           /\{\{(\w+)\}\}/g,
@@ -86,6 +89,7 @@ describe("SourceReviewPlanDrawer", () => {
   it("seeds the requested review schedule presets", () => {
     render(<SourceReviewPlanDrawer open onClose={vi.fn()} />)
 
+    expect(screen.getByText("Translated plan details")).toBeInTheDocument()
     for (const label of [
       "Day 1",
       "Day 3",
@@ -110,6 +114,12 @@ describe("SourceReviewPlanDrawer", () => {
     expect(
       screen.getByText("Enter a whole number between 1 and 3650.")
     ).toBeInTheDocument()
+    const offsetInput = screen.getByLabelText("Offset 1")
+    expect(offsetInput).toHaveAttribute("aria-invalid", "true")
+    expect(offsetInput).toHaveAttribute(
+      "aria-describedby",
+      "source-review-schedule-error-preset-0"
+    )
     expect(screen.getByRole("button", { name: "Create plan" })).toBeDisabled()
   })
 
@@ -129,9 +139,17 @@ describe("SourceReviewPlanDrawer", () => {
     })
 
     expect(screen.getByText("Enter a valid IANA timezone.")).toBeInTheDocument()
+    expect(screen.getByLabelText("Timezone")).toHaveAttribute(
+      "aria-describedby",
+      "source-review-timezone-error"
+    )
     expect(
       screen.getByText("Use 20,000 characters or fewer.")
     ).toBeInTheDocument()
+    expect(screen.getByLabelText("Source excerpt")).toHaveAttribute(
+      "aria-describedby",
+      "source-review-excerpt-error"
+    )
     expect(screen.getByRole("button", { name: "Add source" })).toBeDisabled()
     expect(screen.getByRole("button", { name: "Create plan" })).toBeDisabled()
   })

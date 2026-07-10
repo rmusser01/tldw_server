@@ -84,6 +84,9 @@ from tldw_Server_API.app.core.DB_Management.backends.factory import (  # noqa: E
     release_managed_backend,
 )
 from tldw_Server_API.app.core.DB_Management.backends.fts_translator import FTSQueryTranslator  # noqa: E402
+from tldw_Server_API.app.core.DB_Management.backends.pg_rls_policies import (  # noqa: E402
+    build_source_review_rls_sql,
+)
 from tldw_Server_API.app.core.DB_Management.backends.query_utils import (  # noqa: E402
     normalise_params,
     prepare_backend_many_statement,
@@ -10317,6 +10320,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 """,
                 connection=conn,
             )
+            for statement in build_source_review_rls_sql():
+                self.backend.execute(statement, connection=conn)
         except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:
             raise SchemaError(f"Failed ensuring PostgreSQL source review schema: {exc}") from exc  # noqa: TRY003
 

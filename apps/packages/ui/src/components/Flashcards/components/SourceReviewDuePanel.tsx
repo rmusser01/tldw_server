@@ -9,9 +9,11 @@ import {
   buildSourceReviewFlashcardsIntent
 } from "@/services/tldw/source-review-handoff"
 import { Button, Skeleton, Tag, Typography } from "antd"
+import type { TFunction } from "i18next"
 import {
   CalendarClock,
   Check,
+  ExternalLink,
   Play,
   Plus,
   RotateCcw,
@@ -37,13 +39,6 @@ type SourceReviewDuePanelProps = {
   onSourceReviewQuiz: (payload: SourceReviewHandoffPayload) => void
 }
 
-const activityLabels: Record<SourceReviewActivity, string> = {
-  reread: "Reread",
-  quiz: "Quiz",
-  flashcards: "Flashcards",
-  cloze: "Fill in the blank"
-}
-
 const formatDueAt = (value: string): string => {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
@@ -54,7 +49,8 @@ const formatDueAt = (value: string): string => {
 }
 
 const sourceSummaryText = (
-  occurrence: SourceReviewOccurrenceActionResponse
+  occurrence: SourceReviewOccurrenceActionResponse,
+  t: TFunction
 ): string | null => {
   const items = occurrence.source_summary ?? []
   if (items.length === 0) return null
@@ -64,9 +60,24 @@ const sourceSummaryText = (
     .filter(Boolean)
     .join(", ")
   const remainder = items.length > 2 ? `, +${items.length - 2}` : ""
-  return `${items.length} ${items.length === 1 ? "source" : "sources"}${
-    labels ? ` · ${labels}${remainder}` : ""
-  }`
+  const countLabel = t(
+    items.length === 1
+      ? "option:flashcards.sourceReviewSourceCountOne"
+      : "option:flashcards.sourceReviewSourceCountOther",
+    {
+      count: items.length,
+      defaultValue:
+        items.length === 1 ? "{{count}} source" : "{{count}} sources"
+    }
+  )
+  return labels
+    ? t("option:flashcards.sourceReviewSourceSummary", {
+        countLabel,
+        labels,
+        remainder,
+        defaultValue: "{{countLabel}} · {{labels}}{{remainder}}"
+      })
+    : countLabel
 }
 
 const handoffPayload = (
@@ -110,6 +121,37 @@ export const SourceReviewDuePanel: React.FC<SourceReviewDuePanelProps> = ({
     action: "start" | "complete" | "skip"
   } | null>(null)
   const [showAll, setShowAll] = React.useState(false)
+  const activityLabels = React.useMemo<Record<SourceReviewActivity, string>>(
+    () => ({
+      reread: t("option:flashcards.sourceReviewActivityReread", {
+        defaultValue: "Reread"
+      }),
+      quiz: t("option:flashcards.sourceReviewActivityQuiz", {
+        defaultValue: "Quiz"
+      }),
+      flashcards: t("option:flashcards.sourceReviewActivityFlashcards", {
+        defaultValue: "Flashcards"
+      }),
+      cloze: t("option:flashcards.sourceReviewActivityCloze", {
+        defaultValue: "Fill in the blank"
+      })
+    }),
+    [t]
+  )
+  const sourceTypeLabels = React.useMemo(
+    () => ({
+      note: t("option:flashcards.sourceReviewSourceTypeNote", {
+        defaultValue: "Note"
+      }),
+      media: t("option:flashcards.sourceReviewSourceTypeMedia", {
+        defaultValue: "Media"
+      }),
+      message: t("option:flashcards.sourceReviewSourceTypeMessage", {
+        defaultValue: "Message"
+      })
+    }),
+    [t]
+  )
 
   React.useEffect(() => {
     setLocalOccurrences({})
@@ -128,10 +170,17 @@ export const SourceReviewDuePanel: React.FC<SourceReviewDuePanelProps> = ({
     (dueQuery.data?.total ?? occurrences.length) - hiddenIds.size
   )
   const dueSummary = dueQuery.isError
-    ? "Source reviews unavailable"
+    ? t("option:flashcards.sourceReviewUnavailable", {
+        defaultValue: "Source reviews unavailable"
+      })
     : dueTotal > 0
-      ? `${dueTotal} due now`
-      : "No source reviews due"
+      ? t("option:flashcards.sourceReviewDueNow", {
+          count: dueTotal,
+          defaultValue: "{{count}} due now"
+        })
+      : t("option:flashcards.sourceReviewNoneDue", {
+          defaultValue: "No source reviews due"
+        })
 
   const launchOccurrence = React.useCallback(
     (occurrence: SourceReviewOccurrenceActionResponse) => {
@@ -234,7 +283,9 @@ export const SourceReviewDuePanel: React.FC<SourceReviewDuePanelProps> = ({
           />
           <div className="min-w-0">
             <Text strong id="source-review-due-heading" className="block">
-              Source reviews
+              {t("option:flashcards.sourceReviewHeading", {
+                defaultValue: "Source reviews"
+              })}
             </Text>
             <Text type="secondary" className="block text-xs" aria-live="polite">
               {dueSummary}
@@ -245,7 +296,9 @@ export const SourceReviewDuePanel: React.FC<SourceReviewDuePanelProps> = ({
           size="small"
           icon={<Plus className="size-4" />}
           onClick={() => setPlannerOpen(true)}>
-          Schedule
+          {t("option:flashcards.sourceReviewSchedule", {
+            defaultValue: "Schedule"
+          })}
         </Button>
       </div>
 
@@ -255,12 +308,18 @@ export const SourceReviewDuePanel: React.FC<SourceReviewDuePanelProps> = ({
         </div>
       ) : dueQuery.isError ? (
         <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-border px-1 pt-2">
-          <Text type="danger">Could not load due source reviews.</Text>
+          <Text type="danger">
+            {t("option:flashcards.sourceReviewLoadFailed", {
+              defaultValue: "Could not load due source reviews."
+            })}
+          </Text>
           <Button
             size="small"
             loading={dueQuery.isFetching}
             onClick={() => void dueQuery.refetch()}>
-            Retry
+            {t("option:flashcards.sourceReviewRetry", {
+              defaultValue: "Retry"
+            })}
           </Button>
         </div>
       ) : occurrences.length > 0 ? (
@@ -268,7 +327,7 @@ export const SourceReviewDuePanel: React.FC<SourceReviewDuePanelProps> = ({
           {visibleOccurrences.map((occurrence) => {
             const isPending = occurrence.status === "pending"
             const isBusy = pendingAction?.occurrenceId === occurrence.id
-            const sourceSummary = sourceSummaryText(occurrence)
+            const sourceSummary = sourceSummaryText(occurrence, t)
             const sourcePreview = occurrence.source_summary
               ?.find((item) => item.excerpt_preview?.trim())
               ?.excerpt_preview?.trim()
@@ -283,14 +342,20 @@ export const SourceReviewDuePanel: React.FC<SourceReviewDuePanelProps> = ({
                     <div className="flex flex-wrap items-center gap-2">
                       <Text strong className="truncate">
                         {occurrence.plan_title ||
-                          `Review plan ${occurrence.plan_id}`}
+                          t("option:flashcards.sourceReviewPlanFallback", {
+                            id: occurrence.plan_id,
+                            defaultValue: "Review plan {{id}}"
+                          })}
                       </Text>
                       <Tag className="!m-0">
                         {activityLabels[occurrence.activity_type]}
                       </Tag>
                     </div>
                     <Text type="secondary" className="block text-xs">
-                      Due {formatDueAt(occurrence.due_at)}
+                      {t("option:flashcards.sourceReviewDueAt", {
+                        dueAt: formatDueAt(occurrence.due_at),
+                        defaultValue: "Due {{dueAt}}"
+                      })}
                     </Text>
                     {sourceSummary ? (
                       <Text
@@ -327,7 +392,13 @@ export const SourceReviewDuePanel: React.FC<SourceReviewDuePanelProps> = ({
                           launchOccurrence(occurrence)
                         }
                       }}>
-                      {isPending ? "Start" : "Resume"}
+                      {isPending
+                        ? t("option:flashcards.sourceReviewStart", {
+                            defaultValue: "Start"
+                          })
+                        : t("option:flashcards.sourceReviewResume", {
+                            defaultValue: "Resume"
+                          })}
                     </Button>
                     {!isPending ? (
                       <Button
@@ -336,7 +407,9 @@ export const SourceReviewDuePanel: React.FC<SourceReviewDuePanelProps> = ({
                         loading={isBusy && pendingAction?.action === "complete"}
                         disabled={isBusy}
                         onClick={() => void handleComplete(occurrence.id)}>
-                        Complete
+                        {t("option:flashcards.sourceReviewComplete", {
+                          defaultValue: "Complete"
+                        })}
                       </Button>
                     ) : null}
                     <Button
@@ -346,7 +419,9 @@ export const SourceReviewDuePanel: React.FC<SourceReviewDuePanelProps> = ({
                       loading={isBusy && pendingAction?.action === "skip"}
                       disabled={isBusy}
                       onClick={() => void handleSkip(occurrence.id)}>
-                      Skip
+                      {t("option:flashcards.sourceReviewSkip", {
+                        defaultValue: "Skip"
+                      })}
                     </Button>
                   </div>
                 </div>
@@ -354,7 +429,12 @@ export const SourceReviewDuePanel: React.FC<SourceReviewDuePanelProps> = ({
                 {rereadItems.length > 0 ? (
                   <div
                     role="region"
-                    aria-label="Source snapshot"
+                    aria-label={t(
+                      "option:flashcards.sourceReviewSnapshotLabel",
+                      {
+                        defaultValue: "Source snapshot"
+                      }
+                    )}
                     className="mt-2 max-h-64 divide-y divide-border overflow-y-auto rounded border border-border bg-background">
                     {rereadItems.map((item, itemIndex) => (
                       <div
@@ -363,10 +443,40 @@ export const SourceReviewDuePanel: React.FC<SourceReviewDuePanelProps> = ({
                         <Text strong className="block text-sm">
                           {item.label || item.source_title || item.source_id}
                         </Text>
+                        <Text type="secondary" className="block text-xs">
+                          {t("option:flashcards.sourceReviewSourceIdentity", {
+                            sourceType: sourceTypeLabels[item.source_type],
+                            sourceId: item.source_id,
+                            defaultValue: "{{sourceType}} · {{sourceId}}"
+                          })}
+                        </Text>
                         {item.excerpt_text ? (
                           <Text className="mt-1 block whitespace-pre-wrap text-sm">
                             {item.excerpt_text}
                           </Text>
+                        ) : null}
+                        {item.locator &&
+                        Object.keys(item.locator).length > 0 ? (
+                          <Text
+                            type="secondary"
+                            className="mt-1 block break-words font-mono text-xs">
+                            {t("option:flashcards.sourceReviewLocator", {
+                              locator: JSON.stringify(item.locator),
+                              defaultValue: "Locator: {{locator}}"
+                            })}
+                          </Text>
+                        ) : null}
+                        {item.source_type === "media" ? (
+                          <Button
+                            type="link"
+                            size="small"
+                            className="!mt-1 !h-auto !p-0"
+                            icon={<ExternalLink className="size-3.5" />}
+                            href={`/media/${encodeURIComponent(item.source_id)}/view`}>
+                            {t("option:flashcards.sourceReviewOpenSource", {
+                              defaultValue: "Open source"
+                            })}
+                          </Button>
                         ) : null}
                       </div>
                     ))}
@@ -381,7 +491,14 @@ export const SourceReviewDuePanel: React.FC<SourceReviewDuePanelProps> = ({
                 size="small"
                 type="link"
                 onClick={() => setShowAll((current) => !current)}>
-                {showAll ? "Show fewer" : `Show all ${occurrences.length}`}
+                {showAll
+                  ? t("option:flashcards.sourceReviewShowFewer", {
+                      defaultValue: "Show fewer"
+                    })
+                  : t("option:flashcards.sourceReviewShowAll", {
+                      count: occurrences.length,
+                      defaultValue: "Show all {{count}}"
+                    })}
               </Button>
             </div>
           ) : null}

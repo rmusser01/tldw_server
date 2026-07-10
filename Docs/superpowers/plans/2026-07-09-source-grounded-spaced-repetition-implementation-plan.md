@@ -429,7 +429,7 @@ export function buildSourceReviewQuizRoute(payload: SourceReviewHandoffPayload):
 /quiz?tab=generate&source_review=1&source_review_token=<token>
 ```
 
-It must not include excerpt text or the full source bundle in the URL. Store only in `sessionStorage`; if storage is unavailable, return a safe fallback route to `/quiz?tab=generate` and let the caller show a non-blocking error.
+It must not include excerpt text or the full source bundle in the URL. Store only in `sessionStorage`; if storage is unavailable, return a safe fallback route to `/quiz?tab=generate` and let the caller show a non-blocking error. Handoffs expire after 30 minutes, are read without mutation during React render, are consumed after successful Quiz hydration, are pruned before later writes, and have their route token removed from browser history.
 
 - [x] **Step 7: Run service and hook tests**
 
@@ -670,6 +670,29 @@ Record:
 git add Docs/superpowers/plans/2026-07-09-source-grounded-spaced-repetition-implementation-plan.md 'backlog/tasks/task-12932 - Add-source-grounded-spaced-repetition-review-schedules.md'
 git commit -m "docs: finalize source review task record"
 ```
+
+---
+
+### Task 8: Address PR Review Findings
+
+**Goal:** Close the verified security, validation, provenance, storage-lifecycle, accessibility, and localization findings from independent review `019f4c90-66ed-7f21-ae05-a29786459650`.
+
+- [x] **Step 1: Add failing backend regressions**
+  - Require RLS policies for both source-review tables, including write checks.
+  - Exercise two-principal PostgreSQL isolation when the live fixture is available.
+  - Reject oversized timezone keys, source IDs, labels, and aggregate source bundles.
+- [x] **Step 2: Implement backend fixes**
+  - Extend the existing ChaCha RLS installer with missing-table guards and apply it after PostgreSQL source-review schema creation.
+  - Bound request fields and normalize timezone failures to validation errors.
+- [x] **Step 3: Add failing frontend regressions**
+  - Require reread fallback provenance, one-shot handoff consumption and pruning, URL token cleanup, and programmatic form-error associations.
+- [x] **Step 4: Implement frontend fixes**
+  - Render source type, ID, and locator in reread snapshots.
+  - Prune and consume handoffs, then remove hydrated tokens from browser history.
+  - Connect errors to controls and move source-review copy into the existing locale namespace.
+- [ ] **Step 5: Verify and re-review**
+  - Run focused backend/frontend suites, shared UI type checking, OpenAPI guard, Bandit, and diff checks.
+  - Request a fresh independent review of the updated range before marking the task done.
 
 ---
 

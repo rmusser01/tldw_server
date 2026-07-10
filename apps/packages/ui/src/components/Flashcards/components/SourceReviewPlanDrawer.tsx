@@ -7,6 +7,7 @@ import type {
   StudyPackSourceType
 } from "@/services/flashcards"
 import { Button, Drawer, Input, Select, Typography } from "antd"
+import type { TFunction } from "i18next"
 import { Plus, Trash2 } from "lucide-react"
 import React from "react"
 import { useTranslation } from "react-i18next"
@@ -17,6 +18,8 @@ const { Text } = Typography
 const EMPTY_SOURCE_ITEMS: StudyPackSourceSelection[] = []
 const SOURCE_EXCERPT_LIMIT = 20_000
 const SOURCE_LOCATOR_BYTE_LIMIT = 8 * 1024
+const SOURCE_ID_LIMIT = 256
+const SOURCE_LABEL_LIMIT = 200
 
 type SourceReviewPlanDrawerProps = {
   open: boolean
@@ -63,7 +66,7 @@ const browserTimezone = (): string => {
 }
 
 const isValidTimezone = (value: string): boolean => {
-  if (!value.trim()) return false
+  if (!value.trim() || value.trim().length > 255) return false
   try {
     new Intl.DateTimeFormat("en-US", { timeZone: value.trim() })
     return true
@@ -75,23 +78,43 @@ const isValidTimezone = (value: string): boolean => {
 const utf8Bytes = (value: string): number =>
   new TextEncoder().encode(value).length
 
-const scheduleLabel = (row: ScheduleDraft): string => {
+const scheduleLabel = (row: ScheduleDraft, t: TFunction): string => {
   const value = row.offsetValue || "0"
   if (row.offsetUnit === "month") {
-    return `${value} ${value === "1" ? "month" : "months"}`
+    return t(
+      value === "1"
+        ? "option:flashcards.sourceReviewScheduleMonthOne"
+        : "option:flashcards.sourceReviewScheduleMonthOther",
+      {
+        count: Number(value),
+        value,
+        defaultValue: value === "1" ? "{{value}} month" : "{{value}} months"
+      }
+    )
   }
-  return `Day ${value}`
+  return t("option:flashcards.sourceReviewScheduleDay", {
+    value,
+    defaultValue: "Day {{value}}"
+  })
 }
 
-const scheduleErrors = (rows: ScheduleDraft[]): Array<string | null> => {
+const scheduleErrors = (
+  rows: ScheduleDraft[],
+  t: TFunction
+): Array<string | null> => {
   const errors = rows.map((row) => {
     const value = Number(row.offsetValue)
     const maximum = row.offsetUnit === "month" ? 120 : 3650
     if (!Number.isInteger(value) || value < 1 || value > maximum) {
-      return `Enter a whole number between 1 and ${maximum}.`
+      return t("option:flashcards.sourceReviewOffsetError", {
+        maximum,
+        defaultValue: "Enter a whole number between 1 and {{maximum}}."
+      })
     }
     if (!["reread", "quiz", "flashcards", "cloze"].includes(row.activityType)) {
-      return "Choose a review activity."
+      return t("option:flashcards.sourceReviewActivityError", {
+        defaultValue: "Choose a review activity."
+      })
     }
     return null
   })
@@ -105,7 +128,9 @@ const scheduleErrors = (rows: ScheduleDraft[]): Array<string | null> => {
   duplicateRows.forEach((indices) => {
     if (indices.length < 2) return
     indices.forEach((index) => {
-      errors[index] = "Duplicate interval and activity."
+      errors[index] = t("option:flashcards.sourceReviewDuplicateError", {
+        defaultValue: "Duplicate interval and activity."
+      })
     })
   })
   return errors
@@ -165,38 +190,77 @@ export const SourceReviewPlanDrawer: React.FC<SourceReviewPlanDrawerProps> = ({
     try {
       const parsed = JSON.parse(sourceLocator)
       if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") {
-        return { value: undefined, error: "Locator must be a JSON object." }
+        return {
+          value: undefined,
+          error: t("option:flashcards.sourceReviewLocatorObjectError", {
+            defaultValue: "Locator must be a JSON object."
+          })
+        }
       }
       const serialized = JSON.stringify(parsed)
       if (utf8Bytes(serialized) > SOURCE_LOCATOR_BYTE_LIMIT) {
         return {
           value: undefined,
-          error: "Use 8 KiB or less for locator JSON."
+          error: t("option:flashcards.sourceReviewLocatorSizeError", {
+            defaultValue: "Use 8 KiB or less for locator JSON."
+          })
         }
       }
       return { value: parsed as Record<string, unknown>, error: null }
     } catch {
-      return { value: undefined, error: "Enter valid locator JSON." }
+      return {
+        value: undefined,
+        error: t("option:flashcards.sourceReviewLocatorJsonError", {
+          defaultValue: "Enter valid locator JSON."
+        })
+      }
     }
-  }, [sourceLocator])
-  const rowErrors = React.useMemo(() => scheduleErrors(schedule), [schedule])
+  }, [sourceLocator, t])
+  const rowErrors = React.useMemo(
+    () => scheduleErrors(schedule, t),
+    [schedule, t]
+  )
   const titleError =
-    title.trim().length > 200 ? "Use 200 characters or fewer." : null
+    title.trim().length > 200
+      ? t("option:flashcards.sourceReviewTitleError", {
+          defaultValue: "Use 200 characters or fewer."
+        })
+      : null
   const timezoneError = isValidTimezone(timezone)
     ? null
-    : "Enter a valid IANA timezone."
+    : t("option:flashcards.sourceReviewTimezoneError", {
+        defaultValue: "Enter a valid IANA timezone."
+      })
+  const sourceIdError =
+    sourceId.trim().length > SOURCE_ID_LIMIT
+      ? t("option:flashcards.sourceReviewSourceIdError", {
+          defaultValue: "Use 256 characters or fewer."
+        })
+      : null
+  const sourceLabelError =
+    sourceLabel.trim().length > SOURCE_LABEL_LIMIT
+      ? t("option:flashcards.sourceReviewSourceLabelError", {
+          defaultValue: "Use 200 characters or fewer."
+        })
+      : null
   const sourceExcerptError =
     sourceExcerpt.length > SOURCE_EXCERPT_LIMIT
-      ? "Use 20,000 characters or fewer."
+      ? t("option:flashcards.sourceReviewExcerptError", {
+          defaultValue: "Use 20,000 characters or fewer."
+        })
       : null
   const sourceItemsValid = sourceItems.every(
     (item) =>
+      item.source_id.length <= SOURCE_ID_LIMIT &&
+      (item.label?.length ?? 0) <= SOURCE_LABEL_LIMIT &&
       (item.excerpt_text?.length ?? 0) <= SOURCE_EXCERPT_LIMIT &&
       (!item.locator ||
         utf8Bytes(JSON.stringify(item.locator)) <= SOURCE_LOCATOR_BYTE_LIMIT)
   )
   const canAddSource =
     sourceId.trim().length > 0 &&
+    !sourceIdError &&
+    !sourceLabelError &&
     !sourceExcerptError &&
     !locatorResult.error &&
     sourceItems.length < 10
@@ -329,43 +393,81 @@ export const SourceReviewPlanDrawer: React.FC<SourceReviewPlanDrawerProps> = ({
           className="grid gap-3 sm:grid-cols-2"
           aria-labelledby="source-review-plan-details">
           <h3 id="source-review-plan-details" className="sr-only">
-            Plan details
+            {t("option:flashcards.sourceReviewPlanDetailsHeading", {
+              defaultValue: "Plan details"
+            })}
           </h3>
           <label className="space-y-1 sm:col-span-2">
             <Text strong className="block">
-              Plan title
+              {t("option:flashcards.sourceReviewPlanTitleLabel", {
+                defaultValue: "Plan title"
+              })}
             </Text>
             <Input
-              aria-label="Plan title"
+              aria-label={t("option:flashcards.sourceReviewPlanTitleLabel", {
+                defaultValue: "Plan title"
+              })}
+              aria-invalid={Boolean(titleError)}
+              aria-describedby={
+                titleError ? "source-review-title-error" : undefined
+              }
               value={title}
               status={titleError ? "error" : undefined}
               onChange={(event) => setTitle(event.target.value)}
-              placeholder="Cardiac physiology review"
+              placeholder={t(
+                "option:flashcards.sourceReviewPlanTitlePlaceholder",
+                {
+                  defaultValue: "Cardiac physiology review"
+                }
+              )}
             />
-            {titleError ? <Text type="danger">{titleError}</Text> : null}
+            {titleError ? (
+              <Text id="source-review-title-error" type="danger" role="alert">
+                {titleError}
+              </Text>
+            ) : null}
           </label>
           <label className="space-y-1">
             <Text strong className="block">
-              Start date
+              {t("option:flashcards.sourceReviewStartDateLabel", {
+                defaultValue: "Start date"
+              })}
             </Text>
             <Input
               type="date"
-              aria-label="Start date"
+              aria-label={t("option:flashcards.sourceReviewStartDateLabel", {
+                defaultValue: "Start date"
+              })}
               value={startsOn}
               onChange={(event) => setStartsOn(event.target.value)}
             />
           </label>
           <label className="space-y-1">
             <Text strong className="block">
-              Timezone
+              {t("option:flashcards.sourceReviewTimezoneLabel", {
+                defaultValue: "Timezone"
+              })}
             </Text>
             <Input
-              aria-label="Timezone"
+              aria-label={t("option:flashcards.sourceReviewTimezoneLabel", {
+                defaultValue: "Timezone"
+              })}
+              aria-invalid={Boolean(timezoneError)}
+              aria-describedby={
+                timezoneError ? "source-review-timezone-error" : undefined
+              }
               value={timezone}
               status={timezoneError ? "error" : undefined}
               onChange={(event) => setTimezone(event.target.value)}
             />
-            {timezoneError ? <Text type="danger">{timezoneError}</Text> : null}
+            {timezoneError ? (
+              <Text
+                id="source-review-timezone-error"
+                type="danger"
+                role="alert">
+                {timezoneError}
+              </Text>
+            ) : null}
           </label>
         </section>
 
@@ -375,10 +477,15 @@ export const SourceReviewPlanDrawer: React.FC<SourceReviewPlanDrawerProps> = ({
           <div className="mb-3 flex items-center justify-between gap-3">
             <div>
               <Text strong id="source-review-sources" className="block">
-                Sources
+                {t("option:flashcards.sourceReviewSourcesHeading", {
+                  defaultValue: "Sources"
+                })}
               </Text>
               <Text type="secondary" className="text-sm">
-                The saved snapshot grounds every future review.
+                {t("option:flashcards.sourceReviewSourcesHelp", {
+                  defaultValue:
+                    "The saved snapshot grounds every future review."
+                })}
               </Text>
             </div>
             <Text type="secondary" className="shrink-0 whitespace-nowrap">
@@ -387,62 +494,180 @@ export const SourceReviewPlanDrawer: React.FC<SourceReviewPlanDrawerProps> = ({
           </div>
           <div className="grid gap-2 sm:grid-cols-2">
             <label className="space-y-1">
-              <Text className="block text-sm">Source type</Text>
+              <Text className="block text-sm">
+                {t("option:flashcards.sourceReviewSourceTypeLabel", {
+                  defaultValue: "Source type"
+                })}
+              </Text>
               <Select
-                aria-label="Source type"
+                aria-label={t("option:flashcards.sourceReviewSourceTypeLabel", {
+                  defaultValue: "Source type"
+                })}
                 className="w-full"
                 value={sourceType}
                 onChange={setSourceType}
                 options={[
-                  { value: "note", label: "Note" },
-                  { value: "media", label: "Media" },
-                  { value: "message", label: "Message" }
+                  {
+                    value: "note",
+                    label: t("option:flashcards.sourceReviewSourceTypeNote", {
+                      defaultValue: "Note"
+                    })
+                  },
+                  {
+                    value: "media",
+                    label: t("option:flashcards.sourceReviewSourceTypeMedia", {
+                      defaultValue: "Media"
+                    })
+                  },
+                  {
+                    value: "message",
+                    label: t(
+                      "option:flashcards.sourceReviewSourceTypeMessage",
+                      {
+                        defaultValue: "Message"
+                      }
+                    )
+                  }
                 ]}
               />
             </label>
             <label className="space-y-1">
-              <Text className="block text-sm">Source ID</Text>
+              <Text className="block text-sm">
+                {t("option:flashcards.sourceReviewSourceIdLabel", {
+                  defaultValue: "Source ID"
+                })}
+              </Text>
               <Input
-                aria-label="Source ID"
+                aria-label={t("option:flashcards.sourceReviewSourceIdLabel", {
+                  defaultValue: "Source ID"
+                })}
+                aria-invalid={Boolean(sourceIdError)}
+                aria-describedby={
+                  sourceIdError ? "source-review-source-id-error" : undefined
+                }
                 value={sourceId}
                 onChange={(event) => setSourceId(event.target.value)}
               />
+              {sourceIdError ? (
+                <Text
+                  id="source-review-source-id-error"
+                  type="danger"
+                  role="alert">
+                  {sourceIdError}
+                </Text>
+              ) : null}
             </label>
             <label className="space-y-1 sm:col-span-2">
-              <Text className="block text-sm">Source label</Text>
+              <Text className="block text-sm">
+                {t("option:flashcards.sourceReviewSourceLabelLabel", {
+                  defaultValue: "Source label"
+                })}
+              </Text>
               <Input
-                aria-label="Source label"
+                aria-label={t(
+                  "option:flashcards.sourceReviewSourceLabelLabel",
+                  {
+                    defaultValue: "Source label"
+                  }
+                )}
+                aria-invalid={Boolean(sourceLabelError)}
+                aria-describedby={
+                  sourceLabelError
+                    ? "source-review-source-label-error"
+                    : undefined
+                }
                 value={sourceLabel}
                 onChange={(event) => setSourceLabel(event.target.value)}
-                placeholder="Optional label"
+                placeholder={t(
+                  "option:flashcards.sourceReviewSourceLabelPlaceholder",
+                  {
+                    defaultValue: "Optional label"
+                  }
+                )}
               />
+              {sourceLabelError ? (
+                <Text
+                  id="source-review-source-label-error"
+                  type="danger"
+                  role="alert">
+                  {sourceLabelError}
+                </Text>
+              ) : null}
             </label>
             <label className="space-y-1 sm:col-span-2">
-              <Text className="block text-sm">Source excerpt</Text>
+              <Text className="block text-sm">
+                {t("option:flashcards.sourceReviewSourceExcerptLabel", {
+                  defaultValue: "Source excerpt"
+                })}
+              </Text>
               <Input.TextArea
-                aria-label="Source excerpt"
+                aria-label={t(
+                  "option:flashcards.sourceReviewSourceExcerptLabel",
+                  {
+                    defaultValue: "Source excerpt"
+                  }
+                )}
+                aria-invalid={Boolean(sourceExcerptError)}
+                aria-describedby={
+                  sourceExcerptError ? "source-review-excerpt-error" : undefined
+                }
                 rows={3}
                 value={sourceExcerpt}
                 status={sourceExcerptError ? "error" : undefined}
                 onChange={(event) => setSourceExcerpt(event.target.value)}
-                placeholder="Optional excerpt to preserve with the plan"
+                placeholder={t(
+                  "option:flashcards.sourceReviewSourceExcerptPlaceholder",
+                  {
+                    defaultValue: "Optional excerpt to preserve with the plan"
+                  }
+                )}
               />
               {sourceExcerptError ? (
-                <Text type="danger">{sourceExcerptError}</Text>
+                <Text
+                  id="source-review-excerpt-error"
+                  type="danger"
+                  role="alert">
+                  {sourceExcerptError}
+                </Text>
               ) : null}
             </label>
             <label className="space-y-1 sm:col-span-2">
-              <Text className="block text-sm">Source locator JSON</Text>
+              <Text className="block text-sm">
+                {t("option:flashcards.sourceReviewSourceLocatorLabel", {
+                  defaultValue: "Source locator JSON"
+                })}
+              </Text>
               <Input.TextArea
-                aria-label="Source locator JSON"
+                aria-label={t(
+                  "option:flashcards.sourceReviewSourceLocatorLabel",
+                  {
+                    defaultValue: "Source locator JSON"
+                  }
+                )}
+                aria-invalid={Boolean(locatorResult.error)}
+                aria-describedby={
+                  locatorResult.error
+                    ? "source-review-locator-error"
+                    : undefined
+                }
                 rows={2}
                 value={sourceLocator}
                 status={locatorResult.error ? "error" : undefined}
                 onChange={(event) => setSourceLocator(event.target.value)}
-                placeholder='Optional, for example {"page": 12}'
+                placeholder={t(
+                  "option:flashcards.sourceReviewSourceLocatorPlaceholder",
+                  {
+                    defaultValue: 'Optional, for example {"page": 12}'
+                  }
+                )}
               />
               {locatorResult.error ? (
-                <Text type="danger">{locatorResult.error}</Text>
+                <Text
+                  id="source-review-locator-error"
+                  type="danger"
+                  role="alert">
+                  {locatorResult.error}
+                </Text>
               ) : null}
             </label>
           </div>
@@ -451,7 +676,9 @@ export const SourceReviewPlanDrawer: React.FC<SourceReviewPlanDrawerProps> = ({
               icon={<Plus className="size-4" />}
               disabled={!canAddSource}
               onClick={handleAddSource}>
-              Add source
+              {t("option:flashcards.sourceReviewAddSource", {
+                defaultValue: "Add source"
+              })}
             </Button>
           </div>
           {sourceItems.length > 0 ? (
@@ -471,7 +698,13 @@ export const SourceReviewPlanDrawer: React.FC<SourceReviewPlanDrawerProps> = ({
                   <Button
                     type="text"
                     icon={<Trash2 className="size-4" />}
-                    aria-label={`Remove source ${index + 1}`}
+                    aria-label={t(
+                      "option:flashcards.sourceReviewRemoveSource",
+                      {
+                        number: index + 1,
+                        defaultValue: "Remove source {{number}}"
+                      }
+                    )}
                     onClick={() =>
                       setSourceItems((current) =>
                         current.filter((_, itemIndex) => itemIndex !== index)
@@ -490,10 +723,14 @@ export const SourceReviewPlanDrawer: React.FC<SourceReviewPlanDrawerProps> = ({
           <div className="mb-3 flex items-center justify-between gap-3">
             <div>
               <Text strong id="source-review-schedule" className="block">
-                Review schedule
+                {t("option:flashcards.sourceReviewScheduleHeading", {
+                  defaultValue: "Review schedule"
+                })}
               </Text>
               <Text type="secondary" className="text-sm">
-                Choose what happens at each interval.
+                {t("option:flashcards.sourceReviewScheduleHelp", {
+                  defaultValue: "Choose what happens at each interval."
+                })}
               </Text>
             </div>
             <Button
@@ -512,7 +749,9 @@ export const SourceReviewPlanDrawer: React.FC<SourceReviewPlanDrawerProps> = ({
                   }
                 ])
               }}>
-              Add interval
+              {t("option:flashcards.sourceReviewAddInterval", {
+                defaultValue: "Add interval"
+              })}
             </Button>
           </div>
           <div className="space-y-2">
@@ -520,15 +759,31 @@ export const SourceReviewPlanDrawer: React.FC<SourceReviewPlanDrawerProps> = ({
               <div key={row.key} className="rounded border border-border p-2">
                 <div className="grid items-end gap-2 sm:grid-cols-[88px_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.25fr)_32px]">
                   <Text strong className="self-center text-sm">
-                    {scheduleLabel(row)}
+                    {scheduleLabel(row, t)}
                   </Text>
                   <label className="space-y-1">
-                    <Text className="block text-xs">Offset</Text>
+                    <Text className="block text-xs">
+                      {t("option:flashcards.sourceReviewOffsetLabel", {
+                        defaultValue: "Offset"
+                      })}
+                    </Text>
                     <Input
                       type="number"
                       min={1}
                       step={1}
-                      aria-label={`Offset ${index + 1}`}
+                      aria-label={t(
+                        "option:flashcards.sourceReviewOffsetNumber",
+                        {
+                          number: index + 1,
+                          defaultValue: "Offset {{number}}"
+                        }
+                      )}
+                      aria-invalid={Boolean(rowErrors[index])}
+                      aria-describedby={
+                        rowErrors[index]
+                          ? `source-review-schedule-error-${row.key}`
+                          : undefined
+                      }
                       value={row.offsetValue}
                       status={rowErrors[index] ? "error" : undefined}
                       onChange={(event) =>
@@ -539,41 +794,109 @@ export const SourceReviewPlanDrawer: React.FC<SourceReviewPlanDrawerProps> = ({
                     />
                   </label>
                   <label className="space-y-1">
-                    <Text className="block text-xs">Unit</Text>
+                    <Text className="block text-xs">
+                      {t("option:flashcards.sourceReviewUnitLabel", {
+                        defaultValue: "Unit"
+                      })}
+                    </Text>
                     <Select
-                      aria-label={`Unit ${index + 1}`}
+                      aria-label={t(
+                        "option:flashcards.sourceReviewUnitNumber",
+                        {
+                          number: index + 1,
+                          defaultValue: "Unit {{number}}"
+                        }
+                      )}
                       className="w-full"
                       value={row.offsetUnit}
                       onChange={(value) =>
                         updateSchedule(row.key, { offsetUnit: value })
                       }
                       options={[
-                        { value: "day", label: "Days" },
-                        { value: "month", label: "Months" }
+                        {
+                          value: "day",
+                          label: t("option:flashcards.sourceReviewUnitDays", {
+                            defaultValue: "Days"
+                          })
+                        },
+                        {
+                          value: "month",
+                          label: t("option:flashcards.sourceReviewUnitMonths", {
+                            defaultValue: "Months"
+                          })
+                        }
                       ]}
                     />
                   </label>
                   <label className="space-y-1">
-                    <Text className="block text-xs">Activity</Text>
+                    <Text className="block text-xs">
+                      {t("option:flashcards.sourceReviewActivityLabel", {
+                        defaultValue: "Activity"
+                      })}
+                    </Text>
                     <Select
-                      aria-label={`Activity ${index + 1}`}
+                      aria-label={t(
+                        "option:flashcards.sourceReviewActivityNumber",
+                        {
+                          number: index + 1,
+                          defaultValue: "Activity {{number}}"
+                        }
+                      )}
                       className="w-full"
                       value={row.activityType}
                       onChange={(value) =>
                         updateSchedule(row.key, { activityType: value })
                       }
                       options={[
-                        { value: "reread", label: "Reread" },
-                        { value: "flashcards", label: "Flashcards" },
-                        { value: "cloze", label: "Fill in the blank" },
-                        { value: "quiz", label: "Quiz" }
+                        {
+                          value: "reread",
+                          label: t(
+                            "option:flashcards.sourceReviewActivityReread",
+                            {
+                              defaultValue: "Reread"
+                            }
+                          )
+                        },
+                        {
+                          value: "flashcards",
+                          label: t(
+                            "option:flashcards.sourceReviewActivityFlashcards",
+                            {
+                              defaultValue: "Flashcards"
+                            }
+                          )
+                        },
+                        {
+                          value: "cloze",
+                          label: t(
+                            "option:flashcards.sourceReviewActivityCloze",
+                            {
+                              defaultValue: "Fill in the blank"
+                            }
+                          )
+                        },
+                        {
+                          value: "quiz",
+                          label: t(
+                            "option:flashcards.sourceReviewActivityQuiz",
+                            {
+                              defaultValue: "Quiz"
+                            }
+                          )
+                        }
                       ]}
                     />
                   </label>
                   <Button
                     type="text"
                     icon={<Trash2 className="size-4" />}
-                    aria-label={`Remove interval ${index + 1}`}
+                    aria-label={t(
+                      "option:flashcards.sourceReviewRemoveInterval",
+                      {
+                        number: index + 1,
+                        defaultValue: "Remove interval {{number}}"
+                      }
+                    )}
                     onClick={() =>
                       setSchedule((current) =>
                         current.filter((item) => item.key !== row.key)
@@ -583,6 +906,7 @@ export const SourceReviewPlanDrawer: React.FC<SourceReviewPlanDrawerProps> = ({
                 </div>
                 {rowErrors[index] ? (
                   <Text
+                    id={`source-review-schedule-error-${row.key}`}
                     type="danger"
                     role="alert"
                     className="mt-1 block text-xs">

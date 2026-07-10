@@ -1,52 +1,26 @@
 ---
 id: TASK-12932
 title: Add source-grounded spaced repetition review schedules
-status: Done
+status: In Progress
+assignee: []
+created_date: ''
+updated_date: '2026-07-10 15:22'
+labels: []
+dependencies: []
 references:
-- 'Design spec: Docs/superpowers/specs/2026-07-09-source-grounded-spaced-repetition-design.md'
-- Spec review approved by subagent 019f4a0a-f590-75e0-9fc6-ff1f4d48eba6
-- 'Implementation plan: Docs/superpowers/plans/2026-07-09-source-grounded-spaced-repetition-implementation-plan.md'
-- Plan review approved by subagent 019f4a19-7d71-7bf2-8425-db97d8674734
-- 'Task 5 Flashcards UI commit: 296cc53a4f'
-- 'Task 6 Quiz handoff commit: fb0e1266e8'
-- 'Independent code review: subagent 019f4c74-52d1-7c80-8f8a-62d5bfcb76f9'
-- 'Review fixes: c669d2b545 and e694a3b08b'
-- 'Bandit report: /tmp/bandit_task_12932.json'
-modified_files:
-- Docs/superpowers/specs/2026-07-09-source-grounded-spaced-repetition-design.md
-- Docs/superpowers/plans/2026-07-09-source-grounded-spaced-repetition-implementation-plan.md
-- tldw_Server_API/app/core/Flashcards/source_review.py
-- tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py
-- tldw_Server_API/app/api/v1/schemas/flashcards.py
-- tldw_Server_API/app/api/v1/endpoints/flashcards.py
-- tldw_Server_API/tests/ChaChaNotesDB/test_source_review_plans.py
-- tldw_Server_API/tests/ChaChaNotesDB/test_source_review_plans_postgres.py
-- tldw_Server_API/tests/Flashcards/test_source_review_plans_api.py
-- apps/packages/ui/src/services/flashcards.ts
-- apps/packages/ui/src/services/tldw/openapi-guard.ts
-- apps/packages/ui/src/services/tldw/source-review-handoff.ts
-- apps/packages/ui/src/services/__tests__/flashcards-source-review.test.ts
-- apps/packages/ui/src/services/tldw/__tests__/source-review-handoff.test.ts
-- apps/packages/ui/src/components/Flashcards/hooks/useSourceReviewQueries.ts
-- apps/packages/ui/src/components/Flashcards/hooks/index.ts
-- apps/packages/ui/src/components/Flashcards/hooks/__tests__/useSourceReviewQueries.test.tsx
-- apps/packages/ui/src/components/Flashcards/components/SourceReviewPlanDrawer.tsx
-- apps/packages/ui/src/components/Flashcards/components/SourceReviewDuePanel.tsx
-- apps/packages/ui/src/components/Flashcards/components/__tests__/SourceReviewPlanDrawer.test.tsx
-- apps/packages/ui/src/components/Flashcards/components/__tests__/SourceReviewDuePanel.test.tsx
-- apps/packages/ui/src/components/Flashcards/components/index.ts
-- apps/packages/ui/src/components/Flashcards/tabs/ReviewTab.tsx
-- apps/packages/ui/src/components/Flashcards/FlashcardsManager.tsx
-- apps/packages/ui/src/components/Flashcards/__tests__/FlashcardsManager.consistency.test.tsx
-- apps/packages/ui/src/components/Flashcards/tabs/ImportExportTab.tsx
-- apps/packages/ui/src/components/Flashcards/tabs/ImportExport/GeneratePanel.tsx
-- apps/packages/ui/src/components/Flashcards/tabs/ImportExport/shared.ts
-- apps/packages/ui/src/components/Flashcards/tabs/__tests__/ImportExportTab.llm-gating.test.tsx
-- apps/packages/ui/src/components/Quiz/QuizPlayground.tsx
-- apps/packages/ui/src/components/Quiz/__tests__/QuizPlayground.navigation.test.tsx
-- apps/packages/ui/src/components/Quiz/tabs/GenerateTab.tsx
-- apps/packages/ui/src/components/Quiz/tabs/__tests__/GenerateTab.source-review.test.tsx
-- backlog/tasks/task-12932 - Add-source-grounded-spaced-repetition-review-schedules.md
+  - >-
+    Design spec:
+    Docs/superpowers/specs/2026-07-09-source-grounded-spaced-repetition-design.md
+  - Spec review approved by subagent 019f4a0a-f590-75e0-9fc6-ff1f4d48eba6
+  - >-
+    Implementation plan:
+    Docs/superpowers/plans/2026-07-09-source-grounded-spaced-repetition-implementation-plan.md
+  - Plan review approved by subagent 019f4a19-7d71-7bf2-8425-db97d8674734
+  - 'Task 5 Flashcards UI commit: 296cc53a4f'
+  - 'Task 6 Quiz handoff commit: fb0e1266e8'
+  - 'Independent code review: subagent 019f4c74-52d1-7c80-8f8a-62d5bfcb76f9'
+  - 'Review fixes: c669d2b545 and e694a3b08b'
+  - 'Bandit report: /tmp/bandit_task_12932.json'
 ---
 
 ## Description
@@ -81,9 +55,13 @@ Execute Docs/superpowers/plans/2026-07-09-source-grounded-spaced-repetition-impl
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented the approved first slice using TDD across scheduling helpers, SQLite/PostgreSQL persistence, Flashcards-owned REST APIs, typed WebUI clients/hooks, Flashcards planner and due-review surfaces, and tokenized Quiz/Flashcards handoffs. Source snapshots remain on the server/sessionStorage rather than in URLs; starting a review does not auto-generate artifacts. Independent review findings were addressed in c669d2b545 and e694a3b08b: nonexistent civil dates are rejected, due rows receive bounded source summaries and 60-second refresh, storage failures remain recoverable, multi-source generation budgets are fair, and ambiguous card provenance is omitted. The approved Quiz first-slice limitation remains explicit: one media source and note IDs are selectable; messages and additional media remain visible as read-only snapshot context.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+Reopened after independent PR review 019f4c90-66ed-7f21-ae05-a29786459650. Confirmed findings: missing PostgreSQL RLS for source review tables; oversized timezone OSError; unbounded source IDs, labels, and aggregate bundle; incomplete reread provenance fallback; non-consuming handoff storage; form a11y associations; untranslated source-review UI copy.
+<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
@@ -93,10 +71,10 @@ Delivered source-grounded spaced-repetition plans with custom day/month schedule
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [x] #1 Acceptance criteria completed
-- [x] #2 Tests or verification recorded
-- [x] #3 Documentation updated when relevant
-- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [x] #5 Final summary added
+- [ ] #1 Acceptance criteria completed
+- [ ] #2 Tests or verification recorded
+- [ ] #3 Documentation updated when relevant
+- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [ ] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

@@ -36,6 +36,33 @@ const storage = (): Storage | null => {
   }
 }
 
+const pruneSourceReviewHandoffs = (session: Storage): void => {
+  try {
+    for (let index = session.length - 1; index >= 0; index -= 1) {
+      const key = session.key(index)
+      if (!key?.startsWith(SOURCE_REVIEW_HANDOFF_PREFIX)) continue
+      try {
+        const raw = session.getItem(key)
+        const stored = raw
+          ? (JSON.parse(raw) as Partial<StoredSourceReviewHandoff>)
+          : null
+        if (
+          !stored ||
+          typeof stored.expires_at !== "number" ||
+          stored.expires_at <= Date.now() ||
+          !isSourceReviewHandoff(stored.payload)
+        ) {
+          session.removeItem(key)
+        }
+      } catch {
+        session.removeItem(key)
+      }
+    }
+  } catch {
+    // Storage cleanup is best-effort when browser privacy settings block access.
+  }
+}
+
 const token = (): string => {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
     return crypto.randomUUID()
@@ -112,7 +139,8 @@ export function buildSourceReviewRereadContent(
 export function buildSourceReviewFlashcardsIntent(
   payload: SourceReviewHandoffPayload
 ): SourceReviewFlashcardsIntent {
-  const activityType = payload.activity_type === "cloze" ? "cloze" : "flashcards"
+  const activityType =
+    payload.activity_type === "cloze" ? "cloze" : "flashcards"
   const text = buildBoundedGenerationText(payload.source_bundle.items)
 
   return {
@@ -127,6 +155,7 @@ export function saveSourceReviewHandoff(
 ): string {
   const session = storage()
   if (!session) return ""
+  pruneSourceReviewHandoffs(session)
   const handoffToken = token()
   const stored: StoredSourceReviewHandoff = {
     expires_at: Date.now() + SOURCE_REVIEW_HANDOFF_TTL_MS,
@@ -144,13 +173,15 @@ export function saveSourceReviewHandoff(
 }
 
 export function loadSourceReviewHandoff(
-  handoffToken: string
+  handoffToken: string,
+  consume = true
 ): SourceReviewHandoffPayload | null {
   if (!handoffToken.trim()) return null
   const session = storage()
   if (!session) return null
   const key = `${SOURCE_REVIEW_HANDOFF_PREFIX}${handoffToken}`
   const removeStoredHandoff = () => {
+    if (!consume) return
     try {
       session.removeItem(key)
     } catch {
@@ -169,6 +200,7 @@ export function loadSourceReviewHandoff(
       removeStoredHandoff()
       return null
     }
+    removeStoredHandoff()
     return stored.payload
   } catch {
     removeStoredHandoff()
