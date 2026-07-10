@@ -266,6 +266,7 @@ Notes:
 - `WEATHER_UNITS`: Unit system for weather summaries (`metric|imperial`, default `metric`).
 - `WEATHER_LANG`: OpenWeather language code for descriptions (default `en`).
 - `WEATHER_TIMEOUT_MS`: OpenWeather HTTP timeout in milliseconds (default `1500`).
+- `EGRESS_ALLOWLIST`: Comma-separated outbound host allowlist. Production's strict egress profile requires `api.openweathermap.org` in this list for live OpenWeather requests; retain any other outbound hosts your deployment needs.
 
 ## Chatbooks
 - `CHATBOOKS_JOBS_BACKEND`: Backend is fixed to "core"; this environment variable exists for compatibility and is ignored.

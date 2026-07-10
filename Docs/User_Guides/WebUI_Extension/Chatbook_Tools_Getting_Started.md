@@ -76,7 +76,7 @@ default_location =        # fallback for /weather
 
 Built-in commands:
 - `/time [TZ]` → “Current time (America/New_York): 2025-11-10 20:15:00”
-- `/weather [location]` → “Boston: 42°F, clear skies” (requires provider config; otherwise “weather unavailable”). Configure `WEATHER_PROVIDER=openweather` and `OPENWEATHER_API_KEY` to enable live weather lookups.
+- `/weather [location]` → “Boston: 42°F, clear skies” (requires provider config; otherwise “weather unavailable”). Configure `WEATHER_PROVIDER=openweather` and `OPENWEATHER_API_KEY` to enable live weather lookups. Production deployments also need `api.openweathermap.org` in `EGRESS_ALLOWLIST` because the production egress profile is strict by default.
 - `/skills [filter]` → lists invocable skills for the current user (optional substring filter on name/description/argument hint).
 - `/skill <name> [args]` → executes an invocable skill and injects its output using the configured slash-command injection mode.
 

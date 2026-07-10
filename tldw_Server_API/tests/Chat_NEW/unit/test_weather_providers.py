@@ -1,7 +1,7 @@
 import httpx
 import pytest
 
-from tldw_Server_API.app.core.exceptions import EgressPolicyError
+from tldw_Server_API.app.core import http_client
 from tldw_Server_API.app.core.Integrations import weather_providers
 
 
@@ -87,11 +87,14 @@ def test_openweather_exception_metadata_does_not_expose_raw_details(monkeypatch)
 @pytest.mark.unit
 def test_openweather_central_policy_denial_returns_sanitized_error(monkeypatch):
     client = weather_providers.OpenWeatherClient(api_key="secret-key")
-
-    def fake_fetch(**kwargs):
-        raise EgressPolicyError("blocked appid=secret-key")
-
-    monkeypatch.setattr(weather_providers, "fetch", fake_fetch)
+    monkeypatch.setenv("WORKFLOWS_EGRESS_PROFILE", "strict")
+    monkeypatch.delenv("WORKFLOWS_EGRESS_ALLOWLIST", raising=False)
+    monkeypatch.delenv("EGRESS_ALLOWLIST", raising=False)
+    monkeypatch.setattr(
+        http_client,
+        "_get_httpx_client",
+        lambda **kwargs: pytest.fail("strict policy denial must happen before network I/O"),
+    )
 
     result = client.get_current(location="Boston")
     combined = f"{result.summary} {result.metadata}"
@@ -100,6 +103,74 @@ def test_openweather_central_policy_denial_returns_sanitized_error(monkeypatch):
     assert result.metadata.get("exception_type") == "EgressPolicyError"
     assert "details" not in result.metadata
     assert "secret-key" not in combined
+
+
+@pytest.mark.unit
+def test_openweather_strict_policy_allows_documented_host(monkeypatch):
+    client = weather_providers.OpenWeatherClient(api_key="secret-key")
+    monkeypatch.setenv("WORKFLOWS_EGRESS_PROFILE", "strict")
+    monkeypatch.setenv("EGRESS_ALLOWLIST", "api.openweathermap.org")
+    monkeypatch.delenv("WORKFLOWS_EGRESS_ALLOWLIST", raising=False)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.host == "api.openweathermap.org"
+        return httpx.Response(
+            200,
+            request=request,
+            json={
+                "name": "Boston",
+                "sys": {"country": "US"},
+                "main": {"temp": 12.6},
+                "weather": [{"description": "clear sky"}],
+            },
+        )
+
+    transport_client = httpx.Client(transport=httpx.MockTransport(handler))
+    monkeypatch.setattr(http_client, "_get_httpx_client", lambda **kwargs: transport_client)
+    try:
+        result = client.get_current(location="Boston")
+    finally:
+        transport_client.close()
+
+    assert result.ok
+
+
+@pytest.mark.unit
+def test_openweather_does_not_follow_provider_redirects(monkeypatch):
+    client = weather_providers.OpenWeatherClient(api_key="secret-key")
+    monkeypatch.setenv("WORKFLOWS_EGRESS_PROFILE", "permissive")
+    monkeypatch.delenv("WORKFLOWS_EGRESS_ALLOWLIST", raising=False)
+    monkeypatch.delenv("EGRESS_ALLOWLIST", raising=False)
+    requested_urls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested_urls.append(str(request.url))
+        if request.url.host == "api.openweathermap.org":
+            return httpx.Response(
+                302,
+                request=request,
+                headers={"Location": "https://example.com/capture"},
+            )
+        return httpx.Response(
+            200,
+            request=request,
+            json={
+                "name": "Redirected",
+                "main": {"temp": 10},
+                "weather": [{"description": "unexpected"}],
+            },
+        )
+
+    transport_client = httpx.Client(transport=httpx.MockTransport(handler))
+    monkeypatch.setattr(http_client, "_get_httpx_client", lambda **kwargs: transport_client)
+    try:
+        result = client.get_current(location="Boston")
+    finally:
+        transport_client.close()
+
+    assert not result.ok
+    assert len(requested_urls) == 1
+    assert requested_urls[0].startswith("https://api.openweathermap.org/")
 
 
 @pytest.mark.unit
@@ -140,6 +211,7 @@ def test_openweather_uses_central_http_fetch_for_requests(monkeypatch):
     }
     assert call["timeout"] == client.timeout_seconds
     assert call["retry"].attempts == 1
+    assert call["allow_redirects"] is False
 
 
 @pytest.mark.unit

@@ -46,8 +46,9 @@ Integrations currently contains the weather provider used by chat slash commands
 ### Security And Operations
 
 - The no-key client must not make outbound network requests.
+- OpenWeather requests use the central HTTP policy, do not follow redirects, and require `api.openweathermap.org` in `EGRESS_ALLOWLIST` when the strict production egress profile is active.
 - OpenWeather failures should return normalized unavailable/error metadata without leaking API keys.
-- The injectable HTTP client factory is the test boundary for timeout, status-code, and response-shape behavior.
+- Tests use the central HTTP helper or an in-memory transport as the boundary for policy, redirect, timeout, status-code, and response-shape behavior.
 
 ### Extension Checklist
 

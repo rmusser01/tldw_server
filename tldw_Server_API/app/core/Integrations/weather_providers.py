@@ -230,6 +230,7 @@ class OpenWeatherClient(WeatherClient):
                 params=params,
                 retry=RetryPolicy(attempts=1),
                 timeout=self.timeout_seconds,
+                allow_redirects=False,
             )
             if response.status_code >= 400:
                 return WeatherResult(
