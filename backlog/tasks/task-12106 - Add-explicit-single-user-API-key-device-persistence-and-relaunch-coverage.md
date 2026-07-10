@@ -4,7 +4,7 @@ title: Add explicit single-user API key device persistence and relaunch coverage
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-07-10 22:26'
+updated_date: '2026-07-10 22:34'
 labels: []
 dependencies:
   - TASK-12108
@@ -39,13 +39,7 @@ Add explicit device/session persistence for API keys only when users manually co
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Scope revised after the hybrid architecture was approved. This task covers only manually configured remote WebUI and browser-extension API-key persistence. Same-origin runtime auth moves to TASK-12108 and must never persist or expose the runtime key. Prior spec review required no-inherited-auth candidate probes, ordered origin transitions, strict legacy ownership classification, and device → session → memory fallback. Design: Docs/superpowers/specs/2026-07-10-single-user-api-key-device-persistence-design.md
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
-Hybrid spec review found that legacy or partial runtime writes could be misclassified as manual. Migration now scrubs ambiguous browser-readable keys after successful same-origin cookie authentication and preserves only complete new-format origin-bound manual records.
-
-Second re-review found a contradiction between preserving manual device keys and scrubbing tldwConfig.apiKey. The design now makes dedicated manual-device/manual-session records the only canonical secret locations; persisted tldwConfig is non-secret and its legacy apiKey field is always removed after migration.
+This task covers manually configured remote WebUI and browser-extension API-key persistence; same-origin runtime auth is TASK-12108 and never exposes or persists its key. Manual device persistence remains atomically in tldwConfig with complete manual/device/origin metadata so existing background and streaming readers continue working. Manual session keys use session storage. Candidate probes never inherit old auth; origin transitions are ordered; ambiguous or runtime-owned legacy values fail closed; persistence falls back device → session → memory. Design: Docs/superpowers/specs/2026-07-10-single-user-api-key-device-persistence-design.md
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

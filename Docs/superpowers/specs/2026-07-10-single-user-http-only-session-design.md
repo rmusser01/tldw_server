@@ -9,11 +9,11 @@
 
 The quickstart WebUI currently receives the configured single-user API key from a Next.js runtime-config endpoint and installs it into browser JavaScript so requests can send `X-API-KEY`. This removes repeated manual entry, but it gives every script running in the page access to a reusable server credential and relies on client storage behavior for continuity.
 
-For a WebUI and API presented through one browser origin, the server can provide the same low-friction experience without exposing the API key: exchange the server-side runtime key for a bounded, revocable, opaque session stored in an HttpOnly cookie.
+For the existing runtime-enabled loopback quickstart, where the WebUI and API are presented through one browser origin, the server can provide the same low-friction experience without exposing the API key: exchange the server-side runtime key for a bounded, revocable, opaque session stored in an HttpOnly cookie.
 
 ## Goals
 
-- A runtime-enabled same-origin single-user WebUI authenticates without API-key entry.
+- A runtime-enabled loopback quickstart WebUI authenticates without API-key entry.
 - The configured API key is never returned to browser JavaScript, browser storage, logs, or diagnostics.
 - Authentication survives hard reloads and closing/reopening the same browser profile.
 - Sessions are bounded, revocable, and invalidated by single-user API-key rotation.
@@ -28,6 +28,7 @@ For a WebUI and API presented through one browser origin, the server can provide
 - Creating a new general-purpose identity provider.
 - Making a network-exposed single-user WebUI private by itself. Enabling automatic runtime auth means anyone allowed to reach that WebUI receives the single-user session; deployment network controls remain part of the security boundary.
 - Infinite sessions. “Remember” means a bounded persistent session, not a credential that never expires.
+- Expanding automatic session provisioning to LAN hosts or reverse-proxied deployments. Those environments require an explicit trusted-proxy, public-origin, TLS, and network-access policy before they can safely opt in.
 
 ## Chosen Architecture
 
@@ -49,16 +50,18 @@ The same-origin deployment must proxy both HTTP requests and WebSocket upgrades 
 
 Create two independent random values for each session so existing access/refresh hash uniqueness constraints remain valid. Set both expiries to the single-user session lifetime; the refresh value remains server-side and reserved for safe future rotation.
 
-Tag the session record's existing `device_id` field with a versioned, non-secret binding derived from the configured API key, for example `single-user-cookie:v1:<fingerprint>`. The fingerprint is a one-way SHA-256 digest over a domain-separated API-key value; raw key material is never stored in the tag.
+Tag the session record's existing `device_id` field with the constant versioned type marker `single-user-cookie:v1`. Do not store an API-key fingerprint.
+
+`SessionManager` already indexes session tokens with HMAC keys derived from the current single-user API key. After an API-key change and settings reload/process restart, old token hashes no longer resolve. This provides key-rotation invalidation without adding a second verifier or a database value that could serve as an offline API-key-guessing oracle.
 
 Cookie validation requires all of the following:
 
 - `AUTH_MODE == "single_user"`.
 - `SessionManager.validate_session(cookie_token)` returns an active, non-expired record.
 - The record user matches the canonical single-user account.
-- The record `device_id` fingerprint matches the currently configured single-user API key using constant-time comparison.
+- The record `device_id` equals the `single-user-cookie:v1` type marker.
 
-An API-key change therefore invalidates old sessions immediately even before periodic cleanup. A mismatched session is treated as unauthenticated and may be revoked best-effort.
+An API-key change therefore invalidates old sessions when the new settings become active, normally after the required service restart. A wrong-type session is treated as unauthenticated and may be revoked best-effort.
 
 The session-validation repository query must return `device_id`; no new table or migration is required.
 
@@ -71,7 +74,7 @@ Add dedicated single-user session settings rather than overloading the CSRF cook
 - Host-only: omit `Domain`.
 - `Path=/api`.
 - `SameSite=Lax` by default.
-- `Secure` follows `SESSION_COOKIE_SECURE`; production/HTTPS remains secure, while explicit loopback HTTP development may opt out.
+- `Secure` follows `SESSION_COOKIE_SECURE`. The loopback HTTP quickstart explicitly sets it false; HTTPS deployments keep it true. Never infer this from untrusted forwarding headers.
 - Persistent `Max-Age`/`Expires`, default 30 days, matching the server-side access expiry.
 
 The backend returns only non-secret metadata such as `{ authenticated: true, expires_at }`. Responses use `Cache-Control: no-store`.
@@ -106,7 +109,7 @@ Extend the unified principal resolver with a narrowly scoped cookie path:
 
 1. Preserve current precedence for explicit `Authorization` and `X-API-KEY` headers.
 2. Only when both headers are absent and auth mode is single-user, read the configured single-user session cookie.
-3. Validate the opaque session and key fingerprint.
+3. Validate the opaque session and its constant single-user-cookie type marker.
 4. Build the existing canonical single-user `AuthPrincipal` with a distinct token/source marker such as `single_user_session`.
 5. Attach the validated session ID to request state for exact logout and auditing.
 
@@ -138,7 +141,7 @@ Remote/manual WebUI and extension builders retain their explicit credential beha
 
 ## Runtime Bootstrap
 
-The existing runtime-config endpoint becomes non-secret. Its successful payload reports capability only:
+The existing runtime-config endpoint becomes non-secret. Its successful payload reports capability only for the existing runtime-enabled loopback quickstart guard:
 
 ```json
 {
@@ -163,7 +166,8 @@ Add a separate POST bootstrap route rather than creating sessions from a GET. Th
 - Uses only a validated `TLDW_INTERNAL_API_ORIGIN` as its backend target.
 - Sends the API key only to that fixed internal origin.
 - Forwards only the known session and CSRF cookies, not arbitrary browser authorization headers.
-- Copies only the expected authentication-session and `csrf_token` `Set-Cookie` headers, content type, cache, and status data back to the browser. Multiple `Set-Cookie` values remain separate headers.
+- Copies only the expected authentication-session and `csrf_token` `Set-Cookie` headers, content type, cache, and status data back to the browser. Use the runtime's `Headers.getSetCookie()` support (with a tested equivalent only if unavailable) so multiple cookie headers are never comma-folded.
+- Retains the existing quickstart, loopback host/peer, and no-forwarding-header restrictions. A same-origin URL alone does not make a non-loopback deployment trusted.
 
 Runtime bootstrap failure reports a generic unavailable/authentication error and never falls back to the old API-key response.
 
@@ -177,7 +181,7 @@ On startup:
 4. Probe the normal authenticated profile endpoint using the ambient cookie.
 5. Clear any legacy runtime-owned key copies only after the cookie-authenticated probe succeeds.
 
-After that successful probe, perform a fail-closed secret scrub for the same-origin runtime context: always remove `apiKey` from persisted `tldwConfig` and all legacy runtime/session bridge slots. Preserve only a complete credential in the dedicated new-format manual-device/manual-session secret location with explicit `source: "manual"`, persistence scope, normalized origin, and matching non-secret manual connection metadata. Missing, malformed, partially written, or contradictory ownership metadata never preserves a browser-readable key. Preserve non-secret connection metadata. This scrub is idempotent and runs before publishing cookie-session readiness.
+After that successful probe, perform a fail-closed secret scrub for the same-origin runtime context: remove all legacy runtime/session bridge slots and every `tldwConfig.apiKey` or session record that lacks complete explicit manual source, persistence scope, normalized remote origin, and matching connection metadata. A complete manual/device credential may remain atomically in `tldwConfig`; a complete manual/session credential may remain in its session store. Missing, malformed, partially written, or contradictory ownership metadata never preserves a browser-readable key. Preserve non-secret connection metadata. This scrub is idempotent and runs before publishing cookie-session readiness.
 
 For same-origin requests, the shared request client:
 
@@ -194,9 +198,10 @@ The existing `CSRFProtectionMiddleware` already implements the double-submit coo
 
 - Enable the middleware in single-user mode.
 - In single-user mode, require CSRF only when the dedicated session cookie is present; public/headerless endpoints without that cookie retain existing behavior.
-- Keep the session-mint endpoint excluded because it authenticates with a server-to-server API-key header and the Next route performs same-origin bootstrap checks.
+- Do not add the session path to the middleware's path exclusions. The mint POST is already exempt because its server-to-server request carries `X-API-KEY`; keeping the path protected ensures DELETE logout still requires CSRF.
 - Protect session deletion and all other state-changing cookie-authenticated API calls.
 - When `CSRF_BIND_TO_USER=true`, the middleware's pre-dependency user resolver validates the session cookie through the shared helper and recovers the canonical user ID. Bound-cookie validation must not depend on an endpoint dependency that runs later.
+- Centralize effective-CSRF-state resolution so middleware setup and session issuance cannot disagree. If CSRF is explicitly disabled, the backend refuses to mint cookie sessions and bootstrap fails closed. Tests that exercise cookie sessions explicitly enable CSRF.
 
 The readable CSRF cookie is expected; the authentication session cookie remains HttpOnly.
 
@@ -217,7 +222,7 @@ Because runtime-enabled same-origin bootstrap is automatic, normal expiry does n
 - Session database unavailable: fail closed; never issue an untracked cookie.
 - Cookie write rejected: the authenticated follow-up probe fails and the UI explains that browser cookies must be enabled.
 - CSRF token missing/mismatched: return the existing 403 response; the client may perform one safe GET to obtain a fresh CSRF cookie before retrying only if current request semantics permit a retry.
-- API-key rotation: old cookie receives 401; the next runtime bootstrap uses the new server-side key and creates a new session.
+- API-key rotation: after settings reload/process restart, the old cookie receives 401; the next runtime bootstrap uses the new server-side key and creates a new session.
 
 No error or log includes the API key, opaque token, cookie header, or CSRF token.
 
@@ -230,12 +235,13 @@ No error or log includes the API key, opaque token, cookie header, or CSRF token
 - Repeated mint with a valid cookie reuses the session.
 - Cookie principal resolution succeeds without auth headers.
 - Explicit headers take precedence over cookies.
-- Expired, revoked, malformed, wrong-user, and wrong-key-fingerprint sessions fail.
+- Expired, revoked, malformed, wrong-user, and wrong-type sessions fail.
 - API-key rotation invalidates an existing cookie session.
 - Logout revokes the exact session and clears the cookie.
 - Cookie-authenticated mutation without matching CSRF fails; matching CSRF succeeds.
 - Cookie-authenticated mutation with `CSRF_BIND_TO_USER=true` resolves the cookie user before dependency execution and succeeds only with the correctly bound token.
 - `X-API-KEY` mutation remains exempt from CSRF.
+- Explicitly disabled CSRF prevents cookie-session minting and runtime bootstrap.
 - Shared WebSocket resolution accepts a valid cookie only for an exact trusted Origin and rejects missing, null, malformed, cross-origin, expired, revoked, and key-mismatched cases before accept.
 - A route-audit test covers every first-party WebSocket endpoint intended for WebUI use.
 
@@ -247,11 +253,12 @@ No error or log includes the API key, opaque token, cookie header, or CSRF token
 - Client cookie-session mode omits `X-API-KEY`, includes same-origin credentials, and adds CSRF on mutations.
 - Cookie-session WebSocket builders use the same-origin proxy and omit query credentials; remote/extension builders retain explicit credentials.
 - Failed bootstrap never writes a key to local/session storage.
-- Successful cookie probe always removes legacy `tldwConfig.apiKey`/bridge artifacts, scrubs ambiguous dedicated records, and preserves only complete new-format origin-bound credentials in the dedicated manual secret stores.
+- Successful cookie probe removes legacy bridge/runtime artifacts, scrubs ambiguous `tldwConfig.apiKey` and session records, and preserves only complete new-format origin-bound manual credentials.
+- Runtime config does not advertise cookie-session outside the loopback quickstart guard, and partial deployments do not retain a browser-visible runtime-key fallback.
 
 ### Browser Lifecycle
 
-- Runtime-enabled same-origin setup reaches an authenticated route with no key in localStorage, sessionStorage, IndexedDB, extension storage, page state, or runtime-config response.
+- A fresh runtime-enabled loopback setup reaches an authenticated route with no key in localStorage, sessionStorage, IndexedDB, extension storage, page state, or runtime-config response. An upgraded profile may retain only a separately entered, complete origin-bound manual remote credential.
 - Save/bootstrap then hard reload remains authenticated.
 - Close Chromium completely, relaunch with the same Playwright `userDataDir`, and remain authenticated without API-key entry.
 - Logout clears the cookie; relaunch does not reuse the revoked token.
@@ -281,4 +288,5 @@ The close/reopen case uses two browser processes against one persistent profile;
 3. Switch same-origin request hydration from runtime key to cookie session.
 4. Enable single-user cookie-aware CSRF and client CSRF headers in the same release.
 5. Add lifecycle E2E, migration cleanup, deployment docs, and security verification.
-6. Keep the old runtime key response permanently removed once the cookie path ships; do not retain a browser-visible compatibility fallback.
+6. Enable the existing runtime-auth flag's `cookie-session` capability only after HTTP, CSRF, standalone WebSocket proxy, and first-party WebSocket route coverage pass together.
+7. Keep the old runtime key response permanently removed once the cookie path ships; do not retain a browser-visible compatibility fallback.
