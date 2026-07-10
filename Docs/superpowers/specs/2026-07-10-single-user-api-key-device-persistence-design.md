@@ -130,11 +130,11 @@ Network errors, timeouts, and server `5xx` responses do not clear credentials. A
 
 ## Migration
 
-- Existing valid manual keys already stored persistently remain `device` credentials and gain origin metadata on the next successful load or save.
+- Existing valid manual keys already stored persistently remain `device` credentials and gain origin metadata on the next successful load or save only in a remote/manual context where no same-origin cookie session succeeded.
 - A legacy `tldwRuntimeSessionSingleUserApiKey` bridge is migrated as a manual `session` credential only when all of the following hold: the stored config is single-user, it has a valid remote server URL, no current same-origin cookie-session/runtime config is available, and runtime ownership metadata does not fingerprint-match the bridge key.
-- Existing runtime-owned keys identified by runtime ownership metadata are cleared from browser-readable storage after the cookie-session bootstrap succeeds; they are never reclassified as manual.
-- If ownership cannot be distinguished confidently or the server origin cannot be derived, do not migrate or persist the bridge key.
-- Missing or malformed runtime-ownership metadata fails closed; it does not authorize manual migration.
+- After a same-origin cookie-session bootstrap and authenticated probe succeed, clear `tldwConfig.apiKey`, all legacy bridge/runtime slots, and every incomplete or ambiguous single-user secret record before publishing readiness. Missing, malformed, partially written, or contradictory ownership metadata is evidence to scrub, never evidence to preserve or reclassify.
+- Only a complete new-format record with explicit `source: "manual"`, persistence scope, normalized remote origin, and matching non-secret manual connection metadata may survive that scrub. Preserve non-secret metadata even when its ambiguous secret is removed.
+- In a remote/manual context, if legacy ownership cannot be distinguished confidently or the server origin cannot be derived, do not migrate or persist the bridge key.
 - Placeholder keys are ignored.
 - Configurations with an unparseable server URL do not hydrate a manual key until the URL is corrected.
 
@@ -164,6 +164,7 @@ Logs and diagnostics may report credential source, persistence scope, and origin
 - Logout/reset/auth-mode changes clear both scopes.
 - Persistent-write failure falls back to session-only with a warning.
 - Legacy migration fails closed for both missing and malformed runtime-ownership metadata.
+- Upgraded same-origin profiles with an API key in `tldwConfig` and missing, malformed, partially written, or contradictory ownership metadata scrub the key after the cookie-authenticated probe succeeds.
 
 ### Remote WebUI Browser Tests
 

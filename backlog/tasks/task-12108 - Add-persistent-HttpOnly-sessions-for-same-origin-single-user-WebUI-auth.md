@@ -2,14 +2,19 @@
 id: TASK-12108
 title: Add persistent HttpOnly sessions for same-origin single-user WebUI auth
 status: In Progress
-priority: High
+assignee: []
+created_date: ''
+updated_date: '2026-07-10 22:24'
+labels: []
+dependencies: []
 references:
-- TASK-12106
-- TASK-12030
-- TASK-12127
-- https://github.com/rmusser01/tldw_server/issues/2590
+  - TASK-12106
+  - TASK-12030
+  - TASK-12127
+  - 'https://github.com/rmusser01/tldw_server/issues/2590'
 documentation:
-- Docs/superpowers/specs/2026-07-10-single-user-http-only-session-design.md
+  - Docs/superpowers/specs/2026-07-10-single-user-http-only-session-design.md
+priority: high
 ---
 
 ## Description
@@ -31,13 +36,21 @@ Replace browser-visible runtime API-key provisioning in quickstart same-origin d
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Hybrid design selected: reuse the existing AuthNZ SessionManager/sessions table for a high-entropy opaque single-user session, bind each record to a fingerprint of the current configured API key, authenticate same-origin WebUI requests through an HttpOnly host-only cookie, and reuse the existing double-submit CSRF middleware. The Next runtime endpoint becomes non-secret and a separate same-origin POST route performs the server-to-server API-key exchange. Design: Docs/superpowers/specs/2026-07-10-single-user-http-only-session-design.md
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
+Independent spec review found three blockers: omitted WebSocket cookie auth/origin validation, ambiguous legacy runtime-key cleanup, and CSRF user-binding pre-resolution. Revised the linked specs to add a shared HTTP/WebSocket cookie-principal helper, exact trusted-Origin WebSocket auth with query-secret removal, fail-closed upgraded-profile key scrubbing, and CSRF_BIND_TO_USER cookie resolution.
+<!-- SECTION:NOTES:END -->
+
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+
+<!-- SECTION:FINAL_SUMMARY:END -->
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 <!-- SECTION:FINAL_SUMMARY:END -->
 

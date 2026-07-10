@@ -43,6 +43,8 @@ Use a server-side opaque session backed by the existing AuthNZ `sessions` table 
 
 The cookie value is a high-entropy opaque random token, not the single-user API key and not a JWT. The API key remains a provisioning credential used only on the server-to-server bootstrap hop and by explicit API clients.
 
+The same-origin deployment must proxy both HTTP requests and WebSocket upgrades under the WebUI origin. The implementation verifies the existing quickstart rewrite in the standalone runtime with an upgrade integration test. If that runtime does not preserve WebSocket upgrades, the deployment layer must add an explicit same-origin WebSocket proxy before cookie-session auth is enabled; connecting directly to a different backend origin is not an acceptable fallback.
+
 ## Session Record and Key-Rotation Binding
 
 Create two independent random values for each session so existing access/refresh hash uniqueness constraints remain valid. Set both expiries to the single-user session lifetime; the refresh value remains server-side and reserved for safe future rotation.
@@ -83,6 +85,7 @@ Deleting the cookie repeats the same Path/SameSite/Secure attributes needed for 
 - Available only in single-user mode.
 - Requires a valid `X-API-KEY`; it is excluded from cookie fallback so an existing cookie cannot mint replacement sessions by itself.
 - If a valid matching session cookie is supplied, returns it without creating another database row.
+- Reusing a session does not reset the browser cookie beyond the record's existing server-side expiry. It may omit the auth `Set-Cookie` header entirely.
 - Otherwise creates an opaque server-side session and sets the cookie.
 - Uses the normal single-user IP allowlist and request audit context.
 - Never includes the API key or opaque cookie value in the response body.
@@ -93,6 +96,7 @@ Deleting the cookie repeats the same Path/SameSite/Secure attributes needed for 
 - Revokes that exact session by ID and deletes the cookie.
 - Is CSRF protected.
 - Is idempotent from the browser's perspective: an absent/invalid session still returns a cleared cookie and a non-secret logged-out result.
+- The idempotent result is evaluated after the CSRF gate when a session cookie is present. A caller with a stale cookie but no CSRF token first performs a safe GET/bootstrap to obtain a token; the server does not weaken logout CSRF protection merely to clear an already unusable cookie.
 
 The general `/api/v1/auth/logout` endpoint may delegate to the same current-session revocation helper when the authenticated credential came from this cookie, but cookie cleanup remains explicit in the response.
 
@@ -107,6 +111,30 @@ Extend the unified principal resolver with a narrowly scoped cookie path:
 5. Attach the validated session ID to request state for exact logout and auditing.
 
 Explicit header credentials always win. Cookie extraction is never enabled for multi-user mode in this change.
+
+Put opaque cookie validation and principal construction in one reusable AuthNZ helper. HTTP principal resolution, WebSocket principal resolution, CSRF pre-resolution, bootstrap reuse, and exact-session logout call this helper rather than implementing separate cookie checks.
+
+## WebSocket Authentication
+
+Browser WebSocket APIs cannot set `Authorization` or `X-API-KEY` headers. Existing first-party clients therefore put the API key or token in query parameters. Cookie-session mode must remove that browser-visible secret without regressing live features.
+
+Add a shared WebSocket principal resolver with this precedence:
+
+1. Preserve explicit header, subprotocol, and legacy query credentials for API clients, remote WebUI mode, extension mode, and multi-user compatibility.
+2. Only when no explicit credential is supplied, auth mode is single-user, and the dedicated session cookie is present, validate the opaque session through the shared helper.
+3. Before accepting cookie auth, require a non-null HTTP(S) `Origin` that exactly matches a configured trusted WebUI origin. Reuse the normalized runtime allowed-origin/public-WebUI configuration; wildcard origins never authorize cookie WebSockets.
+4. Reject malformed, `null`, cross-origin, unconfigured reverse-proxy, expired, revoked, or key-mismatched cookie connections with code `4401`/`4403` before `accept()`.
+5. Attach the canonical principal and session ID to `websocket.state` for ownership, quota, and audit code.
+
+All first-party WebSocket authentication entry points reachable from the WebUI must delegate to this resolver, including representative persona, ACP, audio/voice, meetings, workflows/watchlists, prompt-studio, sandbox, and MCP transports. Endpoint-specific scope and ownership checks still run after authentication. Add a route-audit contract test so a newly added first-party WebSocket cannot silently omit the shared cookie-auth path.
+
+In cookie-session mode, first-party WebSocket URL builders:
+
+- Resolve to the same WebUI `ws:`/`wss:` origin and the existing `/api/...` proxy path.
+- Omit `api_key` and `token` query parameters.
+- Rely on the browser to attach the host-only HttpOnly cookie.
+
+Remote/manual WebUI and extension builders retain their explicit credential behavior because their WebSocket origin does not share the WebUI cookie.
 
 ## Runtime Bootstrap
 
@@ -135,7 +163,7 @@ Add a separate POST bootstrap route rather than creating sessions from a GET. Th
 - Uses only a validated `TLDW_INTERNAL_API_ORIGIN` as its backend target.
 - Sends the API key only to that fixed internal origin.
 - Forwards only the known session and CSRF cookies, not arbitrary browser authorization headers.
-- Copies only the expected `Set-Cookie`, content type, cache, and status data back to the browser.
+- Copies only the expected authentication-session and `csrf_token` `Set-Cookie` headers, content type, cache, and status data back to the browser. Multiple `Set-Cookie` values remain separate headers.
 
 Runtime bootstrap failure reports a generic unavailable/authentication error and never falls back to the old API-key response.
 
@@ -148,6 +176,8 @@ On startup:
 3. Mark the in-memory connection source as cookie session without populating `apiKey`.
 4. Probe the normal authenticated profile endpoint using the ambient cookie.
 5. Clear any legacy runtime-owned key copies only after the cookie-authenticated probe succeeds.
+
+After that successful probe, perform a fail-closed secret scrub for the same-origin runtime context: remove `apiKey` from persisted `tldwConfig`, all legacy runtime/session bridge slots, and any single-user secret record that is not a complete new-format manual remote credential with explicit `source: "manual"`, persistence scope, and normalized origin metadata. Missing, malformed, partially written, or contradictory ownership metadata never preserves a browser-readable key. Preserve non-secret connection metadata. This scrub is idempotent and runs before publishing cookie-session readiness.
 
 For same-origin requests, the shared request client:
 
@@ -166,6 +196,7 @@ The existing `CSRFProtectionMiddleware` already implements the double-submit coo
 - In single-user mode, require CSRF only when the dedicated session cookie is present; public/headerless endpoints without that cookie retain existing behavior.
 - Keep the session-mint endpoint excluded because it authenticates with a server-to-server API-key header and the Next route performs same-origin bootstrap checks.
 - Protect session deletion and all other state-changing cookie-authenticated API calls.
+- When `CSRF_BIND_TO_USER=true`, the middleware's pre-dependency user resolver validates the session cookie through the shared helper and recovers the canonical user ID. Bound-cookie validation must not depend on an endpoint dependency that runs later.
 
 The readable CSRF cookie is expected; the authentication session cookie remains HttpOnly.
 
@@ -203,7 +234,10 @@ No error or log includes the API key, opaque token, cookie header, or CSRF token
 - API-key rotation invalidates an existing cookie session.
 - Logout revokes the exact session and clears the cookie.
 - Cookie-authenticated mutation without matching CSRF fails; matching CSRF succeeds.
+- Cookie-authenticated mutation with `CSRF_BIND_TO_USER=true` resolves the cookie user before dependency execution and succeeds only with the correctly bound token.
 - `X-API-KEY` mutation remains exempt from CSRF.
+- Shared WebSocket resolution accepts a valid cookie only for an exact trusted Origin and rejects missing, null, malformed, cross-origin, expired, revoked, and key-mismatched cases before accept.
+- A route-audit test covers every first-party WebSocket endpoint intended for WebUI use.
 
 ### Next.js Route and Client
 
@@ -211,8 +245,9 @@ No error or log includes the API key, opaque token, cookie header, or CSRF token
 - Bootstrap rejects non-POST, cross-origin, forwarded/untrusted, disabled, wrong-mode, and invalid-internal-origin cases according to the deployment guard.
 - Bootstrap sends the key only in the fixed internal request and forwards only expected response headers.
 - Client cookie-session mode omits `X-API-KEY`, includes same-origin credentials, and adds CSRF on mutations.
+- Cookie-session WebSocket builders use the same-origin proxy and omit query credentials; remote/extension builders retain explicit credentials.
 - Failed bootstrap never writes a key to local/session storage.
-- Successful cookie probe removes only legacy runtime-owned key artifacts, not unrelated manual remote credentials.
+- Successful cookie probe scrubs ambiguous/partial legacy key artifacts and preserves only complete new-format origin-bound manual remote credentials.
 
 ### Browser Lifecycle
 
@@ -221,6 +256,8 @@ No error or log includes the API key, opaque token, cookie header, or CSRF token
 - Close Chromium completely, relaunch with the same Playwright `userDataDir`, and remain authenticated without API-key entry.
 - Logout clears the cookie; relaunch does not reuse the revoked token.
 - Rotate the configured API key and confirm the old browser session is rejected and safely reprovisioned.
+- Open representative persona, ACP, and audio WebSockets through the same-origin proxy; confirm the HttpOnly session authenticates them and neither URL nor frames contain the API key.
+- Attempt a cookie-bearing WebSocket from a different Origin and confirm rejection before accept.
 
 The close/reopen case uses two browser processes against one persistent profile; another page in the same context is insufficient.
 
@@ -231,6 +268,7 @@ The close/reopen case uses two browser processes against one persistent profile;
 - Session record is server-side, bounded, exact-session revocable, and key-rotation-bound.
 - Cookie is HttpOnly, host-only, appropriately Secure, and SameSite=Lax.
 - Cookie mutations require CSRF.
+- Cookie WebSockets require exact trusted-Origin validation before accept.
 - Bootstrap target cannot be influenced by request input.
 - Bootstrap validates same-origin browser intent and fails closed.
 - No secrets appear in bodies, URLs, logs, diagnostics, storage migrations, screenshots, or test artifacts.

@@ -4,7 +4,7 @@ title: Add explicit single-user API key device persistence and relaunch coverage
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-07-10 22:17'
+updated_date: '2026-07-10 22:24'
 labels: []
 dependencies:
   - TASK-12108
@@ -42,14 +42,16 @@ Add explicit device/session persistence for API keys only when users manually co
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Scope revised after the hybrid architecture was approved. This task covers only manually configured remote WebUI and browser-extension API-key persistence. Same-origin runtime auth moves to TASK-12108 and must never persist or expose the runtime key. Prior spec review required no-inherited-auth candidate probes, ordered origin transitions, strict legacy ownership classification, and device → session → memory fallback. Design: Docs/superpowers/specs/2026-07-10-single-user-api-key-device-persistence-design.md
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+Hybrid spec review found that legacy or partial runtime writes could be misclassified as manual. Migration now scrubs ambiguous browser-readable keys after successful same-origin cookie authentication and preserves only complete new-format origin-bound manual records.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
+
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 <!-- SECTION:FINAL_SUMMARY:END -->
