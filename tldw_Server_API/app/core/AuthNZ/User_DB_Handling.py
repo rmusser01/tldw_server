@@ -181,24 +181,6 @@ def _enrich_user_with_rbac(
         for role_name in roles:
             _merge_role_permissions(role_name)
 
-    # Fallback: honor legacy role column when user_roles entries are absent
-    if not roles:
-        implicit_role = user_data.get("role")
-        if implicit_role:
-            try:
-                rname = str(implicit_role)
-                roles.append(rname)
-                if rname == "admin":
-                    is_admin_flag = True
-                _merge_role_permissions(rname)
-            except _USER_DB_NONCRITICAL_EXCEPTIONS as rb_exc_outer:  # pragma: no cover - guard against unexpected shapes
-                if pii_redact_logs:
-                    logger.debug("RBAC fallback (role column) outer failure [redacted]")
-                else:
-                    logger.debug(
-                        f"RBAC fallback (role column) outer failure for role {implicit_role}: {rb_exc_outer}"
-                    )
-
     perms = sorted(base_perms)
     if is_admin_flag:
         perms = sorted(set(perms) | {"system.configure"})

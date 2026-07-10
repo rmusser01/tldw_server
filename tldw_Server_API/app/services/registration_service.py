@@ -257,6 +257,34 @@ class RegistrationService:
 
         return was_already_member
 
+    async def _insert_role_membership(self, conn, *, user_id: int, role_name: str) -> None:
+        """Resolve a role by name and persist the user's canonical membership."""
+        if self._is_postgres_backend():
+            role_id = await conn.fetchval(
+                "SELECT id FROM roles WHERE name = $1",
+                role_name,
+            )
+            if role_id is None:
+                raise RegistrationError(f"Registration role '{role_name}' does not exist")
+            await conn.execute(
+                "INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2)",
+                user_id,
+                role_id,
+            )
+            return
+
+        cursor = await conn.execute(
+            "SELECT id FROM roles WHERE name = ?",
+            (role_name,),
+        )
+        role_row = await cursor.fetchone()
+        if not role_row:
+            raise RegistrationError(f"Registration role '{role_name}' does not exist")
+        await conn.execute(
+            "INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)",
+            (user_id, role_row[0]),
+        )
+
     async def register_user(
         self,
         username: str,
@@ -409,6 +437,12 @@ class RegistrationService:
                          int(is_active), int(is_verified), created_by, storage_quota)
                     )
                     user_id = cursor.lastrowid
+
+                await self._insert_role_membership(
+                    conn,
+                    user_id=user_id,
+                    role_name=role,
+                )
 
                 # Add password to history
                 await self._add_password_to_history(user_id, password_hash, conn)

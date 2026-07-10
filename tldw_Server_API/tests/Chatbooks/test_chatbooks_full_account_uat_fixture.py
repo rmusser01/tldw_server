@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import sqlite3
 import sys
 import zipfile
 from pathlib import Path
@@ -30,6 +31,46 @@ def _load_fixture_module() -> ModuleType:
     return module
 
 
+def _effective_auth_state(db_path: Path, user_id: int) -> tuple[list[str], list[str]]:
+    with sqlite3.connect(db_path) as conn:
+        roles = [
+            str(row[0])
+            for row in conn.execute(
+                """
+                SELECT r.name
+                FROM roles r
+                JOIN user_roles ur ON ur.role_id = r.id
+                WHERE ur.user_id = ?
+                ORDER BY r.name
+                """,
+                (user_id,),
+            ).fetchall()
+        ]
+        permissions = [
+            str(row[0])
+            for row in conn.execute(
+                """
+                SELECT DISTINCT p.name
+                FROM permissions p
+                JOIN role_permissions rp ON rp.permission_id = p.id
+                JOIN user_roles ur ON ur.role_id = rp.role_id
+                WHERE ur.user_id = ?
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM user_permissions up
+                      WHERE up.user_id = ur.user_id
+                        AND up.permission_id = p.id
+                        AND up.granted = 0
+                        AND (up.expires_at IS NULL OR up.expires_at > CURRENT_TIMESTAMP)
+                  )
+                ORDER BY p.name
+                """,
+                (user_id,),
+            ).fetchall()
+        ]
+    return roles, permissions
+
+
 @pytest.mark.asyncio
 async def test_prepare_and_reset_create_separate_source_and_empty_destination(tmp_path: Path) -> None:
     fixture = _load_fixture_module()
@@ -38,6 +79,10 @@ async def test_prepare_and_reset_create_separate_source_and_empty_destination(tm
     archive_path = Path(prepared["archive_path"])
     expected_path = Path(prepared["expected_path"])
     expected = json.loads(expected_path.read_text(encoding="utf-8"))
+    roles, permissions = _effective_auth_state(
+        tmp_path / "source" / "users.db",
+        int(prepared["source_user_id"]),
+    )
 
     assert archive_path == tmp_path / "source" / "full-account.chatbook"
     assert archive_path.is_file()
@@ -45,6 +90,8 @@ async def test_prepare_and_reset_create_separate_source_and_empty_destination(tm
     assert expected["source_user_id"] != expected["destination_user_id"]
     assert expected["media"]["artifact_sha256"]
     assert expected["embeddings"]["collection_ids"]
+    assert roles == ["user"]
+    assert {"notifications.read", "notifications.control"}.issubset(permissions)
 
     with zipfile.ZipFile(archive_path) as archive:
         names = set(archive.namelist())
@@ -75,6 +122,10 @@ async def test_prepare_and_reset_create_separate_source_and_empty_destination(tm
     assert fixture.sha256_bytes(archived_media) == expected["media"]["artifact_sha256"]
 
     reset = await fixture.reset_destination(tmp_path)
+    destination_roles, destination_permissions = _effective_auth_state(
+        tmp_path / "destination" / "users.db",
+        int(reset["destination_user_id"]),
+    )
 
     assert reset["destination_user_id"] == expected["destination_user_id"]
     assert reset["counts"] == {
@@ -83,6 +134,8 @@ async def test_prepare_and_reset_create_separate_source_and_empty_destination(tm
         "media_stored_artifacts": 0,
         "embeddings": 0,
     }
+    assert destination_roles == ["user"]
+    assert {"notifications.read", "notifications.control"}.issubset(destination_permissions)
     assert archive_path.is_file(), "reset-destination must not move or copy the source archive"
     with pytest.raises(fixture.FixtureVerificationError, match="destination"):
         await fixture.verify(tmp_path)

@@ -99,19 +99,23 @@ async def _activate_phase(root: Path, phase: str) -> Path:
 
 async def _create_user(*, username: str, email: str) -> int:
     pool = await get_db_pool()
+    role_name = "user"
     users_db = UsersDB(pool)
     await users_db.initialize()
     created = await users_db.create_user(
         username=username,
         email=email,
         password_hash=_fixture_password_hash(username),
-        role="user",
+        role=role_name,
         is_active=True,
         is_verified=True,
     )
-    if isinstance(created, dict):
-        return int(created["id"])
-    return int(created)
+    user_id = int(created["id"]) if isinstance(created, dict) else int(created)
+    users_repo = AuthnzUsersRepo(db_pool=pool)
+    await users_repo.assign_role_if_missing(user_id=user_id, role_name=role_name)
+    if not await users_repo.has_role_assignment(user_id=user_id, role_name=role_name):
+        raise RuntimeError(f"Fixture role '{role_name}' does not exist or could not be assigned")
+    return user_id
 
 
 def _new_chatbook_service(user_id: int) -> ChatbookService:
