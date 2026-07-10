@@ -26568,6 +26568,51 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         except BackendDatabaseError as exc:
             raise CharactersRAGDBError(f"Failed to create source review plan: {exc}") from exc  # noqa: TRY003
 
+    def _source_review_occurrences_by_plan(
+        self,
+        plan_ids: list[int],
+    ) -> dict[int, list[dict[str, Any]]]:
+        """Load active occurrence summaries for source review plan responses."""
+        occurrences: dict[int, list[dict[str, Any]]] = {plan_id: [] for plan_id in plan_ids}
+        if not plan_ids:
+            return occurrences
+
+        placeholders = ", ".join("?" for _ in plan_ids)
+        rows = self.execute_query(
+            f"""
+            SELECT id, plan_id, offset_value, offset_unit, activity_type, due_at,
+                   status, launch_state_json, started_at, completed_at,
+                   completion_source, created_at, last_modified, deleted,
+                   client_id, version
+              FROM source_review_occurrences
+             WHERE deleted = ? AND plan_id IN ({placeholders})
+             ORDER BY plan_id ASC, due_at ASC, id ASC
+            """,  # nosec B608 - placeholders are generated from an internal integer list.
+            (False, *plan_ids),
+        ).fetchall()
+        for row in rows:
+            item = self._deserialize_row_fields(row, ["launch_state_json"])
+            if item is not None:
+                occurrences[int(item["plan_id"])].append(item)
+        return occurrences
+
+    def get_source_review_plan(self, plan_id: int) -> dict[str, Any] | None:
+        """Return one active source review plan with occurrence summaries."""
+        row = self.execute_query(
+            """
+            SELECT id, title, starts_on, timezone, source_bundle_json,
+                   created_at, last_modified, deleted, client_id, version
+              FROM source_review_plans
+             WHERE id = ? AND deleted = ?
+            """,
+            (plan_id, False),
+        ).fetchone()
+        plan = self._deserialize_row_fields(row, ["source_bundle_json"])
+        if plan is None:
+            return None
+        plan["occurrences"] = self._source_review_occurrences_by_plan([int(plan["id"])])[int(plan["id"])]
+        return plan
+
     def list_source_review_plans(
         self,
         *,
@@ -26593,10 +26638,15 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             """,
             (False, limit, offset),
         ).fetchall()
-        return (
-            [item for row in rows if (item := self._deserialize_row_fields(row, ["source_bundle_json"])) is not None],
-            total,
-        )
+        plans = [
+            item
+            for row in rows
+            if (item := self._deserialize_row_fields(row, ["source_bundle_json"])) is not None
+        ]
+        occurrences = self._source_review_occurrences_by_plan([int(plan["id"]) for plan in plans])
+        for plan in plans:
+            plan["occurrences"] = occurrences[int(plan["id"])]
+        return plans, total
 
     def list_due_source_review_occurrences(
         self,

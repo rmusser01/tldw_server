@@ -482,6 +482,33 @@ def test_create_source_review_plan_persists_bundle_and_occurrences_atomically(
     assert all(row["last_modified"] == created_at for row in occurrences)  # nosec B101
 
 
+def test_source_review_plan_projections_include_occurrence_summaries(
+    source_review_db: CharactersRAGDB,
+) -> None:
+    plan_id = _create_source_review_plan(
+        source_review_db,
+        schedule=[
+            _schedule_row("2026-07-10T07:00:00Z", activity_type="reread"),
+            _schedule_row(
+                "2026-07-12T07:00:00Z",
+                activity_type="quiz",
+                offset_value=3,
+            ),
+        ],
+    )
+
+    plan = source_review_db.get_source_review_plan(plan_id)
+    listed, total = source_review_db.list_source_review_plans()
+
+    assert plan is not None  # nosec B101
+    assert total == 1  # nosec B101
+    assert [row["activity_type"] for row in plan["occurrences"]] == [  # nosec B101
+        "reread",
+        "quiz",
+    ]
+    assert listed[0]["occurrences"] == plan["occurrences"]  # nosec B101
+
+
 def test_create_source_review_plan_rolls_back_after_occurrence_insert_failure(
     source_review_db: CharactersRAGDB,
 ) -> None:
