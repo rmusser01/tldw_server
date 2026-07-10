@@ -690,9 +690,10 @@ git commit -m "docs: finalize source review task record"
   - Render source type, ID, and locator in reread snapshots.
   - Prune and consume handoffs, then remove hydrated tokens from browser history.
   - Connect errors to controls and move source-review copy into the existing locale namespace.
-- [ ] **Step 5: Verify and re-review**
+- [x] **Step 5: Verify and re-review**
   - Run focused backend/frontend suites, shared UI type checking, OpenAPI guard, Bandit, and diff checks.
   - Request a fresh independent review of the updated range before marking the task done.
+  - Fresh subagent review was requested but could not start because the reviewer service reached its usage limit. The committed range was reviewed locally, and all six existing Gemini PR threads were resolved: three with tested fixes and three with verified no-change explanations.
 
 ---
 
