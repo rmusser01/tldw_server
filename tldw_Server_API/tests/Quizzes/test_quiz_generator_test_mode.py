@@ -220,6 +220,33 @@ def test_normalize_questions_accepts_strict_emq_answer_forms(
 
 
 @pytest.mark.parametrize(
+    ("options", "raw_answer"),
+    [
+        (["1", "x"], "1"),
+        (["B", "x"], "B"),
+        (["x", "x"], "x"),
+    ],
+)
+def test_normalize_questions_rejects_ambiguous_emq_string_answers(
+    options: list[str],
+    raw_answer: str,
+) -> None:
+    raw_questions = _valid_emq_questions()
+    for question in raw_questions:
+        question["options"] = list(options)
+    raw_questions[0]["correct_answer"] = raw_answer
+    raw_questions[1]["correct_answer"] = 1
+
+    with pytest.raises(ValueError, match="ambiguous"):
+        _normalize_questions(
+            raw_questions,
+            default_source_type="note",
+            default_source_id="note-emq",
+            generation_profile="emq",
+        )
+
+
+@pytest.mark.parametrize(
     ("field", "invalid_value"),
     [
         ("group_id", None),
@@ -369,6 +396,42 @@ def test_normalize_questions_preserves_legacy_mcq_answer_fallback() -> None:
     assert questions[0]["correct_answer"] == 0
 
 
+@pytest.mark.parametrize("generation_profile", ["standard_recall", "mixed_assessment", "best_of_five"])
+def test_normalize_questions_clears_group_metadata_for_non_emq_profiles(
+    generation_profile: str,
+) -> None:
+    options = ["A", "B", "C", "D", "E"] if generation_profile == "best_of_five" else ["A", "B"]
+    questions = _normalize_questions(
+        [
+            {
+                "question_type": "multiple_choice",
+                "question_text": "Ordinary multiple choice question",
+                "group_id": "llm-supplied-group",
+                "group_prompt": "LLM-supplied group prompt",
+                "options": options,
+                "correct_answer": 0,
+            }
+        ],
+        default_source_type="note",
+        default_source_id="note-ordinary",
+        generation_profile=generation_profile,
+    )
+
+    assert questions[0]["group_id"] is None
+    assert questions[0]["group_prompt"] is None
+
+
+def test_validate_emq_groups_does_not_mutate_answers_before_all_invariants_pass() -> None:
+    questions = _valid_emq_questions()
+    questions[0]["correct_answer"] = "B"
+    questions[1]["options"] = ["First option", "Different option", "Third option"]
+
+    with pytest.raises(ValueError, match="option bank"):
+        quiz_generator._validate_emq_groups(questions)
+
+    assert questions[0]["correct_answer"] == "B"
+
+
 def test_emq_limiter_keeps_whole_groups_and_non_emq_uses_plain_slicing() -> None:
     limiter = getattr(quiz_generator, "_limit_questions_by_profile", None)
     assert limiter is not None
@@ -467,39 +530,13 @@ async def test_generate_quiz_from_sources_persists_complete_emq_group_in_test_mo
 
 
 @pytest.mark.asyncio
-async def test_generate_quiz_validates_emq_after_limiting_before_persistence(
+async def test_generate_quiz_requests_at_least_two_emq_stems_from_production_llm(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    limiter = getattr(quiz_generator, "_limit_questions_by_profile", None)
-    validator = getattr(quiz_generator, "_validate_emq_groups", None)
-    assert limiter is not None
-    assert validator is not None
+    captured: dict = {}
 
-    events: list[tuple[str, int]] = []
-
-    def recording_validator(questions):
-        events.append(("validate", len(questions)))
-        return validator(questions)
-
-    def recording_limiter(questions, *, num_questions, generation_profile):
-        events.append(("limit", len(questions)))
-        return limiter(
-            questions,
-            num_questions=num_questions,
-            generation_profile=generation_profile,
-        )
-
-    original_provenance_validator = quiz_generator._validate_strict_provenance
-
-    def recording_provenance(questions, selected_sources):
-        events.append(("provenance", len(questions)))
-        return original_provenance_validator(questions, selected_sources)
-
-    def recording_persistence(**kwargs):
-        events.append(("persist", len(kwargs["questions"])))
-        return {"quiz": {"id": 1}, "questions": kwargs["questions"]}
-
-    async def fake_llm(**_kwargs):
+    async def fake_llm(**kwargs):
+        captured.update(kwargs)
         return {"questions": _valid_emq_questions()}
 
     monkeypatch.setattr(
@@ -511,10 +548,11 @@ async def test_generate_quiz_validates_emq_after_limiting_before_persistence(
     )
     monkeypatch.setattr(quiz_generator, "_call_quiz_generation_llm", fake_llm)
     monkeypatch.setattr(quiz_generator, "extract_response_content", lambda raw: raw)
-    monkeypatch.setattr(quiz_generator, "_validate_emq_groups", recording_validator)
-    monkeypatch.setattr(quiz_generator, "_limit_questions_by_profile", recording_limiter)
-    monkeypatch.setattr(quiz_generator, "_validate_strict_provenance", recording_provenance)
-    monkeypatch.setattr(quiz_generator, "_persist_generated_quiz", recording_persistence)
+    monkeypatch.setattr(
+        quiz_generator,
+        "_persist_generated_quiz",
+        lambda **kwargs: {"quiz": {"id": 1}, "questions": kwargs["questions"]},
+    )
 
     result = await generate_quiz_from_sources(
         db=Mock(),
@@ -525,13 +563,43 @@ async def test_generate_quiz_validates_emq_after_limiting_before_persistence(
     )
 
     assert len(result["questions"]) == 2
-    assert events == [
-        ("validate", 2),
-        ("limit", 2),
-        ("validate", 2),
-        ("provenance", 2),
-        ("persist", 2),
-    ]
+    assert "generate 2 quiz questions" in captured["prompt"]
+
+
+@pytest.mark.asyncio
+async def test_generate_quiz_does_not_persist_emq_invalidated_after_limiting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_llm(**_kwargs):
+        return {"questions": _valid_emq_questions()}
+
+    persistence = Mock()
+    monkeypatch.setattr(
+        quiz_generator,
+        "resolve_quiz_sources",
+        lambda *_args, **_kwargs: [
+            {"source_type": "note", "source_id": "note-emq", "text": "EMQ evidence."}
+        ],
+    )
+    monkeypatch.setattr(quiz_generator, "_call_quiz_generation_llm", fake_llm)
+    monkeypatch.setattr(quiz_generator, "extract_response_content", lambda raw: raw)
+    monkeypatch.setattr(
+        quiz_generator,
+        "_limit_questions_by_profile",
+        lambda questions, **_kwargs: list(questions)[:1],
+    )
+    monkeypatch.setattr(quiz_generator, "_persist_generated_quiz", persistence)
+
+    with pytest.raises(ValueError, match="at least two stems"):
+        await generate_quiz_from_sources(
+            db=Mock(),
+            media_db=Mock(),
+            sources=[{"source_type": "note", "source_id": "note-emq"}],
+            num_questions=1,
+            generation_profile="emq",
+        )
+
+    persistence.assert_not_called()
 
 
 @pytest.mark.asyncio

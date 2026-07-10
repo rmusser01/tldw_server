@@ -28,6 +28,7 @@ def test_quiz_generation_prompt_template_formats_with_literal_citation_object():
     assert '"source_type": "media" | "note" | "flashcard_deck" | "flashcard_card"' in rendered_prompt
     assert '"group_id": "Optional EMQ group identifier"' in rendered_prompt
     assert '"group_prompt": "Optional shared EMQ group prompt"' in rendered_prompt
+    assert '"correct_answer": 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9' in rendered_prompt
     assert "For EMQ" in rendered_prompt
     assert "at least two stems" in rendered_prompt
     assert "Allowed sources for source_citations.source_type/source_id: note:note-1" in rendered_prompt

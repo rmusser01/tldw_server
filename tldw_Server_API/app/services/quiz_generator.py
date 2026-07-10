@@ -140,7 +140,7 @@ Return a JSON object in this exact format:
       "group_id": "Optional EMQ group identifier",
       "group_prompt": "Optional shared EMQ group prompt",
       "options": ["A", "B", "C", "D", "E if required by the profile"],
-      "correct_answer": 0 | 1 | 2 | 3 | 4 | "true" | "false" | "the answer",
+      "correct_answer": 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | "true" | "false" | "the answer",
       "explanation": "Brief explanation of why this is correct",
       "hint": "Optional short hint shown on request",
       "hint_penalty_points": 0,
@@ -163,7 +163,7 @@ Return a JSON object in this exact format:
 Important:
 - For multiple_choice: options must be an array of answer strings, correct_answer is the 0-based index
 - For Best of Five: multiple_choice options must be exactly 5 strings
-- For EMQ: create at least two stems per group; repeat one nonempty group_id, group_prompt, and shared bank of 2-10 options on every stem
+- For EMQ: create at least two stems per group; repeat one nonempty group_id, group_prompt, and shared bank of 2-10 options on every stem; correct_answer is a 0-based index into that bank
 - For true_false: correct_answer must be exactly "true" or "false"
 - For fill_blank: question_text should contain ___ where answer goes, correct_answer is the word/phrase
 - hint_penalty_points must be a non-negative integer
@@ -349,30 +349,32 @@ def _normalize_emq_mc_answer(raw: Any, options: list[str]) -> int:
     if isinstance(raw, bool):
         raise ValueError("EMQ correct_answer must be a valid option index, letter, or exact label")
     if isinstance(raw, int):
-        index = raw
-    elif isinstance(raw, str):
-        text = raw.strip()
-        if text.isdigit():
-            index = int(text)
-        elif len(text) == 1 and "A" <= text.upper() <= chr(ord("A") + len(options) - 1):
-            index = ord(text.upper()) - ord("A")
-        else:
-            try:
-                return options.index(text)
-            except ValueError as exc:
-                raise ValueError(
-                    "EMQ correct_answer must be a valid option index, letter, or exact label"
-                ) from exc
-    else:
+        if 0 <= raw < len(options):
+            return raw
+        raise ValueError("EMQ correct_answer index is out of range")
+    if not isinstance(raw, str):
         raise ValueError("EMQ correct_answer must be a valid option index, letter, or exact label")
 
-    if 0 <= index < len(options):
-        return index
-    raise ValueError("EMQ correct_answer index is out of range")
+    text = raw.strip()
+    candidates: set[int] = set()
+    if text.isdigit():
+        index = int(text)
+        if 0 <= index < len(options):
+            candidates.add(index)
+    if len(text) == 1 and "A" <= text.upper() <= chr(ord("A") + len(options) - 1):
+        candidates.add(ord(text.upper()) - ord("A"))
+    candidates.update(index for index, option in enumerate(options) if option == text)
+
+    if len(candidates) == 1:
+        return candidates.pop()
+    if candidates:
+        raise ValueError("EMQ correct_answer is ambiguous")
+    raise ValueError("EMQ correct_answer must be a valid option index, letter, or exact label")
 
 
 def _validate_emq_groups(questions: Sequence[dict[str, Any]]) -> None:
     groups: dict[str, dict[str, Any]] = {}
+    normalized_answers: list[tuple[dict[str, Any], int]] = []
     for question in questions:
         if question.get("question_type") != "multiple_choice":
             raise ValueError("EMQ questions must use the multiple_choice question type")
@@ -395,9 +397,8 @@ def _validate_emq_groups(questions: Sequence[dict[str, Any]]) -> None:
         if not isinstance(options, list) or not 2 <= len(options) <= MAX_EMQ_OPTIONS:
             raise ValueError(f"EMQ options must contain 2-{MAX_EMQ_OPTIONS} entries")
 
-        question["correct_answer"] = _normalize_emq_mc_answer(
-            question.get("correct_answer"),
-            options,
+        normalized_answers.append(
+            (question, _normalize_emq_mc_answer(question.get("correct_answer"), options))
         )
         group = groups.setdefault(
             group_id,
@@ -413,6 +414,8 @@ def _validate_emq_groups(questions: Sequence[dict[str, Any]]) -> None:
         raise ValueError("EMQ generation must include at least one group")
     if any(group["count"] < 2 for group in groups.values()):
         raise ValueError("Every EMQ group must include at least two stems")
+    for question, correct_answer in normalized_answers:
+        question["correct_answer"] = correct_answer
 
 
 def _normalize_tf_answer(raw: Any) -> str:
@@ -883,8 +886,8 @@ def _normalize_questions(
         question_payload = {
             "question_type": q_type,
             "question_text": question_text,
-            "group_id": str(raw.get("group_id") or "").strip() or None,
-            "group_prompt": str(raw.get("group_prompt") or "").strip() or None,
+            "group_id": (str(raw.get("group_id") or "").strip() or None) if is_emq else None,
+            "group_prompt": (str(raw.get("group_prompt") or "").strip() or None) if is_emq else None,
             "options": options,
             "correct_answer": correct_answer,
             "explanation": str(raw.get("explanation") or "").strip() or None,
@@ -1471,8 +1474,9 @@ async def generate_quiz_from_sources(
 
     content = _build_content_from_evidence(evidence)
 
+    prompt_question_count = max(2, num_questions) if normalized_profile == "emq" else num_questions
     prompt = _format_quiz_generation_prompt(
-        num_questions=num_questions,
+        num_questions=prompt_question_count,
         content=content,
         difficulty=difficulty,
         question_types=normalized_types,
