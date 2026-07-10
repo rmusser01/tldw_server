@@ -1,7 +1,7 @@
 ---
 id: TASK-12106
 title: Add explicit single-user API key device persistence and relaunch coverage
-status: To Do
+status: In Progress
 priority: High
 references:
 - TASK-12030
@@ -29,7 +29,8 @@ Provision same-origin single-user WebUI auth from runtime configuration, add exp
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
+Approved design: runtime-provisioned same-origin auth remains automatic; manual single-user setup defaults Remember on this device to enabled; unchecked credentials are session-only; keys are origin-bound; runtime keys are never persisted; extension device storage must remain local rather than synced.
+Design specification: docs/superpowers/specs/2026-07-10-single-user-api-key-device-persistence-design.md
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
