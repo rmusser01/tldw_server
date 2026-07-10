@@ -1,5 +1,6 @@
 import json
 import zipfile
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -12,8 +13,11 @@ from tldw_Server_API.app.api.v1.schemas.chatbook_schemas import CreateChatbookRe
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 from tldw_Server_API.app.core.Chat.document_generator import (
     DocumentGeneratorService,
+)
+from tldw_Server_API.app.core.Chat.document_generator import (
     DocumentType as GeneratedDocumentType,
 )
+from tldw_Server_API.app.core.Chatbooks.chatbook_account_inventory import ACCOUNT_DATA_INVENTORY
 from tldw_Server_API.app.core.Chatbooks.chatbook_models import (
     FULL_ACCOUNT_EXPORT_MODE,
     ChatbookVersion,
@@ -21,7 +25,6 @@ from tldw_Server_API.app.core.Chatbooks.chatbook_models import (
     ExportJob,
     ExportStatus,
 )
-from tldw_Server_API.app.core.Chatbooks.chatbook_account_inventory import ACCOUNT_DATA_INVENTORY
 from tldw_Server_API.app.core.Chatbooks.chatbook_service import ChatbookService
 from tldw_Server_API.app.core.Chatbooks.services.jobs_worker import ChatbooksJobError, _handle_export
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
@@ -238,9 +241,42 @@ async def test_full_account_export_expands_to_existing_content_and_manifest_summ
     assert summary["warning_count"] >= 1
     assert summary["archive_size_bytes"] == Path(file_path).stat().st_size
     assert summary["post_write_verification"] is True
+    assert service.build_export_job_metadata(file_path)["post_write_verification"] is True
     assert manifest["statistics"]["notes"] == 1
     assert manifest["statistics"]["account_profiles"] == 1
     assert secret_user_id not in json.dumps(manifest)
+
+
+def test_completed_export_api_timestamps_include_explicit_timezone(tmp_path, monkeypatch):
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path))
+    db = CharactersRAGDB(db_path=str(tmp_path / "chatbooks.db"), client_id="chatbooks-timezone")
+    service = ChatbookService(user_id=1, db=db, user_id_int=1)
+    job = ExportJob(
+        job_id="timezone-job",
+        user_id=service.user_id,
+        status=ExportStatus.COMPLETED,
+        chatbook_name="Timezone export",
+    )
+    job.started_at = job.created_at
+    job.completed_at = job.created_at
+    service._save_export_job(job)
+
+    app = FastAPI()
+    app.include_router(chatbooks_endpoints.router, prefix="/api/v1")
+    app.dependency_overrides[chatbooks_endpoints.get_chatbook_service] = lambda: service
+    app.dependency_overrides[chatbooks_endpoints.get_request_user] = _override_user
+
+    response = TestClient(app).get(f"/api/v1/chatbooks/export/jobs/{job.job_id}")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["progress_percentage"] == 100
+    assert payload["total_items"] == 0
+    assert payload["processed_items"] == 0
+    for field in ("created_at", "started_at", "completed_at"):
+        timestamp = payload[field]
+        parsed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+        assert parsed.tzinfo is not None, f"{field} was timezone-naive: {timestamp}"
 
 
 @pytest.mark.asyncio

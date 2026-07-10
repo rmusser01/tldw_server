@@ -58,6 +58,21 @@ def _build_chacha_db_for_user(user_id: str) -> CharactersRAGDB:
         raise
 
 
+def _count_result_items(counts: object) -> int:
+    """Return the non-negative item total from redacted result counts."""
+    if not isinstance(counts, dict):
+        return 0
+    total = 0
+    for value in counts.values():
+        if isinstance(value, bool):
+            continue
+        try:
+            total += max(0, int(value or 0))
+        except (TypeError, ValueError):
+            continue
+    return total
+
+
 async def run_chatbooks_core_jobs_worker(stop_event: asyncio.Event | None = None) -> None:
     """Shared background worker for Chatbooks when using core Jobs backend.
 
@@ -256,6 +271,21 @@ async def run_chatbooks_core_jobs_worker(stop_event: asyncio.Event | None = None
                             ej.status = ExportStatus.COMPLETED
                             ej.completed_at = datetime.now(timezone.utc)
                             ej.output_path = file_path
+                            terminal_metadata = svc.build_export_job_metadata(file_path)
+                            inventory_summary = terminal_metadata.get("account_inventory_summary")
+                            counts = (
+                                inventory_summary.get("counts")
+                                if isinstance(inventory_summary, dict)
+                                else None
+                            )
+                            total_items = _count_result_items(counts)
+                            ej.progress_percentage = 100
+                            ej.total_items = total_items
+                            ej.processed_items = total_items
+                            ej.metadata = {
+                                **(ej.metadata if isinstance(ej.metadata, dict) else {}),
+                                **terminal_metadata,
+                            }
                             try:
                                 ej.file_size_bytes = Path(file_path).stat().st_size if file_path else None
                             except _CORE_JOBS_WORKER_NONCRITICAL_EXCEPTIONS as e:
@@ -370,19 +400,44 @@ async def run_chatbooks_core_jobs_worker(stop_event: asyncio.Event | None = None
                         if ij and ij.status != ImportStatus.CANCELLED:
                             ij.status = ImportStatus.COMPLETED
                             ij.completed_at = datetime.now(timezone.utc)
+                            ij.progress_percentage = 100
                             if isinstance(result, dict):
-                                imported_items = result.get("imported_items")
-                                skipped_non_restorable = result.get("skipped_non_restorable")
-                                ij.warnings = result.get("warnings") if isinstance(result.get("warnings"), list) else []
+                                imported_items = (
+                                    result.get("imported_items")
+                                    if isinstance(result.get("imported_items"), dict)
+                                    else {}
+                                )
+                                skipped_non_restorable = (
+                                    result.get("skipped_non_restorable")
+                                    if isinstance(result.get("skipped_non_restorable"), dict)
+                                    else {}
+                                )
+                                successful_count = _count_result_items(imported_items)
+                                skipped_count = _count_result_items(skipped_non_restorable)
+                                total_items = successful_count + skipped_count
+                                ij.total_items = total_items
+                                ij.processed_items = total_items
+                                ij.successful_items = successful_count
+                                ij.skipped_items = skipped_count
+                                result_warnings = (
+                                    result.get("warnings")
+                                    if isinstance(result.get("warnings"), list)
+                                    else []
+                                )
+                                ij.warnings = list(ij.warnings or []) + [
+                                    warning
+                                    for warning in result_warnings
+                                    if warning not in (ij.warnings or [])
+                                ]
                                 ij.metadata = {
-                                    "imported_items": imported_items if isinstance(imported_items, dict) else {},
+                                    **(ij.metadata if isinstance(ij.metadata, dict) else {}),
+                                    "imported_items": imported_items,
                                     "inventory_summary": result.get("inventory_summary"),
-                                    "skipped_non_restorable": (
-                                        skipped_non_restorable
-                                        if isinstance(skipped_non_restorable, dict)
-                                        else {}
-                                    ),
+                                    "skipped_non_restorable": skipped_non_restorable,
                                 }
+                            else:
+                                ij.total_items = 0
+                                ij.processed_items = 0
                             svc._save_import_job(ij)
                         jm.complete_job(int(job["id"]), worker_id=worker_id, lease_id=str(lease_id), completion_token=str(lease_id))
                     else:

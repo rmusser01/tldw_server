@@ -337,4 +337,92 @@ describe("ChatbooksPlaygroundPage backup-all flow", () => {
     expect(screen.getByText("4")).toBeInTheDocument()
     expect(screen.getByText("Verified")).toBeInTheDocument()
   })
+
+  it("renders a completed historical job with stale zero progress as complete", async () => {
+    tldwClientMock.listChatbookExportJobs.mockResolvedValueOnce({
+      jobs: [
+        {
+          job_id: "completed-stale-progress",
+          status: "completed",
+          chatbook_name: "Historical backup",
+          created_at: "2026-07-09T12:00:00Z",
+          progress_percentage: 0
+        }
+      ]
+    })
+
+    render(<ChatbooksPlaygroundPage />)
+    fireEvent.click(screen.getByRole("tab", { name: "Jobs" }))
+
+    await waitFor(() => {
+      expect(screen.getByText("Historical backup")).toBeInTheDocument()
+    })
+    const progressBars = screen.getAllByRole("progressbar")
+    expect(progressBars.length).toBeGreaterThan(0)
+    progressBars.forEach((bar) => expect(bar).toHaveAttribute("aria-valuenow", "100"))
+    expect(screen.queryByText("0%")).not.toBeInTheDocument()
+  })
+
+  it("does not render failed terminal jobs at zero or complete progress", async () => {
+    tldwClientMock.listChatbookImportJobs.mockResolvedValueOnce({
+      jobs: [
+        {
+          job_id: "failed-stale-progress",
+          status: "failed",
+          created_at: "2026-07-09T12:00:00Z",
+          progress_percentage: 0
+        },
+        {
+          job_id: "failed-complete-progress",
+          status: "failed",
+          created_at: "2026-07-09T12:01:00Z",
+          progress_percentage: 100
+        }
+      ]
+    })
+
+    render(<ChatbooksPlaygroundPage />)
+    fireEvent.click(screen.getByRole("tab", { name: "Jobs" }))
+
+    await waitFor(() => {
+      expect(screen.getByText("failed-stale-progress")).toBeInTheDocument()
+    })
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument()
+    expect(screen.queryByText("100%")).not.toBeInTheDocument()
+  })
+
+  it("treats a legacy timezone-naive API timestamp as UTC before local formatting", async () => {
+    const originalTimezone = process.env.TZ
+    process.env.TZ = "America/Los_Angeles"
+    const localeSpy = vi
+      .spyOn(Date.prototype, "toLocaleString")
+      .mockImplementation(function () {
+        return this.toISOString()
+      })
+    tldwClientMock.listChatbookExportJobs.mockResolvedValueOnce({
+      jobs: [
+        {
+          job_id: "legacy-naive-time",
+          status: "completed",
+          chatbook_name: "UTC backup",
+          created_at: "2026-07-09T12:00:00"
+        }
+      ]
+    })
+
+    try {
+      render(<ChatbooksPlaygroundPage />)
+      fireEvent.click(screen.getByRole("tab", { name: "Jobs" }))
+
+      await waitFor(() => {
+        expect(screen.getByText("UTC backup")).toBeInTheDocument()
+      })
+      expect(screen.getAllByText("2026-07-09T12:00:00.000Z").length).toBeGreaterThan(0)
+      expect(screen.queryByText("2026-07-09T19:00:00.000Z")).not.toBeInTheDocument()
+    } finally {
+      localeSpy.mockRestore()
+      if (originalTimezone === undefined) delete process.env.TZ
+      else process.env.TZ = originalTimezone
+    }
+  })
 })

@@ -1074,9 +1074,21 @@ const extractJobList = (payload: any): ChatbookJob[] => {
 }
 
 const computeProgress = (job: ChatbookJob) => {
-  if (typeof job.progress_percentage === "number") return job.progress_percentage
+  const status = (job.status || "").toLowerCase()
+  if (status === "completed") return 100
+  const isIncompleteTerminal = ["failed", "cancelled", "expired"].includes(status)
+  if (typeof job.progress_percentage === "number") {
+    if (
+      isIncompleteTerminal &&
+      (job.progress_percentage <= 0 || job.progress_percentage >= 100)
+    ) {
+      return undefined
+    }
+    return job.progress_percentage
+  }
   if (job.total_items && job.processed_items != null) {
-    return Math.round((job.processed_items / job.total_items) * 100)
+    const progress = Math.round((job.processed_items / job.total_items) * 100)
+    return isIncompleteTerminal && progress >= 100 ? undefined : progress
   }
   return undefined
 }
@@ -1125,7 +1137,10 @@ const getJobPostWriteVerification = (job: ChatbookJob) => {
 
 const formatTimestamp = (value?: string) => {
   if (!value) return "—"
-  const date = new Date(value)
+  const normalizedValue = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(value)
+    ? `${value.replace(" ", "T")}Z`
+    : value
+  const date = new Date(normalizedValue)
   if (Number.isNaN(date.getTime())) return String(value)
   return date.toLocaleString()
 }

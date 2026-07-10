@@ -958,6 +958,30 @@ class ChatbookService:
         return None
 
     @staticmethod
+    def _serialize_job_timestamp(value: datetime | None) -> str | None:
+        """Serialize a job timestamp with explicit UTC semantics."""
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc).isoformat(sep=" ")
+
+    @staticmethod
+    def _job_timestamp_for_api(value: datetime | None) -> datetime | None:
+        """Return an aware UTC timestamp for API serialization."""
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+
+    @classmethod
+    def _normalize_job_timestamps_for_api(cls, job: ExportJob | ImportJob) -> None:
+        for field_name in ("created_at", "started_at", "completed_at", "expires_at"):
+            if hasattr(job, field_name):
+                setattr(job, field_name, cls._job_timestamp_for_api(getattr(job, field_name)))
+
+    @staticmethod
     def _normalize_timestamp_to_naive(value: datetime | None) -> datetime | None:
         """Convert aware timestamps to naive UTC for consistent downstream handling."""
         if value is None:
@@ -2253,6 +2277,12 @@ class ChatbookService:
         except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
             return {}
         summary = manifest.get("account_inventory_summary") or {}
+        counts = summary.get("counts") if isinstance(summary.get("counts"), dict) else {}
+        total_items = sum(
+            max(0, int(count or 0))
+            for count in counts.values()
+            if isinstance(count, (int, float)) and not isinstance(count, bool)
+        )
         return {
             "account_inventory_summary": summary,
             "archive_size_bytes": summary.get("archive_size_bytes")
@@ -2261,6 +2291,7 @@ class ChatbookService:
             "pointer_only_count": int(summary.get("pointer_only_count") or 0),
             "warning_count": int(summary.get("warning_count") or 0),
             "sensitive_category_count": int(summary.get("sensitive_category_count") or 0),
+            "total_items": total_items,
         }
 
     async def _stabilize_archive_size(
@@ -2560,7 +2591,14 @@ class ChatbookService:
                 job.completed_at = now_utc
                 job.output_path = file_path
                 job.file_size_bytes = Path(file_path).stat().st_size if file_path else None
-                job.metadata = self.build_export_job_metadata(file_path)
+                terminal_metadata = self.build_export_job_metadata(file_path)
+                job.total_items = int(terminal_metadata.get("total_items") or 0)
+                job.processed_items = job.total_items
+                job.progress_percentage = 100
+                job.metadata = {
+                    **(job.metadata if isinstance(job.metadata, dict) else {}),
+                    **terminal_metadata,
+                }
                 # Build (optionally signed) download URL and expiry
                 job.expires_at = self._get_export_expiry(now_utc)
                 download_expires_at = self._get_download_expiry(now_utc, job.expires_at)
@@ -3207,15 +3245,23 @@ class ChatbookService:
                     skipped_count = sum(int(count or 0) for count in skipped_non_restorable.values())
                     job.progress_percentage = 100
                     job.successful_items = successful_count
-                    job.skipped_items = max(job.skipped_items, skipped_count)
-                    job.processed_items = max(job.processed_items, successful_count + skipped_count)
-                    job.total_items = max(job.total_items, successful_count + skipped_count)
-                    job.warnings = result.get("warnings") if isinstance(result.get("warnings"), list) else []
+                    job.skipped_items = skipped_count
+                    job.processed_items = successful_count + skipped_count
+                    job.total_items = job.processed_items
+                    result_warnings = result.get("warnings") if isinstance(result.get("warnings"), list) else []
+                    job.warnings = list(job.warnings or []) + [
+                        warning for warning in result_warnings if warning not in (job.warnings or [])
+                    ]
                     job.metadata = {
+                        **(job.metadata if isinstance(job.metadata, dict) else {}),
                         "imported_items": imported_items,
                         "inventory_summary": result.get("inventory_summary"),
                         "skipped_non_restorable": skipped_non_restorable,
                     }
+                else:
+                    job.progress_percentage = 100
+                    job.total_items = 0
+                    job.processed_items = 0
             else:
                 job.status = ImportStatus.FAILED
                 job.error_message = message
@@ -4521,6 +4567,8 @@ class ChatbookService:
         if job and getattr(self, "_jobs_adapter", None) is not None:
             with contextlib.suppress(_CHATBOOK_NONCRITICAL_EXCEPTIONS):
                 self._jobs_adapter.apply_export_status(job)
+        if job:
+            self._normalize_job_timestamps_for_api(job)
         return job
 
     def get_import_job(self, job_id: str) -> ImportJob | None:
@@ -4529,6 +4577,8 @@ class ChatbookService:
         if job and getattr(self, "_jobs_adapter", None) is not None:
             with contextlib.suppress(_CHATBOOK_NONCRITICAL_EXCEPTIONS):
                 self._jobs_adapter.apply_import_status(job)
+        if job:
+            self._normalize_job_timestamps_for_api(job)
         return job
 
     def list_export_jobs(self, status: str | None = None, limit: int = 100, offset: int = 0) -> list[ExportJob]:
@@ -4651,6 +4701,9 @@ class ChatbookService:
                             self._jobs_adapter.apply_export_status(job, job_row=row)
                 except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
                     pass
+
+            for job in jobs:
+                self._normalize_job_timestamps_for_api(job)
 
             return jobs
         except _CHATBOOK_NONCRITICAL_EXCEPTIONS as e:
@@ -4780,6 +4833,9 @@ class ChatbookService:
                             self._jobs_adapter.apply_import_status(job, job_row=row)
                 except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
                     pass
+
+            for job in jobs:
+                self._normalize_job_timestamps_for_api(job)
 
             return jobs
         except _CHATBOOK_NONCRITICAL_EXCEPTIONS as e:
@@ -7443,6 +7499,9 @@ class ChatbookService:
         connection that didn't share the transaction with execute_query's connection.
         """
         try:
+            if job.status == ExportStatus.COMPLETED:
+                job.progress_percentage = 100
+                job.processed_items = job.total_items
             self.db.execute_query("""
                 INSERT OR REPLACE INTO export_jobs (
                     job_id, user_id, status, chatbook_name, output_path,
@@ -7453,12 +7512,12 @@ class ChatbookService:
             """, (
                 job.job_id, job.user_id, job.status.value, job.chatbook_name,
                 job.output_path,
-                job.created_at.strftime('%Y-%m-%d %H:%M:%S.%f') if job.created_at else None,
-                job.started_at.strftime('%Y-%m-%d %H:%M:%S.%f') if job.started_at else None,
-                job.completed_at.strftime('%Y-%m-%d %H:%M:%S.%f') if job.completed_at else None,
+                self._serialize_job_timestamp(job.created_at),
+                self._serialize_job_timestamp(job.started_at),
+                self._serialize_job_timestamp(job.completed_at),
                 job.error_message, job.progress_percentage, job.total_items,
                 job.processed_items, job.file_size_bytes, job.download_url,
-                job.expires_at.strftime('%Y-%m-%d %H:%M:%S.%f') if job.expires_at else None,
+                self._serialize_job_timestamp(job.expires_at),
                 json.dumps(job.metadata or {}, ensure_ascii=False)
             ), commit=commit)
         except _CHATBOOK_NONCRITICAL_EXCEPTIONS as e:
@@ -7478,7 +7537,7 @@ class ChatbookService:
             True if the job was successfully claimed, False if already claimed or not found
         """
         try:
-            started_at = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')
+            started_at = self._serialize_job_timestamp(datetime.now(timezone.utc))
             cursor = self.db.execute_query(
                 """UPDATE export_jobs
                    SET status = ?, started_at = ?
@@ -7511,7 +7570,7 @@ class ChatbookService:
             True if the job was successfully claimed, False if already claimed or not found
         """
         try:
-            started_at = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')
+            started_at = self._serialize_job_timestamp(datetime.now(timezone.utc))
             cursor = self.db.execute_query(
                 """UPDATE import_jobs
                    SET status = ?, started_at = ?
@@ -7616,6 +7675,9 @@ class ChatbookService:
         connection that didn't share the transaction with execute_query's connection.
         """
         try:
+            if job.status == ImportStatus.COMPLETED:
+                job.progress_percentage = 100
+                job.processed_items = job.total_items
             self.db.execute_query("""
                 INSERT OR REPLACE INTO import_jobs (
                     job_id, user_id, status, chatbook_path,
@@ -7626,9 +7688,9 @@ class ChatbookService:
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 job.job_id, job.user_id, job.status.value, job.chatbook_path,
-                job.created_at.strftime('%Y-%m-%d %H:%M:%S.%f') if job.created_at else None,
-                job.started_at.strftime('%Y-%m-%d %H:%M:%S.%f') if job.started_at else None,
-                job.completed_at.strftime('%Y-%m-%d %H:%M:%S.%f') if job.completed_at else None,
+                self._serialize_job_timestamp(job.created_at),
+                self._serialize_job_timestamp(job.started_at),
+                self._serialize_job_timestamp(job.completed_at),
                 job.error_message, job.progress_percentage, job.total_items,
                 job.processed_items, job.successful_items, job.failed_items,
                 job.skipped_items, json.dumps(job.conflicts), json.dumps(job.warnings),
