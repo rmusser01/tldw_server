@@ -8,6 +8,7 @@ from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -288,6 +289,76 @@ async def test_zero_items_persists_text_and_requests_short_audio(
     assert audio_requests[0]["occurrence_id"] == result.occurrence_id
     assert audio_requests[0]["output_id"] == result.output_id
     assert "No qualifying new material was found" in (output_paths / saved.storage_path).read_text()
+
+
+@pytest.mark.asyncio
+async def test_text_fulfillment_schedules_post_artifact_delivery(output_paths: Path) -> None:
+    job = _job()
+    contract = _contract()
+    contract["delivery"]["email"] = {
+        "enabled": True,
+        "recipients": ["digest@example.com"],
+    }
+    job.output_prefs_json = json.dumps({"briefing_pipeline": contract})
+    run = _run()
+    watchlists_db = FakeWatchlistsDB(job=job, run=run, items=make_items(1))
+    scheduler = MagicMock()
+    scheduler.submit = AsyncMock(return_value="delivery-task-text")
+
+    result = await fulfill_watchlist_briefing(
+        user_id=1,
+        job=job,
+        run=run,
+        watchlists_db=watchlists_db,
+        collections_db=FakeCollectionsDB(),
+        scheduler=scheduler,
+    )
+
+    assert result.artifact_status == "ready"
+    assert scheduler.submit.await_args.args[0] == "watchlists_deliver_briefing"
+    assert scheduler.submit.await_args.kwargs["depends_on"] is None
+    assert watchlists_db.occurrence.delivery_task_id == "delivery-task-text"
+
+
+@pytest.mark.asyncio
+async def test_audio_fulfillment_schedules_delivery_after_audio_dependency(
+    monkeypatch: pytest.MonkeyPatch,
+    output_paths: Path,
+) -> None:
+    job = _job(audio=True)
+    contract = _contract(audio=True)
+    contract["delivery"]["email"] = {
+        "enabled": True,
+        "recipients": ["digest@example.com"],
+    }
+    job.output_prefs_json = json.dumps({"briefing_pipeline": contract})
+    run = _run()
+    watchlists_db = FakeWatchlistsDB(job=job, run=run, items=make_items(1))
+    scheduler = MagicMock()
+    scheduler.submit = AsyncMock(return_value="delivery-task-audio")
+
+    async def trigger(**kwargs: Any) -> AudioBriefingTriggerResult:
+        return AudioBriefingTriggerResult(
+            status="submitted",
+            task_id="audio-task-7",
+            audio_request_id=kwargs["audio_request_id"],
+        )
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Watchlists.briefing_fulfillment.trigger_audio_briefing",
+        trigger,
+    )
+
+    await fulfill_watchlist_briefing(
+        user_id=1,
+        job=job,
+        run=run,
+        watchlists_db=watchlists_db,
+        collections_db=FakeCollectionsDB(),
+        scheduler=scheduler,
+    )
+
+    assert scheduler.submit.await_args.kwargs["depends_on"] == ["audio-task-7"]
 
 
 @pytest.mark.asyncio
@@ -574,6 +645,60 @@ async def test_failed_audio_stage_retries_without_recreating_ready_text(
 
 
 @pytest.mark.asyncio
+async def test_downstream_audio_stage_retry_resumes_same_audio_attempt(
+    monkeypatch: pytest.MonkeyPatch,
+    output_paths: Path,
+) -> None:
+    job = _job(audio=True)
+    run = _run()
+    watchlists_db = FakeWatchlistsDB(job=job, run=run, items=make_items(1))
+    collections_db = FakeCollectionsDB()
+    request_ids: list[str] = []
+
+    async def trigger(**kwargs: Any) -> AudioBriefingTriggerResult:
+        request_ids.append(kwargs["audio_request_id"])
+        return AudioBriefingTriggerResult(
+            status="submitted",
+            task_id=f"audio-task-{len(request_ids)}",
+            audio_request_id=kwargs["audio_request_id"],
+        )
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Watchlists.briefing_fulfillment.trigger_audio_briefing",
+        trigger,
+    )
+    first = await fulfill_watchlist_briefing(
+        user_id=1,
+        job=job,
+        run=run,
+        watchlists_db=watchlists_db,
+        collections_db=collections_db,
+    )
+    stages = json.loads(watchlists_db.occurrence.stages_json)
+    stages["compose_audio_script"] = {"status": "ready"}
+    stages["persist_audio_script"] = {"status": "ready"}
+    stages["generate_audio"] = {"status": "failed", "retryable": True}
+    watchlists_db.update_briefing_occurrence(
+        first.occurrence_id,
+        stages=stages,
+        artifact_status="failed",
+        audio_task_id=None,
+    )
+
+    retried = await retry_briefing_stage(
+        user_id=1,
+        occurrence_id=first.occurrence_id,
+        stage="generate_audio",
+        watchlists_db=watchlists_db,
+        collections_db=collections_db,
+    )
+
+    assert retried.audio_task_id == "audio-task-2"
+    assert request_ids == [request_ids[0], request_ids[0]]
+    assert collections_db.create_calls == 1
+
+
+@pytest.mark.asyncio
 async def test_failed_text_persistence_retries_same_occurrence(
     monkeypatch: pytest.MonkeyPatch,
     output_paths: Path,
@@ -617,6 +742,124 @@ async def test_failed_text_persistence_retries_same_occurrence(
     assert retried.stages["persist_text"]["status"] == "ready"
     assert retried.output_id is not None
     assert collections_db.create_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_text_retry_schedules_delivery_after_artifact_recovers(
+    monkeypatch: pytest.MonkeyPatch,
+    output_paths: Path,
+) -> None:
+    from tldw_Server_API.app.core.Watchlists import briefing_fulfillment as module
+
+    job = _job()
+    contract = _contract()
+    contract["delivery"]["email"] = {
+        "enabled": True,
+        "recipients": ["digest@example.com"],
+    }
+    job.output_prefs_json = json.dumps({"briefing_pipeline": contract})
+    run = _run()
+    watchlists_db = FakeWatchlistsDB(job=job, run=run, items=make_items(1))
+    collections_db = FakeCollectionsDB()
+    scheduler = MagicMock()
+    scheduler.submit = AsyncMock(return_value="delivery-task-after-text-retry")
+    persist = module._persist_text_output
+    attempts = 0
+
+    async def fail_once(**kwargs: Any) -> int:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise OSError("disk full")
+        return await persist(**kwargs)
+
+    monkeypatch.setattr(module, "_persist_text_output", fail_once)
+
+    failed = await fulfill_watchlist_briefing(
+        user_id=1,
+        job=job,
+        run=run,
+        watchlists_db=watchlists_db,
+        collections_db=collections_db,
+        scheduler=scheduler,
+    )
+    retried = await retry_briefing_stage(
+        user_id=1,
+        occurrence_id=failed.occurrence_id,
+        stage="persist_text",
+        watchlists_db=watchlists_db,
+        collections_db=collections_db,
+        scheduler=scheduler,
+    )
+
+    assert retried.output_id is not None
+    assert retried.delivery_status == "waiting_for_artifacts"
+    assert scheduler.submit.await_count == 1
+    assert scheduler.submit.await_args.kwargs["depends_on"] is None
+
+
+@pytest.mark.asyncio
+async def test_audio_retry_replaces_delivery_dependency(
+    monkeypatch: pytest.MonkeyPatch,
+    output_paths: Path,
+) -> None:
+    job = _job(audio=True)
+    contract = _contract(audio=True)
+    contract["delivery"]["email"] = {
+        "enabled": True,
+        "recipients": ["digest@example.com"],
+    }
+    job.output_prefs_json = json.dumps({"briefing_pipeline": contract})
+    run = _run()
+    watchlists_db = FakeWatchlistsDB(job=job, run=run, items=make_items(1))
+    collections_db = FakeCollectionsDB()
+    scheduler = MagicMock()
+    scheduler.submit = AsyncMock(side_effect=["delivery-task-old", "delivery-task-new"])
+    request_ids: list[str] = []
+
+    async def trigger(**kwargs: Any) -> AudioBriefingTriggerResult:
+        request_ids.append(kwargs["audio_request_id"])
+        return AudioBriefingTriggerResult(
+            status="submitted",
+            task_id=f"audio-task-{len(request_ids)}",
+            audio_request_id=kwargs["audio_request_id"],
+        )
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Watchlists.briefing_fulfillment.trigger_audio_briefing",
+        trigger,
+    )
+    first = await fulfill_watchlist_briefing(
+        user_id=1,
+        job=job,
+        run=run,
+        watchlists_db=watchlists_db,
+        collections_db=collections_db,
+        scheduler=scheduler,
+    )
+    stages = json.loads(watchlists_db.occurrence.stages_json)
+    stages["generate_audio"] = {"status": "failed", "retryable": True}
+    watchlists_db.update_briefing_occurrence(
+        first.occurrence_id,
+        stages=stages,
+        artifact_status="failed",
+        audio_task_id=None,
+    )
+
+    await retry_briefing_stage(
+        user_id=1,
+        occurrence_id=first.occurrence_id,
+        stage="generate_audio",
+        watchlists_db=watchlists_db,
+        collections_db=collections_db,
+        scheduler=scheduler,
+    )
+
+    assert scheduler.submit.await_count == 2
+    assert scheduler.submit.await_args.kwargs["depends_on"] == ["audio-task-2"]
+    assert scheduler.submit.await_args.kwargs["idempotency_key"] == (
+        "watchlists-briefing-delivery:1:31:audio:audio-task-2"
+    )
 
 
 @pytest.mark.asyncio

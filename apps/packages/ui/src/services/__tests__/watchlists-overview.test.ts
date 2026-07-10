@@ -6,7 +6,8 @@ const mocks = vi.hoisted(() => ({
   fetchWatchlistJobs: vi.fn(),
   fetchWatchlistOutputs: vi.fn(),
   fetchWatchlistRuns: vi.fn(),
-  fetchWatchlistSources: vi.fn()
+  fetchWatchlistSources: vi.fn(),
+  getLatestWatchlistBriefing: vi.fn()
 }))
 
 vi.mock("@/services/watchlists", () => ({
@@ -15,7 +16,8 @@ vi.mock("@/services/watchlists", () => ({
   fetchWatchlistJobs: (...args: unknown[]) => mocks.fetchWatchlistJobs(...args),
   fetchWatchlistOutputs: (...args: unknown[]) => mocks.fetchWatchlistOutputs(...args),
   fetchWatchlistRuns: (...args: unknown[]) => mocks.fetchWatchlistRuns(...args),
-  fetchWatchlistSources: (...args: unknown[]) => mocks.fetchWatchlistSources(...args)
+  fetchWatchlistSources: (...args: unknown[]) => mocks.fetchWatchlistSources(...args),
+  getLatestWatchlistBriefing: (...args: unknown[]) => mocks.getLatestWatchlistBriefing(...args)
 }))
 
 import {
@@ -29,6 +31,7 @@ import {
 describe("watchlists overview service", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.getLatestWatchlistBriefing.mockResolvedValue(null)
   })
 
   it("classifies source health from active flag and status", () => {
@@ -258,6 +261,7 @@ describe("watchlists overview service", () => {
       })
     ])
     expect(result.systemHealth).toBe("degraded")
+    expect(result.latestBriefing).toBeNull()
   })
 
   it("forwards selected Watchlist scope into aggregate fetches", async () => {
@@ -340,6 +344,42 @@ describe("watchlists overview service", () => {
       page: 1,
       size: 100
     })
+    expect(mocks.getLatestWatchlistBriefing).toHaveBeenCalledWith({
+      watchlist_id: 42
+    })
+  })
+
+  it("includes the latest briefing projection and surfaces request errors", async () => {
+    const emptyPage = { items: [], total: 0, has_more: false }
+    mocks.fetchWatchlistSources.mockResolvedValue(emptyPage)
+    mocks.fetchWatchlistJobs.mockResolvedValue(emptyPage)
+    mocks.fetchScrapedItems.mockResolvedValue(emptyPage)
+    mocks.fetchWatchlistContentAlerts.mockResolvedValue(emptyPage)
+    mocks.fetchWatchlistRuns.mockResolvedValue(emptyPage)
+    mocks.fetchWatchlistOutputs.mockResolvedValue(emptyPage)
+    const latestBriefing = {
+      occurrence_id: 31,
+      run_id: 123,
+      job_id: 7,
+      artifact_status: "ready",
+      delivery_status: "failed",
+      stages: {},
+      output: null,
+      audio: null,
+      editorial: {},
+      selection: {},
+      next_run_at: null,
+      recovery: { can_retry_delivery: true }
+    }
+    mocks.getLatestWatchlistBriefing.mockResolvedValueOnce(latestBriefing)
+
+    await expect(fetchWatchlistsOverviewData({ watchlist_id: 42 })).resolves.toEqual(
+      expect.objectContaining({ latestBriefing })
+    )
+
+    const networkError = new Error("offline")
+    mocks.getLatestWatchlistBriefing.mockRejectedValueOnce(networkError)
+    await expect(fetchWatchlistsOverviewData({ watchlist_id: 42 })).rejects.toBe(networkError)
   })
 
   it("marks source-error zero-item runs and failed audio outputs as attention", async () => {

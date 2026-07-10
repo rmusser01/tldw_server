@@ -465,6 +465,7 @@ export interface WatchlistBriefingStage {
   retryable?: boolean
   started_at?: string | null
   finished_at?: string | null
+  outcome?: "sending" | "successful" | "partial" | "failed" | "unknown" | null
 }
 
 export type WatchlistBriefingArtifactStatus = "running" | "ready" | "failed" | "cancelled"
@@ -504,6 +505,7 @@ export type WatchlistBriefingRetryStage =
 
 export interface WatchlistBriefingRetryRequest {
   stage: WatchlistBriefingRetryStage
+  regenerate?: boolean
   confirm_unknown_delivery_retry?: boolean
 }
 

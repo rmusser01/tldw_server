@@ -21,6 +21,10 @@ from tldw_Server_API.app.core.Watchlists.briefing_contract import (
     briefing_selection_limit,
     get_briefing_contract,
 )
+from tldw_Server_API.app.core.Watchlists.briefing_delivery import (
+    external_delivery_adapters,
+    schedule_briefing_delivery,
+)
 from tldw_Server_API.app.services.outputs_service import (
     _build_output_filename,
     _outputs_dir_for_user,
@@ -633,14 +637,68 @@ def _recover_audio_submission(
 
 
 def _delivery_configured(contract: Mapping[str, Any]) -> bool:
-    delivery = contract.get("delivery")
-    if not isinstance(delivery, Mapping):
-        return False
-    return any(
-        bool(config.get("enabled"))
-        for name, config in delivery.items()
-        if name != "reports" and isinstance(config, Mapping)
+    return bool(external_delivery_adapters(contract))
+
+
+async def _schedule_delivery_after_artifacts(
+    result: FulfillmentResult,
+    *,
+    contract: Mapping[str, Any],
+    watchlists_db: Any,
+    scheduler: Any | None,
+) -> FulfillmentResult:
+    """Queue configured delivery once text exists and selected audio has a dependency."""
+    if not _delivery_configured(contract) or result.output_id is None:
+        return result
+    occurrence = watchlists_db.get_briefing_occurrence(result.occurrence_id)
+    audio_enabled = bool(contract.get("audio", {}).get("enabled"))
+    if audio_enabled and not occurrence.audio_task_id:
+        return result
+    stages = _read_stages(
+        occurrence,
+        run=watchlists_db.get_run(int(occurrence.run_id)),
+        audio_enabled=audio_enabled,
+        delivery_configured=True,
     )
+    audio_dependency_task_id = str(occurrence.audio_task_id) if occurrence.audio_task_id else None
+    previous_dependency = stages.get("deliver", {}).get("audio_dependency_task_id")
+    if occurrence.delivery_task_id and (
+        not audio_enabled or str(previous_dependency or "") == str(audio_dependency_task_id)
+    ):
+        return result
+    try:
+        task_id = await schedule_briefing_delivery(
+            occurrence=occurrence,
+            audio_task_id=audio_dependency_task_id,
+            scheduler=scheduler,
+            watchlists_db=watchlists_db,
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception:  # noqa: BLE001 - scheduling boundary must persist truthful failure
+        _transition(stages, "deliver", "failed", code="delivery_enqueue_failed", retryable=True)
+        occurrence = _save_occurrence(
+            watchlists_db,
+            int(occurrence.id),
+            stages,
+            delivery_status="failed",
+        )
+        return _result(occurrence, stages)
+    _transition(
+        stages,
+        "deliver",
+        "queued",
+        task_id=task_id,
+        audio_dependency_task_id=audio_dependency_task_id,
+    )
+    occurrence = _save_occurrence(
+        watchlists_db,
+        int(occurrence.id),
+        stages,
+        delivery_status="waiting_for_artifacts",
+        delivery_task_id=task_id,
+    )
+    return _result(occurrence, stages)
 
 
 async def _submit_audio(
@@ -1068,9 +1126,19 @@ async def fulfill_watchlist_briefing(
             watchlists_db=watchlists_db,
         )
         if recovered_audio is not None:
-            return _result(recovered_audio, stages)
+            return await _schedule_delivery_after_artifacts(
+                _result(recovered_audio, stages),
+                contract=contract,
+                watchlists_db=watchlists_db,
+                scheduler=scheduler,
+            )
         if not audio_enabled or occurrence.audio_task_id:
-            return _result(occurrence, stages)
+            return await _schedule_delivery_after_artifacts(
+                _result(occurrence, stages),
+                contract=contract,
+                watchlists_db=watchlists_db,
+                scheduler=scheduler,
+            )
         if stages["compose_audio_script"]["status"] == "failed":
             return _result(occurrence, stages)
         items = metadata.get("briefing_items")
@@ -1093,8 +1161,13 @@ async def fulfill_watchlist_briefing(
             return _result(occurrence, stages)
         items = text_flow.items
         if not audio_enabled:
-            return _result(occurrence, stages)
-    return await _submit_audio(
+            return await _schedule_delivery_after_artifacts(
+                _result(occurrence, stages),
+                contract=contract,
+                watchlists_db=watchlists_db,
+                scheduler=scheduler,
+            )
+    result = await _submit_audio(
         user_id=user_id,
         job=job,
         run=run,
@@ -1106,6 +1179,12 @@ async def fulfill_watchlist_briefing(
         watchlists_db=watchlists_db,
         scheduler=scheduler,
         output_version=output_version,
+    )
+    return await _schedule_delivery_after_artifacts(
+        result,
+        contract=contract,
+        watchlists_db=watchlists_db,
+        scheduler=scheduler,
     )
 
 
@@ -1120,7 +1199,14 @@ async def retry_briefing_stage(
     regenerate: bool = False,
 ) -> FulfillmentResult:
     """Retry one failed/missing artifact stage while reusing durable outputs."""
-    if stage not in {"render_text", "persist_text", "compose_audio_script"}:
+    if stage not in {
+        "render_text",
+        "persist_text",
+        "compose_audio_script",
+        "persist_audio_script",
+        "generate_audio",
+        "persist_audio",
+    }:
         raise ValueError("unsupported_briefing_retry_stage")
     occurrence = watchlists_db.get_briefing_occurrence(occurrence_id)
     job = watchlists_db.get_job(int(occurrence.job_id))
@@ -1158,20 +1244,28 @@ async def retry_briefing_stage(
             rerender=stage == "render_text",
         )
         occurrence = text_flow.occurrence
-        if text_flow.output_id is None or not audio_enabled:
+        if text_flow.output_id is None:
             return _result(occurrence, stages)
-        return await _submit_audio(
-            user_id=user_id,
-            job=job,
-            run=run,
+        result = _result(occurrence, stages)
+        if audio_enabled:
+            result = await _submit_audio(
+                user_id=user_id,
+                job=job,
+                run=run,
+                contract=contract,
+                occurrence=occurrence,
+                stages=stages,
+                items=text_flow.items,
+                collections_db=collections_db,
+                watchlists_db=watchlists_db,
+                scheduler=scheduler,
+                output_version=output_version,
+            )
+        return await _schedule_delivery_after_artifacts(
+            result,
             contract=contract,
-            occurrence=occurrence,
-            stages=stages,
-            items=text_flow.items,
-            collections_db=collections_db,
             watchlists_db=watchlists_db,
             scheduler=scheduler,
-            output_version=output_version,
         )
 
     if not audio_enabled:
@@ -1186,7 +1280,7 @@ async def retry_briefing_stage(
         raise ValueError("briefing_selection_missing")
     current_version = int(metadata.get("audio_output_version") or 1)
     output_version = current_version + 1 if regenerate else current_version
-    return await _submit_audio(
+    result = await _submit_audio(
         user_id=user_id,
         job=job,
         run=run,
@@ -1198,6 +1292,12 @@ async def retry_briefing_stage(
         watchlists_db=watchlists_db,
         scheduler=scheduler,
         output_version=output_version,
+    )
+    return await _schedule_delivery_after_artifacts(
+        result,
+        contract=contract,
+        watchlists_db=watchlists_db,
+        scheduler=scheduler,
     )
 
 

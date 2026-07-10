@@ -4,10 +4,12 @@ import {
   fetchWatchlistJobs,
   fetchWatchlistOutputs,
   fetchWatchlistRuns,
-  fetchWatchlistSources
+  fetchWatchlistSources,
+  getLatestWatchlistBriefing
 } from "@/services/watchlists"
 import type {
   PaginatedResponse,
+  WatchlistBriefingProjection,
   WatchlistJob,
   WatchlistOutput,
   WatchlistRun,
@@ -71,6 +73,7 @@ export interface WatchlistsOverviewHealthModel {
 
 export interface WatchlistsOverviewData {
   fetchedAt: string
+  latestBriefing: WatchlistBriefingProjection | null
   sources: {
     total: number
     healthy: number
@@ -426,7 +429,8 @@ export const fetchWatchlistsOverviewData = async (
     pendingResult,
     failedResult,
     recentRunsResult,
-    outputsResult
+    outputsResult,
+    latestBriefing
   ] = await Promise.all([
     fetchAllPages((pageParams) => fetchWatchlistSources({ ...scopedParams, ...pageParams })),
     fetchAllPages((pageParams) => fetchWatchlistJobs({ ...scopedParams, ...pageParams })),
@@ -436,7 +440,8 @@ export const fetchWatchlistsOverviewData = async (
     fetchWatchlistRuns({ ...scopedParams, q: "pending", page: 1, size: 1 }),
     fetchWatchlistRuns({ ...scopedParams, q: "failed", page: 1, size: 5 }),
     fetchWatchlistRuns({ ...scopedParams, page: 1, size: 10 }),
-    fetchWatchlistOutputs({ ...scopedParams, page: 1, size: 100 })
+    fetchWatchlistOutputs({ ...scopedParams, page: 1, size: 100 }),
+    getLatestWatchlistBriefing(scopedParams)
   ])
 
   let healthy = 0
@@ -510,6 +515,7 @@ export const fetchWatchlistsOverviewData = async (
 
   return {
     fetchedAt: new Date().toISOString(),
+    latestBriefing,
     sources: {
       total: asFiniteNumber(sourcesResult.total, sourcesResult.items.length),
       healthy,

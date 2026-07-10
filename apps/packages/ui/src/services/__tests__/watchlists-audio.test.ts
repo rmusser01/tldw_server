@@ -12,8 +12,11 @@ vi.mock("@/services/background-proxy", () => ({
 }))
 
 import {
+  getLatestWatchlistBriefing,
+  getWatchlistRunBriefing,
   getWatchlistRunAudio,
   getWatchlistRunDiagnostics,
+  retryWatchlistBriefingStage,
   retryWatchlistRunAudio,
   retryWatchlistRunDelivery
 } from "@/services/watchlists"
@@ -113,6 +116,70 @@ describe("watchlists audio services", () => {
       })
     )
     expect(result.run_id).toBe(123)
+  })
+
+  it("fetches latest and exact-run briefing projections", async () => {
+    const projection = {
+      occurrence_id: 31,
+      run_id: 123,
+      job_id: 7,
+      artifact_status: "ready",
+      delivery_status: "failed",
+      stages: {},
+      output: null,
+      audio: null,
+      editorial: {},
+      selection: {},
+      next_run_at: null,
+      recovery: { can_retry_delivery: true }
+    }
+    mocks.bgRequest.mockResolvedValueOnce(projection).mockResolvedValueOnce(projection)
+
+    await expect(getLatestWatchlistBriefing({ watchlist_id: 9 })).resolves.toEqual(projection)
+    await expect(getWatchlistRunBriefing(123)).resolves.toEqual(projection)
+
+    expect(mocks.bgRequest).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        path: "/api/v1/watchlists/briefings/latest?watchlist_id=9",
+        method: "GET"
+      })
+    )
+    expect(mocks.bgRequest).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        path: "/api/v1/watchlists/runs/123/briefing",
+        method: "GET"
+      })
+    )
+  })
+
+  it("maps only latest-briefing 404 responses to null", async () => {
+    mocks.bgRequest.mockRejectedValueOnce(Object.assign(new Error("missing"), { status: 404 }))
+    await expect(getLatestWatchlistBriefing({ watchlist_id: 9 })).resolves.toBeNull()
+
+    const unauthorized = Object.assign(new Error("unauthorized"), { status: 401 })
+    mocks.bgRequest.mockRejectedValueOnce(unauthorized)
+    await expect(getLatestWatchlistBriefing({ watchlist_id: 9 })).rejects.toBe(unauthorized)
+  })
+
+  it("retries one briefing stage with explicit unknown-delivery confirmation", async () => {
+    mocks.bgRequest.mockResolvedValueOnce({ occurrence_id: 31 })
+
+    await retryWatchlistBriefingStage(123, "deliver:email", {
+      confirm_unknown_delivery_retry: true
+    })
+
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/watchlists/runs/123/briefing/retry",
+        method: "POST",
+        body: {
+          stage: "deliver:email",
+          confirm_unknown_delivery_retry: true
+        }
+      })
+    )
   })
 
   it("accepts backend-supported audio fields on output creation payloads", () => {

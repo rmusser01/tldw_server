@@ -3102,6 +3102,53 @@ class WatchlistsDatabase:
             raise KeyError("briefing_occurrence_not_found")
         return BriefingOccurrenceRow(**row)
 
+    def get_briefing_occurrence_for_run(self, run_id: int) -> BriefingOccurrenceRow:
+        """Return the exact occurrence for an owned run."""
+        row = self.backend.execute(
+            """
+            SELECT * FROM watchlist_briefing_occurrences
+            WHERE user_id = ? AND run_id = ?
+            ORDER BY created_at DESC, id DESC
+            LIMIT 1
+            """,
+            (self.user_id, run_id),
+        ).first
+        if not row:
+            raise KeyError("briefing_occurrence_not_found")
+        return BriefingOccurrenceRow(**row)
+
+    def get_latest_briefing_occurrence_for_watchlist(
+        self,
+        watchlist_id: int | None = None,
+    ) -> BriefingOccurrenceRow:
+        """Return the newest owned occurrence, optionally scoped to one watchlist."""
+        if watchlist_id is None:
+            row = self.backend.execute(
+                """
+                SELECT occurrence.* FROM watchlist_briefing_occurrences AS occurrence
+                JOIN scrape_jobs AS job ON job.id = occurrence.job_id AND job.user_id = occurrence.user_id
+                WHERE occurrence.user_id = ?
+                ORDER BY occurrence.created_at DESC, occurrence.id DESC
+                LIMIT 1
+                """,
+                (self.user_id,),
+            ).first
+        else:
+            self.get_watchlist(int(watchlist_id))
+            row = self.backend.execute(
+                """
+                SELECT occurrence.* FROM watchlist_briefing_occurrences AS occurrence
+                JOIN scrape_jobs AS job ON job.id = occurrence.job_id AND job.user_id = occurrence.user_id
+                WHERE occurrence.user_id = ? AND job.watchlist_id = ?
+                ORDER BY occurrence.created_at DESC, occurrence.id DESC
+                LIMIT 1
+                """,
+                (self.user_id, int(watchlist_id)),
+            ).first
+        if not row:
+            raise KeyError("briefing_occurrence_not_found")
+        return BriefingOccurrenceRow(**row)
+
     def update_briefing_occurrence(
         self,
         occurrence_id: int,

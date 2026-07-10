@@ -42,6 +42,8 @@ import type {
   WatchlistContentAlertStatus,
   WatchlistContentAlertUpdate,
   WatchlistCreate,
+  WatchlistBriefingProjection,
+  WatchlistBriefingRetryStage,
   WatchlistItemSavedView,
   WatchlistItemSavedViewCreate,
   WatchlistItemSavedViewUpdate,
@@ -687,6 +689,44 @@ export const getWatchlistRunAudio = async (
   return bgRequest<WatchlistRunAudioStatus>({
     path: `/api/v1/watchlists/runs/${runId}/audio` as any,
     method: "GET"
+  })
+}
+
+export const getLatestWatchlistBriefing = async (
+  params: { watchlist_id?: number } = {}
+): Promise<WatchlistBriefingProjection | null> => {
+  try {
+    return await bgRequest<WatchlistBriefingProjection>({
+      path: `/api/v1/watchlists/briefings/latest${buildQuery(params)}`,
+      method: "GET"
+    })
+  } catch (error) {
+    if ((error as { status?: number } | null)?.status === 404) return null
+    throw error
+  }
+}
+
+export const getWatchlistRunBriefing = async (
+  runId: number
+): Promise<WatchlistBriefingProjection> => {
+  return bgRequest<WatchlistBriefingProjection>({
+    path: `/api/v1/watchlists/runs/${runId}/briefing`,
+    method: "GET"
+  })
+}
+
+export const retryWatchlistBriefingStage = async (
+  runId: number,
+  stage: WatchlistBriefingRetryStage,
+  options: {
+    regenerate?: boolean
+    confirm_unknown_delivery_retry?: boolean
+  } = {}
+): Promise<WatchlistBriefingProjection> => {
+  return bgRequest<WatchlistBriefingProjection>({
+    path: `/api/v1/watchlists/runs/${runId}/briefing/retry`,
+    method: "POST",
+    body: { stage, ...options }
   })
 }
 

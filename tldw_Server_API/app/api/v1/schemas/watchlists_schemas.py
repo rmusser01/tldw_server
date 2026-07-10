@@ -4,6 +4,7 @@ from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import AnyUrl, BaseModel, ConfigDict, Field, field_validator, model_validator
+
 from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 
 SourceType = Literal["rss", "site", "forum"]  # forums are feature-flagged for Phase 3
@@ -1035,6 +1036,67 @@ class WatchlistRunAudioResponse(BaseModel):
     stale: bool | None = None
     superseded_by: str | int | None = None
     error: str | None = None
+
+
+class WatchlistBriefingStage(BaseModel):
+    """Typed status for one briefing fulfillment stage."""
+
+    status: Literal["not_started", "queued", "running", "ready", "failed", "skipped", "cancelled"]
+    code: str | None = None
+    retryable: bool = False
+    started_at: str | None = None
+    finished_at: str | None = None
+    outcome: Literal["sending", "successful", "partial", "failed", "unknown"] | None = None
+
+
+class WatchlistBriefingProjection(BaseModel):
+    """Effective artifact and delivery state for one briefing occurrence."""
+
+    occurrence_id: int
+    run_id: int
+    job_id: int
+    artifact_status: Literal["running", "ready", "failed", "cancelled"]
+    delivery_status: Literal[
+        "not_configured",
+        "waiting_for_artifacts",
+        "delivering",
+        "delivered",
+        "partially_delivered",
+        "failed",
+        "unknown",
+    ]
+    stages: dict[str, WatchlistBriefingStage]
+    output: dict[str, Any] | None = None
+    audio: WatchlistRunAudioResponse | None = None
+    editorial: dict[str, Any] = Field(default_factory=dict)
+    selection: dict[str, int] = Field(default_factory=dict)
+    next_run_at: str | None = None
+    recovery: dict[str, bool] = Field(default_factory=dict)
+
+
+class WatchlistBriefingRetryRequest(BaseModel):
+    """Narrow retry request for one safe briefing stage or delivery adapter."""
+
+    stage: str
+    regenerate: bool = False
+    confirm_unknown_delivery_retry: bool = False
+
+    @field_validator("stage")
+    @classmethod
+    def _validate_stage(cls, value: str) -> str:
+        allowed = {
+            "render_text",
+            "persist_text",
+            "compose_audio_script",
+            "persist_audio_script",
+            "generate_audio",
+            "persist_audio",
+            "deliver:email",
+            "deliver:chatbook",
+        }
+        if value not in allowed:
+            raise ValueError("unsupported_briefing_retry_stage")
+        return value
 
 
 class WatchlistOutputCreateRequest(BaseModel):

@@ -16,6 +16,236 @@ import pytest
 pytestmark = pytest.mark.unit
 
 
+class _DeliveryWatchlistsDB:
+    def __init__(self, occurrence):
+        self.occurrence = occurrence
+        self.history: list[dict[str, object]] = []
+
+    def get_briefing_occurrence(self, occurrence_id: int):
+        assert occurrence_id == self.occurrence.id
+        return self.occurrence
+
+    def update_briefing_occurrence(self, occurrence_id: int, **patch):
+        assert occurrence_id == self.occurrence.id
+        if "stages" in patch:
+            self.occurrence.stages_json = json.dumps(patch["stages"])
+            self.history.append(json.loads(self.occurrence.stages_json))
+        for key, value in patch.items():
+            if key != "stages":
+                setattr(self.occurrence, key, value)
+        return self.occurrence
+
+
+class _DeliveryCollectionsDB:
+    def __init__(self, output):
+        self.output = output
+
+    def get_output_artifact(self, output_id: int):
+        assert output_id == self.output.id
+        return self.output
+
+    def update_output_artifact_metadata(self, output_id: int, *, metadata_json=None, chatbook_path=None):
+        assert output_id == self.output.id
+        if metadata_json is not None:
+            self.output.metadata_json = metadata_json
+        if chatbook_path is not None:
+            self.output.chatbook_path = chatbook_path
+        return self.output
+
+
+def _delivery_case(*, reports_only: bool = False):
+    delivery = {"reports": {"enabled": True}}
+    if not reports_only:
+        delivery["email"] = {
+            "enabled": True,
+            "recipients": ["digest@example.com"],
+            "attach_file": False,
+        }
+    occurrence = SimpleNamespace(
+        id=31,
+        user_id="17",
+        job_id=11,
+        run_id=22,
+        contract_json=json.dumps({"audio": {"enabled": False}, "delivery": delivery}),
+        stages_json=json.dumps(
+            {
+                "persist_text": {"status": "ready"},
+                "persist_audio": {"status": "skipped"},
+                "deliver": {"status": "not_started"},
+            }
+        ),
+        artifact_status="ready",
+        delivery_status="waiting_for_artifacts",
+        output_id=44,
+        audio_task_id=None,
+        delivery_task_id=None,
+    )
+    output = SimpleNamespace(
+        id=44,
+        title="Daily digest",
+        format="md",
+        storage_path="daily-digest.md",
+        metadata_json=json.dumps({"content": "Today in the feeds."}),
+        chatbook_path=None,
+    )
+    return occurrence, _DeliveryWatchlistsDB(occurrence), _DeliveryCollectionsDB(output)
+
+
+@pytest.mark.asyncio
+async def test_delivery_waits_for_audio_dependency():
+    from tldw_Server_API.app.core.Watchlists.briefing_delivery import schedule_briefing_delivery
+
+    occurrence, watchlists_db, _collections_db = _delivery_case()
+    scheduler = MagicMock()
+    scheduler.submit = AsyncMock(return_value="delivery-task")
+
+    task_id = await schedule_briefing_delivery(
+        occurrence=occurrence,
+        audio_task_id="audio-7",
+        scheduler=scheduler,
+        watchlists_db=watchlists_db,
+    )
+
+    assert task_id == "delivery-task"
+    assert scheduler.submit.await_args.kwargs["depends_on"] == ["audio-7"]
+    assert scheduler.submit.await_args.kwargs["payload"]["audio_dependency_task_id"] == "audio-7"
+    assert scheduler.submit.await_args.kwargs["idempotency_key"] == "watchlists-briefing-delivery:17:31"
+
+
+@pytest.mark.asyncio
+async def test_reviewed_delivery_retry_uses_stable_attempt_specific_task_key():
+    from tldw_Server_API.app.core.Watchlists.briefing_delivery import schedule_briefing_delivery
+
+    occurrence, watchlists_db, _collections_db = _delivery_case()
+    occurrence.stages_json = json.dumps(
+        {
+            "persist_text": {"status": "ready"},
+            "deliver:email": {
+                "status": "failed",
+                "outcome": "unknown",
+                "attempt_count": 1,
+            },
+        }
+    )
+    scheduler = MagicMock()
+    scheduler.submit = AsyncMock(return_value="reviewed-delivery-task")
+
+    for _ in range(2):
+        await schedule_briefing_delivery(
+            occurrence=occurrence,
+            audio_task_id=None,
+            scheduler=scheduler,
+            watchlists_db=watchlists_db,
+            requested_adapters={"email"},
+            confirmed_unknown_adapters={"email"},
+        )
+
+    keys = [call.kwargs["idempotency_key"] for call in scheduler.submit.await_args_list]
+    assert keys == [
+        "watchlists-briefing-delivery:17:31:retry:email-1",
+        "watchlists-briefing-delivery:17:31:retry:email-1",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_successful_email_is_not_sent_twice():
+    from tldw_Server_API.app.core.Watchlists.briefing_delivery import deliver_briefing_occurrence
+
+    occurrence, watchlists_db, collections_db = _delivery_case()
+    notifications = MagicMock()
+    notifications.deliver_email = AsyncMock(
+        return_value=SimpleNamespace(channel="email", status="sent", details={"provider_id": "ack-1"})
+    )
+
+    await deliver_briefing_occurrence(
+        occurrence_id=occurrence.id,
+        watchlists_db=watchlists_db,
+        collections_db=collections_db,
+        notifications=notifications,
+    )
+    await deliver_briefing_occurrence(
+        occurrence_id=occurrence.id,
+        watchlists_db=watchlists_db,
+        collections_db=collections_db,
+        notifications=notifications,
+    )
+
+    assert notifications.deliver_email.await_count == 1
+    assert occurrence.delivery_status == "delivered"
+    outcomes = [
+        snapshot.get("deliver:email", {}).get("outcome")
+        for snapshot in watchlists_db.history
+    ]
+    assert "sending" in outcomes
+    assert "successful" in outcomes
+
+
+@pytest.mark.asyncio
+async def test_timed_out_email_becomes_unknown_and_is_not_automatically_retried():
+    from tldw_Server_API.app.core.Watchlists.briefing_delivery import deliver_briefing_occurrence
+
+    occurrence, watchlists_db, collections_db = _delivery_case()
+    notifications = MagicMock()
+    notifications.deliver_email = AsyncMock(side_effect=asyncio.TimeoutError())
+
+    await deliver_briefing_occurrence(
+        occurrence_id=occurrence.id,
+        watchlists_db=watchlists_db,
+        collections_db=collections_db,
+        notifications=notifications,
+    )
+    await deliver_briefing_occurrence(
+        occurrence_id=occurrence.id,
+        watchlists_db=watchlists_db,
+        collections_db=collections_db,
+        notifications=notifications,
+    )
+
+    assert notifications.deliver_email.await_count == 1
+    assert occurrence.delivery_status == "unknown"
+    stage = json.loads(occurrence.stages_json)["deliver:email"]
+    assert stage["outcome"] == "unknown"
+    assert stage["retryable"] is False
+    assert stage["attempt_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_reports_only_contract_has_no_external_delivery_attempt():
+    from tldw_Server_API.app.core.Watchlists.briefing_delivery import deliver_briefing_occurrence
+
+    occurrence, watchlists_db, collections_db = _delivery_case(reports_only=True)
+    notifications = MagicMock()
+
+    result = await deliver_briefing_occurrence(
+        occurrence_id=occurrence.id,
+        watchlists_db=watchlists_db,
+        collections_db=collections_db,
+        notifications=notifications,
+    )
+
+    assert result.delivery_status == "not_configured"
+    notifications.deliver_email.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_delivery_refuses_before_required_artifacts_are_ready():
+    from tldw_Server_API.app.core.Watchlists.briefing_delivery import (
+        BriefingArtifactsNotReadyError,
+        deliver_briefing_occurrence,
+    )
+
+    occurrence, watchlists_db, collections_db = _delivery_case()
+    occurrence.artifact_status = "running"
+
+    with pytest.raises(BriefingArtifactsNotReadyError):
+        await deliver_briefing_occurrence(
+            occurrence_id=occurrence.id,
+            watchlists_db=watchlists_db,
+            collections_db=collections_db,
+            notifications=MagicMock(),
+        )
+
+
 def test_external_delivery_plan_only_keeps_enabled_external_adapters():
     from tldw_Server_API.app.api.v1.endpoints.watchlists import _external_delivery_plan
 

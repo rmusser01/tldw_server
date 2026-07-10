@@ -88,6 +88,12 @@ from tldw_Server_API.app.core.Watchlists.briefing_contract import (
     get_briefing_contract,
     normalize_briefing_output_prefs,
 )
+from tldw_Server_API.app.core.Watchlists.briefing_delivery import (
+    external_delivery_adapters,
+    schedule_briefing_delivery,
+)
+from tldw_Server_API.app.core.Watchlists.briefing_fulfillment import retry_briefing_stage
+from tldw_Server_API.app.core.Watchlists.briefing_projection import build_briefing_projection
 from tldw_Server_API.app.core.Watchlists.fetchers import (
     fetch_rss_feed,
     fetch_site_items_with_rules,
@@ -248,6 +254,8 @@ from tldw_Server_API.app.api.v1.schemas.watchlists_schemas import (  # noqa: E40
     WatchlistOutputEvidenceResponse,
     WatchlistOutputsListResponse,
     WatchlistRunAudioResponse,
+    WatchlistBriefingProjection,
+    WatchlistBriefingRetryRequest,
     WatchlistReportReadiness,
     WatchlistsListResponse,
     WatchlistUpdateRequest,
@@ -5109,6 +5117,228 @@ def _mirror_audio_retry_state_to_output(
         return False
 
 
+async def _build_briefing_projection(
+    *,
+    occurrence: Any,
+    current_user: User,
+    resolved_user_id: int,
+    watchlists_db: Any,
+    collections_db: Any,
+) -> WatchlistBriefingProjection:
+    """Load current audio state and validate the core occurrence projection."""
+    contract = _parse_json_object(getattr(occurrence, "contract_json", None))
+    audio: dict[str, Any] | None = None
+    if bool(contract.get("audio", {}).get("enabled")):
+        try:
+            audio = await get_run_audio(
+                run_id=int(occurrence.run_id),
+                target_user_id=resolved_user_id
+                if resolved_user_id != _safe_int(getattr(current_user, "id", None), -1)
+                else None,
+                current_user=current_user,
+                db=watchlists_db,
+                collections_db=collections_db,
+            )
+        except HTTPException as exc:
+            if exc.status_code != 404:
+                raise
+    return WatchlistBriefingProjection.model_validate(
+        build_briefing_projection(
+            occurrence=occurrence,
+            watchlists_db=watchlists_db,
+            collections_db=collections_db,
+            audio=audio,
+        )
+    )
+
+
+async def _owned_briefing_context(
+    *,
+    run_id: int,
+    target_user_id: int | None,
+    current_user: User,
+    db: Any,
+    collections_db: Any,
+) -> tuple[int, Any, Any, Any]:
+    _enforce_runs_admin_if_configured(current_user)
+    resolved_user_id, target_db = await _resolve_target_watchlists_context(
+        current_user=current_user,
+        current_db=db,
+        target_user_id=target_user_id,
+    )
+    target_collections_db = _resolve_collections_db_for_target_user(
+        current_user=current_user,
+        current_db=collections_db,
+        target_user_id=resolved_user_id,
+    )
+    try:
+        target_db.get_run(run_id)
+        occurrence = target_db.get_briefing_occurrence_for_run(run_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="briefing_not_found") from None
+    return resolved_user_id, target_db, target_collections_db, occurrence
+
+
+def _run_briefing_occurrence_or_none(db: Any, run_id: int) -> Any | None:
+    """Return a real exact-run occurrence while preserving legacy/mock DB compatibility."""
+    lookup = getattr(db, "get_briefing_occurrence_for_run", None)
+    if not callable(lookup):
+        return None
+    try:
+        occurrence = lookup(run_id)
+    except (AttributeError, KeyError):
+        return None
+    return occurrence if _safe_int(getattr(occurrence, "run_id", None), -1) == run_id else None
+
+
+@router.get(
+    "/briefings/latest",
+    response_model=WatchlistBriefingProjection,
+    summary="Get the latest briefing fulfillment projection",
+    dependencies=[Depends(rbac_rate_limit("watchlists.read"))],
+)
+async def get_latest_watchlist_briefing(
+    watchlist_id: int | None = Query(None, ge=1),
+    target_user_id: int | None = Query(None, ge=1),
+    current_user: User = Depends(get_request_user),
+    db: Any = Depends(get_watchlists_db_for_user),
+    collections_db: Any = Depends(get_collections_db_for_user),
+) -> WatchlistBriefingProjection:
+    """Return the latest owned occurrence, optionally scoped to one Watchlist."""
+    _enforce_runs_admin_if_configured(current_user)
+    resolved_user_id, target_db = await _resolve_target_watchlists_context(
+        current_user=current_user,
+        current_db=db,
+        target_user_id=target_user_id,
+    )
+    target_collections_db = _resolve_collections_db_for_target_user(
+        current_user=current_user,
+        current_db=collections_db,
+        target_user_id=resolved_user_id,
+    )
+    _ensure_watchlist_exists(target_db, watchlist_id)
+    try:
+        occurrence = target_db.get_latest_briefing_occurrence_for_watchlist(watchlist_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="briefing_not_found") from None
+    return await _build_briefing_projection(
+        occurrence=occurrence,
+        current_user=current_user,
+        resolved_user_id=resolved_user_id,
+        watchlists_db=target_db,
+        collections_db=target_collections_db,
+    )
+
+
+@router.get(
+    "/runs/{run_id}/briefing",
+    response_model=WatchlistBriefingProjection,
+    summary="Get briefing fulfillment for an exact run",
+    dependencies=[Depends(rbac_rate_limit("watchlists.read"))],
+)
+async def get_watchlist_run_briefing(
+    run_id: int = Path(..., ge=1),
+    target_user_id: int | None = Query(None, ge=1),
+    current_user: User = Depends(get_request_user),
+    db: Any = Depends(get_watchlists_db_for_user),
+    collections_db: Any = Depends(get_collections_db_for_user),
+) -> WatchlistBriefingProjection:
+    """Return one exact owned occurrence even when a newer job run exists."""
+    resolved_user_id, target_db, target_collections_db, occurrence = await _owned_briefing_context(
+        run_id=run_id,
+        target_user_id=target_user_id,
+        current_user=current_user,
+        db=db,
+        collections_db=collections_db,
+    )
+    return await _build_briefing_projection(
+        occurrence=occurrence,
+        current_user=current_user,
+        resolved_user_id=resolved_user_id,
+        watchlists_db=target_db,
+        collections_db=target_collections_db,
+    )
+
+
+@router.post(
+    "/runs/{run_id}/briefing/retry",
+    response_model=WatchlistBriefingProjection,
+    summary="Retry one briefing fulfillment stage",
+    dependencies=[Depends(rbac_rate_limit("watchlists.run"))],
+)
+async def retry_watchlist_briefing_stage(
+    payload: WatchlistBriefingRetryRequest,
+    run_id: int = Path(..., ge=1),
+    target_user_id: int | None = Query(None, ge=1),
+    current_user: User = Depends(get_request_user),
+    db: Any = Depends(get_watchlists_db_for_user),
+    collections_db: Any = Depends(get_collections_db_for_user),
+) -> WatchlistBriefingProjection:
+    """Retry only the selected owned stage, preserving already-ready artifacts."""
+    resolved_user_id, target_db, target_collections_db, occurrence = await _owned_briefing_context(
+        run_id=run_id,
+        target_user_id=target_user_id,
+        current_user=current_user,
+        db=db,
+        collections_db=collections_db,
+    )
+    raw_stages = _parse_json_object(occurrence.stages_json)
+    current_stage = raw_stages.get(payload.stage)
+    if not isinstance(current_stage, dict):
+        current_stage = {"status": "not_started"}
+    if current_stage.get("status") == "ready" and not payload.regenerate:
+        raise HTTPException(status_code=409, detail="stage_already_ready")
+
+    if payload.stage.startswith("deliver:"):
+        adapter = payload.stage.partition(":")[2]
+        contract = _parse_json_object(occurrence.contract_json)
+        if adapter not in external_delivery_adapters(contract):
+            raise HTTPException(status_code=422, detail="delivery_adapter_not_configured")
+        outcome = current_stage.get("outcome")
+        if outcome == "successful":
+            raise HTTPException(status_code=409, detail="stage_already_ready")
+        if outcome == "unknown" and not payload.confirm_unknown_delivery_retry:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "unknown_delivery_confirmation_required",
+                    "message": "Delivery outcome is unknown. Review the destination and confirm retry; it may create a duplicate.",
+                },
+            )
+        try:
+            await schedule_briefing_delivery(
+                occurrence=occurrence,
+                audio_task_id=str(occurrence.audio_task_id) if occurrence.audio_task_id else None,
+                watchlists_db=target_db,
+                requested_adapters={adapter},
+                confirmed_unknown_adapters={adapter}
+                if payload.confirm_unknown_delivery_retry
+                else set(),
+            )
+        except (SchedulerError, RuntimeError) as exc:
+            raise HTTPException(status_code=503, detail="briefing_delivery_queue_unavailable") from exc
+    else:
+        try:
+            await retry_briefing_stage(
+                user_id=resolved_user_id,
+                occurrence_id=int(occurrence.id),
+                stage=payload.stage,
+                watchlists_db=target_db,
+                collections_db=target_collections_db,
+                regenerate=payload.regenerate,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    refreshed = target_db.get_briefing_occurrence(int(occurrence.id))
+    return await _build_briefing_projection(
+        occurrence=refreshed,
+        current_user=current_user,
+        resolved_user_id=resolved_user_id,
+        watchlists_db=target_db,
+        collections_db=target_collections_db,
+    )
+
+
 @router.post(
     "/runs/{run_id}/retry-audio",
     response_model=RunStageRetryResponse,
@@ -5147,6 +5377,41 @@ async def retry_run_audio(
         job = target_db.get_job(run.job_id)
     except KeyError:
         raise HTTPException(status_code=404, detail="job_not_found") from None
+
+    if target_collections_db is not None:
+        occurrence = _run_briefing_occurrence_or_none(target_db, run_id)
+        if occurrence is not None:
+            stages = _parse_json_object(occurrence.stages_json)
+            audio_stages = (
+                "compose_audio_script",
+                "persist_audio_script",
+                "generate_audio",
+                "persist_audio",
+            )
+            retry_stage = next(
+                (
+                    name
+                    for name in audio_stages
+                    if _parse_json_object(stages.get(name)).get("status") in {"failed", "not_started"}
+                ),
+                None,
+            )
+            if retry_stage is None:
+                raise HTTPException(status_code=409, detail="stage_already_ready")
+            result = await retry_briefing_stage(
+                user_id=resolved_user_id,
+                occurrence_id=int(occurrence.id),
+                stage=retry_stage,
+                watchlists_db=target_db,
+                collections_db=target_collections_db,
+            )
+            return RunStageRetryResponse(
+                run_id=run_id,
+                stage="audio",
+                retried=True,
+                task_id=result.audio_task_id,
+                output_id=result.output_id,
+            )
 
     output_prefs = _parse_json_object(getattr(job, "output_prefs_json", None))
     contract = get_briefing_contract(
@@ -5248,6 +5513,48 @@ async def retry_run_delivery(
         run = target_db.get_run(run_id)
     except KeyError:
         raise HTTPException(status_code=404, detail="run_not_found") from None
+
+    occurrence = _run_briefing_occurrence_or_none(target_db, run_id)
+    if occurrence is not None:
+        contract = _parse_json_object(occurrence.contract_json)
+        adapters = external_delivery_adapters(contract)
+        stages = _parse_json_object(occurrence.stages_json)
+        unknown = [
+            adapter
+            for adapter in adapters
+            if _parse_json_object(stages.get(f"deliver:{adapter}")).get("outcome") == "unknown"
+        ]
+        if unknown:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "unknown_delivery_confirmation_required",
+                    "message": "Delivery outcome is unknown. Use the briefing retry endpoint to review duplicate risk and confirm.",
+                },
+            )
+        requested = {
+            adapter
+            for adapter in adapters
+            if _parse_json_object(stages.get(f"deliver:{adapter}")).get("outcome") != "successful"
+        }
+        if not requested:
+            raise HTTPException(status_code=409, detail="stage_already_ready")
+        try:
+            task_id = await schedule_briefing_delivery(
+                occurrence=occurrence,
+                audio_task_id=str(occurrence.audio_task_id) if occurrence.audio_task_id else None,
+                watchlists_db=target_db,
+                requested_adapters=requested,
+            )
+        except (SchedulerError, RuntimeError) as exc:
+            raise HTTPException(status_code=503, detail="briefing_delivery_queue_unavailable") from exc
+        return RunStageRetryResponse(
+            run_id=run_id,
+            stage="delivery",
+            retried=True,
+            task_id=task_id,
+            output_id=int(occurrence.output_id) if occurrence.output_id is not None else None,
+        )
 
     output_rows = await _list_run_watchlist_outputs(target_collections_db, run_id, limit=20)
     if not output_rows:

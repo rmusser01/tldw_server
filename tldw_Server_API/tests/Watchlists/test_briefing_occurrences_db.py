@@ -199,6 +199,28 @@ def test_get_latest_occurrence_is_job_and_user_scoped(tmp_path):
         outsider.get_latest_briefing_occurrence(job_id)
 
 
+def test_get_occurrence_for_run_is_exact_and_user_scoped(tmp_path):
+    backend = _make_backend(tmp_path)
+    owner = WatchlistsDatabase(user_id=1, backend=backend)
+    outsider = WatchlistsDatabase(user_id=2, backend=backend)
+    job_id, first_run_id = _create_job_run(owner, label="exact-run")
+    second_run = owner.create_run(job_id, status="finished")
+    first = owner.create_or_get_briefing_occurrence(
+        run_id=first_run_id,
+        occurrence_key="exact:first",
+        contract_json='{"version":1}',
+    )
+    owner.create_or_get_briefing_occurrence(
+        run_id=int(second_run.id),
+        occurrence_key="exact:second",
+        contract_json='{"version":1}',
+    )
+
+    assert owner.get_briefing_occurrence_for_run(first_run_id).id == first.id
+    with pytest.raises(KeyError, match="briefing_occurrence_not_found"):
+        outsider.get_briefing_occurrence_for_run(first_run_id)
+
+
 def test_update_occurrence_serializes_stages_and_only_changes_named_fields(tmp_path, monkeypatch):
     db = _make_db(tmp_path)
     job_id, run_id = _create_job_run(db, label="update")
