@@ -1,9 +1,11 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { describe, expect, it, vi } from "vitest"
+import { StrictMode } from "react"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { QuizPlayground } from "../QuizPlayground"
 import { RESULTS_FILTER_PREFS_KEY, TAKE_QUIZ_LIST_PREFS_KEY } from "../stateKeys"
 import { useAttemptsQuery, useQuizzesQuery } from "../hooks"
+import { buildSourceReviewQuizRoute } from "@/services/tldw/source-review-handoff"
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -93,8 +95,15 @@ vi.mock("../tabs/TakeQuizTab", () => ({
 }))
 
 vi.mock("../tabs/GenerateTab", () => ({
-  GenerateTab: ({ onNavigateToTake, onNavigateToManage }: any) => (
+  GenerateTab: ({
+    initialSourceReviewIntent,
+    onNavigateToTake,
+    onNavigateToManage
+  }: any) => (
     <div>
+      <div data-testid="generate-source-review-intent">
+        {JSON.stringify(initialSourceReviewIntent ?? null)}
+      </div>
       <button
         type="button"
         onClick={() =>
@@ -112,6 +121,11 @@ vi.mock("../tabs/GenerateTab", () => ({
     </div>
   )
 }))
+
+afterEach(() => {
+  window.history.replaceState({}, "", "/")
+  window.sessionStorage.clear()
+})
 
 vi.mock("../tabs/CreateTab", () => ({
   CreateTab: ({ onNavigateToTake, onDirtyStateChange }: any) => (
@@ -164,6 +178,111 @@ vi.mock("../tabs/ResultsTab", () => ({
 }))
 
 describe("QuizPlayground navigation intents", () => {
+  it("opens Generate and hydrates a source-review token without putting excerpts in the URL", async () => {
+    const excerpt = "Sensitive spinal-cord review excerpt"
+    const route = buildSourceReviewQuizRoute({
+      occurrence_id: 42,
+      plan_id: 7,
+      plan_title: "Neuro review",
+      activity_type: "quiz",
+      source_bundle: {
+        items: [
+          {
+            source_type: "media",
+            source_id: "19",
+            label: "Neuroanatomy atlas",
+            excerpt_text: excerpt
+          }
+        ]
+      }
+    })
+    window.history.replaceState({}, "", route)
+
+    render(
+      <StrictMode>
+        <QuizPlayground />
+      </StrictMode>
+    )
+
+    expect(screen.getByTestId("active-tab")).toHaveTextContent("generate")
+    expect(await screen.findByTestId("generate-source-review-intent")).toHaveTextContent(
+      '"occurrence_id":42'
+    )
+    expect(screen.getByTestId("generate-source-review-intent")).toHaveTextContent(
+      '"source_id":"19"'
+    )
+    await waitFor(() => {
+      expect(window.location.search).not.toContain("source_review_token")
+      expect(window.location.search).not.toContain("source_review=1")
+    })
+    expect(window.location.href).not.toContain(excerpt)
+    expect(window.location.href).not.toContain(encodeURIComponent(excerpt))
+  })
+
+  it("keeps an expired source-review handoff recoverable on Generate", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/quiz?tab=generate&source_review=1&source_review_token=expired"
+    )
+
+    render(<QuizPlayground />)
+
+    expect(screen.getByTestId("active-tab")).toHaveTextContent("generate")
+    expect(await screen.findByTestId("generate-source-review-intent")).toHaveTextContent(
+      '"error":"expired_or_missing"'
+    )
+  })
+
+  it("keeps a storage-failure source-review handoff recoverable on Generate", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/quiz?tab=generate&source_review=1"
+    )
+
+    render(<QuizPlayground />)
+
+    expect(screen.getByTestId("active-tab")).toHaveTextContent("generate")
+    expect(await screen.findByTestId("generate-source-review-intent")).toHaveTextContent(
+      '"error":"missing_token"'
+    )
+  })
+
+  it("honors the token-storage fallback Generate route", async () => {
+    window.history.replaceState({}, "", "/quiz?tab=generate")
+
+    render(<QuizPlayground />)
+
+    expect(screen.getByTestId("active-tab")).toHaveTextContent("generate")
+    expect(await screen.findByTestId("generate-source-review-intent")).toHaveTextContent(
+      "null"
+    )
+  })
+
+  it("clears a hydrated source-review intent when Generate is reset", async () => {
+    const route = buildSourceReviewQuizRoute({
+      occurrence_id: 42,
+      plan_id: 7,
+      activity_type: "quiz",
+      source_bundle: {
+        items: [{ source_type: "note", source_id: "note-8" }]
+      }
+    })
+    window.history.replaceState({}, "", route)
+
+    render(<QuizPlayground />)
+
+    expect(await screen.findByTestId("generate-source-review-intent")).toHaveTextContent(
+      '"occurrence_id":42'
+    )
+    fireEvent.click(screen.getByTestId("quiz-reset-current-tab"))
+
+    await waitFor(() => {
+      expect(screen.getByTestId("generate-source-review-intent")).toHaveTextContent("null")
+    })
+  })
+
   it("prompts before leaving Create tab when unsaved changes are present", async () => {
     const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false)
 

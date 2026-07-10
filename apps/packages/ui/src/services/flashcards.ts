@@ -195,6 +195,109 @@ export type StudyPackJobStatusResponse = {
   error?: string | null
 }
 
+export type SourceReviewActivity =
+  | "reread"
+  | "quiz"
+  | "flashcards"
+  | "cloze"
+
+export type SourceReviewOffsetUnit = "day" | "month"
+export type SourceReviewStatus =
+  | "pending"
+  | "in_progress"
+  | "completed"
+  | "skipped"
+
+export type SourceReviewScheduleRow = {
+  offset_value: number
+  offset_unit: SourceReviewOffsetUnit
+  activity_type: SourceReviewActivity
+}
+
+export type SourceReviewPlanCreateRequest = {
+  title: string
+  starts_on: string
+  timezone: string
+  source_items: StudyPackSourceSelection[]
+  schedule: SourceReviewScheduleRow[]
+}
+
+export type SourceReviewOccurrence = {
+  id: number
+  plan_id: number
+  offset_value: number
+  offset_unit: SourceReviewOffsetUnit
+  activity_type: SourceReviewActivity
+  due_at: string
+  status: SourceReviewStatus
+  started_at?: string | null
+  completed_at?: string | null
+  completion_source?: string | null
+  created_at: string
+  last_modified: string
+  client_id: string
+  version: number
+}
+
+export type SourceReviewSourceSummaryItem = {
+  source_type: StudyPackSourceType
+  source_id: string
+  label?: string | null
+  excerpt_preview?: string | null
+}
+
+export type SourceReviewLaunchState = {
+  activity_type: SourceReviewActivity
+  plan_id: number
+  occurrence_id: number
+  target_route: string
+  target_surface: string
+  action: string
+  source_payload_field: "source_bundle" | "source_items"
+  completion_required: true
+  created_at: string
+  source_bundle: {
+    items: StudyPackSourceSelection[]
+  }
+}
+
+export type SourceReviewOccurrenceActionResponse = SourceReviewOccurrence & {
+  plan_title?: string | null
+  source_summary?: SourceReviewSourceSummaryItem[]
+  launch_state?: SourceReviewLaunchState | null
+}
+
+export type SourceReviewPlanResponse = {
+  id: number
+  title: string
+  starts_on: string
+  timezone: string
+  source_bundle: {
+    items: StudyPackSourceSelection[]
+  }
+  occurrences: SourceReviewOccurrence[]
+  created_at: string
+  last_modified: string
+  client_id: string
+  version: number
+}
+
+export type SourceReviewPlanListResponse = {
+  items: SourceReviewPlanResponse[]
+  total: number
+}
+
+export type SourceReviewDueListResponse = {
+  items: SourceReviewOccurrenceActionResponse[]
+  total: number
+  now: string
+}
+
+export type SourceReviewPlanDeleteResponse = {
+  /** Whether this request newly applied the delete; false means it was already deleted. */
+  deleted: boolean
+}
+
 // Minimal client types based on openapi.json
 export type Deck = {
   id: number
@@ -837,6 +940,102 @@ export async function generateFlashcards(
     headers: { "Content-Type": "application/json" },
     body: input,
     timeoutMs: FLASHCARD_GENERATION_TIMEOUT_MS,
+    abortSignal: options?.signal
+  })
+}
+
+const SOURCE_REVIEW_BASE_PATH =
+  "/api/v1/flashcards/source-review-plans" as const
+
+export async function createSourceReviewPlan(
+  request: SourceReviewPlanCreateRequest,
+  options?: { signal?: AbortSignal }
+): Promise<SourceReviewPlanResponse> {
+  return await bgRequest<SourceReviewPlanResponse, AllowedPath, "POST">({
+    path: SOURCE_REVIEW_BASE_PATH,
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: request,
+    abortSignal: options?.signal
+  })
+}
+
+export async function listSourceReviewPlans(params?: {
+  limit?: number
+  offset?: number
+  signal?: AbortSignal
+}): Promise<SourceReviewPlanListResponse> {
+  const query = buildQuery({
+    limit: params?.limit,
+    offset: params?.offset
+  })
+  return await bgRequest<SourceReviewPlanListResponse, AllowedPath, "GET">({
+    path: `${SOURCE_REVIEW_BASE_PATH}${query}` as AllowedPath,
+    method: "GET",
+    abortSignal: params?.signal
+  })
+}
+
+export async function listDueSourceReviewOccurrences(params?: {
+  limit?: number
+  offset?: number
+  signal?: AbortSignal
+}): Promise<SourceReviewDueListResponse> {
+  const query = buildQuery({
+    limit: params?.limit,
+    offset: params?.offset
+  })
+  return await bgRequest<SourceReviewDueListResponse, AllowedPath, "GET">({
+    path: `${SOURCE_REVIEW_BASE_PATH}/due${query}` as AllowedPath,
+    method: "GET",
+    abortSignal: params?.signal
+  })
+}
+
+const sourceReviewOccurrenceAction = async (
+  occurrenceId: number,
+  action: "start" | "complete" | "skip",
+  options?: { signal?: AbortSignal }
+): Promise<SourceReviewOccurrenceActionResponse> => {
+  return await bgRequest<
+    SourceReviewOccurrenceActionResponse,
+    AllowedPath,
+    "POST"
+  >({
+    path: `${SOURCE_REVIEW_BASE_PATH}/occurrences/${occurrenceId}/${action}` as AllowedPath,
+    method: "POST",
+    abortSignal: options?.signal
+  })
+}
+
+export async function startSourceReviewOccurrence(
+  occurrenceId: number,
+  options?: { signal?: AbortSignal }
+): Promise<SourceReviewOccurrenceActionResponse> {
+  return await sourceReviewOccurrenceAction(occurrenceId, "start", options)
+}
+
+export async function completeSourceReviewOccurrence(
+  occurrenceId: number,
+  options?: { signal?: AbortSignal }
+): Promise<SourceReviewOccurrenceActionResponse> {
+  return await sourceReviewOccurrenceAction(occurrenceId, "complete", options)
+}
+
+export async function skipSourceReviewOccurrence(
+  occurrenceId: number,
+  options?: { signal?: AbortSignal }
+): Promise<SourceReviewOccurrenceActionResponse> {
+  return await sourceReviewOccurrenceAction(occurrenceId, "skip", options)
+}
+
+export async function deleteSourceReviewPlan(
+  planId: number,
+  options?: { signal?: AbortSignal }
+): Promise<SourceReviewPlanDeleteResponse> {
+  return await bgRequest<SourceReviewPlanDeleteResponse, AllowedPath, "DELETE">({
+    path: `${SOURCE_REVIEW_BASE_PATH}/${planId}` as AllowedPath,
+    method: "DELETE",
     abortSignal: options?.signal
   })
 }

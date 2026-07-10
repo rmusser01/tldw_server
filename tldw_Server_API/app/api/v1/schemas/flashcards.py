@@ -1,14 +1,20 @@
 import json
+from datetime import date, datetime
 from typing import Any, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 from tldw_Server_API.app.api.v1.schemas.study_packs import (
     FlashcardCitationResponse,
     FlashcardDeepDiveTarget,
+    StudyPackSourceSelection,
     StudyPackSummaryResponse,
+)
+from tldw_Server_API.app.core.Flashcards.source_review import (
+    SOURCE_REVIEW_OFFSET_CAPS,
+    compute_source_review_schedule,
 )
 
 DeckSchedulerType = Literal["sm2_plus", "fsrs"]
@@ -754,3 +760,179 @@ class StructuredQaImportPreviewResponse(BaseModel):
     errors: list[StructuredQaImportPreviewError] = Field(default_factory=list)
     detected_format: Literal["qa_labels"] = "qa_labels"
     skipped_blocks: int = 0
+
+
+SourceReviewActivity = Literal["reread", "quiz", "flashcards", "cloze"]
+SourceReviewOffsetUnit = Literal["day", "month"]
+SourceReviewStatus = Literal["pending", "in_progress", "completed", "skipped"]
+SOURCE_REVIEW_BUNDLE_MAX_BYTES = 256 * 1024
+
+
+class SourceReviewScheduleRow(BaseModel):
+    """One activity scheduled at a bounded day or month offset."""
+
+    offset_value: int = Field(..., strict=True, gt=0)
+    offset_unit: SourceReviewOffsetUnit
+    activity_type: SourceReviewActivity
+
+    @model_validator(mode="after")
+    def validate_offset_cap(self) -> "SourceReviewScheduleRow":
+        """Reject schedule offsets beyond the supported unit-specific cap."""
+        cap = SOURCE_REVIEW_OFFSET_CAPS[self.offset_unit]
+        if self.offset_value > cap:
+            raise ValueError(f"offset_value exceeds the {cap} {self.offset_unit} cap")
+        return self
+
+
+class SourceReviewSourceSelection(StudyPackSourceSelection):
+    """Study Pack-compatible source selection with source-review bounds."""
+
+    source_id: str = Field(..., min_length=1, max_length=256)
+    label: Optional[str] = Field(
+        default=None,
+        max_length=200,
+        validation_alias=AliasChoices("label", "source_title"),
+    )
+
+
+class SourceReviewPlanCreateRequest(BaseModel):
+    """Request for a source snapshot, local anchor date, and review schedule."""
+
+    title: str = Field(..., min_length=1, max_length=200)
+    starts_on: date
+    timezone: str = Field(..., min_length=1, max_length=255)
+    source_items: list[SourceReviewSourceSelection] = Field(..., min_length=1, max_length=10)
+    schedule: list[SourceReviewScheduleRow] = Field(..., min_length=1, max_length=24)
+
+    @field_validator("title", "timezone", mode="before")
+    @classmethod
+    def normalize_required_text(cls, value: Any) -> Any:
+        """Trim required plan text before field constraints are evaluated."""
+        return _strip_required_string(value)
+
+    @model_validator(mode="after")
+    def validate_source_snapshot_and_schedule(self) -> "SourceReviewPlanCreateRequest":
+        """Validate source snapshot sizes and the computed review schedule."""
+        for source_item in self.source_items:
+            if source_item.excerpt_text is not None and len(source_item.excerpt_text) > 20_000:
+                raise ValueError("source excerpt_text exceeds 20000 characters")
+            try:
+                locator_size = len(
+                    json.dumps(source_item.locator, ensure_ascii=False).encode("utf-8")
+                )
+            except (TypeError, ValueError) as exc:
+                raise ValueError("source locator must be JSON serializable") from exc
+            if locator_size > 8 * 1024:
+                raise ValueError("source locator exceeds 8 KiB")
+        bundle_size = len(
+            json.dumps(
+                {
+                    "items": [
+                        source_item.model_dump(mode="json", exclude_none=True)
+                        for source_item in self.source_items
+                    ]
+                },
+                ensure_ascii=False,
+            ).encode("utf-8")
+        )
+        if bundle_size > SOURCE_REVIEW_BUNDLE_MAX_BYTES:
+            raise ValueError("source bundle exceeds 256 KiB")
+        self.computed_schedule()
+        return self
+
+    def computed_schedule(self) -> list[dict[str, Any]]:
+        """Return validated occurrences with timezone-aware UTC due times."""
+        return compute_source_review_schedule(
+            starts_on=self.starts_on,
+            timezone_name=self.timezone,
+            schedule=[row.model_dump() for row in self.schedule],
+        )
+
+
+class SourceReviewOccurrenceResponse(BaseModel):
+    """Persisted schedule occurrence and its lifecycle timestamps."""
+
+    id: int
+    plan_id: int
+    offset_value: int
+    offset_unit: SourceReviewOffsetUnit
+    activity_type: SourceReviewActivity
+    due_at: datetime
+    status: SourceReviewStatus
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    completion_source: Optional[str] = None
+    created_at: datetime
+    last_modified: datetime
+    client_id: str
+    version: int
+
+
+class SourceReviewLaunchStateResponse(BaseModel):
+    """Resume metadata plus the full source bundle returned by action endpoints."""
+
+    activity_type: SourceReviewActivity
+    plan_id: int
+    occurrence_id: int
+    target_route: str
+    target_surface: str
+    action: str
+    source_payload_field: Literal["source_bundle", "source_items"]
+    completion_required: bool
+    created_at: datetime
+    source_bundle: dict[str, Any]
+
+
+class SourceReviewSourceSummaryItem(BaseModel):
+    """Bounded source identity and preview used by the polled due queue."""
+
+    source_type: Literal["note", "media", "message"]
+    source_id: str = Field(..., max_length=256)
+    label: Optional[str] = Field(default=None, max_length=200)
+    excerpt_preview: Optional[str] = Field(default=None, max_length=240)
+
+
+class SourceReviewOccurrenceActionResponse(SourceReviewOccurrenceResponse):
+    """Occurrence returned after an action, including optional resume payload."""
+
+    plan_title: Optional[str] = None
+    source_summary: list[SourceReviewSourceSummaryItem] = Field(default_factory=list)
+    launch_state: Optional[SourceReviewLaunchStateResponse] = None
+
+
+class SourceReviewPlanResponse(BaseModel):
+    """Saved source-review plan with its source bundle and occurrences."""
+
+    id: int
+    title: str
+    starts_on: date
+    timezone: str
+    source_bundle: dict[str, Any]
+    occurrences: list[SourceReviewOccurrenceResponse] = Field(default_factory=list)
+    created_at: datetime
+    last_modified: datetime
+    client_id: str
+    version: int
+
+
+class SourceReviewPlanListResponse(BaseModel):
+    """Paginated source-review plan collection."""
+
+    items: list[SourceReviewPlanResponse] = Field(default_factory=list)
+    total: int = Field(ge=0)
+
+
+class SourceReviewDueListResponse(BaseModel):
+    """Polled due occurrences with bounded summaries and a server timestamp."""
+
+    items: list[SourceReviewOccurrenceActionResponse] = Field(default_factory=list)
+    total: int = Field(ge=0)
+    now: datetime
+
+
+class SourceReviewPlanDeleteResponse(BaseModel):
+    """Report whether this request newly applied the idempotent soft delete."""
+
+    deleted: bool = Field(
+        description="True when this request deleted the plan; false when it was already deleted."
+    )

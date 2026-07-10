@@ -3,6 +3,7 @@ import { bgRequest } from "@/services/background-proxy"
 import { emitSplashAfterLoginSuccess } from "@/services/splash-events"
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
 import { getRuntimeSingleUserApiKeyOverride } from "@/services/tldw/runtime-auth-override"
+import { clearSourceReviewHandoffs } from "@/services/tldw/source-review-handoff"
 
 export interface LoginCredentials {
   username: string
@@ -212,6 +213,8 @@ export class TldwAuthService {
     } catch (error) {
       console.error('Server logout failed:', error)
     }
+
+    clearSourceReviewHandoffs()
 
     // Clear local tokens
     await tldwClient.updateConfig({

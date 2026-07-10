@@ -84,6 +84,9 @@ from tldw_Server_API.app.core.DB_Management.backends.factory import (  # noqa: E
     release_managed_backend,
 )
 from tldw_Server_API.app.core.DB_Management.backends.fts_translator import FTSQueryTranslator  # noqa: E402
+from tldw_Server_API.app.core.DB_Management.backends.pg_rls_policies import (  # noqa: E402
+    build_source_review_rls_sql,
+)
 from tldw_Server_API.app.core.DB_Management.backends.query_utils import (  # noqa: E402
     normalise_params,
     prepare_backend_many_statement,
@@ -91,6 +94,7 @@ from tldw_Server_API.app.core.DB_Management.backends.query_utils import (  # noq
     replace_insert_or_ignore,
     transform_sqlite_query_for_postgres,
 )
+from tldw_Server_API.app.core.DB_Management.db_errors import NotFoundError  # noqa: E402
 from tldw_Server_API.app.core.DB_Management.backends.sqlite_backend import SQLiteBackend  # noqa: E402
 from tldw_Server_API.app.core.DB_Management.content_backend import get_content_backend  # noqa: E402
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths  # noqa: E402
@@ -98,6 +102,9 @@ from tldw_Server_API.app.core.DB_Management.sqlite_policy import begin_immediate
 from tldw_Server_API.app.core.Flashcards.asset_refs import (  # noqa: E402
     extract_flashcard_asset_uuids,
     sanitize_flashcard_text_for_search,
+)
+from tldw_Server_API.app.core.Flashcards.source_review import (  # noqa: E402
+    build_source_review_launch_metadata,
 )
 from tldw_Server_API.app.core.Flashcards.scheduler_sm2 import (  # noqa: E402
     MATURE_INTERVAL_DAYS,
@@ -609,7 +616,7 @@ class CharactersRAGDB:
         is_memory_db (bool): True if the database is in-memory.
         db_path_str (str): String representation of the database path for SQLite connection.
     """
-    _CURRENT_SCHEMA_VERSION = 51  # Schema v51 adds manuscript annotation storage
+    _CURRENT_SCHEMA_VERSION = 52  # Schema v52 adds source review plan storage
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _SQLITE_SCHEMA_INIT_LOCKS_GUARD: ClassVar[threading.RLock] = threading.RLock()
     _SQLITE_SCHEMA_INIT_LOCKS: ClassVar[dict[str, threading.RLock]] = {}
@@ -810,6 +817,8 @@ class CharactersRAGDB:
         ("study_packs", "id"),
         ("study_pack_cards", "id"),
         ("flashcard_citations", "id"),
+        ("source_review_plans", "id"),
+        ("source_review_occurrences", "id"),
         ("suggestion_snapshots", "id"),
         ("suggestion_generation_links", "id"),
         ("study_assistant_threads", "id"),
@@ -5842,6 +5851,147 @@ UPDATE db_schema_version
    AND version < 51;
 """
 
+    _MIGRATION_SQL_V51_TO_V52 = """
+/*───────────────────────────────────────────────────────────────
+  Migration to Version 52 - Source review plan storage (2026-07-09)
+───────────────────────────────────────────────────────────────*/
+CREATE TABLE IF NOT EXISTS source_review_plans(
+  id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+  title              TEXT NOT NULL,
+  starts_on          TEXT NOT NULL,
+  timezone           TEXT NOT NULL,
+  source_bundle_json TEXT NOT NULL,
+  created_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_modified      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted            BOOLEAN NOT NULL DEFAULT 0,
+  client_id          TEXT NOT NULL DEFAULT 'unknown',
+  version            INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS source_review_occurrences(
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  plan_id           INTEGER NOT NULL REFERENCES source_review_plans(id) ON DELETE CASCADE,
+  offset_value      INTEGER NOT NULL,
+  offset_unit       TEXT NOT NULL CHECK(offset_unit IN ('day','month')),
+  activity_type     TEXT NOT NULL CHECK(activity_type IN ('reread','quiz','flashcards','cloze')),
+  due_at            DATETIME NOT NULL,
+  status            TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','in_progress','completed','skipped')),
+  launch_state_json TEXT,
+  started_at        DATETIME,
+  completed_at      DATETIME,
+  completion_source TEXT,
+  created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_modified     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted           BOOLEAN NOT NULL DEFAULT 0,
+  client_id         TEXT NOT NULL DEFAULT 'unknown',
+  version           INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE INDEX IF NOT EXISTS idx_source_review_plans_deleted
+  ON source_review_plans(deleted);
+CREATE INDEX IF NOT EXISTS idx_source_review_plans_list
+  ON source_review_plans(deleted, created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_source_review_occurrences_plan_id
+  ON source_review_occurrences(plan_id, id);
+CREATE INDEX IF NOT EXISTS idx_source_review_occurrences_due_status
+  ON source_review_occurrences(status, due_at, id);
+CREATE INDEX IF NOT EXISTS idx_source_review_occurrences_deleted
+  ON source_review_occurrences(deleted);
+DROP INDEX IF EXISTS idx_source_review_occurrences_due_list;
+CREATE INDEX IF NOT EXISTS idx_source_review_occurrences_due_list
+  ON source_review_occurrences(deleted, due_at, id, status);
+
+DROP TRIGGER IF EXISTS source_review_plans_sync_create;
+DROP TRIGGER IF EXISTS source_review_plans_sync_update;
+DROP TRIGGER IF EXISTS source_review_plans_sync_delete;
+
+CREATE TRIGGER source_review_plans_sync_create
+AFTER INSERT ON source_review_plans BEGIN
+  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+  VALUES('source_review_plans',NEW.id,'create',NEW.last_modified,NEW.client_id,NEW.version,
+         json_object('id',NEW.id,'title',NEW.title,'starts_on',NEW.starts_on,
+                     'timezone',NEW.timezone,'source_bundle_json',NEW.source_bundle_json,
+                     'created_at',NEW.created_at,'last_modified',NEW.last_modified,
+                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+CREATE TRIGGER source_review_plans_sync_update
+AFTER UPDATE ON source_review_plans
+WHEN OLD.deleted = NEW.deleted AND (
+     OLD.title IS NOT NEW.title OR OLD.starts_on IS NOT NEW.starts_on OR
+     OLD.timezone IS NOT NEW.timezone OR OLD.source_bundle_json IS NOT NEW.source_bundle_json OR
+     OLD.last_modified IS NOT NEW.last_modified OR OLD.version IS NOT NEW.version)
+BEGIN
+  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+  VALUES('source_review_plans',NEW.id,'update',NEW.last_modified,NEW.client_id,NEW.version,
+         json_object('id',NEW.id,'title',NEW.title,'starts_on',NEW.starts_on,
+                     'timezone',NEW.timezone,'source_bundle_json',NEW.source_bundle_json,
+                     'created_at',NEW.created_at,'last_modified',NEW.last_modified,
+                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+CREATE TRIGGER source_review_plans_sync_delete
+AFTER UPDATE ON source_review_plans
+WHEN OLD.deleted = 0 AND NEW.deleted = 1
+BEGIN
+  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+  VALUES('source_review_plans',NEW.id,'delete',NEW.last_modified,NEW.client_id,NEW.version,
+         json_object('id',NEW.id,'deleted',NEW.deleted,'last_modified',NEW.last_modified,
+                     'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+DROP TRIGGER IF EXISTS source_review_occurrences_sync_create;
+DROP TRIGGER IF EXISTS source_review_occurrences_sync_update;
+DROP TRIGGER IF EXISTS source_review_occurrences_sync_delete;
+
+CREATE TRIGGER source_review_occurrences_sync_create
+AFTER INSERT ON source_review_occurrences BEGIN
+  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+  VALUES('source_review_occurrences',NEW.id,'create',NEW.last_modified,NEW.client_id,NEW.version,
+         json_object('id',NEW.id,'plan_id',NEW.plan_id,'offset_value',NEW.offset_value,
+                     'offset_unit',NEW.offset_unit,'activity_type',NEW.activity_type,
+                     'due_at',NEW.due_at,'status',NEW.status,'launch_state_json',NEW.launch_state_json,
+                     'started_at',NEW.started_at,'completed_at',NEW.completed_at,
+                     'completion_source',NEW.completion_source,'created_at',NEW.created_at,
+                     'last_modified',NEW.last_modified,'deleted',NEW.deleted,
+                     'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+CREATE TRIGGER source_review_occurrences_sync_update
+AFTER UPDATE ON source_review_occurrences
+WHEN OLD.deleted = NEW.deleted AND (
+     OLD.status IS NOT NEW.status OR OLD.launch_state_json IS NOT NEW.launch_state_json OR
+     OLD.started_at IS NOT NEW.started_at OR OLD.completed_at IS NOT NEW.completed_at OR
+     OLD.completion_source IS NOT NEW.completion_source OR
+     OLD.last_modified IS NOT NEW.last_modified OR OLD.version IS NOT NEW.version)
+BEGIN
+  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+  VALUES('source_review_occurrences',NEW.id,'update',NEW.last_modified,NEW.client_id,NEW.version,
+         json_object('id',NEW.id,'plan_id',NEW.plan_id,'offset_value',NEW.offset_value,
+                     'offset_unit',NEW.offset_unit,'activity_type',NEW.activity_type,
+                     'due_at',NEW.due_at,'status',NEW.status,'launch_state_json',NEW.launch_state_json,
+                     'started_at',NEW.started_at,'completed_at',NEW.completed_at,
+                     'completion_source',NEW.completion_source,'created_at',NEW.created_at,
+                     'last_modified',NEW.last_modified,'deleted',NEW.deleted,
+                     'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+CREATE TRIGGER source_review_occurrences_sync_delete
+AFTER UPDATE ON source_review_occurrences
+WHEN OLD.deleted = 0 AND NEW.deleted = 1
+BEGIN
+  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+  VALUES('source_review_occurrences',NEW.id,'delete',NEW.last_modified,NEW.client_id,NEW.version,
+         json_object('id',NEW.id,'plan_id',NEW.plan_id,'deleted',NEW.deleted,
+                     'last_modified',NEW.last_modified,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+UPDATE db_schema_version
+   SET version = 52
+ WHERE schema_name = 'rag_char_chat_schema'
+   AND version < 52;
+"""
+
     _MIGRATION_SQL_V47_TO_V48_POSTGRES = """
 /*───────────────────────────────────────────────────────────────
   Migration to Version 48 — Notes task-backed checklist storage (2026-06-05) [Postgres]
@@ -7225,6 +7375,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             (48, "_migrate_from_v48_to_v49"),
             (49, "_migrate_from_v49_to_v50"),
             (50, "_migrate_from_v50_to_v51"),
+            (51, "_migrate_from_v51_to_v52"),
         ):
             method = getattr(self, method_name, None)
             if method is not None:
@@ -8630,6 +8781,32 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V50->V51: {e}", exc_info=True)
             raise SchemaError(f"Unexpected error migrating to V51 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
 
+    def _migrate_from_v51_to_v52(self, conn: sqlite3.Connection) -> None:
+        """Migrate schema from V51 to V52 (source review plan storage)."""
+        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V51 to V52 for DB: {self.db_path_str}...")
+        try:
+            self._ensure_source_review_schema_sqlite(conn)
+            conn.execute(
+                "UPDATE db_schema_version SET version = 52 WHERE schema_name = ? AND version < 52",
+                (self._SCHEMA_NAME,),
+            )
+            final_version = self._get_db_version(conn)
+            if final_version != 52:
+                raise SchemaError(  # noqa: TRY003, TRY301
+                    f"[{self._SCHEMA_NAME}] Migration V51->V52 failed version check. Expected 52, got: {final_version}"
+                )
+            logger.info(f"[{self._SCHEMA_NAME}] Migration to V52 completed.")
+        except sqlite3.Error as exc:
+            logger.error(f"[{self._SCHEMA_NAME}] Migration V51->V52 failed: {exc}", exc_info=True)
+            raise SchemaError(f"Migration V51->V52 failed for '{self._SCHEMA_NAME}': {exc}") from exc  # noqa: TRY003
+        except SchemaError:
+            raise
+        except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:
+            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V51->V52: {exc}", exc_info=True)
+            raise SchemaError(
+                f"Unexpected error migrating to V52 for '{self._SCHEMA_NAME}': {exc}"
+            ) from exc  # noqa: TRY003
+
     def _ensure_persona_persistence_schema_sqlite(self, conn: sqlite3.Connection) -> None:
         """Ensure persona persistence tables and columns exist for drifted SQLite schemas."""
         try:
@@ -9944,6 +10121,211 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         except sqlite3.Error as exc:
             raise SchemaError(f"Failed ensuring SQLite manuscript annotations schema: {exc}") from exc  # noqa: TRY003
 
+    def _ensure_source_review_schema_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Ensure source review storage, indexes, and sync triggers exist for SQLite."""
+        try:
+            ddl, _, _version_update = self._MIGRATION_SQL_V51_TO_V52.partition("UPDATE db_schema_version")
+            conn.executescript(ddl)
+        except sqlite3.Error as exc:
+            raise SchemaError(f"Failed ensuring SQLite source review schema: {exc}") from exc  # noqa: TRY003
+
+    def _ensure_source_review_schema_postgres(self, conn: Any) -> None:
+        """Ensure source review storage, indexes, and sync triggers exist for PostgreSQL."""
+        statements = [
+            """
+            CREATE TABLE IF NOT EXISTS source_review_plans(
+              id BIGSERIAL PRIMARY KEY,
+              title TEXT NOT NULL,
+              starts_on DATE NOT NULL,
+              timezone TEXT NOT NULL,
+              source_bundle_json TEXT NOT NULL,
+              created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              last_modified TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              deleted BOOLEAN NOT NULL DEFAULT FALSE,
+              client_id TEXT NOT NULL DEFAULT 'unknown',
+              version INTEGER NOT NULL DEFAULT 1
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS source_review_occurrences(
+              id BIGSERIAL PRIMARY KEY,
+              plan_id BIGINT NOT NULL REFERENCES source_review_plans(id) ON DELETE CASCADE,
+              offset_value INTEGER NOT NULL,
+              offset_unit TEXT NOT NULL CHECK(offset_unit IN ('day','month')),
+              activity_type TEXT NOT NULL CHECK(activity_type IN ('reread','quiz','flashcards','cloze')),
+              due_at TIMESTAMPTZ NOT NULL,
+              status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','in_progress','completed','skipped')),
+              launch_state_json TEXT,
+              started_at TIMESTAMPTZ,
+              completed_at TIMESTAMPTZ,
+              completion_source TEXT,
+              created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              last_modified TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              deleted BOOLEAN NOT NULL DEFAULT FALSE,
+              client_id TEXT NOT NULL DEFAULT 'unknown',
+              version INTEGER NOT NULL DEFAULT 1
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_source_review_plans_deleted ON source_review_plans(deleted)",
+            "CREATE INDEX IF NOT EXISTS idx_source_review_plans_list "
+            "ON source_review_plans(deleted, created_at DESC, id DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_source_review_occurrences_plan_id "
+            "ON source_review_occurrences(plan_id, id)",
+            "CREATE INDEX IF NOT EXISTS idx_source_review_occurrences_due_status "
+            "ON source_review_occurrences(status, due_at, id)",
+            "CREATE INDEX IF NOT EXISTS idx_source_review_occurrences_deleted "
+            "ON source_review_occurrences(deleted)",
+            "DROP INDEX IF EXISTS idx_source_review_occurrences_due_list",
+            "CREATE INDEX IF NOT EXISTS idx_source_review_occurrences_due_list "
+            "ON source_review_occurrences(deleted, due_at, id, status)",
+        ]
+        try:
+            for statement in statements:
+                self.backend.execute(statement, connection=conn)
+
+            self.backend.execute(
+                """
+                CREATE OR REPLACE FUNCTION source_review_plans_sync_log_fn()
+                RETURNS trigger AS $$
+                BEGIN
+                  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+                  VALUES(
+                    'source_review_plans', CAST(NEW.id AS TEXT), TG_ARGV[0],
+                    NEW.last_modified, NEW.client_id, NEW.version,
+                    json_build_object(
+                      'id',NEW.id,'title',NEW.title,'starts_on',NEW.starts_on,
+                      'timezone',NEW.timezone,'source_bundle_json',NEW.source_bundle_json,
+                      'created_at',NEW.created_at,'last_modified',NEW.last_modified,
+                      'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version
+                    )::text
+                  );
+                  RETURN NEW;
+                END;
+                $$ LANGUAGE plpgsql
+                """,
+                connection=conn,
+            )
+            self.backend.execute(
+                """
+                CREATE OR REPLACE FUNCTION source_review_occurrences_sync_log_fn()
+                RETURNS trigger AS $$
+                BEGIN
+                  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+                  VALUES(
+                    'source_review_occurrences', CAST(NEW.id AS TEXT), TG_ARGV[0],
+                    NEW.last_modified, NEW.client_id, NEW.version,
+                    json_build_object(
+                      'id',NEW.id,'plan_id',NEW.plan_id,'offset_value',NEW.offset_value,
+                      'offset_unit',NEW.offset_unit,'activity_type',NEW.activity_type,
+                      'due_at',NEW.due_at,'status',NEW.status,
+                      'launch_state_json',NEW.launch_state_json,'started_at',NEW.started_at,
+                      'completed_at',NEW.completed_at,'completion_source',NEW.completion_source,
+                      'created_at',NEW.created_at,'last_modified',NEW.last_modified,
+                      'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version
+                    )::text
+                  );
+                  RETURN NEW;
+                END;
+                $$ LANGUAGE plpgsql
+                """,
+                connection=conn,
+            )
+
+            for trigger_name in (
+                "source_review_plans_sync_create",
+                "source_review_plans_sync_update",
+                "source_review_plans_sync_delete",
+            ):
+                self.backend.execute(
+                    f"DROP TRIGGER IF EXISTS {trigger_name} ON source_review_plans",  # nosec B608
+                    connection=conn,
+                )
+            self.backend.execute(
+                """
+                CREATE TRIGGER source_review_plans_sync_create
+                AFTER INSERT ON source_review_plans
+                FOR EACH ROW EXECUTE FUNCTION source_review_plans_sync_log_fn('create')
+                """,
+                connection=conn,
+            )
+            self.backend.execute(
+                """
+                CREATE TRIGGER source_review_plans_sync_update
+                AFTER UPDATE ON source_review_plans
+                FOR EACH ROW
+                WHEN (OLD.deleted IS NOT DISTINCT FROM NEW.deleted AND (
+                  OLD.title IS DISTINCT FROM NEW.title OR
+                  OLD.starts_on IS DISTINCT FROM NEW.starts_on OR
+                  OLD.timezone IS DISTINCT FROM NEW.timezone OR
+                  OLD.source_bundle_json IS DISTINCT FROM NEW.source_bundle_json OR
+                  OLD.last_modified IS DISTINCT FROM NEW.last_modified OR
+                  OLD.version IS DISTINCT FROM NEW.version
+                ))
+                EXECUTE FUNCTION source_review_plans_sync_log_fn('update')
+                """,
+                connection=conn,
+            )
+            self.backend.execute(
+                """
+                CREATE TRIGGER source_review_plans_sync_delete
+                AFTER UPDATE ON source_review_plans
+                FOR EACH ROW
+                WHEN (OLD.deleted = FALSE AND NEW.deleted = TRUE)
+                EXECUTE FUNCTION source_review_plans_sync_log_fn('delete')
+                """,
+                connection=conn,
+            )
+
+            for trigger_name in (
+                "source_review_occurrences_sync_create",
+                "source_review_occurrences_sync_update",
+                "source_review_occurrences_sync_delete",
+            ):
+                self.backend.execute(
+                    f"DROP TRIGGER IF EXISTS {trigger_name} ON source_review_occurrences",  # nosec B608
+                    connection=conn,
+                )
+            self.backend.execute(
+                """
+                CREATE TRIGGER source_review_occurrences_sync_create
+                AFTER INSERT ON source_review_occurrences
+                FOR EACH ROW EXECUTE FUNCTION source_review_occurrences_sync_log_fn('create')
+                """,
+                connection=conn,
+            )
+            self.backend.execute(
+                """
+                CREATE TRIGGER source_review_occurrences_sync_update
+                AFTER UPDATE ON source_review_occurrences
+                FOR EACH ROW
+                WHEN (OLD.deleted IS NOT DISTINCT FROM NEW.deleted AND (
+                  OLD.status IS DISTINCT FROM NEW.status OR
+                  OLD.launch_state_json IS DISTINCT FROM NEW.launch_state_json OR
+                  OLD.started_at IS DISTINCT FROM NEW.started_at OR
+                  OLD.completed_at IS DISTINCT FROM NEW.completed_at OR
+                  OLD.completion_source IS DISTINCT FROM NEW.completion_source OR
+                  OLD.last_modified IS DISTINCT FROM NEW.last_modified OR
+                  OLD.version IS DISTINCT FROM NEW.version
+                ))
+                EXECUTE FUNCTION source_review_occurrences_sync_log_fn('update')
+                """,
+                connection=conn,
+            )
+            self.backend.execute(
+                """
+                CREATE TRIGGER source_review_occurrences_sync_delete
+                AFTER UPDATE ON source_review_occurrences
+                FOR EACH ROW
+                WHEN (OLD.deleted = FALSE AND NEW.deleted = TRUE)
+                EXECUTE FUNCTION source_review_occurrences_sync_log_fn('delete')
+                """,
+                connection=conn,
+            )
+            for statement in build_source_review_rls_sql():
+                self.backend.execute(statement, connection=conn)
+        except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:
+            raise SchemaError(f"Failed ensuring PostgreSQL source review schema: {exc}") from exc  # noqa: TRY003
+
     def _ensure_workspace_assistant_defaults_schema_sqlite(self, conn: sqlite3.Connection) -> None:
         """Ensure Workspace Assistant Defaults storage exists for SQLite."""
         try:
@@ -10744,6 +11126,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         self._ensure_note_studio_schema_sqlite(conn)
                         self._ensure_workspace_assistant_defaults_schema_sqlite(conn)
                         self._ensure_manuscript_annotations_schema_sqlite(conn)
+                        self._ensure_source_review_schema_sqlite(conn)
                         # Seed/heal character_cards_fts before request traffic. Schema V4
                         # inserts "Default Assistant" before FTS triggers are created.
                         self._self_heal_character_cards_fts_sqlite(conn)
@@ -10900,6 +11283,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         current_db_version = self._get_db_version(conn)
                     if target_version >= 51 and current_db_version == 50:
                         self._migrate_from_v50_to_v51(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 52 and current_db_version == 51:
+                        self._migrate_from_v51_to_v52(conn)
                         current_db_version = self._get_db_version(conn)
                 # Ensure helpful indexes that may have been introduced post-creation
                 try:
@@ -11303,6 +11689,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 if target_version >= 51 and current_db_version == 50:
                     self._migrate_from_v50_to_v51(conn)
                     current_db_version = self._get_db_version(conn)
+                if target_version >= 52 and current_db_version == 51:
+                    self._migrate_from_v51_to_v52(conn)
+                    current_db_version = self._get_db_version(conn)
 
                 self._ensure_recent_persona_schema_sqlite(conn)
                 self._ensure_recent_voice_command_schema_sqlite(conn)
@@ -11313,6 +11702,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._ensure_workspace_assistant_defaults_schema_sqlite(conn)
                 self._ensure_workspace_activity_events_schema_sqlite(conn)
                 self._ensure_manuscript_annotations_schema_sqlite(conn)
+                self._ensure_source_review_schema_sqlite(conn)
 
                 final_version_check = self._get_db_version(conn)
                 if final_version_check != target_version:
@@ -11329,6 +11719,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._ensure_flashcard_scheduler_schema_sqlite(conn)
                 self._ensure_flashcard_deck_sharing_schema_sqlite(conn)
                 self._ensure_study_pack_schema_sqlite(conn)
+                self._ensure_source_review_schema_sqlite(conn)
                 self._ensure_study_assistant_schema_sqlite(conn)
                 self._ensure_quiz_remediation_conversion_schema_sqlite(conn)
                 self._ensure_web_clipper_schema_sqlite(conn)
@@ -15201,6 +15592,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             if current_version < 51:
                 self._apply_postgres_migration_script(self._MIGRATION_SQL_V50_TO_V51_POSTGRES, conn, expected_version=51)
                 current_version = 51
+            if current_version < 52:
+                self._ensure_source_review_schema_postgres(conn)
+                self._set_schema_version_postgres(conn, 52)
+                self._sync_postgres_sequences(conn)
+                current_version = 52
 
             if current_version > target_version:
                 raise SchemaError(  # noqa: TRY003
@@ -15212,6 +15608,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             self._ensure_flashcard_scheduler_schema_postgres(conn)
             self._ensure_flashcard_deck_sharing_schema_postgres(conn)
             self._ensure_study_pack_schema_postgres(conn)
+            self._ensure_source_review_schema_postgres(conn)
             self._ensure_study_assistant_schema_postgres(conn)
             self._ensure_workspace_study_material_schema_postgres(conn)
             self._ensure_quiz_remediation_conversion_schema_postgres(conn)
@@ -26086,6 +26483,447 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         # unlink extras
         for kid in cur_kw_ids - desired_kw_ids:
             conn.execute("DELETE FROM flashcard_keywords WHERE card_id = ? AND keyword_id = ?", (card_id, int(kid)))
+
+    # ==========================
+    # Source Review Plans
+    # ==========================
+    @staticmethod
+    def _source_review_timestamp_value(value: Any) -> str:
+        """Serialize computed due timestamps consistently for both backends."""
+        if isinstance(value, datetime):
+            if value.tzinfo is None:
+                value = value.replace(tzinfo=timezone.utc)
+            return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+        return str(value)
+
+    def create_source_review_plan(
+        self,
+        *,
+        title: str,
+        starts_on: str,
+        timezone_name: str,
+        source_bundle_json: dict[str, Any],
+        schedule: list[dict[str, Any]],
+    ) -> int:
+        """Create a source review plan and all of its occurrences atomically."""
+        source_bundle = self._ensure_json_string_from_mixed(source_bundle_json)
+        if source_bundle is None:
+            raise InputError("Source review source_bundle_json is required")  # noqa: TRY003
+
+        now = self._get_current_utc_timestamp_iso()
+        try:
+            with self.transaction() as conn:
+                insert_plan_sql = (
+                    "INSERT INTO source_review_plans("
+                    "title, starts_on, timezone, source_bundle_json, created_at, last_modified, "
+                    "deleted, client_id, version"
+                    ") VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                )
+                plan_params = (
+                    title,
+                    starts_on,
+                    timezone_name,
+                    source_bundle,
+                    now,
+                    now,
+                    False,
+                    self.client_id,
+                    1,
+                )
+                if self.backend_type == BackendType.POSTGRESQL:
+                    cursor = conn.execute(insert_plan_sql + " RETURNING id", plan_params)
+                    row = cursor.fetchone()
+                    plan_id = int(row["id"]) if row else None
+                else:
+                    cursor = conn.execute(insert_plan_sql, plan_params)
+                    plan_id = int(cursor.lastrowid) if cursor.lastrowid is not None else None
+                if plan_id is None:
+                    raise CharactersRAGDBError("Failed to determine source review plan ID after insert")  # noqa: TRY003
+
+                insert_occurrence_sql = """
+                    INSERT INTO source_review_occurrences(
+                      plan_id, offset_value, offset_unit, activity_type, due_at, status,
+                      launch_state_json, started_at, completed_at, completion_source,
+                      created_at, last_modified, deleted, client_id, version
+                    ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """
+                for schedule_row in schedule:
+                    conn.execute(
+                        insert_occurrence_sql,
+                        (
+                            plan_id,
+                            int(schedule_row["offset_value"]),
+                            schedule_row["offset_unit"],
+                            schedule_row["activity_type"],
+                            self._source_review_timestamp_value(schedule_row["due_at"]),
+                            "pending",
+                            None,
+                            None,
+                            None,
+                            None,
+                            now,
+                            now,
+                            False,
+                            self.client_id,
+                            1,
+                        ),
+                    )
+                return plan_id
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Failed to create source review plan: {exc}") from exc  # noqa: TRY003
+        except BackendDatabaseError as exc:
+            raise CharactersRAGDBError(f"Failed to create source review plan: {exc}") from exc  # noqa: TRY003
+
+    def _source_review_occurrences_by_plan(
+        self,
+        plan_ids: list[int],
+    ) -> dict[int, list[dict[str, Any]]]:
+        """Load active occurrence summaries for source review plan responses."""
+        occurrences: dict[int, list[dict[str, Any]]] = {plan_id: [] for plan_id in plan_ids}
+        if not plan_ids:
+            return occurrences
+
+        placeholders = ", ".join("?" for _ in plan_ids)
+        rows = self.execute_query(
+            f"""
+            SELECT id, plan_id, offset_value, offset_unit, activity_type, due_at,
+                   status, launch_state_json, started_at, completed_at,
+                   completion_source, created_at, last_modified, deleted,
+                   client_id, version
+              FROM source_review_occurrences
+             WHERE deleted = ? AND plan_id IN ({placeholders})
+             ORDER BY plan_id ASC, due_at ASC, id ASC
+            """,  # nosec B608 - placeholders are generated from an internal integer list.
+            (False, *plan_ids),
+        ).fetchall()
+        for row in rows:
+            item = self._deserialize_row_fields(row, ["launch_state_json"])
+            if item is not None:
+                occurrences[int(item["plan_id"])].append(item)
+        return occurrences
+
+    def get_source_review_plan(self, plan_id: int) -> dict[str, Any] | None:
+        """Return one active source review plan with occurrence summaries."""
+        row = self.execute_query(
+            """
+            SELECT id, title, starts_on, timezone, source_bundle_json,
+                   created_at, last_modified, deleted, client_id, version
+              FROM source_review_plans
+             WHERE id = ? AND deleted = ?
+            """,
+            (plan_id, False),
+        ).fetchone()
+        plan = self._deserialize_row_fields(row, ["source_bundle_json"])
+        if plan is None:
+            return None
+        plan["occurrences"] = self._source_review_occurrences_by_plan([int(plan["id"])])[int(plan["id"])]
+        return plan
+
+    def list_source_review_plans(
+        self,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """List active source review plans in stable newest-first order."""
+        limit = max(0, int(limit))
+        offset = max(0, int(offset))
+        count_row = self.execute_query(
+            "SELECT COUNT(*) AS total FROM source_review_plans WHERE deleted = ?",
+            (False,),
+        ).fetchone()
+        total = int(count_row["total"]) if count_row else 0
+        rows = self.execute_query(
+            """
+            SELECT id, title, starts_on, timezone, source_bundle_json,
+                   created_at, last_modified, deleted, client_id, version
+              FROM source_review_plans
+             WHERE deleted = ?
+             ORDER BY created_at DESC, id DESC
+             LIMIT ? OFFSET ?
+            """,
+            (False, limit, offset),
+        ).fetchall()
+        plans = [
+            item
+            for row in rows
+            if (item := self._deserialize_row_fields(row, ["source_bundle_json"])) is not None
+        ]
+        occurrences = self._source_review_occurrences_by_plan([int(plan["id"]) for plan in plans])
+        for plan in plans:
+            plan["occurrences"] = occurrences[int(plan["id"])]
+        return plans, total
+
+    def list_due_source_review_occurrences(
+        self,
+        *,
+        now_utc: str,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """List due pending or in-progress occurrences with their active plan snapshot."""
+        limit = max(0, int(limit))
+        offset = max(0, int(offset))
+        where_params = (False, False, now_utc)
+        count_row = self.execute_query(
+            """
+            SELECT COUNT(*) AS total
+              FROM source_review_occurrences o
+              JOIN source_review_plans p ON p.id = o.plan_id
+             WHERE o.deleted = ? AND p.deleted = ?
+               AND o.status IN ('pending', 'in_progress')
+               AND o.due_at <= ?
+            """,
+            where_params,
+        ).fetchone()
+        total = int(count_row["total"]) if count_row else 0
+        rows = self.execute_query(
+            """
+            SELECT o.id, o.plan_id, o.offset_value, o.offset_unit, o.activity_type,
+                   o.due_at, o.status, o.launch_state_json, o.started_at,
+                   o.completed_at, o.completion_source, o.created_at, o.last_modified,
+                   o.deleted, o.client_id, o.version,
+                   p.title AS plan_title, p.starts_on, p.timezone, p.source_bundle_json
+              FROM source_review_occurrences o
+              JOIN source_review_plans p ON p.id = o.plan_id
+             WHERE o.deleted = ? AND p.deleted = ?
+               AND o.status IN ('pending', 'in_progress')
+               AND o.due_at <= ?
+             ORDER BY o.due_at ASC, o.id ASC
+             LIMIT ? OFFSET ?
+            """,
+            (*where_params, limit, offset),
+        ).fetchall()
+        return (
+            [
+                item
+                for row in rows
+                if (
+                    item := self._deserialize_row_fields(
+                        row,
+                        ["launch_state_json", "source_bundle_json"],
+                    )
+                )
+                is not None
+            ],
+            total,
+        )
+
+    def _get_source_review_occurrence_row(
+        self,
+        conn: Any,
+        occurrence_id: int,
+        *,
+        for_update: bool = False,
+    ) -> dict[str, Any] | None:
+        """Load one active occurrence and its plan snapshot within a transaction."""
+        query = """
+            SELECT o.id, o.plan_id, o.offset_value, o.offset_unit, o.activity_type,
+                   o.due_at, o.status, o.launch_state_json, o.started_at,
+                   o.completed_at, o.completion_source, o.created_at, o.last_modified,
+                   o.deleted, o.client_id, o.version,
+                   p.title AS plan_title, p.starts_on, p.timezone, p.source_bundle_json
+              FROM source_review_occurrences o
+              JOIN source_review_plans p ON p.id = o.plan_id
+             WHERE o.id = ? AND o.deleted = ? AND p.deleted = ?
+        """
+        if for_update and self.backend_type == BackendType.POSTGRESQL:
+            query += " FOR UPDATE OF o"
+        row = conn.execute(query, (occurrence_id, False, False)).fetchone()
+        return self._deserialize_row_fields(row, ["launch_state_json", "source_bundle_json"])
+
+    def _require_source_review_occurrence(
+        self,
+        conn: Any,
+        occurrence_id: int,
+    ) -> dict[str, Any]:
+        """Lock and return an occurrence or raise the domain not-found error."""
+        occurrence = self._get_source_review_occurrence_row(conn, occurrence_id, for_update=True)
+        if occurrence is None:
+            raise NotFoundError(f"Source review occurrence {occurrence_id} not found")
+        return occurrence
+
+    def start_source_review_occurrence(self, occurrence_id: int) -> dict[str, Any]:
+        """Start a pending occurrence or idempotently return an active/completed one."""
+        try:
+            with self.transaction() as conn:
+                occurrence = self._require_source_review_occurrence(conn, occurrence_id)
+                status = str(occurrence["status"])
+                if status in {"in_progress", "completed"}:
+                    return occurrence
+                if status == "skipped":
+                    raise ConflictError(
+                        "Skipped source review occurrence cannot be started",
+                        entity="source_review_occurrences",
+                        identifier=occurrence_id,
+                    )
+
+                now = self._get_current_utc_timestamp_iso()
+                launch_state = build_source_review_launch_metadata(
+                    activity_type=occurrence["activity_type"],
+                    plan_id=int(occurrence["plan_id"]),
+                    occurrence_id=occurrence_id,
+                    created_at=now,
+                )
+                cursor = conn.execute(
+                    """
+                    UPDATE source_review_occurrences
+                       SET status = 'in_progress', launch_state_json = ?, started_at = ?,
+                           last_modified = ?, client_id = ?, version = version + 1
+                     WHERE id = ? AND deleted = ? AND status = 'pending'
+                    """,
+                    (json.dumps(launch_state), now, now, self.client_id, occurrence_id, False),
+                )
+                if cursor.rowcount != 1:
+                    raise ConflictError(
+                        "Concurrent update starting source review occurrence",
+                        entity="source_review_occurrences",
+                        identifier=occurrence_id,
+                    )
+                started = self._get_source_review_occurrence_row(conn, occurrence_id)
+                if started is None:
+                    raise NotFoundError(
+                        f"Source review occurrence {occurrence_id} not found"
+                    )
+                return started
+        except ValueError as exc:
+            raise CharactersRAGDBError(
+                "Stored source review launch metadata is invalid"
+            ) from exc
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Failed to start source review occurrence: {exc}") from exc  # noqa: TRY003
+        except BackendDatabaseError as exc:
+            raise CharactersRAGDBError(f"Failed to start source review occurrence: {exc}") from exc  # noqa: TRY003
+
+    def complete_source_review_occurrence(
+        self,
+        occurrence_id: int,
+        *,
+        completion_source: str = "manual",
+    ) -> dict[str, Any]:
+        """Complete an in-progress occurrence idempotently."""
+        try:
+            with self.transaction() as conn:
+                occurrence = self._require_source_review_occurrence(conn, occurrence_id)
+                status = str(occurrence["status"])
+                if status == "completed":
+                    return occurrence
+                if status == "pending":
+                    message = "Source review occurrence must be started before completion"
+                elif status == "skipped":
+                    message = "Skipped source review occurrence cannot be completed"
+                else:
+                    message = ""
+                if message:
+                    raise ConflictError(
+                        message,
+                        entity="source_review_occurrences",
+                        identifier=occurrence_id,
+                    )
+
+                now = self._get_current_utc_timestamp_iso()
+                cursor = conn.execute(
+                    """
+                    UPDATE source_review_occurrences
+                       SET status = 'completed', completed_at = ?, completion_source = ?,
+                           last_modified = ?, client_id = ?, version = version + 1
+                     WHERE id = ? AND deleted = ? AND status = 'in_progress'
+                    """,
+                    (now, completion_source, now, self.client_id, occurrence_id, False),
+                )
+                if cursor.rowcount != 1:
+                    raise ConflictError(
+                        "Concurrent update completing source review occurrence",
+                        entity="source_review_occurrences",
+                        identifier=occurrence_id,
+                    )
+                completed = self._get_source_review_occurrence_row(conn, occurrence_id)
+                if completed is None:
+                    raise NotFoundError(
+                        f"Source review occurrence {occurrence_id} not found"
+                    )
+                return completed
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Failed to complete source review occurrence: {exc}") from exc  # noqa: TRY003
+        except BackendDatabaseError as exc:
+            raise CharactersRAGDBError(f"Failed to complete source review occurrence: {exc}") from exc  # noqa: TRY003
+
+    def skip_source_review_occurrence(self, occurrence_id: int) -> dict[str, Any]:
+        """Skip a pending/in-progress occurrence or return an already skipped one."""
+        try:
+            with self.transaction() as conn:
+                occurrence = self._require_source_review_occurrence(conn, occurrence_id)
+                status = str(occurrence["status"])
+                if status == "skipped":
+                    return occurrence
+                if status == "completed":
+                    raise ConflictError(
+                        "Completed source review occurrence cannot be skipped",
+                        entity="source_review_occurrences",
+                        identifier=occurrence_id,
+                    )
+
+                now = self._get_current_utc_timestamp_iso()
+                cursor = conn.execute(
+                    """
+                    UPDATE source_review_occurrences
+                       SET status = 'skipped', last_modified = ?, client_id = ?, version = version + 1
+                     WHERE id = ? AND deleted = ? AND status IN ('pending', 'in_progress')
+                    """,
+                    (now, self.client_id, occurrence_id, False),
+                )
+                if cursor.rowcount != 1:
+                    raise ConflictError(
+                        "Concurrent update skipping source review occurrence",
+                        entity="source_review_occurrences",
+                        identifier=occurrence_id,
+                    )
+                skipped = self._get_source_review_occurrence_row(conn, occurrence_id)
+                if skipped is None:
+                    raise NotFoundError(
+                        f"Source review occurrence {occurrence_id} not found"
+                    )
+                return skipped
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Failed to skip source review occurrence: {exc}") from exc  # noqa: TRY003
+        except BackendDatabaseError as exc:
+            raise CharactersRAGDBError(f"Failed to skip source review occurrence: {exc}") from exc  # noqa: TRY003
+
+    def soft_delete_source_review_plan(self, plan_id: int) -> bool:
+        """Soft-delete a plan and its active occurrences in one transaction."""
+        try:
+            with self.transaction() as conn:
+                select_query = "SELECT deleted FROM source_review_plans WHERE id = ?"
+                if self.backend_type == BackendType.POSTGRESQL:
+                    select_query += " FOR UPDATE"
+                plan = conn.execute(select_query, (plan_id,)).fetchone()
+                if plan is None:
+                    raise NotFoundError(f"Source review plan {plan_id} not found")
+                if bool(plan["deleted"]):
+                    return False
+
+                now = self._get_current_utc_timestamp_iso()
+                conn.execute(
+                    """
+                    UPDATE source_review_plans
+                       SET deleted = ?, last_modified = ?, client_id = ?, version = version + 1
+                     WHERE id = ? AND deleted = ?
+                    """,
+                    (True, now, self.client_id, plan_id, False),
+                )
+                conn.execute(
+                    """
+                    UPDATE source_review_occurrences
+                       SET deleted = ?, last_modified = ?, client_id = ?, version = version + 1
+                     WHERE plan_id = ? AND deleted = ?
+                    """,
+                    (True, now, self.client_id, plan_id, False),
+                )
+                return True
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Failed to delete source review plan: {exc}") from exc  # noqa: TRY003
+        except BackendDatabaseError as exc:
+            raise CharactersRAGDBError(f"Failed to delete source review plan: {exc}") from exc  # noqa: TRY003
 
     # ==========================
     # Study Packs

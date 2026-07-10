@@ -181,6 +181,60 @@ def build_prompt_studio_rls_sql() -> list[str]:
     return stmts
 
 
+def build_source_review_rls_sql() -> list[str]:
+    """Build tenant policies for source-review plans and occurrences."""
+    return [
+        """
+        DO $source_review_plans_rls$
+        BEGIN
+          IF to_regclass('source_review_plans') IS NULL THEN
+            RETURN;
+          END IF;
+          EXECUTE 'ALTER TABLE IF EXISTS source_review_plans ENABLE ROW LEVEL SECURITY';
+          EXECUTE 'ALTER TABLE IF EXISTS source_review_plans FORCE ROW LEVEL SECURITY';
+          EXECUTE 'DROP POLICY IF EXISTS source_review_plans_tenant_isolation ON source_review_plans';
+          EXECUTE $plan_policy$
+            CREATE POLICY source_review_plans_tenant_isolation ON source_review_plans
+              USING (client_id = current_setting('app.current_user_id', true))
+              WITH CHECK (client_id = current_setting('app.current_user_id', true))
+          $plan_policy$;
+        END
+        $source_review_plans_rls$;
+        """.strip(),
+        """
+        DO $source_review_occurrences_rls$
+        BEGIN
+          IF to_regclass('source_review_occurrences') IS NULL THEN
+            RETURN;
+          END IF;
+          EXECUTE 'ALTER TABLE IF EXISTS source_review_occurrences ENABLE ROW LEVEL SECURITY';
+          EXECUTE 'ALTER TABLE IF EXISTS source_review_occurrences FORCE ROW LEVEL SECURITY';
+          EXECUTE 'DROP POLICY IF EXISTS source_review_occurrences_tenant_isolation ON source_review_occurrences';
+          EXECUTE $occurrence_policy$
+            CREATE POLICY source_review_occurrences_tenant_isolation ON source_review_occurrences
+              USING (
+                client_id = current_setting('app.current_user_id', true)
+                AND EXISTS (
+                  SELECT 1 FROM source_review_plans p
+                  WHERE p.id = source_review_occurrences.plan_id
+                    AND p.client_id = current_setting('app.current_user_id', true)
+                )
+              )
+              WITH CHECK (
+                client_id = current_setting('app.current_user_id', true)
+                AND EXISTS (
+                  SELECT 1 FROM source_review_plans p
+                  WHERE p.id = source_review_occurrences.plan_id
+                    AND p.client_id = current_setting('app.current_user_id', true)
+                )
+              )
+          $occurrence_policy$;
+        END
+        $source_review_occurrences_rls$;
+        """.strip(),
+    ]
+
+
 def build_chacha_rls_sql() -> list[str]:
     """RLS for ChaChaNotes (notes, character_cards) using client_id scoping."""
     stmts: list[str] = []
@@ -220,6 +274,7 @@ def build_chacha_rls_sql() -> list[str]:
           USING (client_id = current_setting('app.current_user_id', true));
         """
     )
+    stmts.extend(build_source_review_rls_sql())
     return stmts
 
 
@@ -237,8 +292,10 @@ def _ensure_rls_policy_set(
 
     with backend.transaction() as conn:
         cur = conn.cursor()
+        index = 0
         try:
-            for index, statement in enumerate(statements, start=1):
+            for statement in statements:
+                index += 1
                 cur.execute(statement)
             conn.commit()
             return True
