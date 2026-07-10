@@ -1,7 +1,7 @@
 ---
 id: TASK-12932
 title: Add source-grounded spaced repetition review schedules
-status: Done
+status: In Progress
 assignee: []
 created_date: ''
 updated_date: 2026-07-10 15:22
