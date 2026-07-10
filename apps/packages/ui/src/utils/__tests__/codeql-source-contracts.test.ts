@@ -14,6 +14,9 @@ describe("CodeQL source contracts", () => {
     expect(source).toContain(
       'console.debug("Failed to refresh job", job.job_id, err)'
     )
+    expect(source).not.toContain(
+      'console.debug(`Failed to refresh job ${job.job_id}:`, err)'
+    )
   })
 
   it("keeps timeline identifiers out of console format arguments", () => {
@@ -24,6 +27,24 @@ describe("CodeQL source contracts", () => {
     )
     expect(source).toContain(
       'console.error("Failed to list conversations by root", rootId, error)'
+    )
+    expect(source).toContain(
+      'console.error("Failed to get conversation messages", conversationId, error)'
+    )
+    expect(source).toContain(
+      'console.error("Failed to search messages", query, error)'
+    )
+    expect(source).not.toContain(
+      'console.error(`Failed to get conversation ${conversationId}:`, error)'
+    )
+    expect(source).not.toContain(
+      'console.error(`Failed to list conversations by root ${rootId}:`, error)'
+    )
+    expect(source).not.toContain(
+      'console.error(`Failed to get conversation messages ${conversationId}:`, error)'
+    )
+    expect(source).not.toContain(
+      'console.error(`Failed to search messages query="${query}":`, error)'
     )
   })
 

@@ -169,7 +169,7 @@ export class TimelineApiService {
 
       return messages.map((m) => this.normalizeMessage(m, conversationId))
     } catch (error) {
-      console.error(`Failed to get conversation messages ${conversationId}:`, error)
+      console.error("Failed to get conversation messages", conversationId, error)
       return []
     }
   }
@@ -297,7 +297,7 @@ export class TimelineApiService {
         }
       })
     } catch (error) {
-      console.error(`Failed to search messages query="${query}":`, error)
+      console.error("Failed to search messages", query, error)
       return []
     }
   }
