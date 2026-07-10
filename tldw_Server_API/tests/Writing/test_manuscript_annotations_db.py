@@ -89,7 +89,7 @@ def _schema_version(db: CharactersRAGDB) -> int:
 
 
 def test_fresh_db_creates_manuscript_annotations_table(raw_db):
-    assert _schema_version(raw_db) == 51
+    assert _schema_version(raw_db) == CharactersRAGDB._CURRENT_SCHEMA_VERSION
     assert "manuscript_annotations" in _table_names(raw_db)
     table_sql = _table_sql(raw_db, "manuscript_annotations")
     assert "CHECK(anchor_status IN ('scene_level','attached','reattached','needs_review'))" in table_sql
@@ -107,7 +107,7 @@ def test_fresh_db_creates_manuscript_annotations_table(raw_db):
     }.issubset(_trigger_names(raw_db))
 
 
-def test_sqlite_v50_migration_routes_to_v51(tmp_path):
+def test_sqlite_v50_migration_routes_to_current_schema(tmp_path):
     db_path = tmp_path / "migrating.db"
     db = CharactersRAGDB(str(db_path), client_id="test_client")
     db.close_connection()
@@ -132,7 +132,7 @@ def test_sqlite_v50_migration_routes_to_v51(tmp_path):
 
     migrated = CharactersRAGDB(str(db_path), client_id="test_client")
     try:
-        assert _schema_version(migrated) == 51
+        assert _schema_version(migrated) == CharactersRAGDB._CURRENT_SCHEMA_VERSION
         assert "manuscript_annotations" in _table_names(migrated)
         table_sql = _table_sql(migrated, "manuscript_annotations")
         assert "CHECK(anchor_status IN ('scene_level','attached','reattached','needs_review'))" in table_sql
