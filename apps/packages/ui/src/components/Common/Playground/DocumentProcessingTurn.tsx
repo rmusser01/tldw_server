@@ -89,7 +89,11 @@ export const DocumentProcessingTurn: React.FC<Props> = ({ metadata }) => {
         : Loader2
 
   return (
-    <div className="w-full max-w-[calc(100%-1.75rem)] rounded-lg border border-border bg-surface/80 px-3 py-2 text-xs text-text">
+    <div
+      role="status"
+      aria-live="polite"
+      className="w-full max-w-[calc(100%-1.75rem)] rounded-lg border border-border bg-surface/80 px-3 py-2 text-xs text-text"
+    >
       <div className="flex flex-wrap items-center gap-2">
         <Icon className="h-3.5 w-3.5 text-text-subtle" aria-hidden="true" />
         <span className="font-medium">

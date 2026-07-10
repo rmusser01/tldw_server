@@ -36,6 +36,7 @@ describe("DocumentProcessingTurn", () => {
     expect(screen.getByText("1 file")).toBeInTheDocument()
     expect(screen.getByText("scan.pdf")).toBeInTheDocument()
     expect(screen.getByText("OCR pages")).toBeInTheDocument()
+    expect(screen.getByRole("status")).toHaveAttribute("aria-live", "polite")
   })
 
   it("uses specific labels for preflight and pending states", () => {

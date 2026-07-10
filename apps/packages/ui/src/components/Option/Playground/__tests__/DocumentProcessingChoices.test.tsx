@@ -171,6 +171,37 @@ describe("DocumentProcessingChoices", () => {
     )
 
     const summary = screen.getByTestId("document-processing-summary")
-    expect(within(summary).getByText("2 ready, 1 blocked")).toBeInTheDocument()
+    expect(
+      within(summary).getByText("1 ready, 1 pending, 1 blocked")
+    ).toBeInTheDocument()
+  })
+
+  it("disables bulk and per-file modes until preflight capabilities arrive", async () => {
+    const user = userEvent.setup()
+
+    render(
+      <DocumentProcessingChoices
+        files={[
+          makeFile("preflight.pdf", "add_to_chat", {
+            processingStatus: "preflighting",
+            processingCapabilities: undefined
+          })
+        ]}
+        onChangeFiles={vi.fn()}
+      />
+    )
+
+    expect(screen.getByRole("button", { name: /Add to chat/i })).toBeDisabled()
+    expect(screen.getByRole("button", { name: /OCR pages/i })).toBeDisabled()
+    expect(
+      screen.getByRole("button", { name: /Ingest to library/i })
+    ).toBeDisabled()
+
+    await user.click(screen.getByRole("button", { name: /Adjust per file/i }))
+    const fileRow = screen.getByText("preflight.pdf").parentElement
+    expect(fileRow).not.toBeNull()
+    within(fileRow!).getAllByRole("button").forEach((button) => {
+      expect(button).toBeDisabled()
+    })
   })
 })

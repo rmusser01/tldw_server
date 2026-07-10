@@ -231,6 +231,72 @@ describe("chat document processing service", () => {
     })
   })
 
+  it("does not borrow a blocked reason from an unrelated processing mode", () => {
+    const [normalized] = normalizeDocumentPreflightResponse(
+      {
+        files: [
+          {
+            client_id: "file-1",
+            filename: "notes.md",
+            media_type: "document",
+            default_mode: "add_to_chat",
+            modes: {
+              add_to_chat: { available: false, status: "unavailable" },
+              ocr_pages: {
+                available: false,
+                status: "unavailable",
+                reason: "OCR is unavailable for markdown",
+              },
+              ingest_to_library: { available: true, status: "available" },
+            },
+            max_size_bytes: 20,
+            max_pages: 200,
+            max_chat_tokens: 24000,
+          },
+        ],
+      },
+      [makeUploadedFile({ processingMode: "add_to_chat" })],
+    )
+
+    expect(normalized.processingBlockedReason).toBe(
+      "This document type is unsupported.",
+    )
+  })
+
+  it.each([
+    ["add_to_chat", ["switch_to_ingest"]],
+    ["ingest_to_library", ["switch_to_add_to_chat"]],
+  ] as const)(
+    "does not suggest switching to the already blocked %s mode",
+    async (processingMode, expectedActions) => {
+      const result = await prepareChatDocumentAttachmentsForSend({
+        files: [
+          makeUploadedFile({
+            processingMode,
+            processingCapabilities: {
+              add_to_chat: {
+                available: processingMode !== "add_to_chat",
+                status:
+                  processingMode === "add_to_chat" ? "unavailable" : "available",
+              },
+              ingest_to_library: {
+                available: processingMode !== "ingest_to_library",
+                status:
+                  processingMode === "ingest_to_library"
+                    ? "unavailable"
+                    : "available",
+              },
+            },
+          }),
+        ],
+      })
+
+      expect(result.blockedFiles[0]?.processingRecoveryActions).toEqual(
+        expectedActions,
+      )
+    },
+  )
+
   it("applies default and explicit document processing decisions", () => {
     const file = makeUploadedFile({
       processingCapabilities: {
@@ -328,7 +394,7 @@ describe("chat document processing service", () => {
 
     expect(normalized).toMatchObject({
       processingStatus: "blocked",
-      processingBlockedReason: "Unsupported document type",
+      processingBlockedReason: "This document type is unsupported.",
     })
     expect(normalized.processingMode).toBeUndefined()
   })

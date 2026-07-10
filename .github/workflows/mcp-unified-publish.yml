@@ -29,7 +29,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: mcp-unified-publish-${{ github.ref }}
+  group: mcp-unified-publish
   cancel-in-progress: false
 
 jobs:

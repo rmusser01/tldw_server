@@ -344,22 +344,6 @@ export function usePlaygroundQueueManagement(
         throw new Error(validationError)
       }
 
-      setSelectedModel(item.snapshot.selectedModel)
-      setChatMode(item.snapshot.chatMode)
-      setWebSearch(item.snapshot.webSearch)
-      setCompareMode(item.snapshot.compareMode)
-      setCompareSelectedModels(item.snapshot.compareSelectedModels)
-      setSelectedSystemPrompt(item.snapshot.selectedSystemPrompt ?? "")
-      setSelectedQuickPrompt(item.snapshot.selectedQuickPrompt ?? "")
-      if (
-        item.snapshot.toolChoice === "auto" ||
-        item.snapshot.toolChoice === "required" ||
-        item.snapshot.toolChoice === "none"
-      ) {
-        setToolChoice(item.snapshot.toolChoice)
-      }
-      setUseOCR(item.snapshot.useOCR)
-
       const sourceContext = (item.sourceContext ??
         null) as PlaygroundQueuedSourceContext | null
       const documents = Array.isArray(sourceContext?.documents)
@@ -369,33 +353,6 @@ export function usePlaygroundQueueManagement(
         ? sourceContext.uploadedFiles
         : []
 
-      const projectedForSubmission = projectTokenBudget({
-        conversationTokens: conversationTokenCount,
-        draftTokens: estimateTokensForText(item.promptText),
-        maxTokens: resolvedMaxContext
-      })
-      if (
-        projectedForSubmission.isOverLimit ||
-        projectedForSubmission.isNearLimit
-      ) {
-        notificationApi.warning({
-          message: t(
-            "playground:tokens.preSendWarningTitle",
-            "Context budget warning"
-          ),
-          description: projectedForSubmission.isOverLimit
-            ? t(
-                "playground:tokens.preSendOverLimit",
-                "Projected send exceeds the model context window. Consider trimming prompt/context before sending."
-              )
-            : t(
-                "playground:tokens.preSendNearLimit",
-                "Projected send is near the context window limit."
-              )
-        })
-      }
-
-      setLastSubmittedContext(currentContextSnapshot)
       let queuedRequestOverrides: Record<string, unknown> = {
         ...(sourceContext?.requestOverrides ?? {})
       }
@@ -430,6 +387,50 @@ export function usePlaygroundQueueManagement(
           item.promptText
         )
       }
+
+      setSelectedModel(item.snapshot.selectedModel)
+      setChatMode(item.snapshot.chatMode)
+      setWebSearch(item.snapshot.webSearch)
+      setCompareMode(item.snapshot.compareMode)
+      setCompareSelectedModels(item.snapshot.compareSelectedModels)
+      setSelectedSystemPrompt(item.snapshot.selectedSystemPrompt ?? "")
+      setSelectedQuickPrompt(item.snapshot.selectedQuickPrompt ?? "")
+      if (
+        item.snapshot.toolChoice === "auto" ||
+        item.snapshot.toolChoice === "required" ||
+        item.snapshot.toolChoice === "none"
+      ) {
+        setToolChoice(item.snapshot.toolChoice)
+      }
+      setUseOCR(item.snapshot.useOCR)
+
+      const projectedForSubmission = projectTokenBudget({
+        conversationTokens: conversationTokenCount,
+        draftTokens: estimateTokensForText(item.promptText),
+        maxTokens: resolvedMaxContext
+      })
+      if (
+        projectedForSubmission.isOverLimit ||
+        projectedForSubmission.isNearLimit
+      ) {
+        notificationApi.warning({
+          message: t(
+            "playground:tokens.preSendWarningTitle",
+            "Context budget warning"
+          ),
+          description: projectedForSubmission.isOverLimit
+            ? t(
+                "playground:tokens.preSendOverLimit",
+                "Projected send exceeds the model context window. Consider trimming prompt/context before sending."
+              )
+            : t(
+                "playground:tokens.preSendNearLimit",
+                "Projected send is near the context window limit."
+              )
+        })
+      }
+
+      setLastSubmittedContext(currentContextSnapshot)
       const submitResult = await sendMessage({
         image: sourceContext?.isImageCommand ? "" : item.image,
         message: item.promptText,
