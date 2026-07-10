@@ -108,7 +108,7 @@ export class TimelineApiService {
       })
       return this.normalizeChatSummary(data)
     } catch (error) {
-      console.error(`Failed to get conversation ${conversationId}:`, error)
+      console.error("Failed to get conversation", conversationId, error)
       return null
     }
   }
@@ -140,7 +140,7 @@ export class TimelineApiService {
         .map((c) => this.normalizeChatSummary(c))
         .filter((c) => c.root_id === rootId || c.id === rootId)
     } catch (error) {
-      console.error(`Failed to list conversations by root ${rootId}:`, error)
+      console.error("Failed to list conversations by root", rootId, error)
       // Fallback: get single conversation
       const conv = await this.getConversation(rootId)
       return conv ? [conv] : []
