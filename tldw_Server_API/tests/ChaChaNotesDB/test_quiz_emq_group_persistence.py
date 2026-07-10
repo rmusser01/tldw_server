@@ -80,3 +80,41 @@ def test_update_question_persists_emq_group_metadata(quiz_db: CharactersRAGDB) -
     assert persisted is not None
     assert persisted["group_id"] == "updated-group"
     assert persisted["group_prompt"] == "Choose the best answer for each stem."
+
+
+def test_create_question_preserves_legacy_positional_argument_order(quiz_db: CharactersRAGDB) -> None:
+    quiz_id = quiz_db.create_quiz(name="Legacy positional arguments")
+    citations = [{"source_type": "note", "source_id": "note-1", "label": "Legacy source"}]
+
+    question_id = quiz_db.create_question(
+        quiz_id,
+        "multiple_choice",
+        "Legacy positional stem",
+        1,
+        ["A", "B"],
+        "Legacy explanation",
+        "Legacy hint",
+        2,
+        citations,
+        3,
+        4,
+        ["legacy-tag"],
+        "legacy-client",
+    )
+
+    question = quiz_db.get_question(question_id)
+    assert question is not None
+    assert question["question_type"] == "multiple_choice"
+    assert question["question_text"] == "Legacy positional stem"
+    assert question["correct_answer"] == 1
+    assert question["options"] == ["A", "B"]
+    assert question["explanation"] == "Legacy explanation"
+    assert question["hint"] == "Legacy hint"
+    assert question["hint_penalty_points"] == 2
+    assert question["source_citations"] == citations
+    assert question["points"] == 3
+    assert question["order_index"] == 4
+    assert question["tags"] == ["legacy-tag"]
+    assert question["client_id"] == "legacy-client"
+    assert question["group_id"] is None
+    assert question["group_prompt"] is None

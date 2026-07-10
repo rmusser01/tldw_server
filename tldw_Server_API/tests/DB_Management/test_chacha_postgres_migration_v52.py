@@ -40,7 +40,7 @@ class _FakeBackend:
         return None
 
 
-def test_sqlite_v52_to_v53_adds_emq_group_columns_and_updates_version(tmp_path: Path) -> None:
+def test_sqlite_v52_to_v53_preserves_existing_group_column_and_is_rerunnable(tmp_path: Path) -> None:
     db_path = tmp_path / "chacha-v52.db"
     with sqlite3.connect(db_path) as conn:
         conn.executescript(
@@ -51,7 +51,10 @@ def test_sqlite_v52_to_v53_adds_emq_group_columns_and_updates_version(tmp_path: 
             );
             INSERT INTO db_schema_version(schema_name, version)
             VALUES('rag_char_chat_schema', 52);
-            CREATE TABLE quiz_questions (id INTEGER PRIMARY KEY);
+            CREATE TABLE quiz_questions (
+                id INTEGER PRIMARY KEY,
+                group_id TEXT
+            );
             """
         )
 
@@ -65,6 +68,7 @@ def test_sqlite_v52_to_v53_adds_emq_group_columns_and_updates_version(tmp_path: 
             target_version=53,
             initial_version=52,
         )
+        db._migrate_from_v52_to_v53(conn)
         columns = {row["name"] for row in conn.execute("PRAGMA table_info('quiz_questions')")}
         stored_version = conn.execute(
             "SELECT version FROM db_schema_version WHERE schema_name = ?",
