@@ -4,27 +4,27 @@ Status: Confirmed for implementation planning
 Date: 2026-07-09
 Backlog: TASK-12105
 Register: Product
-Scope: Shared Watchlists UI used by the WebUI and browser extension, directly connected Watchlists APIs, scheduled pipeline execution, generated text and audio artifacts, delivery state, and recovery.
+Scope: Shared Watchlists UI used by the WebUI and browser extension, directly connected Watchlists APIs, scheduled pipeline execution, generated text and spoken-program artifacts, delivery state, and recovery.
 
 ## 1. Problem
 
 Watchlists currently exposes several overlapping setup paths that create materially different monitor payloads. The guided pipeline builder can enable scheduled output, while Quick Setup and the broader Watchlist Setup flow can create a schedule with text or audio intent but omit `auto_output.enabled`. The backend then marks collection runs successful before downstream output and audio work has completed, skips output when no new items exist, suppresses some downstream failures, and uses different item limits for text and audio.
 
-The resulting product can say a monitor is ready while its configured scheduled briefing is not guaranteed to be attempted, persisted, or surfaced truthfully. Users must also reconstruct state across Overview, Activity, Reports, Jobs, and setup drawers. Live UAT exposed inconsistent counts and timestamps, missing audio and delivery state, an output download failure under mismatched revisions, repeated accessible names, unlabeled controls, and background transitions that were not reliably announced.
+The resulting product can say a monitor is ready while its configured scheduled briefing or episode is not guaranteed to be attempted, persisted, or surfaced truthfully. The current language and audio composer also assume that tracked content is news, even though the same source and multi-speaker capabilities can support sportscasts, culture roundtables, hobby updates, market commentary, and other recurring spoken programs. Users must reconstruct state across Overview, Activity, Reports, Jobs, and setup drawers. Live UAT exposed inconsistent counts and timestamps, missing audio and delivery state, an output download failure under mismatched revisions, repeated accessible names, unlabeled controls, and background transitions that were not reliably announced.
 
 ## 2. Goal
 
 Make one user promise reliable and inspectable:
 
-> Turn these sources into this briefing, at this cadence, and deliver it here.
+> Turn these sources into this recurring briefing or program, at this cadence, and deliver it here.
 
-Every setup entry point must produce the same versioned pipeline contract. Every scheduled occurrence must expose a durable fulfillment lifecycle for collection, selection, text, audio, persistence, and delivery. The shared UI must guide setup through Sources, Cadence, Briefing, Delivery, and Test, then keep the latest outcome playable and recoverable without requiring the user to navigate operational tables.
+Every setup entry point must produce the same versioned pipeline contract. Every scheduled occurrence must expose a durable fulfillment lifecycle for collection, selection, text, audio, persistence, and delivery. The shared UI must guide setup through Sources, Cadence, Briefing, Delivery, and Test, let the user choose the editorial format within Briefing, then keep the latest outcome playable and recoverable without requiring the user to navigate operational tables.
 
 ## 3. Users and Context
 
-### First-time news researcher
+### First-time tracked-content user
 
-Knows which publications or sites matter, but should not need to understand cron, output preference nesting, Scheduler tasks, or workflow artifacts. Success means leaving setup with an exact receipt and finding a text and optional audio briefing at the promised time.
+Knows which publications, teams, communities, creators, or sites matter, but should not need to understand cron, output preference nesting, Scheduler tasks, or workflow artifacts. Success means leaving setup with an exact receipt and finding the selected text and audio outcome at the promised time.
 
 ### Returning researcher or analyst
 
@@ -34,7 +34,11 @@ Checks the newest briefing quickly, often before a meeting. Success means seeing
 
 Needs filters, templates, raw cron, source diagnostics, stage identifiers, and retry controls. Success means the simplified default flow preserves advanced controls and provides accurate provenance rather than hiding operational truth.
 
-The primary scene is a researcher in a normally lit home office checking before their first meeting whether overnight sources became a trustworthy, playable briefing, then returning in dim light if a failed stage needs diagnosis.
+### Tracked-content creator or enthusiast
+
+Follows teams, leagues, artists, media, cultural events, creators, industries, or other recurring subjects and wants that material turned into a listenable program. They may want a concise solo update, a sportscast, or two hosts discussing the week. Success means setting a stable show premise and cast once, receiving grounded episodes on schedule, and retaining source notes without learning prompt or workflow internals.
+
+The primary scene is a researcher or creator in a normally lit home office checking whether newly tracked material became a trustworthy, playable outcome, then returning in dim light if a failed stage needs diagnosis.
 
 ## 4. Confirmed Product Decisions
 
@@ -48,6 +52,8 @@ The primary scene is a researcher in a normally lit home office checking before 
 8. Retries resume failed stages and must not duplicate reports, audio artifacts, Chatbooks, or external messages.
 9. Test exercises the real collection, selection, rendering, persistence, and optional audio path. It does not activate a schedule or contact external recipients by default.
 10. Existing advanced fields and unknown output preference keys survive normalization and edits.
+11. Editorial format is independent of watchlist domain. A general watchlist can produce a sportscast or culture roundtable without adding a new source domain or parallel audio pipeline.
+12. “Podcast” in this scope means a recurring, playable and downloadable podcast-style episode. Public feed hosting, syndication, and distribution to external podcast platforms are not implied.
 
 ## 5. Approaches Considered
 
@@ -77,8 +83,9 @@ The normalized contract contains these logical sections:
 - `sources`: source or group scope plus source-owned fetch and extraction settings.
 - `cadence`: manual or scheduled expression, IANA timezone, activation state, and next occurrence projection.
 - `selection`: monitor filters, deduplication behavior, deterministic cap, and manual-curation override.
-- `briefing.text`: enabled state, type, format, template name and version, title policy, and retention.
-- `briefing.audio`: enabled state, target duration, language, provider/model/voice defaults, cast, and fallback policy.
+- `briefing.editorial`: output noun, program format, show name, audience, premise, tone, source-grounding rules, episode title policy, and optional custom instructions.
+- `briefing.text`: enabled state, type, format, template name and version, show-notes policy, title policy, and retention.
+- `briefing.audio`: enabled state, target duration, language, provider/model/voice defaults, cast, intro/outro policy, and fallback policy.
 - `delivery.reports`: always enabled.
 - `delivery.email` and `delivery.chatbook`: existing adapters with explicit enabled state and validated configuration.
 - `test_policy`: delivery disabled by default and a marker that identifies test artifacts.
@@ -99,13 +106,42 @@ Normalization must:
 
 Saved legacy monitors remain runnable. Opening one in the editor displays its normalized meaning, and saving writes the current version while preserving unknown fields.
 
-### 6.3 Exact receipt
+### 6.3 Editorial and program model
+
+The contract separates what the user tracks from how the generated program sounds. `briefing.editorial.program_format` uses a small extensible set:
+
+- `concise_briefing`: factual, compact, one or more voices;
+- `solo_update`: one host narrating a recurring topical update;
+- `host_discussion`: two to four hosts discussing tracked material;
+- `sportscast`: results, developments, context, and analysis for tracked teams, leagues, or events;
+- `culture_roundtable`: discussion of a tracked cultural event, release, creator, or movement;
+- `custom`: user-authored premise and cast instructions within the same grounding and safety rules.
+
+These are editorial presets, not separate pipelines. A preset supplies default structure, pacing, transition style, and host-role suggestions. It never changes source ownership, selection, artifact, retry, or delivery semantics.
+
+The editorial contract also records:
+
+- user-visible outcome noun, defaulting to “briefing” and using “episode” for podcast-style formats;
+- optional show name and stable show premise;
+- intended audience and tone;
+- episode title pattern;
+- host roles, labels, voices, and concise persona direction;
+- whether analysis is allowed and how it must be distinguished from sourced fact;
+- whether spoken source attributions are brief, with complete citations retained in the text report or show notes.
+
+The outcome noun is selected from localized product terms rather than accepted as arbitrary executable copy. All formats remain source-grounded. Host dialogue may interpret or compare collected material, but it must not invent quotes, scores, dates, consensus, controversy, or disagreement between hosts. Custom instructions cannot disable provenance, factual-grounding, copyright, disclosure, or safety rules.
+
+### 6.4 Exact receipt
 
 The same normalized contract drives review copy and persistence. The receipt includes the next absolute occurrence, timezone abbreviation and IANA timezone, source count, artifact selection, target audio length, Reports storage, and enabled deliveries.
 
 Example:
 
-> Tomorrow at 8:00 AM PT (America/Los_Angeles), collect new items from 3 sources, generate a text report and an 8-minute audio briefing, save both in Reports, and email the briefing to name@example.com.
+> Tomorrow at 8:00 AM PT (America/Los_Angeles), collect new items from 3 sources, generate a text report and an audio briefing targeting 8 minutes, save both in Reports, and email the briefing to name@example.com.
+
+Podcast-style example:
+
+> Sunday at 6:00 PM PT (America/Los_Angeles), collect updates from 8 Lakers sources, generate show notes and a two-host sportscast targeting 20 minutes for “Purple and Gold Weekly,” save both in Reports, and email the episode to name@example.com.
 
 For daylight-saving boundaries, the receipt adds a concise note when the UTC offset of the following occurrence differs from the current offset.
 
@@ -121,9 +157,11 @@ Fulfillment stages are:
 2. `select`
 3. `render_text`
 4. `persist_text`
-5. `generate_audio`, when selected
-6. `persist_audio`, when selected
-7. `deliver`, for each enabled adapter
+5. `compose_audio_script`, when audio is selected
+6. `persist_audio_script`, when audio is selected
+7. `generate_audio`, when selected
+8. `persist_audio`, when selected
+9. `deliver`, for each enabled adapter
 
 Each stage records `not_started`, `queued`, `running`, `ready`, `failed`, `skipped`, or `cancelled`, plus timestamps, stable diagnostic code, retryability, and artifact identifiers where applicable.
 
@@ -154,7 +192,7 @@ When selection produces zero items, the system creates a deterministic text arti
 - how many sources succeeded, failed, or were deferred;
 - when the next run is expected.
 
-If audio is selected, this text becomes the short audio script. It does not require an LLM. TTS capability is still required and failures remain retryable.
+If audio is selected, this text becomes a short status script. It does not require an LLM and does not expand to the configured target episode duration. TTS capability is still required and failures remain retryable.
 
 ### 7.3 Selection cap
 
@@ -192,7 +230,9 @@ Users select manual, interval, daily, weekdays, weekly, or advanced cron and an 
 
 ### 8.3 Briefing
 
-Text is selected by default for briefing outcomes. Users choose format/template and may enable audio, target length, voice, and advanced cast settings. Audio readiness validation checks provider/model/voice resolution without claiming future availability.
+The step begins with “What are you making?” and offers the editorial presets from the canonical contract. Text or show notes are selected by default for every outcome. Users choose a show name, premise, format/template, and may enable audio, target length, host count, roles, voices, and advanced persona settings. Concise Briefing remains the low-friction default; sportscast and roundtable presets demonstrate that the system is not news-only. Audio readiness validation checks provider/model/voice resolution without claiming future availability.
+
+Preset selection changes only relevant fields and previews the resulting structure. It does not expose a raw prompt by default. Advanced users can edit custom editorial instructions, while the UI continues to show the non-overridable grounding and provenance rules.
 
 ### 8.4 Delivery
 
@@ -201,6 +241,8 @@ Reports is shown as required and always enabled. Existing email and Chatbook ada
 ### 8.5 Test
 
 The final step shows the natural-language receipt and runs a real test occurrence. External delivery is off by default. Users can separately choose Send test for a reviewed recipient or destination.
+
+To prevent surprising latency or provider cost, the default audio Test uses the real selected provider, cast, editorial format, and TTS path to create a clearly labeled 60-second sample from the selected content. Before running, the UI shows that this invokes configured LLM and TTS providers. “Generate full test episode” is an explicit secondary action that uses the configured target duration. Activation and scheduled occurrences always use the full contract.
 
 Test progress shows collection, selection, text, audio, persistence, and delivery-test state. Activation becomes available after contract validation; a failed runtime test does not destroy the draft and provides stage-specific recovery.
 
@@ -212,11 +254,12 @@ No separate abbreviated builder may persist a reduced contract. Duplicate tours,
 
 ## 9. Latest Briefing Surface
 
-The selected watchlist’s Overview begins with one latest-briefing region when an occurrence exists. It is a semantic section rather than a nested card grid.
+The selected watchlist’s Overview begins with one latest-outcome region when an occurrence exists. The default heading is “Latest briefing”; podcast-style formats use “Latest episode.” The show name and episode title are primary, so creators do not see their program reduced to a generic report. It is a semantic section rather than a nested card grid.
 
 The surface includes:
 
 - briefing title and exact generation time;
+- show name, episode title, format, and cast when configured;
 - Play, Pause, Resume, seek, duration, and playback state when audio is ready;
 - text readiness and Open report action;
 - audio readiness and Regenerate action when failed;
@@ -225,6 +268,7 @@ The surface includes:
 - last run and next exact run;
 - a link to all Reports;
 - Inspect run for detailed diagnostics.
+- Review script or show notes when audio is configured.
 
 Empty state copy explains when the first briefing will run and offers Test now. Running state presents stage progress without shifting the primary controls. Partial failure retains Play or Open report for ready artifacts.
 
@@ -242,7 +286,7 @@ Linear is the reference for compact hierarchy, GitHub Actions for stage state an
 
 The Overview hierarchy is:
 
-1. Latest briefing and its primary action.
+1. Latest briefing or episode and its primary action.
 2. Next run and current fulfillment state.
 3. Source health or blockers that affect the next outcome.
 4. Recent activity and all-history navigation.
@@ -256,8 +300,11 @@ Use these nouns consistently:
 
 - Sources: configured feeds and sites.
 - Schedule: when collection occurs.
-- Briefing: the user outcome containing selected artifacts.
+- Briefing: the default concise user outcome containing selected artifacts.
+- Program: the recurring editorial configuration used to generate an audio outcome.
+- Episode: one podcast-style generated outcome from a program.
 - Report: persisted text artifact.
+- Show notes: persisted text companion for a podcast-style episode, including provenance.
 - Audio: persisted playable artifact.
 - Delivery: movement or notification outside Reports.
 - Run: collection execution.
@@ -265,10 +312,12 @@ Use these nouns consistently:
 
 Copy identifies the object, action, outcome, and recovery:
 
-- “Generating the 8-minute audio briefing.”
+- “Generating an audio briefing targeting 8 minutes.”
 - “Text report ready. Audio generation failed.”
 - “Briefing ready. Email delivery failed. Retry email.”
 - “No qualifying updates were found. A status briefing was saved.”
+- “Episode ready. Show notes include 12 tracked sources.”
+- “Audio failed. Your show notes are ready; regenerate the two-host episode.”
 
 Avoid “included in briefing” unless the item belongs to the persisted selection. Counts must name their definition, such as New, Unread, Selected, or Included.
 
@@ -303,6 +352,7 @@ The implementation must handle:
 - zero, one, typical, and hundreds of sources;
 - zero, typical, and capped qualifying items;
 - very long source, monitor, article, template, and recipient names;
+- long show names, episode patterns, host labels, and custom editorial instructions;
 - RTL layout and CJK text without fixed character assumptions;
 - browser extension side-panel widths;
 - 200% zoom and reduced motion;
@@ -313,11 +363,17 @@ The implementation must handle:
 - missing or expired artifact download URLs;
 - legacy monitors with unknown output preference fields;
 - partial source failure where a briefing can still be generated.
+- stale or conflicting sports scores, event dates, and time-sensitive cultural reporting that require timestamped provenance rather than invented reconciliation.
 
 ## 14. Security and Privacy
 
 - Do not include secrets, provider credentials, raw filesystem paths, or private recipient data in logs or broad live-region messages.
 - Validate recipient and template inputs at API boundaries.
+- Treat scraped source content as untrusted data, never as workflow or model instructions. Source text cannot override the editorial, grounding, delivery, or safety contract.
+- Generate spoken scripts from summaries and attributable facts rather than reproducing long source passages. Complete source links remain in the report or show notes.
+- Mark generated episode metadata and show notes as AI-generated speech so downloaded audio is not mistaken for a human recording.
+- Do not offer real-person voice impersonation through host names or persona text. Hosts use configured synthetic voice identities unless a separately authorized voice feature explicitly proves consent.
+- User-supplied background audio does not imply redistribution rights. The interface must not describe it as licensed or safe to publish unless a separate rights system can prove that state.
 - Preserve per-user and organization artifact ownership on every readiness, download, and retry route.
 - Recovery actions must authorize the underlying run, output, audio task, and delivery destination.
 - Idempotency keys are opaque externally and scoped to the owning user or organization.
@@ -342,11 +398,17 @@ The migration is additive:
 - Scheduled text and audio intent sets required output fields.
 - Manual-only configurations do not silently enable scheduled output.
 - Receipt text is derived from the normalized contract and exact next occurrence.
+- Concise briefing, solo update, host discussion, sportscast, culture roundtable, and custom formats normalize through the same artifact contract.
+- Editorial presets cannot disable grounding or provenance.
 
 ### Backend unit and integration tests
 
 - A selected artifact failure persists failed fulfillment rather than silent success.
 - Zero-item runs persist the no-material-update text and optional audio request.
+- Audio composition uses the selected editorial format and no longer hardcodes news language.
+- Multi-host dialogue remains grounded and preserves complete source notes.
+- Script composition and persistence fail and retry independently from TTS generation.
+- Sample Test audio uses the real cast/provider path without activating a schedule or creating a full-duration episode.
 - Text and audio consume the same bounded selection.
 - Delivery waits for selected artifacts.
 - Repeated stage retries are idempotent.
@@ -357,7 +419,9 @@ The migration is additive:
 ### Frontend component tests
 
 - The setup sequence, validation, receipt, Test safety, and recovery states.
+- Clear provider-use disclosure and separate sample versus full-test actions.
 - Latest briefing ready, running, empty, partial, failed, offline, and stale states.
+- Dynamic Latest briefing and Latest episode labeling, show identity, cast, and format.
 - Multiple-record accessible-name assertions.
 - Live-region transition and AbortError suppression assertions.
 - Narrow, medium, wide, RTL, long-copy, and 200%-zoom layout behavior.
@@ -366,6 +430,7 @@ The migration is additive:
 
 - Start matched frontend and backend revisions from the implementation worktree.
 - Complete the daily news-source scenario in WebUI through CDP.
+- Complete a two-host sportscast or cultural-roundtable scenario from tracked sources.
 - Verify scheduled contract persistence, Test behavior, text report, audio readiness/player, delivery state, next run, and recovery.
 - Repeat the shared flow in the browser extension build at side-panel width.
 - Confirm the generated artifact download endpoints and playback URLs from the same revision.
@@ -390,10 +455,14 @@ The migration is additive:
 8. Latest briefing exposes playback, text/audio readiness, delivery, provenance, next run, and recovery on WebUI and extension layouts.
 9. Record-specific accessible names, keyboard focus, and background announcements work with multiple live records.
 10. Matched-revision CDP UAT completes the daily news briefing use case with text and selected audio artifacts available in Reports.
+11. The same contract produces a named podcast-style episode with one to four configured hosts, source-grounded script, show notes, playback, and recovery.
+12. Target duration is described honestly, no-update audio stays short, and default Test audio is bounded to 60 seconds unless the user explicitly requests a full episode.
 
 ## 18. Non-Goals
 
 - Building a new podcast studio or audio workflow engine.
+- Hosting public podcast RSS feeds, syndicating episodes, or publishing to Spotify, Apple Podcasts, YouTube, or other external platforms.
+- Adding waveform editing, multitrack production, licensed music catalogs, recording, or live broadcast controls.
 - Adding new delivery providers.
 - Replacing existing source extraction, deduplication, Scheduler, output templates, Notifications, or TTS provider systems.
 - Removing power-user tabs, raw cron, template editing, raw voice maps, or operator diagnostics.

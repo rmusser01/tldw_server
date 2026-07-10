@@ -27,6 +27,7 @@ Implement the confirmed UAT-driven Watchlists remediation: route every setup pat
 - Confirmed Impeccable shape brief and hardening amendments: fulfillment-stage truth, no-material-update artifacts, delivery ordering, idempotent retries, one bounded selection policy, safe Test behavior, versioned legacy normalization, capability validation, and timezone/DST clarity.
 - Confirmed design specification: `Docs/superpowers/specs/2026-07-09-watchlists-briefing-contract-ux-hardening-design.md`.
 - Clean baseline before implementation planning: frontend contract/setup suite 35 passed; backend Watchlists briefing/audio suite 56 passed and 4 external-feed tests skipped.
+- Spec review broadened the audience and editorial model beyond news/OSINT. The same contract now supports concise briefings, solo updates, multi-host discussions, sportscasts, culture roundtables, and custom source-grounded programs. Added durable script stages, show identity/notes, 60-second sample tests, honest target-duration copy, prompt-injection/copyright/disclosure/impersonation safeguards, and explicit podcast publishing non-goals.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
