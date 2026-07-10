@@ -95,22 +95,36 @@ Every route first confirms that the workspace is visible through the current use
 
 Responses include `id`, `workspace_id`, `name`, `schema_version`, `state`, `valid`, `invalid_reason`, `version`, `created_at`, and `updated_at`. Normal valid rows return typed V1 state. A corrupt JSON payload or unsupported stored schema version returns metadata with `valid = false`, `state = null`, and a stable `invalid_reason` instead of failing the list.
 
+Saved views are ordered deterministically by `updated_at DESC`, then `name_key ASC`, then `id ASC`.
+
+Conflict responses use a structured `detail` object with a stable `code`:
+
+- `source_view_name_exists`: includes the current user's conflicting `view_id` and `version`, allowing explicit replacement without duplicating server name normalization in the client.
+- `source_view_limit_reached`: includes the configured per-workspace limit.
+- `source_view_version_conflict`: includes the requested view ID and current version.
+
+The API never includes metadata for a view outside the authenticated user and workspace scope.
+
 ## Duplicate-Name Replacement
 
-Create never silently overwrites. A duplicate name returns `409`. The UI refreshes the list if necessary, identifies the same normalized name, and asks the user to confirm replacement. Confirmation issues an explicit versioned `PATCH` to that view. A version conflict keeps the dialog open, refreshes the row, and asks the user to retry rather than discarding another tab's update.
+Create never silently overwrites. A duplicate name returns `409` with `code = source_view_name_exists` and the conflicting owned view's ID and version. The UI uses that server metadata and asks the user to confirm replacement; it does not attempt to reproduce Unicode normalization. Confirmation issues an explicit versioned `PATCH` to that view. A version conflict keeps the dialog open, refreshes the row, and asks the user to retry rather than discarding another tab's update.
 
 ## UI Design
 
 Add a focused `SourceViewControls` row near search and advanced filters. It contains:
 
 - A grouped menu for immutable built-in presets and server-backed user views.
-- An icon button with tooltip for saving the current filter/sort state.
+- An icon button with tooltip and accessible name for saving the current filter/sort state.
 - Management actions for replacing or deleting a valid saved view.
 - Warning, Reset, and Delete actions for an invalid saved view; invalid views cannot be applied.
 
 Applying a view fully replaces persisted fields and preserves the `expanded` disclosure flag. Manual changes after applying a view mark the control as Modified but do not write to the server. Switching workspaces clears the applied selection and loads that workspace's personal views.
 
+The control uses the existing accessible menu/dialog primitives: arrow keys move through menu items, Enter/Space applies or invokes an action, Escape closes without changes, dialogs trap focus, and closing restores focus to the invoking control. Every icon-only action has an `aria-label` in addition to its tooltip.
+
 The save dialog trims names and reports validation errors inline. A duplicate uses the approved replacement confirmation. Network failures show a compact retryable error and do not disable built-in presets, manual filters, or the source list.
+
+Successful create or replacement marks the returned view active and unmodified; applying it again is unnecessary because its canonical state equals the current state. Resetting an invalid view writes `schema_version = 1` with the canonical default filter/sort state, preserves its name, increments its version, marks it active, and immediately applies that default state. Deleting the active view clears the active selection without changing current filters.
 
 ## Client Data Flow
 
@@ -125,8 +139,9 @@ The save dialog trims names and reports validation errors inline. A duplicate us
 ## Failure And Recovery Behavior
 
 - List failure: retain ordinary filtering and built-in presets; show Retry for saved views.
-- Invalid stored JSON: list the row as invalid, disable Apply, permit Reset or Delete.
-- Unsupported schema version: same recovery path as invalid JSON.
+- Invalid stored JSON: list the row as invalid with `invalid_reason = invalid_json`, disable Apply, permit Reset or Delete.
+- Valid JSON that fails the V1 state model: list it as invalid with `invalid_reason = invalid_state`, using the same recovery path.
+- Unsupported schema version: list it as invalid with `invalid_reason = unsupported_schema_version`, using the same recovery path.
 - Duplicate name: no overwrite until explicit confirmation.
 - Concurrent update: return `409`, refresh, and require retry.
 - Deleted or inaccessible workspace/view: return `404` without leaking another user's row.
@@ -141,6 +156,7 @@ Logs record identifiers and stable reason codes, never raw saved-state JSON.
 - Use bound SQL parameters and canonical server-side name normalization.
 - Bound names, payload size, and row count to prevent preference-storage abuse.
 - Never return the existence or metadata of another user's view.
+- Extend `build_chacha_rls_sql()` for PostgreSQL: enable and force RLS on `workspace_source_saved_views`, and create a tenant policy with both `USING` and `WITH CHECK` clauses requiring `owner_user_id = current_setting('app.current_user_id', true)`.
 
 ## Testing Strategy
 
@@ -159,6 +175,8 @@ Logs record identifiers and stable reason codes, never raw saved-state JSON.
 - User and workspace isolation.
 - View-count and payload-size limits.
 - Corrupt JSON and unsupported versions remain listable and resettable.
+- Valid JSON with invalid V1 fields remains listable and resettable.
+- PostgreSQL RLS SQL includes owner-scoped `USING` and `WITH CHECK` clauses.
 
 ### API Tests
 
@@ -174,8 +192,10 @@ Logs record identifiers and stable reason codes, never raw saved-state JSON.
 - Mark an applied view Modified after manual changes.
 - Reset/delete an invalid view.
 - Preserve built-in/manual filtering when saved-view requests fail.
+- Operate the view menu, save action, confirmation, reset, and delete flows by keyboard with accessible names and focus restoration.
 
 ## Rollout And Compatibility
 
 The new table is additive and empty by default. Existing source-list behavior remains unchanged until a user applies a preset or saved view. Schema-version handling allows a future contract to coexist with V1 while keeping unsupported rows recoverable.
 
+The Unreviewed preset is retained because Child Task 1 already shipped it with the review lifecycle. Child Task 2 adds the other required presets and includes all seven in the unified view menu; retaining the existing preset avoids a regression rather than expanding this task's scope.
