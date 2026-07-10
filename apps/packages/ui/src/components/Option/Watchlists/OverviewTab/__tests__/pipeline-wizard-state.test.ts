@@ -15,7 +15,7 @@ describe("watchlists pipeline wizard state", () => {
 
     expect(validatePipelineWizardDraft(base)).toEqual({
       valid: false,
-      errors: expect.arrayContaining(["sourceIds", "monitorName", "templateName"])
+      errors: expect.arrayContaining(["sourceIds", "monitorName"])
     })
 
     expect(
@@ -131,13 +131,13 @@ describe("watchlists pipeline wizard state", () => {
         scheduleExpr: "15 */5 * * *",
         timezone: "UTC",
         templateName: "newsletter_markdown",
-        createScheduledOutput: false,
+        createScheduledOutput: true,
         includeAudio: true,
         audioCast: {
           speaker_count: 2,
           speakers: [
-            { id: "host", label: "Host", role: "host", voice: "alloy" },
-            { id: "analyst", label: "Analyst", role: "analyst", voice: "nova" }
+            expect.objectContaining({ id: "host", label: "Host", role: "host", voice: "alloy" }),
+            expect.objectContaining({ id: "analyst", label: "Analyst", role: "analyst", voice: "nova" })
           ]
         },
         voiceMap: {

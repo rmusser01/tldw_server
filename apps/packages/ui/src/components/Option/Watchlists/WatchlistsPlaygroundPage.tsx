@@ -37,7 +37,8 @@ import {
   fetchWatchlistRuns,
   fetchWatchlists,
   triggerWatchlistRun,
-  updateWatchlist
+  updateWatchlist,
+  updateWatchlistJob
 } from "@/services/watchlists"
 import { useWatchlistsStore } from "@/store/watchlists"
 import type {
@@ -49,7 +50,6 @@ import type {
   WatchlistSourceCreate,
   WatchlistStatus
 } from "@/types/watchlists"
-import type { WatchlistTab } from "@/types/watchlists"
 import {
   WatchlistSetupWizard,
   type WatchlistSetupCompleteResult
@@ -98,6 +98,9 @@ const ORIENTATION_DISMISSED_STORAGE_KEY = "watchlists:orientation-dismissed:v1"
 const SHOW_ALL_VIEWS_STORAGE_KEY = "watchlists:show-all-views:v1"
 const SECONDARY_EXPANDED_STORAGE_KEY = "watchlists:secondary-expanded:v1"
 const SUCCESSFUL_RUN_STATUSES = new Set(["completed", "succeeded", "success", "done", "finished"])
+const TAB_PANEL_FALLBACK = (
+  <div className="py-6 text-sm text-text-muted" data-testid="watchlists-tab-loading" />
+)
 
 const OverviewTab = React.lazy(() =>
   import("./OverviewTab/OverviewTab").then((module) => ({ default: module.OverviewTab }))
@@ -661,6 +664,11 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
       watchlist_id: watchlistId
     })
   }, [])
+
+  const updateSetupJob = useCallback(async (
+    jobId: number,
+    job: WatchlistJobCreate | { active: true }
+  ) => updateWatchlistJob(jobId, job), [])
 
   const completeSetupWizard = useCallback((result: WatchlistSetupCompleteResult) => {
     addWatchlist(result.watchlist)
@@ -1568,63 +1576,59 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
       </span>
     ) : null
 
-  const tabPanelFallback = (
-    <div className="py-6 text-sm text-text-muted" data-testid="watchlists-tab-loading" />
-  )
-
   const renderWatchlistsTab = useCallback((tab: WatchlistsTabKey): React.ReactNode => {
     switch (tab) {
       case "overview":
         return (
-          <Suspense fallback={tabPanelFallback}>
+          <Suspense fallback={TAB_PANEL_FALLBACK}>
             <OverviewTab />
           </Suspense>
         )
       case "sources":
         return (
-          <Suspense fallback={tabPanelFallback}>
+          <Suspense fallback={TAB_PANEL_FALLBACK}>
             <SourcesTab />
           </Suspense>
         )
       case "jobs":
         return (
-          <Suspense fallback={tabPanelFallback}>
+          <Suspense fallback={TAB_PANEL_FALLBACK}>
             <JobsTab />
           </Suspense>
         )
       case "runs":
         return (
-          <Suspense fallback={tabPanelFallback}>
+          <Suspense fallback={TAB_PANEL_FALLBACK}>
             <RunsTab />
           </Suspense>
         )
       case "items":
         return (
-          <Suspense fallback={tabPanelFallback}>
+          <Suspense fallback={TAB_PANEL_FALLBACK}>
             <ItemsTab />
           </Suspense>
         )
       case "alerts":
         return (
-          <Suspense fallback={tabPanelFallback}>
+          <Suspense fallback={TAB_PANEL_FALLBACK}>
             <AlertsTab />
           </Suspense>
         )
       case "outputs":
         return (
-          <Suspense fallback={tabPanelFallback}>
+          <Suspense fallback={TAB_PANEL_FALLBACK}>
             <OutputsTab />
           </Suspense>
         )
       case "templates":
         return (
-          <Suspense fallback={tabPanelFallback}>
+          <Suspense fallback={TAB_PANEL_FALLBACK}>
             <TemplatesTab />
           </Suspense>
         )
       case "settings":
         return (
-          <Suspense fallback={tabPanelFallback}>
+          <Suspense fallback={TAB_PANEL_FALLBACK}>
             <SettingsTab />
           </Suspense>
         )
@@ -2519,6 +2523,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
         onCreateWatchlist={createWatchlist}
         onCreateSources={createSetupSources}
         onCreateJob={createSetupJob}
+        onUpdateJob={updateSetupJob}
         onComplete={completeSetupWizard}
       />
 

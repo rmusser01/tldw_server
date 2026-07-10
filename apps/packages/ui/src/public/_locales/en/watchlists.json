@@ -3697,5 +3697,335 @@
   },
   "items_alertSummary_openAlerts": {
     "message": "Open Alerts"
+  },
+  "overview_pipelineSetup_title": {
+    "message": "Set up briefing"
+  },
+  "overview_pipelineSetup_open": {
+    "message": "Set up briefing"
+  },
+  "overview_pipelineSetup_progress": {
+    "message": "Briefing setup steps"
+  },
+  "overview_pipelineSetup_steps_sources": {
+    "message": "Sources"
+  },
+  "overview_pipelineSetup_steps_cadence": {
+    "message": "Cadence"
+  },
+  "overview_pipelineSetup_steps_briefing": {
+    "message": "Briefing"
+  },
+  "overview_pipelineSetup_steps_delivery": {
+    "message": "Delivery"
+  },
+  "overview_pipelineSetup_steps_test": {
+    "message": "Test"
+  },
+  "overview_pipelineSetup_actions_next": {
+    "message": "Continue to {{step}}"
+  },
+  "overview_pipelineSetup_source_existing": {
+    "message": "Use existing sources"
+  },
+  "overview_pipelineSetup_source_new": {
+    "message": "Add a new source"
+  },
+  "overview_pipelineSetup_sources_help": {
+    "message": "Choose existing sources or add one, then test the connection."
+  },
+  "overview_pipelineSetup_sourcesLoading": {
+    "message": "Loading sources..."
+  },
+  "overview_pipelineSetup_sourcesError": {
+    "message": "Failed to load feeds for the pipeline builder."
+  },
+  "overview_pipelineSetup_sourceTest_action": {
+    "message": "Test source"
+  },
+  "overview_pipelineSetup_sourceTest_ready": {
+    "message": "Source is ready."
+  },
+  "overview_pipelineSetup_sourceTest_cancelled": {
+    "message": "Source test cancelled."
+  },
+  "overview_pipelineSetup_sourceTest_failed": {
+    "message": "Source test failed. {{message}}"
+  },
+  "overview_pipelineSetup_fields_sources": {
+    "message": "Sources"
+  },
+  "overview_pipelineSetup_fields_sourceName": {
+    "message": "Source name"
+  },
+  "overview_pipelineSetup_fields_sourceUrl": {
+    "message": "Source URL"
+  },
+  "overview_pipelineSetup_fields_monitorName": {
+    "message": "Monitor name"
+  },
+  "overview_pipelineSetup_fields_schedule": {
+    "message": "Schedule"
+  },
+  "overview_pipelineSetup_fields_timezone": {
+    "message": "Timezone"
+  },
+  "overview_pipelineSetup_fields_intervalEvery": {
+    "message": "Every"
+  },
+  "overview_pipelineSetup_fields_intervalUnit": {
+    "message": "Interval unit"
+  },
+  "overview_pipelineSetup_fields_weekday": {
+    "message": "Weekday"
+  },
+  "overview_pipelineSetup_fields_hour": {
+    "message": "Hour"
+  },
+  "overview_pipelineSetup_fields_minute": {
+    "message": "Minute"
+  },
+  "overview_pipelineSetup_fields_cronExpression": {
+    "message": "Cron expression"
+  },
+  "overview_pipelineSetup_fields_showName": {
+    "message": "Show name"
+  },
+  "overview_pipelineSetup_fields_premise": {
+    "message": "Show premise"
+  },
+  "overview_pipelineSetup_fields_includeAudio": {
+    "message": "Audio"
+  },
+  "overview_pipelineSetup_fields_audioHelp": {
+    "message": "Add a playable spoken version."
+  },
+  "overview_pipelineSetup_fields_audioMinutes": {
+    "message": "Target duration in minutes"
+  },
+  "overview_pipelineSetup_fields_speakerCount": {
+    "message": "Cast size"
+  },
+  "overview_pipelineSetup_fields_template": {
+    "message": "Report template"
+  },
+  "overview_pipelineSetup_fields_audioProvider": {
+    "message": "Audio provider override"
+  },
+  "overview_pipelineSetup_fields_audioModel": {
+    "message": "Audio model override"
+  },
+  "overview_pipelineSetup_fields_customInstructions": {
+    "message": "Custom editorial instructions"
+  },
+  "overview_pipelineSetup_fields_emailDelivery": {
+    "message": "Email"
+  },
+  "overview_pipelineSetup_fields_emailRecipients": {
+    "message": "Email recipients"
+  },
+  "overview_pipelineSetup_fields_chatbookDelivery": {
+    "message": "Chatbook"
+  },
+  "overview_pipelineSetup_fields_chatbookTitle": {
+    "message": "Chatbook title"
+  },
+  "overview_pipelineSetup_schedule_manual": {
+    "message": "Manual only"
+  },
+  "overview_pipelineSetup_schedule_interval": {
+    "message": "Every N hours or minutes"
+  },
+  "overview_pipelineSetup_schedule_daily": {
+    "message": "Daily"
+  },
+  "overview_pipelineSetup_schedule_weekdays": {
+    "message": "Weekdays"
+  },
+  "overview_pipelineSetup_schedule_weekly": {
+    "message": "Weekly"
+  },
+  "overview_pipelineSetup_schedule_advanced": {
+    "message": "Advanced cron"
+  },
+  "overview_pipelineSetup_intervalUnits_hours": {
+    "message": "Hours"
+  },
+  "overview_pipelineSetup_intervalUnits_minutes": {
+    "message": "Minutes"
+  },
+  "overview_pipelineSetup_weekdays_monday": {
+    "message": "Monday"
+  },
+  "overview_pipelineSetup_weekdays_tuesday": {
+    "message": "Tuesday"
+  },
+  "overview_pipelineSetup_weekdays_wednesday": {
+    "message": "Wednesday"
+  },
+  "overview_pipelineSetup_weekdays_thursday": {
+    "message": "Thursday"
+  },
+  "overview_pipelineSetup_weekdays_friday": {
+    "message": "Friday"
+  },
+  "overview_pipelineSetup_weekdays_saturday": {
+    "message": "Saturday"
+  },
+  "overview_pipelineSetup_weekdays_sunday": {
+    "message": "Sunday"
+  },
+  "overview_pipelineSetup_advancedCron": {
+    "message": "Advanced cron"
+  },
+  "overview_pipelineSetup_nextOccurrence": {
+    "message": "Next occurrence"
+  },
+  "overview_pipelineSetup_manualOccurrence": {
+    "message": "Manual only"
+  },
+  "overview_pipelineSetup_nextOccurrencePending": {
+    "message": "Save a valid schedule to calculate the exact time."
+  },
+  "overview_pipelineSetup_briefing_question": {
+    "message": "What are you making?"
+  },
+  "overview_pipelineSetup_briefing_help": {
+    "message": "Choose the editorial shape. Every option stays grounded in your selected sources."
+  },
+  "overview_pipelineSetup_briefing_advanced": {
+    "message": "Advanced briefing settings"
+  },
+  "overview_pipelineSetup_formats_concise_briefing": {
+    "message": "Concise briefing"
+  },
+  "overview_pipelineSetup_formats_solo_update": {
+    "message": "Solo update"
+  },
+  "overview_pipelineSetup_formats_host_discussion": {
+    "message": "Host discussion"
+  },
+  "overview_pipelineSetup_formats_sportscast": {
+    "message": "Sportscast"
+  },
+  "overview_pipelineSetup_formats_culture_roundtable": {
+    "message": "Culture roundtable"
+  },
+  "overview_pipelineSetup_formats_custom": {
+    "message": "Custom"
+  },
+  "overview_pipelineSetup_speaker_defaultLabel": {
+    "message": "Speaker {{index}}"
+  },
+  "overview_pipelineSetup_speaker_labelField": {
+    "message": "Speaker {{index}} label"
+  },
+  "overview_pipelineSetup_speaker_roleField": {
+    "message": "Speaker {{index}} role"
+  },
+  "overview_pipelineSetup_speaker_voiceField": {
+    "message": "Speaker {{index}} voice"
+  },
+  "overview_pipelineSetup_speaker_personaField": {
+    "message": "Speaker {{index}} persona"
+  },
+  "overview_pipelineSetup_preview_generate": {
+    "message": "Preview report"
+  },
+  "overview_pipelineSetup_preview_diagnostics": {
+    "message": "Preview diagnostics"
+  },
+  "overview_pipelineSetup_preview_context": {
+    "message": "Preview run: {{runId}}"
+  },
+  "overview_pipelineSetup_preview_noRunContext": {
+    "message": "Run a successful monitor before previewing this report."
+  },
+  "overview_pipelineSetup_preview_templateRequired": {
+    "message": "Select a template before generating preview."
+  },
+  "overview_pipelineSetup_preview_templateEmpty": {
+    "message": "The selected template is empty."
+  },
+  "overview_pipelineSetup_preview_emptyResult": {
+    "message": "Preview returned no rendered content."
+  },
+  "overview_pipelineSetup_preview_error": {
+    "message": "Failed to generate preview."
+  },
+  "overview_pipelineSetup_delivery_help": {
+    "message": "Reports is always included. External delivery waits until selected artifacts are ready."
+  },
+  "overview_pipelineSetup_delivery_reports": {
+    "message": "Reports"
+  },
+  "overview_pipelineSetup_delivery_required": {
+    "message": "Required storage"
+  },
+  "overview_pipelineSetup_delivery_alwaysOn": {
+    "message": "Always on"
+  },
+  "overview_pipelineSetup_test_providerDisclosure": {
+    "message": "Tests use your configured LLM and text-to-speech providers. A sample is limited to 60 seconds; a full test uses the target duration."
+  },
+  "overview_pipelineSetup_test_receipt": {
+    "message": "Activation receipt"
+  },
+  "overview_pipelineSetup_test_manualReceipt": {
+    "message": "This briefing runs manually, saves selected artifacts in Reports, and contacts no external destination unless you choose Send test."
+  },
+  "overview_pipelineSetup_test_progress": {
+    "message": "Test progress"
+  },
+  "overview_pipelineSetup_test_stages_collection": {
+    "message": "Collect sources"
+  },
+  "overview_pipelineSetup_test_stages_selection": {
+    "message": "Select updates"
+  },
+  "overview_pipelineSetup_test_stages_text": {
+    "message": "Create report"
+  },
+  "overview_pipelineSetup_test_stages_audio": {
+    "message": "Create audio"
+  },
+  "overview_pipelineSetup_test_stages_persistence": {
+    "message": "Save in Reports"
+  },
+  "overview_pipelineSetup_test_stages_delivery": {
+    "message": "Check test delivery"
+  },
+  "overview_pipelineSetup_test_sample": {
+    "message": "Generate 60-second sample"
+  },
+  "overview_pipelineSetup_test_full": {
+    "message": "Generate full test episode"
+  },
+  "overview_pipelineSetup_test_send": {
+    "message": "Send test"
+  },
+  "overview_pipelineSetup_test_activate": {
+    "message": "Activate schedule"
+  },
+  "overview_pipelineSetup_test_ready": {
+    "message": "Test started. This draft stays inactive until you activate its schedule."
+  },
+  "overview_pipelineSetup_test_cancelled": {
+    "message": "Test cancelled. Your draft is saved."
+  },
+  "overview_pipelineSetup_test_failed": {
+    "message": "Test failed. Your draft is saved. {{message}}"
+  },
+  "overview_pipelineSetup_activate_ready": {
+    "message": "Schedule activated."
+  },
+  "overview_pipelineSetup_activate_failed": {
+    "message": "Schedule could not be activated. Your draft is saved. {{message}}"
+  },
+  "overview_pipelineSetup_validation_sourcesRequired": {
+    "message": "Choose at least one source before continuing."
+  },
+  "overview_pipelineSetup_validationError": {
+    "message": "Review the highlighted fields before continuing."
   }
 }

@@ -1,7 +1,9 @@
 import type {
+  JobOutputPrefs,
   SourceType,
   WatchlistAudioCast,
   WatchlistAudioCastSpeaker,
+  WatchlistProgramFormat,
   WatchlistSourceCreate
 } from "@/types/watchlists"
 import {
@@ -51,9 +53,21 @@ export interface PipelineWizardDraft {
   scheduleMinute: number
   scheduleWeekday: WeekdayToken
   scheduleAdvancedCron: string
+  timezone: string
+  nextRunAt?: string
+  followingRunAt?: string
   createScheduledOutput: boolean
+  programFormat: WatchlistProgramFormat
+  outcomeNoun: "briefing" | "episode"
+  showName: string
+  premise: string
+  audience: string
+  tone: string
+  episodeTitlePattern: string
+  customInstructions: string
   templateName: string
   templateFormat?: "md" | "html"
+  showNotes: boolean
   emailDeliveryEnabled: boolean
   emailRecipients: string[]
   chatbookDeliveryEnabled: boolean
@@ -61,7 +75,10 @@ export interface PipelineWizardDraft {
   audioEnabled: boolean
   audioSpeakers: PipelineWizardAudioSpeakerDraft[]
   targetAudioMinutes: number
+  audioProvider: string
+  audioModel: string
   runNow: boolean
+  preservedOutputPrefs?: JobOutputPrefs | null
 }
 
 export interface PipelineWizardValidationResult {
@@ -129,8 +146,18 @@ export const createDefaultPipelineWizardDraft = (): PipelineWizardDraft => ({
   scheduleMinute: 0,
   scheduleWeekday: "MON",
   scheduleAdvancedCron: "",
-  createScheduledOutput: false,
-  templateName: "",
+  timezone: getLocalTimezone(),
+  createScheduledOutput: true,
+  programFormat: "concise_briefing",
+  outcomeNoun: "briefing",
+  showName: "",
+  premise: "",
+  audience: "",
+  tone: "",
+  episodeTitlePattern: "",
+  customInstructions: "",
+  templateName: "briefing_markdown",
+  showNotes: false,
   emailDeliveryEnabled: false,
   emailRecipients: [],
   chatbookDeliveryEnabled: false,
@@ -145,8 +172,30 @@ export const createDefaultPipelineWizardDraft = (): PipelineWizardDraft => ({
     }
   ],
   targetAudioMinutes: 8,
+  audioProvider: "",
+  audioModel: "",
   runNow: true
 })
+
+export const mergePipelineWizardDraft = (
+  initial?: Partial<PipelineWizardDraft> | null
+): PipelineWizardDraft => {
+  const defaults = createDefaultPipelineWizardDraft()
+  return {
+    ...defaults,
+    ...(initial || {}),
+    sourceIds: Array.isArray(initial?.sourceIds) ? [...initial.sourceIds] : defaults.sourceIds,
+    emailRecipients: Array.isArray(initial?.emailRecipients)
+      ? [...initial.emailRecipients]
+      : defaults.emailRecipients,
+    audioSpeakers: Array.isArray(initial?.audioSpeakers)
+      ? initial.audioSpeakers.map((speaker) => ({ ...speaker }))
+      : defaults.audioSpeakers,
+    preservedOutputPrefs: initial?.preservedOutputPrefs
+      ? structuredClone(initial.preservedOutputPrefs)
+      : initial?.preservedOutputPrefs
+  }
+}
 
 const trim = (value: unknown): string => String(value || "").trim()
 
@@ -206,6 +255,11 @@ export const validatePipelineWizardDraft = (
 
   if (!trim(draft.monitorName)) errors.push("monitorName")
   if (!trim(draft.templateName)) errors.push("templateName")
+  try {
+    new Intl.DateTimeFormat("en", { timeZone: trim(draft.timezone) || "UTC" }).format()
+  } catch {
+    errors.push("timezone")
+  }
 
   if (draft.scheduleMode === "interval") {
     const value = Number(draft.scheduleIntervalValue)
@@ -256,7 +310,9 @@ export const validatePipelineWizardDraft = (
     if (new Set(ids).size !== ids.length) errors.push("audioSpeakerIds")
     if (speakers.some((speaker) => !trim(speaker.voice))) errors.push("audioSpeakerVoices")
     const minutes = Number(draft.targetAudioMinutes)
-    if (!Number.isFinite(minutes) || minutes <= 0) errors.push("targetAudioMinutes")
+    if (!Number.isFinite(minutes) || minutes < 1 || minutes > 60) {
+      errors.push("targetAudioMinutes")
+    }
   }
 
   return {
@@ -290,7 +346,7 @@ export const buildPipelineWizardSchedule = (
   if (draft.scheduleMode === "advanced") {
     const cron = trim(draft.scheduleAdvancedCron)
     return cron && !validatePipelineWizardCron(cron)
-      ? { schedule_expr: cron, timezone: getLocalTimezone() }
+      ? { schedule_expr: cron, timezone: trim(draft.timezone) || getLocalTimezone() }
       : {}
   }
   const preset =
@@ -310,7 +366,7 @@ export const buildPipelineWizardSchedule = (
       minute: draft.scheduleMinute,
       weekday: draft.scheduleWeekday
     }),
-    timezone: getLocalTimezone()
+    timezone: trim(draft.timezone) || getLocalTimezone()
   }
 }
 
@@ -358,20 +414,33 @@ export const toBriefingPipelineDraft = (
   return {
     monitorName: trim(draft.monitorName),
     sourceIds,
+    active: false,
     schedulePreset: schedule.schedule_expr ? "daily" : "none",
     scheduleExpr: schedule.schedule_expr,
     timezone: schedule.timezone,
     createScheduledOutput: Boolean(schedule.schedule_expr && draft.createScheduledOutput),
     templateName: trim(draft.templateName),
     ...(draft.templateFormat ? { templateFormat: draft.templateFormat } : {}),
+    programFormat: draft.programFormat,
+    outcomeNoun: draft.outcomeNoun,
+    showName: trim(draft.showName) || undefined,
+    premise: trim(draft.premise) || undefined,
+    audience: trim(draft.audience) || undefined,
+    tone: trim(draft.tone) || undefined,
+    episodeTitlePattern: trim(draft.episodeTitlePattern) || undefined,
+    customInstructions: trim(draft.customInstructions) || undefined,
+    showNotes: draft.showNotes,
     includeAudio: Boolean(draft.audioEnabled),
     audioVoice: firstSpeakerVoice,
+    audioProvider: trim(draft.audioProvider) || undefined,
+    audioModel: trim(draft.audioModel) || undefined,
     audioCast,
     voiceMap,
     targetAudioMinutes: draft.audioEnabled ? Number(draft.targetAudioMinutes) : undefined,
     emailRecipients: draft.emailDeliveryEnabled ? normalizeEmails(draft.emailRecipients) : [],
     createChatbook: Boolean(draft.chatbookDeliveryEnabled),
-    chatbookTitle: draft.chatbookDeliveryEnabled ? trim(draft.chatbookTitle) : undefined
+    chatbookTitle: draft.chatbookDeliveryEnabled ? trim(draft.chatbookTitle) : undefined,
+    preservedOutputPrefs: draft.preservedOutputPrefs
   }
 }
 

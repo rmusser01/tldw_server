@@ -82,6 +82,8 @@ export interface BriefingSetupDraft {
   audioEnabled: boolean
   targetAudioMinutes?: number
   audioLanguage?: string
+  audioProvider?: string
+  audioModel?: string
   audioVoice?: string
   audioCast?: WatchlistAudioCast
   voiceMap?: Record<string, string>
@@ -478,6 +480,8 @@ export const buildBriefingPipelineContract = (
   const audio = record(existing.audio)
   audio.enabled = Boolean(draft.audioEnabled)
   audio.language = trimmed(draft.audioLanguage) || trimmed(existing.audio.language) || "en"
+  setOptionalString(audio, "provider", draft.audioProvider)
+  setOptionalString(audio, "model", draft.audioModel)
   if (draft.audioEnabled) {
     audio.target_minutes = clampInteger(
       draft.targetAudioMinutes ?? existing.audio.target_minutes,

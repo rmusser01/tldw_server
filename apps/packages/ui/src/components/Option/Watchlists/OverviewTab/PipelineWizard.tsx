@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react"
+import React, { useEffect, useMemo, useRef, useState } from "react"
 import {
   Button,
   Checkbox,
@@ -9,12 +9,11 @@ import {
   Radio,
   Select,
   Space,
-  Steps,
   Switch
 } from "antd"
 import { useTranslation } from "react-i18next"
 import { Alert as DesignSystemAlert } from "@/components/ui"
-import type { WatchlistSource } from "@/types/watchlists"
+import type { WatchlistProgramFormat, WatchlistSource } from "@/types/watchlists"
 import {
   INTERVAL_HOURS_MAX,
   INTERVAL_HOURS_MIN,
@@ -23,39 +22,76 @@ import {
   type ScheduleIntervalUnit,
   type WeekdayToken
 } from "../JobsTab/schedule-utils"
+import { buildBriefingReceiptModel } from "../shared/briefing-receipt"
+import { toPipelineJobCreatePayload } from "./pipeline-contract"
 import {
-  buildPipelineWizardReviewSummary,
-  createDefaultPipelineWizardDraft,
+  mergePipelineWizardDraft,
+  toBriefingPipelineDraft,
   type PipelineWizardAudioSpeakerDraft,
   type PipelineWizardDraft,
   type PipelineWizardScheduleMode,
   type PipelineWizardSourceMode,
-  validatePipelineWizardCron,
   validatePipelineWizardDraft
 } from "./pipeline-wizard-state"
 
+export type PipelineWizardStep = "sources" | "cadence" | "briefing" | "delivery" | "test"
+
+export interface PipelineWizardTestOptions {
+  externalDelivery: boolean
+  audioSampleSeconds: 60 | null
+  jobId?: number
+}
+
+export interface PipelineWizardActionResult {
+  jobId?: number
+  runId?: number
+  status?: "ready" | "active" | "cancelled"
+  message?: string
+}
+
 interface PipelineWizardProps {
   open: boolean
-  sources: WatchlistSource[]
-  sourcesLoading: boolean
-  submitting: boolean
-  previewLoading: boolean
-  previewError: string | null
-  previewRendered: string | null
-  previewRunId: number | null
-  previewWarnings: string[]
-  submitError: string | null
+  sources?: WatchlistSource[]
+  sourcesLoading?: boolean
+  submitting?: boolean
+  submitError?: string | null
+  initialStep?: PipelineWizardStep | number
+  initialDraft?: Partial<PipelineWizardDraft>
   onCancel: () => void
-  onSubmit: (draft: PipelineWizardDraft, options: { mode: "create" | "test" }) => void
-  onPreview: (draft: PipelineWizardDraft) => void
+  onSaveDraft?: (draft: PipelineWizardDraft) => void | Promise<void>
+  onTest?: (
+    draft: PipelineWizardDraft,
+    options: PipelineWizardTestOptions
+  ) => PipelineWizardActionResult | void | Promise<PipelineWizardActionResult | void>
+  onActivate?: (
+    draft: PipelineWizardDraft,
+    options: { jobId?: number }
+  ) => PipelineWizardActionResult | void | Promise<PipelineWizardActionResult | void>
+  onTestSource?: (
+    draft: PipelineWizardDraft
+  ) => PipelineWizardActionResult | void | Promise<PipelineWizardActionResult | void>
+  previewLoading?: boolean
+  previewError?: string | null
+  previewRendered?: string | null
+  previewRunId?: number | null
+  previewWarnings?: string[]
+  onPreview?: (draft: PipelineWizardDraft) => void
 }
 
 export type { PipelineWizardProps }
 
-const STEP_COUNT = 5
-const LAST_STEP = STEP_COUNT - 1
-
+const STEPS: PipelineWizardStep[] = ["sources", "cadence", "briefing", "delivery", "test"]
+const LAST_STEP = STEPS.length - 1
 const DEFAULT_SPEAKER_VOICES = ["alloy", "nova", "echo", "fable"]
+
+const PROGRAM_FORMATS: Array<{ value: WatchlistProgramFormat; label: string }> = [
+  { value: "concise_briefing", label: "Concise briefing" },
+  { value: "solo_update", label: "Solo update" },
+  { value: "host_discussion", label: "Host discussion" },
+  { value: "sportscast", label: "Sportscast" },
+  { value: "culture_roundtable", label: "Culture roundtable" },
+  { value: "custom", label: "Custom" }
+]
 
 const createSpeakers = (
   count: number,
@@ -73,80 +109,153 @@ const createSpeakers = (
     }
   })
 
+const stepIndex = (value: PipelineWizardProps["initialStep"]): number => {
+  if (typeof value === "number") return Math.max(0, Math.min(LAST_STEP, value))
+  const index = value ? STEPS.indexOf(value) : 0
+  return index < 0 ? 0 : index
+}
+
+const getErrorMessage = (error: unknown): string =>
+  error instanceof Error && error.message.trim() ? error.message.trim() : "Server request failed."
+
+const isAbortError = (error: unknown): boolean =>
+  error instanceof Error && error.name === "AbortError"
+
+const zonedParts = (date: Date, formatter: Intl.DateTimeFormat) => {
+  const parts = formatter.formatToParts(date)
+  const get = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value || ""
+  return {
+    weekday: get("weekday").toUpperCase(),
+    hour: Number(get("hour")),
+    minute: Number(get("minute"))
+  }
+}
+
+const projectNextRunAt = (draft: PipelineWizardDraft, from = new Date()): string | undefined => {
+  if (draft.nextRunAt) return draft.nextRunAt
+  if (draft.scheduleMode === "manual" || draft.scheduleMode === "advanced") return undefined
+  const timezone = draft.timezone || "UTC"
+  let formatter: Intl.DateTimeFormat
+  try {
+    formatter = new Intl.DateTimeFormat("en-US", {
+      timeZone: timezone,
+      weekday: "short",
+      hour: "numeric",
+      minute: "numeric",
+      hourCycle: "h23"
+    })
+    formatter.format(from)
+  } catch {
+    return undefined
+  }
+  const candidate = new Date(Math.ceil((from.getTime() + 1) / 60_000) * 60_000)
+  const maxMinutes = 8 * 24 * 60
+  for (let index = 0; index < maxMinutes; index += 1) {
+    const parts = zonedParts(candidate, formatter)
+    const matches = draft.scheduleMode === "interval"
+      ? draft.scheduleIntervalUnit === "minutes"
+        ? parts.minute % Math.max(1, draft.scheduleIntervalValue) === 0
+        : parts.hour % Math.max(1, draft.scheduleIntervalValue) === 0 &&
+          parts.minute === draft.scheduleMinute
+      : parts.hour === draft.scheduleHour &&
+        parts.minute === draft.scheduleMinute &&
+        (draft.scheduleMode === "daily" ||
+          (draft.scheduleMode === "weekdays" && !["SAT", "SUN"].includes(parts.weekday)) ||
+          (draft.scheduleMode === "weekly" && parts.weekday === draft.scheduleWeekday))
+    if (matches) return candidate.toISOString()
+    candidate.setUTCMinutes(candidate.getUTCMinutes() + 1)
+  }
+  return undefined
+}
+
 export const PipelineWizard: React.FC<PipelineWizardProps> = ({
   open,
-  sources,
-  sourcesLoading,
-  submitting,
-  previewLoading,
-  previewError,
-  previewRendered,
-  previewRunId,
-  previewWarnings,
-  submitError,
+  sources = [],
+  sourcesLoading = false,
+  submitting = false,
+  submitError = null,
+  initialStep,
+  initialDraft,
   onCancel,
-  onSubmit,
+  onSaveDraft,
+  onTest,
+  onActivate,
+  onTestSource,
+  previewLoading = false,
+  previewError = null,
+  previewRendered = null,
+  previewRunId = null,
+  previewWarnings = [],
   onPreview
 }) => {
   const { t } = useTranslation(["watchlists", "common"])
-  const [currentStep, setCurrentStep] = useState(0)
-  const [draft, setDraft] = useState<PipelineWizardDraft>(() => ({
-    ...createDefaultPipelineWizardDraft(),
-    templateName: "briefing_md"
-  }))
+  const initial = useMemo(
+    () => mergePipelineWizardDraft(initialDraft),
+    [initialDraft]
+  )
+  const [currentStep, setCurrentStep] = useState(() => stepIndex(initialStep))
+  const [draft, setDraft] = useState<PipelineWizardDraft>(initial)
+  const draftRef = useRef(draft)
+  const wasOpenRef = useRef(false)
+  const validationRef = useRef<HTMLDivElement | null>(null)
   const [stepErrors, setStepErrors] = useState<string[]>([])
+  const [actionBusy, setActionBusy] = useState(false)
+  const [actionError, setActionError] = useState<string | null>(null)
+  const [actionMessage, setActionMessage] = useState<string | null>(null)
+  const [sourceTestMessage, setSourceTestMessage] = useState<string | null>(null)
+  const [inactiveJobId, setInactiveJobId] = useState<number | undefined>()
 
   useEffect(() => {
-    if (!open) return
-    setCurrentStep(0)
-    setStepErrors([])
-    setDraft({
-      ...createDefaultPipelineWizardDraft(),
-      templateName: "briefing_md"
-    })
-  }, [open])
-
-  useEffect(() => {
-    if (!open || draft.sourceIds.length > 0 || draft.sourceMode !== "existing") return
-    if (sources.length === 1) {
-      setDraft((previous) => ({
-        ...previous,
-        sourceIds: [sources[0].id]
-      }))
+    if (open && !wasOpenRef.current) {
+      const next = mergePipelineWizardDraft(initialDraft)
+      draftRef.current = next
+      setDraft(next)
+      setCurrentStep(stepIndex(initialStep))
+      setStepErrors([])
+      setActionError(null)
+      setActionMessage(null)
+      setSourceTestMessage(null)
+      setInactiveJobId(undefined)
     }
+    wasOpenRef.current = open
+  }, [initialDraft, initialStep, open])
+
+  useEffect(() => {
+    if (!open || draft.sourceMode !== "existing" || draft.sourceIds.length > 0) return
+    if (sources.length !== 1) return
+    const next = { ...draftRef.current, sourceIds: [sources[0].id] }
+    draftRef.current = next
+    setDraft(next)
   }, [draft.sourceIds.length, draft.sourceMode, open, sources])
 
+  useEffect(() => {
+    if (stepErrors.length === 0) return
+    validationRef.current?.focus()
+  }, [currentStep, stepErrors])
+
   const updateDraft = (patch: Partial<PipelineWizardDraft>) => {
-    setDraft((previous) => ({
-      ...previous,
-      ...patch
-    }))
+    const next = { ...draftRef.current, ...patch }
+    draftRef.current = next
+    setDraft(next)
     setStepErrors([])
+    setActionError(null)
+    void Promise.resolve(onSaveDraft?.(next)).catch((error) => {
+      if (!isAbortError(error)) setActionError(getErrorMessage(error))
+    })
   }
 
   const getSpeakerLabel = (index: number) =>
     t("watchlists:overview.pipelineSetup.speaker.defaultLabel", "Speaker {{index}}", { index })
 
-  const updateSpeaker = (
-    index: number,
-    patch: Partial<PipelineWizardAudioSpeakerDraft>
-  ) => {
-    setDraft((previous) => {
-      const nextSpeakers = createSpeakers(
-        previous.audioSpeakers.length || 1,
-        previous.audioSpeakers,
-        getSpeakerLabel
-      )
-      nextSpeakers[index] = {
-        ...nextSpeakers[index],
-        ...patch
-      }
-      return {
-        ...previous,
-        audioSpeakers: nextSpeakers
-      }
-    })
-    setStepErrors([])
+  const updateSpeaker = (index: number, patch: Partial<PipelineWizardAudioSpeakerDraft>) => {
+    const speakers = createSpeakers(
+      draft.audioSpeakers.length || 1,
+      draft.audioSpeakers,
+      getSpeakerLabel
+    )
+    speakers[index] = { ...speakers[index], ...patch }
+    updateDraft({ audioSpeakers: speakers })
   }
 
   const weekdayOptions = useMemo<Array<{ value: WeekdayToken; label: string }>>(
@@ -161,14 +270,10 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
     ],
     [t]
   )
-  const weekdayLabelByToken = useMemo(
-    () => Object.fromEntries(weekdayOptions.map((option) => [option.value, option.label])) as Record<WeekdayToken, string>,
-    [weekdayOptions]
-  )
   const scheduleOptions = useMemo<Array<{ value: PipelineWizardScheduleMode; label: string }>>(
     () => [
       { value: "manual", label: t("watchlists:overview.pipelineSetup.schedule.manual", "Manual only") },
-      { value: "interval", label: t("watchlists:overview.pipelineSetup.schedule.interval", "Every N hours/minutes") },
+      { value: "interval", label: t("watchlists:overview.pipelineSetup.schedule.interval", "Every N hours or minutes") },
       { value: "daily", label: t("watchlists:overview.pipelineSetup.schedule.daily", "Daily") },
       { value: "weekdays", label: t("watchlists:overview.pipelineSetup.schedule.weekdays", "Weekdays") },
       { value: "weekly", label: t("watchlists:overview.pipelineSetup.schedule.weekly", "Weekly") },
@@ -183,686 +288,552 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
     ],
     [t]
   )
-  const speakerCountOptions = useMemo(
-    () => [1, 2, 3, 4].map((count) => ({
-      value: count,
-      label: t(
-        "watchlists:overview.pipelineSetup.speaker.count",
-        `${count} speaker${count === 1 ? "" : "s"}`,
-        { count }
-      )
-    })),
-    [t]
-  )
 
-  const reviewSummaryCopy = useMemo(() => ({
-    newFeed: t("watchlists:overview.pipelineSetup.review.newFeed", "New feed"),
-    noFeedsSelected: t("watchlists:overview.pipelineSetup.review.noFeedsSelected", "No feeds selected"),
-    feedLabel: (id: number) => t("watchlists:overview.pipelineSetup.review.feedLabel", "Feed #{{id}}", { id }),
-    filters: t(
-      "watchlists:overview.pipelineSetup.review.filtersRefine",
-      "Monitor filters can be refined after creation"
-    ),
-    noTemplate: t("watchlists:overview.pipelineSetup.review.noTemplate", "No template"),
-    outputDigest: (templateName: string) =>
-      t("watchlists:overview.pipelineSetup.review.outputDigest", "{{templateName}} digest", { templateName }),
-    email: t("watchlists:overview.pipelineSetup.review.delivery.email", "Email"),
-    chatbook: t("watchlists:overview.pipelineSetup.review.delivery.chatbook", "Chatbook"),
-    inAppReports: t("watchlists:overview.pipelineSetup.review.delivery.inAppReports", "In-app reports"),
-    audioBriefing: (speakerCount: number) =>
-      t(
-        "watchlists:overview.pipelineSetup.review.audioBriefing",
-        `${speakerCount} speaker${speakerCount === 1 ? "" : "s"} audio briefing`,
-        { count: speakerCount }
-      ),
-    audioDisabled: t("watchlists:overview.pipelineSetup.review.audioDisabled", "Audio disabled"),
-    cadence: {
-      manual: t("watchlists:overview.pipelineSetup.schedule.manual", "Manual only"),
-      interval: (value: number, unit: ScheduleIntervalUnit) =>
-        unit === "minutes"
-          ? t(
-            "watchlists:overview.pipelineSetup.review.cadence.everyMinutes",
-            `Every ${value} minute${value === 1 ? "" : "s"}`,
-            { count: value }
-          )
-          : t(
-            "watchlists:overview.pipelineSetup.review.cadence.everyHours",
-            `Every ${value} hour${value === 1 ? "" : "s"}`,
-            { count: value }
-          ),
-      daily: (time: string) =>
-        t("watchlists:overview.pipelineSetup.review.cadence.daily", "Daily at {{time}}", { time }),
-      weekly: (weekday: string, time: string) =>
-        t(
-          "watchlists:overview.pipelineSetup.review.cadence.weekly",
-          "Weekly on {{weekday}} at {{time}}",
-          { weekday, time }
-        ),
-      weekdays: (time: string) =>
-        t("watchlists:overview.pipelineSetup.review.cadence.weekdays", "Weekdays at {{time}}", { time }),
-      advanced: (cron: string) =>
-        t("watchlists:overview.pipelineSetup.review.cadence.advanced", "Custom cron: {{cron}}", { cron }),
-      weekdayLabels: weekdayLabelByToken
-    }
-  }), [t, weekdayLabelByToken])
-
-  const summary = useMemo(
-    () => buildPipelineWizardReviewSummary(draft, sources, reviewSummaryCopy),
-    [draft, reviewSummaryCopy, sources]
-  )
-
-  const hasAdvancedCronError =
-    stepErrors.includes("scheduleAdvancedCron") ||
-    stepErrors.includes("scheduleAdvancedCronTooFrequent")
-  const advancedCronValidationError =
-    draft.scheduleMode === "advanced" && hasAdvancedCronError
-      ? stepErrors.includes("scheduleAdvancedCronTooFrequent")
-        ? "too_frequent"
-        : validatePipelineWizardCron(draft.scheduleAdvancedCron)
-      : null
-  const advancedCronHelp = (() => {
-    if (!advancedCronValidationError) return undefined
-    if (advancedCronValidationError === "invalid_token") {
-      return t(
-        "watchlists:overview.pipelineSetup.validation.cronExpressionInvalidToken",
-        "Cron tokens can only include letters, numbers, *, /, -, ?, and comma."
-      )
-    }
-    if (advancedCronValidationError === "invalid_value") {
-      return t(
-        "watchlists:overview.pipelineSetup.validation.cronExpressionInvalidValue",
-        "Cron field values are outside supported ranges."
-      )
-    }
-    if (advancedCronValidationError === "too_frequent") {
-      return t(
-        "watchlists:overview.pipelineSetup.validation.cronExpressionTooFrequent",
-        "Schedule is too frequent. Minimum interval is every {{minutes}} minutes.",
-        { minutes: INTERVAL_MINUTES_MIN }
-      )
-    }
-    return t(
-      "watchlists:overview.pipelineSetup.validation.cronExpression",
-      "Use exactly 5 cron fields: minute hour day-of-month month day-of-week."
-    )
-  })()
-
-  const stepItems = useMemo(
-    () => [
-      { title: t("watchlists:overview.pipelineSetup.steps.source", "Source") },
-      { title: t("watchlists:overview.pipelineSetup.steps.monitor", "Monitor") },
-      { title: t("watchlists:overview.pipelineSetup.steps.digest", "Digest") },
-      { title: t("watchlists:overview.pipelineSetup.steps.audio", "Audio") },
-      { title: t("watchlists:overview.pipelineSetup.steps.review", "Review") }
-    ],
-    [t]
-  )
-
-  const validateCurrentStep = (): boolean => {
-    const validation = validatePipelineWizardDraft(draft)
-    const currentStepFields: string[] = (() => {
-      if (currentStep === 0) {
-        return draft.sourceMode === "new" ? ["sourceName", "sourceUrl"] : ["sourceIds"]
-      }
-      if (currentStep === 1) {
-        return [
-          "monitorName",
-          "scheduleIntervalValue",
-          "scheduleHour",
-          "scheduleMinute",
-          "scheduleAdvancedCron",
-          "scheduleAdvancedCronTooFrequent"
-        ]
-      }
-      if (currentStep === 2) return ["templateName", "emailRecipients"]
-      if (currentStep === 3) {
-        return [
-          "audioSpeakers",
-          "audioSpeakerIds",
-          "audioSpeakerVoices",
-          "targetAudioMinutes"
-        ]
-      }
-      return validation.errors
-    })()
-    const errors = validation.errors.filter((error) => currentStepFields.includes(error))
+  const validateStep = (index = currentStep): boolean => {
+    const validation = validatePipelineWizardDraft(draftRef.current)
+    const stepFields = index === 0
+      ? draft.sourceMode === "new" ? ["sourceName", "sourceUrl"] : ["sourceIds"]
+      : index === 1
+        ? [
+            "monitorName",
+            "timezone",
+            "scheduleIntervalValue",
+            "scheduleHour",
+            "scheduleMinute",
+            "scheduleAdvancedCron",
+            "scheduleAdvancedCronTooFrequent"
+          ]
+        : index === 2
+          ? ["templateName", "audioSpeakers", "audioSpeakerIds", "audioSpeakerVoices", "targetAudioMinutes"]
+          : index === 3
+            ? ["emailRecipients"]
+            : validation.errors
+    const errors = validation.errors.filter((error) => stepFields.includes(error))
     setStepErrors(errors)
     return errors.length === 0
   }
 
-  const handleNext = () => {
-    if (!validateCurrentStep()) return
-    setCurrentStep((previous) => Math.min(LAST_STEP, previous + 1))
+  const moveNext = () => {
+    if (!validateStep()) return
+    setCurrentStep((value) => Math.min(LAST_STEP, value + 1))
   }
 
-  const handleSubmit = (mode: "create" | "test") => {
-    const validation = validatePipelineWizardDraft(draft)
-    if (!validation.valid) {
-      setStepErrors(validation.errors)
-      const firstError = validation.errors[0]
-      if (["sourceIds", "sourceName", "sourceUrl"].includes(firstError)) setCurrentStep(0)
-      else if ([
-        "monitorName",
-        "scheduleIntervalValue",
-        "scheduleHour",
-        "scheduleMinute",
-        "scheduleAdvancedCron",
-        "scheduleAdvancedCronTooFrequent"
-      ].includes(firstError)) setCurrentStep(1)
-      else if (["templateName", "emailRecipients"].includes(firstError)) setCurrentStep(2)
-      else setCurrentStep(3)
-      return
-    }
-    onSubmit(draft, { mode })
+  const validateAll = (): boolean => {
+    const validation = validatePipelineWizardDraft(draftRef.current)
+    if (validation.valid) return true
+    const first = validation.errors[0]
+    setStepErrors(validation.errors)
+    if (["sourceIds", "sourceName", "sourceUrl"].includes(first)) setCurrentStep(0)
+    else if (["monitorName", "timezone", "scheduleIntervalValue", "scheduleHour", "scheduleMinute", "scheduleAdvancedCron", "scheduleAdvancedCronTooFrequent"].includes(first)) setCurrentStep(1)
+    else if (["templateName", "audioSpeakers", "audioSpeakerIds", "audioSpeakerVoices", "targetAudioMinutes"].includes(first)) setCurrentStep(2)
+    else setCurrentStep(3)
+    return false
   }
+
+  const runTest = async (options: Omit<PipelineWizardTestOptions, "jobId">) => {
+    if (!validateAll()) return
+    setActionBusy(true)
+    setActionError(null)
+    setActionMessage(null)
+    try {
+      const result = await onTest?.(
+        draftRef.current,
+        { ...options, ...(inactiveJobId ? { jobId: inactiveJobId } : {}) }
+      )
+      if (result && result.jobId) setInactiveJobId(result.jobId)
+      setActionMessage(
+        result && result.status === "cancelled"
+          ? t("watchlists:overview.pipelineSetup.test.cancelled", "Test cancelled. Your draft is saved.")
+          : t("watchlists:overview.pipelineSetup.test.ready", "Test started. This draft stays inactive until you activate its schedule.")
+      )
+    } catch (error) {
+      if (!isAbortError(error)) {
+        setActionError(
+          t(
+            "watchlists:overview.pipelineSetup.test.failed",
+            "Test failed. Your draft is saved. {{message}}",
+            { message: getErrorMessage(error) }
+          )
+        )
+      }
+    } finally {
+      setActionBusy(false)
+    }
+  }
+
+  const activate = async () => {
+    if (!validateAll()) return
+    setActionBusy(true)
+    setActionError(null)
+    setActionMessage(null)
+    try {
+      const result = await onActivate?.(draftRef.current, { jobId: inactiveJobId })
+      if (result && result.jobId) setInactiveJobId(result.jobId)
+      setActionMessage(t("watchlists:overview.pipelineSetup.activate.ready", "Schedule activated."))
+    } catch (error) {
+      if (!isAbortError(error)) {
+        setActionError(
+          t(
+            "watchlists:overview.pipelineSetup.activate.failed",
+            "Schedule could not be activated. Your draft is saved. {{message}}",
+            { message: getErrorMessage(error) }
+          )
+        )
+      }
+    } finally {
+      setActionBusy(false)
+    }
+  }
+
+  const testSource = async () => {
+    if (!validateStep(0)) return
+    setActionBusy(true)
+    setActionError(null)
+    setSourceTestMessage(null)
+    try {
+      const result = await onTestSource?.(draftRef.current)
+      setSourceTestMessage(
+        result && result.status === "cancelled"
+          ? t("watchlists:overview.pipelineSetup.sourceTest.cancelled", "Source test cancelled.")
+          : t("watchlists:overview.pipelineSetup.sourceTest.ready", "Source is ready.")
+      )
+    } catch (error) {
+      if (!isAbortError(error)) {
+        setActionError(
+          t("watchlists:overview.pipelineSetup.sourceTest.failed", "Source test failed. {{message}}", {
+            message: getErrorMessage(error)
+          })
+        )
+      }
+    } finally {
+      setActionBusy(false)
+    }
+  }
+
+  const nextRunAt = useMemo(() => projectNextRunAt(draft), [draft])
+  const receipt = useMemo(() => {
+    if (!nextRunAt) return null
+    const payload = toPipelineJobCreatePayload(toBriefingPipelineDraft(draft))
+    const contract = payload.output_prefs?.briefing_pipeline
+    if (!contract) return null
+    return buildBriefingReceiptModel({
+      contract,
+      sourceCount: draft.sourceMode === "new" ? 1 : draft.sourceIds.length,
+      nextRunAt,
+      followingRunAt: draft.followingRunAt,
+      timezone: draft.timezone || "UTC"
+    })
+  }, [draft, nextRunAt])
 
   const currentSpeakerCount = Math.max(1, Math.min(4, draft.audioSpeakers.length || 1))
-  const intervalMin =
-    draft.scheduleIntervalUnit === "minutes" ? INTERVAL_MINUTES_MIN : INTERVAL_HOURS_MIN
-  const intervalMax =
-    draft.scheduleIntervalUnit === "minutes" ? INTERVAL_MINUTES_MAX : INTERVAL_HOURS_MAX
-  const hasScheduledCadence = draft.scheduleMode !== "manual"
+  const intervalMin = draft.scheduleIntervalUnit === "minutes"
+    ? INTERVAL_MINUTES_MIN
+    : INTERVAL_HOURS_MIN
+  const intervalMax = draft.scheduleIntervalUnit === "minutes"
+    ? INTERVAL_MINUTES_MAX
+    : INTERVAL_HOURS_MAX
+  const hasExternalDelivery = draft.emailDeliveryEnabled || draft.chatbookDeliveryEnabled
+  const isBusy = submitting || actionBusy
 
-  return (
-    <Modal
-      open={open}
-      title={t("watchlists:overview.pipelineSetup.title", "Briefing pipeline builder")}
-      onCancel={onCancel}
-      destroyOnHidden
-      maskClosable={!submitting}
-      width={760}
-      footer={[
-        <Button key="cancel" onClick={onCancel} disabled={submitting}>
+  const errorMessage = stepErrors.includes("sourceIds")
+    ? t("watchlists:overview.pipelineSetup.validation.sourcesRequired", "Choose at least one source before continuing.")
+    : t("watchlists:overview.pipelineSetup.validationError", "Review the highlighted fields before continuing.")
+
+  const footer = currentStep === LAST_STEP
+    ? [
+        <Button key="cancel" className="min-h-11" onClick={onCancel} disabled={isBusy}>
           {t("common:cancel", "Cancel")}
         </Button>,
         <Button
           key="back"
-          onClick={() => setCurrentStep((previous) => Math.max(0, previous - 1))}
-          disabled={submitting || currentStep === 0}
+          className="min-h-11"
+          onClick={() => setCurrentStep((value) => Math.max(0, value - 1))}
+          disabled={isBusy}
         >
           {t("common:back", "Back")}
+        </Button>
+      ]
+    : [
+        <Button key="cancel" className="min-h-11" onClick={onCancel} disabled={isBusy}>
+          {t("common:cancel", "Cancel")}
         </Button>,
-        currentStep === LAST_STEP ? (
+        currentStep > 0 ? (
           <Button
-            key="test-generation"
-            data-testid="watchlists-pipeline-test-generation"
-            onClick={() => handleSubmit("test")}
-            loading={submitting}
+            key="back"
+            className="min-h-11"
+            onClick={() => setCurrentStep((value) => Math.max(0, value - 1))}
+            disabled={isBusy}
           >
-            {t("watchlists:overview.pipelineSetup.actions.testGeneration", "Run test generation")}
+            {t("common:back", "Back")}
           </Button>
         ) : null,
-        <Button
-          key="next"
-          type="primary"
-          loading={submitting}
-          onClick={() => {
-            if (currentStep === LAST_STEP) {
-              handleSubmit("create")
-              return
-            }
-            handleNext()
-          }}
-        >
-          {currentStep === LAST_STEP
-            ? t("watchlists:overview.pipelineSetup.actions.finish", "Create pipeline")
-            : t("common:next", "Next")}
+        <Button key="next" type="primary" className="min-h-11" onClick={moveNext} disabled={isBusy}>
+          {t(
+            "watchlists:overview.pipelineSetup.actions.next",
+            "Next: {{step}}",
+            { step: ["Cadence", "Briefing", "Delivery", "Test"][currentStep] }
+          )}
         </Button>
-      ]}
+      ]
+
+  return (
+    <Modal
+      open={open}
+      title={t("watchlists:overview.pipelineSetup.title", "Set up briefing")}
+      onCancel={isBusy ? undefined : onCancel}
+      destroyOnHidden
+      maskClosable={!isBusy}
+      width={760}
+      footer={footer}
     >
-      <div className="space-y-4">
-        <Steps size="small" current={currentStep} items={stepItems} />
+      <div className="space-y-5">
+        <nav aria-label={t("watchlists:overview.pipelineSetup.progress", "Briefing setup steps")}>
+          <ol className="flex min-w-0 gap-1 overflow-x-auto" role="list">
+            {STEPS.map((step, index) => (
+              <li key={step} className="min-w-max flex-1">
+                <button
+                  type="button"
+                  className={`min-h-11 w-full rounded-md px-3 py-2 text-start text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary ${
+                    index === currentStep ? "bg-primary/10 font-semibold text-primary" : "text-text-muted"
+                  }`}
+                  aria-current={index === currentStep ? "step" : undefined}
+                  onClick={() => {
+                    if (index <= currentStep) setCurrentStep(index)
+                  }}
+                >
+                  {t(`watchlists:overview.pipelineSetup.steps.${step}`, step[0].toUpperCase() + step.slice(1))}
+                </button>
+              </li>
+            ))}
+          </ol>
+        </nav>
+
         {stepErrors.length > 0 && (
-          <DesignSystemAlert
-            variant="warning"
-            title={t(
-              "watchlists:overview.pipelineSetup.validationError",
-              "Review the highlighted pipeline fields."
-            )}
-          />
+          <div ref={validationRef} tabIndex={-1} data-testid="watchlists-pipeline-validation-summary">
+            <DesignSystemAlert variant="warning" title={errorMessage} />
+          </div>
         )}
-        {submitError && (
+        {(submitError || actionError) && (
           <DesignSystemAlert
             variant="error"
-            title={submitError}
-            data-testid="watchlists-pipeline-error"
+            title={submitError || actionError || ""}
+            data-testid="watchlists-pipeline-action-error"
           />
         )}
+        {actionMessage && <DesignSystemAlert variant="info" title={actionMessage} />}
 
         {currentStep === 0 && (
-          <div className="space-y-3">
+          <section aria-labelledby="pipeline-sources-heading" className="space-y-4">
+            <div>
+              <h2 id="pipeline-sources-heading" className="text-base font-semibold">
+                {t("watchlists:overview.pipelineSetup.steps.sources", "Sources")}
+              </h2>
+              <p className="mt-1 text-sm text-text-muted">
+                {t("watchlists:overview.pipelineSetup.sources.help", "Choose existing sources or add one, then test the connection.")}
+              </p>
+            </div>
             <Radio.Group
               value={draft.sourceMode}
               onChange={(event) => updateDraft({ sourceMode: event.target.value as PipelineWizardSourceMode })}
             >
               <Space orientation="vertical">
-                <Radio value="existing">{t("watchlists:overview.pipelineSetup.source.existing", "Use existing feeds")}</Radio>
-                <Radio value="new">{t("watchlists:overview.pipelineSetup.source.new", "Create a new feed")}</Radio>
+                <Radio value="existing">{t("watchlists:overview.pipelineSetup.source.existing", "Use existing sources")}</Radio>
+                <Radio value="new">{t("watchlists:overview.pipelineSetup.source.new", "Add a new source")}</Radio>
               </Space>
             </Radio.Group>
-
             {draft.sourceMode === "existing" ? (
               <Form layout="vertical">
                 <Form.Item
-                  label={t("watchlists:overview.pipelineSetup.fields.sources", "Feeds")}
+                  label={t("watchlists:overview.pipelineSetup.fields.sources", "Sources")}
                   validateStatus={stepErrors.includes("sourceIds") ? "error" : undefined}
-                  help={stepErrors.includes("sourceIds") ? t("watchlists:overview.pipelineSetup.validation.sourcesRequired", "Select at least one feed") : undefined}
                 >
                   <Checkbox.Group
-                    className="grid gap-2"
+                    className="grid max-h-64 gap-2 overflow-y-auto"
                     value={draft.sourceIds}
-                    onChange={(values) => updateDraft({ sourceIds: values.map((value) => Number(value)) })}
+                    onChange={(values) => updateDraft({ sourceIds: values.map(Number) })}
                   >
                     {sources.map((source) => (
-                      <Checkbox key={source.id} value={source.id}>
-                        {source.name || `Feed #${source.id}`}
+                      <Checkbox key={source.id} value={source.id} className="min-h-11 py-2">
+                        {source.name || `Source #${source.id}`}
                       </Checkbox>
                     ))}
                   </Checkbox.Group>
                 </Form.Item>
-                {sourcesLoading && (
-                  <p className="text-xs text-text-muted">
-                    {t("watchlists:overview.pipelineSetup.sourcesLoading", "Loading feeds...")}
-                  </p>
-                )}
+                {sourcesLoading && <p className="text-sm text-text-muted">{t("watchlists:overview.pipelineSetup.sourcesLoading", "Loading sources...")}</p>}
               </Form>
             ) : (
               <Form layout="vertical">
-                <Form.Item
-                  label={t("watchlists:overview.pipelineSetup.fields.sourceName", "Feed name")}
-                  validateStatus={stepErrors.includes("sourceName") ? "error" : undefined}
-                >
-                  <Input
-                    aria-label={t("watchlists:overview.pipelineSetup.fields.sourceName", "Feed name")}
-                    value={draft.sourceName}
-                    onChange={(event) => updateDraft({ sourceName: event.target.value })}
-                  />
+                <Form.Item label={t("watchlists:overview.pipelineSetup.fields.sourceName", "Source name")} validateStatus={stepErrors.includes("sourceName") ? "error" : undefined}>
+                  <Input aria-label={t("watchlists:overview.pipelineSetup.fields.sourceName", "Source name")} value={draft.sourceName} onChange={(event) => updateDraft({ sourceName: event.target.value })} />
                 </Form.Item>
-                <Form.Item
-                  label={t("watchlists:overview.pipelineSetup.fields.sourceUrl", "Feed URL")}
-                  validateStatus={stepErrors.includes("sourceUrl") ? "error" : undefined}
-                  help={stepErrors.includes("sourceUrl") ? t("watchlists:overview.pipelineSetup.validation.sourceUrlRequired", "Enter a valid http or https feed URL") : undefined}
-                >
-                  <Input
-                    aria-label={t("watchlists:overview.pipelineSetup.fields.sourceUrl", "Feed URL")}
-                    value={draft.sourceUrl}
-                    onChange={(event) => updateDraft({ sourceUrl: event.target.value })}
-                  />
+                <Form.Item label={t("watchlists:overview.pipelineSetup.fields.sourceUrl", "Source URL")} validateStatus={stepErrors.includes("sourceUrl") ? "error" : undefined}>
+                  <Input aria-label={t("watchlists:overview.pipelineSetup.fields.sourceUrl", "Source URL")} value={draft.sourceUrl} onChange={(event) => updateDraft({ sourceUrl: event.target.value })} />
                 </Form.Item>
               </Form>
             )}
-          </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <Button className="min-h-11" onClick={() => void testSource()} loading={actionBusy}>
+                {t("watchlists:overview.pipelineSetup.sourceTest.action", "Test source")}
+              </Button>
+              {sourceTestMessage && <p className="text-sm text-success">{sourceTestMessage}</p>}
+            </div>
+          </section>
         )}
 
         {currentStep === 1 && (
-          <Form layout="vertical">
-            <Form.Item
-              label={t("watchlists:overview.pipelineSetup.fields.monitorName", "Monitor name")}
-              validateStatus={stepErrors.includes("monitorName") ? "error" : undefined}
-            >
-              <Input
-                aria-label={t("watchlists:overview.pipelineSetup.fields.monitorName", "Monitor name")}
-                value={draft.monitorName}
-                onChange={(event) => updateDraft({ monitorName: event.target.value })}
-              />
-            </Form.Item>
-            <Form.Item label={t("watchlists:overview.pipelineSetup.fields.schedule", "Schedule")}>
-              <Select
-                aria-label={t("watchlists:overview.pipelineSetup.fields.schedule", "Schedule")}
-                value={draft.scheduleMode}
-                options={scheduleOptions}
-                onChange={(value) => updateDraft({
-                  scheduleMode: value as PipelineWizardScheduleMode,
-                  createScheduledOutput:
-                    value === "manual" ? false : draft.createScheduledOutput
-                })}
-              />
-            </Form.Item>
-            {draft.scheduleMode === "interval" && (
-              <div className="grid gap-3 sm:grid-cols-2">
-                <Form.Item
-                  label={t("watchlists:overview.pipelineSetup.fields.intervalEvery", "Every")}
-                  validateStatus={stepErrors.includes("scheduleIntervalValue") ? "error" : undefined}
-                >
-                  <InputNumber
-                    aria-label={t("watchlists:overview.pipelineSetup.fields.intervalEvery", "Every")}
-                    className="w-full"
-                    min={intervalMin}
-                    max={intervalMax}
-                    precision={0}
-                    value={draft.scheduleIntervalValue}
-                    onChange={(value) => updateDraft({ scheduleIntervalValue: Number(value) })}
-                  />
-                </Form.Item>
-                <Form.Item label={t("watchlists:overview.pipelineSetup.fields.intervalUnit", "Interval unit")}>
-                  <Select
-                    aria-label={t("watchlists:overview.pipelineSetup.fields.intervalUnit", "Interval unit")}
-                    value={draft.scheduleIntervalUnit}
-                    options={intervalUnitOptions}
-                    onChange={(value) => updateDraft({ scheduleIntervalUnit: value })}
-                  />
-                </Form.Item>
-              </div>
-            )}
-            {(
-              draft.scheduleMode === "daily" ||
-              draft.scheduleMode === "weekdays" ||
-              draft.scheduleMode === "weekly"
-            ) && (
-              <div className="grid gap-3 sm:grid-cols-3">
-                {draft.scheduleMode === "weekly" && (
-                  <Form.Item label={t("watchlists:overview.pipelineSetup.fields.weekday", "Weekday")}>
-                    <Select
-                      aria-label={t("watchlists:overview.pipelineSetup.fields.weekday", "Weekday")}
-                      value={draft.scheduleWeekday}
-                      options={weekdayOptions}
-                      onChange={(value) => updateDraft({ scheduleWeekday: value })}
-                    />
-                  </Form.Item>
-                )}
-                <Form.Item
-                  label={t("watchlists:overview.pipelineSetup.fields.hour", "Hour")}
-                  validateStatus={stepErrors.includes("scheduleHour") ? "error" : undefined}
-                >
-                  <InputNumber
-                    aria-label={t("watchlists:overview.pipelineSetup.fields.hour", "Hour")}
-                    className="w-full"
-                    min={0}
-                    max={23}
-                    precision={0}
-                    value={draft.scheduleHour}
-                    onChange={(value) => updateDraft({ scheduleHour: Number(value) })}
-                  />
-                </Form.Item>
-                <Form.Item
-                  label={t("watchlists:overview.pipelineSetup.fields.minute", "Minute")}
-                  validateStatus={stepErrors.includes("scheduleMinute") ? "error" : undefined}
-                >
-                  <InputNumber
-                    aria-label={t("watchlists:overview.pipelineSetup.fields.minute", "Minute")}
-                    className="w-full"
-                    min={0}
-                    max={59}
-                    precision={0}
-                    value={draft.scheduleMinute}
-                    onChange={(value) => updateDraft({ scheduleMinute: Number(value) })}
-                  />
-                </Form.Item>
-              </div>
-            )}
-            {draft.scheduleMode === "advanced" && (
-              <Form.Item
-                label={t("watchlists:overview.pipelineSetup.fields.cronExpression", "Cron expression")}
-                validateStatus={hasAdvancedCronError ? "error" : undefined}
-                help={advancedCronHelp}
-              >
-                <Input
-                  aria-label={t("watchlists:overview.pipelineSetup.fields.cronExpression", "Cron expression")}
-                  placeholder="0 8 * * MON-FRI"
-                  value={draft.scheduleAdvancedCron}
-                  onChange={(event) => updateDraft({ scheduleAdvancedCron: event.target.value })}
-                />
+          <section aria-labelledby="pipeline-cadence-heading" className="space-y-4">
+            <h2 id="pipeline-cadence-heading" className="text-base font-semibold">
+              {t("watchlists:overview.pipelineSetup.steps.cadence", "Cadence")}
+            </h2>
+            <Form layout="vertical">
+              <Form.Item label={t("watchlists:overview.pipelineSetup.fields.monitorName", "Monitor name")} validateStatus={stepErrors.includes("monitorName") ? "error" : undefined}>
+                <Input aria-label={t("watchlists:overview.pipelineSetup.fields.monitorName", "Monitor name")} value={draft.monitorName} onChange={(event) => updateDraft({ monitorName: event.target.value })} />
               </Form.Item>
-            )}
-            <Form.Item label={t("watchlists:overview.pipelineSetup.fields.runNow", "Run immediately")}>
-              <Switch
-                aria-label={t("watchlists:overview.pipelineSetup.fields.runNow", "Run immediately")}
-                checked={draft.runNow}
-                onChange={(checked) => updateDraft({ runNow: checked })}
-              />
-            </Form.Item>
-          </Form>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Form.Item label={t("watchlists:overview.pipelineSetup.fields.schedule", "Schedule")}>
+                  <Select aria-label={t("watchlists:overview.pipelineSetup.fields.schedule", "Schedule")} value={draft.scheduleMode} options={scheduleOptions} onChange={(value) => updateDraft({ scheduleMode: value, createScheduledOutput: value !== "manual", nextRunAt: undefined, followingRunAt: undefined })} />
+                </Form.Item>
+                <Form.Item label={t("watchlists:overview.pipelineSetup.fields.timezone", "Timezone")} validateStatus={stepErrors.includes("timezone") ? "error" : undefined}>
+                  <Input aria-label={t("watchlists:overview.pipelineSetup.fields.timezone", "Timezone")} value={draft.timezone} onChange={(event) => updateDraft({ timezone: event.target.value, nextRunAt: undefined, followingRunAt: undefined })} />
+                </Form.Item>
+              </div>
+              {draft.scheduleMode === "interval" && (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Form.Item label={t("watchlists:overview.pipelineSetup.fields.intervalEvery", "Every")} validateStatus={stepErrors.includes("scheduleIntervalValue") ? "error" : undefined}>
+                    <InputNumber aria-label={t("watchlists:overview.pipelineSetup.fields.intervalEvery", "Every")} className="w-full" min={intervalMin} max={intervalMax} precision={0} value={draft.scheduleIntervalValue} onChange={(value) => updateDraft({ scheduleIntervalValue: Number(value), nextRunAt: undefined, followingRunAt: undefined })} />
+                  </Form.Item>
+                  <Form.Item label={t("watchlists:overview.pipelineSetup.fields.intervalUnit", "Interval unit")}>
+                    <Select aria-label={t("watchlists:overview.pipelineSetup.fields.intervalUnit", "Interval unit")} value={draft.scheduleIntervalUnit} options={intervalUnitOptions} onChange={(value) => updateDraft({ scheduleIntervalUnit: value, nextRunAt: undefined, followingRunAt: undefined })} />
+                  </Form.Item>
+                </div>
+              )}
+              {(["daily", "weekdays", "weekly"] as PipelineWizardScheduleMode[]).includes(draft.scheduleMode) && (
+                <div className="grid gap-3 sm:grid-cols-3">
+                  {draft.scheduleMode === "weekly" && (
+                    <Form.Item label={t("watchlists:overview.pipelineSetup.fields.weekday", "Weekday")}>
+                      <Select aria-label={t("watchlists:overview.pipelineSetup.fields.weekday", "Weekday")} value={draft.scheduleWeekday} options={weekdayOptions} onChange={(value) => updateDraft({ scheduleWeekday: value, nextRunAt: undefined, followingRunAt: undefined })} />
+                    </Form.Item>
+                  )}
+                  <Form.Item label={t("watchlists:overview.pipelineSetup.fields.hour", "Hour")} validateStatus={stepErrors.includes("scheduleHour") ? "error" : undefined}>
+                    <InputNumber aria-label={t("watchlists:overview.pipelineSetup.fields.hour", "Hour")} className="w-full" min={0} max={23} precision={0} value={draft.scheduleHour} onChange={(value) => updateDraft({ scheduleHour: Number(value), nextRunAt: undefined, followingRunAt: undefined })} />
+                  </Form.Item>
+                  <Form.Item label={t("watchlists:overview.pipelineSetup.fields.minute", "Minute")} validateStatus={stepErrors.includes("scheduleMinute") ? "error" : undefined}>
+                    <InputNumber aria-label={t("watchlists:overview.pipelineSetup.fields.minute", "Minute")} className="w-full" min={0} max={59} precision={0} value={draft.scheduleMinute} onChange={(value) => updateDraft({ scheduleMinute: Number(value), nextRunAt: undefined, followingRunAt: undefined })} />
+                  </Form.Item>
+                </div>
+              )}
+              {draft.scheduleMode === "advanced" && (
+                <details className="rounded-md border border-border px-3 py-2">
+                  <summary className="min-h-11 cursor-pointer py-3 font-medium">{t("watchlists:overview.pipelineSetup.advancedCron", "Advanced cron")}</summary>
+                  <Form.Item label={t("watchlists:overview.pipelineSetup.fields.cronExpression", "Cron expression")} validateStatus={stepErrors.some((error) => error.startsWith("scheduleAdvancedCron")) ? "error" : undefined}>
+                    <Input aria-label={t("watchlists:overview.pipelineSetup.fields.cronExpression", "Cron expression")} value={draft.scheduleAdvancedCron} placeholder="0 8 * * MON-FRI" onChange={(event) => updateDraft({ scheduleAdvancedCron: event.target.value, nextRunAt: undefined, followingRunAt: undefined })} />
+                  </Form.Item>
+                </details>
+              )}
+            </Form>
+            <div className="border-t border-border pt-3 text-sm">
+              <span className="font-medium">{t("watchlists:overview.pipelineSetup.nextOccurrence", "Next occurrence")}:</span>{" "}
+              {receipt?.nextRunLabel
+                ? `${receipt.nextRunLabel} (${draft.timezone})`
+                : draft.scheduleMode === "manual"
+                  ? t("watchlists:overview.pipelineSetup.manualOccurrence", "Manual only")
+                  : t("watchlists:overview.pipelineSetup.nextOccurrencePending", "Save a valid schedule to calculate the exact time.")}
+            </div>
+          </section>
         )}
 
         {currentStep === 2 && (
-          <Form layout="vertical">
-            <Form.Item
-              label={t("watchlists:overview.pipelineSetup.fields.template", "Template")}
-              validateStatus={stepErrors.includes("templateName") ? "error" : undefined}
+          <section aria-labelledby="pipeline-briefing-heading" className="space-y-5">
+            <div>
+              <h2 id="pipeline-briefing-heading" className="text-lg font-semibold">
+                {t("watchlists:overview.pipelineSetup.briefing.question", "What are you making?")}
+              </h2>
+              <p className="mt-1 text-sm text-text-muted">{t("watchlists:overview.pipelineSetup.briefing.help", "Choose the editorial shape. Every option stays grounded in your selected sources.")}</p>
+            </div>
+            <Radio.Group
+              className="grid gap-2 sm:grid-cols-2"
+              value={draft.programFormat}
+              onChange={(event) => {
+                const programFormat = event.target.value as WatchlistProgramFormat
+                updateDraft({
+                  programFormat,
+                  outcomeNoun: programFormat === "concise_briefing" ? "briefing" : "episode",
+                  showNotes: programFormat !== "concise_briefing"
+                })
+              }}
             >
-              <Input
-                aria-label={t("watchlists:overview.pipelineSetup.fields.template", "Template")}
-                value={draft.templateName}
-                onChange={(event) => updateDraft({ templateName: event.target.value })}
-              />
-            </Form.Item>
-            <Form.Item label={t("watchlists:overview.pipelineSetup.fields.createScheduledOutput", "Scheduled reports")}>
-              <div className="space-y-1">
-                <Switch
-                  aria-label={t("watchlists:overview.pipelineSetup.fields.createScheduledOutput", "Scheduled reports")}
-                  checked={draft.createScheduledOutput}
-                  disabled={!hasScheduledCadence}
-                  onChange={(checked) => updateDraft({ createScheduledOutput: checked })}
-                />
-                <p className="text-xs text-text-muted">
-                  {hasScheduledCadence
-                    ? t(
-                      "watchlists:overview.pipelineSetup.fields.createScheduledOutputHelp",
-                      "Create a digest after each scheduled monitor run."
-                    )
-                    : t(
-                      "watchlists:overview.pipelineSetup.fields.createScheduledOutputNeedsSchedule",
-                      "Choose a schedule before enabling scheduled reports."
-                    )}
-                </p>
-              </div>
-            </Form.Item>
-            <Form.Item label={t("watchlists:overview.pipelineSetup.fields.emailDelivery", "Email delivery")}>
-              <Switch
-                aria-label={t("watchlists:overview.pipelineSetup.fields.emailDelivery", "Email delivery")}
-                checked={draft.emailDeliveryEnabled}
-                onChange={(checked) => updateDraft({ emailDeliveryEnabled: checked })}
-              />
-            </Form.Item>
-            {draft.emailDeliveryEnabled && (
-              <Form.Item
-                label={t("watchlists:overview.pipelineSetup.fields.emailRecipients", "Email recipients")}
-                validateStatus={stepErrors.includes("emailRecipients") ? "error" : undefined}
-              >
-                <Select
-                  mode="tags"
-                  tokenSeparators={[","]}
-                  aria-label={t("watchlists:overview.pipelineSetup.fields.emailRecipients", "Email recipients")}
-                  value={draft.emailRecipients}
-                  onChange={(value) => updateDraft({ emailRecipients: value })}
-                />
-              </Form.Item>
+              {PROGRAM_FORMATS.map((format) => (
+                <Radio key={format.value} value={format.value} className="min-h-11 rounded-md border border-border px-3 py-2">
+                  {t(`watchlists:overview.pipelineSetup.formats.${format.value}`, format.label)}
+                </Radio>
+              ))}
+            </Radio.Group>
+            {draft.programFormat !== "concise_briefing" && (
+              <Form layout="vertical">
+                <Form.Item label={t("watchlists:overview.pipelineSetup.fields.showName", "Show name")}>
+                  <Input aria-label={t("watchlists:overview.pipelineSetup.fields.showName", "Show name")} value={draft.showName} onChange={(event) => updateDraft({ showName: event.target.value })} />
+                </Form.Item>
+                <Form.Item label={t("watchlists:overview.pipelineSetup.fields.premise", "Show premise")}>
+                  <Input.TextArea aria-label={t("watchlists:overview.pipelineSetup.fields.premise", "Show premise")} value={draft.premise} rows={3} onChange={(event) => updateDraft({ premise: event.target.value })} />
+                </Form.Item>
+              </Form>
             )}
-            <Form.Item label={t("watchlists:overview.pipelineSetup.fields.chatbookDelivery", "Chatbook delivery")}>
-              <Switch
-                aria-label={t("watchlists:overview.pipelineSetup.fields.chatbookDelivery", "Chatbook delivery")}
-                checked={draft.chatbookDeliveryEnabled}
-                onChange={(checked) => updateDraft({ chatbookDeliveryEnabled: checked })}
-              />
-            </Form.Item>
-          </Form>
-        )}
-
-        {currentStep === 3 && (
-          <Form layout="vertical">
-            <Form.Item label={t("watchlists:overview.pipelineSetup.fields.includeAudio", "Audio briefing")}>
-              <Switch
-                aria-label={t("watchlists:overview.pipelineSetup.fields.includeAudio", "Audio briefing")}
-                checked={draft.audioEnabled}
-                onChange={(checked) => updateDraft({
-                  audioEnabled: checked,
-                  audioSpeakers: checked
-                    ? createSpeakers(currentSpeakerCount, draft.audioSpeakers, getSpeakerLabel)
-                    : []
-                })}
-              />
-            </Form.Item>
+            <div className="flex min-h-11 items-center justify-between gap-3 border-t border-border pt-4">
+              <div>
+                <p className="font-medium">{t("watchlists:overview.pipelineSetup.fields.includeAudio", "Audio")}</p>
+                <p className="text-sm text-text-muted">{t("watchlists:overview.pipelineSetup.fields.audioHelp", "Add a playable spoken version.")}</p>
+              </div>
+              <Switch aria-label={t("watchlists:overview.pipelineSetup.fields.includeAudio", "Audio")} checked={draft.audioEnabled} onChange={(checked) => updateDraft({ audioEnabled: checked, audioSpeakers: checked ? createSpeakers(currentSpeakerCount, draft.audioSpeakers, getSpeakerLabel) : [] })} />
+            </div>
             {draft.audioEnabled && (
-              <>
+              <div className="space-y-4">
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <Form.Item label={t("watchlists:overview.pipelineSetup.fields.speakerCount", "Speaker count")}>
-                    <Select
-                      aria-label={t("watchlists:overview.pipelineSetup.fields.speakerCount", "Speaker count")}
-                      value={currentSpeakerCount}
-                      options={speakerCountOptions}
-                      onChange={(value) => updateDraft({
-                        audioSpeakers: createSpeakers(value, draft.audioSpeakers, getSpeakerLabel)
-                      })}
-                    />
+                  <Form.Item label={t("watchlists:overview.pipelineSetup.fields.audioMinutes", "Target duration in minutes")} validateStatus={stepErrors.includes("targetAudioMinutes") ? "error" : undefined}>
+                    <Input aria-label={t("watchlists:overview.pipelineSetup.fields.audioMinutes", "Target duration in minutes")} type="number" min={1} max={60} value={draft.targetAudioMinutes} onChange={(event) => updateDraft({ targetAudioMinutes: Number(event.target.value) })} />
                   </Form.Item>
-                  <Form.Item
-                    label={t("watchlists:overview.pipelineSetup.fields.audioMinutes", "Target audio minutes")}
-                    validateStatus={stepErrors.includes("targetAudioMinutes") ? "error" : undefined}
-                  >
-                    <Input
-                      aria-label={t("watchlists:overview.pipelineSetup.fields.audioMinutes", "Target audio minutes")}
-                      type="number"
-                      min={1}
-                      value={draft.targetAudioMinutes}
-                      onChange={(event) => updateDraft({ targetAudioMinutes: Number(event.target.value) })}
-                    />
+                  <Form.Item label={t("watchlists:overview.pipelineSetup.fields.speakerCount", "Cast size")}>
+                    <Select aria-label={t("watchlists:overview.pipelineSetup.fields.speakerCount", "Cast size")} value={currentSpeakerCount} options={[1, 2, 3, 4].map((value) => ({ value, label: `${value}` }))} onChange={(value) => updateDraft({ audioSpeakers: createSpeakers(value, draft.audioSpeakers, getSpeakerLabel) })} />
                   </Form.Item>
                 </div>
-                <div className="space-y-3">
+                <div className="divide-y divide-border border-y border-border">
                   {draft.audioSpeakers.map((speaker, index) => (
-                    <div
-                      key={speaker.id || index}
-                      className="grid gap-3 rounded-md border border-border bg-surface p-3 sm:grid-cols-2"
-                    >
-                      <Form.Item
-                        label={t(
-                          "watchlists:overview.pipelineSetup.speaker.labelField",
-                          "Speaker {{index}} label",
-                          { index: index + 1 }
-                        )}
-                      >
-                        <Input
-                          aria-label={t(
-                            "watchlists:overview.pipelineSetup.speaker.labelField",
-                            "Speaker {{index}} label",
-                            { index: index + 1 }
-                          )}
-                          value={speaker.label}
-                          onChange={(event) => updateSpeaker(index, { label: event.target.value })}
-                        />
+                    <div key={speaker.id || index} className="grid gap-3 py-3 sm:grid-cols-2">
+                      <Form.Item label={t("watchlists:overview.pipelineSetup.speaker.labelField", "Speaker {{index}} label", { index: index + 1 })}>
+                        <Input aria-label={t("watchlists:overview.pipelineSetup.speaker.labelField", "Speaker {{index}} label", { index: index + 1 })} value={speaker.label} onChange={(event) => updateSpeaker(index, { label: event.target.value })} />
                       </Form.Item>
-                      <Form.Item
-                        label={t(
-                          "watchlists:overview.pipelineSetup.speaker.voiceField",
-                          "Speaker {{index}} voice",
-                          { index: index + 1 }
-                        )}
-                      >
-                        <Select
-                          aria-label={t(
-                            "watchlists:overview.pipelineSetup.speaker.voiceField",
-                            "Speaker {{index}} voice",
-                            { index: index + 1 }
-                          )}
-                          value={speaker.voice}
-                          options={DEFAULT_SPEAKER_VOICES.map((voice) => ({
-                            value: voice,
-                            label: voice
-                          }))}
-                          onChange={(value) => updateSpeaker(index, { voice: value })}
-                        />
+                      <Form.Item label={t("watchlists:overview.pipelineSetup.speaker.roleField", "Speaker {{index}} role", { index: index + 1 })}>
+                        <Input aria-label={t("watchlists:overview.pipelineSetup.speaker.roleField", "Speaker {{index}} role", { index: index + 1 })} value={speaker.role} onChange={(event) => updateSpeaker(index, { role: event.target.value })} />
                       </Form.Item>
                     </div>
                   ))}
                 </div>
-              </>
+              </div>
             )}
-          </Form>
+            <details className="rounded-md border border-border px-3 py-2">
+              <summary className="min-h-11 cursor-pointer py-3 font-medium">{t("watchlists:overview.pipelineSetup.briefing.advanced", "Advanced briefing settings")}</summary>
+              <div className="space-y-3 pt-2">
+                <Form layout="vertical">
+                  <Form.Item label={t("watchlists:overview.pipelineSetup.fields.template", "Report template")} validateStatus={stepErrors.includes("templateName") ? "error" : undefined}>
+                    <Input aria-label={t("watchlists:overview.pipelineSetup.fields.template", "Report template")} value={draft.templateName} onChange={(event) => updateDraft({ templateName: event.target.value })} />
+                  </Form.Item>
+                  {draft.audioEnabled && (
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <Form.Item label={t("watchlists:overview.pipelineSetup.fields.audioProvider", "Audio provider override")}>
+                        <Input aria-label={t("watchlists:overview.pipelineSetup.fields.audioProvider", "Audio provider override")} value={draft.audioProvider} onChange={(event) => updateDraft({ audioProvider: event.target.value })} />
+                      </Form.Item>
+                      <Form.Item label={t("watchlists:overview.pipelineSetup.fields.audioModel", "Audio model override")}>
+                        <Input aria-label={t("watchlists:overview.pipelineSetup.fields.audioModel", "Audio model override")} value={draft.audioModel} onChange={(event) => updateDraft({ audioModel: event.target.value })} />
+                      </Form.Item>
+                    </div>
+                  )}
+                  {draft.audioEnabled && draft.audioSpeakers.map((speaker, index) => (
+                    <div key={speaker.id || index} className="grid gap-3 sm:grid-cols-2">
+                      <Form.Item label={t("watchlists:overview.pipelineSetup.speaker.voiceField", "Speaker {{index}} voice", { index: index + 1 })}>
+                        <Select aria-label={t("watchlists:overview.pipelineSetup.speaker.voiceField", "Speaker {{index}} voice", { index: index + 1 })} value={speaker.voice} options={DEFAULT_SPEAKER_VOICES.map((voice) => ({ value: voice, label: voice }))} onChange={(value) => updateSpeaker(index, { voice: value })} />
+                      </Form.Item>
+                      <Form.Item label={t("watchlists:overview.pipelineSetup.speaker.personaField", "Speaker {{index}} persona", { index: index + 1 })}>
+                        <Input aria-label={t("watchlists:overview.pipelineSetup.speaker.personaField", "Speaker {{index}} persona", { index: index + 1 })} value={speaker.persona} onChange={(event) => updateSpeaker(index, { persona: event.target.value })} />
+                      </Form.Item>
+                    </div>
+                  ))}
+                  {draft.programFormat === "custom" && (
+                    <Form.Item label={t("watchlists:overview.pipelineSetup.fields.customInstructions", "Custom editorial instructions")}>
+                      <Input.TextArea aria-label={t("watchlists:overview.pipelineSetup.fields.customInstructions", "Custom editorial instructions")} value={draft.customInstructions} rows={4} onChange={(event) => updateDraft({ customInstructions: event.target.value })} />
+                    </Form.Item>
+                  )}
+                </Form>
+                {onPreview && (
+                  <Button className="min-h-11" onClick={() => onPreview(draft)} loading={previewLoading}>
+                    {t("watchlists:overview.pipelineSetup.preview.generate", "Preview report")}
+                  </Button>
+                )}
+                {(previewError || previewRendered || previewRunId != null || previewWarnings.length > 0) && (
+                  <details>
+                    <summary className="min-h-11 cursor-pointer py-3">{t("watchlists:overview.pipelineSetup.preview.diagnostics", "Preview diagnostics")}</summary>
+                    {previewError && <DesignSystemAlert variant="warning" title={previewError} />}
+                    {previewRunId != null && <p className="text-sm text-text-muted">{t("watchlists:overview.pipelineSetup.preview.context", "Preview run: {{runId}}", { runId: previewRunId })}</p>}
+                    {previewWarnings.map((warning) => <p key={warning} className="text-sm text-text-muted">{warning}</p>)}
+                    {previewRendered && <pre className="max-h-48 overflow-auto whitespace-pre-wrap text-xs">{previewRendered}</pre>}
+                  </details>
+                )}
+              </div>
+            </details>
+          </section>
+        )}
+
+        {currentStep === 3 && (
+          <section aria-labelledby="pipeline-delivery-heading" className="space-y-5">
+            <div>
+              <h2 id="pipeline-delivery-heading" className="text-base font-semibold">{t("watchlists:overview.pipelineSetup.steps.delivery", "Delivery")}</h2>
+              <p className="mt-1 text-sm text-text-muted">{t("watchlists:overview.pipelineSetup.delivery.help", "Reports is always included. External delivery waits until selected artifacts are ready.")}</p>
+            </div>
+            <div className="flex min-h-11 items-center justify-between border-y border-border py-3">
+              <div><p className="font-medium">{t("watchlists:overview.pipelineSetup.delivery.reports", "Reports")}</p><p className="text-sm text-text-muted">{t("watchlists:overview.pipelineSetup.delivery.required", "Required storage")}</p></div>
+              <span className="text-sm font-medium text-success">{t("watchlists:overview.pipelineSetup.delivery.alwaysOn", "Always on")}</span>
+            </div>
+            <Form layout="vertical">
+              <div className="flex min-h-11 items-center justify-between gap-3">
+                <span className="font-medium">{t("watchlists:overview.pipelineSetup.fields.emailDelivery", "Email")}</span>
+                <Switch aria-label={t("watchlists:overview.pipelineSetup.fields.emailDelivery", "Email")} checked={draft.emailDeliveryEnabled} onChange={(checked) => updateDraft({ emailDeliveryEnabled: checked })} />
+              </div>
+              {draft.emailDeliveryEnabled && (
+                <Form.Item label={t("watchlists:overview.pipelineSetup.fields.emailRecipients", "Email recipients")} validateStatus={stepErrors.includes("emailRecipients") ? "error" : undefined}>
+                  <Select mode="tags" tokenSeparators={[","]} aria-label={t("watchlists:overview.pipelineSetup.fields.emailRecipients", "Email recipients")} value={draft.emailRecipients} onChange={(value) => updateDraft({ emailRecipients: value })} />
+                </Form.Item>
+              )}
+              <div className="flex min-h-11 items-center justify-between gap-3 border-t border-border pt-3">
+                <span className="font-medium">{t("watchlists:overview.pipelineSetup.fields.chatbookDelivery", "Chatbook")}</span>
+                <Switch aria-label={t("watchlists:overview.pipelineSetup.fields.chatbookDelivery", "Chatbook")} checked={draft.chatbookDeliveryEnabled} onChange={(checked) => updateDraft({ chatbookDeliveryEnabled: checked })} />
+              </div>
+              {draft.chatbookDeliveryEnabled && (
+                <Form.Item label={t("watchlists:overview.pipelineSetup.fields.chatbookTitle", "Chatbook title")}>
+                  <Input aria-label={t("watchlists:overview.pipelineSetup.fields.chatbookTitle", "Chatbook title")} value={draft.chatbookTitle} onChange={(event) => updateDraft({ chatbookTitle: event.target.value })} />
+                </Form.Item>
+              )}
+            </Form>
+          </section>
         )}
 
         {currentStep === 4 && (
-          <div className="space-y-3 text-sm">
-            <div
-              className="rounded-md border border-border bg-surface p-3"
-              data-testid="watchlists-pipeline-review-summary"
-            >
-              <p>
-                <span className="font-medium">
-                  {t("watchlists:overview.pipelineSetup.review.sources", "Sources")}:
-                </span>{" "}
-                {summary.sources}
-              </p>
-              <p>
-                <span className="font-medium">
-                  {t("watchlists:overview.pipelineSetup.review.cadence", "Cadence")}:
-                </span>{" "}
-                {summary.cadence}
-              </p>
-              <p>
-                <span className="font-medium">
-                  {t("watchlists:overview.pipelineSetup.review.filters", "Filters")}:
-                </span>{" "}
-                {summary.filters}
-              </p>
-              <p>
-                <span className="font-medium">
-                  {t("watchlists:overview.pipelineSetup.review.output", "Output")}:
-                </span>{" "}
-                {summary.output}
-              </p>
-              <p>
-                <span className="font-medium">
-                  {t("watchlists:overview.pipelineSetup.review.delivery", "Delivery")}:
-                </span>{" "}
-                {summary.delivery}
-              </p>
-              <p>
-                <span className="font-medium">
-                  {t("watchlists:overview.pipelineSetup.review.audio", "Audio")}:
-                </span>{" "}
-                {summary.audio}
-              </p>
+          <section aria-labelledby="pipeline-test-heading" className="space-y-5">
+            <div>
+              <h2 id="pipeline-test-heading" className="text-base font-semibold">{t("watchlists:overview.pipelineSetup.steps.test", "Test")}</h2>
+              <p className="mt-1 text-sm text-text-muted">{t("watchlists:overview.pipelineSetup.test.providerDisclosure", "Tests use your configured LLM and text-to-speech providers. A sample is limited to 60 seconds; a full test uses the target duration.")}</p>
             </div>
-            <div className="rounded-md border border-border bg-surface p-3 space-y-2">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-xs text-text-muted">
-                  {t(
-                    "watchlists:overview.pipelineSetup.preview.description",
-                    "Preview template output using the latest completed run context before creating the pipeline."
-                  )}
-                </p>
-                <Button
-                  size="small"
-                  onClick={() => onPreview(draft)}
-                  loading={previewLoading}
-                  data-testid="watchlists-pipeline-preview-generate"
-                >
-                  {t("watchlists:overview.pipelineSetup.preview.generate", "Generate preview")}
-                </Button>
-              </div>
-              {previewError && (
-                <DesignSystemAlert
-                  variant="warning"
-                  data-testid="watchlists-pipeline-preview-error"
-                  title={previewError}
-                />
-              )}
-              {previewRunId != null && !previewError && (
-                <p className="text-xs text-text-muted">
-                  {t(
-                    "watchlists:overview.pipelineSetup.preview.context",
-                    "Preview context run: #{{runId}}",
-                    { runId: previewRunId }
-                  )}
-                </p>
-              )}
-              {previewWarnings.length > 0 && (
-                <ul className="list-disc pl-5 text-xs text-text-muted">
-                  {previewWarnings.map((warning, index) => (
-                    <li key={`${warning}-${index}`}>{warning}</li>
-                  ))}
-                </ul>
-              )}
-              {previewRendered && (
-                <pre
-                  className="max-h-48 overflow-auto rounded border border-border bg-background p-2 text-xs"
-                  data-testid="watchlists-pipeline-preview-rendered"
-                >
-                  {previewRendered}
-                </pre>
-              )}
+            <div className="border-y border-border py-4" data-testid="watchlists-pipeline-receipt">
+              <p className="font-medium">{t("watchlists:overview.pipelineSetup.test.receipt", "Activation receipt")}</p>
+              <p className="mt-2 max-w-[75ch] text-sm text-text-muted">
+                {receipt?.sentence || t("watchlists:overview.pipelineSetup.test.manualReceipt", "This briefing runs manually, saves selected artifacts in Reports, and contacts no external destination unless you choose Send test.")}
+              </p>
+              {receipt?.dstNote && <p className="mt-2 text-sm text-text-muted">{receipt.dstNote}</p>}
             </div>
-          </div>
+            <ol className="space-y-2 text-sm" aria-label={t("watchlists:overview.pipelineSetup.test.progress", "Test progress")}>
+              {[
+                t("watchlists:overview.pipelineSetup.test.stages.collection", "Collect sources"),
+                t("watchlists:overview.pipelineSetup.test.stages.selection", "Select updates"),
+                t("watchlists:overview.pipelineSetup.test.stages.text", "Create report"),
+                ...(draft.audioEnabled ? [t("watchlists:overview.pipelineSetup.test.stages.audio", "Create audio")] : []),
+                t("watchlists:overview.pipelineSetup.test.stages.persistence", "Save in Reports"),
+                t("watchlists:overview.pipelineSetup.test.stages.delivery", "Check test delivery")
+              ].map((label) => (
+                <li key={label} className="flex min-h-11 items-center gap-3 border-b border-border py-2"><span aria-hidden="true">○</span>{label}</li>
+              ))}
+            </ol>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <Button className="min-h-11" onClick={() => void runTest({ externalDelivery: false, audioSampleSeconds: 60 })} loading={actionBusy}>
+                {t("watchlists:overview.pipelineSetup.test.sample", "Generate 60-second sample")}
+              </Button>
+              <Button className="min-h-11" onClick={() => void runTest({ externalDelivery: false, audioSampleSeconds: null })} disabled={!draft.audioEnabled || isBusy}>
+                {t("watchlists:overview.pipelineSetup.test.full", "Generate full test episode")}
+              </Button>
+              <Button className="min-h-11" onClick={() => void runTest({ externalDelivery: true, audioSampleSeconds: 60 })} disabled={!hasExternalDelivery || isBusy}>
+                {t("watchlists:overview.pipelineSetup.test.send", "Send test")}
+              </Button>
+              <Button type="primary" className="min-h-11" onClick={() => void activate()} loading={actionBusy}>
+                {t("watchlists:overview.pipelineSetup.test.activate", "Activate schedule")}
+              </Button>
+            </div>
+          </section>
         )}
       </div>
     </Modal>

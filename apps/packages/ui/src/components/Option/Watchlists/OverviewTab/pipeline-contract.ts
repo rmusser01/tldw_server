@@ -40,6 +40,7 @@ export type {
 export interface BriefingPipelineDraft {
   monitorName: string
   sourceIds: number[]
+  active?: boolean
   schedulePreset: QuickSetupSchedulePreset
   scheduleCadence?: WatchlistCadenceDraft
   scheduleExpr?: string | null
@@ -68,6 +69,8 @@ export interface BriefingPipelineDraft {
   customInstructions?: string
   showNotes?: boolean
   audioLanguage?: string
+  audioProvider?: string
+  audioModel?: string
   preservedOutputPrefs?: BriefingSetupDraft["preservedOutputPrefs"]
 }
 
@@ -80,6 +83,11 @@ export interface PipelineReviewSummary {
   scheduleLabel: string
   artifacts: string[]
   deliveries: string[]
+}
+
+export interface PipelineOutputTestOptions {
+  externalDelivery: boolean
+  audioSampleSeconds: 60 | null
 }
 
 export interface PipelineScheduleLabelCopy {
@@ -232,7 +240,7 @@ export const toPipelineJobCreatePayload = (
   return toCanonicalWatchlistJobPayload({
     monitorName: String(draft.monitorName || "").trim(),
     scope: { sources: draft.sourceIds },
-    active: true,
+    active: draft.active ?? true,
     scheduleExpr: schedule.schedule_expr,
     timezone: schedule.timezone,
     selectionMode: draft.selectionMode,
@@ -255,6 +263,8 @@ export const toPipelineJobCreatePayload = (
     voiceMap: draft.includeAudio ? draft.voiceMap : undefined,
     targetAudioMinutes: draft.includeAudio ? Number(draft.targetAudioMinutes) : undefined,
     audioLanguage: draft.audioLanguage,
+    audioProvider: draft.audioProvider,
+    audioModel: draft.audioModel,
     emailEnabled: recipients.length > 0,
     emailRecipients: recipients,
     chatbookEnabled: Boolean(draft.createChatbook),
@@ -268,7 +278,8 @@ export const toPipelineJobCreatePayload = (
 export const toPipelineOutputCreatePayload = (
   runId: number,
   draft: BriefingPipelineDraft,
-  itemIds?: number[]
+  itemIds?: number[],
+  testOptions?: PipelineOutputTestOptions
 ): WatchlistOutputCreate => {
   const recipients = normalizeRecipients(draft.emailRecipients)
   const templateFormat =
@@ -294,7 +305,9 @@ export const toPipelineOutputCreatePayload = (
     if (normalizedAudioVoice) payload.audio_voice = normalizedAudioVoice
     if (draft.audioCast) payload.audio_cast = draft.audioCast
     if (draft.voiceMap) payload.voice_map = draft.voiceMap
-    const targetAudioMinutes = Number(draft.targetAudioMinutes)
+    const targetAudioMinutes = testOptions?.audioSampleSeconds
+      ? Math.max(1, Math.ceil(testOptions.audioSampleSeconds / 60))
+      : Number(draft.targetAudioMinutes)
     if (Number.isFinite(targetAudioMinutes) && targetAudioMinutes > 0) {
       payload.target_audio_minutes = targetAudioMinutes
     }
@@ -304,7 +317,8 @@ export const toPipelineOutputCreatePayload = (
         voice: normalizedAudioVoice || null,
         ...(draft.audioCast ? { speaker_count: draft.audioCast.speaker_count } : {}),
         target_minutes: targetAudioMinutes
-      }
+      },
+      ...(testOptions ? { test: testOptions } : {})
     }
   }
 
@@ -323,6 +337,10 @@ export const toPipelineOutputCreatePayload = (
           }
         : undefined
     }
+  }
+
+  if (testOptions && !testOptions.externalDelivery) {
+    delete payload.deliveries
   }
 
   return payload

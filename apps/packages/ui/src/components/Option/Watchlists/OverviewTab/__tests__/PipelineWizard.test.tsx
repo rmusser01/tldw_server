@@ -5,378 +5,271 @@ import { PipelineWizard } from "../PipelineWizard"
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (key: string, fallback?: string, options?: Record<string, unknown>) =>
-      (fallback || key).replace(/\{\{(\w+)\}\}/g, (_match, token) => {
+    t: (_key: string, fallback?: string, options?: Record<string, unknown>) =>
+      (fallback || _key).replace(/\{\{(\w+)\}\}/g, (_match, token) => {
         const value = options?.[token]
         return value == null ? "" : String(value)
       })
   })
 }))
 
-const sources = [
-  {
-    id: 11,
-    name: "AI Feed",
-    url: "https://example.com/ai.xml",
-    source_type: "rss" as const,
-    active: true,
-    tags: [],
-    created_at: "2026-05-18T00:00:00Z"
-  },
-  {
-    id: 12,
-    name: "Security Feed",
-    url: "https://example.com/security.xml",
-    source_type: "rss" as const,
-    active: true,
-    tags: [],
-    created_at: "2026-05-18T00:00:00Z"
-  }
-]
+const sources = Array.from({ length: 8 }, (_value, index) => ({
+  id: index + 1,
+  name: `Lakers source ${index + 1}`,
+  url: `https://example.com/lakers-${index + 1}.xml`,
+  source_type: "rss" as const,
+  active: true,
+  tags: [],
+  created_at: "2026-07-01T00:00:00Z"
+}))
 
-const renderWizard = (overrides: Partial<React.ComponentProps<typeof PipelineWizard>> = {}) => {
-  const onCancel = vi.fn()
-  const onSubmit = vi.fn()
-  const onPreview = vi.fn()
-  const result = render(
+const sportscastDraft = {
+  sourceIds: sources.map((source) => source.id),
+  monitorName: "Purple and Gold Weekly",
+  scheduleMode: "weekly" as const,
+  scheduleWeekday: "SUN" as const,
+  scheduleHour: 18,
+  scheduleMinute: 0,
+  timezone: "America/Los_Angeles",
+  nextRunAt: "2026-07-12T18:00:00-07:00",
+  createScheduledOutput: true,
+  templateName: "briefing_markdown",
+  programFormat: "sportscast" as const,
+  outcomeNoun: "episode" as const,
+  showName: "Purple and Gold Weekly",
+  showNotes: true,
+  audioEnabled: true,
+  targetAudioMinutes: 20,
+  audioSpeakers: [
+    { id: "host", label: "Host", role: "host", voice: "alloy" },
+    { id: "analyst", label: "Analyst", role: "analyst", voice: "nova" }
+  ]
+}
+
+const renderWizard = (
+  overrides: Partial<React.ComponentProps<typeof PipelineWizard>> = {}
+) => {
+  const callbacks = {
+    onCancel: vi.fn(),
+    onSaveDraft: vi.fn(),
+    onTest: vi.fn().mockResolvedValue({ jobId: 77, status: "ready" }),
+    onActivate: vi.fn().mockResolvedValue({ jobId: 77, status: "active" }),
+    onTestSource: vi.fn().mockResolvedValue({ status: "ready" })
+  }
+  const props = { ...callbacks, ...overrides }
+  render(
     <PipelineWizard
       open
       sources={sources}
       sourcesLoading={false}
       submitting={false}
       submitError={null}
-      previewLoading={false}
-      previewError={null}
-      previewRendered={null}
-      previewRunId={null}
-      previewWarnings={[]}
-      onCancel={onCancel}
-      onSubmit={onSubmit}
-      onPreview={onPreview}
+      onCancel={props.onCancel}
+      onSaveDraft={props.onSaveDraft}
+      onTest={props.onTest}
+      onActivate={props.onActivate}
+      onTestSource={props.onTestSource}
       {...overrides}
     />
   )
-  return { ...result, onCancel, onSubmit, onPreview }
+  return props
 }
 
-const getDialog = () => screen.getByRole("dialog", { name: "Briefing pipeline builder" })
-const getDialogQueries = () => within(getDialog())
+const dialog = () => screen.getByRole("dialog", { name: "Set up briefing" })
+const inDialog = () => within(dialog())
 
 describe("PipelineWizard", () => {
-  it("renders validation feedback with the design-system Alert", async () => {
+  it("uses the single outcome-first step sequence", () => {
     renderWizard()
 
-    await waitFor(() => {
-      expect(getDialogQueries().getByLabelText("AI Feed")).toBeInTheDocument()
-    })
-
-    fireEvent.click(getDialogQueries().getByRole("button", { name: "Next" }))
-
-    const validationTitle = await screen.findByText("Review the highlighted pipeline fields.")
-    expect(validationTitle.closest('[data-ds-component="Alert"]')).toBeInTheDocument()
+    expect(inDialog().getAllByRole("listitem").map((item) => item.textContent)).toEqual([
+      expect.stringContaining("Sources"),
+      expect.stringContaining("Cadence"),
+      expect.stringContaining("Briefing"),
+      expect.stringContaining("Delivery"),
+      expect.stringContaining("Test")
+    ])
+    expect(inDialog().getAllByRole("button").filter((button) => button.classList.contains("ant-btn-primary"))).toHaveLength(1)
   })
 
-  it("creates a pipeline from an existing source with digest and two-speaker audio", async () => {
-    const { onSubmit } = renderWizard()
+  it("keeps the step sequence scrollable and uses logical alignment for narrow RTL layouts", () => {
+    renderWizard()
+    dialog().setAttribute("dir", "rtl")
+
+    const progress = inDialog().getByRole("navigation", { name: "Briefing setup steps" })
+    expect(within(progress).getByRole("list")).toHaveClass("overflow-x-auto")
+    expect(within(progress).getByRole("button", { name: "Sources" })).toHaveClass("text-start")
+  })
+
+  it("shows a complete activation receipt", () => {
+    renderWizard({ initialStep: "test", initialDraft: sportscastDraft })
+
+    const receipt = screen.getByTestId("watchlists-pipeline-receipt")
+    expect(receipt).toHaveTextContent("Sunday, July 12 at 6:00 PM PDT")
+    expect(receipt).toHaveTextContent("America/Los_Angeles")
+    expect(receipt).toHaveTextContent("8 sources")
+    expect(receipt).toHaveTextContent("two-host sportscast")
+    expect(receipt).toHaveTextContent("targeting 20 minutes")
+    expect(receipt).toHaveTextContent("Reports")
+  })
+
+  it("does not send external delivery during the default test", async () => {
+    const props = renderWizard({
+      initialStep: "test",
+      initialDraft: {
+        ...sportscastDraft,
+        emailDeliveryEnabled: true,
+        emailRecipients: ["coach@example.com"]
+      }
+    })
+
+    fireEvent.click(inDialog().getByRole("button", { name: "Generate 60-second sample" }))
 
     await waitFor(() => {
-      expect(getDialogQueries().getByLabelText("AI Feed")).toBeInTheDocument()
-    })
-
-    fireEvent.click(getDialogQueries().getByLabelText("AI Feed"))
-    fireEvent.click(getDialogQueries().getByRole("button", { name: "Next" }))
-
-    await waitFor(() => {
-      expect(getDialogQueries().getByLabelText("Monitor name")).toBeInTheDocument()
-    })
-    fireEvent.change(getDialogQueries().getByLabelText("Monitor name"), {
-      target: { value: "Five Hour Brief" }
-    })
-    fireEvent.mouseDown(getDialogQueries().getByLabelText("Schedule"))
-    fireEvent.click(await screen.findByText("Every N hours/minutes"))
-    fireEvent.change(getDialogQueries().getByLabelText("Every"), {
-      target: { value: "5" }
-    })
-    fireEvent.click(getDialogQueries().getByRole("button", { name: "Next" }))
-
-    await waitFor(() => {
-      expect(getDialogQueries().getByLabelText("Template")).toBeInTheDocument()
-    })
-    fireEvent.change(getDialogQueries().getByLabelText("Template"), {
-      target: { value: "newsletter_markdown" }
-    })
-    fireEvent.click(getDialogQueries().getByRole("button", { name: "Next" }))
-
-    await waitFor(() => {
-      expect(getDialogQueries().getByLabelText("Audio briefing")).toBeInTheDocument()
-    })
-    fireEvent.mouseDown(getDialogQueries().getByLabelText("Speaker count"))
-    fireEvent.click(await screen.findByText("2 speakers"))
-    fireEvent.change(getDialogQueries().getByLabelText("Speaker 1 label"), {
-      target: { value: "Host" }
-    })
-    fireEvent.change(getDialogQueries().getByLabelText("Speaker 2 label"), {
-      target: { value: "Analyst" }
-    })
-    fireEvent.click(getDialogQueries().getByRole("button", { name: "Next" }))
-
-    await waitFor(() => {
-      expect(screen.getByTestId("watchlists-pipeline-review-summary")).toHaveTextContent("AI Feed")
-    })
-    expect(screen.getByTestId("watchlists-pipeline-review-summary")).toHaveTextContent("Every 5 hours")
-    expect(screen.getByTestId("watchlists-pipeline-review-summary")).toHaveTextContent("2 speakers audio briefing")
-
-    fireEvent.click(getDialogQueries().getByRole("button", { name: "Create pipeline" }))
-
-    await waitFor(() => {
-      expect(onSubmit).toHaveBeenCalledWith(
+      expect(props.onTest).toHaveBeenCalledWith(
+        expect.objectContaining({ emailRecipients: ["coach@example.com"] }),
         expect.objectContaining({
-          sourceMode: "existing",
-          sourceIds: [11],
-          monitorName: "Five Hour Brief",
-          scheduleMode: "interval",
-          scheduleIntervalValue: 5,
-          createScheduledOutput: false,
-          templateName: "newsletter_markdown",
-          audioEnabled: true,
-          audioSpeakers: expect.arrayContaining([
-            expect.objectContaining({ label: "Host" }),
-            expect.objectContaining({ label: "Analyst" })
-          ])
-        }),
-        { mode: "create" }
+          externalDelivery: false,
+          audioSampleSeconds: 60
+        })
       )
     })
   })
 
-  it("lets scheduled pipeline creation opt in to scheduled reports explicitly", async () => {
-    const { onSubmit } = renderWizard()
-
-    await waitFor(() => {
-      expect(getDialogQueries().getByLabelText("AI Feed")).toBeInTheDocument()
+  it("offers sample, full, send, and activation actions while reusing the inactive job id", async () => {
+    const props = renderWizard({
+      initialStep: "test",
+      initialDraft: {
+        ...sportscastDraft,
+        emailDeliveryEnabled: true,
+        emailRecipients: ["coach@example.com"]
+      }
     })
 
-    fireEvent.click(getDialogQueries().getByLabelText("AI Feed"))
-    fireEvent.click(getDialogQueries().getByRole("button", { name: "Next" }))
+    fireEvent.click(inDialog().getByRole("button", { name: "Generate 60-second sample" }))
+    await waitFor(() => expect(props.onTest).toHaveBeenCalledTimes(1))
 
+    fireEvent.click(inDialog().getByRole("button", { name: "Generate full test episode" }))
     await waitFor(() => {
-      expect(getDialogQueries().getByLabelText("Monitor name")).toBeInTheDocument()
-    })
-    fireEvent.change(getDialogQueries().getByLabelText("Monitor name"), {
-      target: { value: "Scheduled Report Brief" }
-    })
-    fireEvent.click(getDialogQueries().getByRole("button", { name: "Next" }))
-
-    await waitFor(() => {
-      expect(getDialogQueries().getByLabelText("Template")).toBeInTheDocument()
-    })
-    const scheduledReportsSwitch = getDialogQueries().getByLabelText("Scheduled reports")
-    expect(scheduledReportsSwitch).toHaveAttribute("aria-checked", "false")
-    fireEvent.click(scheduledReportsSwitch)
-    fireEvent.click(getDialogQueries().getByRole("button", { name: "Next" }))
-
-    await waitFor(() => {
-      expect(getDialogQueries().getByLabelText("Audio briefing")).toBeInTheDocument()
-    })
-    fireEvent.click(getDialogQueries().getByLabelText("Audio briefing"))
-    fireEvent.click(getDialogQueries().getByRole("button", { name: "Next" }))
-
-    await waitFor(() => {
-      expect(screen.getByTestId("watchlists-pipeline-review-summary")).toHaveTextContent("AI Feed")
-    })
-    fireEvent.click(getDialogQueries().getByRole("button", { name: "Create pipeline" }))
-
-    await waitFor(() => {
-      expect(onSubmit).toHaveBeenCalledWith(
+      expect(props.onTest).toHaveBeenLastCalledWith(
+        expect.any(Object),
         expect.objectContaining({
-          monitorName: "Scheduled Report Brief",
-          createScheduledOutput: true,
-          audioEnabled: false
-        }),
-        { mode: "create" }
+          externalDelivery: false,
+          audioSampleSeconds: null,
+          jobId: 77
+        })
+      )
+    })
+
+    fireEvent.click(inDialog().getByRole("button", { name: "Send test" }))
+    await waitFor(() => {
+      expect(props.onTest).toHaveBeenLastCalledWith(
+        expect.any(Object),
+        expect.objectContaining({
+          externalDelivery: true,
+          audioSampleSeconds: 60,
+          jobId: 77
+        })
+      )
+    })
+
+    fireEvent.click(inDialog().getByRole("button", { name: "Activate schedule" }))
+    await waitFor(() => {
+      expect(props.onActivate).toHaveBeenCalledWith(
+        expect.any(Object),
+        { jobId: 77 }
       )
     })
   })
 
-  it("supports creating a new source before monitor setup", async () => {
-    const { onSubmit } = renderWizard()
+  it("starts Briefing with all six formats and reveals custom controls progressively", () => {
+    renderWizard({ initialStep: "briefing", initialDraft: sportscastDraft })
+
+    expect(inDialog().getByRole("heading", { name: "What are you making?" })).toBeInTheDocument()
+    for (const label of [
+      "Concise briefing",
+      "Solo update",
+      "Host discussion",
+      "Sportscast",
+      "Culture roundtable",
+      "Custom"
+    ]) {
+      expect(inDialog().getByLabelText(label)).toBeInTheDocument()
+    }
+    expect(inDialog().getByLabelText("Target duration in minutes")).toHaveAttribute("min", "1")
+    expect(inDialog().getByLabelText("Target duration in minutes")).toHaveAttribute("max", "60")
+
+    fireEvent.click(inDialog().getByLabelText("Custom"))
+    fireEvent.click(inDialog().getByText("Advanced briefing settings"))
+    expect(inDialog().getByLabelText("Custom editorial instructions")).toBeInTheDocument()
+    expect(inDialog().getByLabelText("Speaker 1 persona")).toBeInTheDocument()
+  })
+
+  it("tests new sources without leaving Sources", async () => {
+    const props = renderWizard({
+      initialDraft: {
+        sourceMode: "new",
+        sourceName: "Policy feed",
+        sourceUrl: "https://example.com/policy.xml"
+      }
+    })
+
+    fireEvent.click(inDialog().getByRole("button", { name: "Test source" }))
 
     await waitFor(() => {
-      expect(getDialogQueries().getByLabelText("Create a new feed")).toBeInTheDocument()
-    })
-    fireEvent.click(getDialogQueries().getByLabelText("Create a new feed"))
-    fireEvent.change(getDialogQueries().getByLabelText("Feed name"), {
-      target: { value: "Policy Feed" }
-    })
-    fireEvent.change(getDialogQueries().getByLabelText("Feed URL"), {
-      target: { value: "https://example.com/policy.xml" }
-    })
-
-    fireEvent.click(getDialogQueries().getByRole("button", { name: "Next" }))
-    await waitFor(() => {
-      expect(getDialogQueries().getByLabelText("Monitor name")).toBeInTheDocument()
-    })
-    fireEvent.change(getDialogQueries().getByLabelText("Monitor name"), {
-      target: { value: "Policy Brief" }
-    })
-    fireEvent.click(getDialogQueries().getByRole("button", { name: "Next" }))
-    await waitFor(() => {
-      expect(getDialogQueries().getByLabelText("Template")).toBeInTheDocument()
-    })
-    fireEvent.click(getDialogQueries().getByRole("button", { name: "Next" }))
-    await waitFor(() => {
-      expect(getDialogQueries().getByLabelText("Audio briefing")).toBeInTheDocument()
-    })
-    fireEvent.click(getDialogQueries().getByLabelText("Audio briefing"))
-    fireEvent.click(getDialogQueries().getByRole("button", { name: "Next" }))
-
-    await waitFor(() => {
-      expect(screen.getByTestId("watchlists-pipeline-review-summary")).toHaveTextContent("Policy Feed")
-    })
-    fireEvent.click(getDialogQueries().getByRole("button", { name: "Create pipeline" }))
-
-    await waitFor(() => {
-      expect(onSubmit).toHaveBeenCalledWith(
+      expect(props.onTestSource).toHaveBeenCalledWith(
         expect.objectContaining({
           sourceMode: "new",
-          sourceName: "Policy Feed",
-          sourceUrl: "https://example.com/policy.xml",
-          monitorName: "Policy Brief",
-          audioEnabled: false,
-          audioSpeakers: []
-        }),
-        { mode: "create" }
+          sourceUrl: "https://example.com/policy.xml"
+        })
       )
     })
+    expect(inDialog().getByText("Source is ready.")).toBeInTheDocument()
   })
 
-  it("surfaces interval bounds that match the persisted cron bounds", async () => {
+  it("keeps the draft after server failure and distinguishes explicit cancellation", async () => {
+    const onTest = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("Provider unavailable"))
+      .mockResolvedValueOnce({ jobId: 77, status: "cancelled" })
+    renderWizard({ initialStep: "test", initialDraft: sportscastDraft, onTest })
+
+    fireEvent.click(inDialog().getByRole("button", { name: "Generate 60-second sample" }))
+    expect(await inDialog().findByText(/Provider unavailable/)).toHaveTextContent(
+      "Test failed. Your draft is saved. Provider unavailable"
+    )
+
+    fireEvent.click(inDialog().getByRole("button", { name: "Generate 60-second sample" }))
+    expect(await inDialog().findByText("Test cancelled. Your draft is saved.")).toBeInTheDocument()
+
+    fireEvent.click(inDialog().getByRole("button", { name: "Back" }))
+    fireEvent.click(inDialog().getByRole("button", { name: "Back" }))
+    expect(inDialog().getByLabelText("Show name")).toHaveValue("Purple and Gold Weekly")
+  })
+
+  it("silently ignores AbortError from superseded work", async () => {
+    const abortError = new Error("superseded")
+    abortError.name = "AbortError"
+    renderWizard({
+      initialStep: "test",
+      initialDraft: sportscastDraft,
+      onTest: vi.fn().mockRejectedValue(abortError)
+    })
+
+    fireEvent.click(inDialog().getByRole("button", { name: "Generate 60-second sample" }))
+
+    await waitFor(() => {
+      expect(inDialog().queryByTestId("watchlists-pipeline-action-error")).not.toBeInTheDocument()
+    })
+  })
+
+  it("moves focus to the validation summary and keeps fallback copy usable", async () => {
     renderWizard()
 
-    await waitFor(() => {
-      expect(getDialogQueries().getByLabelText("AI Feed")).toBeInTheDocument()
-    })
-    fireEvent.click(getDialogQueries().getByLabelText("AI Feed"))
-    fireEvent.click(getDialogQueries().getByRole("button", { name: "Next" }))
+    fireEvent.click(inDialog().getByRole("button", { name: "Next: Cadence" }))
 
-    await waitFor(() => {
-      expect(getDialogQueries().getByLabelText("Monitor name")).toBeInTheDocument()
-    })
-    fireEvent.change(getDialogQueries().getByLabelText("Monitor name"), {
-      target: { value: "Oversized Interval" }
-    })
-    fireEvent.mouseDown(getDialogQueries().getByLabelText("Schedule"))
-    fireEvent.click(await screen.findByText("Every N hours/minutes"))
-
-    expect(getDialogQueries().getByLabelText("Every")).toHaveAttribute("aria-valuemin", "1")
-    expect(getDialogQueries().getByLabelText("Every")).toHaveAttribute("aria-valuemax", "23")
-
-    fireEvent.mouseDown(getDialogQueries().getByLabelText("Interval unit"))
-    fireEvent.click(await screen.findByText("Minutes"))
-
-    expect(getDialogQueries().getByLabelText("Every")).toHaveAttribute("aria-valuemin", "5")
-    expect(getDialogQueries().getByLabelText("Every")).toHaveAttribute("aria-valuemax", "59")
-  })
-
-  it("offers weekdays and advanced cron cadence choices in the monitor step", async () => {
-    renderWizard()
-
-    await waitFor(() => {
-      expect(getDialogQueries().getByLabelText("AI Feed")).toBeInTheDocument()
-    })
-    fireEvent.click(getDialogQueries().getByLabelText("AI Feed"))
-    fireEvent.click(getDialogQueries().getByRole("button", { name: "Next" }))
-
-    await waitFor(() => {
-      expect(getDialogQueries().getByLabelText("Monitor name")).toBeInTheDocument()
-    })
-    fireEvent.change(getDialogQueries().getByLabelText("Monitor name"), {
-      target: { value: "Weekday Brief" }
-    })
-
-    fireEvent.mouseDown(getDialogQueries().getByLabelText("Schedule"))
-    fireEvent.click(await screen.findByText("Weekdays"))
-    expect(getDialogQueries().getByLabelText("Hour")).toBeInTheDocument()
-    expect(getDialogQueries().getByLabelText("Minute")).toBeInTheDocument()
-
-    fireEvent.mouseDown(getDialogQueries().getByLabelText("Schedule"))
-    fireEvent.click(await screen.findByText("Advanced cron"))
-    expect(getDialogQueries().getByLabelText("Cron expression")).toHaveValue("")
-  })
-
-  it("distinguishes advanced cron format and frequency errors", async () => {
-    renderWizard()
-
-    await waitFor(() => {
-      expect(getDialogQueries().getByLabelText("AI Feed")).toBeInTheDocument()
-    })
-    fireEvent.click(getDialogQueries().getByLabelText("AI Feed"))
-    fireEvent.click(getDialogQueries().getByRole("button", { name: "Next" }))
-
-    await waitFor(() => {
-      expect(getDialogQueries().getByLabelText("Monitor name")).toBeInTheDocument()
-    })
-    fireEvent.change(getDialogQueries().getByLabelText("Monitor name"), {
-      target: { value: "Cron Brief" }
-    })
-    fireEvent.mouseDown(getDialogQueries().getByLabelText("Schedule"))
-    fireEvent.click(await screen.findByText("Advanced cron"))
-    fireEvent.change(getDialogQueries().getByLabelText("Cron expression"), {
-      target: { value: "15 6 * * WED;rm" }
-    })
-    fireEvent.click(getDialogQueries().getByRole("button", { name: "Next" }))
-
-    expect(
-      await screen.findByText("Cron tokens can only include letters, numbers, *, /, -, ?, and comma.")
-    ).toBeInTheDocument()
-
-    fireEvent.change(getDialogQueries().getByLabelText("Cron expression"), {
-      target: { value: "61 6 * * WED" }
-    })
-    fireEvent.click(getDialogQueries().getByRole("button", { name: "Next" }))
-
-    expect(
-      await screen.findByText("Cron field values are outside supported ranges.")
-    ).toBeInTheDocument()
-
-    fireEvent.change(getDialogQueries().getByLabelText("Cron expression"), {
-      target: { value: "*/1 * * * *" }
-    })
-    fireEvent.click(getDialogQueries().getByRole("button", { name: "Next" }))
-
-    expect(
-      await screen.findByText("Schedule is too frequent. Minimum interval is every 5 minutes.")
-    ).toBeInTheDocument()
-  })
-
-  it("renders preview failures with the design-system Alert", async () => {
-    renderWizard({ previewError: "Preview context unavailable" })
-
-    await waitFor(() => {
-      expect(getDialogQueries().getByLabelText("AI Feed")).toBeInTheDocument()
-    })
-    fireEvent.click(getDialogQueries().getByLabelText("AI Feed"))
-    fireEvent.click(getDialogQueries().getByRole("button", { name: "Next" }))
-
-    await waitFor(() => {
-      expect(getDialogQueries().getByLabelText("Monitor name")).toBeInTheDocument()
-    })
-    fireEvent.change(getDialogQueries().getByLabelText("Monitor name"), {
-      target: { value: "Preview Brief" }
-    })
-    fireEvent.click(getDialogQueries().getByRole("button", { name: "Next" }))
-
-    await waitFor(() => {
-      expect(getDialogQueries().getByLabelText("Template")).toBeInTheDocument()
-    })
-    fireEvent.click(getDialogQueries().getByRole("button", { name: "Next" }))
-
-    await waitFor(() => {
-      expect(getDialogQueries().getByLabelText("Audio briefing")).toBeInTheDocument()
-    })
-    fireEvent.click(getDialogQueries().getByRole("button", { name: "Next" }))
-
-    const previewTitle = await screen.findByText("Preview context unavailable")
-    expect(previewTitle.closest('[data-ds-component="Alert"]')).toBeInTheDocument()
+    const summary = await screen.findByTestId("watchlists-pipeline-validation-summary")
+    await waitFor(() => expect(summary).toHaveFocus())
+    expect(summary).toHaveTextContent("Choose at least one source before continuing.")
   })
 })

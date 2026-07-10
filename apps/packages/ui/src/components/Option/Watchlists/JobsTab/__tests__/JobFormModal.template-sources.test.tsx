@@ -10,6 +10,7 @@ const servicesMock = vi.hoisted(() => ({
   fetchWatchlistSources: vi.fn(),
   fetchWatchlistGroups: vi.fn(),
   fetchJobOutputTemplates: vi.fn(),
+  fetchWatchlistOutputPresets: vi.fn(),
   fetchWatchlistTemplates: vi.fn(),
   previewWatchlistJob: vi.fn()
 }))
@@ -53,6 +54,7 @@ vi.mock("@/services/watchlists", () => ({
   fetchWatchlistSources: (...args: unknown[]) => servicesMock.fetchWatchlistSources(...args),
   fetchWatchlistGroups: (...args: unknown[]) => servicesMock.fetchWatchlistGroups(...args),
   fetchJobOutputTemplates: (...args: unknown[]) => servicesMock.fetchJobOutputTemplates(...args),
+  fetchWatchlistOutputPresets: (...args: unknown[]) => servicesMock.fetchWatchlistOutputPresets(...args),
   fetchWatchlistTemplates: (...args: unknown[]) => servicesMock.fetchWatchlistTemplates(...args),
   previewWatchlistJob: (...args: unknown[]) => servicesMock.previewWatchlistJob(...args)
 }))
@@ -98,6 +100,13 @@ describe("JobFormModal template source options", () => {
         }
       ],
       total: 1
+    })
+    servicesMock.fetchWatchlistOutputPresets.mockResolvedValue({
+      items: [],
+      total: 0,
+      page: 1,
+      size: 100,
+      has_more: false
     })
     servicesMock.fetchWatchlistSources.mockResolvedValue({
       items: [

@@ -356,6 +356,154 @@
         "error": "Failed to add initial collection."
       }
     },
+    "pipelineSetup": {
+      "title": "Set up briefing",
+      "open": "Set up briefing",
+      "progress": "Briefing setup steps",
+      "steps": {
+        "sources": "Sources",
+        "cadence": "Cadence",
+        "briefing": "Briefing",
+        "delivery": "Delivery",
+        "test": "Test"
+      },
+      "actions": {
+        "next": "Continue to {{step}}"
+      },
+      "source": {
+        "existing": "Use existing sources",
+        "new": "Add a new source"
+      },
+      "sources": {
+        "help": "Choose existing sources or add one, then test the connection."
+      },
+      "sourcesLoading": "Loading sources...",
+      "sourcesError": "Failed to load feeds for the pipeline builder.",
+      "sourceTest": {
+        "action": "Test source",
+        "ready": "Source is ready.",
+        "cancelled": "Source test cancelled.",
+        "failed": "Source test failed. {{message}}"
+      },
+      "fields": {
+        "sources": "Sources",
+        "sourceName": "Source name",
+        "sourceUrl": "Source URL",
+        "monitorName": "Monitor name",
+        "schedule": "Schedule",
+        "timezone": "Timezone",
+        "intervalEvery": "Every",
+        "intervalUnit": "Interval unit",
+        "weekday": "Weekday",
+        "hour": "Hour",
+        "minute": "Minute",
+        "cronExpression": "Cron expression",
+        "showName": "Show name",
+        "premise": "Show premise",
+        "includeAudio": "Audio",
+        "audioHelp": "Add a playable spoken version.",
+        "audioMinutes": "Target duration in minutes",
+        "speakerCount": "Cast size",
+        "template": "Report template",
+        "audioProvider": "Audio provider override",
+        "audioModel": "Audio model override",
+        "customInstructions": "Custom editorial instructions",
+        "emailDelivery": "Email",
+        "emailRecipients": "Email recipients",
+        "chatbookDelivery": "Chatbook",
+        "chatbookTitle": "Chatbook title"
+      },
+      "schedule": {
+        "manual": "Manual only",
+        "interval": "Every N hours or minutes",
+        "daily": "Daily",
+        "weekdays": "Weekdays",
+        "weekly": "Weekly",
+        "advanced": "Advanced cron"
+      },
+      "intervalUnits": {
+        "hours": "Hours",
+        "minutes": "Minutes"
+      },
+      "weekdays": {
+        "monday": "Monday",
+        "tuesday": "Tuesday",
+        "wednesday": "Wednesday",
+        "thursday": "Thursday",
+        "friday": "Friday",
+        "saturday": "Saturday",
+        "sunday": "Sunday"
+      },
+      "advancedCron": "Advanced cron",
+      "nextOccurrence": "Next occurrence",
+      "manualOccurrence": "Manual only",
+      "nextOccurrencePending": "Save a valid schedule to calculate the exact time.",
+      "briefing": {
+        "question": "What are you making?",
+        "help": "Choose the editorial shape. Every option stays grounded in your selected sources.",
+        "advanced": "Advanced briefing settings"
+      },
+      "formats": {
+        "concise_briefing": "Concise briefing",
+        "solo_update": "Solo update",
+        "host_discussion": "Host discussion",
+        "sportscast": "Sportscast",
+        "culture_roundtable": "Culture roundtable",
+        "custom": "Custom"
+      },
+      "speaker": {
+        "defaultLabel": "Speaker {{index}}",
+        "labelField": "Speaker {{index}} label",
+        "roleField": "Speaker {{index}} role",
+        "voiceField": "Speaker {{index}} voice",
+        "personaField": "Speaker {{index}} persona"
+      },
+      "preview": {
+        "generate": "Preview report",
+        "diagnostics": "Preview diagnostics",
+        "context": "Preview run: {{runId}}",
+        "noRunContext": "Run a successful monitor before previewing this report.",
+        "templateRequired": "Select a template before generating preview.",
+        "templateEmpty": "The selected template is empty.",
+        "emptyResult": "Preview returned no rendered content.",
+        "error": "Failed to generate preview."
+      },
+      "delivery": {
+        "help": "Reports is always included. External delivery waits until selected artifacts are ready.",
+        "reports": "Reports",
+        "required": "Required storage",
+        "alwaysOn": "Always on"
+      },
+      "test": {
+        "providerDisclosure": "Tests use your configured LLM and text-to-speech providers. A sample is limited to 60 seconds; a full test uses the target duration.",
+        "receipt": "Activation receipt",
+        "manualReceipt": "This briefing runs manually, saves selected artifacts in Reports, and contacts no external destination unless you choose Send test.",
+        "progress": "Test progress",
+        "stages": {
+          "collection": "Collect sources",
+          "selection": "Select updates",
+          "text": "Create report",
+          "audio": "Create audio",
+          "persistence": "Save in Reports",
+          "delivery": "Check test delivery"
+        },
+        "sample": "Generate 60-second sample",
+        "full": "Generate full test episode",
+        "send": "Send test",
+        "activate": "Activate schedule",
+        "ready": "Test started. This draft stays inactive until you activate its schedule.",
+        "cancelled": "Test cancelled. Your draft is saved.",
+        "failed": "Test failed. Your draft is saved. {{message}}"
+      },
+      "activate": {
+        "ready": "Schedule activated.",
+        "failed": "Schedule could not be activated. Your draft is saved. {{message}}"
+      },
+      "validation": {
+        "sourcesRequired": "Choose at least one source before continuing."
+      },
+      "validationError": "Review the highlighted fields before continuing."
+    },
     "setupComplete": {
       "title": "Setup complete",
       "nextRunDescription": "Your next monitor run is {{time}}. New content will appear in Updates and Activity.",
