@@ -187,17 +187,81 @@ describe("stripHtmlToText", () => {
     const html = "<p>Hello <strong>world</strong></p><p>  Next&nbsp;line </p>"
     expect(stripHtmlToText(html)).toBe("Hello world Next line")
   })
+
+  it("removes script and style content without DOMParser", () => {
+    vi.stubGlobal("DOMParser", undefined)
+    try {
+      const html =
+        "<p>Hello <script>alert(1)</script>world</p><p><style>body{}</style>Next&nbsp;line</p>"
+
+      expect(stripHtmlToText(html)).toBe("Hello world Next line")
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
 })
 
 describe("extractImageUrl", () => {
-  it("extracts first image URL from html", () => {
-    const html = '<p>One</p><img src="https://example.com/image.jpg" alt="img" />'
-    expect(extractImageUrl(html)).toBe("https://example.com/image.jpg")
+  it.each([
+    ["https://example.com/image.jpg", "https://example.com/image.jpg"],
+    ["/images/image.jpg", "/images/image.jpg"],
+    ["javascript:alert(1)", null],
+    ["data:image/svg+xml;base64,PHN2Zy8+", null]
+  ])("validates html image candidate %s", (candidate, expected) => {
+    expect(extractImageUrl(`<img src="${candidate}" alt="img" />`)).toBe(
+      expected
+    )
   })
 
-  it("extracts first image URL from markdown", () => {
-    const markdown = "Text ![hero](https://example.com/hero.png) after"
-    expect(extractImageUrl(markdown)).toBe("https://example.com/hero.png")
+  it.each([
+    ["http://example.com/hero.png", "http://example.com/hero.png"],
+    ["../images/hero.png", "../images/hero.png"],
+    ["mailto:image@example.com", null],
+    ["data:text/html;base64,PHNjcmlwdD4=", null]
+  ])("validates markdown image candidate %s", (candidate, expected) => {
+    expect(extractImageUrl(`Text ![hero](${candidate}) after`)).toBe(expected)
+  })
+
+  it("prefers an earlier src attribute over a later data-src attribute", () => {
+    const html =
+      '<img src="https://example.com/primary.jpg" data-src="https://example.com/lazy.jpg" />'
+
+    expect(extractImageUrl(html)).toBe("https://example.com/primary.jpg")
+  })
+
+  it.each([
+    ['<img src = "https://example.com/spaced.jpg" />'],
+    ['<img src= "https://example.com/spaced.jpg" />']
+  ])("accepts valid whitespace around the src assignment", (html) => {
+    expect(extractImageUrl(html)).toBe("https://example.com/spaced.jpg")
+  })
+
+  it("uses a later safe html image when the first candidate is unsafe", () => {
+    const html =
+      '<img src="javascript:alert(1)" /><img src="https://example.com/safe.jpg" />'
+
+    expect(extractImageUrl(html)).toBe("https://example.com/safe.jpg")
+  })
+
+  it("uses a later safe markdown image when the first candidate is unsafe", () => {
+    const markdown =
+      "![unsafe](data:image/svg+xml;base64,PHN2Zy8+) ![safe](https://example.com/safe.jpg)"
+
+    expect(extractImageUrl(markdown)).toBe("https://example.com/safe.jpg")
+  })
+
+  it("falls back to safe markdown when every html image is unsafe", () => {
+    const content =
+      '<img src="javascript:alert(1)" /> ![safe](https://example.com/safe.jpg)'
+
+    expect(extractImageUrl(content)).toBe("https://example.com/safe.jpg")
+  })
+
+  it("keeps html precedence when safe markdown appears first", () => {
+    const content =
+      '![markdown](https://example.com/markdown.jpg) <img src="https://example.com/html.jpg" />'
+
+    expect(extractImageUrl(content)).toBe("https://example.com/html.jpg")
   })
 
   it("returns null when no image exists", () => {

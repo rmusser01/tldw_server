@@ -142,6 +142,7 @@ export const updateWatchlist = async (
 export interface FetchSourcesParams {
   q?: string
   tags?: string[]
+  groups?: number[]
   watchlist_id?: number
   page?: number
   size?: number

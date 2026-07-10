@@ -20,7 +20,7 @@ import { useAntdModal } from "@/hooks/useAntdModal"
 import { useConfirmModal } from "@/hooks/useConfirmModal"
 import { useSelectedCharacter } from "@/hooks/useSelectedCharacter"
 import { collectGreetings } from "@/utils/character-greetings"
-import { createImageDataUrl } from "@/utils/image-utils"
+import { createImageDataUrl, safeImageUrl } from "@/utils/image-utils"
 import {
   CHARACTER_MOOD_OPTIONS,
   getCharacterMoodImagesFromExtensions,
@@ -124,10 +124,9 @@ const normalizeCharacter = (
   }
 
   const avatar =
-    character.avatar_url ||
-    (character.image_base64
-      ? createImageDataUrl(character.image_base64) || ""
-      : "")
+    safeImageUrl(character.avatar_url) ??
+    createImageDataUrl(character.image_base64) ??
+    ""
 
   const greetings = collectGreetings(character)
   const [primaryGreeting, ...alternateGreetings] = greetings

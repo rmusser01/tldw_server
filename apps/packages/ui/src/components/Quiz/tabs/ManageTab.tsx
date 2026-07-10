@@ -1,4 +1,5 @@
 import React from "react"
+import DOMPurify from "dompurify"
 import {
   Alert,
   Button,
@@ -354,6 +355,8 @@ const escapeHtml = (value: string): string => (
     .replaceAll("'", "&#39;")
 )
 
+const PRINTABLE_DOCUMENT_DOCTYPE = "<!doctype html>\n"
+
 const formatPrintableCorrectAnswer = (question: Question): string => {
   if (question.question_type === "multiple_choice") {
     const correctIndex = Number(question.correct_answer)
@@ -424,7 +427,7 @@ const buildPrintableQuizHtml = (entry: QuizExportEntry): string => {
       return `
         <article class="question">
           <h2>${index + 1}. ${escapeHtml(question.question_text)}</h2>
-          <p class="meta">Type: ${escapeHtml(question.question_type)} · Points: ${question.points}</p>
+          <p class="meta">Type: ${escapeHtml(question.question_type)} · Points: ${Number.isFinite(question.points) ? question.points : 0}</p>
           ${optionsMarkup}
           ${hintMarkup}
           ${hintPenaltyMarkup}
@@ -445,8 +448,7 @@ const buildPrintableQuizHtml = (entry: QuizExportEntry): string => {
     ? `<p><strong>Passing Score:</strong> ${entry.quiz.passing_score}%</p>`
     : ""
 
-  return `<!doctype html>
-<html lang="en">
+  const rawDocument = `<html lang="en">
 <head>
   <meta charset="utf-8" />
   <title>${escapeHtml(entry.quiz.name)} - Printable Quiz</title>
@@ -474,6 +476,8 @@ const buildPrintableQuizHtml = (entry: QuizExportEntry): string => {
   ${questionsMarkup}
 </body>
 </html>`
+
+  return `${PRINTABLE_DOCUMENT_DOCTYPE}${DOMPurify.sanitize(rawDocument, { WHOLE_DOCUMENT: true })}`
 }
 
 export const ManageTab: React.FC<ManageTabProps> = ({

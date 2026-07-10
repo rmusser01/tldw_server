@@ -31,3 +31,15 @@ describe("provider-registry TTS inference", () => {
     expect(kittenProviders).toHaveLength(1)
   })
 })
+
+describe("provider-registry LLM inference", () => {
+  it.each([
+    ["gpt-4o", "openai"],
+    ["claude-3-7-sonnet", "anthropic"],
+    ["meta-llama/Llama-3.3-70B-Instruct", "meta"],
+    ["gemini-2.5-pro", "google"],
+    ["mistral-large-latest", "mistral"]
+  ])("infers %s as %s", (model, provider) => {
+    expect(inferProviderFromModel(model)).toBe(provider)
+  })
+})

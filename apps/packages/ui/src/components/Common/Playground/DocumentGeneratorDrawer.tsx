@@ -345,7 +345,7 @@ export const DocumentGeneratorDrawer: React.FC<DocumentGeneratorDrawerProps> = (
               ...(res || {})
             }
           } catch (err) {
-            console.debug(`Failed to refresh job ${job.job_id}:`, err)
+            console.debug("Failed to refresh job", job.job_id, err)
             return job
           }
         })

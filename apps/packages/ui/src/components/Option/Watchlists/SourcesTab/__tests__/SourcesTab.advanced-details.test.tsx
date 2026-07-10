@@ -363,43 +363,121 @@ describe("SourcesTab advanced details disclosure", () => {
     }
   )
 
-  it("reuses cached group OPML URLs across refreshes while cache is fresh", async () => {
-    const sourceA = buildSource(301)
-    const sourceB = {
-      ...buildSource(302),
-      url: "https://example.com/other-feed.xml"
-    }
-    const sources = [sourceA, sourceB]
-
+  it("filters a selected group through the paginated sources API", async () => {
+    const source = buildSource(301)
     mocks.storeStateRef.current = baseState({
       selectedGroupId: 7,
       groups: [{ id: 7, name: "Priority", description: null, parent_group_id: null }],
-      sources,
-      sourcesTotal: 2
+      sources: [source],
+      sourcesTotal: 41,
+      sourcesPage: 3,
+      sourcesPageSize: 10
     })
     mocks.fetchWatchlistSourcesMock.mockResolvedValue({
-      items: sources,
-      total: 2,
-      page: 1,
-      size: 200,
+      items: [source],
+      total: 41,
+      page: 3,
+      size: 10,
       has_more: false
     })
-    mocks.exportOpmlMock.mockResolvedValue(
-      `<opml><body><outline text="Priority"><outline xmlUrl="${sourceA.url}" /></outline></body></opml>`
-    )
 
     render(<SourcesTab />)
 
     await waitFor(() => {
-      expect(mocks.exportOpmlMock).toHaveBeenCalledTimes(1)
+      expect(mocks.fetchWatchlistSourcesMock).toHaveBeenCalledWith({
+        watchlist_id: 42,
+        q: undefined,
+        tags: undefined,
+        groups: [7],
+        page: 3,
+        size: 10
+      })
+    })
+    expect(mocks.exportOpmlMock).not.toHaveBeenCalled()
+  })
+
+  it("does not treat a defensive zero group id as an empty selection", async () => {
+    const source = buildSource(302)
+    mocks.storeStateRef.current = baseState({
+      selectedGroupId: 0,
+      groups: [{ id: 0, name: "Defensive", description: null, parent_group_id: null }],
+      sources: [source],
+      sourcesTotal: 1
+    })
+    mocks.fetchWatchlistSourcesMock.mockResolvedValue({
+      items: [source],
+      total: 1,
+      page: 1,
+      size: 25,
+      has_more: false
     })
 
-    fireEvent.click(screen.getByText("Refresh"))
+    render(<SourcesTab />)
+
+    await waitFor(() => {
+      expect(mocks.fetchWatchlistSourcesMock).toHaveBeenCalledWith(
+        expect.objectContaining({ groups: [0] })
+      )
+    })
+  })
+
+  it("server-filters every group page before client-side type filtering and paging", async () => {
+    const firstRssSource = buildSource(501)
+    const secondRssSource = buildSource(502)
+    const firstPage = [
+      firstRssSource,
+      ...Array.from({ length: 199 }, (_unused, index) => ({
+        ...buildSource(600 + index),
+        source_type: "site" as const
+      }))
+    ]
+
+    mocks.storeStateRef.current = baseState({
+      selectedGroupId: 7,
+      groups: [{ id: 7, name: "Priority", description: null, parent_group_id: null }],
+      sources: [secondRssSource],
+      sourcesTotal: 201,
+      sourcesPage: 2,
+      sourcesPageSize: 1
+    })
+    mocks.fetchWatchlistSourcesMock.mockImplementation(async ({ page, size }) => {
+      if (size === 1) {
+        return {
+          items: [secondRssSource],
+          total: 201,
+          page: 2,
+          size: 1,
+          has_more: true
+        }
+      }
+      return page === 1
+        ? { items: firstPage, total: 201, page: 1, size: 200, has_more: true }
+        : { items: [secondRssSource], total: 201, page: 2, size: 200, has_more: false }
+    })
+
+    render(<SourcesTab />)
+
+    await waitFor(() => {
+      expect(mocks.fetchWatchlistSourcesMock).toHaveBeenCalledWith(
+        expect.objectContaining({ groups: [7], page: 2, size: 1 })
+      )
+    })
+    mocks.fetchWatchlistSourcesMock.mockClear()
+    mocks.storeStateRef.current.setSources.mockClear()
+
+    fireEvent.change(screen.getByLabelText("Filter by type"), {
+      target: { value: "rss" }
+    })
 
     await waitFor(() => {
       expect(mocks.fetchWatchlistSourcesMock).toHaveBeenCalledTimes(2)
     })
-    expect(mocks.exportOpmlMock).toHaveBeenCalledTimes(1)
+    expect(mocks.fetchWatchlistSourcesMock.mock.calls.map(([params]) => params)).toEqual([
+      expect.objectContaining({ groups: [7], page: 1, size: 200 }),
+      expect.objectContaining({ groups: [7], page: 2, size: 200 })
+    ])
+    expect(mocks.storeStateRef.current.setSources).toHaveBeenCalledWith([secondRssSource], 2)
+    expect(mocks.exportOpmlMock).not.toHaveBeenCalled()
   })
 
   it("opens cloned feeds in the source form before creating so duplicate URLs can be edited", async () => {

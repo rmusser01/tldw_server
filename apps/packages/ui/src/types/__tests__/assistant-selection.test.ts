@@ -122,6 +122,24 @@ describe("normalizeAssistantSelection", () => {
     )
   })
 
+  it("falls back to verified embedded image data when avatar_url is unsafe", () => {
+    const embeddedPng =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+
+    expect(
+      characterToAssistantSelection({
+        id: 39,
+        name: "Miku",
+        avatar_url: "javascript:alert(1)",
+        image_base64: embeddedPng
+      })
+    ).toEqual(
+      expect.objectContaining({
+        avatar_url: `data:image/png;base64,${embeddedPng}`
+      })
+    )
+  })
+
   it("falls back to an explicit avatar_url when embedded character image data is invalid", () => {
     expect(
       characterToAssistantSelection({
