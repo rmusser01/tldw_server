@@ -167,6 +167,7 @@ export const OverviewTab: React.FC = () => {
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const overviewRequestRef = useRef(0)
   const previousBriefingRef = useRef<WatchlistBriefingProjection | null>(null)
+  const explicitPoliteAnnouncementRef = useRef(false)
   const briefingActionGenerationRef = useRef(0)
   const briefingActionControllerRef = useRef<AbortController | null>(null)
   const briefingActionKeyRef = useRef<BriefingActionKey | null>(null)
@@ -192,6 +193,7 @@ export const OverviewTab: React.FC = () => {
     briefingActionControllerRef.current = null
     briefingActionKeyRef.current = null
     previousBriefingRef.current = null
+    explicitPoliteAnnouncementRef.current = false
     setPoliteAnnouncement("")
     setAssertiveAnnouncement("")
   }, [selectedWatchlistId])
@@ -199,8 +201,10 @@ export const OverviewTab: React.FC = () => {
   const announceBriefingTransition = useCallback((next: WatchlistBriefingProjection | null) => {
     const previous = previousBriefingRef.current
     if (!next) {
-      previousBriefingRef.current = null
-      setPoliteAnnouncement("")
+      if (!explicitPoliteAnnouncementRef.current) {
+        previousBriefingRef.current = null
+        setPoliteAnnouncement("")
+      }
       setAssertiveAnnouncement("")
       return
     }
@@ -216,8 +220,15 @@ export const OverviewTab: React.FC = () => {
       briefingActionControllerRef.current = null
       briefingActionKeyRef.current = null
     }
-    setPoliteAnnouncement(transitionAnnouncement(previous, next, t) || "")
-    setAssertiveAnnouncement(blockingFailureAnnouncement(previous, next, t) || "")
+    const polite = transitionAnnouncement(previous, next, t)
+    const assertive = blockingFailureAnnouncement(previous, next, t)
+    if (polite || assertive) {
+      explicitPoliteAnnouncementRef.current = false
+      setPoliteAnnouncement(polite || "")
+    } else if (!explicitPoliteAnnouncementRef.current) {
+      setPoliteAnnouncement("")
+    }
+    setAssertiveAnnouncement(assertive || "")
     previousBriefingRef.current = next
   }, [selectedWatchlistId, t])
 
@@ -236,6 +247,7 @@ export const OverviewTab: React.FC = () => {
       setData(null)
       setError(null)
       previousBriefingRef.current = null
+      explicitPoliteAnnouncementRef.current = false
       setPoliteAnnouncement("")
       setAssertiveAnnouncement("")
       if (typeof setOverviewHealth === "function") {
@@ -574,6 +586,7 @@ export const OverviewTab: React.FC = () => {
     }
     try {
       await triggerWatchlistRun(jobId)
+      explicitPoliteAnnouncementRef.current = true
       setPoliteAnnouncement(t(
         "watchlists:overview.latest.announcements.testQueued",
         "Test run queued. Progress will appear in the latest briefing."

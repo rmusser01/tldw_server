@@ -18,6 +18,16 @@ import {
 import { hasCurrentBriefingAudio } from "../shared/watchlists-announcements"
 
 type RetryOptions = { confirm_unknown_delivery_retry?: boolean }
+type DeliveryReview = {
+  adapter: "email" | "chatbook"
+  stageName: WatchlistBriefingRetryStage
+  occurrenceId: number
+  runId: number
+  jobId: number
+  outcome: string
+  destinationOwner: string
+  destinationLabel: string
+}
 
 export interface LatestBriefingProps {
   projection: WatchlistBriefingProjection | null
@@ -61,6 +71,14 @@ const numberValue = (value: unknown): number | undefined => {
 
 const stringValue = (value: unknown): string | undefined =>
   typeof value === "string" && value.trim() ? value.trim() : undefined
+
+const deliveryDestinationOwner = (
+  projection: WatchlistBriefingProjection,
+  adapter: "email" | "chatbook"
+): string => {
+  const destination = projection.delivery?.[adapter]
+  return `${destination?.recipient_count ?? ""}:${destination?.masked_label ?? ""}`
+}
 
 const formatClock = (seconds: number): string => {
   if (!Number.isFinite(seconds) || seconds < 0) return "0:00"
@@ -209,10 +227,9 @@ export const LatestBriefing: React.FC<LatestBriefingProps> = ({
   const [scriptLoading, setScriptLoading] = useState(false)
   const [scriptText, setScriptText] = useState("")
   const [scriptErrorKind, setScriptErrorKind] = useState<WatchlistArtifactErrorKind | null>(null)
-  const [deliveryReview, setDeliveryReview] = useState<{
-    adapter: "email" | "chatbook"
-    stageName: WatchlistBriefingRetryStage
-  } | null>(null)
+  const scriptRequestControllerRef = useRef<AbortController | null>(null)
+  const scriptRequestGenerationRef = useRef(0)
+  const [deliveryReview, setDeliveryReview] = useState<DeliveryReview | null>(null)
   const [deliveryReviewed, setDeliveryReviewed] = useState(false)
   const deliveryTriggerRef = useRef<HTMLElement | null>(null)
   const locale = i18n.resolvedLanguage || i18n.language || "en"
@@ -220,6 +237,19 @@ export const LatestBriefing: React.FC<LatestBriefingProps> = ({
   const effectiveTimezone = projection?.timezone || timezone || "UTC"
   const nextRunLabel = formatWatchlistOccurrenceDate(effectiveNextRun, effectiveTimezone, locale)
   const projectedAudio = projection?.audio
+  const scriptArtifact = projectedAudio?.script_artifact
+  const scriptArtifactPath = stringValue(scriptArtifact?.download_url)
+  const scriptIdentity = projection
+    ? `${projection.occurrence_id}:${projection.run_id}:${scriptArtifact?.artifact_id || ""}:${scriptArtifactPath || ""}`
+    : ""
+  const deliveryReviewStage = deliveryReview && projection?.stages[deliveryReview.stageName]
+  const deliveryReviewOutcome = deliveryReviewStage?.outcome || deliveryReviewStage?.status
+  const deliveryReviewIsCurrent = Boolean(deliveryReview && projection &&
+    projection.occurrence_id === deliveryReview.occurrenceId &&
+    projection.run_id === deliveryReview.runId &&
+    projection.job_id === deliveryReview.jobId &&
+    deliveryReviewOutcome === deliveryReview.outcome &&
+    deliveryDestinationOwner(projection, deliveryReview.adapter) === deliveryReview.destinationOwner)
   const hasCurrentAudio = Boolean(projection && hasCurrentBriefingAudio(projection))
   const audioArtifactPath = hasCurrentAudio
     ? stringValue(projectedAudio.download_url)
@@ -282,6 +312,27 @@ export const LatestBriefing: React.FC<LatestBriefingProps> = ({
       if (audioObjectUrlRef.current === createdUrl) audioObjectUrlRef.current = null
     }
   }, [audioArtifactPath, audioIdentity, projectedAudio?.mime_type])
+
+  useEffect(() => {
+    scriptRequestGenerationRef.current += 1
+    scriptRequestControllerRef.current?.abort()
+    scriptRequestControllerRef.current = null
+    setScriptOpen(false)
+    setScriptLoading(false)
+    setScriptText("")
+    setScriptErrorKind(null)
+    return () => {
+      scriptRequestGenerationRef.current += 1
+      scriptRequestControllerRef.current?.abort()
+      scriptRequestControllerRef.current = null
+    }
+  }, [scriptIdentity])
+
+  useEffect(() => {
+    if (!deliveryReview || deliveryReviewIsCurrent) return
+    setDeliveryReview(null)
+    setDeliveryReviewed(false)
+  }, [deliveryReview, deliveryReviewIsCurrent])
 
   if (!projection) {
     return (
@@ -417,16 +468,31 @@ export const LatestBriefing: React.FC<LatestBriefingProps> = ({
   const retryDelivery = (
     stageName: WatchlistBriefingRetryStage,
     adapter: "email" | "chatbook",
-    unknown: boolean,
+    outcome: string,
     trigger: HTMLElement
   ) => {
-    if (!unknown) {
+    if (outcome !== "unknown") {
       onRetryStage(projection.run_id, stageName)
       return
     }
+    const destinationSummary = projection.delivery?.[adapter]
+    const destinationLabel = adapter === "email"
+      ? t("watchlists:overview.latest.delivery.recipientCount", "{{count}} recipients", {
+          count: destinationSummary?.recipient_count || 0
+        })
+      : t("watchlists:overview.latest.delivery.chatbookDestination", "Chatbook")
     deliveryTriggerRef.current = trigger
     setDeliveryReviewed(false)
-    setDeliveryReview({ adapter, stageName })
+    setDeliveryReview({
+      adapter,
+      stageName,
+      occurrenceId: projection.occurrence_id,
+      runId: projection.run_id,
+      jobId: projection.job_id,
+      outcome,
+      destinationOwner: deliveryDestinationOwner(projection, adapter),
+      destinationLabel
+    })
   }
 
   const handleDownloadAudio = async () => {
@@ -448,20 +514,34 @@ export const LatestBriefing: React.FC<LatestBriefingProps> = ({
     }
   }
 
-  const scriptArtifact = projection.audio?.script_artifact
-  const scriptArtifactPath = stringValue(scriptArtifact?.download_url)
   const handleReviewScript = async () => {
     if (!scriptArtifactPath) return
+    scriptRequestControllerRef.current?.abort()
+    const controller = new AbortController()
+    const generation = ++scriptRequestGenerationRef.current
+    scriptRequestControllerRef.current = controller
     setScriptOpen(true)
     setScriptLoading(true)
     setScriptText("")
     setScriptErrorKind(null)
     try {
-      setScriptText(await fetchWatchlistArtifactText(scriptArtifactPath, {}))
+      const text = await fetchWatchlistArtifactText(scriptArtifactPath, {
+        signal: controller.signal
+      })
+      if (controller.signal.aborted || generation !== scriptRequestGenerationRef.current) return
+      setScriptText(text)
     } catch (error) {
+      if (
+        controller.signal.aborted ||
+        generation !== scriptRequestGenerationRef.current ||
+        (error as { name?: string } | null)?.name === "AbortError"
+      ) return
       setScriptErrorKind((error as { kind?: WatchlistArtifactErrorKind } | null)?.kind || "network")
     } finally {
-      setScriptLoading(false)
+      if (generation === scriptRequestGenerationRef.current) {
+        setScriptLoading(false)
+        scriptRequestControllerRef.current = null
+      }
     }
   }
 
@@ -476,14 +556,7 @@ export const LatestBriefing: React.FC<LatestBriefingProps> = ({
     { name: objectName }
   )
 
-  const reviewedDeliverySummary = deliveryReview
-    ? projection.delivery?.[deliveryReview.adapter]
-    : undefined
-  const reviewedDeliveryLabel = deliveryReview?.adapter === "email"
-    ? t("watchlists:overview.latest.delivery.recipientCount", "{{count}} recipients", {
-        count: reviewedDeliverySummary?.recipient_count || 0
-      })
-    : t("watchlists:overview.latest.delivery.chatbookDestination", "Chatbook")
+  const reviewedDeliveryLabel = deliveryReview?.destinationLabel || ""
   const closeDeliveryReview = () => {
     setDeliveryReview(null)
     setDeliveryReviewed(false)
@@ -514,7 +587,9 @@ export const LatestBriefing: React.FC<LatestBriefingProps> = ({
             )}
             <div className="flex flex-wrap gap-2 pt-1">
               {programFormat && <Tag>{sentenceCase(programFormat)}</Tag>}
-              {speakers.length > 0 && <Tag>{speakers.join(", ")}</Tag>}
+              {speakers.length > 0 && (
+                <Tag className="max-w-full whitespace-normal break-words">{speakers.join(", ")}</Tag>
+              )}
               {targetMinutes !== undefined && (
                 <Tag>
                   {t("watchlists:overview.pipelineSetup.receipt.duration", "targeting {{count}} minutes", {
@@ -669,7 +744,7 @@ export const LatestBriefing: React.FC<LatestBriefingProps> = ({
                       aria-label={unknown
                         ? t("watchlists:overview.latest.delivery.retryUnknownAria", "Review and retry {{adapter}} delivery for {{name}}", { adapter, name: objectName })
                         : t("watchlists:overview.latest.delivery.retryAria", "Retry {{adapter}} delivery for {{name}}", { adapter, name: objectName })}
-                      onClick={(event) => retryDelivery(stageName, adapter, unknown, event.currentTarget)}
+                      onClick={(event) => retryDelivery(stageName, adapter, outcome, event.currentTarget)}
                     >
                       {unknown ? t("watchlists:overview.latest.delivery.reviewRetry", "Review and retry") : t("watchlists:overview.latest.actions.retry", "Retry")}
                     </Button>
@@ -808,7 +883,7 @@ export const LatestBriefing: React.FC<LatestBriefingProps> = ({
           key="settings"
           onClick={() => {
             closeDeliveryReview()
-            onReviewDeliverySettings(projection.job_id)
+            onReviewDeliverySettings(deliveryReview.jobId)
           }}
         >
           {t("watchlists:overview.latest.delivery.reviewSettings", "Review delivery settings")}
@@ -827,7 +902,11 @@ export const LatestBriefing: React.FC<LatestBriefingProps> = ({
             { adapter: deliveryReview.adapter }
           )}
           onClick={() => {
-            onRetryStage(projection.run_id, deliveryReview.stageName, {
+            if (!deliveryReviewIsCurrent) {
+              closeDeliveryReview()
+              return
+            }
+            onRetryStage(deliveryReview.runId, deliveryReview.stageName, {
               confirm_unknown_delivery_retry: true
             })
             closeDeliveryReview()

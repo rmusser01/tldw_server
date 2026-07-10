@@ -375,6 +375,53 @@ describe("OverviewTab alert and health summary", () => {
     expect(container).toBeInTheDocument()
   })
 
+  it("preserves the queued Test announcement through an unchanged poll until a real transition", async () => {
+    const running = {
+      occurrence_id: 31,
+      run_id: 123,
+      job_id: 7,
+      artifact_status: "running",
+      delivery_status: "waiting_for_artifacts",
+      stages: { persist_text: { status: "ready" }, generate_audio: { status: "running" } },
+      output: { id: 71, title: "Signal Check" },
+      audio: null,
+      editorial: { outcome_noun: "briefing", show_name: "Signal Check" },
+      selection: { candidate_count: 5, included_count: 3, omitted_count: 2 },
+      next_run_at: null,
+      timezone: "UTC",
+      recovery: { can_open_report: true }
+    }
+    const ready = {
+      ...running,
+      artifact_status: "ready",
+      stages: { ...running.stages, generate_audio: { status: "ready" } }
+    }
+    mocks.fetchOverviewMock
+      .mockResolvedValueOnce(createOverviewPayload({ latestBriefing: running }))
+      .mockResolvedValueOnce(createOverviewPayload({ latestBriefing: running }))
+      .mockResolvedValueOnce(createOverviewPayload({ latestBriefing: ready }))
+    mocks.triggerWatchlistRunMock.mockResolvedValue({ id: 99 })
+
+    vi.useFakeTimers()
+    try {
+      render(<OverviewTab />)
+      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+      expect(screen.getByRole("heading", { name: "Latest briefing" })).toBeVisible()
+      fireEvent.click(screen.getByRole("button", { name: "Test now: Signal Check" }))
+      await act(async () => { await Promise.resolve(); await Promise.resolve() })
+      expect(screen.getByTestId("watchlists-overview-live-polite")).toHaveTextContent(
+        "Test run queued. Progress will appear in the latest briefing."
+      )
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(30_000) })
+      expect(screen.getByTestId("watchlists-overview-live-polite")).toHaveTextContent(
+        "Signal Check is ready. The report is available."
+      )
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it("opens the exact monitor when unknown delivery asks to review settings", async () => {
     mocks.fetchOverviewMock.mockResolvedValue(createOverviewPayload({
       latestBriefing: {

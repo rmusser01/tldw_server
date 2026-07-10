@@ -1,5 +1,5 @@
 import React from "react"
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type {
@@ -277,6 +277,48 @@ describe("LatestBriefing", () => {
     })
   })
 
+  it("does not carry reviewed delivery consent into a newer occurrence", async () => {
+    const user = userEvent.setup()
+    const callbacks = actions()
+    const unknownEmail = readyEpisode({
+      delivery_status: "unknown",
+      stages: {
+        ...readyEpisode().stages,
+        "deliver:email": { status: "failed", outcome: "unknown" }
+      }
+    })
+    const { rerender } = render(<LatestBriefing projection={unknownEmail} {...callbacks} />)
+
+    await user.click(screen.getByRole("button", {
+      name: "Review and retry email delivery for Purple and Gold Weekly"
+    }))
+    await user.click(screen.getByRole("checkbox", { name: /reviewed the destination/i }))
+    expect(screen.getByRole("button", { name: "Retry email delivery" })).toBeEnabled()
+
+    rerender(<LatestBriefing projection={readyEpisode({
+      occurrence_id: 32,
+      run_id: 124,
+      job_id: 8,
+      delivery_status: "unknown",
+      stages: {
+        ...readyEpisode().stages,
+        "deliver:email": { status: "failed", outcome: "unknown" }
+      },
+      editorial: { ...readyEpisode().editorial, show_name: "New occurrence" },
+      delivery: {
+        ...readyEpisode().delivery,
+        email: { adapter: "email", recipient_count: 3, masked_label: "3 recipients" }
+      }
+    })} {...callbacks} />)
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+    expect(callbacks.onRetryStage).not.toHaveBeenCalled()
+    await user.click(screen.getByRole("button", {
+      name: "Review and retry email delivery for New occurrence"
+    }))
+    expect(screen.getByRole("button", { name: "Retry email delivery" })).toBeDisabled()
+  })
+
   it("scopes unknown delivery recovery to the affected adapter", () => {
     render(<LatestBriefing projection={readyEpisode({
       delivery_status: "unknown",
@@ -332,13 +374,19 @@ describe("LatestBriefing", () => {
   })
 
   it("uses a container-driven one-to-two-column layout with RTL, long copy, and coarse targets", () => {
+    const longLabels = ["س", "ص", "ع", "ف"].map((letter) => letter.repeat(128))
+    const longCast = longLabels.join(", ")
     const { container } = render(
       <div dir="rtl" style={{ width: 320 }}>
         <LatestBriefing
           projection={readyEpisode({
             editorial: {
               ...readyEpisode().editorial,
-              show_name: "برنامج طويل للغاية لمراجعة المصادر الموثوقة والتحديثات اليومية المهمة"
+              show_name: "برنامج طويل للغاية لمراجعة المصادر الموثوقة والتحديثات اليومية المهمة",
+              cast: {
+                speaker_count: 4,
+                speakers: longLabels.map((label) => ({ label }))
+              }
             }
           })}
           {...actions()}
@@ -349,6 +397,11 @@ describe("LatestBriefing", () => {
     const section = container.querySelector("section")
     expect(section).toHaveClass("@container")
     expect(section?.querySelector("[data-testid='latest-briefing-layout']")).toHaveClass("@3xl:grid-cols-[minmax(0,1fr)_minmax(13rem,0.35fr)]")
+    expect(screen.getByText(longCast).closest(".ant-tag")).toHaveClass(
+      "max-w-full",
+      "whitespace-normal",
+      "break-words"
+    )
     expect(screen.getAllByRole("button")[0]).toHaveClass("min-h-11")
     expect(section).not.toHaveAttribute("style")
   })
@@ -471,6 +524,60 @@ describe("LatestBriefing", () => {
       expect.any(Object)
     )
     expect(await screen.findByRole("dialog", { name: "Week 28 script" })).toHaveTextContent("# Week 28 script")
+  })
+
+  it("aborts and ignores a superseded script request when the occurrence changes", async () => {
+    const user = userEvent.setup()
+    let resolveA!: (value: string) => void
+    let resolveB!: (value: string) => void
+    artifactMocks.fetchText
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveA = resolve }))
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveB = resolve }))
+    const callbacks = actions()
+    const { rerender } = render(<LatestBriefing projection={readyEpisode()} {...callbacks} />)
+
+    await user.click(screen.getByRole("button", { name: "Review script for Purple and Gold Weekly" }))
+    await waitFor(() => expect(artifactMocks.fetchText).toHaveBeenCalledTimes(1))
+    const firstOptions = artifactMocks.fetchText.mock.calls[0][1]
+
+    rerender(<LatestBriefing projection={readyEpisode({
+      occurrence_id: 32,
+      run_id: 124,
+      editorial: { ...readyEpisode().editorial, show_name: "New occurrence" },
+      audio: {
+        ...readyEpisode().audio!,
+        run_id: 124,
+        script_artifact: {
+          artifact_id: "script-124",
+          title: "New occurrence script",
+          download_url: "/api/v1/watchlists/runs/124/audio/script/download"
+        }
+      }
+    })} {...callbacks} />)
+
+    await user.click(screen.getByRole("button", { name: "Review script for New occurrence" }))
+    await act(async () => resolveB("# New occurrence script"))
+    expect(await screen.findByRole("dialog", { name: "New occurrence script" }))
+      .toHaveTextContent("# New occurrence script")
+    await act(async () => resolveA("# Stale occurrence script"))
+    expect(screen.getByRole("dialog", { name: "New occurrence script" }))
+      .not.toHaveTextContent("# Stale occurrence script")
+    expect(firstOptions.signal).toBeInstanceOf(AbortSignal)
+    expect(firstOptions.signal.aborted).toBe(true)
+  })
+
+  it("aborts an active script request on unmount", async () => {
+    const user = userEvent.setup()
+    artifactMocks.fetchText.mockImplementation(() => new Promise(() => undefined))
+    const { unmount } = render(<LatestBriefing projection={readyEpisode()} {...actions()} />)
+
+    await user.click(screen.getByRole("button", { name: "Review script for Purple and Gold Weekly" }))
+    await waitFor(() => expect(artifactMocks.fetchText).toHaveBeenCalledTimes(1))
+    const options = artifactMocks.fetchText.mock.calls[0][1]
+    unmount()
+
+    expect(options.signal).toBeInstanceOf(AbortSignal)
+    expect(options.signal.aborted).toBe(true)
   })
 
   it("distinguishes missing artifacts from authorization or network errors", async () => {
