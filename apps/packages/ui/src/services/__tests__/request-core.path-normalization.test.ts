@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { deriveRequestTimeout, tldwRequest } from "@/services/tldw/request-core"
 
@@ -62,10 +62,46 @@ describe("request-core media path normalization", () => {
 })
 
 describe("request-core advanced WebUI transport", () => {
+  let originalDeploymentMode: string | undefined
+  let originalApiUrl: string | undefined
+  let originalWindow: PropertyDescriptor | undefined
+
+  beforeEach(() => {
+    originalDeploymentMode = process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
+    originalApiUrl = process.env.NEXT_PUBLIC_API_URL
+    originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window")
+
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "advanced"
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: {
+        location: {
+          origin: "https://webui.example.test",
+          protocol: "https:"
+        }
+      }
+    })
+  })
+
+  afterEach(() => {
+    if (originalDeploymentMode === undefined) {
+      delete process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
+    } else {
+      process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = originalDeploymentMode
+    }
+    if (originalApiUrl === undefined) {
+      delete process.env.NEXT_PUBLIC_API_URL
+    } else {
+      process.env.NEXT_PUBLIC_API_URL = originalApiUrl
+    }
+    if (originalWindow) {
+      Object.defineProperty(globalThis, "window", originalWindow)
+    } else {
+      Reflect.deleteProperty(globalThis, "window")
+    }
+  })
+
   it("uses the runtime API origin without a persisted server URL", async () => {
-    const originalDeploymentMode = process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
-    const originalApiUrl = process.env.NEXT_PUBLIC_API_URL
-    const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window")
     const fetchFn = vi.fn(async () =>
       new Response(JSON.stringify({ batch_id: "batch-1", jobs: [] }), {
         status: 200,
@@ -73,109 +109,50 @@ describe("request-core advanced WebUI transport", () => {
       })
     )
 
-    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "advanced"
     process.env.NEXT_PUBLIC_API_URL = "https://api.example.test"
-    Object.defineProperty(globalThis, "window", {
-      configurable: true,
-      value: {
-        location: {
-          origin: "https://webui.example.test",
-          protocol: "https:"
-        }
-      }
-    })
 
-    try {
-      const response = await tldwRequest(
-        {
-          path: "/api/v1/media/ingest/jobs",
-          method: "POST",
-          body: new FormData(),
-          noAuth: true
-        },
-        {
-          getConfig: async () => null,
-          fetchFn
-        }
-      )
+    const response = await tldwRequest(
+      {
+        path: "/api/v1/media/ingest/jobs",
+        method: "POST",
+        body: new FormData(),
+        noAuth: true
+      },
+      {
+        getConfig: async () => null,
+        fetchFn
+      }
+    )
 
-      expect(response.ok).toBe(true)
-      expect(fetchFn).toHaveBeenCalledTimes(1)
-      expect(getFetchCall(fetchFn)?.[0]).toBe(
-        "https://api.example.test/api/v1/media/ingest/jobs"
-      )
-    } finally {
-      if (originalDeploymentMode === undefined) {
-        delete process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
-      } else {
-        process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = originalDeploymentMode
-      }
-      if (originalApiUrl === undefined) {
-        delete process.env.NEXT_PUBLIC_API_URL
-      } else {
-        process.env.NEXT_PUBLIC_API_URL = originalApiUrl
-      }
-      if (originalWindow) {
-        Object.defineProperty(globalThis, "window", originalWindow)
-      } else {
-        Reflect.deleteProperty(globalThis, "window")
-      }
-    }
+    expect(response.ok).toBe(true)
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+    expect(getFetchCall(fetchFn)?.[0]).toBe(
+      "https://api.example.test/api/v1/media/ingest/jobs"
+    )
   })
 
   it("fails closed when no persisted or runtime API origin exists", async () => {
-    const originalDeploymentMode = process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
-    const originalApiUrl = process.env.NEXT_PUBLIC_API_URL
-    const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window")
     const fetchFn = vi.fn()
 
-    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "advanced"
     delete process.env.NEXT_PUBLIC_API_URL
-    Object.defineProperty(globalThis, "window", {
-      configurable: true,
-      value: {
-        location: {
-          origin: "https://webui.example.test",
-          protocol: "https:"
-        }
-      }
-    })
 
-    try {
-      const response = await tldwRequest(
-        {
-          path: "/api/v1/media/ingest/jobs",
-          method: "POST",
-          body: new FormData(),
-          noAuth: true
-        },
-        {
-          getConfig: async () => null,
-          fetchFn
-        }
-      )
+    const response = await tldwRequest(
+      {
+        path: "/api/v1/media/ingest/jobs",
+        method: "POST",
+        body: new FormData(),
+        noAuth: true
+      },
+      {
+        getConfig: async () => null,
+        fetchFn
+      }
+    )
 
-      expect(response.ok).toBe(false)
-      expect(response.status).toBe(400)
-      expect(String(response.error || "")).toContain("server not configured")
-      expect(fetchFn).not.toHaveBeenCalled()
-    } finally {
-      if (originalDeploymentMode === undefined) {
-        delete process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
-      } else {
-        process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = originalDeploymentMode
-      }
-      if (originalApiUrl === undefined) {
-        delete process.env.NEXT_PUBLIC_API_URL
-      } else {
-        process.env.NEXT_PUBLIC_API_URL = originalApiUrl
-      }
-      if (originalWindow) {
-        Object.defineProperty(globalThis, "window", originalWindow)
-      } else {
-        Reflect.deleteProperty(globalThis, "window")
-      }
-    }
+    expect(response.ok).toBe(false)
+    expect(response.status).toBe(400)
+    expect(String(response.error || "")).toContain("server not configured")
+    expect(fetchFn).not.toHaveBeenCalled()
   })
 })
 

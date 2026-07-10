@@ -7,6 +7,7 @@ import {
   resolveBrowserRequestTransport,
   tldwRequest
 } from "@/services/tldw/request-core"
+import { resolveAdvancedRequestTransportGuard } from "@/services/tldw/browser-networking"
 import { getRuntimeSingleUserApiKeyOverride } from "@/services/tldw/runtime-auth-override"
 import {
   BACKEND_UNREACHABLE_EVENT,
@@ -22,8 +23,7 @@ import type {
 } from "@/services/tldw/openapi-guard"
 import {
   isAbsoluteUrlAllowlisted,
-  isSameOriginAbsoluteUrlForConfiguredServer,
-  parseHttpOrigin
+  isSameOriginAbsoluteUrlForConfiguredServer
 } from "@/utils/absolute-url-guard"
 
 const ERROR_LOG_THROTTLE_MS = 15_000
@@ -1092,21 +1092,19 @@ async function* bgStreamDirect<
         })
       : null
   const hostedMode = transport?.mode === "hosted"
-  const advancedTransportOrigin =
-    transport?.mode === "advanced" ? parseHttpOrigin(transport?.url) : null
+  const advancedTransportGuard = resolveAdvancedRequestTransportGuard({
+    transport,
+    hasConfiguredServerUrl: Boolean(cfg?.serverUrl),
+    isAbsolute
+  })
   if (isAbsolute && !isAbsoluteUrlAllowlisted(absolutePath, cfg)) {
     throw new Error(ABSOLUTE_URL_BLOCK_ERROR)
   }
-  if (
-    !cfg?.serverUrl &&
-    !isAbsolute &&
-    transport?.mode === "advanced" &&
-    !advancedTransportOrigin
-  ) {
+  if (advancedTransportGuard.isUnconfigured) {
     throw new Error("tldw server not configured")
   }
   const baseUrl =
-    advancedTransportOrigin ||
+    advancedTransportGuard.origin ||
     (cfg?.serverUrl ? String(cfg.serverUrl).replace(/\/$/, "") : "")
   const url = isAbsolute
     ? absolutePath

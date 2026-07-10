@@ -4,7 +4,7 @@ title: Fix advanced WebUI Quick Ingest transport without persisted server URL
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-07-10 04:59'
+updated_date: '2026-07-10 05:20'
 labels:
   - frontend
   - quick-ingest
@@ -35,15 +35,13 @@ UAT on release 0.1.40 found that Quick Ingest direct uploads fail before reachin
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Full-stack CDP UAT completed after the patched WebUI and isolated backend were launched on ports 18180 and 18000. With localStorage.tldwConfig removed immediately before submission, Quick preset sent an authenticated POST to http://127.0.0.1:18000/api/v1/media/ingest/jobs and received batch 05dd45df-9788-4618-91e3-63328861aade / job 1. The WebUI's own polling completed with 1 succeeded, 0 failed in 15 seconds. SQLite verification found media ID 1, title 'Me at the zoo', exact YouTube URL, type video, and 210 content characters. Screenshot: /tmp/quick-ingest-advanced-transport-uat.png. The initial attempt to remove every connection-related storage key was intentionally discarded because it destabilized unrelated connection state; the authoritative regression check removes only tldwConfig, which is the config source evaluated by the request guard, while retaining runtime/bootstrap mirrors.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
+Full-stack CDP UAT remains valid: with localStorage.tldwConfig removed immediately before submission, Quick preset sent an authenticated POST to the runtime API origin; batch 05dd45df-9788-4618-91e3-63328861aade / job 1 completed with 1 succeeded and 0 failed, and SQLite stored media ID 1 (Me at the zoo) with 210 content characters. PR #2703 review follow-up addressed all three inline findings: narrowly matched client configuration errors, deduplicated test fixtures, and centralized foreground/background advanced transport validation. Verification: 35 request/classification tests and 63 networking/background-proxy tests passed; frontend typecheck passed; touched-file ESLint had 0 errors with existing warnings only; git diff --check passed. Bandit remains not applicable because only TypeScript, tests, and Backlog metadata changed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Fixed advanced WebUI requests so a valid resolved NEXT_PUBLIC_API_URL transport is accepted when tldwConfig.serverUrl is absent, while retaining fail-closed behavior for invalid or missing origins. Added focused request-core and Quick Ingest error-classification regression tests, and classified missing server configuration as an auth/configuration issue instead of an unsupported file format. Verified with focused Vitest, frontend typecheck, touched-file ESLint, git diff checks, and full-stack CDP UAT of a real YouTube Quick Ingest that stored 'Me at the zoo' with transcript content.
+Fixed advanced WebUI requests so a valid resolved NEXT_PUBLIC_API_URL transport is accepted when tldwConfig.serverUrl is absent while invalid or missing origins remain fail-closed. Configuration errors are narrowly classified without capturing unrelated backend messages. Review follow-up centralized advanced transport origin/validation for request-core and background-proxy and reduced test fixture duplication. Focused tests, background-proxy suites, typecheck, lint, diff checks, and full-stack YouTube ingestion UAT passed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

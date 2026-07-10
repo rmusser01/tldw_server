@@ -57,6 +57,15 @@ describe("classifyError", () => {
       expect(result.badgeLabel).toContain("Config")
       expect(result.userMessage).toContain("server is not configured")
     })
+
+    it("does not relabel unrelated server configuration errors", () => {
+      const result = classifyError(
+        "Third-party server configuration is invalid"
+      )
+
+      expect(result.badgeLabel).not.toContain("Config")
+      expect(result.userMessage).not.toContain("server is not configured")
+    })
   })
 
   // -------------------------------------------------------------------------

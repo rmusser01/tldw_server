@@ -113,7 +113,7 @@ const PATTERN_TABLE: PatternEntry[] = [
     category: JOB_LIMIT_CATEGORY,
   },
   {
-    patterns: /server (?:is )?not configured|server configuration/i,
+    patterns: /^(?:HTTP 400:\s*)?tldw server not configured\.?$/i,
     category: CONFIG_CATEGORY,
   },
   {
