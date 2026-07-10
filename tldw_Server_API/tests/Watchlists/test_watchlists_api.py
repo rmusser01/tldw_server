@@ -1366,6 +1366,41 @@ def test_output_deliveries_email_and_chatbook(client_with_user, monkeypatch, tmp
             assert stored_meta.get("origin") == "test"
 
 
+def test_output_reports_only_default_omits_external_delivery_plan(client_with_user, monkeypatch):
+    c = client_with_user
+    monkeypatch.setenv("TEST_MODE", "1")
+
+    source = c.post(
+        "/api/v1/watchlists/sources",
+        json={
+            "name": "Reports-only Feed",
+            "url": "https://example.com/reports-only.xml",
+            "source_type": "rss",
+            "tags": ["reports-only"],
+        },
+    )
+    assert source.status_code == 200, source.text
+
+    job = c.post(
+        "/api/v1/watchlists/jobs",
+        json={
+            "name": "Reports-only Digest",
+            "scope": {"tags": ["reports-only"]},
+        },
+    )
+    assert job.status_code == 200, job.text
+
+    run = c.post(f"/api/v1/watchlists/jobs/{job.json()['id']}/run")
+    assert run.status_code == 200, run.text
+
+    output = c.post(
+        "/api/v1/watchlists/outputs",
+        json={"run_id": run.json()["id"], "title": "Reports-only Digest"},
+    )
+    assert output.status_code == 200, output.text
+    assert "delivery_plan" not in output.json().get("metadata", {})
+
+
 def test_output_creation_schedules_pending_enrichment(client_with_user, monkeypatch):
     c = client_with_user
     monkeypatch.setenv("TEST_MODE", "1")

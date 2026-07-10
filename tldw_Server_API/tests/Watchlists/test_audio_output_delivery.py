@@ -16,6 +16,29 @@ import pytest
 pytestmark = pytest.mark.unit
 
 
+def test_external_delivery_plan_only_keeps_enabled_external_adapters():
+    from tldw_Server_API.app.api.v1.endpoints.watchlists import _external_delivery_plan
+
+    assert _external_delivery_plan({"reports": {"enabled": True}}) == {}
+    assert _external_delivery_plan(
+        {
+            "reports": {"enabled": True},
+            "email": {"enabled": False, "recipients": ["disabled@example.com"]},
+            "chatbook": {"enabled": False},
+        }
+    ) == {}
+    assert _external_delivery_plan(
+        {
+            "reports": {"enabled": True},
+            "email": {"enabled": True, "recipients": ["digest@example.com"]},
+            "chatbook": {"enabled": True, "title": "Digest"},
+        }
+    ) == {
+        "email": {"enabled": True, "recipients": ["digest@example.com"]},
+        "chatbook": {"enabled": True, "title": "Digest"},
+    }
+
+
 def test_output_row_metadata_uses_parser_for_object_rows():
     from tldw_Server_API.app.api.v1.endpoints.watchlists import _output_row_metadata
 

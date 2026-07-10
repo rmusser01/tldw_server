@@ -4981,9 +4981,21 @@ def _is_audio_output_row(row: Any, metadata: dict[str, Any]) -> bool:
     )
 
 
+def _external_delivery_plan(raw: Any) -> dict[str, dict[str, Any]]:
+    """Return only enabled email and Chatbook adapters from a delivery plan."""
+    if not isinstance(raw, dict):
+        return {}
+    external: dict[str, dict[str, Any]] = {}
+    for channel in ("email", "chatbook"):
+        config = raw.get(channel)
+        if isinstance(config, dict) and config and config.get("enabled", True) is True:
+            external[channel] = dict(config)
+    return external
+
+
 def _has_delivery_plan(metadata: dict[str, Any]) -> bool:
-    """Return whether metadata includes a persisted delivery plan."""
-    return isinstance(metadata.get("delivery_plan"), dict)
+    """Return whether metadata includes an enabled external delivery plan."""
+    return bool(_external_delivery_plan(metadata.get("delivery_plan")))
 
 
 def _is_canonical_delivery_output(row: Any, metadata: dict[str, Any]) -> bool:
@@ -5008,7 +5020,7 @@ def _output_row_summary(row: Any) -> dict[str, Any]:
         "type": getattr(row, "type", None),
         "created_at": getattr(row, "created_at", None),
         "deliveries": _sanitize_delivery_results(metadata.get("deliveries")),
-        "delivery_plan_present": isinstance(metadata.get("delivery_plan"), dict),
+        "delivery_plan_present": _has_delivery_plan(metadata),
         "audio_briefing_status": metadata.get("audio_briefing_status"),
         "audio_briefing_task_id": metadata.get("audio_briefing_task_id"),
         "audio_briefing_reason": metadata.get("audio_briefing_reason"),
@@ -5265,7 +5277,7 @@ async def retry_run_delivery(
     output = await _row_to_output(selected_row, user_id=int(resolved_user_id))
     title = output.title or f"watchlist-output-{output.id}"
     output_format = output.format or getattr(selected_row, "format", None) or "md"
-    delivery_plan = selected_metadata.get("delivery_plan") or {}
+    delivery_plan = _external_delivery_plan(selected_metadata.get("delivery_plan"))
     is_delegated_retry = resolved_user_id != _safe_int(getattr(current_user, "id", None), -1)
     notifications = NotificationsService(
         user_id=int(resolved_user_id),
@@ -6838,9 +6850,11 @@ async def create_output(
             metadata["_enrichment_summary_config"] = payload.briefing_summary.model_dump()
 
     delivery_override = payload.deliveries.model_dump(exclude_none=True) if payload.deliveries else {}
-    delivery_plan = (
+    merged_delivery_plan = (
         _deep_merge_dict(delivery_defaults, delivery_override) if (delivery_defaults or delivery_override) else {}
     )
+    delivery_plan = _external_delivery_plan(merged_delivery_plan)
+    metadata.pop("delivery_plan", None)
     if delivery_plan:
         metadata["delivery_plan"] = delivery_plan
 

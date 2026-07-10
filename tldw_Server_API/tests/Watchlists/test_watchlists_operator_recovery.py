@@ -410,6 +410,54 @@ async def test_retry_run_delivery_redelivers_latest_output_and_updates_metadata(
 
 
 @pytest.mark.asyncio
+async def test_retry_run_delivery_ignores_reports_only_plan(monkeypatch):
+    from fastapi import HTTPException
+
+    from tldw_Server_API.app.api.v1.endpoints import watchlists
+
+    run = SimpleNamespace(id=10, job_id=7, stats_json="{}", error_msg=None)
+    db = MagicMock()
+    db.get_run.return_value = run
+    output_row = SimpleNamespace(
+        id=55,
+        run_id=10,
+        job_id=7,
+        title="Reports-only Digest",
+        format="md",
+        metadata_json=json.dumps(
+            {
+                "origin": "watchlists",
+                "delivery_plan": {"reports": {"enabled": True}},
+            }
+        ),
+        chatbook_path=None,
+    )
+    collections_db = MagicMock()
+    collections_db.list_output_artifacts.return_value = ([output_row], 1)
+    monkeypatch.setattr(
+        watchlists,
+        "_resolve_target_watchlists_context",
+        AsyncMock(return_value=(945, db)),
+    )
+    row_to_output = AsyncMock()
+    monkeypatch.setattr(watchlists, "_row_to_output", row_to_output)
+
+    user = SimpleNamespace(id=945, email="wl@example.com", role="admin")
+    with pytest.raises(HTTPException) as exc_info:
+        await watchlists.retry_run_delivery(
+            run_id=10,
+            target_user_id=None,
+            current_user=user,
+            db=db,
+            collections_db=collections_db,
+        )
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == "delivery_plan_not_found"
+    row_to_output.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_retry_run_delivery_uses_target_collections_db_and_does_not_fallback_to_actor_email(monkeypatch):
     from tldw_Server_API.app.api.v1.endpoints import watchlists
 
@@ -590,6 +638,55 @@ async def test_run_diagnostics_bundle_includes_run_and_latest_output_metadata(mo
         "reason": "workflows_queue_has_no_workers",
     }
     assert "log_path" not in json.dumps(result.model_dump())
+
+
+@pytest.mark.asyncio
+async def test_run_diagnostics_does_not_advertise_reports_only_delivery_plan(monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import watchlists
+
+    run = SimpleNamespace(
+        id=10,
+        job_id=7,
+        status="succeeded",
+        started_at="2026-05-19T04:00:00Z",
+        finished_at="2026-05-19T04:03:00Z",
+        stats_json="{}",
+        error_msg=None,
+    )
+    db = MagicMock()
+    db.get_run.return_value = run
+    db.get_job.return_value = SimpleNamespace(id=7, name="Daily Digest", schedule_expr="0 */5 * * *")
+    output_row = SimpleNamespace(
+        id=55,
+        run_id=10,
+        job_id=7,
+        title="Daily Digest",
+        format="md",
+        metadata_json=json.dumps(
+            {
+                "origin": "watchlists",
+                "delivery_plan": {"reports": {"enabled": True}},
+            }
+        ),
+    )
+    collections_db = MagicMock()
+    collections_db.list_output_artifacts.return_value = ([output_row], 1)
+    monkeypatch.setattr(
+        watchlists,
+        "_resolve_target_watchlists_context",
+        AsyncMock(return_value=(945, db)),
+    )
+
+    result = await watchlists.get_run_diagnostics(
+        run_id=10,
+        target_user_id=None,
+        current_user=SimpleNamespace(id=945, role="admin"),
+        db=db,
+        collections_db=collections_db,
+    )
+
+    assert result.outputs[0]["delivery_plan_present"] is False
+    assert result.recovery["can_retry_delivery"] is False
 
 
 @pytest.mark.asyncio

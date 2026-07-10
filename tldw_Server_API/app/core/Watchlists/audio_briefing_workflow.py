@@ -1,7 +1,8 @@
 """Audio briefing workflow bridge.
 
-Triggers the audio briefing workflow pipeline after a watchlist run completes,
-when the job's output_prefs has generate_audio=True.
+Triggers the audio briefing workflow pipeline after a watchlist run completes
+when `briefing_pipeline.audio.enabled` is true, with legacy preferences normalized
+through the canonical briefing contract.
 """
 
 from __future__ import annotations
