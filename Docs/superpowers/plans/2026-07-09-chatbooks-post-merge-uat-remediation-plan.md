@@ -237,7 +237,7 @@ external approval is claimed.
 - Test: `tldw_Server_API/tests/Chatbooks/test_chatbooks_api_error_and_preview_mapping.py`
 - Create: `apps/packages/ui/src/components/Option/Chatbooks/__tests__/ChatbooksPlaygroundPage.jobs.test.tsx`
 
-- [ ] **Step 1: Write failing job-center tests**
+- [x] **Step 1: Write failing job-center tests**
 
 Assert that:
 
@@ -248,7 +248,7 @@ Assert that:
 - `Remove`, `Remove finished`, and archive cleanup confirm their scope before deleting files or job history;
 - cleanup terminology distinguishes expired archive files from finished job-history removal.
 
-- [ ] **Step 2: Prove the current failures**
+- [x] **Step 2: Prove the current failures**
 
 Run:
 
@@ -264,19 +264,19 @@ bunx vitest run src/components/Option/Chatbooks/__tests__/ChatbooksPlaygroundPag
 
 Expected: backend FAILS because import-job responses do not expose the redacted human-readable archive identity; UI FAILS because the side rail is rendered on Jobs, rows lead with UUID, errors expose multipart flags, and destructive actions execute immediately.
 
-- [ ] **Step 3: Give the Jobs tab full width**
+- [x] **Step 3: Give the Jobs tab full width**
 
 Render the compact side tracker only on Export and Import. On Jobs, use the entire page width for the tables. Preserve responsive horizontal overflow as a fallback, but keep the primary status and action columns visible at common desktop widths.
 
-- [ ] **Step 4: Add human-readable identity and recovery**
+- [x] **Step 4: Add human-readable identity and recovery**
 
 Expose redacted source filename/Chatbook name in import job metadata and use it as the row label. Translate known backend failures into user language while preserving copyable technical detail under disclosure. Route recovery back to Import and preserve the in-memory preview when still available.
 
-- [ ] **Step 5: Guard destructive actions**
+- [x] **Step 5: Guard destructive actions**
 
 Use the existing confirmation pattern to name exactly what is removed: server archive files, one job record, or all finished job records. Keep Download as the primary action for completed exports.
 
-- [ ] **Step 6: Verify desktop, mobile, and keyboard behavior**
+- [x] **Step 6: Verify desktop, mobile, and keyboard behavior**
 
 At 1280px, all primary columns and actions must be discoverable without the duplicate rail. At 390px and 200% zoom, tables may scroll horizontally but status, row identity, and an action menu must remain reachable. Confirm focus moves to recovery feedback after a failed action.
 
@@ -284,12 +284,28 @@ Re-run both Step 2 commands.
 
 Expected: backend and UI tests PASS before commit.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps/packages/ui/src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx apps/packages/ui/src/components/Option/Chatbooks/__tests__/ChatbooksPlaygroundPage.jobs.test.tsx tldw_Server_API/app/api/v1/endpoints/chatbooks.py tldw_Server_API/tests/Chatbooks/test_chatbooks_api_error_and_preview_mapping.py
 git commit -m "fix: improve chatbook job trust and recovery"
 ```
+
+Task 4 completed in `b72c2e5d0c`. TDD covered full-width job history,
+human-readable import identity, recovery focus, explicit destructive scope,
+server-side removal beyond the loaded page, and responsive action reachability.
+Follow-up review found and drove additional regression coverage for unquoted
+Windows/UNC/spaced path redaction, nested metadata keys and path-like names,
+archive-unlink failure preservation, and strict bulk-list failures. Final
+verification passed 29 API/worker tests, 6 focused service tests, 12 lifecycle
+tests, 24 full-account export/import contract tests, and 25 focused frontend
+tests; TypeScript and client ownership checks passed; Bandit reported zero
+findings. Live in-app browser UAT at 1280px, 720px effective width, and 390px
+showed no document-level horizontal overflow. Desktop identity/actions remained
+pinned; smaller widths rendered non-scrolling job lists with 44px row and
+toolbar controls. The final fresh delegated review could not run because the
+agent quota was exhausted, so no final external approval is claimed; controller
+review rechecked the reviewer contracts and found no remaining Task 4 defect.
 
 ## Task 5: Build A Media-Bearing Clean-Destination UAT Fixture
 
