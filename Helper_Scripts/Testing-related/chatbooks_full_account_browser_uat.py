@@ -188,6 +188,23 @@ def _verify_inventory_payload(
     return digest
 
 
+def _verify_no_sensitive_archive_leaks(
+    archive: zipfile.ZipFile,
+    config: BrowserUatConfig,
+) -> None:
+    password_hash = hashlib.sha256(b"chatbooks-uat-disabled-login:chatbooks-backup-source").hexdigest()
+    forbidden_values = (
+        password_hash.encode("utf-8"),
+        str(config.source_root).encode("utf-8"),
+    )
+    for member in archive.infolist():
+        if member.is_dir():
+            continue
+        payload = archive.read(member)
+        if any(value in payload for value in forbidden_values):
+            raise BrowserUatError("Browser archive contains sensitive data or a raw source storage path")
+
+
 def inspect_browser_archive(config: BrowserUatConfig) -> dict[str, Any]:
     """Prove the actual browser download is a complete integrity-bearing archive."""
     archive_path = config.downloaded_archive.resolve()
@@ -225,6 +242,7 @@ def inspect_browser_archive(config: BrowserUatConfig) -> dict[str, Any]:
             inventory = manifest.get("file_inventory")
             if not isinstance(inventory, list):
                 raise BrowserUatError("Browser archive has no verified file inventory")
+            _verify_no_sensitive_archive_leaks(archive, config)
 
             profile_sha = _verify_inventory_payload(
                 archive,
@@ -255,6 +273,7 @@ def inspect_browser_archive(config: BrowserUatConfig) -> dict[str, Any]:
         "sha256": archive_sha256,
         "format_version": "1.1.0",
         "post_write_verification": True,
+        "sensitive_data_scan": True,
         "verified_payloads": {
             "account_profile": profile_sha,
             "account_settings": settings_sha,

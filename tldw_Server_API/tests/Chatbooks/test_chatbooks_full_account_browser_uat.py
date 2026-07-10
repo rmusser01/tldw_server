@@ -150,6 +150,40 @@ def test_archive_inspection_rejects_fixture_substitution_even_after_copy(
         browser_uat.inspect_browser_archive(config)
 
 
+def test_archive_inspection_rejects_sensitive_or_source_path_leaks(
+    tmp_path: Path,
+) -> None:
+    config = browser_uat.BrowserUatConfig(
+        surface="webui",
+        root=tmp_path,
+        api_port=18001,
+        web_port=18269,
+    )
+    _write_expected(tmp_path)
+    _write_archive(
+        config.fixture_archive,
+        name="fixture archive",
+        payloads={"fixture.txt": b"fixture"},
+    )
+    password_hash = hashlib.sha256(b"chatbooks-uat-disabled-login:chatbooks-backup-source").hexdigest()
+    _write_archive(
+        config.downloaded_archive,
+        name="browser archive",
+        payloads={
+            **REQUIRED_PAYLOADS,
+            "json/leak.json": json.dumps(
+                {
+                    "password_hash": password_hash,
+                    "source_root": str(config.source_root),
+                }
+            ).encode("utf-8"),
+        },
+    )
+
+    with pytest.raises(browser_uat.BrowserUatError, match="sensitive data"):
+        browser_uat.inspect_browser_archive(config)
+
+
 def test_api_scope_preflight_rejects_wrong_source_or_dirty_destination() -> None:
     source_scope = {
         "categories": [
