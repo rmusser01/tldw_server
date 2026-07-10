@@ -316,11 +316,11 @@ review rechecked the reviewer contracts and found no remaining Task 4 defect.
 - Create: `tldw_Server_API/tests/e2e/test_chatbooks_full_account_media_roundtrip.py`
 - Test: `tldw_Server_API/tests/Chatbooks/test_chatbooks_full_account_import_restore.py`
 
-- [ ] **Step 1: Write failing fixture and two-user round-trip tests**
+- [x] **Step 1: Write failing fixture and two-user round-trip tests**
 
 The fixture test must require `prepare`, `reset-destination`, and `verify` behavior. The E2E test must create a source user with non-secret account profile/settings values, a character, media record, transcript/chunks, a stored media artifact with known SHA-256, and embedding/vector records; export full account; import into a distinct clean destination user; then compare destination profile/settings state, content records, artifact hash, and vector identifiers.
 
-- [ ] **Step 2: Prove the fixture does not exist**
+- [x] **Step 2: Prove the fixture does not exist**
 
 Run:
 
@@ -333,28 +333,50 @@ python -m pytest \
 
 Expected: FAIL because the fixture helper and media-bearing two-user round trip are not implemented.
 
-- [ ] **Step 3: Implement deterministic prepare/reset/verify behavior**
+- [x] **Step 3: Implement deterministic prepare/reset/verify behavior**
 
 `prepare` writes the full-account archive plus `expected.json`; `reset-destination` initializes an empty target without copying source state; `verify` reads only the destination and fails unless all expected categories, account profile/settings values, media bytes, and embedding/vector identifiers are present. Never satisfy verification from manifest counts or import-job metadata alone.
 
 If the red round trip confirms that account profile/settings are inventory-only placeholders, add a versioned archive payload and restore handler using the existing user/profile/settings abstractions. Apply the approved sensitive-data policy: include required account-owned state, redact preview/log output, and represent intentionally excluded secrets with explicit policy metadata rather than fabricated counts.
 
-- [ ] **Step 4: Run fixture and backend round-trip tests**
+- [x] **Step 4: Run fixture and backend round-trip tests**
 
 Run the Step 2 command again.
 
 Expected: PASS with two distinct users, no same-account conflict skips, restored account profile/settings values, matching media SHA-256, and restored vector identifiers.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/Chatbooks/chatbook_service.py tldw_Server_API/tests/Chatbooks/test_chatbooks_full_account_import_restore.py Helper_Scripts/Testing-related/chatbooks_full_account_uat_fixture.py tldw_Server_API/tests/Chatbooks/test_chatbooks_full_account_uat_fixture.py tldw_Server_API/tests/e2e/test_chatbooks_full_account_media_roundtrip.py
 git commit -m "test: add full account chatbook restore fixture"
 ```
 
+Implemented in `b49d885112`. Verification evidence: the exact two-user Task 5 command passed, and the
+expanded account restore/fixture set passed 12 tests. Four separate CLI
+processes prepared a source archive, observed an empty destination including
+zero actual Chroma vectors, imported the exact archive, and verified source
+user 1 against destination user 2. Destination checks matched the stored media
+SHA-256, media vector SHA-256, Chroma collection IDs, account email, settings,
+character, transcript, and chunks. Archive inspection proved both versioned
+account payloads were in the verified file inventory and that neither the
+fixture password hash nor source storage root leaked. Worker regressions passed
+8 tests; full-account export/import contracts passed 35 tests; Chroma lifecycle
+coverage passed 37 tests with one documented integration skip; the focused
+Pydantic v2 email regression passed. Critical Ruff and compile checks passed,
+`git diff --check` passed, and Bandit reported zero findings across 11,869
+production/helper lines. The red/green cycle additionally found and fixed
+Media DB versioned vector restore, NumPy Chroma export serialization, Chroma
+not-found exception mapping, and final-client close/reopen lifecycle behavior.
+
 ## Task 6: Certify WebUI And Packaged Extension Workflows
 
 **Files:**
+- Modify: `apps/packages/ui/src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx`
+- Modify: `apps/packages/ui/src/services/tldw/TldwApiClient.ts`
+- Modify: `apps/packages/ui/src/services/tldw/domains/chat-rag.ts`
+- Test: `apps/packages/ui/src/components/Option/Chatbooks/__tests__/ChatbooksPlaygroundPage.backup-all.test.tsx`
+- Test: `apps/packages/ui/src/services/__tests__/tldw-api-client.chatbooks-openwebui.test.ts`
 - Modify: `apps/extension/tests/e2e/utils/extension.ts:278`
 - Modify: `apps/extension/tests/e2e/chatbooks-export-download.spec.ts`
 - Test: `apps/extension/tests/e2e/utils/extension.launch.test.ts`
@@ -366,6 +388,11 @@ git commit -m "test: add full account chatbook restore fixture"
 - [ ] **Step 1: Write failing extension-launch and browser-orchestrator tests**
 
 Model a persistent extension context with no immediately visible service-worker target. Assert that extension ID resolution and seeded configuration still succeed through the existing extension-page fallback.
+
+Assert that WebUI Backup all explicitly requests Chatbook format `1.1.0` and
+that the shared client type forwards `format_version`. The API's v1.0 default
+remains available for compatibility, but browser safety backups must use the
+integrity-bearing v1.1 format.
 
 Test the browser UAT orchestrator in dry-run/fake-process mode. It must enforce this order independently for WebUI and extension: seed media-bearing source root; start source services; export and capture the browser-downloaded archive path; stop source services; initialize a distinct clean destination root; start destination services; import that exact downloaded archive; stop services; verify destination artifact hash and vector identifiers. The runner must reject a fixture archive substituted for the browser download.
 
@@ -391,6 +418,11 @@ Keep service-worker seeding when available. When absent, resolve the extension I
 - [ ] **Step 4: Add two-phase WebUI and packaged-extension acceptance**
 
 Add an export phase and import phase to the WebUI real-server spec and packaged-extension spec. The export phase connects to the seeded source root, clicks **Backup all**, waits for completion, downloads the archive, and writes the actual download path to the runner result. The import phase starts only after the runner has stopped source services and started a clean destination; it uploads the exact download path, verifies the full account-impact preview, starts import, and waits for a completed job whose metadata reports imported media and embedding categories.
+
+Before stopping source services, inspect the browser-downloaded archive and
+fail unless it is v1.1 with verified file-inventory entries for account profile,
+account settings, and bundled media. A valid ZIP or completed export job alone
+is insufficient.
 
 Implement `chatbooks_full_account_browser_uat.py` to own process lifecycle, ports, temporary roots, archive handoff, and cleanup. After each surface's import phase, call the fixture helper's `verify` logic against that surface's destination root. Compare restored media artifact SHA-256 and embedding/vector identifiers to `expected.json`. A completed job without matching destination bytes/vectors is a failure.
 
@@ -423,7 +455,7 @@ Re-run the Step 2 unit commands before commit.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add apps/extension/tests/e2e/utils/extension.ts apps/extension/tests/e2e/utils/extension.launch.test.ts apps/extension/tests/e2e/chatbooks-export-download.spec.ts apps/tldw-frontend/e2e/workflows/tier-2-features/chatbooks-full-account-roundtrip.spec.ts Helper_Scripts/Testing-related/chatbooks_full_account_browser_uat.py tldw_Server_API/tests/Chatbooks/test_chatbooks_full_account_browser_uat.py
+git add apps/packages/ui/src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx apps/packages/ui/src/services/tldw/TldwApiClient.ts apps/packages/ui/src/services/tldw/domains/chat-rag.ts apps/packages/ui/src/components/Option/Chatbooks/__tests__/ChatbooksPlaygroundPage.backup-all.test.tsx apps/packages/ui/src/services/__tests__/tldw-api-client.chatbooks-openwebui.test.ts apps/extension/tests/e2e/utils/extension.ts apps/extension/tests/e2e/utils/extension.launch.test.ts apps/extension/tests/e2e/chatbooks-export-download.spec.ts apps/tldw-frontend/e2e/workflows/tier-2-features/chatbooks-full-account-roundtrip.spec.ts Helper_Scripts/Testing-related/chatbooks_full_account_browser_uat.py tldw_Server_API/tests/Chatbooks/test_chatbooks_full_account_browser_uat.py
 git commit -m "test: certify browser chatbook backup restore"
 ```
 
