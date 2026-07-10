@@ -9,6 +9,7 @@ import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import { useStorage } from "@plasmohq/storage/hook"
 import { collectGreetings, pickGreeting } from "@/utils/character-greetings"
+import { createImageDataUrl, safeImageUrl } from "@/utils/image-utils"
 import {
   CHARACTER_MOOD_OPTIONS,
   getCharacterMoodImagesFromExtensions,
@@ -85,6 +86,13 @@ type ImageOnlyErrorDetail = {
 const GREETING_RETRY_DELAY_MS = 800
 const MAX_PERSONA_IMAGE_BYTES = 5 * 1024 * 1024
 const MAX_MOOD_IMAGE_BYTES = 5 * 1024 * 1024
+
+const resolveAssistantAvatar = (
+  avatarUrl: unknown,
+  imageBase64?: unknown
+): string | null =>
+  safeImageUrl(avatarUrl) ??
+  (typeof imageBase64 === "string" ? createImageDataUrl(imageBase64) : null)
 
 const delayWithAbort = (ms: number, signal?: AbortSignal) =>
   new Promise<void>((resolve) => {
@@ -284,26 +292,44 @@ export const CharacterSelect: React.FC<Props> = ({
     staleTime: 5 * 60 * 1000
   })
 
+  const normalizedCharacters = useMemo<CharacterApiResponse[]>(
+    () =>
+      (characters || []).map((character) => ({
+        ...character,
+        avatar_url: resolveAssistantAvatar(
+          character.avatar_url,
+          character.image_base64
+        )
+      })),
+    [characters]
+  )
+  const normalizedPersonas = useMemo<PersonaInfo[]>(
+    () =>
+      (personas || []).map((persona) => ({
+        ...persona,
+        avatar_url: resolveAssistantAvatar(persona.avatar_url)
+      })),
+    [personas]
+  )
+
   // Filter characters based on search
   const filteredCharacters = useMemo<CharacterApiResponse[]>(() => {
-    if (!characters) return []
-    if (!searchText.trim()) return characters
+    if (!searchText.trim()) return normalizedCharacters
     const q = searchText.toLowerCase()
-    return characters.filter(
+    return normalizedCharacters.filter(
       (char) =>
         char.name?.toLowerCase().includes(q) ||
         char.description?.toLowerCase().includes(q) ||
         char.tags?.some((tag) => tag.toLowerCase().includes(q))
     )
-  }, [characters, searchText])
+  }, [normalizedCharacters, searchText])
   const filteredPersonas = useMemo<PersonaInfo[]>(() => {
-    if (!personas) return []
-    if (!searchText.trim()) return personas
+    if (!searchText.trim()) return normalizedPersonas
     const q = searchText.toLowerCase()
-    return personas.filter((persona) =>
+    return normalizedPersonas.filter((persona) =>
       String(persona.name || "").toLowerCase().includes(q)
     )
-  }, [personas, searchText])
+  }, [normalizedPersonas, searchText])
 
   const favoriteIndex = useMemo(() => {
     const ids = new Set<string>()
@@ -376,28 +402,28 @@ export const CharacterSelect: React.FC<Props> = ({
   }, [filteredCharacters, getCharacterDisplayName, isFavoriteCharacter, sortMode])
 
   const selectedCharacter = useMemo(() => {
-    if (!selectedCharacterId || !characters) return null
-    return characters.find(
+    if (!selectedCharacterId) return null
+    return normalizedCharacters.find(
       (char) => String(char.id) === String(selectedCharacterId)
     )
-  }, [characters, selectedCharacterId])
+  }, [normalizedCharacters, selectedCharacterId])
   const selectedPersona = useMemo(() => {
     if (selectedAssistant?.kind !== "persona") return null
     return (
-      personas.find(
+      normalizedPersonas.find(
         (persona) => String(persona.id ?? "") === String(selectedAssistant.id)
       ) ??
       selectedAssistant
     )
-  }, [personas, selectedAssistant])
+  }, [normalizedPersonas, selectedAssistant])
   const selectedPersonaSource = useMemo(() => {
     if (selectedAssistant?.kind !== "persona") return null
-    return personas.some(
+    return normalizedPersonas.some(
       (persona) => String(persona.id ?? "") === String(selectedAssistant.id)
     )
       ? "catalog"
       : "selected-assistant-fallback"
-  }, [personas, selectedAssistant])
+  }, [normalizedPersonas, selectedAssistant])
   const selectedCharacterMoodImages = useMemo(
     () =>
       getCharacterMoodImagesFromExtensions(
@@ -488,13 +514,10 @@ export const CharacterSelect: React.FC<Props> = ({
       const id = character?.id
       const name = character?.name
       if (!id || !name) return null
-      const avatar =
-        character.avatar_url ||
-        (character.image_base64
-          ? `data:${character.image_mime || "image/png"};base64,${
-              character.image_base64
-            }`
-          : undefined)
+      const avatar = resolveAssistantAvatar(
+        character.avatar_url,
+        character.image_base64
+      )
       return {
         id: String(id),
         name,
@@ -1115,12 +1138,12 @@ export const CharacterSelect: React.FC<Props> = ({
   const handleSelect = React.useCallback(
     (id: string | null) => {
       const selected = id
-        ? characters?.find((char) => String(char.id) === String(id))
+        ? normalizedCharacters.find((char) => String(char.id) === String(id))
         : null
       const stored = selected ? buildStoredCharacter(selected) : null
       void applySelection(id, stored)
     },
-    [applySelection, buildStoredCharacter, characters]
+    [applySelection, buildStoredCharacter, normalizedCharacters]
   )
 
   const handlePersonaSelect = React.useCallback(

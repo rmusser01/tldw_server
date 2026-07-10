@@ -1,6 +1,7 @@
 import type { AssistantSelection } from "@/types/assistant-selection"
 import type { ChatAssistantOverlay } from "@/types/chat-session-settings"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
+import { safeImageUrl } from "@/utils/image-utils"
 
 const normalizeText = (value: unknown): string | null => {
   if (typeof value !== "string") return null
@@ -38,7 +39,7 @@ export const buildAssistantOverlaySnapshotFromSelection = (
     name:
       normalizeText(selection.name) ??
       (selection.kind === "persona" ? "Persona" : "Assistant"),
-    avatarUrl: normalizeText(selection.avatar_url) ?? null,
+    avatarUrl: safeImageUrl(selection.avatar_url),
     systemPrompt: normalizeText(selection.system_prompt) ?? null
   })
 
@@ -64,9 +65,7 @@ export const resolveAssistantOverlaySnapshot = async (
         normalizeText(selection.name) ??
         "Persona",
       avatarUrl:
-        normalizeText(profile?.avatar_url) ??
-        normalizeText(selection.avatar_url) ??
-        null,
+        safeImageUrl(profile?.avatar_url) ?? safeImageUrl(selection.avatar_url),
       systemPrompt:
         normalizeText(profile?.system_prompt) ??
         normalizeText(selection.system_prompt) ??
@@ -93,9 +92,7 @@ export const resolveAssistantOverlaySnapshot = async (
       normalizeText(selection.name) ??
       "Assistant",
     avatarUrl:
-      normalizeText(detail?.avatar_url) ??
-      normalizeText(selection.avatar_url) ??
-      null,
+      safeImageUrl(detail?.avatar_url) ?? safeImageUrl(selection.avatar_url),
     systemPrompt:
       normalizeText(detail?.system_prompt) ??
       normalizeText(selection.system_prompt) ??

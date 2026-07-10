@@ -210,6 +210,13 @@ describe("extractImageUrl", () => {
     expect(extractImageUrl(`Text ![hero](${candidate}) after`)).toBe(expected)
   })
 
+  it("prefers an earlier src attribute over a later data-src attribute", () => {
+    const html =
+      '<img src="https://example.com/primary.jpg" data-src="https://example.com/lazy.jpg" />'
+
+    expect(extractImageUrl(html)).toBe("https://example.com/primary.jpg")
+  })
+
   it("returns null when no image exists", () => {
     expect(extractImageUrl("no image here")).toBeNull()
   })

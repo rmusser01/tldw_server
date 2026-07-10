@@ -268,6 +268,40 @@ describe("CharacterSelect persona avatar", () => {
     )
   })
 
+  it("does not render an unsafe persona avatar", () => {
+    mocks.useQuery.mockImplementation(({ queryKey }: { queryKey: string[] }) => {
+      if (queryKey[0] === "persona-profiles") {
+        return {
+          data: [
+            {
+              id: "persona-1",
+              name: "Guide Persona",
+              avatar_url: "javascript:alert(1)"
+            }
+          ]
+        }
+      }
+
+      return {
+        data: [],
+        isLoading: false,
+        refetch: vi.fn()
+      }
+    })
+
+    render(
+      <CharacterSelect
+        selectedCharacterId={null}
+        setSelectedCharacterId={vi.fn()}
+      />
+    )
+
+    const trigger = screen.getByTestId("chat-character-select")
+    expect(
+      within(trigger).queryByTestId("persona-avatar")
+    ).not.toBeInTheDocument()
+  })
+
   it("does not replay the same open request when capabilities update", async () => {
     mocks.setCapabilities({
       hasCharacters: true,
