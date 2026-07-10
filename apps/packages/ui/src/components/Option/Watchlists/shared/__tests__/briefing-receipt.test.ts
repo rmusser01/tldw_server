@@ -76,4 +76,62 @@ describe("watchlists briefing receipt", () => {
     expect(receipt.dstNote).toContain("PST")
     expect(receipt.dstNote).toContain("America/Los_Angeles")
   })
+
+  it("names deterministic reviewed email and Chatbook destinations", () => {
+    const contract = buildBriefingPipelineContract({
+      monitorName: "Delivery Brief",
+      scope: { sources: [1, 2] },
+      active: true,
+      scheduleExpr: "0 9 * * *",
+      timezone: "UTC",
+      templateName: "briefing_markdown",
+      audioEnabled: true,
+      targetAudioMinutes: 8,
+      emailEnabled: true,
+      emailRecipients: ["zeta@example.com", "alpha@example.com"],
+      chatbookEnabled: true,
+      chatbookTitle: "Morning Review"
+    })
+
+    const receipt = buildBriefingReceiptModel({
+      contract,
+      sourceCount: 2,
+      nextRunAt: "2026-07-12T09:00:00Z",
+      timezone: "UTC"
+    })
+
+    expect(receipt.emailRecipients).toEqual([
+      "alpha@example.com",
+      "zeta@example.com"
+    ])
+    expect(receipt.chatbookTitle).toBe("Morning Review")
+    expect(receipt.sentence).toContain(
+      "email the outcome to alpha@example.com and zeta@example.com"
+    )
+    expect(receipt.sentence).toContain('save it to Chatbook “Morning Review”')
+    expect(receipt.sentence).toContain("targeting 8 minutes")
+    expect(receipt.sentence).toContain("Reports")
+  })
+
+  it("formats 24-hour locales without an undefined day period", () => {
+    const contract = buildBriefingPipelineContract({
+      monitorName: "UK Brief",
+      scope: { sources: [1] },
+      active: true,
+      templateName: "briefing_markdown",
+      audioEnabled: false
+    })
+
+    const receipt = buildBriefingReceiptModel({
+      contract,
+      sourceCount: 1,
+      nextRunAt: "2026-07-12T18:00:00+01:00",
+      timezone: "Europe/London",
+      locale: "en-GB"
+    })
+
+    expect(receipt.nextRunLabel).not.toContain("undefined")
+    expect(receipt.sentence).not.toContain("undefined")
+    expect(receipt.nextRunLabel).toContain("18:00")
+  })
 })

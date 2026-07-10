@@ -20,6 +20,8 @@ export interface BriefingReceiptModel {
   timezoneAbbreviation: string
   nextRunLabel: string
   sentence: string
+  emailRecipients: string[]
+  chatbookTitle?: string
   dstNote?: string
 }
 
@@ -58,11 +60,19 @@ const timezoneOffset = (date: Date, timezone: string, locale: string): string =>
 
 const formatOccurrence = (date: Date, timezone: string, locale: string) => {
   const parts = formatParts(date, timezone, locale)
-  const nextRunLabel = `${parts.weekday}, ${parts.month} ${parts.day} at ${parts.hour}:${parts.minute} ${parts.dayPeriod} ${parts.timeZoneName}`
+  const dayPeriod = parts.dayPeriod ? ` ${parts.dayPeriod}` : ""
+  const timezoneName = parts.timeZoneName ? ` ${parts.timeZoneName}` : ""
+  const nextRunLabel = `${parts.weekday}, ${parts.month} ${parts.day} at ${parts.hour}:${parts.minute}${dayPeriod}${timezoneName}`
   return {
     nextRunLabel,
     timezoneAbbreviation: parts.timeZoneName || timezone
   }
+}
+
+const formatDestinations = (destinations: string[]): string => {
+  if (destinations.length < 2) return destinations[0] || ""
+  if (destinations.length === 2) return destinations.join(" and ")
+  return `${destinations.slice(0, -1).join(", ")}, and ${destinations.at(-1)}`
 }
 
 const programLabel = (
@@ -102,9 +112,19 @@ export const buildBriefingReceiptModel = (
     ? `${input.contract.text.show_notes ? "show notes" : "a text report"} and a ${programLabel(input.contract, speakerCount)}${target}${showName}`
     : "a text report"
   const saved = input.contract.audio.enabled ? "save both in Reports" : "save it in Reports"
+  const emailRecipients = input.contract.delivery.email.enabled
+    ? Array.from(new Set(input.contract.delivery.email.recipients)).sort()
+    : []
+  const chatbookTitle = input.contract.delivery.chatbook.enabled
+    ? input.contract.delivery.chatbook.title?.trim() || undefined
+    : undefined
   const deliveries = [
-    input.contract.delivery.email.enabled ? "email the outcome" : null,
-    input.contract.delivery.chatbook.enabled ? "save it to Chatbook" : null
+    emailRecipients.length > 0
+      ? `email the outcome to ${formatDestinations(emailRecipients)}`
+      : null,
+    input.contract.delivery.chatbook.enabled
+      ? `save it to Chatbook${chatbookTitle ? ` “${chatbookTitle}”` : ""}`
+      : null
   ].filter((entry): entry is string => Boolean(entry))
   const delivery = deliveries.length > 0 ? `, and ${deliveries.join(" and ")}` : ""
   const sentence = `${nextRunLabel} (${input.timezone}), collect new items from ${sources}, generate ${generated}, ${saved}${delivery}.`
@@ -132,6 +152,8 @@ export const buildBriefingReceiptModel = (
     timezoneAbbreviation,
     nextRunLabel,
     sentence,
+    emailRecipients,
+    ...(chatbookTitle ? { chatbookTitle } : {}),
     ...(dstNote ? { dstNote } : {})
   }
 }

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
+import type { JobOutputPrefs } from "@/types/watchlists"
 import {
   buildBriefingPipelineContract,
   normalizeLegacyBriefingContract,
@@ -237,5 +238,80 @@ describe("shared watchlists briefing contract", () => {
     expect(normalized.contract.audio).not.toHaveProperty("cast")
     expect(normalized.contract.audio).not.toHaveProperty("voice_map")
     expect(normalized.contract.delivery.chatbook).not.toHaveProperty("title")
+  })
+
+  it("uses safe defaults for null and blank numeric values and normalizes boolean strings", () => {
+    const malformedBoundary = {
+      briefing_pipeline: {
+        version: 1,
+        selection: { mode: "automatic", max_items: null },
+        editorial: { program_format: "concise_briefing", outcome_noun: "briefing" },
+        text: {
+          enabled: " TRUE ",
+          type: "briefing_markdown",
+          format: "md",
+          template_name: "briefing_markdown",
+          show_notes: " OFF "
+        },
+        audio: {
+          enabled: " TRUE ",
+          target_minutes: "",
+          language: "en"
+        },
+        delivery: {
+          reports: { enabled: false },
+          email: { enabled: " true ", recipients: ["ops@example.com"] },
+          chatbook: { enabled: " FALSE " }
+        },
+        test: { external_delivery: true, audio_sample_seconds: 1 }
+      }
+    } as unknown as JobOutputPrefs
+
+    const normalized = normalizeLegacyBriefingContract(malformedBoundary, {
+      scheduled: true
+    }).contract
+
+    expect(normalized.selection.max_items).toBe(100)
+    expect(normalized.text.show_notes).toBe(false)
+    expect(normalized.audio).toMatchObject({ enabled: true, target_minutes: 8 })
+    expect(normalized.delivery.email.enabled).toBe(true)
+    expect(normalized.delivery.chatbook.enabled).toBe(false)
+  })
+
+  it.each([
+    {
+      label: "sportscast briefing without show notes",
+      programFormat: "sportscast",
+      outcomeNoun: "briefing",
+      showNotes: false
+    },
+    {
+      label: "concise briefing with show notes",
+      programFormat: "concise_briefing",
+      outcomeNoun: "briefing",
+      showNotes: true
+    }
+  ] as const)("preserves hidden canonical intent for $label", ({
+    programFormat,
+    outcomeNoun,
+    showNotes
+  }) => {
+    const preserved = buildBriefingPipelineContract({
+      ...canonicalDraft,
+      programFormat,
+      outcomeNoun,
+      showNotes
+    })
+
+    const rebuilt = buildBriefingPipelineContract({
+      ...canonicalDraft,
+      preservedOutputPrefs: { briefing_pipeline: preserved }
+    })
+
+    expect(rebuilt.editorial).toMatchObject({
+      program_format: programFormat,
+      outcome_noun: outcomeNoun
+    })
+    expect(rebuilt.text.show_notes).toBe(showNotes)
   })
 })

@@ -123,6 +123,13 @@ const deepMerge = (base: UnknownRecord, overlay: UnknownRecord): UnknownRecord =
 }
 
 const clampInteger = (value: unknown, fallback: number, min: number, max: number): number => {
+  if (
+    value === null ||
+    value === undefined ||
+    (typeof value === "string" && value.trim().length === 0)
+  ) {
+    return fallback
+  }
   const parsed = Number(value)
   const normalized = Number.isFinite(parsed) ? Math.floor(parsed) : fallback
   return Math.min(max, Math.max(min, normalized))
@@ -130,10 +137,11 @@ const clampInteger = (value: unknown, fallback: number, min: number, max: number
 
 const coerceBoolean = (value: unknown, fallback = false): boolean => {
   if (typeof value === "boolean") return value
-  if (value === 1 || value === "1" || value === "true" || value === "yes" || value === "on") {
+  const normalized = typeof value === "string" ? value.trim().toLowerCase() : value
+  if (normalized === 1 || normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on") {
     return true
   }
-  if (value === 0 || value === "0" || value === "false" || value === "no" || value === "off" || value === "") {
+  if (normalized === 0 || normalized === "0" || normalized === "false" || normalized === "no" || normalized === "off" || normalized === "") {
     return false
   }
   return fallback
@@ -425,10 +433,17 @@ export const buildBriefingPipelineContract = (
     scheduled: Boolean(trimmed(draft.scheduleExpr))
   })
   const existing = normalized.contract
+  const preservedContract = record(draft.preservedOutputPrefs?.briefing_pipeline)
+  const preservedEditorial = record(preservedContract.editorial)
+  const preservedText = record(preservedContract.text)
   const format = draft.programFormat || existing.editorial.program_format
-  const outcomeNoun = draft.outcomeNoun || (
-    format === "concise_briefing" ? "briefing" : "episode"
-  )
+  const preservedOutcomeNoun = preservedEditorial.outcome_noun === "briefing" ||
+    preservedEditorial.outcome_noun === "episode"
+    ? existing.editorial.outcome_noun
+    : undefined
+  const outcomeNoun = draft.outcomeNoun || preservedOutcomeNoun || (
+      format === "concise_briefing" ? "briefing" : "episode"
+    )
   const editorial = record(existing.editorial)
   editorial.program_format = format
   editorial.outcome_noun = outcomeNoun
@@ -452,7 +467,13 @@ export const buildBriefingPipelineContract = (
       delete text.template_version
     }
   }
-  text.show_notes = draft.showNotes ?? outcomeNoun === "episode"
+  const preservedShowNotes = Object.prototype.hasOwnProperty.call(
+    preservedText,
+    "show_notes"
+  )
+    ? existing.text.show_notes
+    : undefined
+  text.show_notes = draft.showNotes ?? preservedShowNotes ?? outcomeNoun === "episode"
 
   const audio = record(existing.audio)
   audio.enabled = Boolean(draft.audioEnabled)

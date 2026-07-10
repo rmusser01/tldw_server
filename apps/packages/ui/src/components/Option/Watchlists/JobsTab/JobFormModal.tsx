@@ -499,8 +499,22 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
       } else {
         delete emailPrefs.recipients
       }
-      emailPrefs.attach_file = deliveryEmailAttachFile
-      emailPrefs.body_format = deliveryEmailBodyFormat
+      if (
+        Object.prototype.hasOwnProperty.call(emailPrefs, "attach_file") ||
+        !deliveryEmailAttachFile
+      ) {
+        emailPrefs.attach_file = deliveryEmailAttachFile
+      } else {
+        delete emailPrefs.attach_file
+      }
+      if (
+        Object.prototype.hasOwnProperty.call(emailPrefs, "body_format") ||
+        deliveryEmailBodyFormat !== "auto"
+      ) {
+        emailPrefs.body_format = deliveryEmailBodyFormat
+      } else {
+        delete emailPrefs.body_format
+      }
       if (normalizedEmailSubject.length > 0) {
         emailPrefs.subject = normalizedEmailSubject
       } else {
@@ -557,7 +571,15 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
     if (audioBriefingEnabled) {
       audioPrefs.enabled = true
       audioPrefs.voice = audioVoice.trim() || DEFAULT_AUDIO_VOICE
-      audioPrefs.speed = normalizeAudioSpeed(audioSpeed)
+      const normalizedSpeed = normalizeAudioSpeed(audioSpeed)
+      if (
+        Object.prototype.hasOwnProperty.call(audioPrefs, "speed") ||
+        normalizedSpeed !== DEFAULT_AUDIO_SPEED
+      ) {
+        audioPrefs.speed = normalizedSpeed
+      } else {
+        delete audioPrefs.speed
+      }
       audioPrefs.target_minutes = normalizeAudioTargetMinutes(audioTargetMinutes)
       if (audioBackgroundUri.trim().length > 0) {
         audioPrefs.background_audio_uri = audioBackgroundUri.trim()
