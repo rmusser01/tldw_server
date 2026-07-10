@@ -12,6 +12,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from tldw_Server_API.app.core.Watchlists.audio_briefing_workflow import (
+    apply_audio_briefing_result_metadata,
+    trigger_audio_briefing,
+)
 from tldw_Server_API.app.core.Watchlists.briefing_contract import (
     BRIEFING_PIPELINE_KEY,
     briefing_selection_limit,
@@ -66,6 +70,14 @@ class FulfillmentResult:
     selected_count: int
     omitted_count: int
     stages: dict[str, dict[str, Any]]
+
+
+@dataclass(frozen=True)
+class _TextFlowResult:
+    occurrence: Any
+    selection: BriefingSelection | None
+    items: list[dict[str, Any]]
+    output_id: int | None
 
 
 def _utcnow_iso() -> str:
@@ -202,6 +214,11 @@ def audio_request_id_for_occurrence(occurrence_key: str, *, output_version: int 
     return f"wla_{digest[:32]}"
 
 
+def _text_output_idempotency_key(occurrence_key: str, *, output_version: int = 1) -> str:
+    source = f"{occurrence_key}:text:v{output_version}"
+    return f"wlt_{hashlib.sha256(source.encode('utf-8')).hexdigest()[:32]}"
+
+
 def _stable_item_id(item: Any) -> str:
     raw = item.get("id") if isinstance(item, Mapping) else getattr(item, "id", "")
     try:
@@ -253,6 +270,29 @@ async def _load_selection(
         candidate_count=candidate_count,
         selected_count=len(ordered),
         omitted_count=max(0, candidate_count - len(ordered)),
+    )
+
+
+async def _load_durable_selection(
+    watchlists_db: Any,
+    stages: Mapping[str, Mapping[str, Any]],
+) -> BriefingSelection:
+    select_stage = stages.get("select", {})
+    item_ids = select_stage.get("selected_item_ids")
+    if not isinstance(item_ids, list):
+        raise ValueError("briefing_selection_missing")
+    rows_list: list[Any] = []
+    for item_id in item_ids:
+        rows_list.append(await asyncio.to_thread(watchlists_db.get_item, int(item_id)))
+    rows = tuple(rows_list)
+    selected_count = int(select_stage.get("selected_count", len(rows)) or 0)
+    candidate_count = int(select_stage.get("candidate_count", selected_count) or 0)
+    omitted_count = int(select_stage.get("omitted_count", max(0, candidate_count - selected_count)) or 0)
+    return BriefingSelection(
+        items=rows,
+        candidate_count=candidate_count,
+        selected_count=selected_count,
+        omitted_count=omitted_count,
     )
 
 
@@ -317,6 +357,8 @@ def _render_briefing_text(
     checked_at: str,
     next_run_at: str | None,
     source_counts: Mapping[str, int],
+    selection: BriefingSelection,
+    selection_cap: int,
 ) -> str:
     if not items:
         return no_material_updates_markdown(
@@ -333,6 +375,11 @@ def _render_briefing_text(
         "generated_at": checked_at,
         "items": items,
         "item_count": len(items),
+        "candidate_count": selection.candidate_count,
+        "included_count": selection.selected_count,
+        "selected_count": selection.selected_count,
+        "omitted_count": selection.omitted_count,
+        "selection_cap": selection_cap,
     }
     if template_name:
         from tldw_Server_API.app.core.Watchlists import template_store
@@ -341,6 +388,14 @@ def _render_briefing_text(
         return render_output_template(template.content, context)
 
     lines = [f"# {title}", ""]
+    if selection.omitted_count:
+        lines.extend(
+            (
+                f"Included {selection.selected_count} of {selection.candidate_count} candidate items; "
+                f"{selection.omitted_count} omitted by the selection cap.",
+                "",
+            )
+        )
     for index, item in enumerate(items, 1):
         item_title = str(item.get("title") or "Untitled")
         item_url = str(item.get("url") or "")
@@ -406,11 +461,12 @@ def _metadata(
         "show_name": editorial.get("show_name"),
         "show_identity": {
             "name": editorial.get("show_name"),
-            "premise": editorial.get("show_premise"),
+            "premise": editorial.get("premise"),
         },
         "provenance": _provenance(items),
-        "ai_generated_speech": audio_enabled,
-        "speech_disclosure": "Synthetic AI-generated speech" if audio_enabled else None,
+        "audio_selected": audio_enabled,
+        "ai_generated_speech": False,
+        "speech_disclosure": "Synthetic speech generation pending" if audio_enabled else None,
         "audio_output_version": output_version,
     }
 
@@ -430,7 +486,10 @@ async def _persist_text_output(
     output_format = str(contract["text"].get("format") or "md")
     output_type = str(contract["text"].get("type") or "briefing_markdown")
     show_name = str(contract["editorial"].get("show_name") or "").strip()
-    title = show_name or f"{getattr(job, 'name', 'Watchlist')} briefing"
+    base_title = show_name or f"{getattr(job, 'name', 'Watchlist')} briefing"
+    title = f"{base_title} (run {int(run.id)})"
+    if output_version > 1:
+        title = f"{title} (version {output_version})"
     suffix = f"occurrence-{int(occurrence.id)}-v{output_version}"
     digest = hashlib.sha256(str(occurrence.occurrence_key).encode("utf-8")).hexdigest()[:12]
     filename = _build_output_filename(title, suffix, digest, output_format)
@@ -447,15 +506,16 @@ async def _persist_text_output(
         metadata_json=json.dumps(metadata, ensure_ascii=False, sort_keys=True),
         job_id=int(job.id),
         run_id=int(run.id),
+        idempotency_key=_text_output_idempotency_key(
+            str(occurrence.occurrence_key),
+            output_version=output_version,
+        ),
     )
     return int(artifact.id)
 
 
-def _existing_output(collections_db: Any, occurrence: Any) -> tuple[Any, dict[str, Any]] | None:
-    if occurrence.output_id is None:
-        return None
+def _parse_output_metadata(row: Any, occurrence: Any, output_version: int) -> dict[str, Any] | None:
     try:
-        row = collections_db.get_output_artifact(int(occurrence.output_id))
         metadata = json.loads(getattr(row, "metadata_json", None) or "{}")
     except (AttributeError, KeyError, TypeError, ValueError, json.JSONDecodeError):
         return None
@@ -465,16 +525,36 @@ def _existing_output(collections_db: Any, occurrence: Any) -> tuple[Any, dict[st
         return None
     if metadata.get("occurrence_key") != str(occurrence.occurrence_key):
         return None
-    return row, metadata
+    if int(metadata.get("output_version") or 1) != output_version:
+        return None
+    return metadata
 
 
-async def trigger_audio_briefing(**kwargs: Any) -> Any:
-    """Resolve the existing audio bridge lazily so legacy patches still apply."""
-    from tldw_Server_API.app.core.Watchlists.audio_briefing_workflow import (
-        trigger_audio_briefing as trigger,
-    )
-
-    return await trigger(**kwargs)
+def _existing_output(
+    collections_db: Any,
+    occurrence: Any,
+    *,
+    output_version: int = 1,
+) -> tuple[Any, dict[str, Any]] | None:
+    if occurrence.output_id is not None:
+        try:
+            row = collections_db.get_output_artifact(int(occurrence.output_id))
+            metadata = _parse_output_metadata(row, occurrence, output_version)
+            if metadata is not None:
+                return row, metadata
+        except (AttributeError, KeyError, TypeError, ValueError):
+            pass
+    try:
+        row = collections_db.get_output_artifact_by_idempotency_key(
+            _text_output_idempotency_key(
+                str(occurrence.occurrence_key),
+                output_version=output_version,
+            )
+        )
+    except (AttributeError, KeyError, TypeError, ValueError):
+        return None
+    metadata = _parse_output_metadata(row, occurrence, output_version)
+    return (row, metadata) if metadata is not None else None
 
 
 async def _update_output_audio_metadata(
@@ -484,10 +564,6 @@ async def _update_output_audio_metadata(
     *,
     output_version: int,
 ) -> None:
-    from tldw_Server_API.app.core.Watchlists.audio_briefing_workflow import (
-        apply_audio_briefing_result_metadata,
-    )
-
     row = await asyncio.to_thread(collections_db.get_output_artifact, output_id)
     try:
         metadata = json.loads(getattr(row, "metadata_json", None) or "{}")
@@ -497,10 +573,39 @@ async def _update_output_audio_metadata(
         metadata = {}
     metadata["audio_output_version"] = output_version
     apply_audio_briefing_result_metadata(metadata, audio_result, requested=True, retry=output_version > 1)
+    metadata["ai_generated_speech"] = False
+    metadata["speech_disclosure"] = "Synthetic speech generation pending"
     await asyncio.to_thread(
         collections_db.update_output_artifact_metadata,
         output_id,
         metadata_json=json.dumps(metadata, ensure_ascii=False, sort_keys=True),
+    )
+
+
+def _recover_audio_submission(
+    *,
+    metadata: Mapping[str, Any],
+    occurrence: Any,
+    stages: dict[str, dict[str, Any]],
+    watchlists_db: Any,
+) -> Any | None:
+    task_id = str(metadata.get("audio_briefing_task_id") or "").strip()
+    if not task_id or metadata.get("audio_briefing_status") != "queued":
+        return None
+    request_id = str(metadata.get("audio_request_id") or "").strip() or None
+    _transition(
+        stages,
+        "compose_audio_script",
+        "queued",
+        audio_request_id=request_id,
+        task_id=task_id,
+    )
+    return _save_occurrence(
+        watchlists_db,
+        int(occurrence.id),
+        stages,
+        artifact_status="running",
+        audio_task_id=task_id,
     )
 
 
@@ -646,6 +751,188 @@ async def _submit_audio(
     return _result(occurrence, stages)
 
 
+async def _run_text_flow(
+    *,
+    user_id: int,
+    job: Any,
+    run: Any,
+    contract: Mapping[str, Any],
+    occurrence: Any,
+    stages: dict[str, dict[str, Any]],
+    watchlists_db: Any,
+    collections_db: Any,
+    output_version: int,
+    force_reselect: bool = False,
+) -> _TextFlowResult:
+    """Select once, then render and persist from that durable ordered snapshot."""
+    selection: BriefingSelection
+    durable_selection = (
+        not force_reselect
+        and stages["select"].get("status") == "ready"
+        and isinstance(stages["select"].get("selected_item_ids"), list)
+    )
+    if durable_selection:
+        try:
+            selection = await _load_durable_selection(watchlists_db, stages)
+        except asyncio.CancelledError:
+            _transition(stages, "select", "cancelled", code="selection_reload_cancelled", retryable=True)
+            _save_occurrence(watchlists_db, int(occurrence.id), stages, artifact_status="cancelled")
+            raise
+        except Exception:  # noqa: BLE001 - snapshot reload boundary persists failure
+            _transition(stages, "select", "failed", code="selection_snapshot_missing", retryable=True)
+            occurrence = _save_occurrence(
+                watchlists_db,
+                int(occurrence.id),
+                stages,
+                artifact_status="failed",
+            )
+            return _TextFlowResult(occurrence, None, [], None)
+    else:
+        _transition(stages, "select", "running")
+        occurrence = _save_occurrence(
+            watchlists_db,
+            int(occurrence.id),
+            stages,
+            artifact_status="running",
+        )
+        try:
+            selection = await _load_selection(
+                watchlists_db,
+                run_id=int(run.id),
+                limit=briefing_selection_limit(contract),
+            )
+        except asyncio.CancelledError:
+            _transition(stages, "select", "cancelled", code="selection_cancelled", retryable=True)
+            _save_occurrence(watchlists_db, int(occurrence.id), stages, artifact_status="cancelled")
+            raise
+        except Exception:  # noqa: BLE001 - orchestration boundary persists selection failures
+            _transition(stages, "select", "failed", code="selection_load_failed", retryable=True)
+            occurrence = _save_occurrence(
+                watchlists_db,
+                int(occurrence.id),
+                stages,
+                artifact_status="failed",
+            )
+            return _TextFlowResult(occurrence, None, [], None)
+        selected_item_ids = [
+            int(item.get("id") if isinstance(item, Mapping) else getattr(item, "id"))
+            for item in selection.items
+        ]
+        _transition(
+            stages,
+            "select",
+            "ready",
+            candidate_count=selection.candidate_count,
+            selected_count=selection.selected_count,
+            omitted_count=selection.omitted_count,
+            selected_item_ids=selected_item_ids,
+        )
+        occurrence = _save_occurrence(
+            watchlists_db,
+            int(occurrence.id),
+            stages,
+            selected_count=selection.selected_count,
+            omitted_count=selection.omitted_count,
+        )
+
+    items = _normalize_items(selection.items)
+    checked_at = str(getattr(run, "finished_at", None) or _utcnow_iso())
+    try:
+        refreshed_job = watchlists_db.get_job(int(job.id))
+    except (AttributeError, KeyError, RuntimeError, TypeError, ValueError):
+        refreshed_job = job
+    next_run_at = getattr(refreshed_job, "next_run_at", None) or getattr(job, "next_run_at", None)
+    source_counts = _source_counts(run)
+    title = str(contract["editorial"].get("show_name") or getattr(job, "name", "Watchlist briefing"))
+
+    _transition(stages, "render_text", "running")
+    occurrence = _save_occurrence(watchlists_db, int(occurrence.id), stages, artifact_status="running")
+    try:
+        content = _render_briefing_text(
+            title=title,
+            items=items,
+            contract=contract,
+            checked_at=checked_at,
+            next_run_at=next_run_at,
+            source_counts=source_counts,
+            selection=selection,
+            selection_cap=briefing_selection_limit(contract),
+        )
+    except asyncio.CancelledError:
+        _transition(stages, "render_text", "cancelled", code="text_render_cancelled", retryable=True)
+        _save_occurrence(watchlists_db, int(occurrence.id), stages, artifact_status="cancelled")
+        raise
+    except Exception:  # noqa: BLE001 - orchestration boundary persists renderer failures
+        _transition(stages, "render_text", "failed", code="text_render_failed", retryable=True)
+        occurrence = _save_occurrence(
+            watchlists_db,
+            int(occurrence.id),
+            stages,
+            artifact_status="failed",
+        )
+        return _TextFlowResult(occurrence, selection, items, None)
+    _transition(stages, "render_text", "ready")
+    occurrence = _save_occurrence(watchlists_db, int(occurrence.id), stages)
+
+    metadata = _metadata(
+        occurrence=occurrence,
+        contract=contract,
+        selection=selection,
+        items=items,
+        run=run,
+        job=job,
+        checked_at=checked_at,
+        next_run_at=next_run_at,
+        source_counts=source_counts,
+        output_version=output_version,
+    )
+    _transition(stages, "persist_text", "running", output_version=output_version)
+    occurrence = _save_occurrence(watchlists_db, int(occurrence.id), stages, artifact_status="running")
+    try:
+        output_id = await _persist_text_output(
+            user_id=user_id,
+            collections_db=collections_db,
+            occurrence=occurrence,
+            job=job,
+            run=run,
+            contract=contract,
+            content=content,
+            metadata=metadata,
+            output_version=output_version,
+        )
+    except asyncio.CancelledError:
+        _transition(stages, "persist_text", "cancelled", code="text_persist_cancelled", retryable=True)
+        _save_occurrence(watchlists_db, int(occurrence.id), stages, artifact_status="cancelled")
+        raise
+    except Exception:  # noqa: BLE001 - orchestration boundary persists storage failures
+        _transition(stages, "persist_text", "failed", code="text_persist_failed", retryable=True)
+        occurrence = _save_occurrence(
+            watchlists_db,
+            int(occurrence.id),
+            stages,
+            artifact_status="failed",
+        )
+        return _TextFlowResult(occurrence, selection, items, None)
+
+    # The row is now the durable idempotency anchor. A crash in this link update is
+    # deliberately allowed to propagate; replay recovers the row by its stable key.
+    _transition(
+        stages,
+        "persist_text",
+        "ready",
+        artifact_id=output_id,
+        output_version=output_version,
+    )
+    occurrence = _save_occurrence(
+        watchlists_db,
+        int(occurrence.id),
+        stages,
+        output_id=output_id,
+        artifact_status="running" if contract["audio"]["enabled"] else "ready",
+    )
+    return _TextFlowResult(occurrence, selection, items, output_id)
+
+
 async def fulfill_watchlist_briefing(
     *,
     user_id: int,
@@ -675,140 +962,89 @@ async def fulfill_watchlist_briefing(
         audio_enabled=audio_enabled,
         delivery_configured=delivery_configured,
     )
-    expected_delivery_status = "waiting_for_artifacts" if delivery_configured else "not_configured"
-    if occurrence.delivery_status != expected_delivery_status:
+    is_new_occurrence = (
+        str(getattr(occurrence, "stages_json", None) or "{}").strip() == "{}"
+        and occurrence.output_id is None
+        and occurrence.audio_task_id is None
+    )
+    if is_new_occurrence and not delivery_configured and occurrence.delivery_status == "waiting_for_artifacts":
         occurrence = _save_occurrence(
             watchlists_db,
             int(occurrence.id),
             stages,
-            delivery_status=expected_delivery_status,
+            delivery_status="not_configured",
         )
-    existing = _existing_output(collections_db, occurrence)
+    output_version = int(stages["persist_text"].get("output_version") or 1)
+    existing = _existing_output(collections_db, occurrence, output_version=output_version)
     if existing is not None:
+        row, metadata = existing
+        if stages["select"].get("status") != "ready":
+            _transition(
+                stages,
+                "select",
+                "ready",
+                candidate_count=int(metadata.get("candidate_count") or 0),
+                selected_count=int(metadata.get("selected_count") or 0),
+                omitted_count=int(metadata.get("omitted_count") or 0),
+                selected_item_ids=list(metadata.get("item_ids") or []),
+            )
+        if stages["render_text"].get("status") != "ready":
+            _transition(stages, "render_text", "ready")
+        _transition(
+            stages,
+            "persist_text",
+            "ready",
+            artifact_id=int(row.id),
+            output_version=output_version,
+        )
+        occurrence = _save_occurrence(
+            watchlists_db,
+            int(occurrence.id),
+            stages,
+            output_id=int(row.id),
+            selected_count=int(metadata.get("selected_count") or 0),
+            omitted_count=int(metadata.get("omitted_count") or 0),
+            artifact_status=(
+                "ready"
+                if not audio_enabled
+                else occurrence.artifact_status
+                if occurrence.artifact_status in {"failed", "cancelled"}
+                else "running"
+            ),
+        )
+        recovered_audio = _recover_audio_submission(
+            metadata=metadata,
+            occurrence=occurrence,
+            stages=stages,
+            watchlists_db=watchlists_db,
+        )
+        if recovered_audio is not None:
+            return _result(recovered_audio, stages)
         if not audio_enabled or occurrence.audio_task_id:
             return _result(occurrence, stages)
         if stages["compose_audio_script"]["status"] == "failed":
             return _result(occurrence, stages)
-
-    try:
-        _transition(stages, "select", "running")
-        occurrence = _save_occurrence(watchlists_db, int(occurrence.id), stages)
-        selection = await _load_selection(
-            watchlists_db,
-            run_id=int(run.id),
-            limit=briefing_selection_limit(contract),
-        )
-    except asyncio.CancelledError:
-        _transition(stages, "select", "cancelled", code="selection_cancelled", retryable=True)
-        _save_occurrence(watchlists_db, int(occurrence.id), stages, artifact_status="cancelled")
-        raise
-    except Exception:  # noqa: BLE001 - orchestration boundary persists selection failures
-        _transition(stages, "select", "failed", code="selection_load_failed", retryable=True)
-        occurrence = _save_occurrence(
-            watchlists_db,
-            int(occurrence.id),
-            stages,
-            artifact_status="failed",
-        )
-        return _result(occurrence, stages)
-
-    _transition(
-        stages,
-        "select",
-        "ready",
-        candidate_count=selection.candidate_count,
-        selected_count=selection.selected_count,
-        omitted_count=selection.omitted_count,
-    )
-    occurrence = _save_occurrence(
-        watchlists_db,
-        int(occurrence.id),
-        stages,
-        selected_count=selection.selected_count,
-        omitted_count=selection.omitted_count,
-    )
-    items = _normalize_items(selection.items)
-    checked_at = str(getattr(run, "finished_at", None) or _utcnow_iso())
-    try:
-        refreshed_job = watchlists_db.get_job(int(job.id))
-    except (AttributeError, KeyError, RuntimeError, TypeError, ValueError):
-        refreshed_job = job
-    next_run_at = getattr(refreshed_job, "next_run_at", None) or getattr(job, "next_run_at", None)
-    source_counts = _source_counts(run)
-    title = str(contract["editorial"].get("show_name") or getattr(job, "name", "Watchlist briefing"))
-
-    _transition(stages, "render_text", "running")
-    occurrence = _save_occurrence(watchlists_db, int(occurrence.id), stages)
-    try:
-        content = _render_briefing_text(
-            title=title,
-            items=items,
-            contract=contract,
-            checked_at=checked_at,
-            next_run_at=next_run_at,
-            source_counts=source_counts,
-        )
-    except Exception:  # noqa: BLE001 - orchestration boundary persists renderer failures
-        _transition(stages, "render_text", "failed", code="text_render_failed", retryable=True)
-        occurrence = _save_occurrence(
-            watchlists_db,
-            int(occurrence.id),
-            stages,
-            artifact_status="failed",
-        )
-        return _result(occurrence, stages)
-    _transition(stages, "render_text", "ready")
-    occurrence = _save_occurrence(watchlists_db, int(occurrence.id), stages)
-
-    metadata = _metadata(
-        occurrence=occurrence,
-        contract=contract,
-        selection=selection,
-        items=items,
-        run=run,
-        job=job,
-        checked_at=checked_at,
-        next_run_at=next_run_at,
-        source_counts=source_counts,
-    )
-    _transition(stages, "persist_text", "running")
-    occurrence = _save_occurrence(watchlists_db, int(occurrence.id), stages)
-    try:
-        output_id = await _persist_text_output(
+        items = metadata.get("briefing_items")
+        if not isinstance(items, list):
+            raise ValueError("briefing_selection_missing")
+    else:
+        text_flow = await _run_text_flow(
             user_id=user_id,
-            collections_db=collections_db,
-            occurrence=occurrence,
             job=job,
             run=run,
             contract=contract,
-            content=content,
-            metadata=metadata,
+            occurrence=occurrence,
+            stages=stages,
+            watchlists_db=watchlists_db,
+            collections_db=collections_db,
+            output_version=output_version,
         )
-    except asyncio.CancelledError:
-        _transition(stages, "persist_text", "cancelled", code="text_persist_cancelled", retryable=True)
-        _save_occurrence(watchlists_db, int(occurrence.id), stages, artifact_status="cancelled")
-        raise
-    except Exception:  # noqa: BLE001 - orchestration boundary persists storage failures
-        _transition(stages, "persist_text", "failed", code="text_persist_failed", retryable=True)
-        occurrence = _save_occurrence(
-            watchlists_db,
-            int(occurrence.id),
-            stages,
-            artifact_status="failed",
-        )
-        return _result(occurrence, stages)
-    _transition(stages, "persist_text", "ready", artifact_id=output_id)
-    occurrence = _save_occurrence(
-        watchlists_db,
-        int(occurrence.id),
-        stages,
-        output_id=output_id,
-        artifact_status="running" if audio_enabled else "ready",
-        delivery_status="waiting_for_artifacts" if delivery_configured else "not_configured",
-    )
-
-    if not audio_enabled:
-        return _result(occurrence, stages)
+        occurrence = text_flow.occurrence
+        if text_flow.output_id is None:
+            return _result(occurrence, stages)
+        items = text_flow.items
+        if not audio_enabled:
+            return _result(occurrence, stages)
     return await _submit_audio(
         user_id=user_id,
         job=job,
@@ -820,7 +1056,7 @@ async def fulfill_watchlist_briefing(
         collections_db=collections_db,
         watchlists_db=watchlists_db,
         scheduler=scheduler,
-        output_version=1,
+        output_version=output_version,
     )
 
 
@@ -854,110 +1090,45 @@ async def retry_briefing_stage(
         delivery_configured=_delivery_configured(contract),
     )
     current_status = stages[stage]["status"]
-    if not regenerate and current_status not in {"failed", "not_started"}:
+    if stage != "select" and not regenerate and current_status not in {"failed", "not_started"}:
         return _result(occurrence, stages)
 
     if stage in {"select", "render_text", "persist_text"}:
-        _transition(stages, stage, "running")
-        occurrence = _save_occurrence(
-            watchlists_db,
-            int(occurrence.id),
-            stages,
-            artifact_status="running",
+        current_version = int(stages["persist_text"].get("output_version") or 1)
+        output_version = current_version + 1 if regenerate else current_version
+        text_flow = await _run_text_flow(
+            user_id=user_id,
+            job=job,
+            run=run,
+            contract=contract,
+            occurrence=occurrence,
+            stages=stages,
+            watchlists_db=watchlists_db,
+            collections_db=collections_db,
+            output_version=output_version,
+            force_reselect=stage == "select",
         )
-        try:
-            selection = await _load_selection(
-                watchlists_db,
-                run_id=int(run.id),
-                limit=briefing_selection_limit(contract),
-            )
-            items = _normalize_items(selection.items)
-            checked_at = str(getattr(run, "finished_at", None) or _utcnow_iso())
-            next_run_at = getattr(job, "next_run_at", None)
-            source_counts = _source_counts(run)
-            title = str(contract["editorial"].get("show_name") or getattr(job, "name", "Watchlist briefing"))
-            content = _render_briefing_text(
-                title=title,
-                items=items,
-                contract=contract,
-                checked_at=checked_at,
-                next_run_at=next_run_at,
-                source_counts=source_counts,
-            )
-            existing = _existing_output(collections_db, occurrence)
-            existing_metadata = existing[1] if existing else {}
-            output_version = int(existing_metadata.get("output_version") or 1) + (1 if regenerate else 0)
-            metadata = _metadata(
-                occurrence=occurrence,
-                contract=contract,
-                selection=selection,
-                items=items,
-                run=run,
-                job=job,
-                checked_at=checked_at,
-                next_run_at=next_run_at,
-                source_counts=source_counts,
-                output_version=output_version,
-            )
-            output_id = await _persist_text_output(
-                user_id=user_id,
-                collections_db=collections_db,
-                occurrence=occurrence,
-                job=job,
-                run=run,
-                contract=contract,
-                content=content,
-                metadata=metadata,
-                output_version=output_version,
-            )
-        except asyncio.CancelledError:
-            _transition(stages, stage, "cancelled", code=f"{stage}_retry_cancelled", retryable=True)
-            _save_occurrence(
-                watchlists_db,
-                int(occurrence.id),
-                stages,
-                artifact_status="cancelled",
-            )
-            raise
-        except Exception:  # noqa: BLE001 - retry boundary persists every stage failure
-            failure_code = {
-                "select": "selection_load_failed",
-                "render_text": "text_render_failed",
-                "persist_text": "text_persist_failed",
-            }[stage]
-            _transition(stages, stage, "failed", code=failure_code, retryable=True)
-            occurrence = _save_occurrence(
-                watchlists_db,
-                int(occurrence.id),
-                stages,
-                artifact_status="failed",
-            )
+        occurrence = text_flow.occurrence
+        if text_flow.output_id is None or not audio_enabled:
             return _result(occurrence, stages)
-        _transition(
-            stages,
-            "select",
-            "ready",
-            candidate_count=selection.candidate_count,
-            selected_count=selection.selected_count,
-            omitted_count=selection.omitted_count,
+        return await _submit_audio(
+            user_id=user_id,
+            job=job,
+            run=run,
+            contract=contract,
+            occurrence=occurrence,
+            stages=stages,
+            items=text_flow.items,
+            collections_db=collections_db,
+            watchlists_db=watchlists_db,
+            scheduler=scheduler,
+            output_version=output_version,
         )
-        _transition(stages, "render_text", "ready")
-        _transition(stages, "persist_text", "ready", artifact_id=output_id)
-        occurrence = _save_occurrence(
-            watchlists_db,
-            int(occurrence.id),
-            stages,
-            output_id=output_id,
-            artifact_status="running" if audio_enabled else "ready",
-            selected_count=selection.selected_count,
-            omitted_count=selection.omitted_count,
-            delivery_status=("waiting_for_artifacts" if _delivery_configured(contract) else "not_configured"),
-        )
-        return _result(occurrence, stages)
 
     if not audio_enabled:
         raise ValueError("audio_not_selected")
-    existing = _existing_output(collections_db, occurrence)
+    text_version = int(stages["persist_text"].get("output_version") or 1)
+    existing = _existing_output(collections_db, occurrence, output_version=text_version)
     if existing is None:
         raise ValueError("ready_text_output_required")
     _, metadata = existing

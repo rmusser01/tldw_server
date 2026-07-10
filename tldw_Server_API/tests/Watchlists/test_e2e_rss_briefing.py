@@ -5,12 +5,15 @@ Skip by default — enable with RUN_E2E=1 environment variable.
 """
 from __future__ import annotations
 
+import json
 import os
 
 import pytest
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
+from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 
 pytestmark = [
     pytest.mark.e2e,
@@ -132,14 +135,15 @@ def test_real_xkcd_rss_to_briefing(client_with_user: TestClient):
         assert item.get("title")
         assert item.get("url")
 
-    # Generate briefing
-    output = c.post(
-        "/api/v1/watchlists/outputs",
-        json={"run_id": run_id, "type": "briefing_markdown", "temporary": True},
-    )
-    assert output.status_code == 200, output.text
-    content = output.json().get("content", "")
-    assert len(content) > 0
+    output_id = int(occurrence["output_id"])
+    output = CollectionsDatabase.for_user(990).get_output_artifact(output_id)
+    metadata = json.loads(output.metadata_json or "{}")
+    content = (DatabasePaths.get_user_outputs_dir(990) / output.storage_path).read_text(encoding="utf-8")
+    assert metadata["origin"] == "watchlists"
+    assert metadata["generation_mode"] == "auto_output"
+    assert metadata["occurrence_id"] == occurrence["id"]
+    assert metadata["selected_count"] >= 1
+    assert content.startswith("# xkcd Digest")
 
 
 def test_real_hnrss_best_to_briefing(client_with_user: TestClient):

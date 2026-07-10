@@ -121,8 +121,7 @@ AUDIO_BRIEFING_WORKFLOW_DEF: dict[str, Any] = {
                 "persona_provider": "{{ inputs.persona_provider }}",
                 "persona_model": "{{ inputs.persona_model }}",
                 "editorial": "{{ inputs.editorial }}",
-                "status_audio_intent": "{{ inputs.status_audio_intent }}",
-                "skip_llm_expansion": "{{ inputs.skip_llm_expansion }}",
+                "is_no_material_update": "{{ inputs.is_no_material_update }}",
             },
             "timeout_seconds": 120,
         },
@@ -320,8 +319,7 @@ def _build_workflow_inputs(
         "background_delay_ms": audio_prefs.get("background_delay_ms", 0),
         "background_fade_seconds": audio_prefs.get("background_fade_seconds", 2.0),
         "editorial": dict(editorial or contract["editorial"]),
-        "status_audio_intent": status_audio,
-        "skip_llm_expansion": status_audio,
+        "is_no_material_update": status_audio,
     }
 
 

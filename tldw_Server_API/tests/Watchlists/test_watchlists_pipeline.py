@@ -10,6 +10,7 @@ from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDat
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.Personalization_DB import PersonalizationDB
 from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatabase
+from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError
 from tldw_Server_API.app.core.Watchlists import fetchers, pipeline
 from tldw_Server_API.app.core.Watchlists.briefing_fulfillment import FulfillmentResult
 from tldw_Server_API.app.core.Watchlists.pipeline import run_watchlist_job
@@ -829,3 +830,63 @@ async def test_pipeline_persists_post_run_audio_and_output_stats():
     assert output_metadata["audio_briefing_requested"] is True
     assert output_metadata["audio_briefing_status"] == "queued"
     assert output_metadata["audio_briefing_task_id"] == "task_stage2"
+
+
+def _create_fulfillment_boundary_job(db: WatchlistsDatabase, suffix: int):
+    source = db.create_source(
+        name="Boundary Feed",
+        url=f"https://example.com/boundary-{suffix}.xml",
+        source_type="rss",
+        active=True,
+        settings_json=json.dumps({"limit": 1}),
+        tags=["boundary"],
+        group_ids=[],
+    )
+    return db.create_job(
+        name="Boundary Job",
+        description=None,
+        scope_json=json.dumps({"sources": [source.id]}),
+        schedule_expr=None,
+        schedule_timezone="UTC",
+        active=True,
+        max_concurrency=None,
+        per_host_delay_ms=None,
+        retry_policy_json=None,
+        output_prefs_json=json.dumps({"auto_output": {"enabled": True, "type": "briefing_markdown"}}),
+    )
+
+
+@pytest.mark.asyncio
+async def test_fulfillment_database_error_cannot_rewrite_succeeded_collection_run():
+    user_id = 883
+    db = WatchlistsDatabase.for_user(user_id)
+    job = _create_fulfillment_boundary_job(db, time.time_ns())
+
+    with patch(
+        "tldw_Server_API.app.core.Watchlists.briefing_fulfillment.fulfill_watchlist_briefing",
+        new=AsyncMock(side_effect=DatabaseError("occurrence write failed")),
+    ):
+        result = await run_watchlist_job(user_id, job.id)
+
+    persisted = db.get_run(int(result["run_id"]))
+    stats = json.loads(persisted.stats_json or "{}")
+    assert persisted.status == "succeeded"
+    assert result["briefing_fulfillment_error"] == "occurrence_persistence_failed"
+    assert stats["briefing_fulfillment_error"] == "occurrence_persistence_failed"
+
+
+@pytest.mark.asyncio
+async def test_fulfillment_cancellation_propagates_without_rewriting_succeeded_collection_run():
+    user_id = 884
+    db = WatchlistsDatabase.for_user(user_id)
+    job = _create_fulfillment_boundary_job(db, time.time_ns())
+
+    with patch(
+        "tldw_Server_API.app.core.Watchlists.briefing_fulfillment.fulfill_watchlist_briefing",
+        new=AsyncMock(side_effect=asyncio.CancelledError),
+    ):
+        with pytest.raises(asyncio.CancelledError):
+            await run_watchlist_job(user_id, job.id)
+
+    runs, _total = db.list_runs_for_job(job.id, limit=1, offset=0)
+    assert runs[0].status == "succeeded"

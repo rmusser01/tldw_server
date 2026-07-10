@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
+import threading
 from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
@@ -32,6 +34,7 @@ def _contract(*, audio: bool = False, limit: int = 100) -> dict[str, Any]:
             "program_format": "host_discussion" if audio else "concise_briefing",
             "outcome_noun": "episode" if audio else "briefing",
             "show_name": "Tracked Weekly" if audio else "",
+            "premise": "Verified developments from tracked sources.",
         },
         "text": {
             "enabled": True,
@@ -176,28 +179,45 @@ class FakeWatchlistsDB:
         )
         return ordered[: int(kwargs["limit"])], len(ordered)
 
+    def get_item(self, item_id: int) -> Any:
+        return next(item for item in self.items if int(item.id) == int(item_id))
+
 
 class FakeCollectionsDB:
     def __init__(self) -> None:
         self.outputs: dict[int, SimpleNamespace] = {}
         self.create_calls = 0
+        self._idempotency: dict[str, int] = {}
+        self._lock = threading.Lock()
 
     def create_output_artifact(self, **kwargs: Any) -> SimpleNamespace:
-        self.create_calls += 1
-        output_id = 100 + self.create_calls
-        row = SimpleNamespace(
-            id=output_id,
-            metadata_json=kwargs["metadata_json"],
-            storage_path=kwargs["storage_path"],
-            **{key: value for key, value in kwargs.items() if key not in {"metadata_json", "storage_path"}},
-        )
-        self.outputs[output_id] = row
-        return row
+        idempotency_key = kwargs.get("idempotency_key")
+        with self._lock:
+            if idempotency_key in self._idempotency:
+                return self.outputs[self._idempotency[idempotency_key]]
+            self.create_calls += 1
+            output_id = 100 + self.create_calls
+            row = SimpleNamespace(
+                id=output_id,
+                metadata_json=kwargs["metadata_json"],
+                storage_path=kwargs["storage_path"],
+                **{key: value for key, value in kwargs.items() if key not in {"metadata_json", "storage_path"}},
+            )
+            self.outputs[output_id] = row
+            if idempotency_key:
+                self._idempotency[str(idempotency_key)] = output_id
+            return row
 
     def get_output_artifact(self, output_id: int) -> SimpleNamespace:
         if output_id not in self.outputs:
             raise KeyError("output_not_found")
         return self.outputs[output_id]
+
+    def get_output_artifact_by_idempotency_key(self, idempotency_key: str) -> SimpleNamespace:
+        try:
+            return self.outputs[self._idempotency[idempotency_key]]
+        except KeyError as exc:
+            raise KeyError("output_not_found") from exc
 
     def update_output_artifact_metadata(self, output_id: int, *, metadata_json: str) -> SimpleNamespace:
         row = self.get_output_artifact(output_id)
@@ -640,3 +660,449 @@ async def test_explicit_audio_regeneration_versions_request_not_occurrence(
         output_version=2,
     )
     assert collections_db.create_calls == 1
+
+
+class CrashAfterArtifactDB(FakeWatchlistsDB):
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.crash_output_link_once = False
+        self.crash_audio_link_once = False
+
+    def update_briefing_occurrence(self, occurrence_id: int, **patch: Any) -> SimpleNamespace:
+        if self.crash_output_link_once and patch.get("output_id") is not None:
+            self.crash_output_link_once = False
+            raise RuntimeError("crash_after_output_create")
+        if self.crash_audio_link_once and patch.get("audio_task_id") is not None:
+            self.crash_audio_link_once = False
+            raise RuntimeError("crash_after_audio_metadata")
+        return super().update_briefing_occurrence(occurrence_id, **patch)
+
+
+@pytest.mark.asyncio
+async def test_replay_recovers_output_when_link_save_crashes(
+    output_paths: Path,
+) -> None:
+    job = _job()
+    run = _run()
+    watchlists_db = CrashAfterArtifactDB(job=job, run=run, items=make_items(3))
+    collections_db = FakeCollectionsDB()
+    watchlists_db.crash_output_link_once = True
+
+    with pytest.raises(RuntimeError, match="crash_after_output_create"):
+        await fulfill_watchlist_briefing(
+            user_id=1,
+            job=job,
+            run=run,
+            watchlists_db=watchlists_db,
+            collections_db=collections_db,
+        )
+
+    replay = await fulfill_watchlist_briefing(
+        user_id=1,
+        job=job,
+        run=run,
+        watchlists_db=watchlists_db,
+        collections_db=collections_db,
+    )
+
+    assert replay.output_id == 101
+    assert replay.stages["persist_text"]["status"] == "ready"
+    assert collections_db.create_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_stale_occurrence_output_id_recovers_by_idempotency_key(
+    output_paths: Path,
+) -> None:
+    job = _job()
+    run = _run()
+    watchlists_db = FakeWatchlistsDB(job=job, run=run, items=make_items(3))
+    collections_db = FakeCollectionsDB()
+    first = await fulfill_watchlist_briefing(
+        user_id=1,
+        job=job,
+        run=run,
+        watchlists_db=watchlists_db,
+        collections_db=collections_db,
+    )
+    watchlists_db.occurrence.output_id = 999_999
+
+    replay = await fulfill_watchlist_briefing(
+        user_id=1,
+        job=job,
+        run=run,
+        watchlists_db=watchlists_db,
+        collections_db=collections_db,
+    )
+
+    assert replay.output_id == first.output_id
+    assert collections_db.create_calls == 1
+    assert len(watchlists_db.list_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_concurrent_fulfillment_creates_one_logical_output(
+    output_paths: Path,
+) -> None:
+    job = _job()
+    run = _run()
+    watchlists_db = FakeWatchlistsDB(job=job, run=run, items=make_items(3))
+    collections_db = FakeCollectionsDB()
+
+    async def fulfill() -> FulfillmentResult:
+        return await fulfill_watchlist_briefing(
+            user_id=1,
+            job=job,
+            run=run,
+            watchlists_db=watchlists_db,
+            collections_db=collections_db,
+        )
+
+    results = await asyncio.gather(fulfill(), fulfill())
+
+    assert results[0].output_id == results[1].output_id
+    assert collections_db.create_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_replay_recovers_submitted_audio_from_output_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+    output_paths: Path,
+) -> None:
+    job = _job(audio=True)
+    run = _run()
+    watchlists_db = CrashAfterArtifactDB(job=job, run=run, items=make_items(2))
+    collections_db = FakeCollectionsDB()
+    requests: list[str] = []
+
+    async def trigger(**kwargs: Any) -> AudioBriefingTriggerResult:
+        requests.append(kwargs["audio_request_id"])
+        return AudioBriefingTriggerResult(
+            status="submitted",
+            task_id="audio-task-durable",
+            audio_request_id=kwargs["audio_request_id"],
+        )
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Watchlists.briefing_fulfillment.trigger_audio_briefing",
+        trigger,
+    )
+    watchlists_db.crash_audio_link_once = True
+
+    with pytest.raises(RuntimeError, match="crash_after_audio_metadata"):
+        await fulfill_watchlist_briefing(
+            user_id=1,
+            job=job,
+            run=run,
+            watchlists_db=watchlists_db,
+            collections_db=collections_db,
+        )
+    replay = await fulfill_watchlist_briefing(
+        user_id=1,
+        job=job,
+        run=run,
+        watchlists_db=watchlists_db,
+        collections_db=collections_db,
+    )
+
+    assert replay.audio_task_id == "audio-task-durable"
+    assert replay.stages["compose_audio_script"]["status"] == "queued"
+    assert requests == [requests[0]]
+    assert collections_db.create_calls == 1
+    metadata = json.loads(collections_db.get_output_artifact(replay.output_id).metadata_json)
+    assert metadata["ai_generated_speech"] is False
+    assert metadata["speech_disclosure"] == "Synthetic speech generation pending"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("delivery_status", ["delivered", "unknown"])
+async def test_replay_preserves_delivery_truth(
+    output_paths: Path,
+    delivery_status: str,
+) -> None:
+    job = _job()
+    run = _run()
+    watchlists_db = FakeWatchlistsDB(job=job, run=run, items=make_items(1))
+    collections_db = FakeCollectionsDB()
+    await fulfill_watchlist_briefing(
+        user_id=1,
+        job=job,
+        run=run,
+        watchlists_db=watchlists_db,
+        collections_db=collections_db,
+    )
+    watchlists_db.occurrence.delivery_status = delivery_status
+
+    replay = await fulfill_watchlist_briefing(
+        user_id=1,
+        job=job,
+        run=run,
+        watchlists_db=watchlists_db,
+        collections_db=collections_db,
+    )
+
+    assert replay.delivery_status == delivery_status
+
+
+@pytest.mark.asyncio
+async def test_render_retry_reuses_durable_selection_order(
+    monkeypatch: pytest.MonkeyPatch,
+    output_paths: Path,
+) -> None:
+    job = _job(limit=2)
+    run = _run()
+    original = [_item(1, "2026-07-10T00:00:00+00:00"), _item(2, "2026-07-09T00:00:00+00:00")]
+    watchlists_db = FakeWatchlistsDB(job=job, run=run, items=original)
+    collections_db = FakeCollectionsDB()
+    rendered_ids: list[list[int]] = []
+
+    def render(**kwargs: Any) -> str:
+        rendered_ids.append([int(item["id"]) for item in kwargs["items"]])
+        if len(rendered_ids) == 1:
+            raise RuntimeError("render failed")
+        return "# recovered"
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Watchlists.briefing_fulfillment._render_briefing_text",
+        render,
+    )
+    failed = await fulfill_watchlist_briefing(
+        user_id=1,
+        job=job,
+        run=run,
+        watchlists_db=watchlists_db,
+        collections_db=collections_db,
+    )
+    watchlists_db.items = [*original, _item(99, "2026-07-11T00:00:00+00:00")]
+
+    retried = await retry_briefing_stage(
+        user_id=1,
+        occurrence_id=failed.occurrence_id,
+        stage="render_text",
+        watchlists_db=watchlists_db,
+        collections_db=collections_db,
+    )
+
+    assert rendered_ids == [[1, 2], [1, 2]]
+    assert retried.stages["select"]["selected_item_ids"] == [1, 2]
+    assert any(snapshot["persist_text"]["status"] == "running" for snapshot in watchlists_db.stage_snapshots)
+
+
+@pytest.mark.asyncio
+async def test_zero_selection_is_explicitly_durable(output_paths: Path) -> None:
+    job = _job()
+    run = _run(zero_items=True)
+    watchlists_db = FakeWatchlistsDB(job=job, run=run, items=[])
+
+    result = await fulfill_watchlist_briefing(
+        user_id=1,
+        job=job,
+        run=run,
+        watchlists_db=watchlists_db,
+        collections_db=FakeCollectionsDB(),
+    )
+
+    assert result.stages["select"]["selected_item_ids"] == []
+    assert result.stages["select"]["candidate_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_default_markdown_and_template_context_disclose_omissions(
+    monkeypatch: pytest.MonkeyPatch,
+    output_paths: Path,
+) -> None:
+    job = _job(limit=2)
+    run = _run()
+    watchlists_db = FakeWatchlistsDB(job=job, run=run, items=make_items(3))
+    collections_db = FakeCollectionsDB()
+
+    result = await fulfill_watchlist_briefing(
+        user_id=1,
+        job=job,
+        run=run,
+        watchlists_db=watchlists_db,
+        collections_db=collections_db,
+    )
+    row = collections_db.get_output_artifact(result.output_id)
+    assert "Included 2 of 3 candidate items; 1 omitted by the selection cap." in (
+        output_paths / row.storage_path
+    ).read_text()
+
+    contexts: list[dict[str, Any]] = []
+    from tldw_Server_API.app.core.Watchlists import briefing_fulfillment as module
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Watchlists.template_store.load_template",
+        lambda _name: SimpleNamespace(content="ignored"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        module,
+        "render_output_template",
+        lambda _body, context: contexts.append(context) or "# template",
+    )
+    contract = _contract(limit=2)
+    contract["text"]["template_name"] = "test-template"
+    job.output_prefs_json = json.dumps({"briefing_pipeline": contract})
+    job.id = 8
+    run.id = 12
+    run.job_id = 8
+    watchlists_db.job = job
+    watchlists_db.run = run
+    watchlists_db.occurrence = None
+    await fulfill_watchlist_briefing(
+        user_id=1,
+        job=job,
+        run=run,
+        watchlists_db=watchlists_db,
+        collections_db=collections_db,
+    )
+
+    assert contexts[0]["candidate_count"] == 3
+    assert contexts[0]["included_count"] == 2
+    assert contexts[0]["omitted_count"] == 1
+    assert contexts[0]["selection_cap"] == 2
+
+
+@pytest.mark.asyncio
+async def test_enqueue_failure_keeps_speech_truth_pending_and_uses_canonical_premise(
+    monkeypatch: pytest.MonkeyPatch,
+    output_paths: Path,
+) -> None:
+    job = _job(audio=True)
+    run = _run()
+    watchlists_db = FakeWatchlistsDB(job=job, run=run, items=make_items(1))
+    collections_db = FakeCollectionsDB()
+
+    async def trigger(**kwargs: Any) -> AudioBriefingTriggerResult:
+        return AudioBriefingTriggerResult(
+            status="enqueue_failed",
+            audio_request_id=kwargs["audio_request_id"],
+            reason="scheduler_submit_failed",
+        )
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Watchlists.briefing_fulfillment.trigger_audio_briefing",
+        trigger,
+    )
+    result = await fulfill_watchlist_briefing(
+        user_id=1,
+        job=job,
+        run=run,
+        watchlists_db=watchlists_db,
+        collections_db=collections_db,
+    )
+    metadata = json.loads(collections_db.get_output_artifact(result.output_id).metadata_json)
+
+    assert metadata["show_identity"]["premise"] == "Verified developments from tracked sources."
+    assert metadata["audio_selected"] is True
+    assert metadata["ai_generated_speech"] is False
+    assert metadata["speech_disclosure"] == "Synthetic speech generation pending"
+
+
+@pytest.mark.asyncio
+async def test_explicit_text_regeneration_uses_new_version_and_key(
+    output_paths: Path,
+) -> None:
+    job = _job()
+    run = _run()
+    watchlists_db = FakeWatchlistsDB(job=job, run=run, items=make_items(2))
+    collections_db = FakeCollectionsDB()
+    first = await fulfill_watchlist_briefing(
+        user_id=1,
+        job=job,
+        run=run,
+        watchlists_db=watchlists_db,
+        collections_db=collections_db,
+    )
+
+    regenerated = await retry_briefing_stage(
+        user_id=1,
+        occurrence_id=first.occurrence_id,
+        stage="persist_text",
+        watchlists_db=watchlists_db,
+        collections_db=collections_db,
+        regenerate=True,
+    )
+
+    first_row = collections_db.get_output_artifact(first.output_id)
+    regenerated_row = collections_db.get_output_artifact(regenerated.output_id)
+    assert regenerated.output_id != first.output_id
+    assert regenerated.stages["persist_text"]["output_version"] == 2
+    assert json.loads(regenerated_row.metadata_json)["output_version"] == 2
+    assert regenerated_row.idempotency_key != first_row.idempotency_key
+
+
+@pytest.mark.asyncio
+async def test_select_retry_reselects_then_advances_downstream(
+    monkeypatch: pytest.MonkeyPatch,
+    output_paths: Path,
+) -> None:
+    job = _job(limit=2)
+    run = _run()
+    original = [_item(1, "2026-07-10T00:00:00+00:00"), _item(2, "2026-07-09T00:00:00+00:00")]
+    watchlists_db = FakeWatchlistsDB(job=job, run=run, items=original)
+    collections_db = FakeCollectionsDB()
+
+    def fail_render(**_kwargs: Any) -> str:
+        raise RuntimeError("render failed")
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Watchlists.briefing_fulfillment._render_briefing_text",
+        fail_render,
+    )
+    failed = await fulfill_watchlist_briefing(
+        user_id=1,
+        job=job,
+        run=run,
+        watchlists_db=watchlists_db,
+        collections_db=collections_db,
+    )
+    watchlists_db.items = [*original, _item(99, "2026-07-11T00:00:00+00:00")]
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Watchlists.briefing_fulfillment._render_briefing_text",
+        lambda **_kwargs: "# reselected",
+    )
+
+    retried = await retry_briefing_stage(
+        user_id=1,
+        occurrence_id=failed.occurrence_id,
+        stage="select",
+        watchlists_db=watchlists_db,
+        collections_db=collections_db,
+    )
+
+    assert retried.artifact_status == "ready"
+    assert retried.stages["select"]["selected_item_ids"] == [99, 1]
+    assert retried.stages["render_text"]["status"] == "ready"
+    assert retried.stages["persist_text"]["status"] == "ready"
+
+
+@pytest.mark.asyncio
+async def test_audio_cancellation_persists_occurrence_state(
+    monkeypatch: pytest.MonkeyPatch,
+    output_paths: Path,
+) -> None:
+    job = _job(audio=True)
+    run = _run()
+    watchlists_db = FakeWatchlistsDB(job=job, run=run, items=make_items(1))
+
+    async def cancelled(**_kwargs: Any) -> AudioBriefingTriggerResult:
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Watchlists.briefing_fulfillment.trigger_audio_briefing",
+        cancelled,
+    )
+    with pytest.raises(asyncio.CancelledError):
+        await fulfill_watchlist_briefing(
+            user_id=1,
+            job=job,
+            run=run,
+            watchlists_db=watchlists_db,
+            collections_db=FakeCollectionsDB(),
+        )
+
+    assert watchlists_db.occurrence.artifact_status == "cancelled"
+    stages = json.loads(watchlists_db.occurrence.stages_json)
+    assert stages["compose_audio_script"]["status"] == "cancelled"

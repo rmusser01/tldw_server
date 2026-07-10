@@ -59,6 +59,7 @@ class TestAudioBriefingWorkflowDefinition:
         assert compose_cfg["persona_id"] == "{{ inputs.persona_id }}"
         assert compose_cfg["persona_provider"] == "{{ inputs.persona_provider }}"
         assert compose_cfg["persona_model"] == "{{ inputs.persona_model }}"
+        assert compose_cfg["is_no_material_update"] == "{{ inputs.is_no_material_update }}"
 
         audio_cfg = next(
             step["config"] for step in AUDIO_BRIEFING_WORKFLOW_DEF["steps"] if step["id"] == "generate_audio"
@@ -126,6 +127,7 @@ class TestBuildWorkflowInputs:
         assert inputs["background_volume"] == 0.15
         assert inputs["background_delay_ms"] == 0
         assert inputs["background_fade_seconds"] == 2.0
+        assert inputs["is_no_material_update"] is False
         resolver.assert_called_once_with(provider=None, model=None, voice=None)
 
     def test_custom_inputs(self):
@@ -172,6 +174,20 @@ class TestBuildWorkflowInputs:
         assert inputs["background_volume"] == 0.2
         assert inputs["background_delay_ms"] == 500
         assert inputs["background_fade_seconds"] == 3.0
+
+    def test_status_audio_sets_no_material_update_flag(self):
+        from tldw_Server_API.app.core.Watchlists.audio_briefing_workflow import (
+            _build_workflow_inputs,
+        )
+
+        inputs = _build_workflow_inputs(
+            [{"title": "No material updates", "summary": "No qualifying new material."}],
+            {"generate_audio": True},
+            status_audio=True,
+        )
+
+        assert inputs["is_no_material_update"] is True
+        assert inputs["target_audio_minutes"] == 1
 
     def test_legacy_tts_keys_feed_default_resolution(self):
         from tldw_Server_API.app.core.TTS.tts_request_resolution import ResolvedTTSRequestDefaults

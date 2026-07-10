@@ -613,6 +613,7 @@ async def run_watchlist_job(
         persist_to_media_db = bool(job_output_prefs.get("persist_to_media_db"))
 
     stack = contextlib.ExitStack()
+    collection_succeeded = False
     try:
         # Resolve per-user media DB path and instantiate when requested
         mdb = None
@@ -1671,6 +1672,7 @@ async def run_watchlist_job(
             return {"run_id": run.id, "status": "cancelled", **stats}
 
         db.update_run(run.id, status="succeeded", finished_at=_utcnow_iso(), stats_json=json.dumps(stats))
+        collection_succeeded = True
 
         # Update job history
         next_run = _compute_next_run(job.schedule_expr, job.schedule_timezone)
@@ -1702,7 +1704,7 @@ async def run_watchlist_job(
                     collections_db=collections_db,
                 )
                 stats.update(_fulfillment_stats_projection(fulfillment))
-            except _WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS as exc:
+            except Exception as exc:  # noqa: BLE001 - fulfillment is downstream of durable collection success
                 logger.error(
                     "Briefing occurrence could not be persisted for job {} (error_type={})",
                     job_id,
@@ -1718,22 +1720,24 @@ async def run_watchlist_job(
 
         return {"run_id": run.id, **stats}
     except asyncio.CancelledError:
-        with contextlib.suppress(_WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS):
-            db.update_run(
-                run.id,
-                status="cancelled",
-                finished_at=_utcnow_iso(),
-                error_msg="cancelled",
-            )
+        if not collection_succeeded:
+            with contextlib.suppress(_WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS):
+                db.update_run(
+                    run.id,
+                    status="cancelled",
+                    finished_at=_utcnow_iso(),
+                    error_msg="cancelled",
+                )
         raise
     except Exception as exc:
-        with contextlib.suppress(_WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS):
-            db.update_run(
-                run.id,
-                status="failed",
-                finished_at=_utcnow_iso(),
-                error_msg=_safe_source_error_text(exc) or type(exc).__name__,
-            )
+        if not collection_succeeded:
+            with contextlib.suppress(_WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS):
+                db.update_run(
+                    run.id,
+                    status="failed",
+                    finished_at=_utcnow_iso(),
+                    error_msg=_safe_source_error_text(exc) or type(exc).__name__,
+                )
         raise
     finally:
         stack.close()

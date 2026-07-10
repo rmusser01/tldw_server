@@ -999,6 +999,7 @@ class CollectionsDatabase:
                 created_at TEXT NOT NULL,
                 media_item_id BIGINT,
                 chatbook_path TEXT,
+                idempotency_key TEXT,
                 deleted BOOLEAN NOT NULL DEFAULT FALSE,
                 deleted_at TEXT,
                 retention_until TEXT
@@ -1407,6 +1408,7 @@ class CollectionsDatabase:
                 created_at TEXT NOT NULL,
                 media_item_id INTEGER,
                 chatbook_path TEXT,
+                idempotency_key TEXT,
                 deleted INTEGER NOT NULL DEFAULT 0,
                 deleted_at TEXT,
                 retention_until TEXT
@@ -1831,6 +1833,25 @@ class CollectionsDatabase:
                     logger.debug("collections backfill: outputs.workspace_tag already exists or skipped")
                 else:
                     raise
+        if "idempotency_key" not in output_columns:
+            try:
+                self.backend.execute("ALTER TABLE outputs ADD COLUMN idempotency_key TEXT", ())
+            except _COLLECTIONS_NONCRITICAL_EXCEPTIONS as exc:
+                if _is_backfill_noop_error(exc):
+                    logger.debug("collections backfill: outputs.idempotency_key already exists or skipped")
+                else:
+                    raise
+        try:
+            self.backend.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ux_outputs_user_idempotency "
+                "ON outputs(user_id, idempotency_key)",
+                (),
+            )
+        except _COLLECTIONS_NONCRITICAL_EXCEPTIONS as exc:
+            if _is_backfill_noop_error(exc):
+                logger.debug("collections backfill: outputs idempotency index already exists or skipped")
+            else:
+                raise
         try:
             self.backend.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_outputs_user_title_format ON outputs(user_id, title, format) WHERE deleted = 0", ())
         except _COLLECTIONS_NONCRITICAL_EXCEPTIONS as exc:
@@ -4709,6 +4730,7 @@ class CollectionsDatabase:
         created_at: str
         media_item_id: int | None
         chatbook_path: str | None
+        idempotency_key: str | None = None
 
     def create_output_artifact(
         self,
@@ -4724,12 +4746,14 @@ class CollectionsDatabase:
         media_item_id: int | None = None,
         chatbook_path: str | None = None,
         retention_until: str | None = None,
+        idempotency_key: str | None = None,
     ) -> CollectionsDatabase.OutputArtifactRow:
         now = _utcnow_iso()
         resolved_storage_path = self.resolve_output_storage_path(storage_path)
+        normalized_idempotency_key = str(idempotency_key or "").strip() or None
         q = (
-            "INSERT INTO outputs (user_id, job_id, run_id, type, title, format, storage_path, metadata_json, workspace_tag, created_at, media_item_id, chatbook_path, deleted, deleted_at, retention_until) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?)"
+            "INSERT INTO outputs (user_id, job_id, run_id, type, title, format, storage_path, metadata_json, workspace_tag, created_at, media_item_id, chatbook_path, deleted, deleted_at, retention_until, idempotency_key) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?)"
         )
         params = (
             self.user_id,
@@ -4745,12 +4769,40 @@ class CollectionsDatabase:
             media_item_id,
             chatbook_path,
             retention_until,
+            normalized_idempotency_key,
         )
+        if normalized_idempotency_key is not None:
+            self.backend.execute(
+                q + " ON CONFLICT (user_id, idempotency_key) DO NOTHING",
+                params,
+            )
+            return self.get_output_artifact_by_idempotency_key(normalized_idempotency_key)
         res = self._execute_insert(q, params)
         new_id = self._extract_lastrowid(res)
         if not new_id:
             raise DatabaseError("Failed to create output artifact")
         return self.get_output_artifact(new_id)
+
+    def get_output_artifact_by_idempotency_key(
+        self,
+        idempotency_key: str,
+        *,
+        include_deleted: bool = False,
+    ) -> CollectionsDatabase.OutputArtifactRow:
+        """Return the output created for a stable logical operation key."""
+        key = str(idempotency_key or "").strip()
+        if not key:
+            raise KeyError("output_not_found")
+        deleted_clause = "" if include_deleted else " AND deleted = 0"
+        row = self.backend.execute(
+            "SELECT id, user_id, job_id, run_id, type, title, format, storage_path, "
+            "metadata_json, workspace_tag, created_at, media_item_id, chatbook_path, idempotency_key "
+            f"FROM outputs WHERE user_id = ? AND idempotency_key = ?{deleted_clause}",  # nosec B608
+            (self.user_id, key),
+        ).first
+        if not row:
+            raise KeyError("output_not_found")
+        return CollectionsDatabase.OutputArtifactRow(**row)
 
     def update_output_media_item_id(self, output_id: int, media_item_id: int | None) -> CollectionsDatabase.OutputArtifactRow:
         q = "UPDATE outputs SET media_item_id = ? WHERE id = ? AND user_id = ?"
@@ -4786,7 +4838,7 @@ class CollectionsDatabase:
     def get_output_artifact(self, output_id: int, include_deleted: bool = False) -> CollectionsDatabase.OutputArtifactRow:
         cond = "id = ? AND user_id = ?" + ("" if include_deleted else " AND deleted = 0")
         q = (
-            "SELECT id, user_id, job_id, run_id, type, title, format, storage_path, metadata_json, workspace_tag, created_at, media_item_id, chatbook_path "  # nosec B608
+            "SELECT id, user_id, job_id, run_id, type, title, format, storage_path, metadata_json, workspace_tag, created_at, media_item_id, chatbook_path, idempotency_key "  # nosec B608
             f"FROM outputs WHERE {cond}"
         )
         row = self.backend.execute(q, (output_id, self.user_id)).first
@@ -4835,7 +4887,7 @@ class CollectionsDatabase:
         if not include_deleted:
             where.append("deleted = 0")
         q = (
-            "SELECT id, user_id, job_id, run_id, type, title, format, storage_path, metadata_json, workspace_tag, created_at, media_item_id, chatbook_path "  # nosec B608
+            "SELECT id, user_id, job_id, run_id, type, title, format, storage_path, metadata_json, workspace_tag, created_at, media_item_id, chatbook_path, idempotency_key "  # nosec B608
             f"FROM outputs WHERE {' AND '.join(where)} ORDER BY created_at DESC LIMIT 1"
         )
         row = self.backend.execute(q, tuple(params)).first
@@ -4908,7 +4960,7 @@ class CollectionsDatabase:
         cq = f"SELECT COUNT(*) AS cnt FROM outputs WHERE {where_sql}"  # nosec B608
         total = int(self.backend.execute(cq, tuple(params)).scalar or 0)
         sq = (
-            "SELECT id, user_id, job_id, run_id, type, title, format, storage_path, metadata_json, workspace_tag, created_at, media_item_id, chatbook_path "  # nosec B608
+            "SELECT id, user_id, job_id, run_id, type, title, format, storage_path, metadata_json, workspace_tag, created_at, media_item_id, chatbook_path, idempotency_key "  # nosec B608
             f"FROM outputs WHERE {where_sql} ORDER BY created_at DESC LIMIT ? OFFSET ?"
         )
         rows = self.backend.execute(sq, tuple(params + [limit, offset])).rows
@@ -4939,7 +4991,7 @@ class CollectionsDatabase:
         cq = f"SELECT COUNT(*) AS cnt FROM outputs WHERE {where_sql}"  # nosec B608
         total = int(self.backend.execute(cq, tuple(params)).scalar or 0)
         sq = (
-            "SELECT id, user_id, job_id, run_id, type, title, format, storage_path, metadata_json, workspace_tag, created_at, media_item_id, chatbook_path "  # nosec B608
+            "SELECT id, user_id, job_id, run_id, type, title, format, storage_path, metadata_json, workspace_tag, created_at, media_item_id, chatbook_path, idempotency_key "  # nosec B608
             f"FROM outputs WHERE {where_sql} ORDER BY created_at DESC LIMIT ? OFFSET ?"
         )
         rows = self.backend.execute(sq, tuple(params + [limit, offset])).rows

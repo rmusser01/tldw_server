@@ -2539,6 +2539,67 @@ class TestAudioBriefingComposeAdapter:
         assert "Good morning, here is your daily briefing" in Path(script_path).read_text(encoding="utf-8")
 
     @pytest.mark.asyncio
+    async def test_no_material_update_is_deterministic_and_never_calls_llm(
+        self,
+        base_context,
+        tmp_path,
+        monkeypatch,
+    ):
+        """A zero-item status audio path must stay deterministic and offline."""
+        from tldw_Server_API.app.core.Workflows.adapters.content._config import (
+            AudioBriefingComposeConfig,
+        )
+        from tldw_Server_API.app.core.Workflows.adapters.content.audio_briefing import (
+            run_audio_briefing_compose_adapter,
+        )
+
+        validated = AudioBriefingComposeConfig.model_validate(
+            {
+                "items": [{"title": "No material updates", "summary": "No qualifying new material."}],
+                "is_no_material_update": True,
+            }
+        )
+        assert validated.is_no_material_update is True
+
+        monkeypatch.setenv("WORKFLOWS_ARTIFACTS_DIR", str(tmp_path / "artifacts"))
+        artifacts: list[dict[str, Any]] = []
+        base_context["add_artifact"] = lambda **kwargs: artifacts.append(kwargs)
+        config = {
+            "items": [{"title": "No material updates", "summary": "No qualifying new material."}],
+            "is_no_material_update": True,
+            "provider": "openai",
+            "persona_summarize": True,
+            "audio_cast": {
+                "speaker_count": 1,
+                "speakers": [{"id": "announcer", "label": "Announcer", "voice": "af_bella"}],
+            },
+        }
+
+        with patch(
+            "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async",
+            new_callable=AsyncMock,
+            side_effect=AssertionError("LLM must not be called"),
+        ) as llm:
+            result = await run_audio_briefing_compose_adapter(config, base_context)
+
+        llm.assert_not_awaited()
+        assert result["script"] == (
+            "[ANNOUNCER]: No qualifying new material was found during this source check. "
+            "Your next briefing will run as scheduled."
+        )
+        assert result["sections"] == [
+            {
+                "voice": "ANNOUNCER",
+                "text": (
+                    "No qualifying new material was found during this source check. "
+                    "Your next briefing will run as scheduled."
+                ),
+            }
+        ]
+        assert result["voice_assignments"] == {"ANNOUNCER": "af_bella"}
+        assert len([artifact for artifact in artifacts if artifact["type"] == "audio_script"]) == 1
+
+    @pytest.mark.asyncio
     async def test_compose_audio_cast_controls_markers_and_voice_assignments(self, sample_items, base_context):
         """Test structured speaker config drives prompt markers and voices."""
         from tldw_Server_API.app.core.Workflows.adapters.content.audio_briefing import (

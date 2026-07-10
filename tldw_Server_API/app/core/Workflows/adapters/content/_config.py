@@ -196,6 +196,10 @@ class AudioBriefingComposeConfig(BaseAdapterConfig):
         None, description="Structured 1-4 speaker cast for script markers and voices"
     )
     multi_voice: bool = Field(True, description="Enable multi-voice markers in script")
+    is_no_material_update: bool = Field(
+        False,
+        description="Compose the deterministic no-material status script without LLM calls",
+    )
     persona_summarize: bool = Field(
         False,
         description="Pre-summarize each item in persona voice before final script composition",

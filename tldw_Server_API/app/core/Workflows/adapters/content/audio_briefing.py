@@ -393,21 +393,6 @@ async def run_audio_briefing_compose_adapter(config: dict[str, Any], context: di
     if not normalized_items:
         return {"text": "", "script": "", "sections": [], "error": "missing_items"}
 
-    persona_summarize = bool(config.get("persona_summarize", False))
-    persona_provider_cfg = config.get("persona_provider") or config.get("provider")
-    persona_model_cfg = config.get("persona_model") or config.get("model")
-    persona_id_cfg = config.get("persona_id")
-    if persona_summarize:
-        normalized_items = await _persona_pre_summarize_items(
-            normalized_items,
-            output_language=output_language,
-            provider=persona_provider_cfg,
-            model=persona_model_cfg,
-            persona_id=str(persona_id_cfg).strip() if persona_id_cfg is not None else None,
-        )
-
-    items = normalized_items
-
     multi_voice = config.get("multi_voice", True)
     target_minutes = config.get("target_audio_minutes", 10)
     target_words = target_minutes * 150
@@ -423,6 +408,59 @@ async def run_audio_briefing_compose_adapter(config: dict[str, Any], context: di
         voice_map_cfg = {**cast_voice_map, **voice_map_cfg}
     elif cast_voice_map:
         voice_map_cfg = cast_voice_map
+
+    if bool(config.get("is_no_material_update", False)):
+        spoken_text = (
+            "No qualifying new material was found during this source check. "
+            "Your next briefing will run as scheduled."
+        )
+        marker = audio_cast_speakers[0]["marker"] if audio_cast_speakers else "HOST"
+        script = f"[{marker}]: {spoken_text}" if multi_voice else spoken_text
+        sections = [{"voice": marker, "text": spoken_text}]
+        resolved_voice_assignments = _resolve_voice_assignments(
+            sections,
+            voice_map_cfg if isinstance(voice_map_cfg, dict) else None,
+        )
+        voice_assignments = {marker: resolved_voice_assignments[marker]}
+        word_count = len(spoken_text.split())
+        estimated_minutes = round(word_count / 150, 1)
+        script_artifact = _register_script_artifact(
+            context=context,
+            script=script,
+            sections=sections,
+            voice_assignments=voice_assignments,
+            output_language=output_language,
+            word_count=word_count,
+            estimated_minutes=estimated_minutes,
+        )
+        result: dict[str, Any] = {
+            "text": script,
+            "script": script,
+            "sections": sections,
+            "word_count": word_count,
+            "estimated_minutes": estimated_minutes,
+            "voice_assignments": voice_assignments,
+            "is_no_material_update": True,
+        }
+        if script_artifact:
+            result["script_artifact_id"] = script_artifact["artifact_id"]
+            result["script_artifact_uri"] = script_artifact["uri"]
+        return result
+
+    persona_summarize = bool(config.get("persona_summarize", False))
+    persona_provider_cfg = config.get("persona_provider") or config.get("provider")
+    persona_model_cfg = config.get("persona_model") or config.get("model")
+    persona_id_cfg = config.get("persona_id")
+    if persona_summarize:
+        normalized_items = await _persona_pre_summarize_items(
+            normalized_items,
+            output_language=output_language,
+            provider=persona_provider_cfg,
+            model=persona_model_cfg,
+            persona_id=str(persona_id_cfg).strip() if persona_id_cfg is not None else None,
+        )
+
+    items = normalized_items
 
     system_prompt = config.get("system_prompt_override") or _build_system_prompt(
         target_words, multi_voice, output_language, audio_cast_speakers
