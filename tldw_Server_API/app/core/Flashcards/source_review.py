@@ -53,6 +53,9 @@ def compute_source_review_due_at(
 ) -> datetime:
     """Compute a review's local-midnight due time and return it in UTC."""
 
+    if isinstance(starts_on, datetime):
+        starts_on = starts_on.date()
+
     if not isinstance(offset_unit, str) or offset_unit not in _OFFSET_CAPS:
         raise ValueError("offset_unit must be 'day' or 'month'")
     if isinstance(offset_value, bool) or not isinstance(offset_value, int):

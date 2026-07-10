@@ -156,7 +156,6 @@ export const SourceReviewDuePanel: React.FC<SourceReviewDuePanelProps> = ({
   React.useEffect(() => {
     setLocalOccurrences({})
     setHiddenIds(new Set())
-    setShowAll(false)
   }, [dueQuery.data?.now])
 
   const occurrences = (dueQuery.data?.items ?? [])
@@ -333,7 +332,7 @@ export const SourceReviewDuePanel: React.FC<SourceReviewDuePanelProps> = ({
               ?.excerpt_preview?.trim()
             const rereadItems =
               expandedRereadId === occurrence.id
-                ? occurrence.launch_state?.source_bundle.items ?? []
+                ? occurrence.launch_state?.source_bundle?.items ?? []
                 : []
             return (
               <article key={occurrence.id} className="px-1 py-2">

@@ -30,6 +30,17 @@ def test_source_review_day_offset_uses_local_midnight():
     assert due_at == datetime(2026, 7, 10, 7, 0, tzinfo=timezone.utc)  # nosec B101
 
 
+def test_source_review_day_offset_accepts_datetime_anchor():
+    due_at = compute_source_review_due_at(
+        starts_on=datetime(2026, 7, 9, 15, 30, tzinfo=timezone.utc),
+        timezone_name="America/Los_Angeles",
+        offset_value=1,
+        offset_unit="day",
+    )
+
+    assert due_at == datetime(2026, 7, 10, 7, 0, tzinfo=timezone.utc)  # nosec B101
+
+
 def test_source_review_month_offset_clamps_to_month_end():
     due_at = compute_source_review_due_at(
         starts_on=date(2026, 1, 31),

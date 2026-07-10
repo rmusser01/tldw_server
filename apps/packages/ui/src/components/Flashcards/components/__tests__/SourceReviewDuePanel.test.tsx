@@ -220,6 +220,59 @@ describe("SourceReviewDuePanel", () => {
     expect(screen.getAllByRole("article")).toHaveLength(5)
   })
 
+  it("preserves an expanded due queue across background refetches", async () => {
+    const items = Array.from({ length: 5 }, (_, index) => ({
+      ...occurrence("reread"),
+      id: index + 1,
+      plan_title: `Review plan ${index + 1}`
+    }))
+    const dueResult = (now: string) => ({
+      data: { items, total: 5, now },
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn()
+    })
+    mocks.dueQuery.mockReturnValue(dueResult("2026-07-10T12:00:00Z"))
+    const onGenerate = vi.fn<
+      SourceReviewDuePanelProps["onSourceReviewGenerate"]
+    >()
+    const onQuiz = vi.fn<SourceReviewDuePanelProps["onSourceReviewQuiz"]>()
+    const view = render(
+      <SourceReviewDuePanel
+        isActive
+        onSourceReviewGenerate={onGenerate}
+        onSourceReviewQuiz={onQuiz}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Show all 5" }))
+    expect(screen.getAllByRole("article")).toHaveLength(5)
+
+    mocks.dueQuery.mockReturnValue(dueResult("2026-07-10T12:01:00Z"))
+    view.rerender(
+      <SourceReviewDuePanel
+        isActive
+        onSourceReviewGenerate={onGenerate}
+        onSourceReviewQuiz={onQuiz}
+      />
+    )
+
+    await waitFor(() =>
+      expect(screen.getAllByRole("article")).toHaveLength(5)
+    )
+  })
+
+  it("tolerates a missing reread source bundle", () => {
+    const resumed = occurrence("reread", "in_progress")
+    const launchState = resumed.launch_state as any
+    launchState.source_bundle = undefined
+    renderPanel(resumed)
+
+    expect(() =>
+      fireEvent.click(screen.getByRole("button", { name: "Resume" }))
+    ).not.toThrow()
+  })
+
   it("starts a pending occurrence", async () => {
     const started = occurrence("reread", "in_progress")
     mocks.start.mockResolvedValue(started)
