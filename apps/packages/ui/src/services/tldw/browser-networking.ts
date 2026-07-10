@@ -22,6 +22,22 @@ type ResolveBrowserTransportInput = {
   apiOrigin?: string | null
 }
 
+type AdvancedRequestTransportLike = {
+  mode: string
+  url: string
+}
+
+type ResolveAdvancedRequestTransportGuardInput = {
+  transport?: AdvancedRequestTransportLike | null
+  hasConfiguredServerUrl: boolean
+  isAbsolute: boolean
+}
+
+export type AdvancedRequestTransportGuard = {
+  origin: string | null
+  isUnconfigured: boolean
+}
+
 const trimTrailingSlash = (value: string): string => value.replace(/\/+$/, "")
 
 const normalizeString = (value?: string | null): string =>
@@ -51,6 +67,25 @@ const normalizeOrigin = (value?: string | null): string => {
   }
 
   return trimTrailingSlash(normalizeString(value))
+}
+
+export const resolveAdvancedRequestTransportGuard = ({
+  transport,
+  hasConfiguredServerUrl,
+  isAbsolute
+}: ResolveAdvancedRequestTransportGuardInput): AdvancedRequestTransportGuard => {
+  const parsedOrigin =
+    transport?.mode === "advanced" ? parseHttpOrigin(transport.url) : null
+  const origin = parsedOrigin?.origin.toLowerCase() ?? null
+
+  return {
+    origin,
+    isUnconfigured:
+      !hasConfiguredServerUrl &&
+      !isAbsolute &&
+      transport?.mode === "advanced" &&
+      !origin
+  }
 }
 
 export const resolveBrowserTransportMode = (

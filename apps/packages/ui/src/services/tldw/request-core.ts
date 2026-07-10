@@ -5,6 +5,7 @@ import type { ApiSendResponse } from "@/services/api-send"
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
 import {
   buildBrowserHttpBase,
+  resolveAdvancedRequestTransportGuard,
   resolveBrowserTransport,
   type BrowserSurface
 } from "@/services/tldw/browser-networking"
@@ -283,6 +284,11 @@ export const tldwRequest = async (
         })
       : null
   const hostedMode = transport?.mode === "hosted"
+  const advancedTransportGuard = resolveAdvancedRequestTransportGuard({
+    transport,
+    hasConfiguredServerUrl: Boolean(cfg?.serverUrl),
+    isAbsolute
+  })
   const sameOriginAbsoluteUrl =
     isAbsolute && isSameOriginAbsoluteUrlForConfiguredServer(absolutePath, cfg)
   if (
@@ -296,7 +302,7 @@ export const tldwRequest = async (
       error: ABSOLUTE_URL_BLOCK_ERROR
     }
   }
-  if (!cfg?.serverUrl && !isAbsolute && transport?.mode === "advanced") {
+  if (advancedTransportGuard.isUnconfigured) {
     return { ok: false, status: 400, error: "tldw server not configured" }
   }
   if (!normalizedPath) {
