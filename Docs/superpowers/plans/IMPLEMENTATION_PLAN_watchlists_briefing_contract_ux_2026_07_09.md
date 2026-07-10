@@ -897,7 +897,7 @@ git commit -m "feat: support source-grounded audio programs"
 - `PipelineWizard` becomes the canonical shared setup component and accepts `initialStep`, `initialDraft`, `onSaveDraft`, `onTest`, and `onActivate`.
 - Quick Setup and Watchlist Setup launch the same component with prepared defaults instead of rendering separate forms.
 
-- [ ] **Step 1: Write failing five-step and receipt tests**
+- [x] **Step 1: Write failing five-step and receipt tests**
 
 ```typescript
 it("uses the single outcome-first step sequence", () => {
@@ -931,7 +931,7 @@ it("does not send external delivery during the default test", async () => {
 })
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 ```bash
 ./node_modules/.bin/vitest run ../packages/ui/src/components/Option/Watchlists/OverviewTab/__tests__/PipelineWizard.test.tsx ../packages/ui/src/components/Option/Watchlists/OverviewTab/__tests__/OverviewTab.quick-setup.test.tsx ../packages/ui/src/components/Option/Watchlists/SetupWizard/__tests__/WatchlistSetupWizard.test.tsx
@@ -939,21 +939,21 @@ it("does not send external delivery during the default test", async () => {
 
 Expected: current Source, Monitor, Digest, Audio, Review sequence and separate forms fail the new expectations.
 
-- [ ] **Step 3: Reorder and distill the canonical component**
+- [x] **Step 3: Reorder and distill the canonical component**
 
 Sources handles existing/new sources and testing. Cadence contains schedule/timezone and exact next occurrence. Briefing starts with “What are you making?” and progressively reveals show identity, target duration, cast, and custom editorial controls. Delivery shows required Reports plus optional existing adapters. Test contains the full receipt, provider-use disclosure, Generate 60-second sample, Generate full test episode, Send test, and Activate schedule.
 
 Only one primary action is visually dominant per step. Advanced cron, raw voice map, custom instructions, provider overrides, and diagnostics use progressive disclosure. Do not nest cards.
 
-- [ ] **Step 4: Route every entry point to the canonical flow**
+- [x] **Step 4: Route every entry point to the canonical flow**
 
 Remove the separate Quick Setup modal body and have its trigger open `PipelineWizard` with quick defaults. Make Watchlist Setup create or select its container, then continue in the same component at Sources. Monitor Add/Edit uses the same contract sections in `JobFormModal`; it remains an advanced editor, not a divergent payload builder.
 
-- [ ] **Step 5: Add activation and Test state semantics**
+- [x] **Step 5: Add activation and Test state semantics**
 
 Test creates or updates an inactive monitor and invokes a manual occurrence. Activate uses the same job ID and sets `active: true`; it does not create a second monitor. Show stage progress and keep the draft on failure. AbortError caused by superseded polling is silent, while user cancellation and server failure produce distinct messages.
 
-- [ ] **Step 6: Verify GREEN, copy, and focus**
+- [x] **Step 6: Verify GREEN, copy, and focus**
 
 ```bash
 ./node_modules/.bin/vitest run ../packages/ui/src/components/Option/Watchlists/OverviewTab/__tests__/PipelineWizard.test.tsx ../packages/ui/src/components/Option/Watchlists/OverviewTab/__tests__/OverviewTab.quick-setup.test.tsx ../packages/ui/src/components/Option/Watchlists/SetupWizard/__tests__/WatchlistSetupWizard.test.tsx ../packages/ui/src/components/Option/Watchlists/JobsTab/__tests__/JobFormModal.live-summary.test.tsx ../packages/ui/src/components/Option/Watchlists/__tests__/watchlists-plain-language-copy-contract.test.ts
@@ -961,7 +961,7 @@ Test creates or updates an inactive monitor and invokes a manual occurrence. Act
 
 Expected: the flow, receipt, sample/full test, delivery safety, localization fallback, and focus tests pass.
 
-- [ ] **Step 7: Commit Task 7**
+- [x] **Step 7: Commit Task 7**
 
 ```bash
 git add apps/packages/ui/src/components/Option/Watchlists/OverviewTab/PipelineWizard.tsx apps/packages/ui/src/components/Option/Watchlists/OverviewTab/pipeline-wizard-state.ts apps/packages/ui/src/components/Option/Watchlists/OverviewTab/OverviewTab.tsx apps/packages/ui/src/components/Option/Watchlists/SetupWizard/WatchlistSetupWizard.tsx apps/packages/ui/src/components/Option/Watchlists/WatchlistsPlaygroundPage.tsx apps/packages/ui/src/components/Option/Watchlists/OverviewTab/__tests__/PipelineWizard.test.tsx apps/packages/ui/src/components/Option/Watchlists/OverviewTab/__tests__/OverviewTab.quick-setup.test.tsx apps/packages/ui/src/components/Option/Watchlists/SetupWizard/__tests__/WatchlistSetupWizard.test.tsx apps/packages/ui/src/assets/locale/en/watchlists.json apps/packages/ui/src/public/_locales/en/watchlists.json
