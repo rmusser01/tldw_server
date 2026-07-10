@@ -2630,12 +2630,14 @@ class ChatbookService:
         request_id: str | None = None,
         source_format: str = "chatbook",
         selected_openwebui_user_id: str | None = None,
+        source_filename: str | None = None,
     ) -> tuple[bool, str, str | dict[str, Any] | None]:
         """
         Import a chatbook.
 
         Args:
             file_path: Path to chatbook file
+            source_filename: User-facing upload filename; server paths are removed
             content_selections: Specific content to import
             conflict_resolution: How to handle conflicts
             prefix_imported: Add prefix to imported items
@@ -2713,6 +2715,9 @@ class ChatbookService:
             )
             return False, detail, None
         file_token = self._build_import_file_token(resolved_path)
+        safe_source_filename = Path(str(source_filename or "").replace("\\", "/")).name
+        if safe_source_filename in {"", ".", ".."}:
+            safe_source_filename = ""
 
         if not async_mode:
             self._check_chatbook_job_admission_with_lock("import")
@@ -2725,7 +2730,14 @@ class ChatbookService:
                 user_id=self.user_id,
                 status=ImportStatus.PENDING,
                 chatbook_path=file_token,
-                metadata={"source_format": source_format_value},
+                metadata={
+                    "source_format": source_format_value,
+                    **(
+                        {"source_filename": safe_source_filename}
+                        if safe_source_filename
+                        else {}
+                    ),
+                },
             )
 
             # Store job in database after atomically reserving Chatbooks quota.
@@ -4581,13 +4593,21 @@ class ChatbookService:
             self._normalize_job_timestamps_for_api(job)
         return job
 
-    def list_export_jobs(self, status: str | None = None, limit: int = 100, offset: int = 0) -> list[ExportJob]:
+    def list_export_jobs(
+        self,
+        status: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+        *,
+        raise_on_error: bool = False,
+    ) -> list[ExportJob]:
         """List all export jobs for this user.
 
         Args:
             status: Optional status filter (pending, in_progress, completed, failed, cancelled, expired)
             limit: Maximum number of jobs to return
             offset: Offset for pagination
+            raise_on_error: Propagate database errors for destructive workflows
         """
         # Sanity check: ensure user_id is set to prevent listing all jobs
         if not self.user_id:
@@ -4708,15 +4728,25 @@ class ChatbookService:
             return jobs
         except _CHATBOOK_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Error listing export jobs: {e}")
+            if raise_on_error:
+                raise
             return []
 
-    def list_import_jobs(self, status: str | None = None, limit: int = 100, offset: int = 0) -> list[ImportJob]:
+    def list_import_jobs(
+        self,
+        status: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+        *,
+        raise_on_error: bool = False,
+    ) -> list[ImportJob]:
         """List all import jobs for this user.
 
         Args:
             status: Optional status filter (pending, validating, in_progress, completed, failed, cancelled)
             limit: Maximum number of jobs to return
             offset: Offset for pagination
+            raise_on_error: Propagate database errors for destructive workflows
         """
         # Sanity check: ensure user_id is set to prevent listing all jobs
         if not self.user_id:
@@ -4840,6 +4870,8 @@ class ChatbookService:
             return jobs
         except _CHATBOOK_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Error listing import jobs: {e}")
+            if raise_on_error:
+                raise
             return []
 
     def count_export_jobs(self, status: str | None = None) -> int:
@@ -7977,11 +8009,28 @@ class ChatbookService:
                 file_path = Path(job.output_path).resolve()
                 expected_base = Path(self.export_dir).resolve()
                 if os.path.commonpath([str(file_path), str(expected_base)]) != str(expected_base):
-                    logger.warning(f"Refusing to delete export outside export dir: {file_path}")
-                elif file_path.exists() and file_path.is_file():
+                    raise JobError(
+                        "Saved export archive is outside managed storage; job history was preserved",
+                        job_id=job_id,
+                        job_type="export",
+                    )
+                if file_path.exists() and not file_path.is_file():
+                    raise JobError(
+                        "Saved export archive is not a regular file; job history was preserved",
+                        job_id=job_id,
+                        job_type="export",
+                    )
+                if file_path.is_file():
                     file_path.unlink()
+            except JobError:
+                raise
             except _CHATBOOK_NONCRITICAL_EXCEPTIONS as exc:
-                logger.warning(f"Failed to delete export file for job {job_id}: {exc}")
+                logger.error(f"Failed to delete export file for job {job_id}: {exc}")
+                raise JobError(
+                    "Unable to delete saved export archive; job history was preserved",
+                    job_id=job_id,
+                    job_type="export",
+                ) from exc
 
         try:
             self.db.execute_query(
@@ -8016,6 +8065,66 @@ class ChatbookService:
             raise
 
         return True
+
+    def delete_finished_jobs(self, batch_size: int = 100) -> dict[str, int]:
+        """Remove all terminal job records, including saved export archives."""
+        batch_size = max(1, min(int(batch_size), 1000))
+        export_jobs_removed = 0
+        import_jobs_removed = 0
+
+        for status in (
+            ExportStatus.COMPLETED,
+            ExportStatus.CANCELLED,
+            ExportStatus.EXPIRED,
+            ExportStatus.FAILED,
+        ):
+            while True:
+                jobs = self.list_export_jobs(
+                    status=status.value,
+                    limit=batch_size,
+                    offset=0,
+                    raise_on_error=True,
+                )
+                if not jobs:
+                    break
+                removed_in_batch = sum(
+                    1 for job in jobs if self.delete_export_job(job.job_id)
+                )
+                export_jobs_removed += removed_in_batch
+                if removed_in_batch == 0:
+                    raise JobError(
+                        "Finished export job removal made no progress",
+                        job_type="export",
+                    )
+
+        for status in (
+            ImportStatus.COMPLETED,
+            ImportStatus.CANCELLED,
+            ImportStatus.FAILED,
+        ):
+            while True:
+                jobs = self.list_import_jobs(
+                    status=status.value,
+                    limit=batch_size,
+                    offset=0,
+                    raise_on_error=True,
+                )
+                if not jobs:
+                    break
+                removed_in_batch = sum(
+                    1 for job in jobs if self.delete_import_job(job.job_id)
+                )
+                import_jobs_removed += removed_in_batch
+                if removed_in_batch == 0:
+                    raise JobError(
+                        "Finished import job removal made no progress",
+                        job_type="import",
+                    )
+
+        return {
+            "export_jobs_removed": export_jobs_removed,
+            "import_jobs_removed": import_jobs_removed,
+        }
 
     def create_import_job(self, file_path: str, conflict_strategy: str = "skip") -> dict[str, Any]:
         """

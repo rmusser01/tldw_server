@@ -1860,6 +1860,13 @@ export const chatRagMethods = {
     })
   },
 
+  async removeFinishedChatbookJobs(this: TldwApiClientCore): Promise<any> {
+    return await bgRequest<any>({
+      path: "/api/v1/chatbooks/jobs/finished",
+      method: "DELETE"
+    })
+  },
+
   async cleanupChatbooks(this: TldwApiClientCore): Promise<any> {
     return await bgRequest<any>({
       path: "/api/v1/chatbooks/cleanup",

@@ -6590,6 +6590,13 @@ export class TldwApiClientBase {
     })
   }
 
+  async removeFinishedChatbookJobs(): Promise<any> {
+    return await bgRequest<any>({
+      path: "/api/v1/chatbooks/jobs/finished",
+      method: "DELETE"
+    })
+  }
+
   async cleanupChatbooks(): Promise<any> {
     return await bgRequest<any>({
       path: "/api/v1/chatbooks/cleanup",

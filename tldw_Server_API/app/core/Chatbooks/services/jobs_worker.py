@@ -485,6 +485,7 @@ async def _handle_import(service: ChatbookService, payload: dict[str, Any], job_
             )
             ij.warnings = warnings
             ij.metadata = {
+                **(ij.metadata if isinstance(ij.metadata, dict) else {}),
                 "imported_items": imported_items,
                 "inventory_summary": result_data.get("inventory_summary"),
                 "skipped_non_restorable": skipped_non_restorable,

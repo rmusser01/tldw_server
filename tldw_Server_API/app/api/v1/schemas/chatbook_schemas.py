@@ -329,8 +329,12 @@ class ImportJobResponse(BaseModel):
     """Import job status."""
     job_id: str
     status: ImportStatus
-    chatbook_path: str
+    chatbook_path: str = Field(
+        description="Deprecated safe filename alias; internal server paths are never returned"
+    )
     created_at: datetime
+    source_filename: Optional[str] = None
+    chatbook_name: Optional[str] = None
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     error_message: Optional[str] = None
@@ -748,6 +752,14 @@ class RemoveJobResponse(BaseModel):
     success: bool
     message: str
     job_id: str
+
+
+class RemoveFinishedJobsResponse(BaseModel):
+    """Response for removing all terminal Chatbook job history."""
+    success: bool
+    message: str
+    export_jobs_removed: int = Field(default=0, ge=0)
+    import_jobs_removed: int = Field(default=0, ge=0)
 
 
 class ContinueExportRequest(BaseModel):

@@ -20,6 +20,7 @@ async def test_handle_import_defaults_chatbook_media_and_embeddings_to_true(tmp_
                 status=ImportStatus.PENDING,
                 completed_at=None,
                 error_message=None,
+                metadata={"source_filename": "backup.chatbook"},
             )
             self.called_args = None
 
@@ -70,6 +71,7 @@ async def test_handle_import_defaults_chatbook_media_and_embeddings_to_true(tmp_
     assert service.import_job.status == ImportStatus.COMPLETED
     assert service.import_job.progress_percentage == 100
     assert service.import_job.successful_items == 1
+    assert service.import_job.metadata["source_filename"] == "backup.chatbook"
     assert service.import_job.metadata["imported_items"] == {"note": 1}
     assert isinstance(service.import_job.completed_at, datetime)
     assert not archive_path.exists()

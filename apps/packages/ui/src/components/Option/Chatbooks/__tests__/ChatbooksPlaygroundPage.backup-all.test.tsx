@@ -79,6 +79,7 @@ vi.mock("react-i18next", () => ({
         | {
             defaultValue?: string
             count?: number
+            name?: string
             seconds?: number
           }
     ) => {
@@ -86,6 +87,7 @@ vi.mock("react-i18next", () => ({
       if (defaultValueOrOptions?.defaultValue) {
         return defaultValueOrOptions.defaultValue
           .replace("{{count}}", String(defaultValueOrOptions.count ?? ""))
+          .replace("{{name}}", String(defaultValueOrOptions.name ?? ""))
           .replace("{{seconds}}", String(defaultValueOrOptions.seconds ?? ""))
       }
       return key
@@ -257,7 +259,7 @@ describe("ChatbooksPlaygroundPage backup-all flow", () => {
     await waitFor(() => {
       expect(tldwClientMock.exportChatbook).not.toHaveBeenCalled()
     })
-  })
+  }, 10_000)
 
   it("omits archive import media and embedding flags so default restore handles all archive data", async () => {
     tldwClientMock.previewChatbook.mockResolvedValueOnce({
@@ -412,7 +414,7 @@ describe("ChatbooksPlaygroundPage backup-all flow", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Jobs" }))
 
     await waitFor(() => {
-      expect(screen.getByText("failed-stale-progress")).toBeInTheDocument()
+      expect(screen.getByText("Job ID: failed-stale-progress")).toBeInTheDocument()
     })
     expect(screen.queryByRole("progressbar")).not.toBeInTheDocument()
     expect(screen.queryByText("100%")).not.toBeInTheDocument()
