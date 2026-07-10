@@ -7,14 +7,19 @@ when the job's output_prefs has generate_audio=True.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping, MutableMapping
 from dataclasses import dataclass
-from typing import Any, Literal, MutableMapping
+from typing import Any, Literal
 from uuid import uuid4
 
 from loguru import logger
 from starlette.concurrency import run_in_threadpool
 
 from tldw_Server_API.app.core.TTS.tts_request_resolution import resolve_tts_request_defaults
+from tldw_Server_API.app.core.Watchlists.briefing_contract import (
+    briefing_selection_limit,
+    get_briefing_contract,
+)
 
 AudioBriefingTriggerStatus = Literal[
     "disabled",
@@ -202,7 +207,7 @@ def _normalize_audio_cast_voice_map(audio_cast: Any) -> dict[str, str] | None:
     return voice_map or None
 
 
-def _first_non_empty_pref(output_prefs: dict[str, Any], *keys: str) -> Any:
+def _first_non_empty_pref(output_prefs: Mapping[str, Any], *keys: str) -> Any:
     """Return the first non-empty preference value for current and legacy keys."""
     for key in keys:
         value = output_prefs.get(key)
@@ -216,11 +221,11 @@ def _first_non_empty_pref(output_prefs: dict[str, Any], *keys: str) -> Any:
     return None
 
 
-def _resolve_workflow_tts_defaults(output_prefs: dict[str, Any]) -> tuple[str | None, str, str] | None:
+def _resolve_workflow_tts_defaults(audio_prefs: Mapping[str, Any]) -> tuple[str | None, str, str] | None:
     """Resolve Watchlists audio prefs through the same defaults as /audio/speech."""
-    provider = _first_non_empty_pref(output_prefs, "audio_provider", "tts_provider")
-    model = _first_non_empty_pref(output_prefs, "audio_model", "tts_model")
-    voice = _first_non_empty_pref(output_prefs, "audio_voice", "tts_voice")
+    provider = _first_non_empty_pref(audio_prefs, "provider")
+    model = _first_non_empty_pref(audio_prefs, "model")
+    voice = _first_non_empty_pref(audio_prefs, "voice")
     try:
         resolved = resolve_tts_request_defaults(
             provider=provider,
@@ -275,36 +280,37 @@ def _build_workflow_inputs(
     output_prefs: dict[str, Any],
 ) -> dict[str, Any] | None:
     """Build workflow inputs dict from watchlist output_prefs."""
-    tts_defaults = _resolve_workflow_tts_defaults(output_prefs)
+    audio_prefs = get_briefing_contract(output_prefs, scheduled=False)["audio"]
+    tts_defaults = _resolve_workflow_tts_defaults(audio_prefs)
     if tts_defaults is None:
         return None
     tts_provider, tts_model, tts_voice = tts_defaults
 
-    audio_cast = output_prefs.get("audio_cast")
-    voice_map = output_prefs.get("voice_map")
+    audio_cast = audio_prefs.get("cast")
+    voice_map = audio_prefs.get("voice_map")
     if not isinstance(voice_map, dict):
         voice_map = _normalize_audio_cast_voice_map(audio_cast)
 
     return {
         "items": items,
-        "target_audio_minutes": output_prefs.get("target_audio_minutes", 10),
-        "audio_language": output_prefs.get("audio_language") or "en",
+        "target_audio_minutes": audio_prefs.get("target_minutes", 10),
+        "audio_language": audio_prefs.get("language") or "en",
         "tts_provider": tts_provider,
         "tts_model": tts_model,
         "tts_voice": tts_voice,
-        "tts_speed": output_prefs.get("audio_speed") or 1.0,
-        "llm_provider": output_prefs.get("llm_provider"),
-        "llm_model": output_prefs.get("llm_model"),
+        "tts_speed": audio_prefs.get("speed") or 1.0,
+        "llm_provider": audio_prefs.get("llm_provider"),
+        "llm_model": audio_prefs.get("llm_model"),
         "voice_map": voice_map,
         "audio_cast": audio_cast if isinstance(audio_cast, dict) else None,
-        "persona_summarize": bool(output_prefs.get("persona_summarize", False)),
-        "persona_id": output_prefs.get("persona_id"),
-        "persona_provider": output_prefs.get("persona_provider"),
-        "persona_model": output_prefs.get("persona_model"),
-        "background_audio_uri": output_prefs.get("background_audio_uri"),
-        "background_volume": output_prefs.get("background_volume", 0.15),
-        "background_delay_ms": output_prefs.get("background_delay_ms", 0),
-        "background_fade_seconds": output_prefs.get("background_fade_seconds", 2.0),
+        "persona_summarize": bool(audio_prefs.get("persona_summarize", False)),
+        "persona_id": audio_prefs.get("persona_id"),
+        "persona_provider": audio_prefs.get("persona_provider"),
+        "persona_model": audio_prefs.get("persona_model"),
+        "background_audio_uri": audio_prefs.get("background_audio_uri"),
+        "background_volume": audio_prefs.get("background_volume", 0.15),
+        "background_delay_ms": audio_prefs.get("background_delay_ms", 0),
+        "background_fade_seconds": audio_prefs.get("background_fade_seconds", 2.0),
     }
 
 
@@ -332,7 +338,8 @@ async def trigger_audio_briefing(
     Returns:
         Structured status for the trigger attempt.
     """
-    if not output_prefs.get("generate_audio"):
+    contract = get_briefing_contract(output_prefs, scheduled=False)
+    if not contract["audio"]["enabled"]:
         return AudioBriefingTriggerResult(status="disabled")
 
     # Gather scraped items for this run
@@ -341,7 +348,7 @@ async def trigger_audio_briefing(
             db.list_items,
             run_id=run_id,
             status="ingested",
-            limit=100,
+            limit=briefing_selection_limit(contract),
             offset=0,
         )
     except asyncio.CancelledError:

@@ -46,23 +46,26 @@ from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.Collections.embedding_queue import enqueue_embeddings_job_for_item
 from tldw_Server_API.app.core.Collections.utils import hash_text_sha256, truncate_text, word_count
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
-from tldw_Server_API.app.core.DB_Management.media_db.api import get_media_repository
-from tldw_Server_API.app.core.DB_Management.media_db.api import managed_media_database
-from tldw_Server_API.app.core.DB_Management.Personalization_DB import PersonalizationDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.DB_Management.media_db.api import get_media_repository, managed_media_database
+from tldw_Server_API.app.core.DB_Management.Personalization_DB import PersonalizationDB
 from tldw_Server_API.app.core.DB_Management.scope_context import get_scope
 from tldw_Server_API.app.core.DB_Management.Watchlists_DB import SourceRow, WatchlistsDatabase
-from tldw_Server_API.app.core.Personalization.companion_activity import build_watchlist_item_added_activity
 from tldw_Server_API.app.core.feature_flags import is_personalization_enabled
+from tldw_Server_API.app.core.Personalization.companion_activity import build_watchlist_item_added_activity
+from tldw_Server_API.app.core.testing import env_flag_enabled, is_test_mode
+from tldw_Server_API.app.core.Watchlists.briefing_contract import (
+    briefing_selection_limit,
+    get_briefing_contract,
+)
+from tldw_Server_API.app.core.Watchlists.content_alerts import evaluate_content_alert_rules_for_item
 from tldw_Server_API.app.core.Watchlists.fetchers import (
     fetch_rss_feed,
     fetch_rss_feed_history,
     fetch_site_article_async,
     fetch_site_items_with_rules,
 )
-from tldw_Server_API.app.core.Watchlists.content_alerts import evaluate_content_alert_rules_for_item
 from tldw_Server_API.app.core.Watchlists.filters import evaluate_filters, normalize_filters
-from tldw_Server_API.app.core.testing import env_flag_enabled, is_test_mode
 
 try:
     import bleach as _bleach  # type: ignore
@@ -554,8 +557,12 @@ async def _maybe_auto_generate_output(
 
     Returns the output artifact ID, or None if skipped.
     """
-    auto_cfg = job_output_prefs.get("auto_output")
-    if not isinstance(auto_cfg, dict) or not auto_cfg.get("enabled"):
+    contract = get_briefing_contract(
+        job_output_prefs,
+        scheduled=bool(getattr(job, "schedule_expr", None)),
+    )
+    text_cfg = contract["text"]
+    if not text_cfg["enabled"]:
         return None
     if stats.get("items_ingested", 0) <= 0:
         return None
@@ -570,19 +577,21 @@ async def _maybe_auto_generate_output(
         render_output_template,
     )
 
-    items_rows, _ = db.list_items(run_id=run.id, status="ingested", limit=1000, offset=0)
+    items_rows, _ = db.list_items(
+        run_id=run.id,
+        status="ingested",
+        limit=briefing_selection_limit(contract),
+        offset=0,
+    )
     if not items_rows:
         return None
 
-    output_type = str(auto_cfg.get("type", "briefing_markdown"))
-    template_name = auto_cfg.get("template_name")
-    if not template_name:
-        template_defaults = job_output_prefs.get("template") or {}
-        template_name = template_defaults.get("default_name")
+    output_type = str(text_cfg.get("type") or "briefing_markdown")
+    template_name = text_cfg.get("template_name")
 
     # Resolve template content
     template_content: str | None = None
-    template_format = "md"
+    template_format = str(text_cfg.get("format") or "md")
     if template_name:
         try:
             tpl = template_store.load_template(str(template_name))
@@ -1791,25 +1800,34 @@ async def run_watchlist_job(
         except _WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS as exc:
             logger.debug(f"collections schedule auto-promote failed for job {job_id}: {exc}")
 
+        contract = get_briefing_contract(
+            job_output_prefs,
+            scheduled=bool(getattr(job, "schedule_expr", None)),
+        )
+        text_enabled = bool(contract["text"]["enabled"])
+        audio_enabled = bool(contract["audio"]["enabled"])
+
         # Auto-generate output if configured
+        auto_output_id = None
         try:
-            auto_output_id = await _maybe_auto_generate_output(
-                db=db,
-                collections_db=collections_db,
-                user_id=user_id,
-                run=run,
-                job=job,
-                job_output_prefs=job_output_prefs,
-                stats=stats,
-            )
-            if auto_output_id:
-                stats["auto_output_id"] = auto_output_id
+            if text_enabled:
+                auto_output_id = await _maybe_auto_generate_output(
+                    db=db,
+                    collections_db=collections_db,
+                    user_id=user_id,
+                    run=run,
+                    job=job,
+                    job_output_prefs=job_output_prefs,
+                    stats=stats,
+                )
+                if auto_output_id:
+                    stats["auto_output_id"] = auto_output_id
         except _WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS as exc:
             logger.debug(f"auto-output generation failed for run {run.id}: {exc}")
 
         # Trigger audio briefing workflow if configured
         try:
-            if isinstance(job_output_prefs, dict) and job_output_prefs.get("generate_audio"):
+            if audio_enabled:
                 from tldw_Server_API.app.core.Watchlists.audio_briefing_workflow import (
                     apply_audio_briefing_result_metadata,
                     trigger_audio_briefing,
