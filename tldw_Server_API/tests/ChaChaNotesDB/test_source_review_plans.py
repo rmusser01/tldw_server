@@ -35,6 +35,39 @@ def test_source_review_month_offset_clamps_to_month_end():
 
 
 @pytest.mark.parametrize(
+    ("starts_on", "offset_value", "offset_unit", "expected_due_at"),
+    [
+        (
+            date(2026, 1, 1),
+            3650,
+            "day",
+            datetime(2035, 12, 30, tzinfo=timezone.utc),
+        ),
+        (
+            date(2026, 1, 31),
+            120,
+            "month",
+            datetime(2036, 1, 31, tzinfo=timezone.utc),
+        ),
+    ],
+)
+def test_source_review_offset_accepts_exact_caps(
+    starts_on,
+    offset_value,
+    offset_unit,
+    expected_due_at,
+):
+    due_at = compute_source_review_due_at(
+        starts_on=starts_on,
+        timezone_name="UTC",
+        offset_value=offset_value,
+        offset_unit=offset_unit,
+    )
+
+    assert due_at == expected_due_at  # nosec B101
+
+
+@pytest.mark.parametrize(
     ("offset_value", "offset_unit"),
     [
         (0, "day"),
@@ -78,6 +111,26 @@ def test_source_review_due_at_rejects_invalid_timezone():
         )
 
 
+def test_source_review_day_offset_rejects_date_overflow_consistently():
+    with pytest.raises(ValueError, match="supported date range"):
+        compute_source_review_due_at(
+            starts_on=date.max,
+            timezone_name="UTC",
+            offset_value=1,
+            offset_unit="day",
+        )
+
+
+def test_source_review_month_offset_rejects_date_overflow_consistently():
+    with pytest.raises(ValueError, match="supported date range"):
+        compute_source_review_due_at(
+            starts_on=date.max,
+            timezone_name="UTC",
+            offset_value=1,
+            offset_unit="month",
+        )
+
+
 def test_source_review_schedule_rejects_duplicate_computed_due_activity():
     with pytest.raises(ValueError, match="Duplicate"):
         compute_source_review_schedule(
@@ -117,6 +170,27 @@ def test_source_review_schedule_allows_different_activities_at_same_due_at():
     )
 
     assert rows[0]["due_at"] == rows[1]["due_at"]  # nosec B101
+
+
+@pytest.mark.parametrize(
+    "schedule_row",
+    [
+        {"offset_value": 1, "offset_unit": "day"},
+        {"offset_value": 1, "offset_unit": "day", "activity_type": 7},
+        {
+            "offset_value": 1,
+            "offset_unit": "day",
+            "activity_type": "matching",
+        },
+    ],
+)
+def test_source_review_schedule_rejects_invalid_activity_values(schedule_row):
+    with pytest.raises(ValueError, match="activity_type"):
+        compute_source_review_schedule(
+            starts_on=date(2026, 1, 1),
+            timezone_name="UTC",
+            schedule=[schedule_row],
+        )
 
 
 @pytest.mark.parametrize(
@@ -204,6 +278,25 @@ def test_source_review_launch_metadata_is_thin_and_under_size_cap():
         "created_at",
     }
     assert len(json.dumps(metadata).encode("utf-8")) <= 16 * 1024  # nosec B101
+
+
+def test_source_review_launch_metadata_accepts_exact_default_json_size_cap():
+    baseline = build_source_review_launch_metadata(
+        activity_type="quiz",
+        plan_id=7,
+        occurrence_id=11,
+        created_at="",
+    )
+    created_at = "x" * (16 * 1024 - len(json.dumps(baseline).encode("utf-8")))
+
+    metadata = build_source_review_launch_metadata(
+        activity_type="quiz",
+        plan_id=7,
+        occurrence_id=11,
+        created_at=created_at,
+    )
+
+    assert len(json.dumps(metadata).encode("utf-8")) == 16 * 1024  # nosec B101
 
 
 def test_source_review_launch_metadata_rejects_unsupported_activity():

@@ -62,14 +62,17 @@ def compute_source_review_due_at(
     if offset_value > _OFFSET_CAPS[offset_unit]:
         raise ValueError(f"offset_value exceeds the {_OFFSET_CAPS[offset_unit]} {offset_unit} cap")
 
-    if offset_unit == "day":
-        due_date = starts_on + timedelta(days=offset_value)
-    else:
-        month_index = starts_on.month - 1 + offset_value
-        due_year = starts_on.year + month_index // 12
-        due_month = month_index % 12 + 1
-        due_day = min(starts_on.day, monthrange(due_year, due_month)[1])
-        due_date = date(due_year, due_month, due_day)
+    try:
+        if offset_unit == "day":
+            due_date = starts_on + timedelta(days=offset_value)
+        else:
+            month_index = starts_on.month - 1 + offset_value
+            due_year = starts_on.year + month_index // 12
+            due_month = month_index % 12 + 1
+            due_day = min(starts_on.day, monthrange(due_year, due_month)[1])
+            due_date = date(due_year, due_month, due_day)
+    except (OverflowError, ValueError) as exc:
+        raise ValueError("Source review due date is outside the supported date range") from exc
 
     try:
         plan_timezone = ZoneInfo(timezone_name)
