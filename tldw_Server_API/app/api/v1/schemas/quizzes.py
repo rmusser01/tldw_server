@@ -147,6 +147,8 @@ class QuizGenerationProfileDefinition(BaseModel):
 class QuestionCreate(BaseModel):
     question_type: QuestionType
     question_text: str
+    group_id: Optional[str] = Field(None, max_length=128)
+    group_prompt: Optional[str] = Field(None, max_length=2000)
     options: Optional[list[str]] = Field(None, description="Multiple choice options")
     correct_answer: AnswerValue
     explanation: Optional[str] = None
@@ -163,6 +165,8 @@ class QuestionUpdate(BaseModel):
 
     question_type: Optional[QuestionType] = None
     question_text: Optional[str] = None
+    group_id: Optional[str] = Field(None, max_length=128)
+    group_prompt: Optional[str] = Field(None, max_length=2000)
     options: Optional[list[str]] = None
     correct_answer: Optional[AnswerValue] = None
     explanation: Optional[str] = None
@@ -180,6 +184,8 @@ class QuestionPublicResponse(BaseModel):
     quiz_id: int
     question_type: QuestionType
     question_text: str
+    group_id: Optional[str] = Field(None, max_length=128)
+    group_prompt: Optional[str] = Field(None, max_length=2000)
     options: Optional[list[str]] = None
     hint: Optional[str] = None
     hint_penalty_points: int = Field(0, ge=0)
@@ -399,6 +405,8 @@ class QuizGenerateResponse(BaseModel):
 class QuizImportQuestion(BaseModel):
     question_type: QuestionType
     question_text: str
+    group_id: Optional[str] = Field(None, max_length=128)
+    group_prompt: Optional[str] = Field(None, max_length=2000)
     options: Optional[list[str]] = None
     correct_answer: AnswerValue
     explanation: Optional[str] = None

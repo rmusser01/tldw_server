@@ -2,8 +2,12 @@ import pytest
 from pydantic import ValidationError
 
 from tldw_Server_API.app.api.v1.schemas.quizzes import (
+    QuestionCreate,
+    QuestionPublicResponse,
+    QuestionUpdate,
     QuizGenerateRequest,
     QuizGenerationProfile,
+    QuizImportQuestion,
     SourceCitation,
 )
 
@@ -147,3 +151,53 @@ def test_source_citation_accepts_canonical_source_fields():
 
     assert citation.source_type == "flashcard_card"
     assert citation.source_id == "card-uuid"
+
+
+_QUESTION_MODEL_PAYLOADS = (
+    (
+        QuestionCreate,
+        {"question_type": "multiple_choice", "question_text": "Stem", "correct_answer": 0},
+    ),
+    (QuestionUpdate, {}),
+    (
+        QuestionPublicResponse,
+        {
+            "id": 1,
+            "quiz_id": 2,
+            "question_type": "multiple_choice",
+            "question_text": "Stem",
+            "points": 1,
+            "order_index": 0,
+            "deleted": False,
+            "client_id": "test",
+            "version": 1,
+        },
+    ),
+    (
+        QuizImportQuestion,
+        {"question_type": "multiple_choice", "question_text": "Stem", "correct_answer": 0},
+    ),
+)
+
+
+@pytest.mark.parametrize(("model_type", "payload"), _QUESTION_MODEL_PAYLOADS)
+def test_question_contracts_default_emq_group_metadata_to_none(model_type, payload):
+    question = model_type.model_validate(payload)
+
+    assert question.group_id is None
+    assert question.group_prompt is None
+
+
+@pytest.mark.parametrize(("model_type", "payload"), _QUESTION_MODEL_PAYLOADS)
+@pytest.mark.parametrize(("field_name", "max_length"), (("group_id", 128), ("group_prompt", 2000)))
+def test_question_contracts_enforce_emq_group_metadata_max_lengths(
+    model_type,
+    payload,
+    field_name,
+    max_length,
+):
+    accepted = model_type.model_validate({**payload, field_name: "x" * max_length})
+    assert getattr(accepted, field_name) == "x" * max_length
+
+    with pytest.raises(ValidationError):
+        model_type.model_validate({**payload, field_name: "x" * (max_length + 1)})
