@@ -43,5 +43,608 @@
   },
   "items_queue_generateReport": {
     "message": "Створити звіт із черги"
+  },
+  "setupWizard_title": {
+    "message": "Створити список спостереження"
+  },
+  "setupWizard_containerTitle": {
+    "message": "Створити список спостереження"
+  },
+  "setupWizard_containerHelp": {
+    "message": "Спочатку створіть контейнер проєкту. Джерела, періодичність, зведення, доставка й тест налаштовуються в одному процесі."
+  },
+  "setupWizard_actions_continue": {
+    "message": "Перейти до джерел"
+  },
+  "setupWizard_sections_preset": {
+    "message": "Профіль галузі"
+  },
+  "setupWizard_fields_name": {
+    "message": "Назва списку спостереження"
+  },
+  "setupWizard_fields_objective": {
+    "message": "Мета"
+  },
+  "setupWizard_validation_nameRequired": {
+    "message": "Додайте назву списку спостереження."
+  },
+  "setupWizard_errors_createFailed": {
+    "message": "Не вдалося створити список спостереження."
+  },
+  "setupWizard_presets_cti_osint_label": {
+    "message": "CTI / OSINT"
+  },
+  "setupWizard_presets_cti_osint_description": {
+    "message": "Відстежуйте вразливості, шкідливі програми, суб’єктів, рекомендації та зміни джерел."
+  },
+  "setupWizard_presets_news_label": {
+    "message": "Новини"
+  },
+  "setupWizard_presets_news_description": {
+    "message": "Відстежуйте події, що розвиваються, людей, організації та різноманітність джерел."
+  },
+  "setupWizard_presets_general_label": {
+    "message": "Загальний"
+  },
+  "setupWizard_presets_general_description": {
+    "message": "Відстежуйте тему та збирайте оновлення для перегляду."
+  },
+  "setupWizard_presets_blank_label": {
+    "message": "Порожній"
+  },
+  "setupWizard_presets_blank_description": {
+    "message": "Почніть із порожнього списку спостереження та налаштуйте деталі самостійно."
+  },
+  "setupWizard_startModes_sources_label": {
+    "message": "Почати з джерел"
+  },
+  "setupWizard_startModes_sources_description": {
+    "message": "Створіть список спостереження з початковими каналами й необов’язковим монітором."
+  },
+  "setupWizard_startModes_topic_label": {
+    "message": "Почати з теми"
+  },
+  "setupWizard_startModes_topic_description": {
+    "message": "Спершу створіть мету списку, а потім додайте канали до початку збирання."
+  },
+  "setupWizard_startModes_report_goal_label": {
+    "message": "Почати з мети звіту"
+  },
+  "setupWizard_startModes_report_goal_description": {
+    "message": "Спершу визначте мету зведення, а потім під’єднайте джерела й шаблони."
+  },
+  "setupWizard_boundaries_alerts": {
+    "message": "Сповіщення про збіг вмісту налаштовуються пізніше. Тут визначаються список спостереження та початкове охоплення збирання."
+  },
+  "overview_pipelineSetup_title": {
+    "message": "Налаштувати зведення"
+  },
+  "overview_pipelineSetup_open": {
+    "message": "Налаштувати зведення"
+  },
+  "overview_pipelineSetup_progress": {
+    "message": "Кроки налаштування зведення"
+  },
+  "overview_pipelineSetup_steps_sources": {
+    "message": "Джерела"
+  },
+  "overview_pipelineSetup_steps_cadence": {
+    "message": "Періодичність"
+  },
+  "overview_pipelineSetup_steps_briefing": {
+    "message": "Зведення"
+  },
+  "overview_pipelineSetup_steps_delivery": {
+    "message": "Доставка"
+  },
+  "overview_pipelineSetup_steps_test": {
+    "message": "Тест"
+  },
+  "overview_pipelineSetup_actions_next": {
+    "message": "Перейти до кроку «{{step}}»"
+  },
+  "overview_pipelineSetup_source_existing": {
+    "message": "Використати наявні джерела"
+  },
+  "overview_pipelineSetup_source_new": {
+    "message": "Додати нове джерело"
+  },
+  "overview_pipelineSetup_source_fallback": {
+    "message": "Джерело {{id}}"
+  },
+  "overview_pipelineSetup_sources_help": {
+    "message": "Виберіть наявні джерела або додайте нове, а потім перевірте з’єднання."
+  },
+  "overview_pipelineSetup_sourcesLoading": {
+    "message": "Завантаження джерел..."
+  },
+  "overview_pipelineSetup_sourcesError": {
+    "message": "Не вдалося завантажити канали для налаштування."
+  },
+  "overview_pipelineSetup_sourceTest_action": {
+    "message": "Перевірити джерело"
+  },
+  "overview_pipelineSetup_sourceTest_ready": {
+    "message": "Джерело готове."
+  },
+  "overview_pipelineSetup_sourceTest_cancelled": {
+    "message": "Перевірку джерела скасовано."
+  },
+  "overview_pipelineSetup_sourceTest_failed": {
+    "message": "Не вдалося перевірити джерело. {{message}}"
+  },
+  "overview_pipelineSetup_sourceTest_summary": {
+    "message": "готово: {{ready}}, відфільтровано: {{filtered}}"
+  },
+  "overview_pipelineSetup_sourceTest_sample": {
+    "message": "Приклади матеріалів"
+  },
+  "overview_pipelineSetup_sourceTest_readyItem": {
+    "message": "Готово"
+  },
+  "overview_pipelineSetup_sourceTest_filteredItem": {
+    "message": "Відфільтровано"
+  },
+  "overview_pipelineSetup_sourceTest_untitled": {
+    "message": "Матеріал без назви"
+  },
+  "overview_pipelineSetup_fields_sources": {
+    "message": "Джерела"
+  },
+  "overview_pipelineSetup_fields_sourceName": {
+    "message": "Назва джерела"
+  },
+  "overview_pipelineSetup_fields_sourceUrl": {
+    "message": "URL джерела"
+  },
+  "overview_pipelineSetup_fields_monitorName": {
+    "message": "Назва монітора"
+  },
+  "overview_pipelineSetup_fields_schedule": {
+    "message": "Розклад"
+  },
+  "overview_pipelineSetup_fields_timezone": {
+    "message": "Часовий пояс"
+  },
+  "overview_pipelineSetup_fields_intervalEvery": {
+    "message": "Кожні"
+  },
+  "overview_pipelineSetup_fields_intervalUnit": {
+    "message": "Одиниця інтервалу"
+  },
+  "overview_pipelineSetup_fields_weekday": {
+    "message": "День тижня"
+  },
+  "overview_pipelineSetup_fields_hour": {
+    "message": "Година"
+  },
+  "overview_pipelineSetup_fields_minute": {
+    "message": "Хвилина"
+  },
+  "overview_pipelineSetup_fields_cronExpression": {
+    "message": "Вираз cron"
+  },
+  "overview_pipelineSetup_fields_showName": {
+    "message": "Назва програми"
+  },
+  "overview_pipelineSetup_fields_premise": {
+    "message": "Концепція програми"
+  },
+  "overview_pipelineSetup_fields_includeAudio": {
+    "message": "Аудіо"
+  },
+  "overview_pipelineSetup_fields_audioHelp": {
+    "message": "Додати відтворювану озвучену версію."
+  },
+  "overview_pipelineSetup_fields_audioMinutes": {
+    "message": "Цільова тривалість у хвилинах"
+  },
+  "overview_pipelineSetup_fields_speakerCount": {
+    "message": "Кількість учасників"
+  },
+  "overview_pipelineSetup_fields_template": {
+    "message": "Шаблон звіту"
+  },
+  "overview_pipelineSetup_fields_audioProvider": {
+    "message": "Інший постачальник аудіо"
+  },
+  "overview_pipelineSetup_fields_audioModel": {
+    "message": "Інша модель аудіо"
+  },
+  "overview_pipelineSetup_fields_customInstructions": {
+    "message": "Власні редакційні вказівки"
+  },
+  "overview_pipelineSetup_fields_emailDelivery": {
+    "message": "Електронна пошта"
+  },
+  "overview_pipelineSetup_fields_emailRecipients": {
+    "message": "Одержувачі листів"
+  },
+  "overview_pipelineSetup_fields_chatbookDelivery": {
+    "message": "Chatbook"
+  },
+  "overview_pipelineSetup_fields_chatbookTitle": {
+    "message": "Назва Chatbook"
+  },
+  "overview_pipelineSetup_schedule_manual": {
+    "message": "Лише вручну"
+  },
+  "overview_pipelineSetup_schedule_interval": {
+    "message": "Кожні N годин або хвилин"
+  },
+  "overview_pipelineSetup_schedule_daily": {
+    "message": "Щодня"
+  },
+  "overview_pipelineSetup_schedule_weekdays": {
+    "message": "У будні"
+  },
+  "overview_pipelineSetup_schedule_weekly": {
+    "message": "Щотижня"
+  },
+  "overview_pipelineSetup_schedule_advanced": {
+    "message": "Розширений cron"
+  },
+  "overview_pipelineSetup_intervalUnits_hours": {
+    "message": "Години"
+  },
+  "overview_pipelineSetup_intervalUnits_minutes": {
+    "message": "Хвилини"
+  },
+  "overview_pipelineSetup_weekdays_monday": {
+    "message": "Понеділок"
+  },
+  "overview_pipelineSetup_weekdays_tuesday": {
+    "message": "Вівторок"
+  },
+  "overview_pipelineSetup_weekdays_wednesday": {
+    "message": "Середа"
+  },
+  "overview_pipelineSetup_weekdays_thursday": {
+    "message": "Четвер"
+  },
+  "overview_pipelineSetup_weekdays_friday": {
+    "message": "П’ятниця"
+  },
+  "overview_pipelineSetup_weekdays_saturday": {
+    "message": "Субота"
+  },
+  "overview_pipelineSetup_weekdays_sunday": {
+    "message": "Неділя"
+  },
+  "overview_pipelineSetup_advancedCron": {
+    "message": "Розширений cron"
+  },
+  "overview_pipelineSetup_nextOccurrence": {
+    "message": "Наступний запуск"
+  },
+  "overview_pipelineSetup_manualOccurrence": {
+    "message": "Лише вручну"
+  },
+  "overview_pipelineSetup_nextOccurrencePending": {
+    "message": "Збережіть допустимий розклад, щоб обчислити точний час."
+  },
+  "overview_pipelineSetup_briefing_question": {
+    "message": "Що ви створюєте?"
+  },
+  "overview_pipelineSetup_briefing_help": {
+    "message": "Виберіть редакційний формат. Усі варіанти спираються на вибрані джерела."
+  },
+  "overview_pipelineSetup_briefing_advanced": {
+    "message": "Розширені параметри зведення"
+  },
+  "overview_pipelineSetup_formats_concise_briefing": {
+    "message": "Стисле зведення"
+  },
+  "overview_pipelineSetup_formats_solo_update": {
+    "message": "Одиночне оновлення"
+  },
+  "overview_pipelineSetup_formats_host_discussion": {
+    "message": "Обговорення ведучих"
+  },
+  "overview_pipelineSetup_formats_sportscast": {
+    "message": "Спортивний випуск"
+  },
+  "overview_pipelineSetup_formats_culture_roundtable": {
+    "message": "Культурний круглий стіл"
+  },
+  "overview_pipelineSetup_formats_custom": {
+    "message": "Власний формат"
+  },
+  "overview_pipelineSetup_speaker_defaultLabel": {
+    "message": "Учасник {{index}}"
+  },
+  "overview_pipelineSetup_speaker_defaultRole": {
+    "message": "Ведучий"
+  },
+  "overview_pipelineSetup_speaker_labelField": {
+    "message": "Мітка учасника {{index}}"
+  },
+  "overview_pipelineSetup_speaker_roleField": {
+    "message": "Роль учасника {{index}}"
+  },
+  "overview_pipelineSetup_speaker_voiceField": {
+    "message": "Голос учасника {{index}}"
+  },
+  "overview_pipelineSetup_speaker_personaField": {
+    "message": "Образ учасника {{index}}"
+  },
+  "overview_pipelineSetup_preview_generate": {
+    "message": "Попередній перегляд звіту"
+  },
+  "overview_pipelineSetup_preview_diagnostics": {
+    "message": "Діагностика перегляду"
+  },
+  "overview_pipelineSetup_preview_context": {
+    "message": "Запуск перегляду: {{runId}}"
+  },
+  "overview_pipelineSetup_preview_noRunContext": {
+    "message": "Успішно запустіть монітор перед попереднім переглядом цього звіту."
+  },
+  "overview_pipelineSetup_preview_templateRequired": {
+    "message": "Виберіть шаблон перед створенням перегляду."
+  },
+  "overview_pipelineSetup_preview_templateEmpty": {
+    "message": "Вибраний шаблон порожній."
+  },
+  "overview_pipelineSetup_preview_emptyResult": {
+    "message": "Попередній перегляд не повернув готового вмісту."
+  },
+  "overview_pipelineSetup_preview_error": {
+    "message": "Не вдалося створити попередній перегляд."
+  },
+  "overview_pipelineSetup_delivery_help": {
+    "message": "Звіти завжди включено. Зовнішня доставка очікує готовності вибраних артефактів."
+  },
+  "overview_pipelineSetup_delivery_reports": {
+    "message": "Звіти"
+  },
+  "overview_pipelineSetup_delivery_required": {
+    "message": "Обов’язкове сховище"
+  },
+  "overview_pipelineSetup_delivery_alwaysOn": {
+    "message": "Завжди ввімкнено"
+  },
+  "overview_pipelineSetup_receipt_labels_schedule": {
+    "message": "Розклад"
+  },
+  "overview_pipelineSetup_receipt_labels_sources": {
+    "message": "Джерела"
+  },
+  "overview_pipelineSetup_receipt_labels_artifacts": {
+    "message": "Артефакти"
+  },
+  "overview_pipelineSetup_receipt_labels_format": {
+    "message": "Формат"
+  },
+  "overview_pipelineSetup_receipt_labels_showName": {
+    "message": "Назва програми"
+  },
+  "overview_pipelineSetup_receipt_labels_cast": {
+    "message": "Учасники"
+  },
+  "overview_pipelineSetup_receipt_labels_duration": {
+    "message": "Цільова тривалість"
+  },
+  "overview_pipelineSetup_receipt_labels_destinations": {
+    "message": "Призначення"
+  },
+  "overview_pipelineSetup_receipt_schedule_manual": {
+    "message": "Лише вручну"
+  },
+  "overview_pipelineSetup_receipt_schedule_scheduled": {
+    "message": "{{date}} ({{timezone}})"
+  },
+  "overview_pipelineSetup_receipt_sources": {
+    "message": "Джерел: {{count}}"
+  },
+  "overview_pipelineSetup_receipt_artifacts_textReport": {
+    "message": "текстовий звіт"
+  },
+  "overview_pipelineSetup_receipt_artifacts_showNotes": {
+    "message": "нотатки програми"
+  },
+  "overview_pipelineSetup_receipt_artifacts_audio": {
+    "message": "аудіо"
+  },
+  "overview_pipelineSetup_receipt_formats_concise_briefing": {
+    "message": "стисле зведення"
+  },
+  "overview_pipelineSetup_receipt_formats_solo_update": {
+    "message": "одиночне оновлення"
+  },
+  "overview_pipelineSetup_receipt_formats_host_discussion": {
+    "message": "обговорення ведучих"
+  },
+  "overview_pipelineSetup_receipt_formats_sportscast": {
+    "message": "спортивний випуск"
+  },
+  "overview_pipelineSetup_receipt_formats_culture_roundtable": {
+    "message": "культурний круглий стіл"
+  },
+  "overview_pipelineSetup_receipt_formats_custom": {
+    "message": "власна програма"
+  },
+  "overview_pipelineSetup_receipt_speakerStyle_1": {
+    "message": "один ведучий"
+  },
+  "overview_pipelineSetup_receipt_speakerStyle_2": {
+    "message": "два ведучі"
+  },
+  "overview_pipelineSetup_receipt_speakerStyle_3": {
+    "message": "три ведучі"
+  },
+  "overview_pipelineSetup_receipt_speakerStyle_4": {
+    "message": "чотири ведучі"
+  },
+  "overview_pipelineSetup_receipt_programWithSpeakers": {
+    "message": "{{format}}, {{speakers}}"
+  },
+  "overview_pipelineSetup_receipt_cast": {
+    "message": "Учасників: {{count}}"
+  },
+  "overview_pipelineSetup_receipt_duration": {
+    "message": "ціль — {{count}} хв."
+  },
+  "overview_pipelineSetup_receipt_destinations_email": {
+    "message": "Пошта: {{recipients}}"
+  },
+  "overview_pipelineSetup_receipt_destinations_chatbook": {
+    "message": "Chatbook: {{title}}"
+  },
+  "overview_pipelineSetup_receipt_untitledChatbook": {
+    "message": "Без назви"
+  },
+  "overview_pipelineSetup_receipt_dstChange": {
+    "message": "Наступний запуск використовує {{timezoneName}} після переходу на літній або зимовий час: {{date}}."
+  },
+  "overview_pipelineSetup_test_providerDisclosure": {
+    "message": "Тести використовують налаштованих постачальників LLM і синтезу мовлення. Зразок обмежено 60 секундами, а повний тест використовує цільову тривалість."
+  },
+  "overview_pipelineSetup_test_textProviderDisclosure": {
+    "message": "Тести використовують налаштованого постачальника LLM. У текстових тестах синтез мовлення не використовується."
+  },
+  "overview_pipelineSetup_test_receipt": {
+    "message": "Підсумок активації"
+  },
+  "overview_pipelineSetup_test_manualReceipt": {
+    "message": "Це зведення запускається вручну, зберігає вибрані артефакти у Звітах і не звертається до зовнішніх призначень, доки ви не виберете Надіслати тест."
+  },
+  "overview_pipelineSetup_test_progress": {
+    "message": "Перебіг тесту"
+  },
+  "overview_pipelineSetup_test_stages_collection": {
+    "message": "Зібрати джерела"
+  },
+  "overview_pipelineSetup_test_stages_selection": {
+    "message": "Вибрати оновлення"
+  },
+  "overview_pipelineSetup_test_stages_text": {
+    "message": "Створити звіт"
+  },
+  "overview_pipelineSetup_test_stages_audio": {
+    "message": "Створити аудіо"
+  },
+  "overview_pipelineSetup_test_stages_persistence": {
+    "message": "Зберегти у Звітах"
+  },
+  "overview_pipelineSetup_test_stages_audioScript": {
+    "message": "Скласти аудіосценарій"
+  },
+  "overview_pipelineSetup_test_stages_audioScriptPersistence": {
+    "message": "Зберегти аудіосценарій"
+  },
+  "overview_pipelineSetup_test_stages_audioPersistence": {
+    "message": "Зберегти аудіо у Звітах"
+  },
+  "overview_pipelineSetup_test_stages_delivery": {
+    "message": "Перевірити тестову доставку"
+  },
+  "overview_pipelineSetup_test_stages_deliveryAdapter": {
+    "message": "Доставити через {{adapter}}"
+  },
+  "overview_pipelineSetup_test_stages_unknown": {
+    "message": "Етап {{stage}}"
+  },
+  "overview_pipelineSetup_test_sample": {
+    "message": "Створити 60-секундний зразок"
+  },
+  "overview_pipelineSetup_test_full": {
+    "message": "Створити повний тестовий випуск"
+  },
+  "overview_pipelineSetup_test_text": {
+    "message": "Створити тестовий звіт"
+  },
+  "overview_pipelineSetup_test_send": {
+    "message": "Надіслати тест"
+  },
+  "overview_pipelineSetup_test_activate": {
+    "message": "Активувати розклад"
+  },
+  "overview_pipelineSetup_test_ready": {
+    "message": "Тест розпочато. Чернетка залишатиметься неактивною, доки ви не активуєте її розклад."
+  },
+  "overview_pipelineSetup_test_cancelled": {
+    "message": "Тест скасовано. Чернетку збережено."
+  },
+  "overview_pipelineSetup_test_failed": {
+    "message": "Тест завершився помилкою. Чернетку збережено. {{message}}"
+  },
+  "overview_pipelineSetup_test_status_not_started": {
+    "message": "Не розпочато"
+  },
+  "overview_pipelineSetup_test_status_queued": {
+    "message": "У черзі"
+  },
+  "overview_pipelineSetup_test_status_running": {
+    "message": "Виконується"
+  },
+  "overview_pipelineSetup_test_status_ready": {
+    "message": "Готово"
+  },
+  "overview_pipelineSetup_test_status_failed": {
+    "message": "Помилка"
+  },
+  "overview_pipelineSetup_test_status_skipped": {
+    "message": "Пропущено"
+  },
+  "overview_pipelineSetup_test_status_cancelled": {
+    "message": "Скасовано"
+  },
+  "overview_pipelineSetup_activate_ready": {
+    "message": "Розклад активовано."
+  },
+  "overview_pipelineSetup_activate_failed": {
+    "message": "Не вдалося активувати розклад. Чернетку збережено. {{message}}"
+  },
+  "overview_pipelineSetup_validation_sourcesRequired": {
+    "message": "Виберіть принаймні одне джерело."
+  },
+  "overview_pipelineSetup_validation_sourceNameRequired": {
+    "message": "Введіть назву джерела."
+  },
+  "overview_pipelineSetup_validation_sourceUrlInvalid": {
+    "message": "Введіть допустиму HTTP- або HTTPS-адресу джерела."
+  },
+  "overview_pipelineSetup_validation_monitorNameRequired": {
+    "message": "Введіть назву монітора."
+  },
+  "overview_pipelineSetup_validation_timezoneInvalid": {
+    "message": "Введіть допустимий часовий пояс IANA."
+  },
+  "overview_pipelineSetup_validation_intervalInvalid": {
+    "message": "Введіть підтримуваний інтервал розкладу."
+  },
+  "overview_pipelineSetup_validation_hourInvalid": {
+    "message": "Введіть годину від 0 до 23."
+  },
+  "overview_pipelineSetup_validation_minuteInvalid": {
+    "message": "Введіть хвилину від 0 до 59."
+  },
+  "overview_pipelineSetup_validation_cronInvalid": {
+    "message": "Введіть допустимий вираз cron із п’яти полів."
+  },
+  "overview_pipelineSetup_validation_cronTooFrequent": {
+    "message": "Виберіть розклад з інтервалом щонайменше п’ять хвилин."
+  },
+  "overview_pipelineSetup_validation_templateRequired": {
+    "message": "Введіть шаблон звіту."
+  },
+  "overview_pipelineSetup_validation_castSizeInvalid": {
+    "message": "Виберіть від одного до чотирьох учасників."
+  },
+  "overview_pipelineSetup_validation_castIdsInvalid": {
+    "message": "Кожному учаснику потрібна унікальна ідентичність."
+  },
+  "overview_pipelineSetup_validation_castVoicesRequired": {
+    "message": "Виберіть голос для кожного учасника."
+  },
+  "overview_pipelineSetup_validation_audioMinutesInvalid": {
+    "message": "Введіть тривалість від 1 до 60 хвилин."
+  },
+  "overview_pipelineSetup_validation_emailInvalid": {
+    "message": "Введіть принаймні одну допустиму адресу електронної пошти."
+  },
+  "overview_pipelineSetup_validationError": {
+    "message": "Перевірте виділені поля перед продовженням."
   }
 }

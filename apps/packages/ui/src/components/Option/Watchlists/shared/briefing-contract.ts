@@ -475,7 +475,7 @@ export const buildBriefingPipelineContract = (
   )
     ? existing.text.show_notes
     : undefined
-  text.show_notes = draft.showNotes ?? preservedShowNotes ?? outcomeNoun === "episode"
+  text.show_notes = draft.showNotes ?? preservedShowNotes ?? false
 
   const audio = record(existing.audio)
   audio.enabled = Boolean(draft.audioEnabled)

@@ -1,159 +1,135 @@
 import type { BriefingPipelineContractV1 } from "@/types/watchlists"
 
+export type BriefingReceiptArtifact = "text_report" | "show_notes" | "audio"
+export type BriefingReceiptDestination = "reports" | "email" | "chatbook"
+
 export interface BriefingReceiptInput {
   contract: BriefingPipelineContractV1
   sourceCount: number
-  nextRunAt: string
+  nextRunAt?: string
   followingRunAt?: string
   timezone: string
   locale?: string
 }
 
 export interface BriefingReceiptModel {
+  scheduleMode: "manual" | "scheduled"
   outcomeNoun: "briefing" | "episode"
   programFormat: BriefingPipelineContractV1["editorial"]["program_format"]
   speakerCount: number
   targetMinutes?: number
   sourceCount: number
-  nextRunAt: string
+  nextRunAt?: string
+  followingRunAt?: string
   timezone: string
   timezoneAbbreviation: string
-  nextRunLabel: string
-  sentence: string
+  followingTimezoneAbbreviation?: string
+  nextRunLabel?: string
+  followingRunLabel?: string
+  hasDstChange: boolean
+  artifacts: BriefingReceiptArtifact[]
+  destinations: BriefingReceiptDestination[]
+  showName?: string
   emailRecipients: string[]
   chatbookTitle?: string
-  dstNote?: string
 }
 
-const numberWords: Record<number, string> = {
-  1: "one",
-  2: "two",
-  3: "three",
-  4: "four"
-}
+const occurrenceFormatter = (
+  timezone: string,
+  locale: string
+): Intl.DateTimeFormat => new Intl.DateTimeFormat(locale, {
+  timeZone: timezone,
+  weekday: "long",
+  month: "long",
+  day: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+  timeZoneName: "short"
+})
 
-const formatParts = (date: Date, timezone: string, locale: string) => {
-  const formatter = new Intl.DateTimeFormat(locale, {
-    timeZone: timezone,
-    weekday: "long",
-    month: "long",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    timeZoneName: "short"
-  })
-  return Object.fromEntries(
-    formatter
-      .formatToParts(date)
-      .filter((part) => part.type !== "literal")
-      .map((part) => [part.type, part.value])
-  )
-}
+const timezoneName = (
+  formatter: Intl.DateTimeFormat,
+  date: Date,
+  fallback: string
+): string => formatter
+  .formatToParts(date)
+  .find((part) => part.type === "timeZoneName")
+  ?.value || fallback
 
-const timezoneOffset = (date: Date, timezone: string, locale: string): string => {
-  const part = new Intl.DateTimeFormat(locale, {
+const timezoneOffset = (date: Date, timezone: string, locale: string): string =>
+  new Intl.DateTimeFormat(locale, {
     timeZone: timezone,
     timeZoneName: "shortOffset"
-  }).formatToParts(date).find((entry) => entry.type === "timeZoneName")
-  return part?.value || ""
-}
+  }).formatToParts(date).find((entry) => entry.type === "timeZoneName")?.value || ""
 
-const formatOccurrence = (date: Date, timezone: string, locale: string) => {
-  const parts = formatParts(date, timezone, locale)
-  const dayPeriod = parts.dayPeriod ? ` ${parts.dayPeriod}` : ""
-  const timezoneName = parts.timeZoneName ? ` ${parts.timeZoneName}` : ""
-  const nextRunLabel = `${parts.weekday}, ${parts.month} ${parts.day} at ${parts.hour}:${parts.minute}${dayPeriod}${timezoneName}`
-  return {
-    nextRunLabel,
-    timezoneAbbreviation: parts.timeZoneName || timezone
-  }
-}
-
-const formatDestinations = (destinations: string[]): string => {
-  if (destinations.length < 2) return destinations[0] || ""
-  if (destinations.length === 2) return destinations.join(" and ")
-  return `${destinations.slice(0, -1).join(", ")}, and ${destinations.at(-1)}`
-}
-
-const programLabel = (
-  contract: BriefingPipelineContractV1,
-  speakerCount: number
-): string => {
-  const format = contract.editorial.program_format.replaceAll("_", " ")
-  if (!contract.audio.enabled) return "text report"
-  if (speakerCount === 1) return `solo ${format}`
-  if (speakerCount > 1) return `${numberWords[speakerCount] || speakerCount}-host ${format}`
-  return `audio ${format}`
+const validDate = (value: string | undefined): Date | null => {
+  if (!value) return null
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? null : date
 }
 
 export const buildBriefingReceiptModel = (
   input: BriefingReceiptInput
 ): BriefingReceiptModel => {
   const locale = input.locale || "en-US"
-  const nextRun = new Date(input.nextRunAt)
-  const { nextRunLabel, timezoneAbbreviation } = formatOccurrence(
-    nextRun,
-    input.timezone,
-    locale
-  )
+  const nextRun = validDate(input.nextRunAt)
+  const followingRun = validDate(input.followingRunAt)
+  const formatter = occurrenceFormatter(input.timezone, locale)
   const speakerCount = input.contract.audio.cast?.speaker_count || (
     input.contract.audio.enabled ? 1 : 0
   )
-  const targetMinutes = input.contract.audio.enabled
-    ? input.contract.audio.target_minutes
-    : undefined
   const sourceCount = Math.max(0, Math.floor(Number(input.sourceCount) || 0))
-  const sources = `${sourceCount} source${sourceCount === 1 ? "" : "s"}`
-  const showName = input.contract.editorial.show_name
-    ? ` for “${input.contract.editorial.show_name}”`
-    : ""
-  const target = targetMinutes === undefined ? "" : ` targeting ${targetMinutes} minutes`
-  const generated = input.contract.audio.enabled
-    ? `${input.contract.text.show_notes ? "show notes" : "a text report"} and a ${programLabel(input.contract, speakerCount)}${target}${showName}`
-    : "a text report"
-  const saved = input.contract.audio.enabled ? "save both in Reports" : "save it in Reports"
   const emailRecipients = input.contract.delivery.email.enabled
     ? Array.from(new Set(input.contract.delivery.email.recipients)).sort()
     : []
   const chatbookTitle = input.contract.delivery.chatbook.enabled
     ? input.contract.delivery.chatbook.title?.trim() || undefined
     : undefined
-  const deliveries = [
-    emailRecipients.length > 0
-      ? `email the outcome to ${formatDestinations(emailRecipients)}`
-      : null,
-    input.contract.delivery.chatbook.enabled
-      ? `save it to Chatbook${chatbookTitle ? ` “${chatbookTitle}”` : ""}`
-      : null
-  ].filter((entry): entry is string => Boolean(entry))
-  const delivery = deliveries.length > 0 ? `, and ${deliveries.join(" and ")}` : ""
-  const sentence = `${nextRunLabel} (${input.timezone}), collect new items from ${sources}, generate ${generated}, ${saved}${delivery}.`
-
-  let dstNote: string | undefined
-  if (input.followingRunAt) {
-    const followingRun = new Date(input.followingRunAt)
-    if (
-      timezoneOffset(nextRun, input.timezone, locale) !==
+  const artifacts: BriefingReceiptArtifact[] = [
+    input.contract.text.show_notes ? "show_notes" : "text_report",
+    ...(input.contract.audio.enabled ? ["audio" as const] : [])
+  ]
+  const destinations: BriefingReceiptDestination[] = [
+    "reports",
+    ...(emailRecipients.length > 0 ? ["email" as const] : []),
+    ...(input.contract.delivery.chatbook.enabled ? ["chatbook" as const] : [])
+  ]
+  const timezoneAbbreviation = nextRun
+    ? timezoneName(formatter, nextRun, input.timezone)
+    : input.timezone
+  const followingTimezoneAbbreviation = followingRun
+    ? timezoneName(formatter, followingRun, input.timezone)
+    : undefined
+  const hasDstChange = Boolean(
+    nextRun &&
+    followingRun &&
+    timezoneOffset(nextRun, input.timezone, locale) !==
       timezoneOffset(followingRun, input.timezone, locale)
-    ) {
-      const following = formatOccurrence(followingRun, input.timezone, locale)
-      dstNote = `The following run observes ${following.timezoneAbbreviation} in ${input.timezone} after the daylight-saving offset change.`
-    }
-  }
+  )
 
   return {
+    scheduleMode: nextRun ? "scheduled" : "manual",
     outcomeNoun: input.contract.editorial.outcome_noun,
     programFormat: input.contract.editorial.program_format,
     speakerCount,
-    targetMinutes,
+    ...(input.contract.audio.enabled && input.contract.audio.target_minutes !== undefined
+      ? { targetMinutes: input.contract.audio.target_minutes }
+      : {}),
     sourceCount,
-    nextRunAt: input.nextRunAt,
+    ...(input.nextRunAt && nextRun ? { nextRunAt: input.nextRunAt } : {}),
+    ...(input.followingRunAt && followingRun ? { followingRunAt: input.followingRunAt } : {}),
     timezone: input.timezone,
     timezoneAbbreviation,
-    nextRunLabel,
-    sentence,
+    ...(followingTimezoneAbbreviation ? { followingTimezoneAbbreviation } : {}),
+    ...(nextRun ? { nextRunLabel: formatter.format(nextRun) } : {}),
+    ...(followingRun ? { followingRunLabel: formatter.format(followingRun) } : {}),
+    hasDstChange,
+    artifacts,
+    destinations,
+    ...(input.contract.editorial.show_name?.trim()
+      ? { showName: input.contract.editorial.show_name.trim() }
+      : {}),
     emailRecipients,
-    ...(chatbookTitle ? { chatbookTitle } : {}),
-    ...(dstNote ? { dstNote } : {})
+    ...(chatbookTitle ? { chatbookTitle } : {})
   }
 }

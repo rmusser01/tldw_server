@@ -275,6 +275,34 @@ export const toPipelineJobCreatePayload = (
   })
 }
 
+export const toPipelineTestJobCreatePayload = (
+  draft: BriefingPipelineDraft,
+  options: PipelineOutputTestOptions
+): WatchlistJobCreate => {
+  const payload = toPipelineJobCreatePayload({ ...draft, active: false })
+  const contract = payload.output_prefs?.briefing_pipeline
+  if (!contract) return payload
+
+  if (contract.audio.enabled && options.audioSampleSeconds) {
+    contract.audio.target_minutes = Math.max(
+      1,
+      Math.ceil(options.audioSampleSeconds / 60)
+    )
+  }
+  if (!options.externalDelivery) {
+    contract.delivery.email = {
+      ...contract.delivery.email,
+      enabled: false,
+      recipients: []
+    }
+    contract.delivery.chatbook = {
+      ...contract.delivery.chatbook,
+      enabled: false
+    }
+  }
+  return payload
+}
+
 export const toPipelineOutputCreatePayload = (
   runId: number,
   draft: BriefingPipelineDraft,
@@ -320,6 +348,10 @@ export const toPipelineOutputCreatePayload = (
       },
       ...(testOptions ? { test: testOptions } : {})
     }
+  }
+
+  if (testOptions && !payload.metadata) {
+    payload.metadata = { test: testOptions }
   }
 
   if (recipients.length > 0 || draft.createChatbook) {

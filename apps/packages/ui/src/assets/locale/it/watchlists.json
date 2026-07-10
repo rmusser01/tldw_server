@@ -17,5 +17,294 @@
       "generateError": "Impossibile generare il report dagli elementi in coda.",
       "generateReport": "Genera report dalla coda"
     }
+  },
+  "setupWizard": {
+    "title": "Crea lista di controllo",
+    "containerTitle": "Crea lista di controllo",
+    "containerHelp": "Crea prima il contenitore del progetto. Fonti, cadenza, briefing, consegna e test proseguono in un unico flusso di configurazione.",
+    "actions": {
+      "continue": "Continua a Fonti"
+    },
+    "sections": {
+      "preset": "Preimpostazione del dominio"
+    },
+    "fields": {
+      "name": "Nome della lista di controllo",
+      "objective": "Obiettivo"
+    },
+    "validation": {
+      "nameRequired": "Aggiungi un nome per la lista di controllo."
+    },
+    "errors": {
+      "createFailed": "Impossibile creare la lista di controllo."
+    },
+    "presets": {
+      "cti_osint": {
+        "label": "CTI / OSINT",
+        "description": "Monitora vulnerabilità, malware, soggetti, avvisi e modifiche alle fonti."
+      },
+      "news": {
+        "label": "Notizie",
+        "description": "Monitora eventi in evoluzione, persone, organizzazioni e varietà delle fonti."
+      },
+      "general": {
+        "label": "Generale",
+        "description": "Monitora un argomento e raccogli aggiornamenti da esaminare."
+      },
+      "blank": {
+        "label": "Vuota",
+        "description": "Inizia con una lista di controllo vuota e configura i dettagli."
+      }
+    },
+    "startModes": {
+      "sources": {
+        "label": "Inizia dalle fonti",
+        "description": "Crea una lista di controllo con feed iniziali e un monitor facoltativo."
+      },
+      "topic": {
+        "label": "Inizia dall’argomento",
+        "description": "Crea prima l’obiettivo della lista, poi aggiungi i feed prima dell’avvio della raccolta."
+      },
+      "report_goal": {
+        "label": "Inizia dall’obiettivo del report",
+        "description": "Definisci prima l’obiettivo del briefing, quindi collega fonti e modelli."
+      }
+    },
+    "boundaries": {
+      "alerts": "Gli avvisi di corrispondenza dei contenuti verranno dopo. Questa configurazione definisce la lista di controllo e l’ambito iniziale della raccolta."
+    }
+  },
+  "overview": {
+    "pipelineSetup": {
+      "title": "Configura briefing",
+      "open": "Configura briefing",
+      "progress": "Passaggi di configurazione del briefing",
+      "steps": {
+        "sources": "Fonti",
+        "cadence": "Cadenza",
+        "briefing": "Briefing",
+        "delivery": "Consegna",
+        "test": "Test"
+      },
+      "actions": {
+        "next": "Continua a {{step}}"
+      },
+      "source": {
+        "existing": "Usa fonti esistenti",
+        "new": "Aggiungi una nuova fonte",
+        "fallback": "Fonte {{id}}"
+      },
+      "sources": {
+        "help": "Scegli fonti esistenti o aggiungine una, quindi verifica la connessione."
+      },
+      "sourcesLoading": "Caricamento fonti...",
+      "sourcesError": "Impossibile caricare i feed per la configurazione.",
+      "sourceTest": {
+        "action": "Verifica fonte",
+        "ready": "La fonte è pronta.",
+        "cancelled": "Verifica della fonte annullata.",
+        "failed": "Verifica della fonte non riuscita. {{message}}",
+        "summary": "{{ready}} pronte, {{filtered}} filtrate",
+        "sample": "Elementi di esempio",
+        "readyItem": "Pronta",
+        "filteredItem": "Filtrato",
+        "untitled": "Elemento senza titolo"
+      },
+      "fields": {
+        "sources": "Fonti",
+        "sourceName": "Nome della fonte",
+        "sourceUrl": "URL della fonte",
+        "monitorName": "Nome del monitor",
+        "schedule": "Pianificazione",
+        "timezone": "Fuso orario",
+        "intervalEvery": "Ogni",
+        "intervalUnit": "Unità dell’intervallo",
+        "weekday": "Giorno della settimana",
+        "hour": "Ora",
+        "minute": "Minuto",
+        "cronExpression": "Espressione cron",
+        "showName": "Nome del programma",
+        "premise": "Premessa del programma",
+        "includeAudio": "Audio",
+        "audioHelp": "Aggiungi una versione parlata riproducibile.",
+        "audioMinutes": "Durata obiettivo in minuti",
+        "speakerCount": "Dimensione del cast",
+        "template": "Modello del report",
+        "audioProvider": "Sostituzione del provider audio",
+        "audioModel": "Sostituzione del modello audio",
+        "customInstructions": "Istruzioni editoriali personalizzate",
+        "emailDelivery": "E-mail",
+        "emailRecipients": "Destinatari e-mail",
+        "chatbookDelivery": "Chatbook",
+        "chatbookTitle": "Titolo del Chatbook"
+      },
+      "schedule": {
+        "manual": "Solo manuale",
+        "interval": "Ogni N ore o minuti",
+        "daily": "Ogni giorno",
+        "weekdays": "Giorni feriali",
+        "weekly": "Ogni settimana",
+        "advanced": "Cron avanzato"
+      },
+      "intervalUnits": {
+        "hours": "Ore",
+        "minutes": "Minuti"
+      },
+      "weekdays": {
+        "monday": "Lunedì",
+        "tuesday": "Martedì",
+        "wednesday": "Mercoledì",
+        "thursday": "Giovedì",
+        "friday": "Venerdì",
+        "saturday": "Sabato",
+        "sunday": "Domenica"
+      },
+      "advancedCron": "Cron avanzato",
+      "nextOccurrence": "Prossima esecuzione",
+      "manualOccurrence": "Solo manuale",
+      "nextOccurrencePending": "Salva una pianificazione valida per calcolare l’ora esatta.",
+      "briefing": {
+        "question": "Che cosa stai creando?",
+        "help": "Scegli la forma editoriale. Ogni opzione rimane basata sulle fonti selezionate.",
+        "advanced": "Impostazioni avanzate del briefing"
+      },
+      "formats": {
+        "concise_briefing": "Briefing conciso",
+        "solo_update": "Aggiornamento individuale",
+        "host_discussion": "Discussione tra conduttori",
+        "sportscast": "Notiziario sportivo",
+        "culture_roundtable": "Tavola rotonda culturale",
+        "custom": "Personalizzato"
+      },
+      "speaker": {
+        "defaultLabel": "Partecipante {{index}}",
+        "defaultRole": "Conduttore",
+        "labelField": "Etichetta del partecipante {{index}}",
+        "roleField": "Ruolo del partecipante {{index}}",
+        "voiceField": "Voce del partecipante {{index}}",
+        "personaField": "Personalità del partecipante {{index}}"
+      },
+      "preview": {
+        "generate": "Anteprima del report",
+        "diagnostics": "Diagnostica dell’anteprima",
+        "context": "Esecuzione anteprima: {{runId}}",
+        "noRunContext": "Esegui correttamente un monitor prima di visualizzare l’anteprima del report.",
+        "templateRequired": "Seleziona un modello prima di generare l’anteprima.",
+        "templateEmpty": "Il modello selezionato è vuoto.",
+        "emptyResult": "L’anteprima non ha restituito contenuti elaborati.",
+        "error": "Impossibile generare l’anteprima."
+      },
+      "delivery": {
+        "help": "I report sono sempre inclusi. La consegna esterna attende che gli artefatti selezionati siano pronti.",
+        "reports": "Report",
+        "required": "Archiviazione obbligatoria",
+        "alwaysOn": "Sempre attivo"
+      },
+      "receipt": {
+        "labels": {
+          "schedule": "Pianificazione",
+          "sources": "Fonti",
+          "artifacts": "Artefatti",
+          "format": "Formato",
+          "showName": "Nome del programma",
+          "cast": "Cast",
+          "duration": "Durata obiettivo",
+          "destinations": "Destinazioni"
+        },
+        "schedule": {
+          "manual": "Solo manuale",
+          "scheduled": "{{date}} ({{timezone}})"
+        },
+        "sources": "{{count}} fonti",
+        "artifacts": {
+          "textReport": "report di testo",
+          "showNotes": "note del programma",
+          "audio": "audio"
+        },
+        "formats": {
+          "concise_briefing": "briefing conciso",
+          "solo_update": "aggiornamento individuale",
+          "host_discussion": "discussione tra conduttori",
+          "sportscast": "notiziario sportivo",
+          "culture_roundtable": "tavola rotonda culturale",
+          "custom": "programma personalizzato"
+        },
+        "speakerStyle": {
+          "1": "individuale",
+          "2": "con due conduttori",
+          "3": "con tre conduttori",
+          "4": "con quattro conduttori"
+        },
+        "programWithSpeakers": "{{format}} {{speakers}}",
+        "cast": "{{count}} partecipanti",
+        "duration": "durata obiettivo di {{count}} minuti",
+        "destinations": {
+          "email": "E-mail: {{recipients}}",
+          "chatbook": "Chatbook: {{title}}"
+        },
+        "untitledChatbook": "Senza titolo",
+        "dstChange": "L’esecuzione successiva usa {{timezoneName}} dopo il cambio dell’ora legale: {{date}}."
+      },
+      "test": {
+        "providerDisclosure": "I test usano i provider LLM e di sintesi vocale configurati. Un campione è limitato a 60 secondi; il test completo usa la durata obiettivo.",
+        "textProviderDisclosure": "I test usano il provider LLM configurato. I test di solo testo non usano la sintesi vocale.",
+        "receipt": "Riepilogo di attivazione",
+        "manualReceipt": "Questo briefing viene eseguito manualmente, salva gli artefatti selezionati in Report e non contatta destinazioni esterne a meno che non selezioni Invia test.",
+        "progress": "Avanzamento del test",
+        "stages": {
+          "collection": "Raccogli fonti",
+          "selection": "Seleziona aggiornamenti",
+          "text": "Crea report",
+          "audio": "Crea audio",
+          "persistence": "Salva in Report",
+          "audioScript": "Componi copione audio",
+          "audioScriptPersistence": "Salva copione audio",
+          "audioPersistence": "Salva audio in Report",
+          "delivery": "Verifica consegna del test",
+          "deliveryAdapter": "Consegna a {{adapter}}",
+          "unknown": "Fase {{stage}}"
+        },
+        "sample": "Genera campione di 60 secondi",
+        "full": "Genera episodio di test completo",
+        "text": "Genera report di test",
+        "send": "Invia test",
+        "activate": "Attiva pianificazione",
+        "ready": "Test avviato. Questa bozza rimane inattiva finché non attivi la pianificazione.",
+        "cancelled": "Test annullato. La bozza è stata salvata.",
+        "failed": "Test non riuscito. La bozza è stata salvata. {{message}}",
+        "status": {
+          "not_started": "Non avviato",
+          "queued": "In coda",
+          "running": "In esecuzione",
+          "ready": "Pronto",
+          "failed": "Non riuscito",
+          "skipped": "Ignorato",
+          "cancelled": "Annullato"
+        }
+      },
+      "activate": {
+        "ready": "Pianificazione attivata.",
+        "failed": "Impossibile attivare la pianificazione. La bozza è stata salvata. {{message}}"
+      },
+      "validation": {
+        "sourcesRequired": "Scegli almeno una fonte prima di continuare.",
+        "sourceNameRequired": "Inserisci un nome per la fonte.",
+        "sourceUrlInvalid": "Inserisci un URL HTTP o HTTPS valido per la fonte.",
+        "monitorNameRequired": "Inserisci un nome per il monitor.",
+        "timezoneInvalid": "Inserisci un fuso orario IANA valido.",
+        "intervalInvalid": "Inserisci un intervallo di pianificazione supportato.",
+        "hourInvalid": "Inserisci un’ora da 0 a 23.",
+        "minuteInvalid": "Inserisci un minuto da 0 a 59.",
+        "cronInvalid": "Inserisci un’espressione cron valida di cinque campi.",
+        "cronTooFrequent": "Scegli una pianificazione con almeno cinque minuti di intervallo.",
+        "templateRequired": "Inserisci un modello per il report.",
+        "castSizeInvalid": "Scegli da uno a quattro partecipanti.",
+        "castIdsInvalid": "Ogni partecipante deve avere un’identità univoca.",
+        "castVoicesRequired": "Scegli una voce per ogni partecipante.",
+        "audioMinutesInvalid": "Inserisci una durata da 1 a 60 minuti.",
+        "emailInvalid": "Inserisci almeno un indirizzo e-mail valido."
+      },
+      "validationError": "Controlla i campi evidenziati prima di continuare."
+    }
   }
 }

@@ -43,5 +43,608 @@
   },
   "items_queue_generateReport": {
     "message": "Generer rapport fra kø"
+  },
+  "setupWizard_title": {
+    "message": "Opprett overvåkingsliste"
+  },
+  "setupWizard_containerTitle": {
+    "message": "Opprett overvåkingsliste"
+  },
+  "setupWizard_containerHelp": {
+    "message": "Opprett prosjektbeholderen først. Kilder, frekvens, orientering, levering og test følger i én samlet oppsettsflyt."
+  },
+  "setupWizard_actions_continue": {
+    "message": "Fortsett til Kilder"
+  },
+  "setupWizard_sections_preset": {
+    "message": "Domeneforvalg"
+  },
+  "setupWizard_fields_name": {
+    "message": "Navn på overvåkingsliste"
+  },
+  "setupWizard_fields_objective": {
+    "message": "Mål"
+  },
+  "setupWizard_validation_nameRequired": {
+    "message": "Legg til et navn på overvåkingslisten."
+  },
+  "setupWizard_errors_createFailed": {
+    "message": "Kunne ikke opprette overvåkingslisten."
+  },
+  "setupWizard_presets_cti_osint_label": {
+    "message": "CTI / OSINT"
+  },
+  "setupWizard_presets_cti_osint_description": {
+    "message": "Overvåk sårbarheter, skadevare, aktører, varsler og kildeendringer."
+  },
+  "setupWizard_presets_news_label": {
+    "message": "Nyheter"
+  },
+  "setupWizard_presets_news_description": {
+    "message": "Følg hendelser i utvikling, personer, organisasjoner og kildemangfold."
+  },
+  "setupWizard_presets_general_label": {
+    "message": "Generelt"
+  },
+  "setupWizard_presets_general_description": {
+    "message": "Følg et emne og samle oppdateringer for gjennomgang."
+  },
+  "setupWizard_presets_blank_label": {
+    "message": "Tom"
+  },
+  "setupWizard_presets_blank_description": {
+    "message": "Start med en tom overvåkingsliste og konfigurer detaljene selv."
+  },
+  "setupWizard_startModes_sources_label": {
+    "message": "Start med kilder"
+  },
+  "setupWizard_startModes_sources_description": {
+    "message": "Opprett en overvåkingsliste med innledende strømmer og en valgfri monitor."
+  },
+  "setupWizard_startModes_topic_label": {
+    "message": "Start med emne"
+  },
+  "setupWizard_startModes_topic_description": {
+    "message": "Opprett først målet for listen, og legg til strømmer før innsamlingen starter."
+  },
+  "setupWizard_startModes_report_goal_label": {
+    "message": "Start med rapportmål"
+  },
+  "setupWizard_startModes_report_goal_description": {
+    "message": "Definer først målet for orienteringen, og koble deretter til kilder og maler."
+  },
+  "setupWizard_boundaries_alerts": {
+    "message": "Varsler for innholdstreff kommer senere. Dette oppsettet definerer overvåkingslisten og det første innsamlingsomfanget."
+  },
+  "overview_pipelineSetup_title": {
+    "message": "Sett opp orientering"
+  },
+  "overview_pipelineSetup_open": {
+    "message": "Sett opp orientering"
+  },
+  "overview_pipelineSetup_progress": {
+    "message": "Trinn i oppsettet av orienteringen"
+  },
+  "overview_pipelineSetup_steps_sources": {
+    "message": "Kilder"
+  },
+  "overview_pipelineSetup_steps_cadence": {
+    "message": "Frekvens"
+  },
+  "overview_pipelineSetup_steps_briefing": {
+    "message": "Orientering"
+  },
+  "overview_pipelineSetup_steps_delivery": {
+    "message": "Levering"
+  },
+  "overview_pipelineSetup_steps_test": {
+    "message": "Test"
+  },
+  "overview_pipelineSetup_actions_next": {
+    "message": "Fortsett til {{step}}"
+  },
+  "overview_pipelineSetup_source_existing": {
+    "message": "Bruk eksisterende kilder"
+  },
+  "overview_pipelineSetup_source_new": {
+    "message": "Legg til en ny kilde"
+  },
+  "overview_pipelineSetup_source_fallback": {
+    "message": "Kilde {{id}}"
+  },
+  "overview_pipelineSetup_sources_help": {
+    "message": "Velg eksisterende kilder eller legg til en, og test deretter tilkoblingen."
+  },
+  "overview_pipelineSetup_sourcesLoading": {
+    "message": "Laster inn kilder..."
+  },
+  "overview_pipelineSetup_sourcesError": {
+    "message": "Kunne ikke laste inn strømmer for oppsettet."
+  },
+  "overview_pipelineSetup_sourceTest_action": {
+    "message": "Test kilde"
+  },
+  "overview_pipelineSetup_sourceTest_ready": {
+    "message": "Kilden er klar."
+  },
+  "overview_pipelineSetup_sourceTest_cancelled": {
+    "message": "Kildetest avbrutt."
+  },
+  "overview_pipelineSetup_sourceTest_failed": {
+    "message": "Kildetesten mislyktes. {{message}}"
+  },
+  "overview_pipelineSetup_sourceTest_summary": {
+    "message": "{{ready}} klare, {{filtered}} filtrert"
+  },
+  "overview_pipelineSetup_sourceTest_sample": {
+    "message": "Eksempelelementer"
+  },
+  "overview_pipelineSetup_sourceTest_readyItem": {
+    "message": "Klar"
+  },
+  "overview_pipelineSetup_sourceTest_filteredItem": {
+    "message": "Filtrert"
+  },
+  "overview_pipelineSetup_sourceTest_untitled": {
+    "message": "Element uten tittel"
+  },
+  "overview_pipelineSetup_fields_sources": {
+    "message": "Kilder"
+  },
+  "overview_pipelineSetup_fields_sourceName": {
+    "message": "Kildenavn"
+  },
+  "overview_pipelineSetup_fields_sourceUrl": {
+    "message": "Kilde-URL"
+  },
+  "overview_pipelineSetup_fields_monitorName": {
+    "message": "Monitornavn"
+  },
+  "overview_pipelineSetup_fields_schedule": {
+    "message": "Tidsplan"
+  },
+  "overview_pipelineSetup_fields_timezone": {
+    "message": "Tidssone"
+  },
+  "overview_pipelineSetup_fields_intervalEvery": {
+    "message": "Hver"
+  },
+  "overview_pipelineSetup_fields_intervalUnit": {
+    "message": "Intervallenhet"
+  },
+  "overview_pipelineSetup_fields_weekday": {
+    "message": "Ukedag"
+  },
+  "overview_pipelineSetup_fields_hour": {
+    "message": "Time"
+  },
+  "overview_pipelineSetup_fields_minute": {
+    "message": "Minutt"
+  },
+  "overview_pipelineSetup_fields_cronExpression": {
+    "message": "Cron-uttrykk"
+  },
+  "overview_pipelineSetup_fields_showName": {
+    "message": "Programnavn"
+  },
+  "overview_pipelineSetup_fields_premise": {
+    "message": "Programidé"
+  },
+  "overview_pipelineSetup_fields_includeAudio": {
+    "message": "Lyd"
+  },
+  "overview_pipelineSetup_fields_audioHelp": {
+    "message": "Legg til en avspillbar, opplest versjon."
+  },
+  "overview_pipelineSetup_fields_audioMinutes": {
+    "message": "Målvarighet i minutter"
+  },
+  "overview_pipelineSetup_fields_speakerCount": {
+    "message": "Antall medvirkende"
+  },
+  "overview_pipelineSetup_fields_template": {
+    "message": "Rapportmal"
+  },
+  "overview_pipelineSetup_fields_audioProvider": {
+    "message": "Overstyr lydleverandør"
+  },
+  "overview_pipelineSetup_fields_audioModel": {
+    "message": "Overstyr lydmodell"
+  },
+  "overview_pipelineSetup_fields_customInstructions": {
+    "message": "Tilpassede redaksjonelle instruksjoner"
+  },
+  "overview_pipelineSetup_fields_emailDelivery": {
+    "message": "E-post"
+  },
+  "overview_pipelineSetup_fields_emailRecipients": {
+    "message": "E-postmottakere"
+  },
+  "overview_pipelineSetup_fields_chatbookDelivery": {
+    "message": "Chatbook"
+  },
+  "overview_pipelineSetup_fields_chatbookTitle": {
+    "message": "Chatbook-tittel"
+  },
+  "overview_pipelineSetup_schedule_manual": {
+    "message": "Bare manuelt"
+  },
+  "overview_pipelineSetup_schedule_interval": {
+    "message": "Hver N. time eller minutt"
+  },
+  "overview_pipelineSetup_schedule_daily": {
+    "message": "Daglig"
+  },
+  "overview_pipelineSetup_schedule_weekdays": {
+    "message": "Hverdager"
+  },
+  "overview_pipelineSetup_schedule_weekly": {
+    "message": "Ukentlig"
+  },
+  "overview_pipelineSetup_schedule_advanced": {
+    "message": "Avansert cron"
+  },
+  "overview_pipelineSetup_intervalUnits_hours": {
+    "message": "Timer"
+  },
+  "overview_pipelineSetup_intervalUnits_minutes": {
+    "message": "Minutter"
+  },
+  "overview_pipelineSetup_weekdays_monday": {
+    "message": "Mandag"
+  },
+  "overview_pipelineSetup_weekdays_tuesday": {
+    "message": "Tirsdag"
+  },
+  "overview_pipelineSetup_weekdays_wednesday": {
+    "message": "Onsdag"
+  },
+  "overview_pipelineSetup_weekdays_thursday": {
+    "message": "Torsdag"
+  },
+  "overview_pipelineSetup_weekdays_friday": {
+    "message": "Fredag"
+  },
+  "overview_pipelineSetup_weekdays_saturday": {
+    "message": "Lørdag"
+  },
+  "overview_pipelineSetup_weekdays_sunday": {
+    "message": "Søndag"
+  },
+  "overview_pipelineSetup_advancedCron": {
+    "message": "Avansert cron"
+  },
+  "overview_pipelineSetup_nextOccurrence": {
+    "message": "Neste kjøring"
+  },
+  "overview_pipelineSetup_manualOccurrence": {
+    "message": "Bare manuelt"
+  },
+  "overview_pipelineSetup_nextOccurrencePending": {
+    "message": "Lagre en gyldig tidsplan for å beregne det nøyaktige tidspunktet."
+  },
+  "overview_pipelineSetup_briefing_question": {
+    "message": "Hva lager du?"
+  },
+  "overview_pipelineSetup_briefing_help": {
+    "message": "Velg redaksjonell form. Alle alternativene er fortsatt forankret i de valgte kildene."
+  },
+  "overview_pipelineSetup_briefing_advanced": {
+    "message": "Avanserte innstillinger for orienteringen"
+  },
+  "overview_pipelineSetup_formats_concise_briefing": {
+    "message": "Kort orientering"
+  },
+  "overview_pipelineSetup_formats_solo_update": {
+    "message": "Solooppdatering"
+  },
+  "overview_pipelineSetup_formats_host_discussion": {
+    "message": "Vertssamtale"
+  },
+  "overview_pipelineSetup_formats_sportscast": {
+    "message": "Sportssending"
+  },
+  "overview_pipelineSetup_formats_culture_roundtable": {
+    "message": "Kulturell rundebordssamtale"
+  },
+  "overview_pipelineSetup_formats_custom": {
+    "message": "Tilpasset"
+  },
+  "overview_pipelineSetup_speaker_defaultLabel": {
+    "message": "Deltaker {{index}}"
+  },
+  "overview_pipelineSetup_speaker_defaultRole": {
+    "message": "Vert"
+  },
+  "overview_pipelineSetup_speaker_labelField": {
+    "message": "Etikett for deltaker {{index}}"
+  },
+  "overview_pipelineSetup_speaker_roleField": {
+    "message": "Rolle for deltaker {{index}}"
+  },
+  "overview_pipelineSetup_speaker_voiceField": {
+    "message": "Stemme for deltaker {{index}}"
+  },
+  "overview_pipelineSetup_speaker_personaField": {
+    "message": "Persona for deltaker {{index}}"
+  },
+  "overview_pipelineSetup_preview_generate": {
+    "message": "Forhåndsvis rapport"
+  },
+  "overview_pipelineSetup_preview_diagnostics": {
+    "message": "Diagnostikk for forhåndsvisning"
+  },
+  "overview_pipelineSetup_preview_context": {
+    "message": "Forhåndsvisningskjøring: {{runId}}"
+  },
+  "overview_pipelineSetup_preview_noRunContext": {
+    "message": "Kjør en monitor uten feil før du forhåndsviser denne rapporten."
+  },
+  "overview_pipelineSetup_preview_templateRequired": {
+    "message": "Velg en mal før du genererer forhåndsvisningen."
+  },
+  "overview_pipelineSetup_preview_templateEmpty": {
+    "message": "Den valgte malen er tom."
+  },
+  "overview_pipelineSetup_preview_emptyResult": {
+    "message": "Forhåndsvisningen returnerte ikke noe gjengitt innhold."
+  },
+  "overview_pipelineSetup_preview_error": {
+    "message": "Kunne ikke generere forhåndsvisningen."
+  },
+  "overview_pipelineSetup_delivery_help": {
+    "message": "Rapporter er alltid inkludert. Ekstern levering venter til de valgte artefaktene er klare."
+  },
+  "overview_pipelineSetup_delivery_reports": {
+    "message": "Rapporter"
+  },
+  "overview_pipelineSetup_delivery_required": {
+    "message": "Obligatorisk lagring"
+  },
+  "overview_pipelineSetup_delivery_alwaysOn": {
+    "message": "Alltid aktiv"
+  },
+  "overview_pipelineSetup_receipt_labels_schedule": {
+    "message": "Tidsplan"
+  },
+  "overview_pipelineSetup_receipt_labels_sources": {
+    "message": "Kilder"
+  },
+  "overview_pipelineSetup_receipt_labels_artifacts": {
+    "message": "Artefakter"
+  },
+  "overview_pipelineSetup_receipt_labels_format": {
+    "message": "Format"
+  },
+  "overview_pipelineSetup_receipt_labels_showName": {
+    "message": "Programnavn"
+  },
+  "overview_pipelineSetup_receipt_labels_cast": {
+    "message": "Medvirkende"
+  },
+  "overview_pipelineSetup_receipt_labels_duration": {
+    "message": "Målvarighet"
+  },
+  "overview_pipelineSetup_receipt_labels_destinations": {
+    "message": "Mål"
+  },
+  "overview_pipelineSetup_receipt_schedule_manual": {
+    "message": "Bare manuelt"
+  },
+  "overview_pipelineSetup_receipt_schedule_scheduled": {
+    "message": "{{date}} ({{timezone}})"
+  },
+  "overview_pipelineSetup_receipt_sources": {
+    "message": "{{count}} kilder"
+  },
+  "overview_pipelineSetup_receipt_artifacts_textReport": {
+    "message": "tekstrapport"
+  },
+  "overview_pipelineSetup_receipt_artifacts_showNotes": {
+    "message": "programnotater"
+  },
+  "overview_pipelineSetup_receipt_artifacts_audio": {
+    "message": "lyd"
+  },
+  "overview_pipelineSetup_receipt_formats_concise_briefing": {
+    "message": "kort orientering"
+  },
+  "overview_pipelineSetup_receipt_formats_solo_update": {
+    "message": "solooppdatering"
+  },
+  "overview_pipelineSetup_receipt_formats_host_discussion": {
+    "message": "vertssamtale"
+  },
+  "overview_pipelineSetup_receipt_formats_sportscast": {
+    "message": "sportssending"
+  },
+  "overview_pipelineSetup_receipt_formats_culture_roundtable": {
+    "message": "kulturell rundebordssamtale"
+  },
+  "overview_pipelineSetup_receipt_formats_custom": {
+    "message": "tilpasset program"
+  },
+  "overview_pipelineSetup_receipt_speakerStyle_1": {
+    "message": "solo"
+  },
+  "overview_pipelineSetup_receipt_speakerStyle_2": {
+    "message": "med to verter"
+  },
+  "overview_pipelineSetup_receipt_speakerStyle_3": {
+    "message": "med tre verter"
+  },
+  "overview_pipelineSetup_receipt_speakerStyle_4": {
+    "message": "med fire verter"
+  },
+  "overview_pipelineSetup_receipt_programWithSpeakers": {
+    "message": "{{speakers}} {{format}}"
+  },
+  "overview_pipelineSetup_receipt_cast": {
+    "message": "{{count}} deltakere"
+  },
+  "overview_pipelineSetup_receipt_duration": {
+    "message": "mål på {{count}} minutter"
+  },
+  "overview_pipelineSetup_receipt_destinations_email": {
+    "message": "E-post: {{recipients}}"
+  },
+  "overview_pipelineSetup_receipt_destinations_chatbook": {
+    "message": "Chatbook: {{title}}"
+  },
+  "overview_pipelineSetup_receipt_untitledChatbook": {
+    "message": "Uten tittel"
+  },
+  "overview_pipelineSetup_receipt_dstChange": {
+    "message": "Den følgende kjøringen bruker {{timezoneName}} etter skiftet til eller fra sommertid: {{date}}."
+  },
+  "overview_pipelineSetup_test_providerDisclosure": {
+    "message": "Tester bruker de konfigurerte leverandørene av LLM og talesyntese. Et eksempel er begrenset til 60 sekunder; en full test bruker målvarigheten."
+  },
+  "overview_pipelineSetup_test_textProviderDisclosure": {
+    "message": "Tester bruker den konfigurerte LLM-leverandøren. Tester med bare tekst bruker ikke talesyntese."
+  },
+  "overview_pipelineSetup_test_receipt": {
+    "message": "Aktiveringsoversikt"
+  },
+  "overview_pipelineSetup_test_manualReceipt": {
+    "message": "Denne orienteringen kjøres manuelt, lagrer valgte artefakter i Rapporter og kontakter ingen eksterne mål med mindre du velger Send test."
+  },
+  "overview_pipelineSetup_test_progress": {
+    "message": "Testfremdrift"
+  },
+  "overview_pipelineSetup_test_stages_collection": {
+    "message": "Samle kilder"
+  },
+  "overview_pipelineSetup_test_stages_selection": {
+    "message": "Velg oppdateringer"
+  },
+  "overview_pipelineSetup_test_stages_text": {
+    "message": "Opprett rapport"
+  },
+  "overview_pipelineSetup_test_stages_audio": {
+    "message": "Opprett lyd"
+  },
+  "overview_pipelineSetup_test_stages_persistence": {
+    "message": "Lagre i Rapporter"
+  },
+  "overview_pipelineSetup_test_stages_audioScript": {
+    "message": "Skriv lydmanus"
+  },
+  "overview_pipelineSetup_test_stages_audioScriptPersistence": {
+    "message": "Lagre lydmanus"
+  },
+  "overview_pipelineSetup_test_stages_audioPersistence": {
+    "message": "Lagre lyd i Rapporter"
+  },
+  "overview_pipelineSetup_test_stages_delivery": {
+    "message": "Kontroller testlevering"
+  },
+  "overview_pipelineSetup_test_stages_deliveryAdapter": {
+    "message": "Lever til {{adapter}}"
+  },
+  "overview_pipelineSetup_test_stages_unknown": {
+    "message": "Trinn {{stage}}"
+  },
+  "overview_pipelineSetup_test_sample": {
+    "message": "Generer eksempel på 60 sekunder"
+  },
+  "overview_pipelineSetup_test_full": {
+    "message": "Generer full testepisode"
+  },
+  "overview_pipelineSetup_test_text": {
+    "message": "Generer testrapport"
+  },
+  "overview_pipelineSetup_test_send": {
+    "message": "Send test"
+  },
+  "overview_pipelineSetup_test_activate": {
+    "message": "Aktiver tidsplan"
+  },
+  "overview_pipelineSetup_test_ready": {
+    "message": "Test startet. Dette utkastet forblir inaktivt til du aktiverer tidsplanen."
+  },
+  "overview_pipelineSetup_test_cancelled": {
+    "message": "Test avbrutt. Utkastet er lagret."
+  },
+  "overview_pipelineSetup_test_failed": {
+    "message": "Testen mislyktes. Utkastet er lagret. {{message}}"
+  },
+  "overview_pipelineSetup_test_status_not_started": {
+    "message": "Ikke startet"
+  },
+  "overview_pipelineSetup_test_status_queued": {
+    "message": "I kø"
+  },
+  "overview_pipelineSetup_test_status_running": {
+    "message": "Kjører"
+  },
+  "overview_pipelineSetup_test_status_ready": {
+    "message": "Klar"
+  },
+  "overview_pipelineSetup_test_status_failed": {
+    "message": "Mislyktes"
+  },
+  "overview_pipelineSetup_test_status_skipped": {
+    "message": "Hoppet over"
+  },
+  "overview_pipelineSetup_test_status_cancelled": {
+    "message": "Avbrutt"
+  },
+  "overview_pipelineSetup_activate_ready": {
+    "message": "Tidsplan aktivert."
+  },
+  "overview_pipelineSetup_activate_failed": {
+    "message": "Tidsplanen kunne ikke aktiveres. Utkastet er lagret. {{message}}"
+  },
+  "overview_pipelineSetup_validation_sourcesRequired": {
+    "message": "Velg minst én kilde før du fortsetter."
+  },
+  "overview_pipelineSetup_validation_sourceNameRequired": {
+    "message": "Skriv inn et kildenavn."
+  },
+  "overview_pipelineSetup_validation_sourceUrlInvalid": {
+    "message": "Skriv inn en gyldig HTTP- eller HTTPS-kilde-URL."
+  },
+  "overview_pipelineSetup_validation_monitorNameRequired": {
+    "message": "Skriv inn et monitornavn."
+  },
+  "overview_pipelineSetup_validation_timezoneInvalid": {
+    "message": "Skriv inn en gyldig IANA-tidssone."
+  },
+  "overview_pipelineSetup_validation_intervalInvalid": {
+    "message": "Skriv inn et støttet tidsintervall."
+  },
+  "overview_pipelineSetup_validation_hourInvalid": {
+    "message": "Skriv inn en time fra 0 til 23."
+  },
+  "overview_pipelineSetup_validation_minuteInvalid": {
+    "message": "Skriv inn et minutt fra 0 til 59."
+  },
+  "overview_pipelineSetup_validation_cronInvalid": {
+    "message": "Skriv inn et gyldig cron-uttrykk med fem felt."
+  },
+  "overview_pipelineSetup_validation_cronTooFrequent": {
+    "message": "Velg en tidsplan med minst fem minutters mellomrom."
+  },
+  "overview_pipelineSetup_validation_templateRequired": {
+    "message": "Skriv inn en rapportmal."
+  },
+  "overview_pipelineSetup_validation_castSizeInvalid": {
+    "message": "Velg én til fire deltakere."
+  },
+  "overview_pipelineSetup_validation_castIdsInvalid": {
+    "message": "Hver deltaker trenger en unik identitet."
+  },
+  "overview_pipelineSetup_validation_castVoicesRequired": {
+    "message": "Velg en stemme for hver deltaker."
+  },
+  "overview_pipelineSetup_validation_audioMinutesInvalid": {
+    "message": "Skriv inn en varighet fra 1 til 60 minutter."
+  },
+  "overview_pipelineSetup_validation_emailInvalid": {
+    "message": "Skriv inn minst én gyldig e-postadresse."
+  },
+  "overview_pipelineSetup_validationError": {
+    "message": "Se gjennom de uthevede feltene før du fortsetter."
   }
 }

@@ -43,5 +43,608 @@
   },
   "items_queue_generateReport": {
     "message": "대기열에서 보고서 생성"
+  },
+  "setupWizard_title": {
+    "message": "관심 목록 만들기"
+  },
+  "setupWizard_containerTitle": {
+    "message": "관심 목록 만들기"
+  },
+  "setupWizard_containerHelp": {
+    "message": "먼저 프로젝트 컨테이너를 만드세요. 소스, 주기, 브리핑, 전송, 테스트를 하나의 설정 흐름에서 이어서 구성할 수 있습니다."
+  },
+  "setupWizard_actions_continue": {
+    "message": "소스로 계속"
+  },
+  "setupWizard_sections_preset": {
+    "message": "분야 사전 설정"
+  },
+  "setupWizard_fields_name": {
+    "message": "관심 목록 이름"
+  },
+  "setupWizard_fields_objective": {
+    "message": "목표"
+  },
+  "setupWizard_validation_nameRequired": {
+    "message": "관심 목록 이름을 입력하세요."
+  },
+  "setupWizard_errors_createFailed": {
+    "message": "관심 목록을 만들 수 없습니다."
+  },
+  "setupWizard_presets_cti_osint_label": {
+    "message": "CTI / OSINT"
+  },
+  "setupWizard_presets_cti_osint_description": {
+    "message": "취약점, 악성 코드, 위협 행위자, 권고 및 소스 변경을 추적합니다."
+  },
+  "setupWizard_presets_news_label": {
+    "message": "뉴스"
+  },
+  "setupWizard_presets_news_description": {
+    "message": "진행 중인 사건, 인물, 조직 및 소스 다양성을 추적합니다."
+  },
+  "setupWizard_presets_general_label": {
+    "message": "일반"
+  },
+  "setupWizard_presets_general_description": {
+    "message": "주제를 추적하고 검토할 업데이트를 수집합니다."
+  },
+  "setupWizard_presets_blank_label": {
+    "message": "비어 있음"
+  },
+  "setupWizard_presets_blank_description": {
+    "message": "빈 관심 목록으로 시작하여 세부 정보를 직접 구성합니다."
+  },
+  "setupWizard_startModes_sources_label": {
+    "message": "소스에서 시작"
+  },
+  "setupWizard_startModes_sources_description": {
+    "message": "초기 피드와 선택적 모니터가 있는 관심 목록을 만듭니다."
+  },
+  "setupWizard_startModes_topic_label": {
+    "message": "주제에서 시작"
+  },
+  "setupWizard_startModes_topic_description": {
+    "message": "먼저 관심 목록 목표를 만든 다음 수집이 시작되기 전에 피드를 추가합니다."
+  },
+  "setupWizard_startModes_report_goal_label": {
+    "message": "보고서 목표에서 시작"
+  },
+  "setupWizard_startModes_report_goal_description": {
+    "message": "먼저 브리핑 목표를 정의한 다음 소스와 템플릿을 연결합니다."
+  },
+  "setupWizard_boundaries_alerts": {
+    "message": "콘텐츠 일치 알림은 나중에 설정합니다. 이 설정에서는 관심 목록과 초기 수집 범위를 정의합니다."
+  },
+  "overview_pipelineSetup_title": {
+    "message": "브리핑 설정"
+  },
+  "overview_pipelineSetup_open": {
+    "message": "브리핑 설정"
+  },
+  "overview_pipelineSetup_progress": {
+    "message": "브리핑 설정 단계"
+  },
+  "overview_pipelineSetup_steps_sources": {
+    "message": "소스"
+  },
+  "overview_pipelineSetup_steps_cadence": {
+    "message": "주기"
+  },
+  "overview_pipelineSetup_steps_briefing": {
+    "message": "브리핑"
+  },
+  "overview_pipelineSetup_steps_delivery": {
+    "message": "전송"
+  },
+  "overview_pipelineSetup_steps_test": {
+    "message": "테스트"
+  },
+  "overview_pipelineSetup_actions_next": {
+    "message": "{{step}} 단계로 계속"
+  },
+  "overview_pipelineSetup_source_existing": {
+    "message": "기존 소스 사용"
+  },
+  "overview_pipelineSetup_source_new": {
+    "message": "새 소스 추가"
+  },
+  "overview_pipelineSetup_source_fallback": {
+    "message": "소스 {{id}}"
+  },
+  "overview_pipelineSetup_sources_help": {
+    "message": "기존 소스를 선택하거나 새 소스를 추가한 다음 연결을 테스트하세요."
+  },
+  "overview_pipelineSetup_sourcesLoading": {
+    "message": "소스 불러오는 중..."
+  },
+  "overview_pipelineSetup_sourcesError": {
+    "message": "설정 도구에 사용할 피드를 불러오지 못했습니다."
+  },
+  "overview_pipelineSetup_sourceTest_action": {
+    "message": "소스 테스트"
+  },
+  "overview_pipelineSetup_sourceTest_ready": {
+    "message": "소스가 준비되었습니다."
+  },
+  "overview_pipelineSetup_sourceTest_cancelled": {
+    "message": "소스 테스트가 취소되었습니다."
+  },
+  "overview_pipelineSetup_sourceTest_failed": {
+    "message": "소스 테스트에 실패했습니다. {{message}}"
+  },
+  "overview_pipelineSetup_sourceTest_summary": {
+    "message": "준비 {{ready}}개, 필터링 {{filtered}}개"
+  },
+  "overview_pipelineSetup_sourceTest_sample": {
+    "message": "샘플 항목"
+  },
+  "overview_pipelineSetup_sourceTest_readyItem": {
+    "message": "준비됨"
+  },
+  "overview_pipelineSetup_sourceTest_filteredItem": {
+    "message": "필터링됨"
+  },
+  "overview_pipelineSetup_sourceTest_untitled": {
+    "message": "제목 없는 항목"
+  },
+  "overview_pipelineSetup_fields_sources": {
+    "message": "소스"
+  },
+  "overview_pipelineSetup_fields_sourceName": {
+    "message": "소스 이름"
+  },
+  "overview_pipelineSetup_fields_sourceUrl": {
+    "message": "소스 URL"
+  },
+  "overview_pipelineSetup_fields_monitorName": {
+    "message": "모니터 이름"
+  },
+  "overview_pipelineSetup_fields_schedule": {
+    "message": "일정"
+  },
+  "overview_pipelineSetup_fields_timezone": {
+    "message": "시간대"
+  },
+  "overview_pipelineSetup_fields_intervalEvery": {
+    "message": "매"
+  },
+  "overview_pipelineSetup_fields_intervalUnit": {
+    "message": "간격 단위"
+  },
+  "overview_pipelineSetup_fields_weekday": {
+    "message": "요일"
+  },
+  "overview_pipelineSetup_fields_hour": {
+    "message": "시간"
+  },
+  "overview_pipelineSetup_fields_minute": {
+    "message": "분"
+  },
+  "overview_pipelineSetup_fields_cronExpression": {
+    "message": "Cron 식"
+  },
+  "overview_pipelineSetup_fields_showName": {
+    "message": "프로그램 이름"
+  },
+  "overview_pipelineSetup_fields_premise": {
+    "message": "프로그램 개요"
+  },
+  "overview_pipelineSetup_fields_includeAudio": {
+    "message": "오디오"
+  },
+  "overview_pipelineSetup_fields_audioHelp": {
+    "message": "재생 가능한 음성 버전을 추가합니다."
+  },
+  "overview_pipelineSetup_fields_audioMinutes": {
+    "message": "목표 길이(분)"
+  },
+  "overview_pipelineSetup_fields_speakerCount": {
+    "message": "출연자 수"
+  },
+  "overview_pipelineSetup_fields_template": {
+    "message": "보고서 템플릿"
+  },
+  "overview_pipelineSetup_fields_audioProvider": {
+    "message": "오디오 공급자 재정의"
+  },
+  "overview_pipelineSetup_fields_audioModel": {
+    "message": "오디오 모델 재정의"
+  },
+  "overview_pipelineSetup_fields_customInstructions": {
+    "message": "사용자 지정 편집 지침"
+  },
+  "overview_pipelineSetup_fields_emailDelivery": {
+    "message": "이메일"
+  },
+  "overview_pipelineSetup_fields_emailRecipients": {
+    "message": "이메일 수신자"
+  },
+  "overview_pipelineSetup_fields_chatbookDelivery": {
+    "message": "Chatbook"
+  },
+  "overview_pipelineSetup_fields_chatbookTitle": {
+    "message": "Chatbook 제목"
+  },
+  "overview_pipelineSetup_schedule_manual": {
+    "message": "수동 전용"
+  },
+  "overview_pipelineSetup_schedule_interval": {
+    "message": "N시간 또는 N분마다"
+  },
+  "overview_pipelineSetup_schedule_daily": {
+    "message": "매일"
+  },
+  "overview_pipelineSetup_schedule_weekdays": {
+    "message": "평일"
+  },
+  "overview_pipelineSetup_schedule_weekly": {
+    "message": "매주"
+  },
+  "overview_pipelineSetup_schedule_advanced": {
+    "message": "고급 Cron"
+  },
+  "overview_pipelineSetup_intervalUnits_hours": {
+    "message": "시간"
+  },
+  "overview_pipelineSetup_intervalUnits_minutes": {
+    "message": "분"
+  },
+  "overview_pipelineSetup_weekdays_monday": {
+    "message": "월요일"
+  },
+  "overview_pipelineSetup_weekdays_tuesday": {
+    "message": "화요일"
+  },
+  "overview_pipelineSetup_weekdays_wednesday": {
+    "message": "수요일"
+  },
+  "overview_pipelineSetup_weekdays_thursday": {
+    "message": "목요일"
+  },
+  "overview_pipelineSetup_weekdays_friday": {
+    "message": "금요일"
+  },
+  "overview_pipelineSetup_weekdays_saturday": {
+    "message": "토요일"
+  },
+  "overview_pipelineSetup_weekdays_sunday": {
+    "message": "일요일"
+  },
+  "overview_pipelineSetup_advancedCron": {
+    "message": "고급 Cron"
+  },
+  "overview_pipelineSetup_nextOccurrence": {
+    "message": "다음 실행"
+  },
+  "overview_pipelineSetup_manualOccurrence": {
+    "message": "수동 전용"
+  },
+  "overview_pipelineSetup_nextOccurrencePending": {
+    "message": "정확한 시간을 계산하려면 유효한 일정을 저장하세요."
+  },
+  "overview_pipelineSetup_briefing_question": {
+    "message": "무엇을 만들고 있나요?"
+  },
+  "overview_pipelineSetup_briefing_help": {
+    "message": "편집 형식을 선택하세요. 모든 옵션은 선택한 소스를 근거로 합니다."
+  },
+  "overview_pipelineSetup_briefing_advanced": {
+    "message": "고급 브리핑 설정"
+  },
+  "overview_pipelineSetup_formats_concise_briefing": {
+    "message": "간결한 브리핑"
+  },
+  "overview_pipelineSetup_formats_solo_update": {
+    "message": "단독 업데이트"
+  },
+  "overview_pipelineSetup_formats_host_discussion": {
+    "message": "진행자 토론"
+  },
+  "overview_pipelineSetup_formats_sportscast": {
+    "message": "스포츠 중계"
+  },
+  "overview_pipelineSetup_formats_culture_roundtable": {
+    "message": "문화 좌담회"
+  },
+  "overview_pipelineSetup_formats_custom": {
+    "message": "사용자 지정"
+  },
+  "overview_pipelineSetup_speaker_defaultLabel": {
+    "message": "출연자 {{index}}"
+  },
+  "overview_pipelineSetup_speaker_defaultRole": {
+    "message": "진행자"
+  },
+  "overview_pipelineSetup_speaker_labelField": {
+    "message": "출연자 {{index}} 레이블"
+  },
+  "overview_pipelineSetup_speaker_roleField": {
+    "message": "출연자 {{index}} 역할"
+  },
+  "overview_pipelineSetup_speaker_voiceField": {
+    "message": "출연자 {{index}} 음성"
+  },
+  "overview_pipelineSetup_speaker_personaField": {
+    "message": "출연자 {{index}} 성격"
+  },
+  "overview_pipelineSetup_preview_generate": {
+    "message": "보고서 미리 보기"
+  },
+  "overview_pipelineSetup_preview_diagnostics": {
+    "message": "미리 보기 진단"
+  },
+  "overview_pipelineSetup_preview_context": {
+    "message": "미리 보기 실행: {{runId}}"
+  },
+  "overview_pipelineSetup_preview_noRunContext": {
+    "message": "이 보고서를 미리 보기 전에 모니터를 성공적으로 실행하세요."
+  },
+  "overview_pipelineSetup_preview_templateRequired": {
+    "message": "미리 보기를 생성하기 전에 템플릿을 선택하세요."
+  },
+  "overview_pipelineSetup_preview_templateEmpty": {
+    "message": "선택한 템플릿이 비어 있습니다."
+  },
+  "overview_pipelineSetup_preview_emptyResult": {
+    "message": "미리 보기에 렌더링된 콘텐츠가 없습니다."
+  },
+  "overview_pipelineSetup_preview_error": {
+    "message": "미리 보기를 생성하지 못했습니다."
+  },
+  "overview_pipelineSetup_delivery_help": {
+    "message": "보고서는 항상 포함됩니다. 외부 전송은 선택한 결과물이 준비될 때까지 기다립니다."
+  },
+  "overview_pipelineSetup_delivery_reports": {
+    "message": "보고서"
+  },
+  "overview_pipelineSetup_delivery_required": {
+    "message": "필수 저장소"
+  },
+  "overview_pipelineSetup_delivery_alwaysOn": {
+    "message": "항상 켜짐"
+  },
+  "overview_pipelineSetup_receipt_labels_schedule": {
+    "message": "일정"
+  },
+  "overview_pipelineSetup_receipt_labels_sources": {
+    "message": "소스"
+  },
+  "overview_pipelineSetup_receipt_labels_artifacts": {
+    "message": "결과물"
+  },
+  "overview_pipelineSetup_receipt_labels_format": {
+    "message": "형식"
+  },
+  "overview_pipelineSetup_receipt_labels_showName": {
+    "message": "프로그램 이름"
+  },
+  "overview_pipelineSetup_receipt_labels_cast": {
+    "message": "출연진"
+  },
+  "overview_pipelineSetup_receipt_labels_duration": {
+    "message": "목표 길이"
+  },
+  "overview_pipelineSetup_receipt_labels_destinations": {
+    "message": "대상"
+  },
+  "overview_pipelineSetup_receipt_schedule_manual": {
+    "message": "수동 전용"
+  },
+  "overview_pipelineSetup_receipt_schedule_scheduled": {
+    "message": "{{date}} ({{timezone}})"
+  },
+  "overview_pipelineSetup_receipt_sources": {
+    "message": "소스 {{count}}개"
+  },
+  "overview_pipelineSetup_receipt_artifacts_textReport": {
+    "message": "텍스트 보고서"
+  },
+  "overview_pipelineSetup_receipt_artifacts_showNotes": {
+    "message": "프로그램 노트"
+  },
+  "overview_pipelineSetup_receipt_artifacts_audio": {
+    "message": "오디오"
+  },
+  "overview_pipelineSetup_receipt_formats_concise_briefing": {
+    "message": "간결한 브리핑"
+  },
+  "overview_pipelineSetup_receipt_formats_solo_update": {
+    "message": "단독 업데이트"
+  },
+  "overview_pipelineSetup_receipt_formats_host_discussion": {
+    "message": "진행자 토론"
+  },
+  "overview_pipelineSetup_receipt_formats_sportscast": {
+    "message": "스포츠 중계"
+  },
+  "overview_pipelineSetup_receipt_formats_culture_roundtable": {
+    "message": "문화 좌담회"
+  },
+  "overview_pipelineSetup_receipt_formats_custom": {
+    "message": "사용자 지정 프로그램"
+  },
+  "overview_pipelineSetup_receipt_speakerStyle_1": {
+    "message": "단독"
+  },
+  "overview_pipelineSetup_receipt_speakerStyle_2": {
+    "message": "진행자 2명"
+  },
+  "overview_pipelineSetup_receipt_speakerStyle_3": {
+    "message": "진행자 3명"
+  },
+  "overview_pipelineSetup_receipt_speakerStyle_4": {
+    "message": "진행자 4명"
+  },
+  "overview_pipelineSetup_receipt_programWithSpeakers": {
+    "message": "{{speakers}} {{format}}"
+  },
+  "overview_pipelineSetup_receipt_cast": {
+    "message": "출연자 {{count}}명"
+  },
+  "overview_pipelineSetup_receipt_duration": {
+    "message": "목표 {{count}}분"
+  },
+  "overview_pipelineSetup_receipt_destinations_email": {
+    "message": "이메일: {{recipients}}"
+  },
+  "overview_pipelineSetup_receipt_destinations_chatbook": {
+    "message": "Chatbook: {{title}}"
+  },
+  "overview_pipelineSetup_receipt_untitledChatbook": {
+    "message": "제목 없음"
+  },
+  "overview_pipelineSetup_receipt_dstChange": {
+    "message": "일광 절약 시간 오프셋 변경 후 다음 실행에서는 {{timezoneName}}을(를) 사용합니다: {{date}}."
+  },
+  "overview_pipelineSetup_test_providerDisclosure": {
+    "message": "테스트는 구성된 LLM 및 텍스트 음성 변환 공급자를 사용합니다. 샘플은 60초로 제한되며 전체 테스트는 목표 길이를 사용합니다."
+  },
+  "overview_pipelineSetup_test_textProviderDisclosure": {
+    "message": "테스트는 구성된 LLM 공급자를 사용합니다. 텍스트 전용 테스트에서는 텍스트 음성 변환을 사용하지 않습니다."
+  },
+  "overview_pipelineSetup_test_receipt": {
+    "message": "활성화 요약"
+  },
+  "overview_pipelineSetup_test_manualReceipt": {
+    "message": "이 브리핑은 수동으로 실행되고 선택한 결과물을 보고서에 저장하며, 테스트 보내기를 선택하지 않는 한 외부 대상으로 전송하지 않습니다."
+  },
+  "overview_pipelineSetup_test_progress": {
+    "message": "테스트 진행률"
+  },
+  "overview_pipelineSetup_test_stages_collection": {
+    "message": "소스 수집"
+  },
+  "overview_pipelineSetup_test_stages_selection": {
+    "message": "업데이트 선택"
+  },
+  "overview_pipelineSetup_test_stages_text": {
+    "message": "보고서 만들기"
+  },
+  "overview_pipelineSetup_test_stages_audio": {
+    "message": "오디오 만들기"
+  },
+  "overview_pipelineSetup_test_stages_persistence": {
+    "message": "보고서에 저장"
+  },
+  "overview_pipelineSetup_test_stages_audioScript": {
+    "message": "오디오 대본 작성"
+  },
+  "overview_pipelineSetup_test_stages_audioScriptPersistence": {
+    "message": "오디오 대본 저장"
+  },
+  "overview_pipelineSetup_test_stages_audioPersistence": {
+    "message": "오디오를 보고서에 저장"
+  },
+  "overview_pipelineSetup_test_stages_delivery": {
+    "message": "테스트 전송 확인"
+  },
+  "overview_pipelineSetup_test_stages_deliveryAdapter": {
+    "message": "{{adapter}}에 전송"
+  },
+  "overview_pipelineSetup_test_stages_unknown": {
+    "message": "단계 {{stage}}"
+  },
+  "overview_pipelineSetup_test_sample": {
+    "message": "60초 샘플 생성"
+  },
+  "overview_pipelineSetup_test_full": {
+    "message": "전체 테스트 프로그램 생성"
+  },
+  "overview_pipelineSetup_test_text": {
+    "message": "테스트 보고서 생성"
+  },
+  "overview_pipelineSetup_test_send": {
+    "message": "테스트 보내기"
+  },
+  "overview_pipelineSetup_test_activate": {
+    "message": "일정 활성화"
+  },
+  "overview_pipelineSetup_test_ready": {
+    "message": "테스트가 시작되었습니다. 일정을 활성화할 때까지 이 초안은 비활성 상태로 유지됩니다."
+  },
+  "overview_pipelineSetup_test_cancelled": {
+    "message": "테스트가 취소되었습니다. 초안이 저장되었습니다."
+  },
+  "overview_pipelineSetup_test_failed": {
+    "message": "테스트에 실패했습니다. 초안이 저장되었습니다. {{message}}"
+  },
+  "overview_pipelineSetup_test_status_not_started": {
+    "message": "시작 안 함"
+  },
+  "overview_pipelineSetup_test_status_queued": {
+    "message": "대기 중"
+  },
+  "overview_pipelineSetup_test_status_running": {
+    "message": "실행 중"
+  },
+  "overview_pipelineSetup_test_status_ready": {
+    "message": "준비됨"
+  },
+  "overview_pipelineSetup_test_status_failed": {
+    "message": "실패"
+  },
+  "overview_pipelineSetup_test_status_skipped": {
+    "message": "건너뜀"
+  },
+  "overview_pipelineSetup_test_status_cancelled": {
+    "message": "취소됨"
+  },
+  "overview_pipelineSetup_activate_ready": {
+    "message": "일정이 활성화되었습니다."
+  },
+  "overview_pipelineSetup_activate_failed": {
+    "message": "일정을 활성화할 수 없습니다. 초안이 저장되었습니다. {{message}}"
+  },
+  "overview_pipelineSetup_validation_sourcesRequired": {
+    "message": "계속하기 전에 소스를 하나 이상 선택하세요."
+  },
+  "overview_pipelineSetup_validation_sourceNameRequired": {
+    "message": "소스 이름을 입력하세요."
+  },
+  "overview_pipelineSetup_validation_sourceUrlInvalid": {
+    "message": "유효한 HTTP 또는 HTTPS 소스 URL을 입력하세요."
+  },
+  "overview_pipelineSetup_validation_monitorNameRequired": {
+    "message": "모니터 이름을 입력하세요."
+  },
+  "overview_pipelineSetup_validation_timezoneInvalid": {
+    "message": "유효한 IANA 시간대를 입력하세요."
+  },
+  "overview_pipelineSetup_validation_intervalInvalid": {
+    "message": "지원되는 일정 간격을 입력하세요."
+  },
+  "overview_pipelineSetup_validation_hourInvalid": {
+    "message": "0에서 23 사이의 시간을 입력하세요."
+  },
+  "overview_pipelineSetup_validation_minuteInvalid": {
+    "message": "0에서 59 사이의 분을 입력하세요."
+  },
+  "overview_pipelineSetup_validation_cronInvalid": {
+    "message": "유효한 5개 필드 Cron 식을 입력하세요."
+  },
+  "overview_pipelineSetup_validation_cronTooFrequent": {
+    "message": "간격이 5분 이상인 일정을 선택하세요."
+  },
+  "overview_pipelineSetup_validation_templateRequired": {
+    "message": "보고서 템플릿을 입력하세요."
+  },
+  "overview_pipelineSetup_validation_castSizeInvalid": {
+    "message": "출연자를 1명에서 4명까지 선택하세요."
+  },
+  "overview_pipelineSetup_validation_castIdsInvalid": {
+    "message": "각 출연자에게 고유한 ID가 필요합니다."
+  },
+  "overview_pipelineSetup_validation_castVoicesRequired": {
+    "message": "각 출연자의 음성을 선택하세요."
+  },
+  "overview_pipelineSetup_validation_audioMinutesInvalid": {
+    "message": "1분에서 60분 사이의 길이를 입력하세요."
+  },
+  "overview_pipelineSetup_validation_emailInvalid": {
+    "message": "유효한 이메일 주소를 하나 이상 입력하세요."
+  },
+  "overview_pipelineSetup_validationError": {
+    "message": "계속하기 전에 강조 표시된 필드를 확인하세요."
   }
 }

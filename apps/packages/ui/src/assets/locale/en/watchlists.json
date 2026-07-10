@@ -81,6 +81,24 @@
   },
   "setupWizard": {
     "title": "Create Watchlist",
+    "containerTitle": "Create Watchlist",
+    "containerHelp": "Create the project container first. Sources, cadence, briefing, delivery, and Test follow in one setup flow.",
+    "actions": {
+      "continue": "Continue to Sources"
+    },
+    "sections": {
+      "preset": "Domain preset"
+    },
+    "fields": {
+      "name": "Watchlist name",
+      "objective": "Objective"
+    },
+    "validation": {
+      "nameRequired": "Add a Watchlist name."
+    },
+    "errors": {
+      "createFailed": "Could not create the Watchlist."
+    },
     "presets": {
       "cti_osint": {
         "label": "CTI / OSINT",
@@ -370,9 +388,10 @@
       "actions": {
         "next": "Continue to {{step}}"
       },
-      "source": {
-        "existing": "Use existing sources",
-        "new": "Add a new source"
+    "source": {
+      "existing": "Use existing sources",
+      "new": "Add a new source",
+      "fallback": "Source {{id}}"
       },
       "sources": {
         "help": "Choose existing sources or add one, then test the connection."
@@ -380,10 +399,15 @@
       "sourcesLoading": "Loading sources...",
       "sourcesError": "Failed to load feeds for the pipeline builder.",
       "sourceTest": {
-        "action": "Test source",
-        "ready": "Source is ready.",
-        "cancelled": "Source test cancelled.",
-        "failed": "Source test failed. {{message}}"
+      "action": "Test source",
+      "ready": "Source is ready.",
+      "cancelled": "Source test cancelled.",
+      "failed": "Source test failed. {{message}}",
+      "summary": "{{ready}} ready, {{filtered}} filtered",
+      "sample": "Sample items",
+      "readyItem": "Ready",
+      "filteredItem": "Filtered",
+      "untitled": "Untitled item"
       },
       "fields": {
         "sources": "Sources",
@@ -451,9 +475,10 @@
         "culture_roundtable": "Culture roundtable",
         "custom": "Custom"
       },
-      "speaker": {
-        "defaultLabel": "Speaker {{index}}",
-        "labelField": "Speaker {{index}} label",
+    "speaker": {
+      "defaultLabel": "Speaker {{index}}",
+      "defaultRole": "Host",
+      "labelField": "Speaker {{index}} label",
         "roleField": "Speaker {{index}} role",
         "voiceField": "Speaker {{index}} voice",
         "personaField": "Speaker {{index}} persona"
@@ -468,14 +493,60 @@
         "emptyResult": "Preview returned no rendered content.",
         "error": "Failed to generate preview."
       },
-      "delivery": {
+    "delivery": {
         "help": "Reports is always included. External delivery waits until selected artifacts are ready.",
         "reports": "Reports",
         "required": "Required storage",
-        "alwaysOn": "Always on"
+      "alwaysOn": "Always on"
+    },
+    "receipt": {
+      "labels": {
+        "schedule": "Schedule",
+        "sources": "Sources",
+        "artifacts": "Artifacts",
+        "format": "Format",
+        "showName": "Show name",
+        "cast": "Cast",
+        "duration": "Target duration",
+        "destinations": "Destinations"
       },
-      "test": {
-        "providerDisclosure": "Tests use your configured LLM and text-to-speech providers. A sample is limited to 60 seconds; a full test uses the target duration.",
+      "schedule": {
+        "manual": "Manual only",
+        "scheduled": "{{date}} ({{timezone}})"
+      },
+      "sources": "{{count}} sources",
+      "artifacts": {
+        "textReport": "text report",
+        "showNotes": "show notes",
+        "audio": "audio"
+      },
+      "formats": {
+        "concise_briefing": "concise briefing",
+        "solo_update": "solo update",
+        "host_discussion": "host discussion",
+        "sportscast": "sportscast",
+        "culture_roundtable": "culture roundtable",
+        "custom": "custom program"
+      },
+      "speakerStyle": {
+        "1": "solo",
+        "2": "two-host",
+        "3": "three-host",
+        "4": "four-host"
+      },
+      "programWithSpeakers": "{{speakers}} {{format}}",
+      "cast": "{{count}} speakers",
+      "duration": "targeting {{count}} minutes",
+      "destinations": {
+        "email": "Email: {{recipients}}",
+        "chatbook": "Chatbook: {{title}}"
+      },
+      "untitledChatbook": "Untitled",
+      "dstChange": "The following run uses {{timezoneName}} after the daylight-saving offset change: {{date}}."
+    },
+    "test": {
+      "providerDisclosure": "Tests use your configured LLM and text-to-speech providers. A sample is limited to 60 seconds; a full test uses the target duration.",
+      "textProviderDisclosure": "Tests use your configured LLM provider. Text-only tests do not use text-to-speech.",
         "receipt": "Activation receipt",
         "manualReceipt": "This briefing runs manually, saves selected artifacts in Reports, and contacts no external destination unless you choose Send test.",
         "progress": "Test progress",
@@ -484,23 +555,53 @@
           "selection": "Select updates",
           "text": "Create report",
           "audio": "Create audio",
-          "persistence": "Save in Reports",
-          "delivery": "Check test delivery"
-        },
+        "persistence": "Save in Reports",
+        "audioScript": "Compose audio script",
+        "audioScriptPersistence": "Save audio script",
+        "audioPersistence": "Save audio in Reports",
+        "delivery": "Check test delivery",
+        "deliveryAdapter": "Deliver to {{adapter}}",
+        "unknown": "Stage {{stage}}"
+      },
         "sample": "Generate 60-second sample",
-        "full": "Generate full test episode",
+      "full": "Generate full test episode",
+      "text": "Generate test report",
         "send": "Send test",
         "activate": "Activate schedule",
         "ready": "Test started. This draft stays inactive until you activate its schedule.",
         "cancelled": "Test cancelled. Your draft is saved.",
-        "failed": "Test failed. Your draft is saved. {{message}}"
+      "failed": "Test failed. Your draft is saved. {{message}}",
+      "status": {
+        "not_started": "Not started",
+        "queued": "Queued",
+        "running": "Running",
+        "ready": "Ready",
+        "failed": "Failed",
+        "skipped": "Skipped",
+        "cancelled": "Cancelled"
+      }
       },
       "activate": {
         "ready": "Schedule activated.",
         "failed": "Schedule could not be activated. Your draft is saved. {{message}}"
       },
-      "validation": {
-        "sourcesRequired": "Choose at least one source before continuing."
+    "validation": {
+      "sourcesRequired": "Choose at least one source before continuing.",
+      "sourceNameRequired": "Enter a source name.",
+      "sourceUrlInvalid": "Enter a valid HTTP or HTTPS source URL.",
+      "monitorNameRequired": "Enter a monitor name.",
+      "timezoneInvalid": "Enter a valid IANA timezone.",
+      "intervalInvalid": "Enter a supported schedule interval.",
+      "hourInvalid": "Enter an hour from 0 through 23.",
+      "minuteInvalid": "Enter a minute from 0 through 59.",
+      "cronInvalid": "Enter a valid five-field cron expression.",
+      "cronTooFrequent": "Choose a schedule at least five minutes apart.",
+      "templateRequired": "Enter a report template.",
+      "castSizeInvalid": "Choose one to four speakers.",
+      "castIdsInvalid": "Each speaker needs a unique identity.",
+      "castVoicesRequired": "Choose a voice for every speaker.",
+      "audioMinutesInvalid": "Enter a duration from 1 through 60 minutes.",
+      "emailInvalid": "Enter at least one valid email address."
       },
       "validationError": "Review the highlighted fields before continuing."
     },

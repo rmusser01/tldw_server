@@ -4027,5 +4027,230 @@
   },
   "overview_pipelineSetup_validationError": {
     "message": "Review the highlighted fields before continuing."
+  },
+  "setupWizard_containerTitle": {
+    "message": "Create Watchlist"
+  },
+  "setupWizard_containerHelp": {
+    "message": "Create the project container first. Sources, cadence, briefing, delivery, and Test follow in one setup flow."
+  },
+  "setupWizard_actions_continue": {
+    "message": "Continue to Sources"
+  },
+  "setupWizard_sections_preset": {
+    "message": "Domain preset"
+  },
+  "setupWizard_fields_name": {
+    "message": "Watchlist name"
+  },
+  "setupWizard_fields_objective": {
+    "message": "Objective"
+  },
+  "setupWizard_validation_nameRequired": {
+    "message": "Add a Watchlist name."
+  },
+  "setupWizard_errors_createFailed": {
+    "message": "Could not create the Watchlist."
+  },
+  "overview_pipelineSetup_source_fallback": {
+    "message": "Source {{id}}"
+  },
+  "overview_pipelineSetup_sourceTest_summary": {
+    "message": "{{ready}} ready, {{filtered}} filtered"
+  },
+  "overview_pipelineSetup_sourceTest_sample": {
+    "message": "Sample items"
+  },
+  "overview_pipelineSetup_sourceTest_readyItem": {
+    "message": "Ready"
+  },
+  "overview_pipelineSetup_sourceTest_filteredItem": {
+    "message": "Filtered"
+  },
+  "overview_pipelineSetup_sourceTest_untitled": {
+    "message": "Untitled item"
+  },
+  "overview_pipelineSetup_speaker_defaultRole": {
+    "message": "Host"
+  },
+  "overview_pipelineSetup_receipt_labels_schedule": {
+    "message": "Schedule"
+  },
+  "overview_pipelineSetup_receipt_labels_sources": {
+    "message": "Sources"
+  },
+  "overview_pipelineSetup_receipt_labels_artifacts": {
+    "message": "Artifacts"
+  },
+  "overview_pipelineSetup_receipt_labels_format": {
+    "message": "Format"
+  },
+  "overview_pipelineSetup_receipt_labels_showName": {
+    "message": "Show name"
+  },
+  "overview_pipelineSetup_receipt_labels_cast": {
+    "message": "Cast"
+  },
+  "overview_pipelineSetup_receipt_labels_duration": {
+    "message": "Target duration"
+  },
+  "overview_pipelineSetup_receipt_labels_destinations": {
+    "message": "Destinations"
+  },
+  "overview_pipelineSetup_receipt_schedule_manual": {
+    "message": "Manual only"
+  },
+  "overview_pipelineSetup_receipt_schedule_scheduled": {
+    "message": "{{date}} ({{timezone}})"
+  },
+  "overview_pipelineSetup_receipt_sources": {
+    "message": "{{count}} sources"
+  },
+  "overview_pipelineSetup_receipt_artifacts_textReport": {
+    "message": "text report"
+  },
+  "overview_pipelineSetup_receipt_artifacts_showNotes": {
+    "message": "show notes"
+  },
+  "overview_pipelineSetup_receipt_artifacts_audio": {
+    "message": "audio"
+  },
+  "overview_pipelineSetup_receipt_formats_concise_briefing": {
+    "message": "concise briefing"
+  },
+  "overview_pipelineSetup_receipt_formats_solo_update": {
+    "message": "solo update"
+  },
+  "overview_pipelineSetup_receipt_formats_host_discussion": {
+    "message": "host discussion"
+  },
+  "overview_pipelineSetup_receipt_formats_sportscast": {
+    "message": "sportscast"
+  },
+  "overview_pipelineSetup_receipt_formats_culture_roundtable": {
+    "message": "culture roundtable"
+  },
+  "overview_pipelineSetup_receipt_formats_custom": {
+    "message": "custom program"
+  },
+  "overview_pipelineSetup_receipt_speakerStyle_1": {
+    "message": "solo"
+  },
+  "overview_pipelineSetup_receipt_speakerStyle_2": {
+    "message": "two-host"
+  },
+  "overview_pipelineSetup_receipt_speakerStyle_3": {
+    "message": "three-host"
+  },
+  "overview_pipelineSetup_receipt_speakerStyle_4": {
+    "message": "four-host"
+  },
+  "overview_pipelineSetup_receipt_programWithSpeakers": {
+    "message": "{{speakers}} {{format}}"
+  },
+  "overview_pipelineSetup_receipt_cast": {
+    "message": "{{count}} speakers"
+  },
+  "overview_pipelineSetup_receipt_duration": {
+    "message": "targeting {{count}} minutes"
+  },
+  "overview_pipelineSetup_receipt_destinations_email": {
+    "message": "Email: {{recipients}}"
+  },
+  "overview_pipelineSetup_receipt_destinations_chatbook": {
+    "message": "Chatbook: {{title}}"
+  },
+  "overview_pipelineSetup_receipt_untitledChatbook": {
+    "message": "Untitled"
+  },
+  "overview_pipelineSetup_receipt_dstChange": {
+    "message": "The following run uses {{timezoneName}} after the daylight-saving offset change: {{date}}."
+  },
+  "overview_pipelineSetup_test_textProviderDisclosure": {
+    "message": "Tests use your configured LLM provider. Text-only tests do not use text-to-speech."
+  },
+  "overview_pipelineSetup_test_stages_audioScript": {
+    "message": "Compose audio script"
+  },
+  "overview_pipelineSetup_test_stages_audioScriptPersistence": {
+    "message": "Save audio script"
+  },
+  "overview_pipelineSetup_test_stages_audioPersistence": {
+    "message": "Save audio in Reports"
+  },
+  "overview_pipelineSetup_test_stages_deliveryAdapter": {
+    "message": "Deliver to {{adapter}}"
+  },
+  "overview_pipelineSetup_test_stages_unknown": {
+    "message": "Stage {{stage}}"
+  },
+  "overview_pipelineSetup_test_text": {
+    "message": "Generate test report"
+  },
+  "overview_pipelineSetup_test_status_not_started": {
+    "message": "Not started"
+  },
+  "overview_pipelineSetup_test_status_queued": {
+    "message": "Queued"
+  },
+  "overview_pipelineSetup_test_status_running": {
+    "message": "Running"
+  },
+  "overview_pipelineSetup_test_status_ready": {
+    "message": "Ready"
+  },
+  "overview_pipelineSetup_test_status_failed": {
+    "message": "Failed"
+  },
+  "overview_pipelineSetup_test_status_skipped": {
+    "message": "Skipped"
+  },
+  "overview_pipelineSetup_test_status_cancelled": {
+    "message": "Cancelled"
+  },
+  "overview_pipelineSetup_validation_sourceNameRequired": {
+    "message": "Enter a source name."
+  },
+  "overview_pipelineSetup_validation_sourceUrlInvalid": {
+    "message": "Enter a valid HTTP or HTTPS source URL."
+  },
+  "overview_pipelineSetup_validation_monitorNameRequired": {
+    "message": "Enter a monitor name."
+  },
+  "overview_pipelineSetup_validation_timezoneInvalid": {
+    "message": "Enter a valid IANA timezone."
+  },
+  "overview_pipelineSetup_validation_intervalInvalid": {
+    "message": "Enter a supported schedule interval."
+  },
+  "overview_pipelineSetup_validation_hourInvalid": {
+    "message": "Enter an hour from 0 through 23."
+  },
+  "overview_pipelineSetup_validation_minuteInvalid": {
+    "message": "Enter a minute from 0 through 59."
+  },
+  "overview_pipelineSetup_validation_cronInvalid": {
+    "message": "Enter a valid five-field cron expression."
+  },
+  "overview_pipelineSetup_validation_cronTooFrequent": {
+    "message": "Choose a schedule at least five minutes apart."
+  },
+  "overview_pipelineSetup_validation_templateRequired": {
+    "message": "Enter a report template."
+  },
+  "overview_pipelineSetup_validation_castSizeInvalid": {
+    "message": "Choose one to four speakers."
+  },
+  "overview_pipelineSetup_validation_castIdsInvalid": {
+    "message": "Each speaker needs a unique identity."
+  },
+  "overview_pipelineSetup_validation_castVoicesRequired": {
+    "message": "Choose a voice for every speaker."
+  },
+  "overview_pipelineSetup_validation_audioMinutesInvalid": {
+    "message": "Enter a duration from 1 through 60 minutes."
+  },
+  "overview_pipelineSetup_validation_emailInvalid": {
+    "message": "Enter at least one valid email address."
   }
 }

@@ -43,5 +43,608 @@
   },
   "items_queue_generateReport": {
     "message": "Skapa rapport från kö"
+  },
+  "setupWizard_title": {
+    "message": "Skapa bevakningslista"
+  },
+  "setupWizard_containerTitle": {
+    "message": "Skapa bevakningslista"
+  },
+  "setupWizard_containerHelp": {
+    "message": "Skapa projektbehållaren först. Källor, frekvens, briefing, leverans och test följer i ett gemensamt konfigurationsflöde."
+  },
+  "setupWizard_actions_continue": {
+    "message": "Fortsätt till Källor"
+  },
+  "setupWizard_sections_preset": {
+    "message": "Domänförval"
+  },
+  "setupWizard_fields_name": {
+    "message": "Bevakningslistans namn"
+  },
+  "setupWizard_fields_objective": {
+    "message": "Mål"
+  },
+  "setupWizard_validation_nameRequired": {
+    "message": "Lägg till ett namn på bevakningslistan."
+  },
+  "setupWizard_errors_createFailed": {
+    "message": "Det gick inte att skapa bevakningslistan."
+  },
+  "setupWizard_presets_cti_osint_label": {
+    "message": "CTI / OSINT"
+  },
+  "setupWizard_presets_cti_osint_description": {
+    "message": "Bevaka sårbarheter, skadlig kod, aktörer, meddelanden och ändringar i källor."
+  },
+  "setupWizard_presets_news_label": {
+    "message": "Nyheter"
+  },
+  "setupWizard_presets_news_description": {
+    "message": "Följ pågående händelser, personer, organisationer och källornas mångfald."
+  },
+  "setupWizard_presets_general_label": {
+    "message": "Allmänt"
+  },
+  "setupWizard_presets_general_description": {
+    "message": "Följ ett ämne och samla uppdateringar för granskning."
+  },
+  "setupWizard_presets_blank_label": {
+    "message": "Tom"
+  },
+  "setupWizard_presets_blank_description": {
+    "message": "Börja med en tom bevakningslista och konfigurera detaljerna själv."
+  },
+  "setupWizard_startModes_sources_label": {
+    "message": "Börja med källor"
+  },
+  "setupWizard_startModes_sources_description": {
+    "message": "Skapa en bevakningslista med inledande flöden och en valfri bevakare."
+  },
+  "setupWizard_startModes_topic_label": {
+    "message": "Börja med ämne"
+  },
+  "setupWizard_startModes_topic_description": {
+    "message": "Skapa först bevakningslistans mål och lägg till flöden innan insamlingen börjar."
+  },
+  "setupWizard_startModes_report_goal_label": {
+    "message": "Börja med rapportmål"
+  },
+  "setupWizard_startModes_report_goal_description": {
+    "message": "Definiera först briefingens mål och anslut sedan källor och mallar."
+  },
+  "setupWizard_boundaries_alerts": {
+    "message": "Aviseringar om innehållsträffar kommer senare. Den här konfigurationen definierar bevakningslistan och dess första insamlingsomfång."
+  },
+  "overview_pipelineSetup_title": {
+    "message": "Konfigurera briefing"
+  },
+  "overview_pipelineSetup_open": {
+    "message": "Konfigurera briefing"
+  },
+  "overview_pipelineSetup_progress": {
+    "message": "Steg i briefingkonfigurationen"
+  },
+  "overview_pipelineSetup_steps_sources": {
+    "message": "Källor"
+  },
+  "overview_pipelineSetup_steps_cadence": {
+    "message": "Frekvens"
+  },
+  "overview_pipelineSetup_steps_briefing": {
+    "message": "Briefing"
+  },
+  "overview_pipelineSetup_steps_delivery": {
+    "message": "Leverans"
+  },
+  "overview_pipelineSetup_steps_test": {
+    "message": "Test"
+  },
+  "overview_pipelineSetup_actions_next": {
+    "message": "Fortsätt till {{step}}"
+  },
+  "overview_pipelineSetup_source_existing": {
+    "message": "Använd befintliga källor"
+  },
+  "overview_pipelineSetup_source_new": {
+    "message": "Lägg till en ny källa"
+  },
+  "overview_pipelineSetup_source_fallback": {
+    "message": "Källa {{id}}"
+  },
+  "overview_pipelineSetup_sources_help": {
+    "message": "Välj befintliga källor eller lägg till en och testa sedan anslutningen."
+  },
+  "overview_pipelineSetup_sourcesLoading": {
+    "message": "Läser in källor..."
+  },
+  "overview_pipelineSetup_sourcesError": {
+    "message": "Det gick inte att läsa in flöden för konfigurationen."
+  },
+  "overview_pipelineSetup_sourceTest_action": {
+    "message": "Testa källa"
+  },
+  "overview_pipelineSetup_sourceTest_ready": {
+    "message": "Källan är klar."
+  },
+  "overview_pipelineSetup_sourceTest_cancelled": {
+    "message": "Källtestet avbröts."
+  },
+  "overview_pipelineSetup_sourceTest_failed": {
+    "message": "Källtestet misslyckades. {{message}}"
+  },
+  "overview_pipelineSetup_sourceTest_summary": {
+    "message": "{{ready}} klara, {{filtered}} filtrerade"
+  },
+  "overview_pipelineSetup_sourceTest_sample": {
+    "message": "Exempelobjekt"
+  },
+  "overview_pipelineSetup_sourceTest_readyItem": {
+    "message": "Klar"
+  },
+  "overview_pipelineSetup_sourceTest_filteredItem": {
+    "message": "Filtrerad"
+  },
+  "overview_pipelineSetup_sourceTest_untitled": {
+    "message": "Objekt utan titel"
+  },
+  "overview_pipelineSetup_fields_sources": {
+    "message": "Källor"
+  },
+  "overview_pipelineSetup_fields_sourceName": {
+    "message": "Källans namn"
+  },
+  "overview_pipelineSetup_fields_sourceUrl": {
+    "message": "Källans URL"
+  },
+  "overview_pipelineSetup_fields_monitorName": {
+    "message": "Bevakarens namn"
+  },
+  "overview_pipelineSetup_fields_schedule": {
+    "message": "Schema"
+  },
+  "overview_pipelineSetup_fields_timezone": {
+    "message": "Tidszon"
+  },
+  "overview_pipelineSetup_fields_intervalEvery": {
+    "message": "Varje"
+  },
+  "overview_pipelineSetup_fields_intervalUnit": {
+    "message": "Intervallenhet"
+  },
+  "overview_pipelineSetup_fields_weekday": {
+    "message": "Veckodag"
+  },
+  "overview_pipelineSetup_fields_hour": {
+    "message": "Timme"
+  },
+  "overview_pipelineSetup_fields_minute": {
+    "message": "Minut"
+  },
+  "overview_pipelineSetup_fields_cronExpression": {
+    "message": "Cron-uttryck"
+  },
+  "overview_pipelineSetup_fields_showName": {
+    "message": "Programnamn"
+  },
+  "overview_pipelineSetup_fields_premise": {
+    "message": "Programidé"
+  },
+  "overview_pipelineSetup_fields_includeAudio": {
+    "message": "Ljud"
+  },
+  "overview_pipelineSetup_fields_audioHelp": {
+    "message": "Lägg till en spelbar uppläst version."
+  },
+  "overview_pipelineSetup_fields_audioMinutes": {
+    "message": "Mållängd i minuter"
+  },
+  "overview_pipelineSetup_fields_speakerCount": {
+    "message": "Antal medverkande"
+  },
+  "overview_pipelineSetup_fields_template": {
+    "message": "Rapportmall"
+  },
+  "overview_pipelineSetup_fields_audioProvider": {
+    "message": "Åsidosätt ljudleverantör"
+  },
+  "overview_pipelineSetup_fields_audioModel": {
+    "message": "Åsidosätt ljudmodell"
+  },
+  "overview_pipelineSetup_fields_customInstructions": {
+    "message": "Anpassade redaktionella instruktioner"
+  },
+  "overview_pipelineSetup_fields_emailDelivery": {
+    "message": "E-post"
+  },
+  "overview_pipelineSetup_fields_emailRecipients": {
+    "message": "E-postmottagare"
+  },
+  "overview_pipelineSetup_fields_chatbookDelivery": {
+    "message": "Chatbook"
+  },
+  "overview_pipelineSetup_fields_chatbookTitle": {
+    "message": "Chatbook-titel"
+  },
+  "overview_pipelineSetup_schedule_manual": {
+    "message": "Endast manuellt"
+  },
+  "overview_pipelineSetup_schedule_interval": {
+    "message": "Var N:e timme eller minut"
+  },
+  "overview_pipelineSetup_schedule_daily": {
+    "message": "Dagligen"
+  },
+  "overview_pipelineSetup_schedule_weekdays": {
+    "message": "Vardagar"
+  },
+  "overview_pipelineSetup_schedule_weekly": {
+    "message": "Varje vecka"
+  },
+  "overview_pipelineSetup_schedule_advanced": {
+    "message": "Avancerad cron"
+  },
+  "overview_pipelineSetup_intervalUnits_hours": {
+    "message": "Timmar"
+  },
+  "overview_pipelineSetup_intervalUnits_minutes": {
+    "message": "Minuter"
+  },
+  "overview_pipelineSetup_weekdays_monday": {
+    "message": "Måndag"
+  },
+  "overview_pipelineSetup_weekdays_tuesday": {
+    "message": "Tisdag"
+  },
+  "overview_pipelineSetup_weekdays_wednesday": {
+    "message": "Onsdag"
+  },
+  "overview_pipelineSetup_weekdays_thursday": {
+    "message": "Torsdag"
+  },
+  "overview_pipelineSetup_weekdays_friday": {
+    "message": "Fredag"
+  },
+  "overview_pipelineSetup_weekdays_saturday": {
+    "message": "Lördag"
+  },
+  "overview_pipelineSetup_weekdays_sunday": {
+    "message": "Söndag"
+  },
+  "overview_pipelineSetup_advancedCron": {
+    "message": "Avancerad cron"
+  },
+  "overview_pipelineSetup_nextOccurrence": {
+    "message": "Nästa körning"
+  },
+  "overview_pipelineSetup_manualOccurrence": {
+    "message": "Endast manuellt"
+  },
+  "overview_pipelineSetup_nextOccurrencePending": {
+    "message": "Spara ett giltigt schema för att beräkna den exakta tiden."
+  },
+  "overview_pipelineSetup_briefing_question": {
+    "message": "Vad skapar du?"
+  },
+  "overview_pipelineSetup_briefing_help": {
+    "message": "Välj redaktionell form. Alla alternativ bygger fortfarande på dina valda källor."
+  },
+  "overview_pipelineSetup_briefing_advanced": {
+    "message": "Avancerade briefinginställningar"
+  },
+  "overview_pipelineSetup_formats_concise_briefing": {
+    "message": "Kort briefing"
+  },
+  "overview_pipelineSetup_formats_solo_update": {
+    "message": "Solouppdatering"
+  },
+  "overview_pipelineSetup_formats_host_discussion": {
+    "message": "Värdsamtal"
+  },
+  "overview_pipelineSetup_formats_sportscast": {
+    "message": "Sportsändning"
+  },
+  "overview_pipelineSetup_formats_culture_roundtable": {
+    "message": "Kulturellt rundabordssamtal"
+  },
+  "overview_pipelineSetup_formats_custom": {
+    "message": "Anpassat"
+  },
+  "overview_pipelineSetup_speaker_defaultLabel": {
+    "message": "Medverkande {{index}}"
+  },
+  "overview_pipelineSetup_speaker_defaultRole": {
+    "message": "Värd"
+  },
+  "overview_pipelineSetup_speaker_labelField": {
+    "message": "Etikett för medverkande {{index}}"
+  },
+  "overview_pipelineSetup_speaker_roleField": {
+    "message": "Roll för medverkande {{index}}"
+  },
+  "overview_pipelineSetup_speaker_voiceField": {
+    "message": "Röst för medverkande {{index}}"
+  },
+  "overview_pipelineSetup_speaker_personaField": {
+    "message": "Persona för medverkande {{index}}"
+  },
+  "overview_pipelineSetup_preview_generate": {
+    "message": "Förhandsgranska rapport"
+  },
+  "overview_pipelineSetup_preview_diagnostics": {
+    "message": "Diagnostik för förhandsgranskning"
+  },
+  "overview_pipelineSetup_preview_context": {
+    "message": "Förhandsgranskningskörning: {{runId}}"
+  },
+  "overview_pipelineSetup_preview_noRunContext": {
+    "message": "Kör en bevakare utan fel innan du förhandsgranskar rapporten."
+  },
+  "overview_pipelineSetup_preview_templateRequired": {
+    "message": "Välj en mall innan du skapar förhandsgranskningen."
+  },
+  "overview_pipelineSetup_preview_templateEmpty": {
+    "message": "Den valda mallen är tom."
+  },
+  "overview_pipelineSetup_preview_emptyResult": {
+    "message": "Förhandsgranskningen gav inget renderat innehåll."
+  },
+  "overview_pipelineSetup_preview_error": {
+    "message": "Det gick inte att skapa förhandsgranskningen."
+  },
+  "overview_pipelineSetup_delivery_help": {
+    "message": "Rapporter ingår alltid. Extern leverans väntar tills de valda artefakterna är klara."
+  },
+  "overview_pipelineSetup_delivery_reports": {
+    "message": "Rapporter"
+  },
+  "overview_pipelineSetup_delivery_required": {
+    "message": "Obligatorisk lagring"
+  },
+  "overview_pipelineSetup_delivery_alwaysOn": {
+    "message": "Alltid aktiv"
+  },
+  "overview_pipelineSetup_receipt_labels_schedule": {
+    "message": "Schema"
+  },
+  "overview_pipelineSetup_receipt_labels_sources": {
+    "message": "Källor"
+  },
+  "overview_pipelineSetup_receipt_labels_artifacts": {
+    "message": "Artefakter"
+  },
+  "overview_pipelineSetup_receipt_labels_format": {
+    "message": "Format"
+  },
+  "overview_pipelineSetup_receipt_labels_showName": {
+    "message": "Programnamn"
+  },
+  "overview_pipelineSetup_receipt_labels_cast": {
+    "message": "Medverkande"
+  },
+  "overview_pipelineSetup_receipt_labels_duration": {
+    "message": "Mållängd"
+  },
+  "overview_pipelineSetup_receipt_labels_destinations": {
+    "message": "Mål"
+  },
+  "overview_pipelineSetup_receipt_schedule_manual": {
+    "message": "Endast manuellt"
+  },
+  "overview_pipelineSetup_receipt_schedule_scheduled": {
+    "message": "{{date}} ({{timezone}})"
+  },
+  "overview_pipelineSetup_receipt_sources": {
+    "message": "{{count}} källor"
+  },
+  "overview_pipelineSetup_receipt_artifacts_textReport": {
+    "message": "textrapport"
+  },
+  "overview_pipelineSetup_receipt_artifacts_showNotes": {
+    "message": "programanteckningar"
+  },
+  "overview_pipelineSetup_receipt_artifacts_audio": {
+    "message": "ljud"
+  },
+  "overview_pipelineSetup_receipt_formats_concise_briefing": {
+    "message": "kort briefing"
+  },
+  "overview_pipelineSetup_receipt_formats_solo_update": {
+    "message": "solouppdatering"
+  },
+  "overview_pipelineSetup_receipt_formats_host_discussion": {
+    "message": "värdsamtal"
+  },
+  "overview_pipelineSetup_receipt_formats_sportscast": {
+    "message": "sportsändning"
+  },
+  "overview_pipelineSetup_receipt_formats_culture_roundtable": {
+    "message": "kulturellt rundabordssamtal"
+  },
+  "overview_pipelineSetup_receipt_formats_custom": {
+    "message": "anpassat program"
+  },
+  "overview_pipelineSetup_receipt_speakerStyle_1": {
+    "message": "solo"
+  },
+  "overview_pipelineSetup_receipt_speakerStyle_2": {
+    "message": "med två värdar"
+  },
+  "overview_pipelineSetup_receipt_speakerStyle_3": {
+    "message": "med tre värdar"
+  },
+  "overview_pipelineSetup_receipt_speakerStyle_4": {
+    "message": "med fyra värdar"
+  },
+  "overview_pipelineSetup_receipt_programWithSpeakers": {
+    "message": "{{speakers}} {{format}}"
+  },
+  "overview_pipelineSetup_receipt_cast": {
+    "message": "{{count}} medverkande"
+  },
+  "overview_pipelineSetup_receipt_duration": {
+    "message": "mål på {{count}} minuter"
+  },
+  "overview_pipelineSetup_receipt_destinations_email": {
+    "message": "E-post: {{recipients}}"
+  },
+  "overview_pipelineSetup_receipt_destinations_chatbook": {
+    "message": "Chatbook: {{title}}"
+  },
+  "overview_pipelineSetup_receipt_untitledChatbook": {
+    "message": "Utan titel"
+  },
+  "overview_pipelineSetup_receipt_dstChange": {
+    "message": "Följande körning använder {{timezoneName}} efter övergången till eller från sommartid: {{date}}."
+  },
+  "overview_pipelineSetup_test_providerDisclosure": {
+    "message": "Tester använder dina konfigurerade leverantörer för LLM och talsyntes. Ett prov begränsas till 60 sekunder; ett fullständigt test använder mållängden."
+  },
+  "overview_pipelineSetup_test_textProviderDisclosure": {
+    "message": "Tester använder din konfigurerade LLM-leverantör. Tester med endast text använder inte talsyntes."
+  },
+  "overview_pipelineSetup_test_receipt": {
+    "message": "Aktiveringsöversikt"
+  },
+  "overview_pipelineSetup_test_manualReceipt": {
+    "message": "Den här briefingen körs manuellt, sparar valda artefakter i Rapporter och kontaktar inget externt mål om du inte väljer Skicka test."
+  },
+  "overview_pipelineSetup_test_progress": {
+    "message": "Testförlopp"
+  },
+  "overview_pipelineSetup_test_stages_collection": {
+    "message": "Samla källor"
+  },
+  "overview_pipelineSetup_test_stages_selection": {
+    "message": "Välj uppdateringar"
+  },
+  "overview_pipelineSetup_test_stages_text": {
+    "message": "Skapa rapport"
+  },
+  "overview_pipelineSetup_test_stages_audio": {
+    "message": "Skapa ljud"
+  },
+  "overview_pipelineSetup_test_stages_persistence": {
+    "message": "Spara i Rapporter"
+  },
+  "overview_pipelineSetup_test_stages_audioScript": {
+    "message": "Skriv ljudmanus"
+  },
+  "overview_pipelineSetup_test_stages_audioScriptPersistence": {
+    "message": "Spara ljudmanus"
+  },
+  "overview_pipelineSetup_test_stages_audioPersistence": {
+    "message": "Spara ljud i Rapporter"
+  },
+  "overview_pipelineSetup_test_stages_delivery": {
+    "message": "Kontrollera testleverans"
+  },
+  "overview_pipelineSetup_test_stages_deliveryAdapter": {
+    "message": "Leverera till {{adapter}}"
+  },
+  "overview_pipelineSetup_test_stages_unknown": {
+    "message": "Steg {{stage}}"
+  },
+  "overview_pipelineSetup_test_sample": {
+    "message": "Skapa 60-sekundersprov"
+  },
+  "overview_pipelineSetup_test_full": {
+    "message": "Skapa fullständigt testavsnitt"
+  },
+  "overview_pipelineSetup_test_text": {
+    "message": "Skapa testrapport"
+  },
+  "overview_pipelineSetup_test_send": {
+    "message": "Skicka test"
+  },
+  "overview_pipelineSetup_test_activate": {
+    "message": "Aktivera schema"
+  },
+  "overview_pipelineSetup_test_ready": {
+    "message": "Testet startade. Utkastet förblir inaktivt tills du aktiverar schemat."
+  },
+  "overview_pipelineSetup_test_cancelled": {
+    "message": "Testet avbröts. Utkastet har sparats."
+  },
+  "overview_pipelineSetup_test_failed": {
+    "message": "Testet misslyckades. Utkastet har sparats. {{message}}"
+  },
+  "overview_pipelineSetup_test_status_not_started": {
+    "message": "Inte startat"
+  },
+  "overview_pipelineSetup_test_status_queued": {
+    "message": "I kö"
+  },
+  "overview_pipelineSetup_test_status_running": {
+    "message": "Körs"
+  },
+  "overview_pipelineSetup_test_status_ready": {
+    "message": "Klar"
+  },
+  "overview_pipelineSetup_test_status_failed": {
+    "message": "Misslyckades"
+  },
+  "overview_pipelineSetup_test_status_skipped": {
+    "message": "Överhoppat"
+  },
+  "overview_pipelineSetup_test_status_cancelled": {
+    "message": "Avbrutet"
+  },
+  "overview_pipelineSetup_activate_ready": {
+    "message": "Schemat aktiverades."
+  },
+  "overview_pipelineSetup_activate_failed": {
+    "message": "Schemat kunde inte aktiveras. Utkastet har sparats. {{message}}"
+  },
+  "overview_pipelineSetup_validation_sourcesRequired": {
+    "message": "Välj minst en källa innan du fortsätter."
+  },
+  "overview_pipelineSetup_validation_sourceNameRequired": {
+    "message": "Ange ett källnamn."
+  },
+  "overview_pipelineSetup_validation_sourceUrlInvalid": {
+    "message": "Ange en giltig HTTP- eller HTTPS-URL för källan."
+  },
+  "overview_pipelineSetup_validation_monitorNameRequired": {
+    "message": "Ange ett namn på bevakaren."
+  },
+  "overview_pipelineSetup_validation_timezoneInvalid": {
+    "message": "Ange en giltig IANA-tidszon."
+  },
+  "overview_pipelineSetup_validation_intervalInvalid": {
+    "message": "Ange ett intervall som stöds."
+  },
+  "overview_pipelineSetup_validation_hourInvalid": {
+    "message": "Ange en timme från 0 till 23."
+  },
+  "overview_pipelineSetup_validation_minuteInvalid": {
+    "message": "Ange en minut från 0 till 59."
+  },
+  "overview_pipelineSetup_validation_cronInvalid": {
+    "message": "Ange ett giltigt cron-uttryck med fem fält."
+  },
+  "overview_pipelineSetup_validation_cronTooFrequent": {
+    "message": "Välj ett schema med minst fem minuters mellanrum."
+  },
+  "overview_pipelineSetup_validation_templateRequired": {
+    "message": "Ange en rapportmall."
+  },
+  "overview_pipelineSetup_validation_castSizeInvalid": {
+    "message": "Välj en till fyra medverkande."
+  },
+  "overview_pipelineSetup_validation_castIdsInvalid": {
+    "message": "Varje medverkande behöver en unik identitet."
+  },
+  "overview_pipelineSetup_validation_castVoicesRequired": {
+    "message": "Välj en röst för varje medverkande."
+  },
+  "overview_pipelineSetup_validation_audioMinutesInvalid": {
+    "message": "Ange en längd från 1 till 60 minuter."
+  },
+  "overview_pipelineSetup_validation_emailInvalid": {
+    "message": "Ange minst en giltig e-postadress."
+  },
+  "overview_pipelineSetup_validationError": {
+    "message": "Granska de markerade fälten innan du fortsätter."
   }
 }

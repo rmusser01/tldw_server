@@ -7,12 +7,14 @@ import { WatchlistSetupWizard } from "../WatchlistSetupWizard"
 
 const services = vi.hoisted(() => ({
   triggerRun: vi.fn(),
+  getBriefing: vi.fn(),
   createOutput: vi.fn(),
   testSource: vi.fn()
 }))
 
 vi.mock("@/services/watchlists", () => ({
   triggerWatchlistRun: (...args: unknown[]) => services.triggerRun(...args),
+  getWatchlistRunBriefing: (...args: unknown[]) => services.getBriefing(...args),
   createWatchlistOutput: (...args: unknown[]) => services.createOutput(...args),
   testWatchlistSourceDraft: (...args: unknown[]) => services.testSource(...args)
 }))
@@ -63,6 +65,24 @@ const renderWizard = (overrides: Record<string, unknown> = {}) => {
 beforeEach(() => {
   vi.clearAllMocks()
   services.triggerRun.mockResolvedValue({ id: 88 })
+  services.getBriefing.mockResolvedValue({
+    occurrence_id: 89,
+    run_id: 88,
+    job_id: 77,
+    artifact_status: "ready",
+    delivery_status: "not_configured",
+    stages: {
+      collect: { status: "ready" },
+      render_text: { status: "ready" },
+      persist_text: { status: "ready" }
+    },
+    output: { id: 99 },
+    audio: null,
+    editorial: {},
+    selection: {},
+    next_run_at: null,
+    recovery: {}
+  })
   services.createOutput.mockResolvedValue({ id: 99 })
   services.testSource.mockResolvedValue({ total: 1, ingestable: 1, filtered: 0, items: [] })
 })
@@ -122,6 +142,8 @@ describe("WatchlistSetupWizard", () => {
       )
     })
     expect(services.triggerRun).toHaveBeenCalledWith(77)
+    expect(services.getBriefing).toHaveBeenCalledWith(88)
+    expect(services.createOutput).not.toHaveBeenCalled()
 
     fireEvent.click(pipeline.getByRole("button", { name: "Activate schedule" }))
     await waitFor(() => expect(props.onUpdateJob).toHaveBeenCalledWith(77, { active: true }))
@@ -131,5 +153,39 @@ describe("WatchlistSetupWizard", () => {
       sourceIds: [301],
       job: expect.objectContaining({ id: 77, active: true })
     }))
+  }, 20_000)
+
+  it("recreates a changed new source and updates the same inactive job scope", async () => {
+    const onCreateSources = vi.fn()
+      .mockResolvedValueOnce([301])
+      .mockResolvedValueOnce([302])
+    const props = renderWizard({ onCreateSources })
+    fireEvent.change(screen.getByLabelText("Watchlist name"), { target: { value: "Policy" } })
+    fireEvent.click(screen.getByRole("button", { name: "Continue to Sources" }))
+    const pipeline = within(await screen.findByRole("dialog", { name: "Set up briefing" }))
+
+    fireEvent.change(pipeline.getByLabelText("Source name"), { target: { value: "Policy feed" } })
+    fireEvent.change(pipeline.getByLabelText("Source URL"), { target: { value: "https://example.com/one.xml" } })
+    fireEvent.click(pipeline.getByRole("button", { name: "Next: Cadence" }))
+    fireEvent.click(pipeline.getByRole("button", { name: "Next: Briefing" }))
+    fireEvent.click(pipeline.getByRole("button", { name: "Next: Delivery" }))
+    fireEvent.click(pipeline.getByRole("button", { name: "Next: Test" }))
+    fireEvent.click(pipeline.getByRole("button", { name: "Generate 60-second sample" }))
+    await waitFor(() => expect(onCreateSources).toHaveBeenCalledTimes(1))
+
+    fireEvent.click(pipeline.getByRole("button", { name: "Sources" }))
+    fireEvent.change(pipeline.getByLabelText("Source URL"), { target: { value: "https://example.com/two.xml" } })
+    fireEvent.click(pipeline.getByRole("button", { name: "Next: Cadence" }))
+    fireEvent.click(pipeline.getByRole("button", { name: "Next: Briefing" }))
+    fireEvent.click(pipeline.getByRole("button", { name: "Next: Delivery" }))
+    fireEvent.click(pipeline.getByRole("button", { name: "Next: Test" }))
+    fireEvent.click(pipeline.getByRole("button", { name: "Generate full test episode" }))
+
+    await waitFor(() => expect(onCreateSources).toHaveBeenCalledTimes(2))
+    expect(props.onUpdateJob).toHaveBeenCalledWith(
+      77,
+      expect.objectContaining({ scope: { sources: [302] }, active: false })
+    )
+    expect(props.onCreateJob).toHaveBeenCalledTimes(1)
   }, 20_000)
 })

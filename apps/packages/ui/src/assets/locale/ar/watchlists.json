@@ -17,5 +17,294 @@
       "generateError": "تعذر إنشاء تقرير من العناصر في قائمة الانتظار.",
       "generateReport": "إنشاء تقرير من قائمة الانتظار"
     }
+  },
+  "setupWizard": {
+    "title": "إنشاء قائمة مراقبة",
+    "containerTitle": "إنشاء قائمة مراقبة",
+    "containerHelp": "أنشئ حاوية المشروع أولاً. ثم اضبط المصادر ودورية التشغيل والموجز والتسليم والاختبار ضمن مسار إعداد واحد.",
+    "actions": {
+      "continue": "المتابعة إلى المصادر"
+    },
+    "sections": {
+      "preset": "إعداد مسبق للمجال"
+    },
+    "fields": {
+      "name": "اسم قائمة المراقبة",
+      "objective": "الهدف"
+    },
+    "validation": {
+      "nameRequired": "أضف اسماً لقائمة المراقبة."
+    },
+    "errors": {
+      "createFailed": "تعذر إنشاء قائمة المراقبة."
+    },
+    "presets": {
+      "cti_osint": {
+        "label": "CTI / OSINT",
+        "description": "راقب الثغرات والبرمجيات الضارة والجهات الفاعلة والتنبيهات وتغييرات المصادر."
+      },
+      "news": {
+        "label": "الأخبار",
+        "description": "تابع الأحداث المتطورة والأشخاص والمؤسسات وتنوع المصادر."
+      },
+      "general": {
+        "label": "عام",
+        "description": "تابع موضوعاً واجمع تحديثات لمراجعتها."
+      },
+      "blank": {
+        "label": "فارغة",
+        "description": "ابدأ بقائمة مراقبة فارغة واضبط التفاصيل بنفسك."
+      }
+    },
+    "startModes": {
+      "sources": {
+        "label": "البدء من المصادر",
+        "description": "أنشئ قائمة مراقبة بموجزات أولية ومراقب اختياري."
+      },
+      "topic": {
+        "label": "البدء من موضوع",
+        "description": "أنشئ هدف قائمة المراقبة أولاً، ثم أضف الموجزات قبل بدء الجمع."
+      },
+      "report_goal": {
+        "label": "البدء من هدف التقرير",
+        "description": "حدد هدف الموجز أولاً، ثم صِل المصادر والقوالب."
+      }
+    },
+    "boundaries": {
+      "alerts": "تأتي تنبيهات مطابقة المحتوى لاحقاً. يحدد هذا الإعداد قائمة المراقبة ونطاق الجمع الأولي لها."
+    }
+  },
+  "overview": {
+    "pipelineSetup": {
+      "title": "إعداد الموجز",
+      "open": "إعداد الموجز",
+      "progress": "خطوات إعداد الموجز",
+      "steps": {
+        "sources": "المصادر",
+        "cadence": "الدورية",
+        "briefing": "الموجز",
+        "delivery": "التسليم",
+        "test": "الاختبار"
+      },
+      "actions": {
+        "next": "المتابعة إلى {{step}}"
+      },
+      "source": {
+        "existing": "استخدام المصادر الموجودة",
+        "new": "إضافة مصدر جديد",
+        "fallback": "المصدر {{id}}"
+      },
+      "sources": {
+        "help": "اختر مصادر موجودة أو أضف مصدراً جديداً، ثم اختبر الاتصال للتأكد من جاهزيته."
+      },
+      "sourcesLoading": "جارٍ تحميل المصادر...",
+      "sourcesError": "تعذر تحميل الموجزات لأداة الإعداد.",
+      "sourceTest": {
+        "action": "اختبار المصدر",
+        "ready": "المصدر جاهز.",
+        "cancelled": "أُلغي اختبار المصدر.",
+        "failed": "فشل اختبار المصدر. {{message}}",
+        "summary": "الجاهز: {{ready}}، والمصفّى: {{filtered}}",
+        "sample": "عناصر نموذجية",
+        "readyItem": "جاهز",
+        "filteredItem": "مصفّى",
+        "untitled": "عنصر بلا عنوان"
+      },
+      "fields": {
+        "sources": "المصادر",
+        "sourceName": "اسم المصدر",
+        "sourceUrl": "عنوان URL للمصدر",
+        "monitorName": "اسم المراقب",
+        "schedule": "الجدول",
+        "timezone": "المنطقة الزمنية",
+        "intervalEvery": "كل",
+        "intervalUnit": "وحدة الفاصل",
+        "weekday": "يوم الأسبوع",
+        "hour": "الساعة",
+        "minute": "الدقيقة",
+        "cronExpression": "تعبير cron",
+        "showName": "اسم البرنامج",
+        "premise": "فكرة البرنامج",
+        "includeAudio": "الصوت",
+        "audioHelp": "أضف نسخة منطوقة قابلة للتشغيل.",
+        "audioMinutes": "المدة المستهدفة بالدقائق",
+        "speakerCount": "حجم فريق التقديم",
+        "template": "قالب التقرير",
+        "audioProvider": "تجاوز موفر الصوت",
+        "audioModel": "تجاوز نموذج الصوت",
+        "customInstructions": "تعليمات تحرير مخصصة",
+        "emailDelivery": "البريد الإلكتروني",
+        "emailRecipients": "مستلمو البريد",
+        "chatbookDelivery": "Chatbook",
+        "chatbookTitle": "عنوان Chatbook"
+      },
+      "schedule": {
+        "manual": "يدوي فقط",
+        "interval": "كل N ساعة أو دقيقة",
+        "daily": "يومياً",
+        "weekdays": "أيام العمل",
+        "weekly": "أسبوعياً",
+        "advanced": "cron متقدم"
+      },
+      "intervalUnits": {
+        "hours": "ساعات",
+        "minutes": "دقائق"
+      },
+      "weekdays": {
+        "monday": "الاثنين",
+        "tuesday": "الثلاثاء",
+        "wednesday": "الأربعاء",
+        "thursday": "الخميس",
+        "friday": "الجمعة",
+        "saturday": "السبت",
+        "sunday": "الأحد"
+      },
+      "advancedCron": "cron متقدم",
+      "nextOccurrence": "التشغيل التالي",
+      "manualOccurrence": "يدوي فقط",
+      "nextOccurrencePending": "احفظ جدولاً صالحاً لحساب الوقت الدقيق.",
+      "briefing": {
+        "question": "ماذا تريد أن تنشئ؟",
+        "help": "اختر الصيغة التحريرية. تبقى كل الخيارات مستندة إلى المصادر التي حددتها.",
+        "advanced": "إعدادات الموجز المتقدمة"
+      },
+      "formats": {
+        "concise_briefing": "موجز مختصر",
+        "solo_update": "تحديث فردي",
+        "host_discussion": "نقاش بين المقدمين",
+        "sportscast": "نشرة رياضية",
+        "culture_roundtable": "طاولة ثقافية مستديرة",
+        "custom": "مخصص"
+      },
+      "speaker": {
+        "defaultLabel": "المشارك {{index}}",
+        "defaultRole": "مقدم",
+        "labelField": "تسمية المشارك {{index}}",
+        "roleField": "دور المشارك {{index}}",
+        "voiceField": "صوت المشارك {{index}}",
+        "personaField": "شخصية المشارك {{index}}"
+      },
+      "preview": {
+        "generate": "معاينة التقرير",
+        "diagnostics": "تشخيص المعاينة",
+        "context": "تشغيل المعاينة: {{runId}}",
+        "noRunContext": "شغّل المراقب بنجاح قبل معاينة هذا التقرير.",
+        "templateRequired": "اختر قالباً قبل إنشاء المعاينة.",
+        "templateEmpty": "القالب المحدد فارغ.",
+        "emptyResult": "لم تُرجع المعاينة محتوى معروضاً.",
+        "error": "تعذر إنشاء المعاينة."
+      },
+      "delivery": {
+        "help": "تُحفظ التقارير دائماً. ينتظر التسليم الخارجي حتى تصبح المخرجات المحددة جاهزة بالكامل للإرسال.",
+        "reports": "التقارير",
+        "required": "تخزين مطلوب",
+        "alwaysOn": "مفعّل دائماً"
+      },
+      "receipt": {
+        "labels": {
+          "schedule": "الجدول",
+          "sources": "المصادر",
+          "artifacts": "المخرجات",
+          "format": "الصيغة",
+          "showName": "اسم البرنامج",
+          "cast": "فريق التقديم",
+          "duration": "المدة المستهدفة",
+          "destinations": "الوجهات"
+        },
+        "schedule": {
+          "manual": "يدوي فقط",
+          "scheduled": "{{date}} ({{timezone}})"
+        },
+        "sources": "{{count}} من المصادر",
+        "artifacts": {
+          "textReport": "تقرير نصي",
+          "showNotes": "ملاحظات البرنامج",
+          "audio": "صوت"
+        },
+        "formats": {
+          "concise_briefing": "موجز مختصر",
+          "solo_update": "تحديث فردي",
+          "host_discussion": "نقاش بين المقدمين",
+          "sportscast": "نشرة رياضية",
+          "culture_roundtable": "طاولة ثقافية مستديرة",
+          "custom": "برنامج مخصص"
+        },
+        "speakerStyle": {
+          "1": "فردي",
+          "2": "بمقدمين",
+          "3": "بثلاثة مقدمين",
+          "4": "بأربعة مقدمين"
+        },
+        "programWithSpeakers": "{{format}} {{speakers}}",
+        "cast": "{{count}} من المشاركين",
+        "duration": "بهدف {{count}} دقيقة",
+        "destinations": {
+          "email": "البريد: {{recipients}}",
+          "chatbook": "Chatbook: {{title}}"
+        },
+        "untitledChatbook": "بلا عنوان",
+        "dstChange": "يستخدم التشغيل التالي {{timezoneName}} بعد تغير إزاحة التوقيت الصيفي: {{date}}."
+      },
+      "test": {
+        "providerDisclosure": "تستخدم الاختبارات موفري نموذج اللغة وتحويل النص إلى كلام الذين ضبطتهم. تقتصر العينة على 60 ثانية، ويستخدم الاختبار الكامل المدة المستهدفة.",
+        "textProviderDisclosure": "تستخدم الاختبارات موفر نموذج اللغة الذي ضبطته. لا تستخدم الاختبارات النصية تحويل النص إلى كلام.",
+        "receipt": "ملخص التفعيل",
+        "manualReceipt": "يعمل هذا الموجز يدوياً ويحفظ المخرجات المحددة في التقارير، ولا يتصل بأي وجهة خارجية إلا إذا اخترت إرسال الاختبار.",
+        "progress": "تقدم الاختبار",
+        "stages": {
+          "collection": "جمع المصادر",
+          "selection": "تحديد التحديثات",
+          "text": "إنشاء التقرير",
+          "audio": "إنشاء الصوت",
+          "persistence": "الحفظ في التقارير",
+          "audioScript": "كتابة النص الصوتي",
+          "audioScriptPersistence": "حفظ النص الصوتي",
+          "audioPersistence": "حفظ الصوت في التقارير",
+          "delivery": "فحص تسليم الاختبار",
+          "deliveryAdapter": "التسليم إلى {{adapter}}",
+          "unknown": "المرحلة {{stage}}"
+        },
+        "sample": "إنشاء عينة من 60 ثانية",
+        "full": "إنشاء حلقة اختبار كاملة",
+        "text": "إنشاء تقرير اختبار",
+        "send": "إرسال الاختبار",
+        "activate": "تفعيل الجدول",
+        "ready": "بدأ الاختبار. تبقى هذه المسودة غير مفعلة حتى تفعّل جدولها.",
+        "cancelled": "أُلغي الاختبار. حُفظت مسودتك.",
+        "failed": "فشل الاختبار. حُفظت مسودتك. {{message}}",
+        "status": {
+          "not_started": "لم يبدأ",
+          "queued": "في قائمة الانتظار",
+          "running": "قيد التشغيل",
+          "ready": "جاهز",
+          "failed": "فشل",
+          "skipped": "تم التخطي",
+          "cancelled": "أُلغي"
+        }
+      },
+      "activate": {
+        "ready": "فُعّل الجدول.",
+        "failed": "تعذر تفعيل الجدول. حُفظت مسودتك. {{message}}"
+      },
+      "validation": {
+        "sourcesRequired": "اختر مصدراً واحداً على الأقل قبل المتابعة.",
+        "sourceNameRequired": "أدخل اسم المصدر.",
+        "sourceUrlInvalid": "أدخل عنوان مصدر HTTP أو HTTPS صالحاً.",
+        "monitorNameRequired": "أدخل اسم المراقب.",
+        "timezoneInvalid": "أدخل منطقة زمنية صالحة وفق IANA.",
+        "intervalInvalid": "أدخل فاصل جدول مدعوماً.",
+        "hourInvalid": "أدخل ساعة من 0 إلى 23.",
+        "minuteInvalid": "أدخل دقيقة من 0 إلى 59.",
+        "cronInvalid": "أدخل تعبير cron صالحاً من خمسة حقول.",
+        "cronTooFrequent": "اختر جدولاً بفاصل خمس دقائق على الأقل.",
+        "templateRequired": "أدخل قالب تقرير.",
+        "castSizeInvalid": "اختر من مشارك واحد إلى أربعة.",
+        "castIdsInvalid": "يحتاج كل مشارك إلى هوية فريدة.",
+        "castVoicesRequired": "اختر صوتاً لكل مشارك.",
+        "audioMinutesInvalid": "أدخل مدة من دقيقة إلى 60 دقيقة.",
+        "emailInvalid": "أدخل عنوان بريد إلكتروني صالحاً واحداً على الأقل."
+      },
+      "validationError": "راجع الحقول المميزة قبل المتابعة."
+    }
   }
 }

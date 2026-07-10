@@ -2,14 +2,68 @@ import { describe, expect, it, vi } from "vitest"
 import {
   buildPipelineWizardReviewSummary,
   createDefaultPipelineWizardDraft,
+  getPipelineWizardSourceSignature,
   toBriefingPipelineDraft,
   toPipelineWizardSourcePayload,
   validatePipelineWizardCron,
-  validatePipelineWizardDraft
+  validatePipelineWizardDraft,
+  waitForPipelineWizardBriefing
 } from "../pipeline-wizard-state"
 import { toPipelineJobCreatePayload } from "../pipeline-contract"
 
 describe("watchlists pipeline wizard state", () => {
+  it("binds persisted sources to normalized draft identity", () => {
+    const base = createDefaultPipelineWizardDraft()
+    expect(getPipelineWizardSourceSignature({
+      ...base,
+      sourceMode: "new",
+      sourceName: " Feed ",
+      sourceUrl: " https://example.com/feed.xml "
+    })).toBe(getPipelineWizardSourceSignature({
+      ...base,
+      sourceMode: "new",
+      sourceName: "Feed",
+      sourceUrl: "https://example.com/feed.xml"
+    }))
+    expect(getPipelineWizardSourceSignature({
+      ...base,
+      sourceIds: [3, 1, 3]
+    })).toBe(getPipelineWizardSourceSignature({
+      ...base,
+      sourceIds: [1, 3]
+    }))
+  })
+
+  it("polls the exact run and stops on an observed stage failure", async () => {
+    const projection = (stageStatus: "running" | "failed") => ({
+      occurrence_id: 1,
+      run_id: 44,
+      job_id: 7,
+      artifact_status: "running" as const,
+      delivery_status: "waiting_for_artifacts" as const,
+      stages: { select: { status: stageStatus, retryable: stageStatus === "failed" } },
+      output: null,
+      audio: null,
+      editorial: {},
+      selection: {},
+      next_run_at: null,
+      recovery: {}
+    })
+    const getBriefing = vi.fn()
+      .mockResolvedValueOnce(projection("running"))
+      .mockResolvedValueOnce(projection("failed"))
+    const onProgress = vi.fn()
+
+    const result = await waitForPipelineWizardBriefing(44, getBriefing, onProgress, {
+      intervalMs: 0,
+      maxAttempts: 3,
+      waitForDelivery: true
+    })
+
+    expect(getBriefing).toHaveBeenCalledTimes(2)
+    expect(onProgress).toHaveBeenCalledTimes(2)
+    expect(result.stages.select?.status).toBe("failed")
+  })
   it("validates source, monitor, digest, delivery, and optional audio requirements", () => {
     const base = createDefaultPipelineWizardDraft()
 

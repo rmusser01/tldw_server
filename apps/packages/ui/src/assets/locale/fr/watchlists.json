@@ -17,5 +17,294 @@
       "generateError": "Échec de la génération du rapport à partir des éléments en file.",
       "generateReport": "Générer un rapport depuis la file"
     }
+  },
+  "setupWizard": {
+    "title": "Créer une liste de veille",
+    "containerTitle": "Créer une liste de veille",
+    "containerHelp": "Créez d’abord le conteneur du projet. Les sources, la cadence, le briefing, la diffusion et le test suivent dans un même parcours de configuration.",
+    "actions": {
+      "continue": "Continuer vers Sources"
+    },
+    "sections": {
+      "preset": "Préréglage du domaine"
+    },
+    "fields": {
+      "name": "Nom de la liste de veille",
+      "objective": "Objectif"
+    },
+    "validation": {
+      "nameRequired": "Ajoutez un nom de liste de veille."
+    },
+    "errors": {
+      "createFailed": "Impossible de créer la liste de veille."
+    },
+    "presets": {
+      "cti_osint": {
+        "label": "CTI / OSINT",
+        "description": "Suivez les vulnérabilités, logiciels malveillants, acteurs, avis et changements de sources."
+      },
+      "news": {
+        "label": "Actualités",
+        "description": "Suivez les événements en cours, les personnes, les organisations et la diversité des sources."
+      },
+      "general": {
+        "label": "Général",
+        "description": "Suivez un sujet et collectez les mises à jour à examiner."
+      },
+      "blank": {
+        "label": "Vide",
+        "description": "Commencez avec une liste de veille vide et configurez vous-même les détails."
+      }
+    },
+    "startModes": {
+      "sources": {
+        "label": "Commencer par les sources",
+        "description": "Créez une liste de veille avec des flux initiaux et un moniteur facultatif."
+      },
+      "topic": {
+        "label": "Commencer par le sujet",
+        "description": "Créez d’abord l’objectif de la liste, puis ajoutez les flux avant le début de la collecte."
+      },
+      "report_goal": {
+        "label": "Commencer par l’objectif du rapport",
+        "description": "Définissez d’abord l’objectif du briefing, puis reliez les sources et les modèles."
+      }
+    },
+    "boundaries": {
+      "alerts": "Les alertes de correspondance de contenu viennent plus tard. Cette configuration définit la liste de veille et son périmètre de collecte initial."
+    }
+  },
+  "overview": {
+    "pipelineSetup": {
+      "title": "Configurer le briefing",
+      "open": "Configurer le briefing",
+      "progress": "Étapes de configuration du briefing",
+      "steps": {
+        "sources": "Sources",
+        "cadence": "Cadence",
+        "briefing": "Briefing",
+        "delivery": "Diffusion",
+        "test": "Test"
+      },
+      "actions": {
+        "next": "Continuer vers {{step}}"
+      },
+      "source": {
+        "existing": "Utiliser des sources existantes",
+        "new": "Ajouter une nouvelle source",
+        "fallback": "Source {{id}}"
+      },
+      "sources": {
+        "help": "Choisissez des sources existantes ou ajoutez-en une, puis testez la connexion."
+      },
+      "sourcesLoading": "Chargement des sources...",
+      "sourcesError": "Impossible de charger les flux pour le configurateur.",
+      "sourceTest": {
+        "action": "Tester la source",
+        "ready": "La source est prête.",
+        "cancelled": "Test de la source annulé.",
+        "failed": "Échec du test de la source. {{message}}",
+        "summary": "{{ready}} prêtes, {{filtered}} filtrées",
+        "sample": "Éléments d’exemple",
+        "readyItem": "Prête",
+        "filteredItem": "Filtré",
+        "untitled": "Élément sans titre"
+      },
+      "fields": {
+        "sources": "Sources",
+        "sourceName": "Nom de la source",
+        "sourceUrl": "URL de la source",
+        "monitorName": "Nom du moniteur",
+        "schedule": "Planification",
+        "timezone": "Fuseau horaire",
+        "intervalEvery": "Toutes les",
+        "intervalUnit": "Unité de l’intervalle",
+        "weekday": "Jour de la semaine",
+        "hour": "Heure",
+        "minute": "Minute",
+        "cronExpression": "Expression cron",
+        "showName": "Nom de l’émission",
+        "premise": "Concept de l’émission",
+        "includeAudio": "Audio",
+        "audioHelp": "Ajoutez une version parlée lisible.",
+        "audioMinutes": "Durée cible en minutes",
+        "speakerCount": "Taille de la distribution",
+        "template": "Modèle de rapport",
+        "audioProvider": "Remplacement du fournisseur audio",
+        "audioModel": "Remplacement du modèle audio",
+        "customInstructions": "Instructions éditoriales personnalisées",
+        "emailDelivery": "E-mail",
+        "emailRecipients": "Destinataires de l’e-mail",
+        "chatbookDelivery": "Chatbook",
+        "chatbookTitle": "Titre du Chatbook"
+      },
+      "schedule": {
+        "manual": "Manuel uniquement",
+        "interval": "Toutes les N heures ou minutes",
+        "daily": "Chaque jour",
+        "weekdays": "Jours ouvrés",
+        "weekly": "Chaque semaine",
+        "advanced": "Cron avancé"
+      },
+      "intervalUnits": {
+        "hours": "Heures",
+        "minutes": "Minutes"
+      },
+      "weekdays": {
+        "monday": "Lundi",
+        "tuesday": "Mardi",
+        "wednesday": "Mercredi",
+        "thursday": "Jeudi",
+        "friday": "Vendredi",
+        "saturday": "Samedi",
+        "sunday": "Dimanche"
+      },
+      "advancedCron": "Cron avancé",
+      "nextOccurrence": "Prochaine exécution",
+      "manualOccurrence": "Manuel uniquement",
+      "nextOccurrencePending": "Enregistrez une planification valide pour calculer l’heure exacte.",
+      "briefing": {
+        "question": "Que créez-vous ?",
+        "help": "Choisissez la forme éditoriale. Chaque option reste fondée sur les sources sélectionnées.",
+        "advanced": "Paramètres avancés du briefing"
+      },
+      "formats": {
+        "concise_briefing": "Briefing concis",
+        "solo_update": "Mise à jour en solo",
+        "host_discussion": "Discussion entre animateurs",
+        "sportscast": "Émission sportive",
+        "culture_roundtable": "Table ronde culturelle",
+        "custom": "Personnalisé"
+      },
+      "speaker": {
+        "defaultLabel": "Intervenant {{index}}",
+        "defaultRole": "Animateur",
+        "labelField": "Libellé de l’intervenant {{index}}",
+        "roleField": "Rôle de l’intervenant {{index}}",
+        "voiceField": "Voix de l’intervenant {{index}}",
+        "personaField": "Personnalité de l’intervenant {{index}}"
+      },
+      "preview": {
+        "generate": "Aperçu du rapport",
+        "diagnostics": "Diagnostic de l’aperçu",
+        "context": "Exécution d’aperçu : {{runId}}",
+        "noRunContext": "Exécutez un moniteur avec succès avant de prévisualiser ce rapport.",
+        "templateRequired": "Sélectionnez un modèle avant de générer l’aperçu.",
+        "templateEmpty": "Le modèle sélectionné est vide.",
+        "emptyResult": "L’aperçu n’a renvoyé aucun contenu rendu.",
+        "error": "Impossible de générer l’aperçu."
+      },
+      "delivery": {
+        "help": "Les rapports sont toujours inclus. La diffusion externe attend que les artefacts sélectionnés soient prêts.",
+        "reports": "Rapports",
+        "required": "Stockage obligatoire",
+        "alwaysOn": "Toujours actif"
+      },
+      "receipt": {
+        "labels": {
+          "schedule": "Planification",
+          "sources": "Sources",
+          "artifacts": "Artefacts",
+          "format": "Format",
+          "showName": "Nom de l’émission",
+          "cast": "Distribution",
+          "duration": "Durée cible",
+          "destinations": "Destinations"
+        },
+        "schedule": {
+          "manual": "Manuel uniquement",
+          "scheduled": "{{date}} ({{timezone}})"
+        },
+        "sources": "{{count}} sources",
+        "artifacts": {
+          "textReport": "rapport texte",
+          "showNotes": "notes d’émission",
+          "audio": "audio"
+        },
+        "formats": {
+          "concise_briefing": "briefing concis",
+          "solo_update": "mise à jour en solo",
+          "host_discussion": "discussion entre animateurs",
+          "sportscast": "émission sportive",
+          "culture_roundtable": "table ronde culturelle",
+          "custom": "programme personnalisé"
+        },
+        "speakerStyle": {
+          "1": "solo",
+          "2": "à deux animateurs",
+          "3": "à trois animateurs",
+          "4": "à quatre animateurs"
+        },
+        "programWithSpeakers": "{{format}} {{speakers}}",
+        "cast": "{{count}} intervenants",
+        "duration": "durée cible de {{count}} minutes",
+        "destinations": {
+          "email": "E-mail : {{recipients}}",
+          "chatbook": "Chatbook : {{title}}"
+        },
+        "untitledChatbook": "Sans titre",
+        "dstChange": "L’exécution suivante utilise {{timezoneName}} après le changement d’heure : {{date}}."
+      },
+      "test": {
+        "providerDisclosure": "Les tests utilisent vos fournisseurs LLM et de synthèse vocale configurés. Un extrait est limité à 60 secondes ; un test complet utilise la durée cible.",
+        "textProviderDisclosure": "Les tests utilisent votre fournisseur LLM configuré. Les tests texte uniquement n’utilisent pas la synthèse vocale.",
+        "receipt": "Récapitulatif d’activation",
+        "manualReceipt": "Ce briefing s’exécute manuellement, enregistre les artefacts sélectionnés dans Rapports et ne contacte aucune destination externe sauf si vous choisissez Envoyer le test.",
+        "progress": "Progression du test",
+        "stages": {
+          "collection": "Collecter les sources",
+          "selection": "Sélectionner les mises à jour",
+          "text": "Créer le rapport",
+          "audio": "Créer l’audio",
+          "persistence": "Enregistrer dans Rapports",
+          "audioScript": "Composer le script audio",
+          "audioScriptPersistence": "Enregistrer le script audio",
+          "audioPersistence": "Enregistrer l’audio dans Rapports",
+          "delivery": "Vérifier la diffusion du test",
+          "deliveryAdapter": "Diffuser vers {{adapter}}",
+          "unknown": "Étape {{stage}}"
+        },
+        "sample": "Générer un extrait de 60 secondes",
+        "full": "Générer l’épisode de test complet",
+        "text": "Générer le rapport de test",
+        "send": "Envoyer le test",
+        "activate": "Activer la planification",
+        "ready": "Test démarré. Ce brouillon reste inactif jusqu’à l’activation de sa planification.",
+        "cancelled": "Test annulé. Votre brouillon est enregistré.",
+        "failed": "Échec du test. Votre brouillon est enregistré. {{message}}",
+        "status": {
+          "not_started": "Non démarré",
+          "queued": "En attente",
+          "running": "En cours",
+          "ready": "Prêt",
+          "failed": "Échec",
+          "skipped": "Ignoré",
+          "cancelled": "Annulé"
+        }
+      },
+      "activate": {
+        "ready": "Planification activée.",
+        "failed": "Impossible d’activer la planification. Votre brouillon est enregistré. {{message}}"
+      },
+      "validation": {
+        "sourcesRequired": "Choisissez au moins une source avant de continuer.",
+        "sourceNameRequired": "Saisissez un nom de source.",
+        "sourceUrlInvalid": "Saisissez une URL de source HTTP ou HTTPS valide.",
+        "monitorNameRequired": "Saisissez un nom de moniteur.",
+        "timezoneInvalid": "Saisissez un fuseau horaire IANA valide.",
+        "intervalInvalid": "Saisissez un intervalle de planification pris en charge.",
+        "hourInvalid": "Saisissez une heure de 0 à 23.",
+        "minuteInvalid": "Saisissez une minute de 0 à 59.",
+        "cronInvalid": "Saisissez une expression cron valide à cinq champs.",
+        "cronTooFrequent": "Choisissez une planification espacée d’au moins cinq minutes.",
+        "templateRequired": "Saisissez un modèle de rapport.",
+        "castSizeInvalid": "Choisissez de un à quatre intervenants.",
+        "castIdsInvalid": "Chaque intervenant doit avoir une identité unique.",
+        "castVoicesRequired": "Choisissez une voix pour chaque intervenant.",
+        "audioMinutesInvalid": "Saisissez une durée de 1 à 60 minutes.",
+        "emailInvalid": "Saisissez au moins une adresse e-mail valide."
+      },
+      "validationError": "Vérifiez les champs en surbrillance avant de continuer."
+    }
   }
 }

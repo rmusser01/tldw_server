@@ -17,5 +17,294 @@
       "generateError": "Falha ao gerar relatório a partir dos itens na fila.",
       "generateReport": "Gerar relatório da fila"
     }
+  },
+  "setupWizard": {
+    "title": "Criar lista de monitoramento",
+    "containerTitle": "Criar lista de monitoramento",
+    "containerHelp": "Crie primeiro o contêiner do projeto. Fontes, frequência, briefing, entrega e teste seguem em um único fluxo de configuração.",
+    "actions": {
+      "continue": "Continuar para Fontes"
+    },
+    "sections": {
+      "preset": "Predefinição de domínio"
+    },
+    "fields": {
+      "name": "Nome da lista de monitoramento",
+      "objective": "Objetivo"
+    },
+    "validation": {
+      "nameRequired": "Adicione um nome para a lista de monitoramento."
+    },
+    "errors": {
+      "createFailed": "Não foi possível criar a lista de monitoramento."
+    },
+    "presets": {
+      "cti_osint": {
+        "label": "CTI / OSINT",
+        "description": "Monitore vulnerabilidades, malware, agentes, avisos e mudanças nas fontes."
+      },
+      "news": {
+        "label": "Notícias",
+        "description": "Monitore acontecimentos em andamento, pessoas, organizações e diversidade de fontes."
+      },
+      "general": {
+        "label": "Geral",
+        "description": "Monitore um tema e reúna atualizações para análise."
+      },
+      "blank": {
+        "label": "Em branco",
+        "description": "Comece com uma lista de monitoramento vazia e configure os detalhes."
+      }
+    },
+    "startModes": {
+      "sources": {
+        "label": "Começar pelas fontes",
+        "description": "Crie uma lista de monitoramento com feeds iniciais e um monitor opcional."
+      },
+      "topic": {
+        "label": "Começar pelo tema",
+        "description": "Crie primeiro o objetivo da lista e adicione feeds antes do início da coleta."
+      },
+      "report_goal": {
+        "label": "Começar pelo objetivo do relatório",
+        "description": "Defina primeiro o objetivo do briefing e depois conecte fontes e modelos."
+      }
+    },
+    "boundaries": {
+      "alerts": "Os alertas por correspondência de conteúdo vêm depois. Esta configuração define a lista de monitoramento e o escopo inicial de coleta."
+    }
+  },
+  "overview": {
+    "pipelineSetup": {
+      "title": "Configurar briefing",
+      "open": "Configurar briefing",
+      "progress": "Etapas de configuração do briefing",
+      "steps": {
+        "sources": "Fontes",
+        "cadence": "Frequência",
+        "briefing": "Briefing",
+        "delivery": "Entrega",
+        "test": "Teste"
+      },
+      "actions": {
+        "next": "Continuar para {{step}}"
+      },
+      "source": {
+        "existing": "Usar fontes existentes",
+        "new": "Adicionar nova fonte",
+        "fallback": "Fonte {{id}}"
+      },
+      "sources": {
+        "help": "Escolha fontes existentes ou adicione uma e teste a conexão."
+      },
+      "sourcesLoading": "Carregando fontes...",
+      "sourcesError": "Não foi possível carregar os feeds para a configuração.",
+      "sourceTest": {
+        "action": "Testar fonte",
+        "ready": "A fonte está pronta.",
+        "cancelled": "Teste da fonte cancelado.",
+        "failed": "Falha no teste da fonte. {{message}}",
+        "summary": "{{ready}} prontas, {{filtered}} filtradas",
+        "sample": "Itens de exemplo",
+        "readyItem": "Pronta",
+        "filteredItem": "Filtrado",
+        "untitled": "Item sem título"
+      },
+      "fields": {
+        "sources": "Fontes",
+        "sourceName": "Nome da fonte",
+        "sourceUrl": "URL da fonte",
+        "monitorName": "Nome do monitor",
+        "schedule": "Agendamento",
+        "timezone": "Fuso horário",
+        "intervalEvery": "A cada",
+        "intervalUnit": "Unidade do intervalo",
+        "weekday": "Dia da semana",
+        "hour": "Hora",
+        "minute": "Minuto",
+        "cronExpression": "Expressão cron",
+        "showName": "Nome do programa",
+        "premise": "Proposta do programa",
+        "includeAudio": "Áudio",
+        "audioHelp": "Adicione uma versão falada reproduzível.",
+        "audioMinutes": "Duração desejada em minutos",
+        "speakerCount": "Tamanho do elenco",
+        "template": "Modelo de relatório",
+        "audioProvider": "Substituição do provedor de áudio",
+        "audioModel": "Substituição do modelo de áudio",
+        "customInstructions": "Instruções editoriais personalizadas",
+        "emailDelivery": "E-mail",
+        "emailRecipients": "Destinatários do e-mail",
+        "chatbookDelivery": "Chatbook",
+        "chatbookTitle": "Título do Chatbook"
+      },
+      "schedule": {
+        "manual": "Somente manual",
+        "interval": "A cada N horas ou minutos",
+        "daily": "Diariamente",
+        "weekdays": "Dias úteis",
+        "weekly": "Semanalmente",
+        "advanced": "Cron avançado"
+      },
+      "intervalUnits": {
+        "hours": "Horas",
+        "minutes": "Minutos"
+      },
+      "weekdays": {
+        "monday": "Segunda-feira",
+        "tuesday": "Terça-feira",
+        "wednesday": "Quarta-feira",
+        "thursday": "Quinta-feira",
+        "friday": "Sexta-feira",
+        "saturday": "Sábado",
+        "sunday": "Domingo"
+      },
+      "advancedCron": "Cron avançado",
+      "nextOccurrence": "Próxima execução",
+      "manualOccurrence": "Somente manual",
+      "nextOccurrencePending": "Salve um agendamento válido para calcular o horário exato.",
+      "briefing": {
+        "question": "O que você está criando?",
+        "help": "Escolha o formato editorial. Todas as opções permanecem baseadas nas fontes selecionadas.",
+        "advanced": "Configurações avançadas do briefing"
+      },
+      "formats": {
+        "concise_briefing": "Briefing conciso",
+        "solo_update": "Atualização individual",
+        "host_discussion": "Conversa entre apresentadores",
+        "sportscast": "Transmissão esportiva",
+        "culture_roundtable": "Mesa-redonda cultural",
+        "custom": "Personalizado"
+      },
+      "speaker": {
+        "defaultLabel": "Participante {{index}}",
+        "defaultRole": "Apresentador",
+        "labelField": "Rótulo do participante {{index}}",
+        "roleField": "Função do participante {{index}}",
+        "voiceField": "Voz do participante {{index}}",
+        "personaField": "Personalidade do participante {{index}}"
+      },
+      "preview": {
+        "generate": "Visualizar relatório",
+        "diagnostics": "Diagnóstico da visualização",
+        "context": "Execução de visualização: {{runId}}",
+        "noRunContext": "Execute um monitor com sucesso antes de visualizar este relatório.",
+        "templateRequired": "Selecione um modelo antes de gerar a visualização.",
+        "templateEmpty": "O modelo selecionado está vazio.",
+        "emptyResult": "A visualização não retornou conteúdo processado.",
+        "error": "Não foi possível gerar a visualização."
+      },
+      "delivery": {
+        "help": "Relatórios estão sempre incluídos. A entrega externa aguarda até que os artefatos selecionados estejam prontos.",
+        "reports": "Relatórios",
+        "required": "Armazenamento obrigatório",
+        "alwaysOn": "Sempre ativo"
+      },
+      "receipt": {
+        "labels": {
+          "schedule": "Agendamento",
+          "sources": "Fontes",
+          "artifacts": "Artefatos",
+          "format": "Formato",
+          "showName": "Nome do programa",
+          "cast": "Elenco",
+          "duration": "Duração desejada",
+          "destinations": "Destinos"
+        },
+        "schedule": {
+          "manual": "Somente manual",
+          "scheduled": "{{date}} ({{timezone}})"
+        },
+        "sources": "{{count}} fontes",
+        "artifacts": {
+          "textReport": "relatório de texto",
+          "showNotes": "notas do programa",
+          "audio": "áudio"
+        },
+        "formats": {
+          "concise_briefing": "briefing conciso",
+          "solo_update": "atualização individual",
+          "host_discussion": "conversa entre apresentadores",
+          "sportscast": "transmissão esportiva",
+          "culture_roundtable": "mesa-redonda cultural",
+          "custom": "programa personalizado"
+        },
+        "speakerStyle": {
+          "1": "individual",
+          "2": "com dois apresentadores",
+          "3": "com três apresentadores",
+          "4": "com quatro apresentadores"
+        },
+        "programWithSpeakers": "{{format}} {{speakers}}",
+        "cast": "{{count}} participantes",
+        "duration": "meta de {{count}} minutos",
+        "destinations": {
+          "email": "E-mail: {{recipients}}",
+          "chatbook": "Chatbook: {{title}}"
+        },
+        "untitledChatbook": "Sem título",
+        "dstChange": "A execução seguinte usa {{timezoneName}} após a mudança do horário de verão: {{date}}."
+      },
+      "test": {
+        "providerDisclosure": "Os testes usam os provedores configurados de LLM e conversão de texto em fala. Uma amostra é limitada a 60 segundos; o teste completo usa a duração desejada.",
+        "textProviderDisclosure": "Os testes usam o provedor de LLM configurado. Testes somente de texto não usam conversão de texto em fala.",
+        "receipt": "Resumo da ativação",
+        "manualReceipt": "Este briefing é executado manualmente, salva os artefatos selecionados em Relatórios e não contata destinos externos, a menos que você escolha Enviar teste.",
+        "progress": "Progresso do teste",
+        "stages": {
+          "collection": "Coletar fontes",
+          "selection": "Selecionar atualizações",
+          "text": "Criar relatório",
+          "audio": "Criar áudio",
+          "persistence": "Salvar em Relatórios",
+          "audioScript": "Criar roteiro de áudio",
+          "audioScriptPersistence": "Salvar roteiro de áudio",
+          "audioPersistence": "Salvar áudio em Relatórios",
+          "delivery": "Verificar entrega do teste",
+          "deliveryAdapter": "Entregar para {{adapter}}",
+          "unknown": "Etapa {{stage}}"
+        },
+        "sample": "Gerar amostra de 60 segundos",
+        "full": "Gerar episódio de teste completo",
+        "text": "Gerar relatório de teste",
+        "send": "Enviar teste",
+        "activate": "Ativar agendamento",
+        "ready": "Teste iniciado. Este rascunho permanece inativo até você ativar o agendamento.",
+        "cancelled": "Teste cancelado. Seu rascunho foi salvo.",
+        "failed": "Falha no teste. Seu rascunho foi salvo. {{message}}",
+        "status": {
+          "not_started": "Não iniciado",
+          "queued": "Na fila",
+          "running": "Em andamento",
+          "ready": "Pronto",
+          "failed": "Falhou",
+          "skipped": "Ignorado",
+          "cancelled": "Cancelado"
+        }
+      },
+      "activate": {
+        "ready": "Agendamento ativado.",
+        "failed": "Não foi possível ativar o agendamento. Seu rascunho foi salvo. {{message}}"
+      },
+      "validation": {
+        "sourcesRequired": "Escolha pelo menos uma fonte antes de continuar.",
+        "sourceNameRequired": "Informe um nome para a fonte.",
+        "sourceUrlInvalid": "Informe uma URL HTTP ou HTTPS válida para a fonte.",
+        "monitorNameRequired": "Informe um nome para o monitor.",
+        "timezoneInvalid": "Informe um fuso horário IANA válido.",
+        "intervalInvalid": "Informe um intervalo de agendamento aceito.",
+        "hourInvalid": "Informe uma hora entre 0 e 23.",
+        "minuteInvalid": "Informe um minuto entre 0 e 59.",
+        "cronInvalid": "Informe uma expressão cron válida de cinco campos.",
+        "cronTooFrequent": "Escolha um agendamento com pelo menos cinco minutos de intervalo.",
+        "templateRequired": "Informe um modelo de relatório.",
+        "castSizeInvalid": "Escolha de um a quatro participantes.",
+        "castIdsInvalid": "Cada participante precisa de uma identidade exclusiva.",
+        "castVoicesRequired": "Escolha uma voz para cada participante.",
+        "audioMinutesInvalid": "Informe uma duração entre 1 e 60 minutos.",
+        "emailInvalid": "Informe pelo menos um endereço de e-mail válido."
+      },
+      "validationError": "Revise os campos destacados antes de continuar."
+    }
   }
 }

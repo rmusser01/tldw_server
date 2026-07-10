@@ -127,6 +127,26 @@ describe("watchlists pipeline contract", () => {
     expect(toPipelineJobCreatePayload(baseDraft).output_prefs).not.toHaveProperty("auto_output")
   })
 
+  it("records text-only test metadata without inventing audio metadata", () => {
+    const payload = toPipelineOutputCreatePayload(
+      9003,
+      {
+        ...baseDraft,
+        includeAudio: false,
+        emailRecipients: [],
+        createChatbook: false
+      },
+      undefined,
+      { externalDelivery: false, audioSampleSeconds: null }
+    )
+
+    expect(payload.metadata).toEqual({
+      test: { externalDelivery: false, audioSampleSeconds: null }
+    })
+    expect(payload).not.toHaveProperty("generate_audio")
+    expect(payload.metadata).not.toHaveProperty("audio")
+  })
+
   it("keeps required text reports in the canonical contract", () => {
     expect(
       toPipelineJobCreatePayload({

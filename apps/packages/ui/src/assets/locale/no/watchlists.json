@@ -17,5 +17,294 @@
       "generateError": "Kunne ikke generere rapport fra køede elementer.",
       "generateReport": "Generer rapport fra kø"
     }
+  },
+  "setupWizard": {
+    "title": "Opprett overvåkingsliste",
+    "containerTitle": "Opprett overvåkingsliste",
+    "containerHelp": "Opprett prosjektbeholderen først. Kilder, frekvens, orientering, levering og test følger i én samlet oppsettsflyt.",
+    "actions": {
+      "continue": "Fortsett til Kilder"
+    },
+    "sections": {
+      "preset": "Domeneforvalg"
+    },
+    "fields": {
+      "name": "Navn på overvåkingsliste",
+      "objective": "Mål"
+    },
+    "validation": {
+      "nameRequired": "Legg til et navn på overvåkingslisten."
+    },
+    "errors": {
+      "createFailed": "Kunne ikke opprette overvåkingslisten."
+    },
+    "presets": {
+      "cti_osint": {
+        "label": "CTI / OSINT",
+        "description": "Overvåk sårbarheter, skadevare, aktører, varsler og kildeendringer."
+      },
+      "news": {
+        "label": "Nyheter",
+        "description": "Følg hendelser i utvikling, personer, organisasjoner og kildemangfold."
+      },
+      "general": {
+        "label": "Generelt",
+        "description": "Følg et emne og samle oppdateringer for gjennomgang."
+      },
+      "blank": {
+        "label": "Tom",
+        "description": "Start med en tom overvåkingsliste og konfigurer detaljene selv."
+      }
+    },
+    "startModes": {
+      "sources": {
+        "label": "Start med kilder",
+        "description": "Opprett en overvåkingsliste med innledende strømmer og en valgfri monitor."
+      },
+      "topic": {
+        "label": "Start med emne",
+        "description": "Opprett først målet for listen, og legg til strømmer før innsamlingen starter."
+      },
+      "report_goal": {
+        "label": "Start med rapportmål",
+        "description": "Definer først målet for orienteringen, og koble deretter til kilder og maler."
+      }
+    },
+    "boundaries": {
+      "alerts": "Varsler for innholdstreff kommer senere. Dette oppsettet definerer overvåkingslisten og det første innsamlingsomfanget."
+    }
+  },
+  "overview": {
+    "pipelineSetup": {
+      "title": "Sett opp orientering",
+      "open": "Sett opp orientering",
+      "progress": "Trinn i oppsettet av orienteringen",
+      "steps": {
+        "sources": "Kilder",
+        "cadence": "Frekvens",
+        "briefing": "Orientering",
+        "delivery": "Levering",
+        "test": "Test"
+      },
+      "actions": {
+        "next": "Fortsett til {{step}}"
+      },
+      "source": {
+        "existing": "Bruk eksisterende kilder",
+        "new": "Legg til en ny kilde",
+        "fallback": "Kilde {{id}}"
+      },
+      "sources": {
+        "help": "Velg eksisterende kilder eller legg til en, og test deretter tilkoblingen."
+      },
+      "sourcesLoading": "Laster inn kilder...",
+      "sourcesError": "Kunne ikke laste inn strømmer for oppsettet.",
+      "sourceTest": {
+        "action": "Test kilde",
+        "ready": "Kilden er klar.",
+        "cancelled": "Kildetest avbrutt.",
+        "failed": "Kildetesten mislyktes. {{message}}",
+        "summary": "{{ready}} klare, {{filtered}} filtrert",
+        "sample": "Eksempelelementer",
+        "readyItem": "Klar",
+        "filteredItem": "Filtrert",
+        "untitled": "Element uten tittel"
+      },
+      "fields": {
+        "sources": "Kilder",
+        "sourceName": "Kildenavn",
+        "sourceUrl": "Kilde-URL",
+        "monitorName": "Monitornavn",
+        "schedule": "Tidsplan",
+        "timezone": "Tidssone",
+        "intervalEvery": "Hver",
+        "intervalUnit": "Intervallenhet",
+        "weekday": "Ukedag",
+        "hour": "Time",
+        "minute": "Minutt",
+        "cronExpression": "Cron-uttrykk",
+        "showName": "Programnavn",
+        "premise": "Programidé",
+        "includeAudio": "Lyd",
+        "audioHelp": "Legg til en avspillbar, opplest versjon.",
+        "audioMinutes": "Målvarighet i minutter",
+        "speakerCount": "Antall medvirkende",
+        "template": "Rapportmal",
+        "audioProvider": "Overstyr lydleverandør",
+        "audioModel": "Overstyr lydmodell",
+        "customInstructions": "Tilpassede redaksjonelle instruksjoner",
+        "emailDelivery": "E-post",
+        "emailRecipients": "E-postmottakere",
+        "chatbookDelivery": "Chatbook",
+        "chatbookTitle": "Chatbook-tittel"
+      },
+      "schedule": {
+        "manual": "Bare manuelt",
+        "interval": "Hver N. time eller minutt",
+        "daily": "Daglig",
+        "weekdays": "Hverdager",
+        "weekly": "Ukentlig",
+        "advanced": "Avansert cron"
+      },
+      "intervalUnits": {
+        "hours": "Timer",
+        "minutes": "Minutter"
+      },
+      "weekdays": {
+        "monday": "Mandag",
+        "tuesday": "Tirsdag",
+        "wednesday": "Onsdag",
+        "thursday": "Torsdag",
+        "friday": "Fredag",
+        "saturday": "Lørdag",
+        "sunday": "Søndag"
+      },
+      "advancedCron": "Avansert cron",
+      "nextOccurrence": "Neste kjøring",
+      "manualOccurrence": "Bare manuelt",
+      "nextOccurrencePending": "Lagre en gyldig tidsplan for å beregne det nøyaktige tidspunktet.",
+      "briefing": {
+        "question": "Hva lager du?",
+        "help": "Velg redaksjonell form. Alle alternativene er fortsatt forankret i de valgte kildene.",
+        "advanced": "Avanserte innstillinger for orienteringen"
+      },
+      "formats": {
+        "concise_briefing": "Kort orientering",
+        "solo_update": "Solooppdatering",
+        "host_discussion": "Vertssamtale",
+        "sportscast": "Sportssending",
+        "culture_roundtable": "Kulturell rundebordssamtale",
+        "custom": "Tilpasset"
+      },
+      "speaker": {
+        "defaultLabel": "Deltaker {{index}}",
+        "defaultRole": "Vert",
+        "labelField": "Etikett for deltaker {{index}}",
+        "roleField": "Rolle for deltaker {{index}}",
+        "voiceField": "Stemme for deltaker {{index}}",
+        "personaField": "Persona for deltaker {{index}}"
+      },
+      "preview": {
+        "generate": "Forhåndsvis rapport",
+        "diagnostics": "Diagnostikk for forhåndsvisning",
+        "context": "Forhåndsvisningskjøring: {{runId}}",
+        "noRunContext": "Kjør en monitor uten feil før du forhåndsviser denne rapporten.",
+        "templateRequired": "Velg en mal før du genererer forhåndsvisningen.",
+        "templateEmpty": "Den valgte malen er tom.",
+        "emptyResult": "Forhåndsvisningen returnerte ikke noe gjengitt innhold.",
+        "error": "Kunne ikke generere forhåndsvisningen."
+      },
+      "delivery": {
+        "help": "Rapporter er alltid inkludert. Ekstern levering venter til de valgte artefaktene er klare.",
+        "reports": "Rapporter",
+        "required": "Obligatorisk lagring",
+        "alwaysOn": "Alltid aktiv"
+      },
+      "receipt": {
+        "labels": {
+          "schedule": "Tidsplan",
+          "sources": "Kilder",
+          "artifacts": "Artefakter",
+          "format": "Format",
+          "showName": "Programnavn",
+          "cast": "Medvirkende",
+          "duration": "Målvarighet",
+          "destinations": "Mål"
+        },
+        "schedule": {
+          "manual": "Bare manuelt",
+          "scheduled": "{{date}} ({{timezone}})"
+        },
+        "sources": "{{count}} kilder",
+        "artifacts": {
+          "textReport": "tekstrapport",
+          "showNotes": "programnotater",
+          "audio": "lyd"
+        },
+        "formats": {
+          "concise_briefing": "kort orientering",
+          "solo_update": "solooppdatering",
+          "host_discussion": "vertssamtale",
+          "sportscast": "sportssending",
+          "culture_roundtable": "kulturell rundebordssamtale",
+          "custom": "tilpasset program"
+        },
+        "speakerStyle": {
+          "1": "solo",
+          "2": "med to verter",
+          "3": "med tre verter",
+          "4": "med fire verter"
+        },
+        "programWithSpeakers": "{{speakers}} {{format}}",
+        "cast": "{{count}} deltakere",
+        "duration": "mål på {{count}} minutter",
+        "destinations": {
+          "email": "E-post: {{recipients}}",
+          "chatbook": "Chatbook: {{title}}"
+        },
+        "untitledChatbook": "Uten tittel",
+        "dstChange": "Den følgende kjøringen bruker {{timezoneName}} etter skiftet til eller fra sommertid: {{date}}."
+      },
+      "test": {
+        "providerDisclosure": "Tester bruker de konfigurerte leverandørene av LLM og talesyntese. Et eksempel er begrenset til 60 sekunder; en full test bruker målvarigheten.",
+        "textProviderDisclosure": "Tester bruker den konfigurerte LLM-leverandøren. Tester med bare tekst bruker ikke talesyntese.",
+        "receipt": "Aktiveringsoversikt",
+        "manualReceipt": "Denne orienteringen kjøres manuelt, lagrer valgte artefakter i Rapporter og kontakter ingen eksterne mål med mindre du velger Send test.",
+        "progress": "Testfremdrift",
+        "stages": {
+          "collection": "Samle kilder",
+          "selection": "Velg oppdateringer",
+          "text": "Opprett rapport",
+          "audio": "Opprett lyd",
+          "persistence": "Lagre i Rapporter",
+          "audioScript": "Skriv lydmanus",
+          "audioScriptPersistence": "Lagre lydmanus",
+          "audioPersistence": "Lagre lyd i Rapporter",
+          "delivery": "Kontroller testlevering",
+          "deliveryAdapter": "Lever til {{adapter}}",
+          "unknown": "Trinn {{stage}}"
+        },
+        "sample": "Generer eksempel på 60 sekunder",
+        "full": "Generer full testepisode",
+        "text": "Generer testrapport",
+        "send": "Send test",
+        "activate": "Aktiver tidsplan",
+        "ready": "Test startet. Dette utkastet forblir inaktivt til du aktiverer tidsplanen.",
+        "cancelled": "Test avbrutt. Utkastet er lagret.",
+        "failed": "Testen mislyktes. Utkastet er lagret. {{message}}",
+        "status": {
+          "not_started": "Ikke startet",
+          "queued": "I kø",
+          "running": "Kjører",
+          "ready": "Klar",
+          "failed": "Mislyktes",
+          "skipped": "Hoppet over",
+          "cancelled": "Avbrutt"
+        }
+      },
+      "activate": {
+        "ready": "Tidsplan aktivert.",
+        "failed": "Tidsplanen kunne ikke aktiveres. Utkastet er lagret. {{message}}"
+      },
+      "validation": {
+        "sourcesRequired": "Velg minst én kilde før du fortsetter.",
+        "sourceNameRequired": "Skriv inn et kildenavn.",
+        "sourceUrlInvalid": "Skriv inn en gyldig HTTP- eller HTTPS-kilde-URL.",
+        "monitorNameRequired": "Skriv inn et monitornavn.",
+        "timezoneInvalid": "Skriv inn en gyldig IANA-tidssone.",
+        "intervalInvalid": "Skriv inn et støttet tidsintervall.",
+        "hourInvalid": "Skriv inn en time fra 0 til 23.",
+        "minuteInvalid": "Skriv inn et minutt fra 0 til 59.",
+        "cronInvalid": "Skriv inn et gyldig cron-uttrykk med fem felt.",
+        "cronTooFrequent": "Velg en tidsplan med minst fem minutters mellomrom.",
+        "templateRequired": "Skriv inn en rapportmal.",
+        "castSizeInvalid": "Velg én til fire deltakere.",
+        "castIdsInvalid": "Hver deltaker trenger en unik identitet.",
+        "castVoicesRequired": "Velg en stemme for hver deltaker.",
+        "audioMinutesInvalid": "Skriv inn en varighet fra 1 til 60 minutter.",
+        "emailInvalid": "Skriv inn minst én gyldig e-postadresse."
+      },
+      "validationError": "Se gjennom de uthevede feltene før du fortsetter."
+    }
   }
 }

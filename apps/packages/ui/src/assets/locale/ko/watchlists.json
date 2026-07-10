@@ -17,5 +17,294 @@
       "generateError": "대기열 항목으로 보고서를 생성하지 못했습니다.",
       "generateReport": "대기열에서 보고서 생성"
     }
+  },
+  "setupWizard": {
+    "title": "관심 목록 만들기",
+    "containerTitle": "관심 목록 만들기",
+    "containerHelp": "먼저 프로젝트 컨테이너를 만드세요. 소스, 주기, 브리핑, 전송, 테스트를 하나의 설정 흐름에서 이어서 구성할 수 있습니다.",
+    "actions": {
+      "continue": "소스로 계속"
+    },
+    "sections": {
+      "preset": "분야 사전 설정"
+    },
+    "fields": {
+      "name": "관심 목록 이름",
+      "objective": "목표"
+    },
+    "validation": {
+      "nameRequired": "관심 목록 이름을 입력하세요."
+    },
+    "errors": {
+      "createFailed": "관심 목록을 만들 수 없습니다."
+    },
+    "presets": {
+      "cti_osint": {
+        "label": "CTI / OSINT",
+        "description": "취약점, 악성 코드, 위협 행위자, 권고 및 소스 변경을 추적합니다."
+      },
+      "news": {
+        "label": "뉴스",
+        "description": "진행 중인 사건, 인물, 조직 및 소스 다양성을 추적합니다."
+      },
+      "general": {
+        "label": "일반",
+        "description": "주제를 추적하고 검토할 업데이트를 수집합니다."
+      },
+      "blank": {
+        "label": "비어 있음",
+        "description": "빈 관심 목록으로 시작하여 세부 정보를 직접 구성합니다."
+      }
+    },
+    "startModes": {
+      "sources": {
+        "label": "소스에서 시작",
+        "description": "초기 피드와 선택적 모니터가 있는 관심 목록을 만듭니다."
+      },
+      "topic": {
+        "label": "주제에서 시작",
+        "description": "먼저 관심 목록 목표를 만든 다음 수집이 시작되기 전에 피드를 추가합니다."
+      },
+      "report_goal": {
+        "label": "보고서 목표에서 시작",
+        "description": "먼저 브리핑 목표를 정의한 다음 소스와 템플릿을 연결합니다."
+      }
+    },
+    "boundaries": {
+      "alerts": "콘텐츠 일치 알림은 나중에 설정합니다. 이 설정에서는 관심 목록과 초기 수집 범위를 정의합니다."
+    }
+  },
+  "overview": {
+    "pipelineSetup": {
+      "title": "브리핑 설정",
+      "open": "브리핑 설정",
+      "progress": "브리핑 설정 단계",
+      "steps": {
+        "sources": "소스",
+        "cadence": "주기",
+        "briefing": "브리핑",
+        "delivery": "전송",
+        "test": "테스트"
+      },
+      "actions": {
+        "next": "{{step}} 단계로 계속"
+      },
+      "source": {
+        "existing": "기존 소스 사용",
+        "new": "새 소스 추가",
+        "fallback": "소스 {{id}}"
+      },
+      "sources": {
+        "help": "기존 소스를 선택하거나 새 소스를 추가한 다음 연결을 테스트하세요."
+      },
+      "sourcesLoading": "소스 불러오는 중...",
+      "sourcesError": "설정 도구에 사용할 피드를 불러오지 못했습니다.",
+      "sourceTest": {
+        "action": "소스 테스트",
+        "ready": "소스가 준비되었습니다.",
+        "cancelled": "소스 테스트가 취소되었습니다.",
+        "failed": "소스 테스트에 실패했습니다. {{message}}",
+        "summary": "준비 {{ready}}개, 필터링 {{filtered}}개",
+        "sample": "샘플 항목",
+        "readyItem": "준비됨",
+        "filteredItem": "필터링됨",
+        "untitled": "제목 없는 항목"
+      },
+      "fields": {
+        "sources": "소스",
+        "sourceName": "소스 이름",
+        "sourceUrl": "소스 URL",
+        "monitorName": "모니터 이름",
+        "schedule": "일정",
+        "timezone": "시간대",
+        "intervalEvery": "매",
+        "intervalUnit": "간격 단위",
+        "weekday": "요일",
+        "hour": "시간",
+        "minute": "분",
+        "cronExpression": "Cron 식",
+        "showName": "프로그램 이름",
+        "premise": "프로그램 개요",
+        "includeAudio": "오디오",
+        "audioHelp": "재생 가능한 음성 버전을 추가합니다.",
+        "audioMinutes": "목표 길이(분)",
+        "speakerCount": "출연자 수",
+        "template": "보고서 템플릿",
+        "audioProvider": "오디오 공급자 재정의",
+        "audioModel": "오디오 모델 재정의",
+        "customInstructions": "사용자 지정 편집 지침",
+        "emailDelivery": "이메일",
+        "emailRecipients": "이메일 수신자",
+        "chatbookDelivery": "Chatbook",
+        "chatbookTitle": "Chatbook 제목"
+      },
+      "schedule": {
+        "manual": "수동 전용",
+        "interval": "N시간 또는 N분마다",
+        "daily": "매일",
+        "weekdays": "평일",
+        "weekly": "매주",
+        "advanced": "고급 Cron"
+      },
+      "intervalUnits": {
+        "hours": "시간",
+        "minutes": "분"
+      },
+      "weekdays": {
+        "monday": "월요일",
+        "tuesday": "화요일",
+        "wednesday": "수요일",
+        "thursday": "목요일",
+        "friday": "금요일",
+        "saturday": "토요일",
+        "sunday": "일요일"
+      },
+      "advancedCron": "고급 Cron",
+      "nextOccurrence": "다음 실행",
+      "manualOccurrence": "수동 전용",
+      "nextOccurrencePending": "정확한 시간을 계산하려면 유효한 일정을 저장하세요.",
+      "briefing": {
+        "question": "무엇을 만들고 있나요?",
+        "help": "편집 형식을 선택하세요. 모든 옵션은 선택한 소스를 근거로 합니다.",
+        "advanced": "고급 브리핑 설정"
+      },
+      "formats": {
+        "concise_briefing": "간결한 브리핑",
+        "solo_update": "단독 업데이트",
+        "host_discussion": "진행자 토론",
+        "sportscast": "스포츠 중계",
+        "culture_roundtable": "문화 좌담회",
+        "custom": "사용자 지정"
+      },
+      "speaker": {
+        "defaultLabel": "출연자 {{index}}",
+        "defaultRole": "진행자",
+        "labelField": "출연자 {{index}} 레이블",
+        "roleField": "출연자 {{index}} 역할",
+        "voiceField": "출연자 {{index}} 음성",
+        "personaField": "출연자 {{index}} 성격"
+      },
+      "preview": {
+        "generate": "보고서 미리 보기",
+        "diagnostics": "미리 보기 진단",
+        "context": "미리 보기 실행: {{runId}}",
+        "noRunContext": "이 보고서를 미리 보기 전에 모니터를 성공적으로 실행하세요.",
+        "templateRequired": "미리 보기를 생성하기 전에 템플릿을 선택하세요.",
+        "templateEmpty": "선택한 템플릿이 비어 있습니다.",
+        "emptyResult": "미리 보기에 렌더링된 콘텐츠가 없습니다.",
+        "error": "미리 보기를 생성하지 못했습니다."
+      },
+      "delivery": {
+        "help": "보고서는 항상 포함됩니다. 외부 전송은 선택한 결과물이 준비될 때까지 기다립니다.",
+        "reports": "보고서",
+        "required": "필수 저장소",
+        "alwaysOn": "항상 켜짐"
+      },
+      "receipt": {
+        "labels": {
+          "schedule": "일정",
+          "sources": "소스",
+          "artifacts": "결과물",
+          "format": "형식",
+          "showName": "프로그램 이름",
+          "cast": "출연진",
+          "duration": "목표 길이",
+          "destinations": "대상"
+        },
+        "schedule": {
+          "manual": "수동 전용",
+          "scheduled": "{{date}} ({{timezone}})"
+        },
+        "sources": "소스 {{count}}개",
+        "artifacts": {
+          "textReport": "텍스트 보고서",
+          "showNotes": "프로그램 노트",
+          "audio": "오디오"
+        },
+        "formats": {
+          "concise_briefing": "간결한 브리핑",
+          "solo_update": "단독 업데이트",
+          "host_discussion": "진행자 토론",
+          "sportscast": "스포츠 중계",
+          "culture_roundtable": "문화 좌담회",
+          "custom": "사용자 지정 프로그램"
+        },
+        "speakerStyle": {
+          "1": "단독",
+          "2": "진행자 2명",
+          "3": "진행자 3명",
+          "4": "진행자 4명"
+        },
+        "programWithSpeakers": "{{speakers}} {{format}}",
+        "cast": "출연자 {{count}}명",
+        "duration": "목표 {{count}}분",
+        "destinations": {
+          "email": "이메일: {{recipients}}",
+          "chatbook": "Chatbook: {{title}}"
+        },
+        "untitledChatbook": "제목 없음",
+        "dstChange": "일광 절약 시간 오프셋 변경 후 다음 실행에서는 {{timezoneName}}을(를) 사용합니다: {{date}}."
+      },
+      "test": {
+        "providerDisclosure": "테스트는 구성된 LLM 및 텍스트 음성 변환 공급자를 사용합니다. 샘플은 60초로 제한되며 전체 테스트는 목표 길이를 사용합니다.",
+        "textProviderDisclosure": "테스트는 구성된 LLM 공급자를 사용합니다. 텍스트 전용 테스트에서는 텍스트 음성 변환을 사용하지 않습니다.",
+        "receipt": "활성화 요약",
+        "manualReceipt": "이 브리핑은 수동으로 실행되고 선택한 결과물을 보고서에 저장하며, 테스트 보내기를 선택하지 않는 한 외부 대상으로 전송하지 않습니다.",
+        "progress": "테스트 진행률",
+        "stages": {
+          "collection": "소스 수집",
+          "selection": "업데이트 선택",
+          "text": "보고서 만들기",
+          "audio": "오디오 만들기",
+          "persistence": "보고서에 저장",
+          "audioScript": "오디오 대본 작성",
+          "audioScriptPersistence": "오디오 대본 저장",
+          "audioPersistence": "오디오를 보고서에 저장",
+          "delivery": "테스트 전송 확인",
+          "deliveryAdapter": "{{adapter}}에 전송",
+          "unknown": "단계 {{stage}}"
+        },
+        "sample": "60초 샘플 생성",
+        "full": "전체 테스트 프로그램 생성",
+        "text": "테스트 보고서 생성",
+        "send": "테스트 보내기",
+        "activate": "일정 활성화",
+        "ready": "테스트가 시작되었습니다. 일정을 활성화할 때까지 이 초안은 비활성 상태로 유지됩니다.",
+        "cancelled": "테스트가 취소되었습니다. 초안이 저장되었습니다.",
+        "failed": "테스트에 실패했습니다. 초안이 저장되었습니다. {{message}}",
+        "status": {
+          "not_started": "시작 안 함",
+          "queued": "대기 중",
+          "running": "실행 중",
+          "ready": "준비됨",
+          "failed": "실패",
+          "skipped": "건너뜀",
+          "cancelled": "취소됨"
+        }
+      },
+      "activate": {
+        "ready": "일정이 활성화되었습니다.",
+        "failed": "일정을 활성화할 수 없습니다. 초안이 저장되었습니다. {{message}}"
+      },
+      "validation": {
+        "sourcesRequired": "계속하기 전에 소스를 하나 이상 선택하세요.",
+        "sourceNameRequired": "소스 이름을 입력하세요.",
+        "sourceUrlInvalid": "유효한 HTTP 또는 HTTPS 소스 URL을 입력하세요.",
+        "monitorNameRequired": "모니터 이름을 입력하세요.",
+        "timezoneInvalid": "유효한 IANA 시간대를 입력하세요.",
+        "intervalInvalid": "지원되는 일정 간격을 입력하세요.",
+        "hourInvalid": "0에서 23 사이의 시간을 입력하세요.",
+        "minuteInvalid": "0에서 59 사이의 분을 입력하세요.",
+        "cronInvalid": "유효한 5개 필드 Cron 식을 입력하세요.",
+        "cronTooFrequent": "간격이 5분 이상인 일정을 선택하세요.",
+        "templateRequired": "보고서 템플릿을 입력하세요.",
+        "castSizeInvalid": "출연자를 1명에서 4명까지 선택하세요.",
+        "castIdsInvalid": "각 출연자에게 고유한 ID가 필요합니다.",
+        "castVoicesRequired": "각 출연자의 음성을 선택하세요.",
+        "audioMinutesInvalid": "1분에서 60분 사이의 길이를 입력하세요.",
+        "emailInvalid": "유효한 이메일 주소를 하나 이상 입력하세요."
+      },
+      "validationError": "계속하기 전에 강조 표시된 필드를 확인하세요."
+    }
   }
 }

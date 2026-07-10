@@ -17,5 +17,294 @@
       "generateError": "تولید گزارش از موارد صف‌شده ناموفق بود.",
       "generateReport": "تولید گزارش از صف"
     }
+  },
+  "setupWizard": {
+    "title": "ایجاد فهرست پایش",
+    "containerTitle": "ایجاد فهرست پایش",
+    "containerHelp": "ابتدا محفظهٔ پروژه را ایجاد کنید. سپس منابع، تناوب، گزارش، تحویل و آزمون را در یک جریان راه‌اندازی تنظیم کنید.",
+    "actions": {
+      "continue": "ادامه به منابع"
+    },
+    "sections": {
+      "preset": "پیش‌تنظیم حوزه"
+    },
+    "fields": {
+      "name": "نام فهرست پایش",
+      "objective": "هدف"
+    },
+    "validation": {
+      "nameRequired": "نامی برای فهرست پایش وارد کنید."
+    },
+    "errors": {
+      "createFailed": "فهرست پایش ایجاد نشد."
+    },
+    "presets": {
+      "cti_osint": {
+        "label": "CTI / OSINT",
+        "description": "آسیب‌پذیری‌ها، بدافزارها، عاملان، هشدارها و تغییرات منابع را پیگیری کنید."
+      },
+      "news": {
+        "label": "اخبار",
+        "description": "رویدادهای در حال تحول، افراد، سازمان‌ها و تنوع منابع را پیگیری کنید."
+      },
+      "general": {
+        "label": "عمومی",
+        "description": "موضوعی را پیگیری و به‌روزرسانی‌ها را برای بررسی جمع‌آوری کنید."
+      },
+      "blank": {
+        "label": "خالی",
+        "description": "با یک فهرست پایش خالی شروع کنید و جزئیات را خودتان تنظیم کنید."
+      }
+    },
+    "startModes": {
+      "sources": {
+        "label": "شروع از منابع",
+        "description": "فهرستی با خوراک‌های اولیه و یک پایشگر اختیاری ایجاد کنید."
+      },
+      "topic": {
+        "label": "شروع از موضوع",
+        "description": "ابتدا هدف فهرست را ایجاد کنید، سپس پیش از آغاز گردآوری خوراک‌ها را بیفزایید."
+      },
+      "report_goal": {
+        "label": "شروع از هدف گزارش",
+        "description": "ابتدا هدف گزارش را تعریف کنید، سپس منابع و الگوها را متصل کنید."
+      }
+    },
+    "boundaries": {
+      "alerts": "هشدارهای تطبیق محتوا بعداً تنظیم می‌شوند. این راه‌اندازی فهرست پایش و دامنهٔ اولیهٔ گردآوری آن را مشخص می‌کند."
+    }
+  },
+  "overview": {
+    "pipelineSetup": {
+      "title": "راه‌اندازی گزارش",
+      "open": "راه‌اندازی گزارش",
+      "progress": "مراحل راه‌اندازی گزارش",
+      "steps": {
+        "sources": "منابع",
+        "cadence": "تناوب",
+        "briefing": "گزارش",
+        "delivery": "تحویل",
+        "test": "آزمون"
+      },
+      "actions": {
+        "next": "ادامه به {{step}}"
+      },
+      "source": {
+        "existing": "استفاده از منابع موجود",
+        "new": "افزودن منبع جدید",
+        "fallback": "منبع {{id}}"
+      },
+      "sources": {
+        "help": "منابع موجود را انتخاب کنید یا منبعی تازه بیفزایید، سپس اتصال را برای اطمینان از آمادگی آزمایش کنید."
+      },
+      "sourcesLoading": "در حال بارگیری منابع...",
+      "sourcesError": "خوراک‌های مورد نیاز راه‌اندازی بارگیری نشدند.",
+      "sourceTest": {
+        "action": "آزمایش منبع",
+        "ready": "منبع آماده است.",
+        "cancelled": "آزمایش منبع لغو شد.",
+        "failed": "آزمایش منبع ناموفق بود. {{message}}",
+        "summary": "{{ready}} آماده، {{filtered}} پالایش‌شده",
+        "sample": "موارد نمونه",
+        "readyItem": "آماده",
+        "filteredItem": "پالایش‌شده",
+        "untitled": "مورد بدون عنوان"
+      },
+      "fields": {
+        "sources": "منابع",
+        "sourceName": "نام منبع",
+        "sourceUrl": "نشانی منبع",
+        "monitorName": "نام پایشگر",
+        "schedule": "زمان‌بندی",
+        "timezone": "منطقهٔ زمانی",
+        "intervalEvery": "هر",
+        "intervalUnit": "واحد فاصله",
+        "weekday": "روز هفته",
+        "hour": "ساعت",
+        "minute": "دقیقه",
+        "cronExpression": "عبارت cron",
+        "showName": "نام برنامه",
+        "premise": "طرح برنامه",
+        "includeAudio": "صدا",
+        "audioHelp": "نسخهٔ گفتاری قابل پخش اضافه کنید.",
+        "audioMinutes": "مدت هدف به دقیقه",
+        "speakerCount": "تعداد گویندگان",
+        "template": "الگوی گزارش",
+        "audioProvider": "جایگزینی ارائه‌دهندهٔ صدا",
+        "audioModel": "جایگزینی مدل صدا",
+        "customInstructions": "دستورهای ویرایشی سفارشی",
+        "emailDelivery": "ایمیل",
+        "emailRecipients": "گیرندگان ایمیل",
+        "chatbookDelivery": "Chatbook",
+        "chatbookTitle": "عنوان Chatbook"
+      },
+      "schedule": {
+        "manual": "فقط دستی",
+        "interval": "هر N ساعت یا دقیقه",
+        "daily": "روزانه",
+        "weekdays": "روزهای کاری",
+        "weekly": "هفتگی",
+        "advanced": "cron پیشرفته"
+      },
+      "intervalUnits": {
+        "hours": "ساعت",
+        "minutes": "دقیقه"
+      },
+      "weekdays": {
+        "monday": "دوشنبه",
+        "tuesday": "سه‌شنبه",
+        "wednesday": "چهارشنبه",
+        "thursday": "پنج‌شنبه",
+        "friday": "جمعه",
+        "saturday": "شنبه",
+        "sunday": "یکشنبه"
+      },
+      "advancedCron": "cron پیشرفته",
+      "nextOccurrence": "اجرای بعدی",
+      "manualOccurrence": "فقط دستی",
+      "nextOccurrencePending": "برای محاسبهٔ زمان دقیق، یک زمان‌بندی معتبر ذخیره کنید.",
+      "briefing": {
+        "question": "چه چیزی می‌سازید؟",
+        "help": "قالب ویرایشی را انتخاب کنید. همهٔ گزینه‌ها بر منابع منتخب شما استوار می‌مانند.",
+        "advanced": "تنظیمات پیشرفتهٔ گزارش"
+      },
+      "formats": {
+        "concise_briefing": "گزارش کوتاه",
+        "solo_update": "به‌روزرسانی تک‌نفره",
+        "host_discussion": "گفت‌وگوی میزبانان",
+        "sportscast": "گزارش ورزشی",
+        "culture_roundtable": "میزگرد فرهنگی",
+        "custom": "سفارشی"
+      },
+      "speaker": {
+        "defaultLabel": "گویندهٔ {{index}}",
+        "defaultRole": "میزبان",
+        "labelField": "برچسب گویندهٔ {{index}}",
+        "roleField": "نقش گویندهٔ {{index}}",
+        "voiceField": "صدای گویندهٔ {{index}}",
+        "personaField": "شخصیت گویندهٔ {{index}}"
+      },
+      "preview": {
+        "generate": "پیش‌نمایش گزارش",
+        "diagnostics": "عیب‌یابی پیش‌نمایش",
+        "context": "اجرای پیش‌نمایش: {{runId}}",
+        "noRunContext": "پیش از دیدن پیش‌نمایش این گزارش، پایشگر را با موفقیت اجرا کنید.",
+        "templateRequired": "پیش از ایجاد پیش‌نمایش یک الگو انتخاب کنید.",
+        "templateEmpty": "الگوی انتخاب‌شده خالی است.",
+        "emptyResult": "پیش‌نمایش هیچ محتوای آماده‌ای برنگرداند.",
+        "error": "پیش‌نمایش ایجاد نشد."
+      },
+      "delivery": {
+        "help": "گزارش‌ها همیشه ذخیره می‌شوند. تحویل بیرونی تا آماده شدن کامل خروجی‌های منتخب منتظر می‌ماند.",
+        "reports": "گزارش‌ها",
+        "required": "ذخیره‌سازی الزامی",
+        "alwaysOn": "همیشه فعال"
+      },
+      "receipt": {
+        "labels": {
+          "schedule": "زمان‌بندی",
+          "sources": "منابع",
+          "artifacts": "خروجی‌ها",
+          "format": "قالب",
+          "showName": "نام برنامه",
+          "cast": "گویندگان",
+          "duration": "مدت هدف",
+          "destinations": "مقصدها"
+        },
+        "schedule": {
+          "manual": "فقط دستی",
+          "scheduled": "{{date}} ({{timezone}})"
+        },
+        "sources": "{{count}} منبع",
+        "artifacts": {
+          "textReport": "گزارش متنی",
+          "showNotes": "یادداشت‌های برنامه",
+          "audio": "صدا"
+        },
+        "formats": {
+          "concise_briefing": "گزارش کوتاه",
+          "solo_update": "به‌روزرسانی تک‌نفره",
+          "host_discussion": "گفت‌وگوی میزبانان",
+          "sportscast": "گزارش ورزشی",
+          "culture_roundtable": "میزگرد فرهنگی",
+          "custom": "برنامهٔ سفارشی"
+        },
+        "speakerStyle": {
+          "1": "تک‌نفره",
+          "2": "با دو میزبان",
+          "3": "با سه میزبان",
+          "4": "با چهار میزبان"
+        },
+        "programWithSpeakers": "{{format}} {{speakers}}",
+        "cast": "{{count}} گوینده",
+        "duration": "با هدف {{count}} دقیقه",
+        "destinations": {
+          "email": "ایمیل: {{recipients}}",
+          "chatbook": "Chatbook: {{title}}"
+        },
+        "untitledChatbook": "بدون عنوان",
+        "dstChange": "اجرای بعدی پس از تغییر ساعت تابستانی از {{timezoneName}} استفاده می‌کند: {{date}}."
+      },
+      "test": {
+        "providerDisclosure": "آزمون‌ها از ارائه‌دهندگان تنظیم‌شدهٔ مدل زبانی و تبدیل متن به گفتار استفاده می‌کنند. نمونه به ۶۰ ثانیه محدود است و آزمون کامل مدت هدف را به کار می‌برد.",
+        "textProviderDisclosure": "آزمون‌ها از ارائه‌دهندهٔ مدل زبانی تنظیم‌شده استفاده می‌کنند. آزمون‌های فقط‌متنی تبدیل متن به گفتار ندارند.",
+        "receipt": "خلاصهٔ فعال‌سازی",
+        "manualReceipt": "این گزارش به‌صورت دستی اجرا می‌شود، خروجی‌های منتخب را در گزارش‌ها ذخیره می‌کند و جز با انتخاب ارسال آزمون با مقصد بیرونی تماس نمی‌گیرد.",
+        "progress": "پیشرفت آزمون",
+        "stages": {
+          "collection": "گردآوری منابع",
+          "selection": "انتخاب به‌روزرسانی‌ها",
+          "text": "ایجاد گزارش",
+          "audio": "ایجاد صدا",
+          "persistence": "ذخیره در گزارش‌ها",
+          "audioScript": "نوشتن متن صوتی",
+          "audioScriptPersistence": "ذخیرهٔ متن صوتی",
+          "audioPersistence": "ذخیرهٔ صدا در گزارش‌ها",
+          "delivery": "بررسی تحویل آزمایشی",
+          "deliveryAdapter": "تحویل به {{adapter}}",
+          "unknown": "مرحلهٔ {{stage}}"
+        },
+        "sample": "ایجاد نمونهٔ ۶۰ ثانیه‌ای",
+        "full": "ایجاد قسمت آزمایشی کامل",
+        "text": "ایجاد گزارش آزمایشی",
+        "send": "ارسال آزمون",
+        "activate": "فعال‌سازی زمان‌بندی",
+        "ready": "آزمون آغاز شد. این پیش‌نویس تا فعال‌سازی زمان‌بندی غیرفعال می‌ماند.",
+        "cancelled": "آزمون لغو شد. پیش‌نویس شما ذخیره شد.",
+        "failed": "آزمون ناموفق بود. پیش‌نویس شما ذخیره شد. {{message}}",
+        "status": {
+          "not_started": "آغاز نشده",
+          "queued": "در صف",
+          "running": "در حال اجرا",
+          "ready": "آماده",
+          "failed": "ناموفق",
+          "skipped": "رد شده",
+          "cancelled": "لغوشده"
+        }
+      },
+      "activate": {
+        "ready": "زمان‌بندی فعال شد.",
+        "failed": "زمان‌بندی فعال نشد. پیش‌نویس شما ذخیره شد. {{message}}"
+      },
+      "validation": {
+        "sourcesRequired": "پیش از ادامه دست‌کم یک منبع انتخاب کنید.",
+        "sourceNameRequired": "نام منبع را وارد کنید.",
+        "sourceUrlInvalid": "نشانی معتبر HTTP یا HTTPS برای منبع وارد کنید.",
+        "monitorNameRequired": "نام پایشگر را وارد کنید.",
+        "timezoneInvalid": "منطقهٔ زمانی معتبر IANA وارد کنید.",
+        "intervalInvalid": "فاصلهٔ زمان‌بندی پشتیبانی‌شده وارد کنید.",
+        "hourInvalid": "ساعتی بین ۰ تا ۲۳ وارد کنید.",
+        "minuteInvalid": "دقیقه‌ای بین ۰ تا ۵۹ وارد کنید.",
+        "cronInvalid": "عبارت cron معتبر پنج‌بخشی وارد کنید.",
+        "cronTooFrequent": "زمان‌بندی با فاصلهٔ دست‌کم پنج دقیقه انتخاب کنید.",
+        "templateRequired": "الگوی گزارش را وارد کنید.",
+        "castSizeInvalid": "یک تا چهار گوینده انتخاب کنید.",
+        "castIdsInvalid": "هر گوینده به هویتی یکتا نیاز دارد.",
+        "castVoicesRequired": "برای هر گوینده صدایی انتخاب کنید.",
+        "audioMinutesInvalid": "مدتی بین ۱ تا ۶۰ دقیقه وارد کنید.",
+        "emailInvalid": "دست‌کم یک نشانی ایمیل معتبر وارد کنید."
+      },
+      "validationError": "پیش از ادامه فیلدهای برجسته را بررسی کنید."
+    }
   }
 }

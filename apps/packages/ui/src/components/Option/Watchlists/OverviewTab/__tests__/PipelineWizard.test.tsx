@@ -1,15 +1,24 @@
 import React from "react"
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
-import { describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import { PipelineWizard } from "../PipelineWizard"
+
+const i18nMocks = vi.hoisted(() => ({
+  language: "en-US",
+  translations: {} as Record<string, string>
+}))
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (_key: string, fallback?: string, options?: Record<string, unknown>) =>
-      (fallback || _key).replace(/\{\{(\w+)\}\}/g, (_match, token) => {
+      (i18nMocks.translations[_key] || fallback || _key).replace(/\{\{(\w+)\}\}/g, (_match, token) => {
         const value = options?.[token]
         return value == null ? "" : String(value)
-      })
+      }),
+    i18n: {
+      get language() { return i18nMocks.language },
+      get resolvedLanguage() { return i18nMocks.language }
+    }
   })
 }))
 
@@ -78,7 +87,27 @@ const renderWizard = (
 const dialog = () => screen.getByRole("dialog", { name: "Set up briefing" })
 const inDialog = () => within(dialog())
 
+const readyProjection = (stages: Record<string, { status: string }> = {}) => ({
+  occurrence_id: 1,
+  run_id: 2,
+  job_id: 77,
+  artifact_status: "ready" as const,
+  delivery_status: "not_configured" as const,
+  stages,
+  output: { id: 3 },
+  audio: null,
+  editorial: {},
+  selection: {},
+  next_run_at: null,
+  recovery: {}
+})
+
 describe("PipelineWizard", () => {
+  beforeEach(() => {
+    i18nMocks.language = "en-US"
+    i18nMocks.translations = {}
+  })
+
   it("uses the single outcome-first step sequence", () => {
     renderWizard()
 
@@ -131,9 +160,63 @@ describe("PipelineWizard", () => {
         expect.objectContaining({
           externalDelivery: false,
           audioSampleSeconds: 60
-        })
+        }),
+        expect.any(Function)
       )
     })
+  })
+
+  it("renders only durable stages observed from the exact-run projection", async () => {
+    const projection = readyProjection({
+      collect: { status: "ready" },
+      render_text: { status: "ready" }
+    })
+    const onTest = vi.fn().mockImplementation(async (
+      _draft: unknown,
+      _options: unknown,
+      onProgress: (value: typeof projection) => void
+    ) => {
+      onProgress(projection)
+      return { jobId: 77, runId: 2, status: "ready", briefing: projection }
+    })
+    renderWizard({ initialStep: "test", initialDraft: sportscastDraft, onTest })
+
+    expect(inDialog().queryByText("Select updates")).not.toBeInTheDocument()
+    fireEvent.click(inDialog().getByRole("button", { name: "Generate 60-second sample" }))
+
+    expect(await inDialog().findByText("Collect sources")).toBeInTheDocument()
+    expect(inDialog().getByText("Create report")).toBeInTheDocument()
+    expect(inDialog().getAllByText("Ready")).toHaveLength(2)
+    expect(inDialog().queryByText("Create audio")).not.toBeInTheDocument()
+    expect(inDialog().queryByText("Check test delivery")).not.toBeInTheDocument()
+  })
+
+  it("uses text-only test actions, disclosure, receipt, and metadata", async () => {
+    const props = renderWizard({
+      initialStep: "test",
+      initialDraft: {
+        ...sportscastDraft,
+        programFormat: "concise_briefing",
+        outcomeNoun: "briefing",
+        showNotes: false,
+        audioEnabled: false,
+        audioSpeakers: []
+      }
+    })
+
+    expect(inDialog().getByText(/Text-only tests do not use text-to-speech/)).toBeInTheDocument()
+    expect(inDialog().getByRole("button", { name: "Generate test report" })).toBeInTheDocument()
+    expect(inDialog().queryByRole("button", { name: "Generate 60-second sample" })).not.toBeInTheDocument()
+    expect(inDialog().queryByRole("button", { name: "Generate full test episode" })).not.toBeInTheDocument()
+    expect(screen.getByTestId("watchlists-pipeline-receipt")).toHaveTextContent("text report")
+    expect(screen.getByTestId("watchlists-pipeline-receipt")).not.toHaveTextContent("audio")
+
+    fireEvent.click(inDialog().getByRole("button", { name: "Generate test report" }))
+    await waitFor(() => expect(props.onTest).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({ audioSampleSeconds: null }),
+      expect.any(Function)
+    ))
   })
 
   it("offers sample, full, send, and activation actions while reusing the inactive job id", async () => {
@@ -157,7 +240,8 @@ describe("PipelineWizard", () => {
           externalDelivery: false,
           audioSampleSeconds: null,
           jobId: 77
-        })
+        }),
+        expect.any(Function)
       )
     })
 
@@ -169,7 +253,8 @@ describe("PipelineWizard", () => {
           externalDelivery: true,
           audioSampleSeconds: 60,
           jobId: 77
-        })
+        }),
+        expect.any(Function)
       )
     })
 
@@ -211,7 +296,19 @@ describe("PipelineWizard", () => {
         sourceMode: "new",
         sourceName: "Policy feed",
         sourceUrl: "https://example.com/policy.xml"
-      }
+      },
+      onTestSource: vi.fn().mockResolvedValue({
+        status: "ready",
+        sourceTest: {
+          total: 3,
+          ingestable: 2,
+          filtered: 1,
+          items: [
+            { source_id: 1, source_type: "rss", title: "Ready item", decision: "ingest" },
+            { source_id: 1, source_type: "rss", title: "Filtered item", decision: "filtered" }
+          ]
+        }
+      })
     })
 
     fireEvent.click(inDialog().getByRole("button", { name: "Test source" }))
@@ -224,7 +321,9 @@ describe("PipelineWizard", () => {
         })
       )
     })
-    expect(inDialog().getByText("Source is ready.")).toBeInTheDocument()
+    expect(inDialog().getByText("2 ready, 1 filtered from 3 items.")).toBeInTheDocument()
+    expect(inDialog().getByText("Ready item")).toBeInTheDocument()
+    expect(inDialog().getByText("Filtered item")).toBeInTheDocument()
   })
 
   it("keeps the draft after server failure and distinguishes explicit cancellation", async () => {
@@ -247,7 +346,7 @@ describe("PipelineWizard", () => {
     expect(inDialog().getByLabelText("Show name")).toHaveValue("Purple and Gold Weekly")
   })
 
-  it("silently ignores AbortError from superseded work", async () => {
+  it("surfaces a current AbortError instead of assuming it is stale", async () => {
     const abortError = new Error("superseded")
     abortError.name = "AbortError"
     renderWizard({
@@ -258,18 +357,92 @@ describe("PipelineWizard", () => {
 
     fireEvent.click(inDialog().getByRole("button", { name: "Generate 60-second sample" }))
 
+    expect(await inDialog().findByTestId("watchlists-pipeline-action-error")).toHaveTextContent(
+      "superseded"
+    )
+  })
+
+  it("rehydrates a new open session and ignores completion from the superseded session", async () => {
+    let resolveFirst: ((value: unknown) => void) | undefined
+    const onTest = vi.fn().mockImplementation(() => new Promise((resolve) => {
+      resolveFirst = resolve
+    }))
+    const firstProps = {
+      open: true,
+      sessionKey: "first",
+      sources,
+      initialStep: "test" as const,
+      initialDraft: sportscastDraft,
+      onCancel: vi.fn(),
+      onTest,
+      onActivate: vi.fn()
+    }
+    const view = render(<PipelineWizard {...(firstProps as React.ComponentProps<typeof PipelineWizard>)} />)
+    fireEvent.click(inDialog().getByRole("button", { name: "Generate 60-second sample" }))
+    await waitFor(() => expect(onTest).toHaveBeenCalledTimes(1))
+
+    view.rerender(
+      <PipelineWizard
+        {...(firstProps as React.ComponentProps<typeof PipelineWizard>)}
+        {...({ sessionKey: "second" } as Record<string, unknown>)}
+        initialStep="sources"
+        initialDraft={{ sourceMode: "new", sourceName: "Fresh feed", sourceUrl: "https://example.com/fresh.xml" }}
+      />
+    )
+    expect(inDialog().getByLabelText("Source name")).toHaveValue("Fresh feed")
+    resolveFirst?.({ jobId: 77, status: "ready" })
     await waitFor(() => {
-      expect(inDialog().queryByTestId("watchlists-pipeline-action-error")).not.toBeInTheDocument()
+      expect(inDialog().queryByText(/Test started/)).not.toBeInTheDocument()
+      expect(inDialog().getByLabelText("Source name")).toHaveValue("Fresh feed")
     })
   })
 
-  it("moves focus to the validation summary and keeps fallback copy usable", async () => {
-    renderWizard()
+  it("connects localized validation messages and focuses the first invalid control", async () => {
+    renderWizard({ initialDraft: { sourceMode: "new", sourceName: "", sourceUrl: "" } })
 
     fireEvent.click(inDialog().getByRole("button", { name: "Next: Cadence" }))
 
-    const summary = await screen.findByTestId("watchlists-pipeline-validation-summary")
-    await waitFor(() => expect(summary).toHaveFocus())
-    expect(summary).toHaveTextContent("Choose at least one source before continuing.")
+    const sourceName = inDialog().getByLabelText("Source name")
+    await waitFor(() => expect(sourceName).toHaveFocus())
+    expect(sourceName).toHaveAttribute("id", "pipeline-source-name")
+    expect(sourceName).toHaveAttribute("aria-invalid", "true")
+    expect(sourceName).toHaveAttribute("aria-describedby", "pipeline-source-name-error")
+    expect(inDialog().getByText("Enter a source name.")).toHaveAttribute(
+      "id",
+      "pipeline-source-name-error"
+    )
+  })
+
+  it("localizes destination step and default source/speaker grammar", () => {
+    i18nMocks.translations = {
+      "watchlists:overview.pipelineSetup.steps.cadence": "Ritmo",
+      "watchlists:overview.pipelineSetup.actions.next": "Siguiente: {{step}}",
+      "watchlists:overview.pipelineSetup.speaker.defaultLabel": "Locutor {{index}}",
+      "watchlists:overview.pipelineSetup.speaker.defaultRole": "presentador",
+      "watchlists:overview.pipelineSetup.source.fallback": "Fuente {{id}}"
+    }
+    renderWizard({
+      sources: [{ ...sources[0], name: "" }],
+      initialDraft: { sourceIds: [1] }
+    })
+
+    expect(inDialog().getByRole("button", { name: "Siguiente: Ritmo" })).toBeInTheDocument()
+    expect(inDialog().getByLabelText("Fuente 1")).toBeInTheDocument()
+    fireEvent.click(inDialog().getByRole("button", { name: "Siguiente: Ritmo" }))
+    fireEvent.change(inDialog().getByLabelText("Monitor name"), { target: { value: "Monitor" } })
+    fireEvent.click(inDialog().getByRole("button", { name: "Siguiente: Briefing" }))
+    expect(inDialog().getByLabelText("Speaker 1 label")).toHaveValue("Locutor 1")
+    expect(inDialog().getByLabelText("Speaker 1 role")).toHaveValue("presentador")
+  })
+
+  it("constrains the modal and wraps full-width controls for narrow coarse pointers", () => {
+    renderWizard({ initialStep: "briefing", initialDraft: sportscastDraft })
+
+    expect(dialog()).toHaveClass("w-[min(760px,calc(100vw-2rem))]")
+    expect(inDialog().getByTestId("watchlists-pipeline-scroll-region")).toHaveClass("overflow-y-auto")
+    expect(inDialog().getByRole("button", { name: "Cancel" })).toHaveClass("w-full", "whitespace-normal")
+    expect(inDialog().getByRole("switch", { name: "Audio" }).className).toContain(
+      "[@media(pointer:coarse)]:min-h-11"
+    )
   })
 })

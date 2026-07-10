@@ -10,9 +10,11 @@ const mocks = vi.hoisted(() => ({
   fetchSources: vi.fn(),
   fetchRuns: vi.fn(),
   createSource: vi.fn(),
+  updateSource: vi.fn(),
   createJob: vi.fn(),
   updateJob: vi.fn(),
   triggerRun: vi.fn(),
+  getBriefing: vi.fn(),
   createOutput: vi.fn(),
   getTemplate: vi.fn(),
   previewTemplate: vi.fn(),
@@ -47,11 +49,13 @@ vi.mock("@/services/watchlists", () => ({
   fetchWatchlistRuns: (...args: unknown[]) => mocks.fetchRuns(...args),
   bulkCreateSources: vi.fn().mockResolvedValue({ items: [], total: 0 }),
   createWatchlistSource: (...args: unknown[]) => mocks.createSource(...args),
+  updateWatchlistSource: (...args: unknown[]) => mocks.updateSource(...args),
   deleteWatchlistSource: vi.fn(),
   createWatchlistJob: (...args: unknown[]) => mocks.createJob(...args),
   deleteWatchlistJob: vi.fn(),
   updateWatchlistJob: (...args: unknown[]) => mocks.updateJob(...args),
   triggerWatchlistRun: (...args: unknown[]) => mocks.triggerRun(...args),
+  getWatchlistRunBriefing: (...args: unknown[]) => mocks.getBriefing(...args),
   createWatchlistOutput: (...args: unknown[]) => mocks.createOutput(...args),
   getWatchlistTemplate: (...args: unknown[]) => mocks.getTemplate(...args),
   previewWatchlistTemplate: (...args: unknown[]) => mocks.previewTemplate(...args),
@@ -121,8 +125,28 @@ beforeEach(() => {
   })
   mocks.fetchRuns.mockResolvedValue({ items: [], total: 0, has_more: false })
   mocks.createJob.mockResolvedValue({ id: 303, active: false })
+  mocks.createSource.mockResolvedValue({ id: 501, active: true })
+  mocks.updateSource.mockResolvedValue({ id: 501, active: true })
   mocks.updateJob.mockResolvedValue({ id: 303, active: true })
   mocks.triggerRun.mockResolvedValue({ id: 404 })
+  mocks.getBriefing.mockResolvedValue({
+    occurrence_id: 405,
+    run_id: 404,
+    job_id: 303,
+    artifact_status: "ready",
+    delivery_status: "not_configured",
+    stages: {
+      collect: { status: "ready" },
+      render_text: { status: "ready" },
+      persist_text: { status: "ready" }
+    },
+    output: { id: 505 },
+    audio: null,
+    editorial: {},
+    selection: {},
+    next_run_at: null,
+    recovery: {}
+  })
   mocks.createOutput.mockResolvedValue({ id: 505 })
   mocks.testSource.mockResolvedValue({ items: [], total: 0, ingestable: 0, filtered: 0 })
 })
@@ -179,18 +203,113 @@ describe("OverviewTab canonical setup", () => {
       watchlist_id: 42,
       output_prefs: expect.objectContaining({ briefing_pipeline: expect.any(Object) })
     }))
-    expect(mocks.createOutput).toHaveBeenCalledWith(expect.objectContaining({
-      run_id: 404,
-      target_audio_minutes: 1,
-      metadata: expect.objectContaining({
-        test: expect.objectContaining({ externalDelivery: false, audioSampleSeconds: 60 })
-      })
-    }))
+    expect(mocks.getBriefing).toHaveBeenCalledWith(404)
+    expect(mocks.createOutput).not.toHaveBeenCalled()
     expect(mocks.setActiveTab).not.toHaveBeenCalled()
     expect(pipeline().getByText("Test started. This draft stays inactive until you activate its schedule.")).toBeInTheDocument()
 
     fireEvent.click(pipeline().getByRole("button", { name: "Activate schedule" }))
     await waitFor(() => expect(mocks.updateJob).toHaveBeenCalledWith(303, { active: true }))
+    expect(mocks.createJob).toHaveBeenCalledTimes(1)
+  }, 20_000)
+
+  it("applies a safe test contract and restores full delivery on activation", async () => {
+    render(<OverviewTab />)
+    fireEvent.click(await screen.findByTestId("watchlists-overview-cta-pipeline-builder"))
+    await waitFor(() => expect(pipeline().getByLabelText("AI Feed")).toBeInTheDocument())
+    await reachTestStep()
+    fireEvent.click(pipeline().getByRole("button", { name: "Delivery" }))
+    fireEvent.click(pipeline().getByRole("switch", { name: "Email" }))
+    fireEvent.change(pipeline().getByLabelText("Email recipients"), {
+      target: { value: "coach@example.com" }
+    })
+    fireEvent.click(pipeline().getByRole("button", { name: "Next: Test" }))
+
+    fireEvent.click(pipeline().getByRole("button", { name: "Generate 60-second sample" }))
+    await waitFor(() => expect(mocks.createJob).toHaveBeenCalledWith(expect.objectContaining({
+      output_prefs: expect.objectContaining({
+        briefing_pipeline: expect.objectContaining({
+          audio: expect.objectContaining({ target_minutes: 1 }),
+          delivery: expect.objectContaining({
+            email: expect.objectContaining({ enabled: false, recipients: [] })
+          })
+        })
+      })
+    })))
+
+    fireEvent.click(pipeline().getByRole("button", { name: "Activate schedule" }))
+    await waitFor(() => expect(mocks.updateJob).toHaveBeenCalledWith(
+      303,
+      expect.objectContaining({
+        output_prefs: expect.objectContaining({
+          briefing_pipeline: expect.objectContaining({
+            audio: expect.objectContaining({ target_minutes: 8 }),
+            delivery: expect.objectContaining({
+              email: expect.objectContaining({ enabled: true, recipients: ["coach@example.com"] })
+            })
+          })
+        })
+      })
+    ))
+  }, 20_000)
+
+  it("updates the inactive job with the current existing source selection", async () => {
+    render(<OverviewTab />)
+    fireEvent.click(await screen.findByTestId("watchlists-overview-cta-pipeline-builder"))
+    await waitFor(() => expect(pipeline().getByLabelText("AI Feed")).toBeInTheDocument())
+    await reachTestStep()
+
+    fireEvent.click(pipeline().getByRole("button", { name: "Generate 60-second sample" }))
+    await waitFor(() => expect(mocks.createJob).toHaveBeenCalledTimes(1))
+
+    fireEvent.click(pipeline().getByRole("button", { name: "Sources" }))
+    fireEvent.click(pipeline().getByLabelText("AI Feed"))
+    fireEvent.click(pipeline().getByLabelText("Security Feed"))
+    fireEvent.click(pipeline().getByRole("button", { name: "Next: Cadence" }))
+    fireEvent.click(pipeline().getByRole("button", { name: "Next: Briefing" }))
+    fireEvent.click(pipeline().getByRole("button", { name: "Next: Delivery" }))
+    fireEvent.click(pipeline().getByRole("button", { name: "Next: Test" }))
+    fireEvent.click(pipeline().getByRole("button", { name: "Generate full test episode" }))
+
+    await waitFor(() => expect(mocks.updateJob).toHaveBeenCalledWith(
+      303,
+      expect.objectContaining({ scope: { sources: [12] }, active: false })
+    ))
+    expect(mocks.createJob).toHaveBeenCalledTimes(1)
+  }, 20_000)
+
+  it("updates a persisted new source when its draft identity changes", async () => {
+    mocks.fetchOverview.mockResolvedValue(overview(0, 0))
+    render(<OverviewTab />)
+    fireEvent.click(await screen.findByTestId("watchlists-overview-cta-guided-setup"))
+
+    fireEvent.change(pipeline().getByLabelText("Source name"), { target: { value: "Policy feed" } })
+    fireEvent.change(pipeline().getByLabelText("Source URL"), { target: { value: "https://example.com/one.xml" } })
+    fireEvent.click(pipeline().getByRole("button", { name: "Next: Cadence" }))
+    fireEvent.change(pipeline().getByLabelText("Monitor name"), { target: { value: "Policy monitor" } })
+    fireEvent.click(pipeline().getByRole("button", { name: "Next: Briefing" }))
+    fireEvent.click(pipeline().getByRole("button", { name: "Next: Delivery" }))
+    fireEvent.click(pipeline().getByRole("button", { name: "Next: Test" }))
+    fireEvent.click(pipeline().getByRole("button", { name: "Generate 60-second sample" }))
+    await waitFor(() => expect(mocks.createSource).toHaveBeenCalledTimes(1))
+
+    fireEvent.click(pipeline().getByRole("button", { name: "Sources" }))
+    fireEvent.change(pipeline().getByLabelText("Source URL"), { target: { value: "https://example.com/two.xml" } })
+    fireEvent.click(pipeline().getByRole("button", { name: "Next: Cadence" }))
+    fireEvent.click(pipeline().getByRole("button", { name: "Next: Briefing" }))
+    fireEvent.click(pipeline().getByRole("button", { name: "Next: Delivery" }))
+    fireEvent.click(pipeline().getByRole("button", { name: "Next: Test" }))
+    fireEvent.click(pipeline().getByRole("button", { name: "Generate full test episode" }))
+
+    await waitFor(() => expect(mocks.updateSource).toHaveBeenCalledWith(
+      501,
+      expect.objectContaining({ url: "https://example.com/two.xml" })
+    ))
+    expect(mocks.updateSource.mock.calls[0]?.[1]).not.toHaveProperty("watchlist_id")
+    expect(mocks.updateJob).toHaveBeenCalledWith(
+      303,
+      expect.objectContaining({ scope: { sources: [501] }, active: false })
+    )
     expect(mocks.createJob).toHaveBeenCalledTimes(1)
   }, 20_000)
 })

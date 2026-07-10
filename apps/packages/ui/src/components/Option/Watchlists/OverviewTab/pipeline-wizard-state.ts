@@ -3,6 +3,7 @@ import type {
   SourceType,
   WatchlistAudioCast,
   WatchlistAudioCastSpeaker,
+  WatchlistBriefingProjection,
   WatchlistProgramFormat,
   WatchlistSourceCreate
 } from "@/types/watchlists"
@@ -84,6 +85,17 @@ export interface PipelineWizardDraft {
 export interface PipelineWizardValidationResult {
   valid: boolean
   errors: string[]
+}
+
+export interface PipelineWizardSourceBinding {
+  signature: string
+  ids: number[]
+}
+
+export interface PipelineWizardBriefingPollOptions {
+  intervalMs?: number
+  maxAttempts?: number
+  waitForDelivery?: boolean
 }
 
 export type PipelineWizardCronValidationError =
@@ -198,6 +210,72 @@ export const mergePipelineWizardDraft = (
 }
 
 const trim = (value: unknown): string => String(value || "").trim()
+
+export const getPipelineWizardSourceSignature = (
+  draft: Pick<
+    PipelineWizardDraft,
+    "sourceMode" | "sourceIds" | "sourceName" | "sourceUrl" | "sourceType"
+  >
+): string => draft.sourceMode === "new"
+  ? JSON.stringify([
+      "new",
+      trim(draft.sourceName),
+      trim(draft.sourceUrl),
+      draft.sourceType || "rss"
+    ])
+  : JSON.stringify([
+      "existing",
+      [...new Set(draft.sourceIds.map(Number).filter(Number.isFinite))].sort((a, b) => a - b)
+    ])
+
+const wait = (milliseconds: number): Promise<void> =>
+  milliseconds > 0
+    ? new Promise((resolve) => setTimeout(resolve, milliseconds))
+    : Promise.resolve()
+
+const hasTerminalStageFailure = (projection: WatchlistBriefingProjection): boolean =>
+  Object.values(projection.stages).some((stage) =>
+    stage.status === "failed" || stage.status === "cancelled"
+  )
+
+const isPipelineWizardBriefingTerminal = (
+  projection: WatchlistBriefingProjection,
+  waitForDelivery: boolean
+): boolean => {
+  if (hasTerminalStageFailure(projection)) return true
+  if (projection.artifact_status === "failed" || projection.artifact_status === "cancelled") {
+    return true
+  }
+  if (projection.artifact_status !== "ready") return false
+  return !waitForDelivery || ![
+    "waiting_for_artifacts",
+    "delivering"
+  ].includes(projection.delivery_status)
+}
+
+export const waitForPipelineWizardBriefing = async (
+  runId: number,
+  getBriefing: (runId: number) => Promise<WatchlistBriefingProjection>,
+  onProgress: (projection: WatchlistBriefingProjection) => void,
+  options: PipelineWizardBriefingPollOptions = {}
+): Promise<WatchlistBriefingProjection> => {
+  const intervalMs = Math.max(0, options.intervalMs ?? 1_000)
+  const maxAttempts = Math.max(1, options.maxAttempts ?? 120)
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    try {
+      const projection = await getBriefing(runId)
+      onProgress(projection)
+      if (isPipelineWizardBriefingTerminal(projection, Boolean(options.waitForDelivery))) {
+        return projection
+      }
+    } catch (error) {
+      const status = (error as { status?: number } | null)?.status
+      if (status !== 404 || attempt === maxAttempts - 1) throw error
+    }
+    await wait(intervalMs)
+  }
+  throw new Error("briefing_status_timeout")
+}
 
 const normalizeEmails = (value: string[] | undefined): string[] =>
   Array.isArray(value)

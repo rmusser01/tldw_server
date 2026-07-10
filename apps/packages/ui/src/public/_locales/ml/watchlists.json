@@ -43,5 +43,608 @@
   },
   "items_queue_generateReport": {
     "message": "ക്യൂയിൽ നിന്ന് റിപ്പോർട്ട് സൃഷ്ടിക്കുക"
+  },
+  "setupWizard_title": {
+    "message": "നിരീക്ഷണപ്പട്ടിക സൃഷ്ടിക്കുക"
+  },
+  "setupWizard_containerTitle": {
+    "message": "നിരീക്ഷണപ്പട്ടിക സൃഷ്ടിക്കുക"
+  },
+  "setupWizard_containerHelp": {
+    "message": "ആദ്യം പ്രോജക്റ്റ് കണ്ടെയ്‌നർ സൃഷ്ടിക്കുക. ഉറവിടങ്ങൾ, ആവൃത്തി, സംക്ഷിപ്തം, വിതരണം, പരിശോധന എന്നിവ ഒരൊറ്റ സജ്ജീകരണ പ്രവാഹത്തിൽ തുടരും."
+  },
+  "setupWizard_actions_continue": {
+    "message": "ഉറവിടങ്ങളിലേക്ക് തുടരുക"
+  },
+  "setupWizard_sections_preset": {
+    "message": "മേഖലാ മുൻക്രമീകരണം"
+  },
+  "setupWizard_fields_name": {
+    "message": "നിരീക്ഷണപ്പട്ടികയുടെ പേര്"
+  },
+  "setupWizard_fields_objective": {
+    "message": "ലക്ഷ്യം"
+  },
+  "setupWizard_validation_nameRequired": {
+    "message": "നിരീക്ഷണപ്പട്ടികയ്ക്ക് ഒരു പേര് നൽകുക."
+  },
+  "setupWizard_errors_createFailed": {
+    "message": "നിരീക്ഷണപ്പട്ടിക സൃഷ്ടിക്കാനായില്ല."
+  },
+  "setupWizard_presets_cti_osint_label": {
+    "message": "CTI / OSINT"
+  },
+  "setupWizard_presets_cti_osint_description": {
+    "message": "ദുർബലതകൾ, മാൽവെയർ, ഭീഷണി പ്രവർത്തകർ, അറിയിപ്പുകൾ, ഉറവിട മാറ്റങ്ങൾ എന്നിവ നിരീക്ഷിക്കുക."
+  },
+  "setupWizard_presets_news_label": {
+    "message": "വാർത്ത"
+  },
+  "setupWizard_presets_news_description": {
+    "message": "വികസിച്ചുകൊണ്ടിരിക്കുന്ന സംഭവങ്ങൾ, ആളുകൾ, സ്ഥാപനങ്ങൾ, ഉറവിട വൈവിധ്യം എന്നിവ നിരീക്ഷിക്കുക."
+  },
+  "setupWizard_presets_general_label": {
+    "message": "പൊതുവായത്"
+  },
+  "setupWizard_presets_general_description": {
+    "message": "ഒരു വിഷയം നിരീക്ഷിച്ച് അവലോകനത്തിനായി പുതുക്കലുകൾ ശേഖരിക്കുക."
+  },
+  "setupWizard_presets_blank_label": {
+    "message": "ശൂന്യം"
+  },
+  "setupWizard_presets_blank_description": {
+    "message": "ശൂന്യമായ നിരീക്ഷണപ്പട്ടികയിൽ തുടങ്ങി വിശദാംശങ്ങൾ സ്വയം ക്രമീകരിക്കുക."
+  },
+  "setupWizard_startModes_sources_label": {
+    "message": "ഉറവിടങ്ങളിൽ നിന്ന് തുടങ്ങുക"
+  },
+  "setupWizard_startModes_sources_description": {
+    "message": "പ്രാരംഭ ഫീഡുകളും ഐച്ഛിക നിരീക്ഷകനുമുള്ള നിരീക്ഷണപ്പട്ടിക സൃഷ്ടിക്കുക."
+  },
+  "setupWizard_startModes_topic_label": {
+    "message": "വിഷയത്തിൽ നിന്ന് തുടങ്ങുക"
+  },
+  "setupWizard_startModes_topic_description": {
+    "message": "ആദ്യം പട്ടികയുടെ ലക്ഷ്യം സൃഷ്ടിക്കുക, തുടർന്ന് ശേഖരണം തുടങ്ങുന്നതിന് മുമ്പ് ഫീഡുകൾ ചേർക്കുക."
+  },
+  "setupWizard_startModes_report_goal_label": {
+    "message": "റിപ്പോർട്ട് ലക്ഷ്യത്തിൽ നിന്ന് തുടങ്ങുക"
+  },
+  "setupWizard_startModes_report_goal_description": {
+    "message": "ആദ്യം സംക്ഷിപ്തത്തിന്റെ ലക്ഷ്യം നിർവചിക്കുക, തുടർന്ന് ഉറവിടങ്ങളും ടെംപ്ലേറ്റുകളും ബന്ധിപ്പിക്കുക."
+  },
+  "setupWizard_boundaries_alerts": {
+    "message": "ഉള്ളടക്ക പൊരുത്ത അറിയിപ്പുകൾ പിന്നീട് ക്രമീകരിക്കാം. ഈ സജ്ജീകരണം നിരീക്ഷണപ്പട്ടികയും അതിന്റെ പ്രാരംഭ ശേഖരണ പരിധിയും നിർവചിക്കുന്നു."
+  },
+  "overview_pipelineSetup_title": {
+    "message": "സംക്ഷിപ്തം സജ്ജമാക്കുക"
+  },
+  "overview_pipelineSetup_open": {
+    "message": "സംക്ഷിപ്തം സജ്ജമാക്കുക"
+  },
+  "overview_pipelineSetup_progress": {
+    "message": "സംക്ഷിപ്ത സജ്ജീകരണ ഘട്ടങ്ങൾ"
+  },
+  "overview_pipelineSetup_steps_sources": {
+    "message": "ഉറവിടങ്ങൾ"
+  },
+  "overview_pipelineSetup_steps_cadence": {
+    "message": "ആവൃത്തി"
+  },
+  "overview_pipelineSetup_steps_briefing": {
+    "message": "സംക്ഷിപ്തം"
+  },
+  "overview_pipelineSetup_steps_delivery": {
+    "message": "വിതരണം"
+  },
+  "overview_pipelineSetup_steps_test": {
+    "message": "പരിശോധന"
+  },
+  "overview_pipelineSetup_actions_next": {
+    "message": "{{step}} എന്നതിലേക്ക് തുടരുക"
+  },
+  "overview_pipelineSetup_source_existing": {
+    "message": "നിലവിലുള്ള ഉറവിടങ്ങൾ ഉപയോഗിക്കുക"
+  },
+  "overview_pipelineSetup_source_new": {
+    "message": "പുതിയ ഉറവിടം ചേർക്കുക"
+  },
+  "overview_pipelineSetup_source_fallback": {
+    "message": "ഉറവിടം {{id}}"
+  },
+  "overview_pipelineSetup_sources_help": {
+    "message": "നിലവിലുള്ള ഉറവിടങ്ങൾ തിരഞ്ഞെടുക്കുകയോ പുതിയത് ചേർക്കുകയോ ചെയ്ത ശേഷം ബന്ധം പരിശോധിക്കുക."
+  },
+  "overview_pipelineSetup_sourcesLoading": {
+    "message": "ഉറവിടങ്ങൾ ലോഡ് ചെയ്യുന്നു..."
+  },
+  "overview_pipelineSetup_sourcesError": {
+    "message": "സജ്ജീകരണത്തിനുള്ള ഫീഡുകൾ ലോഡ് ചെയ്യാനായില്ല."
+  },
+  "overview_pipelineSetup_sourceTest_action": {
+    "message": "ഉറവിടം പരിശോധിക്കുക"
+  },
+  "overview_pipelineSetup_sourceTest_ready": {
+    "message": "ഉറവിടം തയ്യാറാണ്."
+  },
+  "overview_pipelineSetup_sourceTest_cancelled": {
+    "message": "ഉറവിട പരിശോധന റദ്ദാക്കി."
+  },
+  "overview_pipelineSetup_sourceTest_failed": {
+    "message": "ഉറവിട പരിശോധന പരാജയപ്പെട്ടു. {{message}}"
+  },
+  "overview_pipelineSetup_sourceTest_summary": {
+    "message": "{{ready}} തയ്യാറാണ്, {{filtered}} ഫിൽട്ടർ ചെയ്തു"
+  },
+  "overview_pipelineSetup_sourceTest_sample": {
+    "message": "മാതൃകാ ഇനങ്ങൾ"
+  },
+  "overview_pipelineSetup_sourceTest_readyItem": {
+    "message": "തയ്യാർ"
+  },
+  "overview_pipelineSetup_sourceTest_filteredItem": {
+    "message": "ഫിൽട്ടർ ചെയ്തത്"
+  },
+  "overview_pipelineSetup_sourceTest_untitled": {
+    "message": "തലക്കെട്ടില്ലാത്ത ഇനം"
+  },
+  "overview_pipelineSetup_fields_sources": {
+    "message": "ഉറവിടങ്ങൾ"
+  },
+  "overview_pipelineSetup_fields_sourceName": {
+    "message": "ഉറവിടത്തിന്റെ പേര്"
+  },
+  "overview_pipelineSetup_fields_sourceUrl": {
+    "message": "ഉറവിട URL"
+  },
+  "overview_pipelineSetup_fields_monitorName": {
+    "message": "നിരീക്ഷകന്റെ പേര്"
+  },
+  "overview_pipelineSetup_fields_schedule": {
+    "message": "സമയക്രമം"
+  },
+  "overview_pipelineSetup_fields_timezone": {
+    "message": "സമയമേഖല"
+  },
+  "overview_pipelineSetup_fields_intervalEvery": {
+    "message": "ഓരോ"
+  },
+  "overview_pipelineSetup_fields_intervalUnit": {
+    "message": "ഇടവേളയുടെ യൂണിറ്റ്"
+  },
+  "overview_pipelineSetup_fields_weekday": {
+    "message": "ആഴ്ചയിലെ ദിവസം"
+  },
+  "overview_pipelineSetup_fields_hour": {
+    "message": "മണിക്കൂർ"
+  },
+  "overview_pipelineSetup_fields_minute": {
+    "message": "മിനിറ്റ്"
+  },
+  "overview_pipelineSetup_fields_cronExpression": {
+    "message": "Cron പ്രയോഗം"
+  },
+  "overview_pipelineSetup_fields_showName": {
+    "message": "പരിപാടിയുടെ പേര്"
+  },
+  "overview_pipelineSetup_fields_premise": {
+    "message": "പരിപാടിയുടെ ആശയം"
+  },
+  "overview_pipelineSetup_fields_includeAudio": {
+    "message": "ശബ്ദം"
+  },
+  "overview_pipelineSetup_fields_audioHelp": {
+    "message": "പ്ലേ ചെയ്യാവുന്ന ശബ്ദ പതിപ്പ് ചേർക്കുക."
+  },
+  "overview_pipelineSetup_fields_audioMinutes": {
+    "message": "ലക്ഷ്യ ദൈർഘ്യം മിനിറ്റിൽ"
+  },
+  "overview_pipelineSetup_fields_speakerCount": {
+    "message": "അവതാരകരുടെ എണ്ണം"
+  },
+  "overview_pipelineSetup_fields_template": {
+    "message": "റിപ്പോർട്ട് ടെംപ്ലേറ്റ്"
+  },
+  "overview_pipelineSetup_fields_audioProvider": {
+    "message": "ശബ്ദ ദാതാവിനെ മാറ്റുക"
+  },
+  "overview_pipelineSetup_fields_audioModel": {
+    "message": "ശബ്ദ മോഡൽ മാറ്റുക"
+  },
+  "overview_pipelineSetup_fields_customInstructions": {
+    "message": "ഇഷ്ടാനുസൃത എഡിറ്റോറിയൽ നിർദ്ദേശങ്ങൾ"
+  },
+  "overview_pipelineSetup_fields_emailDelivery": {
+    "message": "ഇമെയിൽ"
+  },
+  "overview_pipelineSetup_fields_emailRecipients": {
+    "message": "ഇമെയിൽ സ്വീകർത്താക്കൾ"
+  },
+  "overview_pipelineSetup_fields_chatbookDelivery": {
+    "message": "Chatbook"
+  },
+  "overview_pipelineSetup_fields_chatbookTitle": {
+    "message": "Chatbook തലക്കെട്ട്"
+  },
+  "overview_pipelineSetup_schedule_manual": {
+    "message": "കൈമുറയായി മാത്രം"
+  },
+  "overview_pipelineSetup_schedule_interval": {
+    "message": "ഓരോ N മണിക്കൂർ അല്ലെങ്കിൽ മിനിറ്റ്"
+  },
+  "overview_pipelineSetup_schedule_daily": {
+    "message": "ദിവസവും"
+  },
+  "overview_pipelineSetup_schedule_weekdays": {
+    "message": "പ്രവൃത്തിദിവസങ്ങൾ"
+  },
+  "overview_pipelineSetup_schedule_weekly": {
+    "message": "ആഴ്ചതോറും"
+  },
+  "overview_pipelineSetup_schedule_advanced": {
+    "message": "വിപുലമായ Cron"
+  },
+  "overview_pipelineSetup_intervalUnits_hours": {
+    "message": "മണിക്കൂർ"
+  },
+  "overview_pipelineSetup_intervalUnits_minutes": {
+    "message": "മിനിറ്റ്"
+  },
+  "overview_pipelineSetup_weekdays_monday": {
+    "message": "തിങ്കളാഴ്ച"
+  },
+  "overview_pipelineSetup_weekdays_tuesday": {
+    "message": "ചൊവ്വാഴ്ച"
+  },
+  "overview_pipelineSetup_weekdays_wednesday": {
+    "message": "ബുധനാഴ്ച"
+  },
+  "overview_pipelineSetup_weekdays_thursday": {
+    "message": "വ്യാഴാഴ്ച"
+  },
+  "overview_pipelineSetup_weekdays_friday": {
+    "message": "വെള്ളിയാഴ്ച"
+  },
+  "overview_pipelineSetup_weekdays_saturday": {
+    "message": "ശനിയാഴ്ച"
+  },
+  "overview_pipelineSetup_weekdays_sunday": {
+    "message": "ഞായറാഴ്ച"
+  },
+  "overview_pipelineSetup_advancedCron": {
+    "message": "വിപുലമായ Cron"
+  },
+  "overview_pipelineSetup_nextOccurrence": {
+    "message": "അടുത്ത പ്രവർത്തനം"
+  },
+  "overview_pipelineSetup_manualOccurrence": {
+    "message": "കൈമുറയായി മാത്രം"
+  },
+  "overview_pipelineSetup_nextOccurrencePending": {
+    "message": "കൃത്യമായ സമയം കണക്കാക്കാൻ സാധുവായ സമയക്രമം സംരക്ഷിക്കുക."
+  },
+  "overview_pipelineSetup_briefing_question": {
+    "message": "നിങ്ങൾ എന്താണ് സൃഷ്ടിക്കുന്നത്?"
+  },
+  "overview_pipelineSetup_briefing_help": {
+    "message": "എഡിറ്റോറിയൽ രൂപം തിരഞ്ഞെടുക്കുക. എല്ലാ തിരഞ്ഞെടുപ്പുകളും നിങ്ങൾ തിരഞ്ഞെടുത്ത ഉറവിടങ്ങളെ അടിസ്ഥാനമാക്കും."
+  },
+  "overview_pipelineSetup_briefing_advanced": {
+    "message": "വിപുലമായ സംക്ഷിപ്ത ക്രമീകരണങ്ങൾ"
+  },
+  "overview_pipelineSetup_formats_concise_briefing": {
+    "message": "ചുരുക്ക സംക്ഷിപ്തം"
+  },
+  "overview_pipelineSetup_formats_solo_update": {
+    "message": "ഒറ്റ അവതാരക പുതുക്കൽ"
+  },
+  "overview_pipelineSetup_formats_host_discussion": {
+    "message": "അവതാരകരുടെ ചർച്ച"
+  },
+  "overview_pipelineSetup_formats_sportscast": {
+    "message": "കായിക സംപ്രേഷണം"
+  },
+  "overview_pipelineSetup_formats_culture_roundtable": {
+    "message": "സാംസ്കാരിക വട്ടമേശ"
+  },
+  "overview_pipelineSetup_formats_custom": {
+    "message": "ഇഷ്ടാനുസൃതം"
+  },
+  "overview_pipelineSetup_speaker_defaultLabel": {
+    "message": "പങ്കാളി {{index}}"
+  },
+  "overview_pipelineSetup_speaker_defaultRole": {
+    "message": "അവതാരകൻ"
+  },
+  "overview_pipelineSetup_speaker_labelField": {
+    "message": "പങ്കാളി {{index}} ലേബൽ"
+  },
+  "overview_pipelineSetup_speaker_roleField": {
+    "message": "പങ്കാളി {{index}} ചുമതല"
+  },
+  "overview_pipelineSetup_speaker_voiceField": {
+    "message": "പങ്കാളി {{index}} ശബ്ദം"
+  },
+  "overview_pipelineSetup_speaker_personaField": {
+    "message": "പങ്കാളി {{index}} വ്യക്തിത്വം"
+  },
+  "overview_pipelineSetup_preview_generate": {
+    "message": "റിപ്പോർട്ട് പ്രിവ്യൂ"
+  },
+  "overview_pipelineSetup_preview_diagnostics": {
+    "message": "പ്രിവ്യൂ പരിശോധന"
+  },
+  "overview_pipelineSetup_preview_context": {
+    "message": "പ്രിവ്യൂ പ്രവർത്തനം: {{runId}}"
+  },
+  "overview_pipelineSetup_preview_noRunContext": {
+    "message": "ഈ റിപ്പോർട്ട് പ്രിവ്യൂ ചെയ്യുന്നതിന് മുമ്പ് ഒരു നിരീക്ഷണം വിജയകരമായി പ്രവർത്തിപ്പിക്കുക."
+  },
+  "overview_pipelineSetup_preview_templateRequired": {
+    "message": "പ്രിവ്യൂ സൃഷ്ടിക്കുന്നതിന് മുമ്പ് ഒരു ടെംപ്ലേറ്റ് തിരഞ്ഞെടുക്കുക."
+  },
+  "overview_pipelineSetup_preview_templateEmpty": {
+    "message": "തിരഞ്ഞെടുത്ത ടെംപ്ലേറ്റ് ശൂന്യമാണ്."
+  },
+  "overview_pipelineSetup_preview_emptyResult": {
+    "message": "പ്രിവ്യൂ തയ്യാറാക്കിയ ഉള്ളടക്കം നൽകിയില്ല."
+  },
+  "overview_pipelineSetup_preview_error": {
+    "message": "പ്രിവ്യൂ സൃഷ്ടിക്കാനായില്ല."
+  },
+  "overview_pipelineSetup_delivery_help": {
+    "message": "റിപ്പോർട്ടുകൾ എപ്പോഴും ഉൾപ്പെടും. തിരഞ്ഞെടുത്ത ഫലങ്ങൾ തയ്യാറാകുന്നതുവരെ ബാഹ്യ വിതരണം കാത്തിരിക്കും."
+  },
+  "overview_pipelineSetup_delivery_reports": {
+    "message": "റിപ്പോർട്ടുകൾ"
+  },
+  "overview_pipelineSetup_delivery_required": {
+    "message": "നിർബന്ധിത സംഭരണം"
+  },
+  "overview_pipelineSetup_delivery_alwaysOn": {
+    "message": "എപ്പോഴും പ്രവർത്തനം"
+  },
+  "overview_pipelineSetup_receipt_labels_schedule": {
+    "message": "സമയക്രമം"
+  },
+  "overview_pipelineSetup_receipt_labels_sources": {
+    "message": "ഉറവിടങ്ങൾ"
+  },
+  "overview_pipelineSetup_receipt_labels_artifacts": {
+    "message": "ഫലങ്ങൾ"
+  },
+  "overview_pipelineSetup_receipt_labels_format": {
+    "message": "രൂപം"
+  },
+  "overview_pipelineSetup_receipt_labels_showName": {
+    "message": "പരിപാടിയുടെ പേര്"
+  },
+  "overview_pipelineSetup_receipt_labels_cast": {
+    "message": "അവതാരകർ"
+  },
+  "overview_pipelineSetup_receipt_labels_duration": {
+    "message": "ലക്ഷ്യ ദൈർഘ്യം"
+  },
+  "overview_pipelineSetup_receipt_labels_destinations": {
+    "message": "ലക്ഷ്യസ്ഥാനങ്ങൾ"
+  },
+  "overview_pipelineSetup_receipt_schedule_manual": {
+    "message": "കൈമുറയായി മാത്രം"
+  },
+  "overview_pipelineSetup_receipt_schedule_scheduled": {
+    "message": "{{date}} ({{timezone}})"
+  },
+  "overview_pipelineSetup_receipt_sources": {
+    "message": "{{count}} ഉറവിടങ്ങൾ"
+  },
+  "overview_pipelineSetup_receipt_artifacts_textReport": {
+    "message": "എഴുത്ത് റിപ്പോർട്ട്"
+  },
+  "overview_pipelineSetup_receipt_artifacts_showNotes": {
+    "message": "പരിപാടി കുറിപ്പുകൾ"
+  },
+  "overview_pipelineSetup_receipt_artifacts_audio": {
+    "message": "ശബ്ദം"
+  },
+  "overview_pipelineSetup_receipt_formats_concise_briefing": {
+    "message": "ചുരുക്ക സംക്ഷിപ്തം"
+  },
+  "overview_pipelineSetup_receipt_formats_solo_update": {
+    "message": "ഒറ്റ അവതാരക പുതുക്കൽ"
+  },
+  "overview_pipelineSetup_receipt_formats_host_discussion": {
+    "message": "അവതാരകരുടെ ചർച്ച"
+  },
+  "overview_pipelineSetup_receipt_formats_sportscast": {
+    "message": "കായിക സംപ്രേഷണം"
+  },
+  "overview_pipelineSetup_receipt_formats_culture_roundtable": {
+    "message": "സാംസ്കാരിക വട്ടമേശ"
+  },
+  "overview_pipelineSetup_receipt_formats_custom": {
+    "message": "ഇഷ്ടാനുസൃത പരിപാടി"
+  },
+  "overview_pipelineSetup_receipt_speakerStyle_1": {
+    "message": "ഒറ്റ അവതാരകൻ"
+  },
+  "overview_pipelineSetup_receipt_speakerStyle_2": {
+    "message": "രണ്ട് അവതാരകർ"
+  },
+  "overview_pipelineSetup_receipt_speakerStyle_3": {
+    "message": "മൂന്ന് അവതാരകർ"
+  },
+  "overview_pipelineSetup_receipt_speakerStyle_4": {
+    "message": "നാല് അവതാരകർ"
+  },
+  "overview_pipelineSetup_receipt_programWithSpeakers": {
+    "message": "{{speakers}} {{format}}"
+  },
+  "overview_pipelineSetup_receipt_cast": {
+    "message": "{{count}} പങ്കാളികൾ"
+  },
+  "overview_pipelineSetup_receipt_duration": {
+    "message": "{{count}} മിനിറ്റ് ലക്ഷ്യം"
+  },
+  "overview_pipelineSetup_receipt_destinations_email": {
+    "message": "ഇമെയിൽ: {{recipients}}"
+  },
+  "overview_pipelineSetup_receipt_destinations_chatbook": {
+    "message": "Chatbook: {{title}}"
+  },
+  "overview_pipelineSetup_receipt_untitledChatbook": {
+    "message": "തലക്കെട്ടില്ല"
+  },
+  "overview_pipelineSetup_receipt_dstChange": {
+    "message": "പകൽവെളിച്ച സമയമാറ്റത്തിന് ശേഷം അടുത്ത പ്രവർത്തനം {{timezoneName}} ഉപയോഗിക്കുന്നു: {{date}}."
+  },
+  "overview_pipelineSetup_test_providerDisclosure": {
+    "message": "പരിശോധനകൾ നിങ്ങൾ ക്രമീകരിച്ച LLM, എഴുത്തിൽ നിന്ന് ശബ്ദത്തിലേക്കുള്ള ദാതാക്കൾ എന്നിവ ഉപയോഗിക്കുന്നു. മാതൃക 60 സെക്കൻഡായി പരിമിതമാണ്; പൂർണ്ണ പരിശോധന ലക്ഷ്യ ദൈർഘ്യം ഉപയോഗിക്കുന്നു."
+  },
+  "overview_pipelineSetup_test_textProviderDisclosure": {
+    "message": "പരിശോധനകൾ നിങ്ങൾ ക്രമീകരിച്ച LLM ദാതാവിനെ ഉപയോഗിക്കുന്നു. എഴുത്ത് മാത്രമുള്ള പരിശോധനകൾ ശബ്ദ പരിവർത്തനം ഉപയോഗിക്കില്ല."
+  },
+  "overview_pipelineSetup_test_receipt": {
+    "message": "സജീവമാക്കൽ സംഗ്രഹം"
+  },
+  "overview_pipelineSetup_test_manualReceipt": {
+    "message": "ഈ സംക്ഷിപ്തം കൈമുറയായി പ്രവർത്തിച്ച് തിരഞ്ഞെടുത്ത ഫലങ്ങൾ റിപ്പോർട്ടുകളിൽ സംരക്ഷിക്കും; പരിശോധന അയയ്ക്കുക തിരഞ്ഞെടുക്കാത്ത പക്ഷം ബാഹ്യ ലക്ഷ്യസ്ഥാനത്തെ ബന്ധപ്പെടില്ല."
+  },
+  "overview_pipelineSetup_test_progress": {
+    "message": "പരിശോധന പുരോഗതി"
+  },
+  "overview_pipelineSetup_test_stages_collection": {
+    "message": "ഉറവിടങ്ങൾ ശേഖരിക്കുക"
+  },
+  "overview_pipelineSetup_test_stages_selection": {
+    "message": "പുതുക്കലുകൾ തിരഞ്ഞെടുക്കുക"
+  },
+  "overview_pipelineSetup_test_stages_text": {
+    "message": "റിപ്പോർട്ട് സൃഷ്ടിക്കുക"
+  },
+  "overview_pipelineSetup_test_stages_audio": {
+    "message": "ശബ്ദം സൃഷ്ടിക്കുക"
+  },
+  "overview_pipelineSetup_test_stages_persistence": {
+    "message": "റിപ്പോർട്ടുകളിൽ സംരക്ഷിക്കുക"
+  },
+  "overview_pipelineSetup_test_stages_audioScript": {
+    "message": "ശബ്ദ തിരക്കഥ തയ്യാറാക്കുക"
+  },
+  "overview_pipelineSetup_test_stages_audioScriptPersistence": {
+    "message": "ശബ്ദ തിരക്കഥ സംരക്ഷിക്കുക"
+  },
+  "overview_pipelineSetup_test_stages_audioPersistence": {
+    "message": "ശബ്ദം റിപ്പോർട്ടുകളിൽ സംരക്ഷിക്കുക"
+  },
+  "overview_pipelineSetup_test_stages_delivery": {
+    "message": "പരിശോധന വിതരണം പരിശോധിക്കുക"
+  },
+  "overview_pipelineSetup_test_stages_deliveryAdapter": {
+    "message": "{{adapter}} എന്നതിലേക്ക് നൽകുക"
+  },
+  "overview_pipelineSetup_test_stages_unknown": {
+    "message": "ഘട്ടം {{stage}}"
+  },
+  "overview_pipelineSetup_test_sample": {
+    "message": "60 സെക്കൻഡ് മാതൃക സൃഷ്ടിക്കുക"
+  },
+  "overview_pipelineSetup_test_full": {
+    "message": "പൂർണ്ണ പരിശോധനാ പരിപാടി സൃഷ്ടിക്കുക"
+  },
+  "overview_pipelineSetup_test_text": {
+    "message": "പരിശോധനാ റിപ്പോർട്ട് സൃഷ്ടിക്കുക"
+  },
+  "overview_pipelineSetup_test_send": {
+    "message": "പരിശോധന അയയ്ക്കുക"
+  },
+  "overview_pipelineSetup_test_activate": {
+    "message": "സമയക്രമം സജീവമാക്കുക"
+  },
+  "overview_pipelineSetup_test_ready": {
+    "message": "പരിശോധന ആരംഭിച്ചു. സമയക്രമം സജീവമാക്കുന്നതുവരെ ഈ കരട് പ്രവർത്തനരഹിതമായിരിക്കും."
+  },
+  "overview_pipelineSetup_test_cancelled": {
+    "message": "പരിശോധന റദ്ദാക്കി. കരട് സംരക്ഷിച്ചു."
+  },
+  "overview_pipelineSetup_test_failed": {
+    "message": "പരിശോധന പരാജയപ്പെട്ടു. കരട് സംരക്ഷിച്ചു. {{message}}"
+  },
+  "overview_pipelineSetup_test_status_not_started": {
+    "message": "ആരംഭിച്ചിട്ടില്ല"
+  },
+  "overview_pipelineSetup_test_status_queued": {
+    "message": "നിരയിൽ"
+  },
+  "overview_pipelineSetup_test_status_running": {
+    "message": "പ്രവർത്തിക്കുന്നു"
+  },
+  "overview_pipelineSetup_test_status_ready": {
+    "message": "തയ്യാർ"
+  },
+  "overview_pipelineSetup_test_status_failed": {
+    "message": "പരാജയം"
+  },
+  "overview_pipelineSetup_test_status_skipped": {
+    "message": "ഒഴിവാക്കി"
+  },
+  "overview_pipelineSetup_test_status_cancelled": {
+    "message": "റദ്ദാക്കി"
+  },
+  "overview_pipelineSetup_activate_ready": {
+    "message": "സമയക്രമം സജീവമാക്കി."
+  },
+  "overview_pipelineSetup_activate_failed": {
+    "message": "സമയക്രമം സജീവമാക്കാനായില്ല. കരട് സംരക്ഷിച്ചു. {{message}}"
+  },
+  "overview_pipelineSetup_validation_sourcesRequired": {
+    "message": "തുടരുന്നതിന് മുമ്പ് കുറഞ്ഞത് ഒരു ഉറവിടമെങ്കിലും തിരഞ്ഞെടുക്കുക."
+  },
+  "overview_pipelineSetup_validation_sourceNameRequired": {
+    "message": "ഉറവിടത്തിന്റെ പേര് നൽകുക."
+  },
+  "overview_pipelineSetup_validation_sourceUrlInvalid": {
+    "message": "സാധുവായ HTTP അല്ലെങ്കിൽ HTTPS ഉറവിട URL നൽകുക."
+  },
+  "overview_pipelineSetup_validation_monitorNameRequired": {
+    "message": "നിരീക്ഷകന്റെ പേര് നൽകുക."
+  },
+  "overview_pipelineSetup_validation_timezoneInvalid": {
+    "message": "സാധുവായ IANA സമയമേഖല നൽകുക."
+  },
+  "overview_pipelineSetup_validation_intervalInvalid": {
+    "message": "പിന്തുണയ്ക്കുന്ന സമയക്രമ ഇടവേള നൽകുക."
+  },
+  "overview_pipelineSetup_validation_hourInvalid": {
+    "message": "0 മുതൽ 23 വരെയുള്ള മണിക്കൂർ നൽകുക."
+  },
+  "overview_pipelineSetup_validation_minuteInvalid": {
+    "message": "0 മുതൽ 59 വരെയുള്ള മിനിറ്റ് നൽകുക."
+  },
+  "overview_pipelineSetup_validation_cronInvalid": {
+    "message": "സാധുവായ അഞ്ച്-ഫീൽഡ് Cron പ്രയോഗം നൽകുക."
+  },
+  "overview_pipelineSetup_validation_cronTooFrequent": {
+    "message": "കുറഞ്ഞത് അഞ്ച് മിനിറ്റ് ഇടവേളയുള്ള സമയക്രമം തിരഞ്ഞെടുക്കുക."
+  },
+  "overview_pipelineSetup_validation_templateRequired": {
+    "message": "റിപ്പോർട്ട് ടെംപ്ലേറ്റ് നൽകുക."
+  },
+  "overview_pipelineSetup_validation_castSizeInvalid": {
+    "message": "ഒന്ന് മുതൽ നാല് വരെ പങ്കാളികളെ തിരഞ്ഞെടുക്കുക."
+  },
+  "overview_pipelineSetup_validation_castIdsInvalid": {
+    "message": "ഓരോ പങ്കാളിക്കും തനതായ തിരിച്ചറിയൽ വേണം."
+  },
+  "overview_pipelineSetup_validation_castVoicesRequired": {
+    "message": "ഓരോ പങ്കാളിക്കും ഒരു ശബ്ദം തിരഞ്ഞെടുക്കുക."
+  },
+  "overview_pipelineSetup_validation_audioMinutesInvalid": {
+    "message": "1 മുതൽ 60 മിനിറ്റ് വരെയുള്ള ദൈർഘ്യം നൽകുക."
+  },
+  "overview_pipelineSetup_validation_emailInvalid": {
+    "message": "കുറഞ്ഞത് ഒരു സാധുവായ ഇമെയിൽ വിലാസമെങ്കിലും നൽകുക."
+  },
+  "overview_pipelineSetup_validationError": {
+    "message": "തുടരുന്നതിന് മുമ്പ് അടയാളപ്പെടുത്തിയ ഫീൽഡുകൾ പരിശോധിക്കുക."
   }
 }

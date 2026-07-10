@@ -35,6 +35,7 @@ describe("watchlists briefing receipt", () => {
     })
 
     expect(receipt).toMatchObject({
+      scheduleMode: "scheduled",
       outcomeNoun: "episode",
       programFormat: "sportscast",
       speakerCount: 2,
@@ -44,13 +45,9 @@ describe("watchlists briefing receipt", () => {
       timezone: "America/Los_Angeles",
       timezoneAbbreviation: "PDT"
     })
-    expect(receipt.sentence).toContain(
-      "Sunday, July 12 at 6:00 PM PDT (America/Los_Angeles)"
-    )
-    expect(receipt.sentence).toContain("8 sources")
-    expect(receipt.sentence).toContain("two-host sportscast")
-    expect(receipt.sentence).toContain("targeting 20 minutes")
-    expect(receipt.sentence).toContain("save both in Reports")
+    expect(receipt.artifacts).toEqual(["show_notes", "audio"])
+    expect(receipt.destinations).toEqual(["reports"])
+    expect(receipt).not.toHaveProperty("sentence")
   })
 
   it("reports the DST offset change between consecutive occurrences", () => {
@@ -73,8 +70,9 @@ describe("watchlists briefing receipt", () => {
     })
 
     expect(receipt.timezoneAbbreviation).toBe("PDT")
-    expect(receipt.dstNote).toContain("PST")
-    expect(receipt.dstNote).toContain("America/Los_Angeles")
+    expect(receipt.hasDstChange).toBe(true)
+    expect(receipt.followingTimezoneAbbreviation).toBe("PST")
+    expect(receipt.followingRunLabel).toBeTruthy()
   })
 
   it("names deterministic reviewed email and Chatbook destinations", () => {
@@ -105,12 +103,7 @@ describe("watchlists briefing receipt", () => {
       "zeta@example.com"
     ])
     expect(receipt.chatbookTitle).toBe("Morning Review")
-    expect(receipt.sentence).toContain(
-      "email the outcome to alpha@example.com and zeta@example.com"
-    )
-    expect(receipt.sentence).toContain('save it to Chatbook “Morning Review”')
-    expect(receipt.sentence).toContain("targeting 8 minutes")
-    expect(receipt.sentence).toContain("Reports")
+    expect(receipt.destinations).toEqual(["reports", "email", "chatbook"])
   })
 
   it("formats 24-hour locales without an undefined day period", () => {
@@ -131,7 +124,71 @@ describe("watchlists briefing receipt", () => {
     })
 
     expect(receipt.nextRunLabel).not.toContain("undefined")
-    expect(receipt.sentence).not.toContain("undefined")
     expect(receipt.nextRunLabel).toContain("18:00")
+  })
+
+  it("represents a manual text-only receipt without invented schedule or audio copy", () => {
+    const contract = buildBriefingPipelineContract({
+      monitorName: "Manual Brief",
+      scope: { sources: [1, 2] },
+      active: false,
+      templateName: "briefing_markdown",
+      audioEnabled: false
+    })
+
+    const receipt = buildBriefingReceiptModel({
+      contract,
+      sourceCount: 2,
+      timezone: "Europe/Berlin",
+      locale: "de-DE"
+    })
+
+    expect(receipt).toMatchObject({
+      scheduleMode: "manual",
+      artifacts: ["text_report"],
+      destinations: ["reports"],
+      timezone: "Europe/Berlin"
+    })
+    expect(receipt.nextRunAt).toBeUndefined()
+    expect(receipt.nextRunLabel).toBeUndefined()
+    expect(receipt.speakerCount).toBe(0)
+  })
+
+  it.each([
+    "concise_briefing",
+    "solo_update",
+    "host_discussion",
+    "sportscast",
+    "culture_roundtable",
+    "custom"
+  ] as const)("keeps %s as contract data rather than receipt grammar", (programFormat) => {
+    const contract = buildBriefingPipelineContract({
+      monitorName: "Program",
+      scope: { sources: [1] },
+      active: true,
+      programFormat,
+      outcomeNoun: programFormat === "concise_briefing" ? "briefing" : "episode",
+      templateName: "briefing_markdown",
+      audioEnabled: true,
+      targetAudioMinutes: 12,
+      audioCast: {
+        speaker_count: 2,
+        speakers: [
+          { id: "one", label: "One", voice: "alloy" },
+          { id: "two", label: "Two", voice: "nova" }
+        ]
+      }
+    })
+
+    expect(buildBriefingReceiptModel({
+      contract,
+      sourceCount: 1,
+      timezone: "UTC"
+    })).toMatchObject({
+      programFormat,
+      speakerCount: 2,
+      targetMinutes: 12,
+      artifacts: ["text_report", "audio"]
+    })
   })
 })

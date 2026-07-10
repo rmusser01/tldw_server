@@ -17,5 +17,294 @@
       "generateError": "キュー済み項目からレポートを生成できませんでした。",
       "generateReport": "キューからレポートを生成"
     }
+  },
+  "setupWizard": {
+    "title": "ウォッチリストを作成",
+    "containerTitle": "ウォッチリストを作成",
+    "containerHelp": "最初にプロジェクトのコンテナーを作成します。ソース、頻度、ブリーフィング、配信、テストは一つの設定フローで続けて構成できます。",
+    "actions": {
+      "continue": "ソースへ進む"
+    },
+    "sections": {
+      "preset": "分野のプリセット"
+    },
+    "fields": {
+      "name": "ウォッチリスト名",
+      "objective": "目的"
+    },
+    "validation": {
+      "nameRequired": "ウォッチリスト名を入力してください。"
+    },
+    "errors": {
+      "createFailed": "ウォッチリストを作成できませんでした。"
+    },
+    "presets": {
+      "cti_osint": {
+        "label": "CTI / OSINT",
+        "description": "脆弱性、マルウェア、攻撃者、勧告、ソースの変更を追跡します。"
+      },
+      "news": {
+        "label": "ニュース",
+        "description": "進行中の出来事、人物、組織、ソースの多様性を追跡します。"
+      },
+      "general": {
+        "label": "一般",
+        "description": "トピックを追跡し、確認用の更新情報を収集します。"
+      },
+      "blank": {
+        "label": "空白",
+        "description": "空のウォッチリストから始めて、詳細を自分で設定します。"
+      }
+    },
+    "startModes": {
+      "sources": {
+        "label": "ソースから始める",
+        "description": "初期フィードと任意のモニターを含むウォッチリストを作成します。"
+      },
+      "topic": {
+        "label": "トピックから始める",
+        "description": "最初にウォッチリストの目的を作成し、収集開始前にフィードを追加します。"
+      },
+      "report_goal": {
+        "label": "レポート目標から始める",
+        "description": "最初にブリーフィングの目標を定義し、ソースとテンプレートを接続します。"
+      }
+    },
+    "boundaries": {
+      "alerts": "コンテンツ一致アラートは後で設定します。この設定ではウォッチリストと初期収集範囲を定義します。"
+    }
+  },
+  "overview": {
+    "pipelineSetup": {
+      "title": "ブリーフィングを設定",
+      "open": "ブリーフィングを設定",
+      "progress": "ブリーフィング設定の手順",
+      "steps": {
+        "sources": "ソース",
+        "cadence": "頻度",
+        "briefing": "ブリーフィング",
+        "delivery": "配信",
+        "test": "テスト"
+      },
+      "actions": {
+        "next": "{{step}}へ進む"
+      },
+      "source": {
+        "existing": "既存のソースを使用",
+        "new": "新しいソースを追加",
+        "fallback": "ソース {{id}}"
+      },
+      "sources": {
+        "help": "既存のソースを選ぶか新しいソースを追加して、接続をテストします。"
+      },
+      "sourcesLoading": "ソースを読み込んでいます...",
+      "sourcesError": "設定用のフィードを読み込めませんでした。",
+      "sourceTest": {
+        "action": "ソースをテスト",
+        "ready": "ソースの準備ができました。",
+        "cancelled": "ソースのテストをキャンセルしました。",
+        "failed": "ソースのテストに失敗しました。{{message}}",
+        "summary": "準備完了 {{ready}} 件、除外 {{filtered}} 件",
+        "sample": "サンプル項目",
+        "readyItem": "準備完了",
+        "filteredItem": "除外",
+        "untitled": "無題の項目"
+      },
+      "fields": {
+        "sources": "ソース",
+        "sourceName": "ソース名",
+        "sourceUrl": "ソース URL",
+        "monitorName": "モニター名",
+        "schedule": "スケジュール",
+        "timezone": "タイムゾーン",
+        "intervalEvery": "間隔",
+        "intervalUnit": "間隔の単位",
+        "weekday": "曜日",
+        "hour": "時",
+        "minute": "分",
+        "cronExpression": "Cron 式",
+        "showName": "番組名",
+        "premise": "番組の概要",
+        "includeAudio": "音声",
+        "audioHelp": "再生できる音声版を追加します。",
+        "audioMinutes": "目標時間（分）",
+        "speakerCount": "出演者数",
+        "template": "レポートテンプレート",
+        "audioProvider": "音声プロバイダーを上書き",
+        "audioModel": "音声モデルを上書き",
+        "customInstructions": "カスタム編集指示",
+        "emailDelivery": "メール",
+        "emailRecipients": "メール受信者",
+        "chatbookDelivery": "Chatbook",
+        "chatbookTitle": "Chatbook のタイトル"
+      },
+      "schedule": {
+        "manual": "手動のみ",
+        "interval": "N 時間または N 分ごと",
+        "daily": "毎日",
+        "weekdays": "平日",
+        "weekly": "毎週",
+        "advanced": "高度な Cron"
+      },
+      "intervalUnits": {
+        "hours": "時間",
+        "minutes": "分"
+      },
+      "weekdays": {
+        "monday": "月曜日",
+        "tuesday": "火曜日",
+        "wednesday": "水曜日",
+        "thursday": "木曜日",
+        "friday": "金曜日",
+        "saturday": "土曜日",
+        "sunday": "日曜日"
+      },
+      "advancedCron": "高度な Cron",
+      "nextOccurrence": "次回の実行",
+      "manualOccurrence": "手動のみ",
+      "nextOccurrencePending": "正確な時刻を計算するには、有効なスケジュールを保存してください。",
+      "briefing": {
+        "question": "何を作成しますか？",
+        "help": "編集形式を選択してください。どの選択肢も、選択したソースに基づきます。",
+        "advanced": "ブリーフィングの詳細設定"
+      },
+      "formats": {
+        "concise_briefing": "簡潔なブリーフィング",
+        "solo_update": "一人での更新",
+        "host_discussion": "司会者の対談",
+        "sportscast": "スポーツ中継",
+        "culture_roundtable": "文化座談会",
+        "custom": "カスタム"
+      },
+      "speaker": {
+        "defaultLabel": "出演者 {{index}}",
+        "defaultRole": "司会者",
+        "labelField": "出演者 {{index}} の表示名",
+        "roleField": "出演者 {{index}} の役割",
+        "voiceField": "出演者 {{index}} の声",
+        "personaField": "出演者 {{index}} の人物像"
+      },
+      "preview": {
+        "generate": "レポートをプレビュー",
+        "diagnostics": "プレビュー診断",
+        "context": "プレビュー実行: {{runId}}",
+        "noRunContext": "このレポートをプレビューする前に、モニターを正常に実行してください。",
+        "templateRequired": "プレビューを生成する前にテンプレートを選択してください。",
+        "templateEmpty": "選択したテンプレートは空です。",
+        "emptyResult": "プレビューから表示内容が返されませんでした。",
+        "error": "プレビューを生成できませんでした。"
+      },
+      "delivery": {
+        "help": "レポートは常に含まれます。外部配信は、選択した成果物の準備が完了するまで待機します。",
+        "reports": "レポート",
+        "required": "必須ストレージ",
+        "alwaysOn": "常に有効"
+      },
+      "receipt": {
+        "labels": {
+          "schedule": "スケジュール",
+          "sources": "ソース",
+          "artifacts": "成果物",
+          "format": "形式",
+          "showName": "番組名",
+          "cast": "出演者",
+          "duration": "目標時間",
+          "destinations": "配信先"
+        },
+        "schedule": {
+          "manual": "手動のみ",
+          "scheduled": "{{date}}（{{timezone}}）"
+        },
+        "sources": "{{count}} 件のソース",
+        "artifacts": {
+          "textReport": "テキストレポート",
+          "showNotes": "番組ノート",
+          "audio": "音声"
+        },
+        "formats": {
+          "concise_briefing": "簡潔なブリーフィング",
+          "solo_update": "一人での更新",
+          "host_discussion": "司会者の対談",
+          "sportscast": "スポーツ中継",
+          "culture_roundtable": "文化座談会",
+          "custom": "カスタム番組"
+        },
+        "speakerStyle": {
+          "1": "一人",
+          "2": "司会者 2 人",
+          "3": "司会者 3 人",
+          "4": "司会者 4 人"
+        },
+        "programWithSpeakers": "{{speakers}}の{{format}}",
+        "cast": "出演者 {{count}} 人",
+        "duration": "目標 {{count}} 分",
+        "destinations": {
+          "email": "メール: {{recipients}}",
+          "chatbook": "Chatbook: {{title}}"
+        },
+        "untitledChatbook": "無題",
+        "dstChange": "夏時間のオフセット変更後、次の実行では {{timezoneName}} が使用されます: {{date}}。"
+      },
+      "test": {
+        "providerDisclosure": "テストでは、設定済みの LLM と音声合成プロバイダーを使用します。サンプルは 60 秒に制限され、完全テストでは目標時間を使用します。",
+        "textProviderDisclosure": "テストでは設定済みの LLM プロバイダーを使用します。テキストのみのテストでは音声合成を使用しません。",
+        "receipt": "有効化の概要",
+        "manualReceipt": "このブリーフィングは手動で実行され、選択した成果物を「レポート」に保存します。「テストを送信」を選ばない限り、外部の配信先には送信しません。",
+        "progress": "テストの進行状況",
+        "stages": {
+          "collection": "ソースを収集",
+          "selection": "更新を選択",
+          "text": "レポートを作成",
+          "audio": "音声を作成",
+          "persistence": "レポートに保存",
+          "audioScript": "音声台本を作成",
+          "audioScriptPersistence": "音声台本を保存",
+          "audioPersistence": "音声をレポートに保存",
+          "delivery": "テスト配信を確認",
+          "deliveryAdapter": "{{adapter}} に配信",
+          "unknown": "ステージ {{stage}}"
+        },
+        "sample": "60 秒のサンプルを生成",
+        "full": "完全なテスト番組を生成",
+        "text": "テストレポートを生成",
+        "send": "テストを送信",
+        "activate": "スケジュールを有効化",
+        "ready": "テストを開始しました。スケジュールを有効化するまで、この下書きは無効のままです。",
+        "cancelled": "テストをキャンセルしました。下書きは保存されています。",
+        "failed": "テストに失敗しました。下書きは保存されています。{{message}}",
+        "status": {
+          "not_started": "未開始",
+          "queued": "待機中",
+          "running": "実行中",
+          "ready": "準備完了",
+          "failed": "失敗",
+          "skipped": "スキップ",
+          "cancelled": "キャンセル"
+        }
+      },
+      "activate": {
+        "ready": "スケジュールを有効化しました。",
+        "failed": "スケジュールを有効化できませんでした。下書きは保存されています。{{message}}"
+      },
+      "validation": {
+        "sourcesRequired": "続行する前にソースを 1 つ以上選択してください。",
+        "sourceNameRequired": "ソース名を入力してください。",
+        "sourceUrlInvalid": "有効な HTTP または HTTPS のソース URL を入力してください。",
+        "monitorNameRequired": "モニター名を入力してください。",
+        "timezoneInvalid": "有効な IANA タイムゾーンを入力してください。",
+        "intervalInvalid": "対応しているスケジュール間隔を入力してください。",
+        "hourInvalid": "0 から 23 の時を入力してください。",
+        "minuteInvalid": "0 から 59 の分を入力してください。",
+        "cronInvalid": "5 フィールドの有効な Cron 式を入力してください。",
+        "cronTooFrequent": "5 分以上の間隔があるスケジュールを選択してください。",
+        "templateRequired": "レポートテンプレートを入力してください。",
+        "castSizeInvalid": "出演者を 1 人から 4 人選択してください。",
+        "castIdsInvalid": "出演者ごとに一意の識別情報が必要です。",
+        "castVoicesRequired": "出演者ごとに声を選択してください。",
+        "audioMinutesInvalid": "1 分から 60 分の時間を入力してください。",
+        "emailInvalid": "有効なメールアドレスを 1 件以上入力してください。"
+      },
+      "validationError": "続行する前に、強調表示された項目を確認してください。"
+    }
   }
 }
