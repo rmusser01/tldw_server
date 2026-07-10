@@ -157,6 +157,13 @@ def test_workspace_sources_status_reports_readiness_and_missing_media(
     workspace_status_app,
     workspace_status_db,
 ):
+    workspace_status_db.update_workspace_source(
+        "ws-status",
+        "src-ready",
+        {"review_state": "reviewed"},
+        expected_version=1,
+        actor_user_id="reviewer-1",
+    )
     media_db = _MediaStatusDB(
         {
             1: {
@@ -200,6 +207,10 @@ def test_workspace_sources_status_reports_readiness_and_missing_media(
 
     sources = {source["id"]: source for source in payload["sources"]}
     assert sources["src-ready"]["state"] == "queryable"
+    assert sources["src-ready"]["review_state"] == "reviewed"
+    assert sources["src-ready"]["review_state_updated_at"]
+    assert sources["src-ready"]["reviewed_at"]
+    assert sources["src-ready"]["reviewed_by_user_id"] == "reviewer-1"
     assert sources["src-ready"]["readiness"]["text_extracted"] is True
     assert sources["src-ready"]["readiness"]["fts_ready"] is True
     assert sources["src-ready"]["readiness"]["vector_ready"] is True
