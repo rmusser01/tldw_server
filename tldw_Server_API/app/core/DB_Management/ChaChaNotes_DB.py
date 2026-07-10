@@ -5893,8 +5893,9 @@ CREATE INDEX IF NOT EXISTS idx_source_review_occurrences_due_status
   ON source_review_occurrences(status, due_at, id);
 CREATE INDEX IF NOT EXISTS idx_source_review_occurrences_deleted
   ON source_review_occurrences(deleted);
+DROP INDEX IF EXISTS idx_source_review_occurrences_due_list;
 CREATE INDEX IF NOT EXISTS idx_source_review_occurrences_due_list
-  ON source_review_occurrences(deleted, status, due_at, id);
+  ON source_review_occurrences(deleted, due_at, id, status);
 
 DROP TRIGGER IF EXISTS source_review_plans_sync_create;
 DROP TRIGGER IF EXISTS source_review_plans_sync_update;
@@ -10170,8 +10171,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "ON source_review_occurrences(status, due_at, id)",
             "CREATE INDEX IF NOT EXISTS idx_source_review_occurrences_deleted "
             "ON source_review_occurrences(deleted)",
+            "DROP INDEX IF EXISTS idx_source_review_occurrences_due_list",
             "CREATE INDEX IF NOT EXISTS idx_source_review_occurrences_due_list "
-            "ON source_review_occurrences(deleted, status, due_at, id)",
+            "ON source_review_occurrences(deleted, due_at, id, status)",
         ]
         try:
             for statement in statements:

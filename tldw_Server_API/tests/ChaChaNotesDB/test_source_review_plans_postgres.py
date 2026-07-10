@@ -66,14 +66,15 @@ def test_postgres_source_review_schema_and_sync_triggers(
         index_rows = list(
             backend.execute(
                 """
-                SELECT indexname
+                SELECT indexname, indexdef
                   FROM pg_indexes
                  WHERE schemaname = current_schema()
                    AND tablename IN ('source_review_plans', 'source_review_occurrences')
                 """
             )
         )
-        assert {row["indexname"] for row in index_rows}.issuperset(  # nosec B101
+        indexes = {row["indexname"]: row["indexdef"] for row in index_rows}
+        assert set(indexes).issuperset(  # nosec B101
             {
                 "idx_source_review_plans_deleted",
                 "idx_source_review_plans_list",
@@ -83,6 +84,8 @@ def test_postgres_source_review_schema_and_sync_triggers(
                 "idx_source_review_occurrences_due_list",
             }
         )
+        due_list_index = "".join(indexes["idx_source_review_occurrences_due_list"].split()).lower()
+        assert "(deleted,due_at,id,status)" in due_list_index  # nosec B101
 
         trigger_rows = list(
             backend.execute(
@@ -140,7 +143,15 @@ def test_postgres_source_review_schema_and_sync_triggers(
                 0
             ]["id"]
         )
-        db.start_source_review_occurrence(occurrence_id)
+        plans, plan_total = db.list_source_review_plans()
+        due_rows, due_total = db.list_due_source_review_occurrences(now_utc="2026-07-10T00:00:00Z")
+        started = db.start_source_review_occurrence(occurrence_id)
+        resumed = db.start_source_review_occurrence(occurrence_id)
+
+        assert plan_total == 1 and plans[0]["id"] == plan_id  # nosec B101
+        assert due_total == 1 and due_rows[0]["id"] == occurrence_id  # nosec B101
+        assert started["status"] == "in_progress"  # nosec B101
+        assert resumed["version"] == started["version"]  # nosec B101
         assert db.soft_delete_source_review_plan(plan_id) is True  # nosec B101
 
         sync_rows = list(

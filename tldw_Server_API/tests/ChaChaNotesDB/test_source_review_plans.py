@@ -447,7 +447,14 @@ def _occurrence_rows(db: CharactersRAGDB, plan_id: int) -> list[dict[str, object
 
 def test_create_source_review_plan_persists_bundle_and_occurrences_atomically(
     source_review_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    created_at = "2026-07-09T12:00:00.000Z"
+    monkeypatch.setattr(
+        source_review_db,
+        "_get_current_utc_timestamp_iso",
+        lambda: created_at,
+    )
     schedule = compute_source_review_schedule(
         starts_on=date(2026, 7, 9),
         timezone_name="America/Los_Angeles",
@@ -465,10 +472,45 @@ def test_create_source_review_plan_persists_bundle_and_occurrences_atomically(
     assert plans[0]["source_bundle_json"] == _source_bundle()  # nosec B101
     assert plans[0]["version"] == 1  # nosec B101
     assert plans[0]["client_id"] == "source-review-test-client"  # nosec B101
+    assert plans[0]["created_at"] == created_at  # nosec B101
+    assert plans[0]["last_modified"] == created_at  # nosec B101
     assert [row["activity_type"] for row in occurrences] == ["reread", "quiz"]  # nosec B101
     assert [row["status"] for row in occurrences] == ["pending", "pending"]  # nosec B101
     assert all(row["version"] == 1 for row in occurrences)  # nosec B101
     assert all(row["client_id"] == "source-review-test-client" for row in occurrences)  # nosec B101
+    assert all(row["created_at"] == created_at for row in occurrences)  # nosec B101
+    assert all(row["last_modified"] == created_at for row in occurrences)  # nosec B101
+
+
+def test_create_source_review_plan_rolls_back_after_occurrence_insert_failure(
+    source_review_db: CharactersRAGDB,
+) -> None:
+    schedule = [
+        _schedule_row("2026-07-10T07:00:00Z", activity_type="reread"),
+        _schedule_row(
+            "2026-07-12T07:00:00Z",
+            activity_type="unsupported",
+            offset_value=3,
+        ),
+    ]
+
+    with pytest.raises(CharactersRAGDBError, match="create source review plan"):
+        _create_source_review_plan(source_review_db, schedule=schedule)
+
+    plan_count = source_review_db.execute_query("SELECT COUNT(*) AS total FROM source_review_plans").fetchone()["total"]
+    occurrence_count = source_review_db.execute_query(
+        "SELECT COUNT(*) AS total FROM source_review_occurrences"
+    ).fetchone()["total"]
+    sync_count = source_review_db.execute_query(
+        """
+        SELECT COUNT(*) AS total
+          FROM sync_log
+         WHERE entity IN ('source_review_plans', 'source_review_occurrences')
+        """
+    ).fetchone()["total"]
+    assert plan_count == 0  # nosec B101
+    assert occurrence_count == 0  # nosec B101
+    assert sync_count == 0  # nosec B101
 
 
 def test_source_review_plan_and_due_lists_have_stable_pagination_order(
@@ -501,6 +543,63 @@ def test_source_review_plan_and_due_lists_have_stable_pagination_order(
     assert [row["id"] for row in plans] == list(reversed(plan_ids))[1:3]  # nosec B101
     assert due_total == 3  # nosec B101
     assert [row["id"] for row in due_rows] == occurrence_ids[1:3]  # nosec B101
+
+
+def test_source_review_due_query_uses_stable_order_index_without_temp_sort(
+    source_review_db: CharactersRAGDB,
+) -> None:
+    _create_source_review_plan(
+        source_review_db,
+        schedule=[
+            _schedule_row("2026-07-08T12:00:00Z", activity_type="reread"),
+            _schedule_row("2026-07-08T12:00:00Z", activity_type="quiz", offset_value=2),
+        ],
+    )
+
+    query_plan = source_review_db.execute_query(
+        """
+        EXPLAIN QUERY PLAN
+        SELECT o.id, o.plan_id, o.due_at, o.status, p.title
+          FROM source_review_occurrences o
+          JOIN source_review_plans p ON p.id = o.plan_id
+         WHERE o.deleted = ? AND p.deleted = ?
+           AND o.status IN ('pending', 'in_progress')
+           AND o.due_at <= ?
+         ORDER BY o.due_at ASC, o.id ASC
+         LIMIT ? OFFSET ?
+        """,
+        (False, False, "2026-07-09T12:00:00Z", 50, 0),
+    ).fetchall()
+    details = [str(row["detail"]) for row in query_plan]
+
+    assert any("idx_source_review_occurrences_due_list" in detail for detail in details)  # nosec B101
+    assert not any("USE TEMP B-TREE FOR ORDER BY" in detail for detail in details)  # nosec B101
+
+
+def test_source_review_schema_ensure_replaces_legacy_due_order_index(
+    source_review_db: CharactersRAGDB,
+) -> None:
+    source_review_db.execute_query(
+        """
+        DROP INDEX IF EXISTS idx_source_review_occurrences_due_list;
+        CREATE INDEX idx_source_review_occurrences_due_list
+          ON source_review_occurrences(deleted, status, due_at, id);
+        """,
+        script=True,
+    )
+
+    with source_review_db.transaction() as conn:
+        source_review_db._ensure_source_review_schema_sqlite(conn)
+
+    index_sql = source_review_db.execute_query(
+        """
+        SELECT sql
+          FROM sqlite_master
+         WHERE type = 'index'
+           AND name = 'idx_source_review_occurrences_due_list'
+        """
+    ).fetchone()["sql"]
+    assert "(deleted,due_at,id,status)" in "".join(index_sql.split()).lower()  # nosec B101
 
 
 def test_due_source_review_occurrences_filter_status_time_and_deleted_rows(
@@ -550,9 +649,19 @@ def test_due_source_review_occurrences_filter_status_time_and_deleted_rows(
 
 def test_start_source_review_occurrence_is_idempotent_and_stores_thin_metadata(
     source_review_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    created_at = "2026-07-09T12:00:00.000Z"
+    started_at = "2026-07-09T13:00:00.000Z"
+    timestamps = iter((created_at, started_at))
+    monkeypatch.setattr(
+        source_review_db,
+        "_get_current_utc_timestamp_iso",
+        lambda: next(timestamps),
+    )
     plan_id = _create_source_review_plan(source_review_db)
     occurrence_id = int(_occurrence_rows(source_review_db, plan_id)[0]["id"])
+    source_review_db.client_id = "source-review-action-client"
 
     started = source_review_db.start_source_review_occurrence(occurrence_id)
     resumed = source_review_db.start_source_review_occurrence(occurrence_id)
@@ -575,7 +684,107 @@ def test_start_source_review_occurrence_is_idempotent_and_stores_thin_metadata(
     assert set(started["launch_state_json"]) == expected_keys  # nosec B101
     assert "source_bundle" not in started["launch_state_json"]  # nosec B101
     assert "generated_content" not in started["launch_state_json"]  # nosec B101
+    assert stored["created_at"] == created_at  # nosec B101
+    assert stored["started_at"] == started_at  # nosec B101
+    assert stored["last_modified"] == started_at  # nosec B101
+    assert stored["client_id"] == "source-review-action-client"  # nosec B101
     assert stored["version"] == 2  # nosec B101
+
+
+def test_start_source_review_occurrence_rolls_back_status_and_launch_on_update_failure(
+    source_review_db: CharactersRAGDB,
+) -> None:
+    plan_id = _create_source_review_plan(source_review_db)
+    occurrence_id = int(_occurrence_rows(source_review_db, plan_id)[0]["id"])
+    source_review_db.execute_query(
+        """
+        CREATE TRIGGER reject_source_review_start
+        BEFORE UPDATE OF status, launch_state_json ON source_review_occurrences
+        WHEN OLD.status = 'pending' AND NEW.status = 'in_progress'
+        BEGIN
+          SELECT RAISE(ABORT, 'reject source review start');
+        END;
+        """,
+        script=True,
+    )
+
+    with pytest.raises(CharactersRAGDBError, match="start source review occurrence"):
+        source_review_db.start_source_review_occurrence(occurrence_id)
+
+    stored = _occurrence_rows(source_review_db, plan_id)[0]
+    update_sync_count = source_review_db.execute_query(
+        """
+        SELECT COUNT(*) AS total
+          FROM sync_log
+         WHERE entity = 'source_review_occurrences'
+           AND entity_id = ?
+           AND operation = 'update'
+        """,
+        (str(occurrence_id),),
+    ).fetchone()["total"]
+    assert stored["status"] == "pending"  # nosec B101
+    assert stored["launch_state_json"] is None  # nosec B101
+    assert stored["started_at"] is None  # nosec B101
+    assert stored["version"] == 1  # nosec B101
+    assert update_sync_count == 0  # nosec B101
+
+
+def test_complete_source_review_occurrence_updates_metadata_and_completion_source(
+    source_review_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created_at = "2026-07-09T12:00:00.000Z"
+    started_at = "2026-07-09T13:00:00.000Z"
+    completed_at = "2026-07-09T14:00:00.000Z"
+    timestamps = iter((created_at, started_at, completed_at))
+    monkeypatch.setattr(
+        source_review_db,
+        "_get_current_utc_timestamp_iso",
+        lambda: next(timestamps),
+    )
+    plan_id = _create_source_review_plan(source_review_db)
+    occurrence_id = int(_occurrence_rows(source_review_db, plan_id)[0]["id"])
+    source_review_db.start_source_review_occurrence(occurrence_id)
+    source_review_db.client_id = "source-review-completion-client"
+
+    completed = source_review_db.complete_source_review_occurrence(
+        occurrence_id,
+        completion_source="quiz_attempt",
+    )
+
+    assert completed["status"] == "completed"  # nosec B101
+    assert completed["created_at"] == created_at  # nosec B101
+    assert completed["started_at"] == started_at  # nosec B101
+    assert completed["completed_at"] == completed_at  # nosec B101
+    assert completed["last_modified"] == completed_at  # nosec B101
+    assert completed["completion_source"] == "quiz_attempt"  # nosec B101
+    assert completed["client_id"] == "source-review-completion-client"  # nosec B101
+    assert completed["version"] == 3  # nosec B101
+
+
+def test_skip_source_review_occurrence_updates_timestamp_client_and_version(
+    source_review_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created_at = "2026-07-09T12:00:00.000Z"
+    skipped_at = "2026-07-09T13:00:00.000Z"
+    timestamps = iter((created_at, skipped_at))
+    monkeypatch.setattr(
+        source_review_db,
+        "_get_current_utc_timestamp_iso",
+        lambda: next(timestamps),
+    )
+    plan_id = _create_source_review_plan(source_review_db)
+    occurrence_id = int(_occurrence_rows(source_review_db, plan_id)[0]["id"])
+    source_review_db.client_id = "source-review-skip-client"
+
+    skipped = source_review_db.skip_source_review_occurrence(occurrence_id)
+
+    assert skipped["status"] == "skipped"  # nosec B101
+    assert skipped["created_at"] == created_at  # nosec B101
+    assert skipped["last_modified"] == skipped_at  # nosec B101
+    assert skipped["client_id"] == "source-review-skip-client"  # nosec B101
+    assert skipped["version"] == 2  # nosec B101
 
 
 def _occurrence_in_status(db: CharactersRAGDB, status: str) -> tuple[int, int]:
@@ -685,7 +894,16 @@ def test_source_review_delete_rolls_back_plan_when_occurrence_delete_fails(
 
 def test_source_review_delete_is_idempotent_and_syncs_each_row_once(
     source_review_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    created_at = "2026-07-09T12:00:00.000Z"
+    deleted_at = "2026-07-09T13:00:00.000Z"
+    timestamps = iter((created_at, deleted_at))
+    monkeypatch.setattr(
+        source_review_db,
+        "_get_current_utc_timestamp_iso",
+        lambda: next(timestamps),
+    )
     plan_id = _create_source_review_plan(
         source_review_db,
         schedule=[
@@ -693,17 +911,25 @@ def test_source_review_delete_is_idempotent_and_syncs_each_row_once(
             _schedule_row("2026-07-12T07:00:00Z", activity_type="quiz", offset_value=3),
         ],
     )
+    source_review_db.client_id = "source-review-delete-client"
 
     assert source_review_db.soft_delete_source_review_plan(plan_id) is True  # nosec B101
     versions_after_first_delete = [
         dict(
             source_review_db.execute_query(
-                "SELECT deleted, version FROM source_review_plans WHERE id = ?",
+                "SELECT deleted, created_at, last_modified, client_id, version "
+                "FROM source_review_plans WHERE id = ?",
                 (plan_id,),
             ).fetchone()
         ),
         *[
-            {"deleted": row["deleted"], "version": row["version"]}
+            {
+                "deleted": row["deleted"],
+                "created_at": row["created_at"],
+                "last_modified": row["last_modified"],
+                "client_id": row["client_id"],
+                "version": row["version"],
+            }
             for row in _occurrence_rows(source_review_db, plan_id)
         ],
     ]
@@ -721,12 +947,19 @@ def test_source_review_delete_is_idempotent_and_syncs_each_row_once(
     versions_after_second_delete = [
         dict(
             source_review_db.execute_query(
-                "SELECT deleted, version FROM source_review_plans WHERE id = ?",
+                "SELECT deleted, created_at, last_modified, client_id, version "
+                "FROM source_review_plans WHERE id = ?",
                 (plan_id,),
             ).fetchone()
         ),
         *[
-            {"deleted": row["deleted"], "version": row["version"]}
+            {
+                "deleted": row["deleted"],
+                "created_at": row["created_at"],
+                "last_modified": row["last_modified"],
+                "client_id": row["client_id"],
+                "version": row["version"],
+            }
             for row in _occurrence_rows(source_review_db, plan_id)
         ],
     ]
@@ -743,9 +976,27 @@ def test_source_review_delete_is_idempotent_and_syncs_each_row_once(
     due, due_total = source_review_db.list_due_source_review_occurrences(now_utc="2030-01-01T00:00:00Z")
 
     assert versions_after_first_delete == [  # nosec B101
-        {"deleted": 1, "version": 2},
-        {"deleted": 1, "version": 2},
-        {"deleted": 1, "version": 2},
+        {
+            "deleted": 1,
+            "created_at": created_at,
+            "last_modified": deleted_at,
+            "client_id": "source-review-delete-client",
+            "version": 2,
+        },
+        {
+            "deleted": 1,
+            "created_at": created_at,
+            "last_modified": deleted_at,
+            "client_id": "source-review-delete-client",
+            "version": 2,
+        },
+        {
+            "deleted": 1,
+            "created_at": created_at,
+            "last_modified": deleted_at,
+            "client_id": "source-review-delete-client",
+            "version": 2,
+        },
     ]
     assert versions_after_second_delete == versions_after_first_delete  # nosec B101
     assert len(delete_sync_rows_after_first) == 3  # nosec B101
