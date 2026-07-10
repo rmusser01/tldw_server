@@ -4,7 +4,7 @@ title: Fix stale webapp session redirect after relaunch
 status: Done
 assignee: []
 created_date: '2026-07-10 01:41'
-updated_date: '2026-07-10 01:45'
+updated_date: '2026-07-10 03:32'
 labels:
   - frontend
   - auth
@@ -44,12 +44,16 @@ Verification:
 - git diff --check -- touched files
 
 Bandit: skipped because the touched implementation and tests are TypeScript/React frontend files only; no Python code changed.
+
+PR review follow-up: replaced silent logout rejection handling with logged try/catch, classified plain-object Not authenticated errors, and added coverage for optional logout, logout rejection, and hosted tokenless transient failures. Verification: app-layout Vitest 25/25, touched frontend ESLint, TypeScript noEmit, and git diff --check.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Fixed multi-user app-shell auth resolution after relaunch. Explicit auth validation failures now clear stale auth and redirect protected routes to /login, while transient validation failures preserve the persisted authenticated shell. Hosted deployments now validate sessions without requiring a locally stored access token.
+
+PR review feedback is addressed with explicit logout diagnostics and broader auth-error compatibility.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

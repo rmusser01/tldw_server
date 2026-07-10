@@ -58,6 +58,7 @@ const mockRouter = {
 const mockGetConfig = vi.fn()
 const mockGetCurrentUser = vi.fn()
 const mockLogout = vi.fn()
+let mockLogoutAvailable = true
 let currentConfig: Record<string, unknown> | null = null
 
 vi.mock("next/router", () => ({
@@ -146,7 +147,9 @@ vi.mock("@web/lib/configured-auth-state", () => ({
   }),
   loadTldwAuth: async () => ({
     getCurrentUser: (...args: unknown[]) => mockGetCurrentUser(...args),
-    logout: (...args: unknown[]) => mockLogout(...args)
+    ...(mockLogoutAvailable
+      ? { logout: (...args: unknown[]) => mockLogout(...args) }
+      : {})
   })
 }))
 
@@ -174,6 +177,7 @@ beforeEach(() => {
   mockGetConfig.mockReset()
   mockGetCurrentUser.mockReset()
   mockLogout.mockReset()
+  mockLogoutAvailable = true
   mockGetCurrentUser.mockResolvedValue({ username: "test-user" })
   mockLogout.mockResolvedValue(undefined)
   currentConfig = null
@@ -495,6 +499,65 @@ describe("App layout routing", () => {
     expect(mockLogout).toHaveBeenCalled()
   })
 
+  it("redirects stale sessions when the auth provider has no logout method", async () => {
+    mockLogoutAvailable = false
+    currentConfig = {
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "multi-user",
+      accessToken: "stale-token"
+    }
+    mockGetCurrentUser.mockRejectedValueOnce(makeStatusError("Unauthorized", 401))
+
+    renderApp("/media")
+
+    await waitFor(() => {
+      expect(mockRouter.push).toHaveBeenCalledWith("/login")
+    })
+    expect(mockLogout).not.toHaveBeenCalled()
+  })
+
+  it("logs logout failures while still redirecting stale sessions", async () => {
+    const logoutError = new Error("Storage unavailable")
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    currentConfig = {
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "multi-user",
+      accessToken: "stale-token"
+    }
+    mockGetCurrentUser.mockRejectedValueOnce(makeStatusError("Unauthorized", 401))
+    mockLogout.mockRejectedValueOnce(logoutError)
+
+    try {
+      renderApp("/media")
+
+      await waitFor(() => {
+        expect(mockRouter.push).toHaveBeenCalledWith("/login")
+      })
+      expect(warn).toHaveBeenCalledWith(
+        "Failed to clear stale tldw auth session:",
+        logoutError
+      )
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it("redirects when auth validation returns a plain unauthenticated error", async () => {
+    currentConfig = {
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "multi-user",
+      accessToken: "stale-token"
+    }
+    mockGetCurrentUser.mockRejectedValueOnce({ message: "Not authenticated" })
+
+    renderApp("/media")
+
+    await waitFor(() => {
+      expect(mockRouter.push).toHaveBeenCalledWith("/login")
+    })
+    expect(mockLogout).toHaveBeenCalled()
+  })
+
   it("keeps persisted multi-user auth when validation fails with a non-auth status", async () => {
     currentConfig = {
       serverUrl: "http://127.0.0.1:8000",
@@ -525,6 +588,30 @@ describe("App layout routing", () => {
       serverUrl: "",
       authMode: "multi-user"
     }
+
+    renderApp("/chat")
+    const layout = await screen.findByTestId("option-layout")
+
+    await waitFor(() => {
+      expect(mockGetCurrentUser).toHaveBeenCalled()
+    })
+    await waitFor(() => {
+      expect(layout).toHaveAttribute("data-hide-header", "false")
+    })
+    expect(layout).toHaveAttribute("data-hide-sidebar", "false")
+    expect(mockLogout).not.toHaveBeenCalled()
+    expect(mockRouter.push).not.toHaveBeenCalledWith("/login")
+  })
+
+  it("keeps hosted tokenless auth on non-auth validation failures", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "hosted"
+    currentConfig = {
+      serverUrl: "",
+      authMode: "multi-user"
+    }
+    mockGetCurrentUser.mockRejectedValueOnce(
+      makeStatusError("Server unavailable", 500)
+    )
 
     renderApp("/chat")
     const layout = await screen.findByTestId("option-layout")

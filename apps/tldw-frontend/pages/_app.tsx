@@ -84,7 +84,14 @@ const getErrorStatus = (error: unknown): number | null => {
 const isAuthValidationFailure = (error: unknown): boolean => {
   const status = getErrorStatus(error)
   if (status === 401 || status === 403) return true
-  return error instanceof Error && error.message.trim() === "Not authenticated"
+  const candidate = error as { message?: unknown } | null
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof candidate?.message === "string"
+        ? candidate.message
+        : ""
+  return message.trim() === "Not authenticated"
 }
 
 const splitRouteAsPath = (asPath: string) => {
@@ -166,7 +173,11 @@ const getConfiguredAuthState = async (): Promise<ConfiguredAuthState> => {
             isAuthenticated: true
           }
         }
-        await tldwAuth.logout?.().catch(() => undefined)
+        try {
+          await tldwAuth.logout?.()
+        } catch (logoutError) {
+          console.warn("Failed to clear stale tldw auth session:", logoutError)
+        }
         return {
           hasConfig: true,
           authMode: "multi-user",
