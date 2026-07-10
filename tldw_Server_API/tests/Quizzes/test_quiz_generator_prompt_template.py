@@ -5,6 +5,7 @@ import pytest
 os.environ.setdefault("TEST_MODE", "1")
 pytestmark = pytest.mark.unit
 
+from tldw_Server_API.app.core.exceptions import BadRequestError
 from tldw_Server_API.app.services import quiz_generator
 from tldw_Server_API.app.services.quiz_generator import (
     QUIZ_GENERATION_PROMPT,
@@ -12,6 +13,12 @@ from tldw_Server_API.app.services.quiz_generator import (
     _coerce_question_types,
     get_quiz_generation_profiles,
 )
+
+
+@pytest.mark.parametrize("profile", ["unknown-profile", "osce_scenario"])
+def test_profile_normalization_uses_domain_error_for_invalid_requests(profile: str):
+    with pytest.raises(BadRequestError):
+        quiz_generator._normalize_generation_profile(profile)
 
 
 def test_quiz_generation_prompt_template_formats_with_literal_citation_object():

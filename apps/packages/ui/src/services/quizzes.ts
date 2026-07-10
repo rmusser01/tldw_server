@@ -46,6 +46,10 @@ export type QuizGenerationProfile =
   | "emq"
   | "assertion_reasoning"
   | "osce_scenario"
+export type AvailableQuizGenerationProfile = Exclude<
+  QuizGenerationProfile,
+  "osce_scenario"
+>
 export type QuizGenerationProfileDefinition = {
   id: QuizGenerationProfile
   label: string
@@ -268,7 +272,7 @@ export type QuestionUpdate = {
 
 // AI generation request
 type QuizGenerateRequestBase = {
-  generation_profile?: QuizGenerationProfile
+  generation_profile?: AvailableQuizGenerationProfile
   num_questions?: number
   question_types?: QuestionType[]
   question_plan?: QuizQuestionPlanItem[]

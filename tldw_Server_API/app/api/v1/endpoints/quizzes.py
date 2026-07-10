@@ -3,11 +3,16 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from loguru import logger
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user, rbac_rate_limit
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import get_job_manager
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
-from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
+from tldw_Server_API.app.api.v1.schemas.flashcards import (
+    StudyAssistantContextResponse,
+    StudyAssistantRespondRequest,
+    StudyAssistantRespondResponse,
+)
 from tldw_Server_API.app.api.v1.schemas.quizzes import (
     AttemptListResponse,
     AttemptResponse,
@@ -31,19 +36,14 @@ from tldw_Server_API.app.api.v1.schemas.quizzes import (
     QuizResponse,
     QuizUpdate,
 )
-from tldw_Server_API.app.api.v1.schemas.flashcards import (
-    StudyAssistantContextResponse,
-    StudyAssistantRespondRequest,
-    StudyAssistantRespondResponse,
-)
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
+from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
     ConflictError,
     InputError,
 )
-from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
 from tldw_Server_API.app.core.Flashcards.study_assistant import (
     build_quiz_attempt_question_context,
     generate_study_assistant_reply,
@@ -82,10 +82,17 @@ def _format_import_error(exc: Exception, *, default_detail: str) -> str:
     return f"{default_detail}: {detail}"
 
 
-@router.get("/generation-profiles", response_model=list[QuizGenerationProfileDefinition])
-def list_quiz_generation_profiles():
+@router.get(
+    "/generation-profiles",
+    response_model=list[QuizGenerationProfileDefinition],
+    dependencies=[Depends(rbac_rate_limit("quizzes.read"))],
+)
+def list_quiz_generation_profiles() -> list[QuizGenerationProfileDefinition]:
     """List quiz generation profiles exposed by the generator."""
-    return get_quiz_generation_profiles()
+    return [
+        QuizGenerationProfileDefinition.model_validate(profile)
+        for profile in get_quiz_generation_profiles()
+    ]
 
 
 def _build_assistant_context_snapshot(context: dict[str, Any]) -> dict[str, Any]:

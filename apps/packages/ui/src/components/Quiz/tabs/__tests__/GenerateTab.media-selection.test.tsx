@@ -21,6 +21,7 @@ import {
 } from "@/services/flashcards";
 import {
   QUIZ_GENERATION_PROFILES,
+  listQuizGenerationProfiles,
   type QuestionBase,
   type QuestionCreate,
   type QuestionUpdate,
@@ -66,6 +67,16 @@ vi.mock("react-i18next", () => ({
 vi.mock("../../hooks", () => ({
   useGenerateQuizMutation: vi.fn(),
 }));
+
+vi.mock("@/services/quizzes", async () => {
+  const actual = await vi.importActual<typeof import("@/services/quizzes")>(
+    "@/services/quizzes",
+  );
+  return {
+    ...actual,
+    listQuizGenerationProfiles: vi.fn(),
+  };
+});
 
 vi.mock("react-router-dom", () => ({
   useNavigate: () => navigationMocks.navigate,
@@ -143,6 +154,9 @@ describe("GenerateTab scalable media selection and generation flow", () => {
     vi.mocked(createFlashcard).mockResolvedValue({
       uuid: "card-1",
     } as any);
+    vi.mocked(listQuizGenerationProfiles).mockResolvedValue(
+      QUIZ_GENERATION_PROFILES,
+    );
 
     vi.mocked(useGenerateQuizMutation).mockReturnValue({
       mutateAsync: vi.fn(async () => ({
@@ -204,6 +218,51 @@ describe("GenerateTab scalable media selection and generation flow", () => {
       results_per_page: 50,
     });
   }, 20000);
+
+  it("uses the server generation profile catalog when available", async () => {
+    vi.mocked(tldwClient.listMedia).mockResolvedValue({
+      items: [],
+      pagination: { total_items: 0 },
+    } as any);
+    vi.mocked(listQuizGenerationProfiles).mockResolvedValue([
+      {
+        ...QUIZ_GENERATION_PROFILES[0],
+        label: "Server Standard Recall",
+      },
+      {
+        ...QUIZ_GENERATION_PROFILES[2],
+        label: "Server Best of Five",
+      },
+    ]);
+
+    renderWithQueryClient();
+
+    const profileSelect = await screen.findByTestId("generate-profile-select");
+    fireEvent.mouseDown(
+      profileSelect.querySelector(".ant-select-selector") ?? profileSelect,
+    );
+
+    expect(await screen.findByText("Server Best of Five")).toBeInTheDocument();
+  });
+
+  it("falls back to bundled generation profiles when the catalog request fails", async () => {
+    vi.mocked(tldwClient.listMedia).mockResolvedValue({
+      items: [],
+      pagination: { total_items: 0 },
+    } as any);
+    vi.mocked(listQuizGenerationProfiles).mockRejectedValue(
+      new Error("catalog unavailable"),
+    );
+
+    renderWithQueryClient();
+
+    const profileSelect = await screen.findByTestId("generate-profile-select");
+    fireEvent.mouseDown(
+      profileSelect.querySelector(".ant-select-selector") ?? profileSelect,
+    );
+
+    expect(await screen.findByText("Best of Five")).toBeInTheDocument();
+  });
 
   it("uses server-side media search when search term is entered", async () => {
     vi.mocked(tldwClient.listMedia).mockResolvedValue({

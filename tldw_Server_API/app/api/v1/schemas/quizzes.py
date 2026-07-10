@@ -38,6 +38,14 @@ class QuizGenerationProfile(str, Enum):
     OSCE_SCENARIO = "osce_scenario"
 
 
+class AvailableQuizGenerationProfile(str, Enum):
+    STANDARD_RECALL = "standard_recall"
+    MIXED_ASSESSMENT = "mixed_assessment"
+    BEST_OF_FIVE = "best_of_five"
+    EMQ = "emq"
+    ASSERTION_REASONING = "assertion_reasoning"
+
+
 class QuizSourceType(str, Enum):
     MEDIA = "media"
     NOTE = "note"
@@ -357,7 +365,7 @@ class QuizRemediationConvertResponse(BaseModel):
 class QuizGenerateRequest(BaseModel):
     media_id: Optional[int] = Field(None, ge=1)
     sources: Optional[list[QuizGenerateSource]] = Field(None, min_length=1)
-    generation_profile: QuizGenerationProfile = QuizGenerationProfile.STANDARD_RECALL
+    generation_profile: AvailableQuizGenerationProfile = AvailableQuizGenerationProfile.STANDARD_RECALL
     num_questions: int = Field(10, ge=1, le=100)
     question_types: Optional[list[QuestionType]] = None
     question_plan: Optional[list[QuizQuestionPlanItem]] = Field(None, min_length=1)

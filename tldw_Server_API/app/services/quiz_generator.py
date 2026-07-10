@@ -15,6 +15,7 @@ from tldw_Server_API.app.core.Chat.chat_helpers import extract_response_content
 from tldw_Server_API.app.core.Chat.chat_service import resolve_provider_api_key
 from tldw_Server_API.app.core.config import load_and_log_configs
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.exceptions import BadRequestError
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
 from tldw_Server_API.app.core.testing import is_test_mode
@@ -242,9 +243,9 @@ def _normalize_generation_profile(value: Any) -> str:
     profile_id = aliases.get(text, text)
     profile = _PROFILE_BY_ID.get(profile_id)
     if profile is None:
-        raise ValueError(f"Unknown quiz generation profile: {raw}")
+        raise BadRequestError(f"Unknown quiz generation profile: {raw}")
     if profile["status"] != "available":
-        raise ValueError(f"Quiz generation profile '{profile_id}' is not available yet")
+        raise BadRequestError(f"Quiz generation profile '{profile_id}' is not available yet")
     return profile_id
 
 
@@ -985,7 +986,7 @@ def _normalize_questions(
             else:
                 options = _coerce_options(raw.get("options"), max_options=mc_option_count)
                 if profile_id == "best_of_five" and len(options) != 5:
-                    continue
+                    raise ValueError("Best-of-Five questions must include exactly 5 options")
                 correct_answer = (
                     raw.get("correct_answer")
                     if is_emq

@@ -126,6 +126,17 @@ def test_quiz_generate_request_accepts_generation_profile():
     assert payload.generation_profile == QuizGenerationProfile.BEST_OF_FIVE
 
 
+def test_quiz_generate_request_rejects_planned_generation_profile():
+    with pytest.raises(ValidationError, match="osce_scenario"):
+        QuizGenerateRequest.model_validate(
+            {
+                "num_questions": 5,
+                "sources": [{"source_type": "note", "source_id": "note-1"}],
+                "generation_profile": "osce_scenario",
+            }
+        )
+
+
 def test_quiz_generate_request_rejects_unknown_source_type():
     with pytest.raises(ValidationError):
         QuizGenerateRequest.model_validate(

@@ -514,6 +514,28 @@ def test_normalize_questions_marks_best_of_five_with_existing_tags() -> None:
     assert questions[0]["tags"] == ["cardiology", "best_of_five"]
 
 
+def test_normalize_questions_rejects_any_invalid_best_of_five_option_count() -> None:
+    valid_question = {
+        "question_type": "multiple_choice",
+        "question_text": "Which answer is best supported?",
+        "options": ["A", "B", "C", "D", "E"],
+        "correct_answer": 0,
+    }
+    invalid_question = {
+        **valid_question,
+        "question_text": "Which answer has too few options?",
+        "options": ["A", "B", "C", "D"],
+    }
+
+    with pytest.raises(ValueError, match="exactly 5 options"):
+        _normalize_questions(
+            [valid_question, invalid_question],
+            default_source_type="note",
+            default_source_id="note-bof",
+            generation_profile="best_of_five",
+        )
+
+
 @pytest.mark.asyncio
 async def test_generate_quiz_from_sources_persists_best_of_five_tags_in_test_mode(
     monkeypatch: pytest.MonkeyPatch,

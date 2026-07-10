@@ -14,6 +14,8 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
 )
 from tldw_Server_API.app.core.DB_Management.ManuscriptDB import ManuscriptDBHelper
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture()
 def raw_db(tmp_path):

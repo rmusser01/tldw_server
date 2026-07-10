@@ -4,17 +4,41 @@ import pytest
 from fastapi import HTTPException
 
 from tldw_Server_API.app.api.v1.endpoints import quizzes as quizzes_endpoint
-from tldw_Server_API.app.api.v1.schemas.quizzes import QuizGenerateRequest
+from tldw_Server_API.app.api.v1.schemas.quizzes import (
+    QuizGenerateRequest,
+    QuizGenerationProfileDefinition,
+)
 from tldw_Server_API.app.services.quiz_generator import QuizProvenanceValidationError
+
+pytestmark = pytest.mark.unit
+
+
+def test_generation_profiles_endpoint_is_rate_limited():
+    route = next(
+        route
+        for route in quizzes_endpoint.router.routes
+        if getattr(route, "path", None) == "/quizzes/generation-profiles"
+    )
+
+    assert "quizzes.read" in [
+        getattr(dependency.call, "_tldw_rate_limit_resource", None)
+        for dependency in route.dependant.dependencies
+    ]
+
+
+def test_generation_profiles_endpoint_has_explicit_return_type():
+    assert quizzes_endpoint.list_quiz_generation_profiles.__annotations__["return"] == list[
+        QuizGenerationProfileDefinition
+    ]
 
 
 def test_generation_profiles_endpoint_lists_available_best_of_five_profile():
     profiles = quizzes_endpoint.list_quiz_generation_profiles()
 
     assert any(
-        profile["id"] == "best_of_five"
-        and profile["status"] == "available"
-        and profile["default_question_types"] == ["multiple_choice"]
+        profile.id == "best_of_five"
+        and profile.status == "available"
+        and profile.default_question_types == ["multiple_choice"]
         for profile in profiles
     )
 
@@ -23,9 +47,9 @@ def test_generation_profiles_endpoint_lists_available_assertion_reasoning_profil
     profiles = quizzes_endpoint.list_quiz_generation_profiles()
 
     assert any(
-        profile["id"] == "assertion_reasoning"
-        and profile["status"] == "available"
-        and profile["default_question_types"] == ["multiple_choice"]
+        profile.id == "assertion_reasoning"
+        and profile.status == "available"
+        and profile.default_question_types == ["multiple_choice"]
         for profile in profiles
     )
 

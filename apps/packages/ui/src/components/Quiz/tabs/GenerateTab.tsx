@@ -27,6 +27,8 @@ import { useDebounce } from "@/hooks/useDebounce";
 import { tldwClient } from "@/services/tldw";
 import {
   QUIZ_GENERATION_PROFILES,
+  listQuizGenerationProfiles,
+  type AvailableQuizGenerationProfile,
   type QuestionType,
   type QuizGenerateSource,
   type QuizGenerationProfile,
@@ -107,21 +109,30 @@ const MEDIA_PAGE_SIZE = 50;
 const MAX_FLASHCARDS_IN_STUDY_FLOW = 30;
 const MAX_FLASHCARD_SOURCE_TEXT_CHARS = 20_000;
 
-const GENERATION_PROFILE_OPTIONS = QUIZ_GENERATION_PROFILES
-  .filter((profile) => profile.status === "available")
-  .map((profile) => ({
-    label: profile.label,
-    value: profile.id,
-    description: profile.description,
-  }));
+type AvailableGenerationProfileDefinition = Omit<
+  QuizGenerationProfileDefinition,
+  "id" | "status"
+> & {
+  id: AvailableQuizGenerationProfile;
+  status: "available";
+};
 
-const DEFAULT_GENERATION_PROFILE = QUIZ_GENERATION_PROFILES[0] as QuizGenerationProfileDefinition;
+const isAvailableGenerationProfile = (
+  profile: QuizGenerationProfileDefinition,
+): profile is AvailableGenerationProfileDefinition =>
+  profile.status === "available" && profile.id !== "osce_scenario";
 
-const getGenerationProfile = (value: unknown): QuizGenerationProfileDefinition => {
+const DEFAULT_GENERATION_PROFILE = QUIZ_GENERATION_PROFILES[0] as AvailableGenerationProfileDefinition;
+
+const getGenerationProfile = (
+  profiles: QuizGenerationProfileDefinition[],
+  value: unknown,
+): AvailableGenerationProfileDefinition => {
   const profileId = typeof value === "string" ? value : "standard_recall";
   return (
-    QUIZ_GENERATION_PROFILES.find(
-      (profile) => profile.id === profileId && profile.status === "available",
+    profiles.find(
+      (profile): profile is AvailableGenerationProfileDefinition =>
+        profile.id === profileId && isAvailableGenerationProfile(profile),
     ) ?? DEFAULT_GENERATION_PROFILE
   );
 };
@@ -614,8 +625,35 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
   const debouncedMediaSearch = useDebounce(mediaSearchInput, 300);
   const debouncedNotesSearch = useDebounce(notesSearchInput, 300);
   const generateAbortRef = React.useRef<AbortController | null>(null);
+  const { data: serverGenerationProfiles } = useQuery<
+    QuizGenerationProfileDefinition[]
+  >({
+    queryKey: ["quiz-generation-profiles"],
+    queryFn: ({ signal }) => listQuizGenerationProfiles({ signal }),
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  });
+  const generationProfiles = React.useMemo(
+    () =>
+      serverGenerationProfiles?.some(isAvailableGenerationProfile)
+        ? serverGenerationProfiles
+        : QUIZ_GENERATION_PROFILES,
+    [serverGenerationProfiles],
+  );
+  const generationProfileOptions = React.useMemo(
+    () =>
+      generationProfiles
+        .filter(isAvailableGenerationProfile)
+        .map((profile) => ({
+          label: profile.label,
+          value: profile.id,
+          description: profile.description,
+        })),
+    [generationProfiles],
+  );
   const selectedDifficulty = Form.useWatch("difficulty", form) ?? "mixed";
   const selectedGenerationProfile = getGenerationProfile(
+    generationProfiles,
     Form.useWatch("generationProfile", form),
   );
   const profileLocksQuestionShape =
@@ -1104,7 +1142,7 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
 
   const handleGenerationProfileChange = React.useCallback(
     (value: QuizGenerationProfile) => {
-      const profile = getGenerationProfile(value);
+      const profile = getGenerationProfile(generationProfiles, value);
       form.setFieldValue("difficulty", profile.default_difficulty);
       setQuestionPlanRows((rows) => {
         if (profile.id === "standard_recall" || profile.id === "mixed_assessment") {
@@ -1125,7 +1163,7 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
         }));
       });
     },
-    [form],
+    [form, generationProfiles],
   );
 
   const generateStudyMaterialsFlashcards = React.useCallback(
@@ -1316,7 +1354,10 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
       setGeneratedPreview(null);
 
       const focusTopics = normalizeFocusTopics(values.focusTopics);
-      const generationProfile = getGenerationProfile(values.generationProfile);
+      const generationProfile = getGenerationProfile(
+        generationProfiles,
+        values.generationProfile,
+      );
       const usesQuestionPlan =
         generationProfile.id === "standard_recall" ||
         generationProfile.id === "mixed_assessment";
@@ -1847,7 +1888,7 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
                 })}
               >
                 <Select
-                  options={GENERATION_PROFILE_OPTIONS.map((profile) => ({
+                  options={generationProfileOptions.map((profile) => ({
                     value: profile.value,
                     label: profile.label,
                     title: profile.description,
