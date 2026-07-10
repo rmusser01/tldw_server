@@ -783,7 +783,7 @@
     "message": "確認して再試行"
   },
   "overview_latest_delivery_unknownConfirmation": {
-    "message": "プロバイダーは {{adapter}} の配信を確認していません。再試行すると重複して送信される可能性があります。送信先を確認し、そのリスクを許容できる場合のみ続行してください。"
+    "message": "プロバイダーは {{adapter}} の配信を確認していません。再試行すると重複して送信される可能性があります。送信先を確認し、そのリスクを許容できる場合のみ続行してください。 ({{destination}})"
   },
   "overview_latest_playback_region": {
     "message": "音声: {{name}}"
@@ -961,5 +961,101 @@
   },
   "outputs_downloadAria": {
     "message": "ダウンロード: {{title}}"
+  },
+  "overview_latest_delivery_chatbookDestination": {
+    "message": "Chatbook"
+  },
+  "overview_latest_delivery_confirmRetry": {
+    "message": "再試行 配信"
+  },
+  "overview_latest_delivery_confirmRetryAria": {
+    "message": "再試行 {{adapter}} 配信"
+  },
+  "overview_latest_delivery_recipientCount": {
+    "message": "{{count}} 受信者"
+  },
+  "overview_latest_delivery_recipientCount_zero": {
+    "message": "{{count}} 受信者"
+  },
+  "overview_latest_delivery_recipientCount_one": {
+    "message": "{{count}} 受信者"
+  },
+  "overview_latest_delivery_recipientCount_two": {
+    "message": "{{count}} 受信者"
+  },
+  "overview_latest_delivery_recipientCount_few": {
+    "message": "{{count}} 受信者"
+  },
+  "overview_latest_delivery_recipientCount_many": {
+    "message": "{{count}} 受信者"
+  },
+  "overview_latest_delivery_recipientCount_other": {
+    "message": "{{count}} 受信者"
+  },
+  "overview_latest_delivery_reviewAcknowledgement": {
+    "message": "送信先を確認し、重複配信のリスクを承諾します。"
+  },
+  "overview_latest_delivery_reviewSettings": {
+    "message": "確認 設定"
+  },
+  "overview_latest_delivery_reviewTitle": {
+    "message": "確認 {{adapter}} 配信"
+  },
+  "overview_latest_playback_accessError": {
+    "message": "音声: アクセスに失敗しました. サインインとサーバー接続を確認してください。"
+  },
+  "overview_latest_playback_missing": {
+    "message": "音声 は利用できなくなりました."
+  },
+  "overview_latest_actions_downloadAudio": {
+    "message": "ダウンロード 音声"
+  },
+  "overview_latest_actions_downloadAudioAria": {
+    "message": "ダウンロード 音声: {{name}}"
+  },
+  "overview_latest_actions_retryExactAria": {
+    "message": "再試行 {{stage}}: {{name}}"
+  },
+  "overview_latest_actions_reviewScript": {
+    "message": "確認 音声 レポート"
+  },
+  "overview_latest_actions_reviewScriptAria": {
+    "message": "確認 音声 レポート: {{name}}"
+  },
+  "overview_latest_scriptAccessError": {
+    "message": "音声 レポート: アクセスに失敗しました. サインインとサーバー接続を確認してください。"
+  },
+  "overview_latest_scriptLoading": {
+    "message": "読み込み中 音声 レポート"
+  },
+  "overview_latest_scriptMissing": {
+    "message": "音声 レポート は利用できなくなりました."
+  },
+  "overview_latest_recovery_renderText": {
+    "message": "生成中 レポート"
+  },
+  "overview_latest_recovery_persistText": {
+    "message": "保存中 レポート"
+  },
+  "overview_latest_recovery_composeScript": {
+    "message": "作成中 音声 レポート"
+  },
+  "overview_latest_recovery_persistScript": {
+    "message": "保存中 音声 レポート"
+  },
+  "overview_latest_recovery_generateAudio": {
+    "message": "生成中 音声"
+  },
+  "overview_latest_recovery_persistAudio": {
+    "message": "保存中 音声"
+  },
+  "outputs_artifactMissing": {
+    "message": "は利用できなくなりました."
+  },
+  "outputs_artifactAuthError": {
+    "message": "アクセスが拒否されました。サインインを確認してください。"
+  },
+  "outputs_artifactAccessError": {
+    "message": "アクセスに失敗しました. サインインとサーバー接続を確認してください。"
   }
 }

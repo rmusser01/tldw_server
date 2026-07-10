@@ -783,7 +783,7 @@
     "message": "Gennemgå og prøv igen"
   },
   "overview_latest_delivery_unknownConfirmation": {
-    "message": "Udbyderen bekræftede ikke levering via {{adapter}}. Et nyt forsøg kan sende en dublet. Kontrollér destinationen, og fortsæt kun, hvis risikoen er acceptabel."
+    "message": "Udbyderen bekræftede ikke levering via {{adapter}}. Et nyt forsøg kan sende en dublet. Kontrollér destinationen, og fortsæt kun, hvis risikoen er acceptabel. ({{destination}})"
   },
   "overview_latest_playback_region": {
     "message": "lyd: {{name}}"
@@ -961,5 +961,101 @@
   },
   "outputs_downloadAria": {
     "message": "Download: {{title}}"
+  },
+  "overview_latest_delivery_chatbookDestination": {
+    "message": "Chatbook"
+  },
+  "overview_latest_delivery_confirmRetry": {
+    "message": "Prøv igen levering"
+  },
+  "overview_latest_delivery_confirmRetryAria": {
+    "message": "Prøv igen {{adapter}} levering"
+  },
+  "overview_latest_delivery_recipientCount": {
+    "message": "{{count}} modtagere"
+  },
+  "overview_latest_delivery_recipientCount_zero": {
+    "message": "{{count}} modtagere"
+  },
+  "overview_latest_delivery_recipientCount_one": {
+    "message": "{{count}} modtagere"
+  },
+  "overview_latest_delivery_recipientCount_two": {
+    "message": "{{count}} modtagere"
+  },
+  "overview_latest_delivery_recipientCount_few": {
+    "message": "{{count}} modtagere"
+  },
+  "overview_latest_delivery_recipientCount_many": {
+    "message": "{{count}} modtagere"
+  },
+  "overview_latest_delivery_recipientCount_other": {
+    "message": "{{count}} modtagere"
+  },
+  "overview_latest_delivery_reviewAcknowledgement": {
+    "message": "Jeg har gennemgået destinationen og accepterer risikoen for dobbeltlevering."
+  },
+  "overview_latest_delivery_reviewSettings": {
+    "message": "Gennemgå indstillinger"
+  },
+  "overview_latest_delivery_reviewTitle": {
+    "message": "Gennemgå {{adapter}} levering"
+  },
+  "overview_latest_playback_accessError": {
+    "message": "lyd: Adgang mislykkedes. Kontrollér dit login og serverforbindelsen."
+  },
+  "overview_latest_playback_missing": {
+    "message": "lyd er ikke længere tilgængelig."
+  },
+  "overview_latest_actions_downloadAudio": {
+    "message": "Download lyd"
+  },
+  "overview_latest_actions_downloadAudioAria": {
+    "message": "Download lyd: {{name}}"
+  },
+  "overview_latest_actions_retryExactAria": {
+    "message": "Prøv igen {{stage}}: {{name}}"
+  },
+  "overview_latest_actions_reviewScript": {
+    "message": "Gennemgå lyd rapport"
+  },
+  "overview_latest_actions_reviewScriptAria": {
+    "message": "Gennemgå lyd rapport: {{name}}"
+  },
+  "overview_latest_scriptAccessError": {
+    "message": "lyd rapport: Adgang mislykkedes. Kontrollér dit login og serverforbindelsen."
+  },
+  "overview_latest_scriptLoading": {
+    "message": "Indlæser lyd rapport"
+  },
+  "overview_latest_scriptMissing": {
+    "message": "lyd rapport er ikke længere tilgængelig."
+  },
+  "overview_latest_recovery_renderText": {
+    "message": "Genererer rapport"
+  },
+  "overview_latest_recovery_persistText": {
+    "message": "Gemmer rapport"
+  },
+  "overview_latest_recovery_composeScript": {
+    "message": "Udarbejder lyd rapport"
+  },
+  "overview_latest_recovery_persistScript": {
+    "message": "Gemmer lyd rapport"
+  },
+  "overview_latest_recovery_generateAudio": {
+    "message": "Genererer lyd"
+  },
+  "overview_latest_recovery_persistAudio": {
+    "message": "Gemmer lyd"
+  },
+  "outputs_artifactMissing": {
+    "message": "er ikke længere tilgængelig."
+  },
+  "outputs_artifactAuthError": {
+    "message": "Adgang blev afvist. Kontrollér dit login."
+  },
+  "outputs_artifactAccessError": {
+    "message": "Adgang mislykkedes. Kontrollér dit login og serverforbindelsen."
   }
 }

@@ -801,7 +801,7 @@
     "message": "Перевірити й повторити"
   },
   "overview_latest_delivery_unknownConfirmation": {
-    "message": "Провайдер не підтвердив доставку через {{adapter}}. Повторна спроба може надіслати дублікат. Перевірте місце призначення й продовжуйте, лише якщо цей ризик прийнятний."
+    "message": "Провайдер не підтвердив доставку через {{adapter}}. Повторна спроба може надіслати дублікат. Перевірте місце призначення й продовжуйте, лише якщо цей ризик прийнятний. ({{destination}})"
   },
   "overview_latest_playback_region": {
     "message": "аудіо: {{name}}"
@@ -979,5 +979,101 @@
   },
   "outputs_downloadAria": {
     "message": "Завантажити: {{title}}"
+  },
+  "overview_latest_delivery_chatbookDestination": {
+    "message": "Chatbook"
+  },
+  "overview_latest_delivery_confirmRetry": {
+    "message": "Повторити доставку"
+  },
+  "overview_latest_delivery_confirmRetryAria": {
+    "message": "Повторити {{adapter}} доставку"
+  },
+  "overview_latest_delivery_recipientCount": {
+    "message": "{{count}} одержувачів"
+  },
+  "overview_latest_delivery_recipientCount_zero": {
+    "message": "{{count}} одержувачів"
+  },
+  "overview_latest_delivery_recipientCount_one": {
+    "message": "{{count}} одержувачів"
+  },
+  "overview_latest_delivery_recipientCount_two": {
+    "message": "{{count}} одержувачів"
+  },
+  "overview_latest_delivery_recipientCount_few": {
+    "message": "{{count}} одержувачів"
+  },
+  "overview_latest_delivery_recipientCount_many": {
+    "message": "{{count}} одержувачів"
+  },
+  "overview_latest_delivery_recipientCount_other": {
+    "message": "{{count}} одержувачів"
+  },
+  "overview_latest_delivery_reviewAcknowledgement": {
+    "message": "Я перевірив місце призначення та приймаю ризик повторної доставки."
+  },
+  "overview_latest_delivery_reviewSettings": {
+    "message": "Перевірити налаштування"
+  },
+  "overview_latest_delivery_reviewTitle": {
+    "message": "Перевірити {{adapter}} доставку"
+  },
+  "overview_latest_playback_accessError": {
+    "message": "аудіо: Помилка доступу. Перевірте вхід і з’єднання із сервером."
+  },
+  "overview_latest_playback_missing": {
+    "message": "аудіо більше недоступний."
+  },
+  "overview_latest_actions_downloadAudio": {
+    "message": "Завантажити аудіо"
+  },
+  "overview_latest_actions_downloadAudioAria": {
+    "message": "Завантажити аудіо: {{name}}"
+  },
+  "overview_latest_actions_retryExactAria": {
+    "message": "Повторити {{stage}}: {{name}}"
+  },
+  "overview_latest_actions_reviewScript": {
+    "message": "Перевірити аудіо звіт"
+  },
+  "overview_latest_actions_reviewScriptAria": {
+    "message": "Перевірити аудіо звіт: {{name}}"
+  },
+  "overview_latest_scriptAccessError": {
+    "message": "аудіо звіт: Помилка доступу. Перевірте вхід і з’єднання із сервером."
+  },
+  "overview_latest_scriptLoading": {
+    "message": "Завантаження аудіо звіт"
+  },
+  "overview_latest_scriptMissing": {
+    "message": "аудіо звіт більше недоступний."
+  },
+  "overview_latest_recovery_renderText": {
+    "message": "Створення звіт"
+  },
+  "overview_latest_recovery_persistText": {
+    "message": "Збереження звіт"
+  },
+  "overview_latest_recovery_composeScript": {
+    "message": "Підготовка аудіо звіт"
+  },
+  "overview_latest_recovery_persistScript": {
+    "message": "Збереження аудіо звіт"
+  },
+  "overview_latest_recovery_generateAudio": {
+    "message": "Створення аудіо"
+  },
+  "overview_latest_recovery_persistAudio": {
+    "message": "Збереження аудіо"
+  },
+  "outputs_artifactMissing": {
+    "message": "більше недоступний."
+  },
+  "outputs_artifactAuthError": {
+    "message": "Доступ заборонено. Перевірте вхід."
+  },
+  "outputs_artifactAccessError": {
+    "message": "Помилка доступу. Перевірте вхід і з’єднання із сервером."
   }
 }

@@ -363,7 +363,20 @@
         "retryAria": "تلاش دوباره {{adapter}}: {{name}}",
         "retryUnknownAria": "نتیجه نامشخص. تلاش دوباره {{adapter}}: {{name}}",
         "reviewRetry": "بررسی و تلاش دوباره",
-        "unknownConfirmation": "ارائه‌دهنده تحویل {{adapter}} را تأیید نکرد. تلاش دوباره ممکن است یک نسخه تکراری بفرستد. مقصد را بررسی کنید و فقط در صورت پذیرش این خطر ادامه دهید."
+        "unknownConfirmation": "ارائه‌دهنده تحویل {{adapter}} را تأیید نکرد. تلاش دوباره ممکن است یک نسخه تکراری بفرستد. مقصد را بررسی کنید و فقط در صورت پذیرش این خطر ادامه دهید. ({{destination}})",
+        "chatbookDestination": "Chatbook",
+        "confirmRetry": "تلاش دوباره تحویل",
+        "confirmRetryAria": "تلاش دوباره {{adapter}} تحویل",
+        "recipientCount": "{{count}} گیرندگان",
+        "recipientCount_zero": "{{count}} گیرندگان",
+        "recipientCount_one": "{{count}} گیرندگان",
+        "recipientCount_two": "{{count}} گیرندگان",
+        "recipientCount_few": "{{count}} گیرندگان",
+        "recipientCount_many": "{{count}} گیرندگان",
+        "recipientCount_other": "{{count}} گیرندگان",
+        "reviewAcknowledgement": "مقصد را بررسی کردم و خطر تحویل تکراری را می‌پذیرم.",
+        "reviewSettings": "بررسی تنظیمات",
+        "reviewTitle": "بررسی {{adapter}} تحویل"
       },
       "playback": {
         "region": "صدا: {{name}}",
@@ -375,7 +388,9 @@
         "error": "صدا ناموفق. باز کردن گزارش / تولید دوباره صدا.",
         "play": "پخش",
         "pause": "مکث",
-        "resume": "ادامه"
+        "resume": "ادامه",
+        "accessError": "صدا: دسترسی ناموفق بود. ورود و اتصال سرور را بررسی کنید.",
+        "missing": "صدا دیگر در دسترس نیست."
       },
       "actions": {
         "label": "تازه‌ترین خلاصه",
@@ -390,7 +405,12 @@
         "inspect": "بررسی اجرا",
         "inspectAria": "بررسی اجرا {{runId}}: {{name}}",
         "viewReports": "مشاهده همه گزارش‌ها",
-        "testNow": "اکنون آزمایش کن"
+        "testNow": "اکنون آزمایش کن",
+        "downloadAudio": "دانلود صدا",
+        "downloadAudioAria": "دانلود صدا: {{name}}",
+        "retryExactAria": "تلاش دوباره {{stage}}: {{name}}",
+        "reviewScript": "بررسی صدا گزارش",
+        "reviewScriptAria": "بررسی صدا گزارش: {{name}}"
       },
       "announcements": {
         "blockingFailure": "{{name}} ناموفق. بررسی اجرا {{runId}}.",
@@ -432,12 +452,26 @@
         "episode": "قسمت",
         "report": "گزارش",
         "showNotes": "یادداشت‌های برنامه"
+      },
+      "scriptAccessError": "صدا گزارش: دسترسی ناموفق بود. ورود و اتصال سرور را بررسی کنید.",
+      "scriptLoading": "در حال بارگیری صدا گزارش",
+      "scriptMissing": "صدا گزارش دیگر در دسترس نیست.",
+      "recovery": {
+        "renderText": "در حال ایجاد گزارش",
+        "persistText": "در حال ذخیره گزارش",
+        "composeScript": "در حال نگارش صدا گزارش",
+        "persistScript": "در حال ذخیره صدا گزارش",
+        "generateAudio": "در حال ایجاد صدا",
+        "persistAudio": "در حال ذخیره صدا"
       }
     }
   },
   "outputs": {
     "openInNewTabAria": "باز کردن در زبانه جدید: {{title}}",
     "chatAboutAria": "گفت‌وگو درباره این: {{title}}",
-    "downloadAria": "بارگیری: {{title}}"
+    "downloadAria": "بارگیری: {{title}}",
+    "artifactMissing": "دیگر در دسترس نیست.",
+    "artifactAuthError": "دسترسی رد شد. ورود خود را بررسی کنید.",
+    "artifactAccessError": "دسترسی ناموفق بود. ورود و اتصال سرور را بررسی کنید."
   }
 }

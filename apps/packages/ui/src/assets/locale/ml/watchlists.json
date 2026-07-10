@@ -363,7 +363,20 @@
         "retryAria": "വീണ്ടും ശ്രമിക്കുക {{adapter}}: {{name}}",
         "retryUnknownAria": "ഫലം അജ്ഞാതം. വീണ്ടും ശ്രമിക്കുക {{adapter}}: {{name}}",
         "reviewRetry": "പരിശോധിച്ച് വീണ്ടും ശ്രമിക്കുക",
-        "unknownConfirmation": "ദാതാവ് {{adapter}} ഡെലിവറി സ്ഥിരീകരിച്ചില്ല. വീണ്ടും ശ്രമിക്കുന്നത് പകർപ്പ് അയച്ചേക്കാം. ലക്ഷ്യസ്ഥാനം പരിശോധിച്ച് ഈ അപകടസാധ്യത അംഗീകരിക്കാമെങ്കിൽ മാത്രം തുടരുക."
+        "unknownConfirmation": "ദാതാവ് {{adapter}} ഡെലിവറി സ്ഥിരീകരിച്ചില്ല. വീണ്ടും ശ്രമിക്കുന്നത് പകർപ്പ് അയച്ചേക്കാം. ലക്ഷ്യസ്ഥാനം പരിശോധിച്ച് ഈ അപകടസാധ്യത അംഗീകരിക്കാമെങ്കിൽ മാത്രം തുടരുക. ({{destination}})",
+        "chatbookDestination": "Chatbook",
+        "confirmRetry": "വീണ്ടും ശ്രമിക്കുക ഡെലിവറി",
+        "confirmRetryAria": "വീണ്ടും ശ്രമിക്കുക {{adapter}} ഡെലിവറി",
+        "recipientCount": "{{count}} സ്വീകർത്താക്കൾ",
+        "recipientCount_zero": "{{count}} സ്വീകർത്താക്കൾ",
+        "recipientCount_one": "{{count}} സ്വീകർത്താക്കൾ",
+        "recipientCount_two": "{{count}} സ്വീകർത്താക്കൾ",
+        "recipientCount_few": "{{count}} സ്വീകർത്താക്കൾ",
+        "recipientCount_many": "{{count}} സ്വീകർത്താക്കൾ",
+        "recipientCount_other": "{{count}} സ്വീകർത്താക്കൾ",
+        "reviewAcknowledgement": "ലക്ഷ്യസ്ഥാനം പരിശോധിച്ചു; ആവർത്തിച്ചുള്ള ഡെലിവറി അപകടസാധ്യത അംഗീകരിക്കുന്നു.",
+        "reviewSettings": "പരിശോധിക്കുക ക്രമീകരണങ്ങൾ",
+        "reviewTitle": "പരിശോധിക്കുക {{adapter}} ഡെലിവറി"
       },
       "playback": {
         "region": "ഓഡിയോ: {{name}}",
@@ -375,7 +388,9 @@
         "error": "ഓഡിയോ പരാജയം. തുറക്കുക റിപ്പോർട്ട് / വീണ്ടും സൃഷ്ടിക്കുക ഓഡിയോ.",
         "play": "പ്ലേ",
         "pause": "താൽക്കാലികമായി നിർത്തുക",
-        "resume": "തുടരുക"
+        "resume": "തുടരുക",
+        "accessError": "ഓഡിയോ: ആക്സസ് പരാജയപ്പെട്ടു. സൈൻ ഇന്നും സെർവർ കണക്ഷനും പരിശോധിക്കുക.",
+        "missing": "ഓഡിയോ ഇനി ലഭ്യമല്ല."
       },
       "actions": {
         "label": "ഏറ്റവും പുതിയ സംക്ഷിപ്തം",
@@ -390,7 +405,12 @@
         "inspect": "റൺ പരിശോധിക്കുക",
         "inspectAria": "റൺ പരിശോധിക്കുക {{runId}}: {{name}}",
         "viewReports": "എല്ലാ റിപ്പോർട്ടുകളും കാണുക",
-        "testNow": "ഇപ്പോൾ പരീക്ഷിക്കുക"
+        "testNow": "ഇപ്പോൾ പരീക്ഷിക്കുക",
+        "downloadAudio": "ഡൗൺലോഡ് ഓഡിയോ",
+        "downloadAudioAria": "ഡൗൺലോഡ് ഓഡിയോ: {{name}}",
+        "retryExactAria": "വീണ്ടും ശ്രമിക്കുക {{stage}}: {{name}}",
+        "reviewScript": "പരിശോധിക്കുക ഓഡിയോ റിപ്പോർട്ട്",
+        "reviewScriptAria": "പരിശോധിക്കുക ഓഡിയോ റിപ്പോർട്ട്: {{name}}"
       },
       "announcements": {
         "blockingFailure": "{{name}} പരാജയം. റൺ പരിശോധിക്കുക {{runId}}.",
@@ -432,12 +452,26 @@
         "episode": "എപ്പിസോഡ്",
         "report": "റിപ്പോർട്ട്",
         "showNotes": "ഷോ കുറിപ്പുകൾ"
+      },
+      "scriptAccessError": "ഓഡിയോ റിപ്പോർട്ട്: ആക്സസ് പരാജയപ്പെട്ടു. സൈൻ ഇന്നും സെർവർ കണക്ഷനും പരിശോധിക്കുക.",
+      "scriptLoading": "ലോഡ് ചെയ്യുന്നു ഓഡിയോ റിപ്പോർട്ട്",
+      "scriptMissing": "ഓഡിയോ റിപ്പോർട്ട് ഇനി ലഭ്യമല്ല.",
+      "recovery": {
+        "renderText": "സൃഷ്ടിക്കുന്നു റിപ്പോർട്ട്",
+        "persistText": "സംരക്ഷിക്കുന്നു റിപ്പോർട്ട്",
+        "composeScript": "തയ്യാറാക്കുന്നു ഓഡിയോ റിപ്പോർട്ട്",
+        "persistScript": "സംരക്ഷിക്കുന്നു ഓഡിയോ റിപ്പോർട്ട്",
+        "generateAudio": "സൃഷ്ടിക്കുന്നു ഓഡിയോ",
+        "persistAudio": "സംരക്ഷിക്കുന്നു ഓഡിയോ"
       }
     }
   },
   "outputs": {
     "openInNewTabAria": "പുതിയ ടാബിൽ തുറക്കുക: {{title}}",
     "chatAboutAria": "ഇതിനെക്കുറിച്ച് ചാറ്റ് ചെയ്യുക: {{title}}",
-    "downloadAria": "ഡൗൺലോഡ്: {{title}}"
+    "downloadAria": "ഡൗൺലോഡ്: {{title}}",
+    "artifactMissing": "ഇനി ലഭ്യമല്ല.",
+    "artifactAuthError": "ആക്സസ് നിരസിച്ചു. സൈൻ ഇൻ പരിശോധിക്കുക.",
+    "artifactAccessError": "ആക്സസ് പരാജയപ്പെട്ടു. സൈൻ ഇന്നും സെർവർ കണക്ഷനും പരിശോധിക്കുക."
   }
 }

@@ -783,7 +783,7 @@
     "message": "Granska och försök igen"
   },
   "overview_latest_delivery_unknownConfirmation": {
-    "message": "Leverantören bekräftade inte leverans via {{adapter}}. Ett nytt försök kan skicka en dubblett. Kontrollera målet och fortsätt bara om risken är acceptabel."
+    "message": "Leverantören bekräftade inte leverans via {{adapter}}. Ett nytt försök kan skicka en dubblett. Kontrollera målet och fortsätt bara om risken är acceptabel. ({{destination}})"
   },
   "overview_latest_playback_region": {
     "message": "ljud: {{name}}"
@@ -961,5 +961,101 @@
   },
   "outputs_downloadAria": {
     "message": "Hämta: {{title}}"
+  },
+  "overview_latest_delivery_chatbookDestination": {
+    "message": "Chatbook"
+  },
+  "overview_latest_delivery_confirmRetry": {
+    "message": "Försök igen leverans"
+  },
+  "overview_latest_delivery_confirmRetryAria": {
+    "message": "Försök igen {{adapter}} leverans"
+  },
+  "overview_latest_delivery_recipientCount": {
+    "message": "{{count}} mottagare"
+  },
+  "overview_latest_delivery_recipientCount_zero": {
+    "message": "{{count}} mottagare"
+  },
+  "overview_latest_delivery_recipientCount_one": {
+    "message": "{{count}} mottagare"
+  },
+  "overview_latest_delivery_recipientCount_two": {
+    "message": "{{count}} mottagare"
+  },
+  "overview_latest_delivery_recipientCount_few": {
+    "message": "{{count}} mottagare"
+  },
+  "overview_latest_delivery_recipientCount_many": {
+    "message": "{{count}} mottagare"
+  },
+  "overview_latest_delivery_recipientCount_other": {
+    "message": "{{count}} mottagare"
+  },
+  "overview_latest_delivery_reviewAcknowledgement": {
+    "message": "Jag har granskat målet och accepterar risken för dubbelleverans."
+  },
+  "overview_latest_delivery_reviewSettings": {
+    "message": "Granska inställningar"
+  },
+  "overview_latest_delivery_reviewTitle": {
+    "message": "Granska {{adapter}} leverans"
+  },
+  "overview_latest_playback_accessError": {
+    "message": "ljud: Åtkomst misslyckades. Kontrollera din inloggning och serveranslutning."
+  },
+  "overview_latest_playback_missing": {
+    "message": "ljud är inte längre tillgänglig."
+  },
+  "overview_latest_actions_downloadAudio": {
+    "message": "Hämta ljud"
+  },
+  "overview_latest_actions_downloadAudioAria": {
+    "message": "Hämta ljud: {{name}}"
+  },
+  "overview_latest_actions_retryExactAria": {
+    "message": "Försök igen {{stage}}: {{name}}"
+  },
+  "overview_latest_actions_reviewScript": {
+    "message": "Granska ljud rapport"
+  },
+  "overview_latest_actions_reviewScriptAria": {
+    "message": "Granska ljud rapport: {{name}}"
+  },
+  "overview_latest_scriptAccessError": {
+    "message": "ljud rapport: Åtkomst misslyckades. Kontrollera din inloggning och serveranslutning."
+  },
+  "overview_latest_scriptLoading": {
+    "message": "Läser in ljud rapport"
+  },
+  "overview_latest_scriptMissing": {
+    "message": "ljud rapport är inte längre tillgänglig."
+  },
+  "overview_latest_recovery_renderText": {
+    "message": "Genererar rapport"
+  },
+  "overview_latest_recovery_persistText": {
+    "message": "Sparar rapport"
+  },
+  "overview_latest_recovery_composeScript": {
+    "message": "Utformar ljud rapport"
+  },
+  "overview_latest_recovery_persistScript": {
+    "message": "Sparar ljud rapport"
+  },
+  "overview_latest_recovery_generateAudio": {
+    "message": "Genererar ljud"
+  },
+  "overview_latest_recovery_persistAudio": {
+    "message": "Sparar ljud"
+  },
+  "outputs_artifactMissing": {
+    "message": "är inte längre tillgänglig."
+  },
+  "outputs_artifactAuthError": {
+    "message": "Åtkomst nekades. Kontrollera din inloggning."
+  },
+  "outputs_artifactAccessError": {
+    "message": "Åtkomst misslyckades. Kontrollera din inloggning och serveranslutning."
   }
 }

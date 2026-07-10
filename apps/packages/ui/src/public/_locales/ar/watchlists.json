@@ -819,7 +819,7 @@
     "message": "مراجعة وإعادة المحاولة"
   },
   "overview_latest_delivery_unknownConfirmation": {
-    "message": "لم يؤكد المزوّد تسليم {{adapter}}. قد تؤدي إعادة المحاولة إلى إرسال نسخة مكررة. راجع الوجهة ولا تتابع إلا إذا كان هذا الخطر مقبولًا."
+    "message": "لم يؤكد المزوّد تسليم {{adapter}}. قد تؤدي إعادة المحاولة إلى إرسال نسخة مكررة. راجع الوجهة ولا تتابع إلا إذا كان هذا الخطر مقبولًا. ({{destination}})"
   },
   "overview_latest_playback_region": {
     "message": "صوت: {{name}}"
@@ -997,5 +997,101 @@
   },
   "outputs_downloadAria": {
     "message": "تنزيل: {{title}}"
+  },
+  "overview_latest_delivery_chatbookDestination": {
+    "message": "Chatbook"
+  },
+  "overview_latest_delivery_confirmRetry": {
+    "message": "إعادة محاولة التسليم"
+  },
+  "overview_latest_delivery_confirmRetryAria": {
+    "message": "إعادة محاولة {{adapter}} التسليم"
+  },
+  "overview_latest_delivery_recipientCount": {
+    "message": "{{count}} مستلمين"
+  },
+  "overview_latest_delivery_recipientCount_zero": {
+    "message": "{{count}} مستلمين"
+  },
+  "overview_latest_delivery_recipientCount_one": {
+    "message": "{{count}} مستلمين"
+  },
+  "overview_latest_delivery_recipientCount_two": {
+    "message": "{{count}} مستلمين"
+  },
+  "overview_latest_delivery_recipientCount_few": {
+    "message": "{{count}} مستلمين"
+  },
+  "overview_latest_delivery_recipientCount_many": {
+    "message": "{{count}} مستلمين"
+  },
+  "overview_latest_delivery_recipientCount_other": {
+    "message": "{{count}} مستلمين"
+  },
+  "overview_latest_delivery_reviewAcknowledgement": {
+    "message": "راجعت الوجهة وأقبل خطر تكرار التسليم."
+  },
+  "overview_latest_delivery_reviewSettings": {
+    "message": "مراجعة الإعدادات"
+  },
+  "overview_latest_delivery_reviewTitle": {
+    "message": "مراجعة {{adapter}} التسليم"
+  },
+  "overview_latest_playback_accessError": {
+    "message": "صوت: فشل الوصول. تحقق من تسجيل الدخول واتصال الخادم."
+  },
+  "overview_latest_playback_missing": {
+    "message": "صوت لم يعد متاحًا."
+  },
+  "overview_latest_actions_downloadAudio": {
+    "message": "تنزيل صوت"
+  },
+  "overview_latest_actions_downloadAudioAria": {
+    "message": "تنزيل صوت: {{name}}"
+  },
+  "overview_latest_actions_retryExactAria": {
+    "message": "إعادة محاولة {{stage}}: {{name}}"
+  },
+  "overview_latest_actions_reviewScript": {
+    "message": "مراجعة صوت تقرير"
+  },
+  "overview_latest_actions_reviewScriptAria": {
+    "message": "مراجعة صوت تقرير: {{name}}"
+  },
+  "overview_latest_scriptAccessError": {
+    "message": "صوت تقرير: فشل الوصول. تحقق من تسجيل الدخول واتصال الخادم."
+  },
+  "overview_latest_scriptLoading": {
+    "message": "جارٍ تحميل صوت تقرير"
+  },
+  "overview_latest_scriptMissing": {
+    "message": "صوت تقرير لم يعد متاحًا."
+  },
+  "overview_latest_recovery_renderText": {
+    "message": "جارٍ إنشاء تقرير"
+  },
+  "overview_latest_recovery_persistText": {
+    "message": "جارٍ حفظ تقرير"
+  },
+  "overview_latest_recovery_composeScript": {
+    "message": "جارٍ إعداد صوت تقرير"
+  },
+  "overview_latest_recovery_persistScript": {
+    "message": "جارٍ حفظ صوت تقرير"
+  },
+  "overview_latest_recovery_generateAudio": {
+    "message": "جارٍ إنشاء صوت"
+  },
+  "overview_latest_recovery_persistAudio": {
+    "message": "جارٍ حفظ صوت"
+  },
+  "outputs_artifactMissing": {
+    "message": "لم يعد متاحًا."
+  },
+  "outputs_artifactAuthError": {
+    "message": "رُفض الوصول. تحقق من تسجيل الدخول."
+  },
+  "outputs_artifactAccessError": {
+    "message": "فشل الوصول. تحقق من تسجيل الدخول واتصال الخادم."
   }
 }

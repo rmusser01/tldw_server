@@ -107,4 +107,56 @@ describe("watchlists briefing announcements", () => {
       "Purple and Gold Weekly show notes are ready, but audio failed."
     )
   })
+
+  it("announces ready for a different occurrence even when the previous occurrence was ready", () => {
+    const previous = projection({
+      artifact_status: "ready",
+      stages: { persist_text: { status: "ready" } }
+    })
+    const next = projection({
+      occurrence_id: 5,
+      run_id: 9,
+      artifact_status: "ready",
+      stages: { persist_text: { status: "ready" } }
+    })
+
+    expect(transitionAnnouncement(previous, next, t)).toBe(
+      "Purple and Gold Weekly is ready. The report is available."
+    )
+  })
+
+  it("announces blocking failure for a different occurrence even when the previous occurrence was blocked", () => {
+    const previous = projection({
+      output: null,
+      artifact_status: "failed",
+      stages: { persist_text: { status: "failed" } }
+    })
+    const next = projection({
+      occurrence_id: 5,
+      run_id: 9,
+      output: null,
+      artifact_status: "failed",
+      stages: { persist_text: { status: "failed" } }
+    })
+
+    expect(blockingFailureAnnouncement(previous, next, t)).toBe(
+      "Purple and Gold Weekly failed before an artifact was ready. Inspect run 9 to recover it."
+    )
+  })
+
+  it.each([
+    { stale: true, superseded_by: null, download_url: "/api/v1/audio/9" },
+    { stale: false, superseded_by: "new-audio", download_url: "/api/v1/audio/9" },
+    { stale: false, superseded_by: null, download_url: null }
+  ])("does not announce stale, superseded, or URL-less completed audio as available", (audio) => {
+    const next = projection({
+      artifact_status: "ready",
+      stages: { persist_text: { status: "ready" }, persist_audio: { status: "ready" } },
+      audio: { run_id: 8, status: "completed", ...audio }
+    })
+
+    expect(transitionAnnouncement(projection(), next, t)).toBe(
+      "Purple and Gold Weekly is ready. The report is available."
+    )
+  })
 })

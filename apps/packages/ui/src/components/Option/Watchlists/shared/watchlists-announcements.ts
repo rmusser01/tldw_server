@@ -16,8 +16,16 @@ const nameOf = (projection: WatchlistBriefingProjection): string => {
 const textReady = (projection: WatchlistBriefingProjection): boolean =>
   Boolean(projection.output) || projection.stages.persist_text?.status === "ready"
 
-const audioReady = (projection: WatchlistBriefingProjection): boolean =>
-  projection.audio?.status === "completed" || projection.stages.persist_audio?.status === "ready"
+export const hasCurrentBriefingAudio = (projection: WatchlistBriefingProjection): boolean => {
+  const audio = projection.audio
+  return audio?.status === "completed" &&
+    audio.stale !== true &&
+    !audio.superseded_by &&
+    typeof audio.download_url === "string" &&
+    audio.download_url.trim().length > 0
+}
+
+const audioReady = hasCurrentBriefingAudio
 
 const audioFailed = (projection: WatchlistBriefingProjection): boolean =>
   projection.audio?.status === "failed" || [
@@ -88,7 +96,11 @@ export const blockingFailureAnnouncement = (
   next: WatchlistBriefingProjection,
   t: TFunction
 ): string | null => {
-  if (!previous || !isBlocking(next) || isBlocking(previous)) return null
+  if (
+    !previous ||
+    !isBlocking(next) ||
+    (sameOccurrence(previous, next) && isBlocking(previous))
+  ) return null
   return t(
     "watchlists:overview.latest.announcements.blockingFailure",
     "{{name}} failed before an artifact was ready. Inspect run {{runId}} to recover it.",
@@ -106,7 +118,8 @@ export const transitionAnnouncement = (
   }
 
   const name = nameOf(next)
-  if (next.artifact_status === "ready" && previous.artifact_status !== "ready") {
+  const sameIdentity = sameOccurrence(previous, next)
+  if (next.artifact_status === "ready" && (!sameIdentity || previous.artifact_status !== "ready")) {
     if (audioReady(next)) {
       return t(
         "watchlists:overview.latest.announcements.readyWithAudio",
@@ -121,7 +134,7 @@ export const transitionAnnouncement = (
     )
   }
 
-  if (textReady(next) && audioFailed(next) && !audioFailed(previous)) {
+  if (textReady(next) && audioFailed(next) && (!sameIdentity || !audioFailed(previous))) {
     return t(
       "watchlists:overview.latest.announcements.partialAudioFailure",
       "{{name}} show notes are ready, but audio failed.",
@@ -129,7 +142,7 @@ export const transitionAnnouncement = (
     )
   }
 
-  if (next.delivery_status === "delivered" && previous.delivery_status !== "delivered") {
+  if (next.delivery_status === "delivered" && (!sameIdentity || previous.delivery_status !== "delivered")) {
     return t(
       "watchlists:overview.latest.announcements.delivered",
       "{{name}} delivery completed.",
@@ -145,7 +158,6 @@ export const transitionAnnouncement = (
     )
   }
 
-  const sameIdentity = sameOccurrence(previous, next)
   const activeStage = Object.entries(next.stages).find(([stageName, stage]) => {
     const previousStage = sameIdentity ? previous.stages[stageName] : undefined
     return ["queued", "running"].includes(stage.status) && previousStage?.status !== stage.status

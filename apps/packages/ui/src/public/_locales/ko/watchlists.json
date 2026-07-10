@@ -783,7 +783,7 @@
     "message": "검토 후 다시 시도"
   },
   "overview_latest_delivery_unknownConfirmation": {
-    "message": "제공자가 {{adapter}} 전달을 확인하지 않았습니다. 다시 시도하면 중복 전송될 수 있습니다. 대상을 검토하고 이 위험을 감수할 수 있을 때만 계속하세요."
+    "message": "제공자가 {{adapter}} 전달을 확인하지 않았습니다. 다시 시도하면 중복 전송될 수 있습니다. 대상을 검토하고 이 위험을 감수할 수 있을 때만 계속하세요. ({{destination}})"
   },
   "overview_latest_playback_region": {
     "message": "오디오: {{name}}"
@@ -961,5 +961,101 @@
   },
   "outputs_downloadAria": {
     "message": "다운로드: {{title}}"
+  },
+  "overview_latest_delivery_chatbookDestination": {
+    "message": "Chatbook"
+  },
+  "overview_latest_delivery_confirmRetry": {
+    "message": "다시 시도 전달"
+  },
+  "overview_latest_delivery_confirmRetryAria": {
+    "message": "다시 시도 {{adapter}} 전달"
+  },
+  "overview_latest_delivery_recipientCount": {
+    "message": "{{count}} 수신자"
+  },
+  "overview_latest_delivery_recipientCount_zero": {
+    "message": "{{count}} 수신자"
+  },
+  "overview_latest_delivery_recipientCount_one": {
+    "message": "{{count}} 수신자"
+  },
+  "overview_latest_delivery_recipientCount_two": {
+    "message": "{{count}} 수신자"
+  },
+  "overview_latest_delivery_recipientCount_few": {
+    "message": "{{count}} 수신자"
+  },
+  "overview_latest_delivery_recipientCount_many": {
+    "message": "{{count}} 수신자"
+  },
+  "overview_latest_delivery_recipientCount_other": {
+    "message": "{{count}} 수신자"
+  },
+  "overview_latest_delivery_reviewAcknowledgement": {
+    "message": "대상을 검토했으며 중복 전달 위험을 수락합니다."
+  },
+  "overview_latest_delivery_reviewSettings": {
+    "message": "검토 설정"
+  },
+  "overview_latest_delivery_reviewTitle": {
+    "message": "검토 {{adapter}} 전달"
+  },
+  "overview_latest_playback_accessError": {
+    "message": "오디오: 접근 실패. 로그인과 서버 연결을 확인하세요."
+  },
+  "overview_latest_playback_missing": {
+    "message": "오디오 은(는) 더 이상 사용할 수 없습니다."
+  },
+  "overview_latest_actions_downloadAudio": {
+    "message": "다운로드 오디오"
+  },
+  "overview_latest_actions_downloadAudioAria": {
+    "message": "다운로드 오디오: {{name}}"
+  },
+  "overview_latest_actions_retryExactAria": {
+    "message": "다시 시도 {{stage}}: {{name}}"
+  },
+  "overview_latest_actions_reviewScript": {
+    "message": "검토 오디오 보고서"
+  },
+  "overview_latest_actions_reviewScriptAria": {
+    "message": "검토 오디오 보고서: {{name}}"
+  },
+  "overview_latest_scriptAccessError": {
+    "message": "오디오 보고서: 접근 실패. 로그인과 서버 연결을 확인하세요."
+  },
+  "overview_latest_scriptLoading": {
+    "message": "불러오는 중 오디오 보고서"
+  },
+  "overview_latest_scriptMissing": {
+    "message": "오디오 보고서 은(는) 더 이상 사용할 수 없습니다."
+  },
+  "overview_latest_recovery_renderText": {
+    "message": "생성 중 보고서"
+  },
+  "overview_latest_recovery_persistText": {
+    "message": "저장 중 보고서"
+  },
+  "overview_latest_recovery_composeScript": {
+    "message": "작성 중 오디오 보고서"
+  },
+  "overview_latest_recovery_persistScript": {
+    "message": "저장 중 오디오 보고서"
+  },
+  "overview_latest_recovery_generateAudio": {
+    "message": "생성 중 오디오"
+  },
+  "overview_latest_recovery_persistAudio": {
+    "message": "저장 중 오디오"
+  },
+  "outputs_artifactMissing": {
+    "message": "은(는) 더 이상 사용할 수 없습니다."
+  },
+  "outputs_artifactAuthError": {
+    "message": "접근이 거부되었습니다. 로그인을 확인하세요."
+  },
+  "outputs_artifactAccessError": {
+    "message": "접근 실패. 로그인과 서버 연결을 확인하세요."
   }
 }

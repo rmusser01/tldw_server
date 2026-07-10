@@ -4299,7 +4299,7 @@
     "message": "Latest episode"
   },
   "overview_latest_empty_scheduled": {
-    "message": "briefing: {{date}}."
+    "message": "Your first briefing is scheduled for {{date}}."
   },
   "overview_latest_empty_manual": {
     "message": "Not started. Test now."
@@ -4389,7 +4389,7 @@
     "message": "Review and retry"
   },
   "overview_latest_delivery_unknownConfirmation": {
-    "message": "The provider did not confirm {{adapter}} delivery. Retrying may send a duplicate. Review the destination, then continue only if that risk is acceptable."
+    "message": "The provider did not confirm {{adapter}} delivery to {{destination}}. Retrying may send a duplicate."
   },
   "overview_latest_playback_region": {
     "message": "audio: {{name}}"
@@ -4567,5 +4567,101 @@
   },
   "outputs_downloadAria": {
     "message": "Download: {{title}}"
+  },
+  "overview_latest_actions_downloadAudio": {
+    "message": "Download audio"
+  },
+  "overview_latest_actions_downloadAudioAria": {
+    "message": "Download audio for {{name}}"
+  },
+  "overview_latest_actions_retryExactAria": {
+    "message": "Retry {{stage}} for {{name}}"
+  },
+  "overview_latest_actions_reviewScript": {
+    "message": "Review script"
+  },
+  "overview_latest_actions_reviewScriptAria": {
+    "message": "Review script for {{name}}"
+  },
+  "overview_latest_delivery_chatbookDestination": {
+    "message": "Chatbook"
+  },
+  "overview_latest_delivery_confirmRetry": {
+    "message": "Retry delivery"
+  },
+  "overview_latest_delivery_confirmRetryAria": {
+    "message": "Retry {{adapter}} delivery"
+  },
+  "overview_latest_delivery_recipientCount": {
+    "message": "{{count}} recipients"
+  },
+  "overview_latest_delivery_recipientCount_zero": {
+    "message": "{{count}} recipients"
+  },
+  "overview_latest_delivery_recipientCount_one": {
+    "message": "{{count}} recipient"
+  },
+  "overview_latest_delivery_recipientCount_two": {
+    "message": "{{count}} recipients"
+  },
+  "overview_latest_delivery_recipientCount_few": {
+    "message": "{{count}} recipients"
+  },
+  "overview_latest_delivery_recipientCount_many": {
+    "message": "{{count}} recipients"
+  },
+  "overview_latest_delivery_recipientCount_other": {
+    "message": "{{count}} recipients"
+  },
+  "overview_latest_delivery_reviewAcknowledgement": {
+    "message": "I reviewed the destination and accept the duplicate-delivery risk."
+  },
+  "overview_latest_delivery_reviewSettings": {
+    "message": "Review delivery settings"
+  },
+  "overview_latest_delivery_reviewTitle": {
+    "message": "Review {{adapter}} delivery retry"
+  },
+  "overview_latest_playback_accessError": {
+    "message": "Audio access failed. Check your sign-in and server connection."
+  },
+  "overview_latest_playback_missing": {
+    "message": "This audio artifact is no longer available."
+  },
+  "overview_latest_scriptAccessError": {
+    "message": "Script access failed. Check your sign-in and server connection."
+  },
+  "overview_latest_scriptLoading": {
+    "message": "Loading script"
+  },
+  "overview_latest_scriptMissing": {
+    "message": "This script artifact is no longer available."
+  },
+  "overview_latest_recovery_renderText": {
+    "message": "generating report"
+  },
+  "overview_latest_recovery_persistText": {
+    "message": "saving report"
+  },
+  "overview_latest_recovery_composeScript": {
+    "message": "composing audio script"
+  },
+  "overview_latest_recovery_persistScript": {
+    "message": "saving audio script"
+  },
+  "overview_latest_recovery_generateAudio": {
+    "message": "generating audio"
+  },
+  "overview_latest_recovery_persistAudio": {
+    "message": "saving audio"
+  },
+  "outputs_artifactMissing": {
+    "message": "This artifact is no longer available"
+  },
+  "outputs_artifactAuthError": {
+    "message": "Artifact access was denied. Check your sign-in."
+  },
+  "outputs_artifactAccessError": {
+    "message": "Artifact access failed. Check your sign-in and server connection."
   }
 }

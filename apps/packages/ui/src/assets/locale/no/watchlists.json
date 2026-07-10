@@ -363,7 +363,20 @@
         "retryAria": "Prøv igjen {{adapter}}: {{name}}",
         "retryUnknownAria": "Ukjent resultat. Prøv igjen {{adapter}}: {{name}}",
         "reviewRetry": "Se gjennom og prøv igjen",
-        "unknownConfirmation": "Leverandøren bekreftet ikke levering via {{adapter}}. Et nytt forsøk kan sende en duplikat. Kontroller målet og fortsett bare hvis risikoen er akseptabel."
+        "unknownConfirmation": "Leverandøren bekreftet ikke levering via {{adapter}}. Et nytt forsøk kan sende en duplikat. Kontroller målet og fortsett bare hvis risikoen er akseptabel. ({{destination}})",
+        "chatbookDestination": "Chatbook",
+        "confirmRetry": "Prøv igjen levering",
+        "confirmRetryAria": "Prøv igjen {{adapter}} levering",
+        "recipientCount": "{{count}} mottakere",
+        "recipientCount_zero": "{{count}} mottakere",
+        "recipientCount_one": "{{count}} mottakere",
+        "recipientCount_two": "{{count}} mottakere",
+        "recipientCount_few": "{{count}} mottakere",
+        "recipientCount_many": "{{count}} mottakere",
+        "recipientCount_other": "{{count}} mottakere",
+        "reviewAcknowledgement": "Jeg har kontrollert målet og godtar risikoen for dobbeltlevering.",
+        "reviewSettings": "Se gjennom innstillinger",
+        "reviewTitle": "Se gjennom {{adapter}} levering"
       },
       "playback": {
         "region": "lyd: {{name}}",
@@ -375,7 +388,9 @@
         "error": "lyd mislyktes. Åpne rapport / Regenerer lyd.",
         "play": "Spill av",
         "pause": "Pause",
-        "resume": "Fortsett"
+        "resume": "Fortsett",
+        "accessError": "lyd: Tilgang mislyktes. Kontroller innloggingen og servertilkoblingen.",
+        "missing": "lyd er ikke lenger tilgjengelig."
       },
       "actions": {
         "label": "Siste orientering",
@@ -390,7 +405,12 @@
         "inspect": "Undersøk kjøring",
         "inspectAria": "Undersøk kjøring {{runId}}: {{name}}",
         "viewReports": "Se alle rapporter",
-        "testNow": "Test nå"
+        "testNow": "Test nå",
+        "downloadAudio": "Last ned lyd",
+        "downloadAudioAria": "Last ned lyd: {{name}}",
+        "retryExactAria": "Prøv igjen {{stage}}: {{name}}",
+        "reviewScript": "Se gjennom lyd rapport",
+        "reviewScriptAria": "Se gjennom lyd rapport: {{name}}"
       },
       "announcements": {
         "blockingFailure": "{{name}} mislyktes. Undersøk kjøring {{runId}}.",
@@ -432,12 +452,26 @@
         "episode": "episode",
         "report": "rapport",
         "showNotes": "shownotater"
+      },
+      "scriptAccessError": "lyd rapport: Tilgang mislyktes. Kontroller innloggingen og servertilkoblingen.",
+      "scriptLoading": "Laster lyd rapport",
+      "scriptMissing": "lyd rapport er ikke lenger tilgjengelig.",
+      "recovery": {
+        "renderText": "Genererer rapport",
+        "persistText": "Lagrer rapport",
+        "composeScript": "Utarbeider lyd rapport",
+        "persistScript": "Lagrer lyd rapport",
+        "generateAudio": "Genererer lyd",
+        "persistAudio": "Lagrer lyd"
       }
     }
   },
   "outputs": {
     "openInNewTabAria": "Åpne i ny fane: {{title}}",
     "chatAboutAria": "Chat om dette: {{title}}",
-    "downloadAria": "Last ned: {{title}}"
+    "downloadAria": "Last ned: {{title}}",
+    "artifactMissing": "er ikke lenger tilgjengelig.",
+    "artifactAuthError": "Tilgang ble avvist. Kontroller innloggingen.",
+    "artifactAccessError": "Tilgang mislyktes. Kontroller innloggingen og servertilkoblingen."
   }
 }

@@ -801,7 +801,7 @@
     "message": "Проверить и повторить"
   },
   "overview_latest_delivery_unknownConfirmation": {
-    "message": "Провайдер не подтвердил доставку через {{adapter}}. Повторная попытка может отправить дубликат. Проверьте адрес назначения и продолжайте, только если этот риск приемлем."
+    "message": "Провайдер не подтвердил доставку через {{adapter}}. Повторная попытка может отправить дубликат. Проверьте адрес назначения и продолжайте, только если этот риск приемлем. ({{destination}})"
   },
   "overview_latest_playback_region": {
     "message": "аудио: {{name}}"
@@ -979,5 +979,101 @@
   },
   "outputs_downloadAria": {
     "message": "Скачать: {{title}}"
+  },
+  "overview_latest_delivery_chatbookDestination": {
+    "message": "Chatbook"
+  },
+  "overview_latest_delivery_confirmRetry": {
+    "message": "Повторить доставку"
+  },
+  "overview_latest_delivery_confirmRetryAria": {
+    "message": "Повторить {{adapter}} доставку"
+  },
+  "overview_latest_delivery_recipientCount": {
+    "message": "{{count}} получателей"
+  },
+  "overview_latest_delivery_recipientCount_zero": {
+    "message": "{{count}} получателей"
+  },
+  "overview_latest_delivery_recipientCount_one": {
+    "message": "{{count}} получателей"
+  },
+  "overview_latest_delivery_recipientCount_two": {
+    "message": "{{count}} получателей"
+  },
+  "overview_latest_delivery_recipientCount_few": {
+    "message": "{{count}} получателей"
+  },
+  "overview_latest_delivery_recipientCount_many": {
+    "message": "{{count}} получателей"
+  },
+  "overview_latest_delivery_recipientCount_other": {
+    "message": "{{count}} получателей"
+  },
+  "overview_latest_delivery_reviewAcknowledgement": {
+    "message": "Я проверил адрес назначения и принимаю риск повторной доставки."
+  },
+  "overview_latest_delivery_reviewSettings": {
+    "message": "Проверить настройки"
+  },
+  "overview_latest_delivery_reviewTitle": {
+    "message": "Проверить {{adapter}} доставку"
+  },
+  "overview_latest_playback_accessError": {
+    "message": "аудио: Ошибка доступа. Проверьте вход и подключение к серверу."
+  },
+  "overview_latest_playback_missing": {
+    "message": "аудио больше недоступен."
+  },
+  "overview_latest_actions_downloadAudio": {
+    "message": "Скачать аудио"
+  },
+  "overview_latest_actions_downloadAudioAria": {
+    "message": "Скачать аудио: {{name}}"
+  },
+  "overview_latest_actions_retryExactAria": {
+    "message": "Повторить {{stage}}: {{name}}"
+  },
+  "overview_latest_actions_reviewScript": {
+    "message": "Проверить аудио отчёт"
+  },
+  "overview_latest_actions_reviewScriptAria": {
+    "message": "Проверить аудио отчёт: {{name}}"
+  },
+  "overview_latest_scriptAccessError": {
+    "message": "аудио отчёт: Ошибка доступа. Проверьте вход и подключение к серверу."
+  },
+  "overview_latest_scriptLoading": {
+    "message": "Загрузка аудио отчёт"
+  },
+  "overview_latest_scriptMissing": {
+    "message": "аудио отчёт больше недоступен."
+  },
+  "overview_latest_recovery_renderText": {
+    "message": "Создание отчёт"
+  },
+  "overview_latest_recovery_persistText": {
+    "message": "Сохранение отчёт"
+  },
+  "overview_latest_recovery_composeScript": {
+    "message": "Подготовка аудио отчёт"
+  },
+  "overview_latest_recovery_persistScript": {
+    "message": "Сохранение аудио отчёт"
+  },
+  "overview_latest_recovery_generateAudio": {
+    "message": "Создание аудио"
+  },
+  "overview_latest_recovery_persistAudio": {
+    "message": "Сохранение аудио"
+  },
+  "outputs_artifactMissing": {
+    "message": "больше недоступен."
+  },
+  "outputs_artifactAuthError": {
+    "message": "Доступ запрещён. Проверьте вход в систему."
+  },
+  "outputs_artifactAccessError": {
+    "message": "Ошибка доступа. Проверьте вход и подключение к серверу."
   }
 }

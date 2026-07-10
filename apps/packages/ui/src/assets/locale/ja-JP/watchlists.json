@@ -363,7 +363,20 @@
         "retryAria": "再試行 {{adapter}}: {{name}}",
         "retryUnknownAria": "結果不明. 再試行 {{adapter}}: {{name}}",
         "reviewRetry": "確認して再試行",
-        "unknownConfirmation": "プロバイダーは {{adapter}} の配信を確認していません。再試行すると重複して送信される可能性があります。送信先を確認し、そのリスクを許容できる場合のみ続行してください。"
+        "unknownConfirmation": "プロバイダーは {{adapter}} の配信を確認していません。再試行すると重複して送信される可能性があります。送信先を確認し、そのリスクを許容できる場合のみ続行してください。 ({{destination}})",
+        "chatbookDestination": "Chatbook",
+        "confirmRetry": "再試行 配信",
+        "confirmRetryAria": "再試行 {{adapter}} 配信",
+        "recipientCount": "{{count}} 受信者",
+        "recipientCount_zero": "{{count}} 受信者",
+        "recipientCount_one": "{{count}} 受信者",
+        "recipientCount_two": "{{count}} 受信者",
+        "recipientCount_few": "{{count}} 受信者",
+        "recipientCount_many": "{{count}} 受信者",
+        "recipientCount_other": "{{count}} 受信者",
+        "reviewAcknowledgement": "送信先を確認し、重複配信のリスクを承諾します。",
+        "reviewSettings": "確認 設定",
+        "reviewTitle": "確認 {{adapter}} 配信"
       },
       "playback": {
         "region": "音声: {{name}}",
@@ -375,7 +388,9 @@
         "error": "音声 失敗. 開く レポート / 再生成 音声.",
         "play": "再生",
         "pause": "一時停止",
-        "resume": "再開"
+        "resume": "再開",
+        "accessError": "音声: アクセスに失敗しました. サインインとサーバー接続を確認してください。",
+        "missing": "音声 は利用できなくなりました."
       },
       "actions": {
         "label": "最新 ブリーフィング",
@@ -390,7 +405,12 @@
         "inspect": "実行を確認",
         "inspectAria": "実行を確認 {{runId}}: {{name}}",
         "viewReports": "すべてのレポートを表示",
-        "testNow": "今すぐテスト"
+        "testNow": "今すぐテスト",
+        "downloadAudio": "ダウンロード 音声",
+        "downloadAudioAria": "ダウンロード 音声: {{name}}",
+        "retryExactAria": "再試行 {{stage}}: {{name}}",
+        "reviewScript": "確認 音声 レポート",
+        "reviewScriptAria": "確認 音声 レポート: {{name}}"
       },
       "announcements": {
         "blockingFailure": "{{name}} 失敗. 実行を確認 {{runId}}.",
@@ -432,12 +452,26 @@
         "episode": "エピソード",
         "report": "レポート",
         "showNotes": "ショーノート"
+      },
+      "scriptAccessError": "音声 レポート: アクセスに失敗しました. サインインとサーバー接続を確認してください。",
+      "scriptLoading": "読み込み中 音声 レポート",
+      "scriptMissing": "音声 レポート は利用できなくなりました.",
+      "recovery": {
+        "renderText": "生成中 レポート",
+        "persistText": "保存中 レポート",
+        "composeScript": "作成中 音声 レポート",
+        "persistScript": "保存中 音声 レポート",
+        "generateAudio": "生成中 音声",
+        "persistAudio": "保存中 音声"
       }
     }
   },
   "outputs": {
     "openInNewTabAria": "新しいタブで開く: {{title}}",
     "chatAboutAria": "これについてチャット: {{title}}",
-    "downloadAria": "ダウンロード: {{title}}"
+    "downloadAria": "ダウンロード: {{title}}",
+    "artifactMissing": "は利用できなくなりました.",
+    "artifactAuthError": "アクセスが拒否されました。サインインを確認してください。",
+    "artifactAccessError": "アクセスに失敗しました. サインインとサーバー接続を確認してください。"
   }
 }

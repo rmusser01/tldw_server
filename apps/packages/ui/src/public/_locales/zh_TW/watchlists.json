@@ -783,7 +783,7 @@
     "message": "檢查後重試"
   },
   "overview_latest_delivery_unknownConfirmation": {
-    "message": "提供者未確認透過 {{adapter}} 送達。重試可能會傳送重複內容。請檢查目的地，僅在可接受此風險時繼續。"
+    "message": "提供者未確認透過 {{adapter}} 送達。重試可能會傳送重複內容。請檢查目的地，僅在可接受此風險時繼續。 ({{destination}})"
   },
   "overview_latest_playback_region": {
     "message": "音訊: {{name}}"
@@ -961,5 +961,101 @@
   },
   "outputs_downloadAria": {
     "message": "下載: {{title}}"
+  },
+  "overview_latest_delivery_chatbookDestination": {
+    "message": "Chatbook"
+  },
+  "overview_latest_delivery_confirmRetry": {
+    "message": "重試 送達"
+  },
+  "overview_latest_delivery_confirmRetryAria": {
+    "message": "重試 {{adapter}} 送達"
+  },
+  "overview_latest_delivery_recipientCount": {
+    "message": "{{count}} 收件者"
+  },
+  "overview_latest_delivery_recipientCount_zero": {
+    "message": "{{count}} 收件者"
+  },
+  "overview_latest_delivery_recipientCount_one": {
+    "message": "{{count}} 收件者"
+  },
+  "overview_latest_delivery_recipientCount_two": {
+    "message": "{{count}} 收件者"
+  },
+  "overview_latest_delivery_recipientCount_few": {
+    "message": "{{count}} 收件者"
+  },
+  "overview_latest_delivery_recipientCount_many": {
+    "message": "{{count}} 收件者"
+  },
+  "overview_latest_delivery_recipientCount_other": {
+    "message": "{{count}} 收件者"
+  },
+  "overview_latest_delivery_reviewAcknowledgement": {
+    "message": "我已檢查目的地，並接受重複送達的風險。"
+  },
+  "overview_latest_delivery_reviewSettings": {
+    "message": "檢查 設定"
+  },
+  "overview_latest_delivery_reviewTitle": {
+    "message": "檢查 {{adapter}} 送達"
+  },
+  "overview_latest_playback_accessError": {
+    "message": "音訊: 存取失敗. 請檢查登入狀態與伺服器連線。"
+  },
+  "overview_latest_playback_missing": {
+    "message": "音訊 已無法使用."
+  },
+  "overview_latest_actions_downloadAudio": {
+    "message": "下載 音訊"
+  },
+  "overview_latest_actions_downloadAudioAria": {
+    "message": "下載 音訊: {{name}}"
+  },
+  "overview_latest_actions_retryExactAria": {
+    "message": "重試 {{stage}}: {{name}}"
+  },
+  "overview_latest_actions_reviewScript": {
+    "message": "檢查 音訊 報告"
+  },
+  "overview_latest_actions_reviewScriptAria": {
+    "message": "檢查 音訊 報告: {{name}}"
+  },
+  "overview_latest_scriptAccessError": {
+    "message": "音訊 報告: 存取失敗. 請檢查登入狀態與伺服器連線。"
+  },
+  "overview_latest_scriptLoading": {
+    "message": "正在載入 音訊 報告"
+  },
+  "overview_latest_scriptMissing": {
+    "message": "音訊 報告 已無法使用."
+  },
+  "overview_latest_recovery_renderText": {
+    "message": "正在產生 報告"
+  },
+  "overview_latest_recovery_persistText": {
+    "message": "正在儲存 報告"
+  },
+  "overview_latest_recovery_composeScript": {
+    "message": "正在編寫 音訊 報告"
+  },
+  "overview_latest_recovery_persistScript": {
+    "message": "正在儲存 音訊 報告"
+  },
+  "overview_latest_recovery_generateAudio": {
+    "message": "正在產生 音訊"
+  },
+  "overview_latest_recovery_persistAudio": {
+    "message": "正在儲存 音訊"
+  },
+  "outputs_artifactMissing": {
+    "message": "已無法使用."
+  },
+  "outputs_artifactAuthError": {
+    "message": "存取遭拒。請檢查登入狀態。"
+  },
+  "outputs_artifactAccessError": {
+    "message": "存取失敗. 請檢查登入狀態與伺服器連線。"
   }
 }

@@ -664,7 +664,7 @@
         "episode": "Latest episode"
       },
       "empty": {
-        "scheduled": "briefing: {{date}}.",
+        "scheduled": "Your first briefing is scheduled for {{date}}.",
         "manual": "Not started. Test now."
       },
       "generatedAt": "Generated {{date}}",
@@ -700,7 +700,20 @@
         "retryAria": "Retry {{adapter}}: {{name}}",
         "retryUnknownAria": "Outcome unknown. Retry {{adapter}}: {{name}}",
         "reviewRetry": "Review and retry",
-        "unknownConfirmation": "The provider did not confirm {{adapter}} delivery. Retrying may send a duplicate. Review the destination, then continue only if that risk is acceptable."
+        "unknownConfirmation": "The provider did not confirm {{adapter}} delivery to {{destination}}. Retrying may send a duplicate.",
+        "chatbookDestination": "Chatbook",
+        "confirmRetry": "Retry delivery",
+        "confirmRetryAria": "Retry {{adapter}} delivery",
+        "recipientCount": "{{count}} recipients",
+        "recipientCount_zero": "{{count}} recipients",
+        "recipientCount_one": "{{count}} recipient",
+        "recipientCount_two": "{{count}} recipients",
+        "recipientCount_few": "{{count}} recipients",
+        "recipientCount_many": "{{count}} recipients",
+        "recipientCount_other": "{{count}} recipients",
+        "reviewAcknowledgement": "I reviewed the destination and accept the duplicate-delivery risk.",
+        "reviewSettings": "Review delivery settings",
+        "reviewTitle": "Review {{adapter}} delivery retry"
       },
       "playback": {
         "region": "audio: {{name}}",
@@ -712,7 +725,9 @@
         "error": "audio failed. Open report / Regenerate audio.",
         "play": "Play",
         "pause": "Pause",
-        "resume": "Resume"
+        "resume": "Resume",
+        "accessError": "Audio access failed. Check your sign-in and server connection.",
+        "missing": "This audio artifact is no longer available."
       },
       "actions": {
         "label": "Latest briefing",
@@ -727,7 +742,12 @@
         "inspect": "Inspect run",
         "inspectAria": "Inspect run {{runId}}: {{name}}",
         "viewReports": "View all reports",
-        "testNow": "Test now"
+        "testNow": "Test now",
+        "downloadAudio": "Download audio",
+        "downloadAudioAria": "Download audio for {{name}}",
+        "retryExactAria": "Retry {{stage}} for {{name}}",
+        "reviewScript": "Review script",
+        "reviewScriptAria": "Review script for {{name}}"
       },
       "announcements": {
         "blockingFailure": "{{name}} failed. Inspect run {{runId}}.",
@@ -769,6 +789,17 @@
         "episode": "episode",
         "report": "report",
         "showNotes": "show notes"
+      },
+      "scriptAccessError": "Script access failed. Check your sign-in and server connection.",
+      "scriptLoading": "Loading script",
+      "scriptMissing": "This script artifact is no longer available.",
+      "recovery": {
+        "renderText": "generating report",
+        "persistText": "saving report",
+        "composeScript": "composing audio script",
+        "persistScript": "saving audio script",
+        "generateAudio": "generating audio",
+        "persistAudio": "saving audio"
       }
     }
   },
@@ -2033,7 +2064,10 @@
     },
     "openInNewTabAria": "Open in new tab: {{title}}",
     "chatAboutAria": "Chat about this: {{title}}",
-    "downloadAria": "Download: {{title}}"
+    "downloadAria": "Download: {{title}}",
+    "artifactMissing": "This artifact is no longer available",
+    "artifactAuthError": "Artifact access was denied. Check your sign-in.",
+    "artifactAccessError": "Artifact access failed. Check your sign-in and server connection."
   },
   "templates": {
     "title": "Templates",

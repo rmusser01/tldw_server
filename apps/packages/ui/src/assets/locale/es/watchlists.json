@@ -366,7 +366,20 @@
         "retryAria": "Reintentar {{adapter}}: {{name}}",
         "retryUnknownAria": "Resultado desconocido. Reintentar {{adapter}}: {{name}}",
         "reviewRetry": "Revisar y reintentar",
-        "unknownConfirmation": "El proveedor no confirmó la entrega por {{adapter}}. Reintentar puede enviar un duplicado. Revisa el destino y continúa solo si aceptas ese riesgo."
+        "unknownConfirmation": "El proveedor no confirmó la entrega por {{adapter}}. Reintentar puede enviar un duplicado. Revisa el destino y continúa solo si aceptas ese riesgo. ({{destination}})",
+        "chatbookDestination": "Chatbook",
+        "confirmRetry": "Reintentar entrega",
+        "confirmRetryAria": "Reintentar {{adapter}} entrega",
+        "recipientCount": "{{count}} destinatarios",
+        "recipientCount_zero": "{{count}} destinatarios",
+        "recipientCount_one": "{{count}} destinatarios",
+        "recipientCount_two": "{{count}} destinatarios",
+        "recipientCount_few": "{{count}} destinatarios",
+        "recipientCount_many": "{{count}} destinatarios",
+        "recipientCount_other": "{{count}} destinatarios",
+        "reviewAcknowledgement": "He revisado el destino y acepto el riesgo de una entrega duplicada.",
+        "reviewSettings": "Revisar configuración",
+        "reviewTitle": "Revisar {{adapter}} entrega"
       },
       "playback": {
         "region": "audio: {{name}}",
@@ -378,7 +391,9 @@
         "error": "audio falló. Abrir informe / Regenerar audio.",
         "play": "Reproducir",
         "pause": "Pausar",
-        "resume": "Reanudar"
+        "resume": "Reanudar",
+        "accessError": "audio: Error de acceso. Comprueba tu inicio de sesión y la conexión con el servidor.",
+        "missing": "audio ya no está disponible."
       },
       "actions": {
         "label": "Último resumen",
@@ -393,7 +408,12 @@
         "inspect": "Inspeccionar ejecución",
         "inspectAria": "Inspeccionar ejecución {{runId}}: {{name}}",
         "viewReports": "Ver todos los informes",
-        "testNow": "Probar ahora"
+        "testNow": "Probar ahora",
+        "downloadAudio": "Descargar audio",
+        "downloadAudioAria": "Descargar audio: {{name}}",
+        "retryExactAria": "Reintentar {{stage}}: {{name}}",
+        "reviewScript": "Revisar audio informe",
+        "reviewScriptAria": "Revisar audio informe: {{name}}"
       },
       "announcements": {
         "blockingFailure": "{{name}} falló. Inspeccionar ejecución {{runId}}.",
@@ -435,12 +455,26 @@
         "episode": "episodio",
         "report": "informe",
         "showNotes": "notas del programa"
+      },
+      "scriptAccessError": "audio informe: Error de acceso. Comprueba tu inicio de sesión y la conexión con el servidor.",
+      "scriptLoading": "Cargando audio informe",
+      "scriptMissing": "audio informe ya no está disponible.",
+      "recovery": {
+        "renderText": "Generando informe",
+        "persistText": "Guardando informe",
+        "composeScript": "Redactando audio informe",
+        "persistScript": "Guardando audio informe",
+        "generateAudio": "Generando audio",
+        "persistAudio": "Guardando audio"
       }
     }
   },
   "outputs": {
     "openInNewTabAria": "Abrir en una pestaña nueva: {{title}}",
     "chatAboutAria": "Conversar sobre esto: {{title}}",
-    "downloadAria": "Descargar: {{title}}"
+    "downloadAria": "Descargar: {{title}}",
+    "artifactMissing": "ya no está disponible.",
+    "artifactAuthError": "Acceso denegado. Comprueba tu inicio de sesión.",
+    "artifactAccessError": "Error de acceso. Comprueba tu inicio de sesión y la conexión con el servidor."
   }
 }

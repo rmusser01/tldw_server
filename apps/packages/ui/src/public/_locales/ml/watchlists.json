@@ -783,7 +783,7 @@
     "message": "പരിശോധിച്ച് വീണ്ടും ശ്രമിക്കുക"
   },
   "overview_latest_delivery_unknownConfirmation": {
-    "message": "ദാതാവ് {{adapter}} ഡെലിവറി സ്ഥിരീകരിച്ചില്ല. വീണ്ടും ശ്രമിക്കുന്നത് പകർപ്പ് അയച്ചേക്കാം. ലക്ഷ്യസ്ഥാനം പരിശോധിച്ച് ഈ അപകടസാധ്യത അംഗീകരിക്കാമെങ്കിൽ മാത്രം തുടരുക."
+    "message": "ദാതാവ് {{adapter}} ഡെലിവറി സ്ഥിരീകരിച്ചില്ല. വീണ്ടും ശ്രമിക്കുന്നത് പകർപ്പ് അയച്ചേക്കാം. ലക്ഷ്യസ്ഥാനം പരിശോധിച്ച് ഈ അപകടസാധ്യത അംഗീകരിക്കാമെങ്കിൽ മാത്രം തുടരുക. ({{destination}})"
   },
   "overview_latest_playback_region": {
     "message": "ഓഡിയോ: {{name}}"
@@ -961,5 +961,101 @@
   },
   "outputs_downloadAria": {
     "message": "ഡൗൺലോഡ്: {{title}}"
+  },
+  "overview_latest_delivery_chatbookDestination": {
+    "message": "Chatbook"
+  },
+  "overview_latest_delivery_confirmRetry": {
+    "message": "വീണ്ടും ശ്രമിക്കുക ഡെലിവറി"
+  },
+  "overview_latest_delivery_confirmRetryAria": {
+    "message": "വീണ്ടും ശ്രമിക്കുക {{adapter}} ഡെലിവറി"
+  },
+  "overview_latest_delivery_recipientCount": {
+    "message": "{{count}} സ്വീകർത്താക്കൾ"
+  },
+  "overview_latest_delivery_recipientCount_zero": {
+    "message": "{{count}} സ്വീകർത്താക്കൾ"
+  },
+  "overview_latest_delivery_recipientCount_one": {
+    "message": "{{count}} സ്വീകർത്താക്കൾ"
+  },
+  "overview_latest_delivery_recipientCount_two": {
+    "message": "{{count}} സ്വീകർത്താക്കൾ"
+  },
+  "overview_latest_delivery_recipientCount_few": {
+    "message": "{{count}} സ്വീകർത്താക്കൾ"
+  },
+  "overview_latest_delivery_recipientCount_many": {
+    "message": "{{count}} സ്വീകർത്താക്കൾ"
+  },
+  "overview_latest_delivery_recipientCount_other": {
+    "message": "{{count}} സ്വീകർത്താക്കൾ"
+  },
+  "overview_latest_delivery_reviewAcknowledgement": {
+    "message": "ലക്ഷ്യസ്ഥാനം പരിശോധിച്ചു; ആവർത്തിച്ചുള്ള ഡെലിവറി അപകടസാധ്യത അംഗീകരിക്കുന്നു."
+  },
+  "overview_latest_delivery_reviewSettings": {
+    "message": "പരിശോധിക്കുക ക്രമീകരണങ്ങൾ"
+  },
+  "overview_latest_delivery_reviewTitle": {
+    "message": "പരിശോധിക്കുക {{adapter}} ഡെലിവറി"
+  },
+  "overview_latest_playback_accessError": {
+    "message": "ഓഡിയോ: ആക്സസ് പരാജയപ്പെട്ടു. സൈൻ ഇന്നും സെർവർ കണക്ഷനും പരിശോധിക്കുക."
+  },
+  "overview_latest_playback_missing": {
+    "message": "ഓഡിയോ ഇനി ലഭ്യമല്ല."
+  },
+  "overview_latest_actions_downloadAudio": {
+    "message": "ഡൗൺലോഡ് ഓഡിയോ"
+  },
+  "overview_latest_actions_downloadAudioAria": {
+    "message": "ഡൗൺലോഡ് ഓഡിയോ: {{name}}"
+  },
+  "overview_latest_actions_retryExactAria": {
+    "message": "വീണ്ടും ശ്രമിക്കുക {{stage}}: {{name}}"
+  },
+  "overview_latest_actions_reviewScript": {
+    "message": "പരിശോധിക്കുക ഓഡിയോ റിപ്പോർട്ട്"
+  },
+  "overview_latest_actions_reviewScriptAria": {
+    "message": "പരിശോധിക്കുക ഓഡിയോ റിപ്പോർട്ട്: {{name}}"
+  },
+  "overview_latest_scriptAccessError": {
+    "message": "ഓഡിയോ റിപ്പോർട്ട്: ആക്സസ് പരാജയപ്പെട്ടു. സൈൻ ഇന്നും സെർവർ കണക്ഷനും പരിശോധിക്കുക."
+  },
+  "overview_latest_scriptLoading": {
+    "message": "ലോഡ് ചെയ്യുന്നു ഓഡിയോ റിപ്പോർട്ട്"
+  },
+  "overview_latest_scriptMissing": {
+    "message": "ഓഡിയോ റിപ്പോർട്ട് ഇനി ലഭ്യമല്ല."
+  },
+  "overview_latest_recovery_renderText": {
+    "message": "സൃഷ്ടിക്കുന്നു റിപ്പോർട്ട്"
+  },
+  "overview_latest_recovery_persistText": {
+    "message": "സംരക്ഷിക്കുന്നു റിപ്പോർട്ട്"
+  },
+  "overview_latest_recovery_composeScript": {
+    "message": "തയ്യാറാക്കുന്നു ഓഡിയോ റിപ്പോർട്ട്"
+  },
+  "overview_latest_recovery_persistScript": {
+    "message": "സംരക്ഷിക്കുന്നു ഓഡിയോ റിപ്പോർട്ട്"
+  },
+  "overview_latest_recovery_generateAudio": {
+    "message": "സൃഷ്ടിക്കുന്നു ഓഡിയോ"
+  },
+  "overview_latest_recovery_persistAudio": {
+    "message": "സംരക്ഷിക്കുന്നു ഓഡിയോ"
+  },
+  "outputs_artifactMissing": {
+    "message": "ഇനി ലഭ്യമല്ല."
+  },
+  "outputs_artifactAuthError": {
+    "message": "ആക്സസ് നിരസിച്ചു. സൈൻ ഇൻ പരിശോധിക്കുക."
+  },
+  "outputs_artifactAccessError": {
+    "message": "ആക്സസ് പരാജയപ്പെട്ടു. സൈൻ ഇന്നും സെർവർ കണക്ഷനും പരിശോധിക്കുക."
   }
 }

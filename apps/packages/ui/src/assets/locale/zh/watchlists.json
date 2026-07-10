@@ -363,7 +363,20 @@
         "retryAria": "重试 {{adapter}}: {{name}}",
         "retryUnknownAria": "结果未知. 重试 {{adapter}}: {{name}}",
         "reviewRetry": "检查后重试",
-        "unknownConfirmation": "提供商未确认通过 {{adapter}} 送达。重试可能会发送重复内容。请检查目标，仅在可以接受该风险时继续。"
+        "unknownConfirmation": "提供商未确认通过 {{adapter}} 送达。重试可能会发送重复内容。请检查目标，仅在可以接受该风险时继续。 ({{destination}})",
+        "chatbookDestination": "Chatbook",
+        "confirmRetry": "重试 送达",
+        "confirmRetryAria": "重试 {{adapter}} 送达",
+        "recipientCount": "{{count}} 收件人",
+        "recipientCount_zero": "{{count}} 收件人",
+        "recipientCount_one": "{{count}} 收件人",
+        "recipientCount_two": "{{count}} 收件人",
+        "recipientCount_few": "{{count}} 收件人",
+        "recipientCount_many": "{{count}} 收件人",
+        "recipientCount_other": "{{count}} 收件人",
+        "reviewAcknowledgement": "我已检查目标，并接受重复送达的风险。",
+        "reviewSettings": "检查 设置",
+        "reviewTitle": "检查 {{adapter}} 送达"
       },
       "playback": {
         "region": "音频: {{name}}",
@@ -375,7 +388,9 @@
         "error": "音频 失败. 打开 报告 / 重新生成 音频.",
         "play": "播放",
         "pause": "暂停",
-        "resume": "继续"
+        "resume": "继续",
+        "accessError": "音频: 访问失败. 请检查登录状态和服务器连接。",
+        "missing": "音频 已不可用."
       },
       "actions": {
         "label": "最新 简报",
@@ -390,7 +405,12 @@
         "inspect": "检查运行",
         "inspectAria": "检查运行 {{runId}}: {{name}}",
         "viewReports": "查看所有报告",
-        "testNow": "立即测试"
+        "testNow": "立即测试",
+        "downloadAudio": "下载 音频",
+        "downloadAudioAria": "下载 音频: {{name}}",
+        "retryExactAria": "重试 {{stage}}: {{name}}",
+        "reviewScript": "检查 音频 报告",
+        "reviewScriptAria": "检查 音频 报告: {{name}}"
       },
       "announcements": {
         "blockingFailure": "{{name}} 失败. 检查运行 {{runId}}.",
@@ -432,12 +452,26 @@
         "episode": "节目",
         "report": "报告",
         "showNotes": "节目说明"
+      },
+      "scriptAccessError": "音频 报告: 访问失败. 请检查登录状态和服务器连接。",
+      "scriptLoading": "正在加载 音频 报告",
+      "scriptMissing": "音频 报告 已不可用.",
+      "recovery": {
+        "renderText": "正在生成 报告",
+        "persistText": "正在保存 报告",
+        "composeScript": "正在编写 音频 报告",
+        "persistScript": "正在保存 音频 报告",
+        "generateAudio": "正在生成 音频",
+        "persistAudio": "正在保存 音频"
       }
     }
   },
   "outputs": {
     "openInNewTabAria": "在新标签页中打开: {{title}}",
     "chatAboutAria": "讨论此内容: {{title}}",
-    "downloadAria": "下载: {{title}}"
+    "downloadAria": "下载: {{title}}",
+    "artifactMissing": "已不可用.",
+    "artifactAuthError": "访问被拒绝。请检查登录状态。",
+    "artifactAccessError": "访问失败. 请检查登录状态和服务器连接。"
   }
 }

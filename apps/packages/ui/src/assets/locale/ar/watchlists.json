@@ -375,7 +375,20 @@
         "retryAria": "إعادة المحاولة {{adapter}}: {{name}}",
         "retryUnknownAria": "النتيجة غير معروفة. إعادة المحاولة {{adapter}}: {{name}}",
         "reviewRetry": "مراجعة وإعادة المحاولة",
-        "unknownConfirmation": "لم يؤكد المزوّد تسليم {{adapter}}. قد تؤدي إعادة المحاولة إلى إرسال نسخة مكررة. راجع الوجهة ولا تتابع إلا إذا كان هذا الخطر مقبولًا."
+        "unknownConfirmation": "لم يؤكد المزوّد تسليم {{adapter}}. قد تؤدي إعادة المحاولة إلى إرسال نسخة مكررة. راجع الوجهة ولا تتابع إلا إذا كان هذا الخطر مقبولًا. ({{destination}})",
+        "chatbookDestination": "Chatbook",
+        "confirmRetry": "إعادة محاولة التسليم",
+        "confirmRetryAria": "إعادة محاولة {{adapter}} التسليم",
+        "recipientCount": "{{count}} مستلمين",
+        "recipientCount_zero": "{{count}} مستلمين",
+        "recipientCount_one": "{{count}} مستلمين",
+        "recipientCount_two": "{{count}} مستلمين",
+        "recipientCount_few": "{{count}} مستلمين",
+        "recipientCount_many": "{{count}} مستلمين",
+        "recipientCount_other": "{{count}} مستلمين",
+        "reviewAcknowledgement": "راجعت الوجهة وأقبل خطر تكرار التسليم.",
+        "reviewSettings": "مراجعة الإعدادات",
+        "reviewTitle": "مراجعة {{adapter}} التسليم"
       },
       "playback": {
         "region": "صوت: {{name}}",
@@ -387,7 +400,9 @@
         "error": "صوت فشل. فتح تقرير / إعادة الإنشاء صوت.",
         "play": "تشغيل",
         "pause": "إيقاف مؤقت",
-        "resume": "استئناف"
+        "resume": "استئناف",
+        "accessError": "صوت: فشل الوصول. تحقق من تسجيل الدخول واتصال الخادم.",
+        "missing": "صوت لم يعد متاحًا."
       },
       "actions": {
         "label": "أحدث موجز",
@@ -402,7 +417,12 @@
         "inspect": "فحص التشغيل",
         "inspectAria": "فحص التشغيل {{runId}}: {{name}}",
         "viewReports": "عرض كل التقارير",
-        "testNow": "اختبار الآن"
+        "testNow": "اختبار الآن",
+        "downloadAudio": "تنزيل صوت",
+        "downloadAudioAria": "تنزيل صوت: {{name}}",
+        "retryExactAria": "إعادة محاولة {{stage}}: {{name}}",
+        "reviewScript": "مراجعة صوت تقرير",
+        "reviewScriptAria": "مراجعة صوت تقرير: {{name}}"
       },
       "announcements": {
         "blockingFailure": "{{name}} فشل. فحص التشغيل {{runId}}.",
@@ -444,12 +464,26 @@
         "episode": "حلقة",
         "report": "تقرير",
         "showNotes": "ملاحظات العرض"
+      },
+      "scriptAccessError": "صوت تقرير: فشل الوصول. تحقق من تسجيل الدخول واتصال الخادم.",
+      "scriptLoading": "جارٍ تحميل صوت تقرير",
+      "scriptMissing": "صوت تقرير لم يعد متاحًا.",
+      "recovery": {
+        "renderText": "جارٍ إنشاء تقرير",
+        "persistText": "جارٍ حفظ تقرير",
+        "composeScript": "جارٍ إعداد صوت تقرير",
+        "persistScript": "جارٍ حفظ صوت تقرير",
+        "generateAudio": "جارٍ إنشاء صوت",
+        "persistAudio": "جارٍ حفظ صوت"
       }
     }
   },
   "outputs": {
     "openInNewTabAria": "فتح في علامة تبويب جديدة: {{title}}",
     "chatAboutAria": "مناقشة هذا: {{title}}",
-    "downloadAria": "تنزيل: {{title}}"
+    "downloadAria": "تنزيل: {{title}}",
+    "artifactMissing": "لم يعد متاحًا.",
+    "artifactAuthError": "رُفض الوصول. تحقق من تسجيل الدخول.",
+    "artifactAccessError": "فشل الوصول. تحقق من تسجيل الدخول واتصال الخادم."
   }
 }

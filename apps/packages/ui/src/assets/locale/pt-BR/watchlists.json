@@ -366,7 +366,20 @@
         "retryAria": "Tentar novamente {{adapter}}: {{name}}",
         "retryUnknownAria": "Resultado desconhecido. Tentar novamente {{adapter}}: {{name}}",
         "reviewRetry": "Revisar e tentar novamente",
-        "unknownConfirmation": "O provedor não confirmou a entrega por {{adapter}}. Tentar novamente pode enviar uma duplicata. Revise o destino e continue apenas se aceitar esse risco."
+        "unknownConfirmation": "O provedor não confirmou a entrega por {{adapter}}. Tentar novamente pode enviar uma duplicata. Revise o destino e continue apenas se aceitar esse risco. ({{destination}})",
+        "chatbookDestination": "Chatbook",
+        "confirmRetry": "Tentar novamente entrega",
+        "confirmRetryAria": "Tentar novamente {{adapter}} entrega",
+        "recipientCount": "{{count}} destinatários",
+        "recipientCount_zero": "{{count}} destinatários",
+        "recipientCount_one": "{{count}} destinatários",
+        "recipientCount_two": "{{count}} destinatários",
+        "recipientCount_few": "{{count}} destinatários",
+        "recipientCount_many": "{{count}} destinatários",
+        "recipientCount_other": "{{count}} destinatários",
+        "reviewAcknowledgement": "Revisei o destino e aceito o risco de uma entrega duplicada.",
+        "reviewSettings": "Revisar configurações",
+        "reviewTitle": "Revisar {{adapter}} entrega"
       },
       "playback": {
         "region": "áudio: {{name}}",
@@ -378,7 +391,9 @@
         "error": "áudio falhou. Abrir relatório / Regenerar áudio.",
         "play": "Reproduzir",
         "pause": "Pausar",
-        "resume": "Retomar"
+        "resume": "Retomar",
+        "accessError": "áudio: Falha no acesso. Verifique seu login e a conexão com o servidor.",
+        "missing": "áudio não está mais disponível."
       },
       "actions": {
         "label": "Mais recente resumo",
@@ -393,7 +408,12 @@
         "inspect": "Inspecionar execução",
         "inspectAria": "Inspecionar execução {{runId}}: {{name}}",
         "viewReports": "Ver todos os relatórios",
-        "testNow": "Testar agora"
+        "testNow": "Testar agora",
+        "downloadAudio": "Baixar áudio",
+        "downloadAudioAria": "Baixar áudio: {{name}}",
+        "retryExactAria": "Tentar novamente {{stage}}: {{name}}",
+        "reviewScript": "Revisar áudio relatório",
+        "reviewScriptAria": "Revisar áudio relatório: {{name}}"
       },
       "announcements": {
         "blockingFailure": "{{name}} falhou. Inspecionar execução {{runId}}.",
@@ -435,12 +455,26 @@
         "episode": "episódio",
         "report": "relatório",
         "showNotes": "notas do programa"
+      },
+      "scriptAccessError": "áudio relatório: Falha no acesso. Verifique seu login e a conexão com o servidor.",
+      "scriptLoading": "Carregando áudio relatório",
+      "scriptMissing": "áudio relatório não está mais disponível.",
+      "recovery": {
+        "renderText": "Gerando relatório",
+        "persistText": "Salvando relatório",
+        "composeScript": "Compondo áudio relatório",
+        "persistScript": "Salvando áudio relatório",
+        "generateAudio": "Gerando áudio",
+        "persistAudio": "Salvando áudio"
       }
     }
   },
   "outputs": {
     "openInNewTabAria": "Abrir em nova guia: {{title}}",
     "chatAboutAria": "Conversar sobre isto: {{title}}",
-    "downloadAria": "Baixar: {{title}}"
+    "downloadAria": "Baixar: {{title}}",
+    "artifactMissing": "não está mais disponível.",
+    "artifactAuthError": "Acesso negado. Verifique seu login.",
+    "artifactAccessError": "Falha no acesso. Verifique seu login e a conexão com o servidor."
   }
 }

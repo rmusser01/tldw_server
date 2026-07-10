@@ -366,7 +366,20 @@
         "retryAria": "Riprova {{adapter}}: {{name}}",
         "retryUnknownAria": "Esito sconosciuto. Riprova {{adapter}}: {{name}}",
         "reviewRetry": "Verifica e riprova",
-        "unknownConfirmation": "Il provider non ha confermato la consegna tramite {{adapter}}. Un nuovo tentativo può inviare un duplicato. Controlla la destinazione e continua solo se accetti il rischio."
+        "unknownConfirmation": "Il provider non ha confermato la consegna tramite {{adapter}}. Un nuovo tentativo può inviare un duplicato. Controlla la destinazione e continua solo se accetti il rischio. ({{destination}})",
+        "chatbookDestination": "Chatbook",
+        "confirmRetry": "Riprova consegna",
+        "confirmRetryAria": "Riprova {{adapter}} consegna",
+        "recipientCount": "{{count}} destinatari",
+        "recipientCount_zero": "{{count}} destinatari",
+        "recipientCount_one": "{{count}} destinatari",
+        "recipientCount_two": "{{count}} destinatari",
+        "recipientCount_few": "{{count}} destinatari",
+        "recipientCount_many": "{{count}} destinatari",
+        "recipientCount_other": "{{count}} destinatari",
+        "reviewAcknowledgement": "Ho controllato la destinazione e accetto il rischio di una consegna duplicata.",
+        "reviewSettings": "Controlla impostazioni",
+        "reviewTitle": "Controlla {{adapter}} consegna"
       },
       "playback": {
         "region": "audio: {{name}}",
@@ -378,7 +391,9 @@
         "error": "audio non riuscito. Apri rapporto / Rigenera audio.",
         "play": "Riproduci",
         "pause": "Pausa",
-        "resume": "Riprendi"
+        "resume": "Riprendi",
+        "accessError": "audio: Accesso non riuscito. Controlla l’accesso e la connessione al server.",
+        "missing": "audio non è più disponibile."
       },
       "actions": {
         "label": "Ultimo briefing",
@@ -393,7 +408,12 @@
         "inspect": "Ispeziona esecuzione",
         "inspectAria": "Ispeziona esecuzione {{runId}}: {{name}}",
         "viewReports": "Vedi tutti i rapporti",
-        "testNow": "Prova ora"
+        "testNow": "Prova ora",
+        "downloadAudio": "Scarica audio",
+        "downloadAudioAria": "Scarica audio: {{name}}",
+        "retryExactAria": "Riprova {{stage}}: {{name}}",
+        "reviewScript": "Controlla audio rapporto",
+        "reviewScriptAria": "Controlla audio rapporto: {{name}}"
       },
       "announcements": {
         "blockingFailure": "{{name}} non riuscito. Ispeziona esecuzione {{runId}}.",
@@ -435,12 +455,26 @@
         "episode": "episodio",
         "report": "rapporto",
         "showNotes": "note del programma"
+      },
+      "scriptAccessError": "audio rapporto: Accesso non riuscito. Controlla l’accesso e la connessione al server.",
+      "scriptLoading": "Caricamento audio rapporto",
+      "scriptMissing": "audio rapporto non è più disponibile.",
+      "recovery": {
+        "renderText": "Generazione rapporto",
+        "persistText": "Salvataggio rapporto",
+        "composeScript": "Composizione audio rapporto",
+        "persistScript": "Salvataggio audio rapporto",
+        "generateAudio": "Generazione audio",
+        "persistAudio": "Salvataggio audio"
       }
     }
   },
   "outputs": {
     "openInNewTabAria": "Apri in una nuova scheda: {{title}}",
     "chatAboutAria": "Discuti di questo: {{title}}",
-    "downloadAria": "Scarica: {{title}}"
+    "downloadAria": "Scarica: {{title}}",
+    "artifactMissing": "non è più disponibile.",
+    "artifactAuthError": "Accesso negato. Controlla l’accesso.",
+    "artifactAccessError": "Accesso non riuscito. Controlla l’accesso e la connessione al server."
   }
 }

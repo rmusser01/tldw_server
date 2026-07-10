@@ -792,7 +792,7 @@
     "message": "Verifica e riprova"
   },
   "overview_latest_delivery_unknownConfirmation": {
-    "message": "Il provider non ha confermato la consegna tramite {{adapter}}. Un nuovo tentativo può inviare un duplicato. Controlla la destinazione e continua solo se accetti il rischio."
+    "message": "Il provider non ha confermato la consegna tramite {{adapter}}. Un nuovo tentativo può inviare un duplicato. Controlla la destinazione e continua solo se accetti il rischio. ({{destination}})"
   },
   "overview_latest_playback_region": {
     "message": "audio: {{name}}"
@@ -970,5 +970,101 @@
   },
   "outputs_downloadAria": {
     "message": "Scarica: {{title}}"
+  },
+  "overview_latest_delivery_chatbookDestination": {
+    "message": "Chatbook"
+  },
+  "overview_latest_delivery_confirmRetry": {
+    "message": "Riprova consegna"
+  },
+  "overview_latest_delivery_confirmRetryAria": {
+    "message": "Riprova {{adapter}} consegna"
+  },
+  "overview_latest_delivery_recipientCount": {
+    "message": "{{count}} destinatari"
+  },
+  "overview_latest_delivery_recipientCount_zero": {
+    "message": "{{count}} destinatari"
+  },
+  "overview_latest_delivery_recipientCount_one": {
+    "message": "{{count}} destinatari"
+  },
+  "overview_latest_delivery_recipientCount_two": {
+    "message": "{{count}} destinatari"
+  },
+  "overview_latest_delivery_recipientCount_few": {
+    "message": "{{count}} destinatari"
+  },
+  "overview_latest_delivery_recipientCount_many": {
+    "message": "{{count}} destinatari"
+  },
+  "overview_latest_delivery_recipientCount_other": {
+    "message": "{{count}} destinatari"
+  },
+  "overview_latest_delivery_reviewAcknowledgement": {
+    "message": "Ho controllato la destinazione e accetto il rischio di una consegna duplicata."
+  },
+  "overview_latest_delivery_reviewSettings": {
+    "message": "Controlla impostazioni"
+  },
+  "overview_latest_delivery_reviewTitle": {
+    "message": "Controlla {{adapter}} consegna"
+  },
+  "overview_latest_playback_accessError": {
+    "message": "audio: Accesso non riuscito. Controlla l’accesso e la connessione al server."
+  },
+  "overview_latest_playback_missing": {
+    "message": "audio non è più disponibile."
+  },
+  "overview_latest_actions_downloadAudio": {
+    "message": "Scarica audio"
+  },
+  "overview_latest_actions_downloadAudioAria": {
+    "message": "Scarica audio: {{name}}"
+  },
+  "overview_latest_actions_retryExactAria": {
+    "message": "Riprova {{stage}}: {{name}}"
+  },
+  "overview_latest_actions_reviewScript": {
+    "message": "Controlla audio rapporto"
+  },
+  "overview_latest_actions_reviewScriptAria": {
+    "message": "Controlla audio rapporto: {{name}}"
+  },
+  "overview_latest_scriptAccessError": {
+    "message": "audio rapporto: Accesso non riuscito. Controlla l’accesso e la connessione al server."
+  },
+  "overview_latest_scriptLoading": {
+    "message": "Caricamento audio rapporto"
+  },
+  "overview_latest_scriptMissing": {
+    "message": "audio rapporto non è più disponibile."
+  },
+  "overview_latest_recovery_renderText": {
+    "message": "Generazione rapporto"
+  },
+  "overview_latest_recovery_persistText": {
+    "message": "Salvataggio rapporto"
+  },
+  "overview_latest_recovery_composeScript": {
+    "message": "Composizione audio rapporto"
+  },
+  "overview_latest_recovery_persistScript": {
+    "message": "Salvataggio audio rapporto"
+  },
+  "overview_latest_recovery_generateAudio": {
+    "message": "Generazione audio"
+  },
+  "overview_latest_recovery_persistAudio": {
+    "message": "Salvataggio audio"
+  },
+  "outputs_artifactMissing": {
+    "message": "non è più disponibile."
+  },
+  "outputs_artifactAuthError": {
+    "message": "Accesso negato. Controlla l’accesso."
+  },
+  "outputs_artifactAccessError": {
+    "message": "Accesso non riuscito. Controlla l’accesso e la connessione al server."
   }
 }

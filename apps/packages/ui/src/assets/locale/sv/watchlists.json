@@ -363,7 +363,20 @@
         "retryAria": "Försök igen {{adapter}}: {{name}}",
         "retryUnknownAria": "Okänt resultat. Försök igen {{adapter}}: {{name}}",
         "reviewRetry": "Granska och försök igen",
-        "unknownConfirmation": "Leverantören bekräftade inte leverans via {{adapter}}. Ett nytt försök kan skicka en dubblett. Kontrollera målet och fortsätt bara om risken är acceptabel."
+        "unknownConfirmation": "Leverantören bekräftade inte leverans via {{adapter}}. Ett nytt försök kan skicka en dubblett. Kontrollera målet och fortsätt bara om risken är acceptabel. ({{destination}})",
+        "chatbookDestination": "Chatbook",
+        "confirmRetry": "Försök igen leverans",
+        "confirmRetryAria": "Försök igen {{adapter}} leverans",
+        "recipientCount": "{{count}} mottagare",
+        "recipientCount_zero": "{{count}} mottagare",
+        "recipientCount_one": "{{count}} mottagare",
+        "recipientCount_two": "{{count}} mottagare",
+        "recipientCount_few": "{{count}} mottagare",
+        "recipientCount_many": "{{count}} mottagare",
+        "recipientCount_other": "{{count}} mottagare",
+        "reviewAcknowledgement": "Jag har granskat målet och accepterar risken för dubbelleverans.",
+        "reviewSettings": "Granska inställningar",
+        "reviewTitle": "Granska {{adapter}} leverans"
       },
       "playback": {
         "region": "ljud: {{name}}",
@@ -375,7 +388,9 @@
         "error": "ljud misslyckades. Öppna rapport / Återskapa ljud.",
         "play": "Spela",
         "pause": "Pausa",
-        "resume": "Fortsätt"
+        "resume": "Fortsätt",
+        "accessError": "ljud: Åtkomst misslyckades. Kontrollera din inloggning och serveranslutning.",
+        "missing": "ljud är inte längre tillgänglig."
       },
       "actions": {
         "label": "Senaste briefing",
@@ -390,7 +405,12 @@
         "inspect": "Granska körning",
         "inspectAria": "Granska körning {{runId}}: {{name}}",
         "viewReports": "Visa alla rapporter",
-        "testNow": "Testa nu"
+        "testNow": "Testa nu",
+        "downloadAudio": "Hämta ljud",
+        "downloadAudioAria": "Hämta ljud: {{name}}",
+        "retryExactAria": "Försök igen {{stage}}: {{name}}",
+        "reviewScript": "Granska ljud rapport",
+        "reviewScriptAria": "Granska ljud rapport: {{name}}"
       },
       "announcements": {
         "blockingFailure": "{{name}} misslyckades. Granska körning {{runId}}.",
@@ -432,12 +452,26 @@
         "episode": "avsnitt",
         "report": "rapport",
         "showNotes": "programanteckningar"
+      },
+      "scriptAccessError": "ljud rapport: Åtkomst misslyckades. Kontrollera din inloggning och serveranslutning.",
+      "scriptLoading": "Läser in ljud rapport",
+      "scriptMissing": "ljud rapport är inte längre tillgänglig.",
+      "recovery": {
+        "renderText": "Genererar rapport",
+        "persistText": "Sparar rapport",
+        "composeScript": "Utformar ljud rapport",
+        "persistScript": "Sparar ljud rapport",
+        "generateAudio": "Genererar ljud",
+        "persistAudio": "Sparar ljud"
       }
     }
   },
   "outputs": {
     "openInNewTabAria": "Öppna i ny flik: {{title}}",
     "chatAboutAria": "Chatta om detta: {{title}}",
-    "downloadAria": "Hämta: {{title}}"
+    "downloadAria": "Hämta: {{title}}",
+    "artifactMissing": "är inte längre tillgänglig.",
+    "artifactAuthError": "Åtkomst nekades. Kontrollera din inloggning.",
+    "artifactAccessError": "Åtkomst misslyckades. Kontrollera din inloggning och serveranslutning."
   }
 }

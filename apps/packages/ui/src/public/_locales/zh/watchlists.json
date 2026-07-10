@@ -783,7 +783,7 @@
     "message": "检查后重试"
   },
   "overview_latest_delivery_unknownConfirmation": {
-    "message": "提供商未确认通过 {{adapter}} 送达。重试可能会发送重复内容。请检查目标，仅在可以接受该风险时继续。"
+    "message": "提供商未确认通过 {{adapter}} 送达。重试可能会发送重复内容。请检查目标，仅在可以接受该风险时继续。 ({{destination}})"
   },
   "overview_latest_playback_region": {
     "message": "音频: {{name}}"
@@ -961,5 +961,101 @@
   },
   "outputs_downloadAria": {
     "message": "下载: {{title}}"
+  },
+  "overview_latest_delivery_chatbookDestination": {
+    "message": "Chatbook"
+  },
+  "overview_latest_delivery_confirmRetry": {
+    "message": "重试 送达"
+  },
+  "overview_latest_delivery_confirmRetryAria": {
+    "message": "重试 {{adapter}} 送达"
+  },
+  "overview_latest_delivery_recipientCount": {
+    "message": "{{count}} 收件人"
+  },
+  "overview_latest_delivery_recipientCount_zero": {
+    "message": "{{count}} 收件人"
+  },
+  "overview_latest_delivery_recipientCount_one": {
+    "message": "{{count}} 收件人"
+  },
+  "overview_latest_delivery_recipientCount_two": {
+    "message": "{{count}} 收件人"
+  },
+  "overview_latest_delivery_recipientCount_few": {
+    "message": "{{count}} 收件人"
+  },
+  "overview_latest_delivery_recipientCount_many": {
+    "message": "{{count}} 收件人"
+  },
+  "overview_latest_delivery_recipientCount_other": {
+    "message": "{{count}} 收件人"
+  },
+  "overview_latest_delivery_reviewAcknowledgement": {
+    "message": "我已检查目标，并接受重复送达的风险。"
+  },
+  "overview_latest_delivery_reviewSettings": {
+    "message": "检查 设置"
+  },
+  "overview_latest_delivery_reviewTitle": {
+    "message": "检查 {{adapter}} 送达"
+  },
+  "overview_latest_playback_accessError": {
+    "message": "音频: 访问失败. 请检查登录状态和服务器连接。"
+  },
+  "overview_latest_playback_missing": {
+    "message": "音频 已不可用."
+  },
+  "overview_latest_actions_downloadAudio": {
+    "message": "下载 音频"
+  },
+  "overview_latest_actions_downloadAudioAria": {
+    "message": "下载 音频: {{name}}"
+  },
+  "overview_latest_actions_retryExactAria": {
+    "message": "重试 {{stage}}: {{name}}"
+  },
+  "overview_latest_actions_reviewScript": {
+    "message": "检查 音频 报告"
+  },
+  "overview_latest_actions_reviewScriptAria": {
+    "message": "检查 音频 报告: {{name}}"
+  },
+  "overview_latest_scriptAccessError": {
+    "message": "音频 报告: 访问失败. 请检查登录状态和服务器连接。"
+  },
+  "overview_latest_scriptLoading": {
+    "message": "正在加载 音频 报告"
+  },
+  "overview_latest_scriptMissing": {
+    "message": "音频 报告 已不可用."
+  },
+  "overview_latest_recovery_renderText": {
+    "message": "正在生成 报告"
+  },
+  "overview_latest_recovery_persistText": {
+    "message": "正在保存 报告"
+  },
+  "overview_latest_recovery_composeScript": {
+    "message": "正在编写 音频 报告"
+  },
+  "overview_latest_recovery_persistScript": {
+    "message": "正在保存 音频 报告"
+  },
+  "overview_latest_recovery_generateAudio": {
+    "message": "正在生成 音频"
+  },
+  "overview_latest_recovery_persistAudio": {
+    "message": "正在保存 音频"
+  },
+  "outputs_artifactMissing": {
+    "message": "已不可用."
+  },
+  "outputs_artifactAuthError": {
+    "message": "访问被拒绝。请检查登录状态。"
+  },
+  "outputs_artifactAccessError": {
+    "message": "访问失败. 请检查登录状态和服务器连接。"
   }
 }

@@ -369,7 +369,20 @@
         "retryAria": "Повторить {{adapter}}: {{name}}",
         "retryUnknownAria": "Результат неизвестен. Повторить {{adapter}}: {{name}}",
         "reviewRetry": "Проверить и повторить",
-        "unknownConfirmation": "Провайдер не подтвердил доставку через {{adapter}}. Повторная попытка может отправить дубликат. Проверьте адрес назначения и продолжайте, только если этот риск приемлем."
+        "unknownConfirmation": "Провайдер не подтвердил доставку через {{adapter}}. Повторная попытка может отправить дубликат. Проверьте адрес назначения и продолжайте, только если этот риск приемлем. ({{destination}})",
+        "chatbookDestination": "Chatbook",
+        "confirmRetry": "Повторить доставку",
+        "confirmRetryAria": "Повторить {{adapter}} доставку",
+        "recipientCount": "{{count}} получателей",
+        "recipientCount_zero": "{{count}} получателей",
+        "recipientCount_one": "{{count}} получателей",
+        "recipientCount_two": "{{count}} получателей",
+        "recipientCount_few": "{{count}} получателей",
+        "recipientCount_many": "{{count}} получателей",
+        "recipientCount_other": "{{count}} получателей",
+        "reviewAcknowledgement": "Я проверил адрес назначения и принимаю риск повторной доставки.",
+        "reviewSettings": "Проверить настройки",
+        "reviewTitle": "Проверить {{adapter}} доставку"
       },
       "playback": {
         "region": "аудио: {{name}}",
@@ -381,7 +394,9 @@
         "error": "аудио ошибка. Открыть отчёт / Создать заново аудио.",
         "play": "Воспроизвести",
         "pause": "Пауза",
-        "resume": "Продолжить"
+        "resume": "Продолжить",
+        "accessError": "аудио: Ошибка доступа. Проверьте вход и подключение к серверу.",
+        "missing": "аудио больше недоступен."
       },
       "actions": {
         "label": "Последний дайджест",
@@ -396,7 +411,12 @@
         "inspect": "Проверить запуск",
         "inspectAria": "Проверить запуск {{runId}}: {{name}}",
         "viewReports": "Все отчёты",
-        "testNow": "Проверить сейчас"
+        "testNow": "Проверить сейчас",
+        "downloadAudio": "Скачать аудио",
+        "downloadAudioAria": "Скачать аудио: {{name}}",
+        "retryExactAria": "Повторить {{stage}}: {{name}}",
+        "reviewScript": "Проверить аудио отчёт",
+        "reviewScriptAria": "Проверить аудио отчёт: {{name}}"
       },
       "announcements": {
         "blockingFailure": "{{name}} ошибка. Проверить запуск {{runId}}.",
@@ -438,12 +458,26 @@
         "episode": "эпизод",
         "report": "отчёт",
         "showNotes": "заметки к выпуску"
+      },
+      "scriptAccessError": "аудио отчёт: Ошибка доступа. Проверьте вход и подключение к серверу.",
+      "scriptLoading": "Загрузка аудио отчёт",
+      "scriptMissing": "аудио отчёт больше недоступен.",
+      "recovery": {
+        "renderText": "Создание отчёт",
+        "persistText": "Сохранение отчёт",
+        "composeScript": "Подготовка аудио отчёт",
+        "persistScript": "Сохранение аудио отчёт",
+        "generateAudio": "Создание аудио",
+        "persistAudio": "Сохранение аудио"
       }
     }
   },
   "outputs": {
     "openInNewTabAria": "Открыть в новой вкладке: {{title}}",
     "chatAboutAria": "Обсудить: {{title}}",
-    "downloadAria": "Скачать: {{title}}"
+    "downloadAria": "Скачать: {{title}}",
+    "artifactMissing": "больше недоступен.",
+    "artifactAuthError": "Доступ запрещён. Проверьте вход в систему.",
+    "artifactAccessError": "Ошибка доступа. Проверьте вход и подключение к серверу."
   }
 }

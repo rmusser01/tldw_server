@@ -369,7 +369,20 @@
         "retryAria": "Повторити {{adapter}}: {{name}}",
         "retryUnknownAria": "Результат невідомий. Повторити {{adapter}}: {{name}}",
         "reviewRetry": "Перевірити й повторити",
-        "unknownConfirmation": "Провайдер не підтвердив доставку через {{adapter}}. Повторна спроба може надіслати дублікат. Перевірте місце призначення й продовжуйте, лише якщо цей ризик прийнятний."
+        "unknownConfirmation": "Провайдер не підтвердив доставку через {{adapter}}. Повторна спроба може надіслати дублікат. Перевірте місце призначення й продовжуйте, лише якщо цей ризик прийнятний. ({{destination}})",
+        "chatbookDestination": "Chatbook",
+        "confirmRetry": "Повторити доставку",
+        "confirmRetryAria": "Повторити {{adapter}} доставку",
+        "recipientCount": "{{count}} одержувачів",
+        "recipientCount_zero": "{{count}} одержувачів",
+        "recipientCount_one": "{{count}} одержувачів",
+        "recipientCount_two": "{{count}} одержувачів",
+        "recipientCount_few": "{{count}} одержувачів",
+        "recipientCount_many": "{{count}} одержувачів",
+        "recipientCount_other": "{{count}} одержувачів",
+        "reviewAcknowledgement": "Я перевірив місце призначення та приймаю ризик повторної доставки.",
+        "reviewSettings": "Перевірити налаштування",
+        "reviewTitle": "Перевірити {{adapter}} доставку"
       },
       "playback": {
         "region": "аудіо: {{name}}",
@@ -381,7 +394,9 @@
         "error": "аудіо помилка. Відкрити звіт / Створити знову аудіо.",
         "play": "Відтворити",
         "pause": "Пауза",
-        "resume": "Продовжити"
+        "resume": "Продовжити",
+        "accessError": "аудіо: Помилка доступу. Перевірте вхід і з’єднання із сервером.",
+        "missing": "аудіо більше недоступний."
       },
       "actions": {
         "label": "Останній дайджест",
@@ -396,7 +411,12 @@
         "inspect": "Перевірити запуск",
         "inspectAria": "Перевірити запуск {{runId}}: {{name}}",
         "viewReports": "Усі звіти",
-        "testNow": "Перевірити зараз"
+        "testNow": "Перевірити зараз",
+        "downloadAudio": "Завантажити аудіо",
+        "downloadAudioAria": "Завантажити аудіо: {{name}}",
+        "retryExactAria": "Повторити {{stage}}: {{name}}",
+        "reviewScript": "Перевірити аудіо звіт",
+        "reviewScriptAria": "Перевірити аудіо звіт: {{name}}"
       },
       "announcements": {
         "blockingFailure": "{{name}} помилка. Перевірити запуск {{runId}}.",
@@ -438,12 +458,26 @@
         "episode": "епізод",
         "report": "звіт",
         "showNotes": "нотатки до випуску"
+      },
+      "scriptAccessError": "аудіо звіт: Помилка доступу. Перевірте вхід і з’єднання із сервером.",
+      "scriptLoading": "Завантаження аудіо звіт",
+      "scriptMissing": "аудіо звіт більше недоступний.",
+      "recovery": {
+        "renderText": "Створення звіт",
+        "persistText": "Збереження звіт",
+        "composeScript": "Підготовка аудіо звіт",
+        "persistScript": "Збереження аудіо звіт",
+        "generateAudio": "Створення аудіо",
+        "persistAudio": "Збереження аудіо"
       }
     }
   },
   "outputs": {
     "openInNewTabAria": "Відкрити в новій вкладці: {{title}}",
     "chatAboutAria": "Обговорити: {{title}}",
-    "downloadAria": "Завантажити: {{title}}"
+    "downloadAria": "Завантажити: {{title}}",
+    "artifactMissing": "більше недоступний.",
+    "artifactAuthError": "Доступ заборонено. Перевірте вхід.",
+    "artifactAccessError": "Помилка доступу. Перевірте вхід і з’єднання із сервером."
   }
 }

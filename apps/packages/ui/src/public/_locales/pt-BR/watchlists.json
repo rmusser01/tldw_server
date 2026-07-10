@@ -792,7 +792,7 @@
     "message": "Revisar e tentar novamente"
   },
   "overview_latest_delivery_unknownConfirmation": {
-    "message": "O provedor não confirmou a entrega por {{adapter}}. Tentar novamente pode enviar uma duplicata. Revise o destino e continue apenas se aceitar esse risco."
+    "message": "O provedor não confirmou a entrega por {{adapter}}. Tentar novamente pode enviar uma duplicata. Revise o destino e continue apenas se aceitar esse risco. ({{destination}})"
   },
   "overview_latest_playback_region": {
     "message": "áudio: {{name}}"
@@ -970,5 +970,101 @@
   },
   "outputs_downloadAria": {
     "message": "Baixar: {{title}}"
+  },
+  "overview_latest_delivery_chatbookDestination": {
+    "message": "Chatbook"
+  },
+  "overview_latest_delivery_confirmRetry": {
+    "message": "Tentar novamente entrega"
+  },
+  "overview_latest_delivery_confirmRetryAria": {
+    "message": "Tentar novamente {{adapter}} entrega"
+  },
+  "overview_latest_delivery_recipientCount": {
+    "message": "{{count}} destinatários"
+  },
+  "overview_latest_delivery_recipientCount_zero": {
+    "message": "{{count}} destinatários"
+  },
+  "overview_latest_delivery_recipientCount_one": {
+    "message": "{{count}} destinatários"
+  },
+  "overview_latest_delivery_recipientCount_two": {
+    "message": "{{count}} destinatários"
+  },
+  "overview_latest_delivery_recipientCount_few": {
+    "message": "{{count}} destinatários"
+  },
+  "overview_latest_delivery_recipientCount_many": {
+    "message": "{{count}} destinatários"
+  },
+  "overview_latest_delivery_recipientCount_other": {
+    "message": "{{count}} destinatários"
+  },
+  "overview_latest_delivery_reviewAcknowledgement": {
+    "message": "Revisei o destino e aceito o risco de uma entrega duplicada."
+  },
+  "overview_latest_delivery_reviewSettings": {
+    "message": "Revisar configurações"
+  },
+  "overview_latest_delivery_reviewTitle": {
+    "message": "Revisar {{adapter}} entrega"
+  },
+  "overview_latest_playback_accessError": {
+    "message": "áudio: Falha no acesso. Verifique seu login e a conexão com o servidor."
+  },
+  "overview_latest_playback_missing": {
+    "message": "áudio não está mais disponível."
+  },
+  "overview_latest_actions_downloadAudio": {
+    "message": "Baixar áudio"
+  },
+  "overview_latest_actions_downloadAudioAria": {
+    "message": "Baixar áudio: {{name}}"
+  },
+  "overview_latest_actions_retryExactAria": {
+    "message": "Tentar novamente {{stage}}: {{name}}"
+  },
+  "overview_latest_actions_reviewScript": {
+    "message": "Revisar áudio relatório"
+  },
+  "overview_latest_actions_reviewScriptAria": {
+    "message": "Revisar áudio relatório: {{name}}"
+  },
+  "overview_latest_scriptAccessError": {
+    "message": "áudio relatório: Falha no acesso. Verifique seu login e a conexão com o servidor."
+  },
+  "overview_latest_scriptLoading": {
+    "message": "Carregando áudio relatório"
+  },
+  "overview_latest_scriptMissing": {
+    "message": "áudio relatório não está mais disponível."
+  },
+  "overview_latest_recovery_renderText": {
+    "message": "Gerando relatório"
+  },
+  "overview_latest_recovery_persistText": {
+    "message": "Salvando relatório"
+  },
+  "overview_latest_recovery_composeScript": {
+    "message": "Compondo áudio relatório"
+  },
+  "overview_latest_recovery_persistScript": {
+    "message": "Salvando áudio relatório"
+  },
+  "overview_latest_recovery_generateAudio": {
+    "message": "Gerando áudio"
+  },
+  "overview_latest_recovery_persistAudio": {
+    "message": "Salvando áudio"
+  },
+  "outputs_artifactMissing": {
+    "message": "não está mais disponível."
+  },
+  "outputs_artifactAuthError": {
+    "message": "Acesso negado. Verifique seu login."
+  },
+  "outputs_artifactAccessError": {
+    "message": "Falha no acesso. Verifique seu login e a conexão com o servidor."
   }
 }

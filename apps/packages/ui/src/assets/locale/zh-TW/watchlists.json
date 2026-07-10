@@ -363,7 +363,20 @@
         "retryAria": "重試 {{adapter}}: {{name}}",
         "retryUnknownAria": "結果未知. 重試 {{adapter}}: {{name}}",
         "reviewRetry": "檢查後重試",
-        "unknownConfirmation": "提供者未確認透過 {{adapter}} 送達。重試可能會傳送重複內容。請檢查目的地，僅在可接受此風險時繼續。"
+        "unknownConfirmation": "提供者未確認透過 {{adapter}} 送達。重試可能會傳送重複內容。請檢查目的地，僅在可接受此風險時繼續。 ({{destination}})",
+        "chatbookDestination": "Chatbook",
+        "confirmRetry": "重試 送達",
+        "confirmRetryAria": "重試 {{adapter}} 送達",
+        "recipientCount": "{{count}} 收件者",
+        "recipientCount_zero": "{{count}} 收件者",
+        "recipientCount_one": "{{count}} 收件者",
+        "recipientCount_two": "{{count}} 收件者",
+        "recipientCount_few": "{{count}} 收件者",
+        "recipientCount_many": "{{count}} 收件者",
+        "recipientCount_other": "{{count}} 收件者",
+        "reviewAcknowledgement": "我已檢查目的地，並接受重複送達的風險。",
+        "reviewSettings": "檢查 設定",
+        "reviewTitle": "檢查 {{adapter}} 送達"
       },
       "playback": {
         "region": "音訊: {{name}}",
@@ -375,7 +388,9 @@
         "error": "音訊 失敗. 開啟 報告 / 重新產生 音訊.",
         "play": "播放",
         "pause": "暫停",
-        "resume": "繼續"
+        "resume": "繼續",
+        "accessError": "音訊: 存取失敗. 請檢查登入狀態與伺服器連線。",
+        "missing": "音訊 已無法使用."
       },
       "actions": {
         "label": "最新 簡報",
@@ -390,7 +405,12 @@
         "inspect": "檢查執行",
         "inspectAria": "檢查執行 {{runId}}: {{name}}",
         "viewReports": "查看所有報告",
-        "testNow": "立即測試"
+        "testNow": "立即測試",
+        "downloadAudio": "下載 音訊",
+        "downloadAudioAria": "下載 音訊: {{name}}",
+        "retryExactAria": "重試 {{stage}}: {{name}}",
+        "reviewScript": "檢查 音訊 報告",
+        "reviewScriptAria": "檢查 音訊 報告: {{name}}"
       },
       "announcements": {
         "blockingFailure": "{{name}} 失敗. 檢查執行 {{runId}}.",
@@ -432,12 +452,26 @@
         "episode": "節目",
         "report": "報告",
         "showNotes": "節目說明"
+      },
+      "scriptAccessError": "音訊 報告: 存取失敗. 請檢查登入狀態與伺服器連線。",
+      "scriptLoading": "正在載入 音訊 報告",
+      "scriptMissing": "音訊 報告 已無法使用.",
+      "recovery": {
+        "renderText": "正在產生 報告",
+        "persistText": "正在儲存 報告",
+        "composeScript": "正在編寫 音訊 報告",
+        "persistScript": "正在儲存 音訊 報告",
+        "generateAudio": "正在產生 音訊",
+        "persistAudio": "正在儲存 音訊"
       }
     }
   },
   "outputs": {
     "openInNewTabAria": "在新分頁中開啟: {{title}}",
     "chatAboutAria": "討論此內容: {{title}}",
-    "downloadAria": "下載: {{title}}"
+    "downloadAria": "下載: {{title}}",
+    "artifactMissing": "已無法使用.",
+    "artifactAuthError": "存取遭拒。請檢查登入狀態。",
+    "artifactAccessError": "存取失敗. 請檢查登入狀態與伺服器連線。"
   }
 }

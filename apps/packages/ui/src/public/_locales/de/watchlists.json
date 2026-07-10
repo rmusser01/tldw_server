@@ -783,7 +783,7 @@
     "message": "Prüfen und erneut versuchen"
   },
   "overview_latest_delivery_unknownConfirmation": {
-    "message": "Der Anbieter hat die Zustellung über {{adapter}} nicht bestätigt. Ein erneuter Versuch kann ein Duplikat senden. Prüfen Sie das Ziel und fahren Sie nur fort, wenn dieses Risiko vertretbar ist."
+    "message": "Der Anbieter hat die Zustellung über {{adapter}} nicht bestätigt. Ein erneuter Versuch kann ein Duplikat senden. Prüfen Sie das Ziel und fahren Sie nur fort, wenn dieses Risiko vertretbar ist. ({{destination}})"
   },
   "overview_latest_playback_region": {
     "message": "Audio: {{name}}"
@@ -961,5 +961,101 @@
   },
   "outputs_downloadAria": {
     "message": "Herunterladen: {{title}}"
+  },
+  "overview_latest_delivery_chatbookDestination": {
+    "message": "Chatbook"
+  },
+  "overview_latest_delivery_confirmRetry": {
+    "message": "Erneut versuchen Zustellung"
+  },
+  "overview_latest_delivery_confirmRetryAria": {
+    "message": "Erneut versuchen {{adapter}} Zustellung"
+  },
+  "overview_latest_delivery_recipientCount": {
+    "message": "{{count}} Empfänger"
+  },
+  "overview_latest_delivery_recipientCount_zero": {
+    "message": "{{count}} Empfänger"
+  },
+  "overview_latest_delivery_recipientCount_one": {
+    "message": "{{count}} Empfänger"
+  },
+  "overview_latest_delivery_recipientCount_two": {
+    "message": "{{count}} Empfänger"
+  },
+  "overview_latest_delivery_recipientCount_few": {
+    "message": "{{count}} Empfänger"
+  },
+  "overview_latest_delivery_recipientCount_many": {
+    "message": "{{count}} Empfänger"
+  },
+  "overview_latest_delivery_recipientCount_other": {
+    "message": "{{count}} Empfänger"
+  },
+  "overview_latest_delivery_reviewAcknowledgement": {
+    "message": "Ich habe das Ziel geprüft und akzeptiere das Risiko einer doppelten Zustellung."
+  },
+  "overview_latest_delivery_reviewSettings": {
+    "message": "Prüfen Einstellungen"
+  },
+  "overview_latest_delivery_reviewTitle": {
+    "message": "Prüfen {{adapter}} Zustellung"
+  },
+  "overview_latest_playback_accessError": {
+    "message": "Audio: Zugriff fehlgeschlagen. Prüfen Sie Ihre Anmeldung und Serververbindung."
+  },
+  "overview_latest_playback_missing": {
+    "message": "Audio ist nicht mehr verfügbar."
+  },
+  "overview_latest_actions_downloadAudio": {
+    "message": "Herunterladen Audio"
+  },
+  "overview_latest_actions_downloadAudioAria": {
+    "message": "Herunterladen Audio: {{name}}"
+  },
+  "overview_latest_actions_retryExactAria": {
+    "message": "Erneut versuchen {{stage}}: {{name}}"
+  },
+  "overview_latest_actions_reviewScript": {
+    "message": "Prüfen Audio Bericht"
+  },
+  "overview_latest_actions_reviewScriptAria": {
+    "message": "Prüfen Audio Bericht: {{name}}"
+  },
+  "overview_latest_scriptAccessError": {
+    "message": "Audio Bericht: Zugriff fehlgeschlagen. Prüfen Sie Ihre Anmeldung und Serververbindung."
+  },
+  "overview_latest_scriptLoading": {
+    "message": "Wird geladen Audio Bericht"
+  },
+  "overview_latest_scriptMissing": {
+    "message": "Audio Bericht ist nicht mehr verfügbar."
+  },
+  "overview_latest_recovery_renderText": {
+    "message": "Wird erstellt Bericht"
+  },
+  "overview_latest_recovery_persistText": {
+    "message": "Wird gespeichert Bericht"
+  },
+  "overview_latest_recovery_composeScript": {
+    "message": "Wird verfasst Audio Bericht"
+  },
+  "overview_latest_recovery_persistScript": {
+    "message": "Wird gespeichert Audio Bericht"
+  },
+  "overview_latest_recovery_generateAudio": {
+    "message": "Wird erstellt Audio"
+  },
+  "overview_latest_recovery_persistAudio": {
+    "message": "Wird gespeichert Audio"
+  },
+  "outputs_artifactMissing": {
+    "message": "ist nicht mehr verfügbar."
+  },
+  "outputs_artifactAuthError": {
+    "message": "Zugriff verweigert. Prüfen Sie Ihre Anmeldung."
+  },
+  "outputs_artifactAccessError": {
+    "message": "Zugriff fehlgeschlagen. Prüfen Sie Ihre Anmeldung und Serververbindung."
   }
 }

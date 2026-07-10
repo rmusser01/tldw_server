@@ -366,7 +366,20 @@
         "retryAria": "Réessayer {{adapter}}: {{name}}",
         "retryUnknownAria": "Résultat inconnu. Réessayer {{adapter}}: {{name}}",
         "reviewRetry": "Vérifier et réessayer",
-        "unknownConfirmation": "Le fournisseur n’a pas confirmé la livraison via {{adapter}}. Réessayer peut envoyer un doublon. Vérifiez la destination et continuez uniquement si ce risque est acceptable."
+        "unknownConfirmation": "Le fournisseur n’a pas confirmé la livraison via {{adapter}}. Réessayer peut envoyer un doublon. Vérifiez la destination et continuez uniquement si ce risque est acceptable. ({{destination}})",
+        "chatbookDestination": "Chatbook",
+        "confirmRetry": "Réessayer livraison",
+        "confirmRetryAria": "Réessayer {{adapter}} livraison",
+        "recipientCount": "{{count}} destinataires",
+        "recipientCount_zero": "{{count}} destinataires",
+        "recipientCount_one": "{{count}} destinataires",
+        "recipientCount_two": "{{count}} destinataires",
+        "recipientCount_few": "{{count}} destinataires",
+        "recipientCount_many": "{{count}} destinataires",
+        "recipientCount_other": "{{count}} destinataires",
+        "reviewAcknowledgement": "J’ai vérifié la destination et j’accepte le risque d’un envoi en double.",
+        "reviewSettings": "Vérifier paramètres",
+        "reviewTitle": "Vérifier {{adapter}} livraison"
       },
       "playback": {
         "region": "audio: {{name}}",
@@ -378,7 +391,9 @@
         "error": "audio échec. Ouvrir rapport / Régénérer audio.",
         "play": "Lire",
         "pause": "Pause",
-        "resume": "Reprendre"
+        "resume": "Reprendre",
+        "accessError": "audio: Échec de l’accès. Vérifiez votre connexion et celle au serveur.",
+        "missing": "audio n’est plus disponible."
       },
       "actions": {
         "label": "Dernier briefing",
@@ -393,7 +408,12 @@
         "inspect": "Inspecter l’exécution",
         "inspectAria": "Inspecter l’exécution {{runId}}: {{name}}",
         "viewReports": "Voir tous les rapports",
-        "testNow": "Tester maintenant"
+        "testNow": "Tester maintenant",
+        "downloadAudio": "Télécharger audio",
+        "downloadAudioAria": "Télécharger audio: {{name}}",
+        "retryExactAria": "Réessayer {{stage}}: {{name}}",
+        "reviewScript": "Vérifier audio rapport",
+        "reviewScriptAria": "Vérifier audio rapport: {{name}}"
       },
       "announcements": {
         "blockingFailure": "{{name}} échec. Inspecter l’exécution {{runId}}.",
@@ -435,12 +455,26 @@
         "episode": "épisode",
         "report": "rapport",
         "showNotes": "notes d’émission"
+      },
+      "scriptAccessError": "audio rapport: Échec de l’accès. Vérifiez votre connexion et celle au serveur.",
+      "scriptLoading": "Chargement audio rapport",
+      "scriptMissing": "audio rapport n’est plus disponible.",
+      "recovery": {
+        "renderText": "Génération rapport",
+        "persistText": "Enregistrement rapport",
+        "composeScript": "Rédaction audio rapport",
+        "persistScript": "Enregistrement audio rapport",
+        "generateAudio": "Génération audio",
+        "persistAudio": "Enregistrement audio"
       }
     }
   },
   "outputs": {
     "openInNewTabAria": "Ouvrir dans un nouvel onglet: {{title}}",
     "chatAboutAria": "Discuter de ceci: {{title}}",
-    "downloadAria": "Télécharger: {{title}}"
+    "downloadAria": "Télécharger: {{title}}",
+    "artifactMissing": "n’est plus disponible.",
+    "artifactAuthError": "Accès refusé. Vérifiez votre connexion.",
+    "artifactAccessError": "Échec de l’accès. Vérifiez votre connexion et celle au serveur."
   }
 }

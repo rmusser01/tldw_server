@@ -15,6 +15,7 @@ import {
   revokeWatchlistArtifactObjectUrl,
   type WatchlistArtifactErrorKind
 } from "@/services/watchlists-artifacts"
+import { hasCurrentBriefingAudio } from "../shared/watchlists-announcements"
 
 type RetryOptions = { confirm_unknown_delivery_retry?: boolean }
 
@@ -218,9 +219,7 @@ export const LatestBriefing: React.FC<LatestBriefingProps> = ({
   const effectiveTimezone = projection?.timezone || timezone || "UTC"
   const nextRunLabel = formatWatchlistOccurrenceDate(effectiveNextRun, effectiveTimezone, locale)
   const projectedAudio = projection?.audio
-  const audioArtifactPath = projectedAudio?.status === "completed" &&
-    !projectedAudio.stale &&
-    !projectedAudio.superseded_by
+  const audioArtifactPath = projection && hasCurrentBriefingAudio(projection)
     ? stringValue(projectedAudio.download_url)
     : undefined
   const audioIdentity = projection && audioArtifactPath

@@ -792,7 +792,7 @@
     "message": "Vérifier et réessayer"
   },
   "overview_latest_delivery_unknownConfirmation": {
-    "message": "Le fournisseur n’a pas confirmé la livraison via {{adapter}}. Réessayer peut envoyer un doublon. Vérifiez la destination et continuez uniquement si ce risque est acceptable."
+    "message": "Le fournisseur n’a pas confirmé la livraison via {{adapter}}. Réessayer peut envoyer un doublon. Vérifiez la destination et continuez uniquement si ce risque est acceptable. ({{destination}})"
   },
   "overview_latest_playback_region": {
     "message": "audio: {{name}}"
@@ -970,5 +970,101 @@
   },
   "outputs_downloadAria": {
     "message": "Télécharger: {{title}}"
+  },
+  "overview_latest_delivery_chatbookDestination": {
+    "message": "Chatbook"
+  },
+  "overview_latest_delivery_confirmRetry": {
+    "message": "Réessayer livraison"
+  },
+  "overview_latest_delivery_confirmRetryAria": {
+    "message": "Réessayer {{adapter}} livraison"
+  },
+  "overview_latest_delivery_recipientCount": {
+    "message": "{{count}} destinataires"
+  },
+  "overview_latest_delivery_recipientCount_zero": {
+    "message": "{{count}} destinataires"
+  },
+  "overview_latest_delivery_recipientCount_one": {
+    "message": "{{count}} destinataires"
+  },
+  "overview_latest_delivery_recipientCount_two": {
+    "message": "{{count}} destinataires"
+  },
+  "overview_latest_delivery_recipientCount_few": {
+    "message": "{{count}} destinataires"
+  },
+  "overview_latest_delivery_recipientCount_many": {
+    "message": "{{count}} destinataires"
+  },
+  "overview_latest_delivery_recipientCount_other": {
+    "message": "{{count}} destinataires"
+  },
+  "overview_latest_delivery_reviewAcknowledgement": {
+    "message": "J’ai vérifié la destination et j’accepte le risque d’un envoi en double."
+  },
+  "overview_latest_delivery_reviewSettings": {
+    "message": "Vérifier paramètres"
+  },
+  "overview_latest_delivery_reviewTitle": {
+    "message": "Vérifier {{adapter}} livraison"
+  },
+  "overview_latest_playback_accessError": {
+    "message": "audio: Échec de l’accès. Vérifiez votre connexion et celle au serveur."
+  },
+  "overview_latest_playback_missing": {
+    "message": "audio n’est plus disponible."
+  },
+  "overview_latest_actions_downloadAudio": {
+    "message": "Télécharger audio"
+  },
+  "overview_latest_actions_downloadAudioAria": {
+    "message": "Télécharger audio: {{name}}"
+  },
+  "overview_latest_actions_retryExactAria": {
+    "message": "Réessayer {{stage}}: {{name}}"
+  },
+  "overview_latest_actions_reviewScript": {
+    "message": "Vérifier audio rapport"
+  },
+  "overview_latest_actions_reviewScriptAria": {
+    "message": "Vérifier audio rapport: {{name}}"
+  },
+  "overview_latest_scriptAccessError": {
+    "message": "audio rapport: Échec de l’accès. Vérifiez votre connexion et celle au serveur."
+  },
+  "overview_latest_scriptLoading": {
+    "message": "Chargement audio rapport"
+  },
+  "overview_latest_scriptMissing": {
+    "message": "audio rapport n’est plus disponible."
+  },
+  "overview_latest_recovery_renderText": {
+    "message": "Génération rapport"
+  },
+  "overview_latest_recovery_persistText": {
+    "message": "Enregistrement rapport"
+  },
+  "overview_latest_recovery_composeScript": {
+    "message": "Rédaction audio rapport"
+  },
+  "overview_latest_recovery_persistScript": {
+    "message": "Enregistrement audio rapport"
+  },
+  "overview_latest_recovery_generateAudio": {
+    "message": "Génération audio"
+  },
+  "overview_latest_recovery_persistAudio": {
+    "message": "Enregistrement audio"
+  },
+  "outputs_artifactMissing": {
+    "message": "n’est plus disponible."
+  },
+  "outputs_artifactAuthError": {
+    "message": "Accès refusé. Vérifiez votre connexion."
+  },
+  "outputs_artifactAccessError": {
+    "message": "Échec de l’accès. Vérifiez votre connexion et celle au serveur."
   }
 }

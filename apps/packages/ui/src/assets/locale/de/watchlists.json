@@ -363,7 +363,20 @@
         "retryAria": "Erneut versuchen {{adapter}}: {{name}}",
         "retryUnknownAria": "Ergebnis unbekannt. Erneut versuchen {{adapter}}: {{name}}",
         "reviewRetry": "Prüfen und erneut versuchen",
-        "unknownConfirmation": "Der Anbieter hat die Zustellung über {{adapter}} nicht bestätigt. Ein erneuter Versuch kann ein Duplikat senden. Prüfen Sie das Ziel und fahren Sie nur fort, wenn dieses Risiko vertretbar ist."
+        "unknownConfirmation": "Der Anbieter hat die Zustellung über {{adapter}} nicht bestätigt. Ein erneuter Versuch kann ein Duplikat senden. Prüfen Sie das Ziel und fahren Sie nur fort, wenn dieses Risiko vertretbar ist. ({{destination}})",
+        "chatbookDestination": "Chatbook",
+        "confirmRetry": "Erneut versuchen Zustellung",
+        "confirmRetryAria": "Erneut versuchen {{adapter}} Zustellung",
+        "recipientCount": "{{count}} Empfänger",
+        "recipientCount_zero": "{{count}} Empfänger",
+        "recipientCount_one": "{{count}} Empfänger",
+        "recipientCount_two": "{{count}} Empfänger",
+        "recipientCount_few": "{{count}} Empfänger",
+        "recipientCount_many": "{{count}} Empfänger",
+        "recipientCount_other": "{{count}} Empfänger",
+        "reviewAcknowledgement": "Ich habe das Ziel geprüft und akzeptiere das Risiko einer doppelten Zustellung.",
+        "reviewSettings": "Prüfen Einstellungen",
+        "reviewTitle": "Prüfen {{adapter}} Zustellung"
       },
       "playback": {
         "region": "Audio: {{name}}",
@@ -375,7 +388,9 @@
         "error": "Audio fehlgeschlagen. Öffnen Bericht / Neu erzeugen Audio.",
         "play": "Abspielen",
         "pause": "Pause",
-        "resume": "Fortsetzen"
+        "resume": "Fortsetzen",
+        "accessError": "Audio: Zugriff fehlgeschlagen. Prüfen Sie Ihre Anmeldung und Serververbindung.",
+        "missing": "Audio ist nicht mehr verfügbar."
       },
       "actions": {
         "label": "Neueste Übersicht",
@@ -390,7 +405,12 @@
         "inspect": "Lauf prüfen",
         "inspectAria": "Lauf prüfen {{runId}}: {{name}}",
         "viewReports": "Alle Berichte anzeigen",
-        "testNow": "Jetzt testen"
+        "testNow": "Jetzt testen",
+        "downloadAudio": "Herunterladen Audio",
+        "downloadAudioAria": "Herunterladen Audio: {{name}}",
+        "retryExactAria": "Erneut versuchen {{stage}}: {{name}}",
+        "reviewScript": "Prüfen Audio Bericht",
+        "reviewScriptAria": "Prüfen Audio Bericht: {{name}}"
       },
       "announcements": {
         "blockingFailure": "{{name}} fehlgeschlagen. Lauf prüfen {{runId}}.",
@@ -432,12 +452,26 @@
         "episode": "Episode",
         "report": "Bericht",
         "showNotes": "Shownotizen"
+      },
+      "scriptAccessError": "Audio Bericht: Zugriff fehlgeschlagen. Prüfen Sie Ihre Anmeldung und Serververbindung.",
+      "scriptLoading": "Wird geladen Audio Bericht",
+      "scriptMissing": "Audio Bericht ist nicht mehr verfügbar.",
+      "recovery": {
+        "renderText": "Wird erstellt Bericht",
+        "persistText": "Wird gespeichert Bericht",
+        "composeScript": "Wird verfasst Audio Bericht",
+        "persistScript": "Wird gespeichert Audio Bericht",
+        "generateAudio": "Wird erstellt Audio",
+        "persistAudio": "Wird gespeichert Audio"
       }
     }
   },
   "outputs": {
     "openInNewTabAria": "In neuem Tab öffnen: {{title}}",
     "chatAboutAria": "Darüber chatten: {{title}}",
-    "downloadAria": "Herunterladen: {{title}}"
+    "downloadAria": "Herunterladen: {{title}}",
+    "artifactMissing": "ist nicht mehr verfügbar.",
+    "artifactAuthError": "Zugriff verweigert. Prüfen Sie Ihre Anmeldung.",
+    "artifactAccessError": "Zugriff fehlgeschlagen. Prüfen Sie Ihre Anmeldung und Serververbindung."
   }
 }
