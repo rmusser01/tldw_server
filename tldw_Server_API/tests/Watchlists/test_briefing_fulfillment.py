@@ -432,6 +432,7 @@ async def test_text_and_audio_share_selection_cap(
     collections_db = FakeCollectionsDB()
     render_item_ids: list[int] = []
     audio_item_ids: list[int] = []
+    audio_selection_counts: list[dict[str, int]] = []
 
     def render(**kwargs: Any) -> str:
         render_item_ids.extend(item["id"] for item in kwargs["items"])
@@ -439,6 +440,7 @@ async def test_text_and_audio_share_selection_cap(
 
     async def trigger(**kwargs: Any) -> AudioBriefingTriggerResult:
         audio_item_ids.extend(item["id"] for item in kwargs["items"])
+        audio_selection_counts.append(kwargs["selection_counts"])
         return AudioBriefingTriggerResult(
             status="submitted",
             task_id="audio-task-cap",
@@ -465,6 +467,7 @@ async def test_text_and_audio_share_selection_cap(
     assert result.selected_count == 100
     assert result.omitted_count == 37
     assert render_item_ids == audio_item_ids
+    assert audio_selection_counts == [{"candidate_count": 137, "included_count": 100, "omitted_count": 37}]
     assert watchlists_db.list_calls == [
         {"run_id": run.id, "status": "ingested", "sort": "published_desc", "limit": 100, "offset": 0}
     ]

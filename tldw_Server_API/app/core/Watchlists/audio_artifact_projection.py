@@ -22,6 +22,41 @@ _PROJECTION_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
 )
 
 _CORRELATION_KEYS = ("source", "watchlist_job_id", "watchlist_run_id", "audio_request_id")
+_PROGRAM_METADATA_KEYS = {
+    "program_format",
+    "outcome_noun",
+    "show_name",
+    "premise",
+    "audience",
+    "tone",
+    "episode_title",
+    "analysis_allowed",
+    "show_notes",
+    "source_ids",
+    "source_urls",
+    "source_count",
+    "candidate_count",
+    "included_count",
+    "omitted_count",
+    "target_duration_minutes",
+    "estimated_duration_minutes",
+    "target_duration_guaranteed",
+    "cast",
+    "ai_generated_speech",
+    "speech_disclosure",
+    "is_no_material_update",
+}
+_PRIVATE_METADATA_KEY_PARTS = (
+    "api_key",
+    "authorization",
+    "credential",
+    "password",
+    "recipient",
+    "secret",
+    "token",
+)
+_FILESYSTEM_METADATA_KEYS = {"file", "file_path", "path", "storage_path", "uri"}
+_SCRUBBED = object()
 
 
 def _get_value(obj: Any, key: str, default: Any = None) -> Any:
@@ -111,11 +146,26 @@ def _artifact_id(artifact: Any) -> Any:
 
 
 def _scrub_artifact_metadata(value: Any) -> Any:
-    """Remove raw artifact URI fields from metadata before mirroring to Watchlists."""
+    """Remove secrets, recipients, and raw filesystem locations before mirroring."""
     if isinstance(value, dict):
-        return {key: _scrub_artifact_metadata(item) for key, item in value.items() if key != "uri"}
+        scrubbed: dict[str, Any] = {}
+        for key, item in value.items():
+            normalized_key = str(key).strip().lower()
+            if normalized_key in _FILESYSTEM_METADATA_KEYS or any(
+                private_part in normalized_key for private_part in _PRIVATE_METADATA_KEY_PARTS
+            ):
+                continue
+            safe_item = _scrub_artifact_metadata(item)
+            if safe_item is not _SCRUBBED:
+                scrubbed[key] = safe_item
+        return scrubbed
     if isinstance(value, list):
-        return [_scrub_artifact_metadata(item) for item in value]
+        scrubbed_items = [_scrub_artifact_metadata(item) for item in value]
+        return [item for item in scrubbed_items if item is not _SCRUBBED]
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped.lower().startswith("file://") or stripped.startswith("/"):
+            return _SCRUBBED
     return value
 
 
@@ -128,6 +178,8 @@ def summarize_audio_artifact(
 ) -> dict[str, Any]:
     """Return a mirrored-safe artifact summary without raw file URIs."""
     art_meta = _scrub_artifact_metadata(dict(metadata or _artifact_metadata(artifact)))
+    if not isinstance(art_meta, dict):
+        art_meta = {}
     artifact_id = _artifact_id(artifact)
     title = _first_non_empty_string(
         art_meta.get("title"),
@@ -323,6 +375,22 @@ def build_audio_projection(
     script_artifact = max(script_candidates, key=lambda item: item[0])[1] if script_candidates else None
     final_artifact = max(audio_candidates, key=lambda item: item[0])[1] if audio_candidates else None
 
+    if script_artifact and final_artifact:
+        script_metadata = script_artifact.get("metadata")
+        final_metadata = final_artifact.get("metadata")
+        if isinstance(script_metadata, dict) and isinstance(final_metadata, dict):
+            final_artifact["metadata"] = {
+                **final_metadata,
+                **{key: script_metadata[key] for key in _PROGRAM_METADATA_KEYS if key in script_metadata},
+                "script_artifact_id": script_artifact.get("artifact_id"),
+            }
+            final_title = _first_non_empty_string(
+                final_artifact["metadata"].get("episode_title"),
+                final_artifact["metadata"].get("show_name"),
+            )
+            if final_title:
+                final_artifact["title"] = final_title
+
     if final_artifact and status not in {"failed", "cancelled"}:
         status = "completed"
 
@@ -346,6 +414,9 @@ def build_audio_projection(
                 "mime_type": final_artifact.get("mime_type"),
             }
         )
+        final_metadata = final_artifact.get("metadata")
+        if isinstance(final_metadata, dict):
+            projection.update({key: final_metadata[key] for key in _PROGRAM_METADATA_KEYS if key in final_metadata})
     return projection
 
 

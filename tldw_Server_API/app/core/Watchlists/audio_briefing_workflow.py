@@ -120,6 +120,18 @@ AUDIO_BRIEFING_WORKFLOW_DEF: dict[str, Any] = {
                 "persona_id": "{{ inputs.persona_id }}",
                 "persona_provider": "{{ inputs.persona_provider }}",
                 "persona_model": "{{ inputs.persona_model }}",
+                "program_format": "{{ inputs.program_format }}",
+                "outcome_noun": "{{ inputs.outcome_noun }}",
+                "show_name": "{{ inputs.show_name }}",
+                "premise": "{{ inputs.premise }}",
+                "audience": "{{ inputs.audience }}",
+                "tone": "{{ inputs.tone }}",
+                "episode_title": "{{ inputs.episode_title }}",
+                "custom_instructions": "{{ inputs.custom_instructions }}",
+                "analysis_allowed": "{{ inputs.analysis_allowed }}",
+                "candidate_count": "{{ inputs.candidate_count }}",
+                "included_count": "{{ inputs.included_count }}",
+                "omitted_count": "{{ inputs.omitted_count }}",
                 "editorial": "{{ inputs.editorial }}",
                 "is_no_material_update": "{{ inputs.is_no_material_update }}",
             },
@@ -283,6 +295,7 @@ def _build_workflow_inputs(
     output_prefs: dict[str, Any],
     *,
     editorial: Mapping[str, Any] | None = None,
+    selection_counts: Mapping[str, Any] | None = None,
     status_audio: bool = False,
 ) -> dict[str, Any] | None:
     """Build workflow inputs dict from watchlist output_prefs."""
@@ -297,6 +310,23 @@ def _build_workflow_inputs(
     voice_map = audio_prefs.get("voice_map")
     if not isinstance(voice_map, dict):
         voice_map = _normalize_audio_cast_voice_map(audio_cast)
+    editorial_config = dict(editorial or contract["editorial"])
+    program_format = str(editorial_config.get("program_format") or "concise_briefing")
+    outcome_noun = str(editorial_config.get("outcome_noun") or "")
+    if outcome_noun not in {"briefing", "episode"}:
+        outcome_noun = "episode" if program_format in {
+            "host_discussion",
+            "sportscast",
+            "culture_roundtable",
+            "custom",
+        } else "briefing"
+    raw_analysis_allowed = editorial_config.get("analysis_allowed", False)
+    if isinstance(raw_analysis_allowed, str):
+        raw_analysis_allowed = raw_analysis_allowed.strip().lower() in {"true", "1", "yes", "on"}
+    counts = dict(selection_counts or {})
+    included_count = int(counts.get("included_count", 0 if status_audio else len(items)) or 0)
+    candidate_count = max(included_count, int(counts.get("candidate_count", included_count) or 0))
+    omitted_count = max(0, int(counts.get("omitted_count", candidate_count - included_count) or 0))
 
     return {
         "items": items,
@@ -318,7 +348,19 @@ def _build_workflow_inputs(
         "background_volume": audio_prefs.get("background_volume", 0.15),
         "background_delay_ms": audio_prefs.get("background_delay_ms", 0),
         "background_fade_seconds": audio_prefs.get("background_fade_seconds", 2.0),
-        "editorial": dict(editorial or contract["editorial"]),
+        "editorial": editorial_config,
+        "program_format": program_format,
+        "outcome_noun": outcome_noun,
+        "show_name": editorial_config.get("show_name"),
+        "premise": editorial_config.get("premise"),
+        "audience": editorial_config.get("audience"),
+        "tone": editorial_config.get("tone"),
+        "episode_title": editorial_config.get("episode_title"),
+        "custom_instructions": editorial_config.get("custom_instructions"),
+        "analysis_allowed": bool(raw_analysis_allowed),
+        "candidate_count": candidate_count,
+        "included_count": included_count,
+        "omitted_count": omitted_count,
         "is_no_material_update": status_audio,
     }
 
@@ -336,6 +378,7 @@ async def trigger_audio_briefing(
     occurrence_id: int | None = None,
     output_id: int | None = None,
     editorial: Mapping[str, Any] | None = None,
+    selection_counts: Mapping[str, Any] | None = None,
     status_audio: bool = False,
     tenant_id: str | None = None,
     attempt_id: int | None = None,
@@ -358,6 +401,7 @@ async def trigger_audio_briefing(
         occurrence_id: Optional durable briefing occurrence correlation ID.
         output_id: Optional persisted text output correlation ID.
         editorial: Optional canonical editorial configuration.
+        selection_counts: Optional canonical candidate/included/omitted counts.
         status_audio: Whether this is a short deterministic no-update status intent.
 
     Returns:
@@ -406,24 +450,30 @@ async def trigger_audio_briefing(
             row = item._asdict()
         else:
             row = {
+                "id": getattr(item, "id", None),
+                "source_id": getattr(item, "source_id", None),
                 "title": getattr(item, "title", ""),
                 "summary": getattr(item, "summary", ""),
                 "url": getattr(item, "url", ""),
                 "snippet": getattr(item, "snippet", ""),
                 "source_url": getattr(item, "source_url", ""),
+                "published_at": getattr(item, "published_at", None),
             }
-        normalized_items.append(
-            {
-                "title": row.get("title", ""),
-                "summary": row.get("summary", row.get("snippet", "")),
-                "url": row.get("url", row.get("source_url", "")),
-            }
-        )
+        normalized_item = {
+            "title": row.get("title", ""),
+            "summary": row.get("summary", row.get("snippet", "")),
+            "url": row.get("url", row.get("source_url", "")),
+        }
+        for key in ("id", "source_id", "published_at"):
+            if row.get(key) is not None:
+                normalized_item[key] = row[key]
+        normalized_items.append(normalized_item)
 
     workflow_inputs = _build_workflow_inputs(
         normalized_items,
         output_prefs,
         editorial=editorial,
+        selection_counts=selection_counts,
         status_audio=status_audio,
     )
     if workflow_inputs is None:

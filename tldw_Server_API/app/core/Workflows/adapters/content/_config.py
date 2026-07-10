@@ -196,6 +196,31 @@ class AudioBriefingComposeConfig(BaseAdapterConfig):
         None, description="Structured 1-4 speaker cast for script markers and voices"
     )
     multi_voice: bool = Field(True, description="Enable multi-voice markers in script")
+    program_format: Literal[
+        "concise_briefing",
+        "solo_update",
+        "host_discussion",
+        "sportscast",
+        "culture_roundtable",
+        "custom",
+    ] = Field("concise_briefing", description="Spoken-program editorial preset")
+    outcome_noun: Literal["briefing", "episode"] | None = Field(
+        None,
+        description="User-facing artifact noun; inferred from the format when omitted",
+    )
+    show_name: str | None = Field(None, description="Stable spoken-program name")
+    premise: str | None = Field(None, description="Stable source-grounded program premise")
+    audience: str | None = Field(None, description="Intended audience")
+    tone: str | None = Field(None, description="Requested delivery tone")
+    episode_title: str | None = Field(None, description="Episode title for this occurrence")
+    custom_instructions: str | None = Field(
+        None,
+        description="Optional editorial direction subordinate to grounding and safety rules",
+    )
+    analysis_allowed: bool = Field(False, description="Allow clearly labeled analysis")
+    candidate_count: int | None = Field(None, ge=0, description="Qualifying item count before the safety cap")
+    included_count: int | None = Field(None, ge=0, description="Items included in this program")
+    omitted_count: int | None = Field(None, ge=0, description="Items omitted by the safety cap")
     is_no_material_update: bool = Field(
         False,
         description="Compose the deterministic no-material status script without LLM calls",

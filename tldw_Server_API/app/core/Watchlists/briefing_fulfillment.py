@@ -798,6 +798,11 @@ async def _submit_audio(
             occurrence_id=int(occurrence.id),
             output_id=int(occurrence.output_id),
             editorial=copy.deepcopy(dict(contract["editorial"])),
+            selection_counts={
+                "candidate_count": int(stages["select"].get("candidate_count") or len(items)),
+                "included_count": int(stages["select"].get("selected_count") or len(items)),
+                "omitted_count": int(stages["select"].get("omitted_count") or 0),
+            },
             status_audio=no_material,
             tenant_id=tenant_id,
             attempt_id=int(attempt.id) if attempt is not None else None,

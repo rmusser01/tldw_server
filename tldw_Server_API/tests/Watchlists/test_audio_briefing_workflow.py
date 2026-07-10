@@ -6,6 +6,7 @@ Tests the trigger function, workflow input construction, and workflow definition
 from __future__ import annotations
 
 import asyncio
+import json
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -60,6 +61,17 @@ class TestAudioBriefingWorkflowDefinition:
         assert compose_cfg["persona_provider"] == "{{ inputs.persona_provider }}"
         assert compose_cfg["persona_model"] == "{{ inputs.persona_model }}"
         assert compose_cfg["is_no_material_update"] == "{{ inputs.is_no_material_update }}"
+        for key in (
+            "program_format",
+            "show_name",
+            "premise",
+            "audience",
+            "tone",
+            "episode_title",
+            "custom_instructions",
+            "analysis_allowed",
+        ):
+            assert compose_cfg[key] == f"{{{{ inputs.{key} }}}}"
 
         audio_cfg = next(
             step["config"] for step in AUDIO_BRIEFING_WORKFLOW_DEF["steps"] if step["id"] == "generate_audio"
@@ -128,7 +140,64 @@ class TestBuildWorkflowInputs:
         assert inputs["background_delay_ms"] == 0
         assert inputs["background_fade_seconds"] == 2.0
         assert inputs["is_no_material_update"] is False
+        assert inputs["program_format"] == "concise_briefing"
+        assert inputs["show_name"] is None
+        assert inputs["premise"] is None
+        assert inputs["audience"] is None
+        assert inputs["tone"] is None
+        assert inputs["episode_title"] is None
+        assert inputs["custom_instructions"] is None
+        assert inputs["analysis_allowed"] is False
         resolver.assert_called_once_with(provider=None, model=None, voice=None)
+
+    def test_canonical_editorial_and_selection_metadata_feed_workflow_inputs(self):
+        from tldw_Server_API.app.core.Watchlists.audio_briefing_workflow import _build_workflow_inputs
+
+        inputs = _build_workflow_inputs(
+            [{"id": 1, "source_id": 9, "title": "Final", "summary": "Final score", "url": "https://x.test"}],
+            {
+                "briefing_pipeline": {
+                    "editorial": {
+                        "program_format": "sportscast",
+                        "outcome_noun": "episode",
+                        "show_name": "Clubhouse Weekly",
+                        "premise": "A grounded team update",
+                        "audience": "Supporters",
+                        "tone": "Energetic",
+                        "episode_title": "Matchday 12",
+                        "custom_instructions": "Lead with the latest result",
+                        "analysis_allowed": True,
+                    },
+                    "audio": {"enabled": True, "target_minutes": 18},
+                }
+            },
+            selection_counts={"candidate_count": 3, "included_count": 1, "omitted_count": 2},
+        )
+
+        assert inputs["program_format"] == "sportscast"
+        assert inputs["outcome_noun"] == "episode"
+        assert inputs["show_name"] == "Clubhouse Weekly"
+        assert inputs["premise"] == "A grounded team update"
+        assert inputs["audience"] == "Supporters"
+        assert inputs["tone"] == "Energetic"
+        assert inputs["episode_title"] == "Matchday 12"
+        assert inputs["custom_instructions"] == "Lead with the latest result"
+        assert inputs["analysis_allowed"] is True
+        assert inputs["candidate_count"] == 3
+        assert inputs["included_count"] == 1
+        assert inputs["omitted_count"] == 2
+
+    def test_legacy_audio_preferences_keep_concise_briefing_default(self):
+        from tldw_Server_API.app.core.Watchlists.audio_briefing_workflow import _build_workflow_inputs
+
+        inputs = _build_workflow_inputs(
+            [{"title": "Legacy", "summary": "Still supported"}],
+            {"generate_audio": True},
+        )
+
+        assert inputs["program_format"] == "concise_briefing"
+        assert inputs["outcome_noun"] == "briefing"
+        assert inputs["analysis_allowed"] is False
 
     def test_custom_inputs(self):
         from tldw_Server_API.app.core.Watchlists.audio_briefing_workflow import (
@@ -938,3 +1007,79 @@ class TestTriggerAudioBriefing:
         assert payload["inputs"]["items"] == [
             {"title": "Story Obj", "summary": "Summary Obj", "url": "https://example.com/obj"}
         ]
+
+
+def test_final_audio_projection_inherits_safe_program_metadata_from_script():
+    from tldw_Server_API.app.core.Watchlists.audio_artifact_projection import build_audio_projection
+
+    correlation = {
+        "source": "watchlist_audio_briefing",
+        "watchlist_run_id": 7,
+        "audio_request_id": "wla_projection_metadata",
+    }
+    program_metadata = {
+        **correlation,
+        "script_artifact": True,
+        "program_format": "culture_roundtable",
+        "outcome_noun": "episode",
+        "show_name": "Culture Desk",
+        "episode_title": "Summer releases",
+        "show_notes": {
+            "sources": [{"item_id": 11, "source_id": 3, "url": "https://example.test/culture"}]
+        },
+        "source_ids": [3],
+        "source_urls": ["https://example.test/culture"],
+        "candidate_count": 2,
+        "included_count": 1,
+        "omitted_count": 1,
+        "target_duration_minutes": 20,
+        "estimated_duration_minutes": 3.5,
+        "target_duration_guaranteed": False,
+        "cast": [{"label": "Maya", "role": "host", "synthetic_voice": "af_bella"}],
+        "ai_generated_speech": True,
+        "speech_disclosure": "Synthetic AI-generated speech",
+        "uri": "file:///private/script.md",
+        "recipients": ["private@example.test"],
+        "api_key": "secret",
+    }
+    artifacts = [
+        SimpleNamespace(
+            artifact_id="script-1",
+            type="audio_script",
+            mime_type="text/markdown",
+            size_bytes=100,
+            created_at="2026-07-10T08:00:00+00:00",
+            metadata_json=json.dumps(program_metadata),
+        ),
+        SimpleNamespace(
+            artifact_id="audio-1",
+            type="tts_audio",
+            mime_type="audio/mpeg",
+            size_bytes=1000,
+            created_at="2026-07-10T08:01:00+00:00",
+            metadata_json=json.dumps({**correlation, "multi_voice": True, "final_artifact": True}),
+        ),
+    ]
+
+    projection = build_audio_projection(
+        run_id=7,
+        task_id="task-1",
+        audio_request_id="wla_projection_metadata",
+        workflow_run=SimpleNamespace(id="workflow-1", status="completed"),
+        artifacts=artifacts,
+    )
+
+    metadata = projection["final_artifact"]["metadata"]
+    assert metadata["program_format"] == "culture_roundtable"
+    assert metadata["show_name"] == "Culture Desk"
+    assert metadata["show_notes"]["sources"][0]["url"] == "https://example.test/culture"
+    assert metadata["target_duration_minutes"] == 20
+    assert metadata["estimated_duration_minutes"] == 3.5
+    assert metadata["cast"][0]["synthetic_voice"] == "af_bella"
+    assert metadata["ai_generated_speech"] is True
+    assert metadata["speech_disclosure"] == "Synthetic AI-generated speech"
+    assert metadata["script_artifact_id"] == "script-1"
+    serialized = json.dumps(projection)
+    assert "file://" not in serialized
+    assert "private@example.test" not in serialized
+    assert "secret" not in serialized
