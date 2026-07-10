@@ -140,11 +140,13 @@ const processingModeUnavailableReason = (): string =>
     "This processing mode is unavailable."
   )
 
-const unsupportedDocumentReason = (): string =>
-  i18n.t(
-    "playground:documentProcessing.unsupportedDocument",
-    "This document type is unsupported."
+const unsupportedDocumentReason = (): string => {
+  const fallback = "This document type is unsupported."
+  return (
+    i18n.t("playground:documentProcessing.unsupportedDocument", fallback) ||
+    fallback
   )
+}
 
 const directChatTooLargeReason = (tokenEstimate: number): string =>
   i18n.t(
@@ -330,9 +332,6 @@ export const normalizeDocumentPreflightResponse = (
     if (!item) return file
     const mode = file.processingMode || item.default_mode || undefined
     const capability = mode ? item.modes?.[mode] : undefined
-    const firstReason = Object.values(item.modes || {}).find(
-      (entry) => entry.reason,
-    )?.reason
     const blocked =
       !mode || !capability?.available || capability.status === "blocked"
     return {
@@ -341,9 +340,7 @@ export const normalizeDocumentPreflightResponse = (
       processingStatus: blocked ? "blocked" : "pending",
       processingCapabilities: item.modes,
       processingBlockedReason: blocked
-        ? capability?.reason ||
-          firstReason ||
-          unsupportedDocumentReason()
+        ? capability?.reason || unsupportedDocumentReason()
         : undefined,
       processingPageEstimate: item.estimated_pages ?? null,
       processingTokenEstimate: item.estimated_tokens ?? null,
@@ -533,16 +530,20 @@ export const prepareChatDocumentAttachmentsForSend = async ({
     const mode = file.processingMode || "add_to_chat"
     const capability = file.processingCapabilities?.[mode]
     if (capability && !capability.available) {
+      const recoveryActions: DocumentProcessingRecoveryAction[] = []
+      if (mode !== "add_to_chat") {
+        recoveryActions.push("switch_to_add_to_chat")
+      }
+      if (mode !== "ingest_to_library") {
+        recoveryActions.push("switch_to_ingest")
+      }
       const blockedFile: UploadedFile = {
         ...file,
         processingMode: mode,
         processingStatus: "blocked",
         processingBlockedReason:
           capability.reason || processingModeUnavailableReason(),
-        processingRecoveryActions: [
-          "switch_to_add_to_chat",
-          "switch_to_ingest",
-        ],
+        processingRecoveryActions: recoveryActions,
       }
       blockedFiles.push(blockedFile)
       processedFiles.push(blockedFile)

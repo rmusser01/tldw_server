@@ -120,7 +120,7 @@ test.describe("Chatbooks export download", () => {
         expect(exportPayload).not.toHaveProperty("content_selections")
         const exportResponse = await exportRequest.response()
         expect(exportResponse).not.toBeNull()
-        expect(exportResponse!.status()).toBeLessThan(500)
+        expect(exportResponse!.ok()).toBe(true)
 
         const errorNotice = page
           .getByText(

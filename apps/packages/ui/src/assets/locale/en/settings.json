@@ -47,7 +47,14 @@
     "jobArchiveSize": "Archive size",
     "jobPostWriteVerification": "Post-write verification",
     "verified": "Verified",
-    "notVerified": "Not verified"
+    "notVerified": "Not verified",
+    "openwebuiSource": "OpenWebUI",
+    "openwebuiSourceDatabase": "OpenWebUI database",
+    "openwebuiSourceJson": "OpenWebUI JSON",
+    "openwebuiConversationCountOne": "{{count}} conversation",
+    "openwebuiConversationCount": "{{count}} conversations",
+    "openwebuiAttachmentReferenceCountOne": "{{count}} attachment ref",
+    "openwebuiAttachmentReferenceCount": "{{count}} attachment refs"
   },
   "charactersNav": "Characters",
   "mediaNav": "Media",

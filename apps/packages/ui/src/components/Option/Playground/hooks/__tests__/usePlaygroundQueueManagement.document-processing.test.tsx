@@ -235,4 +235,55 @@ describe("usePlaygroundQueueManagement document processing", () => {
       })
     )
   })
+
+  it("does not mutate composer state when queued document preparation is blocked", async () => {
+    prepareChatDocumentAttachmentsForSend.mockResolvedValue({
+      contextFiles: [],
+      failedFiles: [],
+      blockedFiles: [
+        {
+          ...makeFile(),
+          processingStatus: "blocked",
+          processingBlockedReason: "Ingest is unavailable"
+        }
+      ],
+      recoveryActions: ["switch_to_add_to_chat"],
+      requestOverrides: undefined,
+      turnMetadata: {
+        status: "blocked",
+        files: []
+      }
+    })
+    const deps = baseDeps({ uploadedFiles: [] })
+    renderHook(() => usePlaygroundQueueManagement(deps as any))
+
+    await expect(
+      act(async () => {
+        await queueMock.args.sendQueuedRequest({
+          id: "queued-blocked",
+          promptText: "summarize",
+          image: "",
+          snapshot: {
+            selectedModel: "openai:gpt-4o-mini",
+            chatMode: "normal",
+            webSearch: false,
+            compareMode: false,
+            compareSelectedModels: [],
+            selectedSystemPrompt: "",
+            selectedQuickPrompt: "",
+            toolChoice: "auto",
+            useOCR: false
+          },
+          sourceContext: {
+            uploadedFiles: [makeFile()]
+          }
+        })
+      })
+    ).rejects.toThrow("Ingest is unavailable")
+
+    expect(deps.setSelectedModel).not.toHaveBeenCalled()
+    expect(deps.setChatMode).not.toHaveBeenCalled()
+    expect(deps.setWebSearch).not.toHaveBeenCalled()
+    expect(deps.setLastSubmittedContext).not.toHaveBeenCalled()
+  })
 })

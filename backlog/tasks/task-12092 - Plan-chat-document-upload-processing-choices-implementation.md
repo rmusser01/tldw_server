@@ -21,6 +21,11 @@ Write a concrete implementation plan for the approved chat document upload proce
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
+- [x] #1 The implementation plan links the approved design and identifies the frontend, backend, sidepanel, persistence, and test files to change
+- [x] #2 The plan requires authoritative backend preflight for OCR, page, token, file-type, and capability limits with explicit blocked-state recovery
+- [x] #3 The plan keeps Add to chat context chat-scoped, keeps ingest results out of contextFiles, and records visible document-processing turn metadata
+- [x] #4 The plan covers replayable queued uploads plus idempotent retry, cancellation, expiry, and cleanup for ingest jobs and sidepanel drafts
+- [x] #5 The plan defines test-first implementation stages, verification commands, security-gate handling, and reviewer approval criteria
 <!-- AC:END -->
 
 ## Implementation Notes
