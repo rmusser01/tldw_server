@@ -416,7 +416,7 @@ git commit -m "feat: unify watchlists setup contracts"
 
 **Tests:** DB idempotency, pipeline stage transitions, zero-item behavior, selection cap, Scheduler dependency, delivery idempotency, latest projection, and retry authorization.
 
-**Status:** Not Started
+**Status:** In Progress
 
 ### Task 3: Add owned briefing occurrence persistence
 
@@ -428,7 +428,7 @@ git commit -m "feat: unify watchlists setup contracts"
 - Produces: `BriefingOccurrenceRow`, `create_or_get_briefing_occurrence`, `get_briefing_occurrence`, `get_latest_briefing_occurrence`, and `update_briefing_occurrence`.
 - Consumes: owned run/job IDs and JSON stage state.
 
-- [ ] **Step 1: Write failing SQLite and ownership tests**
+- [x] **Step 1: Write failing SQLite and ownership tests**
 
 ```python
 def test_create_or_get_occurrence_is_idempotent(watchlists_db):
@@ -457,7 +457,7 @@ def test_other_user_cannot_read_occurrence(db_factory):
         outsider.get_briefing_occurrence(occurrence.id)
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 ```bash
 /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Watchlists/test_briefing_occurrences_db.py -q
@@ -465,7 +465,7 @@ def test_other_user_cannot_read_occurrence(db_factory):
 
 Expected: methods and row type are missing.
 
-- [ ] **Step 3: Add the table to both backend schemas**
+- [x] **Step 3: Add the table to both backend schemas**
 
 Use the same logical columns in PostgreSQL and SQLite:
 
@@ -493,11 +493,11 @@ CREATE TABLE IF NOT EXISTS watchlist_briefing_occurrences (
 
 Use `BIGSERIAL` and `BIGINT` equivalents in the PostgreSQL schema. Add user/job and run indexes. All repository reads join through owned jobs or filter by `user_id`.
 
-- [ ] **Step 4: Implement atomic create-or-get and stage updates**
+- [x] **Step 4: Implement atomic create-or-get and stage updates**
 
 `update_briefing_occurrence` accepts only named fields, JSON-serializes stage dictionaries before the DB call, updates `updated_at`, and returns the owned row. Do not expose a generic arbitrary-column update.
 
-- [ ] **Step 5: Verify GREEN and DB compatibility**
+- [x] **Step 5: Verify GREEN and DB compatibility**
 
 ```bash
 /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Watchlists/test_briefing_occurrences_db.py tldw_Server_API/tests/Watchlists/test_watchlists_db_user_scope.py tldw_Server_API/tests/Watchlists/test_first_class_watchlists_db.py -q
@@ -505,7 +505,7 @@ Use `BIGSERIAL` and `BIGINT` equivalents in the PostgreSQL schema. Add user/job 
 
 Expected: occurrence and existing Watchlists DB tests pass.
 
-- [ ] **Step 6: Commit Task 3**
+- [x] **Step 6: Commit Task 3**
 
 ```bash
 git add tldw_Server_API/app/core/DB_Management/Watchlists_DB.py tldw_Server_API/tests/Watchlists/test_briefing_occurrences_db.py
