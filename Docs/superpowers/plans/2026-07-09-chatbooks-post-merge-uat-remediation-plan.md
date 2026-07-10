@@ -25,6 +25,7 @@ Confirmed post-merge UAT findings:
 7. P1: essential dark-theme upload, progress, and empty-state text uses raw Ant Design black foregrounds with measured contrast near 1.1:1; multiple switches and select controls have no accessible name.
 8. P1: failed imports expose internal multipart flags without a recovery action, and import jobs are identified by UUID instead of archive name.
 9. P1: the Jobs tab duplicates the side Job tracker, compresses a ten-column table, uses inconsistent cleanup terminology, and performs destructive cleanup without confirmation.
+10. P0: full-account manifests count account profile and settings records, but the importer currently classifies those categories as having no serialized restore payload and skips them with a warning. A full-account archive must carry and restore the actual account-owned profile/settings state permitted by the sensitive-data policy, not inventory placeholders.
 
 This plan does not redesign the Chatbook format, add new account-data categories, or reimplement the Jobs subsystem. Full export continues to include bundled stored media artifacts and all other account data defined by the approved PRD.
 
@@ -117,13 +118,13 @@ git commit -m "fix: restore full chatbook archives in core worker"
 - Test: `tldw_Server_API/tests/Chatbooks/test_chatbooks_full_account_export_contract.py`
 - Test: `apps/packages/ui/src/components/Option/Chatbooks/__tests__/ChatbooksPlaygroundPage.backup-all.test.tsx`
 
-- [ ] **Step 1: Write failing backend and UI tests**
+- [x] **Step 1: Write failing backend and UI tests**
 
 Assert that a successfully completed async export persists `progress_percentage=100`, `processed_items=total_items`, archive size, and redacted manifest metadata. Assert separately that the UI renders a historical job with `status=completed` and stale `progress_percentage=0` as complete rather than showing `0%` beside a completed badge.
 
 Also assert that a verified archive returns `post_write_verification=true` and that API timestamps carry an explicit timezone. A UTC timestamp must never be rendered as a future local wall-clock time.
 
-- [ ] **Step 2: Prove both failures**
+- [x] **Step 2: Prove both failures**
 
 Run:
 
@@ -136,21 +137,21 @@ bunx vitest run src/components/Option/Chatbooks/__tests__/ChatbooksPlaygroundPag
 
 Expected: backend FAILS because the live worker leaves progress fields at their defaults; UI FAILS because `computeProgress` returns the stale numeric zero before considering terminal status.
 
-- [ ] **Step 3: Normalize completion at persistence time**
+- [x] **Step 3: Normalize completion at persistence time**
 
 When export/import succeeds, set progress to 100. Populate total/processed counts from the redacted archive/import result metadata when available. If a completed archive has no countable records, use zero counts with 100% completion; never fabricate content counts.
 
 Persist the archive verification result built by `ChatbookService` in the live core-worker job record. Serialize timestamps with an offset or `Z`; use the browser locale only after timezone semantics are unambiguous.
 
-- [ ] **Step 4: Add a historical-job UI fallback**
+- [x] **Step 4: Add a historical-job UI fallback**
 
 Update `computeProgress` so terminal `completed` status wins over stale values and renders 100. Failed, cancelled, and expired jobs must retain their last meaningful percentage or render no bar.
 
-- [ ] **Step 5: Re-run focused tests and API serialization checks**
+- [x] **Step 5: Re-run focused tests and API serialization checks**
 
 Expected: all focused tests pass and `GET /chatbooks/export/jobs` returns terminal status consistent with progress.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tldw_Server_API/app/services/core_jobs_worker.py tldw_Server_API/app/core/Chatbooks/chatbook_service.py tldw_Server_API/tests/Chatbooks/test_chatbooks_core_jobs_worker.py tldw_Server_API/tests/Chatbooks/test_chatbooks_full_account_export_contract.py apps/packages/ui/src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx apps/packages/ui/src/components/Option/Chatbooks/__tests__/ChatbooksPlaygroundPage.backup-all.test.tsx
@@ -283,13 +284,15 @@ git commit -m "fix: improve chatbook job trust and recovery"
 ## Task 5: Build A Media-Bearing Clean-Destination UAT Fixture
 
 **Files:**
+- Modify: `tldw_Server_API/app/core/Chatbooks/chatbook_service.py`
 - Create: `Helper_Scripts/Testing-related/chatbooks_full_account_uat_fixture.py`
 - Create: `tldw_Server_API/tests/Chatbooks/test_chatbooks_full_account_uat_fixture.py`
 - Create: `tldw_Server_API/tests/e2e/test_chatbooks_full_account_media_roundtrip.py`
+- Test: `tldw_Server_API/tests/Chatbooks/test_chatbooks_full_account_import_restore.py`
 
 - [ ] **Step 1: Write failing fixture and two-user round-trip tests**
 
-The fixture test must require `prepare`, `reset-destination`, and `verify` behavior. The E2E test must create a source user with account settings, a character, media record, transcript/chunks, a stored media artifact with known SHA-256, and embedding/vector records; export full account; import into a distinct clean destination user; then compare destination records, artifact hash, and vector identifiers.
+The fixture test must require `prepare`, `reset-destination`, and `verify` behavior. The E2E test must create a source user with non-secret account profile/settings values, a character, media record, transcript/chunks, a stored media artifact with known SHA-256, and embedding/vector records; export full account; import into a distinct clean destination user; then compare destination profile/settings state, content records, artifact hash, and vector identifiers.
 
 - [ ] **Step 2: Prove the fixture does not exist**
 
@@ -306,18 +309,20 @@ Expected: FAIL because the fixture helper and media-bearing two-user round trip 
 
 - [ ] **Step 3: Implement deterministic prepare/reset/verify behavior**
 
-`prepare` writes the full-account archive plus `expected.json`; `reset-destination` initializes an empty target without copying source state; `verify` reads only the destination and fails unless all expected categories, media bytes, and embedding/vector identifiers are present. Never satisfy verification from import-job metadata alone.
+`prepare` writes the full-account archive plus `expected.json`; `reset-destination` initializes an empty target without copying source state; `verify` reads only the destination and fails unless all expected categories, account profile/settings values, media bytes, and embedding/vector identifiers are present. Never satisfy verification from manifest counts or import-job metadata alone.
+
+If the red round trip confirms that account profile/settings are inventory-only placeholders, add a versioned archive payload and restore handler using the existing user/profile/settings abstractions. Apply the approved sensitive-data policy: include required account-owned state, redact preview/log output, and represent intentionally excluded secrets with explicit policy metadata rather than fabricated counts.
 
 - [ ] **Step 4: Run fixture and backend round-trip tests**
 
 Run the Step 2 command again.
 
-Expected: PASS with two distinct users, no same-account conflict skips, matching media SHA-256, and restored vector identifiers.
+Expected: PASS with two distinct users, no same-account conflict skips, restored account profile/settings values, matching media SHA-256, and restored vector identifiers.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Helper_Scripts/Testing-related/chatbooks_full_account_uat_fixture.py tldw_Server_API/tests/Chatbooks/test_chatbooks_full_account_uat_fixture.py tldw_Server_API/tests/e2e/test_chatbooks_full_account_media_roundtrip.py
+git add tldw_Server_API/app/core/Chatbooks/chatbook_service.py tldw_Server_API/tests/Chatbooks/test_chatbooks_full_account_import_restore.py Helper_Scripts/Testing-related/chatbooks_full_account_uat_fixture.py tldw_Server_API/tests/Chatbooks/test_chatbooks_full_account_uat_fixture.py tldw_Server_API/tests/e2e/test_chatbooks_full_account_media_roundtrip.py
 git commit -m "test: add full account chatbook restore fixture"
 ```
 
@@ -559,6 +564,7 @@ git commit -m "docs: close chatbooks post-merge UAT"
 - [ ] A media-bearing full-account archive imported through the WebUI into a clean destination completes with media and embedding restore enabled by archive defaults.
 - [ ] A fixture with bundled media bytes proves those bytes are restored under user-owned storage.
 - [ ] Destination verification proves restored media bytes match the source SHA-256 and embedding/vector records exist; job completion alone is insufficient.
+- [ ] Destination verification proves account profile/settings values present in the source archive are restored according to the approved sensitive-data policy; inventory counts without payloads are insufficient.
 - [ ] Completed jobs never display `0%`.
 - [ ] Backup all can start without requiring invented metadata, while generated name/description remain editable.
 - [ ] Import preview shows the full account-impact summary and never combines Include all with `Selected: 0`.
