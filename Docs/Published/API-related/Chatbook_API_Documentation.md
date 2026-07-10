@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Chatbook API provides functionality for exporting and importing collections of content (conversations, notes, characters, etc.) in a portable archive format. It also supports importing OpenWebUI chat export JSON and uploaded OpenWebUI `webui.db` database files through the same import and preview endpoints. This enables users to backup, share, and migrate their data between instances or users.
+The Chatbook API provides functionality for exporting and importing full user-account backups or explicit content allowlists in a portable archive format. It also supports importing OpenWebUI chat export JSON and uploaded OpenWebUI `webui.db` database files through the same import and preview endpoints. This enables users to backup, share, and migrate their data between instances or users.
 
 Developer Code Guide: `Docs/Code_Documentation/Guides/Chatbooks_Code_Guide.md:1`
 
@@ -33,12 +33,16 @@ A Chatbook is a portable archive format (`.chatbook` file) that contains:
 - World books and lore
 - Dictionaries for text replacement
 - Generated documents
-- Media files and attachments (optional; small binaries bundled per content-type limits, large media referenced via metadata)
-- Embeddings (optional)
+- Media records, transcripts, chunks, derived metadata, and tldw-stored account file artifacts
+- Embeddings and vector/search data when present
+- Account settings, prompts, evaluations, relationships, and sensitive account values required for restore
+
+Full-account export scope is defined by the Chatbooks account-data inventory. Stored account file artifacts are bundled under `content/media/files/*`. External URLs, local source paths, and other provenance pointers are exported as pointer metadata only unless tldw owns stored artifact bytes for that account.
 
 ### Key Features
 
-- **Selective Export**: Choose specific content types and items to include
+- **Full Account Backup**: Omit `content_selections` or pass `{}` to export the full user-account inventory
+- **Selective Export**: Pass a non-empty `content_selections` object to export an explicit allowlist
 - **Conflict Resolution**: Multiple strategies for handling duplicate content during import
 - **Async Processing**: Large operations can run in the background
 - **Job Management**: Track progress of export/import operations
@@ -62,7 +66,7 @@ Export (async)
 Import (sync/async)
   Client → POST /api/v1/chatbooks/import (multipart)
          → Save temp → Branch by source_format
-         → Chatbook archive: Validate ZIP → Secure extract → Import selections
+         → Chatbook archive: Validate ZIP → Secure extract → Restore restorable archive account data
          → OpenWebUI JSON: Parse export JSON → Import chat trees
          → OpenWebUI DB: Preview users → Require selected user → Import that user's chat trees and mirror folders
          ← Sync: { success, imported_items, warnings } or Async: { job_id }
@@ -70,7 +74,7 @@ Import (sync/async)
 OpenWebUI attachment hydration
   Client → POST /api/v1/chatbooks/openwebui/hydration/preview (JSON)
          → Validate owner/admin access → Resolve data root under allowed roots
-         → Read imported OpenWebUI metadata + webui.db file rows → Return counts/warnings
+         → Read selected import scope or manual conversation IDs + webui.db file rows → Return counts/warnings
   Client → POST /api/v1/chatbooks/openwebui/hydration/jobs (JSON)
          → Enqueue openwebui_attachment_hydration job
   Worker → Copy referenced images, register supported files, optionally process files
@@ -97,28 +101,53 @@ Authorization: Bearer <your-jwt-token>
 
 **Endpoint**: `POST /api/v1/chatbooks/export`
 
-**Description**: Create a new chatbook export with selected content.
+**Description**: Create a new chatbook export. Omit `content_selections` or send `{}` for a full user-account backup; send a non-empty object for explicit allowlist export.
 
-**Request Body**:
+**Full Account Request Body**:
 ```json
 {
   "name": "Weekly Backup - January 2024",
-  "description": "Complete backup of all content",
+  "description": "Complete backup of all restorable account data",
+  "include_media": true,
+  "media_quality": "original",
+  "include_embeddings": true,
+  "include_generated_content": true,
+  "format_version": "1.1.0",
+  "tags": ["backup", "weekly"],
+  "categories": ["work"],
+  "async_mode": true
+}
+```
+
+`"content_selections": {}` is equivalent to omitting the field and also means full user-account export. This compatibility behavior is intentional.
+
+**Selective Request Body**:
+```json
+{
+  "name": "Project Alpha Archive",
+  "description": "Selected conversations and notes",
   "content_selections": {
     "conversation": ["conv_123", "conv_456"],
     "note": ["note_789"],
-    "character": []  // Empty array means all characters
+    "character": []
   },
   "author": "John Doe",
   "include_media": true,
   "media_quality": "compressed",
   "include_embeddings": false,
   "include_generated_content": true,
+  "format_version": "1.0.0",
   "tags": ["backup", "weekly"],
   "categories": ["work"],
   "async_mode": false
 }
 ```
+
+When `content_selections` is non-empty, it is an explicit allowlist. Empty arrays in that allowlist mean no items for that type, not "all items." A non-empty allowlist that resolves to zero exportable items returns a 4xx validation error.
+
+`format_version` is optional and defaults to `"1.0.0"`. Chatbook v1.1 export
+is opt-in: clients must request `"format_version": "1.1.0"` to receive the
+v1.1 manifest additions, file inventory, account inventory summary, and any v1.1 content envelopes. If the field is omitted, export remains v1.0.0/legacy-compatible.
 
 **Response (Synchronous)**:
 ```json
@@ -133,7 +162,12 @@ Authorization: Bearer <your-jwt-token>
 Implementation notes:
 - Sync mode persists a completed export job and returns its `job_id` plus a `download_url` that uses this UUID.
 - For robust automation, prefer async mode and then poll job status to obtain the canonical `download_url` by `job_id`.
+- Completed full-account jobs expose redacted inventory metadata such as archive size, pointer-only count, warning count, and post-write verification status. Secret values are not returned in preview, manifest summaries, job summaries, logs, or audit metadata.
 - When evaluation exports exceed row caps, export job metadata can include continuation tokens and the manifest can include `truncation.evaluations.continuations` so clients can resume the same chatbook export.
+- v1.1 export currently uses the shared format helpers for manifest metadata,
+  `file_inventory` hashing, preview reporting, and import validation. Content
+  types keep their v1-compatible payload layout until producer-specific v1.1
+  envelopes are added.
 
 **Response (Asynchronous)**:
 ```json
@@ -143,6 +177,44 @@ Implementation notes:
   "job_id": "0c9d9a3a-6d1c-4c8f-9c84-9a0c2c2d8f77"
 }
 ```
+
+### 1A. Preview Full Account Export Scope
+
+**Endpoint**: `GET /api/v1/chatbooks/export/scope`
+
+**Description**: Return the redacted account-data inventory summary used by Backup all. Use this endpoint to show users what a full user-account export will cover before creating the export.
+
+**Response**:
+```json
+{
+  "mode": "full_account",
+  "total_items": 42,
+  "pointer_only_count": 3,
+  "sensitive_category_count": 2,
+  "warning_count": 1,
+  "estimated_size_bytes": 10485760,
+  "categories": [
+    {
+      "category": "media_stored_artifacts",
+      "label": "Media stored artifacts",
+      "count": 5,
+      "restore_status": "restorable",
+      "sensitivity": "personal",
+      "warning": null
+    },
+    {
+      "category": "media_pointers",
+      "label": "Media pointers",
+      "count": 3,
+      "restore_status": "pointer_only",
+      "sensitivity": "personal",
+      "warning": "External source bytes are not stored by tldw."
+    }
+  ]
+}
+```
+
+The response contains labels and counts only. Sensitive values and secrets are never returned by this preview endpoint.
 
 ### 2. Import Chatbook
 
@@ -166,13 +238,13 @@ Supported multipart fields:
   "selected_openwebui_user_id": "user_abc123",
   "content_selections": "{\"conversation\":[\"conv_123\"],\"note\":[]}",
   "content_selections_json_shape": {
-    "conversation": ["conv_123"],  // Only import specific items
-    "note": []  // Import all notes if content selections are supported
+    "conversation": ["conv_123"],
+    "note": []
   },
   "conflict_resolution": "skip",
   "prefix_imported": false,
-  "import_media": false,
-  "import_embeddings": false,
+  "import_media": null,
+  "import_embeddings": null,
   "async_mode": false
 }
 ```
@@ -182,6 +254,8 @@ For `source_format=chatbook`, the upload must be a `.zip` or `.chatbook` archive
 OpenWebUI JSON import supports normal OpenWebUI "Export Chats" JSON files. It imports every valid chat as one tldw conversation and preserves all valid message branches through `parent_message_id`.
 
 OpenWebUI webui.db database import supports uploaded SQLite databases copied from an OpenWebUI instance. Preview first, choose exactly one `selected_openwebui_user_id`, then import with `source_format=openwebui_db`. The import reads only chats owned by the selected source user. Source folders are mirrored into tldw folders under `OpenWebUI / <selected user> / ...`, and folder links are attached to imported conversations. Duplicate detection uses `source=openwebui` and a deterministic external reference for both JSON and DB imports. `skip` is the default duplicate behavior; `rename` creates an intentional second copy with a unique imported title and external reference. OpenWebUI v1 does not support `overwrite`, `merge`, admin export import, live OpenWebUI server import, embeddings import, content selections, or unreferenced attachment import. Files, images, and artifacts import as metadata references first; use the OpenWebUI attachment hydration endpoints after import to copy referenced images and register supported files from a server-local OpenWebUI data root.
+
+For Chatbook archives, import restores all restorable account data present by default, including media records, transcripts, chunks, derived metadata, bundled stored media artifacts, embeddings, prompts, evaluations, generated documents, and supported content relationships. Pointer-only sources are restored as metadata only and reported in warnings.
 
 **Response**:
 ```json
@@ -233,6 +307,20 @@ OpenWebUI webui.db database import supports uploaded SQLite databases copied fro
   }
 }
 ```
+
+**v1.1 Import Behavior**:
+- v1.1 manifests must include `file_inventory`; an empty list is valid only
+  when the archive has no bundled payload files.
+- v1.1 archives are validated before any content writes.
+- `file_inventory` checksum failures, missing listed files, unsafe inventory
+  paths, and missing inventory coverage for import payloads fail the import
+  before writes.
+- Conversation image attachments referenced by bundled conversation payloads
+  must also be covered by verified inventory entries before import proceeds.
+- Unknown feature behavior follows `manifest.compatibility.unsupported_feature_behavior`:
+  `reject_import` fails before writes; `warn_and_skip` and
+  `warn_lossy_import` continue where safe and surface warnings in the sync
+  import response or job warnings.
 
 ### 3. Preview Chatbook
 
@@ -317,6 +405,73 @@ OpenWebUI webui.db database import supports uploaded SQLite databases copied fro
 }
 ```
 
+For v1.1 archives the preview response may also include a deterministic preview
+report. These fields are optional so v1.0 preview clients can continue reading
+the existing `manifest` shape:
+
+```json
+{
+  "manifest": {
+    "version": "1.1.0",
+    "name": "My Chatbook",
+    "content_items": []
+  },
+  "compatibility": {
+    "status": "compatible",
+    "reader_version": "1.1.0",
+    "manifest_version": "1.1.0"
+  },
+  "features": {
+    "supported": ["content_envelopes", "file_inventory"],
+    "unsupported": []
+  },
+  "integrity": {
+    "verified_files": 3,
+    "failed_files": []
+  },
+  "lossiness": {
+    "lossless": 1
+  },
+  "source_refs": {
+    "external": 2
+  },
+  "warnings": [],
+  "errors": []
+}
+```
+
+`compatibility` reports reader and manifest compatibility. `features` splits
+manifest feature tokens into supported and unsupported sets. `integrity`
+summarizes file inventory verification. `lossiness` counts content-envelope
+lossiness modes, and `source_refs` counts source reference resolution statuses.
+`warnings` and `errors` are report-level messages; integrity errors in preview
+become blocking validation errors during v1.1 import.
+
+### 3A. List OpenWebUI Import Scopes
+
+**Endpoint**: `GET /api/v1/chatbooks/openwebui/import-scopes`
+
+**Description**: List imported OpenWebUI scopes for the current user. The WebUI uses this after OpenWebUI JSON or database import so attachment hydration can target the last or selected import without asking users to copy tldw conversation IDs.
+
+**Response**:
+```json
+{
+  "scopes": [
+    {
+      "scope_id": "openwebui-json-20260709T181500Z",
+      "source_format": "openwebui_json",
+      "source_user_id": "user_abc123",
+      "source_user_label": "Alice",
+      "conversation_count": 4,
+      "attachment_reference_count": 8,
+      "created_at": "2026-07-09T18:15:00Z"
+    }
+  ]
+}
+```
+
+Scope summaries are user-safe and do not expose server-local source paths.
+
 ### 4. Preview OpenWebUI Attachment Hydration
 
 **Endpoint**: `POST /api/v1/chatbooks/openwebui/hydration/preview`
@@ -336,8 +491,7 @@ Hydration v1 is reference-driven. It does not scan every file under `uploads/` a
 {
   "openwebui_data_root": "/srv/openwebui/data",
   "scope": {
-    "conversation_ids": ["conv_123", "conv_456"],
-    "source_user_id": "user_abc123"
+    "import_scope_id": "openwebui-json-20260709T181500Z"
   },
   "process_supported_files": false
 }
@@ -345,7 +499,8 @@ Hydration v1 is reference-driven. It does not scan every file under `uploads/` a
 
 Fields:
 - `openwebui_data_root`: required server-local OpenWebUI data root.
-- `scope.conversation_ids`: imported tldw conversation IDs to scan. Empty means no conversations are selected.
+- `scope.import_scope_id`: selected OpenWebUI import scope to hydrate. Prefer this for normal WebUI flows.
+- `scope.conversation_ids`: imported tldw conversation IDs to scan. Use as an advanced manual override. Empty means no conversations are selected unless `import_scope_id` is provided.
 - `scope.source_user_id`: optional OpenWebUI user id used for database `chat_file` fallback lookups.
 - `process_supported_files`: optional, defaults to `false`. When `true`, preview includes supported-file processing intent for non-image files.
 
@@ -353,6 +508,7 @@ Fields:
 ```json
 {
   "scope": {
+    "import_scope_id": "openwebui-json-20260709T181500Z",
     "conversation_ids": ["conv_123", "conv_456"],
     "source_user_id": "user_abc123"
   },
@@ -669,6 +825,13 @@ OpenWebUI JSON and database imports support `skip` and `rename` in v1.
 ### Manifest Metadata (selected fields)
 - `metadata.binary_limits`: Per content-type max bundled bytes applied during export.
 - `truncation.evaluations.continuations`: Continuation tokens for resumable evaluation exports.
+- `account_inventory`: v1.1 list of account inventory categories, restore status, sensitivity class, and user-facing warning text.
+- `account_inventory_summary`: v1.1 redacted summary containing category counts, pointer-only counts, warning counts, archive size, and `post_write_verification`.
+- v1.1 manifests may add `features_used`, `producer`, `source_instance`,
+  `compatibility`, and `file_inventory`. These are produced only for opt-in
+  v1.1 exports.
+
+Sensitive values may be present in archive payload files only when required for restore. They are redacted from preview responses, manifest summaries, job metadata, warnings, logs, and audit-facing metadata.
 
 ## Error Handling
 
@@ -782,8 +945,8 @@ data = request_json(
     {
         "name": "Weekly Backup",
         "description": "Complete backup of all content",
-        "content_selections": {},  # Empty = export everything
         "include_media": True,
+        "include_embeddings": True,
         "async_mode": True,
     },
     headers=headers,
@@ -824,8 +987,6 @@ with open("my_backup.chatbook", "rb") as f:
             "source_format": "chatbook",
             "conflict_resolution": "skip",
             "prefix_imported": "false",
-            "import_media": "false",
-            "import_embeddings": "false",
         },
         [("file", "my_backup.chatbook", f.read(), "application/octet-stream")],
     )
@@ -864,8 +1025,8 @@ async function createChatbook() {
     body: JSON.stringify({
       name: 'Weekly Backup',
       description: 'Complete backup',
-      content_selections: {},
       include_media: true,
+      include_embeddings: true,
       async_mode: true
     })
   });
@@ -907,8 +1068,6 @@ async function importChatbook(file) {
   formData.append('source_format', 'chatbook');
   formData.append('conflict_resolution', 'skip');
   formData.append('prefix_imported', 'false');
-  formData.append('import_media', 'false');
-  formData.append('import_embeddings', 'false');
 
   const response = await fetch(`${API_BASE}/chatbooks/import`, {
     method: 'POST',
@@ -943,8 +1102,10 @@ When upgrading from the single-user version to multi-user with authentication:
    curl -X POST "http://localhost:8000/api/v1/chatbooks/export" \
      -H "Content-Type: application/json" \
      -H "Authorization: Bearer <your-jwt-token>" \
-     -d '{"name": "Pre-migration backup", "description": "Complete backup before auth migration", "content_selections": {}, "include_media": true}'
+     -d '{"name": "Pre-migration backup", "description": "Complete backup before auth migration", "include_media": true, "include_embeddings": true}'
    ```
+
+   Compatibility note: omitting `content_selections` and sending `"content_selections": {}` both mean full user-account export. Only a non-empty `content_selections` object starts explicit allowlist mode.
 
 2. **Enable authentication** in the new version
 
@@ -958,9 +1119,9 @@ When upgrading from the single-user version to multi-user with authentication:
 ### Best Practices
 
 1. **Regular Backups**: Schedule weekly or monthly exports
-2. **Selective Exports**: Export only active projects to reduce file size
+2. **Selective Exports**: Export only active projects to reduce file size when you intentionally do not need a full backup
 3. **Conflict Strategy**: Use "skip" for regular backups, "rename" for shared imports
-4. **Media Management**: Exclude media for text-only backups to save space
+4. **Media Management**: Full backups include restorable media data and stored account artifacts; use selective export for text-only archives
 5. **Job Monitoring**: Always check job status for async operations
 6. **Error Recovery**: Keep original files until import is confirmed successful
 
