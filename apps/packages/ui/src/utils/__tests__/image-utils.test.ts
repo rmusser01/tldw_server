@@ -38,6 +38,10 @@ describe("image utils", () => {
     )
   })
 
+  it("rejects backslash-obfuscated network-path image URLs", () => {
+    expect(safeImageUrl("/\\cdn.example/a.png")).toBeNull()
+  })
+
   it("makes bare relative image paths explicit", () => {
     expect(safeImageUrl("images/a.png")).toBe("./images/a.png")
   })

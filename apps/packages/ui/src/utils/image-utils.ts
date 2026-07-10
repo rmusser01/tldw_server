@@ -244,6 +244,7 @@ export function safeImageUrl(value: unknown): string | null {
 
   const safeUrl = safeExternalUrl(value)
   if (!safeUrl) return null
+  if (safeUrl.includes("\\")) return null
 
   const lowerSafeUrl = safeUrl.toLowerCase()
   if (lowerSafeUrl.startsWith("https:")) return `https:${safeUrl.slice(6)}`
