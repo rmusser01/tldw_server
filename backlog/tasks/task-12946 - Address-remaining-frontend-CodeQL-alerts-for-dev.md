@@ -34,7 +34,7 @@ Address the 12 JavaScript/TypeScript CodeQL alerts #2251-#2262 that remain unpat
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
+Pre-implementation review refined the design in four material ways: use the existing server-side `groups` source query instead of OPML/client filtering; centralize an image-specific URL validator with an analyzer-visible safe prefix and embedded-image fallback; sanitize article HTML before the non-DOM text scanner; and preserve the printable quiz document shell with DOMPurify `WHOLE_DOCUMENT` plus a trusted doctype. Verification limitation: the dev-targeted PR is not expected to receive JavaScript default-setup CodeQL because dev is unprotected and the repository advanced workflow is Python-only. Independent spec review approved the revised approach.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
