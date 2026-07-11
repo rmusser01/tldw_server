@@ -810,6 +810,11 @@ class WorkflowEngine:
                             error_reason_code = _reason_code_from_error(e)
                             with contextlib.suppress(_WF_NONCRITICAL_EXCEPTIONS):
                                 record_span_exception(e)
+                        except Exception as e:  # noqa: BLE001 - adapter/provider failures must terminally fail the step
+                            err = e
+                            error_reason_code = _reason_code_from_error(e)
+                            with contextlib.suppress(_WF_NONCRITICAL_EXCEPTIONS):
+                                record_span_exception(e)
 
                         if err is not None:
                             failure = build_failure_envelope(err, step_type=step_type)
@@ -1324,6 +1329,9 @@ class WorkflowEngine:
                     error_reason_code = _reason_code_from_error(te)
                     self._append_event(run_id, "step_timeout", {"step_id": sid, "attempt": attempt})
                 except _WF_NONCRITICAL_EXCEPTIONS as e:
+                    err = e
+                    error_reason_code = _reason_code_from_error(e)
+                except Exception as e:  # noqa: BLE001 - adapter/provider failures must terminally fail the step
                     err = e
                     error_reason_code = _reason_code_from_error(e)
                 if err is not None:

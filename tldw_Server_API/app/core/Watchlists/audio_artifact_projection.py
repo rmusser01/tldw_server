@@ -454,6 +454,9 @@ def build_audio_projection(
 
     if final_artifact and status not in {"failed", "cancelled"}:
         status = "completed"
+    elif status == "completed":
+        status = "failed"
+        fallback_reason = fallback_reason or "audio_final_artifact_missing"
 
     projection: dict[str, Any] = {
         "run_id": run_id,
@@ -479,6 +482,27 @@ def build_audio_projection(
         if isinstance(final_metadata, dict):
             projection.update({key: final_metadata[key] for key in _PROGRAM_METADATA_KEYS if key in final_metadata})
     return projection
+
+
+def apply_scheduler_status_to_audio_projection(
+    projection: dict[str, Any],
+    scheduler_status: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Merge Scheduler task status without overriding terminal Workflow outcomes."""
+    if not scheduler_status:
+        return dict(projection)
+    current_status = normalize_audio_status(projection.get("status"), task_id=projection.get("task_id"))
+    if current_status in {"completed", "failed", "cancelled"}:
+        return {
+            **projection,
+            "fallback_reason": projection.get("fallback_reason") or scheduler_status.get("fallback_reason"),
+        }
+    scheduler_value = normalize_audio_status(scheduler_status.get("status"), task_id=projection.get("task_id"))
+    return {
+        **projection,
+        "status": scheduler_value,
+        "fallback_reason": scheduler_status.get("fallback_reason") or projection.get("fallback_reason"),
+    }
 
 
 def merge_audio_projection_metadata(existing: dict[str, Any], projection: dict[str, Any]) -> dict[str, Any]:

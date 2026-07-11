@@ -582,6 +582,141 @@ def compose_no_material_update_script(context: Mapping[str, Any]) -> dict[str, A
     }
 
 
+def _has_explicit_llm_config(provider: Any, model: Any) -> bool:
+    """Return true when the compose step was given a concrete LLM target."""
+    def _present(value: Any) -> bool:
+        if value is None:
+            return False
+        text = str(value).strip()
+        return bool(text) and text.lower() not in {"none", "null", "undefined"}
+
+    return _present(provider) or _present(model)
+
+
+def _local_compose_fallback_enabled(value: Any) -> bool:
+    """Return true when the caller explicitly allows deterministic local compose."""
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"true", "1", "yes", "on"}
+
+
+def _compose_local_source_grounded_script(
+    *,
+    config: Mapping[str, Any],
+    context: dict[str, Any],
+    items: list[dict[str, Any]],
+    speakers: list[dict[str, str]],
+    voice_map: dict[str, str] | None,
+    editorial: Mapping[str, Any],
+    target_minutes: int,
+    output_language: str,
+    multi_voice: bool,
+) -> dict[str, Any]:
+    """Compose a deterministic spoken script from selected source summaries.
+
+    This is the fail-open path for recommended defaults: text/audio output should
+    not depend on external LLM configuration when the user did not choose one.
+    """
+    fallback_marker = speakers[0]["marker"] if speakers else "HOST"
+    second_marker = speakers[1]["marker"] if len(speakers) > 1 else fallback_marker
+    show_name = str(editorial.get("show_name") or "your briefing").strip()
+    outcome_noun = str(editorial.get("outcome_noun") or "briefing").strip()
+    program_format = str(editorial.get("program_format") or "concise_briefing").strip()
+    item_limit = max(3, min(len(items), target_minutes * 2, 24))
+    selected = items[:item_limit]
+
+    sections: list[dict[str, str]] = [
+        {
+            "voice": fallback_marker,
+            "text": _sanitize_spoken_text(
+                f"This is {show_name}. Here is the latest source-grounded {outcome_noun} "
+                f"from {len(items)} tracked updates."
+            ),
+        }
+    ]
+    if program_format in _PODCAST_FORMATS and len(speakers) > 1:
+        sections.append(
+            {
+                "voice": second_marker,
+                "text": _sanitize_spoken_text(
+                    "I will keep this grounded in the collected source summaries and separate context from speculation."
+                ),
+            }
+        )
+
+    for index, item in enumerate(selected, start=1):
+        marker = fallback_marker if len(speakers) < 2 or index % 2 else second_marker
+        title = _sanitize_spoken_text(str(item.get("title") or f"Update {index}")).strip()
+        summary = _sanitize_spoken_text(str(item.get("summary") or "")).strip()
+        if not summary:
+            summary = title
+        spoken = f"{title}. {summary}" if title and title != summary else summary
+        if spoken:
+            sections.append({"voice": marker, "text": spoken})
+
+    remaining = len(items) - len(selected)
+    if remaining > 0:
+        sections.append(
+            {
+                "voice": fallback_marker,
+                "text": f"There are {remaining} additional tracked updates in the full text report.",
+            }
+        )
+    sections.append(
+        {
+            "voice": fallback_marker,
+            "text": "That is the briefing. Check the report for source links, provenance, and the complete item list.",
+        }
+    )
+    sections = [section for section in sections if section.get("text")]
+    if not sections:
+        return {"text": "", "script": "", "sections": [], "error": "empty_local_script"}
+
+    resolved_voice_assignments = _resolve_voice_assignments(sections, voice_map)
+    if multi_voice:
+        script = "\n".join(f"[{section['voice']}]: {section['text']}" for section in sections)
+    else:
+        script = "\n".join(section["text"] for section in sections)
+    word_count = sum(len(section["text"].split()) for section in sections)
+    estimated_minutes = round(word_count / 150, 1)
+    program_metadata = _build_program_metadata(
+        config=config,
+        editorial=editorial,
+        items=items,
+        speakers=speakers,
+        voice_assignments=resolved_voice_assignments,
+        target_minutes=target_minutes,
+        estimated_minutes=estimated_minutes,
+        is_no_material_update=False,
+    )
+    script_artifact = _register_script_artifact(
+        context=context,
+        script=script,
+        sections=sections,
+        voice_assignments=resolved_voice_assignments,
+        output_language=output_language,
+        word_count=word_count,
+        estimated_minutes=estimated_minutes,
+        program_metadata=program_metadata,
+    )
+    result: dict[str, Any] = {
+        "text": script,
+        "script": script,
+        "sections": sections,
+        "word_count": word_count,
+        "estimated_minutes": estimated_minutes,
+        "voice_assignments": resolved_voice_assignments,
+        "program_metadata": program_metadata,
+        "local_compose_fallback": True,
+    }
+    if script_artifact:
+        result["script_artifact_id"] = script_artifact["artifact_id"]
+        result["script_artifact_uri"] = script_artifact["uri"]
+    return result
+
+
 def _build_program_metadata(
     *,
     config: Mapping[str, Any],
@@ -839,6 +974,25 @@ async def run_audio_briefing_compose_adapter(config: dict[str, Any], context: di
     persona_model_cfg = config.get("persona_model") or config.get("model")
     persona_id_cfg = config.get("persona_id")
     items = normalized_items
+    if (
+        not persona_summarize
+        and _local_compose_fallback_enabled(config.get("allow_local_compose_fallback"))
+        and not _has_explicit_llm_config(config.get("provider"), config.get("model"))
+    ):
+        local_result = _compose_local_source_grounded_script(
+            config=config,
+            context=context,
+            items=items,
+            speakers=audio_cast_speakers,
+            voice_map=voice_map_cfg if isinstance(voice_map_cfg, dict) else None,
+            editorial=editorial,
+            target_minutes=target_minutes,
+            output_language=output_language,
+            multi_voice=multi_voice,
+        )
+        if not local_result.get("error"):
+            return local_result
+
     system_prompt = _build_system_prompt()
     try:
         editorial_block = _build_editorial_configuration_block(

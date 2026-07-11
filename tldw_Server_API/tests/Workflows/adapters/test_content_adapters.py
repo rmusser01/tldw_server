@@ -2956,6 +2956,46 @@ class TestAudioBriefingComposeAdapter:
         assert result["text"] == ""
 
     @pytest.mark.asyncio
+    async def test_compose_without_llm_provider_uses_local_source_grounded_script(self, sample_items, base_context):
+        """Recommended defaults should produce an audio script without requiring LLM config."""
+        from tldw_Server_API.app.core.Workflows.adapters.content.audio_briefing import (
+            run_audio_briefing_compose_adapter,
+        )
+
+        config = {
+            "items": sample_items,
+            "target_audio_minutes": 8,
+            "allow_local_compose_fallback": True,
+            "program_format": "sportscast",
+            "show_name": "Daily Sports Desk",
+            "audio_cast": {
+                "speaker_count": 2,
+                "speakers": [
+                    {"id": "speaker_1", "label": "Host", "role": "Host", "voice": "alloy"},
+                    {"id": "speaker_2", "label": "Analyst", "role": "Analyst", "voice": "nova"},
+                ],
+            },
+            "voice_map": {"speaker_1": "alloy", "speaker_2": "nova"},
+        }
+
+        with patch(
+            "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async",
+            new_callable=AsyncMock,
+        ) as llm:
+            result = await run_audio_briefing_compose_adapter(config, base_context)
+
+        llm.assert_not_called()
+        assert result.get("error") is None
+        assert result["text"]
+        assert len(result["sections"]) >= 2
+        assert "AI Breakthrough" in result["text"]
+        assert "Climate Report" in result["text"]
+        assert result["program_metadata"]["program_format"] == "sportscast"
+        assert result["program_metadata"]["show_name"] == "Daily Sports Desk"
+        assert result["voice_assignments"]["SPEAKER_1"] == "alloy"
+        assert result["voice_assignments"]["SPEAKER_2"] == "nova"
+
+    @pytest.mark.asyncio
     async def test_compose_items_from_prev(self, sample_items, mock_llm_response_multi_voice, base_context):
         """Test items resolved from prev step output."""
         from tldw_Server_API.app.core.Workflows.adapters.content.audio_briefing import (

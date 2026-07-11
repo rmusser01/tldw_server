@@ -142,6 +142,28 @@ def test_build_audio_projection_script_only_partial_graph():
     assert projection.get("download_url") is None
 
 
+def test_succeeded_workflow_without_final_audio_projects_failed():
+    from tldw_Server_API.app.core.Watchlists.audio_artifact_projection import build_audio_projection
+
+    projection = build_audio_projection(
+        run_id=91,
+        task_id="task_missing_audio",
+        audio_request_id="wla_current",
+        workflow_run=_workflow_run(status="succeeded", metadata=_watchlist_meta()),
+        artifacts=[
+            _artifact(
+                "art_script",
+                type_="audio_script",
+                metadata=_watchlist_meta(script_artifact=True, title="Briefing script"),
+            )
+        ],
+    )
+
+    assert projection["status"] == "failed"
+    assert projection["fallback_reason"] == "audio_final_artifact_missing"
+    assert projection["final_artifact"] is None
+
+
 def test_final_only_audio_projection_keeps_public_program_metadata_and_drops_private_paths():
     from tldw_Server_API.app.core.Watchlists.audio_artifact_projection import build_audio_projection
 
@@ -457,6 +479,26 @@ def test_merge_audio_projection_records_terminal_speech_failure_without_final_ar
 
     assert merged["ai_generated_speech"] is False
     assert merged["speech_disclosure"] == disclosure
+
+
+def test_scheduler_status_does_not_override_terminal_workflow_failure():
+    from tldw_Server_API.app.core.Watchlists.audio_artifact_projection import (
+        apply_scheduler_status_to_audio_projection,
+    )
+
+    merged = apply_scheduler_status_to_audio_projection(
+        {
+            "run_id": 91,
+            "task_id": "task_audio",
+            "status": "failed",
+            "fallback_reason": "audio_generation_failed",
+            "final_artifact": None,
+        },
+        {"task_id": "task_audio", "status": "running", "queue_name": "workflows"},
+    )
+
+    assert merged["status"] == "failed"
+    assert merged["fallback_reason"] == "audio_generation_failed"
 
 
 def test_merge_audio_projection_does_not_claim_completed_speech_without_final_artifact():

@@ -282,7 +282,17 @@ def _with_audio(
             stages[name] = {**stages.get(name, {}), "status": "ready", "code": None, "retryable": False}
         return stages, artifact_status
     if status in {"failed", "dead"}:
-        for name in _AUDIO_STAGES:
+        failed_candidates = _AUDIO_STAGES
+        if audio.get("script_artifact"):
+            for ready_name in ("compose_audio_script", "persist_audio_script"):
+                stages[ready_name] = {
+                    **stages.get(ready_name, {}),
+                    "status": "ready",
+                    "code": None,
+                    "retryable": False,
+                }
+            failed_candidates = ("generate_audio", "persist_audio")
+        for name in failed_candidates:
             existing = stages.get(name, {})
             if existing.get("status") not in {"ready", "skipped"}:
                 stages[name] = {

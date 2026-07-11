@@ -591,6 +591,45 @@ def test_completed_audio_does_not_override_failed_text(projection_case):
     assert projection["stages"]["persist_audio"]["status"] == "ready"
 
 
+def test_failed_audio_with_script_artifact_marks_generation_stage_failed(projection_case):
+    from tldw_Server_API.app.core.Watchlists.briefing_projection import build_briefing_projection
+
+    _client, seeded, watchlists_db, collections_db = projection_case
+    occurrence = watchlists_db.get_briefing_occurrence(seeded.occurrence_id)
+    contract = json.loads(occurrence.contract_json)
+    contract["audio"]["enabled"] = True
+    stages = json.loads(occurrence.stages_json)
+    stages["compose_audio_script"] = {"status": "queued"}
+    stages["persist_audio_script"] = {"status": "not_started"}
+    stages["generate_audio"] = {"status": "not_started"}
+    stages["persist_audio"] = {"status": "not_started"}
+    watchlists_db.update_briefing_occurrence(
+        seeded.occurrence_id,
+        stages=stages,
+        artifact_status="running",
+    )
+    occurrence = watchlists_db.get_briefing_occurrence(seeded.occurrence_id)
+    occurrence.contract_json = json.dumps(contract)
+
+    projection = build_briefing_projection(
+        occurrence=occurrence,
+        watchlists_db=watchlists_db,
+        collections_db=collections_db,
+        audio={
+            "status": "failed",
+            "fallback_reason": "audio_final_artifact_missing",
+            "script_artifact": {"artifact_id": "script-1"},
+            "final_artifact": None,
+        },
+    )
+
+    assert projection["artifact_status"] == "failed"
+    assert projection["stages"]["compose_audio_script"]["status"] == "ready"
+    assert projection["stages"]["persist_audio_script"]["status"] == "ready"
+    assert projection["stages"]["generate_audio"]["status"] == "failed"
+    assert projection["stages"]["generate_audio"]["code"] == "audio_final_artifact_missing"
+
+
 def test_missing_report_file_projects_failed_without_mutating_occurrence(projection_case):
     from tldw_Server_API.app.core.Watchlists.briefing_projection import build_briefing_projection
 

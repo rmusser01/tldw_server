@@ -6238,6 +6238,7 @@ async def get_run_audio(
 
     try:
         from tldw_Server_API.app.core.Watchlists.audio_artifact_projection import (
+            apply_scheduler_status_to_audio_projection,
             build_audio_projection,
             find_matching_workflow_run,
             get_mirrored_audio_projection,
@@ -6289,14 +6290,12 @@ async def get_run_audio(
 
         response_status = projection.get("status") or "unknown"
         queue_name = None
-        fallback_reason = projection.get("fallback_reason")
         if not projection.get("final_artifact"):
             scheduler_status = await _get_audio_scheduler_task_status(str(task_id))
             if scheduler_status:
-                response_status = scheduler_status.get("status") or response_status
                 queue_name = scheduler_status.get("queue_name")
-                fallback_reason = scheduler_status.get("fallback_reason") or fallback_reason
-                projection = {**projection, "status": response_status, "fallback_reason": fallback_reason}
+                projection = apply_scheduler_status_to_audio_projection(projection, scheduler_status)
+                response_status = projection.get("status") or response_status
 
         if target_collections_db is not None:
             mirror_ok = await run_in_threadpool(
