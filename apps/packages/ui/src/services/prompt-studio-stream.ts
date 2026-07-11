@@ -1,8 +1,14 @@
 import type { TldwConfig } from "@/services/tldw/TldwApiClient"
-import { resolveBrowserWebSocketBase } from "@/services/tldw/browser-websocket"
+import {
+  resolveBrowserWebSocketBase,
+  resolveCurrentPageWebSocketBase
+} from "@/services/tldw/browser-websocket"
 
 export const buildPromptStudioWebSocketUrl = (
-  config: Pick<TldwConfig, "serverUrl" | "authMode" | "apiKey" | "accessToken">,
+  config: Pick<
+    TldwConfig,
+    "serverUrl" | "authMode" | "authSource" | "apiKey" | "accessToken"
+  >,
   projectId?: number | null
 ): string => {
   const serverUrl = String(config.serverUrl || "").trim()
@@ -10,28 +16,35 @@ export const buildPromptStudioWebSocketUrl = (
     throw new Error("tldw server is not configured")
   }
 
-  const base = resolveBrowserWebSocketBase(serverUrl)
+  const cookieSession = config.authSource === "cookie-session"
+  const base = cookieSession
+    ? resolveCurrentPageWebSocketBase()
+    : resolveBrowserWebSocketBase(serverUrl)
+  if (!base) throw new Error("WebUI origin is not available")
   const params = new URLSearchParams()
 
-  if (config.authMode === "multi-user") {
-    const token = String(config.accessToken || "").trim()
-    if (!token) {
-      throw new Error("Not authenticated. Please log in under Settings.")
+  if (!cookieSession) {
+    if (config.authMode === "multi-user") {
+      const token = String(config.accessToken || "").trim()
+      if (!token) {
+        throw new Error("Not authenticated. Please log in under Settings.")
+      }
+      params.set("token", token)
+    } else {
+      const apiKey = String(config.apiKey || "").trim()
+      if (!apiKey) {
+        throw new Error("API key missing. Update Settings -> tldw server.")
+      }
+      params.set("api_key", apiKey)
     }
-    params.set("token", token)
-  } else {
-    const apiKey = String(config.apiKey || "").trim()
-    if (!apiKey) {
-      throw new Error("API key missing. Update Settings -> tldw server.")
-    }
-    params.set("api_key", apiKey)
   }
 
   if (typeof projectId === "number" && Number.isFinite(projectId)) {
     params.set("project_id", String(projectId))
   }
 
-  return `${base}/api/v1/prompt-studio/ws?${params.toString()}`
+  const query = params.toString()
+  return `${base}/api/v1/prompt-studio/ws${query ? `?${query}` : ""}`
 }
 
 const STATUS_EVENT_TYPES = new Set([

@@ -8,6 +8,7 @@
 import React from "react"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
 import { buildACPAuthParams, resolveACPServerUrl } from "@/services/acp/connection"
+import { resolveCurrentPageWebSocketBase } from "@/services/tldw/browser-websocket"
 import type {
   ACPSessionState,
   ACPWSServerMessage,
@@ -150,9 +151,12 @@ export function useACPSession(options: UseACPSessionOptions = {}): UseACPSession
   const buildWsUrl = React.useCallback(() => {
     if (!sessionId || !connectionConfig) return null
 
-    const wsUrl = resolveACPServerUrl(connectionConfig).replace(/^http/i, "ws")
+    const cookieSession = connectionConfig.authSource === "cookie-session"
+    const wsUrl = cookieSession
+      ? resolveCurrentPageWebSocketBase()
+      : resolveACPServerUrl(connectionConfig).replace(/^http/i, "ws")
     const params = new URLSearchParams()
-    const authParams = buildACPAuthParams(connectionConfig)
+    const authParams = cookieSession ? {} : buildACPAuthParams(connectionConfig)
 
     if (authParams.api_key) {
       params.set("api_key", authParams.api_key)

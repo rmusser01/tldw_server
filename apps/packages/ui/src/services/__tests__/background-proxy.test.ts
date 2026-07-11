@@ -1369,6 +1369,7 @@ describe("background proxy fallback safety", () => {
         return {
           serverUrl: "https://api.example.com",
           authMode: "single-user",
+          authSource: "cookie-session",
           apiKey: "test-key-not-placeholder"
         }
       }

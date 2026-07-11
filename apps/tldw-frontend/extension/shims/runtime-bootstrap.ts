@@ -1,8 +1,5 @@
 import { browser } from "./wxt-browser"
-import {
-  setEnvApiKeySuppressedForSession,
-  setRuntimeApiKey
-} from "@web/lib/authStorage"
+import { clearRuntimeAuth } from "@web/lib/authStorage"
 import { createSafeStorage } from "@/utils/safe-storage"
 import type { TldwConfig } from "@/services/tldw/TldwApiClient"
 import { FEATURE_FLAGS } from "@/hooks/useFeatureFlags"
@@ -21,10 +18,7 @@ import {
   resolveWebUiQuickstartServerUrl,
   type BrowserSurface
 } from "@/services/tldw/browser-networking"
-import {
-  getRuntimeSingleUserApiKeyOverride,
-  setRuntimeSingleUserApiKeyOverride
-} from "@/services/tldw/runtime-auth-override"
+import { clearRuntimeAuthOverride } from "@/services/tldw/runtime-auth-override"
 
 const isRecord = (value: unknown): value is Record<string, unknown> => {
   return typeof value === "object" && value !== null
@@ -206,70 +200,25 @@ const deriveCurrentHostRecoveryServerUrl = (
 
 const DEFAULT_TLDW_SERVER_URL = "http://127.0.0.1:8000"
 const RUNTIME_CONFIG_ENDPOINT = "/api/_tldw-webui/runtime-config"
+const RUNTIME_SESSION_ENDPOINT = "/api/_tldw-webui/session"
+const RUNTIME_PROFILE_PROBE_ENDPOINT = "/api/v1/users/me/profile"
 const RUNTIME_AUTH_METADATA_KEY = "tldwRuntimeAuthMetadata"
-const RUNTIME_AUTH_METADATA_VERSION = 1
-const RUNTIME_ENV_AUTH_OPT_OUT_KEY = "tldwRuntimeEnvAuthOptOut"
-const PLACEHOLDER_API_KEYS = new Set([
-  "change-me",
-  "changeme",
-  "change_me",
-  "default",
-  "test-key",
-  "your-api-key",
-  "your-api-key-here",
-  "your_api_key",
-  "your_api_key_here",
-  "placeholder",
-  "replace-me",
-  "replace_me"
-])
+const MANUAL_SESSION_API_KEY = "tldwManualSessionApiKey"
+const LEGACY_RUNTIME_KEYS = [
+  "apiKey",
+  "tldwRuntimeSessionSingleUserApiKey",
+  RUNTIME_AUTH_METADATA_KEY
+] as const
 
 type RuntimeConfigPayload = {
   runtimeAuth?: {
     available?: boolean
     authMode?: "single-user" | string
-    apiKey?: string
+    transport?: "cookie-session" | string
   }
   networking?: {
     deploymentMode?: string
     serverUrl?: string
-  }
-}
-
-type RuntimeAuthMetadata = {
-  source: "webui-runtime"
-  version: 1
-  authMode: "single-user"
-  keyFingerprint: string
-}
-
-const normalizeApiKey = (value?: string | null): string | null => {
-  const normalized = String(value || "").trim()
-  if (!normalized || /\s/.test(normalized)) return null
-  return normalized
-}
-
-const fingerprintRuntimeKeyFallback = (apiKey: string): string => {
-  let hash = 0x811c9dc5
-  for (let index = 0; index < apiKey.length; index += 1) {
-    hash ^= apiKey.charCodeAt(index)
-    hash = Math.imul(hash, 0x01000193)
-  }
-  return `fnv1a:${apiKey.length}:${(hash >>> 0).toString(16).padStart(8, "0")}`
-}
-
-const fingerprintRuntimeKey = async (apiKey: string): Promise<string> => {
-  try {
-    const subtle = globalThis.crypto?.subtle
-    if (!subtle) return fingerprintRuntimeKeyFallback(apiKey)
-    const digest = await subtle.digest("SHA-256", new TextEncoder().encode(apiKey))
-    const fingerprint = Array.from(new Uint8Array(digest))
-      .slice(0, 12)
-      .map((byte) => byte.toString(16).padStart(2, "0"))
-      .join("")
-    return `sha256:${apiKey.length}:${fingerprint}`
-  } catch {
-    return fingerprintRuntimeKeyFallback(apiKey)
   }
 }
 
@@ -306,173 +255,129 @@ const fetchRuntimeConfig = async (): Promise<RuntimeConfigPayload | null> => {
   }
 }
 
-const isRuntimeAuthMetadata = (
-  value: unknown
-): value is RuntimeAuthMetadata => {
-  return (
-    isRecord(value) &&
-    value.source === "webui-runtime" &&
-    value.version === RUNTIME_AUTH_METADATA_VERSION &&
-    value.authMode === "single-user" &&
-    typeof value.keyFingerprint === "string" &&
-    value.keyFingerprint.length > 0
-  )
-}
+const bootstrapCookieSession = async (): Promise<boolean> => {
+  try {
+    const response = await fetch(RUNTIME_SESSION_ENDPOINT, {
+      method: "POST",
+      credentials: "include",
+      cache: "no-store"
+    })
+    if (!response.ok) return false
 
-const isStoredKeyRuntimeOwned = async (
-  existingKey: string | null,
-  metadata: RuntimeAuthMetadata | null
-): Promise<boolean> => {
-  if (!existingKey || !metadata) return false
-  return metadata.keyFingerprint === (await fingerprintRuntimeKey(existingKey))
-}
-
-const isPlaceholderApiKey = (value: string): boolean => {
-  const normalized = value.trim().toLowerCase()
-  if (normalized.startsWith("change_me")) return true
-
-  return PLACEHOLDER_API_KEYS.has(normalized)
-}
-
-const deriveStoredSingleUserAuth = (
-  existing: TldwConfig | null
-): { authMode: string; manualKey: string | null } => {
-  const authMode = existing?.authMode || "single-user"
-  const rawSingleUserKey =
-    authMode === "single-user" && typeof existing?.apiKey === "string"
-      ? normalizeApiKey(existing.apiKey)
-      : null
-  const configKey =
-    rawSingleUserKey && !isPlaceholderApiKey(rawSingleUserKey)
-      ? rawSingleUserKey
-      : null
-
-  return {
-    authMode,
-    manualKey: configKey
+    const probe = await fetch(RUNTIME_PROFILE_PROBE_ENDPOINT, {
+      method: "GET",
+      credentials: "same-origin",
+      cache: "no-store"
+    })
+    return probe.ok
+  } catch {
+    return false
   }
 }
 
-const shouldRecordRuntimeMetadata = async ({
-  existingKey,
-  metadata,
-  buildTimeKey,
-  existingAuthMode,
-  existingAccessToken
-}: {
-  existingKey: string | null
-  metadata: RuntimeAuthMetadata | null
-  buildTimeKey: string | null
-  existingAuthMode: string | null
-  existingAccessToken: string | null
-}): Promise<boolean> => {
-  if (await isStoredKeyRuntimeOwned(existingKey, metadata)) return true
-  if (existingAuthMode === "multi-user" && existingAccessToken) return false
-  if (!existingKey) return true
-  if (buildTimeKey && existingKey === buildTimeKey) return true
-  return isPlaceholderApiKey(existingKey)
+const removeLegacyRuntimeSecrets = (): void => {
+  for (const key of LEGACY_RUNTIME_KEYS) {
+    try {
+      window.localStorage.removeItem(key)
+    } catch {
+      // Best-effort cleanup for upgraded profiles.
+    }
+  }
+}
+
+const normalizeHttpOrigin = (value: unknown): string | null => {
+  try {
+    const parsed = new URL(String(value || ""))
+    return parsed.protocol === "http:" || parsed.protocol === "https:"
+      ? parsed.origin
+      : null
+  } catch {
+    return null
+  }
+}
+
+const hasCompleteManualDeviceKey = (
+  config: TldwConfig | null
+): boolean => {
+  const record = config as unknown as Record<string, unknown> | null
+  return Boolean(
+    record?.credentialSource === "manual" &&
+      record.apiKeyPersistence === "device" &&
+      typeof record.apiKey === "string" &&
+      record.apiKey.trim() &&
+      normalizeHttpOrigin(record.serverUrl) === record.apiKeyServerOrigin
+  )
+}
+
+const scrubAmbiguousManualSessionKey = (serverUrl: string | null): void => {
+  try {
+    const raw = window.sessionStorage.getItem(MANUAL_SESSION_API_KEY)
+    if (!raw) return
+    const record = JSON.parse(raw) as Record<string, unknown>
+    const complete =
+      record.credentialSource === "manual" &&
+      record.apiKeyPersistence === "session" &&
+      typeof record.apiKey === "string" &&
+      record.apiKey.trim() &&
+      normalizeHttpOrigin(serverUrl) === record.apiKeyServerOrigin
+    if (!complete) window.sessionStorage.removeItem(MANUAL_SESSION_API_KEY)
+  } catch {
+    try {
+      window.sessionStorage.removeItem(MANUAL_SESSION_API_KEY)
+    } catch {
+      // Best-effort cleanup for upgraded profiles.
+    }
+  }
 }
 
 const seedTldwConfigFromRuntime = async (): Promise<void> => {
   if (typeof window === "undefined") return
 
   const payload = await fetchRuntimeConfig()
-  const runtimeKey = normalizeApiKey(payload?.runtimeAuth?.apiKey)
   if (
     payload?.runtimeAuth?.available !== true ||
     payload.runtimeAuth.authMode !== "single-user" ||
-    !runtimeKey
+    payload.runtimeAuth.transport !== "cookie-session"
   ) {
     return
   }
 
-  setRuntimeApiKey(runtimeKey)
-  setRuntimeSingleUserApiKeyOverride(runtimeKey)
+  if (!(await bootstrapCookieSession())) return
 
   try {
     const storage = createSafeStorage()
     const existing =
       (await storage.get<TldwConfig>("tldwConfig").catch(() => null)) || null
-    const rawMetadata =
-      (await storage.get<unknown>(RUNTIME_AUTH_METADATA_KEY).catch(() => null)) ||
-      null
-    const metadata = isRuntimeAuthMetadata(rawMetadata) ? rawMetadata : null
-    const existingKey = normalizeApiKey(
-      typeof existing?.apiKey === "string" ? existing.apiKey : null
-    )
-    const existingAuthMode =
-      typeof existing?.authMode === "string"
-        ? existing.authMode.trim() || null
-        : null
-    const existingAccessToken =
-      typeof existing?.accessToken === "string"
-        ? existing.accessToken.trim() || null
-        : null
-    const buildTimeKey = normalizeApiKey(process.env.NEXT_PUBLIC_X_API_KEY)
     const quickstartWebUiServerUrl = getQuickstartWebUiServerUrl()
-    const shouldRecordMetadata = await shouldRecordRuntimeMetadata({
-      existingKey,
-      metadata,
-      buildTimeKey,
-      existingAuthMode,
-      existingAccessToken
-    })
+    if (!quickstartWebUiServerUrl) return
+
     const next: TldwConfig = {
       ...(existing || {}),
-      serverUrl: existing?.serverUrl || ""
+      authMode: "single-user",
+      authSource: "cookie-session",
+      serverUrl: quickstartWebUiServerUrl
     }
-    let changed = false
+    if (!hasCompleteManualDeviceKey(existing)) delete next.apiKey
 
-    if (next.apiKey !== undefined) {
-      delete next.apiKey
-      changed = true
-    }
-    if (next.apiBearer !== undefined) {
-      delete next.apiBearer
-      changed = true
-    }
-    if (next.accessToken !== undefined) {
-      delete next.accessToken
-      changed = true
-    }
-    if (next.refreshToken !== undefined) {
-      delete next.refreshToken
-      changed = true
-    }
-
-    if (quickstartWebUiServerUrl && next.serverUrl !== quickstartWebUiServerUrl) {
-      next.serverUrl = quickstartWebUiServerUrl
-      changed = true
-    }
-
-    if (next.authMode !== "single-user") {
-      next.authMode = "single-user"
-      changed = true
-    }
-
-    if (changed || (next.serverUrl && !existing)) {
-      await storage.set("tldwConfig", next)
-    }
-    if (next.serverUrl) {
-      await storage.set("tldwServerUrl", next.serverUrl)
-    }
-
-    if (shouldRecordMetadata) {
-      const nextMetadata: RuntimeAuthMetadata = {
-        source: "webui-runtime",
-        version: RUNTIME_AUTH_METADATA_VERSION,
-        authMode: "single-user",
-        keyFingerprint: await fingerprintRuntimeKey(runtimeKey)
-      }
-      await storage.set(RUNTIME_AUTH_METADATA_KEY, nextMetadata)
+    await storage.set("tldwConfig", next)
+    clearRuntimeAuth()
+    clearRuntimeAuthOverride()
+    removeLegacyRuntimeSecrets()
+    scrubAmbiguousManualSessionKey(existing?.serverUrl || null)
+    await storage.set("tldwServerUrl", next.serverUrl).catch(() => undefined)
+    try {
+      window.localStorage.setItem("tldw-api-host", next.serverUrl)
+    } catch {
+      // Best-effort compatibility mirror.
     }
   } catch {
-    // Runtime auth still takes request precedence through setRuntimeApiKey().
+    // Leave existing manual configuration intact if client storage is unavailable.
   }
 }
 
 const seedTldwConfigFromEnv = async (): Promise<void> => {
   if (typeof window === "undefined") return
+  if (getQuickstartWebUiServerUrl()) return
 
   const explicitWebHost = (() => {
     try {
@@ -501,26 +406,8 @@ const seedTldwConfigFromEnv = async (): Promise<void> => {
   const apiKey = (process.env.NEXT_PUBLIC_X_API_KEY || "").trim() || null
   const apiBearer = (process.env.NEXT_PUBLIC_API_BEARER || "").trim() || null
 
-  const envAuthOptedOut = (() => {
-    try {
-      return window.localStorage.getItem(RUNTIME_ENV_AUTH_OPT_OUT_KEY) === "true"
-    } catch {
-      return false
-    }
-  })()
-  setEnvApiKeySuppressedForSession(envAuthOptedOut)
-
-  if (envAuthOptedOut) {
-    setRuntimeApiKey(null)
-    setRuntimeSingleUserApiKeyOverride(null)
-  } else if (apiKey && !getRuntimeSingleUserApiKeyOverride()) {
-    setRuntimeApiKey(apiKey)
-    setRuntimeSingleUserApiKeyOverride(apiKey)
-  }
-
   if (initialServerUrl && explicitWebHost !== initialServerUrl) {
     try {
-      // lgtm[js/clear-text-storage-of-sensitive-data]: tldw-api-host stores non-secret server metadata only.
       window.localStorage.setItem("tldw-api-host", initialServerUrl)
     } catch {
       // Best-effort only; ignore storage failures in web contexts.
@@ -532,18 +419,6 @@ const seedTldwConfigFromEnv = async (): Promise<void> => {
     const existing = (await storage.get<TldwConfig>("tldwConfig").catch(() => null)) || null
     const storedServerUrl =
       (await storage.get<string>("tldwServerUrl").catch(() => null)) || null
-    const { authMode: existingAuthMode, manualKey: manualSingleUserKey } =
-      deriveStoredSingleUserAuth(existing)
-    if (
-      !envAuthOptedOut &&
-      !apiKey &&
-      !apiBearer &&
-      manualSingleUserKey &&
-      !getRuntimeSingleUserApiKeyOverride()
-    ) {
-      setRuntimeApiKey(manualSingleUserKey)
-      setRuntimeSingleUserApiKeyOverride(manualSingleUserKey)
-    }
     const quickstartWebUiServerUrl = getQuickstartWebUiServerUrl()
     const effectiveExplicitWebHost =
       !quickstartWebUiServerUrl && isCurrentBrowserOrigin(repairedExplicitWebHost)
@@ -558,7 +433,6 @@ const seedTldwConfigFromEnv = async (): Promise<void> => {
 
     if (serverUrl && initialServerUrl !== serverUrl) {
       try {
-        // lgtm[js/clear-text-storage-of-sensitive-data]: tldw-api-host stores non-secret server metadata only.
         window.localStorage.setItem("tldw-api-host", serverUrl)
       } catch {
         // Best-effort only; ignore storage failures in web contexts.
@@ -582,29 +456,14 @@ const seedTldwConfigFromEnv = async (): Promise<void> => {
       shouldSyncStoredServerUrl = true
     }
 
-    if (next.apiKey !== undefined) {
-      delete next.apiKey
-      changed = true
-    }
-    if (next.apiBearer !== undefined) {
-      delete next.apiBearer
-      changed = true
-    }
-    if (next.accessToken !== undefined) {
-      delete next.accessToken
-      changed = true
-    }
-    if (next.refreshToken !== undefined) {
-      delete next.refreshToken
-      changed = true
-    }
-
-    if (apiKey || apiBearer) {
-      if (apiKey && next.authMode !== "single-user") {
+    if (!next.apiKey && !next.accessToken) {
+      if (apiKey) {
         next.authMode = "single-user"
+        next.apiKey = apiKey
         changed = true
-      } else if (!apiKey && apiBearer && next.authMode !== "multi-user") {
+      } else if (apiBearer) {
         next.authMode = "multi-user"
+        next.accessToken = apiBearer
         changed = true
       }
     }

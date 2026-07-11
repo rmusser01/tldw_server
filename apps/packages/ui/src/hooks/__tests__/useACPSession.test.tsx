@@ -120,6 +120,32 @@ describe("useACPSession", () => {
     expect(result.current.state).toBe("disconnected")
   })
 
+  it("uses the page origin without query credentials for cookie sessions", async () => {
+    getConfigMock.mockResolvedValue({
+      serverUrl: "https://remote.example.test",
+      authMode: "single-user",
+      authSource: "cookie-session",
+      apiKey: "stale-key",
+      accessToken: "stale-token"
+    })
+
+    renderHook(() =>
+      useACPSession({
+        sessionId: "session-1",
+        autoConnect: true
+      })
+    )
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(MockWebSocket.instances).toHaveLength(1)
+    expect(MockWebSocket.instances[0].url).toBe(
+      `${window.location.origin.replace(/^http/i, "ws")}/api/v1/acp/sessions/session-1/stream`
+    )
+  })
+
   it("sends denied permission responses and clears the pending request", async () => {
     const { result } = renderHook(() =>
       useACPSession({

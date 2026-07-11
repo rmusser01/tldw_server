@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 
 import {
+  buildAuthenticatedAudioWebSocketUrl,
   buildVoiceConversationPreflight,
   normalizeVoiceConversationRuntimeError,
   resolveVoiceConversationAvailability,
@@ -42,6 +43,51 @@ const getTtsConfigErrorReason = (
 }
 
 describe("voice conversation contract", () => {
+  it("builds a secret-free page-origin websocket for cookie sessions", async () => {
+    const originalWindow = globalThis.window
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: {
+        location: {
+          origin: "https://webui.example.test",
+          protocol: "https:"
+        }
+      }
+    })
+
+    try {
+      const result = await buildVoiceConversationPreflight({
+        serverUrl: "https://remote.example.test",
+        token: "stale-token",
+        authSource: "cookie-session",
+        requestedModel: "",
+        ttsProvider: "browser",
+        tldwTtsModel: "kokoro",
+        tldwTtsVoice: "af_heart",
+        tldwTtsSpeed: 1,
+        tldwTtsResponseFormat: "mp3",
+        resolveProvider: vi.fn()
+      })
+
+      expect(result.websocketUrl).toBe(
+        "wss://webui.example.test/api/v1/audio/chat/stream"
+      )
+      expect(
+        buildAuthenticatedAudioWebSocketUrl({
+          serverUrl: "https://remote.example.test",
+          token: "stale-token",
+          authSource: "cookie-session",
+          path: "/api/v1/audio/stream/tts"
+        })
+      ).toBe("wss://webui.example.test/api/v1/audio/stream/tts")
+    } finally {
+      Object.defineProperty(globalThis, "window", {
+        configurable: true,
+        value: originalWindow
+      })
+    }
+  })
+
   it("keeps voice conversation unavailable when only broad audio flags exist", () => {
     const result = resolveVoiceConversationAvailability({
       isConnectionReady: true,

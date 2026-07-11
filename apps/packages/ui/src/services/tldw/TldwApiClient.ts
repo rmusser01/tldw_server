@@ -175,6 +175,7 @@ export interface TldwConfig {
   refreshToken?: string
   orgId?: number
   authMode: 'single-user' | 'multi-user'
+  authSource?: "manual" | "cookie-session"
 }
 
 export type ExplainerMode = "goal" | "sources"
@@ -1530,6 +1531,8 @@ export class TldwApiClientBase {
     const runtimeApiKey = !hostedMode
       ? getRuntimeSingleUserApiKeyOverride()
       : null
+    const cookieSession =
+      cfg?.authSource === "cookie-session" && Boolean(getQuickstartWebUiServerUrl())
     if ((!cfg || !cfg.serverUrl) && !hostedMode && !runtimeApiKey) {
       const msg =
         "tldw server is not configured. Open Settings → tldw server in the extension and set the server URL and API key."
@@ -1545,11 +1548,16 @@ export class TldwApiClientBase {
         accessToken: cfg?.accessToken,
         refreshToken: cfg?.refreshToken,
         orgId: cfg?.orgId,
-        authMode: cfg?.authMode || "multi-user"
+        authMode: cfg?.authMode || "multi-user",
+        authSource: cfg?.authSource
       }
     }
 
     if (!requireAuth) {
+      return cfg
+    }
+
+    if (cookieSession) {
       return cfg
     }
 
@@ -1704,8 +1712,8 @@ export class TldwApiClientBase {
         // ignore migration failures
       }
     }
-    const envApiKey = this.getEnvApiKey()
     const quickstartWebUiServerUrl = getQuickstartWebUiServerUrl()
+    const envApiKey = quickstartWebUiServerUrl ? null : this.getEnvApiKey()
 
     if (!stored) {
       if (quickstartWebUiServerUrl && envApiKey) {
@@ -1730,7 +1738,9 @@ export class TldwApiClientBase {
         authMode: stored.authMode || "single-user",
         serverUrl: quickstartWebUiServerUrl || stored.serverUrl || ""
       }
-      if (!hydrated.apiKey && envApiKey) {
+      if (hydrated.authSource === "cookie-session") {
+        delete hydrated.apiKey
+      } else if (!hydrated.apiKey && envApiKey) {
         hydrated.apiKey = envApiKey
       }
       this.config = hydrated
@@ -1757,23 +1767,27 @@ export class TldwApiClientBase {
     const runtimeApiKey = !hostedMode
       ? getRuntimeSingleUserApiKeyOverride()
       : null
-    if (runtimeApiKey) {
-      this.headers["X-API-KEY"] = runtimeApiKey
-    } else if (
-      !hostedMode &&
-      config?.authMode === "single-user" &&
-      config.apiKey
-    ) {
-      const key = String(config.apiKey || "").trim()
-      if (key) {
-        this.headers["X-API-KEY"] = key
+    const cookieSession =
+      config?.authSource === "cookie-session" && Boolean(quickstartWebUiServerUrl)
+    if (!cookieSession) {
+      if (runtimeApiKey) {
+        this.headers["X-API-KEY"] = runtimeApiKey
+      } else if (
+        !hostedMode &&
+        config?.authMode === "single-user" &&
+        config.apiKey
+      ) {
+        const key = String(config.apiKey || "").trim()
+        if (key) {
+          this.headers["X-API-KEY"] = key
+        }
+      } else if (
+        !hostedMode &&
+        config?.authMode === "multi-user" &&
+        config.accessToken
+      ) {
+        this.headers["Authorization"] = `Bearer ${config.accessToken}`
       }
-    } else if (
-      !hostedMode &&
-      config?.authMode === "multi-user" &&
-      config.accessToken
-    ) {
-      this.headers["Authorization"] = `Bearer ${config.accessToken}`
     }
     if (config?.orgId) {
       this.headers["X-TLDW-Org-Id"] = String(config.orgId)

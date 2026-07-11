@@ -17,8 +17,15 @@ import type {
   ACPWSServerMessage,
 } from "./types"
 import { shouldRetryACPWebSocketClose } from "./constants"
-import { resolveBrowserRequestTransport } from "@/services/tldw/request-core"
-import { resolveBrowserWebSocketBase } from "@/services/tldw/browser-websocket"
+import {
+  isUnsafeMethod,
+  readBrowserCookie,
+  resolveBrowserRequestTransport
+} from "@/services/tldw/request-core"
+import {
+  resolveBrowserWebSocketBase,
+  resolveCurrentPageWebSocketBase
+} from "@/services/tldw/browser-websocket"
 
 // -----------------------------------------------------------------------------
 // Configuration
@@ -26,6 +33,7 @@ import { resolveBrowserWebSocketBase } from "@/services/tldw/browser-websocket"
 
 export interface ACPClientConfig {
   serverUrl: string
+  authSource?: "manual" | "cookie-session"
   getAuthHeaders: () => Promise<Record<string, string>>
   getAuthParams: () => Promise<{ token?: string; api_key?: string }>
 }
@@ -59,19 +67,42 @@ export class ACPRestClient {
     options: RequestInit = {}
   ): Promise<T> {
     const transport = resolveBrowserRequestTransport({
-      config: { serverUrl: this.config.serverUrl },
+      config: {
+        serverUrl: this.config.serverUrl,
+        authSource: this.config.authSource
+      },
       path
     })
+    const cookieSession =
+      this.config.authSource === "cookie-session" &&
+      transport.kind === "same-origin"
     const headers =
-      transport.mode === "hosted" ? {} : await this.config.getAuthHeaders()
+      transport.mode === "hosted" || cookieSession
+        ? {}
+        : await this.config.getAuthHeaders()
+    const baseHeaders = {
+      "Content-Type": "application/json",
+      ...headers,
+      ...options.headers
+    }
+    const requestHeaders: HeadersInit = cookieSession
+      ? new Headers(baseHeaders)
+      : baseHeaders
+    if (cookieSession) {
+      const cookieHeaders = requestHeaders as Headers
+      cookieHeaders.delete("Authorization")
+      cookieHeaders.delete("X-API-KEY")
+      cookieHeaders.delete("X-CSRF-Token")
+      if (isUnsafeMethod(options.method || "GET")) {
+        const csrfToken = readBrowserCookie("csrf_token")
+        if (csrfToken) cookieHeaders.set("X-CSRF-Token", csrfToken)
+      }
+    }
 
     const response = await fetch(transport.url, {
       ...options,
-      headers: {
-        "Content-Type": "application/json",
-        ...headers,
-        ...options.headers,
-      },
+      headers: requestHeaders,
+      ...(cookieSession ? { credentials: "same-origin" as const } : {})
     })
 
     if (!response.ok) {
@@ -245,15 +276,17 @@ export class ACPWebSocketClient {
     }
 
     this.isClosedManually = false
-    const authParams = await this.config.getAuthParams()
-
-    // Build WebSocket URL
-    const wsUrl = resolveBrowserWebSocketBase(this.config.serverUrl)
+    const cookieSession = this.config.authSource === "cookie-session"
+    const authParams = cookieSession ? {} : await this.config.getAuthParams()
+    const wsUrl = cookieSession
+      ? resolveCurrentPageWebSocketBase()
+      : resolveBrowserWebSocketBase(this.config.serverUrl)
     const params = new URLSearchParams()
     if (authParams.token) params.set("token", authParams.token)
     if (authParams.api_key) params.set("api_key", authParams.api_key)
 
-    const url = `${wsUrl}/api/v1/acp/sessions/${sessionId}/stream?${params.toString()}`
+    const query = params.toString()
+    const url = `${wsUrl}/api/v1/acp/sessions/${sessionId}/stream${query ? `?${query}` : ""}`
 
     this.ws = new WebSocket(url)
 

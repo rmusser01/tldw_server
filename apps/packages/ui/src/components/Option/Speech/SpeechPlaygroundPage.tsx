@@ -57,6 +57,7 @@ import {
   setResponseSplitting as persistResponseSplitting
 } from "@/services/tts"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
+import { buildAuthenticatedAudioWebSocketUrl } from "@/services/tldw/voice-conversation"
 import { copyToClipboard } from "@/utils/clipboard"
 import { estimateTtsDurationSeconds, splitMessageContent } from "@/utils/tts"
 import { markdownToText } from "@/utils/markdown-to-text"
@@ -1486,15 +1487,19 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
       config?.authMode === "multi-user"
         ? String(config?.accessToken || "").trim()
         : String(config?.apiKey || "").trim()
-    if (!token) {
+    if (!token && config?.authSource !== "cookie-session") {
       const classified = classifyAudioError("Missing authentication token")
       setStreamStatus("error")
       setStreamErrorSafe(classified.recovery)
       return
     }
 
-    const base = serverUrl.replace(/^http/i, "ws").replace(/\/$/, "")
-    const wsUrl = `${base}/api/v1/audio/stream/tts?token=${encodeURIComponent(token)}`
+    const wsUrl = buildAuthenticatedAudioWebSocketUrl({
+      serverUrl,
+      token,
+      authSource: config?.authSource,
+      path: "/api/v1/audio/stream/tts"
+    })
     const ws = new WebSocket(wsUrl)
     ws.binaryType = "arraybuffer"
     wsRef.current = ws

@@ -59,3 +59,17 @@ export const resolveBrowserWebSocketBase = (serverUrl: string): string => {
     return fallbackWebSocketBase(normalizedServerUrl)
   }
 }
+
+export const resolveCurrentPageWebSocketBase = (): string => {
+  const origin = getCurrentPageOrigin()
+  if (!origin) return ""
+
+  try {
+    const parsed = new URL(origin)
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return ""
+    parsed.protocol = parsed.protocol === "https:" ? "wss:" : "ws:"
+    return parsed.origin
+  } catch {
+    return ""
+  }
+}

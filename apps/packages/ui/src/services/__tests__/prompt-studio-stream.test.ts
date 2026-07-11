@@ -45,6 +45,23 @@ describe("buildPromptStudioWebSocketUrl", () => {
     expect(url).toBe("ws://127.0.0.1:8080/api/v1/prompt-studio/ws?api_key=abc123")
   })
 
+  it("uses a secret-free page-origin url for cookie sessions", () => {
+    const url = buildPromptStudioWebSocketUrl(
+      {
+        serverUrl: "https://remote.example.test",
+        authMode: "single-user",
+        authSource: "cookie-session",
+        apiKey: "stale-key",
+        accessToken: "stale-token"
+      },
+      42
+    )
+
+    expect(url).toBe(
+      "ws://127.0.0.1:8080/api/v1/prompt-studio/ws?project_id=42"
+    )
+  })
+
   it("builds single-user websocket url with api key", () => {
     const url = buildPromptStudioWebSocketUrl({
       serverUrl: "http://127.0.0.1:8000/",

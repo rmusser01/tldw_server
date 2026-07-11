@@ -6,6 +6,7 @@ let suppressEnvApiKeyForSession = false;
 
 type StoredTldwConfig = {
   authMode?: unknown;
+  authSource?: unknown;
   apiKey?: unknown;
   accessToken?: unknown;
 };
@@ -85,13 +86,15 @@ const readRuntimeWindowApiKey = (): string | null => {
 };
 
 export const getApiKey = (): string | null => {
-  const configuredValue = normalizeApiKeyValue(process.env.NEXT_PUBLIC_X_API_KEY || null);
   if (runtimeApiKey) return runtimeApiKey;
+  const storedConfig = readStoredTldwConfig();
+  if (storedConfig?.authSource === "cookie-session") return null;
+
   const runtimeWindowKey = readRuntimeWindowApiKey();
   if (runtimeWindowKey) return runtimeWindowKey;
+  const configuredValue = normalizeApiKeyValue(process.env.NEXT_PUBLIC_X_API_KEY || null);
   if (configuredValue && !suppressEnvApiKeyForSession) return configuredValue;
 
-  const storedConfig = readStoredTldwConfig();
   const storedMode = normalizeValue(String(storedConfig?.authMode || ""));
   if (storedMode === "single-user") {
     const storedConfigKey = normalizeApiKeyValue(String(storedConfig?.apiKey || ""));
@@ -102,11 +105,13 @@ export const getApiKey = (): string | null => {
 };
 
 export const getApiBearer = (): string | null => {
-  const configuredValue = normalizeBearerValue(process.env.NEXT_PUBLIC_API_BEARER || null);
   if (runtimeApiBearer) return runtimeApiBearer;
+  const storedConfig = readStoredTldwConfig();
+  if (storedConfig?.authSource === "cookie-session") return null;
+
+  const configuredValue = normalizeBearerValue(process.env.NEXT_PUBLIC_API_BEARER || null);
   if (configuredValue) return configuredValue;
 
-  const storedConfig = readStoredTldwConfig();
   const storedMode = normalizeValue(String(storedConfig?.authMode || ""));
   if (storedMode === "multi-user") {
     const storedAccessToken = normalizeBearerValue(String(storedConfig?.accessToken || ""));

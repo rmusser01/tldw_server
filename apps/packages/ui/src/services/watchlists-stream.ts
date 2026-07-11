@@ -1,5 +1,8 @@
 import type { TldwConfig } from "@/services/tldw/TldwApiClient"
-import { resolveBrowserWebSocketBase } from "@/services/tldw/browser-websocket"
+import {
+  resolveBrowserWebSocketBase,
+  resolveCurrentPageWebSocketBase
+} from "@/services/tldw/browser-websocket"
 
 type StreamEventType = "snapshot" | "run_update" | "log" | "complete" | "heartbeat"
 
@@ -141,7 +144,10 @@ export const parseWatchlistsRunStreamPayload = (
 }
 
 export const buildWatchlistsRunWebSocketUrl = (
-  config: Pick<TldwConfig, "serverUrl" | "authMode" | "apiKey" | "accessToken">,
+  config: Pick<
+    TldwConfig,
+    "serverUrl" | "authMode" | "authSource" | "apiKey" | "accessToken"
+  >,
   runId: number
 ): string => {
   const normalizedRunId = Math.floor(Number(runId))
@@ -154,7 +160,15 @@ export const buildWatchlistsRunWebSocketUrl = (
     throw new Error("tldw server is not configured")
   }
 
-  const base = resolveBrowserWebSocketBase(serverUrl)
+  const cookieSession = config.authSource === "cookie-session"
+  const base = cookieSession
+    ? resolveCurrentPageWebSocketBase()
+    : resolveBrowserWebSocketBase(serverUrl)
+  if (!base) throw new Error("WebUI origin is not available")
+  if (cookieSession) {
+    return `${base}/api/v1/watchlists/runs/${normalizedRunId}/stream`
+  }
+
   const params = new URLSearchParams()
 
   if (config.authMode === "multi-user") {

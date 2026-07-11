@@ -50,6 +50,23 @@ describe("buildWatchlistsRunWebSocketUrl", () => {
     )
   })
 
+  it("uses a secret-free page-origin url for cookie sessions", () => {
+    const url = buildWatchlistsRunWebSocketUrl(
+      {
+        serverUrl: "https://remote.example.test",
+        authMode: "single-user",
+        authSource: "cookie-session",
+        apiKey: "stale-key",
+        accessToken: "stale-token"
+      },
+      42
+    )
+
+    expect(url).toBe(
+      "ws://127.0.0.1:8080/api/v1/watchlists/runs/42/stream"
+    )
+  })
+
   it("builds api-key websocket url for single-user mode", () => {
     const url = buildWatchlistsRunWebSocketUrl(
       {

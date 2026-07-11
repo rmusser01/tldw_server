@@ -76,7 +76,7 @@ describe("TldwApiClient quickstart auth bootstrap", () => {
     window.localStorage.clear()
   })
 
-  it("creates first-run quickstart config from the public single-user API key", async () => {
+  it("does not persist the public quickstart api key", async () => {
     process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
     process.env.NEXT_PUBLIC_X_API_KEY = "quickstart-api-key"
     delete process.env.NEXT_PUBLIC_API_URL
@@ -85,16 +85,26 @@ describe("TldwApiClient quickstart auth bootstrap", () => {
 
     await client.initialize()
 
-    await expect(client.getConfig()).resolves.toMatchObject({
+    await expect(client.getConfig()).resolves.toBeNull()
+    expect(mocks.storage.get("tldwConfig")).toBeUndefined()
+  })
+
+  it("accepts a cookie-session quickstart config without an api key", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+    process.env.NEXT_PUBLIC_X_API_KEY = "stale-public-key"
+    mocks.storage.set("tldwConfig", {
       authMode: "single-user",
-      apiKey: "quickstart-api-key",
+      authSource: "cookie-session",
       serverUrl: window.location.origin
     })
-    expect(mocks.storage.get("tldwConfig")).toMatchObject({
+    const client = new TldwApiClient()
+
+    await expect(client.ensureConfigForRequest(true)).resolves.toMatchObject({
       authMode: "single-user",
-      apiKey: "quickstart-api-key",
+      authSource: "cookie-session",
       serverUrl: window.location.origin
     })
+    expect(mocks.storage.get("tldwConfig")).not.toHaveProperty("apiKey")
   })
 
   it("keeps the explicit missing-key error when quickstart config has no key", async () => {

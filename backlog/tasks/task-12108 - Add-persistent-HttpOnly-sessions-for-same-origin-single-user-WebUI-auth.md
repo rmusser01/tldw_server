@@ -18,6 +18,7 @@ documentation:
 - .superpowers/sdd/http-task-2-report.md
 - .superpowers/sdd/http-task-3-report.md
 - .superpowers/sdd/http-task-4-report.md
+- .superpowers/sdd/http-task-5-report.md
 priority: high
 modified_files:
 - tldw_Server_API/app/core/AuthNZ/auth_principal_resolver.py
@@ -54,6 +55,31 @@ modified_files:
 - Dockerfiles/docker-compose.webui.yml
 - tldw_Server_API/app/core/AuthNZ/settings.py
 - tldw_Server_API/tests/AuthNZ/unit/test_settings_single_user_session_cookie.py
+- apps/tldw-frontend/extension/shims/runtime-bootstrap.ts
+- apps/tldw-frontend/lib/authStorage.ts
+- apps/tldw-frontend/__tests__/extension/runtime-bootstrap.test.ts
+- apps/packages/ui/src/services/tldw/TldwApiClient.ts
+- apps/packages/ui/src/services/tldw/request-core.ts
+- apps/packages/ui/src/services/tldw/browser-websocket.ts
+- apps/packages/ui/src/services/persona-stream.ts
+- apps/packages/ui/src/services/watchlists-stream.ts
+- apps/packages/ui/src/services/prompt-studio-stream.ts
+- apps/packages/ui/src/services/acp/connection.ts
+- apps/packages/ui/src/services/acp/client.ts
+- apps/packages/ui/src/services/tldw/voice-conversation.ts
+- apps/packages/ui/src/hooks/useCanonicalConnectionConfig.ts
+- apps/packages/ui/src/hooks/useACPSession.tsx
+- apps/packages/ui/src/hooks/useVoiceChatStream.tsx
+- apps/packages/ui/src/components/Option/Speech/SpeechPlaygroundPage.tsx
+- apps/packages/ui/src/services/tldw/__tests__/request-core.quickstart.test.ts
+- apps/packages/ui/src/services/__tests__/persona-stream.test.ts
+- apps/packages/ui/src/services/__tests__/watchlists-stream.test.ts
+- apps/packages/ui/src/services/__tests__/prompt-studio-stream.test.ts
+- apps/packages/ui/src/services/acp/__tests__/client.test.ts
+- apps/packages/ui/src/hooks/__tests__/useACPSession.test.tsx
+- apps/packages/ui/src/services/__tests__/voice-conversation.test.ts
+- apps/packages/ui/src/services/__tests__/tldw-api-client.quickstart-auth.test.ts
+- apps/packages/ui/src/services/__tests__/background-proxy.test.ts
 ---
 
 ## Description
@@ -76,7 +102,7 @@ Replace browser-visible runtime API-key provisioning in the runtime-enabled loop
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-Implementation plan: docs/superpowers/plans/2026-07-10-single-user-http-only-session-implementation-plan.md. Stages: opaque session primitive; HTTP principal/CSRF/endpoints; shared WebSocket auth; non-secret Next runtime bootstrap; cookie-mode WebUI clients; lifecycle/deployment/security verification.
+Implementation plan: docs/superpowers/plans/2026-07-10-single-user-http-only-session-implementation-plan.md. Task 5 is in progress: cookie-authenticated WebUI HTTP requests and secret-free same-origin WebSockets.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes

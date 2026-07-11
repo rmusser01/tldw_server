@@ -59,6 +59,19 @@ describe("buildPersonaWebSocketUrl", () => {
     expect(protocols).toEqual(["bearer", "abc123"])
   })
 
+  it("uses a secret-free page-origin url for cookie sessions", () => {
+    const { url, protocols } = buildPersonaWebSocketUrl({
+      serverUrl: "https://remote.example.test",
+      authMode: "single-user",
+      authSource: "cookie-session",
+      apiKey: "stale-key",
+      accessToken: "stale-token"
+    })
+
+    expect(url).toBe("ws://127.0.0.1:8080/api/v1/persona/stream")
+    expect(protocols).toEqual([])
+  })
+
   it("carries the jwt in the subprotocol for multi-user mode (not the url)", () => {
     const { url, protocols } = buildPersonaWebSocketUrl({
       serverUrl: "https://example.com",
