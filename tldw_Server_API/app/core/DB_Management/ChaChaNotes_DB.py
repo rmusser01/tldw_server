@@ -323,6 +323,7 @@ SOURCE_VIEW_MAX_COUNT = 100
 SOURCE_VIEW_MAX_STATE_BYTES = 16 * 1024
 SOURCE_VIEW_MIN_NAME_LENGTH = 1
 SOURCE_VIEW_MAX_NAME_LENGTH = 120
+SOURCE_VIEW_MAX_INTEGER = 2_147_483_647
 SOURCE_VIEW_NAME_EXISTS = "source_view_name_exists"
 SOURCE_VIEW_LIMIT_REACHED = "source_view_limit_reached"
 SOURCE_VIEW_VERSION_CONFLICT = "source_view_version_conflict"
@@ -18123,6 +18124,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         """Return the trimmed display name and Python NFKC/casefold key."""
         if not isinstance(name, str):
             raise InputError("Saved view name must be a string.")  # noqa: TRY003
+        CharactersRAGDB._validate_workspace_source_saved_view_utf8_text(name, "name")
         display_name = name.strip()
         if not SOURCE_VIEW_MIN_NAME_LENGTH <= len(display_name) <= SOURCE_VIEW_MAX_NAME_LENGTH:
             raise InputError(  # noqa: TRY003
@@ -18136,24 +18138,50 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         """Validate only the raw UTF-8 storage bound; parsing belongs to the API."""
         if not isinstance(state_json, str):
             raise InputError("Saved view state_json must be a string.")  # noqa: TRY003
-        if len(state_json.encode("utf-8")) > SOURCE_VIEW_MAX_STATE_BYTES:
+        encoded = CharactersRAGDB._validate_workspace_source_saved_view_utf8_text(
+            state_json,
+            "state_json",
+        )
+        if len(encoded) > SOURCE_VIEW_MAX_STATE_BYTES:
             raise InputError(  # noqa: TRY003
                 f"Saved view state_json must not exceed {SOURCE_VIEW_MAX_STATE_BYTES} UTF-8 bytes."
             )
         return state_json
 
     @staticmethod
+    def _validate_workspace_source_saved_view_utf8_text(value: str, field_name: str) -> bytes:
+        """Return strict UTF-8 bytes after rejecting database-incompatible NUL text."""
+        if "\x00" in value:
+            raise InputError(f"Saved view {field_name} must not contain NUL characters.")  # noqa: TRY003
+        try:
+            return value.encode("utf-8")
+        except UnicodeEncodeError as exc:
+            raise InputError(f"Saved view {field_name} must contain valid UTF-8 text.") from exc  # noqa: TRY003
+
+    @staticmethod
     def _validate_workspace_source_saved_view_schema_version(schema_version: int) -> int:
         """Require a positive portable integer without interpreting its schema."""
-        if isinstance(schema_version, bool) or not isinstance(schema_version, int) or schema_version < 1:
-            raise InputError("Saved view schema_version must be a positive integer.")  # noqa: TRY003
+        if (
+            isinstance(schema_version, bool)
+            or not isinstance(schema_version, int)
+            or not 1 <= schema_version <= SOURCE_VIEW_MAX_INTEGER
+        ):
+            raise InputError(  # noqa: TRY003
+                f"Saved view schema_version must be an integer from 1 to {SOURCE_VIEW_MAX_INTEGER}."
+            )
         return schema_version
 
     @staticmethod
     def _validate_workspace_source_saved_view_expected_version(expected_version: int) -> int:
         """Require a positive optimistic-lock version."""
-        if isinstance(expected_version, bool) or not isinstance(expected_version, int) or expected_version < 1:
-            raise InputError("Saved view expected_version must be a positive integer.")  # noqa: TRY003
+        if (
+            isinstance(expected_version, bool)
+            or not isinstance(expected_version, int)
+            or not 1 <= expected_version <= SOURCE_VIEW_MAX_INTEGER
+        ):
+            raise InputError(  # noqa: TRY003
+                f"Saved view expected_version must be an integer from 1 to {SOURCE_VIEW_MAX_INTEGER}."
+            )
         return expected_version
 
     def _require_workspace_source_saved_view_workspace(
@@ -18270,7 +18298,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         name_key: str,
     ) -> None:
         """Resolve duplicate metadata through a backend-appropriate fresh transaction."""
-        def raise_scoped_conflict(conn: Any) -> None:
+        def find_scoped_conflict(conn: Any) -> dict[str, Any]:
             self._require_workspace_source_saved_view_workspace(conn, owner_user_id, workspace_id)
             conflict = self._find_workspace_source_saved_view_name_with_conn(
                 conn,
@@ -18280,21 +18308,44 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             )
             if conflict is None:
                 raise WorkspaceSourceSavedViewNotFoundError
-            self._raise_workspace_source_saved_view_name_conflict(conflict)
+            return conflict
 
         if self.backend_type == BackendType.POSTGRESQL:
             backend = self.backend
-            with backend.transaction() as raw_conn:
+            raw_conn = backend.connect()
+            conflict: dict[str, Any] | None = None
+            workspace_found = False
+            try:
                 conn = BackendConnectionWrapper(self, raw_conn, backend)
                 conn.execute(
                     "SELECT set_config('app.current_user_id', ?, true)",
                     (str(owner_user_id),),
                 )
-                raise_scoped_conflict(conn)
-            return
+                workspace_found = conn.execute(
+                    "SELECT id FROM workspaces WHERE id = ? AND client_id = ? AND deleted = ?",
+                    (workspace_id, owner_user_id, self._workspace_active_deleted_value()),
+                ).fetchone() is not None
+                if workspace_found:
+                    conflict = self._find_workspace_source_saved_view_name_with_conn(
+                        conn,
+                        owner_user_id,
+                        workspace_id,
+                        name_key,
+                    )
+                raw_conn.commit()
+            except BaseException:
+                with contextlib.suppress(_CHACHA_NONCRITICAL_EXCEPTIONS):
+                    raw_conn.rollback()
+                raise
+            finally:
+                backend.disconnect(raw_conn)
+            if not workspace_found or conflict is None:
+                raise WorkspaceSourceSavedViewNotFoundError
+            self._raise_workspace_source_saved_view_name_conflict(conflict)
 
         with self.transaction() as conn:
-            raise_scoped_conflict(conn)
+            conflict = find_scoped_conflict(conn)
+        self._raise_workspace_source_saved_view_name_conflict(conflict)
 
     def create_workspace_source_saved_view(
         self,

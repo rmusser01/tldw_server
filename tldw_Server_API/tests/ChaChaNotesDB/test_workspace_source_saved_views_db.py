@@ -261,6 +261,71 @@ def test_state_json_limit_uses_utf8_bytes(db: CharactersRAGDB) -> None:
         _create(db, name="Over limit", state_json=accepted + "x")
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("name", "nul\x00name"),
+        ("name", "surrogate\ud800name"),
+        ("state_json", "nul\x00state"),
+        ("state_json", "surrogate\ud800state"),
+    ],
+)
+def test_saved_view_text_rejects_nul_and_non_utf8_strings(
+    db: CharactersRAGDB,
+    field: str,
+    value: str,
+) -> None:
+    kwargs = {field: value}
+
+    with pytest.raises(InputError, match=field):
+        _create(db, **kwargs)
+
+
+def test_saved_view_state_accepts_escaped_json_nul(db: CharactersRAGDB) -> None:
+    escaped_nul = r'{"value":"\u0000"}'
+
+    created = _create(db, state_json=escaped_nul)
+
+    assert created["state_json"] == escaped_nul
+
+
+@pytest.mark.parametrize("value", [True, 0, -1, 2_147_483_648, 1.5])
+def test_saved_view_schema_version_rejects_nonportable_values(
+    db: CharactersRAGDB,
+    value: object,
+) -> None:
+    with pytest.raises(InputError, match="schema_version"):
+        _create(db, schema_version=value)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("value", [True, 0, -1, 2_147_483_648, 1.5])
+def test_saved_view_expected_version_rejects_nonportable_values(
+    db: CharactersRAGDB,
+    value: object,
+) -> None:
+    created = _create(db)
+
+    with pytest.raises(InputError, match="expected_version"):
+        db.update_workspace_source_saved_view(
+            OWNER_A,
+            WORKSPACE_A,
+            created["id"],
+            expected_version=value,  # type: ignore[arg-type]
+            name="Updated",
+        )
+
+
+def test_saved_view_integer_validators_accept_postgres_integer_max(
+    db: CharactersRAGDB,
+) -> None:
+    maximum = 2_147_483_647
+
+    created = _create(db, schema_version=maximum)
+
+    assert created["schema_version"] == maximum
+    assert db._validate_workspace_source_saved_view_expected_version(maximum) == maximum
+
+
 def test_stale_update_reports_only_view_id_and_current_version(db: CharactersRAGDB) -> None:
     created = _create(db, state_json="private raw state")
     current = db.update_workspace_source_saved_view(

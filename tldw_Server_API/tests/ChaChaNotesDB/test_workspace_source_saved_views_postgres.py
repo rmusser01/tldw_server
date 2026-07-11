@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Callable
+from dataclasses import replace
 from typing import Any
 from uuid import uuid4
 
@@ -13,6 +14,7 @@ from tldw_Server_API.app.core.DB_Management.backends.pg_rls_policies import ensu
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
+    InputError,
 )
 
 pytestmark = pytest.mark.integration
@@ -36,13 +38,15 @@ def _create(
     *,
     owner: str = OWNER_A,
     name: str = "Saved view",
+    schema_version: int = 1,
+    state_json: str = '{"schema_version":1}',
 ) -> dict[str, Any]:
     return db.create_workspace_source_saved_view(
         owner,
         workspace_id,
         name=name,
-        schema_version=1,
-        state_json='{"schema_version":1}',
+        schema_version=schema_version,
+        state_json=state_json,
     )
 
 
@@ -369,6 +373,199 @@ def test_postgres_named_unique_recovery_uses_independent_connection_when_nested(
         workspace = db.get_workspace(workspace_id)
         assert workspace is not None
         assert workspace["description"] is None
+    finally:
+        db.close_all_connections()
+        backend.get_pool().close_all()
+
+
+@pytest.mark.parametrize("outcome", ["conflict", "not_found"])
+def test_postgres_recovery_closes_idle_direct_connection_before_domain_error(
+    pg_database_config: DatabaseConfig,
+    monkeypatch: pytest.MonkeyPatch,
+    outcome: str,
+) -> None:
+    backend, db = _database(pg_database_config)
+    workspace_id = f"ws-recovery-cleanup-{outcome}"
+    db.upsert_workspace(workspace_id, "Recovery cleanup")
+    conflict = _create(db, workspace_id, name="Conflict")
+    original_connect = backend.connect
+    original_disconnect = backend.disconnect
+    recovery_connections: list[Any] = []
+    disconnect_states: list[tuple[str | None, bool]] = []
+
+    def tracked_connect() -> Any:
+        conn = original_connect()
+        recovery_connections.append(conn)
+        return conn
+
+    def tracked_disconnect(conn: Any) -> None:
+        status_name = getattr(conn.info.transaction_status, "name", None)
+        original_disconnect(conn)
+        disconnect_states.append((status_name, bool(conn.closed)))
+
+    monkeypatch.setattr(backend, "connect", tracked_connect)
+    monkeypatch.setattr(backend, "disconnect", tracked_disconnect)
+    name_key = conflict["name_key"] if outcome == "conflict" else "missing"
+
+    try:
+        for _ in range(3):
+            with pytest.raises(CharactersRAGDBError) as exc_info:
+                db._raise_workspace_source_saved_view_duplicate_from_fresh_transaction(
+                    OWNER_A,
+                    workspace_id,
+                    name_key,
+                )
+            if outcome == "conflict":
+                assert exc_info.value.code == "source_view_name_exists"
+                assert exc_info.value.metadata == {"view_id": conflict["id"], "version": 1}
+            else:
+                assert exc_info.value.code == "source_view_not_found"
+                assert exc_info.value.metadata == {}
+
+        assert len(recovery_connections) == 3
+        assert disconnect_states == [("IDLE", True)] * 3
+    finally:
+        db.close_all_connections()
+        backend.get_pool().close_all()
+
+
+def test_postgres_nested_duplicate_recovery_does_not_borrow_pool_capacity(
+    pg_database_config: DatabaseConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    one_connection_config = replace(
+        pg_database_config,
+        pool_size=1,
+        max_overflow=0,
+        pool_timeout=0.2,
+    )
+    backend, db = _database(one_connection_config)
+    workspace_id = "ws-pool-one-recovery"
+    db.upsert_workspace(workspace_id, "Pool one recovery")
+    conflict = _create(db, workspace_id, name="Conflict")
+    original_find = db._find_workspace_source_saved_view_name_with_conn
+    original_pool_get = backend.get_pool().get_connection
+    original_disconnect = backend.disconnect
+    find_calls = 0
+    pool_borrows = 0
+    disconnect_states: list[tuple[str | None, bool]] = []
+
+    def stale_preflight(
+        conn: Any,
+        owner_user_id: str,
+        scoped_workspace_id: str,
+        name_key: str,
+        *,
+        exclude_view_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        nonlocal find_calls
+        find_calls += 1
+        if find_calls % 2 == 1:
+            return None
+        return original_find(
+            conn,
+            owner_user_id,
+            scoped_workspace_id,
+            name_key,
+            exclude_view_id=exclude_view_id,
+        )
+
+    def tracked_pool_get() -> Any:
+        nonlocal pool_borrows
+        pool_borrows += 1
+        return original_pool_get()
+
+    def tracked_disconnect(conn: Any) -> None:
+        status_name = getattr(conn.info.transaction_status, "name", None)
+        original_disconnect(conn)
+        disconnect_states.append((status_name, bool(conn.closed)))
+
+    monkeypatch.setattr(db, "_find_workspace_source_saved_view_name_with_conn", stale_preflight)
+    monkeypatch.setattr(backend.get_pool(), "get_connection", tracked_pool_get)
+    monkeypatch.setattr(backend, "disconnect", tracked_disconnect)
+
+    try:
+        for attempt in range(2):
+            with pytest.raises(CharactersRAGDBError) as exc_info:
+                with db.transaction() as outer_conn:
+                    outer_conn.execute(
+                        "UPDATE workspaces SET description = ? WHERE id = ?",
+                        (f"must roll back {attempt}", workspace_id),
+                    )
+                    _create(db, workspace_id, name="CONFLICT")
+            assert exc_info.value.code == "source_view_name_exists"
+            assert exc_info.value.metadata == {"view_id": conflict["id"], "version": 1}
+
+        assert pool_borrows == 0
+        assert disconnect_states == [("IDLE", True)] * 2
+        workspace = db.get_workspace(workspace_id)
+        assert workspace is not None
+        assert workspace["description"] is None
+    finally:
+        db.close_all_connections()
+        backend.get_pool().close_all()
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("name", "nul\x00name"),
+        ("name", "surrogate\ud800name"),
+        ("state_json", "nul\x00state"),
+        ("state_json", "surrogate\ud800state"),
+    ],
+)
+def test_postgres_saved_view_text_validation_is_driver_independent(
+    pg_database_config: DatabaseConfig,
+    field: str,
+    value: str,
+) -> None:
+    backend, db = _database(pg_database_config)
+    workspace_id = f"ws-text-validation-{field}-{uuid4()}"
+    try:
+        db.upsert_workspace(workspace_id, "Text validation")
+
+        with pytest.raises(InputError, match=field):
+            _create(db, workspace_id, **{field: value})
+    finally:
+        db.close_all_connections()
+        backend.get_pool().close_all()
+
+
+def test_postgres_saved_view_integer_boundaries_are_driver_independent(
+    pg_database_config: DatabaseConfig,
+) -> None:
+    backend, db = _database(pg_database_config)
+    workspace_id = "ws-integer-validation"
+    try:
+        db.upsert_workspace(workspace_id, "Integer validation")
+        created = db.create_workspace_source_saved_view(
+            OWNER_A,
+            workspace_id,
+            name="Maximum schema",
+            schema_version=2_147_483_647,
+            state_json=r'{"value":"\u0000"}',
+        )
+        assert created["schema_version"] == 2_147_483_647
+        assert created["state_json"] == r'{"value":"\u0000"}'
+
+        for value in (True, 0, -1, 2_147_483_648, 1.5):
+            with pytest.raises(InputError, match="schema_version"):
+                db.create_workspace_source_saved_view(
+                    OWNER_A,
+                    workspace_id,
+                    name=f"Invalid schema {value!r}",
+                    schema_version=value,  # type: ignore[arg-type]
+                    state_json="{}",
+                )
+            with pytest.raises(InputError, match="expected_version"):
+                db.update_workspace_source_saved_view(
+                    OWNER_A,
+                    workspace_id,
+                    created["id"],
+                    expected_version=value,  # type: ignore[arg-type]
+                    name="Updated",
+                )
     finally:
         db.close_all_connections()
         backend.get_pool().close_all()
