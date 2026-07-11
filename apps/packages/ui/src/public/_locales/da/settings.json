@@ -941,9 +941,6 @@
   "ollamaSettings_settings_advanced_headers_label": {
     "message": "Tilpas Headers"
   },
-  "ollamaSettings_settings_advanced_headers_Tilføj": {
-    "message": "Tilføj Header"
-  },
   "ollamaSettings_settings_advanced_headers_key_label": {
     "message": "Header-nøgle"
   },
@@ -3376,5 +3373,74 @@
   },
   "dataManagement_navTitle": {
     "message": "Datahåndtering"
+  },
+  "navigation_setupRecovery": {
+    "message": "Opsætning og gendannelse"
+  },
+  "navigation_preferencesWorkflow": {
+    "message": "Præferencer og arbejdsgang"
+  },
+  "navigation_dataAdmin": {
+    "message": "Data og administration"
+  },
+  "preferencesSettings_navTitle": {
+    "message": "Præferencer"
+  },
+  "preferencesSettings_title": {
+    "message": "Generelle præferencer"
+  },
+  "setupRecovery_title": {
+    "message": "Opsætning og gendannelse"
+  },
+  "quickIngestSettings_ocrDefaults_title": {
+    "message": "OCR-standarder"
+  },
+  "quickIngestSettings_ocrDefaults_description": {
+    "message": "Bruges af importflows, der udtrækker tekst fra billeder eller scannede dokumenter."
+  },
+  "sidepanelSettings_shortcuts_title": {
+    "message": "Indstillingsgenveje"
+  },
+  "sidepanelSettings_shortcuts_description": {
+    "message": "Hop til den fulde indstillingsside, der ejer ændringen."
+  },
+  "sidepanelSettings_shortcuts_setupRecovery_label": {
+    "message": "Opsætning og gendannelse"
+  },
+  "sidepanelSettings_shortcuts_setupRecovery_description": {
+    "message": "Forbindelse, godkendelse, udbydernøgler, modeller og diagnostik."
+  },
+  "sidepanelSettings_shortcuts_preferences_label": {
+    "message": "Præferencer"
+  },
+  "sidepanelSettings_shortcuts_preferences_description": {
+    "message": "Sprog, meddelelser, persona, vejledninger og websøgning."
+  },
+  "sidepanelSettings_shortcuts_ui_label": {
+    "message": "UI-tilpasning"
+  },
+  "sidepanelSettings_shortcuts_ui_description": {
+    "message": "Tema, genveje, visningsstandarder og visuel adfærd."
+  },
+  "sidepanelSettings_shortcuts_dataAdmin_label": {
+    "message": "Data og administration"
+  },
+  "sidepanelSettings_shortcuts_dataAdmin_description": {
+    "message": "Datahåndtering, moderation, evalueringer og adminværktøjer."
+  },
+  "sidepanelSettings_shortcuts_serverAuth_label": {
+    "message": "Server og godkendelse"
+  },
+  "sidepanelSettings_shortcuts_serverAuth_description": {
+    "message": "Skift server-URL eller API-nøgle."
+  },
+  "sidepanelSettings_shortcuts_health_label": {
+    "message": "Fuld diagnostik"
+  },
+  "sidepanelSettings_shortcuts_health_description": {
+    "message": "Åbn detaljerede server- og undersystemtjek."
+  },
+  "sidepanelSettings_local_title": {
+    "message": "Sidepaneladfærd"
   }
 }

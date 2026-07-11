@@ -44,12 +44,17 @@ function normalizeMessage(value, key, invalid) {
   return null;
 }
 
+function toChromeMessageKey(key) {
+  return String(key).replace(/[^A-Za-z0-9_]/g, '_');
+}
+
 // Flatten nested assets locales into Chrome i18n keys: section.subkey -> section_subkey.
 // Only string-ish leaves are written as { message: string } entries.
 function flatten(obj, prefix = '', out = {}, invalid = []) {
   if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
     for (const [key, value] of Object.entries(obj)) {
-      const next = prefix ? `${prefix}_${key}` : key;
+      const segment = toChromeMessageKey(key);
+      const next = prefix ? `${prefix}_${segment}` : segment;
       flatten(value, next, out, invalid);
     }
   } else {
@@ -94,13 +99,24 @@ for (const locale of locales) {
     if (fs.existsSync(outPath)) {
       existingRaw = fs.readFileSync(outPath, 'utf8');
       const existing = JSON.parse(existingRaw);
-      const publicOnlyKeys = Object.keys(existing).filter((key) => !(key in output));
+      const publicOnlyKeys = Object.keys(existing).filter((key) => !(key in output) && /^[A-Za-z0-9_]+$/.test(key));
+      const invalidPublicOnlyKeys = Object.keys(existing).filter((key) => !(key in output) && !/^[A-Za-z0-9_]+$/.test(key));
       if (publicOnlyKeys.length) {
         console.warn(
           `[sync-public-locales] Preserving ${publicOnlyKeys.length} public-only keys in ${outPath}.`
         );
       }
+      if (invalidPublicOnlyKeys.length) {
+        console.warn(
+          `[sync-public-locales] Dropping ${invalidPublicOnlyKeys.length} invalid Chrome i18n keys in ${outPath}: ${invalidPublicOnlyKeys.join(
+            ', '
+          )}`
+        );
+      }
       merged = { ...existing, ...output };
+      for (const key of invalidPublicOnlyKeys) {
+        delete merged[key];
+      }
     }
     const nextJson = JSON.stringify(merged, null, 2) + '\n';
     if (existingRaw !== null && existingRaw === nextJson) {

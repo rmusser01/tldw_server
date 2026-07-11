@@ -239,9 +239,6 @@
   "header_omniSearchStartChat": {
     "message": "\"{{query}}\" പുതിയ ചാറ്റ് ആരംഭിക്കുക"
   },
-  "header_connectionCard.connectedCaption": {
-    "message": "ഓപ്ഷൻസിലും സൈഡ്പാനലിലും ചാറ്റും ടൂളുകളും ഇപ്പോൾ ലഭ്യമാണ്."
-  },
   "header_quickIngestQueuedAria": {
     "message": "{{label}} — {{count}} ഇനം ക്യൂ ചെയ്തിരിക്കുന്നു — പരിശോധിച്ച് പ്രോസസ്സ് ചെയ്യാൻ ക്ലിക്ക് ചെയ്യുക"
   },
@@ -2535,7 +2532,7 @@
     "message": "കുടുംബ സുരക്ഷ നിയന്ത്രണങ്ങളും സർവർ ഗാർഡ്റെയിലുകളും ഒരിടത്ത്."
   },
   "header_researchWorkspace": {
-    "message": "Research Workspace"
+    "message": "ഗവേഷണ വർക്ക്‌സ്‌പേസ്"
   },
   "omniSearch_searchError": {
     "message": "തിരയൽ പരാജയപ്പെട്ടു. വീണ്ടും ശ്രമിക്കുക."
@@ -2589,7 +2586,7 @@
     "message": "Document Workspace"
   },
   "header_modelPlayground": {
-    "message": "Model Playground"
+    "message": "മോഡൽ പ്ലേഗ്രൗണ്ട്"
   },
   "header_workflowEditor": {
     "message": "Workflow Editor"
@@ -2677,5 +2674,8 @@
   },
   "repo2txt_status_generated": {
     "message": "Generated output for {{count}} files ({{tokenCount}} tokens)."
+  },
+  "header_connectionCard_connectedCaption": {
+    "message": "ഓപ്ഷൻസിലും സൈഡ്പാനലിലും ചാറ്റും ടൂളുകളും ഇപ്പോൾ ലഭ്യമാണ്."
   }
 }

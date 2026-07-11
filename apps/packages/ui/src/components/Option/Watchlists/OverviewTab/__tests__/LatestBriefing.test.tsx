@@ -186,7 +186,7 @@ describe("LatestBriefing", () => {
   it("shows playback, deliveries, provenance, counts, and the exact next run", async () => {
     render(<LatestBriefing projection={readyEpisode()} unreadCount={3} newCount={4} {...actions()} />)
 
-    expect(screen.getByRole("heading", { name: "Latest episode" })).toBeVisible()
+    expect(screen.getByRole("heading", { name: "Latest briefing" })).toBeVisible()
     expect(await screen.findByRole("button", { name: "Play Purple and Gold Weekly" })).toBeEnabled()
     expect(screen.getByText("Email delivered")).toBeVisible()
     expect(screen.getByText("Chatbook delivered")).toBeVisible()
@@ -610,6 +610,17 @@ describe("LatestBriefing", () => {
     await user.click(screen.getByRole("button", { name: "Close" }))
     await user.click(review)
     expect(await screen.findByText("Script access failed. Check your sign-in and server connection.")).toBeInTheDocument()
+  })
+
+  it("does not report audio as ready when the current artifact is missing", async () => {
+    artifactMocks.fetchBlob.mockRejectedValueOnce({ kind: "missing", status: 404 })
+    render(<LatestBriefing projection={readyEpisode()} {...actions()} />)
+
+    expect(await screen.findByText("This audio artifact is no longer available.")).toBeVisible()
+    expect(screen.getByText("Unavailable")).toHaveClass("text-danger")
+    expect(screen.queryByRole("button", { name: "Play Purple and Gold Weekly" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Download audio for Purple and Gold Weekly" })).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Regenerate two-host episode audio for Purple and Gold Weekly" })).toBeEnabled()
   })
 
   it("uses authoritative show_notes instead of the outcome noun", () => {

@@ -439,5 +439,89 @@
   },
   "chat_error": {
     "message": "Sorry, I encountered an error. Please try again."
+  },
+  "contextBar_sourceScope": {
+    "message": "Source Scope"
+  },
+  "contextBar_sourceSelector": {
+    "message": "Source selector"
+  },
+  "contextBar_sourceCategories": {
+    "message": "Source categories"
+  },
+  "contextBar_all": {
+    "message": "All"
+  },
+  "contextBar_none": {
+    "message": "None"
+  },
+  "contextBar_noSourcesSelected": {
+    "message": "No sources selected. Searches may return empty results."
+  },
+  "contextBar_specificSourceScope": {
+    "message": "Specific source scope"
+  },
+  "contextBar_specificSourceDescription": {
+    "message": "Choose exact docs or notes. Leave this empty to search all items inside selected categories."
+  },
+  "contextBar_useAll": {
+    "message": "Use all"
+  },
+  "contextBar_documentsAndMedia": {
+    "message": "Documents & Media"
+  },
+  "contextBar_notes": {
+    "message": "Notes"
+  },
+  "contextBar_reload": {
+    "message": "Reload"
+  },
+  "contextBar_filterDocsPlaceholder": {
+    "message": "Filter docs by title"
+  },
+  "contextBar_filterNotesPlaceholder": {
+    "message": "Filter notes by title"
+  },
+  "contextBar_sourceStatus": {
+    "message": "Source status"
+  },
+  "contextBar_allStatuses": {
+    "message": "All statuses"
+  },
+  "contextBar_indexing": {
+    "message": "Indexing"
+  },
+  "contextBar_recentImports": {
+    "message": "Recent imports"
+  },
+  "contextBar_allDates": {
+    "message": "All dates"
+  },
+  "contextBar_workspaceScope": {
+    "message": "Workspace scope"
+  },
+  "contextBar_noWorkspaceScope": {
+    "message": "No workspace scope"
+  },
+  "contextBar_selectVisible": {
+    "message": "Select visible"
+  },
+  "contextBar_clearVisible": {
+    "message": "Clear visible"
+  },
+  "contextBar_selectRecentImports": {
+    "message": "Select recent imports"
+  },
+  "contextBar_loadingAvailableSources": {
+    "message": "Loading available sources..."
+  },
+  "contextBar_noMatchingDocuments": {
+    "message": "No matching documents."
+  },
+  "contextBar_noMatchingNotes": {
+    "message": "No matching notes."
+  },
+  "contextBar_itemId": {
+    "message": "ID: {{id}}"
   }
 }

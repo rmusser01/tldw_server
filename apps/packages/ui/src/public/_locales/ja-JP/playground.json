@@ -1037,18 +1037,6 @@
   "actor_presetPlaceholder": {
     "message": "プリセットを選択"
   },
-  "actor_preset.sliceOfLife": {
-    "message": "日常系"
-  },
-  "actor_preset.dungeonCrawl": {
-    "message": "ダンジョン探索"
-  },
-  "actor_preset.romance": {
-    "message": "ロマンス"
-  },
-  "actor_preset.workSession": {
-    "message": "作業セッション"
-  },
   "actor_applyPreset": {
     "message": "適用"
   },
@@ -1069,15 +1057,6 @@
   },
   "actor_templateModeHelp": {
     "message": "Actor がアクティブなシーンテンプレートとどう連携するかを制御します。マージは両方を維持、上書きは Actor が重複フィールドを置き換え、無視はテンプレートが有効なとき Actor をスキップします。"
-  },
-  "actor_templateMode.merge": {
-    "message": "テンプレートとマージ"
-  },
-  "actor_templateMode.override": {
-    "message": "テンプレートを上書き"
-  },
-  "actor_templateMode.ignore": {
-    "message": "テンプレートが有効なとき無視"
   },
   "actor_bladeAspectsTitle": {
     "message": "要素"
@@ -1465,5 +1444,29 @@
   },
   "acp_workspace_title": {
     "message": "ワークスペース端末"
+  },
+  "tts_routeTitle": {
+    "message": "テキスト読み上げ"
+  },
+  "actor_preset_sliceOfLife": {
+    "message": "日常系"
+  },
+  "actor_preset_dungeonCrawl": {
+    "message": "ダンジョン探索"
+  },
+  "actor_preset_romance": {
+    "message": "ロマンス"
+  },
+  "actor_preset_workSession": {
+    "message": "作業セッション"
+  },
+  "actor_templateMode_merge": {
+    "message": "テンプレートとマージ"
+  },
+  "actor_templateMode_override": {
+    "message": "テンプレートを上書き"
+  },
+  "actor_templateMode_ignore": {
+    "message": "テンプレートが有効なとき無視"
   }
 }

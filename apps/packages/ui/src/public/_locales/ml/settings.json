@@ -3376,5 +3376,74 @@
   },
   "dataManagement_navTitle": {
     "message": "ഡാറ്റ മാനേജ്മെന്റ്"
+  },
+  "navigation_setupRecovery": {
+    "message": "സെറ്റപ്പും പുനഃസ്ഥാപനവും"
+  },
+  "navigation_preferencesWorkflow": {
+    "message": "മുൻഗണനകളും വർക്ക്‌ഫ്ലോയും"
+  },
+  "navigation_dataAdmin": {
+    "message": "ഡാറ്റയും അഡ്മിനിസ്ട്രേഷനും"
+  },
+  "preferencesSettings_navTitle": {
+    "message": "മുൻഗണനകൾ"
+  },
+  "preferencesSettings_title": {
+    "message": "പൊതുവായ മുൻഗണനകൾ"
+  },
+  "setupRecovery_title": {
+    "message": "സെറ്റപ്പും പുനഃസ്ഥാപനവും"
+  },
+  "quickIngestSettings_ocrDefaults_title": {
+    "message": "OCR ഡിഫോൾട്ടുകൾ"
+  },
+  "quickIngestSettings_ocrDefaults_description": {
+    "message": "ചിത്രങ്ങളിലോ സ്കാൻ ചെയ്ത പ്രമാണങ്ങളിലോ നിന്ന് ടെക്സ്റ്റ് വേർതിരിക്കുന്ന ഇൻജസ്റ്റ് പ്രവാഹങ്ങൾ ഉപയോഗിക്കുന്നു."
+  },
+  "sidepanelSettings_shortcuts_title": {
+    "message": "ക്രമീകരണ ഷോർട്ട്കട്ടുകൾ"
+  },
+  "sidepanelSettings_shortcuts_description": {
+    "message": "മാറ്റത്തിന് ഉടമയായ പൂർണ്ണ ക്രമീകരണ പേജിലേക്ക് പോകുക."
+  },
+  "sidepanelSettings_shortcuts_setupRecovery_label": {
+    "message": "സെറ്റപ്പും പുനഃസ്ഥാപനവും"
+  },
+  "sidepanelSettings_shortcuts_setupRecovery_description": {
+    "message": "കണക്ഷൻ, ഓത്ത്, പ്രൊവൈഡർ കീകൾ, മോഡലുകൾ, ഡയഗ്നോസ്റ്റിക്സ്."
+  },
+  "sidepanelSettings_shortcuts_preferences_label": {
+    "message": "മുൻഗണനകൾ"
+  },
+  "sidepanelSettings_shortcuts_preferences_description": {
+    "message": "ഭാഷ, അറിയിപ്പുകൾ, പേഴ്സോണ, ട്യൂട്ടോറിയലുകൾ, വെബ് തിരയൽ."
+  },
+  "sidepanelSettings_shortcuts_ui_label": {
+    "message": "UI കസ്റ്റമൈസേഷൻ"
+  },
+  "sidepanelSettings_shortcuts_ui_description": {
+    "message": "തീം, ഷോർട്ട്കട്ടുകൾ, ഡിസ്പ്ലേ ഡിഫോൾട്ടുകൾ, ദൃശ്യ പെരുമാറ്റം."
+  },
+  "sidepanelSettings_shortcuts_dataAdmin_label": {
+    "message": "ഡാറ്റയും അഡ്മിനിസ്ട്രേഷനും"
+  },
+  "sidepanelSettings_shortcuts_dataAdmin_description": {
+    "message": "ഡാറ്റ മാനേജ്മെന്റ്, മോഡറേഷൻ, മൂല്യനിർണ്ണയങ്ങൾ, അഡ്മിൻ ടൂളുകൾ."
+  },
+  "sidepanelSettings_shortcuts_serverAuth_label": {
+    "message": "സെർവർ & ഓത്ത്"
+  },
+  "sidepanelSettings_shortcuts_serverAuth_description": {
+    "message": "സെർവർ URL അല്ലെങ്കിൽ API കീ മാറ്റുക."
+  },
+  "sidepanelSettings_shortcuts_health_label": {
+    "message": "പൂർണ്ണ ഡയഗ്നോസ്റ്റിക്സ്"
+  },
+  "sidepanelSettings_shortcuts_health_description": {
+    "message": "വിശദമായ സെർവർ, സബ്സിസ്റ്റം പരിശോധനകൾ തുറക്കുക."
+  },
+  "sidepanelSettings_local_title": {
+    "message": "സൈഡ്‌പാനൽ പെരുമാറ്റം"
   }
 }

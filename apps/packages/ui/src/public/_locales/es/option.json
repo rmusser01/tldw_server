@@ -239,9 +239,6 @@
   "header_omniSearchStartChat": {
     "message": "Iniciar nuevo chat \"{{query}}\""
   },
-  "header_connectionCard.connectedCaption": {
-    "message": "El chat y las herramientas ya están disponibles en Opciones y en la barra lateral."
-  },
   "header_quickIngestQueuedAria": {
     "message": "{{label}} — {{count}} elementos en cola — haz clic para revisar y procesar"
   },
@@ -2613,7 +2610,7 @@
     "message": "Controles de seguridad familiar y protecciones del servidor en un solo lugar."
   },
   "header_researchWorkspace": {
-    "message": "Research Workspace"
+    "message": "Espacio de investigación"
   },
   "omniSearch_searchError": {
     "message": "La búsqueda falló. Inténtalo de nuevo."
@@ -2667,7 +2664,7 @@
     "message": "Document Workspace"
   },
   "header_modelPlayground": {
-    "message": "Model Playground"
+    "message": "Laboratorio de modelos"
   },
   "header_workflowEditor": {
     "message": "Workflow Editor"
@@ -2755,5 +2752,8 @@
   },
   "repo2txt_status_generated": {
     "message": "Generated output for {{count}} files ({{tokenCount}} tokens)."
+  },
+  "header_connectionCard_connectedCaption": {
+    "message": "El chat y las herramientas ya están disponibles en Opciones y en la barra lateral."
   }
 }

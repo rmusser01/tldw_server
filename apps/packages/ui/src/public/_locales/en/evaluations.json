@@ -622,5 +622,260 @@
   },
   "datasetUploadEmptyError": {
     "message": "No samples found in file."
+  },
+  "tabRecipes": {
+    "message": "Recipes"
+  },
+  "tabSyntheticReview": {
+    "message": "Review"
+  },
+  "syntheticReviewTitle": {
+    "message": "Synthetic review queue"
+  },
+  "syntheticReviewDescription": {
+    "message": "Review generated retrieval and answer-quality samples before they are promoted into active eval datasets."
+  },
+  "syntheticReviewQueueSummary": {
+    "message": "{{shown}} of {{total}} samples shown. {{selected}} selected for promotion."
+  },
+  "syntheticRecipeFilterLabel": {
+    "message": "Recipe"
+  },
+  "syntheticStateFilterLabel": {
+    "message": "Review state"
+  },
+  "syntheticDatasetNameLabel": {
+    "message": "Promoted dataset name"
+  },
+  "syntheticPromoteCta": {
+    "message": "Promote selected"
+  },
+  "syntheticPromoteSuccessInlineTitle": {
+    "message": "Promoted dataset created"
+  },
+  "syntheticReviewLoadErrorTitle": {
+    "message": "Unable to load synthetic review queue"
+  },
+  "syntheticReviewEmpty": {
+    "message": "No review items match the current filters."
+  },
+  "syntheticQueryLabel": {
+    "message": "Query"
+  },
+  "syntheticNoQuery": {
+    "message": "No query text"
+  },
+  "syntheticPayloadLabel": {
+    "message": "Draft payload"
+  },
+  "syntheticNotesLabel": {
+    "message": "Reviewer notes"
+  },
+  "syntheticApproveCta": {
+    "message": "Approve"
+  },
+  "syntheticRejectCta": {
+    "message": "Reject"
+  },
+  "syntheticEditApproveCta": {
+    "message": "Edit & approve"
+  },
+  "syntheticReviewActionSuccessTitle": {
+    "message": "Review updated"
+  },
+  "syntheticReviewActionErrorTitle": {
+    "message": "Failed to update review"
+  },
+  "syntheticPromoteSuccessTitle": {
+    "message": "Synthetic dataset promoted"
+  },
+  "syntheticPromoteErrorTitle": {
+    "message": "Failed to promote synthetic dataset"
+  },
+  "syntheticGenerationSuccessTitle": {
+    "message": "Synthetic drafts created"
+  },
+  "syntheticGenerationSuccessInlineTitle": {
+    "message": "Synthetic drafts created"
+  },
+  "syntheticGenerationSuccessInlineDescription": {
+    "message": "Batch {{batchId}} created {{count}} drafts and is ready for review."
+  },
+  "syntheticGenerationErrorTitle": {
+    "message": "Failed to generate synthetic drafts"
+  },
+  "syntheticGenerationInlineErrorDescription": {
+    "message": "Unable to generate synthetic drafts right now."
+  },
+  "syntheticRetrievalGenerationTitle": {
+    "message": "Synthetic generation"
+  },
+  "syntheticRetrievalTotalCountLabel": {
+    "message": "Total draft set size"
+  },
+  "syntheticRetrievalTotalCountHelp": {
+    "message": "This is the total draft set size, including preferred real examples and synthetic fill."
+  },
+  "syntheticRetrievalCorpusSummaryLabel": {
+    "message": "Current corpus scope"
+  },
+  "syntheticRetrievalCorpusSummaryDescription": {
+    "message": "{{mediaCount}} media IDs, {{noteCount}} note IDs, indexing fixed: {{indexingFixed}}"
+  },
+  "syntheticRetrievalRealExamplesLabel": {
+    "message": "Current dataset samples used as real examples"
+  },
+  "syntheticRetrievalInlineRealExamplesLabel": {
+    "message": "Real examples"
+  },
+  "syntheticRetrievalRealExampleTitle": {
+    "message": "Real example {{index}}"
+  },
+  "syntheticRetrievalNoRealExamples": {
+    "message": "No dataset samples are available yet."
+  },
+  "syntheticRetrievalAddRealExampleCta": {
+    "message": "Add real example"
+  },
+  "syntheticRetrievalSeedExamplesLabel": {
+    "message": "Seed examples"
+  },
+  "syntheticRetrievalAddSeedExampleCta": {
+    "message": "Add seed example"
+  },
+  "syntheticRetrievalRemoveSeedExampleCta": {
+    "message": "Remove"
+  },
+  "syntheticRetrievalSeedExampleTitle": {
+    "message": "Seed example {{index}}"
+  },
+  "syntheticRetrievalSourceLabel": {
+    "message": "Source"
+  },
+  "syntheticRetrievalQueryLabel": {
+    "message": "Query"
+  },
+  "syntheticRetrievalQueryIntentLabel": {
+    "message": "Query intent"
+  },
+  "syntheticRetrievalDifficultyLabel": {
+    "message": "Difficulty"
+  },
+  "syntheticRetrievalMediaTargetIdLabel": {
+    "message": "Relevant media ID"
+  },
+  "syntheticRetrievalMediaTargetGradeLabel": {
+    "message": "Media grade"
+  },
+  "syntheticRetrievalMediaTargetsLabel": {
+    "message": "Relevant media IDs"
+  },
+  "syntheticRetrievalNoteTargetIdLabel": {
+    "message": "Relevant note ID"
+  },
+  "syntheticRetrievalNoteTargetGradeLabel": {
+    "message": "Note grade"
+  },
+  "syntheticRetrievalNoteTargetsLabel": {
+    "message": "Relevant note IDs"
+  },
+  "syntheticRetrievalChunkTargetsLabel": {
+    "message": "Relevant chunk IDs"
+  },
+  "syntheticRetrievalReadyHint": {
+    "message": "Generation is ready once you have filled the preferred examples."
+  },
+  "syntheticRetrievalReadyMissingScope": {
+    "message": "Add at least one media ID or note ID before generating drafts."
+  },
+  "syntheticRetrievalGenerateCta": {
+    "message": "Generate synthetic drafts"
+  },
+  "syntheticAnswerGenerationTitle": {
+    "message": "Synthetic generation"
+  },
+  "syntheticAnswerTotalCountLabel": {
+    "message": "Total draft set size"
+  },
+  "syntheticAnswerTotalCountHelp": {
+    "message": "This is the total draft set size, including preferred real examples and synthetic fill."
+  },
+  "syntheticAnswerAnchorSummaryLabel": {
+    "message": "Current answer-quality anchor"
+  },
+  "syntheticAnswerAnchorSummaryDescriptionFixed": {
+    "message": "Fixed-context mode using {{anchor}}"
+  },
+  "syntheticAnswerAnchorSummaryDescriptionLive": {
+    "message": "Live end-to-end mode using {{anchor}}"
+  },
+  "syntheticAnswerRealExamplesLabel": {
+    "message": "Current dataset samples used as real examples"
+  },
+  "syntheticAnswerInlineRealExamplesLabel": {
+    "message": "Real examples"
+  },
+  "syntheticAnswerRealExampleTitle": {
+    "message": "Real example {{index}}"
+  },
+  "syntheticAnswerNoRealExamples": {
+    "message": "No dataset samples are available yet."
+  },
+  "syntheticAnswerAddRealExampleCta": {
+    "message": "Add real example"
+  },
+  "syntheticAnswerSeedExamplesLabel": {
+    "message": "Seed examples"
+  },
+  "syntheticAnswerAddSeedExampleCta": {
+    "message": "Add seed example"
+  },
+  "syntheticAnswerSeedExampleTitle": {
+    "message": "Seed example {{index}}"
+  },
+  "syntheticAnswerRemoveExampleCta": {
+    "message": "Remove"
+  },
+  "syntheticAnswerQueryLabel": {
+    "message": "Query"
+  },
+  "syntheticAnswerExpectedBehaviorLabel": {
+    "message": "Expected behavior"
+  },
+  "syntheticAnswerReferenceAnswerLabel": {
+    "message": "Reference answer"
+  },
+  "syntheticAnswerRetrievedContextsLabel": {
+    "message": "Retrieved contexts"
+  },
+  "syntheticAnswerReadyHint": {
+    "message": "Generation is ready once your preferred examples and anchor are set."
+  },
+  "syntheticAnswerReadyMissingAnchor": {
+    "message": "Add a context snapshot or retrieval baseline before generating drafts."
+  },
+  "syntheticAnswerGenerateCta": {
+    "message": "Generate synthetic drafts"
+  },
+  "recipeSyntheticReviewRetrievalCta": {
+    "message": "Review synthetic retrieval drafts"
+  },
+  "recipeSyntheticReviewAnswerQualityCta": {
+    "message": "Review synthetic answer-quality drafts"
+  },
+  "recipeFailureExamplesTitle": {
+    "message": "Failure examples"
+  },
+  "recipeFailureQueryLabel": {
+    "message": "Query"
+  },
+  "recipeFailureExpectedBehaviorLabel": {
+    "message": "Expected behavior"
+  },
+  "recipeFailureAnswerLabel": {
+    "message": "Candidate answer"
+  },
+  "recipeFailureReferenceLabel": {
+    "message": "Reference answer"
   }
 }

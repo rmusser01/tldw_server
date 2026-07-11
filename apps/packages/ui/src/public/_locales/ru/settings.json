@@ -3373,5 +3373,74 @@
   },
   "dataManagement_navTitle": {
     "message": "Управление данными"
+  },
+  "navigation_setupRecovery": {
+    "message": "Настройка и восстановление"
+  },
+  "navigation_preferencesWorkflow": {
+    "message": "Предпочтения и рабочий процесс"
+  },
+  "navigation_dataAdmin": {
+    "message": "Данные и администрирование"
+  },
+  "preferencesSettings_navTitle": {
+    "message": "Предпочтения"
+  },
+  "preferencesSettings_title": {
+    "message": "Общие предпочтения"
+  },
+  "setupRecovery_title": {
+    "message": "Настройка и восстановление"
+  },
+  "quickIngestSettings_ocrDefaults_title": {
+    "message": "Настройки OCR по умолчанию"
+  },
+  "quickIngestSettings_ocrDefaults_description": {
+    "message": "Используется в потоках импорта, которые извлекают текст из изображений или сканированных документов."
+  },
+  "sidepanelSettings_shortcuts_title": {
+    "message": "Ярлыки настроек"
+  },
+  "sidepanelSettings_shortcuts_description": {
+    "message": "Перейдите на полную страницу настроек, которая управляет этим изменением."
+  },
+  "sidepanelSettings_shortcuts_setupRecovery_label": {
+    "message": "Настройка и восстановление"
+  },
+  "sidepanelSettings_shortcuts_setupRecovery_description": {
+    "message": "Подключение, авторизация, ключи провайдеров, модели и диагностика."
+  },
+  "sidepanelSettings_shortcuts_preferences_label": {
+    "message": "Предпочтения"
+  },
+  "sidepanelSettings_shortcuts_preferences_description": {
+    "message": "Язык, уведомления, персона, обучение и веб-поиск."
+  },
+  "sidepanelSettings_shortcuts_ui_label": {
+    "message": "Настройка интерфейса"
+  },
+  "sidepanelSettings_shortcuts_ui_description": {
+    "message": "Тема, ярлыки, параметры отображения и визуальное поведение."
+  },
+  "sidepanelSettings_shortcuts_dataAdmin_label": {
+    "message": "Данные и администрирование"
+  },
+  "sidepanelSettings_shortcuts_dataAdmin_description": {
+    "message": "Управление данными, модерация, оценки и инструменты администратора."
+  },
+  "sidepanelSettings_shortcuts_serverAuth_label": {
+    "message": "Сервер и авторизация"
+  },
+  "sidepanelSettings_shortcuts_serverAuth_description": {
+    "message": "Изменить URL сервера или API-ключ."
+  },
+  "sidepanelSettings_shortcuts_health_label": {
+    "message": "Полная диагностика"
+  },
+  "sidepanelSettings_shortcuts_health_description": {
+    "message": "Открыть подробные проверки сервера и подсистем."
+  },
+  "sidepanelSettings_local_title": {
+    "message": "Поведение боковой панели"
   }
 }

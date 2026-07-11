@@ -1324,5 +1324,8 @@
   },
   "mediaPage_presetBulletedNotes": {
     "message": "Bulleted Notes"
+  },
+  "mediaPage_analysisProviderRequired": {
+    "message": "Vælg en analyseudbyder, og prøv analysen igen."
   }
 }

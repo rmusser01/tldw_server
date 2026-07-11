@@ -1001,18 +1001,6 @@
   "actor_presetPlaceholder": {
     "message": "ഒരു പ്രിസെറ്റ് തിരഞ്ഞെടുക്കുക"
   },
-  "actor_preset.sliceOfLife": {
-    "message": "ദൈനംദിന ജീവിതം"
-  },
-  "actor_preset.dungeonCrawl": {
-    "message": "ഡഞ്ചൻ ക്രാൾ"
-  },
-  "actor_preset.romance": {
-    "message": "റൊമാൻസ്"
-  },
-  "actor_preset.workSession": {
-    "message": "ജോലി സെഷൻ"
-  },
   "actor_applyPreset": {
     "message": "പ്രയോഗിക്കുക"
   },
@@ -1033,15 +1021,6 @@
   },
   "actor_templateModeHelp": {
     "message": "Actor സജീവ സീൻ ടെംപ്ലേറ്റുകളുമായി എങ്ങനെ ഇടപെടണമെന്ന് നിയന്ത്രിക്കുന്നു. മർജ് ഇരട്ടെയും നിലനിർത്തും; ഓവർറൈഡ് Actor ഒവർലാപ്പ് ചെയ്യുന്ന ഫീൽഡുകൾ മാറ്റാൻ അനുവദിക്കും; ഇഗ്നോർ ടെംപ്ലേറ്റുകൾ സജീവമായാൽ Actor ഒഴിവാക്കും."
-  },
-  "actor_templateMode.merge": {
-    "message": "ടെംപ്ലേറ്റുകളുമായി മർജ് ചെയ്യുക"
-  },
-  "actor_templateMode.override": {
-    "message": "ടെംപ്ലേറ്റുകൾ ഓവർറൈഡ് ചെയ്യുക"
-  },
-  "actor_templateMode.ignore": {
-    "message": "ടെംപ്ലേറ്റുകൾ സജീവമാകുമ്പോൾ ഇഗ്നോർ ചെയ്യുക"
   },
   "actor_bladeAspectsTitle": {
     "message": "ഘടകങ്ങൾ"
@@ -1465,5 +1444,29 @@
   },
   "acp_workspace_title": {
     "message": "വർക്ക്സ്പേസ് ടെർമിനൽ"
+  },
+  "tts_routeTitle": {
+    "message": "ടെക്സ്റ്റ് ടു സ്പീച്ച്"
+  },
+  "actor_preset_sliceOfLife": {
+    "message": "ദൈനംദിന ജീവിതം"
+  },
+  "actor_preset_dungeonCrawl": {
+    "message": "ഡഞ്ചൻ ക്രാൾ"
+  },
+  "actor_preset_romance": {
+    "message": "റൊമാൻസ്"
+  },
+  "actor_preset_workSession": {
+    "message": "ജോലി സെഷൻ"
+  },
+  "actor_templateMode_merge": {
+    "message": "ടെംപ്ലേറ്റുകളുമായി മർജ് ചെയ്യുക"
+  },
+  "actor_templateMode_override": {
+    "message": "ടെംപ്ലേറ്റുകൾ ഓവർറൈഡ് ചെയ്യുക"
+  },
+  "actor_templateMode_ignore": {
+    "message": "ടെംപ്ലേറ്റുകൾ സജീവമാകുമ്പോൾ ഇഗ്നോർ ചെയ്യുക"
   }
 }

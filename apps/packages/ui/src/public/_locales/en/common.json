@@ -1417,5 +1417,14 @@
   },
   "commandPalette_goToPrompts": {
     "message": "Go to Prompts"
+  },
+  "requestDetails": {
+    "message": "Request details"
+  },
+  "diagnostics": {
+    "message": "Diagnostics"
+  },
+  "knowledgeSidebar_title": {
+    "message": "Knowledge history"
   }
 }

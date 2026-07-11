@@ -636,10 +636,10 @@
     "message": "Notes"
   },
   "rag_sources_characters": {
-    "message": "Story Characters"
+    "message": "Characters"
   },
   "rag_sources_chats": {
-    "message": "Conversations"
+    "message": "Chats"
   },
   "rag_sources_kanban": {
     "message": "Task Boards"
@@ -1452,12 +1452,7 @@
     "message": "No core states available."
   },
   "personaGarden_visuals_builder_configure_animationLabel": {
-    "message": "$state$ animation",
-    "placeholders": {
-      "state": {
-        "content": "$1"
-      }
-    }
+    "message": "{{state}} animation"
   },
   "personaGarden_visuals_builder_configure_requiredTag": {
     "message": "required"
@@ -1509,5 +1504,329 @@
   },
   "personaGarden_visuals_builder_configure_advancedHint": {
     "message": "Use the advanced manifest controls below for inline edits to animations, fallbacks, and trigger rows."
+  },
+  "header_openFullChatWebui": {
+    "message": "Open full chat in WebUI"
+  },
+  "header_openFullChatWebuiDescription": {
+    "message": "Opens /chat in a new tab. Use Continue in WebUI from the composer tools to carry a draft or page context."
+  },
+  "header_openFullChatWebuiRouteOnlyDescription": {
+    "message": "Opens /chat in a new tab. Use Continue in WebUI from the composer tools to carry a draft or page context."
+  },
+  "flashcards_opening": {
+    "message": "Opening Flashcards"
+  },
+  "flashcards_openedInTab": {
+    "message": "Flashcards opens in the full extension workspace so review, import, and deck management have enough room."
+  },
+  "flashcards_openAgain": {
+    "message": "Open Flashcards"
+  },
+  "controlRow_openCharacterChatInFullUI": {
+    "message": "Open Character Chat in full app"
+  },
+  "controlRow_openFullAppDescription": {
+    "message": "Opens /chat in a new tab. Use Continue in WebUI to carry a draft or page context."
+  },
+  "controlRow_openRolePlayFullAppDescription": {
+    "message": "Opens /chat in a new tab with the active role-play route. Use Continue in WebUI to carry a draft or page context."
+  },
+  "clipper_enrichmentFailed": {
+    "message": "The clip was saved, but clip analysis could not be stored."
+  },
+  "clipper_analyzeNowLabel": {
+    "message": "Analyze now"
+  },
+  "knowledge_scopeNote": {
+    "message": "Search and insert context for this chat. Open /knowledge for the full QA workspace."
+  },
+  "personaGarden_visuals_importPreviewUnsupportedExtension": {
+    "message": "Choose a {{extension}} archive exported from Persona Visual Packs."
+  },
+  "personaGarden_visuals_importPreviewUnsupportedMimeType": {
+    "message": "Choose a Persona Visual pack archive with a supported zip media type."
+  },
+  "personaGarden_visuals_builder_eyebrow": {
+    "message": "Persona visuals"
+  },
+  "personaGarden_visuals_builder_description": {
+    "message": "Choose, import, review, configure, and activate a visual buddy for {{persona}}."
+  },
+  "personaGarden_visuals_builder_stepperAria": {
+    "message": "Buddy builder steps"
+  },
+  "personaGarden_visuals_builder_bundledSourceHelp": {
+    "message": "Start from one of the reviewed Basic defaults."
+  },
+  "personaGarden_visuals_builder_codexImportHelp": {
+    "message": "Reuse a Codex-compatible pet archive."
+  },
+  "personaGarden_visuals_builder_codexImportDetail": {
+    "message": "Use a Codex/Petdex .zip with pet.json or petjson.json and a compatible spritesheet."
+  },
+  "personaGarden_visuals_builder_nativeImportHelp": {
+    "message": "Restore or move a native Persona Visual archive."
+  },
+  "personaGarden_visuals_builder_nativeImportDetail": {
+    "message": "Use a .tldw-persona-vpack archive exported from Persona Visual Packs."
+  },
+  "personaGarden_visuals_builder_librarySource": {
+    "message": "Use library pack"
+  },
+  "personaGarden_visuals_builder_librarySourceHelp": {
+    "message": "Attach a saved visual pack already in your library."
+  },
+  "personaGarden_visuals_builder_duplicateSource": {
+    "message": "Duplicate from persona"
+  },
+  "personaGarden_visuals_builder_duplicateSourceHelp": {
+    "message": "Copy a pack from another persona into this one."
+  },
+  "personaGarden_visuals_builder_blankSource": {
+    "message": "Start blank"
+  },
+  "personaGarden_visuals_builder_blankSourceHelp": {
+    "message": "Create a draft when the buddy needs custom states."
+  },
+  "personaGarden_visuals_builder_blankHelp": {
+    "message": "Blank drafts use the existing title and create-draft controls below."
+  },
+  "personaGarden_visuals_builder_libraryHelp": {
+    "message": "Use the existing library panel below to attach or duplicate saved packs."
+  },
+  "personaGarden_visuals_builder_duplicateHelp": {
+    "message": "Use the existing duplicate controls below to copy a pack from another persona."
+  },
+  "personaGarden_visuals_builder_defaultCatalog": {
+    "message": "Choose a bundled default"
+  },
+  "personaGarden_visuals_builder_basicTier": {
+    "message": "Basic defaults"
+  },
+  "personaGarden_visuals_builder_intermediateTier": {
+    "message": "Intermediate production packets"
+  },
+  "personaGarden_visuals_builder_intricateTier": {
+    "message": "Intricate production packets"
+  },
+  "personaGarden_visuals_builder_recommendedTag": {
+    "message": "recommended"
+  },
+  "personaGarden_visuals_builder_recommendedStarter": {
+    "message": "Recommended"
+  },
+  "personaGarden_visuals_builder_productionPacket": {
+    "message": "Production packet"
+  },
+  "personaGarden_visuals_builder_copyRecommended": {
+    "message": "Copy as draft"
+  },
+  "personaGarden_visuals_builder_copyPacket": {
+    "message": "Copy production packet"
+  },
+  "personaGarden_visuals_builder_activePackFallback": {
+    "message": "Active visual buddy"
+  },
+  "personaGarden_visuals_builder_packCount": {
+    "message": "{{count}} packs"
+  },
+  "personaGarden_visuals_builder_review_needsReviewTag": {
+    "message": "needs review"
+  },
+  "personaGarden_visuals_builder_review_previewHeading": {
+    "message": "Draft preview"
+  },
+  "personaGarden_visuals_builder_review_previewFallback": {
+    "message": "Buddy preview"
+  },
+  "personaGarden_visuals_builder_review_atlasHeading": {
+    "message": "Atlas metadata"
+  },
+  "personaGarden_visuals_builder_review_requiredStates": {
+    "message": "Required states"
+  },
+  "personaGarden_visuals_builder_review_movementStates": {
+    "message": "Movement states"
+  },
+  "personaGarden_visuals_builder_review_customStates": {
+    "message": "Custom states"
+  },
+  "personaGarden_visuals_builder_review_warnings": {
+    "message": "Warnings"
+  },
+  "personaGarden_visuals_builder_review_blockers": {
+    "message": "Activation blockers"
+  },
+  "personaGarden_visuals_importPreviewTerminalStatus": {
+    "message": "Import preview {{status}} during {{stage}}."
+  },
+  "personaGarden_visuals_importPreviewBlocked": {
+    "message": "Import preview completed with blockers. Review diagnostics before committing."
+  },
+  "personaGarden_visuals_importPreviewCompleted": {
+    "message": "Import preview completed. Review the draft plan before committing."
+  },
+  "personaGarden_visuals_importPreviewQueued": {
+    "message": "Import preview queued. Refresh to check validation status."
+  },
+  "personaGarden_visuals_importPreviewProcessing": {
+    "message": "Import preview is processing{{stageSuffix}}"
+  },
+  "personaGarden_visuals_importPreviewStatus": {
+    "message": "Import preview {{status}}: {{stage}}"
+  },
+  "personaGarden_visuals_importPreviewQueuedStatus": {
+    "message": "Import preview queued."
+  },
+  "personaGarden_visuals_importCommitTerminalStatus": {
+    "message": "Import commit {{status}} during {{stage}}."
+  },
+  "personaGarden_visuals_importCommitCompleted": {
+    "message": "Import commit completed. Review and activate the new draft when ready."
+  },
+  "personaGarden_visuals_importCommitQueued": {
+    "message": "Import commit queued. Refresh to check draft creation status."
+  },
+  "personaGarden_visuals_importCommitProcessing": {
+    "message": "Import commit is processing{{stageSuffix}}"
+  },
+  "personaGarden_visuals_importCommitStatus": {
+    "message": "Import commit {{status}}: {{stage}}"
+  },
+  "personaGarden_visuals_importCommitQueuedStatus": {
+    "message": "Import commit queued. Imported packs remain drafts until activated."
+  },
+  "personaGarden_visuals_starterHeading": {
+    "message": "Default starter pack"
+  },
+  "personaGarden_visuals_starterDescription": {
+    "message": "Copy a bundled sprite-frame pack as a draft, then review and activate it."
+  },
+  "personaGarden_visuals_starterCopiedDraft": {
+    "message": "Starter pack copied as a draft. Review and activate it when ready."
+  },
+  "personaGarden_visuals_starterCopyError": {
+    "message": "Failed to copy bundled starter pack."
+  },
+  "personaGarden_visuals_starterSelectLabel": {
+    "message": "Starter"
+  },
+  "personaGarden_visuals_starterDraftTitleLabel": {
+    "message": "Draft title"
+  },
+  "personaGarden_visuals_starterCopyAsDraft": {
+    "message": "Copy as draft"
+  },
+  "personaGarden_visuals_starterAssetUnit": {
+    "message": "assets"
+  },
+  "personaGarden_visuals_starterBytesUnit": {
+    "message": "bytes"
+  },
+  "personaGarden_visuals_setup_activeDescription": {
+    "message": "A visual buddy is active for this persona."
+  },
+  "personaGarden_visuals_setup_activeTag": {
+    "message": "active"
+  },
+  "personaGarden_visuals_setup_blankDescription": {
+    "message": "Start blank when this persona needs custom states, poses, or assets instead of a bundled starter."
+  },
+  "personaGarden_visuals_setup_blankTag": {
+    "message": "blank"
+  },
+  "personaGarden_visuals_setup_bundledDefault": {
+    "message": "Bundled default"
+  },
+  "personaGarden_visuals_setup_catalogUnavailable": {
+    "message": "Starter catalog unavailable."
+  },
+  "personaGarden_visuals_setup_checkingDefaults": {
+    "message": "Checking bundled defaults."
+  },
+  "personaGarden_visuals_setup_chooseAnotherDefault": {
+    "message": "Choose another default"
+  },
+  "personaGarden_visuals_setup_compactEyebrow": {
+    "message": "Visual buddy"
+  },
+  "personaGarden_visuals_setup_compactHelp": {
+    "message": "Open the Buddy builder in Persona Garden to choose, import, review, and activate visuals."
+  },
+  "personaGarden_visuals_setup_copyTag": {
+    "message": "copy"
+  },
+  "personaGarden_visuals_setup_defaultCountMany": {
+    "message": "{{count}} bundled defaults available."
+  },
+  "personaGarden_visuals_setup_defaultCountOne": {
+    "message": "1 bundled default available."
+  },
+  "personaGarden_visuals_setup_defaultCountUnknown": {
+    "message": "Bundled default count unavailable."
+  },
+  "personaGarden_visuals_setup_defaultCountZero": {
+    "message": "No bundled defaults available."
+  },
+  "personaGarden_visuals_setup_defaultFallbackDescription": {
+    "message": "Copy the recommended starter as a draft."
+  },
+  "personaGarden_visuals_setup_draftsDescription": {
+    "message": "Draft visual packs are ready to review. Activate one when it matches this persona."
+  },
+  "personaGarden_visuals_setup_emptyDescription": {
+    "message": "No visual buddy is active for this persona. Choose a starter path to create an inactive pack for review."
+  },
+  "personaGarden_visuals_setup_emptyPack": {
+    "message": "Empty pack"
+  },
+  "personaGarden_visuals_setup_firstRunTag": {
+    "message": "first run"
+  },
+  "personaGarden_visuals_setup_heading": {
+    "message": "Visual buddy setup"
+  },
+  "personaGarden_visuals_setup_importDescription": {
+    "message": "Import a visual pack through the existing preview flow, then review and enable it when ready."
+  },
+  "personaGarden_visuals_setup_importPack": {
+    "message": "Import pack"
+  },
+  "personaGarden_visuals_setup_loadingDefaults": {
+    "message": "Loading bundled defaults."
+  },
+  "personaGarden_visuals_setup_openVisuals": {
+    "message": "Open Buddy builder"
+  },
+  "personaGarden_visuals_setup_optionalTag": {
+    "message": "optional"
+  },
+  "personaGarden_visuals_setup_portableArchive": {
+    "message": "Portable archive"
+  },
+  "personaGarden_visuals_setup_previewTag": {
+    "message": "preview"
+  },
+  "personaGarden_visuals_setup_recommendedDefault": {
+    "message": "Recommended default"
+  },
+  "personaGarden_visuals_setup_reviewTag": {
+    "message": "review"
+  },
+  "personaGarden_visuals_setup_startBlank": {
+    "message": "Start blank"
+  },
+  "personaGarden_visuals_setup_useDefault": {
+    "message": "Use default"
+  },
+  "persona_setupLiveDetourNotice": {
+    "message": "Finish this live test, then return to setup."
+  },
+  "persona_setupVisualDetourNotice": {
+    "message": "Review visual setup, then return to assistant setup."
+  },
+  "persona_returnToSetup": {
+    "message": "Return to setup"
   }
 }

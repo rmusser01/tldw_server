@@ -5839,5 +5839,122 @@
   },
   "dataManagement_description": {
     "message": "Export, import, sync, or reset local extension and WebUI data."
+  },
+  "navigation_setupRecovery": {
+    "message": "Setup & Recovery"
+  },
+  "navigation_preferencesWorkflow": {
+    "message": "Preferences & Workflow"
+  },
+  "navigation_dataAdmin": {
+    "message": "Data & Administration"
+  },
+  "preferencesSettings_navTitle": {
+    "message": "Preferences"
+  },
+  "preferencesSettings_title": {
+    "message": "General preferences"
+  },
+  "setupRecovery_title": {
+    "message": "Setup & Recovery"
+  },
+  "chatbooksPlayground_exportTitle": {
+    "message": "Create backup"
+  },
+  "chatbooksPlayground_exportMode": {
+    "message": "Export mode"
+  },
+  "chatbooksPlayground_selectiveMode": {
+    "message": "Selective export"
+  },
+  "chatbooksPlayground_backupAllTitle": {
+    "message": "Backup all account data"
+  },
+  "chatbooksPlayground_backupAllDescription": {
+    "message": "Includes all restorable account records, stored media artifacts, embeddings, generated content, and pointer metadata tracked by tldw."
+  },
+  "chatbooksPlayground_scopeLoadError": {
+    "message": "Unable to load backup scope"
+  },
+  "chatbooksPlayground_scopeTotal": {
+    "message": "Total items"
+  },
+  "chatbooksPlayground_scopePointerOnly": {
+    "message": "Pointer-only items"
+  },
+  "chatbooksPlayground_scopeSensitive": {
+    "message": "Sensitive categories"
+  },
+  "chatbooksPlayground_scopeWarnings": {
+    "message": "Warnings"
+  },
+  "chatbooksPlayground_scopeEstimatedSize": {
+    "message": "Estimated size"
+  },
+  "chatbooksPlayground_scopeLoading": {
+    "message": "Loading backup scope..."
+  },
+  "chatbooksPlayground_scopeEmpty": {
+    "message": "Backup scope is not loaded yet."
+  },
+  "chatbooksPlayground_archiveRestoreDefaultsDescription": {
+    "message": "Chatbook archives restore all restorable archive data by default, including stored media artifacts and embeddings when present."
+  },
+  "chatbooksPlayground_jobArchiveSize": {
+    "message": "Archive size"
+  },
+  "chatbooksPlayground_notVerified": {
+    "message": "Not verified"
+  },
+  "quickIngestSettings_ocrDefaults_title": {
+    "message": "OCR defaults"
+  },
+  "quickIngestSettings_ocrDefaults_description": {
+    "message": "Used by ingest flows that extract text from images or scanned documents."
+  },
+  "sidepanelSettings_shortcuts_title": {
+    "message": "Settings shortcuts"
+  },
+  "sidepanelSettings_shortcuts_description": {
+    "message": "Jump to the full settings page that owns the change."
+  },
+  "sidepanelSettings_shortcuts_setupRecovery_label": {
+    "message": "Setup & Recovery"
+  },
+  "sidepanelSettings_shortcuts_setupRecovery_description": {
+    "message": "Connection, auth, provider keys, models, and diagnostics."
+  },
+  "sidepanelSettings_shortcuts_preferences_label": {
+    "message": "Preferences"
+  },
+  "sidepanelSettings_shortcuts_preferences_description": {
+    "message": "Language, notifications, persona, tutorials, and web search."
+  },
+  "sidepanelSettings_shortcuts_ui_label": {
+    "message": "UI customization"
+  },
+  "sidepanelSettings_shortcuts_ui_description": {
+    "message": "Theme, shortcuts, display defaults, and visual behavior."
+  },
+  "sidepanelSettings_shortcuts_dataAdmin_label": {
+    "message": "Data & Administration"
+  },
+  "sidepanelSettings_shortcuts_dataAdmin_description": {
+    "message": "Data management, moderation, evaluations, and admin tools."
+  },
+  "sidepanelSettings_shortcuts_serverAuth_label": {
+    "message": "Server & auth"
+  },
+  "sidepanelSettings_shortcuts_serverAuth_description": {
+    "message": "Change the server URL or API key."
+  },
+  "sidepanelSettings_shortcuts_health_label": {
+    "message": "Full diagnostics"
+  },
+  "sidepanelSettings_shortcuts_health_description": {
+    "message": "Open detailed server and subsystem checks."
+  },
+  "sidepanelSettings_local_title": {
+    "message": "Sidepanel behavior"
   }
 }

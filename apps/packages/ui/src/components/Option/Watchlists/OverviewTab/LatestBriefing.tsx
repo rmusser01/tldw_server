@@ -376,6 +376,7 @@ export const LatestBriefing: React.FC<LatestBriefingProps> = ({
     ? t("watchlists:overview.latest.nouns.showNotes", "show notes")
     : t("watchlists:overview.latest.nouns.report", "report")
   const audioReady = Boolean(audioArtifactPath && audioObjectUrl)
+  const audioUnavailable = Boolean(artifactErrorKind)
   const noncurrentAudioStatus = projectedAudio?.status === "completed" && !hasCurrentAudio
     ? projectedAudio.stale
       ? ["stale", "Stale"]
@@ -569,9 +570,7 @@ export const LatestBriefing: React.FC<LatestBriefingProps> = ({
         <div className="min-w-0 space-y-5">
           <header className="space-y-1">
             <h2 id={`latest-briefing-heading-${projection.occurrence_id}`} className="text-lg font-semibold text-text">
-              {outcomeNounKey === "episode"
-                ? t("watchlists:overview.latest.heading.episode", "Latest episode")
-                : t("watchlists:overview.latest.heading.briefing", "Latest briefing")}
+              {t("watchlists:overview.latest.heading.briefing", "Latest briefing")}
             </h2>
             {showName && <p className="break-words text-base font-semibold text-text">{showName}</p>}
             {outputTitle && outputTitle !== showName && (
@@ -708,12 +707,14 @@ export const LatestBriefing: React.FC<LatestBriefingProps> = ({
             )}
             <div className="flex items-center justify-between gap-3 border-b border-border py-2">
               <span className="inline-flex min-w-0 items-center gap-2"><Headphones className="h-4 w-4 shrink-0" />{t("watchlists:overview.latest.audio", "Audio")}</span>
-              <span className={audioFailedStage ? "text-danger" : hasCurrentAudio ? "text-success" : "text-text-muted"}>
+              <span className={audioFailedStage || audioUnavailable ? "text-danger" : audioReady ? "text-success" : "text-text-muted"}>
                 {audioFailedStage
                   ? t("watchlists:overview.latest.audioFailed", "Audio failed")
+                  : audioUnavailable
+                    ? t("watchlists:overview.latest.status.unavailable", "Unavailable")
                   : noncurrentAudioStatus
                     ? t(`watchlists:overview.latest.status.${noncurrentAudioStatus[0]}`, noncurrentAudioStatus[1])
-                    : hasCurrentAudio
+                    : audioReady
                     ? t("watchlists:overview.latest.ready", "Ready")
                     : statusLabel(projection.audio?.status || projection.stages.generate_audio?.status || "not_started", t)}
               </span>
@@ -819,7 +820,7 @@ export const LatestBriefing: React.FC<LatestBriefingProps> = ({
               {t("watchlists:overview.latest.actions.regenerateAudio", "Regenerate audio")}
             </Button>
           )}
-          {audioArtifactPath && (
+          {audioArtifactPath && !audioUnavailable && (
             <Button
               block
               className={ACTION_CLASS}

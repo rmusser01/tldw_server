@@ -239,9 +239,6 @@
   "header_omniSearchStartChat": {
     "message": "شروع گفتگوی جدید «{{query}}»"
   },
-  "header_connectionCard.connectedCaption": {
-    "message": "گفتگو و ابزارها اکنون در گزینه‌ها و نوار کناری در دسترس‌اند."
-  },
   "header_quickIngestQueuedAria": {
     "message": "{{label}} — {{count}} مورد در صف — برای بررسی و پردازش کلیک کنید"
   },
@@ -2425,5 +2422,8 @@
   },
   "repo2txt_status_generated": {
     "message": "Generated output for {{count}} files ({{tokenCount}} tokens)."
+  },
+  "header_connectionCard_connectedCaption": {
+    "message": "گفتگو و ابزارها اکنون در گزینه‌ها و نوار کناری در دسترس‌اند."
   }
 }

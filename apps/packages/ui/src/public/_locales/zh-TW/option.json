@@ -239,9 +239,6 @@
   "header_omniSearchStartChat": {
     "message": "開始新的聊天\"{{query}}\""
   },
-  "header_connectionCard.connectedCaption": {
-    "message": "現在可以在選項頁和側邊欄中使用聊天和工具。"
-  },
   "header_quickIngestQueuedAria": {
     "message": "{{label}} — 已排隊 {{count}} 個項目 — 按一下以檢視並處理"
   },
@@ -2580,7 +2577,7 @@
     "message": "家庭安全控制與伺服器防護欄集中於一處。"
   },
   "header_researchWorkspace": {
-    "message": "Research Workspace"
+    "message": "研究工作區"
   },
   "omniSearch_searchError": {
     "message": "搜尋失敗。請重試。"
@@ -2634,7 +2631,7 @@
     "message": "Document Workspace"
   },
   "header_modelPlayground": {
-    "message": "Model Playground"
+    "message": "模型遊樂場"
   },
   "header_workflowEditor": {
     "message": "Workflow Editor"
@@ -2722,5 +2719,8 @@
   },
   "repo2txt_status_generated": {
     "message": "Generated output for {{count}} files ({{tokenCount}} tokens)."
+  },
+  "header_connectionCard_connectedCaption": {
+    "message": "現在可以在選項頁和側邊欄中使用聊天和工具。"
   }
 }
