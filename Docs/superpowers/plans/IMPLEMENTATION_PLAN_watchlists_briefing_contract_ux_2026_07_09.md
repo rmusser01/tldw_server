@@ -877,7 +877,7 @@ git commit -m "feat: support source-grounded audio programs"
 
 **Tests:** Flow behavior, presets, receipt, sample/full test, latest states, playback/recovery, live announcements, multiple accessible names, narrow layouts, RTL, long copy, and focus.
 
-**Status:** In Progress
+**Status:** Complete
 
 ### Task 7: Reshape setup into Sources, Cadence, Briefing, Delivery, Test
 
@@ -1063,7 +1063,7 @@ git commit -m "feat: surface latest watchlists briefing"
 - Produces record-specific names for every source/item/output action and explicit names for global switches and icon buttons.
 - Preserves current routes, deep links, and advanced views.
 
-- [ ] **Step 1: Write failing multi-record accessible-name tests**
+- [x] **Step 1: Write failing multi-record accessible-name tests**
 
 Render at least BBC, NPR, and Guardian records with the real i18n setup, then assert:
 
@@ -1079,7 +1079,7 @@ expect(screen.getByRole("button", { name: "Open update: Guardian title" })).toBe
 
 Also assert unique names for Show all views, health-bar toggle, report output, delivery, audio, preview actions, and close/open buttons.
 
-- [ ] **Step 2: Verify RED before changing labels**
+- [x] **Step 2: Verify RED before changing labels**
 
 ```bash
 ./node_modules/.bin/vitest run ../packages/ui/src/components/Option/Watchlists/SourcesTab/__tests__/SourcesTab.advanced-details.test.tsx ../packages/ui/src/components/Option/Watchlists/ItemsTab/__tests__/ItemsTab.accessibility-baseline.test.tsx ../packages/ui/src/components/Option/Watchlists/__tests__/WatchlistsPlaygroundPage.accessibility-hardening.test.tsx
@@ -1087,19 +1087,19 @@ Also assert unique names for Show all views, health-bar toggle, report output, d
 
 Expected: repeated or missing label expectations fail.
 
-- [ ] **Step 3: Fix labels at the record render boundary**
+- [x] **Step 3: Fix labels at the record render boundary**
 
 Use complete translated templates with each record’s stable name or title and do not close over a selected or first record. For icon buttons, include action and object. For global switches, use a visible label or `aria-labelledby` plus `aria-describedby` for consequence. Keep decorative icons hidden from assistive technology.
 
-- [ ] **Step 4: Distill the first viewport**
+- [x] **Step 4: Distill the first viewport**
 
 Keep selected watchlist identity, Latest briefing/episode, next run, and one primary setup/recovery action. Move documentation, tour, keyboard help, layout mode, and advanced diagnostics into Help or the command palette. Remove duplicate introductory copy and the separate Quick Setup card. Preserve deep-link targets and power-user access.
 
-- [ ] **Step 5: Fix responsive and type-ramp defects**
+- [x] **Step 5: Fix responsive and type-ramp defects**
 
 Replace the fixed 700 pixel output drawer with existing responsive drawer width helpers and a one-column narrow layout. Replace the `text-[10px]` attention badge with the closest existing caption token. Remove or document the detector false positives for the `<img` regex literal and standalone HTML template colors without changing valid parser/template behavior.
 
-- [ ] **Step 6: Verify focus, names, zoom, RTL, and extension width**
+- [x] **Step 6: Verify focus, names, zoom, RTL, and extension width**
 
 ```bash
 ./node_modules/.bin/vitest run ../packages/ui/src/components/Option/Watchlists/SourcesTab/__tests__/SourcesTab.advanced-details.test.tsx ../packages/ui/src/components/Option/Watchlists/ItemsTab/__tests__/ItemsTab.accessibility-baseline.test.tsx ../packages/ui/src/components/Option/Watchlists/OutputsTab/__tests__/OutputPreviewDrawer.focus-management.test.tsx ../packages/ui/src/components/Option/Watchlists/__tests__/WatchlistsPlaygroundPage.accessibility-hardening.test.tsx ../packages/ui/src/components/Option/Watchlists/ItemsTab/__tests__/ItemsTab.scale-responsive.test.tsx
@@ -1107,7 +1107,7 @@ Replace the fixed 700 pixel output drawer with existing responsive drawer width 
 
 Expected: all selected accessibility and responsive tests pass.
 
-- [ ] **Step 7: Run the Impeccable detector**
+- [x] **Step 7: Run the Impeccable detector**
 
 ```bash
 npx impeccable --json apps/packages/ui/src/components/Option/Watchlists
@@ -1115,7 +1115,7 @@ npx impeccable --json apps/packages/ui/src/components/Option/Watchlists
 
 Expected: no unresolved P0/P1 findings and no real type-ramp finding in the touched surface. Record parser/template false positives separately if the detector still reports them.
 
-- [ ] **Step 8: Commit Task 9**
+- [x] **Step 8: Commit Task 9**
 
 ```bash
 git add apps/packages/ui/src/components/Option/Watchlists/SourcesTab/SourcesTab.tsx apps/packages/ui/src/components/Option/Watchlists/ItemsTab/ItemsTab.tsx apps/packages/ui/src/components/Option/Watchlists/OutputsTab/OutputPreviewDrawer.tsx apps/packages/ui/src/components/Option/Watchlists/JobsTab/JobFormModal.tsx apps/packages/ui/src/components/Option/Watchlists/shared/WatchlistsHealthBar.tsx apps/packages/ui/src/components/Option/Watchlists/WatchlistsPlaygroundPage.tsx apps/packages/ui/src/components/Option/Watchlists/SourcesTab/__tests__/SourcesTab.advanced-details.test.tsx apps/packages/ui/src/components/Option/Watchlists/ItemsTab/__tests__/ItemsTab.accessibility-baseline.test.tsx apps/packages/ui/src/components/Option/Watchlists/OutputsTab/__tests__/OutputPreviewDrawer.focus-management.test.tsx apps/packages/ui/src/components/Option/Watchlists/__tests__/WatchlistsPlaygroundPage.accessibility-hardening.test.tsx
@@ -1130,7 +1130,7 @@ git commit -m "fix: harden watchlists accessibility and layout"
 
 **Tests:** Backend, frontend, typecheck, lint, builds, Playwright, CDP UAT, axe, Impeccable audit, Bandit, and manual UX checks.
 
-**Status:** Not Started
+**Status:** In Progress
 
 ### Task 10: Add acceptance coverage, run matched revisions, and polish
 
