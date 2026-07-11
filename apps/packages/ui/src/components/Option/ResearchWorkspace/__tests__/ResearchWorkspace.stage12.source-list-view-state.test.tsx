@@ -145,6 +145,8 @@ vi.mock("@/store/workspace", () => ({
       rightPaneCollapsed: boolean
       setLeftPaneCollapsed: (collapsed: boolean) => void
       setRightPaneCollapsed: (collapsed: boolean) => void
+      sourceSearchQuery: string
+      activeFolderId: string | null
       selectedSourceIds: string[]
       generatedArtifacts: Array<{ id: string }>
       sources: Array<{
@@ -185,6 +187,8 @@ vi.mock("@/store/workspace", () => ({
       rightPaneCollapsed: testState.rightPaneCollapsed,
       setLeftPaneCollapsed: testState.setLeftPaneCollapsed,
       setRightPaneCollapsed: testState.setRightPaneCollapsed,
+      sourceSearchQuery: testState.sourceSearchQuery,
+      activeFolderId: testState.activeFolderId,
       selectedSourceIds: testState.selectedSourceIds,
       generatedArtifacts: testState.generatedArtifacts,
       sources: testState.sources,
@@ -239,6 +243,7 @@ vi.mock("../SourcesPane", async () => {
   const { SourceViewControls } = await vi.importActual<
     typeof import("../SourcesPane/SourceViewControls")
   >("../SourcesPane/SourceViewControls")
+  const { useWorkspaceStore } = await import("@/store/workspace")
   return {
     SourcesPane: (props: {
       sourceListViewState?: SourceListViewState
@@ -249,6 +254,12 @@ vi.mock("../SourcesPane", async () => {
         typeof SourceViewControls
       >["onOpenOverlay"]
     }) => {
+      const observedSourceSearchQuery = useWorkspaceStore(
+        (state) => state.sourceSearchQuery
+      )
+      const observedActiveFolderId = useWorkspaceStore(
+        (state) => state.activeFolderId
+      )
       if (props.sourceSavedViewsController) {
         savedViewHarness.paneControllers.push(props.sourceSavedViewsController)
       }
@@ -268,6 +279,12 @@ vi.mock("../SourcesPane", async () => {
         </div>
         <div data-testid="source-list-expanded-state">
           {props.sourceListViewState?.expanded ? "expanded" : "collapsed"}
+        </div>
+        <div data-testid="workspace-source-search-state">
+          {observedSourceSearchQuery || "none"}
+        </div>
+        <div data-testid="workspace-active-folder-state">
+          {observedActiveFolderId || "none"}
         </div>
         <button
           type="button"
@@ -653,6 +670,12 @@ describe("ResearchWorkspace source list view state", () => {
     expect(screen.getByTestId("source-list-sort-state")).toHaveTextContent("name_asc")
     expect(screen.getByTestId("source-list-expanded-state")).toHaveTextContent(
       "expanded"
+    )
+    expect(screen.getByTestId("workspace-source-search-state")).toHaveTextContent(
+      "Alpha"
+    )
+    expect(screen.getByTestId("workspace-active-folder-state")).toHaveTextContent(
+      "folder-1"
     )
     expect(testState.sourceSearchQuery).toBe("Alpha")
     expect(testState.activeFolderId).toBe("folder-1")
