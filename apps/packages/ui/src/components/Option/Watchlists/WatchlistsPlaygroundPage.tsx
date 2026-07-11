@@ -84,6 +84,7 @@ import {
 import { trackWatchlistsOnboardingTelemetry } from "@/utils/watchlists-onboarding-telemetry"
 import { resolveWatchlistsIaExperimentRollout } from "@/utils/watchlists-ia-rollout"
 import { resolvePreferredWatchlistId } from "./watchlist-selection"
+import { restoreFocusToElement } from "./shared/focus-management"
 
 const RUN_NOTIFICATIONS_POLL_MS = 15_000
 const RUN_NOTIFICATIONS_PAGE_SIZE = 25
@@ -96,6 +97,7 @@ const GUIDED_TOUR_STORAGE_KEY = "watchlists:guided-tour:v1"
 const TEACH_POINTS_STORAGE_KEY = "watchlists:teach-points:v1"
 const SHOW_ALL_VIEWS_STORAGE_KEY = "watchlists:show-all-views:v1"
 const SECONDARY_EXPANDED_STORAGE_KEY = "watchlists:secondary-expanded:v1"
+const HELP_TRIGGER_ID = "watchlists-help-trigger"
 const SUCCESSFUL_RUN_STATUSES = new Set(["completed", "succeeded", "success", "done", "finished"])
 const TAB_PANEL_FALLBACK = (
   <div className="py-6 text-sm text-text-muted" data-testid="watchlists-tab-loading" />
@@ -473,6 +475,8 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
   const [settingsDrawerOpen, setSettingsDrawerOpen] = React.useState(false)
   const [commandPaletteOpen, setCommandPaletteOpen] = React.useState(false)
   const [shortcutsHelpOpen, setShortcutsHelpOpen] = React.useState(false)
+  const pendingHelpActionRef = useRef<(() => void) | null>(null)
+  const guidedTourRestoreFocusRef = useRef<HTMLElement | null>(null)
   const [setupWizardOpen, setSetupWizardOpen] = React.useState(false)
   const [watchlistFormOpen, setWatchlistFormOpen] = React.useState(false)
   const [watchlistFormMode, setWatchlistFormMode] = React.useState<WatchlistFormMode>("create")
@@ -482,6 +486,18 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
   const selectedWatchlistIdRef = useRef<number | null>(selectedWatchlistId)
   const loadWatchlistsRequestRef = useRef(0)
   selectedWatchlistIdRef.current = selectedWatchlistId
+
+  const closeHelpThen = useCallback((action: () => void) => {
+    pendingHelpActionRef.current = action
+    setShortcutsHelpOpen(false)
+  }, [])
+
+  const handleHelpAfterOpenChange = useCallback((open: boolean) => {
+    if (open) return
+    const action = pendingHelpActionRef.current
+    pendingHelpActionRef.current = null
+    action?.()
+  }, [])
   const selectedWatchlist = React.useMemo(
     () =>
       Array.isArray(watchlists)
@@ -693,6 +709,13 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
     }
     setActiveTab(key as typeof activeTab)
   }, [isConstrained, setActiveTab, showAllViews, iaExperimentEnabled])
+
+  const navigateFromHelp = useCallback((key: string) => {
+    closeHelpThen(() => {
+      navigateToTab(key)
+      restoreFocusToElement(document.getElementById(HELP_TRIGGER_ID))
+    })
+  }, [closeHelpThen, navigateToTab])
 
   // Refresh key — incrementing forces tab components to remount and refetch
   const [refreshKey, setRefreshKey] = React.useState(0)
@@ -1071,6 +1094,12 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
       step: toGuidedTourStep(guidedTourState.step)
     })
   }, [guidedTourState.step])
+
+  const handleGuidedTourAfterOpenChange = useCallback((open: boolean) => {
+    if (open) return
+    restoreFocusToElement(guidedTourRestoreFocusRef.current)
+    guidedTourRestoreFocusRef.current = null
+  }, [])
 
   const handleGuidedTourBack = useCallback(() => {
     const nextStep = clampTourStep(guidedTourState.step - 1)
@@ -2055,6 +2084,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
         </h1>
         <Tooltip title={t("watchlists:accessibilityHardening.help.open", "Open Watchlists help")}>
           <Button
+            id={HELP_TRIGGER_ID}
             type="text"
             className="min-h-11 min-w-11"
             icon={<HelpCircle className="h-5 w-5" aria-hidden />}
@@ -2152,6 +2182,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
       <Modal
         open={guidedTourOpen}
         onCancel={handleSkipGuidedTour}
+        afterOpenChange={handleGuidedTourAfterOpenChange}
         title={t("watchlists:guide.title", "Watchlists guided tour")}
         footer={(
           <div className="flex items-center justify-between gap-2">
@@ -2360,6 +2391,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
       <Modal
         open={shortcutsHelpOpen}
         onCancel={() => setShortcutsHelpOpen(false)}
+        afterOpenChange={handleHelpAfterOpenChange}
         title={t("watchlists:accessibilityHardening.help.title", "Watchlists help")}
         footer={null}
         width={isConstrained ? "100%" : 520}
@@ -2406,8 +2438,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
                   icon={<Plus className="h-4 w-4" aria-hidden />}
                   data-testid="watchlists-create-container"
                   onClick={() => {
-                    setShortcutsHelpOpen(false)
-                    openCreateWatchlistForm()
+                    closeHelpThen(openCreateWatchlistForm)
                   }}
                 >
                   {t("watchlists:containers.create", "Create Watchlist")}
@@ -2417,8 +2448,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
                   icon={<Pencil className="h-4 w-4" aria-hidden />}
                   data-testid="watchlists-edit-container"
                   onClick={() => {
-                    setShortcutsHelpOpen(false)
-                    openEditWatchlistForm()
+                    closeHelpThen(openEditWatchlistForm)
                   }}
                 >
                   {t("common:edit", "Edit")}
@@ -2427,7 +2457,12 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
             )}
             <Button
               className="min-h-11"
-              onClick={guidedTourState.status === "in_progress" ? resumeGuidedTour : startGuidedTour}
+              onClick={() => {
+                guidedTourRestoreFocusRef.current = document.getElementById(HELP_TRIGGER_ID)
+                closeHelpThen(
+                  guidedTourState.status === "in_progress" ? resumeGuidedTour : startGuidedTour
+                )
+              }}
               data-testid={guidedTourState.status === "in_progress" ? "watchlists-resume-guide" : "watchlists-start-guide"}
             >
               {guidedTourState.status === "in_progress"
@@ -2440,8 +2475,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
               className="min-h-11"
               icon={<Command className="h-4 w-4" aria-hidden />}
               onClick={() => {
-                setShortcutsHelpOpen(false)
-                setCommandPaletteOpen(true)
+                closeHelpThen(() => setCommandPaletteOpen(true))
               }}
               data-testid="watchlists-open-command-palette"
             >
@@ -2462,7 +2496,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
                   key={action.key}
                   className="min-h-11"
                   data-testid={`watchlists-orientation-action-${action.key}`}
-                  onClick={() => navigateToTab(action.target)}
+                  onClick={() => navigateFromHelp(action.target)}
                 >
                   {action.label}
                 </Button>
@@ -2483,7 +2517,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
                 </div>
                 <Switch
                   checked={showAllViews}
-                  onChange={toggleShowAllViews}
+                  onChange={() => closeHelpThen(toggleShowAllViews)}
                   aria-labelledby="watchlists-show-all-views-label"
                   aria-describedby="watchlists-show-all-views-description"
                   data-testid="watchlists-show-all-views-toggle"
@@ -2502,7 +2536,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
                     className="min-h-11"
                     type={activeTaskView === taskView.key ? "primary" : "default"}
                     aria-pressed={activeTaskView === taskView.key}
-                    onClick={() => setActiveTab(TASK_VIEW_PRIMARY_TAB[taskView.key])}
+                    onClick={() => navigateFromHelp(TASK_VIEW_PRIMARY_TAB[taskView.key])}
                     data-testid={`watchlists-task-view-${taskView.key}`}
                   >
                     {taskView.label}
@@ -2514,7 +2548,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
                     className="min-h-11"
                     type={activeTab === item.key ? "primary" : "default"}
                     data-testid={`watchlists-experimental-tab-${item.key}`}
-                    onClick={() => setActiveTab(item.key as typeof activeTab)}
+                    onClick={() => navigateFromHelp(item.key)}
                   >
                     {item.label}
                   </Button>
@@ -2530,7 +2564,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
               <div className="mt-2 flex flex-wrap gap-2">
                 <Button
                   className="min-h-11"
-                  onClick={() => navigateToTab(activeTeachPoint.actionTarget)}
+                  onClick={() => navigateFromHelp(activeTeachPoint.actionTarget)}
                 >
                   {activeTeachPoint.actionLabel}
                 </Button>

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import React from "react"
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { WatchlistsPlaygroundPage } from "../WatchlistsPlaygroundPage"
@@ -90,14 +90,26 @@ vi.mock("antd", async () => {
     </div>
   )
 
-  const Modal = ({ open, title, children, footer }: any) =>
-    open ? (
-      <div>
+  const Modal = ({ open, title, children, footer, onCancel, afterOpenChange }: any) => {
+    React.useEffect(() => {
+      afterOpenChange?.(open)
+    }, [afterOpenChange, open])
+
+    return open ? (
+      <div
+        role="dialog"
+        aria-label={typeof title === "string" ? title : "dialog"}
+        tabIndex={-1}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") onCancel?.()
+        }}
+      >
         <h3>{title}</h3>
         {children}
         <div>{footer}</div>
       </div>
     ) : null
+  }
   const Drawer = ({ open, title, children }: any) =>
     open ? (
       <div>
@@ -108,10 +120,12 @@ vi.mock("antd", async () => {
 
   const Empty = ({ description }: any) => <div>{description}</div>
   const Tooltip = ({ children }: any) => <>{children}</>
-  const Button = ({ children, onClick, disabled, ...rest }: any) => (
-    <button type="button" onClick={() => onClick?.()} disabled={Boolean(disabled)} {...rest}>
-      {children}
-    </button>
+  const Button = React.forwardRef<HTMLButtonElement, any>(
+    ({ children, onClick, disabled, ...rest }, ref) => (
+      <button ref={ref} type="button" onClick={() => onClick?.()} disabled={Boolean(disabled)} {...rest}>
+        {children}
+      </button>
+    )
   )
   const Switch = ({ checked, onChange, ...rest }: any) => (
     <button
@@ -282,9 +296,11 @@ describe("WatchlistsPlaygroundPage orientation guidance", () => {
     localStorage.removeItem("watchlists:teach-points:v1")
   })
 
-  it("shows per-tab orientation and explicit Activity to Reports next action", () => {
+  it("closes Help before navigating from orientation guidance and restores trigger focus", async () => {
     mocks.state.activeTab = "runs"
     renderPage()
+    const helpTrigger = screen.getByRole("button", { name: "Open Watchlists help" })
+    helpTrigger.focus()
     showTabGuidance()
 
     expect(screen.getByTestId("watchlists-orientation-title")).toHaveTextContent("Activity")
@@ -295,6 +311,11 @@ describe("WatchlistsPlaygroundPage orientation guidance", () => {
 
     fireEvent.click(screen.getByTestId("watchlists-orientation-action-open-reports"))
     expect(mocks.state.setActiveTab).toHaveBeenCalledWith("outputs")
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Watchlists help" })).not.toBeInTheDocument()
+      expect(screen.queryAllByRole("dialog")).toHaveLength(0)
+      expect(helpTrigger).toHaveFocus()
+    })
   })
 
   it("uses the canonical alert for tab teach points", () => {

@@ -66,7 +66,6 @@ import {
 } from "./empty-state"
 import {
   normalizeSourceIds,
-  resolveCheckNowTargets,
   shouldConfirmMultiSourceCheck
 } from "./check-now-utils"
 import { countToggleImpact, summarizeSourceSelection } from "./bulk-action-summary"
@@ -1068,10 +1067,6 @@ export const SourcesTab: React.FC = () => {
     void executeCheckNow(normalizedIds)
   }, [executeCheckNow, t])
 
-  const resolveCheckNowTargetIds = useCallback((sourceId: number): number[] => {
-    return resolveCheckNowTargets(sourceId, selectedSourceIds)
-  }, [selectedSourceIds])
-
   const toggleSourceSelection = useCallback((source: WatchlistSource) => {
     setSelectedRowKeys((previousKeys) => {
       const selectedSet = new Set(previousKeys.map((key) => String(key)))
@@ -1310,19 +1305,12 @@ export const SourcesTab: React.FC = () => {
       key: "last_scraped_at",
       width: 190,
       render: (date: string | null, record) => {
-        const targetIds = resolveCheckNowTargetIds(record.id)
-        const checkNowLoading = targetIds.some((id) => checkingSourceIds.includes(id))
-        const checkNowTooltip = targetIds.length > 1
-          ? t(
-              "watchlists:sources.checkNowSelectedTooltip",
-              "Check now for {{count}} selected sources",
-              { count: targetIds.length }
-            )
-          : t(
-              "watchlists:accessibilityHardening.source.checkNow",
-              "Check now: {{name}}",
-              { name: record.name }
-            )
+        const checkNowLoading = checkingSourceIds.includes(record.id)
+        const checkNowTooltip = t(
+          "watchlists:accessibilityHardening.source.checkNow",
+          "Check now: {{name}}",
+          { name: record.name }
+        )
 
         return (
           <div className="flex items-center gap-1.5">
@@ -1345,7 +1333,7 @@ export const SourcesTab: React.FC = () => {
                 aria-label={checkNowTooltip}
                 onClick={(event) => {
                   event.stopPropagation()
-                  requestCheckNow(targetIds)
+                  requestCheckNow([record.id])
                 }}
               />
             </Tooltip>
@@ -1473,6 +1461,11 @@ export const SourcesTab: React.FC = () => {
         const checkNowLoading = targetIds.some((id) => checkingSourceIds.includes(id))
         const isSelected = selectedRowKeys.some((key) => String(key) === String(source.id))
         const sourceSafeUrl = safeExternalUrl(source.url)
+        const sourceWebsiteLabel = t(
+          "watchlists:accessibilityHardening.source.openWebsite",
+          "Open source website: {{name}}",
+          { name: source.name }
+        )
 
         return (
           <article
@@ -1481,32 +1474,39 @@ export const SourcesTab: React.FC = () => {
             data-testid={`watchlists-source-card-${source.id}`}
           >
             <div className="flex items-start justify-between gap-3">
-              <label className="flex min-w-0 items-start gap-3">
+              <label
+                htmlFor={`watchlists-source-select-${source.id}`}
+                className="flex min-w-0 items-start gap-3"
+              >
                 <input
+                  id={`watchlists-source-select-${source.id}`}
                   type="checkbox"
                   className="mt-1 h-4 w-4 shrink-0"
                   checked={isSelected}
                   aria-label={t("watchlists:sources.selectSourceAria", "Select {{name}}", { name: source.name })}
                   onChange={() => toggleSourceSelection(source)}
                 />
-                <span className="min-w-0 space-y-1">
+                <span className="min-w-0">
                   <span className="block truncate font-medium text-text">{source.name}</span>
-                  {sourceSafeUrl ? (
-                    <a
-                      href={sourceSafeUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="block truncate text-xs text-text-muted hover:text-primary"
-                    >
-                      {sourceSafeUrl}
-                    </a>
-                  ) : null}
                 </span>
               </label>
               <Tag color={SOURCE_TYPE_COLORS[source.source_type] || "default"} className="shrink-0">
                 {source.source_type.toUpperCase()}
               </Tag>
             </div>
+            {sourceSafeUrl ? (
+              <a
+                href={sourceSafeUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={sourceWebsiteLabel}
+                className="mt-1 inline-flex min-h-11 items-center gap-1 text-xs text-text-muted hover:text-primary"
+                onClick={(event) => event.stopPropagation()}
+              >
+                {sourceWebsiteLabel}
+                <ExternalLink className="h-3.5 w-3.5" aria-hidden />
+              </a>
+            ) : null}
 
             <div className="mt-3 flex flex-wrap gap-1.5">
               {sourceTags.slice(0, 4).map((tag) => (
@@ -1549,7 +1549,7 @@ export const SourcesTab: React.FC = () => {
                   aria-label={t("watchlists:accessibilityHardening.source.checkNow", "Check now: {{name}}", { name: source.name })}
                   icon={<RefreshCw className="h-4 w-4" aria-hidden />}
                   loading={checkNowLoading}
-                  onClick={() => requestCheckNow(targetIds)}
+                  onClick={() => requestCheckNow([source.id])}
                 />
                 <Button
                   type="text"
@@ -1722,6 +1722,11 @@ export const SourcesTab: React.FC = () => {
           <Button
             size="small"
             icon={<RefreshCw className="h-3.5 w-3.5" />}
+            aria-label={t(
+              "watchlists:sources.checkNowSelectedTooltip",
+              "Check now for {{count}} selected sources",
+              { count: selectedSourceIds.length }
+            )}
             onClick={() => requestCheckNow(selectedSourceIds)}
             loading={selectedSourceIds.some((id) => checkingSourceIds.includes(id))}
             disabled={bulkWorking}

@@ -2,7 +2,7 @@
 
 import React from "react"
 import axe from "axe-core"
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { WatchlistsPlaygroundPage } from "../WatchlistsPlaygroundPage"
 import {
@@ -150,14 +150,26 @@ vi.mock("antd", async () => {
     </div>
   )
 
-  const Modal = ({ open, title, children, footer }: any) =>
-    open ? (
-      <div>
+  const Modal = ({ open, title, children, footer, onCancel, afterOpenChange }: any) => {
+    React.useEffect(() => {
+      afterOpenChange?.(open)
+    }, [afterOpenChange, open])
+
+    return open ? (
+      <div
+        role="dialog"
+        aria-label={typeof title === "string" ? title : "dialog"}
+        tabIndex={-1}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") onCancel?.()
+        }}
+      >
         <h3>{title}</h3>
         {children}
         <div>{footer}</div>
       </div>
     ) : null
+  }
   const Drawer = ({ open, title, children }: any) =>
     open ? (
       <div>
@@ -168,15 +180,18 @@ vi.mock("antd", async () => {
 
   const Empty = ({ description }: any) => <div>{description}</div>
   const Tooltip = ({ children }: any) => <>{children}</>
-  const Button = ({ children, onClick, disabled, ...rest }: any) => (
-    <button
-      type="button"
-      onClick={() => onClick?.()}
-      disabled={Boolean(disabled)}
-      {...rest}
-    >
-      {children}
-    </button>
+  const Button = React.forwardRef<HTMLButtonElement, any>(
+    ({ children, onClick, disabled, ...rest }, ref) => (
+      <button
+        ref={ref}
+        type="button"
+        onClick={() => onClick?.()}
+        disabled={Boolean(disabled)}
+        {...rest}
+      >
+        {children}
+      </button>
+    )
   )
   const Switch = ({ checked, onChange, ...rest }: any) => (
     <button
@@ -421,7 +436,9 @@ describe("WatchlistsPlaygroundPage help surfaces", () => {
 
     fireEvent.click(screen.getByTestId("watchlists-help-icon"))
     fireEvent.click(screen.getByTestId("watchlists-start-guide"))
-    expect(screen.getByText("Watchlists guided tour")).toBeInTheDocument()
+    expect(screen.queryByRole("dialog", { name: "Watchlists help" })).not.toBeInTheDocument()
+    expect(screen.getAllByRole("dialog")).toHaveLength(1)
+    expect(screen.getByRole("dialog", { name: "Watchlists guided tour" })).toBeInTheDocument()
     expect(screen.getByText("Step 1 of 5")).toBeInTheDocument()
     expect(
       screen.getByText("Feeds are inputs for monitors. Add RSS/site feeds before scheduling Activity checks.")
@@ -450,11 +467,31 @@ describe("WatchlistsPlaygroundPage help surfaces", () => {
     fireEvent.click(screen.getByTestId("watchlists-help-icon"))
     expect(screen.getByTestId("watchlists-resume-guide")).toBeInTheDocument()
     fireEvent.click(screen.getByTestId("watchlists-resume-guide"))
-    expect(screen.getByText("Watchlists guided tour")).toBeInTheDocument()
+    expect(screen.queryByRole("dialog", { name: "Watchlists help" })).not.toBeInTheDocument()
+    expect(screen.getAllByRole("dialog")).toHaveLength(1)
+    expect(screen.getByRole("dialog", { name: "Watchlists guided tour" })).toBeInTheDocument()
     expect(screen.getByText("Step 2 of 5")).toBeInTheDocument()
     expect(mocks.trackWatchlistsOnboardingTelemetryMock).toHaveBeenCalledWith({
       type: "guided_tour_resumed",
       step: 2
+    })
+  })
+
+  it("restores Help trigger focus after escaping the guided tour", async () => {
+    render(<WatchlistsPlaygroundPage />)
+
+    const helpTrigger = screen.getByRole("button", { name: "Open Watchlists help" })
+    helpTrigger.focus()
+    fireEvent.click(helpTrigger)
+    fireEvent.click(screen.getByTestId("watchlists-start-guide"))
+
+    const tour = await screen.findByRole("dialog", { name: "Watchlists guided tour" })
+    expect(screen.getAllByRole("dialog")).toHaveLength(1)
+    fireEvent.keyDown(tour, { key: "Escape" })
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Watchlists guided tour" })).not.toBeInTheDocument()
+      expect(helpTrigger).toHaveFocus()
     })
   })
 

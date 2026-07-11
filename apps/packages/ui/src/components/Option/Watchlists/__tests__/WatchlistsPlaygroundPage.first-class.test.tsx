@@ -111,11 +111,13 @@ vi.mock("antd", async () => {
       {children}
     </div>
   )
-  const Button = ({ children, icon, onClick, disabled, loading: _loading, ...rest }: any) => (
-    <button type="button" onClick={() => onClick?.({ preventDefault: vi.fn(), stopPropagation: vi.fn() })} disabled={Boolean(disabled)} {...rest}>
-      {icon}
-      {children}
-    </button>
+  const Button = React.forwardRef<HTMLButtonElement, any>(
+    ({ children, icon, onClick, disabled, loading: _loading, ...rest }, ref) => (
+      <button ref={ref} type="button" onClick={() => onClick?.({ preventDefault: vi.fn(), stopPropagation: vi.fn() })} disabled={Boolean(disabled)} {...rest}>
+        {icon}
+        {children}
+      </button>
+    )
   )
   const Drawer = ({ open, title, children }: any) =>
     open ? (
@@ -130,8 +132,12 @@ vi.mock("antd", async () => {
   Input.TextArea = ({ value, onChange, ...rest }: any) => (
     <textarea value={value ?? ""} onChange={(event) => onChange?.(event)} {...rest} />
   )
-  const Modal = ({ open, title, children, footer, onOk, onCancel, okText, cancelText }: any) =>
-    open ? (
+  const Modal = ({ open, title, children, footer, onOk, onCancel, okText, cancelText, afterOpenChange }: any) => {
+    React.useEffect(() => {
+      afterOpenChange?.(open)
+    }, [afterOpenChange, open])
+
+    return open ? (
       <div role="dialog" aria-label={typeof title === "string" ? title : "dialog"}>
         <h3>{title}</h3>
         {children}
@@ -140,6 +146,7 @@ vi.mock("antd", async () => {
         {onCancel ? <button type="button" onClick={() => onCancel()}>{cancelText || "Cancel"}</button> : null}
       </div>
     ) : null
+  }
   const Select = ({ value, options = [], onChange, "aria-label": ariaLabel, ...rest }: any) => (
     <select
       aria-label={ariaLabel}
