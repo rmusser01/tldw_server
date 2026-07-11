@@ -23,11 +23,14 @@ modified_files:
 - apps/tldw-frontend/e2e/workflows/media-ingest.spec.ts
 - Docs/Getting_Started/TROUBLESHOOTING.md
 - Docs/Published/Getting_Started/TROUBLESHOOTING.md
+- Docs/superpowers/specs/2026-07-10-quick-ingest-pr-2709-review-remediation-design.md
 - pyproject.toml
 - tldw_Server_API/app/core/Web_Scraping/Article_Extractor_Lib.py
 - tldw_Server_API/app/services/enhanced_web_scraping_service.py
 - tldw_Server_API/tests/Services/test_enhanced_webscraping_persist.py
 - tldw_Server_API/tests/WebScraping/test_extraction_pipeline_router.py
+documentation:
+- Docs/superpowers/specs/2026-07-10-quick-ingest-pr-2709-review-remediation-design.md
 ---
 
 ## Description
