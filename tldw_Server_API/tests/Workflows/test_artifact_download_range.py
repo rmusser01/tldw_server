@@ -45,7 +45,12 @@ def client_and_db(tmp_path, auth_headers):
     app.dependency_overrides.clear()
 
 
-def _bootstrap_run_with_artifact(db: WorkflowsDatabase, tmpdir: Path):
+def _bootstrap_run_with_artifact(
+    db: WorkflowsDatabase,
+    tmpdir: Path,
+    *,
+    mime_type: str = "application/octet-stream",
+):
     run_id = f"run-range-{uuid4()}"
     tenant = "default"
     # Use user_id that matches override_user().id
@@ -63,7 +68,7 @@ def _bootstrap_run_with_artifact(db: WorkflowsDatabase, tmpdir: Path):
         type="blob",
         uri=f"file://{afile}",
         size_bytes=len(data),
-        mime_type="application/octet-stream",
+        mime_type=mime_type,
         checksum_sha256=None,
         metadata={"workdir": str(tmpdir)},
     )
@@ -142,6 +147,19 @@ def test_artifact_download_defaults_missing_single_user_tenant(
 
     assert response.status_code == 200
     assert response.content == b"0123456789abcdefghijklmnopqrstuvwxyz"
+
+
+def test_artifact_download_allows_audio_by_default(monkeypatch, tmp_path, client_and_db):
+    """Generated briefing audio is downloadable without a custom MIME override."""
+    monkeypatch.delenv("WORKFLOWS_ARTIFACT_ALLOWED_MIME", raising=False)
+    client, db = client_and_db
+    run_id = _bootstrap_run_with_artifact(db, tmp_path, mime_type="audio/mpeg")
+    artifact_id = db.list_artifacts_for_run(run_id)[0]["artifact_id"]
+
+    response = client.get(f"/api/v1/workflows/artifacts/{artifact_id}/download")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "audio/mpeg"
 
 
 def test_artifact_download_blocks_outside_scope(monkeypatch, tmp_path, client_and_db):

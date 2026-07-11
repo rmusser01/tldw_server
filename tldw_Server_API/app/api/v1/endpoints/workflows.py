@@ -239,6 +239,7 @@ def _get_db() -> WorkflowsDatabase:
 MAX_DEFINITION_BYTES = 256 * 1024
 MAX_STEPS = 50
 MAX_STEP_CONFIG_BYTES = 32 * 1024
+DEFAULT_ARTIFACT_ALLOWED_MIME = "text/plain,text/markdown,application/json,application/pdf,image/png,image/jpeg,audio/*"
 
 _JSONSCHEMA_REQUIRED_RE = re.compile(r"'([^']+)' is a required property")
 _JSONSCHEMA_ADDITIONAL_RE = re.compile(r"'([^']+)' was unexpected")
@@ -3349,7 +3350,7 @@ async def download_artifact(
     except _WORKFLOWS_NONCRITICAL_EXCEPTIONS:
         pass
     # MIME allowlist
-    allowed = [s.strip() for s in (_os.getenv("WORKFLOWS_ARTIFACT_ALLOWED_MIME", "text/plain,text/markdown,application/json,application/pdf,image/png,image/jpeg").split(",")) if s.strip()]
+    allowed = [s.strip() for s in (_os.getenv("WORKFLOWS_ARTIFACT_ALLOWED_MIME", DEFAULT_ARTIFACT_ALLOWED_MIME).split(",")) if s.strip()]
     mime = art.get("mime_type") or _m.guess_type(str(p))[0] or "application/octet-stream"
     if allowed and not any(mime == a or (a.endswith("/*") and mime.startswith(a[:-1])) for a in allowed):
         raise HTTPException(status_code=415, detail=f"MIME not allowed: {mime}")
@@ -3463,7 +3464,7 @@ async def download_run_artifacts_zip(
 
     # Constraints
     max_total = int(_os.getenv("WORKFLOWS_ARTIFACT_BULK_MAX_BYTES", "52428800"))  # 50MB
-    allowed = [s.strip() for s in (_os.getenv("WORKFLOWS_ARTIFACT_ALLOWED_MIME", "text/plain,text/markdown,application/json,application/pdf,image/png,image/jpeg").split(",")) if s.strip()]
+    allowed = [s.strip() for s in (_os.getenv("WORKFLOWS_ARTIFACT_ALLOWED_MIME", DEFAULT_ARTIFACT_ALLOWED_MIME).split(",")) if s.strip()]
 
     # Preselect eligible files and sum sizes
     selected = []
